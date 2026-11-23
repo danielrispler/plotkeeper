@@ -99,7 +99,7 @@ struct Raw {
     permission_mode: Option<String>,
     /// On a tool's result, how long its call took.
     duration_ms: Option<u64>,
-    /// The terminal the session runs in, which the hook records from `STUDIO_TERMINAL_ID`.
+    /// The terminal the session runs in, which the hook records from `PLOTKEEPER_TERMINAL_ID`.
     studio_terminal_id: Option<String>,
     /// The agent's process, from the hook (#330).
     studio_pid: Option<u32>,

@@ -21,7 +21,7 @@ pub(crate) struct Event {
     /// The agent's id of the turn the event belongs to, absent until the first user input.
     pub prompt_id: Option<String>,
     pub studio_received_ms: u64,
-    /// The terminal the session runs in, which the hook records from `STUDIO_TERMINAL_ID`.
+    /// The terminal the session runs in, which the hook records from `PLOTKEEPER_TERMINAL_ID`.
     pub studio_terminal_id: Option<String>,
     /// The agent's process, which the hook records as `studio_pid`: its parent, or the pid the
     /// agy wrapper passes. `None` when it could not tell (#330).

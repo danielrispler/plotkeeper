@@ -1,5 +1,5 @@
 //! Seam 1 (danielrispler/Falinks#461, decision 8): replay hook events through the core and check that each session
-//! carries its studio terminal, `STUDIO_TERMINAL_ID` as the hook records it, so a row maps to the
+//! carries its studio terminal, `PLOTKEEPER_TERMINAL_ID` as the hook records it, so a row maps to the
 //! terminal its pane shows.
 
 use crate::common::{TWO, replay};

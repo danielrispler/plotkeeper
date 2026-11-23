@@ -171,7 +171,7 @@ pub struct Session {
     pub cwd: String,
     /// The last segment of `cwd`, or the whole `cwd` when that segment is empty.
     pub folder_name: String,
-    /// The studio terminal it runs in, its `STUDIO_TERMINAL_ID` from its latest event, `None` when
+    /// The studio terminal it runs in, its `PLOTKEEPER_TERMINAL_ID` from its latest event, `None` when
     /// it runs outside the studio (danielrispler/Falinks#461, decision 8).
     pub terminal: Option<String>,
     /// Its agent's process, `studio_pid` of its latest event that has one; `None` when its hook
@@ -277,7 +277,7 @@ pub struct Session {
     /// The Bash commands auto mode blocked, in block order (danielrispler/plotkeeper#170).
     #[serde(default)]
     pub blocked_commands: Vec<BlockedCommand>,
-    /// The questions answered on the studio card, by call, whose result has not landed yet.
+    /// The questions answered on the plotkeeper card, by call, whose result has not landed yet.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     carded: BTreeSet<String>,
     /// When its latest turn started and ended (danielrispler/Falinks#461, decision 13).
@@ -677,7 +677,7 @@ impl BlockedStatus {
     }
 }
 
-/// Where Daniel answered: the studio card, through the answer hook, or the terminal.
+/// Where Daniel answered: the plotkeeper card, through the answer hook, or the terminal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Source {
@@ -2122,7 +2122,7 @@ pub const INTERRUPTED: &str = "StudioInterrupted";
 /// at once and after a restart, until a `SessionStart` of it brings it back. Its cards stay.
 pub const DELETE: &str = "StudioDelete";
 
-/// The line the answer hook appends when Daniel answers from the studio card (danielrispler/Falinks#478): the call's hook
+/// The line the answer hook appends when Daniel answers from the plotkeeper card (danielrispler/Falinks#478): the call's hook
 /// payload under this name, with `studio_asked_by` (the event that asked) and `studio_answer`. An
 /// answer in the terminal leaves none.
 pub const STUDIO_ANSWER: &str = "StudioAnswer";
@@ -3311,7 +3311,7 @@ impl Studio {
                     let agent = event.agent_id.clone();
                     session.block(Cause::Elicitation, String::new(), Value::Null, agent, at);
                 }
-                // Daniel decided a plan or a permission from the studio card (danielrispler/Falinks#478): it waits on him no
+                // Daniel decided a plan or a permission from the plotkeeper card (danielrispler/Falinks#478): it waits on him no
                 // more, though its result comes only when the call ends, or for a denial maybe never. A
                 // question's result carries its answer, so its block waits for it.
                 Happened::Answered {

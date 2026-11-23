@@ -111,7 +111,7 @@ pub struct App {
     pub core: Core,
     pub cards: Cards,
     pub notes: Notes,
-    /// The card writer: `claude -p` or `agy`, as `summaries.writer` says, or the fake when `STUDIO_CARD_WRITER=fake`, for checks that must not run `claude -p`.
+    /// The card writer: `claude -p` or `agy`, as `summaries.writer` says, or the fake when `PLOTKEEPER_CARD_WRITER=fake`, for checks that must not run `claude -p`.
     pub writer: Writer,
     pub writing: TurnWriting,
     pub notices: Notices,
@@ -147,7 +147,7 @@ impl App {
         // The store sits beside the log, in the studio's data directory.
         let cards: Cards = Arc::new(Mutex::new(CardStore::open_beside(log)?));
         let notes: Notes = Arc::new(Mutex::new(RiskNotes::open_beside(log)?));
-        let writer: Writer = match std::env::var("STUDIO_CARD_WRITER").as_deref() {
+        let writer: Writer = match std::env::var("PLOTKEEPER_CARD_WRITER").as_deref() {
             Ok("fake") => Arc::new(FakeWriter),
             _ => {
                 let writer = ClaudeWriter::beside(log)?;
@@ -170,7 +170,7 @@ impl App {
     ) -> io::Result<App> {
         // The PR briefs' writer is Claude whatever `summaries.writer` says, and never the fake of the checks.
         let briefs =
-            pr_briefs::PrBriefs::new(match std::env::var("STUDIO_CARD_WRITER").as_deref() {
+            pr_briefs::PrBriefs::new(match std::env::var("PLOTKEEPER_CARD_WRITER").as_deref() {
                 Ok("fake") => None,
                 _ => ClaudeWriter::beside(log).ok().map(|w| {
                     Arc::new(w)
