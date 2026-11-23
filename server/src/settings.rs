@@ -185,21 +185,32 @@ pub fn save_writer(
 ) -> Result<String, String> {
     let [settings, _] = paths().ok_or("no home folder")?;
     let _one_at_a_time = WRITING.lock().unwrap_or_else(|e| e.into_inner());
+    save_writer_in(&settings, expected.as_deref(), writer, model, effort)
+}
+
+fn save_writer_in(
+    settings: &Path,
+    expected: Option<&str>,
+    writer: studio_understanding::WriterKind,
+    model: &str,
+    effort: &str,
+) -> Result<String, String> {
     let key = |leaf: &str| vec!["summaries".to_string(), leaf.to_string()];
     let text = write_in(
-        &settings,
-        expected.as_deref(),
+        settings,
+        expected,
         &key("writer"),
-        Some(&serde_json::json!(writer.program())),
+        // The serde name `summary_writer` reads back: Cursor's program is `agent`, its name `cursor`.
+        Some(&serde_json::json!(writer)),
     )?;
     let text = write_in(
-        &settings,
+        settings,
         Some(&text),
         &key("model"),
         Some(&serde_json::json!(model)),
     )?;
     let effort = (!effort.is_empty()).then(|| serde_json::json!(effort));
-    write_in(&settings, Some(&text), &key("effort"), effort.as_ref())
+    write_in(settings, Some(&text), &key("effort"), effort.as_ref())
 }
 
 /// The `repository` setting (danielrispler/Falinks#605): the folder the shell, Workspaces and the picker start in. Read from
@@ -510,11 +521,22 @@ impl ApiKeys for MemoryKeys {
 #[cfg(test)]
 mod tests {
     use super::{
-        catch_up_in, edit_text, plain_json, pr_briefs_model_in, repository_in, summary_writer_in,
-        write_in,
+        catch_up_in, edit_text, plain_json, pr_briefs_model_in, repository_in, save_writer_in,
+        summary_writer_in, write_in,
     };
     use serde_json::json;
     use studio_understanding::WriterKind;
+
+    #[test]
+    fn a_saved_writer_is_read_back_as_the_same_writer() {
+        let home = tempfile::tempdir().unwrap();
+        let file = home.path().join("settings.json");
+        for kind in WriterKind::ALL {
+            let text = save_writer_in(&file, None, kind, "auto", "").unwrap();
+            assert_eq!(summary_writer_in(&text), kind, "{text}");
+            std::fs::remove_file(&file).unwrap();
+        }
+    }
 
     #[test]
     fn a_fresh_home_gets_no_summaries_until_a_writer_passes_test() {
