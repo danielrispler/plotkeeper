@@ -249,8 +249,8 @@ const briefOf = (steps: BriefStep[], partial = false, extra: Partial<PrBrief> = 
 });
 // Opens the brief from the tray, goes `next` steps on, and checks the panel and the map.
 // Chrome runs a snap for about 2 s of virtual time after the page loads and what is left unrun is silent, so a `quick` brief waits the least it can.
-const mapBrief = (view: BriefView, next: number, check = "", quick = false, pause = 500): Fixture =>
-  mapOpened(
+const mapBrief = (view: BriefView, next: number, check = "", quick = false, pause = 500): Fixture => ({
+  ...mapOpened(
     `
       // Chrome's virtual time stalls animations: the brief plays as it does under reduced motion, whose end state is the one to review.
       const media = window.matchMedia.bind(window);
@@ -275,7 +275,9 @@ const mapBrief = (view: BriefView, next: number, check = "", quick = false, paus
       map_state: mapState({ fog: { shell: "thick", understanding: "thin" }, ready: [{ number: 334, title: "PR briefs on the map", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }] }),
       pr_brief: view,
     },
-  );
+  ),
+  snapDone: "brief ok",
+});
 const escBrief = `
       const before = document.querySelector(".brief-dots i.at") && [...document.querySelectorAll(".brief-dots i")].findIndex((d) => d.classList.contains("at"));
       document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", key: "Escape", bubbles: true }));

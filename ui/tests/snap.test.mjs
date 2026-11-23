@@ -251,3 +251,11 @@ test("a non-zero Chrome status reports the status and the last lines of its stde
   assert.match(chromeFailure(null, ""), /exit status null/);
   assert.equal(chromeFailure(0, stderr), "");
 });
+
+test("a map brief fixture that never printed its ok line fails: Chrome's time budget cut the script off before its assertions ran", () => {
+  assert.equal(fixtures.mapBriefStart().snapDone, "brief ok");
+  assert.equal(failed(["something else"], "brief ok"), true);
+  assert.equal(failed(["brief ok"], "brief ok"), false);
+  assert.equal(failed(["snap:fail x", "brief ok"], "brief ok"), true);
+  assert.equal(failed([]), false, "a fixture with no ok line is as before");
+});

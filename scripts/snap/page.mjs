@@ -79,7 +79,10 @@ export const consoleLines = (stderr) =>
 
 // Whether the run failed: a log line that starts `snap:fail`, or an uncaught exception or unhandled rejection in the page,
 // which Chrome logs as `Uncaught …` (#144).
-export const failed = (lines) => lines.some((line) => line.startsWith("snap:fail") || line.startsWith("Uncaught"));
+// A fixture that names its last line (`snapDone`) fails too when that line never came: Chrome's virtual time budget can cut the script
+// off before its assertions run, and nothing else would say so.
+export const failed = (lines, done = undefined) =>
+  lines.some((line) => line.startsWith("snap:fail") || line.startsWith("Uncaught")) || (done !== undefined && !lines.includes(done));
 
 // What `snap` prints when Chrome exits non-zero: the status and the last lines of its stderr, which the console lines leave out.
 // A zero status reports nothing.
