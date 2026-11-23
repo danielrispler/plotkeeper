@@ -615,7 +615,8 @@ fn a_program_that_is_not_installed_and_one_that_hangs_are_typed_failures() {
         timeout: Duration::from_secs(5),
         ..WriterRequest::default()
     };
-    for kind in WriterKind::ALL {
+    // An HTTP writer runs no program: its failures are read in `http_writer.rs`.
+    for kind in WriterKind::ALL.into_iter().filter(|kind| !kind.http()) {
         let writer_kind = kind;
         writer.use_writer(writer_kind);
         let error = writer.complete(&request).unwrap_err();
@@ -735,10 +736,11 @@ fn the_writers_found_are_the_ones_command_v_finds_in_their_order() {
             .map(|w| (w.kind, w.found))
             .collect::<Vec<_>>()
     };
-    use WriterKind::{Agy, Claude, Codex, Copilot, Cursor};
+    use WriterKind::{Agy, Anthropic, Claude, Codex, Copilot, Cursor};
     assert_eq!(
         found(&["agy"]),
         [
+            (Anthropic, false),
             (Claude, false),
             (Agy, true),
             (Codex, false),
@@ -749,6 +751,7 @@ fn the_writers_found_are_the_ones_command_v_finds_in_their_order() {
     assert_eq!(
         found(&["claude", "agy"]),
         [
+            (Anthropic, false),
             (Claude, true),
             (Agy, true),
             (Codex, false),
@@ -759,6 +762,7 @@ fn the_writers_found_are_the_ones_command_v_finds_in_their_order() {
     assert_eq!(
         found(&["codex"]),
         [
+            (Anthropic, false),
             (Claude, false),
             (Agy, false),
             (Codex, true),
@@ -770,6 +774,7 @@ fn the_writers_found_are_the_ones_command_v_finds_in_their_order() {
     assert_eq!(
         found(&["copilot", "agent"]),
         [
+            (Anthropic, false),
             (Claude, false),
             (Agy, false),
             (Codex, false),
@@ -780,6 +785,7 @@ fn the_writers_found_are_the_ones_command_v_finds_in_their_order() {
     assert_eq!(
         found(&[]),
         [
+            (Anthropic, false),
             (Claude, false),
             (Agy, false),
             (Codex, false),
@@ -787,24 +793,28 @@ fn the_writers_found_are_the_ones_command_v_finds_in_their_order() {
             (Cursor, false)
         ]
     );
+    // An API-key writer runs no program, so none named `anthropic` makes it found: the server says whether its key is set.
+    assert_eq!(found(&["anthropic"])[0], (Anthropic, false));
     // Each writer brings its name, models and efforts for the page.
     let shell = faked_path(&dir.path().join("lists"), &["claude"]);
     let writers = studio_understanding::found_writers(&shell);
-    assert_eq!(writers[0].name, "Claude");
-    assert_eq!(writers[0].models, WriterKind::Claude.models());
-    assert!(writers[0].efforts.contains(&"low"));
-    assert_eq!(writers[1].name, "agy");
+    assert_eq!(writers[0].name, "Anthropic API key");
+    assert_eq!(writers[0].models, WriterKind::Anthropic.models());
+    assert_eq!(writers[1].name, "Claude");
+    assert_eq!(writers[1].models, WriterKind::Claude.models());
+    assert!(writers[1].efforts.contains(&"low"));
+    assert_eq!(writers[2].name, "agy");
     assert!(
-        writers[1].efforts.is_empty(),
+        writers[2].efforts.is_empty(),
         "agy's effort is part of its model id"
     );
-    assert_eq!(writers[2].name, "Codex");
-    assert!(writers[2].models.contains(&"gpt-6-luna"));
-    assert_eq!(writers[2].efforts, ["", "low", "medium", "high"]);
-    assert_eq!((writers[3].name, writers[4].name), ("Copilot", "Cursor"));
-    assert!(writers[3].models.contains(&"claude-haiku-4.5"));
-    assert!(writers[4].models.contains(&"auto"));
-    assert!(writers[3].efforts.is_empty() && writers[4].efforts.is_empty());
+    assert_eq!(writers[3].name, "Codex");
+    assert!(writers[3].models.contains(&"gpt-6-luna"));
+    assert_eq!(writers[3].efforts, ["", "low", "medium", "high"]);
+    assert_eq!((writers[4].name, writers[5].name), ("Copilot", "Cursor"));
+    assert!(writers[4].models.contains(&"claude-haiku-4.5"));
+    assert!(writers[5].models.contains(&"auto"));
+    assert!(writers[4].efforts.is_empty() && writers[5].efforts.is_empty());
 }
 
 #[test]

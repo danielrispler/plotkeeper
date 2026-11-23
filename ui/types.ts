@@ -446,8 +446,9 @@ export type CommitFiles = { commit: string; short: string; label: string; url: s
 
 // The writer section (spec #320): the writers the login shell's `command -v` finds (`understanding/src/writer.rs`), whether
 // summaries are on (off until a writer passes Test for a user who arrived with none) and whether PR briefs can be written,
-// which needs `claude`; and a Test's outcome, with `settings.json`'s new text when the pass saved the choice.
-export type WriterKind = "claude" | "agy" | "codex" | "copilot" | "cursor";
+// which needs `claude`; and a Test's outcome, with `settings.json`'s new text when the pass saved the choice. An API-key
+// writer (`anthropic`) is found when its key is set, which is all the page learns of the key.
+export type WriterKind = "anthropic" | "claude" | "agy" | "codex" | "copilot" | "cursor";
 export type FoundWriter = { kind: WriterKind; name: string; found: boolean; models: string[]; efforts: string[] };
 export type Writers = { writers: FoundWriter[]; summaries_on: boolean; briefs: boolean };
 export type WriterOutcome = "passed" | "not_logged_in" | "quota" | "timeout" | "not_installed" | "empty" | "other";
@@ -496,10 +497,12 @@ export interface Commands {
   open: Selection | null;
   rail_shown: void;
   refresh_landed_tasks: void;
+  remove_api_key: void;
   rename: void;
   select: Selection | null;
   selected: Selection | null;
   sessions: Session[];
+  set_api_key: void;
   settings_files: SettingsFiles;
   subagent_log: SubagentLog | null;
   summary_settings: void;

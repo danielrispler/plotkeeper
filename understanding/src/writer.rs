@@ -2,7 +2,8 @@
 //! optional JSON schema, a model, an effort and a timeout, and gives text, parsed JSON and usage, or a typed failure.
 //! Per writer only four things differ, all here: a command template (`build_command`), an output extractor and a
 //! failure classifier (`read_reply`) and a model list (`WriterKind::models`). The process handling is shared, in
-//! `ClaudeWriter`.
+//! `ClaudeWriter`. An API-key writer takes the contract's HTTP path instead (`http_writer`, spec #320, "The contract gains
+//! an HTTP path"); both paths end in `finish`, so a caller cannot tell which one wrote.
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -12,7 +13,8 @@ use std::{
     time::Duration,
 };
 
-/// Which program writes: `claude` by default, `agy`, `codex`, `copilot` or Cursor's `agent`, chosen by `summaries.writer` in `settings.json`.
+/// Which program writes: `claude` by default, `agy`, `codex`, `copilot` or Cursor's `agent`, chosen by `summaries.writer` in
+/// `settings.json`; or `anthropic`, the Anthropic Messages API called with the key pasted on the page, which runs no program.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WriterKind {
@@ -22,6 +24,7 @@ pub enum WriterKind {
     Codex,
     Copilot,
     Cursor,
+    Anthropic,
 }
 
 /// How long a logged-out `agy` waits for a pasted OAuth code before it gives up.
@@ -29,13 +32,20 @@ pub const AGY_LOGIN_WAIT: Duration = Duration::from_secs(60);
 
 impl WriterKind {
     /// Every writer, in the order the page presets the first found (spec #320, "Writer settings on the page").
-    pub const ALL: [WriterKind; 5] = [
+    /// An API key comes first: it is found only when one is set.
+    pub const ALL: [WriterKind; 6] = [
+        WriterKind::Anthropic,
         WriterKind::Claude,
         WriterKind::Agy,
         WriterKind::Codex,
         WriterKind::Copilot,
         WriterKind::Cursor,
     ];
+
+    /// Whether the writer takes the contract's HTTP path with an API key, instead of running a program.
+    pub fn http(self) -> bool {
+        matches!(self, WriterKind::Anthropic)
+    }
 
     /// The writer's name on the page.
     pub fn name(self) -> &'static str {
@@ -45,6 +55,7 @@ impl WriterKind {
             WriterKind::Codex => "Codex",
             WriterKind::Copilot => "Copilot",
             WriterKind::Cursor => "Cursor",
+            WriterKind::Anthropic => "Anthropic API key",
         }
     }
 
@@ -53,7 +64,7 @@ impl WriterKind {
         match self {
             WriterKind::Claude => &["", "low", "medium", "high"],
             WriterKind::Agy => &[],
-            WriterKind::Codex => &["", "low", "medium", "high"],
+            WriterKind::Codex | WriterKind::Anthropic => &["", "low", "medium", "high"],
             WriterKind::Copilot | WriterKind::Cursor => &[],
         }
     }
@@ -66,6 +77,7 @@ impl WriterKind {
             WriterKind::Codex => "codex",
             WriterKind::Copilot => "copilot",
             WriterKind::Cursor => "agent",
+            WriterKind::Anthropic => "anthropic",
         }
     }
 
@@ -86,15 +98,19 @@ impl WriterKind {
             // Cursor's own `auto`.
             WriterKind::Copilot => &["claude-haiku-4.5", "gpt-6-astra", "gpt-5.3-codex"],
             WriterKind::Cursor => &["auto", "claude-haiku-5-5", "gpt-5.6-luna"],
+            WriterKind::Anthropic => &["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"],
         }
     }
 
-    /// The model a call asked for `asked`, as this writer takes it. Every writer but `claude` takes only its own list,
-    /// so a model one does not know (the default `haiku` after `summaries.writer` moved to it) is its first one.
-    /// `claude` takes any id, a full one included.
+    /// The model a call asked for `asked`, as this writer takes it. Every program writer but `claude` takes only its own
+    /// list, so a model one does not know (the default `haiku` after `summaries.writer` moved to it) is its first one.
+    /// `claude` takes any id, a full one included. The API takes any full model id, so an alias such as `haiku` is its
+    /// first one.
     pub fn model(self, asked: &str) -> &str {
         match self {
             WriterKind::Claude => asked,
+            WriterKind::Anthropic if !asked.starts_with("claude-") => self.models()[0],
+            WriterKind::Anthropic => asked,
             _ if !self.models().contains(&asked) => self.models()[0],
             _ => asked,
         }
@@ -114,20 +130,24 @@ impl WriterKind {
             WriterKind::Codex | WriterKind::Copilot | WriterKind::Cursor => {
                 Duration::from_secs(3 * 60)
             }
+            WriterKind::Anthropic => Duration::from_secs(2 * 60),
         }
     }
 
     /// The least a call that is not to be waited for (the risk judge) may be given.
     pub fn floor(self) -> Duration {
         match self {
-            WriterKind::Claude | WriterKind::Codex | WriterKind::Copilot | WriterKind::Cursor => {
-                Duration::ZERO
-            }
+            WriterKind::Claude
+            | WriterKind::Codex
+            | WriterKind::Copilot
+            | WriterKind::Cursor
+            | WriterKind::Anthropic => Duration::ZERO,
             WriterKind::Agy => AGY_LOGIN_WAIT + Duration::from_secs(15),
         }
     }
 
-    /// The name of the neutral folder, beside the event log, the writer runs in.
+    /// The name of the neutral folder, beside the event log, the writer runs in. An HTTP writer runs in none, and no
+    /// folder of its name is made.
     pub fn folder(self) -> &'static str {
         match self {
             WriterKind::Claude => "card-writer",
@@ -135,6 +155,7 @@ impl WriterKind {
             WriterKind::Codex => "card-writer-codex",
             WriterKind::Copilot => "card-writer-copilot",
             WriterKind::Cursor => "card-writer-cursor",
+            WriterKind::Anthropic => "card-writer-anthropic",
         }
     }
 }
@@ -144,21 +165,23 @@ impl WriterKind {
 pub struct FoundWriter {
     pub kind: WriterKind,
     pub name: &'static str,
-    /// Whether the login shell's `command -v` finds its program. Nothing is run to see whether it is logged in.
+    /// Whether the login shell's `command -v` finds its program. Nothing is run to see whether it is logged in. For an
+    /// HTTP writer: whether its API key is set, which the server, which keeps the key, fills in.
     pub found: bool,
     pub models: &'static [&'static str],
     /// The efforts it takes; none where the effort is part of the model id.
     pub efforts: &'static [&'static str],
 }
 
-/// Today's writers in the order the page presets the first found (#320): Claude, then agy.
+/// Today's writers in the order the page presets the first found (#320): an API key, Claude, agy, then Codex. An HTTP
+/// writer is listed as not found: no program is looked for, and the server says whether its key is set.
 pub fn found_writers(shell: &Path) -> Vec<FoundWriter> {
     WriterKind::ALL
         .into_iter()
         .map(|kind| FoundWriter {
             kind,
             name: kind.name(),
-            found: crate::find(shell, kind.program()).is_some(),
+            found: !kind.http() && crate::find(shell, kind.program()).is_some(),
             models: kind.models(),
             efforts: kind.efforts(),
         })
@@ -239,6 +262,12 @@ impl WriterError {
             (FailureKind::NotLoggedIn, "agy") => {
                 "Log in to `agy` in a terminal, then it writes again."
             }
+            (FailureKind::NotLoggedIn, "anthropic") => {
+                "Add or replace the API key under Writer, at the top of the page."
+            }
+            (FailureKind::Other, "anthropic") => {
+                "The API answered with an error; it tries again at the next turn."
+            }
             (FailureKind::NotLoggedIn, "codex") => {
                 "Run `codex login` in a terminal, then it writes again."
             }
@@ -283,6 +312,7 @@ impl fmt::Display for WriterError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let program = self.program;
         let what = match self.kind {
+            FailureKind::NotLoggedIn if program == "anthropic" => "has no working API key",
             FailureKind::NotLoggedIn => "is not logged in",
             FailureKind::Quota => "hit its quota or rate limit",
             FailureKind::Timeout => "ran past its timeout and was stopped",
@@ -419,6 +449,7 @@ pub fn build_command(
             command.arg(lead(request));
             String::new()
         }
+        WriterKind::Anthropic => unreachable!("an HTTP writer runs no program"),
     };
     command.env("PLOTKEEPER_INTERNAL", "1").current_dir(folder);
     (command, stdin.replace('\0', ""))
@@ -474,6 +505,7 @@ pub fn read_reply(
         // Cursor's one object, as Claude's; none when it failed, which it says on standard error.
         WriterKind::Cursor => Some(crate::parse_object(stdout).unwrap_or(Value::Null)),
         WriterKind::Claude | WriterKind::Codex | WriterKind::Copilot => None,
+        WriterKind::Anthropic => unreachable!("an HTTP writer's reply is read by `http_writer`"),
     };
     if let Some(envelope) = &envelope {
         let (error, reply) = match kind {
@@ -507,20 +539,13 @@ pub fn read_reply(
             // A schema call with no object in its envelope: the whole output, read as today's replies are.
             (None, None) => stdout.to_string(),
         };
-        if text.trim().is_empty() {
-            return fail(FailureKind::Empty, "");
-        }
-        let usage = &envelope["usage"];
-        return Ok(WriterReply {
-            json: json
-                .cloned()
-                .or_else(|| schema.then(|| crate::parse_object(&text).ok()).flatten()),
-            usage: usage["input_tokens"].as_u64().map(|input_tokens| Usage {
-                input_tokens,
-                output_tokens: usage["output_tokens"].as_u64().unwrap_or_default(),
-            }),
+        return finish(
+            kind,
+            schema,
             text,
-        });
+            json.cloned(),
+            usage_of(&envelope["usage"]),
+        );
     }
     // Claude's plain text: today's reading.
     match (status.success(), head.is_empty()) {
@@ -627,6 +652,33 @@ fn read_copilot(
         json: schema.then(|| crate::parse_object(text).ok()).flatten(),
         usage: None,
         text: text.into(),
+    })
+}
+
+/// The usage a reply's `usage` object gives, when it does: the same field names on both paths.
+pub(crate) fn usage_of(usage: &Value) -> Option<Usage> {
+    usage["input_tokens"].as_u64().map(|input_tokens| Usage {
+        input_tokens,
+        output_tokens: usage["output_tokens"].as_u64().unwrap_or_default(),
+    })
+}
+
+/// The reply both paths end in: its text, an empty one a failure; and, when the call had a schema, its object, the
+/// writer's own (`json`) or else read from the text (the schema check).
+pub(crate) fn finish(
+    kind: WriterKind,
+    schema: bool,
+    text: String,
+    json: Option<Value>,
+    usage: Option<Usage>,
+) -> Result<WriterReply, WriterError> {
+    if text.trim().is_empty() {
+        return Err(WriterError::new(FailureKind::Empty, kind, ""));
+    }
+    Ok(WriterReply {
+        json: json.or_else(|| schema.then(|| crate::parse_object(&text).ok()).flatten()),
+        usage,
+        text,
     })
 }
 

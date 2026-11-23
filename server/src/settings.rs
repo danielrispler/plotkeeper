@@ -353,6 +353,132 @@ fn plain_json(text: &str) -> String {
     out
 }
 
+/// Where the API-key writer's key is kept (spec #320, "API-key writers"): the macOS Keychain under plotkeeper's own entry,
+/// or memory in a test. Never another tool's config or the environment. The key goes in and is read back by the writer; the
+/// page only ever learns whether one is set.
+pub trait ApiKeys: Send + Sync {
+    /// The key, when one is set.
+    fn get(&self) -> Option<String>;
+    /// Saves `key`, replacing the one set.
+    fn set(&self, key: &str) -> Result<(), String>;
+    /// Removes the key; none set is no error.
+    fn remove(&self) -> Result<(), String>;
+}
+
+/// The Keychain entry: service `plotkeeper`, account `anthropic-api-key`, through the `security` program, which only ever
+/// touches this entry.
+pub struct Keychain {
+    program: PathBuf,
+}
+
+const SERVICE: &str = "plotkeeper";
+const ACCOUNT: &str = "anthropic-api-key";
+
+impl Default for Keychain {
+    fn default() -> Self {
+        Self::with_program("/usr/bin/security".into())
+    }
+}
+
+impl Keychain {
+    /// The Keychain through `program` in place of `security`, for a test, which must not touch the real Keychain.
+    pub fn with_program(program: PathBuf) -> Self {
+        Self { program }
+    }
+
+    fn run(&self, args: &[&str], stdin: Option<&str>) -> Result<std::process::Output, String> {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let mut child = Command::new(&self.program)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| format!("the Keychain could not be reached: {e}"))?;
+        let mut input = child.stdin.take().expect("piped");
+        if let Some(stdin) = stdin {
+            input
+                .write_all(stdin.as_bytes())
+                .map_err(|e| format!("the Keychain could not be reached: {e}"))?;
+        }
+        drop(input);
+        child
+            .wait_with_output()
+            .map_err(|e| format!("the Keychain could not be reached: {e}"))
+    }
+}
+
+/// Whether `key` looks like an API key: letters, digits, `-` and `_` only, so it goes to `security` unquoted and whole.
+fn plain_key(key: &str) -> bool {
+    !key.is_empty()
+        && key.len() <= 512
+        && key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+impl ApiKeys for Keychain {
+    fn get(&self) -> Option<String> {
+        let out = self
+            .run(
+                &["find-generic-password", "-s", SERVICE, "-a", ACCOUNT, "-w"],
+                None,
+            )
+            .ok()
+            .filter(|out| out.status.success())?;
+        let key = String::from_utf8(out.stdout).ok()?.trim().to_string();
+        (!key.is_empty()).then_some(key)
+    }
+
+    fn set(&self, key: &str) -> Result<(), String> {
+        if !plain_key(key) {
+            return Err("That is not an API key: it holds only letters, digits, - and _.".into());
+        }
+        // In interactive mode the key goes on standard input, so it never shows in the process list.
+        let command = format!("add-generic-password -U -s {SERVICE} -a {ACCOUNT} -w {key}\n");
+        let out = self.run(&["-i"], Some(&command))?;
+        match out.status.success() && self.get().as_deref() == Some(key) {
+            true => Ok(()),
+            false => Err("The Keychain did not save the key.".into()),
+        }
+    }
+
+    fn remove(&self) -> Result<(), String> {
+        self.run(
+            &["delete-generic-password", "-s", SERVICE, "-a", ACCOUNT],
+            None,
+        )?;
+        match self.get() {
+            None => Ok(()),
+            Some(_) => Err("The Keychain did not remove the key.".into()),
+        }
+    }
+}
+
+/// A key kept in memory: a test's, and the server's until it is given the Keychain at start.
+#[derive(Default)]
+pub struct MemoryKeys(Mutex<Option<String>>);
+
+impl ApiKeys for MemoryKeys {
+    fn get(&self) -> Option<String> {
+        self.0.lock().unwrap().clone()
+    }
+
+    fn set(&self, key: &str) -> Result<(), String> {
+        if !plain_key(key) {
+            return Err("That is not an API key: it holds only letters, digits, - and _.".into());
+        }
+        *self.0.lock().unwrap() = Some(key.into());
+        Ok(())
+    }
+
+    fn remove(&self) -> Result<(), String> {
+        *self.0.lock().unwrap() = None;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -724,6 +850,54 @@ mod tests {
             "{ broken",
         ] {
             assert_eq!(repository_in(text), None, "{text}");
+        }
+    }
+
+    /// The Keychain through a stand-in `security` that keeps one entry in a file: the key goes in on standard input, never
+    /// in the arguments, and only plotkeeper's own entry is named. The real Keychain is never touched.
+    #[test]
+    fn the_key_is_saved_replaced_and_removed_in_plotkeepers_own_keychain_entry() {
+        use super::{ApiKeys, Keychain};
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (store, log) = (dir.path().join("store"), dir.path().join("log"));
+        let program = dir.path().join("security");
+        std::fs::write(
+            &program,
+            format!(
+                r#"#!/bin/sh
+echo "ARGS $*" >> '{log}'
+case "$1" in
+  -i) read line; for w in $line; do last=$w; done; echo "$last" > '{store}';;
+  find-generic-password) [ -f '{store}' ] && cat '{store}' || exit 44;;
+  delete-generic-password) [ -f '{store}' ] && rm '{store}' || exit 44;;
+esac
+"#,
+                log = log.display(),
+                store = store.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let keys = Keychain::with_program(program);
+
+        assert_eq!(keys.get(), None);
+        keys.set("sk-ant-first-0001").unwrap();
+        assert_eq!(keys.get().as_deref(), Some("sk-ant-first-0001"));
+        keys.set("sk-ant-second-0002").unwrap();
+        assert_eq!(keys.get().as_deref(), Some("sk-ant-second-0002"));
+        keys.remove().unwrap();
+        assert_eq!(keys.get(), None);
+        keys.remove().unwrap();
+        assert!(keys.set("not a key; rm -rf").is_err());
+
+        let log = std::fs::read_to_string(log).unwrap();
+        for line in log.lines() {
+            assert!(!line.contains("sk-ant"), "a key in the arguments: {line}");
+            assert!(
+                line == "ARGS -i" || line.contains("-s plotkeeper -a anthropic-api-key"),
+                "{line}"
+            );
         }
     }
 }

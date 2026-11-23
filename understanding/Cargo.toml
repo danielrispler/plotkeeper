@@ -10,6 +10,8 @@ autotests = false
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The API-key writers' HTTP path: a blocking client, so the server pulls in no async runtime.
+ureq = { version = "2.12", default-features = false, features = ["tls"] }
 similar = "3"
 studio-core = { path = "../core" }
 # The weekly command finds the event log.
@@ -20,6 +22,8 @@ studio-system-map = { path = "../system-map" }
 [dev-dependencies]
 studio-test-support = { path = "../test-support" }
 tempfile = "3"
+# The fake HTTP server the API-key writers are tested against.
+tiny_http = "0.12"
 
 [[test]]
 name = "it"

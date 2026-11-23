@@ -37,8 +37,8 @@ export interface Files {
 
 // The writer the file names, or undefined, reporting a name that is none of them.
 function writerKind(value: unknown, report: (line: string) => void): WriterKind | undefined {
-  if (value === undefined || value === "claude" || value === "agy" || value === "codex" || value === "copilot" || value === "cursor") return value;
-  report('summaries.writer: expected "claude", "agy", "codex", "copilot" or "cursor"');
+  if (value === undefined || value === "claude" || value === "agy" || value === "codex" || value === "copilot" || value === "cursor" || value === "anthropic") return value;
+  report('summaries.writer: expected "claude", "agy", "codex", "copilot", "cursor" or "anthropic"');
   return undefined;
 }
 
