@@ -26,7 +26,7 @@ import { diffIn, historyIn, logIn, showHistory, startPanes } from "./panes.js";
 import { closePanel, panelShown, showPanel, startPanel } from "./panel.js";
 import { showPalette } from "./palette.js";
 import { projectOfCwd, selectedProject, sidebarOrder } from "./projects.js";
-import { selectedBase } from "./map-model.js";
+import { selectedView } from "./map-model.js";
 import { reload, type SettingsFiles } from "./settings.js";
 import { studio } from "./state.js";
 import { drawFeed, showView } from "./story.js";
@@ -113,10 +113,11 @@ function answer(n: number) {
 
 const actions: Actions = {
   "studio::ToggleList": () => toggle("list-open"),
-  // The selected session's story, which lives in the left panel over the map (#386): shown, or closed back to the bare map.
+  // The selected session's story, which lives in the left panel over the map (#386): shown, or closed back to the bare map with the
+  // session still selected, so ⌘2 opens it again.
   "studio::ToggleRail": () => {
     const id = selectedId();
-    if (panelShown()?.kind === "story") closePanel();
+    if (panelShown()?.kind === "story") showPanel(null, true);
     else if (id) showPanel({ kind: "story", session: id });
   },
   // Ask (danielrispler/plotkeeper#125) on the selected session's newest turn: its Headline's box, in the rail, opened.
@@ -283,7 +284,7 @@ listen<Selection | null>("selected", (selected) => (studio.pending ? (studio.mis
 invoke("selected").then((selected) => {
   show(selected);
   if (selected) openMap(projectOfCwd(selected.session.cwd));
-  if (selected) showPanel(selectedBase(selected.session.id, projectOfCwd(selected.session.cwd), selected.agent).panel);
+  if (selected) showPanel(selectedView(selected.session.id, projectOfCwd(selected.session.cwd), selected.agent).panel);
 });
 listen<SessionCards>("cards", (cards) => (studio.pending ? (studio.missed = true) : showCards(cards)));
 // Claude Code's version changed: re-record the subagent fixture.

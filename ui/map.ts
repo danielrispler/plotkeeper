@@ -109,7 +109,11 @@ const lastViewed = (): string | null => {
 
 // Shows `path`'s map.
 export function openMap(path: string | null) {
-  if (path !== project) [scrub, rig, revealed] = [null, null, null];
+  if (path !== project) {
+    // A PR brief belongs to the project it opened on; the next project may have no map to draw, so it is closed here, not by a draw.
+    if (layers.brief?.open()) layers.brief.close();
+    [scrub, rig, revealed] = [null, null, null];
+  }
   project = path;
   loaded = null;
   view = null;
@@ -184,15 +188,19 @@ function applyCamera(glide: boolean) {
   view.slots.canvas.style.setProperty("--cam-scale", String(scale));
 }
 
-let saving: ReturnType<typeof setTimeout> | undefined;
+// Each project's view waiting to be saved, so a move on another project never cancels it.
+const saving = new Map<string, ReturnType<typeof setTimeout>>();
 // Moves Daniel's view, unless a brief holds the camera, and saves it a moment after the last move (never for a past commit's map).
 function moveCamera(to: Camera, glide: boolean) {
   if (!rig?.move(to)) return;
   applyCamera(glide);
   const path = project;
   if (path === null || view?.scrub) return;
-  clearTimeout(saving);
-  saving = setTimeout(() => void invoke("map_save_view", { project: path, view: to }).catch(failure("map_save_view")), 400);
+  clearTimeout(saving.get(path));
+  saving.set(path, setTimeout(() => {
+    saving.delete(path);
+    invoke("map_save_view", { project: path, view: to }).catch(failure("map_save_view"));
+  }, 400));
 }
 
 // A PR brief's camera, shown while it plays (`map-brief.ts`); Daniel's view is kept as it was.
@@ -459,7 +467,8 @@ function grab(node: HTMLElement, id: string, current: MapView, links: Element, f
   // The drag runs on the screen, so its threshold is in screen pixels whatever the zoom; the plate's place is that over the scale.
   let scale = 1;
   node.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0) return;
+    // A press on a control on the plate, such as an agent's chip, is the control's: capturing it here would give its click to the plate.
+    if (event.button !== 0 || (event.target as Element).closest("button")) return;
     scale = rig?.shown().scale ?? 1;
     const at = current.positions[id];
     drag = dragStart(id, { x: event.clientX, y: event.clientY }, { x: at.x * scale, y: at.y * scale });
@@ -528,7 +537,7 @@ export function startMap(given: MapDeps) {
   );
   // Never on a timer: the focus and a merge.
   window.addEventListener("focus", () => {
-    if (mapShown() && project !== null) load(project, true).catch(failure("map"));
+    if (mapShown() && project !== null && !projectGone(project)) load(project, true).catch(failure("map"));
   });
   listen<string>("map-landed", (landed) => {
     if (mapShown() && landed === project) load(landed, false).catch(failure("map"));

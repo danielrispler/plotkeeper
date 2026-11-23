@@ -6,7 +6,7 @@ import { rewatch } from "./answer.js";
 import { showCards } from "./cards.js";
 import { element, failure, invoke } from "./dom.js";
 import { openMap, shownProject } from "./map.js";
-import { pressRow, selectedBase } from "./map-model.js";
+import { pressRow, selectedView } from "./map-model.js";
 import { closePanel, followSelection, panelShown, showPanel } from "./panel.js";
 import { showSessions } from "./list.js";
 import { showSession } from "./panes.js";
@@ -37,9 +37,9 @@ export async function select(id: string, agent: string | null = null) {
   // log opens there once the server has opened it.
   const session = studio.listed.find((s) => s.id === id);
   if (session) {
-    const base = selectedBase(id, projectOfCwd(session.cwd), agent);
-    if (base.project !== shownProject()) openMap(base.project);
-    if (agent === null) showPanel(base.panel);
+    const page = selectedView(id, projectOfCwd(session.cwd), agent);
+    if (page.project !== shownProject()) openMap(page.project);
+    if (agent === null) showPanel(page.panel);
   }
   const pressed = { id, agent };
   studio.pending = pressed;
@@ -58,7 +58,7 @@ export async function select(id: string, agent: string | null = null) {
       show(selected);
       showCards(cards);
       showSession(selected?.session ?? null, true, selected?.agent ?? null);
-      if (agent !== null && selected?.agent === agent) showPanel(selectedBase(id, projectOfCwd(selected.session.cwd), agent).panel);
+      if (agent !== null && selected?.agent === agent) showPanel(selectedView(id, projectOfCwd(selected.session.cwd), agent).panel);
     }
   } catch (e) {
     if (studio.pending === pressed) {

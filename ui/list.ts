@@ -3,7 +3,7 @@
 // a strip of glyphs and labels, which opens the full list on hover, on click or on ⌘1.
 
 import { logStop } from "./stop-rules.js";
-import { age, element, failure, fullTitle, invoke, patch, prose, pressable, stepText, text } from "./dom.js";
+import { age, element, failure, fullTitle, invoke, newest, patch, prose, pressable, stepText, text } from "./dom.js";
 import { hideClearToast, showClearToast } from "./toast.js";
 import { counts, times, type Time } from "./times.js";
 import { shortPaths } from "./paths.js";
@@ -29,9 +29,19 @@ let marksStale = true;
 const whyText: Record<MarkWhy, string> = { fog: "A Core part you track has changed", broken: "A test that backs a law failed on main", brief: "A PR brief is waiting" };
 export const dotTitle = (why: MarkWhy[]): string => why.map((reason) => whyText[reason]).join("\n");
 export const staleDots = () => void (marksStale = true);
+// One read at a time asked for: `marksStale` is cleared when it starts and set again when it fails, so the next draw of the list asks again;
+// a read's answer that came after a newer one asked is dropped.
+const latestDots = newest();
 async function readDots() {
   marksStale = false;
-  const now = await invoke("map_marks", { projects: knownProjects() });
+  let now;
+  try {
+    now = await latestDots(invoke("map_marks", { projects: knownProjects() }));
+  } catch (e) {
+    marksStale = true;
+    throw e;
+  }
+  if (!now) return;
   const key = (entries: [string, MarkWhy[]][]) => JSON.stringify(entries);
   if (key(now.map((mark) => [mark.project, mark.why])) === key([...marks])) return;
   marks.clear();
@@ -549,7 +559,7 @@ export const landedClear = clearing(
     changed: (pending, writing) => {
       if (pending.length) showClearToast(pending.length, () => landedClear.undo());
       else hideClearToast();
-      drawSidebar();
+      drawShown();
     },
   },
 );
@@ -568,7 +578,9 @@ export const sidebarSessions = <T extends Pick<Session, "state" | "id">>(session
 export const landedToClear = <T extends Pick<Session, "state" | "id" | "landed">>(sessions: T[], hidden: ReadonlySet<string>): T[] =>
   sessions.filter((session) => showsLanded(session.state, session.landed) && !hidden.has(session.id));
 
-// A project's "⋯" (#381): the one menu of the list's headers, opened under it for its project; Remove project is in it.
+// A project's "⋯" (#381): the one menu of the list's headers, opened under it for its project; Remove project is in it. It is drawn only for a
+// project with no live session: the server saves a project again for its sessions' next event, so removing one with live sessions would undo
+// itself (#380's review).
 function projectMore(group: ProjectGroup<Session>): HTMLElement {
   const more = pressable(text("button", "⋯", "project-more"), false, () => {
     const menu = element("project-actions");
@@ -586,7 +598,7 @@ function projectMore(group: ProjectGroup<Session>): HTMLElement {
 }
 
 // A project's header (#97): its name and, even while folded, its most urgent state: needs you over running. A saved project
-// with no live session is its header only; one whose folder is gone is struck through (#381).
+// with no live session is its header only, with its "⋯"; one whose folder is gone is struck through (#381).
 export function projectHead(group: ProjectGroup<Session>): HTMLElement {
   const head = document.createElement("div");
   head.className = ["project-head", ...(group.gone ? ["gone"] : []), ...(group.key === shownProject() ? ["current"] : [])].join(" ");
@@ -605,7 +617,7 @@ export function projectHead(group: ProjectGroup<Session>): HTMLElement {
     dot.setAttribute("aria-label", dot.title);
     toggle.append(dot);
   }
-  head.append(toggle, projectMore(group));
+  head.append(toggle, ...(group.states.length ? [] : [projectMore(group)]));
   return head;
 }
 
@@ -667,12 +679,17 @@ export function showSessions(sessions: Session[]) {
   void refreshAgents();
   landedClear.sync();
   redrawHistory();
-  const live = sidebarSessions(sessions, landedClear.hidden);
-  drawSidebar();
-  patch(element("strip"), strip(live));
+  drawShown();
   const chip = element("needs-you");
   chip.textContent = chipText(sessions);
   chip.hidden = chip.textContent === "";
   chip.title = "Go to the first session that needs you";
+}
+
+// What shows the listed sessions but those Clear landed hid: the list, the strip and the tab's title.
+function drawShown() {
+  const live = sidebarSessions(studio.listed, landedClear.hidden);
+  drawSidebar();
+  patch(element("strip"), strip(live));
   showTitle(live.filter((session) => session.unseen).length);
 }

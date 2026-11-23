@@ -392,11 +392,21 @@ pub fn pr_diff(
 #[derive(Debug, PartialEq, Serialize)]
 pub struct Mark {
     pub project: String,
-    pub why: Vec<&'static str>,
+    pub why: Vec<MarkWhy>,
+}
+
+/// One reason a header's dot lights; `MarkWhy` in `ui/types.ts`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MarkWhy {
+    Fog,
+    Broken,
+    Brief,
 }
 
 /// The projects among `projects` that show a fogged Core part, a broken law or a waiting PR brief, with which of the three, for the project
-/// header's quiet dot and its hover. Reads local refs and the last CI read only: it asks neither `origin` nor GitHub.
+/// header's quiet dot and its hover. Reads local refs and the last CI read only: it asks neither `origin` nor GitHub. A gone folder has
+/// no map to read and gets no mark (#381).
 pub fn map_marks(
     projects: Vec<String>,
     cache: &crate::ci_laws::CiCache,
@@ -407,16 +417,23 @@ pub fn map_marks(
         .into_iter()
         .filter_map(|project| {
             let repo = Path::new(&project);
+            if !repo.is_dir() {
+                return None;
+            }
             let _ = crate::fog::refresh(repo, &file, &project, false);
             let fog = read_map(repo).source.is_some_and(|source| {
                 crate::fog::core_fogged(&read_user(&file, &project), &source)
             });
             let broken = cache.broken(&project);
             let brief = crate::pr_briefs::any_waiting(&project, &prs.ready(&project));
-            let why: Vec<&'static str> = [(fog, "fog"), (broken, "broken"), (brief, "brief")]
-                .into_iter()
-                .filter_map(|(lit, name)| lit.then_some(name))
-                .collect();
+            let why: Vec<MarkWhy> = [
+                (fog, MarkWhy::Fog),
+                (broken, MarkWhy::Broken),
+                (brief, MarkWhy::Brief),
+            ]
+            .into_iter()
+            .filter_map(|(lit, name)| lit.then_some(name))
+            .collect();
             (!why.is_empty()).then_some(Mark { project, why })
         })
         .collect())
@@ -532,6 +549,24 @@ mod tests {
     use studio_test_support::{git, origin, repo};
 
     const MAP: &str = r#"{"version":1,"parts":[],"actors":[],"links":[],"ignored":[],"laws":[]}"#;
+
+    #[test]
+    fn a_gone_folder_gets_no_header_mark_and_its_map_is_not_read() {
+        let data = tempfile::tempdir().unwrap();
+        let gone = data.path().join("pokedex").display().to_string();
+        let file = data.path().join("ci-last.json");
+        std::fs::write(
+            &file,
+            serde_json::json!({ &gone: { "status": "broken", "parts": ["shell"] } }).to_string(),
+        )
+        .unwrap();
+        let cache = crate::ci_laws::CiCache::load(file);
+        assert!(cache.broken(&gone));
+        assert_eq!(
+            map_marks(vec![gone], &cache, &crate::prs::Prs::default()).unwrap(),
+            []
+        );
+    }
 
     fn commit_file(dir: &Path, name: &str, text: &str) {
         std::fs::write(dir.join(name), text).unwrap();

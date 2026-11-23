@@ -450,15 +450,19 @@ const mapBusy = (jump: boolean): Fixture => {
       if (rest.join("|") !== "#312 · CI marks|agy · Name from the prompt|codex · plotkeeper|#313 · Docs needs you") log("snap:fail not placed: " + rest.join("|"));
       if (document.querySelector("#map .agent-chip[title*=Helper], #map .agent-chip[title*='Read the log']")) log("snap:fail a Helper is on the map");
       log("chips ok, not placed " + rest.length);
-      ${jump ? `document.querySelector("#map .plate[data-id=hook] .agent-chip").click();
+      ${jump ? `// A real click, as a mouse gives it: the plate under the chip captures the pointer on its press (#385's review).
+      await __snapClick(document.querySelector("#map .plate[data-id=hook] .agent-chip"));
       await wait(400);
       if (document.getElementById("map").hidden) log("snap:fail a chip left the Map view");
-      if (document.getElementById("map-panel").hidden || !document.querySelector("#panel-body > .rail")) log("snap:fail a chip did not open its session's story in the left panel");` : ""}`, {
+      if (document.getElementById("map-panel").hidden || !document.querySelector("#panel-body > .rail")) log("snap:fail a chip did not open its session's story in the left panel");
+      if (document.getElementById("session-name").textContent !== "Ship PR 286") log("snap:fail the chip opened the story of " + JSON.stringify(document.getElementById("session-name").textContent));
+      if (document.getElementById("map-sheet").childElementCount) log("snap:fail the chip's click opened the plate's sheet");
+      log("jump ok");` : ""}`, {
       map_state: mapState(),
       map_place: { s1: ["core", "window"], "s1/w1": ["shell"], s2: ["hook"], s6: [] },
       select: { __by: "id", values: Object.fromEntries(sessions.map((s) => [s.id, { session: s, agent: null }])) },
     });
-    return { ...f, sessions, selected: { session: sessions[6], agent: null } };
+    return { ...f, sessions, selected: { session: sessions[6], agent: null }, ...(jump && { realPointer: true, snapDone: "jump ok" }) };
   };
 
 // A map whose default branch's CI failed in a test that backs a law of the shell (#312): the red mark beside the Needs you chip, at the
@@ -630,12 +634,18 @@ const listSecondLines = (): Fixture => ({
       if (clear() && getComputedStyle(clear()).color !== "rgb(111, 108, 102)") log("snap:fail Clear landed is not faint: " + getComputedStyle(clear()).color);`,
 });
 // Clear landed pressed: the landed row is hidden, the toast offers Undo, and Undo brings it back; pressed again for the screenshot.
+// The strip and the tab's title follow at once too: the cleared session, unseen here, leaves both.
 const listClearLanded = (): Fixture => ({
   ...listLines(),
+  sessions: (listLines().sessions as Session[]).map((s) => (s.id === "s5" ? { ...s, unseen: true } : s)),
   snapScript: `${listChecks}
+      const title = document.title;
+      if (!document.querySelector('#strip [data-key="strip s5"]')) log("snap:fail the landed session is not in the strip before Clear landed");
       clear().click();
       await wait(100);
       if (line("s5") !== null || document.querySelector('#groups .session-row[data-key="s5 "]')) log("snap:fail the landed row is still shown after Clear landed");
+      if (document.querySelector('#strip [data-key="strip s5"]')) log("snap:fail the landed session is still in the strip after Clear landed");
+      if (document.title === title) log("snap:fail the tab's title still counts the cleared session: " + title);
       if (clear()) log("snap:fail Clear landed shows with nothing landed left");
       const toast = document.getElementById("clear-toast");
       if (toast.hidden || !/Cleared 2 landed/.test(toast.textContent) || !/Undo/.test(toast.textContent)) log("snap:fail the toast: " + toast.textContent);
@@ -848,6 +858,86 @@ const mapNoMap = (): Fixture =>
       frame("without a map");
       checkColours("without a map");
       log("base ok");`, { map_state: mapState({ status: "none", source: null }) });
+// Switching projects (#386's review): what one project's map started is not lost or left over on the next. `calls` are the commands the
+// page sends from here on; `open(path)` presses a project's header.
+const switchProjects = [...baseProjects, { path: "/w/pokedex", gone: true }];
+const switching = (check: string, extra: Fixture = {}): Fixture =>
+  mapBaseOf(`
+      const calls = [];
+      const sent = window.fetch;
+      window.fetch = (url, init) => {
+        calls.push([/\\/api\\/(\\w+)$/.exec(String(url))?.[1], init?.body ? JSON.parse(init.body) : null]);
+        return sent(url, init);
+      };
+      const open = async (path) => { document.querySelector('#groups .project-head[data-project="' + path + '"] .project-toggle').click(); await wait(150); };
+      ${check}
+      log("base ok");`, {
+    projects: switchProjects,
+    map_state: { __by: "project", values: { "/w/plotkeeper": mapState(), "/w/falinks": mapState({ project: "/w/falinks" }) } },
+    ...extra,
+  });
+// A view moved on one project and, within the save's moment, on another: both are saved.
+const mapSwitchSavesViews = (): Fixture =>
+  switching(`
+      const zoom = () => document.querySelector("#map .map-canvas").dispatchEvent(new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, clientX: 700, clientY: 400, bubbles: true, cancelable: true }));
+      zoom();
+      await open("/w/falinks");
+      zoom();
+      await wait(700);
+      const saved = calls.filter(([command]) => command === "map_save_view").map(([, args]) => args.project).sort().join();
+      if (saved !== "/w/falinks,/w/plotkeeper") log("snap:fail the views saved were of " + JSON.stringify(saved));`);
+// A gone folder's empty state: the window's focus asks nothing about it.
+const mapGoneFocus = (): Fixture =>
+  switching(`
+      await open("/w/pokedex");
+      if (!document.querySelector("#map .map-gone")) return log("snap:fail pokedex shows no gone state");
+      calls.length = 0;
+      window.dispatchEvent(new Event("focus"));
+      await wait(300);
+      const asked = calls.filter(([command, args]) => command === "map_state" && args.project === "/w/pokedex");
+      if (asked.length) log("snap:fail the focus read the gone folder's map " + asked.length + " times");`);
+// A PR brief open on one project's map closes when a project with no map shows.
+const mapBriefSwitch = (): Fixture =>
+  switching(`
+      const media = window.matchMedia.bind(window);
+      window.matchMedia = (query) => (query.includes("prefers-reduced-motion") ? { ...media(query), matches: true } : media(query));
+      document.querySelector('#map-tray .tray-row[data-pr="334"]').click();
+      await wait(800);
+      if (document.getElementById("map-brief").hidden) return log("snap:fail the brief did not open");
+      await open("/w/pokedex");
+      if (!document.getElementById("map-brief").hidden || document.body.classList.contains("brief-open")) log("snap:fail the brief stayed open over the gone project");`, {
+    map_state: { __by: "project", values: { "/w/plotkeeper": mapState({ ready: [{ number: 334, title: "PR briefs on the map", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }] }) } },
+    pr_brief: briefOf(storySteps()),
+  });
+// The header dots' reads (#386's review): a read that failed is tried again on the next draw of the list, and an older read's answer never
+// lands over a newer one's. `answer(fn)` answers \`map_marks\` from here on with \`fn(n)\` for its n-th call, a promise or a value.
+const dots = (check: string, extra: Fixture = {}): Fixture =>
+  mapBaseOf(`
+      const dot = () => document.querySelector('#groups .project-head[data-project="/w/falinks"] .project-dot');
+      const sent = window.fetch;
+      const answer = (fn) => {
+        let n = 0;
+        window.fetch = async (url, init) => (String(url).endsWith("/map_marks") ? { ok: true, status: 200, json: async () => await fn(n++) } : sent(url, init));
+      };
+      const falinks = [{ project: "/w/falinks", why: ["fog"] }];
+      ${check}
+      log("base ok");`, extra);
+const mapDotsRetry = (): Fixture =>
+  dots(`
+      if (dot()) return log("snap:fail a dot shows though the read failed");
+      answer(() => falinks);
+      // A press on the shown project's header folds it, which draws the list again.
+      document.querySelector('#groups .project-head[data-project="/w/plotkeeper"] .project-toggle').click();
+      await wait(200);
+      if (!dot()) log("snap:fail the failed read was never tried again");`, { map_marks: { __throw: "the server is busy" } as never });
+const mapDotsOrder = (): Fixture =>
+  dots(`
+      answer((n) => (n === 0 ? new Promise((done) => setTimeout(() => done(falinks), 400)) : []));
+      window.dispatchEvent(new Event("focus"));
+      await wait(50);
+      window.dispatchEvent(new Event("focus"));
+      await wait(700);
+      if (dot()) log("snap:fail the older read's answer landed over the newer one's");`, { map_marks: [] });
 const mapPanel = (check: string, extra: Fixture = {}): Fixture => {
   const sessions = busySessions().map((s) => (s.id === "s1" ? { ...s, turns: s.turns.map((t) => ({ ...t, id: "t1", message: "Chips on the parts a turn touches" })) } : s));
   const selected = Object.fromEntries(sessions.map((s) => [s.id, { session: s, agent: null }]));
@@ -872,6 +962,17 @@ const mapPanelStory = (): Fixture =>
       if (!panelOpen() || !document.querySelector("#panel-body > .rail")) return log("snap:fail a row's press did not open its story in the left panel");
       if (document.getElementById("map").hidden) return log("snap:fail the row's press left the Map view");
       if (document.querySelector("#map .plate[data-id=hook] .agent-chip.lit") === null) log("snap:fail the open session's chip is not lit");
+      // Below 1007 px the open panel leaves no room for the legend (the prototype's scene narrow), and the tray never lies on a plate.
+      const checkFoot = (when) => {
+        if (narrow && panelOpen() && document.getElementById("map-legend").getClientRects().length) log("snap:fail the legend shows beside the open panel below 1007 px " + when);
+        const tray = document.getElementById("map-tray");
+        const over = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+        if (!tray.getClientRects().length) return;
+        const box = tray.getBoundingClientRect();
+        const under = [...document.querySelectorAll("#map .plate, #map .actor")].filter((node) => over(box, node.getBoundingClientRect())).map((node) => node.dataset.id);
+        if (under.length) log("snap:fail the tray lies on " + under.join() + " " + when);
+      };
+      checkFoot("with the story open");
       checkAll("with the story open");
       await plate("understanding");
       if (!sheetOpen()) return log("snap:fail the plate's click did not open its sheet");
@@ -880,6 +981,7 @@ const mapPanelStory = (): Fixture =>
         await press(row("s2"));
         if (!panelOpen() || sheetOpen()) log("snap:fail below 1007 px the panel did not take the sheet's place");
       }
+      checkFoot("with the story and the sheet");
       checkAll("with the story and the sheet");
       if (!narrow && document.querySelector("#map .plate[data-id=hook] .agent-chip.lit") === null) log("snap:fail the open session's chip went out");
       log("panel ok");`);
@@ -903,6 +1005,18 @@ const mapPanelPeel = (): Fixture =>
       if (document.getElementById("map").hidden) log("snap:fail Esc left the Map view while a layer was open");
       checkAll("after Esc");
       log("panel ok");`);
+// ⌘2 closes the selected session's story and opens it again: the session stays selected while it is closed.
+const mapPanelToggle = (): Fixture =>
+  mapPanel(`
+      await press(row("s2"));
+      const cmd2 = async () => { document.dispatchEvent(new KeyboardEvent("keydown", { code: "Digit2", key: "2", metaKey: true, bubbles: true })); await wait(300); };
+      if (!panelOpen()) return log("snap:fail the row's press did not open its story before ⌘2");
+      await cmd2();
+      if (panelOpen()) log("snap:fail ⌘2 did not close the story");
+      if (row("s2").getAttribute("aria-pressed") !== "true") log("snap:fail ⌘2 deselected the session");
+      await cmd2();
+      if (!panelOpen() || document.getElementById("session-name").textContent !== "Ship PR 286") log("snap:fail ⌘2 did not open the story again");
+      log("panel ok");`);
 // A turn's whole diff, widened, from the palette: it closes the part's sheet; its Back shows the story again.
 const mapPanelDiff = (): Fixture =>
   mapPanel(`
@@ -919,6 +1033,10 @@ const mapPanelDiff = (): Fixture =>
       if (Math.round(width) !== Math.round(Math.min(780, room))) log("snap:fail the diff's panel is " + width + " px wide, not min(780, " + room + ")");
       if (!panel.querySelector(".diff-line.add")) log("snap:fail the diff shows no lines");
       checkAll("with the diff open");
+      // Closing the diff, like closing its story, leaves the bare map with no session selected.
+      await esc();
+      if (panelOpen()) log("snap:fail Esc did not close the diff");
+      if (row("s1").getAttribute("aria-pressed") === "true") log("snap:fail closing the diff left its session selected");
       log("panel ok");`);
 // History in the left panel, from the list's link.
 const mapPanelHistory = (): Fixture =>
@@ -958,9 +1076,17 @@ const mapPanelBrief = (): Fixture =>
       document.querySelector('#map-tray .tray-row[data-pr="334"]').click();
       await wait(800);
       if (document.getElementById("map-brief").hidden) return log("snap:fail the brief did not open");
-      for (const card of [panel, document.getElementById("map-side")]) {
-        if (card.hidden) continue;
-        if (Number(getComputedStyle(card).opacity) !== Number(getComputedStyle(document.documentElement).getPropertyValue("--brief-dim"))) log("snap:fail the brief did not dim #" + card.id + ": " + getComputedStyle(card).opacity);
+      // A card's glass stays whole, so the dimmed plates under it never show through; what it holds is dimmed (the prototype's scene brief).
+      const dim = Number(getComputedStyle(document.documentElement).getPropertyValue("--brief-dim"));
+      const cards = [panel, ...document.querySelectorAll("#map-side > .glass")].filter((card) => card.getClientRects().length);
+      if (cards.length < (narrow ? 1 : 2)) log("snap:fail the brief shows " + cards.length + " glass cards");
+      for (const card of cards) {
+        for (let node = card; node && node.id !== "map"; node = node.parentElement) {
+          if (Number(getComputedStyle(node).opacity) !== 1) log("snap:fail #" + card.id + " lets the map show through it under the brief: opacity " + getComputedStyle(node).opacity + " on " + node.tagName + "." + node.className);
+        }
+        for (const inner of card.children) {
+          if (inner.getClientRects().length && Number(getComputedStyle(inner).opacity) !== dim) log("snap:fail the brief did not dim #" + card.id + " > " + inner.tagName + "." + inner.className + ": " + getComputedStyle(inner).opacity);
+        }
       }
       if (!panelOpen()) log("snap:fail the brief closed the panel");
       if (!narrow && !sheetOpen()) log("snap:fail the brief closed the sheet");
@@ -1141,6 +1267,8 @@ export const fixtures = {
       if (order !== "plotkeeper,falinks,pokedex") log("snap:fail the headers' order: " + order);
       if (named("falinks")?.closest(".project").querySelector(".row")) log("snap:fail a project with no sessions shows rows");
       if (!named("pokedex")?.classList.contains("gone")) log("snap:fail the gone project's header is not marked gone");
+      // Remove project is offered only for a project with no live session: one with sessions would come back with their next event.
+      if (named("plotkeeper").querySelector(".project-more")) log("snap:fail a project with live sessions offers Remove project");
       named("pokedex").querySelector(".project-more").click();
       await wait(100);
       const menu = document.getElementById("project-actions");
@@ -1268,10 +1396,29 @@ export const fixtures = {
     };
   },
   mapChipJump: () => mapBusy(true),
+  // Story 34: every card over the map, the left panel and the sheet and drawer alike, arrives by a 12 px slide with a fade.
+  mapGlassMotion: () =>
+    mapOpened(`
+      const start = (name) => {
+        const probe = document.createElement("div");
+        probe.style.animation = name + " 1s linear paused";
+        document.body.append(probe);
+        const look = getComputedStyle(probe);
+        const found = [look.opacity, look.transform];
+        probe.remove();
+        return found;
+      };
+      const want = { "panel-in": "matrix(1, 0, 0, 1, -12, 0)", "glass-in": "matrix(1, 0, 0, 1, 0, -12)" };
+      for (const [name, transform] of Object.entries(want)) {
+        const [opacity, moved] = start(name);
+        if (opacity !== "0" || moved !== transform) log("snap:fail " + name + " starts at opacity " + opacity + ", " + moved + ", not a 12 px slide with a fade");
+      }
+      log("motion ok");`, { map_state: mapState(), snapDone: "motion ok" }),
   // The left panel over the map (#385): the story with a part's sheet, Esc's peel and a second press, the widened diff, History, Settings,
-  // and a brief over both panels. `mapPanelNarrow` is the story at 1000x800 (snap:all's size for it), where only one overlay opens.
+  // ⌘2's toggle, and a brief over both panels. `mapPanelNarrow` is the story at 1000x800 (snap:all's size for it), where only one overlay opens.
   mapPanelStory,
   mapPanelPeel,
+  mapPanelToggle,
   mapPanelDiff,
   mapPanelHistory,
   mapPanelSettings,
@@ -1298,6 +1445,13 @@ export const fixtures = {
   mapBaseNarrow: mapBase,
   mapHeaderDot,
   mapHeaderDotNarrow: mapHeaderDot,
+  // Switching projects: both views saved, a gone folder never read on focus, a PR brief closed.
+  mapSwitchSavesViews,
+  mapGoneFocus,
+  mapBriefSwitch,
+  // The header dots: a failed read is tried again, and an older answer never lands over a newer one.
+  mapDotsRetry,
+  mapDotsOrder,
   mapFresh,
   mapFreshNarrow: mapFresh,
   mapNoMap,
