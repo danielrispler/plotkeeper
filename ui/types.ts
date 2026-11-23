@@ -434,6 +434,15 @@ export type WaitingBriefs = { project: string; numbers: number[] };
 export type HistoricalMap = { commit: string; short: string; label: string; source: string };
 export type CommitFiles = { commit: string; short: string; label: string; url: string | null; files: { path: string; diff: string }[] };
 
+// The writer section (spec #320): the writers the login shell's `command -v` finds (`understanding/src/writer.rs`), whether
+// summaries are on (off until a writer passes Test for a user who arrived with none) and whether PR briefs can be written,
+// which needs `claude`; and a Test's outcome, with `settings.json`'s new text when the pass saved the choice.
+export type WriterKind = "claude" | "agy";
+export type FoundWriter = { kind: WriterKind; name: string; found: boolean; models: string[]; efforts: string[] };
+export type Writers = { writers: FoundWriter[]; summaries_on: boolean; briefs: boolean };
+export type WriterOutcome = "passed" | "not_logged_in" | "quota" | "timeout" | "not_installed" | "empty" | "other";
+export type WriterTest = { outcome: WriterOutcome; line: string; settings: string | null };
+
 // Every command the window invokes, with what the server replies (`server/src/api.rs`): `void` where the
 // window ignores the reply, `null` where the shell may answer none. `invoke` takes only these names, and the snap fixtures
 // (`scripts/snap/`) are typed against it, and `scripts/snap/base.ts` answers every command that is not `void`, so a fixture
@@ -484,11 +493,13 @@ export interface Commands {
   settings_files: SettingsFiles;
   subagent_log: SubagentLog | null;
   summary_settings: void;
+  test_writer: WriterTest;
   turn_file_hunk: Hunk | null;
   turn_reply: string | null;
   turn_summary: TurnSummary | null;
   watch: Ask | null;
   writer_notice: string | null;
+  writers: Writers;
 }
 export type Command = keyof Commands;
 

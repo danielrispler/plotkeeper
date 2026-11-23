@@ -1,6 +1,6 @@
 // The notice that no card writer can run (danielrispler/plotkeeper#51): one line of the notice line, beside the others.
 
-const WRITER = /^Summaries and briefs are off: /;
+const WRITER = /^Summaries are off: /;
 
 // The notice line's text with the writer's line set to `notice`, or removed when it is null.
 export function withWriterNotice(text: string, notice: string | null): string {

@@ -52,3 +52,11 @@ test("a PR whose write failed says so and opens to try again", () => {
   assert.equal(stale.openable, true);
   assert.match(stale.note, /could not be rewritten; open it to try again/);
 });
+
+test("without claude, a PR with no stored brief says briefs need Claude and does not open; a stored one still does", () => {
+  const none = trayRows([pr(7, "Fog")], false)[0];
+  assert.equal(none.openable, false);
+  assert.match(none.note, /#7 · briefs need Claude/);
+  const stored = trayRows([pr(8, "Fog", { stale: false, writing: false, chapters: ["Fog"] })], false)[0];
+  assert.equal(stored.openable, true);
+});

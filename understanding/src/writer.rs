@@ -25,6 +25,25 @@ pub enum WriterKind {
 pub const AGY_LOGIN_WAIT: Duration = Duration::from_secs(60);
 
 impl WriterKind {
+    /// Every writer, in the order the page presets the first found (spec #320, "Writer settings on the page").
+    pub const ALL: [WriterKind; 2] = [WriterKind::Claude, WriterKind::Agy];
+
+    /// The writer's name on the page.
+    pub fn name(self) -> &'static str {
+        match self {
+            WriterKind::Claude => "Claude",
+            WriterKind::Agy => "agy",
+        }
+    }
+
+    /// The efforts the writer takes, the default ("") first; none for `agy`, whose effort is part of each model id.
+    pub fn efforts(self) -> &'static [&'static str] {
+        match self {
+            WriterKind::Claude => &["", "low", "medium", "high"],
+            WriterKind::Agy => &[],
+        }
+    }
+
     /// The program's name, as the login shell finds it.
     pub fn program(self) -> &'static str {
         match self {
@@ -80,6 +99,32 @@ impl WriterKind {
             WriterKind::Agy => "card-writer-agy",
         }
     }
+}
+
+/// A writer as the page's writer section lists it (spec #320, "Writer settings on the page").
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct FoundWriter {
+    pub kind: WriterKind,
+    pub name: &'static str,
+    /// Whether the login shell's `command -v` finds its program. Nothing is run to see whether it is logged in.
+    pub found: bool,
+    pub models: &'static [&'static str],
+    /// The efforts it takes; none where the effort is part of the model id.
+    pub efforts: &'static [&'static str],
+}
+
+/// Today's writers in the order the page presets the first found (#320): Claude, then agy.
+pub fn found_writers(shell: &Path) -> Vec<FoundWriter> {
+    WriterKind::ALL
+        .into_iter()
+        .map(|kind| FoundWriter {
+            kind,
+            name: kind.name(),
+            found: crate::find(shell, kind.program()).is_some(),
+            models: kind.models(),
+            efforts: kind.efforts(),
+        })
+        .collect()
 }
 
 /// One call of the contract.
@@ -142,8 +187,15 @@ impl WriterError {
 }
 
 impl WriterError {
-    /// The line the page shows: why no card is written, and what to do about it.
+    /// The line the page shows: why no summary is written, and what to do about it. PR briefs are written by `claude`
+    /// whatever writer is chosen, so the line speaks of summaries only (spec #320, "The writer's failure notice").
     pub fn notice(&self) -> String {
+        format!("Summaries are off: {}", self.reason())
+    }
+
+    /// Why the call failed and what to do about it, each writer with its own fix: what a Test shows, and the notice's
+    /// words after its opening.
+    pub fn reason(&self) -> String {
         let program = self.program;
         let todo = match (self.kind, program) {
             (FailureKind::NotLoggedIn, "agy") => {
@@ -151,7 +203,7 @@ impl WriterError {
             }
             (FailureKind::NotLoggedIn, _) => "Run `claude` in a terminal and log in with /login.",
             (FailureKind::Quota, _) => {
-                "Wait for the limit to reset, or choose another model or writer in settings.json."
+                "Wait for the limit to reset, or pick another model or writer under Writer, at the top of the page."
             }
             (FailureKind::Timeout, _) => "Check the connection; it tries again at the next turn.",
             (FailureKind::NotInstalled, "agy") => "Install the Antigravity CLI, or fix its path.",
@@ -170,7 +222,7 @@ impl WriterError {
         } else {
             String::new()
         };
-        format!("Summaries and briefs are off: {head}. {todo}")
+        format!("{head}. {todo}")
     }
 }
 

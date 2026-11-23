@@ -8,16 +8,19 @@ import { briefProblem, openBriefOf } from "./map-brief.js";
 import { watchSeen } from "./seen.js";
 import { logStop } from "./stop-rules.js";
 import type { ReadyPr } from "./types.js";
+import { briefsWritten } from "./writers.js";
 
 export type TrayRow = { number: number; chapter: number | null; title: string; note: string; openable: boolean };
 
-// The tray's rows; none when nothing is ready, so the tray is not drawn.
-export const trayRows = (ready: ReadyPr[]): TrayRow[] =>
+// The tray's rows; none when nothing is ready, so the tray is not drawn. Without `claude` (`briefs` false) no brief is written,
+// so a PR with none stored says briefs need Claude (spec #320).
+export const trayRows = (ready: ReadyPr[], briefs = true): TrayRow[] =>
   ready.flatMap((pr): TrayRow[] => {
     const title = pr.title || `PR #${pr.number}`;
     const brief = pr.brief;
     if (brief?.quiet) return [{ number: pr.number, chapter: null, title, note: `#${pr.number} · no brief: nothing you track changed`, openable: false }];
     if (!brief || brief.chapters.length === 0) {
+      if (!briefs) return [{ number: pr.number, chapter: null, title, note: `#${pr.number} · briefs need Claude`, openable: false }];
       // Being written: the row says so and waits. Otherwise opening the row writes the brief (the start writes only a few, newest first).
       if (brief?.writing) return [{ number: pr.number, chapter: null, title, note: `#${pr.number} · writing the brief…`, openable: false }];
       if (brief?.failed) return [{ number: pr.number, chapter: 0, title, note: `#${pr.number} · the brief could not be written; open it to try again`, openable: true }];
@@ -41,7 +44,7 @@ let watching: (() => void)[] = [];
 function paint(view: MapView) {
   watching.forEach((stop) => stop());
   watching = [];
-  const rows = view.scrub ? [] : trayRows(view.state.ready ?? []);
+  const rows = view.scrub ? [] : trayRows(view.state.ready ?? [], briefsWritten());
   view.slots.tray.replaceChildren(
     ...(rows.length
       ? [

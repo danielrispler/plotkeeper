@@ -576,7 +576,7 @@ fn a_writer_that_cannot_start_gives_one_notice_until_a_call_works() {
         let heard = heard.lock().unwrap();
         assert_eq!(heard.len(), 1, "{heard:?}");
         let text = heard[0].as_deref().unwrap();
-        assert!(text.contains("Summaries and briefs are off"), "{text}");
+        assert!(text.contains("Summaries are off"), "{text}");
     }
 
     shell(dir.path(), "claude", "echo ok");
@@ -602,7 +602,7 @@ fn a_writer_that_starts_and_fails_tells_why_and_what_to_do_once_until_a_call_wor
         let heard = heard.lock().unwrap();
         assert_eq!(heard.len(), 1, "{heard:?}");
         let text = heard[0].as_deref().unwrap();
-        assert!(text.starts_with("Summaries and briefs are off: "), "{text}");
+        assert!(text.starts_with("Summaries are off: "), "{text}");
         assert!(text.contains("not logged in"), "{text}");
         assert!(text.contains("claude"), "{text}");
     }
@@ -970,4 +970,103 @@ fn the_judge_stops_after_its_own_limit_and_leaves_nothing_running_while_other_ca
     )
     .with_risk_timeout(Duration::from_millis(100));
     assert!(slow.goal(&["a prompt"]).is_ok());
+}
+
+// Picking and testing the writer on the page (spec #320, "Writer settings on the page" and "The Test gate").
+
+#[test]
+fn a_test_makes_one_call_and_gives_its_typed_outcome_without_a_notice() {
+    use studio_understanding::{FailureKind, WriterKind};
+    let dir = tempfile::tempdir().unwrap();
+    let outcome = |kind: WriterKind, body: Option<&str>| {
+        let program = match body {
+            Some(body) => shell(dir.path(), kind.program(), body),
+            None => dir.path().join("missing"),
+        };
+        let (writer, heard) = watched(&program, dir.path());
+        let writer = writer.with_agy(program, dir.path().into());
+        let outcome = writer.test(kind, "haiku", "").map_err(|e| e.kind);
+        assert_eq!(
+            *heard.lock().unwrap(),
+            Vec::<Option<String>>::new(),
+            "a Test raises no notice"
+        );
+        outcome
+    };
+    let claude = WriterKind::Claude;
+    assert_eq!(outcome(claude, Some("echo ok")), Ok(()));
+    assert_eq!(
+        outcome(
+            claude,
+            Some("echo 'Not logged in. Please run /login'; exit 1")
+        ),
+        Err(FailureKind::NotLoggedIn)
+    );
+    assert_eq!(
+        outcome(claude, Some("echo 'rate limit reached'; exit 1")),
+        Err(FailureKind::Quota)
+    );
+    assert_eq!(outcome(claude, None), Err(FailureKind::NotInstalled));
+    assert_eq!(outcome(claude, Some("exit 0")), Err(FailureKind::Empty));
+    let agy = WriterKind::Agy;
+    assert_eq!(
+        outcome(agy, Some(r#"echo '{"status":"SUCCESS","response":"ok"}'"#)),
+        Ok(())
+    );
+    assert_eq!(
+        outcome(
+            agy,
+            Some(r#"echo '{"status":"ERROR","error":"please log in"}'; exit 1"#)
+        ),
+        Err(FailureKind::NotLoggedIn)
+    );
+    // The Test runs the writer it names, not the one that writes now.
+    let ran = dir.path().join("ran");
+    let agy_program = shell(
+        dir.path(),
+        "agy-marked",
+        &format!(
+            r#"touch '{}'; echo '{{"status":"SUCCESS","response":"ok"}}'"#,
+            ran.display()
+        ),
+    );
+    let writer = ClaudeWriter::new(dir.path().join("missing"), dir.path().into())
+        .with_agy(agy_program, dir.path().into());
+    assert_eq!(
+        writer
+            .test(agy, "gemini-4-neon-low", "")
+            .map_err(|e| e.kind),
+        Ok(())
+    );
+    assert!(ran.exists());
+}
+
+#[test]
+fn with_summaries_off_the_writer_runs_nothing_but_a_test() {
+    let dir = tempfile::tempdir().unwrap();
+    let ran = dir.path().join("ran");
+    let claude = shell(
+        dir.path(),
+        "claude",
+        &format!("touch '{}'; echo ok", ran.display()),
+    );
+    let (writer, heard) = watched(&claude, dir.path());
+    writer.summaries_on(false);
+    assert!(writer.goal(&["a prompt"]).is_err());
+    assert!(!ran.exists(), "no call is made while summaries are off");
+    assert!(
+        heard.lock().unwrap().is_empty(),
+        "being off is no failure notice"
+    );
+    assert_eq!(
+        writer
+            .test(studio_understanding::WriterKind::Claude, "haiku", "")
+            .map_err(|e| e.kind),
+        Ok(())
+    );
+    assert!(ran.exists());
+    std::fs::remove_file(&ran).unwrap();
+    writer.summaries_on(true);
+    assert_eq!(writer.goal(&["a prompt"]).unwrap().trim(), "ok");
+    assert!(ran.exists());
 }

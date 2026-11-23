@@ -93,12 +93,15 @@ fn main() -> ExitCode {
 
 fn run(log: &std::path::Path, held: lock::Held) -> std::io::Result<()> {
     let (writer_notices, writer_notice_reader) = mpsc::channel::<Option<String>>();
+    // The Test gate is read before the writer makes its folder, which the gate's first look reads (spec #320).
+    let summaries_on = studio_server::settings::summaries_open(log.parent().unwrap_or(log));
     let effects = Arc::new(ServerEffects::default());
     let app = Arc::new(App::open(log, effects.clone(), writer_notices)?);
     effects.attach(&app);
     // The writer settings.json names takes effect at start, with no page open to save it.
     app.writer
         .use_writer(studio_server::settings::summary_writer());
+    studio_server::set_summaries_on(&app, summaries_on);
     let token = web::new_token();
     let page = Web::start(
         app.clone(),
