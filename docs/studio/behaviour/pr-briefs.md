@@ -10,7 +10,7 @@ The server asks `gh pr view <branch> --json number,title,isDraft,state,headRefOi
 
 A lookup of a ready PR (`pr_briefs.rs`):
 
-- With no stored brief at that head, the brief is written at once, unless it was ready when `plotkeeper` started: then it is written at start only when its head moved within `catchUp.hours` (2 by default) and it is among the 3 newest such heads; any other is written when Daniel opens it (a PR that becomes ready while `plotkeeper` runs is written at once, as before). The 3 is a constant in the code, not a setting.
+- With no stored brief at that head, the brief is written at once, unless it was ready when `plotkeeper` started: then it is written at start only when its head moved within `catchUp.hours` (2 by default) and it is among the 3 newest such heads; any other is written when Daniel opens it, and is looked at as usual after that (a PR that becomes ready while `plotkeeper` runs is written at once, as before). A stale brief's rewrite counts toward the 3 as well, so a PR whose brief is of an older head is held like one with none. The start is the first lookup that `gh pr list` answered: one that `gh` failed writes nothing and leaves the cap for the next. The 3 is a constant in the code, not a setting.
 - A new head marks the stored brief stale. It is rewritten when Daniel opens it, or when two lookups in a row see the same new head.
 - A PR whose touched parts would not fog at Daniel's effective tiers gets no brief (see Shape): nothing is written, it is not gathered again at the same head, and its tray row says "no brief: nothing you track changed".
 

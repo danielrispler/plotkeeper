@@ -193,10 +193,10 @@ pub struct PrBriefs {
 /// among those whose head moved within `catchUp.hours`.
 pub const START_BRIEFS: usize = 3;
 
-/// What the lookups write at once, given that plotkeeper has just started: the ready PRs found at the first lookup of a project that `gh pr list` answered are
-/// written only when their head moved within the catch-up window, newest head first and no more than `START_BRIEFS`; the others are
-/// written when opened. A PR that becomes ready later is written at once, as is any PR that already has a brief (a new head
-/// marks it stale).
+/// What the lookups write at once, given that plotkeeper has just started: the ready PRs found at the first lookup of a project that
+/// `gh pr list` answered, and with no brief of their head, are written only when their head moved within the catch-up window, newest
+/// head first and no more than `START_BRIEFS`. That cap counts the rewrites of stale briefs too. The others are written (or
+/// rewritten) when opened, and are looked at as usual after that. A PR that becomes ready later is written at once.
 #[derive(Default)]
 pub struct Startup {
     asked: HashSet<String>,
@@ -206,8 +206,8 @@ pub struct Startup {
 
 impl Startup {
     /// The numbers of `ready` (of `project`) this lookup may write. `answered`: `gh pr list` has answered for the project, so
-    /// `ready` is what is really open. `head_ms` is when a PR's head commit was made, if known; `has_brief` whether a brief of the
-    /// PR is stored.
+    /// `ready` is what is really open. `head_ms` is when a PR's head commit was made, if known; `fresh` whether a brief of the
+    /// PR's head is stored and not stale.
     #[allow(clippy::too_many_arguments)]
     pub fn allowed(
         &mut self,
@@ -217,41 +217,40 @@ impl Startup {
         head_ms: &dyn Fn(&Ready) -> Option<u64>,
         now_ms: u64,
         window_ms: u64,
-        has_brief: &dyn Fn(u64) -> bool,
+        fresh: &dyn Fn(&Ready) -> bool,
     ) -> Vec<u64> {
-        // A PR that left the ready list and returns became ready while running: it is written at once, not left for opening.
+        // A PR that left the ready list and returns became ready while running: it is written at once, not left for opening. One
+        // whose brief was written when opened is looked at as usual from then on.
         self.waiting
-            .retain(|(p, n)| p != project || ready.iter().any(|r| r.number == *n));
+            .retain(|(p, n)| p != project || ready.iter().any(|r| r.number == *n && !fresh(r)));
         // Until `gh pr list` has answered, what is open is not known: the start waits for the first lookup that answered.
         if !answered && !self.asked.contains(project) {
             return vec![];
         }
         if self.asked.insert(project.to_string()) {
             let since = now_ms.saturating_sub(window_ms);
-            let mut fresh: Vec<(&Ready, u64)> = ready
+            let mut moved: Vec<(&Ready, u64)> = ready
                 .iter()
-                .filter(|r| !has_brief(r.number))
+                .filter(|r| !fresh(r))
                 .filter_map(|r| Some((r, head_ms(r)?)))
                 .filter(|(_, at)| *at >= since)
                 .collect();
             // The newest head first; of two made together, the newer PR.
-            fresh.sort_by_key(|(r, at)| std::cmp::Reverse((*at, r.number)));
-            let picked: Vec<u64> = fresh
+            moved.sort_by_key(|(r, at)| std::cmp::Reverse((*at, r.number)));
+            let picked: Vec<u64> = moved
                 .iter()
                 .take(START_BRIEFS)
                 .map(|(r, _)| r.number)
                 .collect();
             for r in ready {
-                if !has_brief(r.number) && !picked.contains(&r.number) {
+                if !fresh(r) && !picked.contains(&r.number) {
                     self.waiting.insert((project.to_string(), r.number));
                 }
             }
         }
         ready
             .iter()
-            .filter(|r| {
-                has_brief(r.number) || !self.waiting.contains(&(project.to_string(), r.number))
-            })
+            .filter(|r| fresh(r) || !self.waiting.contains(&(project.to_string(), r.number)))
             .map(|r| r.number)
             .collect()
     }
@@ -489,6 +488,11 @@ fn source_of(project: &str, number: u64) -> Result<PrSource, String> {
     Ok(source)
 }
 
+/// Whether a brief of `pr`'s head is stored and not stale.
+fn has_fresh_brief(store: &BriefStore, pr: &Ready) -> bool {
+    store.get(pr.number, &pr.head).is_some_and(|b| !b.stale)
+}
+
 /// Looks at each ready PR of `project` after a lookup of `prs.rs`: the first brief is written at once, a new head stales it. Each
 /// PR goes on a thread of its own, since a write takes minutes; the Map view is told (`map-landed`) when a brief changed. At the
 /// first lookup after start only the PRs `Startup` picks are written; the rest are written when opened.
@@ -503,7 +507,7 @@ pub fn lookup_later(app: &Arc<App>, project: &str, ready: Vec<Ready>) {
         &|pr| head_time_ms(project, &pr.head),
         studio_understanding::millis(),
         crate::settings::catch_up().window_ms,
-        &|pr| store.latest(pr).is_some(),
+        &|pr| has_fresh_brief(&store, pr),
     );
     for pr in ready.into_iter().filter(|pr| allowed.contains(&pr.number)) {
         let (app, project) = (app.clone(), project.to_string());
@@ -1097,12 +1101,30 @@ mod tests {
     }
 
     #[test]
-    fn a_pr_with_a_stored_brief_is_always_looked_at_and_projects_start_on_their_own() {
+    fn a_pr_whose_brief_is_not_fresh_counts_toward_the_start_cap_and_projects_start_on_their_own() {
         let mut startup = Startup::default();
-        let ready = [ready_pr(1, "h1"), ready_pr(2, "h2")];
-        // Neither head moved in the window, but PR 2 has a brief: its lookup marks it stale or rewrites it.
-        let found = startup.allowed("/p", true, &ready, &|_| None, NOW, 2 * HOUR, &|pr| pr == 2);
-        assert_eq!(found, [2]);
+        // PR 1's brief is of its head; 2, 3, 4 and 6 have a brief of an older head (or one marked stale); 5 has none.
+        let ready: Vec<Ready> = (1..=6).map(|n| ready_pr(n, &format!("h{n}"))).collect();
+        let ago = [
+            ("h1", 9),
+            ("h2", 0),
+            ("h3", 1),
+            ("h4", 1),
+            ("h5", 0),
+            ("h6", 9),
+        ];
+        let head_ms = |pr: &Ready| {
+            ago.iter()
+                .find(|(h, _)| *h == pr.head)
+                .map(|(_, hours)| NOW - hours * HOUR)
+        };
+        let fresh = |pr: &Ready| pr.number == 1;
+        // Rewrites count toward the cap: the newest heads 5 and 2, then 4 (the newer of the two an hour old). 3 and 6 stay stale
+        // until opened; 1 is looked at and kept.
+        let first = startup.allowed("/p", true, &ready, &head_ms, NOW, 2 * HOUR, &fresh);
+        assert_eq!(first, [1, 2, 4, 5]);
+        let again = startup.allowed("/p", true, &ready, &head_ms, NOW, 2 * HOUR, &fresh);
+        assert_eq!(again, [1, 2, 4, 5]);
         // Another project's first lookup is its own start.
         let other = startup.allowed(
             "/q",
@@ -1114,6 +1136,42 @@ mod tests {
             &|_| false,
         );
         assert_eq!(other, [1]);
+    }
+
+    #[test]
+    fn a_pr_left_for_opening_is_looked_at_as_usual_once_its_brief_was_written() {
+        let mut startup = Startup::default();
+        let ready = [ready_pr(3, "h3")];
+        let old = |_: &Ready| Some(NOW - 9 * HOUR);
+        assert!(
+            startup
+                .allowed("/p", true, &ready, &old, NOW, 2 * HOUR, &|_| false)
+                .is_empty()
+        );
+        // Daniel opened it and its brief was written.
+        assert_eq!(
+            startup.allowed("/p", true, &ready, &old, NOW, 2 * HOUR, &|_| true),
+            [3]
+        );
+        // A later push: the lookups stale and rewrite it as for any PR.
+        let pushed = [ready_pr(3, "h3b")];
+        assert_eq!(
+            startup.allowed("/p", true, &pushed, &old, NOW, 2 * HOUR, &|_| false),
+            [3]
+        );
+    }
+
+    #[test]
+    fn a_brief_of_an_older_head_or_marked_stale_is_not_fresh() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = BriefStore::open(dir.path()).unwrap();
+        let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+        assert!(!has_fresh_brief(&store, &ready_pr(7, "aaa")));
+        lookup(&store, &seen, &fake, "aaa");
+        assert!(has_fresh_brief(&store, &ready_pr(7, "aaa")));
+        assert!(!has_fresh_brief(&store, &ready_pr(7, "bbb")));
+        store.mark_stale(7, "aaa").unwrap();
+        assert!(!has_fresh_brief(&store, &ready_pr(7, "aaa")));
     }
 
     #[test]
