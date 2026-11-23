@@ -3,7 +3,8 @@
 // a strip of glyphs and labels, which opens the full list on hover, on click or on ⌘1.
 
 import { logStop } from "./stop-rules.js";
-import { age, element, fullTitle, invoke, patch, prose, pressable, stepText, text } from "./dom.js";
+import { age, element, failure, fullTitle, invoke, patch, prose, pressable, stepText, text } from "./dom.js";
+import { hideClearToast, showClearToast } from "./toast.js";
 import { counts, times, type Time } from "./times.js";
 import { shortPaths } from "./paths.js";
 import { historyLink } from "./history.js";
@@ -14,8 +15,8 @@ import { isSelected, select } from "./selection.js";
 import { studio } from "./state.js";
 import { titled } from "./keys.js";
 import { blockedWaits, stateLabels, type BlockedCommand, type Context, type Session, type SessionState, type Subagent } from "./types.js";
-import { askDelete, report } from "./story.js";
-import { refreshAgents } from "./map-agents.js";
+import { askDelete, lastHeadline, report } from "./story.js";
+import { hoverAgents, refreshAgents } from "./map-agents.js";
 import { showTitle } from "./alerts.js";
 
 // The state groups folded in a project, idle only, and the idle groups Daniel opened, by project and state,
@@ -124,11 +125,12 @@ export function glyph(state: string, unseen = false, landed = false, unwatched =
   return node;
 }
 
-// A row's second line, only while it runs or needs Daniel: the current step, or the open question's
-// first line, else who asks (a plan or a permission); null otherwise.
-export function secondLine(
-  session: Pick<Session, "state" | "line" | "questions"> & { status_only?: boolean; blocked_commands?: Pick<BlockedCommand, "status">[] },
-): string | null {
+// A row's second line (#382, the list holds what Home held): while it needs Daniel, the open question's first line, else who asks
+// (a plan or a permission); while it runs, its Intention, else its current step; once it finished unseen, its last turn's Headline
+// (`headline`). Null otherwise, and on a landed row, which reads as landed.
+type Lined = Pick<Session, "state" | "line" | "questions"> &
+  Partial<Pick<Session, "unseen" | "landed" | "turns">> & { status_only?: boolean; blocked_commands?: Pick<BlockedCommand, "status">[]; transcript?: { intention?: string | null } };
+export function secondLine<T extends Lined>(session: T, headline: (session: T) => string | null = () => null): string | null {
   // A status-only row has no step or question to show (danielrispler/Falinks#560).
   if (session.status_only) return null;
   const open = session.questions.filter((question) => question.answer === "open").at(-1);
@@ -137,7 +139,8 @@ export function secondLine(
   if (waiting > 0 && session.state !== "ended" && !(session.state === "needs_you" && open)) {
     return `${waiting} blocked ${waiting === 1 ? "command" : "commands"} waiting`;
   }
-  if (session.state === "running") return session.line ?? "";
+  if (session.state === "running") return session.transcript?.intention || (session.line ?? "");
+  if (session.unseen && !showsLanded(session.state, !!session.landed) && (session.state === "your_turn" || session.state === "idle")) return headline(session);
   if (session.state !== "needs_you") return null;
   // A question with no text, as a redacted log holds, falls back to the row's line rather than throw.
   return open?.questions[0]?.question?.split("\n")[0] ?? session.line ?? "";
@@ -240,7 +243,7 @@ export function selecting(id: string, agent: string | null, key = `${id} ${agent
 export function row(session: Session, children: Children, token: string | null = null): HTMLElement {
   const button = selecting(session.id, null);
   button.classList.add("row", "session-row");
-  const line = secondLine(session);
+  const line = secondLine(session, lastHeadline);
   const turn = line === null ? null : rowTime(session, isSelected(session.id));
   const clock = text("span", "", "clock");
   const first = rowLines(
@@ -254,6 +257,9 @@ export function row(session: Session, children: Children, token: string | null =
     session.landed,
     !session.pid,
   );
+  // Hovering the row lights its session's chips on the map (#382).
+  button.addEventListener("pointerenter", () => hoverAgents(session.id));
+  button.addEventListener("pointerleave", () => hoverAgents(null));
   // The agent's logo leads the row, apart from its state glyph (#158).
   first.prepend(logo(logoKey(session), noContextNote(session) || undefined));
   return button;
@@ -417,8 +423,109 @@ export function strip(sessions: Session[]): HTMLElement[] {
   ];
 }
 
-// The sessions the list shows: all but the ended ones, which are in History (#94).
-export const sidebarSessions = <T extends Pick<Session, "state">>(sessions: T[]): T[] => sessions.filter((session) => session.state !== "ended");
+// Clear landed (#244): Clear hides every landed row and offers Undo for CLEAR_WINDOW_MS. When the window closes each hidden session
+// that is still landed goes through today's Delete (`commit`); Undo commits nothing. `changed` hears the sessions still pending.
+export type Clock = { set(run: () => void, ms: number): unknown; clear(id: unknown): void };
+export const CLEAR_WINDOW_MS = 8000;
+export function clearing(
+  time: Clock,
+  deps: { landed(id: string): Session | undefined; commit(session: Session): Promise<unknown> | void; changed(pending: Session[], writing: Session[]): void },
+  hidden = new Set<string>(),
+) {
+  const pending = new Map<string, Session>();
+  // The sessions whose delete is in flight: the shell still hears them, so a quit before the write commits them (#244).
+  const writing = new Map<string, Session>();
+  let timer: unknown = null;
+  const stop = () => {
+    if (timer !== null) time.clear(timer);
+    timer = null;
+  };
+  const tell = () => deps.changed([...pending.values()], [...writing.values()]);
+  return {
+    // The rows Clear hides: those pending and those committed, until they leave the list.
+    hidden,
+    clear(sessions: Session[]) {
+      for (const s of sessions) {
+        pending.set(s.id, s);
+        hidden.add(s.id);
+      }
+      stop();
+      timer = time.set(() => {
+        timer = null;
+        const due = [...pending.keys()].map((id) => ({ id, session: deps.landed(id) }));
+        pending.clear();
+        for (const { id, session } of due) if (session) writing.set(id, session);
+        tell();
+        for (const { id, session } of due) {
+          if (!session) hidden.delete(id);
+          else
+            void Promise.resolve(deps.commit(session)).then(
+              () => {
+                writing.delete(id);
+                tell();
+              },
+              // A row whose Delete failed comes back.
+              () => {
+                writing.delete(id);
+                hidden.delete(id);
+                tell();
+              },
+            );
+        }
+      }, CLEAR_WINDOW_MS);
+      tell();
+    },
+    undo() {
+      stop();
+      for (const id of pending.keys()) hidden.delete(id);
+      pending.clear();
+      tell();
+    },
+    // A session that left the list, or stopped being landed, is no longer hidden; one still pending is left alone: it comes back and is
+    // not committed.
+    sync() {
+      let dropped = false;
+      for (const id of [...hidden]) {
+        if (deps.landed(id)) continue;
+        hidden.delete(id);
+        dropped = pending.delete(id) || dropped;
+        dropped = writing.delete(id) || dropped;
+      }
+      if (!dropped) return;
+      if (pending.size === 0) stop();
+      tell();
+    },
+  };
+}
+
+// The page's one Clear: the list's "Clear landed" and Home's, and the toast offers Undo. A commit is today's Delete: the row
+// dropped, the cards kept.
+const stillLanded = (id: string) => studio.listed.find((s) => s.id === id && showsLanded(s.state, s.landed));
+export const landedClear = clearing(
+  { set: (run, ms) => setTimeout(run, ms), clear: (id) => clearTimeout(id as number) },
+  {
+    landed: stillLanded,
+    commit: (session) =>
+      invoke("delete_session", { id: session.id }).catch((e) => {
+        failure("delete_session", "error")(e);
+        throw e;
+      }),
+    changed: (pending, writing) => {
+      if (pending.length) showClearToast(pending.length, () => landedClear.undo());
+      else hideClearToast();
+      drawSidebar();
+      redrawHome();
+    },
+  },
+);
+
+// The sessions the list shows: all but the ended ones, which are in History (#94), and those Clear landed hid (`hidden`, #382).
+export const sidebarSessions = <T extends Pick<Session, "state" | "id">>(sessions: T[], hidden: ReadonlySet<string> = new Set()): T[] =>
+  sessions.filter((session) => session.state !== "ended" && !hidden.has(session.id));
+
+// The sessions "Clear landed" would clear: every landed one it has not hidden yet; none, and the list shows no Clear landed.
+export const landedToClear = <T extends Pick<Session, "state" | "id" | "landed">>(sessions: T[], hidden: ReadonlySet<string>): T[] =>
+  sessions.filter((session) => showsLanded(session.state, session.landed) && !hidden.has(session.id));
 
 // A project's header (#97): its name and, even while folded, its most urgent state: needs you over running.
 export function projectHead(group: ProjectGroup<Session>): HTMLElement {
@@ -473,7 +580,18 @@ function projectNode(group: ProjectGroup<Session>): HTMLElement {
 // The project groups (#97): one per repository, in the order its sessions are listed.
 // Patched, not rebuilt, so focus and text selection survive the update (danielrispler/Falinks#570).
 export function drawSidebar() {
-  patch(element("groups"), projectGroups(sidebarSessions(studio.listed)).map(projectNode));
+  patch(element("groups"), projectGroups(sidebarSessions(studio.listed, landedClear.hidden)).map(projectNode));
+  patch(element("history-link"), [...historyLink(studio.listed, showHistory), ...clearLanded(landedToClear(studio.listed, landedClear.hidden))]);
+}
+
+// "Clear landed" at the list's end (#382), quiet, only while a landed session shows: Home's Clear (#244), with its Undo.
+function clearLanded(landed: Session[]): HTMLElement[] {
+  if (!landed.length) return [];
+  const button = pressable(text("button", "Clear landed", "clear-landed quiet"), false, () => landedClear.clear(landedToClear(studio.listed, landedClear.hidden)));
+  button.removeAttribute("aria-pressed");
+  button.title = "Clear every landed session; Undo for a few seconds";
+  button.dataset.key = "clear";
+  return [button];
 }
 
 // The sessions are grouped by project, then by state: needs you, running, your turn, idle; the idle ones
@@ -485,9 +603,8 @@ export function showSessions(sessions: Session[]) {
   void refreshAgents();
   redrawHome();
   redrawHistory();
-  const live = sidebarSessions(sessions);
+  const live = sidebarSessions(sessions, landedClear.hidden);
   drawSidebar();
-  patch(element("history-link"), historyLink(sessions, showHistory));
   patch(element("strip"), strip(live));
   element("no-sessions").hidden = sessions.length > 0;
   const chip = element("needs-you");

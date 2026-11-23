@@ -119,6 +119,9 @@ h1 { margin: 0 0 var(--sp-4); }
 /* An agent's logo (#158): one colour, the muted text colour; the "Needs you" pill stays the only colour. */
 .logo { flex: none; display: inline-grid; place-items: center; width: var(--icon); height: var(--icon); color: var(--muted); }
 .logo svg { width: var(--icon); height: var(--icon); }
+/* In the session list the logo is small (#382), so the name leads; a second line is one line at the smallest size, cut with an ellipsis. */
+.list .logo, .list .logo svg { width: var(--logo); height: var(--logo); }
+.list .session-row .l2 { font-size: var(--size-xs); }
 .row .id { color: var(--muted); flex: none; font-size: var(--size-small); }
 .row .id.past { color: var(--fg); font-weight: 600; }
 .row .l1 .glyph { margin-inline-start: auto; }
@@ -203,6 +206,9 @@ h1 { margin: 0 0 var(--sp-4); }
 .pane.history .item .delete { visibility: visible; }
 .list-foot { display: flex; align-items: center; justify-content: space-between; }
 .history-link { display: block; margin: var(--sp-3) var(--sp-4); color: var(--muted); }
+/* "Clear landed" (#382): under History, quieter still, only while a landed session shows. */
+.clear-landed { display: block; margin: 0 var(--sp-4) var(--sp-3); font-size: var(--size-xs); color: var(--faint); }
+.clear-landed:hover { color: var(--fg); }
 .pane[hidden] { display: block; }
 .pane[hidden], .pane.fitting { visibility: hidden; }
 /* A split's divider (danielrispler/Falinks#529), in the gap between its two panes. */
@@ -625,6 +631,9 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .agent-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; padding: 0 var(--sp-4); font-size: var(--size-xs);
               line-height: 1.6; border-radius: var(--radius); color: var(--fg); background: var(--raised); box-shadow: inset 0 0 0 var(--hair) var(--plate-edge); }
 .agent-chip.needs-you { font-weight: 600; color: var(--needs-you); background: var(--needs-you-bg); box-shadow: none; }
+/* A list row hovered lights its session's chips (#382): a warm ring, as focus has on the map; a needs-you chip keeps its colour. */
+.agent-chip.lit { color: var(--fg); box-shadow: 0 0 0 var(--mark) var(--ring-warm); }
+.agent-chip.needs-you.lit { color: var(--needs-you); box-shadow: 0 0 0 var(--mark) var(--needs-you-line); }
 #map-not-placed:not(:empty) { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
 #map-not-placed .side-title { margin: 0; font-size: var(--size-xs); font-weight: 400; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
 

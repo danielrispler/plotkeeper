@@ -2,7 +2,9 @@
 
 ## The session list
 
-On the right, the session list: every session (Claude Code, agy and Codex), one line each with the agent's logo, its name and its state, grouped by repository, a task's worktree under its main checkout's, and, inside a repository, by state with "needs you" first. A running row adds a second line, its current step, and a row that needs you the open question's first line, else who asks (a plan, a permission, or a subagent: its name and "asks"), and the selected row adds how long it has waited ("Bash cargo test · 3m"); a session whose last step is a wake-up reads "worker … returned" until its next step.
+On the right, the session list: every session (Claude Code, agy and Codex), one line each with the agent's logo, its name and its state, grouped by repository, a task's worktree under its main checkout's, and, inside a repository, by state with "needs you" first. The list holds what Home showed (#382): a row that needs you adds a second line, the open question's first line, else who asks (a plan, a permission, or a subagent: its name and "asks"); a running row its Intention, or its current step until the Intention is known; an unseen row (your turn or idle, not landed) its last turn's Headline, which updates when the turn's summary is stored. No other row has a second line. A second line is one line, muted, at 11.5 px, cut with an ellipsis. The selected row adds how long it has waited ("Bash cargo test · 3m"); a session whose last step is a wake-up reads "worker … returned" until its next step. The agent's logo is 12 px in one muted tone; colour in the list is the "Needs you" pill only. Hovering a session's row lights its agent chips on the map while the Map view is open.
+
+"Clear landed", quiet under "History · N", shows only while a landed session is in the list. It is Home's Clear (below): it hides every landed row, ended ones included, and shows the toast with Undo for 8 seconds; Undo brings the rows back and nothing was deleted, and when the window passes each hidden session goes through Delete. The rows it hides leave the list and the strip too.
 
 Idle sessions collapse at the bottom; ended ones are in History, from the "History · N" link at the list's end or the palette's "Show history". On the left, the story rail of the session you clicked (see [The story rail](rail.md)); the centre holds Home, History, a turn's whole diff or a subagent's log, and, with a session selected and none of those, a line pointing at the rail. Only your click changes the session shown.
 
@@ -36,7 +38,7 @@ Cmd+Shift+H (`studio::GoHome`, rebindable) flips between Home and the session yo
 
 "Rename" names the session: the server appends a `StudioRename` line to the event log, so the name survives a restart; the page types nothing into the session. An empty name gives the row its folder's again. "Open" and "Close", which resumed and ended a session's terminal, are gone with the terminals.
 
-"Delete" asks, then drops the session's row: the server appends a `StudioDelete` line to the event log, so the row stays gone after a restart until a `SessionStart` of the session brings it back; its cards stay in the store, and no worktree or branch is removed. Clear on Home deletes the landed rows the same way once its Undo window has passed.
+"Delete" asks, then drops the session's row: the server appends a `StudioDelete` line to the event log, so the row stays gone after a restart until a `SessionStart` of the session brings it back; its cards stay in the store, and no worktree or branch is removed. Clear landed, in the list or on Home, deletes the landed rows the same way once its Undo window has passed.
 
 A late Allow of a blocked command reaches no terminal from the page: it shows the line to give the session to retry the command.
 
