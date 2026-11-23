@@ -21,7 +21,7 @@ pub(crate) struct Event {
     /// The agent's id of the turn the event belongs to, absent until the first user input.
     pub prompt_id: Option<String>,
     pub studio_received_ms: u64,
-    /// The terminal the session runs in, which the hook records from `STUDIO_TERMINAL_ID`.
+    /// The terminal the session runs in, which the hook records from `PLOTKEEPER_TERMINAL_ID`.
     pub studio_terminal_id: Option<String>,
     /// The agent's process, which the hook records as `studio_pid`: its parent, or the pid the
     /// agy wrapper passes. `None` when it could not tell (#330).
@@ -105,6 +105,10 @@ pub(crate) enum Happened {
     Interrupted,
     /// Any other notice.
     OtherNotice,
+    /// The server wrote the line itself, in Claude's shape whatever the session's agent: an end by
+    /// the process check or a closed terminal, an interrupted turn, or an answer from a card. It
+    /// never changes the session's agent (#352).
+    WrittenByStudio,
     ElicitationAsked,
     /// What the agent's last message said, on a turn's or a subagent's end.
     Reply(String),
@@ -269,6 +273,11 @@ impl Event {
 
     fn find<'a, T>(&'a self, f: impl Fn(&'a Happened) -> Option<T>) -> Option<T> {
         self.happened.iter().find_map(f)
+    }
+
+    /// Whether the server wrote the line, so it says nothing of the session's agent.
+    pub fn written_by_studio(&self) -> bool {
+        self.has(|h| matches!(h, Happened::WrittenByStudio))
     }
 
     pub fn session_starts(&self) -> bool {

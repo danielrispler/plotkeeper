@@ -100,7 +100,7 @@ struct Raw {
     permission_mode: Option<String>,
     /// On a tool's result, how long its call took.
     duration_ms: Option<u64>,
-    /// The terminal the session runs in, which the hook records from `STUDIO_TERMINAL_ID`.
+    /// The terminal the session runs in, which the hook records from `PLOTKEEPER_TERMINAL_ID`.
     studio_terminal_id: Option<String>,
     /// The agent's process, from the hook (#330).
     studio_pid: Option<u32>,
@@ -173,6 +173,9 @@ fn adapt(raw: Raw) -> Event {
             happened.push(Happened::SessionEnd);
             if raw.reason == "clear" {
                 happened.push(Happened::EndedByClear);
+            }
+            if matches!(raw.reason.as_str(), "process_gone" | "studio_close") {
+                happened.push(Happened::WrittenByStudio);
             }
         }
         "UserPromptSubmit" => {
@@ -285,6 +288,9 @@ fn adapt(raw: Raw) -> Event {
             answer: raw.studio_answer.clone(),
         }),
         _ => {}
+    }
+    if matches!(raw.hook_event_name.as_str(), INTERRUPTED | STUDIO_ANSWER) {
+        happened.push(Happened::WrittenByStudio);
     }
     if let Some(task) = raw.tool_response.background_task_id.clone() {
         happened.push(Happened::BackgroundTask(task));

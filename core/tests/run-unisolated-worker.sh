@@ -31,7 +31,7 @@ trap 'git -C "$repo" worktree remove --force "$worktree" 2>/dev/null || true; rm
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# The plugin runs the studio-hook built in this checkout's `target/`, wherever the caller's shell
+# The plugin runs the plotkeeper-hook built in this checkout's `target/`, wherever the caller's shell
 # points cargo.
 env -u CARGO_TARGET_DIR cargo build -q --release --manifest-path "$studio/Cargo.toml" -p studio-hook
 git -C "$repo" init -q
@@ -44,11 +44,11 @@ git -C "$repo" commit -qm "Start"
 # `Edit` and `Write` the worker edits through Bash, as the workers that are not isolated do. The
 # prompt is not quoted, so it names `$worktree`; it holds no other `$` or backtick unescaped. The
 # session must not take the terminal of a studio shell this runs in, so it gets no
-# `STUDIO_TERMINAL_ID`. Step b waits before it writes: the hooks are async, and a helper's base is
+# `PLOTKEEPER_TERMINAL_ID`. Step b waits before it writes: the hooks are async, and a helper's base is
 # taken when the shell reads its command's `PreToolUse`, so a write that lands first never makes it a
 # worker (the shortcut in `core/src/lib.rs`, danielrispler/Falinks#434, decision 23).
 cd "$repo"
-env -u STUDIO_TERMINAL_ID CLAUDE_CODE_PLUGIN_DIRS="$studio/plugin" claude -p --session-id "$session" \
+env -u PLOTKEEPER_TERMINAL_ID CLAUDE_CODE_PLUGIN_DIRS="$studio/plugin" claude -p --session-id "$session" \
   --allowedTools "Bash" --disallowedTools "Edit" "Write" "NotebookEdit" <<PROMPT
 This session is a scripted test. Follow these steps exactly and keep every reply short.
 

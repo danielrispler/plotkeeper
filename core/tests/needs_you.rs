@@ -488,7 +488,7 @@ fn a_call_that_never_reported_back_holds_no_wait_past_its_sessions_turn() {
     );
 }
 
-/// The answer hook's `StudioAnswer` line for `line`'s call: Daniel's `answer` from the studio card
+/// The answer hook's `StudioAnswer` line for `line`'s call: Daniel's `answer` from the plotkeeper card
 /// (danielrispler/Falinks#478).
 fn card_answer(line: &str, answer: serde_json::Value) -> String {
     let mut event: serde_json::Value = serde_json::from_str(line).unwrap();

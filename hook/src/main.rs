@@ -1,5 +1,5 @@
 //! The hook plugin's command (danielrispler/Falinks#328, module 1): appends the hook payload on stdin as one line to the
-//! event log, with the terminal's `STUDIO_TERMINAL_ID` when set and the time it received the event.
+//! event log, with the terminal's `PLOTKEEPER_TERMINAL_ID` when set and the time it received the event.
 //! At a turn's start and end it also records the git tree of each worktree the turn touched (danielrispler/Falinks#486).
 //! It does nothing else. It prints nothing on stdout and always exits 0, so it never blocks the agent.
 
@@ -14,7 +14,7 @@ use std::{
 
 fn main() {
     if let Err(e) = append() {
-        eprintln!("studio-hook: {e}");
+        eprintln!("plotkeeper-hook: {e}");
     }
 }
 
@@ -27,12 +27,12 @@ fn append() -> Result<(), Box<dyn Error>> {
     if env::var_os("PLOTKEEPER_INTERNAL").is_some_and(|v| v == "1") {
         return Ok(());
     }
-    let terminal = env::var("STUDIO_TERMINAL_ID");
+    let terminal = env::var("PLOTKEEPER_TERMINAL_ID");
     if let Ok(terminal) = terminal {
         event.insert("studio_terminal_id".into(), terminal.into());
     }
     // The agent's process, so the studio ends a session whose agent is gone (#330).
-    let wrapper = env::var("STUDIO_AGENT_PID").ok();
+    let wrapper = env::var("PLOTKEEPER_AGENT_PID").ok();
     let parent = std::os::unix::process::parent_id();
     if let Some(pid) = studio_hook::agent_pid(wrapper.as_deref(), parent, studio_hook::inspect) {
         event.insert("studio_pid".into(), pid.into());
@@ -46,7 +46,7 @@ fn append() -> Result<(), Box<dyn Error>> {
     fs::create_dir_all(data)?;
     // The line goes in the log even when the trees cannot be recorded.
     if let Err(e) = studio_hook::trees(&mut event, data) {
-        eprintln!("studio-hook: record the trees: {e}");
+        eprintln!("plotkeeper-hook: record the trees: {e}");
     }
     // A lock that never comes must not hold the agent: the event is dropped, with a trace (#43,
     // decision 11).
@@ -54,7 +54,7 @@ fn append() -> Result<(), Box<dyn Error>> {
     let name = text("hook_event_name").or_else(|| text("hookEventName"));
     let terminal = text("studio_terminal_id");
     // Tests shorten the 5 seconds.
-    let patience = env::var("STUDIO_HOOK_PATIENCE_MS")
+    let patience = env::var("PLOTKEEPER_HOOK_PATIENCE_MS")
         .ok()
         .and_then(|ms| ms.parse().ok())
         .map_or(studio_hook::PATIENCE, Duration::from_millis);

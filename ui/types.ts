@@ -143,7 +143,7 @@ export type Session = {
   // The folder it works in, from its latest event; `folder_name` is its last segment.
   cwd: string;
   folder_name: string;
-  // The studio terminal it runs in, its `STUDIO_TERMINAL_ID`; null when it runs outside the studio.
+  // The studio terminal it runs in, its `PLOTKEEPER_TERMINAL_ID`; null when it runs outside the studio.
   terminal: string | null;
   // Another agent than Claude Code, from its terminal's OSC 7501 status only (danielrispler/Falinks#560): no intention,
   // card, brief, estimate or decisions. Its id is its terminal's.

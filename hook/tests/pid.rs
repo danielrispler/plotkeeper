@@ -44,9 +44,10 @@ fn no_pid_when_the_hook_has_no_real_parent() {
 fn recorded(wrapper: Option<&str>, name: &str) -> serde_json::Value {
     let home = scratch(&format!("pid-{name}"));
     let mut cmd = hook(&home);
-    cmd.env_remove("STUDIO_AGENT_PID").stdout(Stdio::piped());
+    cmd.env_remove("PLOTKEEPER_AGENT_PID")
+        .stdout(Stdio::piped());
     if let Some(pid) = wrapper {
-        cmd.env("STUDIO_AGENT_PID", pid);
+        cmd.env("PLOTKEEPER_AGENT_PID", pid);
     }
     let payload = serde_json::json!({ "session_id": "s-1", "hook_event_name": "Stop", "cwd": "/" });
     assert!(

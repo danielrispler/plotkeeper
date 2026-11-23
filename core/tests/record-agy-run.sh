@@ -1,7 +1,7 @@
 #!/bin/sh
 # Records fixtures/agy/ (danielrispler/plotkeeper#47): short `agy -p` runs in a temporary repository,
 # with probe hooks in `.agents/hooks.json` that append each hook payload to a log, as the studio's
-# plugin would deliver it to `studio-hook`. The runs are a turn with tools, an edit and a check, a
+# plugin would deliver it to `plotkeeper-hook`. The runs are a turn with tools, an edit and a check, a
 # second prompt, and a subagent that reports back after its parent's turn ended (a wake-up). The
 # script scrubs the hook lines and the conversations' transcripts and `subagents/` files into
 # `core/tests/fixtures/agy/`, and keeps the agy version in `version.txt`. It runs agy's model on
@@ -63,13 +63,13 @@ EXPECT
 rm -f "$trust"
 
 cd "$repo"
-STUDIO_TERMINAL_ID=fixture-terminal agy --mode auto -p "Create hello.txt holding the line hello with a file tool, then run 'cat hello.txt' with the shell. Reply in one short sentence." >/dev/null
+PLOTKEEPER_TERMINAL_ID=fixture-terminal agy --mode auto -p "Create hello.txt holding the line hello with a file tool, then run 'cat hello.txt' with the shell. Reply in one short sentence." >/dev/null
 conversation=$(python3 -I -c '
 import json, sys
 print(json.loads(open(sys.argv[1]).readline().split(" ", 1)[1])["conversationId"])' "$log")
-STUDIO_TERMINAL_ID=fixture-terminal agy --mode auto --conversation "$conversation" -p="Reply with the word ok." >/dev/null
+PLOTKEEPER_TERMINAL_ID=fixture-terminal agy --mode auto --conversation "$conversation" -p="Reply with the word ok." >/dev/null
 # `-p` waits for the subagent, whose report wakes the conversation up after the turn ended.
-STUDIO_TERMINAL_ID=fixture-terminal agy --mode auto --conversation "$conversation" -p="Start one subagent in the background to run 'sleep 8; echo done' and report back. After starting it, end your turn right away with one short sentence, without waiting for it." >/dev/null
+PLOTKEEPER_TERMINAL_ID=fixture-terminal agy --mode auto --conversation "$conversation" -p="Start one subagent in the background to run 'sleep 8; echo done' and report back. After starting it, end your turn right away with one short sentence, without waiting for it." >/dev/null
 # The hooks are backgrounded, so the last events may land just after agy exits.
 sleep 3
 

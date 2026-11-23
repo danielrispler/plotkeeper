@@ -4,7 +4,7 @@
 
 `~/Library/Application Support/plotkeeper/events.jsonl`, one hook payload per line, with two added fields:
 
-- `studio_terminal_id`: the session's `STUDIO_TERMINAL_ID`, when set;
+- `studio_terminal_id`: the session's `PLOTKEEPER_TERMINAL_ID`, when set;
 - `studio_received_ms`: when the hook received the event, in Unix milliseconds.
 
 The app appends lines of its own, named `Studio…`, such as `StudioInterrupted`, which ends a turn Daniel interrupted, by its `prompt_id`, with that turn's end trees.

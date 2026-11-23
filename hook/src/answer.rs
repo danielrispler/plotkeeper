@@ -1,4 +1,4 @@
-//! The answer hook (danielrispler/Falinks#461, decision 16): a synchronous hook that lets Daniel answer from the studio card.
+//! The answer hook (danielrispler/Falinks#461, decision 16): a synchronous hook that lets Daniel answer from the plotkeeper card.
 //! While the studio watches the asking session, the hook leaves a request in `asks/<session>.json`
 //! with a one-time nonce and waits for `asks/<session>.answer.json` echoing it. It returns no decision,
 //! so the terminal asks as today, when nobody watches, the watching goes stale, Daniel answers in the
@@ -265,7 +265,7 @@ fn decide(payload: &Value, kind: Kind, verdict: Verdict) -> Value {
         let decision = match verdict {
             Verdict::Allow => json!({ "behavior": "allow" }),
             Verdict::Deny => json!({ "behavior": "deny",
-                "message": "Daniel denied this from the studio card." }),
+                "message": "Daniel denied this from the plotkeeper card." }),
         };
         json!({ "hookEventName": "PermissionRequest", "decision": decision })
     } else if verdict == Verdict::Allow {
@@ -275,7 +275,7 @@ fn decide(payload: &Value, kind: Kind, verdict: Verdict) -> Value {
     } else {
         json!({ "hookEventName": "PreToolUse", "permissionDecision": "deny",
             "permissionDecisionReason":
-                "Daniel rejected this plan from the studio card. Ask him what to change." })
+                "Daniel rejected this plan from the plotkeeper card. Ask him what to change." })
     };
     json!({ "hookSpecificOutput": out })
 }
@@ -293,7 +293,7 @@ pub fn answered_line(payload: &Value, answer: &Value) -> Value {
     line["hook_event_name"] = "StudioAnswer".into();
     line["studio_answer"] = answer;
     line["studio_received_ms"] = now_ms().into();
-    if let Ok(terminal) = std::env::var("STUDIO_TERMINAL_ID") {
+    if let Ok(terminal) = std::env::var("PLOTKEEPER_TERMINAL_ID") {
         line["studio_terminal_id"] = terminal.into();
     }
     line
@@ -305,11 +305,11 @@ pub fn log_answer(data: &Path, line: &Value) -> bool {
     match crate::append(&data.join("events.jsonl"), line, crate::PATIENCE) {
         Ok(true) => true,
         Ok(false) => {
-            eprintln!("studio-answer: log the answer: the log stayed locked");
+            eprintln!("plotkeeper-answer: log the answer: the log stayed locked");
             false
         }
         Err(e) => {
-            eprintln!("studio-answer: log the answer: {e}");
+            eprintln!("plotkeeper-answer: log the answer: {e}");
             false
         }
     }
@@ -373,7 +373,7 @@ fn wait(data: &Path, session: &str, nonce: &str, timeout: Duration) -> Option<Va
             if answer["nonce"] == nonce {
                 return Some(answer);
             }
-            eprintln!("studio-answer: an answer with a wrong nonce was refused");
+            eprintln!("plotkeeper-answer: an answer with a wrong nonce was refused");
         }
         if !watched(data, session) || Instant::now() >= until {
             return None;
@@ -417,7 +417,7 @@ fn run_blocked(payload: &Value, data: &Path, timeout: Duration) -> io::Result<Op
             if answer["nonce"] == nonce {
                 break Some(answer);
             }
-            eprintln!("studio-answer: an answer with a wrong nonce was refused");
+            eprintln!("plotkeeper-answer: an answer with a wrong nonce was refused");
         }
         if !studio_alive(data) || Instant::now() >= until {
             break None;
@@ -511,7 +511,8 @@ fn take_private_answer(path: &Path, remove: bool) -> Option<Value> {
     if remove {
         let _ = fs::remove_file(path);
     }
-    let refuse = || eprintln!("studio-answer: an answer file not private to its user was refused");
+    let refuse =
+        || eprintln!("plotkeeper-answer: an answer file not private to its user was refused");
     // A link fails to open (ELOOP), so it is refused too.
     let Ok(mut file) = opened else {
         refuse();
