@@ -59,6 +59,9 @@ const OLD_AGY_PLUGIN: &str = "studio";
 struct State {
     /// The marketplace was added with `claude plugin`.
     claude: bool,
+    /// An uninstall that failed partway took the Claude Code plugin out but not its marketplace.
+    #[serde(default)]
+    claude_plugin_gone: bool,
     /// plotkeeper's agy plugin was installed with `agy plugin`.
     agy: bool,
     /// `~/.zshrc` was rewritten to this text; its old bytes are in `backups/zshrc`.
@@ -318,6 +321,8 @@ pub fn install(
                 &claude,
                 &["plugin".as_ref(), "install".as_ref(), CLAUDE_ID.as_ref()],
             )?;
+            state.claude_plugin_gone = false;
+            save(home, &state)?;
             say(
                 out,
                 format!("Claude Code: claude plugin install {CLAUDE_ID}"),
@@ -679,83 +684,153 @@ impl HookFile {
 }
 
 /// `plotkeeper uninstall` for `home`, with the harnesses found on `path`: undoes what install recorded, restores its
-/// backups, and removes the data folder's `bin/`, the rendered plugins and the record. Prints each step to `out`.
+/// backups, and removes the data folder's `bin/`, the rendered plugins and the record. Prints each step to `out`. Every
+/// recorded step runs: one that fails, such as a harness's CLI no longer on the PATH, is said and stays recorded, with
+/// everything in the data folder kept, so running uninstall again retries only the steps that failed.
 pub fn uninstall(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Result<(), String> {
-    let Some(state) = load(home)? else {
+    let Some(mut state) = load(home)? else {
         say(out, "plotkeeper install has not run here; nothing to undo");
         return Ok(());
     };
     let backups = record_dir(home).join("backups");
-    let mut keep_record = false;
+    let bin = studio_hook::bin_dir(home);
+    let mut failed = 0;
+    let mut fail = |out: &mut dyn Write, e: String| {
+        say(out, format!("failed: {e}"));
+        failed += 1;
+    };
 
     if let Some(codex) = &state.codex {
-        codex_file(home).uninstall(home, codex, &studio_hook::bin_dir(home), out)?;
+        match codex_file(home).uninstall(home, codex, &bin, out) {
+            Ok(()) => state.codex = None,
+            Err(e) => fail(out, e),
+        }
     }
     if let Some(cursor) = &state.cursor {
-        cursor_file(home).uninstall(home, cursor, &studio_hook::bin_dir(home), out)?;
+        match cursor_file(home).uninstall(home, cursor, &bin, out) {
+            Ok(()) => state.cursor = None,
+            Err(e) => fail(out, e),
+        }
     }
 
     if state.copilot {
-        let copilot = on_path("copilot", path)
-            .ok_or("Copilot: `copilot` not found, so its plugin cannot be uninstalled")?;
-        run(
-            &copilot,
-            &["plugin".as_ref(), "uninstall".as_ref(), NAME.as_ref()],
-        )?;
-        say(out, format!("Copilot: copilot plugin uninstall {NAME}"));
+        let done = on_path("copilot", path)
+            .ok_or_else(|| {
+                "Copilot: `copilot` not found, so its plugin cannot be uninstalled".to_owned()
+            })
+            .and_then(|copilot| {
+                run(
+                    &copilot,
+                    &["plugin".as_ref(), "uninstall".as_ref(), NAME.as_ref()],
+                )
+            });
+        match done {
+            Ok(()) => {
+                say(out, format!("Copilot: copilot plugin uninstall {NAME}"));
+                state.copilot = false;
+            }
+            Err(e) => fail(out, e),
+        }
     }
 
     if state.agy || !state.agy_backups.is_empty() {
-        let agy = on_path("agy", path)
-            .ok_or("agy: `agy` not found, so its plugin cannot be uninstalled")?;
-        if state.agy {
-            agy_plugin::uninstall(&agy, agy_plugin::NAME, home)?;
-            say(
+        match on_path("agy", path) {
+            None => fail(
                 out,
-                format!("agy: agy plugin uninstall {}", agy_plugin::NAME),
-            );
-        }
-        for name in &state.agy_backups {
-            agy_plugin::install(&agy, &backups.join("agy").join(name), home)?;
-            say(out, format!("agy: put back the plugin `{name}`"));
+                "agy: `agy` not found, so its plugin cannot be uninstalled".into(),
+            ),
+            Some(agy) => {
+                if state.agy {
+                    match agy_plugin::uninstall(&agy, agy_plugin::NAME, home) {
+                        Ok(()) => {
+                            say(
+                                out,
+                                format!("agy: agy plugin uninstall {}", agy_plugin::NAME),
+                            );
+                            state.agy = false;
+                        }
+                        Err(e) => fail(out, e),
+                    }
+                }
+                let mut left = Vec::new();
+                for name in std::mem::take(&mut state.agy_backups) {
+                    match agy_plugin::install(&agy, &backups.join("agy").join(&name), home) {
+                        Ok(()) => say(out, format!("agy: put back the plugin `{name}`")),
+                        Err(e) => {
+                            fail(out, e);
+                            left.push(name);
+                        }
+                    }
+                }
+                state.agy_backups = left;
+            }
         }
     }
 
     if state.claude {
-        let claude = on_path("claude", path)
-            .ok_or("Claude Code: `claude` not found, so its plugin cannot be uninstalled")?;
-        run(
-            &claude,
-            &["plugin".as_ref(), "uninstall".as_ref(), CLAUDE_ID.as_ref()],
-        )?;
-        say(
-            out,
-            format!("Claude Code: claude plugin uninstall {CLAUDE_ID}"),
-        );
-        run(
-            &claude,
-            &[
-                "plugin".as_ref(),
-                "marketplace".as_ref(),
-                "remove".as_ref(),
-                NAME.as_ref(),
-            ],
-        )?;
-        say(
-            out,
-            format!("Claude Code: claude plugin marketplace remove {NAME}"),
-        );
+        match on_path("claude", path) {
+            None => fail(
+                out,
+                "Claude Code: `claude` not found, so its plugin cannot be uninstalled".into(),
+            ),
+            Some(claude) => {
+                if !state.claude_plugin_gone {
+                    match run(
+                        &claude,
+                        &["plugin".as_ref(), "uninstall".as_ref(), CLAUDE_ID.as_ref()],
+                    ) {
+                        Ok(()) => {
+                            say(
+                                out,
+                                format!("Claude Code: claude plugin uninstall {CLAUDE_ID}"),
+                            );
+                            state.claude_plugin_gone = true;
+                        }
+                        Err(e) => fail(out, e),
+                    }
+                }
+                if state.claude_plugin_gone {
+                    match run(
+                        &claude,
+                        &[
+                            "plugin".as_ref(),
+                            "marketplace".as_ref(),
+                            "remove".as_ref(),
+                            NAME.as_ref(),
+                        ],
+                    ) {
+                        Ok(()) => {
+                            say(
+                                out,
+                                format!("Claude Code: claude plugin marketplace remove {NAME}"),
+                            );
+                            state.claude = false;
+                            state.claude_plugin_gone = false;
+                        }
+                        Err(e) => fail(out, e),
+                    }
+                }
+            }
+        }
     }
 
     if let Some(written) = &state.zshrc {
         let zshrc = home.join(".zshrc");
         if fs::read_to_string(&zshrc).is_ok_and(|now| &now == written) {
-            let old = fs::read(backups.join("zshrc"))
-                .map_err(|e| format!("could not read the backup of ~/.zshrc: {e}"))?;
-            fs::write(&zshrc, old).map_err(|e| format!("could not write ~/.zshrc: {e}"))?;
-            say(out, "~/.zshrc: put back as it was");
+            let put_back = fs::read(backups.join("zshrc"))
+                .map_err(|e| format!("could not read the backup of ~/.zshrc: {e}"))
+                .and_then(|old| {
+                    fs::write(&zshrc, old).map_err(|e| format!("could not write ~/.zshrc: {e}"))
+                });
+            match put_back {
+                Ok(()) => {
+                    say(out, "~/.zshrc: put back as it was");
+                    state.zshrc = None;
+                }
+                Err(e) => fail(out, e),
+            }
         } else {
-            keep_record = true;
+            // Not a failure: only the backup of `~/.zshrc` is left to give back, so the record stays for it.
             say(
                 out,
                 format!(
@@ -766,17 +841,16 @@ pub fn uninstall(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Resu
         }
     }
 
-    let mut gone = vec![studio_hook::bin_dir(home), plugins_dir(home)];
-    if keep_record {
-        // Only the backup of `~/.zshrc` is left to give back.
-        let zshrc = state.zshrc.clone();
-        save(
-            home,
-            &State {
-                zshrc,
-                ..State::default()
-            },
-        )?;
+    if failed > 0 {
+        // The hooks of a harness not undone still run the binaries, and a rerun needs the backups.
+        save(home, &state)?;
+        return Err(format!(
+            "{failed} step(s) failed, said above; everything else was undone. Run `plotkeeper uninstall` again to retry them"
+        ));
+    }
+    let mut gone = vec![bin, plugins_dir(home)];
+    if state.zshrc.is_some() {
+        save(home, &state)?;
     } else {
         gone.push(record_dir(home));
     }
