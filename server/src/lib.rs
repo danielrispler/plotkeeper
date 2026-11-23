@@ -32,6 +32,8 @@ pub mod api;
 pub mod ci_laws;
 pub mod fog;
 pub mod history;
+pub mod hook_copies;
+pub mod install;
 pub mod lock;
 pub mod map;
 pub mod pr_briefs;
@@ -111,7 +113,7 @@ pub struct App {
     pub core: Core,
     pub cards: Cards,
     pub notes: Notes,
-    /// The card writer: `claude -p` or `agy`, as `summaries.writer` says, or the fake when `STUDIO_CARD_WRITER=fake`, for checks that must not run `claude -p`.
+    /// The card writer: `claude -p` or `agy`, as `summaries.writer` says, or the fake when `PLOTKEEPER_CARD_WRITER=fake`, for checks that must not run `claude -p`.
     pub writer: Writer,
     pub writing: TurnWriting,
     pub notices: Notices,
@@ -125,6 +127,8 @@ pub struct App {
     pub events: Arc<Events>,
     /// The notice the card writer last raised and not yet cleared, for a page opened after it (danielrispler/plotkeeper#328).
     pub writer_notice: Mutex<Option<String>>,
+    /// Whether summaries are written: off until a writer passes Test for a user who arrived with none (spec #320).
+    pub summaries_on: AtomicBool,
     /// The list changed outside the read loop since it last sent it: a PR was found, or Daniel marked a session unseen.
     pub list_changed: AtomicBool,
     /// Whether the story rail shows, as the UI last said: not in focus mode, behind a closed overlay or under the skills
@@ -133,6 +137,10 @@ pub struct App {
     /// The terminal the split's second pane shows, as the UI last said, `None` with no split: its session is on screen, so its
     /// turn's end raises no toast.
     pub split_shown: Mutex<Option<String>>,
+    /// Where the API-key writers' keys are kept: the Keychain at start (`with_keys`), memory before; and the writers whose
+    /// key is set, all the page learns of them.
+    pub keys: Arc<dyn settings::ApiKeys>,
+    pub key_set: Mutex<Vec<WriterKind>>,
 }
 
 impl App {
@@ -147,9 +155,10 @@ impl App {
         // The store sits beside the log, in the studio's data directory.
         let cards: Cards = Arc::new(Mutex::new(CardStore::open_beside(log)?));
         let notes: Notes = Arc::new(Mutex::new(RiskNotes::open_beside(log)?));
-        let writer: Writer = match std::env::var("STUDIO_CARD_WRITER").as_deref() {
-            Ok("fake") => Arc::new(FakeWriter),
-            _ => {
+        let fake = std::env::var("PLOTKEEPER_CARD_WRITER").as_deref() == Ok("fake");
+        let writer: Writer = match fake {
+            true => Arc::new(FakeWriter),
+            false => {
                 let writer = ClaudeWriter::beside(log)?;
                 let writer_notices = Mutex::new(writer_notices);
                 Arc::new(writer.on_availability(move |notice| {
@@ -157,7 +166,27 @@ impl App {
                 }))
             }
         };
-        Self::open_with(log, cards, notes, writer, effects)
+        let app = Self::open_with(log, cards, notes, writer, effects)?;
+        // The checks' fake writer keeps its key in memory, so no check reads the Keychain.
+        Ok(match fake {
+            true => app,
+            false => app.with_keys(Arc::new(settings::Keychain::default())),
+        })
+    }
+
+    /// The state with the API-key writers' keys kept in `keys`: the writer is given each key set there.
+    pub fn with_keys(mut self, keys: Arc<dyn settings::ApiKeys>) -> Self {
+        let mut set = Vec::new();
+        for kind in WriterKind::ALL.into_iter().filter(|kind| kind.http()) {
+            let key = keys.get(kind);
+            if key.is_some() {
+                set.push(kind);
+            }
+            self.writer.use_key(kind, key);
+        }
+        self.key_set = Mutex::new(set);
+        self.keys = keys;
+        self
     }
 
     /// The state over `log` with the stores and the writer given, so a test can hold the writer.
@@ -168,14 +197,18 @@ impl App {
         writer: Writer,
         effects: Arc<dyn Effects>,
     ) -> io::Result<App> {
-        // The PR briefs' writer is Claude whatever `summaries.writer` says, and never the fake of the checks.
+        // The PR briefs' writer is Claude whatever `summaries.writer` says, and never the fake of the checks. Without
+        // `claude` there is none, so no brief is attempted and the page says briefs need Claude (spec #320).
         let briefs =
-            pr_briefs::PrBriefs::new(match std::env::var("STUDIO_CARD_WRITER").as_deref() {
+            pr_briefs::PrBriefs::new(match std::env::var("PLOTKEEPER_CARD_WRITER").as_deref() {
                 Ok("fake") => None,
-                _ => ClaudeWriter::beside(log).ok().map(|w| {
-                    Arc::new(w)
-                        as Arc<dyn studio_understanding::pr_brief::BriefWriter + Send + Sync>
-                }),
+                _ => ClaudeWriter::beside(log)
+                    .ok()
+                    .filter(ClaudeWriter::claude_found)
+                    .map(|w| {
+                        Arc::new(w)
+                            as Arc<dyn studio_understanding::pr_brief::BriefWriter + Send + Sync>
+                    }),
             });
         let mut studio = Studio::with_roots(studio_understanding::worktree_root);
         studio.know_roots(saved_roots(log));
@@ -196,9 +229,12 @@ impl App {
             watching: Mutex::default(),
             events: Arc::default(),
             writer_notice: Mutex::new(None),
+            summaries_on: AtomicBool::new(true),
             list_changed: AtomicBool::new(false),
             rail_shown: AtomicBool::new(true),
             split_shown: Mutex::new(None),
+            keys: Arc::new(settings::MemoryKeys::default()),
+            key_set: Mutex::new(Vec::new()),
         })
     }
 
@@ -223,6 +259,12 @@ pub fn scrubbed(line: &str) -> &str {
 /// the `understanding` crate starts `save `; a test reads their sources to keep it so.
 pub fn lost_data(line: &str) -> bool {
     line.starts_with("save ")
+}
+
+/// What reaches the log: warnings and errors, and nothing of the HTTP client's, whose debug lines quote a request's headers,
+/// an API key among them (spec #320, "API-key writers"), whatever level is asked for.
+pub fn logged(metadata: &log::Metadata) -> bool {
+    metadata.level() <= log::Level::Warn && !metadata.target().starts_with("ureq")
 }
 
 /// Logs a line from the writers' code: an error when it lost data, a warning otherwise.
@@ -259,6 +301,8 @@ pub fn summary_settings(
     on_open: bool,
 ) {
     app.writer.use_writer(writer);
+    // A base URL edited in `settings.json` by hand takes effect with the page's next read of it.
+    app.writer.use_base_url(settings::openai_base_url());
     app.writing.settings(
         SummarySetup {
             model,
@@ -267,6 +311,165 @@ pub fn summary_settings(
         },
         on_open,
     );
+}
+
+/// Turns summaries on or off (spec #320, "The Test gate"): the writer's calls, and what the page's writer section reads.
+pub fn set_summaries_on(app: &App, on: bool) {
+    app.summaries_on.store(on, Ordering::Release);
+    app.writer.summaries_on(on);
+}
+
+/// What the page's writer section lists (spec #320, "Writer settings on the page"): the writers the login shell's
+/// `command -v` finds, whether summaries are on, and whether PR briefs can be written, which needs `claude`.
+#[derive(serde::Serialize)]
+pub struct Writers {
+    pub writers: Vec<studio_understanding::FoundWriter>,
+    pub summaries_on: bool,
+    pub briefs: bool,
+    /// The API-key writers whose key is set; never a key.
+    pub keys: Vec<WriterKind>,
+    /// The OpenAI-compatible writer's base URL, from `settings.json`; none: OpenAI's own.
+    pub base_url: Option<String>,
+}
+
+pub fn writers(app: &App) -> Writers {
+    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
+    let mut writers = studio_understanding::found_writers(shell.as_ref());
+    let keys = app.key_set.lock().unwrap().clone();
+    let base_url = settings::openai_base_url();
+    // An API-key writer is found when its key is set, the OpenAI-compatible one also when its base URL is; the key itself
+    // never reaches the page.
+    for writer in writers.iter_mut().filter(|w| w.kind.http()) {
+        writer.found = keys.contains(&writer.kind)
+            || (writer.kind == WriterKind::OpenAI && base_url.is_some());
+    }
+    Writers {
+        writers,
+        summaries_on: app.summaries_on.load(Ordering::Acquire),
+        briefs: app.briefs.writes(),
+        keys,
+        base_url,
+    }
+}
+
+/// A Test's outcome: `passed` or the failure's kind, the line the page shows, and `settings.json`'s new text when the pass
+/// saved the choice.
+#[derive(serde::Serialize)]
+pub struct WriterTest {
+    pub outcome: &'static str,
+    pub line: String,
+    pub settings: Option<String>,
+}
+
+/// The page's Test of `writer` at `model` and `effort`: one tiny call. A pass saves the choice in `settings.json` (`expected`
+/// is the text the page last read) and, once saved, turns summaries on, now and at every start; a failure changes nothing.
+pub fn test_writer(
+    app: &App,
+    writer: WriterKind,
+    model: String,
+    effort: String,
+    expected: Option<String>,
+) -> WriterTest {
+    use studio_understanding::FailureKind;
+    if let Err(error) = app.writer.test(writer, &model, &effort) {
+        let outcome = match error.kind {
+            FailureKind::NotLoggedIn => "not_logged_in",
+            FailureKind::Quota => "quota",
+            FailureKind::Timeout => "timeout",
+            FailureKind::NotInstalled => "not_installed",
+            FailureKind::Empty => "empty",
+            FailureKind::Other => "other",
+        };
+        return WriterTest {
+            outcome,
+            line: error.reason(),
+            settings: None,
+        };
+    }
+    let saved = settings::save_writer(expected, writer, &model, &effort).and_then(|text| {
+        let [file, _] = settings::paths().ok_or("no home folder")?;
+        settings::open_summaries(file.parent().unwrap_or(Path::new("")))?;
+        Ok(text)
+    });
+    // Only a saved choice opens summaries: one not saved would write with a writer the next start does not know.
+    if saved.is_ok() {
+        set_summaries_on(app, true);
+    }
+    let name = writer.program();
+    match saved {
+        Ok(text) => WriterTest {
+            outcome: "passed",
+            line: format!("Passed: `{name}` answered. Summaries are written with it."),
+            settings: Some(text),
+        },
+        Err(e) => WriterTest {
+            outcome: "passed",
+            line: format!("Passed: `{name}` answered, but the choice was not saved: {e}"),
+            settings: None,
+        },
+    }
+}
+
+/// Saves what the page set for API-key writer `writer` (spec #320, "API-key writers"): the key pasted, in the Keychain,
+/// replacing the one set, and given to the writer; for the OpenAI-compatible writer (#367), also its base URL, in
+/// `settings.json` (`expected` is the text the page last read; empty: OpenAI's own), and its key is optional. Returns
+/// `settings.json`'s new text when it changed. The key is never sent back, logged or written anywhere else.
+pub fn set_api_key(
+    app: &App,
+    writer: WriterKind,
+    key: Option<String>,
+    base_url: Option<String>,
+    expected: Option<String>,
+) -> Result<Option<String>, String> {
+    if !writer.http() {
+        return Err(format!("`{}` takes no API key", writer.program()));
+    }
+    let key = key
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty());
+    let base_url = base_url.filter(|_| writer == WriterKind::OpenAI);
+    let url = base_url.as_deref().map(str::trim);
+    if let Some(url) = url
+        && !url.is_empty()
+        && !url.starts_with("http://")
+        && !url.starts_with("https://")
+    {
+        return Err(
+            "The base URL starts with http:// or https://, such as http://localhost:11434/v1."
+                .into(),
+        );
+    }
+    // The key first: one the store refuses leaves `settings.json` as the page read it.
+    if let Some(key) = &key {
+        app.keys.set(writer, key)?;
+        app.writer.use_key(writer, Some(key.clone()));
+        let mut set = app.key_set.lock().unwrap();
+        if !set.contains(&writer) {
+            set.push(writer);
+        }
+    }
+    let Some(url) = url else { return Ok(None) };
+    let text = settings::save_base_url(expected, Some(url).filter(|url| !url.is_empty()))?;
+    app.writer.use_base_url(settings::openai_base_url());
+    Ok(Some(text))
+}
+
+/// Removes API-key writer `writer`'s key from the Keychain and from the writer, whose calls then fail as having no key; for
+/// the OpenAI-compatible writer, its base URL too. Returns `settings.json`'s new text when it changed.
+pub fn remove_api_key(
+    app: &App,
+    writer: WriterKind,
+    expected: Option<String>,
+) -> Result<Option<String>, String> {
+    app.keys.remove(writer)?;
+    app.writer.use_key(writer, None);
+    app.key_set.lock().unwrap().retain(|&kind| kind != writer);
+    if writer != WriterKind::OpenAI {
+        return Ok(None);
+    }
+    let text = settings::save_base_url(expected, None)?;
+    app.writer.use_base_url(None);
+    Ok(Some(text))
 }
 
 /// The settings' `checks` (danielrispler/plotkeeper#112): each project folder's list of commands that are checks.

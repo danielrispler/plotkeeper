@@ -1,0 +1,12 @@
+{
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent codex", "timeout": 5, "async": true }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent codex", "timeout": 3, "async": true }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent codex", "timeout": 5, "async": true }] }],
+    "PreToolUse": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent codex", "timeout": 5, "async": true }] }],
+    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent codex", "timeout": 5, "async": true }] }],
+    "PostToolUse": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent codex", "timeout": 5, "async": true }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent codex", "timeout": 5, "async": true }] }],
+    "Interrupt": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent codex", "timeout": 3, "async": true }] }]
+  }
+}

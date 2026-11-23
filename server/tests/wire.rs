@@ -181,3 +181,45 @@ fn the_wire_samples_of_the_map_view_are_written_for_tsc() {
         &samples,
     );
 }
+
+// @law: wire-types-agree
+#[test]
+fn the_wire_samples_of_the_writer_section_are_written_for_tsc() {
+    use studio_server::{WriterTest, Writers};
+    let mut writers = studio_understanding::found_writers(std::path::Path::new("/no/login-shell"));
+    writers[3].found = true;
+    let samples: Vec<Sample> = vec![
+        (
+            "Writers",
+            json(Writers {
+                writers,
+                summaries_on: false,
+                briefs: true,
+                keys: vec![studio_understanding::WriterKind::OpenAI],
+                base_url: Some("http://localhost:11434/v1".into()),
+            }),
+        ),
+        (
+            "WriterTest",
+            json(WriterTest {
+                outcome: "passed",
+                line: "Passed: `agy` answered. Summaries are written with it.".into(),
+                settings: Some("{ \"summaries\": { \"writer\": \"agy\" } }".into()),
+            }),
+        ),
+        (
+            "WriterTest",
+            json(WriterTest {
+                outcome: "not_logged_in",
+                line: "`claude` is not logged in.".into(),
+                settings: None,
+            }),
+        ),
+    ];
+    write(
+        env!("CARGO_MANIFEST_DIR"),
+        "server-writers",
+        &["Writers", "WriterTest"],
+        &samples,
+    );
+}

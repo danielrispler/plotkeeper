@@ -98,11 +98,17 @@ test("the check lists are commands per project folder, none by default, and anyt
   assert.deepEqual(reload(initial, { settings: `{ "checks": [] }`, keymap: null }).errors.length, 1);
 });
 
-test("summaries.writer chooses agy, defaults to claude, and a name that is neither is reported", () => {
+test("summaries.writer chooses agy, codex, copilot, cursor, anthropic or openai, defaults to claude, and a name that is none of them is reported", () => {
   const read = (summaries) => reload(initial, { settings: `{ "summaries": ${summaries} }`, keymap: null });
   assert.equal(read(`{ "writer": "agy" }`).settings.summaries.writer, "agy");
+  assert.equal(read(`{ "writer": "codex" }`).settings.summaries.writer, "codex");
+  assert.equal(read(`{ "writer": "copilot" }`).settings.summaries.writer, "copilot");
+  assert.equal(read(`{ "writer": "cursor" }`).settings.summaries.writer, "cursor");
+  // The API-key writer, which a passed Test of it saves (#366).
+  assert.equal(read(`{ "writer": "anthropic" }`).settings.summaries.writer, "anthropic");
+  assert.equal(read(`{ "writer": "openai" }`).settings.summaries.writer, "openai");
   assert.equal(read(`{}`).settings.summaries.writer, "claude");
-  const bad = read(`{ "writer": "codex" }`);
+  const bad = read(`{ "writer": "opencode" }`);
   assert.equal(bad.settings.summaries.writer, "claude");
   assert.equal(bad.errors.length, 1);
 });

@@ -1,4 +1,4 @@
-// `studio-hook` records an agy event from any terminal (#323, which reverses #43's decision 9), and
+// `plotkeeper-hook` records an agy event from any terminal (#323, which reverses #43's decision 9), and
 // no event from a process with `PLOTKEEPER_INTERNAL=1`, plotkeeper's own model runs.
 use crate::common::{feed, hook, scratch};
 use std::{fs, process::Stdio};
@@ -8,7 +8,7 @@ fn run(terminal: Option<&str>, payload: serde_json::Value, name: &str) -> (bool,
     let mut cmd = hook(&home);
     cmd.stdout(Stdio::piped());
     if let Some(t) = terminal {
-        cmd.env("STUDIO_TERMINAL_ID", t);
+        cmd.env("PLOTKEEPER_TERMINAL_ID", t);
     }
     let out = feed(cmd, &payload).wait_with_output().unwrap();
     assert!(out.status.success());

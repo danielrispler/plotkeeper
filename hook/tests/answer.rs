@@ -116,9 +116,9 @@ fn decided(name: &str, payload: &Value, answer: Value) -> Value {
 }
 
 fn start(home: &Path, timeout_ms: u64, payload: &Value) -> Child {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_studio-answer"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_plotkeeper-answer"));
     cmd.env("HOME", home)
-        .env("STUDIO_ANSWER_TIMEOUT_MS", timeout_ms.to_string())
+        .env("PLOTKEEPER_ANSWER_TIMEOUT_MS", timeout_ms.to_string())
         .stdout(Stdio::piped());
     feed(cmd, payload)
 }
@@ -188,7 +188,7 @@ fn an_approved_plan_allows_it_with_its_input_and_a_rejected_one_denies_it() {
     assert_eq!(out["hookEventName"], "PreToolUse");
     assert_eq!(out["permissionDecision"], "deny");
     let reason = out["permissionDecisionReason"].as_str().unwrap();
-    assert!(reason.contains("studio card"), "{reason}");
+    assert!(reason.contains("plotkeeper card"), "{reason}");
     assert_eq!(out.get("updatedInput"), None);
 }
 
@@ -208,7 +208,7 @@ fn an_allowed_and_a_denied_permission_each_give_their_decision() {
     );
     assert_eq!(decision["behavior"], "deny");
     let message = decision["message"].as_str().unwrap();
-    assert!(message.contains("studio card"), "{message}");
+    assert!(message.contains("plotkeeper card"), "{message}");
 }
 
 #[test]
@@ -840,5 +840,27 @@ fn a_claimed_pass_whose_retry_is_blocked_again_allows_nothing_later() {
     assert_eq!(run(denied()), "");
     watch(&home, "s-other", std::process::id(), 0);
     assert_eq!(run(retried("PermissionRequest", COMMAND, CWD, SESSION)), "");
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// Another harness that runs Claude Code's plugin hooks can send its own payload to the Claude entry's answer hook
+/// (spec #320, "One event, one record, the right agent"): one with Cursor's marker raises no card there and is let
+/// through at once, so that harness asks as it does without plotkeeper.
+#[test]
+fn a_payload_with_another_harness_marker_raises_no_card_on_the_claude_entry() {
+    let home = scratch("foreign");
+    watch(&home, SESSION, std::process::id(), 0);
+    let mut payload = asked();
+    payload["cursor_version"] = json!("2.1.4");
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_plotkeeper-answer"));
+    cmd.args(["--agent", "claude"])
+        .env("HOME", &home)
+        .env("PLOTKEEPER_ANSWER_TIMEOUT_MS", WAIT_MS.to_string())
+        .stdout(Stdio::piped());
+    let since = Instant::now();
+    let (out, took) = finish(feed(cmd, &payload), since);
+    assert_eq!(out, "");
+    assert!(took < PROMPTLY, "it waited {took:?} for a card");
+    assert!(!answer::ask_file(&data(&home), SESSION).exists());
     let _ = fs::remove_dir_all(&home);
 }

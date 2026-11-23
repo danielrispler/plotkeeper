@@ -4,14 +4,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { fakeDocument } from "./dom.mjs";
 
-const { logoKey } = await import("../../dist/logos.js");
+const { logoKey, logo } = await import("../../dist/logos.js");
 const { row, rowMark, strip: stripOf, projectHead, agentRow } = await import("../../dist/list.js");
 // The document is set after the import: times.ts starts a timer when one exists at load.
 globalThis.document = fakeDocument({ visibilityState: "hidden" });
 const make = (tag) => document.createElement(tag);
 
 const base = { id: "s", name: null, prompt_name: null, folder_name: "p", state: "idle", line: "", questions: [], shell: false, status_only: false, unseen: false, landed: false };
-const caps = (agent) => ({ agent, context: agent === "claude" });
+const caps = (agent) => ({ agent, context: agent === "claude", transcript_model: agent === "claude" });
 const claude = { ...base, capabilities: caps("claude"), identity: { issue: null, name: "p" }, transcript: { context: { tokens: 9000, share: 9 } } };
 const agy = { ...base, capabilities: caps("agy"), identity: { issue: null, name: "p" }, transcript: { context: null } };
 const statusOnly = (program) => ({ ...base, status_only: true, capabilities: caps(""), identity: { issue: null, name: `${program} · p` }, transcript: { context: null } });
@@ -30,7 +30,45 @@ test("a session's logo follows its adapter's agent, shell and, for a status-only
   assert.equal(logoKey({ agent: "codex" }), "codex");
 });
 
+test("an agent the page does not know by name wears the generic logo, drawn with its title", () => {
+  const newagent = { ...claude, capabilities: { agent: "newagent", context: true, transcript_model: true } };
+  assert.equal(logoKey(newagent), "generic");
+  assert.equal(logoKey("newagent"), "generic");
+  const drawn = logoOf(row(newagent, new Map()));
+  assert.equal(drawn.getAttribute("data-logo"), "generic");
+  assert.ok(drawn.title.length > 0);
+  assert.match(drawn.innerHTML, /<path d="[^"]+"/);
+});
+
 const logoOf = (node) => node.find("span").find((s) => s.className === "logo");
+
+test("a recorded Codex session wears Codex's logo, titled by its name (#359)", () => {
+  const codex = { ...base, capabilities: caps("codex"), identity: { issue: null, name: "p" }, transcript: { context: null } };
+  assert.equal(logoKey(codex), "codex");
+  const drawn = logoOf(row(codex, new Map()));
+  assert.equal(drawn.getAttribute("data-logo"), "codex");
+  // Its row's title is the note on what it reports; the mark's own title names Codex, no longer as status only.
+  assert.match(drawn.title, /no context share/);
+  assert.equal(logo("codex").title, "Codex");
+});
+
+test("a recorded Qwen Code session wears Qwen's logo, titled by its name (#360)", () => {
+  const qwen = { ...base, capabilities: caps("qwen"), identity: { issue: null, name: "p" }, transcript: { context: null } };
+  assert.equal(logoKey(qwen), "qwen");
+  const drawn = logoOf(row(qwen, new Map()));
+  assert.equal(drawn.getAttribute("data-logo"), "qwen");
+  assert.match(drawn.title, /no context share/);
+  assert.equal(logo("qwen").title, "Qwen Code");
+});
+
+test("a recorded Copilot session wears Copilot's logo, and the page names it Copilot (#361)", async () => {
+  const { agentNames } = await import("../../dist/capabilities.js");
+  const copilot = { ...base, capabilities: caps("copilot"), identity: { issue: null, name: "p" }, transcript: { context: null } };
+  assert.equal(logoKey(copilot), "copilot");
+  assert.equal(logoOf(row(copilot, new Map())).getAttribute("data-logo"), "copilot");
+  assert.equal(logo("copilot").title, "GitHub Copilot");
+  assert.equal(agentNames.copilot, "Copilot");
+});
 
 test("a session row in the list, Home and History shows the logo before its name; an agy row no longer shows \"agy\"", () => {
   const drawn = row(claude, new Map());
@@ -135,4 +173,12 @@ test("a selected subagent's rail logo carries no model line", async () => {
 test("the rail's #detail has no title when the step has no detail", async () => {
   const get = await railOf({ ...claude, transcript: { ...claude.transcript, model: "claude-opus-5-5" } });
   assert.notEqual(get("detail").title, "");
+});
+
+test("a recorded Cursor session wears Cursor's logo, titled by its name (#362)", () => {
+  const cursor = { ...base, capabilities: caps("cursor"), identity: { issue: null, name: "p" }, transcript: { context: null } };
+  assert.equal(logoKey(cursor), "cursor");
+  const drawn = logoOf(row(cursor, new Map()));
+  assert.equal(drawn.getAttribute("data-logo"), "cursor");
+  assert.equal(logo("cursor").title, "Cursor");
 });

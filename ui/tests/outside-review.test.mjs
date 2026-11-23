@@ -186,8 +186,8 @@ test("the review is cut at 15 minutes and answers in the findings' JSON shape", 
   assert.equal(flag(args, "-p"), "p");
 });
 
-test("the review's environment has no STUDIO_TERMINAL_ID, and keeps the rest", () => {
-  const { env } = call([], { STUDIO_TERMINAL_ID: "claude-1", PATH: "/bin" });
+test("the review's environment has no PLOTKEEPER_TERMINAL_ID, and keeps the rest", () => {
+  const { env } = call([], { PLOTKEEPER_TERMINAL_ID: "claude-1", PATH: "/bin" });
   assert.deepEqual(env, { PATH: "/bin", PLOTKEEPER_INTERNAL: "1" });
 });
 
@@ -326,7 +326,7 @@ const scratch = ({ ignored = false } = {}) => {
     TMPDIR: join(dir, "tmp"),
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_CONFIG_NOSYSTEM: "1",
-    STUDIO_TERMINAL_ID: "claude-test",
+    PLOTKEEPER_TERMINAL_ID: "claude-test",
     FAKE_AGY_DIR: dir,
   };
   for (const folder of ["bin", "tmp", "work/src"]) mkdirSync(join(dir, folder), { recursive: true });
@@ -360,7 +360,7 @@ test("a risky diff is reviewed in a throwaway worktree that is gone afterwards, 
   const report = JSON.parse(readFileSync(findings.replace("findings: ", ""), "utf8"));
   assert.equal(report.findings[0].summary, "no default");
   const agy = JSON.parse(readFileSync(join(s.dir, "agy-env.json"), "utf8"));
-  assert.ok(!agy.keys.includes("STUDIO_TERMINAL_ID"));
+  assert.ok(!agy.keys.includes("PLOTKEEPER_TERMINAL_ID"));
   assert.ok(agy.keys.includes("PLOTKEEPER_INTERNAL"));
   assert.ok(agy.cwd.includes("outside-review-") && !agy.cwd.startsWith(s.repo));
   assert.deepEqual(s.left(), nothingLeft);

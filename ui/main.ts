@@ -5,7 +5,7 @@
 
 import "./transport.js";
 import { dismissNotice, onLogRecord, setSettingsErrors, showNotice } from "./notice.js";
-import { withWriterNotice } from "./writer-notice.js";
+import { withGateNotice, withWriterNotice } from "./writer-notice.js";
 import { startWatching } from "./answer.js";
 import { openAsk } from "./ask.js";
 import { showCards } from "./cards.js";
@@ -30,6 +30,7 @@ import { reload, type SettingsFiles } from "./settings.js";
 import { studio } from "./state.js";
 import { drawFeed, showBarName, showView } from "./story.js";
 import { startRailBriefs } from "./rail-brief.js";
+import { startWriters } from "./writers.js";
 import { jumpToNeedsYou, showToast } from "./toast.js";
 import { askOnce, notifyIfAway, type Alert } from "./alerts.js";
 import { finishedNote, showNote, warnContext, watchNotes } from "./notes.js";
@@ -319,11 +320,12 @@ window.addEventListener("keydown", () => void askOnce(), { once: true });
 listen<{ level: number; message: string }>("log://log", onLogRecord);
 element("notice-dismiss").addEventListener("click", dismissNotice);
 // No card writer can run, or one can again (danielrispler/plotkeeper#51).
-const showWriterNotice = (notice: string | null) => {
+const editNotice = (edit: (text: string) => string) => {
   const line = element("notice");
-  line.textContent = withWriterNotice(line.textContent ?? "", notice);
+  line.textContent = edit(line.textContent ?? "");
   line.hidden = !line.textContent;
 };
+const showWriterNotice = (notice: string | null) => editNotice((text) => withWriterNotice(text, notice));
 listen<string | null>("writer-notice", showWriterNotice);
 // A page opened after the writer failed has missed the event (danielrispler/plotkeeper#328).
 // The desktop shell has no such command, so a rejection is no error there.
@@ -331,5 +333,12 @@ invoke("writer_notice")
   .then((notice) => notice && showWriterNotice(notice))
   .catch(() => {});
 invoke("cards").then(showCards);
+// The writer section under Writer (spec #320): its gate notice shares the writer's line, and a passed Test's save applies as one.
+startWriters({
+  summaries: () => studio.files.settings.summaries,
+  texts: () => studio.texts,
+  saved: (settings) => applySettings({ settings, keymap: studio.texts.keymap }),
+  gate: (gated) => editNotice((text) => withGateNotice(text, gated)),
+});
 // The answer hook waits for the card only while its session shows (danielrispler/Falinks#461, decision 16).
 startWatching(() => showView(studio.selection));

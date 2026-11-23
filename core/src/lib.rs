@@ -16,8 +16,12 @@ mod agy;
 mod ask;
 mod checks;
 mod claude;
+mod codex;
+mod copilot;
+mod cursor;
 mod event;
 mod ledger;
+mod qwen;
 mod saved;
 mod transcript;
 mod turn_files;
@@ -30,15 +34,55 @@ pub use checks::{
     output as check_output,
 };
 pub use claude::CAPABILITIES as CLAUDE_CAPABILITIES;
+pub use codex::CAPABILITIES as CODEX_CAPABILITIES;
+pub use copilot::CAPABILITIES as COPILOT_CAPABILITIES;
+pub use cursor::CAPABILITIES as CURSOR_CAPABILITIES;
 pub use event::{Capabilities, TranscriptFormat};
 use event::{Event, Happened, Origin, Start, ToolKind};
 pub use ledger::{Bytes, Details, Ledger, Outcome, Row};
+pub use qwen::CAPABILITIES as QWEN_CAPABILITIES;
 pub use transcript::{Context, LogEntry, SubagentLog, Transcript};
 pub use turn_files::{
     Numstat, RootDiff, TurnDiff, TurnFile, TurnFiles, TurnFilesSnapshot, TurnTrees,
     compute_turn_files,
 };
 pub use work::{Estimate, MIN_HISTORY, Phase, PhaseStart, Work, range};
+
+/// Who reads a line that is not Claude's: agy, when its hook entry named agy or named no agent (a
+/// line written before entries named one), Codex (#359), Qwen Code (#360), or nobody, for another agent (#355). A new
+/// harness is one arm here, beside its `Capabilities` constant and its parser.
+enum Named {
+    Agy,
+    /// An agent read by a parser of its own, Codex's, Cursor's (#362), Qwen Code's or Copilot's (#361), and the line's
+    /// time, for its drift when that parser cannot read it.
+    Parsed(Parse, u64),
+    /// The line's time, for its drift.
+    Other(u64),
+}
+
+/// An adapter's reading of one log line into its event.
+type Parse = fn(&str) -> Result<Event, serde_json::Error>;
+
+impl Named {
+    fn of(line: &str) -> Named {
+        #[derive(Default, Deserialize)]
+        struct Stamp {
+            studio_agent: Option<String>,
+            #[serde(default)]
+            studio_received_ms: u64,
+        }
+        let stamp: Stamp = serde_json::from_str(line).unwrap_or_default();
+        match stamp.studio_agent.as_deref() {
+            None => Named::Agy,
+            Some(agent) if agent == AGY_CAPABILITIES.agent => Named::Agy,
+            Some(codex::CODEX) => Named::Parsed(codex::parse, stamp.studio_received_ms),
+            Some(cursor::CURSOR) => Named::Parsed(cursor::parse, stamp.studio_received_ms),
+            Some(qwen::QWEN) => Named::Parsed(qwen::parse, stamp.studio_received_ms),
+            Some(copilot::COPILOT) => Named::Parsed(copilot::parse, stamp.studio_received_ms),
+            Some(_) => Named::Other(stamp.studio_received_ms),
+        }
+    }
+}
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct Studio {
@@ -171,7 +215,7 @@ pub struct Session {
     pub cwd: String,
     /// The last segment of `cwd`, or the whole `cwd` when that segment is empty.
     pub folder_name: String,
-    /// The studio terminal it runs in, its `STUDIO_TERMINAL_ID` from its latest event, `None` when
+    /// The studio terminal it runs in, its `PLOTKEEPER_TERMINAL_ID` from its latest event, `None` when
     /// it runs outside the studio (danielrispler/Falinks#461, decision 8).
     pub terminal: Option<String>,
     /// Its agent's process, `studio_pid` of its latest event that has one; `None` when its hook
@@ -277,7 +321,7 @@ pub struct Session {
     /// The Bash commands auto mode blocked, in block order (danielrispler/plotkeeper#170).
     #[serde(default)]
     pub blocked_commands: Vec<BlockedCommand>,
-    /// The questions answered on the studio card, by call, whose result has not landed yet.
+    /// The questions answered on the plotkeeper card, by call, whose result has not landed yet.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     carded: BTreeSet<String>,
     /// When its latest turn started and ended (danielrispler/Falinks#461, decision 13).
@@ -287,6 +331,10 @@ pub struct Session {
     /// When its latest turn ended, which took its workers' cards since its last card.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     stopped_at: u64,
+    /// The reply its running turn's agent sent in an event of its own before the turn's end, as Cursor's
+    /// `afterAgentResponse` does (#362); its turn end takes it when that carries no reply.
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
+    reply: String,
     /// Whether its turn was opened by a wake-up and has had no prompt of Daniel's since.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     woken: bool,
@@ -677,7 +725,7 @@ impl BlockedStatus {
     }
 }
 
-/// Where Daniel answered: the studio card, through the answer hook, or the terminal.
+/// Where Daniel answered: the plotkeeper card, through the answer hook, or the terminal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Source {
@@ -2122,7 +2170,7 @@ pub const INTERRUPTED: &str = "StudioInterrupted";
 /// at once and after a restart, until a `SessionStart` of it brings it back. Its cards stay.
 pub const DELETE: &str = "StudioDelete";
 
-/// The line the answer hook appends when Daniel answers from the studio card (danielrispler/Falinks#478): the call's hook
+/// The line the answer hook appends when Daniel answers from the plotkeeper card (danielrispler/Falinks#478): the call's hook
 /// payload under this name, with `studio_asked_by` (the event that asked) and `studio_answer`. An
 /// answer in the terminal leaves none.
 pub const STUDIO_ANSWER: &str = "StudioAnswer";
@@ -2526,11 +2574,26 @@ impl Studio {
         outputs
     }
 
-    /// The events of one log line: Claude's, or else agy's.
+    /// The events of one log line, read by the agent its hook entry named (#355): Claude's, agy's,
+    /// Codex's, Qwen Code's, or none and drift for an agent plotkeeper cannot read or a line its agent's parser
+    /// cannot read. A line that names none is Claude's by its shape, or else agy's.
     fn events(&mut self, line: &str) -> Vec<Event> {
         match claude::parse(line) {
             Ok(event) => vec![event],
-            Err(_) => self.agy.events(line).unwrap_or_default(),
+            Err(_) => match Named::of(line) {
+                Named::Agy => self.agy.events(line).unwrap_or_default(),
+                Named::Parsed(parse, at) => match parse(line) {
+                    Ok(event) => vec![event],
+                    Err(_) => {
+                        self.agy.drift(at, AgyDriftKind::Agent);
+                        Vec::new()
+                    }
+                },
+                Named::Other(at) => {
+                    self.agy.drift(at, AgyDriftKind::Agent);
+                    Vec::new()
+                }
+            },
         }
     }
 
@@ -2538,7 +2601,11 @@ impl Studio {
     fn peek(&self, line: &str) -> Option<Event> {
         match claude::parse(line) {
             Ok(event) => Some(event),
-            Err(_) => self.agy.peek(line),
+            Err(_) => match Named::of(line) {
+                Named::Agy => self.agy.peek(line),
+                Named::Parsed(parse, _) => parse(line).ok(),
+                Named::Other(_) => None,
+            },
         }
     }
 
@@ -2550,6 +2617,13 @@ impl Studio {
     ) -> Vec<Output> {
         let own_id = event.session_id.clone();
         event.session_id = self.row(&event);
+        // A line the server wrote is Claude-shaped whatever the session's agent, so it reads as the
+        // session's own agent's (#352).
+        if event.written_by_studio()
+            && let Some(session) = self.sessions.get(&event.session_id)
+        {
+            event.capabilities = session.capabilities;
+        }
         let continues = event.session_id != own_id && !self.rows.contains_key(&own_id);
         if event.session_id != own_id {
             self.rows.insert(own_id.clone(), event.session_id.clone());
@@ -3033,6 +3107,7 @@ impl Studio {
                 }
                 // A prompt opens a wait, also after an interrupt, which fires no `Stop`.
                 Happened::TurnStart { prompt, origin } => {
+                    session.reply.clear();
                     let sender = match origin {
                         Some(Origin::Daniel) => Sender::Daniel,
                         Some(Origin::WakeUp) => Sender::WakeUp(session.woken_by()),
@@ -3117,10 +3192,25 @@ impl Studio {
                         session.reopen_turn();
                     }
                 }
+                // A reply in an event of its own waits for its turn's end (#362). Only the main agent's: a
+                // subagent's reply (Claude Code's `SubagentStop`) is never its parent turn's.
+                Happened::Reply(reply)
+                    if event.agent_id.is_none()
+                        && !event.has(|h| {
+                            matches!(h, Happened::TurnEnd { .. } | Happened::SubagentEnd)
+                        }) =>
+                {
+                    session.reply.clone_from(reply);
+                }
                 Happened::TurnEnd { background_pending } => {
                     // A reply that asks in text blocks nothing, so the turn ends on your turn unless a
                     // subagent's block outlasts it (danielrispler/Falinks#540).
                     let in_turn = session.in_turn();
+                    let waiting = std::mem::take(&mut session.reply);
+                    let full = match event.reply() {
+                        "" => waiting.as_str(),
+                        own => own,
+                    };
                     session.background = *background_pending;
                     let output = session.end_turn(changes.remove(&session.agent.id), at);
                     if in_turn && event.capabilities.turn_trees {
@@ -3135,11 +3225,16 @@ impl Studio {
                             transcript_path: event.transcript_path.clone(),
                         });
                     }
-                    if !replay && !session.versioned && !event.capabilities.transcript_version {
+                    // agy's version comes from running `agy --version`; another agent with no transcript
+                    // version has none to ask for.
+                    if !replay
+                        && !session.versioned
+                        && event.capabilities.agent == agy::CAPABILITIES.agent
+                    {
                         session.versioned = true;
                         outputs.push(Output::AgyVersion);
                     }
-                    let reply = event.reply().trim();
+                    let reply = full.trim();
                     let wanted = wants_summary(reply, session.needs_you());
                     // The turn's card goes first: its summary then finds the card stored.
                     let card = match &output {
@@ -3179,7 +3274,7 @@ impl Studio {
                             response: Some(reply.into()),
                         }));
                     }
-                    let mut lines = event.reply().lines().map(str::trim);
+                    let mut lines = full.lines().map(str::trim);
                     let stopped = Stopped {
                         card: card_id(&event.session_id, at),
                         requested: card.is_some(),
@@ -3188,7 +3283,7 @@ impl Studio {
                     if let Some(turn) = session.turns.last_mut().filter(|_| in_turn) {
                         turn.id = Some(stopped.card.clone());
                         turn.message.clone_from(&stopped.message);
-                        turn.reply = event.reply().trim().into();
+                        turn.reply = full.trim().into();
                     }
                     session.stopped = Some(stopped);
                 }
@@ -3304,7 +3399,7 @@ impl Studio {
                     let agent = event.agent_id.clone();
                     session.block(Cause::Elicitation, String::new(), Value::Null, agent, at);
                 }
-                // Daniel decided a plan or a permission from the studio card (danielrispler/Falinks#478): it waits on him no
+                // Daniel decided a plan or a permission from the plotkeeper card (danielrispler/Falinks#478): it waits on him no
                 // more, though its result comes only when the call ends, or for a denial maybe never. A
                 // question's result carries its answer, so its block waits for it.
                 Happened::Answered {
@@ -4515,6 +4610,7 @@ impl Studio {
                 .join("subagents")
                 .join(format!("agent-{agent}.jsonl")),
             TranscriptFormat::Agy => agy::subagent_transcript(transcript, agent)?,
+            TranscriptFormat::Unread => return None,
         };
         transcript::read_subagent_log(&path, agent, format, from, &session.cwd)
     }

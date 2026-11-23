@@ -186,7 +186,7 @@ Report only defects you can tie to a line the change adds or edits. Give each on
 
 /** How `agy` is run for the review: hidden from Studio, never recorded (`PLOTKEEPER_INTERNAL`), cut at 15 minutes, answering in SCHEMA. */
 export const agyCall = (opts, { schema, prompt, env }) => {
-  const { STUDIO_TERMINAL_ID: _, ...rest } = env;
+  const { PLOTKEEPER_TERMINAL_ID: _, ...rest } = env;
   const args = ["--model", opts.model, "--print-timeout", `${TIMEOUT_MINUTES}m`];
   return { args: [...args, "--output-format", "json", "--json-schema", schema, "-p", prompt], env: { ...rest, PLOTKEEPER_INTERNAL: "1" } };
 };

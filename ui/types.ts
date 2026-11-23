@@ -126,22 +126,24 @@ export type Capabilities = {
   permission_mode: boolean;
   durations: boolean;
   transcript_version: boolean;
+  // Its transcript names the model, which the header's model line shows; else the model is `Session.model`.
+  transcript_model: boolean;
   // It reports how full its context is.
   context: boolean;
   // It records a git tree of each worktree a turn touches, so a turn has files (danielrispler/plotkeeper#111).
   turn_trees: boolean;
   // How its transcript's lines read.
-  transcript_format?: "claude" | "agy";
+  transcript_format?: "claude" | "agy" | "unread";
 };
 export type Session = {
   id: string;
   capabilities: Capabilities;
-  // The model its agent's hooks name (agy's), null otherwise; Claude's is `transcript.model`.
+  // The model its agent's hooks name (agy's), null otherwise; with `capabilities.transcript_model` it is `transcript.model`.
   model: string | null;
   // The folder it works in, from its latest event; `folder_name` is its last segment.
   cwd: string;
   folder_name: string;
-  // The studio terminal it runs in, its `STUDIO_TERMINAL_ID`; null when it runs outside the studio.
+  // The studio terminal it runs in, its `PLOTKEEPER_TERMINAL_ID`; null when it runs outside the studio.
   terminal: string | null;
   // Another agent than Claude Code, from its terminal's OSC 7501 status only (danielrispler/Falinks#560): no intention,
   // card, brief, estimate or decisions. Its id is its terminal's.
@@ -442,6 +444,18 @@ export type WaitingBriefs = { project: string; numbers: number[] };
 export type HistoricalMap = { commit: string; short: string; label: string; source: string };
 export type CommitFiles = { commit: string; short: string; label: string; url: string | null; files: { path: string; diff: string }[] };
 
+// The writer section (spec #320): the writers the login shell's `command -v` finds (`understanding/src/writer.rs`), whether
+// summaries are on (off until a writer passes Test for a user who arrived with none) and whether PR briefs can be written,
+// which needs `claude`; and a Test's outcome, with `settings.json`'s new text when the pass saved the choice. An API-key
+// writer is found when it can be called: `anthropic` when its key is set, `openai` (any OpenAI-compatible API, #367) when its
+// key or its base URL is. `keys` lists the API-key writers whose key is set, which is all the page learns of a key; `base_url`
+// is the OpenAI-compatible writer's, none for OpenAI's own.
+export type WriterKind = "anthropic" | "openai" | "claude" | "agy" | "codex" | "copilot" | "cursor";
+export type FoundWriter = { kind: WriterKind; name: string; found: boolean; models: string[]; efforts: string[] };
+export type Writers = { writers: FoundWriter[]; summaries_on: boolean; briefs: boolean; keys: WriterKind[]; base_url: string | null };
+export type WriterOutcome = "passed" | "not_logged_in" | "quota" | "timeout" | "not_installed" | "empty" | "other";
+export type WriterTest = { outcome: WriterOutcome; line: string; settings: string | null };
+
 // Every command the window invokes, with what the server replies (`server/src/api.rs`): `void` where the
 // window ignores the reply, `null` where the shell may answer none. `invoke` takes only these names, and the snap fixtures
 // (`scripts/snap/`) are typed against it, and `scripts/snap/base.ts` answers every command that is not `void`, so a fixture
@@ -485,18 +499,22 @@ export interface Commands {
   open: Selection | null;
   rail_shown: void;
   refresh_landed_tasks: void;
+  remove_api_key: string | null;
   rename: void;
   select: Selection | null;
   selected: Selection | null;
   sessions: Session[];
+  set_api_key: string | null;
   settings_files: SettingsFiles;
   subagent_log: SubagentLog | null;
   summary_settings: void;
+  test_writer: WriterTest;
   turn_file_hunk: Hunk | null;
   turn_reply: string | null;
   turn_summary: TurnSummary | null;
   watch: Ask | null;
   writer_notice: string | null;
+  writers: Writers;
 }
 export type Command = keyof Commands;
 

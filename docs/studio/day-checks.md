@@ -21,7 +21,7 @@ npm ci
 npm start
 ```
 
-`npm start` builds `Studio.app` and `studio-hook`, then opens the app. Quit the old app first if one runs. From now on, work only in the studio's terminals.
+`npm start` builds `Studio.app` and `plotkeeper-hook`, then opens the app. Quit the old app first if one runs. From now on, work only in the studio's terminals.
 
 - [ ] **danielrispler/Falinks#555:** if the app offers a daemon upgrade, accept it. Every terminal revives.
 

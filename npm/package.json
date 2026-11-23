@@ -1,0 +1,16 @@
+{
+  "name": "plotkeeper",
+  "version": "0.1.0",
+  "description": "Turns your coding agents' sessions into a learning layer on a local page",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/danielrispler/plotkeeper.git"
+  },
+  "os": ["darwin"],
+  "cpu": ["arm64", "x64"],
+  "bin": {
+    "plotkeeper": "bin/plotkeeper"
+  },
+  "files": ["bin/plotkeeper", "bin/plotkeeper-hook", "bin/plotkeeper-answer"]
+}

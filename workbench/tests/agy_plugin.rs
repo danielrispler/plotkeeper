@@ -1,5 +1,5 @@
 //! #49 (#43, decisions 8 and 9): the studio's agy plugin. agy copies a plugin on install, so the app
-//! renders it with `studio-hook`'s path, compares it with the installed copy and re-installs. The
+//! renders it with `plotkeeper-hook`'s path and installs that copy. The
 //! tests use a scratch `HOME` and a fake `agy` that copies like the real one.
 
 use std::{
@@ -9,21 +9,21 @@ use std::{
     process::{Command, Stdio},
     time::{Duration, Instant},
 };
-use studio_workbench::agy_plugin::{Status, install, installed_is_valid, status};
+use studio_workbench::agy_plugin::{Status, installed_is_valid, render, status};
 
 fn shipped() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugin-agy")
 }
 
 /// A fake `agy` in `dir`: `validate` fails when `fail-validate` exists beside it; `install` copies
-/// the folder to `$HOME/.gemini/config/plugins/studio`; `uninstall` removes it. Each call is logged.
+/// the folder to `$HOME/.gemini/config/plugins/plotkeeper`; `uninstall` removes it. Each call is logged.
 fn fake_agy(dir: &Path) -> PathBuf {
     let agy = dir.join("agy");
     fs::write(
         &agy,
         r#"#!/bin/sh
 echo "$@" >> "$(dirname "$0")/calls"
-dest="$HOME/.gemini/config/plugins/studio"
+dest="$HOME/.gemini/config/plugins/plotkeeper"
 case "$2" in
 validate) [ ! -e "$(dirname "$0")/fail-validate" ] ;;
 uninstall) rm -rf "$dest" ;;
@@ -36,8 +36,15 @@ esac
     agy
 }
 
+/// Renders the plugin for `hook` into a folder beside `home`, as `plotkeeper install` does, and installs it.
+fn install(agy: &Path, hook: &Path, home: &Path) -> Result<(), String> {
+    let dir = home.with_extension("rendered").join("plotkeeper");
+    render(&dir, hook)?;
+    studio_workbench::agy_plugin::install(agy, &dir, home)
+}
+
 fn hook() -> PathBuf {
-    PathBuf::from("/checkout with space/target/release/studio-hook")
+    PathBuf::from("/checkout with space/target/release/plotkeeper-hook")
 }
 
 #[test]
@@ -45,12 +52,13 @@ fn a_missing_plugin_is_installed_with_the_hooks_path_and_then_is_current() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");
     let agy = fake_agy(tmp.path());
-    assert_eq!(status(&shipped(), &hook(), &home).unwrap(), Status::Missing);
-    install(&agy, &shipped(), &hook(), &home).unwrap();
-    assert_eq!(status(&shipped(), &hook(), &home).unwrap(), Status::Current);
-    let copy = fs::read_to_string(home.join(".gemini/config/plugins/studio/hooks.json")).unwrap();
-    assert!(copy.contains("/checkout with space/target/release/studio-hook"));
-    assert!(!copy.contains("__STUDIO_HOOK__"));
+    assert_eq!(status(&hook(), &home).unwrap(), Status::Missing);
+    install(&agy, &hook(), &home).unwrap();
+    assert_eq!(status(&hook(), &home).unwrap(), Status::Current);
+    let copy =
+        fs::read_to_string(home.join(".gemini/config/plugins/plotkeeper/hooks.json")).unwrap();
+    assert!(copy.contains("/checkout with space/target/release/plotkeeper-hook"));
+    assert!(!copy.contains("__PLOTKEEPER_HOOK__"));
 }
 
 #[test]
@@ -58,10 +66,10 @@ fn a_copy_made_for_another_hook_path_is_stale_and_install_replaces_it() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");
     let agy = fake_agy(tmp.path());
-    install(&agy, &shipped(), Path::new("/old/studio-hook"), &home).unwrap();
-    assert_eq!(status(&shipped(), &hook(), &home).unwrap(), Status::Stale);
-    install(&agy, &shipped(), &hook(), &home).unwrap();
-    assert_eq!(status(&shipped(), &hook(), &home).unwrap(), Status::Current);
+    install(&agy, Path::new("/old/plotkeeper-hook"), &home).unwrap();
+    assert_eq!(status(&hook(), &home).unwrap(), Status::Stale);
+    install(&agy, &hook(), &home).unwrap();
+    assert_eq!(status(&hook(), &home).unwrap(), Status::Current);
 }
 
 #[test]
@@ -70,9 +78,9 @@ fn a_plugin_that_fails_validation_is_not_installed() {
     let home = tmp.path().join("home");
     let agy = fake_agy(tmp.path());
     fs::write(tmp.path().join("fail-validate"), "").unwrap();
-    let err = install(&agy, &shipped(), &hook(), &home).unwrap_err();
+    let err = install(&agy, &hook(), &home).unwrap_err();
     assert!(err.contains("validat"), "{err}");
-    assert_eq!(status(&shipped(), &hook(), &home).unwrap(), Status::Missing);
+    assert_eq!(status(&hook(), &home).unwrap(), Status::Missing);
 }
 
 // The wrapper of #43, decision 9, from the shipped `hooks.json`.
@@ -100,7 +108,7 @@ fn commands() -> Vec<String> {
 fn every_command_is_the_inline_wrapper_for_all_six_events() {
     let text = fs::read_to_string(shipped().join("hooks.json")).unwrap();
     let json: serde_json::Value = serde_json::from_str(&text).unwrap();
-    let events = json["studio"].as_object().unwrap();
+    let events = json["plotkeeper"].as_object().unwrap();
     let mut names: Vec<_> = events.keys().map(String::as_str).collect();
     names.sort();
     assert_eq!(
@@ -122,15 +130,15 @@ fn every_command_is_the_inline_wrapper_for_all_six_events() {
     for c in commands {
         assert_eq!(
             c,
-            r#"p=$(cat); (printf %s "$p" | STUDIO_AGENT_PID=$PPID "__STUDIO_HOOK__" >/dev/null 2>&1 &) ; exit 0"#
+            r#"p=$(cat); (printf %s "$p" | PLOTKEEPER_AGENT_PID=$PPID "__PLOTKEEPER_HOOK__" --agent agy >/dev/null 2>&1 &) ; exit 0"#
         );
     }
     assert!(text.matches("\"timeout\"").count() == 6);
 }
 
-/// Runs the shipped wrapper, with `studio-hook` at `hook`, under `sh` on `payload`.
+/// Runs the shipped wrapper, with `plotkeeper-hook` at `hook`, under `sh` on `payload`.
 fn wrapper(hook: &Path, payload: &str) -> (Duration, std::process::Output) {
-    let command = commands()[0].replace("__STUDIO_HOOK__", &hook.display().to_string());
+    let command = commands()[0].replace("__PLOTKEEPER_HOOK__", &hook.display().to_string());
     let start = Instant::now();
     let mut child = Command::new("sh")
         .args(["-c", &command])
@@ -151,7 +159,7 @@ fn wrapper(hook: &Path, payload: &str) -> (Duration, std::process::Output) {
 }
 
 fn script(dir: &Path, body: &str) -> PathBuf {
-    let path = dir.join("studio-hook");
+    let path = dir.join("plotkeeper-hook");
     fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
     fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
     path
@@ -165,7 +173,7 @@ fn the_wrapper_passes_agys_pid_to_the_hook() {
     let seen = tmp.path().join("pid");
     let hook = script(
         tmp.path(),
-        &format!("echo \"$STUDIO_AGENT_PID\" > {}", seen.display()),
+        &format!("echo \"$PLOTKEEPER_AGENT_PID\" > {}", seen.display()),
     );
     wrapper(&hook, "{}");
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -212,8 +220,8 @@ fn an_installed_copy_that_fails_validation_is_stale_though_it_matches_the_source
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");
     let agy = fake_agy(tmp.path());
-    install(&agy, &shipped(), &hook(), &home).unwrap();
-    assert_eq!(status(&shipped(), &hook(), &home).unwrap(), Status::Current);
+    install(&agy, &hook(), &home).unwrap();
+    assert_eq!(status(&hook(), &home).unwrap(), Status::Current);
     assert!(installed_is_valid(&agy, &home));
     // agy now rejects the copy, and would skip it silently.
     fs::write(tmp.path().join("fail-validate"), "").unwrap();

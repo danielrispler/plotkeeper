@@ -8,7 +8,7 @@ import { railFixtures } from "./rail-fixtures.ts";
 const session = (id: string, name: string, state: SessionState, extra: Partial<Session> = {}): Session => {
   const now = Date.now();
   return {
-    id, capabilities: { agent: "claude", asks: true, background_tasks: true, replies: true, permission_mode: true, durations: true, transcript_version: true, context: true, turn_trees: true },
+    id, capabilities: { agent: "claude", asks: true, background_tasks: true, replies: true, permission_mode: true, durations: true, transcript_version: true, transcript_model: true, context: true, turn_trees: true },
     model: null, shell: false, cwd: `/w/plotkeeper/.claude/worktrees/${id}`, folder_name: id, terminal: null, status_only: false, name, prompt_name: null,
     resume_id: id, permission_mode: null, started_mode: null, cleared: [], asks_before_closing: false, landed: false, last_step: null,
     started_at: now - 3600e3, last_event_at: now - 60e3, turn_span: null, step_span: null, state, agents: [], asker: null,
@@ -437,7 +437,7 @@ const mapOpened = (check: string, extra: Fixture = {}): Fixture => ({
 
 const busySessions = () => {
     const touched = (...paths: string[]) => [{ started_at: Date.now() - 600e3, ended_at: null, prompt: "", id: null, message: null, checks: [], listed: [], files: { files: paths.map((path) => ({ root: "/w/plotkeeper", path, from: null, added: 3, removed: 1, agent: null })), merged: 0 } }];
-    const agy = { agent: "agy", asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, context: false, turn_trees: false };
+    const agy = { agent: "agy", asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, transcript_model: false, context: false, turn_trees: false };
     const w = { ...subagent("w1", "Map chips"), kind: "worker" as const };
     const h = { ...subagent("h1", "Read the log"), kind: "helper" as const };
     const sessions = [
@@ -604,8 +604,98 @@ const mapScrubbed = (): Fixture => {
   return { ...f, sessions: busySessions(), selected: { session: busySessions()[6], agent: null } };
 };
 
+// The writer section (#363) open under Writer: claude and agy found, or agy alone; `check` runs after it has drawn, and a script
+// that presses Test waits for its outcome.
+const claudeWriter = { kind: "claude" as const, name: "Claude", found: true, models: ["haiku", "sonnet", "opus", "fable"], efforts: ["", "low", "medium", "high"] };
+const agyWriter = { kind: "agy" as const, name: "agy", found: true, models: ["gemini-4-neon-low", "gemini-4-neon-medium", "gemini-4-neon-high", "gemini-4-argon-low", "gemini-4-hydrogen-low"], efforts: [] };
+const anthropicWriter = { kind: "anthropic" as const, name: "Anthropic API key", found: false, models: ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"], efforts: ["", "low", "medium", "high"] };
+const openaiWriter = { kind: "openai" as const, name: "OpenAI-compatible API", found: false, models: ["gpt-6-luna", "gpt-5.6-luna", "gpt-5.6-terra"], efforts: ["", "low", "medium", "high"] };
+const writersOpen = (extra: Partial<Fixture>, check: string, press = false): Fixture => ({
+  ...list(),
+  ...extra,
+  snapScript: `
+    const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+    await wait(200);
+    document.getElementById("writer-button").click();
+    await wait(200);
+    const panel = document.getElementById("writers");
+    if (!panel.matches(":popover-open")) return log("snap:fail the writer section did not open");
+    ${press ? `document.getElementById("writer-test").click(); await wait(300);` : ""}
+    ${check}
+    log("writers ok");`,
+  snapDone: "writers ok",
+});
+
 export const fixtures = {
   ...railFixtures,
+  // Unconfigured, with both writers found: preset to Claude, summaries off until a Test passes.
+  writersList: () =>
+    writersOpen({ writers: { writers: [claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: null } }, `
+      const picks = [...document.querySelectorAll("#writer-pick option")].map((o) => o.textContent + (o.disabled ? "!" : ""));
+      if (picks.join() !== "Claude,agy") log("snap:fail the writers listed: " + picks.join());
+      if (document.getElementById("writer-pick").value !== "claude") log("snap:fail the preset is not Claude");
+      if (document.getElementById("writer-model").value !== "haiku") log("snap:fail the preset model is not haiku");
+      if (!document.getElementById("notice").textContent.startsWith("Summaries are off: ")) log("snap:fail the gate's notice is not shown");`),
+  // A passed Test of agy, the only writer found.
+  writersPassed: () =>
+    writersOpen({
+      writers: { writers: [{ ...claudeWriter, found: false }, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: null },
+      test_writer: { outcome: "passed", line: "Passed: \`agy\` answered. Summaries are written with it.", settings: null },
+    }, `
+      if (document.getElementById("writer-pick").value !== "agy") log("snap:fail the preset is not agy, the first found");
+      const outcome = document.getElementById("writer-outcome");
+      if (!outcome?.classList.contains("passed") || !outcome.textContent.startsWith("Passed")) log("snap:fail no passed outcome: " + outcome?.textContent);`, true),
+  // A failed Test with its reason and the writer's own fix.
+  writersFailed: () =>
+    writersOpen({
+      writers: { writers: [claudeWriter, agyWriter], summaries_on: true, briefs: true, keys: [], base_url: null },
+      test_writer: { outcome: "not_logged_in", line: "\`claude\` is not logged in. Run \`claude\` in a terminal and log in with /login.", settings: null },
+    }, `
+      const outcome = document.getElementById("writer-outcome");
+      if (!outcome?.classList.contains("failed") || !outcome.textContent.includes("/login")) log("snap:fail no failed outcome with its fix: " + outcome?.textContent);`, true),
+  // No API key set (#366): the writer is listed but cannot be picked, and the key row offers to add one.
+  writersKeyNotSet: () =>
+    writersOpen({ writers: { writers: [anthropicWriter, claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: null } }, `
+      const first = document.querySelector("#writer-pick option");
+      if (first?.textContent !== "Anthropic API key (not set)" || !first.disabled) log("snap:fail the unset key is not listed first and unpickable: " + first?.textContent);
+      if (!document.getElementById("writer-key-state")?.textContent.includes("not set")) log("snap:fail the key row does not say not set");
+      if (document.getElementById("writer-key")?.placeholder !== "Add an API key") log("snap:fail no field to add an API key");
+      if (document.getElementById("writer-key-remove")) log("snap:fail Remove shown with no key set");`),
+  // An API key set: it comes first in the preset order, and a Test of the Anthropic writer passes.
+  writersKeySet: () =>
+    writersOpen({
+      writers: { writers: [{ ...anthropicWriter, found: true }, claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: ["anthropic"], base_url: null },
+      test_writer: { outcome: "passed", line: "Passed: \`anthropic\` answered. Summaries are written with it.", settings: null },
+    }, `
+      if (document.getElementById("writer-pick").value !== "anthropic") log("snap:fail the preset is not the API key");
+      if (document.getElementById("writer-model").value !== "claude-haiku-5-5") log("snap:fail the preset model is not the first");
+      if (!document.getElementById("writer-key-state")?.textContent.includes(": set")) log("snap:fail the key row does not say set");
+      if (document.getElementById("writer-key")?.placeholder !== "Replace the API key" || !document.getElementById("writer-key-remove")) log("snap:fail no replace or remove");
+      const outcome = document.getElementById("writer-outcome");
+      if (!outcome?.classList.contains("passed")) log("snap:fail no passed outcome: " + outcome?.textContent);`, true),
+  // A local Ollama set by its base URL alone (#367): the OpenAI-compatible API is preset before Claude, its model is typed,
+  // its row shows the base URL and no key, and a Test of it passes.
+  writersOpenAI: () =>
+    writersOpen({
+      writers: { writers: [anthropicWriter, { ...openaiWriter, found: true }, claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: "http://localhost:11434/v1" },
+      test_writer: { outcome: "passed", line: "Passed: \`openai\` answered. Summaries are written with it.", settings: null },
+    }, `
+      if (document.getElementById("writer-pick").value !== "openai") log("snap:fail the preset is not the OpenAI-compatible API");
+      const model = document.getElementById("writer-model");
+      if (model?.tagName !== "INPUT" || model.value !== "gpt-6-luna") log("snap:fail the model is not a typed field at the first model: " + model?.tagName);
+      if (document.getElementById("writer-base-url")?.value !== "http://localhost:11434/v1") log("snap:fail the base URL field does not hold the base URL");
+      if (!document.getElementById("writer-openai-state")?.textContent.includes("no key")) log("snap:fail the row does not say no key");
+      if (!document.getElementById("writer-openai-remove")) log("snap:fail no Remove with a base URL set");
+      const outcome = document.getElementById("writer-outcome");
+      if (!outcome?.classList.contains("passed")) log("snap:fail no passed outcome: " + outcome?.textContent);`, true),
+  // No claude: agy writes the summaries, and the section says PR briefs need Claude.
+  writersBriefsNeedClaude: () =>
+    writersOpen({
+      writers: { writers: [{ ...claudeWriter, found: false }, agyWriter], summaries_on: true, briefs: false, keys: [], base_url: null },
+      settings_files: { settings: '{ "summaries": { "writer": "agy", "model": "gemini-4-neon-high" } }', keymap: null },
+    }, `
+      if (!document.getElementById("writer-briefs")?.textContent.includes("briefs need Claude")) log("snap:fail no briefs need Claude line");
+      if (document.getElementById("writer-model").value !== "gemini-4-neon-high") log("snap:fail the model in effect is not shown");`),
   mapTray,
   railBriefRow: () => railBriefReady(false),
   railBriefOpened: () => railBriefReady(true),
@@ -641,8 +731,8 @@ export const fixtures = {
   },
   // The list with each agent's logo in each state (#158): Claude, agy, status-only Codex, another program and a shell.
   logos() {
-    const agy = { capabilities: { agent: "agy", asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, context: false, turn_trees: false }, model: "gemini-3.8-flash-high" };
-    const only = (program: string, extra: Partial<Session> = {}) => ({ status_only: true, capabilities: { agent: "", asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, context: false, turn_trees: false }, ...extra, identity: { issue: null, branch: null, pr: null, worktree: "", name: `${program} · plotkeeper` } });
+    const agy = { capabilities: { agent: "agy", asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, transcript_model: false, context: false, turn_trees: false }, model: "gemini-3.8-flash-high" };
+    const only = (program: string, extra: Partial<Session> = {}) => ({ status_only: true, capabilities: { agent: "", asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, transcript_model: false, context: false, turn_trees: false }, ...extra, identity: { issue: null, branch: null, pr: null, worktree: "", name: `${program} · plotkeeper` } });
     const sessions = [
       session("s1", "#56 · Row controls", "running", { transcript: { ...session("x", "x", "idle").transcript, context: { tokens: 90000, share: 9, window: 1000000, left: 91 } } }),
       session("s2", "agy · Name from the prompt", "needs_you", agy),

@@ -1,5 +1,6 @@
 //! The integration tests of the core, one binary: each file is a module.
 
+mod agents;
 mod agy;
 mod ask_facts;
 mod blocked_commands;
@@ -7,7 +8,10 @@ mod cards;
 mod check_feed;
 mod clear;
 mod close_rename;
+mod codex;
 mod common;
+mod copilot;
+mod cursor;
 mod decisions;
 mod ending;
 mod feed;
@@ -23,6 +27,7 @@ mod notices;
 mod phases;
 mod prompt_name;
 mod questions;
+mod qwen;
 mod replay;
 mod restart;
 #[path = "../../scripts/wire/samples.rs"]

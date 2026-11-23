@@ -41,7 +41,7 @@ Every writer call of the studio, the PR brief's, the claim check's, the turn sum
 
 To run `plotkeeper` with a fake writer instead of `claude -p` (it then writes no PR brief):
 
-    STUDIO_CARD_WRITER=fake plotkeeper
+    PLOTKEEPER_CARD_WRITER=fake plotkeeper
 
 ## The record
 

@@ -9,15 +9,20 @@ use studio_workbench::{fixed_profile, link_checkout, loads_plugin};
 
 const LINK: &str = "$HOME/Library/Application Support/plotkeeper/checkout/plugin";
 
-/// A checkout in `dir` with the studio plugin's manifest.
-fn checkout(dir: &Path) -> PathBuf {
+/// A checkout in `dir` with the plugin's manifest, named `name`.
+fn named_checkout(dir: &Path, name: &str) -> PathBuf {
     fs::create_dir_all(dir.join("plugin/.claude-plugin")).unwrap();
     fs::write(
         dir.join("plugin/.claude-plugin/plugin.json"),
-        r#"{ "name": "falinks-studio" }"#,
+        format!(r#"{{ "name": "{name}" }}"#),
     )
     .unwrap();
     dir.to_path_buf()
+}
+
+/// A checkout in `dir` with plotkeeper's plugin.
+fn checkout(dir: &Path) -> PathBuf {
+    named_checkout(dir, "plotkeeper")
 }
 
 #[test]
@@ -65,7 +70,8 @@ fn the_fix_drops_other_studio_entries_and_keeps_the_rest_as_written() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path();
     let other_studio = checkout(&home.join("other")).join("plugin");
-    checkout(&home.join("old"));
+    // The plugin's name before plotkeeper (#353).
+    named_checkout(&home.join("old"), "falinks-studio");
     let profile = format!(
         "export PATH=/x:$PATH\nif true; then\n  export CLAUDE_CODE_PLUGIN_DIRS=\"/mine:/gone/plugin:{}:$HOME/old/plugin:~/p\"\nfi\n",
         other_studio.display(),
@@ -91,7 +97,7 @@ fn the_fix_reads_a_bare_value_and_appends_a_line_when_there_is_none() {
     assert_eq!(
         appended,
         format!(
-            "alias g=git\n# The studio plugin's hooks, for every claude session (#21).\nexport CLAUDE_CODE_PLUGIN_DIRS=\"{LINK}\"\n"
+            "alias g=git\n# plotkeeper's hooks, for every claude session (#21).\nexport CLAUDE_CODE_PLUGIN_DIRS=\"{LINK}\"\n"
         ),
     );
     assert_eq!(fixed_profile(&appended, LINK, home).unwrap(), appended);
