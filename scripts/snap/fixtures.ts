@@ -494,9 +494,11 @@ const mapBusy = (jump: boolean): Fixture => {
       log("chips ok, not placed " + rest.length);
       ${jump ? `document.querySelector("#map .plate[data-id=hook] .agent-chip").click();
       await wait(400);
-      if (!document.getElementById("map").hidden) log("snap:fail a chip did not leave the Map view");` : ""}`, {
+      if (document.getElementById("map").hidden) log("snap:fail a chip left the Map view");
+      if (document.getElementById("map-panel").hidden || !document.querySelector("#panel-body > .rail")) log("snap:fail a chip did not open its session's story in the left panel");` : ""}`, {
       map_state: mapState(),
       map_place: { s1: ["core", "window"], "s1/w1": ["shell"], s2: ["hook"], s6: [] },
+      select: { __by: "id", values: Object.fromEntries(sessions.map((s) => [s.id, { session: s, agent: null }])) },
     });
     return { ...f, sessions, selected: { session: sessions[6], agent: null } };
   };
@@ -706,6 +708,205 @@ const writersOpen = (extra: Partial<Fixture>, check: string, press = false): Fix
     ${check}
     log("writers ok");`,
   snapDone: "writers ok",
+});
+
+// The left panel over the map (#385). Each script fails when a part's saved position changes as a panel opens or closes, when a colour other
+// than Needs you orange or broken-law red shows, when a card over the map lacks the shared glass class, or when a layer covers the map where
+// no card is. It runs at both sizes: below 1007 px only one overlay is open, so what it expects there differs.
+const panelChecks = `
+      // Chrome's virtual time stalls animations: the cards are drawn as under reduced motion, whose end state is the one to review.
+      const calm = document.createElement("style");
+      calm.textContent = "*, *::before, *::after { transition: none !important; animation: none !important; }";
+      document.head.append(calm);
+      const narrow = innerWidth < 1007;
+      const panel = document.getElementById("map-panel");
+      const sheet = document.getElementById("map-sheet");
+      const panelOpen = () => !panel.hidden;
+      const sheetOpen = () => sheet.childElementCount > 0;
+      const places = () => [...document.querySelectorAll("#map .plate, #map .actor")].map((n) => n.dataset.id + n.style.left + n.style.top).join();
+      const before = places();
+      const checkPlaces = (when) => { if (places() !== before) log("snap:fail a part's position changed " + when); };
+      const row = (key) => document.querySelector('#groups .session-row[data-key="' + key + ' "]');
+      const press = async (node) => { node.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, buttons: 1 })); await wait(300); };
+      const plate = async (id) => { document.querySelector("#map .plate[data-id=" + id + "]").click(); await wait(300); };
+      const esc = async () => { document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", key: "Escape", bubbles: true })); await wait(300); };
+      const palette = async (title) => {
+        document.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyP", key: "p", metaKey: true, shiftKey: true, bubbles: true }));
+        await wait(100);
+        const entry = [...document.querySelectorAll("#palette button.row")].find((b) => b.querySelector(".name").textContent === title);
+        if (!entry) return log("snap:fail no palette entry " + title);
+        entry.click();
+        await wait(400);
+      };
+      const rgb = (value) => { const m = /rgba?\\(([\\d.]+), ([\\d.]+), ([\\d.]+)(?:, ([\\d.]+))?\\)/.exec(value); return m ? [+m[1], +m[2], +m[3], m[4] === undefined ? 1 : +m[4]] : null; };
+      const probe = document.createElement("i");
+      document.body.append(probe);
+      const allowed = ["--needs-you", "--needs-you-bg", "--needs-you-line", "--conflict"].map((token) => { probe.style.color = "var(" + token + ")"; return rgb(getComputedStyle(probe).color).slice(0, 3).join(); });
+      probe.remove();
+      // A colour is a fill or a line whose channels differ by more than the cool mist's and the brief's warm light do.
+      const checkColours = (when) => {
+        const seen = new Set();
+        for (const node of document.querySelectorAll("body *")) {
+          if (!node.getClientRects().length) continue;
+          const style = getComputedStyle(node);
+          if (style.visibility !== "visible" || style.display === "none") continue;
+          for (const prop of ["color", "backgroundColor", "borderTopColor", "fill", "stroke"]) {
+            const c = rgb(style[prop]);
+            if (!c || c[3] === 0 || (prop === "color" && !node.textContent.trim())) continue;
+            if ((Math.max(c[0], c[1], c[2]) - Math.min(c[0], c[1], c[2])) * c[3] <= 24 || allowed.includes(c.slice(0, 3).join())) continue;
+            seen.add(prop + " " + style[prop] + " on " + node.tagName + "." + [...node.classList].join("."));
+          }
+        }
+        if (seen.size) log("snap:fail a colour other than Needs you or broken-law red " + when + ": " + [...seen].slice(0, 4).join(" | "));
+      };
+      // Each card over the map wears the one glass: the same class, so the same blur, corner and shadow.
+      const checkGlass = () => {
+        for (const card of [panel, sheet, document.getElementById("map-drawer")]) if (!card.classList.contains("glass")) log("snap:fail #" + card.id + " lacks the shared glass class");
+        const look = (node) => ["backdropFilter", "borderTopLeftRadius", "boxShadow", "backgroundColor"].map((prop) => getComputedStyle(node)[prop]).join(" / ");
+        if (look(panel) !== look(sheet)) log("snap:fail the panel's glass is not the sheet's: " + look(panel) + " vs " + look(sheet));
+        if (getComputedStyle(panel).backdropFilter === "none") log("snap:fail the panel has no backdrop blur");
+      };
+      // Where no card is, the map itself is under the pointer: a hidden layer (a closed panel, the rail's column) never covers it.
+      const checkHit = (when) => {
+        const area = document.querySelector("#map .map-canvas").getBoundingClientRect();
+        const left = panelOpen() ? panel.getBoundingClientRect().right + 8 : area.left + 8;
+        const side = document.getElementById("map-side");
+        const right = side.hidden ? area.right - 8 : side.getBoundingClientRect().left - 8;
+        // A widened diff in a narrow window can reach under the side area: no band of bare map is left to test there.
+        for (const x of right > left ? [left, (left + right) / 2, right] : []) {
+          for (const y of [area.top + 8, area.top + area.height / 2]) {
+            const hit = document.elementFromPoint(x, y);
+            if (!hit || (!hit.closest(".map-canvas") && !hit.closest("#map-tray"))) log("snap:fail " + (hit ? hit.tagName + "." + hit.className : "nothing") + " covers the map at " + Math.round(x) + "," + Math.round(y) + " " + when);
+          }
+        }
+        if (panelOpen()) {
+          const box = panel.getBoundingClientRect();
+          const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+          if (!hit || !hit.closest("#map-panel")) log("snap:fail the panel is not on top at its middle " + when + ": " + (hit ? hit.tagName + "." + hit.className : "nothing"));
+        }
+      };
+      const checkAll = (when) => { checkPlaces(when); checkColours(when); checkGlass(); checkHit(when); };`;
+// The busy map with a session selected by a press, as the shell answers it.
+const mapPanel = (check: string, extra: Fixture = {}): Fixture => {
+  const sessions = busySessions().map((s) => (s.id === "s1" ? { ...s, turns: s.turns.map((t) => ({ ...t, id: "t1", message: "Chips on the parts a turn touches" })) } : s));
+  const selected = Object.fromEntries(sessions.map((s) => [s.id, { session: s, agent: null }]));
+  const f = mapOpened(`${panelChecks}
+      await wait(300);
+      checkAll("on the bare map");
+      ${check}`, {
+    map_state: mapState({ fog: { understanding: "thin" }, ready: [{ number: 334, title: "PR briefs on the map", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }] }),
+    map_place: { s1: ["core", "window"], "s1/w1": ["shell"], s2: ["hook"], s6: [] },
+    select: { __by: "id", values: selected },
+    projects: [{ path: "/w/plotkeeper", gone: false }],
+    turn_file_hunk: { text: "@@ -261,7 +261,9 @@ function drawMap(\n   const saved = positions;\n-  const added = autoPlace(items, links);\n+  // Placed once and saved, so a part never moves on its own.\n+  const added = autoPlace(items, links, saved);\n", binary: false, left_out: 0, first_line: 261 },
+    ...extra,
+  });
+  return { ...f, sessions: extra.sessions ?? sessions, selected: null, snapDone: "panel ok" };
+};
+// The story of Ship PR 286 in the left panel with Understanding's sheet open (both, in a wide window; below 1007 px the sheet takes the
+// panel's place, and the row's press takes it back).
+const mapPanelStory = (): Fixture =>
+  mapPanel(`
+      await press(row("s2"));
+      if (!panelOpen() || !document.querySelector("#panel-body > .rail")) return log("snap:fail a row's press did not open its story in the left panel");
+      if (document.getElementById("map").hidden) return log("snap:fail the row's press left the Map view");
+      if (document.querySelector("#map .plate[data-id=hook] .agent-chip.lit") === null) log("snap:fail the open session's chip is not lit");
+      checkAll("with the story open");
+      await plate("understanding");
+      if (!sheetOpen()) return log("snap:fail the plate's click did not open its sheet");
+      if (panelOpen() === narrow) log("snap:fail " + (narrow ? "below 1007 px the sheet did not close the panel" : "the sheet closed the panel in a wide window"));
+      if (narrow) {
+        await press(row("s2"));
+        if (!panelOpen() || sheetOpen()) log("snap:fail below 1007 px the panel did not take the sheet's place");
+      }
+      checkAll("with the story and the sheet");
+      if (!narrow && document.querySelector("#map .plate[data-id=hook] .agent-chip.lit") === null) log("snap:fail the open session's chip went out");
+      log("panel ok");`);
+// Esc peels the sheet, then the panel, then nothing of the panel is left; a second press on the open row closes its story.
+const mapPanelPeel = (): Fixture =>
+  mapPanel(`
+      await press(row("s2"));
+      await press(row("s2"));
+      if (panelOpen()) return log("snap:fail a second press on the same row did not close its story");
+      if (document.querySelector("#map .agent-chip.lit")) log("snap:fail the chips stay lit after the story closed");
+      checkAll("after the second press");
+      await press(row("s2"));
+      await plate("understanding");
+      await esc();
+      if (sheetOpen()) log("snap:fail Esc did not close the sheet first");
+      if (panelOpen() === narrow) log("snap:fail Esc closed the panel " + (narrow ? "that the sheet had closed" : "before the sheet"));
+      if (!narrow) {
+        await esc();
+        if (panelOpen()) log("snap:fail the second Esc did not close the panel");
+      }
+      if (document.getElementById("map").hidden) log("snap:fail Esc left the Map view while a layer was open");
+      checkAll("after Esc");
+      log("panel ok");`);
+// A turn's whole diff, widened, from the palette: it closes the part's sheet; its Back shows the story again.
+const mapPanelDiff = (): Fixture =>
+  mapPanel(`
+      await press(row("s1"));
+      if (!narrow) {
+        await plate("core");
+        if (!sheetOpen()) return log("snap:fail the sheet did not open beside the story");
+      }
+      await palette("Open full diff");
+      if (!panelOpen() || !panel.querySelector(".turn-diff")) return log("snap:fail the diff did not open in the left panel");
+      if (sheetOpen()) log("snap:fail the widened diff did not close the part's sheet");
+      const width = panel.getBoundingClientRect().width;
+      const room = document.querySelector("#map .map-stage").getBoundingClientRect().width - 44;
+      if (Math.round(width) !== Math.round(Math.min(780, room))) log("snap:fail the diff's panel is " + width + " px wide, not min(780, " + room + ")");
+      if (!panel.querySelector(".diff-line.add")) log("snap:fail the diff shows no lines");
+      checkAll("with the diff open");
+      log("panel ok");`);
+// History in the left panel, from the list's link.
+const mapPanelHistory = (): Fixture =>
+  mapPanel(`
+      document.querySelector("#history-link .history-link").click();
+      await wait(300);
+      if (!panelOpen() || panel.querySelector(".panel-title")?.textContent !== "History") return log("snap:fail the History link did not open History in the left panel");
+      if (panel.querySelectorAll(".history .row").length !== 2) log("snap:fail History lists " + panel.querySelectorAll(".history .row").length + " ended sessions");
+      const tray = document.getElementById("map-tray").getBoundingClientRect();
+      if (tray.left < panel.getBoundingClientRect().right) log("snap:fail the tray is under the open panel");
+      checkAll("with History open");
+      log("panel ok");`, {
+  sessions: [...busySessions(), session("e1", "Map view drawer, #312", "ended", { last_event_at: Date.now() - 2 * 86400e3 }), session("e2", "Wire check covers MapState, #333", "ended", { last_event_at: Date.now() - 3 * 86400e3 })],
+});
+// Settings in the left panel from the top bar's gear: empty until the writer section moves in (#387); the gear again closes it.
+const mapPanelSettings = (): Fixture =>
+  mapPanel(`
+      document.getElementById("settings-button").click();
+      await wait(300);
+      if (!panelOpen() || panel.querySelector(".panel-title")?.textContent !== "Settings") return log("snap:fail the gear did not open Settings in the left panel");
+      if (document.getElementById("settings-button").ariaPressed !== "true") log("snap:fail the gear does not show pressed");
+      document.getElementById("settings-button").click();
+      await wait(200);
+      if (panelOpen()) log("snap:fail the gear again did not close Settings");
+      await palette("Show settings");
+      if (!panelOpen()) return log("snap:fail the palette did not open Settings");
+      checkAll("with Settings open");
+      log("panel ok");`);
+// A PR brief over the story and the sheet: the one thing that dims the map, and both panels with it.
+const mapPanelBrief = (): Fixture =>
+  mapPanel(`
+      await press(row("s2"));
+      if (!narrow) await plate("understanding");
+      const media = window.matchMedia.bind(window);
+      window.matchMedia = (query) => (query.includes("prefers-reduced-motion") ? { ...media(query), matches: true } : media(query));
+      document.querySelector('#map-tray .tray-row[data-pr="334"]').click();
+      await wait(800);
+      if (document.getElementById("map-brief").hidden) return log("snap:fail the brief did not open");
+      for (const card of [panel, document.getElementById("map-side")]) {
+        if (card.hidden) continue;
+        if (Number(getComputedStyle(card).opacity) !== Number(getComputedStyle(document.documentElement).getPropertyValue("--brief-dim"))) log("snap:fail the brief did not dim #" + card.id + ": " + getComputedStyle(card).opacity);
+      }
+      if (!panelOpen()) log("snap:fail the brief closed the panel");
+      if (!narrow && !sheetOpen()) log("snap:fail the brief closed the sheet");
+      checkPlaces("under the brief");
+      checkColours("under the brief");
+      checkGlass();
+      log("panel ok");`, {
+  pr_brief: briefOf(storySteps()),
 });
 
 export const fixtures = {
@@ -1062,6 +1263,15 @@ export const fixtures = {
     };
   },
   mapChipJump: () => mapBusy(true),
+  // The left panel over the map (#385): the story with a part's sheet, Esc's peel and a second press, the widened diff, History, Settings,
+  // and a brief over both panels. `mapPanelNarrow` is the story at 1000x800 (snap:all's size for it), where only one overlay opens.
+  mapPanelStory,
+  mapPanelPeel,
+  mapPanelDiff,
+  mapPanelHistory,
+  mapPanelSettings,
+  mapPanelBrief,
+  mapPanelNarrow: mapPanelStory,
   // CI on the default branch broke a law (#312): the red mark on the shell next to a Needs you chip; then with "See the proof" open, and
   // with the broken-law drill-down open.
   mapBroken: () => mapBroken("none"),

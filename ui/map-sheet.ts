@@ -1,5 +1,5 @@
-// The part sheet of the Map view (spec danielrispler/plotkeeper#306, ticket #310): a click on a plate opens it beside the map, in the
-// side area's `sheet` slot. It holds the part's plain description, its tier (changed in place), its laws and its fog, with a quiet
+// The part sheet of the Map view (spec danielrispler/plotkeeper#306, ticket #310): a click on a plate opens it over the map's right, in the
+// side area's `sheet` slot, in the glass the left panel shares (#385). It holds the part's plain description, its tier (changed in place), its laws and its fog, with a quiet
 // "I know this" that lifts the mist. `map-model.ts`'s `sheetOf` is what it shows; Esc closes it (the `sheet` layer).
 //
 // "See the proof" (`.sheet-law-actions` of a law a check backs) and the CI line with its drill-down open the drawer (`map-drawer.ts`).
@@ -13,6 +13,7 @@ import { openDrawer } from "./map-drawer.js";
 import { drawStrip } from "./map-history.js";
 import { overturnNote, ratifyActions } from "./map-ratify.js";
 import { sheetPending, statusWords } from "./ratify.js";
+import { besideSheet } from "./panel.js";
 import { ciDrawer, effectiveTier, type Part, proofDrawer, sheetCi, sheetOf, type Tier } from "./map-model.js";
 
 // The part whose sheet is open, and the project it is in; a sheet never carries over to another project's map.
@@ -44,7 +45,10 @@ async function setTier(view: MapView, part: string, tier: Tier) {
   await reloadMap();
 }
 
-function close() {
+// The part whose sheet is open on the shown map, null with none.
+export const sheetPart = () => (open && currentMap()?.project === open.project ? open.part : null);
+
+export function closeSheet() {
   const view = currentMap();
   open = null;
   if (view) drawSheet(view);
@@ -68,7 +72,7 @@ function drawSheet(view: MapView) {
 
   const closer = text("button", "×", "btn quiet sheet-close");
   closer.title = "Close the sheet";
-  closer.addEventListener("click", close);
+  closer.addEventListener("click", closeSheet);
   const tiers = text("div", "", "sheet-tiers");
   for (const each of sheet.tiers) {
     const button = pressable(text("button", each.label, "btn"), each.pressed, () => setTier(view, part.id, each.tier).catch(failure("map_set_tier")));
@@ -164,8 +168,10 @@ function drawSheet(view: MapView) {
 
 onPlateClick(({ view, part }) => {
   open = { project: view.project, part: part.id };
+  // Below 1007 px, or over the widened diff, the sheet takes the left panel's place (#385).
+  besideSheet(part.id);
   logStop("map-action", view.project);
   drawSheet(view);
 });
 onDraw(drawSheet);
-registerLayer("sheet", { open: () => open !== null && currentMap() !== null, close });
+registerLayer("sheet", { open: () => open !== null && currentMap() !== null, close: closeSheet });

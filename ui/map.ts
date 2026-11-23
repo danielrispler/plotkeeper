@@ -7,8 +7,9 @@
 //   right (law marks sit there; a broken-law mark joins them), `chips` along its foot (live agents). A ticket fills a slot.
 // - `onPlateClick(fn)`: a click on a plate that was not a drag, such as one that opens the part's sheet.
 // - `onDraw(fn)`: runs after each draw with the whole `MapView`, for what is not on a plate: the side area (`slots.notPlaced`,
-//   `slots.sheet`, `slots.drawer`, shown by `syncSide`) and the banner (`slots.banner`).
-// - `registerLayer(name, layer)`: Esc's layers, `scrubbed`, `drawer` and `sheet`, peeled in that order before the view is left.
+//   `slots.sheet`, `slots.drawer`, shown by `syncSide`), the tray (`slots.tray`) and the banner (`slots.banner`).
+// - `registerLayer(name, layer)`: Esc's layers, `drawer`, `brief`, `scrubbed`, `sheet` and `panel` (#385), peeled in that order before the view is left.
+// - The left panel (`panel.ts`, #385) floats over the map's left; `revealParts` pans the camera so the parts in focus clear it and the sheet.
 // - `MapState` (`types.ts`, `map.rs`) is the one payload; `currentMap()` gives the view as drawn.
 // - The camera (#383): the map area pans and zooms the world rather than scrolling it. Daniel's view is saved per project (`map_save_view`);
 //   a PR brief borrows the camera with `lendCamera` and `giveCameraBack` shows Daniel's view again (`cameraRig` in `map-model.ts`).
@@ -47,6 +48,9 @@ export const onDraw = (hook: (view: MapView) => void) => void drawHooks.push(hoo
 const unreadHooks: ((banner: HTMLElement, scrub: Scrub | null) => void)[] = [];
 export const onUnread = (hook: (banner: HTMLElement, scrub: Scrub | null) => void) => void unreadHooks.push(hook);
 export const registerLayer = (name: LayerName, layer: Layer) => void (layers[name] = layer);
+// Runs when the Map view is left, for what floats over it (the left panel puts the story back in its rail).
+const leaveHooks: (() => void)[] = [];
+export const onLeave = (hook: () => void) => void leaveHooks.push(hook);
 
 // What `startMap` is given by `main.ts`, which owns what the Map view may not import.
 export type MapDeps = {
@@ -139,6 +143,7 @@ export function leaveMap() {
   if (!mapShown()) return;
   document.body.classList.remove("map-open");
   element("map").hidden = true;
+  leaveHooks.forEach((hook) => hook());
   recheckSeen();
   hideProjects();
 }
@@ -229,20 +234,41 @@ export function mapEscape() {
   if (escapeMap(layers) === "leave") leaveMap();
 }
 
-// The side area shows while any of its slots holds something.
+// The side area shows while any of its slots holds something; the tray floats on its own (#385).
 export const syncSide = (slots: MapView["slots"]) => {
-  slots.side.hidden = ![slots.notPlaced, slots.tray, slots.sheet, slots.drawer].some((slot) => slot.childElementCount > 0);
-  // The map area ends where the side area begins. When a part's sheet opens, the camera pans just enough to show that part whole, once per
-  // part, so a later draw never pans Daniel's view back; positions are never written here.
+  slots.side.hidden = ![slots.notPlaced, slots.sheet, slots.drawer].some((slot) => slot.childElementCount > 0);
+  // When a part's sheet opens, the camera pans just enough to show that part whole beside it, once per part, so a later draw never pans
+  // Daniel's view back; positions are never written here.
   const shown = view && view.slots === slots ? view : null;
   const focus = shown ? (slots.sheet.querySelector<HTMLElement>("[data-part]")?.dataset.part ?? null) : null;
   if (focus === revealed) return;
   revealed = focus;
-  const at = shown && focus !== null ? shown.positions[focus] : undefined;
-  if (!shown || !at || !rig || rig.lent() || !slots.canvas.clientWidth) return;
-  const half = sizeOf(focus!, shown).w / 2;
-  moveCamera(revealPan(rig.user(), at.x - half, at.x + half, { left: 0, right: slots.canvas.clientWidth }, mapGutter), true);
+  if (focus !== null) revealParts([focus]);
 };
+
+// The band of the map area no card covers, in the area's coordinates: from the left panel's right edge to the sheet's (or the drawer's) left edge.
+function clearBand(canvas: HTMLElement) {
+  const area = canvas.getBoundingClientRect();
+  const panel = element("map-panel");
+  const card = [element("map-sheet"), element("map-drawer")].find((slot) => slot.childElementCount > 0);
+  const left = panel.hidden ? 0 : Math.max(0, panel.getBoundingClientRect().right - area.left);
+  const right = card ? Math.min(area.width, card.getBoundingClientRect().left - area.left) : area.width;
+  return { left, right };
+}
+
+// Pans just enough to show the parts `ids` whole in the band the left panel and the sheet leave (#383, #385). Only the camera moves: no position
+// is written, and a brief's camera is never moved.
+export function revealParts(ids: string[]) {
+  const shown = view;
+  if (!shown || !rig || rig.lent() || !shown.slots.canvas.clientWidth) return;
+  const spans = ids.flatMap((id) => {
+    const at = shown.positions[id];
+    return at ? [at.x - sizeOf(id, shown).w / 2, at.x + sizeOf(id, shown).w / 2] : [];
+  });
+  if (!spans.length) return;
+  const to = revealPan(rig.user(), Math.min(...spans), Math.max(...spans), clearBand(shown.slots.canvas), mapGutter);
+  if (to !== rig.user()) moveCamera(to, true);
+}
 
 const name = (path: string) => path.split("/").filter(Boolean).pop() ?? path;
 

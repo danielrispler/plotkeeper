@@ -11,7 +11,7 @@ import { historyLink } from "./history.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
 import { projectGroups, type ProjectGroup } from "./projects.js";
 import { redrawHistory, redrawHome, showHistory } from "./panes.js";
-import { isSelected, select } from "./selection.js";
+import { isSelected, pressSession } from "./selection.js";
 import { studio } from "./state.js";
 import { titled } from "./keys.js";
 import { blockedWaits, stateLabels, type BlockedCommand, type Context, type Session, type SessionState, type Subagent } from "./types.js";
@@ -232,9 +232,9 @@ function rowLines(button: HTMLElement, state: string, name: HTMLElement[], below
 // A row's button, keyed by what it selects (`patch` keeps it across updates). It selects on the press,
 // so the row shows selected at once (danielrispler/Falinks#570); a click without a pointer, from the keyboard, selects too.
 export function selecting(id: string, agent: string | null, key = `${id} ${agent ?? ""}`): HTMLButtonElement {
-  const button = pressable(document.createElement("button"), isSelected(id, agent), (event: MouseEvent) => event.detail === 0 && select(id, agent));
+  const button = pressable(document.createElement("button"), isSelected(id, agent), (event: MouseEvent) => event.detail === 0 && pressSession(id, agent));
   button.dataset.key = key;
-  button.addEventListener("pointerdown", (event) => event.button === 0 && select(id, agent));
+  button.addEventListener("pointerdown", (event) => event.button === 0 && pressSession(id, agent));
   return button;
 }
 

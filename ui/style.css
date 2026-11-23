@@ -46,7 +46,7 @@ body[data-layout="strip"] .app { grid-template-columns: var(--strip) 1fr var(--r
 body[data-layout="overlay"] .app { grid-template-columns: var(--strip) 1fr 0; }
 /* Focus mode (danielrispler/Falinks#573): the list and the rail fold, still in the grid, and the terminal takes the window. */
 body[data-layout="focus"] .app { grid-template-columns: 0 1fr 0; }
-body[data-layout="focus"] .list, body[data-layout="focus"] .rail { visibility: hidden; }
+body[data-layout="focus"] .list, body[data-layout="focus"] .app > .rail { visibility: hidden; }
 
 /* The dividers on the list's and the rail's inner edges; each shows only while its column is in the grid. */
 .divider { position: fixed; top: var(--bar); bottom: 0; width: var(--divider); cursor: col-resize; z-index: 4; touch-action: none;
@@ -257,11 +257,11 @@ h1 { margin: 0 0 var(--sp-4); }
 /* In "overlay" the rail is a layer over the terminal (danielrispler/plotkeeper#128): 320 px on the lighter surface with an edge line,
    sliding in over 150 ms and out over 100 ms, no scrim. It opens by a rest on the spine or the session header, by a click, or ⌘2
    (hover.ts); it is visible only while open, so a closed one takes no pointer. */
-body[data-layout="overlay"] .rail { --rail: var(--layer); position: fixed; top: var(--bar); bottom: 0; left: 0; width: var(--layer);
+body[data-layout="overlay"] .app > .rail { --rail: var(--layer); position: fixed; top: var(--bar); bottom: 0; left: 0; width: var(--layer);
                                     background: var(--surface); box-shadow: inset calc(-1 * var(--hair)) 0 0 var(--edge); z-index: 5;
                                     transform: translateX(-100%); visibility: hidden;
                                     transition: transform var(--slide-out) ease-in, visibility 0s linear var(--slide-out); }
-body[data-layout="overlay"].rail-open .rail { transform: none; visibility: visible; transition: transform var(--slide-in) ease-out, visibility 0s; }
+body[data-layout="overlay"].rail-open .app > .rail { transform: none; visibility: visible; transition: transform var(--slide-in) ease-out, visibility 0s; }
 /* The spine (#128): a 14 px target on the window's left edge, under the top bar, with the session's state dot. */
 .spine { display: none; position: fixed; top: var(--bar); bottom: 0; left: 0; width: var(--spine); z-index: 4; justify-content: center;
          padding-top: var(--sp-5); background: var(--chrome); box-shadow: inset calc(-1 * var(--hair)) 0 0 var(--edge); }
@@ -491,9 +491,11 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .diff-file summary { cursor: pointer; font: var(--size-small)/var(--term-line) var(--mono); padding: var(--sp-2) 0; overflow-wrap: anywhere; }
 .diff-body { margin-top: var(--sp-2); overflow-x: auto; background: var(--surface); border-radius: var(--radius-small); padding: var(--sp-3) 0; }
 .diff-line { margin: 0; padding: 0 var(--sp-4); font: var(--size-small)/var(--term-line) var(--mono); white-space: pre; width: max-content; min-width: 100%; box-sizing: border-box; }
-.diff-line.add { background: var(--selected); }
-.diff-line.del { background: var(--needs-you-bg); color: var(--conflict); }
-.diff-line.hunk, .diff-line.meta { color: var(--muted); }
+/* Monochrome (spec #380's approved call, #385): an added line bright, a removed one faint and struck through, so colour still means "needs you". */
+.diff-line.ctx { color: var(--muted); }
+.diff-line.add { color: var(--fg); background: var(--hover); }
+.diff-line.del { color: var(--faint); text-decoration: line-through; }
+.diff-line.hunk, .diff-line.meta { color: var(--faint); }
 .evidence-more[hidden] { display: none; }
 
 /* "Where we were" (#124): the banner above the newest turn. */
@@ -514,7 +516,10 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 /* The Map view (danielrispler/plotkeeper#306, ticket #309): over the rail's and the terminal's columns, which it hides; the list and the top
    bar stay live. Treatment C: plates on a quiet chart. The sizes are tokens, and map-model.ts holds the plate's and the actor's. */
 .map-view { grid-column: 2 / 4; grid-row: 2; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: var(--map-bg); position: relative; z-index: 2; }
-body.map-open .term, body.map-open .rail, body.map-open .spine { visibility: hidden !important; }
+body.map-open .term, body.map-open .spine { visibility: hidden !important; }
+/* The rail's column is taken out while the map shows, so no layer of it (an overlay mid-transition) is ever over the map; the story shows in the
+   left panel instead (#385). */
+body.map-open .app > .rail { display: none; }
 /* A toast is not hidden: a session that needs Daniel is never out of sight. */
 body.map-open .toasts, body.map-open .toast { visibility: visible !important; }
 .map-head { display: flex; align-items: baseline; gap: var(--sp-5); padding: var(--sp-6) var(--map-gutter) var(--sp-4); }
@@ -526,11 +531,47 @@ body.map-open .toasts, body.map-open .toast { visibility: visible !important; }
 .map-review:not([hidden]) { margin-inline-start: var(--sp-5); }
 .map-banner:not(:empty) { margin-inline-start: auto; font-size: var(--size-small); color: var(--muted); }
 .map-projects[popover] { top: calc(var(--bar) + var(--map-title) + var(--sp-7)); left: var(--map-gutter); right: auto; width: var(--menu); }
-.map-stage { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 0; }
+/* The map fills the stage; the left panel, the side area and the tray float over it, so opening one never moves or squashes a part (#385). */
+.map-stage { --panel-w: var(--rail); display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; position: relative; overflow: hidden; }
+body[data-panel="diff"] .map-stage { --panel-w: min(var(--panel-wide), calc(100% - 2 * var(--inset))); }
 .map-body { position: relative; min-width: 0; min-height: 0; }
-.map-side { width: var(--map-sheet); overflow-y: auto; padding: var(--sp-4) var(--map-gutter) var(--sp-5) var(--sp-5); }
-/* Ready for review (#336): the way into a PR brief, in the side area under Not placed. */
-#map-tray:not(:empty) { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-5); }
+/* One glass recipe (#385) for every card over the map, Treatment C's part sheet: a near-opaque surface, a backdrop blur, a top highlight, a
+   faint edge, a deep shadow and a round corner. It never darkens the map under it. */
+.glass { background: var(--glass); backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur)); border-radius: var(--glass-radius);
+         box-shadow: var(--glass-shadow); }
+/* The side area, over the map's right: the part's sheet, the drawer under it, then the agents no part holds. Only its cards take the pointer. */
+.map-side { position: absolute; top: var(--inset); right: var(--inset); width: var(--map-sheet); max-height: calc(100% - 2 * var(--inset)); z-index: 3;
+            display: flex; flex-direction: column; gap: var(--sp-5); pointer-events: none; }
+.map-side[hidden] { display: none; }
+.map-side > * { pointer-events: auto; min-height: 0; flex: 0 1 auto; }
+#map-sheet:empty, #map-drawer:empty, #map-not-placed:empty { display: none; }
+#map-sheet, #map-drawer { overflow-y: auto; padding: var(--sp-6) var(--sp-6) var(--sp-5); animation: glass-in var(--glass-in) var(--glass-ease); }
+#map-sheet { flex-shrink: 0; max-height: 70%; }
+/* The left panel (#385): the story, History, the diff (widened to at most 780 px) or Settings, inset like the sheet and in its glass. */
+.map-panel { position: absolute; left: var(--inset); top: var(--inset); bottom: var(--inset); width: var(--panel-w); z-index: 4; display: flex; flex-direction: column;
+             overflow: hidden; animation: panel-in var(--glass-in) var(--glass-ease); }
+.map-panel[hidden] { display: none; }
+@keyframes panel-in { from { opacity: 0; transform: translateX(calc(-1 * var(--panel-slide))); } }
+@keyframes glass-in { from { opacity: 0; transform: translateY(calc(-1 * var(--sp-3))); } }
+.panel-close { position: absolute; top: var(--sp-5); right: var(--sp-5); z-index: 2; color: var(--faint); }
+.panel-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+.panel-body > .rail { flex: 1; min-height: 0; }
+.map-panel .rail-h { padding-right: calc(var(--sp-7) * 2 + var(--sp-5)); }
+.panel-title { margin: 0; padding: var(--sp-6) var(--sp-6) var(--sp-4); font-size: var(--size-large); font-weight: 650; }
+.panel-view.history { padding: 0 var(--sp-5) var(--sp-6); }
+.panel-view.history input { width: 100%; box-sizing: border-box; margin-bottom: var(--sp-3); font: inherit; padding: var(--sp-3) var(--sp-4); background: var(--chrome); color: var(--fg);
+                            border: 0; border-radius: var(--radius); }
+.panel-view.history .row:hover { background: var(--hover); }
+.map-panel .pane.turn-diff { position: static; inset: auto; overflow: visible; }
+.map-panel .turn-diff header { background: transparent; border-bottom: 0; padding-right: calc(var(--sp-7) * 2); }
+/* The PR brief alone dims the map, and both panels with it (#385). */
+body.brief-open .map-panel, body.brief-open .map-side { opacity: var(--brief-dim); transition: opacity var(--motion); }
+/* The gear (#385): quiet, in the top bar, pressed while Settings shows. */
+.gear svg { display: block; width: var(--icon); height: var(--icon); fill: none; stroke: currentColor; stroke-width: 1.3; }
+/* Ready for review (#336): the way into a PR brief, over the map's foot on the left; right of the left panel while that is open (#385). */
+.map-tray { position: absolute; left: var(--map-gutter); bottom: var(--sp-7); z-index: 3; width: var(--tray); transition: left var(--glass-in) var(--glass-ease); }
+body.panel-open .map-tray { left: calc(var(--inset) + var(--panel-w) + var(--map-gutter)); }
+#map-tray:not(:empty) { display: flex; flex-direction: column; gap: var(--sp-2); }
 #map-tray .side-title { margin: 0; font-size: var(--size-xs); font-weight: 400; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
 .tray-row { padding: var(--sp-3); border-radius: var(--radius); }
 button.tray-row { display: block; width: 100%; font: inherit; color: inherit; text-align: start; background: none; border: 0; cursor: pointer; }
@@ -660,7 +701,6 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 /* The PR brief (spec #334, ticket #339): treatment C. One focus per step in a panel at the foot of the map, which the camera leaves room for; the
    parts a step lights stand out and the rest of the map dims; a light runs the step's links. Never a colour of its own: the warm light of a brief. */
 .map-body, .map-brief { grid-column: 1; grid-row: 1; }
-.map-side { grid-column: 2; grid-row: 1; }
 .map-brief { align-self: end; justify-self: center; width: min(var(--brief-width), calc(100% - var(--sp-7) * 2)); margin-bottom: var(--sp-7); box-sizing: border-box;
              position: relative; display: flex; flex-direction: column; z-index: 5; padding: var(--sp-6) var(--sp-7) var(--sp-5); border-radius: var(--radius-pane);
              background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(var(--brief-blur)); box-shadow: inset 0 0 0 var(--hair) var(--plate-edge), var(--shadow);
@@ -740,6 +780,7 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .light-spark { fill: var(--brief-light); filter: drop-shadow(0 0 var(--sp-3) var(--brief-light)); }
 .brief-open .map-canvas { overflow: clip; }
 @media (prefers-reduced-motion: reduce) {
+  .map-panel, #map-sheet, #map-drawer, .map-tray { animation: none; transition: none; }
   .map-brief, .brief-cols, .map-world.glide, .brief-dots i { transition: none; }
   .plate.arrive, .plate.picked, .plate.wrong { animation: none; }
 }

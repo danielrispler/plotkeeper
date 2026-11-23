@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
   actorSize, autoPlace, cameraRig, draftPrompt, fitCamera, panTo, zoomAt, zoomLimits, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, mapProject, parseMap, plateSize, rimPoint, revealPan, scrubTickets, sheetOf,
+  narrowBelow, withPanel, withSheet, pressRow, panelSession,
 } from "../../dist/map-model.js";
 
 const part = (id, extra = {}) => ({ id, name: id, caption: "", description: "", tier: "core", paths: [], ...extra });
@@ -78,15 +79,60 @@ test("a link runs from rim to rim, not centre to centre", () => {
   assert.deepEqual(rimPoint(a, plateSize, a), a);
 });
 
-test("Esc closes the drawer, then the brief, then returns from a scrubbed commit to now, then closes the sheet, then leaves the Map view", () => {
-  const open = { scrubbed: true, drawer: true, brief: true, sheet: true };
+test("Esc closes the drawer, then the brief, then returns from a scrubbed commit to now, then closes the sheet, then the left panel, then leaves the Map view", () => {
+  const open = { scrubbed: true, drawer: true, brief: true, sheet: true, panel: true };
   const closed = [];
   const layers = Object.fromEntries(layerOrder.map((name) => [name, { open: () => open[name], close: () => { open[name] = false; closed.push(name); } }]));
-  assert.deepEqual(layerOrder, ["drawer", "brief", "scrubbed", "sheet"]);
   const presses = [];
-  for (let i = 0; i < 5; i++) presses.push(escapeMap(layers));
-  assert.deepEqual(closed, ["drawer", "brief", "scrubbed", "sheet"]);
-  assert.deepEqual(presses, ["drawer", "brief", "scrubbed", "sheet", "leave"]);
+  for (let i = 0; i < 6; i++) presses.push(escapeMap(layers));
+  assert.deepEqual(closed, ["drawer", "brief", "scrubbed", "sheet", "panel"]);
+  assert.deepEqual(presses, ["drawer", "brief", "scrubbed", "sheet", "panel", "leave"]);
+});
+
+// The left panel and the part's sheet (#385): what opens where.
+const story = (session) => ({ kind: "story", session });
+const wide = 1900;
+const narrow = 1000;
+
+test("the window is narrow below 1007 px", () => {
+  assert.equal(narrowBelow, 1007);
+});
+
+test("in a wide window the panel and the sheet stay open together", () => {
+  const both = withPanel({ panel: null, sheet: "core" }, story("s1"), wide);
+  assert.deepEqual(both, { panel: story("s1"), sheet: "core" });
+  assert.deepEqual(withSheet({ panel: { kind: "history" }, sheet: null }, "hook", wide), { panel: { kind: "history" }, sheet: "hook" });
+  assert.deepEqual(withPanel({ panel: story("s1"), sheet: "core" }, { kind: "settings" }, 1007), { panel: { kind: "settings" }, sheet: "core" });
+});
+
+test("below 1007 px only one overlay is open: the panel closes the sheet, and the sheet the panel", () => {
+  assert.deepEqual(withPanel({ panel: null, sheet: "core" }, story("s1"), narrow), { panel: story("s1"), sheet: null });
+  assert.deepEqual(withPanel({ panel: null, sheet: "core" }, { kind: "history" }, 1006), { panel: { kind: "history" }, sheet: null });
+  assert.deepEqual(withSheet({ panel: story("s1"), sheet: null }, "core", narrow), { panel: null, sheet: "core" });
+  // Closing one never opens the other.
+  assert.deepEqual(withPanel({ panel: story("s1"), sheet: null }, null, narrow), { panel: null, sheet: null });
+});
+
+test("the widened diff closes the part's sheet, and a sheet opened over it closes the diff", () => {
+  const diff = { kind: "diff", session: "s1", turn: 2 };
+  assert.deepEqual(withPanel({ panel: story("s1"), sheet: "core" }, diff, wide), { panel: diff, sheet: null });
+  assert.deepEqual(withSheet({ panel: diff, sheet: null }, "hook", wide), { panel: null, sheet: "hook" });
+});
+
+test("a row's press opens its session's story in the panel, and a second press on the same row closes it", () => {
+  assert.deepEqual(pressRow(null, "s1"), story("s1"));
+  assert.equal(pressRow(story("s1"), "s1"), null);
+  assert.deepEqual(pressRow(story("s1"), "s2"), story("s2"));
+  // From History, the diff or Settings, a row's press shows its story.
+  assert.deepEqual(pressRow({ kind: "history" }, "s1"), story("s1"));
+  assert.deepEqual(pressRow({ kind: "diff", session: "s1", turn: 0 }, "s1"), story("s1"));
+});
+
+test("the session whose chips stay lit is the one the panel shows", () => {
+  assert.equal(panelSession(story("s1")), "s1");
+  assert.equal(panelSession({ kind: "diff", session: "s2", turn: 0 }), "s2");
+  assert.equal(panelSession({ kind: "history" }), null);
+  assert.equal(panelSession(null), null);
 });
 
 test("Esc skips a layer that is not open, and a layer nobody registered", () => {
