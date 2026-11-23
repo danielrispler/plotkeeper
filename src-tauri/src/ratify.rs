@@ -863,6 +863,14 @@ mod tests {
         assert!(after.iter().all(|r| r.status == Status::NotYet));
         let before = rows(&project, 7, &map, &[], Some(50));
         assert!(before.iter().all(|r| r.status == Status::Ratified));
+        // The first run's own second counts as before it; the next one does not.
+        let at = rows(&project, 7, &map, &[], Some(100));
+        assert!(at.iter().all(|r| r.status == Status::Ratified));
+        let next = rows(&project, 7, &map, &[], Some(101));
+        assert!(next.iter().all(|r| r.status == Status::NotYet));
+        // An open PR has not landed: nothing is ratified by a record that is not there.
+        let open = rows(&project, 7, &map, &[], None);
+        assert!(open.iter().all(|r| r.status == Status::NotYet));
     }
 
     mod git_repo {
