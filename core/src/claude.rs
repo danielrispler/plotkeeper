@@ -10,9 +10,12 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+/// The name Claude Code's hook entries pass (`--agent claude`), which its lines carry.
+pub const CLAUDE: &str = "claude";
+
 /// What Claude Code reports: everything the core reads today.
 pub const CAPABILITIES: Capabilities = Capabilities {
-    agent: "claude",
+    agent: CLAUDE,
     asks: true,
     background_tasks: true,
     replies: true,
@@ -95,6 +98,8 @@ struct Raw {
     reason: String,
     #[serde(default)]
     studio_received_ms: u64,
+    /// The agent the hook entry named (#355); `None` on a line written before entries named one.
+    studio_agent: Option<String>,
     /// The session's permission mode, which `SessionStart` leaves out.
     permission_mode: Option<String>,
     /// On a tool's result, how long its call took.
@@ -123,9 +128,14 @@ struct Raw {
     studio_asked_by: String,
 }
 
-/// The event of hook line `line`; an error when it is no Claude Code line.
+/// The event of hook line `line`; an error when it is no Claude Code line: it has another shape, or
+/// its hook entry named another agent.
 pub(crate) fn parse(line: &str) -> Result<Event, serde_json::Error> {
-    serde_json::from_str::<Raw>(line).map(adapt)
+    let raw = serde_json::from_str::<Raw>(line)?;
+    match raw.studio_agent.as_deref() {
+        None | Some(CLAUDE) => Ok(adapt(raw)),
+        Some(other) => Err(serde::de::Error::custom(format!("a line of {other}"))),
+    }
 }
 
 fn tool(raw: &Raw) -> Tool {

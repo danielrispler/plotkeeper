@@ -4,17 +4,17 @@
   "parts": [
     {
       "id": "plugins", "name": "Agent plugins", "caption": "Which hooks each agent runs",
-      "description": "Small config folders for Claude Code and agy. They decide which of the agent's events reach the studio.",
+      "description": "Small config folders for Claude Code and agy. They decide which of the agent's events reach the studio, and each entry names its agent to the hook.",
       "tier": "interface", "paths": ["plugin/", "plugin-agy/"]
     },
     {
       "id": "hook", "name": "Hook", "caption": "Records every agent event",
-      "description": "Runs on each agent event and appends it to the event log. It also holds a question or a blocked command until you answer.",
+      "description": "Runs on each agent event and appends it to the event log, with the agent its entry named. It also holds a question or a blocked command until you answer.",
       "tier": "core", "paths": ["hook/"]
     },
     {
       "id": "core", "name": "Core", "caption": "Turns events into session state",
-      "description": "Plain Rust logic. It reads the event log's lines in order and knows every session's turns, checks, subagents and whether it needs you.",
+      "description": "Plain Rust logic. It reads the event log's lines in order, each by the agent its line names, and knows every session's turns, checks, subagents and whether it needs you.",
       "tier": "core", "paths": ["core/"]
     },
     {

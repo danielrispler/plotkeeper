@@ -191,3 +191,38 @@ fn a_line_waiting_for_the_lock_lands_in_the_log_that_replaced_it() {
     assert!(waiting.join().unwrap().unwrap());
     assert_eq!(lines(&log), [at("s-0", NOW), at("s-1", NOW)]);
 }
+
+/// A line's session is read by the agent its hook entry named (#355): an agy line goes by its
+/// conversation, whatever other id its payload holds.
+#[test]
+fn a_prune_keeps_a_sessions_lines_together_by_the_id_its_agent_uses() {
+    let home = scratch("agent");
+    let log = studio_hook::event_log(&home);
+    let agy = |ms: u64, extra: Value| {
+        let mut line = json!({
+            "conversationId": "c-1",
+            "hookEventName": "PreToolUse",
+            "studio_agent": "agy",
+            "studio_received_ms": ms,
+        });
+        line.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        line
+    };
+    let old = agy(NOW - 40 * DAY, json!({ "session_id": "a-tools-id" }));
+    let recent = agy(NOW - DAY, json!({}));
+    let claude_old = json!({
+        "session_id": "s-1",
+        "conversationId": "c-1",
+        "hook_event_name": "Stop",
+        "studio_agent": "claude",
+        "studio_received_ms": NOW - 40 * DAY,
+    });
+    write(&log, &[old.clone(), claude_old.clone(), recent.clone()]);
+
+    prune(&log, NOW).unwrap();
+
+    assert_eq!(lines(&log), [old, recent]);
+    assert_eq!(lines(&archive_file(&log)), [claude_old]);
+}

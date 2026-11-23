@@ -123,7 +123,7 @@ fn every_command_is_the_inline_wrapper_for_all_six_events() {
     for c in commands {
         assert_eq!(
             c,
-            r#"p=$(cat); (printf %s "$p" | PLOTKEEPER_AGENT_PID=$PPID "__PLOTKEEPER_HOOK__" >/dev/null 2>&1 &) ; exit 0"#
+            r#"p=$(cat); (printf %s "$p" | PLOTKEEPER_AGENT_PID=$PPID "__PLOTKEEPER_HOOK__" --agent agy >/dev/null 2>&1 &) ; exit 0"#
         );
     }
     assert!(text.matches("\"timeout\"").count() == 6);

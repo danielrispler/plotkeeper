@@ -54,6 +54,9 @@ pub enum DriftKind {
     ToolShape,
     /// A turn's origin, decided at its start, that its `Stop` check disagreed with.
     TurnOrigin,
+    /// A hook line whose `studio_agent` names an agent plotkeeper has no parser for, or a line its
+    /// own agent's parser cannot read (#355).
+    Agent,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -237,7 +240,7 @@ impl Adapter {
         scratch.events(line)?.pop()
     }
 
-    fn drift(&mut self, at: u64, kind: DriftKind) {
+    pub(crate) fn drift(&mut self, at: u64, kind: DriftKind) {
         self.drift.push(Drift { at, kind });
     }
 
