@@ -4,6 +4,8 @@
 // passes, a user who arrived with none configured gets no summaries (the Test gate), which the writer's notice line says.
 // PR briefs are written by `claude` whatever writer is picked, so without it the section, and the Map view's tray, say
 // "briefs need Claude".
+// An Anthropic API key (ticket #366) is pasted here and kept in the macOS Keychain; the server says only whether one is set,
+// and the API-key writer is listed, first, once it is.
 
 import { element, failure, invoke, text } from "./dom.js";
 import type { Settings, SettingsFiles } from "./settings.js";
@@ -13,7 +15,12 @@ export type Choice = { writer: WriterKind; model: string; effort: string };
 
 // The writer picker's options: every writer, one that was not found shown but not pickable.
 export const choiceOptions = (list: Writers): { kind: WriterKind; label: string; disabled: boolean }[] =>
-  list.writers.map((w) => ({ kind: w.kind, label: w.found ? w.name : `${w.name} (not found)`, disabled: !w.found }));
+  list.writers.map((w) => ({ kind: w.kind, label: w.found ? w.name : `${w.name} (${w.kind === "anthropic" ? "not set" : "not found"})`, disabled: !w.found }));
+
+// Whether an API key is set, as the key row says it; the key itself never reaches the page.
+export const keySet = (list: Writers): boolean => list.writers.some((w) => w.kind === "anthropic" && w.found);
+export const keyLine = (list: Writers): string =>
+  keySet(list) ? "Anthropic API key: set, kept in the macOS Keychain." : "Anthropic API key: not set.";
 
 // A model as writer `kind` takes it: one agy does not list is its first, as the server reads it (`WriterKind::model`).
 function modelOf(list: Writers, kind: WriterKind, model: string): string {
@@ -49,6 +56,8 @@ let list: Writers | null = null;
 let choice: Choice = { writer: "claude", model: "", effort: "" };
 let outcome: WriterTest | null = null;
 let testing = false;
+// The key row's last refusal, such as a pasted text that is no key.
+let keyError: string | null = null;
 
 // Whether PR briefs can be written: until the list is known, yes.
 export const briefsWritten = () => list?.briefs ?? true;
@@ -127,6 +136,7 @@ function draw(panel: HTMLElement, hooks: Hooks) {
   } else if (!known.summaries_on) {
     nodes.push(text("p", "Summaries are off until a writer passes Test.", "writer-outcome"));
   }
+  nodes.push(...keyRow(panel, hooks, known));
   const briefs = briefsLine(known);
   if (briefs) {
     const shown = text("p", briefs, "writer-briefs");
@@ -136,12 +146,72 @@ function draw(panel: HTMLElement, hooks: Hooks) {
   panel.replaceChildren(...nodes);
 }
 
-function refresh(panel: HTMLElement, hooks: Hooks) {
+// The key row: whether a key is set, a field to add one or replace it, and Remove once one is set.
+function keyRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[] {
+  const set = keySet(known);
+  const state = text("p", keyLine(known), "writer-hint");
+  state.id = "writer-key-state";
+  const input = document.createElement("input");
+  input.id = "writer-key";
+  input.type = "password";
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  input.placeholder = set ? "Replace the API key" : "Add an API key";
+  input.title = "An Anthropic API key; it is kept in the macOS Keychain and never shown again";
+  const save = text("button", "Save key", "btn small");
+  save.id = "writer-key-save";
+  save.setAttribute("type", "button");
+  save.title = "Keep the pasted key in the macOS Keychain, in place of any key set; the page never shows it again";
+  save.addEventListener("click", () => {
+    const key = input.value.trim();
+    if (!key) return;
+    input.value = "";
+    invoke("set_api_key", { key })
+      .then(() => {
+        keyError = null;
+        const anthropic = known.writers.find((w) => w.kind === "anthropic");
+        choice = { writer: "anthropic", model: anthropic?.models[0] ?? "", effort: "" };
+        outcome = null;
+      })
+      .catch((e: unknown) => {
+        keyError = e instanceof Error ? e.message : String(e);
+      })
+      .finally(() => void refresh(panel, hooks));
+  });
+  const row = text("div", "", "writer-key");
+  row.append(input, save);
+  if (set) {
+    const remove = text("button", "Remove key", "btn small");
+    remove.id = "writer-key-remove";
+    remove.setAttribute("type", "button");
+    remove.title = "Remove the key from the macOS Keychain; the API-key writer then cannot write";
+    remove.addEventListener("click", () => {
+      invoke("remove_api_key")
+        .then(() => {
+          keyError = null;
+          outcome = null;
+        })
+        .catch(failure("remove_api_key"))
+        .finally(() => void refresh(panel, hooks, true));
+    });
+    row.append(remove);
+  }
+  const nodes = [state, row];
+  if (keyError) {
+    const shown = text("p", keyError, "writer-outcome failed");
+    shown.id = "writer-key-error";
+    nodes.push(shown);
+  }
+  return nodes;
+}
+
+// Asks for the list; the first time, or with `again`, presets the choice from it.
+function refresh(panel: HTMLElement, hooks: Hooks, again = false) {
   return invoke("writers")
     .then((writers) => {
       const first = list === null;
       list = writers;
-      if (first) choice = preset(writers, hooks.summaries());
+      if (first || again) choice = preset(writers, hooks.summaries());
       hooks.notice(gateNotice(writers));
       draw(panel, hooks);
       window.dispatchEvent(new Event("writers"));

@@ -135,6 +135,10 @@ pub struct App {
     /// The terminal the split's second pane shows, as the UI last said, `None` with no split: its session is on screen, so its
     /// turn's end raises no toast.
     pub split_shown: Mutex<Option<String>>,
+    /// Where the API-key writer's key is kept: the Keychain at start (`with_keys`), memory before; and whether one is set,
+    /// all the page learns of it.
+    pub keys: Arc<dyn settings::ApiKeys>,
+    pub key_set: AtomicBool,
 }
 
 impl App {
@@ -149,9 +153,10 @@ impl App {
         // The store sits beside the log, in the studio's data directory.
         let cards: Cards = Arc::new(Mutex::new(CardStore::open_beside(log)?));
         let notes: Notes = Arc::new(Mutex::new(RiskNotes::open_beside(log)?));
-        let writer: Writer = match std::env::var("PLOTKEEPER_CARD_WRITER").as_deref() {
-            Ok("fake") => Arc::new(FakeWriter),
-            _ => {
+        let fake = std::env::var("PLOTKEEPER_CARD_WRITER").as_deref() == Ok("fake");
+        let writer: Writer = match fake {
+            true => Arc::new(FakeWriter),
+            false => {
                 let writer = ClaudeWriter::beside(log)?;
                 let writer_notices = Mutex::new(writer_notices);
                 Arc::new(writer.on_availability(move |notice| {
@@ -159,7 +164,21 @@ impl App {
                 }))
             }
         };
-        Self::open_with(log, cards, notes, writer, effects)
+        let app = Self::open_with(log, cards, notes, writer, effects)?;
+        // The checks' fake writer keeps its key in memory, so no check reads the Keychain.
+        Ok(match fake {
+            true => app,
+            false => app.with_keys(Arc::new(settings::Keychain::default())),
+        })
+    }
+
+    /// The state with the API-key writer's key kept in `keys`: the writer is given the key set there, if any.
+    pub fn with_keys(mut self, keys: Arc<dyn settings::ApiKeys>) -> Self {
+        let key = keys.get();
+        self.key_set = AtomicBool::new(key.is_some());
+        self.writer.use_key(key);
+        self.keys = keys;
+        self
     }
 
     /// The state over `log` with the stores and the writer given, so a test can hold the writer.
@@ -206,6 +225,8 @@ impl App {
             list_changed: AtomicBool::new(false),
             rail_shown: AtomicBool::new(true),
             split_shown: Mutex::new(None),
+            keys: Arc::new(settings::MemoryKeys::default()),
+            key_set: AtomicBool::new(false),
         })
     }
 
@@ -230,6 +251,12 @@ pub fn scrubbed(line: &str) -> &str {
 /// the `understanding` crate starts `save `; a test reads their sources to keep it so.
 pub fn lost_data(line: &str) -> bool {
     line.starts_with("save ")
+}
+
+/// What reaches the log: warnings and errors, and nothing of the HTTP client's, whose debug lines quote a request's headers,
+/// an API key among them (spec #320, "API-key writers"), whatever level is asked for.
+pub fn logged(metadata: &log::Metadata) -> bool {
+    metadata.level() <= log::Level::Warn && !metadata.target().starts_with("ureq")
 }
 
 /// Logs a line from the writers' code: an error when it lost data, a warning otherwise.
@@ -293,8 +320,13 @@ pub struct Writers {
 
 pub fn writers(app: &App) -> Writers {
     let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
+    let mut writers = studio_understanding::found_writers(shell.as_ref());
+    // An API-key writer is found when its key is set; the key itself never reaches the page.
+    for writer in writers.iter_mut().filter(|w| w.kind.http()) {
+        writer.found = app.key_set.load(Ordering::Acquire);
+    }
     Writers {
-        writers: studio_understanding::found_writers(shell.as_ref()),
+        writers,
         summaries_on: app.summaries_on.load(Ordering::Acquire),
         briefs: app.briefs.writes(),
     }
@@ -353,6 +385,24 @@ pub fn test_writer(
             settings: None,
         },
     }
+}
+
+/// Saves the API key pasted on the page in the Keychain, replacing the one set, and gives it to the writer (spec #320,
+/// "API-key writers"). The key is never sent back, logged or written anywhere else.
+pub fn set_api_key(app: &App, key: String) -> Result<(), String> {
+    let key = key.trim();
+    app.keys.set(key)?;
+    app.writer.use_key(Some(key.into()));
+    app.key_set.store(true, Ordering::Release);
+    Ok(())
+}
+
+/// Removes the API key from the Keychain and from the writer, whose calls then fail as having no key.
+pub fn remove_api_key(app: &App) -> Result<(), String> {
+    app.keys.remove()?;
+    app.writer.use_key(None);
+    app.key_set.store(false, Ordering::Release);
+    Ok(())
 }
 
 /// The settings' `checks` (danielrispler/plotkeeper#112): each project folder's list of commands that are checks.

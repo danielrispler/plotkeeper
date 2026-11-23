@@ -257,7 +257,7 @@ fn a_passed_test_saves_the_choice_and_turns_summaries_on_and_a_failed_one_change
     );
     let on = studio_server::api::call(&app, &NoPage, "writers", serde_json::Value::Null).unwrap();
     assert_eq!(on["summaries_on"], true, "{on}");
-    assert_eq!(on["writers"][1]["kind"], "agy", "{on}");
+    assert_eq!(on["writers"][2]["kind"], "agy", "{on}");
     // The next start reads the gate open.
     let data = settings.parent().unwrap();
     fs::remove_file(&settings).unwrap();

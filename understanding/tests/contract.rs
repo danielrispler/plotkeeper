@@ -362,25 +362,41 @@ fn the_writers_found_are_the_ones_command_v_finds_in_their_order() {
     };
     assert_eq!(
         found(&["agy"]),
-        [(WriterKind::Claude, false), (WriterKind::Agy, true)]
+        [
+            (WriterKind::Anthropic, false),
+            (WriterKind::Claude, false),
+            (WriterKind::Agy, true)
+        ]
     );
     assert_eq!(
         found(&["claude", "agy"]),
-        [(WriterKind::Claude, true), (WriterKind::Agy, true)]
+        [
+            (WriterKind::Anthropic, false),
+            (WriterKind::Claude, true),
+            (WriterKind::Agy, true)
+        ]
     );
     assert_eq!(
         found(&[]),
-        [(WriterKind::Claude, false), (WriterKind::Agy, false)]
+        [
+            (WriterKind::Anthropic, false),
+            (WriterKind::Claude, false),
+            (WriterKind::Agy, false)
+        ]
     );
+    // An API-key writer runs no program, so none named `anthropic` makes it found: the server says whether its key is set.
+    assert_eq!(found(&["anthropic"])[0], (WriterKind::Anthropic, false));
     // Each writer brings its name, models and efforts for the page.
     let shell = faked_path(&dir.path().join("lists"), &["claude"]);
     let writers = studio_understanding::found_writers(&shell);
-    assert_eq!(writers[0].name, "Claude");
-    assert_eq!(writers[0].models, WriterKind::Claude.models());
-    assert!(writers[0].efforts.contains(&"low"));
-    assert_eq!(writers[1].name, "agy");
+    assert_eq!(writers[0].name, "Anthropic API key");
+    assert_eq!(writers[0].models, WriterKind::Anthropic.models());
+    assert_eq!(writers[1].name, "Claude");
+    assert_eq!(writers[1].models, WriterKind::Claude.models());
+    assert!(writers[1].efforts.contains(&"low"));
+    assert_eq!(writers[2].name, "agy");
     assert!(
-        writers[1].efforts.is_empty(),
+        writers[2].efforts.is_empty(),
         "agy's effort is part of its model id"
     );
 }
