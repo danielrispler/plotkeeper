@@ -119,9 +119,11 @@ fn prompt(parts: &[serde_json::Value], input: &Input) -> String {
 
 /// The ids in the writer's reply, which may come inside a code fence or with words around it.
 fn read_reply(text: &str) -> Result<Vec<String>, String> {
-    let (Some(from), Some(to)) = (text.find('{'), text.rfind('}')) else {
-        return Err("the writer's reply holds no JSON".into());
-    };
+    let (from, to) = text
+        .find('{')
+        .zip(text.rfind('}'))
+        .filter(|(from, to)| from < to)
+        .ok_or("the writer's reply holds no JSON")?;
     let v: serde_json::Value = serde_json::from_str(&text[from..=to])
         .map_err(|e| format!("the writer's reply does not read: {e}"))?;
     let parts = v["parts"]

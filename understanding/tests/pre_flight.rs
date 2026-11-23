@@ -63,6 +63,18 @@ fn a_failed_call_or_a_reply_naming_nothing_on_the_map_is_an_error_so_the_hand_pi
 }
 
 #[test]
+fn a_reply_whose_closing_brace_comes_before_its_opening_one_holds_no_json() {
+    let backwards = Fake::new(Ok("} sorry, try {"));
+    let predicted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        predict(&backwards, "opus", MAP, &Input::Text("Anything"))
+    }));
+    assert_eq!(
+        predicted.ok(),
+        Some(Err("the writer's reply holds no JSON".to_string()))
+    );
+}
+
+#[test]
 fn the_issue_goes_to_the_writer_fenced_as_text_to_read() {
     let writer = Fake::new(Ok("```json\n{\"parts\": [\"hook\"]}\n```"));
     let issue = Input::Issue {

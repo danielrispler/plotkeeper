@@ -18,7 +18,7 @@ import { logStop, reviewNode, reviewOf } from "./stop-rules.js";
 import { element, failure, invoke, listen, newest, pressable, text } from "./dom.js";
 import {
   actorSize, autoPlace, brokenParts, brokenText, cameraRig, type CameraRig, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, fitCamera, panTo, type Actor, type Drag,
-  type Law, type Layer, type LayerName, type MapDoc, type MapLink, startProject, parseMap, type Part, type Point, plateSize, revealPan, rimPoint, type Scrub, type Tier, zoomAt,
+  type Law, type Layer, type LayerName, type MapDoc, type MapLink, startProject, switchProject, parseMap, type Part, type Point, plateSize, revealPan, rimPoint, type Scrub, type Tier, zoomAt,
 } from "./map-model.js";
 import { recheckSeen } from "./seen.js";
 import { knownProjects, projectGone } from "./projects.js";
@@ -110,8 +110,8 @@ const lastViewed = (): string | null => {
 // Shows `path`'s map.
 export function openMap(path: string | null) {
   if (path !== project) {
-    // A PR brief belongs to the project it opened on; the next project may have no map to draw, so it is closed here, not by a draw.
-    if (layers.brief?.open()) layers.brief.close();
+    // A PR brief and the pre-flight belong to the project they opened on; the next may have no map to draw, so they close here, not by a draw.
+    switchProject(layers);
     [scrub, rig, revealed] = [null, null, null];
   }
   project = path;

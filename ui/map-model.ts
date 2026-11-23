@@ -108,6 +108,11 @@ export function rimPoint(center: Point, size: Size, toward: Point): Point {
   return { x: center.x + dx * reach, y: center.y + dy * reach };
 }
 
+// A project switch: closes the layers that belong to the project shown, whatever the next one draws, since it may have no map to draw.
+export function switchProject(layers: Partial<Record<LayerName, Layer>>) {
+  for (const name of ["pre-flight", "brief"] as const) if (layers[name]?.open()) layers[name].close();
+}
+
 // Esc: closes the first layer that is open, in `layerOrder`, and says which; null when none was: on the bare map Esc does nothing, since the
 // map is the page's base (#386).
 export function escapeMap(layers: Partial<Record<LayerName, Layer>>): LayerName | null {

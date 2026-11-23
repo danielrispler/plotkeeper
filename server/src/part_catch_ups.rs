@@ -74,7 +74,8 @@ pub fn fresh(store: &CatchUpStore, part: &str, fog: &[String]) -> Option<StoredC
     store.get(part).filter(|stored| stored.fog == fog)
 }
 
-/// What is being written and what failed, per project and part. A write's claim ends when its guard drops, a panic included.
+/// What is being written and what failed, per project and part. A write's claim ends when its guard drops, a panic included, and
+/// the page hears it either way.
 #[derive(Default)]
 pub struct CatchUps {
     busy: Arc<Mutex<Busy>>,
@@ -90,8 +91,11 @@ type Busy = HashMap<(String, String), (Vec<String>, Option<Vec<String>>)>;
 
 struct Claim {
     busy: Arc<Mutex<Busy>>,
+    failed: Arc<Mutex<Failed>>,
     key: (String, String),
     released: bool,
+    /// Runs when the claim drops, so the page hears the writes ended even when one panicked.
+    done: Option<Box<dyn FnOnce() + Send>>,
 }
 
 impl Claim {
@@ -113,8 +117,15 @@ impl Claim {
 
 impl Drop for Claim {
     fn drop(&mut self) {
-        if !self.released {
-            self.busy.lock().unwrap().remove(&self.key);
+        // A write panicked: the newest list asked for is marked failed, so the sheet says so and a click tries it again.
+        if !self.released
+            && let Some((writing, queued)) = self.busy.lock().unwrap().remove(&self.key)
+        {
+            let list = queued.unwrap_or(writing);
+            self.failed.lock().unwrap().insert(self.key.clone(), list);
+        }
+        if let Some(done) = self.done.take() {
+            done();
         }
     }
 }
@@ -133,8 +144,10 @@ impl CatchUps {
         busy.insert(key.clone(), (fog.to_vec(), None));
         Some(Claim {
             busy: self.busy.clone(),
+            failed: self.failed.clone(),
             key,
             released: false,
+            done: None,
         })
     }
 
@@ -243,6 +256,7 @@ fn start(
     let Some(mut claim) = catch_ups.claim(project, part, &fog) else {
         return false;
     };
+    claim.done = Some(Box::new(done));
     let failed = catch_ups.failed.clone();
     let (project, part) = (project.to_string(), part.to_string());
     std::thread::spawn(move || {
@@ -265,8 +279,8 @@ fn start(
                 None => break,
             }
         }
+        // Dropping the claim runs `done`.
         drop(claim);
-        done();
     });
     true
 }
@@ -637,6 +651,8 @@ mod tests {
     struct Fake {
         wrote: Mutex<Vec<String>>,
         gate: (Mutex<bool>, std::sync::Condvar),
+        /// Past its gate, the writer panics instead of writing.
+        panics: bool,
     }
 
     impl Fake {
@@ -667,6 +683,8 @@ mod tests {
                 while *shut {
                     shut = self.gate.1.wait(shut).unwrap();
                 }
+                drop(shut);
+                assert!(!self.panics, "the writer broke");
                 let part = prompt
                     .split("steps about part ")
                     .nth(1)
@@ -861,5 +879,38 @@ mod tests {
         wrote.sort();
         assert_eq!(wrote, ["a", "b"]);
         assert_eq!(shows.show(&writer), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_write_that_panics_tells_the_page_and_marks_the_newest_fog_list_failed() {
+        let shows = Shows::new();
+        shows.push("a", "2");
+        let writer = Arc::new(Fake {
+            panics: true,
+            ..Default::default()
+        });
+        *writer.gate.0.lock().unwrap() = true;
+        assert_eq!(shows.show(&writer), ["a"]);
+        // A longer list is asked for while the first is written: it waits its turn.
+        shows.push("a", "3");
+        let list = shows.fog("a");
+        let writer_: SharedWriter = writer.clone();
+        let ended = shows.ended.clone();
+        ask(
+            &shows.catch_ups,
+            Some(writer_),
+            "opus".into(),
+            &shows.rig.main,
+            "a",
+            list.clone(),
+            shows.store(),
+            move || ended.send(()).unwrap(),
+        )
+        .unwrap();
+        writer.open();
+        // The page hears the write ended, and the sheet offers a retry of the newest list.
+        shows.wait(1);
+        assert!(!shows.catch_ups.writing(&shows.rig.main, "a"));
+        assert!(shows.catch_ups.failed(&shows.rig.main, "a", &list));
     }
 }
