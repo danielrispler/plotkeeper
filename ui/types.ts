@@ -550,8 +550,13 @@ export type StopFacts = {
   scrubs: number;
   proofs: number;
   knows: number;
-  dismissed: boolean;
+  // The modules whose review was dismissed (an older log's project-wide dismissal names the modules of its time).
+  dismissed: string[];
   briefs_offered: number;
   briefs_opened: number;
   chapters_done: number;
+  // Every kind's count for the project, for the table's bars and offer-count exceptions.
+  counts: Partial<Record<StopKind, number>>;
+  // The local day of the project's first event, where a calendar wait starts at the latest; null when it has none.
+  began: string | null;
 };

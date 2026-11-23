@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     io::Write,
     path::{Path, PathBuf},
     sync::Mutex,
@@ -19,8 +19,11 @@ use std::{
 /// The log's file, in the data folder.
 const LOG_FILE: &str = "stop-rules.jsonl";
 
+/// The modules an older `dismissed` line with no module dismissed: the review's modules when dismissal was one flag per project.
+const LEGACY_MODULES: [&str; 5] = ["map", "history", "proof", "briefs", "skips"];
+
 /// What happened. A kind this build does not know reads as `Other` and counts for nothing, so an older build tolerates a newer log.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Kind {
     /// The session list had a session on the day.
@@ -35,7 +38,8 @@ pub enum Kind {
     Proof,
     /// "I know this" cleared a part's fog; tracked apart, with no threshold in project 2.
     Know,
-    /// The one-time review was dismissed for the project.
+    /// The review of one module (`module`) was dismissed for the project; an older line with no module dismissed the modules of its
+    /// time (`LEGACY_MODULES`).
     Dismissed,
     /// A PR's brief had a row in the tray and the row was seen (once per PR).
     BriefOffered,
@@ -66,6 +70,9 @@ pub struct Event {
     /// The PR a brief event is about.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pr: Option<u64>,
+    /// The module a `dismissed` event is about.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module: Option<String>,
 }
 
 /// What the window needs of one project to decide on the review. Counts only; the window shows none of them.
@@ -78,12 +85,17 @@ pub struct Facts {
     pub scrubs: u32,
     pub proofs: u32,
     pub knows: u32,
-    pub dismissed: bool,
+    /// The modules whose review was dismissed, sorted.
+    pub dismissed: Vec<String>,
     /// Merged PRs of the project whose brief was offered, and how many of those had it opened.
     pub briefs_offered: u32,
     pub briefs_opened: u32,
     /// Chapters read to their end, to set against `knows`.
     pub chapters_done: u32,
+    /// Every kind's count for the project (kinds with none are left out), for the review table's bars and offer counts.
+    pub counts: BTreeMap<Kind, u32>,
+    /// The local day of the project's first event, where a module's calendar wait starts at the latest.
+    pub began: Option<String>,
 }
 
 /// Serialises appends, so two events never share a line.
@@ -186,11 +198,40 @@ pub fn facts(events: &[Event], project: &str, merged_prs: u32) -> Facts {
         scrubs: count(Kind::Scrub),
         proofs: count(Kind::Proof),
         knows: count(Kind::Know),
-        dismissed: count(Kind::Dismissed) > 0,
+        dismissed: dismissed(events, project),
         briefs_offered: 0,
         briefs_opened: 0,
         chapters_done: count(Kind::ChapterDone),
+        counts: events
+            .iter()
+            .filter(|e| e.kind != Kind::Other && e.project.as_deref() == Some(project))
+            .fold(BTreeMap::new(), |mut counts, e| {
+                *counts.entry(e.kind).or_insert(0) += 1;
+                counts
+            }),
+        began: events
+            .iter()
+            .filter(|e| e.project.as_deref() == Some(project))
+            .min_by_key(|e| e.at)
+            .map(|e| e.day.clone()),
     }
+}
+
+/// The modules whose review `project` dismissed, sorted.
+fn dismissed(events: &[Event], project: &str) -> Vec<String> {
+    let mut modules = BTreeSet::new();
+    for e in events
+        .iter()
+        .filter(|e| e.kind == Kind::Dismissed && e.project.as_deref() == Some(project))
+    {
+        match &e.module {
+            Some(module) => {
+                modules.insert(module.clone());
+            }
+            None => modules.extend(LEGACY_MODULES.map(String::from)),
+        }
+    }
+    modules.into_iter().collect()
 }
 
 /// Of the merged PRs `merged` (numbers), how many had a brief offered for `project`, and how many of those had it opened.
@@ -280,6 +321,7 @@ pub fn stop_log(
         kind,
         project,
         pr,
+        module: None,
     };
     let file = log_file()?;
     if kind == Kind::BriefOffered {
@@ -304,20 +346,36 @@ fn facts_in(file: &Path, project: &str) -> Facts {
     found
 }
 
-/// Dismisses the one-time review of each project; the log goes on.
-pub fn stop_dismiss(projects: Vec<String>, day: String) -> Result<(), String> {
-    let file = log_file()?;
+/// Dismisses the review of `modules` in each of `projects`; a module not named is still reviewed when it falls due, and the log goes on.
+pub fn stop_dismiss(
+    projects: Vec<String>,
+    modules: Vec<String>,
+    day: String,
+) -> Result<(), String> {
+    dismiss_in(&log_file()?, &projects, &modules, &day)
+}
+
+/// `stop_dismiss`, into the log `file`.
+fn dismiss_in(
+    file: &Path,
+    projects: &[String],
+    modules: &[String],
+    day: &str,
+) -> Result<(), String> {
     for project in projects {
-        append(
-            &file,
-            &Event {
-                at: now(),
-                day: day.clone(),
-                kind: Kind::Dismissed,
-                project: Some(project),
-                pr: None,
-            },
-        )?;
+        for module in modules {
+            append(
+                file,
+                &Event {
+                    at: now(),
+                    day: day.into(),
+                    kind: Kind::Dismissed,
+                    project: Some(project.clone()),
+                    pr: None,
+                    module: Some(module.clone()),
+                },
+            )?;
+        }
     }
     Ok(())
 }
@@ -334,6 +392,7 @@ mod tests {
             kind,
             project: project.map(String::from),
             pr: None,
+            module: None,
         }
     }
 
@@ -494,8 +553,58 @@ mod tests {
         ];
         let found = facts(&events, "/p", 0);
         assert_eq!((found.proofs, found.knows), (2, 1));
-        assert!(found.dismissed);
-        assert!(!facts(&events, "/q", 0).dismissed);
+        assert!(!found.dismissed.is_empty());
+        assert!(facts(&events, "/q", 0).dismissed.is_empty());
+    }
+
+    #[test]
+    fn a_dismissal_names_its_modules_and_an_older_one_names_the_modules_of_its_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(LOG_FILE);
+        dismiss_in(
+            &file,
+            &["/p".into(), "/q".into()],
+            &["history".into()],
+            "2026-11-20",
+        )
+        .unwrap();
+        dismiss_in(&file, &["/p".into()], &["refresher".into()], "2026-12-20").unwrap();
+        let events = read(&file);
+        assert_eq!(facts(&events, "/p", 0).dismissed, ["history", "refresher"]);
+        assert_eq!(facts(&events, "/q", 0).dismissed, ["history"]);
+        // A project-wide dismissal of the build before per-module dismissal.
+        let mut log = std::fs::read_to_string(&file).unwrap();
+        log.push_str(
+            "{\"at\":1,\"day\":\"2026-11-07\",\"kind\":\"dismissed\",\"project\":\"/q\"}\n",
+        );
+        std::fs::write(&file, log).unwrap();
+        assert_eq!(
+            facts(&read(&file), "/q", 0).dismissed,
+            ["briefs", "history", "map", "proof", "skips"]
+        );
+    }
+
+    #[test]
+    fn every_kind_is_counted_per_project_and_the_first_day_is_kept() {
+        let at = |at, day, kind, project| Event {
+            at,
+            ..event(day, kind, project)
+        };
+        let events = [
+            at(5, "2026-10-30", Kind::Session, None),
+            at(20, "2026-11-02", Kind::Scrub, Some("/p")),
+            at(10, "2026-11-01", Kind::BriefOffered, Some("/p")),
+            at(30, "2026-11-03", Kind::BriefOffered, Some("/p")),
+            at(40, "2026-11-04", Kind::BriefOffered, Some("/q")),
+        ];
+        let found = facts(&events, "/p", 0);
+        assert_eq!(found.counts.get(&Kind::BriefOffered), Some(&2));
+        assert_eq!(found.counts.get(&Kind::Scrub), Some(&1));
+        assert_eq!(found.counts.get(&Kind::Session), None);
+        assert_eq!(found.began.as_deref(), Some("2026-11-01"));
+        assert_eq!(facts(&events, "/r", 0).began, None);
+        let json = serde_json::to_value(&found).unwrap();
+        assert_eq!(json["counts"]["brief-offered"], 2);
     }
 
     #[test]

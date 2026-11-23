@@ -227,6 +227,7 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
         "stop_facts" => res(stop_rules::stop_facts(arg(a, "project")?)),
         "stop_dismiss" => res(stop_rules::stop_dismiss(
             arg(a, "projects")?,
+            arg(a, "modules")?,
             arg(a, "day")?,
         )),
         "answer_blocked_command" => res(server_answer::answer_blocked_command(

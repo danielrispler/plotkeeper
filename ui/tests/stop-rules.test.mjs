@@ -6,9 +6,9 @@ import { tauri } from "./dom.mjs";
 
 const calls = [];
 tauri(calls);
-const { dismissReview, localDay, logStop, reviewOf, reviewWords, unused } = await import("../../dist/stop-rules.js");
+const { dismissReview, judge, localDay, logStop, reviewOf, reviewWords, table, unused } = await import("../../dist/stop-rules.js");
 
-const facts = (extra = {}) => ({ active_days: 14, merged_prs: 20, engaged_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: false, briefs_offered: 0, briefs_opened: 0, chapters_done: 0, ...extra });
+const facts = (extra = {}) => ({ active_days: 14, merged_prs: 20, engaged_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, counts: {}, began: "2026-11-01", ...extra });
 
 test("the review waits for both 14 active days and 20 merged PRs, whichever comes last", () => {
   assert.deepEqual(unused(facts()), ["map", "history", "proof"]);
@@ -36,9 +36,40 @@ test("nothing is listed when every module passed, and \"I know this\" has no thr
   assert.equal(unused(facts({ engaged_days: 4, scrubs: 2, proofs: 2, knows: 0 })).includes("know"), false);
 });
 
-test("a dismissed review is not shown again while the logging goes on", () => {
-  assert.equal(unused(facts({ dismissed: true })), null);
-  assert.equal(unused(facts({ dismissed: true, scrubs: 50 })), null);
+test("a dismissed module is not shown again while the logging goes on, and the others stay", () => {
+  assert.deepEqual(unused(facts({ dismissed: ["map", "history", "proof", "briefs", "skips"] })), []);
+  assert.deepEqual(unused(facts({ dismissed: ["map"] })), ["history", "proof"]);
+  assert.deepEqual(unused(facts({ dismissed: ["history"], scrubs: 50 })), ["map", "proof"]);
+});
+
+// Two modules of a later ticket, to drive the table's exceptions: one waits 5 calendar weeks from its rollout, one waits for 3 offers.
+const later = [
+  { module: "refresher", name: "the refresher", kept: (f) => (f.counts["refresher-entered"] ?? 0) >= 2, wait: { from: "2026-12-01", weeks: 5 } },
+  { module: "guard", name: "Guard with a law", kept: (f) => (f.counts["guard-started"] ?? 0) >= 1, offers: { kind: "guard-offered", least: 3 } },
+];
+
+test("a module with a calendar wait is not judged before its date, counted from the later of its rollout and the project's first event", () => {
+  assert.deepEqual(judge(later.slice(0, 1), facts(), "2027-01-04"), []);
+  assert.deepEqual(judge(later.slice(0, 1), facts(), "2027-01-05"), ["refresher"]);
+  assert.deepEqual(judge(later.slice(0, 1), facts({ counts: { "refresher-entered": 2 } }), "2027-01-05"), []);
+  // A project whose log began after the rollout waits from its own start.
+  assert.deepEqual(judge(later.slice(0, 1), facts({ began: "2027-01-01" }), "2027-01-05"), []);
+  assert.deepEqual(judge(later.slice(0, 1), facts({ began: "2027-01-01" }), "2027-02-05"), ["refresher"]);
+});
+
+test("a module with an offer count is not judged before that many offers", () => {
+  assert.deepEqual(judge(later.slice(1), facts({ counts: { "guard-offered": 2 } }), "2027-01-05"), []);
+  assert.deepEqual(judge(later.slice(1), facts({ counts: { "guard-offered": 3 } }), "2027-01-05"), ["guard"]);
+  assert.deepEqual(judge(later.slice(1), facts({ counts: { "guard-offered": 3, "guard-started": 1 } }), "2027-01-05"), []);
+});
+
+test("dismissing one module leaves a module that becomes due later to be shown", () => {
+  const rows = [...table, ...later];
+  const once = facts({ dismissed: ["map", "history", "proof"] });
+  assert.deepEqual(judge(rows, once, "2026-12-10"), []);
+  assert.deepEqual(judge(rows, once, "2027-01-05"), ["refresher"]);
+  assert.deepEqual(judge(rows, { ...once, dismissed: [...once.dismissed, "refresher"] }, "2027-01-05"), []);
+  assert.match(reviewWords(["refresher"], rows), /the refresher/);
 });
 
 test("the words name the modules and carry no number", () => {
@@ -69,12 +100,13 @@ test("a day-counting event is told once a day per project, and a use every time"
   assert.ok(calls.every(([, args]) => args.day === localDay()));
 });
 
-test("the review is read from the shell's counts, and a dismissal tells it every project", async () => {
+test("the review is read from the shell's counts, and a dismissal tells it every project and the modules shown", async () => {
   calls.length = 0;
   tauri(calls, () => facts({ engaged_days: 4, scrubs: 2 }));
   assert.deepEqual(await reviewOf("/a"), ["proof"]);
-  await dismissReview(["/a", "/b"]);
+  await dismissReview(["/a", "/b"], ["proof"]);
   assert.deepEqual(calls.at(-1)[1].projects, ["/a", "/b"]);
+  assert.deepEqual(calls.at(-1)[1].modules, ["proof"]);
 });
 
 test("PR briefs are listed when opened for under a quarter of the merged PRs that had one", () => {
