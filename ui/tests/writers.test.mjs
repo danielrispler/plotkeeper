@@ -6,6 +6,7 @@ import { briefsLine, choiceOptions, gateNotice, preset, testLine } from "../../d
 
 const claude = (found) => ({ kind: "claude", name: "Claude", found, models: ["haiku", "sonnet", "opus", "fable"], efforts: ["", "low", "medium", "high"] });
 const agy = (found) => ({ kind: "agy", name: "agy", found, models: ["gemini-4-neon-low", "gemini-4-neon-high"], efforts: [] });
+const codex = (found) => ({ kind: "codex", name: "Codex", found, models: ["gpt-6-luna", "gpt-5.6-luna"], efforts: ["", "low", "medium", "high"] });
 const list = (writers, summaries_on = false, briefs = true) => ({ writers, summaries_on, briefs });
 const settings = (writer = "claude", model = "haiku", effort = "") => ({ model, effort, on_open: false, writer });
 
@@ -26,6 +27,14 @@ test("with summaries on, the choice is the writer that writes now, with its mode
   assert.deepEqual(preset(list([claude(true), agy(true)], true), settings("claude", "claude-opus-5-5", "low")), { writer: "claude", model: "claude-opus-5-5", effort: "low" });
   // A model agy does not take is its first one, as the writer reads it.
   assert.deepEqual(preset(list([claude(true), agy(true)], true), settings("agy", "haiku", "low")), { writer: "agy", model: "gemini-4-neon-low", effort: "" });
+});
+
+test("Codex is listed and picked as the others are, and a model it does not take is its first", () => {
+  const options = choiceOptions(list([claude(false), agy(false), codex(true)]));
+  assert.deepEqual(options.map((o) => [o.kind, o.label, o.disabled]), [["claude", "Claude (not found)", true], ["agy", "agy (not found)", true], ["codex", "Codex", false]]);
+  assert.deepEqual(preset(list([claude(false), agy(false), codex(true)]), settings()), { writer: "codex", model: "gpt-6-luna", effort: "" });
+  assert.deepEqual(preset(list([claude(true), codex(true)], true), settings("codex", "haiku", "low")), { writer: "codex", model: "gpt-6-luna", effort: "low" });
+  assert.deepEqual(preset(list([claude(true), codex(true)], true), settings("codex", "gpt-5.6-luna", "high")), { writer: "codex", model: "gpt-5.6-luna", effort: "high" });
 });
 
 test("each Test outcome is its line, passed or failed", () => {
