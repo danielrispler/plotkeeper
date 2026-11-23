@@ -193,7 +193,7 @@ pub struct PrBriefs {
 /// among those whose head moved within `catchUp.hours`.
 pub const START_BRIEFS: usize = 3;
 
-/// What the lookups write at once, given that plotkeeper has just started: the ready PRs found at the first lookup of a project are
+/// What the lookups write at once, given that plotkeeper has just started: the ready PRs found at the first lookup of a project that `gh pr list` answered are
 /// written only when their head moved within the catch-up window, newest head first and no more than `START_BRIEFS`; the others are
 /// written when opened. A PR that becomes ready later is written at once, as is any PR that already has a brief (a new head
 /// marks it stale).
@@ -205,11 +205,14 @@ pub struct Startup {
 }
 
 impl Startup {
-    /// The numbers of `ready` (of `project`) this lookup may write. `head_ms` is when a PR's head commit was made, if known;
-    /// `has_brief` whether a brief of the PR is stored.
+    /// The numbers of `ready` (of `project`) this lookup may write. `answered`: `gh pr list` has answered for the project, so
+    /// `ready` is what is really open. `head_ms` is when a PR's head commit was made, if known; `has_brief` whether a brief of the
+    /// PR is stored.
+    #[allow(clippy::too_many_arguments)]
     pub fn allowed(
         &mut self,
         project: &str,
+        answered: bool,
         ready: &[Ready],
         head_ms: &dyn Fn(&Ready) -> Option<u64>,
         now_ms: u64,
@@ -219,6 +222,10 @@ impl Startup {
         // A PR that left the ready list and returns became ready while running: it is written at once, not left for opening.
         self.waiting
             .retain(|(p, n)| p != project || ready.iter().any(|r| r.number == *n));
+        // Until `gh pr list` has answered, what is open is not known: the start waits for the first lookup that answered.
+        if !answered && !self.asked.contains(project) {
+            return vec![];
+        }
         if self.asked.insert(project.to_string()) {
             let since = now_ms.saturating_sub(window_ms);
             let mut fresh: Vec<(&Ready, u64)> = ready
@@ -491,6 +498,7 @@ pub fn lookup_later(app: &Arc<App>, project: &str, ready: Vec<Ready>) {
     };
     let allowed = app.briefs.startup.lock().unwrap().allowed(
         project,
+        app.prs.listed(project),
         &ready,
         &|pr| head_time_ms(project, &pr.head),
         studio_understanding::millis(),
@@ -1046,7 +1054,7 @@ mod tests {
                 .find(|(h, _)| *h == pr.head)
                 .map(|(_, hours)| NOW - hours * HOUR)
         };
-        startup.allowed("/p", ready, &head_ms, NOW, 2 * HOUR, &|_| false)
+        startup.allowed("/p", true, ready, &head_ms, NOW, 2 * HOUR, &|_| false)
     }
 
     #[test]
@@ -1072,18 +1080,19 @@ mod tests {
         assert_eq!(at_start(&mut startup, &first, &ago), [1]);
         // The next lookup finds PR 2 again, with a new head: still left for opening; PR 4 became ready while running.
         let second = [ready_pr(1, "h1"), ready_pr(2, "h2b"), ready_pr(4, "h4")];
-        let later = startup.allowed("/p", &second, &|_| None, NOW, 2 * HOUR, &|_| false);
+        let later = startup.allowed("/p", true, &second, &|_| None, NOW, 2 * HOUR, &|_| false);
         assert_eq!(later, [1, 4]);
         // PR 2 leaves the ready list and comes back: it became ready while running.
         startup.allowed(
             "/p",
+            true,
             &[ready_pr(1, "h1")],
             &|_| None,
             NOW,
             2 * HOUR,
             &|_| false,
         );
-        let back = startup.allowed("/p", &second, &|_| None, NOW, 2 * HOUR, &|_| false);
+        let back = startup.allowed("/p", true, &second, &|_| None, NOW, 2 * HOUR, &|_| false);
         assert_eq!(back, [1, 2, 4]);
     }
 
@@ -1092,11 +1101,12 @@ mod tests {
         let mut startup = Startup::default();
         let ready = [ready_pr(1, "h1"), ready_pr(2, "h2")];
         // Neither head moved in the window, but PR 2 has a brief: its lookup marks it stale or rewrites it.
-        let found = startup.allowed("/p", &ready, &|_| None, NOW, 2 * HOUR, &|pr| pr == 2);
+        let found = startup.allowed("/p", true, &ready, &|_| None, NOW, 2 * HOUR, &|pr| pr == 2);
         assert_eq!(found, [2]);
         // Another project's first lookup is its own start.
         let other = startup.allowed(
             "/q",
+            true,
             &[ready_pr(1, "h1")],
             &|_| Some(NOW),
             NOW,
@@ -1104,5 +1114,21 @@ mod tests {
             &|_| false,
         );
         assert_eq!(other, [1]);
+    }
+
+    #[test]
+    fn a_first_lookup_that_gh_did_not_answer_does_not_spend_the_start() {
+        let mut startup = Startup::default();
+        let ready: Vec<Ready> = (1..=5).map(|n| ready_pr(n, &format!("h{n}"))).collect();
+        let old = |_: &Ready| Some(NOW - 9 * HOUR);
+        // `gh` did not answer at start: nothing is known to be open, and nothing is written.
+        assert!(
+            startup
+                .allowed("/p", false, &[], &old, NOW, 2 * HOUR, &|_| false)
+                .is_empty()
+        );
+        // The first lookup that answers is the start: every head is old, so all wait to be opened.
+        let first = startup.allowed("/p", true, &ready, &old, NOW, 2 * HOUR, &|_| false);
+        assert!(first.is_empty(), "the start cap still holds: {first:?}");
     }
 }

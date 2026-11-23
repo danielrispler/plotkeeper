@@ -7,7 +7,7 @@ use crate::App;
 use crate::map::{Fetched, Fetches};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     path::Path,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -100,6 +100,8 @@ pub struct Ready {
 pub struct Prs {
     guard: Fetches,
     found: Mutex<HashMap<String, BTreeMap<String, Pr>>>,
+    /// The projects whose `gh pr list` has answered at least once.
+    listed: Mutex<HashSet<String>>,
 }
 
 impl Prs {
@@ -155,6 +157,7 @@ impl Prs {
         // The open PRs of the repository, sessions or not. Once the list has answered, a PR that is neither on it nor a
         // session's branch is gone (merged, closed, its session closed with it).
         if let Some(listed) = listed {
+            self.listed.lock().unwrap().insert(project.to_string());
             let mut keep: Vec<String> = branches.to_vec();
             for pr in listed {
                 let key = if pr.branch.is_empty() {
@@ -168,6 +171,11 @@ impl Prs {
             of_project.retain(|key, _| keep.contains(key));
         }
         Some(numbers)
+    }
+
+    /// Whether `gh pr list` has answered for `project` since start, so its ready PRs are all known.
+    pub fn listed(&self, project: &str) -> bool {
+        self.listed.lock().unwrap().contains(project)
     }
 
     /// The ready PRs of `project`, by number.
@@ -534,6 +542,8 @@ mod tests {
         );
         assert_eq!(found, Some(vec![]));
         assert_eq!(prs.ready("/p").len(), 2);
+        assert!(prs.listed("/p"), "the list answered once");
+        assert!(!prs.listed("/q"));
         // `gh` says the branch has no PR any more: it goes.
         let found = prs.ask(
             "/p",
