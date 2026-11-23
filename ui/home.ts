@@ -11,10 +11,7 @@ import { counts } from "./times.js";
 import { homeShown, redrawHome } from "./panes.js";
 import { hideClearToast, showClearToast } from "./toast.js";
 import { studio } from "./state.js";
-import { mapShown, openMap } from "./map.js";
-import { watchSeen } from "./seen.js";
-import { homeSeen } from "./layout.js";
-import { logStop, onHome, reviewNode, reviewOf, type Module } from "./stop-rules.js";
+import { openMap } from "./map.js";
 import type { Session } from "./types.js";
 
 export type HomeKey = "needs_you" | "running" | "unseen" | "landed" | "projects";
@@ -188,25 +185,11 @@ if (typeof window !== "undefined") window.addEventListener?.("focus", () => onWi
 async function readMarks(paths: string[], redraw: () => void) {
   marksStale = false;
   const now = await invoke("map_marks", { projects: paths });
-  const review = await readReviews(paths);
   const same = now.length === marked.size && now.every((path) => marked.has(path));
-  if (same && !review) return;
+  if (same) return;
   marked.clear();
   now.forEach((path) => marked.add(path));
   redraw();
-}
-
-// The one-time review on Home (#314): only for the projects whose Map view fell below its threshold, so an unused map still reaches
-// Daniel. It lists that project's unused modules, never a count. Read with the marks, when Home is entered and on focus.
-let homeReview: { modules: Module[]; projects: string[] } | null = null;
-async function readReviews(paths: string[]): Promise<boolean> {
-  const found: Record<string, Module[] | null> = {};
-  await Promise.all(paths.map(async (path) => void (found[path] = await reviewOf(path).catch(() => null))));
-  const projects = onHome(found);
-  const next = projects.length ? { modules: found[projects[0]]!, projects } : null;
-  const changed = JSON.stringify(next) !== JSON.stringify(homeReview);
-  homeReview = next;
-  return changed;
 }
 
 // Whether a click on `target`, inside the session list, is on its empty space: not on a row, a group
@@ -251,29 +234,6 @@ function moreRow(key: HomeKey, count: number, redraw: () => void): HTMLElement {
   button.classList.add("row", "more");
   button.textContent = `+${count} ${key}`;
   return button;
-}
-
-// Each project mark's watch, and the node it watches: a redraw that keeps the node keeps its watch, one that drops it stops it.
-const marksSeen = new Map<string, { node: Element; stop: () => void }>();
-
-// Watches `node`, the mark of `path` as it is in the DOM now (null: the project has no mark); the mark counts as seen when it is in view
-// in a focused window with Home open (the shared Seen), and a day is logged once.
-export function watchMark(path: string, node: Element | null) {
-  const had = marksSeen.get(path);
-  if (had && had.node === node) return;
-  had?.stop();
-  marksSeen.delete(path);
-  if (!node) return;
-  // Once seen, the entry goes: the next redraw watches the same node again, and `logStop` sends one event a day per project, so a mark
-  // still in view on a later day is logged while Studio stays open.
-  const stop = watchSeen(node, {
-    active: () => homeSeen(homeShown(), mapShown()),
-    onSeen: () => {
-      if (marksSeen.get(path)?.stop === stop) marksSeen.delete(path);
-      logStop("mark-seen", path);
-    },
-  });
-  marksSeen.set(path, { node, stop });
 }
 
 function projectRow({ name, path, fogged }: HomeProject): HTMLElement {
@@ -326,14 +286,5 @@ export function drawHome(box: HTMLElement, sessions: Session[], projects: string
     keyed(text("h1", new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" }), "title"), "title"),
     ...(parts.some((p) => p.key === "needs_you") ? [] : [keyed(text("p", "Nothing needs you", "empty"), "none")]),
     ...parts.flatMap(drawPart),
-    ...(homeReview
-      ? [keyed(reviewNode(homeReview.modules, homeReview.projects, () => {
-          homeReview = null;
-          redraw();
-        }), "review")]
-      : []),
   ]);
-  // The marks that patch left in the DOM, not the ones just built and discarded.
-  const rows = new Map([...box.children].map((child) => [(child as HTMLElement).dataset.key, child]));
-  for (const path of new Set([...marksSeen.keys(), ...marked])) watchMark(path, rows.get(`project ${path}`)?.querySelector(".fog-mark") ?? null);
 }

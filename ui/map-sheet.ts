@@ -164,6 +164,7 @@ function drawSheet(view: MapView) {
 
 onPlateClick(({ view, part }) => {
   open = { project: view.project, part: part.id };
+  logStop("map-action", view.project);
   drawSheet(view);
 });
 onDraw(drawSheet);
