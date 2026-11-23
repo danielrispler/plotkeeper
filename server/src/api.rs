@@ -157,6 +157,10 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
         "agent_summary" => out(crate::agent_summary(app, arg(a, "agent_id")?)),
         "map_state" => res(crate::map_state(arc, arg(a, "project")?, arg(a, "fetch")?)),
         "map_know" => res(crate::map::map_know(arg(a, "project")?, arg(a, "part")?)),
+        "map_refresher" => res(crate::map::map_refresher(
+            arg(a, "project")?,
+            arg(a, "part")?,
+        )),
         "map_history" => res(crate::map::map_history(arg(a, "project")?, arg(a, "part")?)),
         "map_at" => res(crate::map::map_at(arg(a, "project")?, arg(a, "commit")?)),
         "map_commit" => res(crate::map::map_commit(
@@ -236,6 +240,14 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "pr")?,
         )),
         "stop_facts" => res(stop_rules::stop_facts(arg(a, "project")?)),
+        "story_bar" => res(crate::story_bar::story_bar(
+            arg(a, "kind")?,
+            arg(a, "project")?,
+            arg(a, "day")?,
+            arg(a, "about")?,
+            arg(a, "rating")?,
+            arg(a, "note")?,
+        )),
         "stop_dismiss" => res(stop_rules::stop_dismiss(
             arg(a, "projects")?,
             arg(a, "modules")?,

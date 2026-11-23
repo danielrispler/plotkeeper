@@ -17,6 +17,7 @@ import { logStop } from "./stop-rules.js";
 import { scrubTo } from "./map-history.js";
 import { overturnNote, ratifyActions } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
+import { type Bar, storyBar } from "./story-bar.js";
 import { actorSize, alsoAt, awaitedCatchUp, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureShapes, figureSize, latestRequest, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
 import type { BriefCheck, BriefStep, BriefView, PrBrief, RatifyRow, ReadyPr, StoredCatchUp } from "./types.js";
 
@@ -60,6 +61,9 @@ let watching: (() => void) | null = null;
 // The "not confirmed from the facts" marks shown, watched until seen or the brief closes (#346).
 let marks: (() => void)[] = [];
 const stopWatching = () => (watching?.(), (watching = null));
+// The end-of-story bar of each chapter played since the brief opened (#393), kept so a redraw keeps what is typed; a reopened brief starts
+// them empty.
+const bars = new Map<string, Bar>();
 function gateOf(): Gate | null {
   const now = player.current();
   if (!now || !playing) return null;
@@ -181,6 +185,7 @@ export async function openCatchUpOf(project: string, part: string) {
   catchUp = { part, fog: got.fog };
   ratifying = [];
   logStop("catch-up-opened", project);
+  if (view.state.stale?.[part]) logStop("stale-entered", project);
   if (!resizing) {
     resizing = true;
     addEventListener("resize", onResize);
@@ -263,6 +268,7 @@ export function closeBrief() {
   playing = null;
   catchUp = null;
   ratifying = [];
+  bars.clear();
   stopLight();
   const view = currentMap();
   panel().hidden = true;
@@ -703,7 +709,9 @@ function show(view: MapView, same: boolean) {
   const also = alsoAt(playing.brief.brief, now.chapter, now.step, storySteps(list).length);
   const fill = () => {
     const node = stepNode(view, step, pr, also);
+    const bar = endBar(node, now.step, list.length);
     cols.replaceChildren(node);
+    bar?.offer();
     watchLast(node, now.step);
   };
   clearTimeout(swap);
@@ -724,6 +732,19 @@ function show(view: MapView, same: boolean) {
   light(view, step);
   paintOrder(view, step);
   aim(view, step);
+}
+
+// The end-of-story bar ends the played list's last step: a single story's end, or a chapter's (#393). It goes under the step's words.
+function endBar(node: HTMLElement, index: number, count: number): Bar | null {
+  const now = player.current();
+  if (!now || index !== count - 1) return null;
+  const key = `${now.project}|${now.pr}|${now.chapter}`;
+  let bar = bars.get(key);
+  // A part catch-up's bar is keyed by its part (#391).
+  const about = catchUp ? { project: now.project, part: catchUp.part } : { project: now.project, pr: now.pr, chapter: now.chapter };
+  if (!bar) bars.set(key, (bar = storyBar(about)));
+  node.querySelector(".brief-txt")?.append(bar.node);
+  return bar;
 }
 
 // The panel's frame, built once per brief: it keeps the height of its tallest step, so it never jumps.
@@ -763,7 +784,9 @@ function buildPanel(view: MapView, list: BriefStep[], pr: number) {
   let tallest = 0;
   const now = player.current();
   list.forEach((step, i) => {
-    cols.replaceChildren(stepNode(view, step, pr, playing && now ? alsoAt(playing.brief.brief, now.chapter, i, storySteps(list).length) : []));
+    const node = stepNode(view, step, pr, playing && now ? alsoAt(playing.brief.brief, now.chapter, i, storySteps(list).length) : []);
+    endBar(node, i, list.length);
+    cols.replaceChildren(node);
     tallest = Math.max(tallest, box.offsetHeight);
   });
   box.style.minHeight = `${tallest}px`;

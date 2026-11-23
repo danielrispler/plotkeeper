@@ -16,6 +16,7 @@ use studio_server::{
     prs::Ready,
     ratify::Pending,
     runner::{End, Kind, RunState, RunView, Runs},
+    staleness::{Activity, Staleness, Touch},
 };
 
 const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
@@ -55,6 +56,16 @@ fn user() -> UserState {
             x: -120.5,
             y: 40.0,
         }),
+        staleness: Staleness {
+            since: Some(1_761_743_990),
+            parts: BTreeMap::from([(
+                "server".into(),
+                Touch {
+                    at: 1_761_744_000,
+                    kind: Activity::Refresher,
+                },
+            )]),
+        },
     }
 }
 
@@ -138,6 +149,7 @@ fn empty(status: Status) -> MapState {
         ratify: Vec::new(),
         runs: Runs::default(),
         catch_ups: BTreeMap::new(),
+        stale: BTreeMap::new(),
     }
 }
 
@@ -227,6 +239,7 @@ fn the_wire_samples_of_the_map_view_are_written_for_tsc() {
                         },
                     ),
                 ]),
+                stale: BTreeMap::from([("core".into(), 2)]),
                 ..empty(Status::Loaded)
             }),
         ));

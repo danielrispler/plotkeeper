@@ -377,7 +377,9 @@ export type FogState = {
 // The map's camera (#383): a world point `p` shows at `p * scale + (x, y)` in the map area.
 export type Camera = { scale: number; x: number; y: number };
 // `view`: the project's saved camera, none until it was first moved.
-export type UserMap = { positions: Record<string, [number, number]>; tiers: Record<string, string>; fog?: FogState; view?: Camera | null };
+// When Daniel last engaged with each part, and the baseline (`staleness.rs`); the window reads the bands, not this.
+export type Staleness = { since: number | null; parts: Record<string, { at: number; kind: "know" | "refresher" | "catch-up" | "other" }> };
+export type UserMap = { positions: Record<string, [number, number]>; tiers: Record<string, string>; fog?: FogState; view?: Camera | null; staleness?: Staleness };
 export type MapState = {
   project: string;
   status: "loaded" | "none" | "unreadable";
@@ -399,6 +401,8 @@ export type MapState = {
   runs: Runs;
   // What each fogged part's sheet offers (`part_catch_ups.rs`): its part catch-up, or the one PR brief chapter that lights it.
   catch_ups: Record<string, CatchUpOffer>;
+  // The staleness band (1 to 3) of each Core part not engaged with for 3, 6 or 12 weeks (`staleness.rs`); a part not listed is not stale.
+  stale: Record<string, number>;
 };
 // A fogged part's offer (#391): a part catch-up, `ready` when one is stored for its current fog list, `writing` while one is written, `failed`
 // when the last write for it failed; or the chapter of the one PR's brief that lights the part.
@@ -504,6 +508,7 @@ export interface Commands {
   map_save_view: void;
   map_set_tier: UserMap;
   map_know: UserMap;
+  map_refresher: UserMap;
   map_history: HistoryEntry[];
   map_at: HistoricalMap;
   map_commit: CommitFiles;
@@ -511,6 +516,7 @@ export interface Commands {
   stop_log: null;
   stop_facts: StopFacts;
   stop_dismiss: null;
+  story_bar: void;
   map_proof: Proof[];
   map_state: MapState;
   // The brief, or that its write has started (it comes through `map-landed`).
@@ -550,7 +556,7 @@ export interface Commands {
 export type Command = keyof Commands;
 
 // What the shell counted of Daniel's use (`stop_rules.rs`), for the one-time review: days, merged PRs and the uses of each module.
-export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen" | "catch-up-offered" | "catch-up-opened" | "catch-up-done";
+export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen" | "rating-offered" | "rating-given" | "rating-skipped" | "note-given" | "refresher-entered" | "stale-entered" | "catch-up-offered" | "catch-up-opened" | "catch-up-done";
 export type StopFacts = {
   active_days: number;
   merged_prs: number;

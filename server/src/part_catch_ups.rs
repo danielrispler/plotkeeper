@@ -201,6 +201,14 @@ pub fn part_catch_up(
     }
     let store = store_of(&project).ok_or("no data folder")?;
     if let Some(stored) = fresh(&store, &part, &fog) {
+        // Opening it is an entered activity on the part: its staleness band clears (#392).
+        crate::staleness::record(
+            &file,
+            &project,
+            &part,
+            crate::staleness::Activity::CatchUp,
+            crate::ratify::now(),
+        )?;
         return Ok(Some(Opened::CatchUp(Box::new(stored))));
     }
     let writer = app

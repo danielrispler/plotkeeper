@@ -59,6 +59,18 @@ pub enum Kind {
     CatchUpOpened,
     /// A part catch-up was read to its end, which cleared the part's fog.
     CatchUpDone,
+    /// The end-of-story bar (`story_bar.rs`) was shown at a story's end; once per bar each time its story is opened.
+    RatingOffered,
+    /// A 1 to 5 rating of the explanation was given in the bar; the line carries it. No threshold: it measures the explanation.
+    RatingGiven,
+    /// The bar was skipped with its key or button before anything was given.
+    RatingSkipped,
+    /// A short note was given in the bar; the line carries it.
+    NoteGiven,
+    /// A part's refresher was entered (#392).
+    RefresherEntered,
+    /// A refresher or a part catch-up was entered from a part with a staleness band (#392); logged beside the entry's own kind.
+    StaleEntered,
     #[serde(other)]
     Other,
 }
@@ -107,7 +119,7 @@ pub struct Facts {
 /// Serialises appends, so two events never share a line.
 static WRITING: Mutex<()> = Mutex::new(());
 
-fn log_file() -> Result<PathBuf, String> {
+pub(crate) fn log_file() -> Result<PathBuf, String> {
     let home = std::env::home_dir().ok_or("no home folder")?;
     Ok(studio_hook::data_dir(&home).join(LOG_FILE))
 }
@@ -118,8 +130,14 @@ pub fn append(file: &Path, event: &Event) -> Result<(), String> {
     append_held(file, event)
 }
 
+/// Appends `line`, any line that reads as an `Event` (one with fields of its own beside them), to `file`.
+pub(crate) fn append_line(file: &Path, line: &impl Serialize) -> Result<(), String> {
+    let _writing = WRITING.lock().unwrap();
+    append_held(file, line)
+}
+
 /// `append`, with `WRITING` held by the caller.
-fn append_held(file: &Path, event: &Event) -> Result<(), String> {
+fn append_held(file: &Path, event: &impl Serialize) -> Result<(), String> {
     let line = serde_json::to_string(event).map_err(|e| e.to_string())?;
     if let Some(dir) = file.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
@@ -162,6 +180,8 @@ fn entered(kind: Kind) -> bool {
             | Kind::Ratify
             | Kind::CatchUpOpened
             | Kind::CatchUpDone
+            | Kind::RefresherEntered
+            | Kind::StaleEntered
     )
 }
 
@@ -617,6 +637,24 @@ mod tests {
         assert_eq!(counts["catch-up-opened"], 1);
         assert_eq!(counts["catch-up-done"], 1);
         assert_eq!(counts["know"], 1);
+    }
+
+    #[test]
+    fn the_refresher_and_an_entry_from_a_stale_part_are_counted_and_each_makes_an_engaged_day() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(LOG_FILE);
+        let lines = [
+            r#"{"at":1,"day":"2026-11-01","kind":"map-open","project":"/p"}"#,
+            r#"{"at":2,"day":"2026-11-01","kind":"refresher-entered","project":"/p"}"#,
+            r#"{"at":3,"day":"2026-11-02","kind":"map-open","project":"/p"}"#,
+            r#"{"at":4,"day":"2026-11-02","kind":"refresher-entered","project":"/p"}"#,
+            r#"{"at":5,"day":"2026-11-02","kind":"stale-entered","project":"/p"}"#,
+        ];
+        std::fs::write(&file, lines.join("\n") + "\n").unwrap();
+        let json = serde_json::to_value(facts_in(&file, "/p")).unwrap();
+        assert_eq!(json["counts"]["refresher-entered"], 2);
+        assert_eq!(json["counts"]["stale-entered"], 1);
+        assert_eq!(json["engaged_days"], 2);
     }
 
     #[test]

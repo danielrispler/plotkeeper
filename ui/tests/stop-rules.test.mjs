@@ -8,7 +8,9 @@ const calls = [];
 tauri(calls);
 const { dismissReview, judge, localDay, logStop, reviewOf, reviewWords, table, unused } = await import("../../dist/stop-rules.js");
 
-const facts = (extra = {}) => ({ active_days: 14, merged_prs: 20, engaged_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, counts: { "catch-up-done": 3 }, began: "2026-11-01", ...extra });
+// The rows that wait 5 calendar weeks (#392), and part catch-ups (#391), are kept by default, so a test of the other rows, judged today, holds after the wait ends.
+const kept = { "refresher-entered": 2, "stale-entered": 1, "catch-up-done": 3 };
+const facts = (extra = {}) => ({ active_days: 14, merged_prs: 20, engaged_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, counts: kept, began: "2026-11-01", ...extra });
 
 test("the review waits for both 14 active days and 20 merged PRs, whichever comes last", () => {
   assert.deepEqual(unused(facts()), ["map", "history", "proof"]);
@@ -49,12 +51,12 @@ const later = [
 ];
 
 test("a module with a calendar wait is not judged before its date, counted from the later of its rollout and the project's first event", () => {
-  assert.deepEqual(judge(later.slice(0, 1), facts(), "2027-01-04"), []);
-  assert.deepEqual(judge(later.slice(0, 1), facts(), "2027-01-05"), ["refresher"]);
+  assert.deepEqual(judge(later.slice(0, 1), facts({ counts: {} }), "2027-01-04"), []);
+  assert.deepEqual(judge(later.slice(0, 1), facts({ counts: {} }), "2027-01-05"), ["refresher"]);
   assert.deepEqual(judge(later.slice(0, 1), facts({ counts: { "refresher-entered": 2 } }), "2027-01-05"), []);
   // A project whose log began after the rollout waits from its own start.
-  assert.deepEqual(judge(later.slice(0, 1), facts({ began: "2027-01-01" }), "2027-01-05"), []);
-  assert.deepEqual(judge(later.slice(0, 1), facts({ began: "2027-01-01" }), "2027-02-05"), ["refresher"]);
+  assert.deepEqual(judge(later.slice(0, 1), facts({ counts: {}, began: "2027-01-01" }), "2027-01-05"), []);
+  assert.deepEqual(judge(later.slice(0, 1), facts({ counts: {}, began: "2027-01-01" }), "2027-02-05"), ["refresher"]);
 });
 
 test("a module with an offer count is not judged before that many offers", () => {
@@ -64,12 +66,24 @@ test("a module with an offer count is not judged before that many offers", () =>
 });
 
 test("dismissing one module leaves a module that becomes due later to be shown", () => {
-  const rows = [...table, ...later];
-  const once = facts({ dismissed: ["map", "history", "proof"] });
-  assert.deepEqual(judge(rows, once, "2026-12-10"), []);
-  assert.deepEqual(judge(rows, once, "2027-01-05"), ["refresher"]);
-  assert.deepEqual(judge(rows, { ...once, dismissed: [...once.dismissed, "refresher"] }, "2027-01-05"), []);
-  assert.match(reviewWords(["refresher"], rows), /the refresher/);
+  const once = facts({ dismissed: ["map", "history", "proof", "catch-ups"], counts: {} });
+  assert.deepEqual(judge(table, once, "2026-12-10"), []);
+  assert.deepEqual(judge(table, once, "2027-01-05"), ["refresher", "staleness"]);
+  assert.deepEqual(judge(table, { ...once, dismissed: [...once.dismissed, "refresher"] }, "2027-01-05"), ["staleness"]);
+  assert.match(reviewWords(["refresher"]), /the refresher/);
+});
+
+test("the refresher needs 2 entries and staleness bands 1 refresher or part catch-up entered from a stale part, each judged from 5 weeks after rollout", () => {
+  const due = (counts, began = "2026-11-01") => facts({ dismissed: ["map", "history", "proof", "catch-ups"], counts, began });
+  assert.deepEqual(judge(table, due({}), "2026-12-28"), []);
+  assert.deepEqual(judge(table, due({}), "2026-12-29"), ["refresher", "staleness"]);
+  assert.deepEqual(judge(table, due({ "refresher-entered": 1 }), "2026-12-29"), ["refresher", "staleness"]);
+  assert.deepEqual(judge(table, due({ "refresher-entered": 2 }), "2026-12-29"), ["staleness"]);
+  assert.deepEqual(judge(table, due({ "stale-entered": 1 }), "2026-12-29"), ["refresher"]);
+  // A project whose log began after the rollout waits 5 weeks from its own start.
+  assert.deepEqual(judge(table, due({}, "2026-12-01"), "2027-01-04"), []);
+  assert.deepEqual(judge(table, due({}, "2026-12-01"), "2027-01-05"), ["refresher", "staleness"]);
+  assert.match(reviewWords(["refresher", "staleness"]), /the refresher and staleness bands/);
 });
 
 test("the words name the modules and carry no number", () => {

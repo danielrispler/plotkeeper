@@ -27,6 +27,9 @@ export type Row = {
   offers?: { kind: StopKind; least: number };
 };
 
+// The day the refresher and staleness bands ship (#392), where their calendar wait starts.
+const staleRollout = "2026-11-24";
+
 // The modules and their bars, in the order the review lists them. Map view: engaged days, active days with at least one entered action on
 // the map (the shell counts them; a day the map was only open on is not one). History strip: scrubs. Proof: opens. PR briefs: opened for at
 // least a quarter of the merged PRs that had one; with none offered there is nothing to judge, so it is kept.
@@ -43,6 +46,10 @@ export const table: Row[] = [
   },
   // Part catch-ups (#391): completed at least 3 times; "I know this" is counted apart (`know`).
   { module: "catch-ups", name: "part catch-ups", kept: (f) => (f.counts["catch-up-done"] ?? 0) >= 3 },
+  // The refresher and staleness bands (#392): a part turns stale 3 weeks after rollout at the earliest, so neither is judged before 5
+  // calendar weeks. "stale-entered" is a refresher or a part catch-up entered from a part with a band.
+  { module: "refresher", name: "the refresher", kept: (f) => (f.counts["refresher-entered"] ?? 0) >= 2, wait: { from: staleRollout, weeks: 5 } },
+  { module: "staleness", name: "staleness bands", kept: (f) => (f.counts["stale-entered"] ?? 0) >= 1, wait: { from: staleRollout, weeks: 5 } },
 ];
 
 // `day` plus `n` days, both local days (`2026-11-03`).
