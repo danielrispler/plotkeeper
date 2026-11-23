@@ -532,7 +532,7 @@ body.map-open .toasts, body.map-open .toast { visibility: visible !important; }
 .map-banner:not(:empty) { margin-inline-start: auto; font-size: var(--size-small); color: var(--muted); }
 .map-projects[popover] { top: calc(var(--bar) + var(--map-title) + var(--sp-7)); left: var(--map-gutter); right: auto; width: var(--menu); }
 /* The map fills the stage; the left panel, the side area and the tray float over it, so opening one never moves or squashes a part (#385). */
-.map-stage { --panel-w: var(--rail); display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; position: relative; overflow: hidden; }
+.map-stage { --panel-w: var(--rail); display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; position: relative; }
 body[data-panel="diff"] .map-stage { --panel-w: min(var(--panel-wide), calc(100% - 2 * var(--inset))); }
 .map-body { position: relative; min-width: 0; min-height: 0; }
 /* One glass recipe (#385) for every card over the map, Treatment C's part sheet: a near-opaque surface, a backdrop blur, a top highlight, a

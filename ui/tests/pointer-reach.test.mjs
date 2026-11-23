@@ -8,6 +8,7 @@ import fs from "node:fs";
 const reasons = {
   ".map-links": "the Map view's lines run under the plates and are no control; a plate and a link's mark take their own pointer",
   ".map-light": "the PR brief's light runs over the links and is no control; the plates under it take the pointer",
+  ".map-side": "the side area's empty space over the map lets the pointer reach the map; its sheet, drawer and not placed list turn pointer events back on",
   ".plate-fog": "the mist behind a plate holds no control, and the plate over it takes the pointer",
   ".toasts": "the stack's empty space lets clicks through to the terminal; each toast turns pointer events back on",
 };
