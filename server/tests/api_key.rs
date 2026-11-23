@@ -1,6 +1,6 @@
-//! The Anthropic API key through the server (spec #320, "API-key writers"): saved, replaced and removed through the key store
-//! (memory here: no test touches the real Keychain), and a planted key never reaches what the page is sent or the log, even
-//! when the API's error body and headers quote it.
+//! The API keys through the server (spec #320, "API-key writers"): the Anthropic key, and the OpenAI-compatible API's key
+//! and base URL (#367), saved, replaced and removed through the key store (memory here: no test touches the real Keychain),
+//! and a planted key never reaches what the page is sent or the log, even when the API's error body and headers quote it.
 
 mod isolated_home;
 use serde_json::{Value, json};
@@ -13,6 +13,7 @@ use studio_understanding::{CardStore, ClaudeWriter, Effects, RiskNotes};
 
 const PLANTED: &str = "sk-ant-planted-key-7f3a9c";
 const REPLACED: &str = "sk-ant-replaced-key-41b2";
+const OPENAI_PLANTED: &str = "sk-proj-planted-key-93d1";
 
 /// The log as the server keeps it (`studio_server::logged`), asked for at every level; and how many lines it dropped.
 struct Logs(Mutex<Vec<String>>, Mutex<usize>);
@@ -48,8 +49,8 @@ impl studio_server::api::Page for NoPage {
     fn focus(&self, _: bool) {}
 }
 
-/// A fake Messages API that answers each request with the next of `answers` (status and body, the body and a header
-/// quoting the key) and keeps the `x-api-key` each one sent.
+/// A fake API that answers each request with the next of `answers` (status and body, the body and a header quoting the
+/// key) and keeps the key each one sent, as `x-api-key` or a bearer `authorization`; none sent is kept as "".
 fn fake(answers: Vec<(u16, String)>) -> (String, Arc<Mutex<Vec<String>>>) {
     let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
     let base = format!("http://{}", server.server_addr().to_ip().unwrap());
@@ -60,10 +61,14 @@ fn fake(answers: Vec<(u16, String)>) -> (String, Arc<Mutex<Vec<String>>>) {
             let mut request = server.recv().unwrap();
             let mut text = String::new();
             request.as_reader().read_to_string(&mut text).unwrap();
-            let key = (request.headers().iter())
-                .find(|h| h.field.equiv("x-api-key"))
-                .map(|h| h.value.to_string())
-                .unwrap_or_default();
+            let header = |name: &'static str| {
+                (request.headers().iter())
+                    .find(|h| h.field.equiv(name))
+                    .map(|h| h.value.to_string())
+            };
+            let bearer =
+                header("authorization").map(|b| b.trim_start_matches("Bearer ").to_string());
+            let key = header("x-api-key").or(bearer).unwrap_or_default();
             sent.lock().unwrap().push(key.clone());
             let echo = tiny_http::Header::from_bytes("x-echo-key", key.as_bytes()).unwrap();
             let _ = request.respond(
@@ -74,6 +79,12 @@ fn fake(answers: Vec<(u16, String)>) -> (String, Arc<Mutex<Vec<String>>>) {
         }
     });
     (base, keys)
+}
+
+fn chat_ok() -> String {
+    json!({ "choices": [{ "finish_reason": "stop", "message": { "role": "assistant", "content": "ok" } }],
+        "usage": { "prompt_tokens": 5, "completion_tokens": 1 } })
+    .to_string()
 }
 
 fn ok() -> String {
@@ -119,7 +130,10 @@ fn a_planted_key_is_saved_replaced_and_removed_and_never_reaches_the_page_or_the
     );
     assert_eq!(unset["writers"][0]["found"], false, "{unset}");
 
-    call("set_api_key", json!({ "key": PLANTED }));
+    call(
+        "set_api_key",
+        json!({ "writer": "anthropic", "key": PLANTED, "base_url": null, "expected": null }),
+    );
     let set = call("writers", Value::Null);
     assert_eq!(set["writers"][0]["found"], true, "{set}");
 
@@ -146,19 +160,110 @@ fn a_planted_key_is_saved_replaced_and_removed_and_never_reaches_the_page_or_the
     call("writer_notice", Value::Null);
 
     // Replaced: the next call sends the new key.
-    call("set_api_key", json!({ "key": REPLACED }));
+    call(
+        "set_api_key",
+        json!({ "writer": "anthropic", "key": REPLACED, "base_url": null, "expected": null }),
+    );
     assert!(app.writer.goal(&["hello"]).is_ok());
     assert_eq!(*sent.lock().unwrap(), [PLANTED, PLANTED, PLANTED, REPLACED]);
 
-    call("remove_api_key", Value::Null);
+    call(
+        "remove_api_key",
+        json!({ "writer": "anthropic", "expected": null }),
+    );
     let removed = call("writers", Value::Null);
     assert_eq!(removed["writers"][0]["found"], false, "{removed}");
-    assert_eq!(app.keys.get(), None);
+    assert_eq!(
+        app.keys.get(studio_understanding::WriterKind::Anthropic),
+        None
+    );
     let error = app.writer.goal(&["hello"]).unwrap_err();
     assert!(error.contains("no API key"), "{error}");
+
+    // The OpenAI-compatible API (#367): its base URL and key saved together, its key sent as a bearer, a refused one read
+    // as having no working key; removed, both are gone; a base URL alone, as for a local Ollama, sends no key.
+    let (openai_base, openai_sent) = fake(vec![
+        (401, refused.to_string()),
+        (200, chat_ok()),
+        (200, chat_ok()),
+    ]);
+    // The page sends the settings text it last read, as `expected`.
+    let read = |call: &mut dyn FnMut(&str, Value) -> Value| {
+        call("settings_files", Value::Null)["settings"].clone()
+    };
+    let openai_test = |expected: Value| json!({ "writer": "openai", "model": "llama3.2", "effort": "", "expected": expected });
+    let unset = call("writers", Value::Null);
+    assert_eq!(unset["writers"][1]["kind"], "openai", "{unset}");
+    assert_eq!(unset["writers"][1]["found"], false, "{unset}");
+    let expected = read(&mut call);
+    let saved = call(
+        "set_api_key",
+        json!({ "writer": "openai", "key": OPENAI_PLANTED, "base_url": openai_base, "expected": expected }),
+    );
+    assert!(
+        saved
+            .as_str()
+            .unwrap()
+            .contains(&format!("\"base_url\": \"{openai_base}\"")),
+        "settings.json keeps the base URL: {saved}"
+    );
+    let set = call("writers", Value::Null);
+    assert_eq!(set["writers"][1]["found"], true, "{set}");
+    assert_eq!(set["keys"], json!(["openai"]), "{set}");
+    assert_eq!(set["base_url"], openai_base, "{set}");
+    let expected = read(&mut call);
+    let failed = call("test_writer", openai_test(expected));
+    assert_eq!(failed["outcome"], "not_logged_in", "{failed}");
+    assert!(
+        failed["line"].as_str().unwrap().contains("API key"),
+        "{failed}"
+    );
+    let expected = read(&mut call);
+    let passed = call("test_writer", openai_test(expected));
+    assert_eq!(passed["outcome"], "passed", "{passed}");
+
+    let expected = read(&mut call);
+    call(
+        "remove_api_key",
+        json!({ "writer": "openai", "expected": expected }),
+    );
+    let removed = call("writers", Value::Null);
+    assert_eq!(removed["writers"][1]["found"], false, "{removed}");
+    assert_eq!(
+        (&removed["keys"], &removed["base_url"]),
+        (&json!([]), &Value::Null),
+        "{removed}"
+    );
+    assert_eq!(app.keys.get(studio_understanding::WriterKind::OpenAI), None);
+
+    let expected = read(&mut call);
+    call(
+        "set_api_key",
+        json!({ "writer": "openai", "key": null, "base_url": openai_base, "expected": expected }),
+    );
+    let keyless = call("writers", Value::Null);
+    assert_eq!(keyless["writers"][1]["found"], true, "{keyless}");
+    assert_eq!(keyless["keys"], json!([]), "{keyless}");
+    let expected = read(&mut call);
+    let passed = call("test_writer", openai_test(expected));
+    assert_eq!(passed["outcome"], "passed", "{passed}");
+    assert_eq!(
+        *openai_sent.lock().unwrap(),
+        [OPENAI_PLANTED, OPENAI_PLANTED, ""]
+    );
+    // A base URL that is no URL is refused, and nothing is saved.
+    let expected = read(&mut call);
+    let bad = studio_server::api::call(
+        &app,
+        &NoPage,
+        "set_api_key",
+        json!({ "writer": "openai", "key": OPENAI_PLANTED, "base_url": "localhost:11434", "expected": expected }),
+    );
+    assert!(bad.is_err());
+    assert_eq!(app.keys.get(studio_understanding::WriterKind::OpenAI), None);
     call("settings_files", Value::Null);
 
-    for key in [PLANTED, REPLACED] {
+    for key in [PLANTED, REPLACED, OPENAI_PLANTED] {
         for reply in &page {
             assert!(
                 !reply.to_string().contains(key),

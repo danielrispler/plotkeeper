@@ -137,10 +137,10 @@ pub struct App {
     /// The terminal the split's second pane shows, as the UI last said, `None` with no split: its session is on screen, so its
     /// turn's end raises no toast.
     pub split_shown: Mutex<Option<String>>,
-    /// Where the API-key writer's key is kept: the Keychain at start (`with_keys`), memory before; and whether one is set,
-    /// all the page learns of it.
+    /// Where the API-key writers' keys are kept: the Keychain at start (`with_keys`), memory before; and the writers whose
+    /// key is set, all the page learns of them.
     pub keys: Arc<dyn settings::ApiKeys>,
-    pub key_set: AtomicBool,
+    pub key_set: Mutex<Vec<WriterKind>>,
 }
 
 impl App {
@@ -174,11 +174,17 @@ impl App {
         })
     }
 
-    /// The state with the API-key writer's key kept in `keys`: the writer is given the key set there, if any.
+    /// The state with the API-key writers' keys kept in `keys`: the writer is given each key set there.
     pub fn with_keys(mut self, keys: Arc<dyn settings::ApiKeys>) -> Self {
-        let key = keys.get();
-        self.key_set = AtomicBool::new(key.is_some());
-        self.writer.use_key(key);
+        let mut set = Vec::new();
+        for kind in WriterKind::ALL.into_iter().filter(|kind| kind.http()) {
+            let key = keys.get(kind);
+            if key.is_some() {
+                set.push(kind);
+            }
+            self.writer.use_key(kind, key);
+        }
+        self.key_set = Mutex::new(set);
         self.keys = keys;
         self
     }
@@ -228,7 +234,7 @@ impl App {
             rail_shown: AtomicBool::new(true),
             split_shown: Mutex::new(None),
             keys: Arc::new(settings::MemoryKeys::default()),
-            key_set: AtomicBool::new(false),
+            key_set: Mutex::new(Vec::new()),
         })
     }
 
@@ -295,6 +301,8 @@ pub fn summary_settings(
     on_open: bool,
 ) {
     app.writer.use_writer(writer);
+    // A base URL edited in `settings.json` by hand takes effect with the page's next read of it.
+    app.writer.use_base_url(settings::openai_base_url());
     app.writing.settings(
         SummarySetup {
             model,
@@ -318,19 +326,29 @@ pub struct Writers {
     pub writers: Vec<studio_understanding::FoundWriter>,
     pub summaries_on: bool,
     pub briefs: bool,
+    /// The API-key writers whose key is set; never a key.
+    pub keys: Vec<WriterKind>,
+    /// The OpenAI-compatible writer's base URL, from `settings.json`; none: OpenAI's own.
+    pub base_url: Option<String>,
 }
 
 pub fn writers(app: &App) -> Writers {
     let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
     let mut writers = studio_understanding::found_writers(shell.as_ref());
-    // An API-key writer is found when its key is set; the key itself never reaches the page.
+    let keys = app.key_set.lock().unwrap().clone();
+    let base_url = settings::openai_base_url();
+    // An API-key writer is found when its key is set, the OpenAI-compatible one also when its base URL is; the key itself
+    // never reaches the page.
     for writer in writers.iter_mut().filter(|w| w.kind.http()) {
-        writer.found = app.key_set.load(Ordering::Acquire);
+        writer.found = keys.contains(&writer.kind)
+            || (writer.kind == WriterKind::OpenAI && base_url.is_some());
     }
     Writers {
         writers,
         summaries_on: app.summaries_on.load(Ordering::Acquire),
         briefs: app.briefs.writes(),
+        keys,
+        base_url,
     }
 }
 
@@ -389,22 +407,67 @@ pub fn test_writer(
     }
 }
 
-/// Saves the API key pasted on the page in the Keychain, replacing the one set, and gives it to the writer (spec #320,
-/// "API-key writers"). The key is never sent back, logged or written anywhere else.
-pub fn set_api_key(app: &App, key: String) -> Result<(), String> {
-    let key = key.trim();
-    app.keys.set(key)?;
-    app.writer.use_key(Some(key.into()));
-    app.key_set.store(true, Ordering::Release);
-    Ok(())
+/// Saves what the page set for API-key writer `writer` (spec #320, "API-key writers"): the key pasted, in the Keychain,
+/// replacing the one set, and given to the writer; for the OpenAI-compatible writer (#367), also its base URL, in
+/// `settings.json` (`expected` is the text the page last read; empty: OpenAI's own), and its key is optional. Returns
+/// `settings.json`'s new text when it changed. The key is never sent back, logged or written anywhere else.
+pub fn set_api_key(
+    app: &App,
+    writer: WriterKind,
+    key: Option<String>,
+    base_url: Option<String>,
+    expected: Option<String>,
+) -> Result<Option<String>, String> {
+    if !writer.http() {
+        return Err(format!("`{}` takes no API key", writer.program()));
+    }
+    let key = key
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty());
+    let base_url = base_url.filter(|_| writer == WriterKind::OpenAI);
+    let text = match base_url.as_deref().map(str::trim) {
+        Some(url)
+            if !url.is_empty() && !url.starts_with("http://") && !url.starts_with("https://") =>
+        {
+            return Err(
+                "The base URL starts with http:// or https://, such as http://localhost:11434/v1."
+                    .into(),
+            );
+        }
+        Some(url) => {
+            let text = settings::save_base_url(expected, Some(url).filter(|url| !url.is_empty()))?;
+            app.writer.use_base_url(settings::openai_base_url());
+            Some(text)
+        }
+        None => None,
+    };
+    if let Some(key) = &key {
+        app.keys.set(writer, key)?;
+        app.writer.use_key(writer, Some(key.clone()));
+        let mut set = app.key_set.lock().unwrap();
+        if !set.contains(&writer) {
+            set.push(writer);
+        }
+    }
+    Ok(text)
 }
 
-/// Removes the API key from the Keychain and from the writer, whose calls then fail as having no key.
-pub fn remove_api_key(app: &App) -> Result<(), String> {
-    app.keys.remove()?;
-    app.writer.use_key(None);
-    app.key_set.store(false, Ordering::Release);
-    Ok(())
+/// Removes API-key writer `writer`'s key from the Keychain and from the writer, whose calls then fail as having no key; for
+/// the OpenAI-compatible writer, its base URL too. Returns `settings.json`'s new text when it changed.
+pub fn remove_api_key(
+    app: &App,
+    writer: WriterKind,
+    expected: Option<String>,
+) -> Result<Option<String>, String> {
+    app.keys.remove(writer)?;
+    app.writer.use_key(writer, None);
+    app.key_set.lock().unwrap().retain(|&kind| kind != writer);
+    if writer != WriterKind::OpenAI {
+        return Ok(None);
+    }
+    let text = settings::save_base_url(expected, None)?;
+    app.writer.use_base_url(None);
+    Ok(Some(text))
 }
 
 /// The settings' `checks` (danielrispler/plotkeeper#112): each project folder's list of commands that are checks.

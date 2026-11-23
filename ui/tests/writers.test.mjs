@@ -10,7 +10,11 @@ const copilot = (found) => ({ kind: "copilot", name: "Copilot", found, models: [
 const cursor = (found) => ({ kind: "cursor", name: "Cursor", found, models: ["auto", "gpt-5.6-luna"], efforts: [] });
 const codex = (found) => ({ kind: "codex", name: "Codex", found, models: ["gpt-6-luna", "gpt-5.6-luna"], efforts: ["", "low", "medium", "high"] });
 const anthropic = (found) => ({ kind: "anthropic", name: "Anthropic API key", found, models: ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"], efforts: ["", "low", "medium", "high"] });
-const list = (writers, summaries_on = false, briefs = true) => ({ writers, summaries_on, briefs });
+const openai = (found) => ({ kind: "openai", name: "OpenAI-compatible API", found, models: ["gpt-6-luna", "gpt-5.6-luna", "gpt-5.6-terra"], efforts: ["", "low", "medium", "high"] });
+// `keys`: the API-key writers whose key is set, by default the Anthropic one when it is found; `base_url`: the OpenAI-compatible
+// writer's, when one is set.
+const list = (writers, summaries_on = false, briefs = true, keys = writers.filter((w) => w.kind === "anthropic" && w.found).map((w) => w.kind), base_url = null) =>
+  ({ writers, summaries_on, briefs, keys, base_url });
 const settings = (writer = "claude", model = "haiku", effort = "") => ({ model, effort, on_open: false, writer });
 
 test("the list shows every writer, and one that was not found cannot be picked", () => {
@@ -84,4 +88,30 @@ test("the API key set comes first in the preset order, and the key row says it i
   assert.deepEqual(preset(set, settings()), { writer: "anthropic", model: "claude-haiku-5-5", effort: "" });
   // A Test of the Anthropic writer reads as any writer's.
   assert.deepEqual(testLine({ outcome: "not_logged_in", line: "`anthropic` has no working API key. Add or replace the API key under Writer, at the top of the page.", settings: null }).passed, false);
+});
+
+test("the OpenAI-compatible API: with no base URL and no key it is listed but cannot be picked", () => {
+  const unset = list([anthropic(false), openai(false), claude(true)]);
+  assert.deepEqual(choiceOptions(unset)[1], { kind: "openai", label: "OpenAI-compatible API (not set)", disabled: true });
+  assert.equal(keySet(unset, "openai"), false);
+  assert.match(keyLine(unset, "openai"), /not set/);
+});
+
+test("a local endpoint with no key is set by its base URL alone, comes before Claude in the preset, and the row names it", () => {
+  const ollama = list([anthropic(false), openai(true), claude(true)], false, true, [], "http://localhost:11434/v1");
+  assert.equal(keySet(ollama, "openai"), false);
+  assert.match(keyLine(ollama, "openai"), /http:\/\/localhost:11434\/v1.*no key/);
+  assert.deepEqual(preset(ollama, settings()), { writer: "openai", model: "gpt-6-luna", effort: "" });
+  // With a key and no base URL, it is OpenAI's own.
+  const keyed = list([anthropic(false), openai(true), claude(true)], false, true, ["openai"]);
+  assert.match(keyLine(keyed, "openai"), /api\.openai\.com.*key: set, kept in the macOS Keychain/);
+  // The Anthropic row reads only its own key.
+  assert.equal(keySet(keyed, "anthropic"), false);
+});
+
+test("the OpenAI-compatible writer takes any model id the endpoint serves, but another writer's alias is its first", () => {
+  const on = list([openai(true), claude(true)], true, true, [], "http://localhost:11434/v1");
+  assert.deepEqual(preset(on, settings("openai", "llama3.2", "")), { writer: "openai", model: "llama3.2", effort: "" });
+  assert.deepEqual(preset(on, settings("openai", "openai/gpt-6-luna", "low")), { writer: "openai", model: "openai/gpt-6-luna", effort: "low" });
+  assert.deepEqual(preset(on, settings("openai", "haiku", "")), { writer: "openai", model: "gpt-6-luna", effort: "" });
 });

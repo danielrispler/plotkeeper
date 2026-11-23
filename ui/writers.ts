@@ -5,7 +5,9 @@
 // PR briefs are written by `claude` whatever writer is picked, so without it the section, and the Map view's tray, say
 // "briefs need Claude".
 // An Anthropic API key (ticket #366) is pasted here and kept in the macOS Keychain; the server says only whether one is set,
-// and the API-key writer is listed, first, once it is.
+// and the API-key writer is listed, first, once it is. Below it, the OpenAI-compatible API (ticket #367): a base URL, kept in
+// `settings.json` as `summaries.base_url` (none: OpenAI's own), and an optional key, also kept in the Keychain, as a local
+// Ollama needs none.
 
 import { element, failure, invoke, text } from "./dom.js";
 import type { Settings, SettingsFiles } from "./settings.js";
@@ -15,18 +17,32 @@ export type Choice = { writer: WriterKind; model: string; effort: string };
 
 // The writer picker's options: every writer, one that was not found shown but not pickable.
 export const choiceOptions = (list: Writers): { kind: WriterKind; label: string; disabled: boolean }[] =>
-  list.writers.map((w) => ({ kind: w.kind, label: w.found ? w.name : `${w.name} (${w.kind === "anthropic" ? "not set" : "not found"})`, disabled: !w.found }));
+  list.writers.map((w) => ({ kind: w.kind, label: w.found ? w.name : `${w.name} (${apiWriter(w.kind) ? "not set" : "not found"})`, disabled: !w.found }));
 
-// Whether an API key is set, as the key row says it; the key itself never reaches the page.
-export const keySet = (list: Writers): boolean => list.writers.some((w) => w.kind === "anthropic" && w.found);
-export const keyLine = (list: Writers): string =>
-  keySet(list) ? "Anthropic API key: set, kept in the macOS Keychain." : "Anthropic API key: not set.";
+// The writers that call an API with a key pasted here, instead of running a program.
+const apiWriter = (kind: WriterKind) => kind === "anthropic" || kind === "openai";
 
-// A model as writer `kind` takes it: one any writer but Claude and the API key does not list is its first, as the server
-// reads it (`WriterKind::model`); Claude takes any id, and the API key any full `claude-` id.
+// OpenAI's own endpoint, which the OpenAI-compatible writer calls when no base URL is set.
+export const OPENAI_URL = "https://api.openai.com/v1";
+
+// Whether writer `kind`'s API key is set, as its key row says it; the key itself never reaches the page.
+export const keySet = (list: Writers, kind: WriterKind = "anthropic"): boolean => list.keys.includes(kind);
+export function keyLine(list: Writers, kind: WriterKind = "anthropic"): string {
+  if (kind === "anthropic") return keySet(list) ? "Anthropic API key: set, kept in the macOS Keychain." : "Anthropic API key: not set.";
+  if (!list.writers.some((w) => w.kind === kind && w.found)) return "OpenAI-compatible API: not set.";
+  const key = keySet(list, kind) ? "key: set, kept in the macOS Keychain" : "no key";
+  return `OpenAI-compatible API at ${list.base_url ?? OPENAI_URL}, ${key}.`;
+}
+
+// Claude's aliases, which the summaries' model defaults to: no OpenAI-compatible endpoint serves them.
+const claudeAliases = ["", "haiku", "sonnet", "opus", "fable"];
+
+// A model as writer `kind` takes it: one any writer but Claude and the API keys does not list is its first, as the server
+// reads it (`WriterKind::model`); Claude takes any id, the Anthropic API any full `claude-` id, and the OpenAI-compatible
+// API any id but Claude's aliases.
 function modelOf(list: Writers, kind: WriterKind, model: string): string {
   const models = list.writers.find((w) => w.kind === kind)?.models ?? [];
-  const any = kind === "claude" || (kind === "anthropic" && model.startsWith("claude-"));
+  const any = kind === "claude" || (kind === "anthropic" && model.startsWith("claude-")) || (kind === "openai" && !claudeAliases.includes(model));
   return !any && !models.includes(model) ? (models[0] ?? model) : model;
 }
 
@@ -58,8 +74,8 @@ let list: Writers | null = null;
 let choice: Choice = { writer: "claude", model: "", effort: "" };
 let outcome: WriterTest | null = null;
 let testing = false;
-// The key row's last refusal, such as a pasted text that is no key.
-let keyError: string | null = null;
+// Each key row's last refusal, such as a pasted text that is no key.
+let keyErrors: Partial<Record<WriterKind, string>> = {};
 
 // Whether PR briefs can be written: until the list is known, yes.
 export const briefsWritten = () => list?.briefs ?? true;
@@ -111,7 +127,7 @@ function draw(panel: HTMLElement, hooks: Hooks) {
         outcome = null;
         draw(panel, hooks);
       })),
-    field("Model", select("writer-model", "The model the program writes with",
+    field("Model", choice.writer === "openai" ? modelInput(models) : select("writer-model", "The model the program writes with",
       [...(models.includes(choice.model) ? [] : [choice.model]), ...models].map((m) => ({ value: m, label: m })), choice.model, (value) => {
         choice = { ...choice, model: value };
         outcome = null;
@@ -138,7 +154,7 @@ function draw(panel: HTMLElement, hooks: Hooks) {
   } else if (!known.summaries_on) {
     nodes.push(text("p", "Summaries are off until a writer passes Test.", "writer-outcome"));
   }
-  nodes.push(...keyRow(panel, hooks, known));
+  nodes.push(...keyRow(panel, hooks, known), ...openaiRow(panel, hooks, known));
   const briefs = briefsLine(known);
   if (briefs) {
     const shown = text("p", briefs, "writer-briefs");
@@ -168,15 +184,15 @@ function keyRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[]
     const key = input.value.trim();
     if (!key) return;
     input.value = "";
-    invoke("set_api_key", { key })
+    invoke("set_api_key", { writer: "anthropic", key, base_url: null, expected: null })
       .then(() => {
-        keyError = null;
+        delete keyErrors.anthropic;
         const anthropic = known.writers.find((w) => w.kind === "anthropic");
         choice = { writer: "anthropic", model: anthropic?.models[0] ?? "", effort: "" };
         outcome = null;
       })
       .catch((e: unknown) => {
-        keyError = e instanceof Error ? e.message : String(e);
+        keyErrors.anthropic = e instanceof Error ? e.message : String(e);
       })
       .finally(() => void refresh(panel, hooks));
   });
@@ -188,9 +204,9 @@ function keyRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[]
     remove.setAttribute("type", "button");
     remove.title = "Remove the key from the macOS Keychain; the API-key writer then cannot write";
     remove.addEventListener("click", () => {
-      invoke("remove_api_key")
+      invoke("remove_api_key", { writer: "anthropic", expected: null })
         .then(() => {
-          keyError = null;
+          delete keyErrors.anthropic;
           outcome = null;
         })
         .catch(failure("remove_api_key"))
@@ -199,9 +215,103 @@ function keyRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[]
     row.append(remove);
   }
   const nodes = [state, row];
-  if (keyError) {
-    const shown = text("p", keyError, "writer-outcome failed");
+  if (keyErrors.anthropic) {
+    const shown = text("p", keyErrors.anthropic, "writer-outcome failed");
     shown.id = "writer-key-error";
+    nodes.push(shown);
+  }
+  return nodes;
+}
+
+// The OpenAI-compatible writer's model: any id its endpoint serves, typed, with the listed ones offered.
+function modelInput(models: string[]): HTMLElement {
+  const input = document.createElement("input");
+  input.id = "writer-model";
+  input.title = "The model the endpoint serves, such as gpt-6-luna on OpenAI or llama3.2 on a local Ollama";
+  input.spellcheck = false;
+  input.value = choice.model;
+  input.setAttribute("list", "writer-models");
+  input.addEventListener("input", () => {
+    choice = { ...choice, model: input.value.trim() };
+    outcome = null;
+  });
+  const options = document.createElement("datalist");
+  options.id = "writer-models";
+  for (const model of models) {
+    const option = document.createElement("option");
+    option.value = model;
+    options.append(option);
+  }
+  const both = text("span", "", "writer-model-input");
+  both.append(input, options);
+  return both;
+}
+
+// The OpenAI-compatible API's row: its base URL (empty: OpenAI's own) and an optional key, saved together, and Remove,
+// which clears both, once either is set.
+function openaiRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[] {
+  const found = known.writers.some((w) => w.kind === "openai" && w.found);
+  const state = text("p", keyLine(known, "openai"), "writer-hint");
+  state.id = "writer-openai-state";
+  const base = document.createElement("input");
+  base.id = "writer-base-url";
+  base.type = "url";
+  base.spellcheck = false;
+  base.value = known.base_url ?? "";
+  base.placeholder = OPENAI_URL;
+  base.title = "The API's base URL, such as https://openrouter.ai/api/v1 or http://localhost:11434/v1 for Ollama; empty: OpenAI's own";
+  const input = document.createElement("input");
+  input.id = "writer-openai-key";
+  input.type = "password";
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  input.placeholder = keySet(known, "openai") ? "Replace the key (optional)" : "Its API key (optional)";
+  input.title = "The endpoint's API key, if it needs one; it is kept in the macOS Keychain and never shown again";
+  const save = text("button", "Save", "btn small");
+  save.id = "writer-openai-save";
+  save.setAttribute("type", "button");
+  save.title = "Keep the base URL in settings.json and any pasted key in the macOS Keychain; the page never shows the key again";
+  save.addEventListener("click", () => {
+    const key = input.value.trim();
+    input.value = "";
+    invoke("set_api_key", { writer: "openai", key: key || null, base_url: base.value.trim(), expected: hooks.texts().settings })
+      .then((settings) => {
+        delete keyErrors.openai;
+        if (settings !== null) hooks.saved(settings);
+        const openai = known.writers.find((w) => w.kind === "openai");
+        choice = { writer: "openai", model: openai?.models[0] ?? "", effort: "" };
+        outcome = null;
+      })
+      .catch((e: unknown) => {
+        keyErrors.openai = e instanceof Error ? e.message : String(e);
+      })
+      .finally(() => void refresh(panel, hooks));
+  });
+  const row = text("div", "", "writer-key");
+  row.append(base);
+  const keyRow = text("div", "", "writer-key");
+  keyRow.append(input, save);
+  if (found) {
+    const remove = text("button", "Remove", "btn small");
+    remove.id = "writer-openai-remove";
+    remove.setAttribute("type", "button");
+    remove.title = "Remove the base URL from settings.json and the key from the macOS Keychain";
+    remove.addEventListener("click", () => {
+      invoke("remove_api_key", { writer: "openai", expected: hooks.texts().settings })
+        .then((settings) => {
+          delete keyErrors.openai;
+          if (settings !== null) hooks.saved(settings);
+          outcome = null;
+        })
+        .catch(failure("remove_api_key"))
+        .finally(() => void refresh(panel, hooks, true));
+    });
+    keyRow.append(remove);
+  }
+  const nodes = [state, row, keyRow];
+  if (keyErrors.openai) {
+    const shown = text("p", keyErrors.openai, "writer-outcome failed");
+    shown.id = "writer-openai-error";
     nodes.push(shown);
   }
   return nodes;
