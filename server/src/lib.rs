@@ -43,6 +43,7 @@ pub mod ratify;
 mod read_loop;
 pub mod runner;
 pub mod settings;
+pub mod staleness;
 pub mod stop_rules;
 pub mod web;
 
