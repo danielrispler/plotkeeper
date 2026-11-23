@@ -126,6 +126,8 @@ export type Capabilities = {
   permission_mode: boolean;
   durations: boolean;
   transcript_version: boolean;
+  // Its transcript names the model, which the header's model line shows; else the model is `Session.model`.
+  transcript_model: boolean;
   // It reports how full its context is.
   context: boolean;
   // It records a git tree of each worktree a turn touches, so a turn has files (danielrispler/plotkeeper#111).
@@ -136,7 +138,7 @@ export type Capabilities = {
 export type Session = {
   id: string;
   capabilities: Capabilities;
-  // The model its agent's hooks name (agy's), null otherwise; Claude's is `transcript.model`.
+  // The model its agent's hooks name (agy's), null otherwise; with `capabilities.transcript_model` it is `transcript.model`.
   model: string | null;
   // The folder it works in, from its latest event; `folder_name` is its last segment.
   cwd: string;
@@ -363,8 +365,16 @@ export type Work = {
 };
 
 // The Map view's payload (`server/src/map.rs`, `MapState`): one project's map as read from `origin`'s default branch, and Daniel's own
-// positions and tiers for it. A feature of the view adds its field here and in `MapState` there.
-export type UserMap = { positions: Record<string, [number, number]>; tiers: Record<string, string> };
+// positions and tiers for it. A feature of the view adds its field here and in `MapState` there; `server/tests/wire.rs` holds
+// the two to agree (#333).
+// What landed since Daniel caught up and what he has read of each PR's brief (`fog.rs`); `UserMap.fog`, which the window does not read.
+export type FogState = {
+  first: string | null;
+  processed: string | null;
+  parts: Record<string, { commit: string; strength: Fog }[]>;
+  reads: Record<string, { lit: string[][]; chapters: Record<string, { head: string; at: number }> }>;
+};
+export type UserMap = { positions: Record<string, [number, number]>; tiers: Record<string, string>; fog?: FogState };
 export type MapState = {
   project: string;
   status: "loaded" | "none" | "unreadable";

@@ -214,7 +214,8 @@ pub(crate) struct Spawned {
 /// What an adapter reports, which decides what its sessions' views show (decision 4).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Capabilities {
-    /// The agent's name, for its mark: `claude` or `agy`. Nothing in a view hides by it.
+    /// The agent's name, for its mark and display name: `claude` or `agy`. Nothing in a view hides or
+    /// picks by it; the views follow the flags below.
     pub agent: &'static str,
     /// It reports a permission or a question that waits on Daniel, with its text.
     pub asks: bool,
@@ -228,6 +229,9 @@ pub struct Capabilities {
     pub durations: bool,
     /// Its transcript carries the agent's version.
     pub transcript_version: bool,
+    /// Its transcript names the model, which the header's model line shows; else the model is the one
+    /// its hooks name on the session.
+    pub transcript_model: bool,
     /// It reports how full the session's context is.
     pub context: bool,
     /// It records a git tree of each worktree a turn touches, at its start and end.
