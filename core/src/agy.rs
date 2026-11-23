@@ -420,17 +420,36 @@ impl Adapter {
             .map(Into::into)
     }
 
-    /// The open turn's last `PLANNER_RESPONSE` with text in conversation `id`'s transcript: its steps
-    /// start at the turn's `initialNumSteps`. `None` when no turn is open or it wrote no text.
+    /// The open turn's last `PLANNER_RESPONSE` with text in conversation `id`'s transcript. The turn's
+    /// steps start at its `initialNumSteps` and stop before the next turn's: a `USER_INPUT` or a
+    /// wake-up's `SYSTEM_MESSAGE` right after a response. A replay reads the final transcript, which
+    /// holds later turns too. `None` when no turn is open or it wrote no text.
     fn final_response(&self, id: &str) -> Option<String> {
         let conversation = self.conversations.get(id)?;
         let initial = conversation.turn?.initial;
-        records(&conversation.transcript)?
-            .into_iter()
-            .filter(|r| r["type"] == "PLANNER_RESPONSE")
-            .filter(|r| r["step_index"].as_u64().is_some_and(|s| s >= initial))
-            .filter_map(|r| r["content"].as_str().map(str::trim).map(str::to_owned))
-            .rfind(|text| !text.is_empty())
+        let mut previous = Value::Null;
+        let mut last = None;
+        for record in records(&conversation.transcript)? {
+            let Some(step) = record["step_index"].as_u64().filter(|s| *s >= initial) else {
+                previous = record;
+                continue;
+            };
+            let starts = matches!(
+                record["type"].as_str(),
+                Some("USER_INPUT" | "SYSTEM_MESSAGE")
+            );
+            if step > initial && starts && previous["type"] == "PLANNER_RESPONSE" {
+                break;
+            }
+            if record["type"] == "PLANNER_RESPONSE"
+                && let Some(text) = record["content"].as_str().map(str::trim)
+                && !text.is_empty()
+            {
+                last = Some(text.to_owned());
+            }
+            previous = record;
+        }
+        last
     }
 
     /// At a turn's `Stop`, the origin read again: a mismatch is drift (decision 6).

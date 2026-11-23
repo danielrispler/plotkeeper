@@ -587,3 +587,25 @@ fn an_agy_turn_with_a_short_final_response_asks_for_no_summary() {
             .any(|o| matches!(o, studio_core::Output::Summary(_)))
     );
 }
+
+#[test]
+fn a_replayed_agy_run_gives_each_turn_its_own_final_response() {
+    // A replay reads the final transcript, which holds the later turns too.
+    let studio = Studio::replayed(fixture());
+    let session = studio.session(PARENT).unwrap();
+    let firsts: Vec<String> = session
+        .turns
+        .iter()
+        .map(|t| {
+            t.reply
+                .split_whitespace()
+                .take(3)
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect();
+    assert_eq!(
+        firsts,
+        ["I have created", "ok", "I have started", "The subagent has"]
+    );
+}
