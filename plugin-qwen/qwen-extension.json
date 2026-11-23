@@ -4,7 +4,7 @@
   "description": "Appends Qwen Code hook events to plotkeeper's event log",
   "hooks": {
     "SessionStart": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent qwen", "timeout": 5, "async": true }] }],
-    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent qwen", "timeout": 3, "async": true }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent qwen", "timeout": 3 }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent qwen", "timeout": 5, "async": true }] }],
     "PreToolUse": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent qwen", "timeout": 5, "async": true }] }],
     "PostToolUse": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent qwen", "timeout": 5, "async": true }] }],

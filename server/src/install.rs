@@ -477,7 +477,8 @@ pub fn install(
 
 /// Renders `plugin-qwen/` for the binaries in `bin` into the data folder and installs it with `qwen extensions install
 /// --consent`, which copies it into Qwen Code's own extension folder without a prompt; a second install replaces the
-/// first, as Qwen Code refuses an extension already installed. plotkeeper opens no file of Qwen Code's.
+/// first, as Qwen Code refuses an extension already installed ("Please uninstall it first", `extensionManager.ts`).
+/// plotkeeper opens no file of Qwen Code's.
 fn install_qwen(
     home: &Path,
     bin: &Path,
@@ -491,11 +492,14 @@ fn install_qwen(
     fs::write(&file, render(QWEN_EXTENSION_JSON, bin)?)
         .map_err(|e| format!("could not write {}: {e}", file.display()))?;
     if state.qwen {
-        // Already gone is fine: the install below puts it back.
+        // Already gone is fine: the install below puts it back. Until it does, nothing is installed, so an install
+        // that fails leaves uninstall nothing to undo for Qwen Code.
         let _ = run(
             qwen,
             &["extensions".as_ref(), "uninstall".as_ref(), NAME.as_ref()],
         );
+        state.qwen = false;
+        save(home, state)?;
     }
     run(
         qwen,

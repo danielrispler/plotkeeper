@@ -710,6 +710,22 @@ fn copilot_goes_through_copilot_plugin_and_never_opens_its_files() {
     }
 }
 
+/// A second install whose `qwen extensions install` fails, after it took the first extension out, leaves nothing for
+/// uninstall to take out of Qwen Code, so uninstall does not fail on an extension that is gone.
+#[test]
+fn a_second_qwen_install_that_fails_leaves_uninstall_nothing_to_undo_there() {
+    let machine = Machine::new(false, false).with_qwen();
+    machine.run("install");
+    script(
+        &machine.tools.join("qwen"),
+        r#"echo "$@" >> "$(dirname "$0")/qwen-calls"; [ "$2" = install ] && exit 1; exit 0"#,
+    );
+    assert!(!machine.run_any("install").status.success());
+    let calls = machine.calls("qwen").len();
+    machine.run("uninstall");
+    assert_eq!(machine.calls("qwen").len(), calls);
+}
+
 #[test]
 fn a_second_copilot_install_replaces_its_plugin() {
     let machine = Machine::new(false, false).with_copilot();
