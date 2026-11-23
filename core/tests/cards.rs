@@ -57,7 +57,6 @@ fn a_prompt_whose_worktree_changed_gets_one_card_on_the_whole_change_at_its_stop
             changed_by: Default::default(),
             workers: vec![],
             check: None,
-            ends: Default::default(),
             asks: false,
         }]
     );

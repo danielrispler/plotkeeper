@@ -15,8 +15,6 @@ use studio_core::{
     Facts, Numstat, RootDiff, Studio, TurnDiff, TurnFiles, TurnFilesSnapshot, compute_turn_files,
 };
 
-use crate::offer::TurnFacts;
-
 /// The refs' namespace.
 const REFS: &str = "refs/plotkeeper/turns";
 
@@ -315,21 +313,6 @@ pub fn turn_facts(state: &Mutex<Studio>, id: &str, warn: &mut dyn FnMut(String))
     let mut facts = state.lock().unwrap().facts_of(&ask, found);
     add_hunks(&ask, &mut facts);
     facts
-}
-
-/// The turn named `id` as the offer reads it (danielrispler/plotkeeper#209): its facts, and whether
-/// it merged.
-pub fn turn_of(state: &Mutex<Studio>, id: &str, warn: &mut dyn FnMut(String)) -> TurnFacts {
-    let facts = turn_facts(state, id, warn);
-    // One lock for the rest: a guard taken in a field lives until the whole struct is built, so a
-    // second `lock()` there would wait on the thread's own first one for ever.
-    let studio = state.lock().unwrap();
-    TurnFacts {
-        facts,
-        merge: studio.turn_merged(id),
-        workers: studio.turn_workers(id),
-        traced: studio.summary_ask(id).is_some(),
-    }
 }
 
 #[cfg(test)]

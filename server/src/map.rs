@@ -54,6 +54,11 @@ pub struct MapState {
     pub fog: BTreeMap<String, crate::fog::Strength>,
     /// CI on the default branch, as last read through `gh` (`ci_laws.rs`); none until a read has finished.
     pub ci: Option<crate::ci_laws::Ci>,
+    /// The PRs ready for review (open, not a draft), as last asked (`prs.rs`); the "Ready for review" tray lists them.
+    pub ready: Vec<crate::prs::Ready>,
+    /// The items the part sheet says are not yet ratified (`ratify.rs`): the map changes that landed after the first run without a
+    /// record, and the ones marked so by hand.
+    pub ratify: Vec<crate::ratify::Pending>,
 }
 
 /// Daniel's choices for one project, kept in the data folder: a saved `(x, y)` per part or actor id, and a tier per part id
@@ -118,6 +123,8 @@ pub fn read_map(repo: &Path) -> MapState {
         user: UserState::default(),
         fog: BTreeMap::new(),
         ci: None,
+        ready: Vec::new(),
+        ratify: Vec::new(),
     };
     let Some((reference, note)) = default_ref(repo) else {
         state.note = Some("this repository has no default branch to read".into());
@@ -185,12 +192,23 @@ impl Fetches {
         now: Instant,
         fetch: impl FnOnce() -> Result<(), String>,
     ) -> Fetched {
+        self.run_after(repo, now, COOLDOWN, fetch)
+    }
+
+    /// As `run`, with its own `cooldown`: zero asks at once unless one is running.
+    pub fn run_after(
+        &self,
+        repo: &str,
+        now: Instant,
+        cooldown: Duration,
+        fetch: impl FnOnce() -> Result<(), String>,
+    ) -> Fetched {
         {
             let mut slots = self.0.lock().unwrap();
             let slot = slots.entry(repo.to_string()).or_default();
             let cooling = slot
                 .last
-                .is_some_and(|at| now.saturating_duration_since(at) < COOLDOWN);
+                .is_some_and(|at| now.saturating_duration_since(at) < cooldown);
             if slot.running || cooling {
                 return Fetched::Skipped;
             }
@@ -208,7 +226,7 @@ impl Fetches {
     }
 }
 
-fn state_file() -> Result<PathBuf, String> {
+pub(crate) fn state_file() -> Result<PathBuf, String> {
     let home = std::env::home_dir().ok_or("no home folder")?;
     Ok(studio_hook::data_dir(&home).join(STATE_FILE))
 }
@@ -281,14 +299,10 @@ fn fetch(fetches: &Fetches, project: &str) -> Fetched {
 /// The Map view's payload for `project`. `fetch` asks for `origin` first: when the view opens and when the window gains
 /// focus while it is open, never on a timer; the cooldown and the in-flight lock decide whether it runs. The same triggers
 /// read CI on the default branch in the background (`ci_laws::refresh_later`), which tells the window when it has an answer.
-pub fn map_state(
-    project: String,
-    fetch: bool,
-    fetches: &Fetches,
-    cache: &Arc<crate::ci_laws::CiCache>,
-    events: &Arc<crate::Events>,
-) -> Result<MapState, String> {
+pub fn map_state(project: String, fetch: bool, app: &Arc<crate::App>) -> Result<MapState, String> {
+    let (fetches, cache, events) = (&app.fetches, &app.ci, &app.events);
     if fetch {
+        crate::prs::ask_later(app, crate::prs::Trigger::MapOpen, Some(&project));
         let fetched = self::fetch(fetches, &project);
         // A fetch inside the cooldown asks nothing again, unless nothing was read yet.
         if fetched != Fetched::Skipped || !cache.has(&project) {
@@ -307,6 +321,12 @@ pub fn map_state(
         state.fog = crate::fog::effective(&state.user, source);
     }
     state.ci = cache.get(&project);
+    state.ready = app.prs.ready(&project);
+    app.briefs.annotate(&project, &mut state.ready);
+    state.ratify = crate::ratify::file()
+        .and_then(|file| crate::ratify::start(&file, &project, crate::ratify::now()))
+        .map(|mine| crate::ratify::pending(repo, &mine))
+        .unwrap_or_default();
     Ok(state)
 }
 
@@ -318,17 +338,23 @@ pub fn map_know(project: String, part: String) -> Result<UserState, String> {
 /// A part's history strip: its first-parent commits on the default branch from the map's birth, oldest to newest, the ones Daniel
 /// has not caught up on marked.
 pub fn map_history(project: String, part: String) -> Result<Vec<crate::history::Entry>, String> {
+    let briefs = crate::pr_briefs::store_of(&project);
     let fogged = read_user(&state_file()?, &project)
         .fog
         .parts
         .get(&part)
         .map(|entries| entries.iter().map(|e| e.commit.clone()).collect())
         .unwrap_or_default();
-    Ok(crate::history::part_history(
-        Path::new(&project),
-        &part,
-        &fogged,
-    ))
+    let mut entries = crate::history::part_history(Path::new(&project), &part, &fogged);
+    // A commit whose PR has a stored brief offers it.
+    for entry in &mut entries {
+        entry.brief = crate::history::pr_of_label(&entry.label).filter(|n| {
+            briefs
+                .as_ref()
+                .is_some_and(|store| store.latest(*n).is_some())
+        });
+    }
+    Ok(entries)
 }
 
 /// The map as of `commit`: what one scrub of the history strip asks the shell for. A later ticket that records scrubs hooks here.
@@ -341,17 +367,29 @@ pub fn map_commit(project: String, commit: String) -> Result<crate::history::Com
     crate::history::commit_files(Path::new(&project), &commit)
 }
 
-/// The projects among `projects` that show a fogged Core part or a broken law, for Home's quiet mark. Reads local refs and the
+/// "See the code" of a PR's brief: the files its head changed since it left the default branch, with their diffs, for the drawer.
+pub fn pr_diff(
+    project: String,
+    number: u64,
+    head: String,
+    title: String,
+) -> Result<crate::history::Commit, String> {
+    crate::history::pr_files(Path::new(&project), &head, &format!("#{number} {title}"))
+}
+
+/// The projects among `projects` that show a fogged Core part, a broken law or a waiting PR brief, for Home's quiet mark. Reads local refs and the
 /// last CI read only: it asks neither `origin` nor GitHub.
 pub fn map_marks(
     projects: Vec<String>,
     cache: &crate::ci_laws::CiCache,
+    prs: &crate::prs::Prs,
 ) -> Result<Vec<String>, String> {
     let file = state_file()?;
     Ok(projects
         .into_iter()
         .filter(|project| {
-            if cache.broken(project) {
+            if cache.broken(project) || crate::pr_briefs::any_waiting(project, &prs.ready(project))
+            {
                 return true;
             }
             let repo = Path::new(project);

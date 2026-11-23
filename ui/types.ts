@@ -201,63 +201,10 @@ export type Session = {
 };
 // What happened in a session since Daniel looked (danielrispler/plotkeeper#124).
 export type Since = { turns: number; files: number; passed: number; failed: number; ran: number };
-// The shell sends a card's request without its diff and base, which the pane never reads. `prompt` is when the
-// prompt it is on arrived; `agent` is the worker whose card it is; `changed_by` holds the files other subagents edited
-// in its worktree, by subagent; `workers` the workers whose changes it covers. `check` is the command of the check whose
-// start requested the card (danielrispler/Falinks#476).
-export type CardRequest = {
-  session_id: string;
-  id: string;
-  prompt?: number | null;
-  agent: string | null;
-  changed_by: Record<string, string[]>;
-  workers?: string[];
-  check: string | null;
-};
-// A check's result, which settles the guess on its card; null while the check runs.
-export type CheckResult = "passed" | "failed" | "not_counted";
-// A card's multiple-choice question; `key` is the right option, counting from 0.
+// A multiple-choice question as the store kept it on a summary written before #347; `key` is the right option, counting from 0.
 export type Quiz = { text: string; options: { text: string; why: string }[]; key: number };
-// `architecture` is null when the change is not structural.
-export type Card = {
-  summary: string;
-  explanation: string;
-  paths: string[];
-  code: string;
-  // The line ranges `code` was pulled from; absent when the writer named none.
-  ranges?: { path: string; from: number; to: number }[];
-  why_it_matters: string;
-  not_checked: string;
-  architecture: string | null;
-  quiz: Quiz | null;
-};
-// Daniel's tap on a quiz, graded by the writer's key; on a check's card by its result, so `right`
-// is null until the result settles it, and stays null when the result does not say (danielrispler/Falinks#476).
-export type Guess = { option: number; right: boolean | null; at: number };
-// Daniel's rating of a card's explanation. His fifth reason, "the key is wrong", is `key_wrong`, the
-// one record the quiz's flag also sets.
-export type Level = "good" | "fair" | "poor";
-export type Reason = "unclear" | "wrong" | "too_shallow" | "too_easy";
-export type Rating = { level: Level; reasons: Reason[] };
-// The store also records when the quiz showed; the pane never shows it, nor any rate. `more` is the
-// longer explanation from "explain more".
-export type StoredCard = {
-  request: CardRequest;
-  card: Card;
-  // When it reached the store; null in a store from before the time was kept.
-  added_at?: number | null;
-  guess: Guess | null;
-  key_wrong: boolean;
-  more: string | null;
-  rating: Rating | null;
-  check_result: CheckResult | null;
-  taps?: QuizTap[];
-  // When the pane first drew the card's Quiz; null until it did (the store's `shown` tap).
-  shown_at?: number | null;
-};
-// What Daniel did with a Quiz besides a card's pick (danielrispler/plotkeeper#120), each with its time: his pick (a lone Quiz's), "Show
-// the rest anyway", and the three chips.
-// The trial's two (#129): how sure he was before the pick, and one optional line on why after it.
+// What Daniel did with a Quiz, each with its time (danielrispler/plotkeeper#120): what the retired turn Quiz, cards, Home and the
+// Retests wrote, which the store still reads (#347, #348). The window sends none.
 export type Tap =
   | { kind: "pick"; option: number }
   | { kind: "confidence"; sure: boolean; surface?: "home" }
@@ -265,12 +212,6 @@ export type Tap =
   | { kind: "shown" | "hunk" }
   | { kind: "skip" | "understood" | "explain_more" | "key_wrong" | "not_now" };
 export type QuizTap = Tap & { at: number };
-// A fresh Quiz on the decision of an earlier one, a week after it, which Home offers (#129). `id` names it for `quiz_tap`.
-// What Home's learning slot serves (#240): a Retest, a fresh Quiz of a turn or card (#241), or "done for today"; null: nothing.
-export type Learning = ({ kind: "retest" } & Retest) | { kind: "fresh"; id: string; session_id: string; quiz: Quiz; at: number; hunk: string } | { kind: "done" };
-export type Retest = { id: string; of: string; session_id: string; added_at: number; of_at?: number | null; hunk?: string; quiz: Quiz | null; taps: QuizTap[] };
-// The selected session's brief, and its cards, split at 30 minutes by the shell's tick, each oldest
-// first.
 // An answered question, plan or permission in the session's decision history (danielrispler/Falinks#479): the call's input,
 // Daniel's answers by question text or "allow"/"deny", when, and where he answered.
 export type Decision = {
@@ -312,8 +253,8 @@ export type BlockedCommand = {
   exit_code?: number | null;
   task?: string | null;
 };
-// A turn's summary (danielrispler/Falinks#526) and, unless the turn has a card, its Quiz, as the store keeps it; a
-// learning section stored before danielrispler/plotkeeper#118 reads as its question.
+// A turn's summary (danielrispler/Falinks#526), as the store keeps it; a Quiz stored before #347 and a learning section stored
+// before danielrispler/plotkeeper#118 read as the old Quiz.
 // `headline` and `lines` are the turn writer's Headline and typed Body lines (danielrispler/plotkeeper#115); a summary stored
 // before them has neither, and its `summary` text reads as a Headline and `reported` lines.
 export type SummaryLine = { kind: "why" | "reported" | "open" | "ask"; text: string };
@@ -328,16 +269,15 @@ export type SummaryRequest = {
   card: string | null;
   facts: { files: TurnFile[]; checks: Check[]; external: number };
   wanted: boolean;
-  asks: boolean;
-  no_quiz: boolean;
 };
 export type TurnSummary = {
   request?: SummaryRequest;
   added_at?: number;
   hunk?: string;
-  summary: { summary: string; headline?: string | null; lines?: SummaryLine[]; quiz: Quiz | null };
+  // The Quiz of a summary stored before #347, which the window no longer shows; a new summary has none.
+  summary: { summary: string; headline?: string | null; lines?: SummaryLine[]; quiz?: Quiz | null };
   taps?: QuizTap[];
-  // The self-test's arm (#130): body-only shows the Body open and no Quiz; absent is quiz-first.
+  // The self-test's arm (#130), kept in the store.
   arm?: "quiz_first" | "body_only" | null;
 };
 // The Brief's slots (danielrispler/plotkeeper#122): the Goal a model wrote, each answered question with Daniel's reply, and
@@ -348,16 +288,13 @@ export type OpenItem = {
 };
 // A line of "Design so far" (danielrispler/plotkeeper#123): a decision with its reason, and the id of the turn or card it came from.
 export type DesignLine = { text: string; cite: string };
+// The selected session's brief, decision history and the risk notes of its blocked commands.
 export type SessionCards = {
   brief: string | null;
   goal: string | null;
   answers: { question: string; reply: string }[];
   open: OpenItem[];
   design: DesignLine[];
-  recent: StoredCard[];
-  older: StoredCard[];
-  // A session's workers' cards, each with the turn of its rail it belongs to (danielrispler/plotkeeper#212).
-  workers: PlacedCard[];
   decisions: Decision[];
   // What each blocked command's card shows of its risk note, by the card's call id (danielrispler/plotkeeper#298).
   risk_notes: RiskView[];
@@ -371,7 +308,6 @@ export type RiskView =
   | { call: string; state: "reading" }
   | { call: string; state: "failed" }
   | { call: string; state: "arrived"; level: RiskLevel; line: string; at?: number };
-export type PlacedCard = { card: StoredCard; turn: number | null };
 // What a call asks Daniel, by its tool, as the answer hook's `Kind`: a question, a plan, or any other
 // tool's permission.
 export type AskKind = "question" | "plan" | "permission";
@@ -442,7 +378,34 @@ export type MapState = {
   fog: Record<string, Fog>;
   // CI on the default branch as last read through `gh` (`ci_laws.rs`); null until a read has finished.
   ci: Ci | null;
+  // The PRs ready for review (open, not a draft), as last asked (`prs.rs`); the Map view's tray lists them.
+  ready: ReadyPr[];
+  // The map items the part sheet says are not yet ratified (`ratify.rs`).
+  ratify: PendingItem[];
 };
+// Ratifying (`ratify.rs`): an item of a PR is a map change (kind part, actor, link, law or flow) or a decision the agent declared.
+export type PendingItem = { pr: number; kind: string; id: string };
+export type RatifyRow = { pr: number; kind: string; id: string; text: string; change: string; status: "ratified" | "accepted" | "overturned" | "not-yet" };
+// What a ready PR's brief is doing (`pr_briefs.rs`): a newer head was pushed (stale), being written now, and the chapters' titles, or the one story's.
+export type BriefInfo = { stale: boolean; writing: boolean; chapters: string[]; quiet: boolean; read?: boolean; failed?: boolean };
+export type ReadyPr = { number: number; title: string; head: string; branch?: string; brief: BriefInfo | null };
+// A PR brief as the writer made it and `pr_brief` returns it (`understanding/src/pr_brief.rs`). A step's `flags` are what the checks found wrong with it
+// that the one rewrite did not mend: it shows "not confirmed from the facts".
+export type BriefCite = { from: string; quote: string };
+export type BriefFigure = { kind: string; frame: string | null; items: { label: string; tone: string | null; bad: boolean | null }[]; before: string[]; after: string[] };
+export type BriefCheck = { kind: string; q: string; opts: string[]; key: unknown; yes: string; no: string; flow: string | null; test: string | null };
+export type BriefStep = {
+  k: string; h: string; b: string; on: string[]; hops: [string, boolean][]; law: string | null; covered_by: string | null; list: string[];
+  risks: { part: string; trigger: string; check: string }[]; fig: BriefFigure | null; check: BriefCheck | null; cites: BriefCite[]; flags: string[];
+};
+export type BriefChapter = { behaviour: string; parts: string[]; title: string; steps: BriefStep[]; flags: string[] };
+export type PrBrief = {
+  title: string; overview: BriefStep[]; chapters: BriefChapter[]; also: { part: string; line: string; flags: string[] }[]; unseen: string[];
+  decisions: { id: string | null; text: string; flags: string[] }[]; flags: string[];
+};
+export type StoredBrief = { version: number; pr: number; head: string; written_at: number; stale: boolean; model: string; brief: PrBrief };
+// `partial`: the writer did not see the whole diff.
+export type BriefView = { brief: StoredBrief; partial: boolean };
 export type Fog = "thin" | "thick";
 // What a finished run of the default branch's CI says of the laws: `unknown` (nothing to read), `passed`, `broken` (a test that backs a
 // law failed), `not-run` (it failed, but not in a test that backs a law), `unreadable` (it failed and its log cannot be read).
@@ -463,12 +426,15 @@ export type Ci = {
 export type Proof = { file: string; line: number; test: string | null; first: number; snippet: string };
 
 // One commit of a part's history strip, oldest first; `fogged` is a commit Daniel has not caught up on.
-export type HistoryEntry = { commit: string; short: string; label: string; fogged: boolean };
+// `brief`: the PR whose stored brief this commit offers (`pr_briefs.rs`), when it has one.
+export type HistoryEntry = { commit: string; short: string; label: string; fogged: boolean; brief: number | null };
+// The ready PRs of a session's project that a brief waits for (`briefs_waiting`).
+export type WaitingBriefs = { project: string; numbers: number[] };
 // The map as of a commit (a scrub), and a commit's files with their diffs (the drill-down).
 export type HistoricalMap = { commit: string; short: string; label: string; source: string };
 export type CommitFiles = { commit: string; short: string; label: string; url: string | null; files: { path: string; diff: string }[] };
 
-// Every command the window invokes, with what the shell replies (`src-tauri/src/*.rs`, `#[tauri::command]`): `void` where the
+// Every command the window invokes, with what the server replies (`server/src/api.rs`): `void` where the
 // window ignores the reply, `null` where the shell may answer none. `invoke` takes only these names, and the snap fixtures
 // (`scripts/snap/`) are typed against it, and `scripts/snap/base.ts` answers every command that is not `void`, so a fixture
 // that lacks a command or a field fails `tsc` (#144).
@@ -486,10 +452,7 @@ export interface Commands {
   check_lists: void;
   check_output: CheckOutput | null;
   delete_session: void;
-  explain_more: string | null;
-  guess: void;
-  hunk_opened: void;
-  key_wrong: void;
+  failed_check_name: string;
   map_place: Record<string, string[]>;
   map_save_positions: UserMap;
   map_set_tier: UserMap;
@@ -503,19 +466,22 @@ export interface Commands {
   stop_dismiss: null;
   map_proof: Proof[];
   map_state: MapState;
+  // The brief, or that its write has started (it comes through `map-landed`).
+  pr_brief: BriefView | { writing: true } | null;
+  pr_diff: CommitFiles;
+  brief_chapter_done: void;
+  briefs_waiting: WaitingBriefs | null;
+  pr_ratify: RatifyRow[];
+  ratify_set: void;
   mark_unseen: void;
   open: Selection | null;
-  quiz_tap: void;
   rail_shown: void;
-  rate: void;
   refresh_landed_tasks: void;
   rename: void;
-  learning: Learning | null;
   select: Selection | null;
   selected: Selection | null;
   sessions: Session[];
   settings_files: SettingsFiles;
-  shown: void;
   subagent_log: SubagentLog | null;
   summary_settings: void;
   turn_file_hunk: Hunk | null;
@@ -527,7 +493,7 @@ export interface Commands {
 export type Command = keyof Commands;
 
 // What the shell counted of Daniel's use (`stop_rules.rs`), for the one-time review: days, merged PRs and the uses of each module.
-export type StopKind = "session" | "map-open" | "mark-seen" | "scrub" | "proof" | "know";
+export type StopKind = "session" | "map-open" | "mark-seen" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen";
 export type StopFacts = {
   active_days: number;
   merged_prs: number;
@@ -538,4 +504,7 @@ export type StopFacts = {
   proofs: number;
   knows: number;
   dismissed: boolean;
+  briefs_offered: number;
+  briefs_opened: number;
+  chapters_done: number;
 };

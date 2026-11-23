@@ -1,5 +1,5 @@
-//! A recorded log through the server with a fake writer (danielrispler/plotkeeper#328): a turn that ended while plotkeeper was
-//! stopped gets its card inside the catch-up window and none outside it, and a writer failure reaches the page with what to do.
+//! A recorded log through the server with a fake writer (danielrispler/plotkeeper#328): a replay changes no stored summary, and a
+//! writer failure reaches the page with what to do. Cards are retired (danielrispler/plotkeeper#348): a start writes none.
 
 mod isolated_home;
 use serde_json::json;
@@ -17,8 +17,6 @@ struct NoEffects;
 
 impl Effects for NoEffects {
     fn list(&self) {}
-    fn new_card(&self, _: &str, _: Option<&str>) {}
-    fn settle_checks(&self) {}
     fn name(&self, _: &str, _: &str) {}
     fn log(&self, _: String) {}
 }
@@ -87,90 +85,18 @@ fn log_with_turn(dir: &Path, ended: u64) -> std::path::PathBuf {
     log
 }
 
-fn card_ids(app: &App) -> Vec<String> {
-    let store = app.cards.lock().unwrap();
-    store.cards().iter().map(|c| c.request.id.clone()).collect()
-}
-
-fn wait_for_cards(app: &App) -> Vec<String> {
-    for _ in 0..400 {
-        let ids = card_ids(app);
-        if !ids.is_empty() {
-            return ids;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    Vec::new()
-}
-
-#[test]
-fn a_turn_that_ended_while_stopped_gets_its_card_from_the_writer_at_start() {
-    let dir = tempfile::tempdir().unwrap();
-    let ended = now() - 60_000;
-    let log = log_with_turn(dir.path(), ended);
-    let (app, _) = app_with(&log, Arc::new(FakeWriter));
-
-    Follower::start(&app, &log).pass();
-
-    assert_eq!(wait_for_cards(&app), [format!("s1@{ended}")]);
-    let store = app.cards.lock().unwrap();
-    let card = &store.cards()[0].card;
-    assert!(
-        card.summary.starts_with("Sample change to"),
-        "{}",
-        card.summary
-    );
-}
-
-#[test]
-fn a_turn_older_than_the_window_gets_no_card_at_start() {
-    let dir = tempfile::tempdir().unwrap();
-    let log = log_with_turn(dir.path(), now() - 3 * 60 * 60 * 1000);
-    let (app, _) = app_with(&log, Arc::new(FakeWriter));
-
-    Follower::start(&app, &log).pass();
-
-    std::thread::sleep(Duration::from_secs(1));
-    assert_eq!(card_ids(&app), Vec::<String>::new());
-}
-
-#[test]
-fn a_turn_older_than_the_window_gets_its_card_when_daniel_opens_it() {
-    let dir = tempfile::tempdir().unwrap();
-    let ended = now() - 3 * 60 * 60 * 1000;
-    let log = log_with_turn(dir.path(), ended);
-    let (app, _) = app_with(&log, Arc::new(FakeWriter));
-    Follower::start(&app, &log).pass();
-    std::thread::sleep(Duration::from_millis(500));
-    assert_eq!(card_ids(&app), Vec::<String>::new());
-
-    let id = format!("s1@{ended}");
-    studio_server::turn_summary(&app, id.clone()).unwrap();
-    studio_server::turn_summary(&app, id.clone()).unwrap();
-
-    assert_eq!(wait_for_cards(&app), [id]);
-    std::thread::sleep(Duration::from_millis(500));
-    assert_eq!(
-        card_ids(&app).len(),
-        1,
-        "opening again writes no second card"
-    );
-}
-
 // @law: replay-never-rewrites
 #[test]
-fn replaying_a_log_twice_over_a_store_changes_no_card_summary_or_answer() {
+fn replaying_a_log_twice_over_a_store_changes_no_summary_and_writes_no_card() {
     let dir = tempfile::tempdir().unwrap();
     let ended = now() - 60_000;
     let log = log_with_turn(dir.path(), ended);
     let id = format!("s1@{ended}");
-    // The first start writes the turn's card; Daniel answers its quiz, and its turn has a summary.
+    // The first start reads the log; the turn has a summary.
     let (app, _) = app_with(&log, Arc::new(FakeWriter));
     Follower::start(&app, &log).pass();
-    assert_eq!(wait_for_cards(&app), std::slice::from_ref(&id));
     {
         let mut store = app.cards.lock().unwrap();
-        store.guess(&id, 0, ended + 5).unwrap();
         let request = studio_core::SummaryRequest {
             session_id: "s1".into(),
             id: id.clone(),
@@ -180,21 +106,23 @@ fn replaying_a_log_twice_over_a_store_changes_no_card_summary_or_answer() {
         store.add_summary_at(request, summary, ended + 10).unwrap();
     }
     drop(app);
-    let files =
-        || ["cards-v2.json", "summaries.json"].map(|name| fs::read(dir.path().join(name)).unwrap());
-    let before = files();
-    assert!(String::from_utf8_lossy(&before[0]).contains("\"guess\""));
-    assert!(String::from_utf8_lossy(&before[1]).contains("Added two files"));
+    let summaries = || fs::read(dir.path().join("summaries.json")).unwrap();
+    let before = summaries();
+    assert!(String::from_utf8_lossy(&before).contains("Added two files"));
 
     for _ in 0..2 {
         let (app, _) = app_with(&log, Arc::new(FakeWriter));
         Follower::start(&app, &log).pass();
         std::thread::sleep(Duration::from_secs(1));
-        assert_eq!(card_ids(&app), std::slice::from_ref(&id));
+        assert_eq!(app.cards.lock().unwrap().summaries().len(), 1);
         drop(app);
     }
 
-    assert_eq!(files(), before);
+    assert_eq!(summaries(), before);
+    assert!(
+        !dir.path().join("cards-v2.json").exists(),
+        "a start writes no card"
+    );
 }
 
 #[test]
@@ -262,7 +190,7 @@ fn a_page_opened_after_the_notice_asks_for_it() {
     assert_eq!(ask().unwrap(), serde_json::Value::Null);
 
     tx.send(Some(
-        "Cards and briefs are off: `claude` is not logged in.".into(),
+        "Summaries and briefs are off: `claude` is not logged in.".into(),
     ))
     .unwrap();
     while heard.0.lock().unwrap().is_empty() {
@@ -270,7 +198,7 @@ fn a_page_opened_after_the_notice_asks_for_it() {
     }
     assert_eq!(
         ask().unwrap(),
-        json!("Cards and briefs are off: `claude` is not logged in.")
+        json!("Summaries and briefs are off: `claude` is not logged in.")
     );
 
     tx.send(None).unwrap();

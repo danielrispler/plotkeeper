@@ -55,7 +55,6 @@ function fileFold(session: string, index: number, file: TurnFile): HTMLElement {
     if (fold.open) folded.delete(key);
     else folded.add(key);
   });
-  invoke("hunk_opened", { session, turn: index }).catch(failure("hunk_opened"));
   const body = text("div", "Reading the hunk…", "diff-body");
   fold.append(fullTitle(text("summary", `${file.from ? `${file.from} → ` : ""}${file.path}${counts(file)}`), `Show or hide this file's change: ${file.path}`), body);
   invoke("turn_file_hunk", { session, turn: index, root: file.root, path: file.path, from: file.from, all: true })

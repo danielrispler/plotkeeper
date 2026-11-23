@@ -66,13 +66,11 @@ test("railRunning: a running turn with an intention, a step and two subagents", 
   assert.ok(s.agents.some((a) => a.status === "running"));
 });
 
-test("railYourTurn: a summary, an unanswered quiz, and a passed and a failed check", () => {
+test("railYourTurn: a summary and a failed check, and no card", () => {
   const f = fixtures.railYourTurn();
   assert.equal(f.selected.session.state, "your_turn");
   assert.ok(f.turn_summary.values.t4.summary);
-  const [stored] = f.cards.older;
-  assert.ok(stored.card.quiz.options.length > 1);
-  assert.equal(stored.guess, null);
+  assert.equal("recent" in f.cards || "older" in f.cards || "workers" in f.cards, false);
   const listed = f.selected.session.turns.flatMap((t) => t.listed);
   assert.ok(listed.length && listed.every((c) => c.status === "failed"));
 });
@@ -86,11 +84,11 @@ test("railNeeds: the session needs you, with a question docked", () => {
   assert.equal(f.watch.tool_name, "AskUserQuestion");
 });
 
-test("railIdle: an idle session with five turns and an answered card", () => {
+test("railIdle: an idle session with five turns and its brief", () => {
   const f = fixtures.railIdle();
   assert.equal(f.selected.session.state, "idle");
   assert.equal(f.selected.session.turns.length, 5);
-  assert.equal(f.cards.older[0].guess.right, true);
+  assert.ok(f.cards.goal);
 });
 
 test("an argument-keyed reply answers by that argument", async () => {
@@ -209,4 +207,12 @@ test("a non-zero Chrome status reports the status and the last lines of its stde
   assert.ok(!report.includes("line 1\n") && !report.includes("line 20"));
   assert.match(chromeFailure(null, ""), /exit status null/);
   assert.equal(chromeFailure(0, stderr), "");
+});
+
+test("a map brief fixture that never printed its ok line fails: Chrome's time budget cut the script off before its assertions ran", () => {
+  assert.equal(fixtures.mapBriefStart().snapDone, "brief ok");
+  assert.equal(failed(["something else"], "brief ok"), true);
+  assert.equal(failed(["brief ok"], "brief ok"), false);
+  assert.equal(failed(["snap:fail x", "brief ok"], "brief ok"), true);
+  assert.equal(failed([]), false, "a fixture with no ok line is as before");
 });

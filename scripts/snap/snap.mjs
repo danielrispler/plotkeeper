@@ -63,5 +63,8 @@ if (run.status !== 0) {
   console.error(chromeFailure(run.status, run.stderr ?? ""));
   process.exit(run.status ?? 1);
 }
-if (failed(log)) process.exit(1);
+if (failed(log, fixtures[name]().snapDone)) {
+  if (!log.some((line) => line.startsWith("snap:fail"))) console.error(`snap:fail the script never printed "${fixtures[name]().snapDone}": Chrome's time budget cut it off`);
+  process.exit(1);
+}
 console.log(`wrote ${out}`);

@@ -1,0 +1,954 @@
+=== SHAPE (decided by code) ===
+chapters by behaviour: 2 to 4 chapters, each one behaviour, lighting every part it crosses
+required parts (together the chapters must light every one): shell, window, core
+overview: no
+also-touched (one line each, no chapter): none
+
+=== SYSTEM MAP ===
+{
+  "version": 1,
+  "extractors": ["cargo", "rust-modules", "typescript-imports"],
+  "parts": [
+    {
+      "id": "plugins", "name": "Agent plugins", "caption": "Which hooks each agent runs",
+      "description": "Small config folders for Claude Code and agy. They decide which of the agent's events reach the studio.",
+      "tier": "interface", "paths": ["plugin/", "plugin-agy/"]
+    },
+    {
+      "id": "hook", "name": "Hook", "caption": "Records every agent event",
+      "description": "Runs on each agent event and appends it to the event log. It also holds a question or a blocked command until you answer.",
+      "tier": "core", "paths": ["hook/"]
+    },
+    {
+      "id": "core", "name": "Core", "caption": "Turns events into session state",
+      "description": "Plain Rust logic. It reads the event log's lines in order and knows every session's turns, checks, subagents and whether it needs you.",
+      "tier": "core", "paths": ["core/"]
+    },
+    {
+      "id": "shell", "name": "Shell", "caption": "Reads the log, feeds the core, acts",
+      "description": "The app's Rust side. It reads the event log, feeds the core, and carries out what follows: notices, sounds, GitHub, the terminals, the map and the CI result it reads from the default branch for the Map view, and the quiet log of what you use of it.",
+      "tier": "core", "paths": ["src-tauri/"]
+    },
+    {
+      "id": "understanding", "name": "Understanding", "caption": "Writes what you read, and keeps it",
+      "description": "Decides what a change is worth telling you, asks the writer for it, and stores it: cards, turn summaries, briefs, the offers record and the risk notes of blocked commands.",
+      "tier": "core", "paths": ["understanding/"]
+    },
+    {
+      "id": "window", "name": "Window", "caption": "Everything you see and press",
+      "description": "The list, the rail, Home, the Map view and the terminal panes. It shows state and sends your actions to the shell.",
+      "tier": "core", "paths": ["ui/"]
+    },
+    {
+      "id": "terminal-daemon", "name": "Terminal daemon", "caption": "Owns the terminals",
+      "description": "A background process that keeps every terminal alive, so they outlive the app.",
+      "tier": "interface", "paths": ["terminal-daemon/"]
+    },
+    {
+      "id": "workbench", "name": "Workbench", "caption": "Worktrees, PRs and plan usage",
+      "description": "Git worktrees, tasks, PR lookups and plan usage. A black box: it never fogs and never asks for your time.",
+      "tier": "black-box", "paths": ["workbench/"]
+    }
+  ],
+  "actors": [
+    { "id": "agents", "name": "Agents" },
+    { "id": "writer", "name": "Writer" },
+    { "id": "github", "name": "GitHub" }
+  ],
+  "links": [
+    { "id": "agents-plugins", "from": "agents", "to": "plugins" },
+    { "id": "plugins-hook", "from": "plugins", "to": "hook" },
+    { "id": "hook-shell", "from": "hook", "to": "shell" },
+    { "id": "core-shell", "from": "core", "to": "shell" },
+    { "id": "shell-understanding", "from": "shell", "to": "understanding" },
+    { "id": "understanding-writer", "from": "understanding", "to": "writer" },
+    { "id": "shell-window", "from": "shell", "to": "window" },
+    { "id": "shell-terminal-daemon", "from": "shell", "to": "terminal-daemon" },
+    { "id": "shell-workbench", "from": "shell", "to": "workbench" },
+    { "id": "workbench-github", "from": "workbench", "to": "github" }
+  ],
+  "ignored": [
+    ".agents/", ".claude/", ".github/", ".gitignore", "AGENTS.md", "CLAUDE.md", "Cargo.lock", "Cargo.toml", "LICENSE",
+    "README.md", "package-lock.json", "package.json", "real-calls.sh", "rust-toolchain.toml", "tsconfig.json",
+    "system-map.json",
+    "docs/", "scripts/", "terminal-spike/", "v0-spike/",
+    "wayfinder/", "test-support/", "system-map/"
+  ],
+  "laws": [
+    { "id": "hook-never-makes-agent-wait", "on": "hook", "backing": "trust",
+      "text": "The hook never makes the agent wait, except for your answer." },
+    { "id": "core-reads-only-transcripts", "on": "core", "backing": "trust",
+      "text": "The core does no I/O except reading transcripts." },
+    { "id": "check-result-is-last-run", "on": "core", "backing": "trust",
+      "text": "A check's result is its last run's." },
+    { "id": "no-notices-lock-on-main-thread", "on": "shell", "backing": "trust",
+      "text": "Nothing on the main thread takes the notices' lock." },
+    { "id": "wire-types-agree", "on": "shell", "backing": "check",
+      "text": "The window's types and the Rust wire types agree." },
+    { "id": "session-pieces-in-order", "on": "understanding", "backing": "check",
+      "text": "A session's pieces are written one at a time, in order." },
+    { "id": "old-stored-files-load", "on": "understanding", "backing": "check",
+      "text": "A stored file of an older format still loads." },
+    { "id": "writer-has-no-tools", "on": "understanding", "backing": "check",
+      "text": "A change is untrusted text: the writer has no tools." },
+    { "id": "delete-keeps-live-terminal", "on": "window", "backing": "check",
+      "text": "Delete never ends a terminal another live session uses." },
+    { "id": "colour-only-for-needs-you", "on": "window", "backing": "trust",
+      "text": "Colour is only for what needs you." },
+    { "id": "terminals-outlive-app", "on": "terminal-daemon", "backing": "trust",
+      "text": "Terminals outlive the app." }
+  ],
+  "flows": [
+    { "id": "turn-writing", "name": "Turn writing",
+      "hops": [
+        { "link": "core-shell", "text": "Core sees the turn end and the shell asks for a card." },
+        { "link": "shell-understanding", "text": "The shell passes the request on; understanding queues it for the session." },
+        { "link": "understanding-writer", "text": "Understanding asks the writer for the card." },
+        { "link": "understanding-writer", "text": "The writer's card comes back and understanding stores it." },
+        { "link": "shell-understanding", "text": "Understanding tells the shell the card is stored." },
+        { "link": "shell-window", "text": "The shell updates the list and sends the notice." }
+      ] }
+  ]
+}
+
+=== MAP DIFF IN THIS PR ===
+diff --git a/system-map.json b/system-map.json
+index 64238ef2b..87a19340a 100644
+--- a/system-map.json
++++ b/system-map.json
+@@ -19,7 +19,7 @@
+     },
+     {
+       "id": "shell", "name": "Shell", "caption": "Reads the log, feeds the core, acts",
+-      "description": "The app's Rust side. It reads the event log, feeds the core, and carries out what follows: notices, sounds, GitHub, the terminals.",
++      "description": "The app's Rust side. It reads the event log, feeds the core, and carries out what follows: notices, sounds, GitHub, the terminals, the map and the CI result it reads from the default branch for the Map view, and the quiet log of what you use of it.",
+       "tier": "core", "paths": ["src-tauri/"]
+     },
+     {
+@@ -29,7 +29,7 @@
+     },
+     {
+       "id": "window", "name": "Window", "caption": "Everything you see and press",
+-      "description": "The list, the rail, Home and the terminal panes. It shows state and sends your actions to the shell.",
++      "description": "The list, the rail, Home, the Map view and the terminal panes. It shows state and sends your actions to the shell.",
+       "tier": "core", "paths": ["ui/"]
+     },
+     {
+
+=== PARTS TABLE ===
+## core (Core, tier core)
+laws:
+  core-reads-only-transcripts (trust): The core does no I/O except reading transcripts. [tagged tests: none]
+  check-result-is-last-run (trust): A check's result is its last run's. [tagged tests: none]
+flows through it: turn-writing
+- core core/src/lib.rs +5/-0
+
+## shell (Shell, tier core)
+laws:
+  no-notices-lock-on-main-thread (trust): Nothing on the main thread takes the notices' lock. [tagged tests: none]
+  wire-types-agree (check): The window's types and the Rust wire types agree. [tagged tests: the_wire_samples_of_the_core_are_written_for_tsc in core/tests/wire.rs (not changed in this PR); the_wire_samples_of_the_understanding_layer_are_written_for_tsc in understanding/tests/wire.rs (not changed in this PR); the_wire_samples_of_the_workbench_are_written_for_tsc in workbench/tests/wire.rs (not changed in this PR)]
+flows through it: turn-writing
+- core src-tauri/src/ci_laws.rs +1195/-0
+- core src-tauri/src/map.rs +682/-0
+- core src-tauri/src/fog.rs +606/-0
+- core src-tauri/src/history.rs +419/-0
+- core src-tauri/src/stop_rules.rs +379/-0
+- core src-tauri/src/main.rs +28/-1
+- core src-tauri/Cargo.toml +3/-1
+- test src-tauri/tests/ci-logs/node-tap-failed.log +74/-0
+- test src-tauri/tests/ci-logs/nextest-fail-fast.log +73/-0
+- test src-tauri/tests/ci-logs/nextest-failed.log +73/-0
+- test src-tauri/tests/ci-logs/node-spec-failed.log +59/-0
+- test src-tauri/tests/ci-logs/fmt-failed.log +21/-0
+- test src-tauri/tests/ci-logs/nextest-real-binaries.log +6/-0
+
+## window (Window, tier core)
+laws:
+  delete-keeps-live-terminal (check): Delete never ends a terminal another live session uses. [tagged tests: a terminal is in use while a session not leaving, and not ended, runs in it in ui/tests/home.test.mjs (not changed in this PR)]
+  colour-only-for-needs-you (trust): Colour is only for what needs you. [tagged tests: none]
+flows through it: turn-writing
+- core ui/map.ts +420/-0
+- core ui/map-model.ts +267/-0
+- core ui/home.ts +126/-23
+- core ui/map-sheet.ts +146/-0
+- core ui/map-agents.ts +121/-0
+- core ui/style.css +119/-0
+- core ui/map-history.ts +105/-0
+- core ui/stop-rules.ts +80/-0
+- core ui/map-drawer.ts +74/-0
+- core ui/types.ts +69/-0
+- core ui/seen.ts +67/-0
+- core ui/cards.ts +31/-30
+- core ui/main.ts +22/-7
+- core ui/index.html +21/-0
+- core ui/picker.ts +11/-8
+- core ui/layout.ts +7/-3
+- core ui/tokens.css +10/-0
+- core ui/panes.ts +4/-4
+- core ui/story.ts +1/-5
+- core ui/list.ts +4/-0
+- core ui/selection.ts +3/-0
+- core ui/settings.ts +2/-0
+- core ui/workspaces.ts +2/-0
+- test ui/tests/map.test.mjs +183/-0
+- test ui/tests/home.test.mjs +113/-24
+- test ui/tests/seen.test.mjs +113/-0
+- test ui/tests/map-drawer.test.mjs +108/-0
+- test ui/tests/card-shown.test.mjs +67/-22
+- test ui/tests/stop-rules.test.mjs +82/-0
+- test ui/tests/map-agents.test.mjs +81/-0
+- test ui/tests/map-scrub-unread.test.mjs +29/-0
+- test ui/tests/layout.test.mjs +16/-7
+- test ui/tests/unseen-card.test.mjs +18/-3
+- test ui/tests/full-text.test.mjs +3/-0
+- test ui/tests/auto-mode.test.mjs +1/-1
+- test ui/tests/pointer-reach.test.mjs +2/-0
+- test ui/tests/projects.test.mjs +1/-1
+
+noise (ignored or unowned paths, not the running system): 13 files
+
+=== LAW TAGS ADDED ===
+- law `<id>`` in docs/studio/behaviour/map.md: (no test line found)
+- law ``` in docs/studio/behaviour/map.md: (no test line found)
+- law `wire-types-agree"))` in scripts/snap/fixtures.ts: map_proof: [{ file: "workbench/tests/wire.rs", line: 11, test: "wire_types_match", first: 11, snippet: "// @law: wire-types-agree\n#[test]\nfn wire_types_match() {\n    studio_test_support::assert_wire_types_agree();\n}" }],
+- law `wire-types-agree\n#[test]\nfn` in scripts/snap/fixtures.ts: (no test line found)
+- law `<id>`` in src-tauri/src/ci_laws.rs: pub fn clean_lines(log: &str) -> Vec<String> {
+- law `<id>`` in src-tauri/src/ci_laws.rs: pub fn law_tests_at(repo: &Path, at: &str) -> Vec<LawTest> {
+- law `",` in src-tauri/src/ci_laws.rs: pub fn snippet(text: &str, tag_line: usize) -> (usize, String) {
+- law `wire-types-agree\n#[test]\nfn` in src-tauri/src/ci_laws.rs: fn the_proof_is_the_tag_and_the_test_after_it_up_to_its_closing_line() {
+- law `wire-types-agree\n#[test]\nfn` in src-tauri/src/ci_laws.rs: "// @law: a\ntest(\"one\", () => {\n  assert.ok(1);\n});\ntest(\"two\", () => {});\n";
+- law `a\ntest(\"one\",` in src-tauri/src/ci_laws.rs: "// @law: a\ntest(\"one\", () => {\n  assert.ok(1);\n});".to_string()
+- law `a\ntest(\"one\",` in src-tauri/src/ci_laws.rs: snippet("// @law: a\n#[test]\nfn one() {}\nfn two() {}", 1).1,
+- law `a\n#[test]\nfn` in src-tauri/src/ci_laws.rs: "// @law: a\n#[test]\nfn one() {}"
+- law `a\n#[test]\nfn` in src-tauri/src/ci_laws.rs: fn a_proof_that_never_closes_stops_at_the_limit() {
+- law `a\nfn` in src-tauri/src/ci_laws.rs: fn commit_file(dir: &Path, name: &str, text: &str) {
+- law `other\nfn` in src-tauri/src/ci_laws.rs: assert!(proof[0].snippet.contains("fn wire_types_match"));
+- law ``` in src-tauri/src/map.rs: pub fn map_proof(project: String, law: String) -> Vec<crate::ci_laws::Proof> {
+- law `wire-types-agree` in src-tauri/tests/ci-logs/fmt-failed.log: macos	Run npm run check	2026-11-22T09:12:10.1234567Z -fn wire_types_match() { assert_eq!(studio_nx::one(), 2, "wire drifted"); }
+- law `wire-types-agree\n#[test]\nfn` in ui/tests/map-drawer.test.mjs: test("a law with no test found says so instead of showing an empty drawer", () => {
+
+=== CHECKS ===
+macos SUCCESS
+macos SUCCESS
+snap FAILURE
+snap SUCCESS
+
+=== PR ===
+#317 Studio: the system map view — fog, live agents, broken laws, history, and seen (#306)
+merged 2026-11-22T16:22:20Z
+
+## Summary
+
+The **Map view** (spec #306, project 2 of 4): Studio draws `system-map.json` from `origin`'s default branch, with fog, live agents, broken laws, part history, a shared **Seen** gate and always-on stop rules.
+
+```text
+src-tauri/src/
+├── map.rs          # map from origin/HEAD, fetch cooldown + lock, map-state.json (positions, tiers), live-agent placement
+├── fog.rs          # first-parent walk, thin/thick by union of parent+commit maps, effective tier, "I know this"
+├── ci_laws.rs      # latest finished studio.yml run via gh, nextest/Node failure parsing → @law test names → parts; ci-last.json
+├── history.rs      # a part's first-parent commits since the map's birth, map at a commit, commit files/diff
+└── stop_rules.rs   # stop-rules.jsonl event log, facts for the evaluator
+system-map/src/     # touched_for_map (in memory), parse_lenient, law_tests / test_name_after
+ui/
+├── seen.ts         # watchSeen: ≥50% element or viewport, 500 ms, visible + focused, active view
+├── map.ts, map-model.ts           # shell, plates, drag (6 px), auto-place, layered Esc
+├── map-sheet.ts, map-drawer.ts    # part sheet (tier, laws, fog, I know this, CI, history), read-only drawer
+├── map-agents.ts, map-history.ts  # chips + not placed; strip + scrub
+└── stop-rules.ts   # thresholds, one-time review (Map view + Home fallback)
+```
+
+```text
+Esc in the Map view
+  drawer open      → close drawer
+  scrubbed         → back to now
+  sheet open       → close sheet
+  else             → leave Map view
+```
+
+The Esc order follows ticket #313 (drawer before scrubbed); the spec's two lines disagree with each other — a one-line change in `ui/map-model.ts` `layerOrder` if the spec's order is wanted.
+
+Per ticket: #307 Seen helper, story-rail cards fixed · #308 system-map entry points · #309 shell, plates, drag, empty state · #310 fog, part sheet, Home mark · #311 live agents · #312 broken laws, drawer · #313 history strip · #314 stop rules, `behaviour/map.md`.
+
+## Evidence
+
+Snap screenshots (`local-evidence/project-2-map-view/screenshots/`, compared with Treatment C `C-busy.png`):
+
+- `309-mapCalm.png`, `309-mapEmpty.png` — calm map; no-map empty state with "Draft a map"
+- `final-map-fog.png` (= `310-map-busy.png`) — thin + thick mist, part sheet open; `310-home-mark.png`
+- `311-map-busy.png` — chips on parts, "needs you" pill, not placed list
+- `312-mapBroken.png`, `312-mapProof.png`, `312-mapBrokenLog.png` — broken-law mark beside Needs you; proof and CI-log drawers
+- `313-mapScrubbed.png` — scrubbed to a past commit, "Viewing … · Back to now"
+- `314-review-map.png`, `314-review-home.png` — the one-time review, no counts
+
+- **Before:** story-rail cards were marked shown when built in the DOM; no Map view.
+  **After:** `npm run check` green (Rust nextest, 627 node tests, `system-map check`, wire types); `npm run snap:all` renders 75 fixtures. New tests include:
+
+```text
+fog:      first open starts clear; paths move fogs both parts thick; zone/ignored/tier → no fog;
+          overlapping walks file nothing twice and don't undo "I know this"
+ci_laws:  tagged test fails → its part; unrelated test in same file → nothing; fmt fails → not-run;
+          real nextest ids (studio-core::it wire::…, studio::bin/studio …) match their tags
+seen:     off-screen / unfocused / folded rail / behind the Map view → not shown; tall card at 50% viewport → shown
+stop:     no review before 14 active days AND 20 merged PRs; Home review only when the Map view missed
+```
+
+## Review
+
+Final review: standards, spec and correctness passes over the whole branch, plus a re-review of the fix commits. Fixed: fog lost update, merge hook blocking the landed loop and firing on start, out-of-order scrub results, locks not freed on panic, torn stop-rule line, CI result lost on restart, per-project merged-PR start, Home learning items on Seen, stale banner/sheet after switching to a no-map project, missing-tier default, `development.md`, redundant dev dependency, review banner snap fixtures, mist too faint, sheet clipping plates.
+
+## Outside review
+
+Model: gemini-4-neon-medium.
+
+- **Round 1** — cost: 4.4 min, 324916 tokens; Gemini quota left: weekly 79% to 77%, 5h 95% to 90%
+  1. `holds` never matched this workspace's `it` test binaries — **fixed**; not reported by the correctness pass.
+  2. TAP parser index out of bounds on a duplicate title — **fixed**; not reported by the correctness pass.
+  3. Merged PRs 0 for a project never opened, so Home's fallback never came due — **fixed**; the spec pass reported the counting basis, not this case.
+  4. Home mark watched a node `patch` discards — **fixed**; not reported.
+  5. Focus on Home didn't redraw marks — **fixed**; not reported.
+  6. Story-rail cards counted as seen behind the Map view — **fixed**; not reported.
+  7. Home quizzes counted as seen behind the Map view — **fixed**; not reported.
+- **Round 2** (`--since 9230b635b`) — cost: 4.3 min, 292996 tokens; Gemini quota left: weekly 77% to 76%, 5h 90% to 86%
+  1. "Back to now" a no-op on an unreadable past map — **fixed**; not reported.
+  2. `rail_shown` still told true behind the Map view — **fixed**; not reported.
+  3. `studio::bin/studio` unit-test ids never matched — **fixed**; not reported.
+  4. Home mark not counted on later days while Studio stays open — **fixed**; not reported.
+
+## Left out or limited
+
+- "Not yet ratified" on laws: no ratification field exists yet (project 3).
+- CI workflow is the constant `studio.yml` (plotkeeper only, per the spec's scope).
+- Active days are Studio-wide, as the spec defines them; merged PRs count per project from that project's first event.
+- A merge that lands while Studio is closed starts no fetch; the next map open fetches.
+
+## Merge Danger
+
+**Door:** two-way
+
+New data-folder files (`map-state.json`, `ci-last.json`, `stop-rules.jsonl`) are additive and tolerant of missing/older shapes; story-rail `shown` timestamps are not rewritten, but what counts as shown changes from now on (one-time step in weekly guess rates, accepted in #306).
+
+**Blast Radius:** moderate
+
+Touches the story rail's shown path, Home's rows and learning `shown`, `refresh_landed` (merge hook on its own thread), and runs `git fetch` / `gh run` on map open and focus (cooldown-guarded). After merge, quit Studio and run `npm run start` from the main checkout.
+
+Closes #306
+Closes #307
+Closes #308
+Closes #309
+Closes #310
+Closes #311
+Closes #312
+Closes #313
+Closes #314
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+=== SPEC ===
+#306 Studio: Spec: the system map view — fog, live agents, broken laws, history, and seen
+created 2026-11-22T13:11:20Z
+(trimmed to its user stories and implementation decisions)
+
+## User Stories
+
+1. As Daniel, I want to open a project's Map view from the palette (`studio::ShowMap`), a rebindable key, or a quiet mark on Home's project row, so that I can reach the map without hunting for it.
+2. As Daniel, I want the Map view to take the story rail and terminal column together while keeping the session list and top bar live, so that the map has generous room without blinding me to `Needs you` sessions across projects.
+3. As Daniel, I want to switch between projects from the project name at the top-left of the Map view, so that I can inspect any project's map without leaving the view.
+4. As Daniel, I want clicking any session in the session list, clicking empty list space (Home), pressing the map key again, or pressing Esc to leave the Map view cleanly, so that returning to my work is effortless.
+5. As Daniel, I want Esc inside the Map view to be layered — first returning from a scrubbed historical commit to live, then closing an open part sheet or drill-down drawer, then leaving the Map view — so that Esc never throws me out of the map unexpectedly.
+6. As Daniel, I want parts drawn as clean plates with their name, short caption, and law marks (distinct between backed by a check and on trust), with links drawn rim to rim and outside actors placed cleanly, so that the map feels like a pilot's cockpit rather than a Mermaid flowchart.
+7. As Daniel, I want every part to keep its saved position per part id in the studio's data folder and never reshuffle on reload, so that I build lasting spatial memory of my system.
+8. As Daniel, I want to drag a part plate (past a ~5–6 px threshold so normal clicks never nudge it) to adjust its saved position, so that I can fix an awkward auto-placement without needing a layout editor.
+9. As Daniel, I want a newly added part to be placed near the parts it links to (in its declared `zone` when present) without moving existing parts, so that the map grows without breaking my spatial memory.
+10. As Daniel, I want the Map view, fog, and broken laws to all read from `origin`'s default branch as last fetched (`origin/HEAD`), so that the map never contradicts CI or waits on me remembering to pull `main`.
+11. As Daniel, I want fog rendered as a cool-grey mist (`--mist`) that stays readable over a plate while keeping the part's name at full strength, so that it reads as "unknown" rather than "disabled" or "selected" and stays distinct by temperature from warm focus/brief light.
+12. As Daniel, I want fog to have two deterministic strengths — thin for internal file changes and thick for changes to a part's laws, links, or flows in `system-map.json` — and never scale by commit or PR count, so that fog reflects mental-model drift rather than a nagging backlog.
+13. As Daniel, I want every project's map to start clear at my first open of its Map view, so that every mist I see represents a real change that landed after I started using the map.
+14. As Daniel, I want to change a part's tier (`Core`, `Interface-only`, `Black box`) directly inside its part sheet, persisted in the studio's data folder, and never be nudged to lower a tier, so that I stay in control of what I track.
+15. As Daniel, I want Black box parts never to fog and Interface-only parts to fog only on thick (edge/law/flow) changes, so that my attention stays on what I care about.
+16. As Daniel, I want a quiet **"I know this"** button on a fogged part's sheet that clears that part's fog (with a smooth mist-lift reveal) and records the clear separately in stop-rule tracking, so that I can clear fog before PR briefs exist or when I already understand a change.
+17. As Daniel, I want to see live `Running` and `Needs you` sessions and Workers placed as chips on every part their active turn has changed files in — with `Needs you` keeping its loud orange pill and clicking any chip jumping to that session — so that I can see what agents are changing right now.
+18. As Daniel, I want read-only Helpers and finished (`Your turn`, `Idle`, `Ended`) sessions to leave the map immediately, and active sessions with no changed files yet, `turn_trees: false` (`agy`), status-only sessions (`Codex`), or `ignored`-only edits to sit in a quiet **not placed** list beside the map, so that no active session vanishes and finished work never clutters the map.
+19. As Daniel, I want Studio to check CI on the default branch via `gh` when the Map view opens, when the window gains focus while it is open, and when a merge to the default branch is seen (never on a timer), so that broken laws stay accurate without background polling.
+20. As Daniel, I want a broken-law mark (*"a test that backs laws here failed on main"*) to appear only when the specific test function tagged with `@law:` actually failed in that CI run — never when an unrelated test in the same file fails, or when formatting/clippy/build fails or the log is unreadable — and I want the drill-down to distinguish *"passed"* from *"law tests did not run"*, so that loud colour never cries wolf.
+21. As Daniel, I want a part's sheet to show its plain description, tier selector, laws (marked backed by a check or on trust, plus "not yet ratified" where applicable), fog status, and a scrubbable history strip of first-parent commits on `origin/HEAD` from the map's birth onward, so that I can inspect a part's evolution.
+22. As Daniel, I want scrubbing a part's history strip to render the map as of that historical commit (read-only, with live agents and CI hidden and a quiet *"Viewing `<commit>` · Back to now"* banner), so that I can see how the system changed over time.
+23. As Daniel, I want clicking **"See the proof"** on a law (to view its tagged test around `@law: <id>`), clicking a broken law's drill-down (to view the failing CI log tail), or clicking a history commit's drill-down (to view its files/diff) to open an inline read-only drawer inside the Map view with one-click **"Open in editor"** / **"Open on GitHub"** links, so that I never lose my place on the map.
+24. As Daniel, I want Home's row for a project to show one subtle mark (with no count) whenever a Core part is fogged or a law is broken, and clicking it to open that project's Map view, so that the map stays discoverable without turning Home into a dashboard.
+25. As Daniel, I want a project with no `system-map.json` to say so clearly in the Map view and offer a **"Draft a map"** button that opens a new session in that project pre-filled with a drafting prompt, so that onboarding another repository is one click.
+26. As Daniel, I want cards, Home items, and map surfaces to count as **Seen** only when they visibly intersect the viewport in a visible, focused window with their holding view open, so that off-screen or unfocused items are never miscounted as seen.
+27. As Daniel, I want always-on stop-rule tracking (with no settings toggle and no score shown to me) that surfaces a quiet, dismissible one-time review after 14 active days and at least 20 merged PRs (whichever comes last) listing only what fell below its threshold — inside the Map view, and on Home too if the Map view itself missed its threshold — so that unused pieces can be pruned honestly.
+
+## Implementation Decisions
+
+### Visual craft and tokens
+- **Treatment C (plates + cool-grey mist):** Build on Treatment A's plate geometry and surface hierarchy with a cool-grey mist token (`--mist`, around `#c4ccd6`, very low chroma) so fog and warm focus/brief light separate by temperature rather than hue. Add all map mist, light, and motion values to the design tokens file first so the raw-value token guard keeps passing.
+- **Visual tuning carried from prototype review:**
+  - Bump `--mist`'s alpha slightly over the prototype's C treatment so thin/lit fog reads cleanly under a warm ring without adding more blue.
+  - Make the visual separation between **thin** and **thick** mist slightly clearer than the prototype's square-root curve (`0.45` → `0.67` vs `1.0`).
+  - Keep `--conflict` and `--needs-you` unchanged; verify both colours side by side at small sizes in snap screenshots before shipping.
+  - Respect `prefers-reduced-motion: reduce` for mist drift, mist lift, and transitions.
+- **No "Ready for review" tray in project 2:** Leave out the bottom-left PR brief tray until project 3 ships PR briefs, so nothing in the UI looks half-wired.
+
+### Data source, default branch, and fog engine
+- **Single commit of truth:** Read `system-map.json` directly from `origin`'s default branch ref as last fetched (`git show <default>:system-map.json`), and compute fog and part history from first-parent history on that same ref. If `origin/HEAD` is unset in a repository that was not cloned, fall back to the local default branch (`main`/`master`) with a quiet note.
+- **Fetch triggers and guard:** Fetch `origin` when the Map view opens, when the window gains focus while it is open, and when Studio's landed-task check sees a task transition to merged — never on a timer. Guard `git fetch` with a per-repo cooldown (~60 s) and an in-flight lock so rapid focus switches never spam fetches or contend with worktree git operations; log fetch failures quietly.
+- **In-memory matcher and historical map loading:** Add an in-memory entry point to `studio-system-map` that classifies paths against a parsed `Map` (rather than reading the working tree on disk). Keep strict `deny_unknown_fields` parsing for `system-map check` on HEAD, and add a lenient historical loader (ignoring unknown fields, degrading gracefully on unreadable commits) so future schema additions never break history scrubbing or fog walks.
+- **Fog model:** Per project, store a fog state in the studio's data folder: the default-branch commit at which the project was first opened (so every project starts clear), and per-part lists of un-caught-up commits (each tagged `thin` or `thick`).
+  - On refresh, walk new first-parent commits since the last processed commit. Classify each commit's changed paths against the **union** of the commit's map and its parent's map (so moving files between parts touches both source and destination).
+  - Compare `system-map.json` between parent and commit to classify strength:
+    - **Thick:** a law attached to the part, a link touching the part, a flow crossing the part, or the part's `paths` changed; or the part was newly added after first open.
+    - **Thin:** internal files owned by the part changed, or only the part's `name`, `caption`, or `description` changed without structural changes.
+    - **No fog:** `zone` changes (placement hint only), `ignored` changes, or **computed edge** changes (computed edges are hints for `system-map check`, never drawn on the map and never cause fog).
+    - **Part removed:** dropped from the live map (its saved position/fog stays harmlessly in the store in case of revert) and still renders when scrubbing to earlier commits.
+  - **"I know this"** clears a part's fog list, plays the mist-lift transition, and logs a dedicated stop-rule event.
+- **Part positions and tiers:** Store Daniel's per-part tier overrides and `(x, y)` coordinates per part id in the studio's data folder (never in the repository).
+  - **Tier precedence:** Daniel's local override always wins over `system-map.json`'s default `tier`. A repo change to `tier` applies only to parts without a local override. All fog filtering (`black-box` never fogs; `interface` fogs only `thick`) and Home's quiet mark (*"a Core part is fogged"*) use Daniel's **effective tier**.
+  - Auto-place any part without a saved coordinate once (respecting links and optional `zone`, never moving already-placed parts). Support pointer dragging with a ~5–6 px movement threshold before entering drag mode so clicks to open a part sheet never nudge positions.
+
+### Broken laws (CI on the default branch)
+- **Triggering:** Query GitHub via `gh` for the latest finished run of the project's law-testing CI job on the default branch on the same triggers as fetch (map open, window focus while open, task seen as merged) — never on a timer. While a newer run is in progress, retain the last finished result and note in the drill-down that it is for an earlier commit.
+- **Test-name attribution (not file-level):** Resolve each `@law: <id>` tag's `(file, line)` to the specific test function immediately following that comment (e.g. `fn <name>` in Rust, `test("<name>"` in Node). When the latest finished CI run failed, fetch its failed log via `gh`, parse failing test names from the supported test runners (`cargo nextest` and Node's test runner), match against tagged test names, and attach the coarse broken-law mark (*"a test that backs laws here failed on main"*) to the owning parts. Unrelated failing tests in the same file never trigger the mark.
+- **Fail-quiet rule and status clarity:** Because `npm run check` runs as a `&&` chain and nextest uses default fail-fast, a missing red mark means only **"no known failure"**, not that every law test ran and passed. If CI failed before law tests ran (fmt, clippy, build), failed only in untagged tests, or the log cannot be fetched/parsed, show **no** broken-law red mark — and in the drill-down distinguish **"passed"**, **"law tests did not run"** (or unreadable log), and **"a test that backs laws here failed on main"**.
+
+### Live agents and "not placed"
+- Read active sessions and Workers from existing core state (`turn_trees` + active turn's changed files, plus Edit/Write paths while a turn is mid-flight). No new hook plumbing.
+- Show only `Running` and `Needs you` sessions and Workers; Helpers and `Your turn` / `Idle` / `Ended` sessions never sit on the map.
+- Place a session/Worker chip on **every** part its active turn touched. Active sessions with no changed files yet, `turn_trees: false`, status-only sessions, or `ignored`-only file changes appear in a quiet **not placed** list beside the map. Clicking any chip jumps straight to that session.
+
+### History strip, inline proof, and drill-downs
+- **History strip:** List first-parent commits on `origin/HEAD` touching the part's paths from the commit that introduced `system-map.json` onward (displaying PR number + title when present in the commit subject, else the commit summary). Scrubbing renders `system-map.json` as of that commit in a read-only mode (live agents and CI hidden, quiet *"Viewing `<commit>` · Back to now"* banner).
+- **Inline proof and drill-downs:** Clicking **"See the proof"** on a law, a broken-law log link, or a history commit's files/diff opens a read-only drawer inside the Map view, with one-click **"Open in editor"** (using Studio's existing editor-open action) and **"Open on GitHub"** actions.
+- **Layered Esc:** Scrubbed history → return to live; else open drill-down drawer → close drawer; else open part sheet → close sheet; else leave Map view.
+
+### Shared `Seen` gate and stop-rule tracking
+- **Shared `Seen` helper:** Build one viewport-observation helper requiring: element intersecting the viewport (**≥ 50% of the element OR ≥ 50% of the viewport**, so tall cards can still be seen) for ≥ 500 ms, document visible and window focused, and holding view active (`railShown`, `homeShown`, or `mapShown`).
+  - Wire existing Story rail cards to this helper, fixing the built-is-shown bug where cards were marked shown on DOM creation. Note: changing what counts as shown introduces a one-time discontinuity in existing weekly guess rates (which retire in project 3); do not backfill or rewrite stored `shown` timestamps.
+  - Use the same helper to record "offered in view" events for stop-rule tracking.
+- **Stop rules (always on, no config, no scores):** Append structured usage events to a store in the studio's data folder. Evaluate per project once **both** conditions hold: **14 active days AND at least 20 merged PRs** (whichever comes **last**).
+  - **Active day:** a local calendar day on which Studio had at least one session event or the Map view was opened.
+  - **Thresholds:**
+    - Map view: opened on ≥ 4 active days **or** on ≥ 20% of the active days on which Home's quiet mark was seen.
+    - Part history strip: scrubbed ≥ 2 times.
+    - "See the proof" / inline drill-downs: opened ≥ 2 times.
+    - "I know this": recorded as its own event with no fail threshold in project 2 (baseline for project 3).
+  - Surface a quiet, dismissible one-time review listing only modules below threshold inside the Map view — **and on Home too if the Map view itself missed its threshold**, so an unused map still reaches Daniel. Once dismissed, the review does not nag again while raw event logging continues quietly.
+
+### Empty state and glossary
+- **No-map project state:** When the selected project has no `system-map.json` on the default branch, render a calm empty state with a **"Draft a map"** button that launches Studio's existing New session flow in that project pre-filled with a drafting prompt referencing `system-map.json` and `system-map check`.
+- **Glossary updates:** Fold the terms in `## Vocabulary` into `docs/studio/CONTEXT.md` in project 2's first ticket (self-contained from this spec, not relying on any unpushed local branch), and update `docs/studio/behaviour/map.md` as behaviour lands.
+
+=== DIFF NOT SENT ===
+50 files not fully sent; do not guess what they hold:
+- ui/main.ts (window): +22/−7, 6 of 7 hunks not sent
+- ui/cards.ts (window): +31/−30, 6 of 6 hunks not sent
+- ui/seen.ts (window): +67/−0, 1 of 1 hunks not sent
+- ui/types.ts (window): +69/−0, 3 of 3 hunks not sent
+- ui/map-drawer.ts (window): +74/−0, 1 of 1 hunks not sent
+- ui/stop-rules.ts (window): +80/−0, 1 of 1 hunks not sent
+- ui/map-history.ts (window): +105/−0, 1 of 1 hunks not sent
+- ui/style.css (window): +119/−0, 1 of 1 hunks not sent
+- ui/map-agents.ts (window): +121/−0, 1 of 1 hunks not sent
+- ui/map-sheet.ts (window): +146/−0, 1 of 1 hunks not sent
+- ui/home.ts (window): +126/−23, 10 of 10 hunks not sent
+- ui/map-model.ts (window): +267/−0, 1 of 1 hunks not sent
+- src-tauri/src/stop_rules.rs (shell): +379/−0, 1 of 1 hunks not sent
+- src-tauri/src/history.rs (shell): +419/−0, 1 of 1 hunks not sent
+- ui/map.ts (window): +420/−0, 1 of 1 hunks not sent
+- src-tauri/src/fog.rs (shell): +606/−0, 1 of 1 hunks not sent
+- src-tauri/src/map.rs (shell): +682/−0, 1 of 1 hunks not sent
+- src-tauri/src/ci_laws.rs (shell): +1195/−0, 1 of 1 hunks not sent
+- ui/tests/pointer-reach.test.mjs (window): +2/−0, 1 of 1 hunks not sent
+- ui/tests/projects.test.mjs (window): +1/−1, 1 of 1 hunks not sent
+- ui/tests/full-text.test.mjs (window): +3/−0, 1 of 1 hunks not sent
+- src-tauri/tests/ci-logs/nextest-real-binaries.log (shell): +6/−0, 1 of 1 hunks not sent
+- src-tauri/tests/ci-logs/fmt-failed.log (shell): +21/−0, 1 of 1 hunks not sent
+- ui/tests/unseen-card.test.mjs (window): +18/−3, 3 of 3 hunks not sent
+- ui/tests/layout.test.mjs (window): +16/−7, 2 of 2 hunks not sent
+- ui/tests/map-scrub-unread.test.mjs (window): +29/−0, 1 of 1 hunks not sent
+- src-tauri/tests/ci-logs/node-spec-failed.log (shell): +59/−0, 1 of 1 hunks not sent
+- src-tauri/tests/ci-logs/nextest-fail-fast.log (shell): +73/−0, 1 of 1 hunks not sent
+- src-tauri/tests/ci-logs/nextest-failed.log (shell): +73/−0, 1 of 1 hunks not sent
+- src-tauri/tests/ci-logs/node-tap-failed.log (shell): +74/−0, 1 of 1 hunks not sent
+- ui/tests/map-agents.test.mjs (window): +81/−0, 1 of 1 hunks not sent
+- ui/tests/stop-rules.test.mjs (window): +82/−0, 1 of 1 hunks not sent
+- ui/tests/card-shown.test.mjs (window): +67/−22, 4 of 4 hunks not sent
+- ui/tests/map-drawer.test.mjs (window): +108/−0, 1 of 1 hunks not sent
+- ui/tests/seen.test.mjs (window): +113/−0, 1 of 1 hunks not sent
+- ui/tests/home.test.mjs (window): +113/−24, 5 of 5 hunks not sent
+- ui/tests/map.test.mjs (window): +183/−0, 1 of 1 hunks not sent
+- Cargo.lock ((noise)): +2/−0, 1 of 1 hunks not sent
+- scripts/snap/all.mjs ((noise)): +1/−1, 1 of 1 hunks not sent
+- system-map.json ((noise)): +2/−2, 2 of 2 hunks not sent
+- docs/studio/development.md ((noise)): +4/−3, 3 of 3 hunks not sent
+- system-map/src/touched.rs ((noise)): +8/−4, 3 of 3 hunks not sent
+- scripts/snap/base.ts ((noise)): +13/−0, 1 of 1 hunks not sent
+- system-map/tests/touched.rs ((noise)): +15/−0, 1 of 1 hunks not sent
+- docs/studio/behaviour/map.md ((noise)): +38/−0, 1 of 1 hunks not sent
+- system-map/tests/map_file.rs ((noise)): +38/−0, 1 of 1 hunks not sent
+- system-map/src/laws.rs ((noise)): +78/−1, 2 of 2 hunks not sent
+- system-map/src/lib.rs ((noise)): +79/−11, 10 of 10 hunks not sent
+- system-map/tests/laws.rs ((noise)): +123/−0, 1 of 1 hunks not sent
+- scripts/snap/fixtures.ts ((noise)): +297/−1, 3 of 3 hunks not sent
+
+=== DIFF ===
+diff --git a/ui/settings.ts b/ui/settings.ts
+index 67a3f5cbe..c5fd80758 100644
+--- a/ui/settings.ts
++++ b/ui/settings.ts
+@@ -117,6 +117,8 @@ const defaultKeymap: Keymap = {
+     "cmd-n": "studio::NewSession",
+     "cmd-t": "studio::NewTerminal",
+     "shift-cmd-h": "studio::GoHome",
++    // The Map view (danielrispler/plotkeeper#306): the selected session's project, else the first with a map; again, leaves it.
++    "shift-cmd-m": "studio::ShowMap",
+     "cmd-,": "studio::OpenSettings",
+     // Modifiers in `MODIFIERS` order, as a keystroke reads.
+     "shift-cmd-p": "studio::Palette",
+diff --git a/ui/workspaces.ts b/ui/workspaces.ts
+index a8764bd4d..5be153640 100644
+--- a/ui/workspaces.ts
++++ b/ui/workspaces.ts
+@@ -356,6 +356,8 @@ function selectedOwner() {
+   const cwd = studio.selection?.session.cwd;
+   return cwd ? ownerOf([...read.keys()], read, cwd) : null;
+ }
++// The project whose workspace holds `cwd`, null outside every project.
++export const projectOfCwd = (cwd: string): string | null => ownerOf([...read.keys()], read, cwd)?.project ?? null;
+ export const selectedProject = (): string | null => selectedOwner()?.project ?? null;
+ 
+ // The repository a worktree belongs to: its own main checkout, project or not, never another project; null when
+
+diff --git a/ui/selection.ts b/ui/selection.ts
+index 14b9be80d..2bd18637f 100644
+--- a/ui/selection.ts
++++ b/ui/selection.ts
+@@ -7,6 +7,7 @@ import { hunkFiles } from "./ask.js";
+ import { openCard, showCards } from "./cards.js";
+ import { element, failure, invoke } from "./dom.js";
+ import { openHunk } from "./evidence.js";
++import { leaveMap } from "./map.js";
+ import { showSessions } from "./list.js";
+ import { homeShown, showSession } from "./panes.js";
+ import { showWorkspaces } from "./workspaces.js";
+@@ -32,6 +33,7 @@ export function isSelected(session: string, agent?: string | null): boolean {
+ // returns. Opening a subagent's line also fades a failed helper. A later press wins over this one's
+ // reply.
+ export async function select(id: string, agent: string | null = null) {
++  leaveMap(); // a session pressed anywhere leaves the Map view over the rail and the terminal
+   const pressed = { id, agent };
+   studio.pending = pressed;
+   showSessions(studio.listed);
+@@ -118,6 +120,7 @@ export async function toggleHome() {
+ 
+ // Selects no session, which shows Home: the core clears the selection and what is viewed.
+ export async function goHome() {
++  leaveMap();
+   studio.pending = null;
+   try {
+     const selected = await invoke("select", { id: null });
+diff --git a/src-tauri/Cargo.toml b/src-tauri/Cargo.toml
+index 973f37a4b..87e669dc2 100644
+--- a/src-tauri/Cargo.toml
++++ b/src-tauri/Cargo.toml
+@@ -10,10 +10,12 @@ studio-hook = { path = "../hook" }
+ studio-understanding = { path = "../understanding" }
+ studio-terminal-daemon = { path = "../terminal-daemon" }
+ studio-workbench = { path = "../workbench" }
++studio-system-map = { path = "../system-map" }
+ serde = { version = "1", features = ["derive"] }
+ serde_json = "1"
+ jsonc-parser = { version = "0.34", features = ["cst"] }
+ tauri = { version = "2", features = [] }
++tempfile = "3"
+ tauri-plugin-dialog = "2"
+ tauri-plugin-log = "2"
+ log = "0.4"
+@@ -24,7 +26,7 @@ objc2 = "0.6"
+ objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSDictionary", "NSObjCRuntime", "NSString", "NSUserDefaults", "NSValue"] }
+ 
+ [dev-dependencies]
+-tempfile = "3"
++studio-test-support = { path = "../test-support" }
+ 
+ [build-dependencies]
+ tauri-build = { version = "2", features = [] }
+diff --git a/ui/list.ts b/ui/list.ts
+index 5659cf5ac..0e2da809b 100644
+--- a/ui/list.ts
++++ b/ui/list.ts
+@@ -2,6 +2,7 @@
+ // by shape (danielrispler/Falinks#572), each session's subagents nested under it. When the window is narrow it collapses to
+ // a strip of glyphs and labels, which opens the full list on hover, on click or on ⌘1.
+ 
++import { logStop } from "./stop-rules.js";
+ import { age, element, fullTitle, invoke, patch, prose, pressable, stepText, text } from "./dom.js";
+ import { counts, times, type Time } from "./times.js";
+ import { shortPaths } from "./paths.js";
+@@ -16,6 +17,7 @@ import { studio } from "./state.js";
+ import { titled } from "./keys.js";
+ import { blockedWaits, stateLabels, type BlockedCommand, type Context, type Session, type SessionState, type Subagent } from "./types.js";
+ import { askDelete, report } from "./story.js";
++import { refreshAgents } from "./map-agents.js";
+ 
+ // The state groups folded in a project, idle only, and the idle groups Daniel opened, by project and state,
+ // which stay open when the list is drawn again.
+@@ -579,6 +581,8 @@ export function drawSidebar() {
+ // (danielrispler/Falinks#572).
+ export function showSessions(sessions: Session[]) {
+   studio.listed = sessions;
++  if (sessions.length) logStop("session");
++  void refreshAgents();
+   redrawHome();
+   redrawHistory();
+   const live = sidebarSessions(sessions);
+diff --git a/core/src/lib.rs b/core/src/lib.rs
+index b2a56ccb1..cfd1897f9 100644
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -4464,6 +4464,11 @@ impl Studio {
+         before != facts
+     }
+ 
++    /// What the shell last found about the task folder `path`, `None` before its first lookup.
++    pub fn task_facts_at(&self, path: &str) -> Option<TaskFacts> {
++        self.tasks.get(path).copied()
++    }
++
+     /// The git half of a task's facts, read again with its workspace's git state (no GitHub): a new
+     /// commit or file clears the mark at once. A task never looked up has no facts to change.
+     /// Returns whether the facts changed.
+diff --git a/ui/story.ts b/ui/story.ts
+index 10688fcae..78d13b4d7 100644
+--- a/ui/story.ts
++++ b/ui/story.ts
+@@ -16,7 +16,7 @@ import { agentState, sessionName, showsLanded } from "./list.js";
+ import { closePane, openHere, refreshHome } from "./panes.js";
+ import { blockedRequestFor, openDecision, type Ask } from "./answer.js";
+ import { blockedElement, docksInDock, fillCardRisk, riskLine, typeRetry } from "./blocked.js";
+-import { beginFeed, briefNodes, cardLine, cardsFor, endFeed, markShown, openCard, quizOpen, rowCards, unseenRow } from "./cards.js";
++import { briefNodes, cardLine, cardsFor, openCard, quizOpen, rowCards, unseenRow } from "./cards.js";
+ import { type Banner, bannerElement, bannerFor, bannerLives } from "./banner.js";
+ import { quizAllowed, quizAnswered, quizItem, quizRegion, seedQuiz, trialOn } from "./quiz.js";
+ import { evidenceElement, hasEvidence } from "./evidence.js";
+@@ -600,8 +600,6 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
+     const cardTurn = turn.files ? { session: session.id, index: turnIndex, files: turn.files.files, ended: turn.ended_at !== null } : null;
+     const rows = open ? [] : rowCards(cards).map((stored) => unseenRow(stored, cardTurn));
+     node.replaceChildren(button, ...rows, ...(open ? [...turnContent(session, block, null).children] : []));
+-    // The cards of an unfolded turn are on screen now.
+-    if (open) markShown();
+   };
+   draw();
+   return node;
+@@ -642,7 +640,6 @@ export function drawFeed() {
+     element("feed").replaceChildren();
+     return;
+   }
+-  beginFeed();
+   const session = selected.session;
+   const own = selected.agent === null;
+   const { latest, blocks } = railOf(selected, all, workers, fedCards(session, selected.agent));
+@@ -656,7 +653,6 @@ export function drawFeed() {
+   );
+   element("brief-fold").hidden = lives || briefNodes(cards).length === 0;
+   element("feed").replaceChildren(...blocks.map((block, i) => turnElement(session, block, own && i === 0 && block.index !== null ? now : null)));
+-  endFeed();
+ }
+ // Rename (danielrispler/Falinks#469): the row's name, kept in the event log, and `/rename` typed into the session while
+ // its claude runs, so Claude Code shows the same name. An empty name gives the row its folder's again.
+diff --git a/ui/panes.ts b/ui/panes.ts
+index cc7ab050e..1d76d3b4c 100644
+--- a/ui/panes.ts
++++ b/ui/panes.ts
+@@ -14,10 +14,11 @@ import type * as Xterm from "@xterm/xterm";
+ import { connect, list, onEvent, request, type Listed } from "./daemon.js";
+ import { diffRequest, drawDiff, keepsDiff } from "./diff.js";
+ import { drawHistory } from "./history.js";
+-import { drawHome, enterHome, landedClear, markLearningShown } from "./home.js";
++import { drawHome, enterHome, landedClear } from "./home.js";
+ import { element, failure, fullTitle, invoke, listen, newest, pressable, text } from "./dom.js";
+ import { onProjects, projects } from "./projects.js";
+ import { followLog, showLog, showMissing } from "./log.js";
++import { leaveMap } from "./map.js";
+ import { type Box, paneBoxes } from "./layout.js";
+ import { isPanel, panelTerm, showPanel, showPanelShell } from "./panel.js";
+ import { offerAgyPluginFix, offerBuilds, offerPluginFix, upgrade } from "./restart.js";
+@@ -224,9 +225,6 @@ export function refreshHome() {
+   redrawHome();
+ }
+ 
+-// Writes the slot's `shown` when the window turns visible or focused with Home on screen.
+-export const markHomeShown = () => markLearningShown(shown === HOME);
+-
+ // Draws Home again when the list changed under it.
+ export function redrawHome() {
+   landedClear.sync();
+@@ -237,6 +235,7 @@ export function redrawHome() {
+ // the session, which takes the column.
+ const HISTORY = "history";
+ export function showHistory() {
++  leaveMap();
+   show(HISTORY, () => null);
+   drawHistory(box(HISTORY), studio.listed);
+   element("terminal-head").hidden = true;
+@@ -343,6 +342,7 @@ export const doctorArgv = (command: string) => [
+ 
+ async function startTerminal(id: string, cwd: string, argv: string[]) {
+   starting = id;
++  leaveMap(); // the new terminal shows in the column the Map view covers
+   element("terminal-head").hidden = false;
+   studio.pending = null; // an earlier press's late reply must not take the pane from this session
+   show(id, () => openPane(box(id), id, cwd, argv));
+diff --git a/ui/layout.ts b/ui/layout.ts
+index e290be0a5..0955e7788 100644
+--- a/ui/layout.ts
++++ b/ui/layout.ts
+@@ -79,9 +79,13 @@ export function paneBoxes(width: number, height: number, cell: number, split: Sp
+ export const panelHeight = (dragged: number, column: number) => Math.round(Math.min(Math.max(dragged, 80), 0.4 * column));
+ 
+ // Whether the story rail shows the selected session (danielrispler/Falinks#556): not in focus mode, not behind a closed
+-// overlay, and not under the skills browser, which takes its place.
+-export const railShown = (mode: LayoutMode, railOpen: boolean, skillsOpen: boolean) =>
+-  mode !== "focus" && (mode !== "overlay" || railOpen) && !skillsOpen;
++// overlay, not under the skills browser, which takes its place, and not behind the Map view, which hides it with `visibility`
++// (so the rail still intersects the viewport).
++export const railShown = (mode: LayoutMode, railOpen: boolean, skillsOpen: boolean, mapOpen: boolean) =>
++  mode !== "focus" && (mode !== "overlay" || railOpen) && !skillsOpen && !mapOpen;
++
++// Whether Home's content is seen: Home is the open pane and the Map view, which hides it with `visibility`, is not over it.
++export const homeSeen = (homeOpen: boolean, mapOpen: boolean) => homeOpen && !mapOpen;
+ 
+ // The top bar's items, in the order they survive a narrowing window (#127): the session's header and the needs-you and unseen
+ // chips never leave, and nor does the settings gear (#194), the bar's last item; the git line, "+" (new session) and the "⋯"
+diff --git a/ui/tokens.css b/ui/tokens.css
+index 423f1ec44..05656702d 100644
+--- a/ui/tokens.css
++++ b/ui/tokens.css
+@@ -40,4 +40,14 @@
+   --popover: 380px; --dialog: 560px; --find: 220px; --outcome: 52px; --toast: 360px; --menu: 180px; --session-header: 280px; --layer: 320px; --spine: 14px;
+   /* The settings page (#195): herdr's 880 by 620, and a switch's track. */
+   --settings: 880px; --settings-height: 620px; --switch: 32px; --switch-height: 18px; --stepper-value: 40px; --select: 140px;
++
++  /* The Map view (danielrispler/plotkeeper#306, Treatment C): plates on a quiet chart. The mist is a cool grey, so it and the warm ring
++     of focus or a brief differ by temperature, not hue; thin is about two thirds of thick, a little denser than the prototype's mist. Plate and actor sizes are map-model.ts's. */
++  --mist: #c4ccd6; --mist-thin: #c4ccd652; --mist-thick: #c4ccd680; --ring-warm: #e0c08c80;
++  --map-bg: #131416; --map-dot: #ffffff0a;
++  --plate: #202226; --plate-core: #25272b; --plate-edge: #ffffff1a; --plate-black: #121315; --plate-black-edge: #ffffff0d;
++  --link: #ffffff26; --law-check: var(--fg); --law-trust: var(--muted);
++  --plate-w: 264px; --plate-h: 76px; --actor-w: 120px; --actor-h: 28px; --map-grid: 28px; --law-mark: 7px; --link-width: 1.5px;
++  --map-title: 28px; --map-gutter: 32px; --map-sheet: 340px; --drawer-code: 280px;
++  --strip-height: 240px; --mist-lift: 900ms ease-out; --mist-drift: 14s; --plate-move: 160ms ease-out;
+ }
+diff --git a/ui/picker.ts b/ui/picker.ts
+index a8149c4b9..588becfdb 100644
+--- a/ui/picker.ts
++++ b/ui/picker.ts
+@@ -56,10 +56,12 @@ export function newTask(
+   prompt: boolean,
+   report: (error: unknown) => void = failed,
+   start: Start = startLast,
++  initial = "",
+ ): HTMLElement {
+   const form = document.createElement("form");
+   form.className = "new-task";
+   const field = document.createElement("input");
++  field.value = initial;
+   field.placeholder = placeholder;
+   field.setAttribute("aria-label", placeholder);
+   field.spellcheck = false;
+@@ -92,8 +94,8 @@ export function newTask(
+ // selected by the time Daniel submits.
+ export const quickTask = (project: string, main: Workspace, request: string, create: typeof invoke = invoke): Promise<Workspace> =>
+   request ? create("create_named_task", { project, request }) : Promise.resolve(main);
+-const quickStart = (project: string, main: Workspace, start: Start) =>
+-  newTask("Issue #, spec path or prompt; empty for main", "Start", "Start the session: in a new task for an issue, spec or prompt, else in the main checkout (↩)", (request) => quickTask(project, main, request), true, failed, start);
++const quickStart = (project: string, main: Workspace, start: Start, initial = "") =>
++  newTask("Issue #, spec path or prompt; empty for main", "Start", "Start the session: in a new task for an issue, spec or prompt, else in the main checkout (↩)", (request) => quickTask(project, main, request), true, failed, start, initial);
+ 
+ // The Auto mode choice (danielrispler/Falinks#541): off each time the picker opens; the session starts in Claude Code's
+ // auto mode when on. Bypass mode is never offered.
+@@ -201,7 +203,7 @@ async function showProjects(current: string, kind: Kind) {
+   (picker.querySelector("input") ?? rows.querySelector<HTMLElement>("[aria-pressed=true]"))?.focus();
+ }
+ 
+-function picked(project: string, workspaces: Workspaces, agents: string[], kind: Kind): HTMLElement[] {
++function picked(project: string, workspaces: Workspaces, agents: string[], kind: Kind, prompt = ""): HTMLElement[] {
+   const { hidden } = workspaces;
+   const count = hidden ? [text("p", `${hidden} agent worktree${hidden === 1 ? "" : "s"} hidden`, "hidden-count")] : [];
+   const [choice, auto] = autoChoice();
+@@ -216,7 +218,7 @@ function picked(project: string, workspaces: Workspaces, agents: string[], kind:
+     projectPill(project, kind),
+     agentButtons,
+     text("h1", "In its own task"),
+-    quickStart(project, workspaces.main, start),
++    quickStart(project, workspaces.main, start, prompt),
+     choice,
+     text("h1", "Start in"),
+     main,
+@@ -292,21 +294,22 @@ export function showPalette(entries: Entry[], run: (binding: Binding) => void) {
+ // Opens the picker, on the last agent for New session or on a plain terminal for New terminal, or
+ // closes it when open. It opens on `from`, a project header's "+", else on `pickerProject`'s choice; from a header it
+ // never closes, so a second header's "+" shows its own project.
+-export async function showPicker(kind: Kind = "session", from?: string) {
++// `prompt` fills the quick start's field, as the Map view's "Draft a map" does.
++export async function showPicker(kind: Kind = "session", from?: string, prompt = "") {
+   const label = kind === "terminal" ? "New terminal" : "New session";
+   if (from === undefined) {
+     if (closed(label)) return;
+   } else element("picker").ariaLabel = label;
+-  await drawPicker(kind, from ?? pickerProject(selectedProject(), lastProject(), await projects().catch(() => [])));
++  await drawPicker(kind, from ?? pickerProject(selectedProject(), lastProject(), await projects().catch(() => [])), prompt);
+ }
+ 
+ // The picker on `project`.
+-async function drawPicker(kind: Kind, project: string) {
++async function drawPicker(kind: Kind, project: string, prompt = "") {
+   const picker = element("picker");
+   // It opens once its rows are read, so no placeholder flashes first in another box (danielrispler/Falinks#570).
+   try {
+     const [workspaces, agents] = await Promise.all([invoke("workspaces", { project }), offeredAgents()]);
+-    picker.replaceChildren(...picked(project, workspaces, agents, kind));
++    picker.replaceChildren(...picked(project, workspaces, agents, kind, prompt));
+   } catch (e) {
+     failure("workspaces", "error")(e);
+     // The pill stays, so a project that cannot be read is left for another.
+diff --git a/ui/index.html b/ui/index.html
+index 990aafd14..e36d4f773 100644
+--- a/ui/index.html
++++ b/ui/index.html
+@@ -134,6 +134,27 @@
+       <!-- The skills browser (danielrispler/Falinks#528), in the rail's place while open; Esc returns. -->
+       <section id="skills" class="story skills" aria-label="Skills"></section>
+     </aside>
++
++    <!-- The Map view (danielrispler/plotkeeper#306): over the rail's and the terminal's columns, which it hides; the list and the top bar
++         stay live. `map.ts` draws it. The side area is for the sheet, the drawer and the not-placed list of later tickets. -->
++    <section id="map" class="map-view" aria-label="Map" hidden>
++      <header class="map-head">
++        <button id="map-project" class="btn quiet map-project" type="button" popovertarget="map-projects" aria-label="Project" title="Show another project's map"></button>
++        <div id="map-projects" class="menu map-projects" popover></div>
++        <span id="map-ref" class="map-ref"></span>
++        <div id="map-review" class="map-review" hidden></div>
++        <div id="map-banner" class="map-banner"></div>
++      </header>
++      <div class="map-stage">
++        <div id="map-body" class="map-body"></div>
++        <aside id="map-side" class="map-side" aria-label="Beside the map" hidden>
++          <section id="map-not-placed"></section>
++          <section id="map-sheet"></section>
++          <section id="map-drawer"></section>
++        </aside>
++      </div>
++      <footer id="map-legend" class="map-legend"></footer>
++    </section>
+   </div>
+   <!-- The dividers: drag to resize the list and the rail. -->
+   <div id="list-divider" class="divider" role="separator" aria-orientation="vertical" aria-label="Resize the session list"></div>
+diff --git a/src-tauri/src/main.rs b/src-tauri/src/main.rs
+index dcf2efc2f..52cf185d1 100644
+--- a/src-tauri/src/main.rs
++++ b/src-tauri/src/main.rs
+@@ -37,10 +37,15 @@ use tauri::{AppHandle, Emitter, Manager, State};
+ use tauri_plugin_notification::NotificationExt;
+ 
+ mod answer;
++mod ci_laws;
++mod fog;
++mod history;
++mod map;
+ mod presence;
+ mod restart;
+ mod settings;
+ mod skills;
++mod stop_rules;
+ mod terminal;
+ 
+ /// The card store, which the log thread adds to and the pane records guesses in.
+@@ -1136,6 +1141,8 @@ fn main() {
+         .manage(writer.clone())
+         .manage(writing)
+         .manage(terminal::Daemon::default())
++        .manage(map::Fetches::default())
++        .manage(ci_laws::load_cache())
+         .manage(Mutex::new(answer::Watching::default()))
+         .invoke_handler(tauri::generate_handler![
+             sessions,
+@@ -1216,6 +1223,19 @@ fn main() {
+             mark_unseen,
+             rail_shown,
+             refresh_landed_tasks,
++            map::map_state,
++            map::map_save_positions,
++            map::map_set_tier,
++            map::map_know,
++            map::map_history,
++            map::map_at,
++            map::map_commit,
++            map::map_marks,
++            map::map_proof,
++            map::map_place,
++            stop_rules::stop_log,
++            stop_rules::stop_facts,
++            stop_rules::stop_dismiss,
+             reveal_log,
+             sounds
+         ])
+@@ -1639,7 +1659,14 @@ fn refresh_landed(app: &AppHandle, session: Option<String>) {
+             let facts = Path::new(&task.path)
+                 .exists()
+                 .then(|| lookup_task(gh, &task));
+-            let changed = studio.lock().unwrap().set_task_facts(&task.path, facts);
++            let (before, changed) = {
++                let mut studio = studio.lock().unwrap();
++                let before = studio.task_facts_at(&task.path);
++                (before, studio.set_task_facts(&task.path, facts))
++            };
++            if map::became_merged(before, facts) {
++                map::merged(&app, &task.path);
++            }
+             if changed {
+                 LIST_CHANGED.store(true, Ordering::Release);
+             }
+diff --git a/ui/main.ts b/ui/main.ts
+index 1bc3ad87d..eec5fd08c 100644
+--- a/ui/main.ts
++++ b/ui/main.ts
+@@ -9,19 +9,24 @@ import { withWriterNotice } from "./writer-notice.js";
+ import { startWatching } from "./answer.js";
+ import { openAsk } from "./ask.js";
+ import { placeBar, watchBar } from "./bar.js";
+-import { markShown, showCards } from "./cards.js";
++import { showCards } from "./cards.js";
++import { recheckSeen } from "./seen.js";
+ import { diffRequest, newestDiff } from "./diff.js";
+ import { element, failure, invoke, listen, logUncaught } from "./dom.js";
+ import { type Actions, doctorEntries, newestUnseen, nextNeedsYou, paletteEntries, run, stepLine, stepSession, titled, windowBinding } from "./keys.js";
+ import { hover, realClock, shownGate } from "./hover.js";
+ import { arrange, defaultWidths, type LayoutMode, railShown, resized, type Widths } from "./layout.js";
+ import { listSpace } from "./home.js";
++import { leaveMap, mapEscape, mapShown, startMap, toggleMap } from "./map.js";
++import "./map-history.js";
++import "./map-sheet.js";
++import { startMapAgents } from "./map-agents.js";
+ import { showSessions } from "./list.js";
+ import { goHome, select, show, toggleHome } from "./selection.js";
+ import { dragPanel, placePanel, togglePanel } from "./panel.js";
+-import { dragSplit, focusPane, markHomeShown, placePanes, runDoctor, showHistory, split, startPanes, toggleSplit } from "./panes.js";
++import { dragSplit, focusPane, placePanes, runDoctor, showHistory, split, startPanes, toggleSplit } from "./panes.js";
+ import { showAddProject, showBranches, showPalette, showPicker } from "./picker.js";
+-import { fetchNow, foundWorkspaces, pullAll, showWorkspaces, sidebarOrder, watchWorkspaces } from "./workspaces.js";
++import { fetchNow, foundWorkspaces, projectOfCwd, pullAll, selectedProject, showWorkspaces, sidebarOrder, watchWorkspaces } from "./workspaces.js";
+ import { reload, reloadedZoom, type SettingsFiles, zoomed } from "./settings.js";
+ import { knownProjects } from "./projects.js";
+ import { studio } from "./state.js";
+diff --git a/ui/tests/auto-mode.test.mjs b/ui/tests/auto-mode.test.mjs
+index 2a7891abc..c3e3d12e3 100644
+--- a/ui/tests/auto-mode.test.mjs
++++ b/ui/tests/auto-mode.test.mjs
+@@ -45,5 +45,5 @@ test("the picker's Auto mode choice is off by default and reaches the start comm
+   // Both ways to start from the picker start the chosen agent with the choice.
+   assert.match(picker, /startAgent\(agent\(\), cwd, prompt, auto\(\)\)/);
+   assert.match(picker, /workspaceRow\(name, workspace, start\)/);
+-  assert.match(picker, /quickStart\(project, workspaces\.main, start\)/);
++  assert.match(picker, /quickStart\(project, workspaces\.main, start, prompt\)/);
+ });
+

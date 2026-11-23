@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { withWriterNotice } from "../../dist/writer-notice.js";
 
-const off = "Cards and briefs are off: `claude` did not start (No such file).";
+const off = "Summaries and briefs are off: `claude` did not start (No such file).";
 
 test("the notice shows once and keeps the other notices", () => {
   const shown = withWriterNotice("settings.json: bad", off);

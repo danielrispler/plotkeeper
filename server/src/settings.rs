@@ -161,7 +161,7 @@ fn write_in(
 static WRITING: Mutex<()> = Mutex::new(());
 
 /// Sets the setting at `path`, such as `["terminal", "font_size"]`, to `value` in `settings.json`, or removes it when `value`
-/// is none (the settings page, #195). `expected` is the text the page last read. Returns the new text,
+/// is none. `expected` is the text the page last read. Returns the new text,
 /// or why the write was refused; the written file reaches the window through `watch` like any save.
 pub fn write_setting(
     expected: Option<String>,
@@ -201,8 +201,9 @@ fn summary_writer_in(text: &str) -> studio_understanding::WriterKind {
         .unwrap_or_default()
 }
 
-/// The catch-up at start from `settings.json`: `catchUp.hours` (default 2) and `catchUp.max` (default 10), each default where
-/// the file leaves it out or gives something else than a number (danielrispler/plotkeeper#328).
+/// The catch-up at start from `settings.json`: `catchUp.hours` (default 2), how far back a ready PR's head may have moved for its
+/// brief to be written at start (danielrispler/plotkeeper#334); the default where the file leaves it out or gives something else than a
+/// number.
 pub fn catch_up() -> studio_core::CatchUp {
     let text = paths().and_then(|[settings, _]| fs::read_to_string(settings).ok());
     catch_up_in(&text.unwrap_or_default())
@@ -214,10 +215,22 @@ fn catch_up_in(text: &str) -> studio_core::CatchUp {
     if let Some(hours) = json["catchUp"]["hours"].as_f64().filter(|h| *h >= 0.0) {
         catch_up.window_ms = (hours * 3_600_000.0) as u64;
     }
-    if let Some(max) = json["catchUp"]["max"].as_u64() {
-        catch_up.max = max as usize;
-    }
     catch_up
+}
+
+/// The model of the PR briefs' writer and claim check, `prBriefs.model` (default Opus), read from the file on each call so a saved
+/// change takes effect (danielrispler/plotkeeper#334).
+pub fn pr_briefs_model() -> String {
+    let text = paths().and_then(|[settings, _]| fs::read_to_string(settings).ok());
+    pr_briefs_model_in(&text.unwrap_or_default())
+}
+
+fn pr_briefs_model_in(text: &str) -> String {
+    let json: serde_json::Value = serde_json::from_str(&plain_json(text)).unwrap_or_default();
+    match json["prBriefs"]["model"].as_str() {
+        Some(model) if !model.trim().is_empty() => model.trim().to_string(),
+        _ => studio_understanding::pr_brief::DEFAULT_MODEL.to_string(),
+    }
 }
 
 /// Zed's format as plain JSON: comments and trailing commas outside strings dropped, as
@@ -263,7 +276,10 @@ fn plain_json(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{catch_up_in, edit_text, plain_json, repository_in, summary_writer_in, write_in};
+    use super::{
+        catch_up_in, edit_text, plain_json, pr_briefs_model_in, repository_in, summary_writer_in,
+        write_in,
+    };
     use serde_json::json;
     use studio_understanding::WriterKind;
 
@@ -276,17 +292,37 @@ mod tests {
     }
 
     #[test]
-    fn the_catch_up_is_two_hours_and_ten_unless_the_settings_say_otherwise() {
+    fn the_catch_up_is_two_hours_unless_the_settings_say_otherwise() {
         let default = studio_core::CatchUp::default();
-        assert_eq!((default.window_ms, default.max), (7_200_000, 10));
+        assert_eq!(default.window_ms, 7_200_000);
         assert_eq!(catch_up_in(""), default);
         assert_eq!(
             catch_up_in("{ \"catchUp\": { \"hours\": \"x\" } }"),
             default
         );
-        let set = catch_up_in("{ // wider\n \"catchUp\": { \"hours\": 6, \"max\": 3, }, }");
-        assert_eq!((set.window_ms, set.max), (21_600_000, 3));
-        assert_eq!(catch_up_in("{ \"catchUp\": { \"max\": 0 } }").max, 0);
+        let set = catch_up_in("{ // wider\n \"catchUp\": { \"hours\": 6, }, }");
+        assert_eq!(set.window_ms, 21_600_000);
+    }
+
+    #[test]
+    fn the_pr_briefs_model_is_opus_unless_the_settings_name_another() {
+        assert_eq!(pr_briefs_model_in(""), "opus");
+        assert_eq!(pr_briefs_model_in("not json"), "opus");
+        assert_eq!(
+            pr_briefs_model_in(r#"{ "prBriefs": { "model": "" } }"#),
+            "opus"
+        );
+        assert_eq!(
+            pr_briefs_model_in(r#"{ "prBriefs": { "model": 3 } }"#),
+            "opus"
+        );
+        let set = "{ // the briefs\n \"prBriefs\": { \"model\": \"sonnet\", }, }";
+        assert_eq!(pr_briefs_model_in(set), "sonnet");
+        // The summaries' model is its own setting.
+        assert_eq!(
+            pr_briefs_model_in(r#"{ "summaries": { "model": "haiku" } }"#),
+            "opus"
+        );
     }
 
     #[test]

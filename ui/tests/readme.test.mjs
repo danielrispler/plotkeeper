@@ -38,8 +38,8 @@ test("the link finder reads links and images and skips URLs and anchors", () => 
   assert.deepEqual(relativeLinks(text), ["docs/x.md", "pic.png"]);
 });
 
-test("the README shows the four pictures", () => {
+test("the README shows the three pictures", () => {
   const shown = [...readme.matchAll(/!\[[^\]]*\]\(([^)\s]+)\)/g)].map((match) => match[1]);
   const pictures = shown.filter((target) => target.startsWith("docs/studio/assets/readme/") && target.endsWith(".png"));
-  assert.equal(new Set(pictures).size, 4);
+  assert.equal(new Set(pictures).size, 3);
 });

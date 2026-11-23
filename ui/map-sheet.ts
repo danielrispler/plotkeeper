@@ -11,6 +11,8 @@ import { failure, invoke, pressable, text } from "./dom.js";
 import { currentMap, onDraw, onPlateClick, reloadMap, registerLayer, syncSide, type MapView } from "./map.js";
 import { openDrawer } from "./map-drawer.js";
 import { drawStrip } from "./map-history.js";
+import { overturnNote, ratifyActions } from "./map-ratify.js";
+import { sheetPending, statusWords } from "./ratify.js";
 import { ciDrawer, effectiveTier, type Part, proofDrawer, sheetCi, sheetOf, type Tier } from "./map-model.js";
 
 // The part whose sheet is open, and the project it is in; a sheet never carries over to another project's map.
@@ -74,6 +76,9 @@ function drawSheet(view: MapView) {
     if (view.scrub) (button as HTMLButtonElement).disabled = true;
     tiers.append(button);
   }
+  // The laws and links at this part that landed without Daniel's say: marked "not yet ratified", with accept and overturn. Of now only.
+  const unratified = view.scrub ? sheetPending([], part.id, []) : sheetPending(view.state.ratify ?? [], part.id, view.doc.links);
+  const ratified = () => void reloadMap();
   const laws = sheet.laws.map((law) => {
     const mark = text("span", "", `law-mark ${law.backing}`);
     const row = text("li", "", "sheet-law");
@@ -90,6 +95,19 @@ function drawSheet(view: MapView) {
       });
       row.querySelector(".sheet-law-actions")!.append(proof);
     }
+    const pr = unratified.laws.get(law.id);
+    if (pr !== undefined) {
+      row.classList.add("unratified");
+      row.append(text("span", statusWords["not-yet"], "ratify-mark"), ratifyActions(view.project, { pr, kind: "law", id: law.id, text: law.text, change: "" }, ratified));
+    }
+    return row;
+  });
+  const nameOf = (id: string) => view.doc.parts.find((p) => p.id === id)?.name ?? view.doc.actors.find((a) => a.id === id)?.name ?? id;
+  const links = unratified.links.map((link) => {
+    const row = text("li", "", "sheet-link unratified");
+    row.dataset.link = link.id;
+    const words = `${nameOf(link.from)} to ${nameOf(link.to)}`;
+    row.append(text("span", words, "sheet-link-text"), text("span", statusWords["not-yet"], "ratify-mark"), ratifyActions(view.project, { pr: link.pr, kind: "link", id: link.id, text: words, change: "" }, ratified));
     return row;
   });
   const fog = text("div", "", `sheet-fog${!view.scrub && view.state.fog?.[part.id] ? ` ${view.state.fog[part.id]}` : ""}`);
@@ -127,12 +145,18 @@ function drawSheet(view: MapView) {
     text("h3", "Laws", "sheet-heading"),
     ...(laws.length ? [text("ul", "", "sheet-laws")] : [text("p", "No laws on this part", "empty")]),
     // Fog and CI are of now: a past commit shows neither.
+    ...(links.length ? [text("h3", "Links", "sheet-heading"), text("ul", "", "sheet-links")] : []),
     ...(view.scrub ? [] : [text("h3", "Fog", "sheet-heading"), fog]),
     ...(state ? [text("h3", "CI on main", "sheet-heading"), ci] : []),
   );
   const extra = text("div", "", "sheet-extra");
   card.append(extra);
   card.querySelector(".sheet-laws")?.append(...laws);
+  card.querySelector(".sheet-links")?.append(...links);
+  const overturned = overturnNote(view.project, (item) =>
+    item.kind === "law" ? sheet.laws.some((law) => law.id === item.id) : item.kind === "link" && view.doc.links.some((link) => link.id === item.id && (link.from === part.id || link.to === part.id)),
+  );
+  if (overturned) card.append(overturned);
   slot.replaceChildren(card);
   drawStrip(view, part.id, extra);
   syncSide(view.slots);

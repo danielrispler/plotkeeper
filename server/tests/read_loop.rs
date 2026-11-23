@@ -52,8 +52,6 @@ struct NoEffects;
 
 impl Effects for NoEffects {
     fn list(&self) {}
-    fn new_card(&self, _: &str, _: Option<&str>) {}
-    fn settle_checks(&self) {}
     fn name(&self, _: &str, _: &str) {}
     fn log(&self, _: String) {}
 }

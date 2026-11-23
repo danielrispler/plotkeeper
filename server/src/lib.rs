@@ -1,10 +1,10 @@
 //! The app's state and the functions behind its learning-layer and session-view commands, with no Tauri in them
-//! (danielrispler/plotkeeper#321, spec #319 "The server"). The Tauri shell (`src-tauri`) holds one [`App`] and each of its
-//! command handlers forwards to the function here that carries the command's name; a server will do the same over HTTP.
+//! (danielrispler/plotkeeper#321, spec #319 "The server"). The `plotkeeper` server holds one [`App`] and answers each
+//! command with the function here that carries its name, over HTTP (`api`).
 //!
 //! The core state, the card store, the risk notes, the card writer, the turn writing and the notices are the [`App`]'s. The
-//! settings are read and written here ([`settings`]), and so are the PR lookups ([`prs`], [`refresh_landed`]) and the hourly
-//! retests ([`write_due_retests`]). What reaches the window or a page leaves through [`Events`], which holds the shell's [`Sink`]; the read loop is [`follow`].
+//! settings are read and written here ([`settings`]), and so are the PR lookups ([`prs`], [`refresh_landed`]) and the PR briefs
+//! ([`pr_briefs`]). What reaches the page leaves through [`Events`], which holds the web server's [`Sink`]; the read loop is [`follow`].
 //! Workbench-only commands (terminals, projects, worktrees, skills, usage, restart) stay in the shell.
 
 use std::{
@@ -18,14 +18,13 @@ use std::{
         mpsc,
     },
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 use studio_core::{Notifications, Session, State::Ended, Studio, TaskFacts, TaskQuery};
 use studio_understanding::{
-    CardStore, ClaudeWriter, Core, Effects, FakeWriter, Offers, OpenItem, Rating, RiskNotes,
-    RiskRequest, RiskView, Row, SessionCards, StoredSummary, SummarySetup, Tap, TurnWriting,
-    Writer, WriterKind, judge, live_roots, millis, open_items, turn_hunk, write_agent_summary,
-    write_retests,
+    CardStore, ClaudeWriter, Core, Effects, FakeWriter, OpenItem, RiskNotes, RiskRequest, RiskView,
+    Row, SessionCards, StoredSummary, SummarySetup, TurnWriting, Writer, WriterKind, judge,
+    live_roots, millis, open_items, turn_hunk, write_agent_summary,
 };
 
 pub mod answer;
@@ -35,6 +34,9 @@ pub mod fog;
 pub mod history;
 pub mod lock;
 pub mod map;
+pub mod pr_briefs;
+pub mod prs;
+pub mod ratify;
 mod read_loop;
 pub mod settings;
 pub mod stop_rules;
@@ -116,6 +118,9 @@ pub struct App {
     pub clearing: Clearing,
     pub fetches: Arc<map::Fetches>,
     pub ci: Arc<ci_laws::CiCache>,
+    /// The PRs found for each project's branches (`prs.rs`) and the PR briefs written for the ready ones (`pr_briefs.rs`).
+    pub prs: prs::Prs,
+    pub briefs: pr_briefs::PrBriefs,
     pub watching: Mutex<answer::Watching>,
     pub events: Arc<Events>,
     /// The notice the card writer last raised and not yet cleared, for a page opened after it (danielrispler/plotkeeper#328).
@@ -163,16 +168,19 @@ impl App {
         writer: Writer,
         effects: Arc<dyn Effects>,
     ) -> io::Result<App> {
+        // The PR briefs' writer is Claude whatever `summaries.writer` says, and never the fake of the checks.
+        let briefs =
+            pr_briefs::PrBriefs::new(match std::env::var("STUDIO_CARD_WRITER").as_deref() {
+                Ok("fake") => None,
+                _ => ClaudeWriter::beside(log).ok().map(|w| {
+                    Arc::new(w)
+                        as Arc<dyn studio_understanding::pr_brief::BriefWriter + Send + Sync>
+                }),
+            });
         let mut studio = Studio::with_roots(studio_understanding::worktree_root);
         studio.know_roots(saved_roots(log));
         let core: Core = Arc::new(Mutex::new(studio));
-        let writing = TurnWriting::new(
-            core.clone(),
-            cards.clone(),
-            writer.clone(),
-            Offers::beside(log),
-            effects,
-        );
+        let writing = TurnWriting::new(core.clone(), cards.clone(), writer.clone(), effects);
         Ok(App {
             core,
             cards,
@@ -183,6 +191,8 @@ impl App {
             clearing: Clearing::default(),
             fetches: Arc::default(),
             ci: Arc::new(ci_laws::load_cache()),
+            prs: prs::Prs::default(),
+            briefs,
             watching: Mutex::default(),
             events: Arc::default(),
             writer_notice: Mutex::new(None),
@@ -247,9 +257,7 @@ pub fn summary_settings(
     effort: String,
     writer: WriterKind,
     on_open: bool,
-    self_test: Option<u64>,
 ) {
-    app.cards.lock().unwrap().set_self_test(self_test);
     app.writer.use_writer(writer);
     app.writing.settings(
         SummarySetup {
@@ -322,33 +330,10 @@ pub fn turn_file_hunk(
     )
 }
 
-/// Daniel opened a hunk of turn `turn` (danielrispler/plotkeeper#130): the self-test counts the turns where he did.
-pub fn hunk_opened(app: &App, session: String, turn: usize) {
-    let id =
-        (app.core.lock().unwrap().session(&session)).and_then(|s| s.turns.get(turn)?.id.clone());
-    if let Some(id) = id {
-        unsaved(app.cards.lock().unwrap().quiz_tap(&id, Tap::Hunk, millis()));
-    }
-}
-
 /// Daniel opened turn `id` (danielrispler/Falinks#526): its summary, written now when it waits for him, which takes
 /// seconds. `None` when the turn has none. A failed write keeps the turn waiting and is an error, so the window asks again
 /// only at the next opening.
 pub fn turn_summary(app: &App, id: String) -> Result<Option<StoredSummary>, String> {
-    // A turn that ended while the app was down, outside the catch-up window, gets its card now.
-    let found = app.core.lock().unwrap().backfill_on_open(&id);
-    if let Some(found) = found {
-        let has_card = app
-            .cards
-            .lock()
-            .unwrap()
-            .cards()
-            .iter()
-            .any(|k| k.request.id == id);
-        if !has_card {
-            app.writing.backfill(vec![found]);
-        }
-    }
     app.writing.opened(&id)
 }
 
@@ -609,27 +594,22 @@ pub fn split_shown(app: &App, terminal: Option<String>) {
     *app.split_shown.lock().unwrap() = terminal;
 }
 
-// The cards and the quizzes.
+// The session's brief and its risk notes.
 
-/// The brief and cards of the selected session, or of the worker of it Daniel opened, split at the
-/// latest tick, without each card's diff and base, which the pane never reads.
+/// The brief, decision history and risk notes of the selected session, or of the worker of it Daniel opened.
 pub fn cards(app: &App) -> SessionCards {
     let studio = app.core.lock().unwrap();
     let Some(owner) = studio.viewed() else {
         return SessionCards::default();
     };
     let cards = app.cards.lock().unwrap();
-    // A session's rail also holds its workers' cards, each with its turn; a worker's view is its own cards.
     let session = studio.session(owner);
-    let mut shown = match session {
-        Some(session) => cards.rail_cards(session, studio.now()),
-        None => cards.session_cards(owner, studio.now()),
-    };
+    let mut shown = cards.session_cards(owner);
     // The Open slot is the session's: a worker's view has none.
     if let Some(session) = session {
         shown.open = open_items(session, studio.task_facts(owner), &cards);
     }
-    // Each blocked command's card is joined to its note here, so the core's type holds none.
+    // Each blocked command's note is joined here, so the core's type holds none.
     join_notes(&studio, &app.notes.lock().unwrap(), &mut shown);
     shown
 }
@@ -650,16 +630,13 @@ pub fn join_notes(studio: &Studio, notes: &RiskNotes, shown: &mut SessionCards) 
     (shown.risk_notes, shown.decision_notes) = risk_views(studio, notes);
 }
 
-/// What the cards were built for; the minute moves a card past 30 minutes, up to one minute late.
+/// What the session's brief was built for.
 #[derive(PartialEq)]
 pub struct CardsKey {
     viewed: Option<String>,
     revision: u64,
-    minute: u64,
     open: Vec<OpenItem>,
-    /// The turn each worker card is placed in, which a wake-up can move with no store change.
-    placed: Vec<(String, Option<usize>)>,
-    /// What the window shows of the risk notes: a note arriving or failing, or a card with a new call, changes no stored card.
+    /// What the window shows of the risk notes: a note arriving or failing changes nothing stored.
     notes: (Vec<RiskView>, Vec<RiskView>),
 }
 
@@ -672,9 +649,7 @@ pub fn cards_key(studio: &Studio, cards: &CardStore, notes: &RiskNotes) -> Cards
     CardsKey {
         viewed: viewed.map(String::from),
         revision: cards.revision(),
-        minute: studio.now() / 60_000,
         open: open.unwrap_or_default(),
-        placed: session.map_or_default(|s| cards.placements(s)),
         notes: risk_views(studio, notes),
     }
 }
@@ -705,60 +680,6 @@ pub fn ask_notes(app: &App, asks: Vec<RiskRequest>) {
         let writer: Writer = app.writer.clone();
         thread::spawn(move || judge(&notes, &*writer, &ask, millis, report));
     }
-}
-
-// The four store commands run off the main thread, since saving the store fsyncs.
-
-/// The pane drew the quizzes of cards `ids` in a visible window.
-pub fn shown(app: &App, ids: Vec<String>) {
-    unsaved(app.cards.lock().unwrap().show(&ids, millis()));
-}
-
-/// Daniel tapped option `option` of card `id`'s quiz, which on a check's card counts only before
-/// the check's result.
-pub fn guess(app: &App, id: String, option: usize) {
-    let studio = app.core.lock().unwrap();
-    let mut store = app.cards.lock().unwrap();
-    settle_checks(&studio, &mut store);
-    unsaved(store.guess(&id, option, millis()));
-}
-
-/// Settles the guesses on the cards of the checks that ended (danielrispler/Falinks#461, decision 15). Takes the core's
-/// lock before the store's, as the read loop does.
-pub fn settle_checks(studio: &Studio, store: &mut CardStore) {
-    for session in studio.sessions() {
-        unsaved(store.settle_checks(session));
-    }
-}
-
-/// Daniel picked, skipped or tapped a chip on the Quiz of `id`, a card's or a turn's own (danielrispler/plotkeeper#120): the turn's
-/// summary with its taps, for a turn's own Quiz.
-pub fn quiz_tap(app: &App, id: String, tap: Tap) -> Option<StoredSummary> {
-    let mut store = app.cards.lock().unwrap();
-    unsaved(store.quiz_tap(&id, tap, millis()));
-    store.turn_summary(&id).cloned()
-}
-
-/// What Home's learning slot serves at `now` (danielrispler/plotkeeper#240), given the start of Daniel's local day: the card store
-/// chooses it, and reads and writes nothing.
-pub fn learning(app: &App, now: u64, day_start: u64) -> Option<studio_understanding::Learning> {
-    app.cards.lock().unwrap().learning(now, day_start)
-}
-
-/// Daniel flagged that the key of card `id`'s quiz is wrong.
-pub fn key_wrong(app: &App, id: String) {
-    unsaved(app.cards.lock().unwrap().key_wrong(&id));
-}
-
-/// Daniel rated card `id`'s explanation.
-pub fn rate(app: &App, id: String, rating: Rating) {
-    unsaved(app.cards.lock().unwrap().rate(&id, rating));
-}
-
-/// Daniel asked card `id` to explain more: the kept text, or the writer's, which takes seconds.
-/// `None` when the writer gave none.
-pub fn explain_more(app: &App, id: String) -> Option<String> {
-    studio_understanding::explain_more(&app.cards, &*app.writer, &id, report)
 }
 
 /// Daniel's side `question` on `item`, a response, card or intention of session `session` (danielrispler/Falinks#461,
@@ -880,18 +801,6 @@ pub fn forward_writer_notices(app: &Arc<App>, notices: mpsc::Receiver<Option<Str
             app.events.emit("writer-notice", serde_json::json!(notice));
         }
     });
-}
-
-/// Writes the retests that fell due, once an hour from a minute after the start, off the read loop; Home reads them
-/// again when one was written (danielrispler/plotkeeper#129).
-pub fn write_due_retests(app: &App) {
-    thread::sleep(Duration::from_secs(60));
-    loop {
-        if write_retests(&app.cards, &*app.writer, millis(), report) > 0 {
-            app.events.emit("retests", serde_json::Value::Null);
-        }
-        thread::sleep(Duration::from_secs(60 * 60));
-    }
 }
 
 // The event log and what is kept beside it.
@@ -1037,49 +946,20 @@ pub fn refresh_landed(app: &Arc<App>, session: Option<String>) {
 
 /// The window gained focus, or Daniel chose the palette's refresh: ask about every task again.
 pub fn refresh_landed_tasks(app: &Arc<App>) {
+    prs::ask_later(app, prs::Trigger::Focus, None);
     refresh_landed(app, None);
-}
-
-/// Finds the PR of each session's branch with `gh pr view` (danielrispler/Falinks#461, decision 19), on its own thread so
-/// the read loop never waits on the network, and asks again after 5 minutes. `gh` runs as Daniel
-/// with its own login; no credential file is read.
-pub fn prs(app: &App) {
-    let gh = studio_workbench::gh_path();
-    let mut asked = HashMap::<String, Instant>::new();
-    loop {
-        let branches = app.core.lock().unwrap().branches();
-        for (cwd, branch) in branches {
-            if asked
-                .get(&branch)
-                .is_some_and(|at| at.elapsed() < Duration::from_secs(300))
-            {
-                continue;
-            }
-            asked.insert(branch.clone(), Instant::now());
-            let output = Command::new(gh)
-                .args(["pr", "view", &branch, "--json", "number", "--jq", ".number"])
-                .current_dir(&cwd)
-                .output();
-            let output = output.ok().filter(|o| o.status.success());
-            let pr = output.and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok());
-            if app.core.lock().unwrap().set_pr(&branch, pr) {
-                app.list_changed();
-            }
-        }
-        thread::sleep(Duration::from_secs(5));
-    }
 }
 
 // The Map view's commands, over `map` and what it keeps.
 
 /// The Map view's payload for `project`: see [`map::map_state`].
-pub fn map_state(app: &App, project: String, fetch: bool) -> Result<map::MapState, String> {
-    map::map_state(project, fetch, &app.fetches, &app.ci, &app.events)
+pub fn map_state(app: &Arc<App>, project: String, fetch: bool) -> Result<map::MapState, String> {
+    map::map_state(project, fetch, app)
 }
 
 /// Home's quiet mark: see [`map::map_marks`].
 pub fn map_marks(app: &App, projects: Vec<String>) -> Result<Vec<String>, String> {
-    map::map_marks(projects, &app.ci)
+    map::map_marks(projects, &app.ci, &app.prs)
 }
 
 /// Opens the sessions' notices: `sounds` is the setting from `settings.json`, which the window parses.
@@ -1352,10 +1232,10 @@ mod tests {
         }
         let seen = std::sync::Arc::new(Seen(std::sync::Mutex::default()));
         events.set(seen.clone());
-        events.emit("retests", serde_json::Value::Null);
+        events.emit("sessions", serde_json::Value::Null);
         assert_eq!(
             *seen.0.lock().unwrap(),
-            [("retests".to_string(), serde_json::Value::Null)]
+            [("sessions".to_string(), serde_json::Value::Null)]
         );
         assert!(events.focused());
     }
@@ -1444,7 +1324,6 @@ mod tests {
         let sources = [
             include_str!("../../understanding/src/lib.rs"),
             include_str!("../../understanding/src/brief.rs"),
-            include_str!("../../understanding/src/retest.rs"),
             include_str!("../../understanding/src/summary.rs"),
             include_str!("../../understanding/src/turn_writing.rs"),
         ];
@@ -1461,7 +1340,7 @@ mod tests {
                 }
             }
         }
-        assert!(saves >= 9, "found only {saves} save lines");
+        assert!(saves >= 4, "found only {saves} save lines");
     }
 
     #[test]

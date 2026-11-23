@@ -9,7 +9,10 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::BTreeMap, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashSet},
+    path::Path,
+};
 
 use crate::map::{UserState, default_ref, git, read_user, update_user};
 
@@ -36,6 +39,64 @@ pub struct FogState {
     pub processed: Option<String>,
     #[serde(default)]
     pub parts: BTreeMap<String, Vec<Entry>>,
+    /// What Daniel has read of each PR's brief, by PR number (spec #334, ticket #342).
+    #[serde(default)]
+    pub reads: BTreeMap<u64, PrRead>,
+}
+
+/// A chapter read to its end: the PR head the brief was written for, and when.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChapterRead {
+    pub head: String,
+    pub at: u64,
+}
+
+/// How far Daniel has read a PR's brief: the parts each chapter lights, in the brief's order, and the chapters finished.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrRead {
+    #[serde(default)]
+    pub lit: Vec<Vec<String>>,
+    #[serde(default)]
+    pub chapters: BTreeMap<usize, ChapterRead>,
+}
+
+impl PrRead {
+    /// The parts whose every lighting chapter is read; a part no chapter lights is never in it.
+    pub fn complete_parts(&self) -> BTreeSet<String> {
+        let parts: BTreeSet<&String> = self.lit.iter().flatten().collect();
+        parts
+            .into_iter()
+            .filter(|part| {
+                self.lit
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, lit)| lit.contains(part))
+                    .all(|(i, _)| self.chapters.contains_key(&i))
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Every chapter of the brief is read.
+    pub fn fully_read(&self) -> bool {
+        !self.lit.is_empty() && (0..self.lit.len()).all(|i| self.chapters.contains_key(&i))
+    }
+
+    /// Every chapter is read, each at `head`: a read of an older head does not count once the PR moved on.
+    pub fn fully_read_at(&self, head: &str) -> bool {
+        self.fully_read() && self.chapters.values().all(|read| read.head == head)
+    }
+
+    /// The head `part` was read at: the earliest read of the chapters that light it, so a push after any of them is seen.
+    fn read_head(&self, part: &str) -> Option<&str> {
+        self.lit
+            .iter()
+            .enumerate()
+            .filter(|(_, lit)| lit.iter().any(|p| p == part))
+            .filter_map(|(i, _)| self.chapters.get(&i))
+            .min_by_key(|read| read.at)
+            .map(|read| read.head.as_str())
+    }
 }
 
 /// How strongly each part of `source` shows fog under Daniel's effective tiers: black box never, interface only for thick.
@@ -239,18 +300,78 @@ pub fn refresh(repo: &Path, file: &Path, project: &str, open: bool) -> Result<()
                 continue;
             };
             let changed: Vec<String> = changed.lines().map(String::from).collect();
-            found.push((
-                commit.to_string(),
-                classify(
-                    text_at(repo, &parent).as_deref(),
-                    text_at(repo, commit).as_deref(),
-                    &changed,
-                ),
-            ));
+            let mut strengths = classify(
+                text_at(repo, &parent).as_deref(),
+                text_at(repo, commit).as_deref(),
+                &changed,
+            );
+            // A PR whose brief was read before it merged files only what changed since.
+            if let Some(read) = subject_pr(repo, commit).and_then(|pr| fog.reads.get(&pr)) {
+                after_reading(repo, commit, &changed, read, &mut strengths);
+            }
+            found.push((commit.to_string(), strengths));
         }
     }
     update_user(file, project, |u| apply(&mut u.fog, &done, head, found))?;
     Ok(())
+}
+
+/// The PR a squash-merge commit came from, read from its subject `Title (#N)`.
+fn subject_pr(repo: &Path, commit: &str) -> Option<u64> {
+    let subject = git(repo, &["log", "-1", "--format=%s", commit]).ok()?;
+    let (_, number) = subject.trim_end().strip_suffix(')')?.rsplit_once(" (#")?;
+    number.parse().ok()
+}
+
+/// What changed in `squash`'s paths since the head `x` a brief was read at, with the strength that diff earns. `None` when `x`
+/// cannot be diffed (not in this repository): the commit's own fog stands then.
+fn late_fog(
+    repo: &Path,
+    x: &str,
+    squash: &str,
+    squash_paths: &[String],
+) -> Option<BTreeMap<String, Strength>> {
+    let old = text_at(repo, x)?;
+    let since = git(repo, &["diff", "--no-renames", "--name-only", x, squash]).ok()?;
+    // Main's changes merged into the branch are in the diff from `x` but not in the squash commit's own: they fog nothing.
+    let changed: Vec<String> = since
+        .lines()
+        .filter(|path| squash_paths.iter().any(|p| p == path))
+        .map(String::from)
+        .collect();
+    Some(classify(
+        Some(&old),
+        text_at(repo, squash).as_deref(),
+        &changed,
+    ))
+}
+
+/// Replaces, for each part whose brief chapters were all read, the squash commit's strength by what changed after the read.
+fn after_reading(
+    repo: &Path,
+    squash: &str,
+    squash_paths: &[String],
+    read: &PrRead,
+    strengths: &mut BTreeMap<String, Strength>,
+) {
+    let mut late: BTreeMap<String, Option<BTreeMap<String, Strength>>> = BTreeMap::new();
+    for part in read.complete_parts() {
+        let Some(head) = read.read_head(&part) else {
+            continue;
+        };
+        let since = late
+            .entry(head.to_string())
+            .or_insert_with(|| late_fog(repo, head, squash, squash_paths));
+        match since.as_ref().map(|s| s.get(&part)) {
+            Some(Some(strength)) => {
+                strengths.insert(part, *strength);
+            }
+            Some(None) => {
+                strengths.remove(&part);
+            }
+            None => {}
+        }
+    }
 }
 
 /// Files a finished walk from `done` to `head`, unless the stored walk has moved since (an overlapping refresh filed it first,
@@ -276,6 +397,87 @@ fn apply(
         }
     }
     fog.processed = Some(head);
+}
+
+/// Clears the entries of `commits` from `parts`.
+pub fn clear_commits(
+    file: &Path,
+    project: &str,
+    commits: &HashSet<String>,
+    parts: &BTreeSet<String>,
+) -> Result<UserState, String> {
+    update_user(file, project, |u| {
+        for part in parts {
+            if let Some(entries) = u.fog.parts.get_mut(part) {
+                entries.retain(|e| !commits.contains(&e.commit));
+                if entries.is_empty() {
+                    u.fog.parts.remove(part);
+                }
+            }
+        }
+    })
+}
+
+/// Chapter `chapter` of PR `pr`'s brief, written for `head`, was read to its end; `lit` is the parts each chapter of that brief
+/// lights. Returns the parts whose every chapter is now read. A brief that lights its parts differently starts the count over.
+pub fn mark_read(
+    file: &Path,
+    project: &str,
+    pr: u64,
+    chapter: usize,
+    head: &str,
+    lit: Vec<Vec<String>>,
+    at: u64,
+) -> Result<BTreeSet<String>, String> {
+    let user = update_user(file, project, |u| {
+        let read = u.fog.reads.entry(pr).or_default();
+        if read.lit != lit {
+            read.chapters.clear();
+            read.lit = lit;
+        }
+        read.chapters.insert(
+            chapter,
+            ChapterRead {
+                head: head.to_string(),
+                at,
+            },
+        );
+    })?;
+    Ok(user.fog.reads[&pr].complete_parts())
+}
+
+/// Reading finished a PR's chapters that light `parts`: the fog the PR's merged commits filed on them leaves at once.
+pub fn clear_pr(
+    repo: &Path,
+    file: &Path,
+    project: &str,
+    pr: u64,
+    parts: &BTreeSet<String>,
+) -> Result<UserState, String> {
+    let fog = read_user(file, project).fog;
+    let commits: HashSet<String> = parts
+        .iter()
+        .filter_map(|part| fog.parts.get(part))
+        .flatten()
+        .map(|e| e.commit.clone())
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .filter(|commit| subject_pr(repo, commit) == Some(pr))
+        .collect();
+    clear_commits(file, project, &commits, parts)
+}
+
+/// Whether every chapter of PR `pr`'s brief is read.
+pub fn fully_read(user: &UserState, pr: u64) -> bool {
+    user.fog.reads.get(&pr).is_some_and(PrRead::fully_read)
+}
+
+/// Whether every chapter of PR `pr`'s brief is read at `head`.
+pub fn fully_read_at(user: &UserState, pr: u64, head: &str) -> bool {
+    user.fog
+        .reads
+        .get(&pr)
+        .is_some_and(|read| read.fully_read_at(head))
 }
 
 /// "I know this": clears every entry of `part`.
@@ -602,5 +804,155 @@ mod tests {
         )
         .unwrap();
         assert_eq!(rig.raw(), FogState::default());
+    }
+
+    // ---- Reading a brief clears the fog it would cause (spec #334, ticket #342).
+
+    impl Rig {
+        fn head(&self) -> String {
+            run(self.dir.path(), &["rev-parse", "HEAD"])
+        }
+        /// Starts a PR branch from main.
+        fn branch(&self) {
+            run(self.dir.path(), &["checkout", "-q", "-b", "pr"]);
+        }
+        /// Squash-merges the PR branch into main, as `Title (#7)`.
+        fn squash(&self) {
+            run(self.dir.path(), &["checkout", "-q", "main"]);
+            run(self.dir.path(), &["merge", "--squash", "pr"]);
+            run(self.dir.path(), &["commit", "-q", "-m", "Title (#7)"]);
+        }
+        fn read(&self, chapter: usize, head: &str, lit: &[&[&str]], at: u64) -> BTreeSet<String> {
+            let lit = lit
+                .iter()
+                .map(|c| c.iter().map(|p| p.to_string()).collect())
+                .collect();
+            mark_read(&self.file(), &self.main, 7, chapter, head, lit, at).unwrap()
+        }
+        fn set(&self, parts: &[&str]) -> BTreeSet<String> {
+            parts.iter().map(|p| p.to_string()).collect()
+        }
+    }
+
+    const LAW_CHANGED: &str = r#"{"version":1,
+      "parts":[
+        {"id":"a","name":"A","caption":"c","description":"d","tier":"core","paths":["a/"]},
+        {"id":"b","name":"B","caption":"c","description":"d","tier":"core","paths":["b/"]},
+        {"id":"c","name":"C","caption":"c","description":"d","tier":"core","paths":["c/"]}],
+      "actors":[],"links":[{"id":"a-b","from":"a","to":"b"}],"ignored":["ign/"],
+      "laws":[{"id":"l1","on":"a","backing":"trust","text":"changed"}]}"#;
+
+    #[test]
+    fn clearing_a_set_of_commits_from_a_set_of_parts_leaves_the_rest() {
+        let rig = Rig::new();
+        rig.open();
+        rig.commit(&[("a/x", "2"), ("b/x", "2"), ("c/x", "2")]);
+        let first = rig.head();
+        rig.commit(&[("a/x", "3"), ("b/x", "3")]);
+        rig.fog();
+        let commits: HashSet<String> = [first.clone()].into();
+        clear_commits(&rig.file(), &rig.main, &commits, &rig.set(&["a", "c"])).unwrap();
+        let raw = rig.raw();
+        assert_eq!(raw.parts["a"].len(), 1, "only that commit left a");
+        assert_ne!(raw.parts["a"][0].commit, first);
+        assert!(!raw.parts.contains_key("c"), "c had only that commit");
+        assert_eq!(raw.parts["b"].len(), 2, "b was not in the set");
+    }
+
+    #[test]
+    fn a_part_lit_by_two_chapters_clears_only_after_both_are_read() {
+        let rig = Rig::new();
+        rig.open();
+        rig.branch();
+        rig.commit(&[("a/x", "2"), ("b/x", "2")]);
+        let x = rig.head();
+        rig.squash();
+        assert_eq!(
+            rig.fog(),
+            strengths(&[("a", Strength::Thin), ("b", Strength::Thin)])
+        );
+        let lit: &[&[&str]] = &[&["a", "b"], &["a"]];
+        let done = rig.read(0, &x, lit, 1);
+        assert_eq!(done, rig.set(&["b"]), "a still waits for chapter 1");
+        clear_pr(Path::new(&rig.main), &rig.file(), &rig.main, 7, &done).unwrap();
+        assert_eq!(rig.fog(), strengths(&[("a", Strength::Thin)]));
+        let done = rig.read(1, &x, lit, 2);
+        assert_eq!(done, rig.set(&["a", "b"]));
+        clear_pr(Path::new(&rig.main), &rig.file(), &rig.main, 7, &done).unwrap();
+        assert!(rig.fog().is_empty());
+        assert!(fully_read(&read_user(&rig.file(), &rig.main), 7));
+    }
+
+    #[test]
+    fn a_part_no_chapter_lights_keeps_its_fog() {
+        let rig = Rig::new();
+        rig.open();
+        rig.branch();
+        rig.commit(&[("a/x", "2"), ("c/x", "2")]);
+        let x = rig.head();
+        rig.squash();
+        let done = rig.read(0, &x, &[&["a"]], 1);
+        clear_pr(Path::new(&rig.main), &rig.file(), &rig.main, 7, &done).unwrap();
+        assert_eq!(rig.fog(), strengths(&[("c", Strength::Thin)]));
+    }
+
+    #[test]
+    fn reading_before_the_merge_with_no_later_push_files_nothing() {
+        let rig = Rig::new();
+        rig.open();
+        rig.branch();
+        rig.commit(&[("a/x", "2"), ("b/x", "2")]);
+        let x = rig.head();
+        rig.read(0, &x, &[&["a", "b"]], 1);
+        assert!(rig.fog().is_empty());
+        rig.squash();
+        assert!(rig.fog().is_empty(), "{:?}", rig.fog());
+    }
+
+    #[test]
+    fn a_push_after_the_read_fogs_only_the_part_it_touched_thin_or_thick_by_its_diff() {
+        let rig = Rig::new();
+        rig.open();
+        rig.branch();
+        rig.commit(&[("a/x", "2"), ("b/x", "2"), ("c/x", "2")]);
+        let x = rig.head();
+        rig.read(0, &x, &[&["a", "b", "c"]], 1);
+        // One push edits b's files; another changes the law on a.
+        rig.commit(&[("b/x", "3")]);
+        rig.commit(&[("system-map.json", LAW_CHANGED)]);
+        rig.squash();
+        assert_eq!(
+            rig.fog(),
+            strengths(&[("a", Strength::Thick), ("b", Strength::Thin)])
+        );
+    }
+
+    #[test]
+    fn main_merged_into_the_branch_after_the_read_fogs_nothing() {
+        let rig = Rig::new();
+        rig.open();
+        rig.branch();
+        rig.commit(&[("a/x", "2")]);
+        let x = rig.head();
+        rig.read(0, &x, &[&["a", "b", "c"]], 1);
+        // Main moves on (its own commit fogs c), and the branch merges it in.
+        run(rig.dir.path(), &["checkout", "-q", "main"]);
+        rig.commit(&[("c/x", "9")]);
+        run(rig.dir.path(), &["checkout", "-q", "pr"]);
+        run(rig.dir.path(), &["merge", "-q", "-m", "sync", "main"]);
+        rig.squash();
+        assert_eq!(rig.fog(), strengths(&[("c", Strength::Thin)]));
+        assert_eq!(rig.raw().parts["c"].len(), 1, "only main's own commit");
+    }
+
+    #[test]
+    fn a_brief_whose_head_is_unknown_to_git_leaves_the_fog_as_filed() {
+        let rig = Rig::new();
+        rig.open();
+        rig.branch();
+        rig.commit(&[("a/x", "2")]);
+        rig.read(0, &"0".repeat(40), &[&["a"]], 1);
+        rig.squash();
+        assert_eq!(rig.fog(), strengths(&[("a", Strength::Thin)]));
     }
 }

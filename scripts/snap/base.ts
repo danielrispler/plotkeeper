@@ -12,7 +12,7 @@ export type ByArg<T> = { __by: string; values: Record<string, T> };
 type ReadCommand = { [C in Command]: Commands[C] extends void ? never : C }[Command];
 
 // Beside the replies, the harness's own keys: errors for the log and a script that runs once the UI has drawn (page.mjs).
-export type Fixture = { [C in Command]?: Commands[C] | ByArg<Commands[C]> } & { appErrors?: string[]; snapScript?: string };
+export type Fixture = { [C in Command]?: Commands[C] | ByArg<Commands[C]> } & { appErrors?: string[]; snapScript?: string; snapDone?: string };
 
 const noSelection: Selection | null = null;
 
@@ -23,10 +23,9 @@ export const base = {
   ask_anchor: "",
   ask_facts: null,
   ask_why_not: { facts: { sections: [] }, reasons: null },
-  cards: { brief: null, goal: null, answers: [], open: [], design: [], recent: [], older: [], workers: [], decisions: [], risk_notes: [], decision_notes: [] },
+  cards: { brief: null, goal: null, answers: [], open: [], design: [], decisions: [], risk_notes: [], decision_notes: [] },
   check_output: null,
-  explain_more: null,
-  learning: null,
+  failed_check_name: "",
   map_place: {},
   map_save_positions: { positions: {}, tiers: {} },
   map_set_tier: { positions: {}, tiers: {} },
@@ -36,11 +35,15 @@ export const base = {
   map_commit: { commit: "", short: "", label: "", url: null, files: [] },
   map_marks: [],
   stop_log: null,
-  stop_facts: { active_days: 0, merged_prs: 0, map_days: 0, mark_days: 0, map_on_mark_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: true },
+  stop_facts: { active_days: 0, merged_prs: 0, map_days: 0, mark_days: 0, map_on_mark_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: true, briefs_offered: 0, briefs_opened: 0, chapters_done: 0 },
   stop_dismiss: null,
   map_proof: [],
-  map_state: { project: "/w/plotkeeper", status: "none", source: null, reference: "origin/main", commit: null, note: null, user: { positions: {}, tiers: {} }, fog: {}, ci: null },
+  map_state: { project: "/w/plotkeeper", status: "none", source: null, reference: "origin/main", commit: null, note: null, user: { positions: {}, tiers: {} }, fog: {}, ci: null, ready: [], ratify: [] },
   open: noSelection,
+  pr_brief: null,
+  pr_diff: { commit: "", short: "", label: "", url: null, files: [] },
+  briefs_waiting: null,
+  pr_ratify: [],
   select: noSelection,
   selected: noSelection,
   sessions: [],

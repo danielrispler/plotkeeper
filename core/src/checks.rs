@@ -551,15 +551,6 @@ pub(crate) fn key<S: AsRef<str>>(list: &[S], command: &str) -> Option<String> {
     (!keys.is_empty()).then(|| keys.join("\n"))
 }
 
-/// 2 minutes, a starting guess (danielrispler/Falinks#461, decision 22): a check that usually runs
-/// longer gets a card at its start (decision 15).
-const LONG_MS: u64 = 2 * 60 * 1000;
-
-/// Whether a check whose typical duration is `typical` usually takes over 2 minutes.
-pub(crate) fn is_long(typical: Option<u64>) -> bool {
-    typical.is_some_and(|ms| ms > LONG_MS)
-}
-
 /// How long each command of checks ran when it did not fail, by `key`, oldest first
 /// (danielrispler/Falinks#461, decision 13), kept in the studio's saved state as the plain map.
 #[derive(Default, Serialize, Deserialize)]
@@ -811,24 +802,6 @@ pub(crate) fn listed(checks: &[Check], typical: &dyn Fn(&str) -> Option<u64>) ->
         .collect();
     listed.sort_by_key(|l| std::cmp::Reverse(l.started_at));
     listed
-}
-
-/// How the command of `row` ended, once it has: `Some(Some(true))` when its checks passed,
-/// `Some(Some(false))` when one failed, `Some(None)` when its exit code does not say; `None` while it
-/// runs, or when it ran no check.
-pub(crate) fn settled(row: &Row, list: &[String]) -> Option<Option<bool>> {
-    let found = runs(row, list, "");
-    if found.is_empty() || found.iter().any(|(_, _, r)| r.status == Status::Running) {
-        return None;
-    }
-    let status = |s| found.iter().any(|(_, _, r)| r.status == s);
-    Some(if status(Status::Failed) {
-        Some(false)
-    } else if found.iter().all(|(_, _, r)| r.status == Status::Passed) {
-        Some(true)
-    } else {
-        None
-    })
 }
 
 /// A check run's exit code and the tail of its output.

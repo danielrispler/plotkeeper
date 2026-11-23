@@ -30,7 +30,7 @@ export type MapView = {
   positions: Record<string, Point>;
   // The past commit this view shows read-only (no fog, no live agents, no CI), null when it shows now (ticket #313).
   scrub: Scrub | null;
-  slots: { canvas: HTMLElement; side: HTMLElement; notPlaced: HTMLElement; sheet: HTMLElement; drawer: HTMLElement; banner: HTMLElement };
+  slots: { canvas: HTMLElement; side: HTMLElement; notPlaced: HTMLElement; tray: HTMLElement; sheet: HTMLElement; drawer: HTMLElement; banner: HTMLElement };
 };
 export type PlateContext = { view: MapView; part: Part; tier: Tier; plate: HTMLElement; fog: HTMLElement; marks: HTMLElement; chips: HTMLElement };
 
@@ -160,7 +160,7 @@ export function mapEscape() {
 
 // The side area shows while any of its slots holds something.
 export const syncSide = (slots: MapView["slots"]) => {
-  slots.side.hidden = ![slots.notPlaced, slots.sheet, slots.drawer].some((slot) => slot.childElementCount > 0);
+  slots.side.hidden = ![slots.notPlaced, slots.tray, slots.sheet, slots.drawer].some((slot) => slot.childElementCount > 0);
   // The map area ends where the side area begins; a plate it now cuts is scrolled into whole view when the plates fit.
   // Only plates count: an actor's label is not worth a plate cut off, and a map too wide for the area keeps its plates whole first.
   const placed = view && view.slots === slots ? Object.entries(view.positions).filter(([id]) => !view!.doc.actors.some((actor) => actor.id === id)) : [];
@@ -275,7 +275,7 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub
   const world = text("div", "", "map-world");
   const links = svg("svg", { class: "map-links", "aria-hidden": "true" });
   world.append(links);
-  const slots = { canvas, side: element("map-side"), notPlaced: element("map-not-placed"), sheet: element("map-sheet"), drawer: element("map-drawer"), banner: element("map-banner") };
+  const slots = { canvas, side: element("map-side"), notPlaced: element("map-not-placed"), tray: element("map-tray"), sheet: element("map-sheet"), drawer: element("map-drawer"), banner: element("map-banner") };
   const current: MapView = { project: state.project, state, doc, positions, scrub: past, slots };
 
   const fit = () => {
@@ -381,9 +381,9 @@ function draw() {
   view = null;
   const unreadable = doc && !doc.ok ? { ...loaded!, status: "unreadable" as const, note: doc.why } : loaded;
   drawEmpty(body, unreadable);
-  const slots = { side: element("map-side"), notPlaced: element("map-not-placed"), sheet: element("map-sheet"), drawer: element("map-drawer"), banner: element("map-banner") };
+  const slots = { side: element("map-side"), notPlaced: element("map-not-placed"), tray: element("map-tray"), sheet: element("map-sheet"), drawer: element("map-drawer"), banner: element("map-banner") };
   // No map is drawn, so nothing of the last one may stay: its banner, sheet and drawer would belong to another project.
-  [slots.notPlaced, slots.sheet, slots.drawer, slots.banner].forEach((slot) => slot.replaceChildren());
+  [slots.notPlaced, slots.tray, slots.sheet, slots.drawer, slots.banner].forEach((slot) => slot.replaceChildren());
   syncSide(slots as MapView["slots"]);
   // A scrubbed commit whose map cannot be read still shows the way back to now.
   unreadHooks.forEach((hook) => hook(slots.banner, scrub));

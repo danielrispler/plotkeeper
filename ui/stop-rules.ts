@@ -8,12 +8,14 @@ import { failure, invoke, text } from "./dom.js";
 import type { StopFacts, StopKind } from "./types.js";
 
 export type Facts = StopFacts;
-export type Module = "map" | "history" | "proof";
+// "skips" is a note, not a module: "I know this" cleared more fog than finished brief chapters did.
+export type Module = "map" | "history" | "proof" | "briefs" | "skips";
 
 // The review is due once both hold, whichever comes last.
 export const dueAfter = { days: 14, prs: 20 };
 // Map view: opened on this many active days, or on this share of the days Home's mark was seen. History strip: scrubs. Proof: opens.
-export const thresholds = { mapDays: 4, markShare: 0.2, scrubs: 2, proofs: 2 };
+// PR briefs: opened for at least this share of the merged PRs that had one.
+export const thresholds = { mapDays: 4, markShare: 0.2, scrubs: 2, proofs: 2, briefShare: 0.25 };
 
 // The modules below their threshold once the review is due, in the order they are listed; null while it is not due or after it was
 // dismissed (the log goes on). An empty list means every module passed.
@@ -24,16 +26,20 @@ export function unused(facts: Facts): Module[] | null {
   if (!mapped) below.push("map");
   if (facts.scrubs < thresholds.scrubs) below.push("history");
   if (facts.proofs < thresholds.proofs) below.push("proof");
+  if (facts.briefs_offered > 0 && facts.briefs_opened < facts.briefs_offered * thresholds.briefShare) below.push("briefs");
+  if (facts.briefs_offered > 0 && facts.knows > facts.chapters_done) below.push("skips");
   return below;
 }
 
-const names: Record<Module, string> = { map: "the Map view", history: "the history strip", proof: "See the proof" };
+const names: Record<Exclude<Module, "skips">, string> = { map: "the Map view", history: "the history strip", proof: "See the proof", briefs: "PR briefs" };
 
-// The review's one sentence: the unused modules only, never a score or a count.
+// The review's words: the unused modules, then the note on skipping when it applies. Never a score or a count.
 export function reviewWords(modules: Module[]): string {
-  const list = modules.map((m) => names[m]);
+  const list = modules.filter((m) => m !== "skips").map((m) => names[m as keyof typeof names]);
   const joined = list.length > 1 ? `${list.slice(0, -1).join(", ")} and ${list.at(-1)}` : list[0];
-  return `Little used so far: ${joined}. Worth pruning?`;
+  const used = list.length ? `Little used so far: ${joined}. Worth pruning?` : "";
+  const skips = modules.includes("skips") ? "“I know this” cleared more fog than finishing a brief's chapters did." : "";
+  return [used, skips].filter(Boolean).join(" ");
 }
 
 // The projects whose review Home shows too: the ones whose Map view itself fell below its threshold, so an unused map still reaches Daniel.
@@ -48,17 +54,19 @@ export const localDay = (at: Date = new Date()) => {
 
 // A kind that counts days is told once a day per project (the shell counts days, so more would only fill the log).
 const dayKinds = new Set<StopKind>(["session", "map-open", "mark-seen"]);
+// A kind about a PR's brief that is told once per PR (the shell also keeps a brief's offer to once, across restarts).
+const prKinds = new Set<StopKind>(["brief-offered", "unconfirmed-seen"]);
 const told = new Set<string>();
 
-// Tells the shell that Daniel used something. Fire and forget: a failure is logged quietly, never shown.
-export function logStop(kind: StopKind, project: string | null = null) {
+// Tells the shell that Daniel used something; brief events name their PR. Fire and forget: a failure is logged quietly, never shown.
+export function logStop(kind: StopKind, project: string | null = null, pr: number | null = null) {
   const day = localDay();
-  if (dayKinds.has(kind)) {
-    const key = `${day}|${kind}|${project}`;
+  const key = dayKinds.has(kind) ? `${day}|${kind}|${project}` : prKinds.has(kind) ? `${kind}|${project}|${pr}` : null;
+  if (key !== null) {
     if (told.has(key)) return;
     told.add(key);
   }
-  invoke("stop_log", { kind, project, day }).catch(failure("stop_log"));
+  invoke("stop_log", { kind, project, day, pr }).catch(failure("stop_log"));
 }
 
 // What the shell counted for `project`, and the modules it is short on (null: not due, or dismissed).

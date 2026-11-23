@@ -9,13 +9,13 @@ The app this effort builds: the place Daniel does all agent work. It has three l
 _Avoid_: Dashboard (one view, not the thing itself)
 
 **Understanding layer**:
-The part of the control room that keeps Daniel's understanding in step with the agents' work: guesses, cards and debrief. It works without the workbench, for any agent session.
+The part of the control room that keeps Daniel's understanding in step with the agents' work: the turn summaries, the session Brief and the PR briefs. It works without the workbench, for any agent session.
 
 **Wait**:
 The time Daniel waits on an agent: from his prompt until the agent ends its turn, or until his next prompt if he interrupts it. Answering a permission, a question or a plan inside it does not start a new wait.
 
 **Card**:
-An explanation, in the explanation language, of what a prompt changed, or what a worker changed, since the previous card. It opens with a quiz, and offers "explain more" and a rating.
+Retired as a turn's or a worker's explanation (danielrispler/plotkeeper#348): a **PR brief** is the explanation now. The cards stored before stay readable and none is shown. A blocked command's card is another thing, see **Blocked command**.
 _Avoid_: Summary (read after the work, with no question first)
 
 **Turn**:
@@ -27,7 +27,7 @@ The files a turn's agent and its workers changed, with their added and removed l
 
 **Intention**:
 The latest thing the agent wrote in its own words during a turn, such as why it is about to read an issue. It stays shown, with its age, until the agent writes again, so it covers the steps that follow it. While a turn runs, its intentions are the last line of each of its responses. When the turn ends, its final response's intention becomes that response's first line, so a footer a plugin adds is never the intention. The rail shows it only while the session is Running (boxed) or Needs you (small, as "Why it asks"); at your turn the turn's Headline says what happened, and the summary's first line never replaces the intention. A side question ("ask about this") gets these intentions as context.
-_Avoid_: Reason (the card writer's account of a step)
+_Avoid_: Reason (the retired card writer's account of a step)
 
 **Headline**:
 One sentence, at most 16 words, on what a turn did, or what it waits on: an outcome, never a narration of the steps, and for a turn that ends by asking Daniel something, the ask. The turn writer is given the turn's recorded facts and writes it; code then holds it to them. A Headline that says fixed, passes or verified with no check of the turn that ended passed (or with one that ended failed) starts with "Agent says:". A Headline with a number or id the turn's material lacks is stripped and asked for once more; stripped twice, the rail shows the final response's first line. Until the summary arrives, the Headline is that line.
@@ -35,7 +35,7 @@ _Avoid_: Intention (the agent's own words while it works)
 
 **Turn summary**:
 A Headline and up to three typed Body lines, written by one cheap writer call when the turn ends, or when Daniel opens the turn if summaries are set to write on open. A turn gets one when its final response is about 150 words or more, or when it ends asking Daniel something; other turns show their response as it is. The writer is given the turn's recorded facts (its files with their line counts, hunks up to a cap, each check's command, result and retries) and told not to restate them. A Body line is `why`, `reported`, `open` or `ask`, at most 20 words; `open` and `ask` always show, and a `reported` line reads "Agent says". A line with a number or id the turn's material lacks is dropped; numbers in the turn's diff, line counts or check results, number words and digits in a known path always pass. A summary stored before the Headline is read with its first line as the Headline and the rest as `reported` lines; the writer is not run again on it.
-_Avoid_: Card (on a change, with its quiz first), brief (the whole session's, kept for resuming)
+_Avoid_: Card (retired), brief (the whole session's, kept for resuming)
 
 **Transcript**:
 Claude Code's own record of an agent session, which the control room reads for the intention, the turn's responses, the branch and the context share. When it cannot be read, the session's view falls back to its steps only.
@@ -52,37 +52,18 @@ _Avoid_: ETA (implies a promise)
 What an agent session's work is, named by its first prompt's slash command, else by its first skill, such as `implement` or `wayfinder`. An estimate compares a session only with sessions of the same kind.
 
 **Base**:
-The state of a worktree that the next card's change is measured from: its commit and its files when the previous card was written, or when the prompt or worker began. A move of the commit that is not the agent's own work moves the base instead of adding to the change.
+The state of a worktree that the next change is measured from: its commit and its files when the previous change was taken, or when the prompt or worker began. A move of the commit that is not the agent's own work moves the base instead of adding to the change.
 _Avoid_: Snapshot, checkpoint (the engine's term)
 
 **Quiz**:
-The one multiple-choice question a turn can have, with the writer's key, which grades Daniel's guess. It is the card's when the turn has a card, and otherwise comes with the turn summary, open under the Headline. One set of rules holds it, and code enforces the guards: [`question-rules.md`](question-rules.md). A learning question stored before the Quiz reads as one. On a check card the quiz asks whether the check will pass, and the check's result is the key.
-_Avoid_: Question (an agent's question to Daniel), Learning section (retired)
-
-**Offer**:
-What one decision gives a change: a card (with its Quiz), a lone Quiz, or nothing, by the table in [`question-rules.md`](question-rules.md). A turn, a worker's card and a **late change** each get one, decided once with the same facts for the card and for the summary. Each is recorded once in `offers.jsonl` ([`storage.md`](behaviour/storage.md)).
-
-**Late change**:
-What a subagent changed in its session's own worktree after the turn ended, which the session's card then covers. It is judged below the card row: it gets a card only when it passes the table's first row, and never a lone Quiz.
+The multiple-choice question a card or a turn summary carried, with the writer's key. All of it is retired: a turn's own Quiz, the Retest a week after it, Home's learning slot and the hourly cap in danielrispler/plotkeeper#347, and the cards, their Quizzes, the check cards and the self-test in danielrispler/plotkeeper#348. The turn summary is a Headline and a Body, and the stored Quizzes, Retests and learning sections stay readable.
+_Avoid_: Question (an agent's question to Daniel), Learning section (retired), Retest (retired)
 
 **Turn writing**:
-What the understanding layer writes when a turn ends, a long check starts or a worker returns: the card its **offer** gives, the turn summary with its Quiz, the session's name, and the Brief's Goal and Design so far. A session's pieces are written one at a time, in the order they were asked for, so a turn's summary follows its card.
-_Avoid_: Card writing (one part of it)
+What the understanding layer writes when a turn ends or a worker returns: the turn summary, the session's name, and the Brief's Goal and Design so far, and no card. A session's pieces are written one at a time, in the order they were asked for.
 
 **Check**:
 A command of a project's check list, as run in one worktree. Its runs in a turn are one check, and its last run's result is the check's. The same command in two worktrees is two checks. [Checks](behaviour/checks.md) has the rules.
-
-**Check card**:
-The card a check of the session's own agent gets at its start when it usually runs over 2 minutes, on the change since the last card, so Daniel can guess while he waits whether the check will pass.
-
-**Guess**:
-Daniel's answer to a card's quiz. The card writer's key grades it, and the card shows right or wrong, with the reasons, as soon as he answers. On a check card the check's result settles it instead, and the card shows right or wrong, with the reasons, once the check ends. It is never shown as a raw score; only numbers that inform are allowed, as calibration against his own past ([the Quiz](behaviour/quiz.md#numbers-that-inform)). On Home a guess is preceded by a confidence tap, "not sure" or not, with Home as its surface.
-
-**Settle**:
-To grade the guess on a check card by the check's result, once the check ends. A tap after the result is no guess.
-
-**Not counted**:
-A check card's guess whose check ended with an exit code that does not say whether it passed, such as `cargo test 2>&1 | tail`. No option is named the right one, and the weekly rates leave it out.
 
 **Step ledger**:
 The index of an agent session's tool calls, workers' included, kept as one row per call: its tool, file, command or pattern, turn, subagent, duration and result or exit code, and where in the event log its start and result lines are. It holds no output; a call's details are read from the log by those offsets.
@@ -91,7 +72,7 @@ The index of an agent session's tool calls, workers' included, kept as one row p
 The line under a turn's Headline that states what the hooks and git recorded for the turn: the files it changed and each ended check's last result, such as `3 files · 2 checks passed`, with "+N merged" when a merge brought files in. It opens in place to each file with its line counts, the merged files, and each check with its status, naming its worktree when it is not the session's own; a failed check opens its exit code and the tail of its output. It has no model in it, and an agent that reports no trees has none.
 
 **Brief**:
-What Daniel reads to resume an agent session he lost track of, folded under its feed (inside **Where we were** while that shows): slots, not prose. **Goal** is one or two lines a model writes from Daniel's prompts, again when a new prompt of his came; it is the only part a model writes. **Decisions** lists each question the agent asked with Daniel's reply, in order. **Open** is computed from facts, never written: the pending question, each check whose last run failed (its worktree named when it is not the session's own), files changed with no check run since, the latest turn's `open` and `ask` lines, and unpushed work or an unmerged PR; each drops out once it is settled. **Design so far** is at most five one-line design decisions with their reasons, which a model writes from the turns' `why` lines and the cards' summaries only; each cites the turn or card it came from, a click on the citation opens it in the rail, and code drops a line that cites nothing or something not in the session. A session with no `why` line and no card has none. A brief stored before the slots, as prose, shows as it is until the session's next Goal.
+What Daniel reads to resume an agent session he lost track of, folded under its feed (inside **Where we were** while that shows): slots, not prose. **Goal** is one or two lines a model writes from Daniel's prompts, again when a new prompt of his came; it is the only part a model writes. **Decisions** lists each question the agent asked with Daniel's reply, in order. **Open** is computed from facts, never written: the pending question, each check whose last run failed (its worktree named when it is not the session's own), files changed with no check run since, the latest turn's `open` and `ask` lines, and unpushed work or an unmerged PR; each drops out once it is settled. **Design so far** is at most five one-line design decisions with their reasons, which a model writes from the turns' `why` lines and the summaries of the cards stored before they were retired; each cites the turn or card it came from, a click on the citation opens it in the rail, and code drops a line that cites nothing or something not in the session. A session with no `why` line and no card has none. A brief stored before the slots, as prose, shows as it is until the session's next Goal.
 
 **Where we were**:
 The banner the rail opens on when Daniel returns to a session, above the newest turn, which shows in full under it. It shows for an idle or ended session, and for one with unseen turns whose last turn ended 15 minutes ago or more. Three lines, all from facts: the last Headline with its age; what happened since he looked (the turns after the last one he saw, their files and check results, such as `2 turns · 4 files · checks passed`); and what is open, from the Brief's Open slot. The Brief folds inside it. It is decided when the session is selected and stays while he reads it, until he selects another session or sends a prompt.
@@ -112,7 +93,7 @@ _Formerly_: Place
 _Avoid_: Location
 
 **Home**:
-The waiting room: the page Daniel parks on while agents run, in the terminal column while no session is selected (such as after a delete or a click on the list's empty space). Under a quiet title (the date) its parts come in order, each absent when empty: **Needs you** (each session with its question's first line, the only colour on the page), **Running** (two lines each: logo, name, project and elapsed time, then its **Intention**, muted, with its age; at most 4, then "+N running"), **Unseen** (the sessions whose last turn he has not seen, newest turn first, each with its **Headline**; at most 3, then "+N unseen"), the learning item (a fresh Quiz or a Retest, or "Done for today"), **Landed** and a row per project to start a session in. A "+N" row expands its group inline until Home is left. With no session needing him it reads "Nothing needs you". Workspaces stays the home of tasks.
+The waiting room: the page Daniel parks on while agents run, in the terminal column while no session is selected (such as after a delete or a click on the list's empty space). Under a quiet title (the date) its parts come in order, each absent when empty: **Needs you** (each session with its question's first line, the only colour on the page), **Running** (two lines each: logo, name, project and elapsed time, then its **Intention**, muted, with its age; at most 4, then "+N running"), **Unseen** (the sessions whose last turn he has not seen, newest turn first, each with its **Headline**; at most 3, then "+N unseen"), **Landed** and a row per project to start a session in. A "+N" row expands its group inline until Home is left. With no session needing him it reads "Nothing needs you". Workspaces stays the home of tasks.
 _Avoid_: Dashboard, board
 
 **History**:
@@ -134,7 +115,7 @@ _Avoid_: Sync, remote (alone)
 
 **Main distance**:
 How far a workspace's branch is from `origin`'s default branch: the commits it adds, and the commits it is behind, which a rebase would take in. On the default branch itself, it is the upstream distance.
-_Avoid_: Base (a card's starting point)
+_Avoid_: Base (a retired card's starting point)
 
 **Git line**:
 The line in the top bar on the git state of the selected session's workspace, or the main checkout's with none: its workspace and branch, its upstream and main distance, its uncommitted files and any operation in progress. The branch shows once: for a task whose branch is its name, only the name does; the main checkout's branch always shows. The tokens that say nothing are hidden. Workspaces rows carry the same tokens.
@@ -152,7 +133,7 @@ The background process that owns the workbench's terminals, so they outlive the 
 _Avoid_: Server (the program that serves the page, below), multiplexer
 
 **Server**:
-The `server/` library and its `plotkeeper` program, which has no window: it holds the core state, the card store and the card writer, follows the event log, writes the cards, and serves the learning layer as a page on 127.0.0.1 (one per data folder, behind a token) that Daniel opens in a browser tab. The app's shell is another host of the same library. It does not own terminals, which stay with the **Terminal daemon**.
+The `server/` library and its `plotkeeper` program, which has no window: it holds the core state, the card store and the writer, follows the event log, writes the summaries and the PR briefs, and serves the learning layer as a page on 127.0.0.1 (one per data folder, behind a token) that Daniel opens in a browser tab. The app's shell is another host of the same library. It does not own terminals, which stay with the **Terminal daemon**.
 _Avoid_: Backend, daemon (the terminal daemon is another process)
 
 **Pane**:
@@ -248,7 +229,7 @@ An agent that an agent session, or another subagent, spawned to do part of its w
 _Avoid_: Task (the workbench's unit of work)
 
 **Worker**:
-A subagent spawned with its own git worktree, or one that changes files. A helper becomes a worker at its first change. Its home is its own worktree: the one it was spawned isolated in, or the first worktree its commands name that is not its session's. Daniel follows a worker like a session, with its own cards and brief. A finished worker folds into its parent's line as a helper does, and its session's rail keeps it in the subagent history. A worker is not a task.
+A subagent spawned with its own git worktree, or one that changes files. A helper becomes a worker at its first change. Its home is its own worktree: the one it was spawned isolated in, or the first worktree its commands name that is not its session's. Daniel follows a worker like a session, with its own brief. A finished worker folds into its parent's line as a helper does, and its session's rail keeps it in the subagent history. A worker is not a task.
 
 **Helper**:
 A subagent that is not a worker, such as a review or a search. It shows as one line under the agent that spawned it.
@@ -257,25 +238,41 @@ A subagent that is not a worker, such as a review or a search. It shows as one l
 A prompt that Claude Code sends, not Daniel, to wake an agent when a subagent or a background command it started returns. It names the returning task's id in markup. It never counts as Daniel's prompt.
 
 **Session list**:
-The list of every live agent session, one row each, in one group per **Project**, in project order. A project's header shows its name and, even folded, its most urgent state (needs you over running), and on hover or focus a "+" that opens New session on that project; inside it the sessions are by state (needs you, running, your turn, then idle sessions collapsed last), then the project's **Workspaces** rows. A session belongs to the project whose workspace holds its folder, and its row carries a token for that workspace and branch (the main checkout's branch, or the task's name and branch), with no project badge. A session in a folder outside every project sits in a dimmed group after the projects, named after its repository's main checkout, else its folder, else `~`. Ended sessions are not in it: a "History · N" link at its end opens **History**. A row is one line, its name then its state's shape: a "Needs you" pill (the only colour), a spinner while running, a dot at your turn (filled, with a bold name, while **unseen**), a ring when idle or ended, a check mark instead when its task is **landed**. Only a running or needs-you row adds a second, muted line: its current step, or its question's first line. Running subagents nest under the agent that spawned them. When the window is narrow the list is a **strip** of the same shapes, each with a short label from the session's name, distinct between sessions; hovering it opens the list over the terminal. The top bar's needs-you chip counts the sessions that need Daniel, and an unseen chip beside it, not in colour, the unseen sessions. A finished subagent leaves the list and counts in its parent's "N done"; a failed one stays until Daniel opens it. Each row leads with its agent's logo, in one muted colour so "Needs you" stays the only colour, in every state and beside the running spinner, not instead of it; the same logo leads a row on Home and in History, and the session's header in the rail. A plain terminal shows a terminal glyph. The strip, a project's header and a subagent's row carry no logo. Hovering the header's logo shows the model running the session with its agent ("Claude · Opus 5.5", "agy · Flash high"), and for an agent that reports no context share, such as agy, a note saying so, so a missing share reads as expected. A **status-only row** is a session of another agent than Claude Code or agy, such as Codex, in a studio terminal whose program reports its status (OSC 7501): it shows running, needs you or your turn from that status, its program's logo (Codex's, or a neutral glyph for a program the studio does not know), its name from the program and its folder, and a "status only" mark instead of a second line, as it has no intention, Headline, card, Brief, estimate or decisions. It notifies as a Claude session does, and goes when its status clears or its terminal ends. Only Daniel's own actions change the session he looks at: a click or key on a row, a click on the list's empty space, which selects none and shows **Home**, or starting a session, which selects it once it reports its terminal.
+The list of every live agent session, one row each, in one group per **Project**, in project order. A project's header shows its name and, even folded, its most urgent state (needs you over running), inside it the sessions are by state (needs you, running, your turn, then idle sessions collapsed last), then the project's **Workspaces** rows. A session belongs to the project whose workspace holds its folder, and its row carries a token for that workspace and branch (the main checkout's branch, or the task's name and branch), with no project badge. A session in a folder outside every project sits in a dimmed group after the projects, named after its repository's main checkout, else its folder, else `~`. Ended sessions are not in it: a "History · N" link at its end opens **History**. A row is one line, its name then its state's shape: a "Needs you" pill (the only colour), a spinner while running, a dot at your turn (filled, with a bold name, while **unseen**), a ring when idle or ended, a check mark instead when its task is **landed**. Only a running or needs-you row adds a second, muted line: its current step, or its question's first line. Running subagents nest under the agent that spawned them. When the window is narrow the list is a **strip** of the same shapes, each with a short label from the session's name, distinct between sessions; hovering it opens the list over the terminal. The top bar's needs-you chip counts the sessions that need Daniel, and an unseen chip beside it, not in colour, the unseen sessions. A finished subagent leaves the list and counts in its parent's "N done"; a failed one stays until Daniel opens it. Each row leads with its agent's logo, in one muted colour so "Needs you" stays the only colour, in every state and beside the running spinner, not instead of it; the same logo leads a row on Home and in History, and the session's header in the rail. A plain terminal shows a terminal glyph. The strip, a project's header and a subagent's row carry no logo. Hovering the header's logo shows the model running the session with its agent ("Claude · Opus 5.5", "agy · Flash high"), and for an agent that reports no context share, such as agy, a note saying so, so a missing share reads as expected. A **status-only row** is a session of another agent than Claude Code or agy, such as Codex, in a studio terminal whose program reports its status (OSC 7501): it shows running, needs you or your turn from that status, its program's logo (Codex's, or a neutral glyph for a program the studio does not know), its name from the program and its folder, and a "status only" mark instead of a second line, as it has no intention, Headline, card, Brief, estimate or decisions. It notifies as a Claude session does, and goes when its status clears or its terminal ends. Only Daniel's own actions change the session he looks at: a click or key on a row, a click on the list's empty space, which selects none and shows **Home**, or starting a session, which selects it once it reports its terminal.
 
 **Story rail**:
-The column on the window's left that tells the selected session's or subagent's story, drawn from recorded facts. Its header is one line: the state (needs you, running, your turn, idle), the phase, and a "⋯" menu for Rename, Close and Delete. Below it the newest turn is shown in full, now by state: while running, what Daniel asked and what has happened so far; at your turn or idle, its **Headline** and Body lines; when the session needs him, the open question first. A turn's block is its prompt in one line, its Headline and **Body**, the **Evidence line** under it, its **Quiz**, its cards, the subagents and checks it ran, and its full response, folded. Earlier turns are folded, newest first, each to one line that opens in place. When Daniel returns to a session the rail opens on the **Where we were** banner, with the **Brief** folded inside it; the decision history stays folded under the feed. The "Ask" mark sits on anchors (a file, a check, a subagent, a Headline) and opens the question about that fact. Below 1007 px the rail is an overlay: a spine at the window's left edge opens it, and it slides away when the pointer leaves.
+The column on the window's left that tells the selected session's or subagent's story, drawn from recorded facts. Its header is one line: the state (needs you, running, your turn, idle), the phase, and a "⋯" menu for Rename, Close and Delete. Below it the newest turn is shown in full, now by state: while running, what Daniel asked and what has happened so far; at your turn or idle, its **Headline** and Body lines; when the session needs him, the open question first. A turn's block is its prompt in one line, its Headline and **Body**, the **Evidence line** under it, its cards, the subagents and checks it ran, and its full response, folded. Earlier turns are folded, newest first, each to one line that opens in place. When Daniel returns to a session the rail opens on the **Where we were** banner, with the **Brief** folded inside it; the decision history stays folded under the feed. The "Ask" mark sits on anchors (a file, a check, a subagent, a Headline) and opens the question about that fact. Below 1007 px the rail is an overlay: a spine at the window's left edge opens it, and it slides away when the pointer leaves.
 
 **Focus mode**:
 The window with the session list and the story rail folded, so the terminal takes the window. One key, rebindable in the keymap, enters it and the same key leaves it. Only two other things leave it: pressing the toast to jump to its session, and the next-needs-you key. Nothing else changes the layout, so the terminal's size never moves under Daniel's typing. While in it, a session that newly needs you shows a toast over the terminal's corner instead.
 _Avoid_: Zen mode, full screen (the macOS window state)
 
 **Map view**:
-The project-scoped view of a project's system map, taking the story rail and terminal column together while keeping the session list and top bar live. Opened from the palette, its key, or the quiet mark on Home's project row; Esc is layered (returns from scrubbed history to live first, then closes an open part sheet, then leaves the map view).
+The project-scoped view of a project's system map, taking the story rail and terminal column together while keeping the session list and top bar live. Opened from the palette, its key, or the quiet mark on Home's project row; Esc is layered, in the order it ships: an open drawer, then a scrubbed commit (back to now), then a part's sheet, then leaving the view. Its **Ready for review** tray lists the PRs of the project that are open and not drafts.
 _Avoid_: Architecture view, graph view
 
 **PR brief**:
-The entered, stepped plain-language explanation of one pull request on the system map, with an understanding check when the change alters a flow or adds a tagged test. Distinct from **Brief** (the session-resume brief in the story rail).
+The stepped plain-language explanation of one pull request on the system map, written when the PR becomes **Ready for review** and kept waiting. A PR that would fog at most two parts is told as a single story; a bigger one in two to four **chapters**. It ends with at most one prediction (the check) when the change alters a flow or adds a tagged test. Distinct from **Brief** (the session-resume brief in the story rail).
 _Avoid_: Brief (alone — that is the session-resume brief), lesson
 
+**Chapter**:
+One behaviour of a chaptered **PR brief**, the kind Daniel would name ("Fog", "Broken laws"), told in three or four steps. It lights every part its behaviour crosses; finishing it clears their fog.
+_Avoid_: Section, step (a step is one line of a chapter)
+
+**Ready for review**:
+A pull request that is open and not a draft. The shell learns it from `gh pr view` at a turn's end, and at window focus and the Map view's opening within one per-repository cooldown; never on a timer. The Map view's "Ready for review" tray lists these PRs.
+_Avoid_: Open PR (a draft is open too), review requested
+
+**Ratify**:
+To accept or overturn a change the agent made to the system map or a law, or a decision it declared, offered in the **PR brief**. A map change nobody has decided on is **not yet ratified**; it is in effect all the same, since ratifying never blocks. Overturning copies a prompt that quotes the item to the clipboard, for Daniel to paste into his agent.
+_Avoid_: Approve (that is the PR review), sign off
+
+**Claim check**:
+The second sandboxed call that checks each claim of a **PR brief** against the same facts the writer had. An item still flagged after one rewrite carries the mark **not confirmed from the facts**.
+_Avoid_: Fact check, verification
+
 **Seen**:
-In the viewport (intersecting visibly, not merely built in the DOM), in a visible and focused window, with the view that holds it open. Used for cards, Home items, and stop-rule counts.
+In the viewport (intersecting visibly, not merely built in the DOM), in a visible and focused window, with the view that holds it open. Used for Home items, PR brief rows and stop-rule counts.
 _Avoid_: Shown (when it meant DOM-built), rendered
 
 **System map**:
@@ -330,7 +327,7 @@ A place the control room learns about agent sessions from, such as a worker runt
 A repository added to the control room.
 
 **Settings**:
-Daniel's choices for the studio, kept in `settings.json` in its data folder, in Zed's format: zoom, the terminal's font size, the summary writer's model and effort, and the Doctor menu, whose entries are palette actions. ⌘, and a gear, the last item of the top bar, open the settings page, a dialog whose controls save each change by editing `settings.json` in place; it never folds into the bar's "⋯" menu. `studio::OpenSettingsFile` opens the raw file. "Settings files" means `settings.json` and `keymap.json` together: the studio reloads either when saved, and a file that does not parse is reported while its last good version stays in effect.
+Daniel's choices for the studio, kept in `settings.json` in its data folder, in Zed's format: zoom, the terminal's font size, the summary writer's model and effort, the catch-up window and the PR brief writer's model (`prBriefs.model`). The page has no settings page: Daniel edits the files in his editor. "Settings files" means `settings.json` and `keymap.json` together: the studio reloads either when saved, and a file that does not parse is reported while its last good version stays in effect.
 _Avoid_: Preferences, config
 
 **Sounds**:
@@ -342,7 +339,7 @@ Daniel's shortcuts for the studio, kept in `keymap.json` beside the settings, in
 _Avoid_: Keybindings, shortcuts file
 
 **Explanation language**:
-The human language of cards and questions: English for now, no longer Hebrew (danielrispler/Falinks#463), in plain words at Daniel's level. Code terms are in backticks.
+The human language of briefs and questions: English for now, no longer Hebrew (danielrispler/Falinks#463), in plain words at Daniel's level. Code terms are in backticks.
 
 **Prior art**:
 How the benchmark tools already solve a standard shell or workspace problem, such as sidebar hierarchy, worktree navigation, branch switching or history. The benchmark tools are herdr, cmux, Workmux, AgentsRoom, T3 Code and Cursor's parallel background agents, with Zed second for editor chrome. The studio copies their proven pattern for these decisions and keeps its own design for the understanding layer. Prior-art notes live in `docs/studio/research/`.

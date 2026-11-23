@@ -11,10 +11,10 @@ export const studio = {
   // A `selected` or `cards` event came while `pending` waited, so the press's settling fetches both.
   missed: false,
   // The selected session's brief, cards and decisions, as the shell last sent them.
-  cards: { brief: null, goal: null, answers: [], open: [], design: [], recent: [], older: [], workers: [], decisions: [], risk_notes: [], decision_notes: [] } as SessionCards,
+  cards: { brief: null, goal: null, answers: [], open: [], design: [], decisions: [], risk_notes: [], decision_notes: [] } as SessionCards,
   // Focus mode (danielrispler/Falinks#573): the list and the rail folded, the terminal takes the window.
   focus: false,
   files: initial,
-  // The two files' text as the shell last sent it: what the settings page's write is made from (#195).
+  // The two files' text as the shell last sent it: what a settings write is made from.
   texts: { settings: null, keymap: null } as SettingsFiles,
 };

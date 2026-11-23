@@ -724,6 +724,114 @@ pub fn refresh_later(cache: &Arc<CiCache>, events: &Arc<crate::Events>, project:
     });
 }
 
+/// How a failed local check reads on the rail's evidence line (spec #334, ticket #345): the first failing test of its output
+/// tail, with the part that owns the test's file, then "(+N more)"; with no test parsed, the step that failed.
+///
+/// `tail` is the check's output tail, `suite` its name (`cargo fmt --check`) and `map_source` the project's map, when it has one.
+/// Not the sentence's mark: the line adds "✗ " itself.
+pub fn name_failed_check(tail: &str, suite: &str, map_source: Option<&str>) -> String {
+    let failures = parse_failures(tail);
+    let Some(first) = failures.first() else {
+        return format!("{} failed", failed_step(tail, suite));
+    };
+    let test = plain_test(first);
+    let more = match failures.len() - 1 {
+        0 => String::new(),
+        n => format!(" (+{n} more)"),
+    };
+    match part_name(first, map_source) {
+        Some(part) => format!("{part} tests failed: {test}{more}"),
+        None => format!("Test failed: {test}{more}"),
+    }
+}
+
+/// A test's name in words: Node's title as written; a Rust test's last path segment with its underscores as spaces.
+fn plain_test(failure: &Failure) -> String {
+    match failure.binary {
+        Some(_) => failure
+            .name
+            .rsplit("::")
+            .next()
+            .unwrap_or(&failure.name)
+            .replace('_', " "),
+        None => failure.name.clone(),
+    }
+}
+
+/// The name of the part of the map that owns the failing test's file.
+fn part_name(failure: &Failure, map_source: Option<&str>) -> Option<String> {
+    let source = map_source?;
+    let map = system_map::parse_lenient(source).ok()?;
+    let id = test_paths(failure).into_iter().find_map(|path| {
+        // A log from another machine names the file by its own folders: drop leading folders until a part owns the rest.
+        let mut rest = path.as_str();
+        loop {
+            let found = system_map::touched_for_map(&map, &[rest.to_string()]);
+            if let Some(part) = found.parts.into_iter().next() {
+                return Some(part.id);
+            }
+            rest = rest.split_once('/')?.1;
+        }
+    })?;
+    let names: serde_json::Value = serde_json::from_str(source).ok()?;
+    names["parts"]
+        .as_array()?
+        .iter()
+        .find(|part| part["id"].as_str() == Some(id.as_str()))
+        .and_then(|part| part["name"].as_str())
+        .map(String::from)
+}
+
+/// Where a failing test's file is: Node's own file; a nextest binary's crate folder, with its integration test file when the
+/// binary names one (the `it` binary's by the test's module). The crate's folder is as `rust_holds` reads it.
+fn test_paths(failure: &Failure) -> Vec<String> {
+    let Some(binary) = &failure.binary else {
+        return failure.file.iter().cloned().collect();
+    };
+    let (krate, test_binary) = match binary.split_once("::") {
+        Some((krate, id)) => (krate, Some(id)),
+        None => (binary.as_str(), None),
+    };
+    let dir = match krate {
+        "studio" => "src-tauri",
+        other => other.strip_prefix("studio-").unwrap_or(other),
+    };
+    match test_binary.filter(|id| !id.starts_with("bin/")) {
+        Some("it") => {
+            let module = failure.name.split("::").next().unwrap_or_default();
+            vec![format!("{dir}/tests/{module}.rs")]
+        }
+        Some(id) => vec![format!("{dir}/tests/{id}.rs")],
+        None => vec![format!("{dir}/src/lib.rs")],
+    }
+}
+
+/// The step a check that ran no failing test broke on, in words.
+fn failed_step(tail: &str, suite: &str) -> String {
+    let suite_has = |word: &str| suite.contains(word);
+    let tail_has = |text: &str| tail.contains(text);
+    let step = if suite_has("fmt") || suite_has("format") || tail_has("Diff in ") {
+        "formatting check"
+    } else if suite_has("clippy") || suite_has("lint") || tail_has("clippy") {
+        "lint check"
+    } else if suite_has("build")
+        || tail_has("could not compile")
+        || tail_has("error[E")
+        || tail_has("error TS")
+    {
+        "build"
+    } else {
+        return suite.to_string();
+    };
+    step.to_string()
+}
+
+/// The words for a failed check's output tail, read on the project's own map (the default branch's). Off the studio's lock.
+pub fn failed_check_name(tail: String, suite: String, worktree: String) -> String {
+    let map = crate::map::read_map(Path::new(&worktree)).source;
+    name_failed_check(&tail, &suite, map.as_deref())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1188,5 +1296,59 @@ mod tests {
         assert!(cache.put("/p", ci(Status::NotRun, &[])));
         assert!(!cache.broken("/p"));
         assert!(!cache.has("/q") && cache.put("/q", ci(Status::Unknown, &[])) && cache.has("/q"));
+    }
+
+    const MAP: &str = r#"{"version":1,"parts":[
+      {"id":"core","name":"Core","caption":"c","description":"d","tier":"core","paths":["core/"]},
+      {"id":"understanding","name":"Understanding","caption":"c","description":"d","tier":"core","paths":["understanding/"]},
+      {"id":"window","name":"Window","caption":"c","description":"d","tier":"core","paths":["ui/"]}],
+      "actors":[],"links":[],"ignored":[],"laws":[]}"#;
+
+    #[test]
+    fn a_failed_check_names_its_one_test_and_the_part_that_owns_it() {
+        assert_eq!(
+            name_failed_check(NODE_TAP, "npm run check", Some(MAP)),
+            "Window tests failed: a delete keeps the live terminal (+1 more)"
+        );
+        let one =
+            "not ok 1 - a delete keeps the live terminal\n  location: 'ui/tests/t.test.mjs:5:1'\n";
+        assert_eq!(
+            name_failed_check(one, "npm run check", Some(MAP)),
+            "Window tests failed: a delete keeps the live terminal"
+        );
+    }
+
+    #[test]
+    fn several_failures_across_parts_name_the_first_and_count_the_rest() {
+        assert_eq!(
+            name_failed_check(NEXTEST_REAL, "cargo nextest run", Some(MAP)),
+            "Core tests failed: the wire samples of the core are written for tsc (+2 more)"
+        );
+    }
+
+    #[test]
+    fn a_failure_with_no_test_parsed_names_the_step() {
+        assert_eq!(
+            name_failed_check(FMT, "npm run check", Some(MAP)),
+            "formatting check failed"
+        );
+        assert_eq!(
+            name_failed_check("error: could not compile `x`", "cargo build", None),
+            "build failed"
+        );
+        assert_eq!(name_failed_check("", "go vet", None), "go vet failed");
+    }
+
+    #[test]
+    fn a_project_without_a_map_names_the_test_alone() {
+        assert_eq!(
+            name_failed_check(NODE_SPEC, "npm run check", None),
+            "Test failed: a delete keeps the live terminal (+1 more)"
+        );
+        // A test no part owns is named the same way.
+        assert_eq!(
+            name_failed_check(NEXTEST, "cargo nextest run", Some(MAP)),
+            "Test failed: unrelated in same file (+2 more)"
+        );
     }
 }

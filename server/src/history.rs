@@ -17,6 +17,13 @@ pub struct Entry {
     pub short: String,
     pub label: String,
     pub fogged: bool,
+    /// The PR whose stored brief this commit offers (`map_history` fills it).
+    pub brief: Option<u64>,
+}
+
+/// The PR number a strip label names: `12` for `#12 Title`, none for any other label.
+pub fn pr_of_label(label: &str) -> Option<u64> {
+    label.strip_prefix('#')?.split(' ').next()?.parse().ok()
 }
 
 /// The map as of a commit: its text as the window parses it.
@@ -169,6 +176,7 @@ pub fn part_history(repo: &Path, part: &str, fogged: &HashSet<String>) -> Vec<En
             short: commit.chars().take(7).collect(),
             label: label(subject),
             fogged: fogged.contains(commit),
+            brief: None,
         })
         .collect()
 }
@@ -201,20 +209,15 @@ const DIFF_LINES: usize = 400;
 /// The most files of a commit the drawer lists.
 const FILES: usize = 80;
 
-/// The files `commit` changed against its first parent, each with its diff.
-pub fn commit_files(repo: &Path, commit: &str) -> Result<Commit, String> {
-    let (full, label) = subject_of(repo, commit)?;
-    let parent = parent_of(repo, &full);
-    let names = git(
-        repo,
-        &["diff", "--no-renames", "--name-only", &parent, &full],
-    )?;
-    let files = names
+/// The files that differ between `from` and `to`, each with its diff cut to what the drawer holds.
+fn files_between(repo: &Path, from: &str, to: &str) -> Result<Vec<File>, String> {
+    let names = git(repo, &["diff", "--no-renames", "--name-only", from, to])?;
+    Ok(names
         .lines()
         .take(FILES)
         .map(|path| {
-            let diff = git(repo, &["diff", "--no-renames", &parent, &full, "--", path])
-                .unwrap_or_default();
+            let diff =
+                git(repo, &["diff", "--no-renames", from, to, "--", path]).unwrap_or_default();
             let lines: Vec<&str> = diff.lines().collect();
             let diff = if lines.len() > DIFF_LINES {
                 format!(
@@ -230,7 +233,14 @@ pub fn commit_files(repo: &Path, commit: &str) -> Result<Commit, String> {
                 diff,
             }
         })
-        .collect();
+        .collect())
+}
+
+/// The files `commit` changed against its first parent, each with its diff.
+pub fn commit_files(repo: &Path, commit: &str) -> Result<Commit, String> {
+    let (full, label) = subject_of(repo, commit)?;
+    let parent = parent_of(repo, &full);
+    let files = files_between(repo, &parent, &full)?;
     let url = git(repo, &["remote", "get-url", "origin"])
         .ok()
         .and_then(|remote| github_commit_url(&remote, &full));
@@ -240,6 +250,25 @@ pub fn commit_files(repo: &Path, commit: &str) -> Result<Commit, String> {
         label,
         url,
         files,
+    })
+}
+
+/// What a PR changed: its files against where its head left the default branch, each with its diff, as the brief's writer read them
+/// (`git diff base head` from the merge base). `label` names the PR in the drawer.
+pub fn pr_files(repo: &Path, head: &str, label: &str) -> Result<Commit, String> {
+    let (reference, _) =
+        crate::map::default_ref(repo).ok_or("the repository has no default branch")?;
+    let full = git(
+        repo,
+        &["rev-parse", "--verify", &format!("{head}^{{commit}}")],
+    )?;
+    let base = git(repo, &["merge-base", &reference, &full])?;
+    Ok(Commit {
+        short: full.chars().take(7).collect(),
+        files: files_between(repo, &base, &full)?,
+        commit: full,
+        label: label.to_string(),
+        url: None,
     })
 }
 
@@ -279,6 +308,15 @@ mod tests {
         fn labels(&self, part: &str) -> Vec<String> {
             self.history(part).into_iter().map(|e| e.label).collect()
         }
+    }
+
+    #[test]
+    fn a_strip_label_names_its_pr_only_when_it_is_a_squash_merge_label() {
+        assert_eq!(pr_of_label("#310 Studio: fog engine"), Some(310));
+        assert_eq!(pr_of_label("#7"), Some(7));
+        assert_eq!(pr_of_label("Revert (#9) of a thing"), None);
+        assert_eq!(pr_of_label("#x thing"), None);
+        assert_eq!(pr_of_label("Add a thing"), None);
     }
 
     #[test]
@@ -415,5 +453,25 @@ mod tests {
                 .files
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn a_prs_files_are_what_its_head_changed_since_it_left_the_default_branch() {
+        let rig = Rig::new();
+        rig.commit("The map", &[("system-map.json", MAP), ("a/x", "one\n")]);
+        run(rig.dir.path(), &["checkout", "-q", "-b", "work"]);
+        let head = rig.commit("Edit a", &[("a/x", "two\n"), ("b/new", "n\n")]);
+        run(rig.dir.path(), &["checkout", "-q", "main"]);
+        // The default branch moved on meanwhile; the PR's diff is its own, not that.
+        rig.commit("Elsewhere", &[("c/y", "y\n")]);
+        let found = pr_files(Path::new(&rig.main), &head, "#7 Edit a").unwrap();
+        assert_eq!(
+            (found.label.as_str(), found.commit.as_str()),
+            ("#7 Edit a", head.as_str())
+        );
+        let paths: Vec<_> = found.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["a/x", "b/new"]);
+        assert!(found.files[0].diff.contains("-one") && found.files[0].diff.contains("+two"));
+        assert!(pr_files(Path::new(&rig.main), "deadbeef", "x").is_err());
     }
 }

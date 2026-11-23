@@ -2,10 +2,8 @@
 
 mod agy;
 mod ask_facts;
-mod backfill;
 mod blocked_commands;
 mod cards;
-mod check_cards;
 mod check_feed;
 mod clear;
 mod close_rename;

@@ -1,32 +1,28 @@
 //! Turn writing (danielrispler/plotkeeper#250): what a turn's end writes, in one place. The shell hands this module the requests the
-//! core emits and an [`Effects`] for what only it can do; the offer, the writer calls, the store and
-//! the order of a session's pieces are behind it.
+//! core emits and an [`Effects`] for what only it can do; the writer calls, the store and the order of a
+//! session's pieces are behind it. A turn's end writes its summary, the session's Goal and Design so far, and no
+//! card: cards are retired (danielrispler/plotkeeper#348).
 //!
-//! Each session has a queue of its own: its jobs run one at a time, first in first out, so a parent's
-//! card reads its workers' cards and two writes never update one brief at once; sessions write in
-//! parallel. [`TurnWriting::stepped`] has no threads, for tests that run the jobs in order themselves.
+//! Each session has a queue of its own: its jobs run one at a time, first in first out, so two writes never
+//! update one brief at once; sessions write in parallel. [`TurnWriting::stepped`] has no threads, for tests that run the
+//! jobs in order themselves.
 
 use crate::{
-    CardStore, CardWriter, Changed, Decision, Offer, Offers, StoredSummary, SummarySetup,
-    backfilled, changed_in, offer_stop, offer_summary, settle, turn_of, turns_card, write_design,
-    write_goal, write_name,
+    CardStore, CardWriter, StoredSummary, SummarySetup, turn_facts, write_design, write_goal,
+    write_name, write_summary,
 };
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, VecDeque},
     panic::{self, AssertUnwindSafe},
     sync::{Arc, Mutex},
     thread,
 };
-use studio_core::{Backfill, CardRequest, NameRequest, Session, Studio, SummaryRequest};
+use studio_core::{CardRequest, NameRequest, Session, Studio, SummaryRequest};
 
 /// What only the shell can do, called from the module's jobs with no lock of the core or the store held.
 pub trait Effects: Send + Sync {
     /// Sends the session list: a row's line changed with no line read.
     fn list(&self);
-    /// Raises the "New card" notice on `session_id`'s line, naming its subagent `agent`, if any.
-    fn new_card(&self, session_id: &str, agent: Option<&str>);
-    /// Settles the guesses on the cards of the checks that ended, before a new card is drawn.
-    fn settle_checks(&self);
     /// Appends the line that names session `session_id` `name` to the event log.
     fn name(&self, session_id: &str, name: &str);
     /// Logs a problem, as one line, as the understanding layer does everywhere.
@@ -36,7 +32,7 @@ pub trait Effects: Send + Sync {
 /// A writer call, run on its session's queue.
 type Job = Box<dyn FnOnce() + Send>;
 
-/// The card writer, as the shell holds it.
+/// The writer, as the shell holds it.
 pub type Writer = Arc<dyn CardWriter + Send + Sync>;
 
 /// The core, which the shell and this module lock for one statement at a time.
@@ -60,7 +56,6 @@ struct State {
     core: Core,
     store: Arc<Mutex<CardStore>>,
     writer: Writer,
-    offers: Offers,
     effects: Arc<dyn Effects>,
     /// The summary writer's setup, from the settings the window sends.
     setup: Mutex<SummarySetup>,
@@ -69,16 +64,6 @@ struct State {
     // shortcut: the waiting turns live in memory, so a restart loses them; keep them in the store if
     // that bites.
     waiting: Mutex<HashMap<String, SummaryRequest>>,
-    /// The files of each turn card's own change, for a summary of an agent that reports no trees: it is
-    /// judged on the same change as its card (danielrispler/plotkeeper#209).
-    changes: Mutex<HashMap<String, Vec<Changed>>>,
-    /// What the card path decided for each live turn card, by turn id, until the turn's summary takes it:
-    /// one decision for a turn (danielrispler/plotkeeper#209), however late its summary runs.
-    decided: Mutex<HashMap<String, Decision>>,
-    /// The turns whose decision was a lone Quiz, by turn id, until their summary puts it on record.
-    lone: Mutex<HashMap<String, Decision>>,
-    /// The backfill cards queued or being written, by turn id: opening a turn twice quickly asks for one card.
-    backfilling: Mutex<HashSet<String>>,
 }
 
 impl TurnWriting {
@@ -87,11 +72,10 @@ impl TurnWriting {
         core: Core,
         store: Arc<Mutex<CardStore>>,
         writer: Writer,
-        offers: Offers,
         effects: Arc<dyn Effects>,
     ) -> TurnWriting {
         let queues = Queues::Threads(Arc::default());
-        Self::build(core, store, writer, offers, effects, queues)
+        Self::build(core, store, writer, effects, queues)
     }
 
     /// Turn writing with no threads: a job waits until [`TurnWriting::run_queued`] runs it, through
@@ -100,18 +84,16 @@ impl TurnWriting {
         core: Core,
         store: Arc<Mutex<CardStore>>,
         writer: Writer,
-        offers: Offers,
         effects: Arc<dyn Effects>,
     ) -> TurnWriting {
         let queues = Queues::Stepped(Mutex::default());
-        Self::build(core, store, writer, offers, effects, queues)
+        Self::build(core, store, writer, effects, queues)
     }
 
     fn build(
         core: Core,
         store: Arc<Mutex<CardStore>>,
         writer: Writer,
-        offers: Offers,
         effects: Arc<dyn Effects>,
         queues: Queues,
     ) -> TurnWriting {
@@ -119,14 +101,9 @@ impl TurnWriting {
             core,
             store,
             writer,
-            offers,
             effects,
             setup: Mutex::default(),
             waiting: Mutex::default(),
-            changes: Mutex::default(),
-            decided: Mutex::default(),
-            lone: Mutex::default(),
-            backfilling: Mutex::default(),
         };
         TurnWriting {
             state: Arc::new(state),
@@ -149,40 +126,21 @@ impl TurnWriting {
         }
     }
 
-    /// The card `request` asks for, on its session's queue; `live` is false for a card of a turn that
-    /// ended while the app was down. `claude -p` takes seconds, so the caller goes on.
-    pub fn card(&self, request: CardRequest, live: bool) {
-        self.write(request, true, live);
-    }
-
-    /// Only the Goal of `request`'s owner, with no card.
+    /// The Goal and Design so far of `request`'s owner, on its session's queue: all a change's request writes now that
+    /// cards are retired (danielrispler/plotkeeper#348). `claude -p` takes seconds, so the caller goes on.
     pub fn brief(&self, request: CardRequest) {
-        self.write(request, false, true);
-    }
-
-    /// The cards of the turns that ended while the app was down (danielrispler/Falinks#486), but for those already on
-    /// record: a turn decided, a refused one too, is not asked again. No summary follows such a card,
-    /// so nothing is kept for one.
-    pub fn backfill(&self, turns: Vec<Backfill>) {
-        let recorded = &self.state.offers;
-        let turns = turns
-            .into_iter()
-            .filter(|b| !recorded.settled(&b.request.session_id, &b.request.id));
-        for request in turns.filter_map(backfilled) {
-            let (id, session) = (request.id.clone(), request.session_id.clone());
-            if !self.state.backfilling.lock().unwrap().insert(id.clone()) {
-                continue;
+        let state = self.state.clone();
+        let id = request.session_id.clone();
+        // The job reads its session when it runs, not now: it may wait behind earlier writer calls.
+        let job = move || {
+            if let Some(session) = state.present(&request.session_id) {
+                state.write_brief(&request, &session);
             }
-            self.write(request, true, false);
-            let state = self.state.clone();
-            let done = move || {
-                state.backfilling.lock().unwrap().remove(&id);
-            };
-            self.queue(session, Box::new(done));
-        }
+        };
+        self.queue(id, Box::new(job));
     }
 
-    /// The summary of `request`'s turn, on its session's queue after the turn's card. While summaries are
+    /// The summary of `request`'s turn, on its session's queue after the turn's Goal. While summaries are
     /// written on open, the turn waits for Daniel instead ([`TurnWriting::opened`]).
     pub fn summary(&self, request: SummaryRequest) {
         let on_open = self.state.core.lock().unwrap().summaries_on_open();
@@ -247,29 +205,6 @@ impl TurnWriting {
         }
     }
 
-    fn write(&self, mut request: CardRequest, card: bool, live: bool) {
-        let state = self.state.clone();
-        let id = request.session_id.clone();
-        // The job reads its session when it runs, not now: it may wait behind earlier writer calls.
-        let job = move || {
-            let Some(session) = state.present(&request.session_id) else {
-                return;
-            };
-            // Only a live turn's own card has a summary to come, which takes what is kept here and clears it.
-            let turn_card = card && live && turns_card(&session, &request);
-            if turn_card {
-                let files = changed_in(request.diff());
-                state
-                    .changes
-                    .lock()
-                    .unwrap()
-                    .insert(request.id.clone(), files);
-            }
-            state.write_stop(&mut request, &session, card, turn_card);
-        };
-        self.queue(id, Box::new(job));
-    }
-
     /// Adds `job` to session `id`'s queue, which starts when it has none.
     fn queue(&self, id: String, job: Job) {
         match &self.queues {
@@ -314,54 +249,13 @@ impl State {
         session.filter(|s| !s.is_deleted())
     }
 
-    /// A card job: the card, or only the Goal when `card` is false, then Design so far.
-    fn write_stop(
-        &self,
-        request: &mut CardRequest,
-        session: &Session,
-        card: bool,
-        turn_card: bool,
-    ) {
+    /// A brief job: the Goal, then Design so far.
+    fn write_brief(&self, request: &CardRequest, session: &Session) {
         let log = |line| self.effects.log(line);
-        // Where the card's code is pulled from: its turn's end trees (danielrispler/plotkeeper#121).
-        request.ends = self.core.lock().unwrap().card_ends(request);
-        let agent = request.agent.clone();
-        // The list and the notice go out once the card is stored, before a brief rewrite.
-        let stored = || {
-            // A check that ended while its card was written settles it before the pane draws it.
-            self.effects.settle_checks();
-            self.effects.list();
-            self.effects.new_card(&session.agent.id, agent.as_deref());
-        };
-        let card_id = request.id.clone();
-        // A turn the table gives no card is written none, but still feeds the design.
-        let written = match card {
-            true => {
-                let turn = turn_of(&self.core, &request.id, &mut |w| log(w));
-                let (written, decided) = offer_stop(
-                    &self.store,
-                    &*self.writer,
-                    request.clone(),
-                    session,
-                    &turn,
-                    &self.offers,
-                    turn_card,
-                    stored,
-                    log,
-                );
-                if let Some(decided) = decided.filter(|_| turn_card) {
-                    self.decided
-                        .lock()
-                        .unwrap()
-                        .insert(card_id.clone(), decided);
-                }
-                written
-            }
-            false => write_goal(&self.store, &*self.writer, request, session, log),
-        };
+        let goal = write_goal(&self.store, &*self.writer, request, session, log);
         let designed = self.design(&session.agent.id);
-        // The brief, which a row's line may show, changed again.
-        if written || designed {
+        // The brief, which a row's line may show, changed.
+        if goal || designed {
             self.effects.list();
         }
     }
@@ -377,25 +271,11 @@ impl State {
         })
     }
 
-    /// Fills in `request`'s facts and, by the one offer function (danielrispler/plotkeeper#209), whether its summary may
-    /// keep a Quiz. Returns whether the summary is written: one asked for the sake of a lone Quiz is dropped when the
-    /// turn gets none.
+    /// Fills in `request`'s facts from its turn's trees. Returns whether the summary is written: only one that is wanted for
+    /// itself.
     fn settle(&self, request: &mut SummaryRequest) -> bool {
-        let change = self.changes.lock().unwrap().remove(&request.id);
-        let decided = self.decided.lock().unwrap().remove(&request.id);
-        let turn = turn_of(&self.core, &request.id, &mut |w| self.effects.log(w));
-        let settled = settle(
-            request,
-            &turn,
-            &change.unwrap_or_default(),
-            decided.as_ref(),
-        );
-        settled.record(&self.offers, request);
-        if settled.decision.offer == Offer::Quiz {
-            let mut lone = self.lone.lock().unwrap();
-            lone.insert(request.id.clone(), settled.decision);
-        }
-        settled.write
+        request.facts = turn_facts(&self.core, &request.id, &mut |w| self.effects.log(w));
+        request.wanted
     }
 
     /// The summary job of a summary written at the turn's end.
@@ -408,16 +288,9 @@ impl State {
             return;
         }
         let session = request.session_id.clone();
-        let lone = self.lone.lock().unwrap().remove(&request.id);
-        let written = offer_summary(
-            &self.store,
-            &*self.writer,
-            &setup,
-            request,
-            lone.as_ref(),
-            &self.offers,
-            |l| self.effects.log(l),
-        );
+        let written = write_summary(&self.store, &*self.writer, &setup, request, |l| {
+            self.effects.log(l);
+        });
         if written.is_some() {
             self.design(&session);
         }
@@ -446,20 +319,10 @@ impl State {
             return Ok((None, None));
         };
         let setup = self.setup.lock().unwrap().clone();
-        let lone = self.lone.lock().unwrap().remove(id);
-        let written = offer_summary(
-            &self.store,
-            &*self.writer,
-            &setup,
-            request.clone(),
-            lone.as_ref(),
-            &self.offers,
-            |l| self.effects.log(l),
-        );
+        let written = write_summary(&self.store, &*self.writer, &setup, request.clone(), |l| {
+            self.effects.log(l);
+        });
         if written.is_none() {
-            if let Some(lone) = lone {
-                self.lone.lock().unwrap().insert(id.to_owned(), lone);
-            }
             self.waiting.lock().unwrap().insert(id.to_owned(), request);
             return Err(format!("no summary on {id}"));
         }

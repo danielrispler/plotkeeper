@@ -1,5 +1,5 @@
 // **Seen** (danielrispler/plotkeeper#306): an element is seen when it is in the viewport, not merely built in the DOM, in a visible
-// and focused window, with the view that holds it open. One helper for the story rail's cards, Home's marks and the map's events.
+// and focused window, with the view that holds it open. One helper for Home's marks and the map's events.
 //
 // In the viewport means covering at least half of the element or at least half of the viewport (so a card taller than twice the
 // viewport can be seen), for `seenAfter` ms without a break.

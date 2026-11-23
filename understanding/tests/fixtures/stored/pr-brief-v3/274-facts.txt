@@ -1,0 +1,1076 @@
+=== SHAPE (decided by code) ===
+chapters by behaviour: 2 to 4 chapters, each one behaviour, lighting every part it crosses
+required parts (together the chapters must light every one): understanding, shell, core
+overview: no
+also-touched (one line each, no chapter): none
+
+=== SYSTEM MAP ===
+{
+  "version": 1,
+  "extractors": ["cargo", "rust-modules", "typescript-imports"],
+  "parts": [
+    {
+      "id": "plugins", "name": "Agent plugins", "caption": "Which hooks each agent runs",
+      "description": "Small config folders for Claude Code and agy. They decide which of the agent's events reach the studio.",
+      "tier": "interface", "paths": ["plugin/", "plugin-agy/"]
+    },
+    {
+      "id": "hook", "name": "Hook", "caption": "Records every agent event",
+      "description": "Runs on each agent event and appends it to the event log. It also holds a question or a blocked command until you answer.",
+      "tier": "core", "paths": ["hook/"]
+    },
+    {
+      "id": "core", "name": "Core", "caption": "Turns events into session state",
+      "description": "Plain Rust logic. It reads the event log's lines in order and knows every session's turns, checks, subagents and whether it needs you.",
+      "tier": "core", "paths": ["core/"]
+    },
+    {
+      "id": "shell", "name": "Shell", "caption": "Reads the log, feeds the core, acts",
+      "description": "The app's Rust side. It reads the event log, feeds the core, and carries out what follows: notices, sounds, GitHub, the terminals.",
+      "tier": "core", "paths": ["src-tauri/"]
+    },
+    {
+      "id": "understanding", "name": "Understanding", "caption": "Writes what you read, and keeps it",
+      "description": "Decides what a change is worth telling you, asks the writer for it, and stores it: cards, turn summaries, briefs and the offers record.",
+      "tier": "core", "paths": ["understanding/"]
+    },
+    {
+      "id": "window", "name": "Window", "caption": "Everything you see and press",
+      "description": "The list, the rail, Home and the terminal panes. It shows state and sends your actions to the shell.",
+      "tier": "core", "paths": ["ui/"]
+    },
+    {
+      "id": "terminal-daemon", "name": "Terminal daemon", "caption": "Owns the terminals",
+      "description": "A background process that keeps every terminal alive, so they outlive the app.",
+      "tier": "interface", "paths": ["terminal-daemon/"]
+    },
+    {
+      "id": "workbench", "name": "Workbench", "caption": "Worktrees, PRs and plan usage",
+      "description": "Git worktrees, tasks, PR lookups and plan usage. A black box: it never fogs and never asks for your time.",
+      "tier": "black-box", "paths": ["workbench/"]
+    }
+  ],
+  "actors": [
+    { "id": "agents", "name": "Agents" },
+    { "id": "writer", "name": "Writer" },
+    { "id": "github", "name": "GitHub" }
+  ],
+  "links": [
+    { "id": "agents-plugins", "from": "agents", "to": "plugins" },
+    { "id": "plugins-hook", "from": "plugins", "to": "hook" },
+    { "id": "hook-shell", "from": "hook", "to": "shell" },
+    { "id": "core-shell", "from": "core", "to": "shell" },
+    { "id": "shell-understanding", "from": "shell", "to": "understanding" },
+    { "id": "understanding-writer", "from": "understanding", "to": "writer" },
+    { "id": "shell-window", "from": "shell", "to": "window" },
+    { "id": "shell-terminal-daemon", "from": "shell", "to": "terminal-daemon" },
+    { "id": "shell-workbench", "from": "shell", "to": "workbench" },
+    { "id": "workbench-github", "from": "workbench", "to": "github" }
+  ],
+  "ignored": [
+    ".claude/", ".github/", ".gitignore", "AGENTS.md", "CLAUDE.md", "Cargo.lock", "Cargo.toml", "LICENSE",
+    "README.md", "package-lock.json", "package.json", "real-calls.sh", "rust-toolchain.toml", "tsconfig.json",
+    "system-map.json",
+    "docs/", "scripts/", "terminal-spike/", "v0-spike/",
+    "wayfinder/", "test-support/", "system-map/"
+  ],
+  "laws": [
+    { "id": "hook-never-makes-agent-wait", "on": "hook", "backing": "trust",
+      "text": "The hook never makes the agent wait, except for your answer." },
+    { "id": "core-reads-only-transcripts", "on": "core", "backing": "trust",
+      "text": "The core does no I/O except reading transcripts." },
+    { "id": "check-result-is-last-run", "on": "core", "backing": "trust",
+      "text": "A check's result is its last run's." },
+    { "id": "no-notices-lock-on-main-thread", "on": "shell", "backing": "trust",
+      "text": "Nothing on the main thread takes the notices' lock." },
+    { "id": "wire-types-agree", "on": "shell", "backing": "check",
+      "text": "The window's types and the Rust wire types agree." },
+    { "id": "session-pieces-in-order", "on": "understanding", "backing": "check",
+      "text": "A session's pieces are written one at a time, in order." },
+    { "id": "old-stored-files-load", "on": "understanding", "backing": "check",
+      "text": "A stored file of an older format still loads." },
+    { "id": "writer-has-no-tools", "on": "understanding", "backing": "check",
+      "text": "A change is untrusted text: the writer has no tools." },
+    { "id": "delete-keeps-live-terminal", "on": "window", "backing": "check",
+      "text": "Delete never ends a terminal another live session uses." },
+    { "id": "colour-only-for-needs-you", "on": "window", "backing": "trust",
+      "text": "Colour is only for what needs you." },
+    { "id": "terminals-outlive-app", "on": "terminal-daemon", "backing": "trust",
+      "text": "Terminals outlive the app." }
+  ],
+  "flows": [
+    { "id": "turn-writing", "name": "Turn writing",
+      "hops": [
+        { "link": "core-shell", "text": "Core sees the turn end and the shell asks for a card." },
+        { "link": "shell-understanding", "text": "The shell passes the request on; understanding queues it for the session." },
+        { "link": "understanding-writer", "text": "Understanding asks the writer for the card." },
+        { "link": "understanding-writer", "text": "The writer's card comes back and understanding stores it." },
+        { "link": "shell-understanding", "text": "Understanding tells the shell the card is stored." },
+        { "link": "shell-window", "text": "The shell updates the list and sends the notice." }
+      ] }
+  ]
+}
+
+=== MAP DIFF IN THIS PR ===
+none: this PR is older than the map; the map shown is as of its birth (6f88cbb94)
+
+=== PARTS TABLE ===
+## core (Core, tier core)
+laws:
+  core-reads-only-transcripts (trust): The core does no I/O except reading transcripts. [tagged tests: none]
+  check-result-is-last-run (trust): A check's result is its last run's. [tagged tests: none]
+flows through it: turn-writing
+- core core/src/lib.rs +17/-4
+- test core/tests/backfill.rs +56/-0
+- test core/tests/cards.rs +55/-0
+
+## shell (Shell, tier core)
+laws:
+  no-notices-lock-on-main-thread (trust): Nothing on the main thread takes the notices' lock. [tagged tests: none]
+  wire-types-agree (check): The window's types and the Rust wire types agree. [tagged tests: none]
+flows through it: turn-writing
+- core src-tauri/src/main.rs +99/-501
+- core src-tauri/src/restart.rs +4/-3
+
+## understanding (Understanding, tier core)
+laws:
+  session-pieces-in-order (check): A session's pieces are written one at a time, in order. [tagged tests: none]
+  old-stored-files-load (check): A stored file of an older format still loads. [tagged tests: none]
+  writer-has-no-tools (check): A change is untrusted text: the writer has no tools. [tagged tests: none]
+flows through it: turn-writing
+- core understanding/src/turn_writing.rs +471/-0
+- core understanding/src/lib.rs +105/-73
+- core understanding/src/turn_trees.rs +66/-1
+- core understanding/src/summary.rs +6/-8
+- core understanding/src/retest.rs +4/-5
+- core understanding/src/offer.rs +4/-2
+- core understanding/src/brief.rs +1/-1
+- test understanding/tests/turn_writing.rs +2027/-0
+- test understanding/tests/prompt_cards.rs +0/-908
+- test understanding/tests/turn_trees.rs +114/-2
+- test understanding/tests/store.rs +32/-0
+- test understanding/tests/writer.rs +18/-12
+
+noise (ignored or unowned paths, not the running system): 5 files
+
+=== LAW TAGS ADDED ===
+none
+
+=== CHECKS ===
+macos SUCCESS
+snap SUCCESS
+
+=== PR ===
+#274 Studio: Turn writing moves from the shell into the understanding layer (#250)
+merged 2026-11-21T08:30:02Z
+
+Closes #250
+Closes #255
+Closes #256
+Closes #257
+Closes #258
+Closes #259
+Closes #260
+Closes #261
+Closes #262
+Closes #263
+
+## Summary
+
+**Turn writing** (#250) is one module of the understanding layer. The shell passes the core's outputs to it and runs four effects through a callback.
+
+```diff
+ src-tauri/src/main.rs        # passes outputs, implements Effects (list, New card notice, settle checks, name line)
+-  write / summarize / name / queue / design / turn_summary / Summaries
+-  diff_turn / found_files / turn_facts / turn_of
+ understanding/src/
++├── turn_writing.rs          # TurnWriting: per-session queues, card/brief/summary/name jobs, summary on open, backfill
+ ├── turn_trees.rs            # + diff_turn, found_files, turn_facts, turn_of (#255)
+ ├── lib.rs                   # place_card_quiz: rule, then cap, then store, one lock (#257); parse_object, once_more (#262)
+ ├── offer.rs                 # Offers: "already on record?" and the append under one lock (#258)
+ └── brief.rs                 # Design so far written only on the queue (#258)
+ understanding/tests/
++├── turn_writing.rs          # the module through its seam: fake writer, replayed core, real store/offers/git
+-└── prompt_cards.rs          # the stand-in Shell and its tests (#261)
+```
+
+A session's jobs, one at a time, in order:
+
+```text
+card job (turn end, worker return, long check start)
+  read the session now (#259); gone or deleted → end quietly
+  offer decides (a check's card skips it) → one line on the offers record
+  write card → [store lock: asks? no Quiz · hourly cap · store]   (#257)
+  Effects: list, "New card" notice
+  Goal, then Design so far
+summary job → takes its card's decision; `ask` line or asks → its Quiz and its card's Quiz go
+opened(turn) → writes the parked summary off the queue, returns it, queues Design so far (#258)
+```
+
+The five differences Daniel sees, from #250's Solution:
+1. A card's Quiz from a turn that ended in Needs you is never stored, shown or counted, and never displaces a lone Quiz (#257).
+2. The rule is judged from how the turn ended (`CardRequest.asks`, set by the core at the turn's end and in backfill), for every card and every lone Quiz.
+3. Opening a turn returns once its summary is written; Design so far follows on the queue (#258).
+4. Design so far never goes back to an older version: one design per session at a time (#258).
+5. The parent's card from its workers' summaries is retired; stored ones still show and answer "explain more" (#260).
+
+### Where the old `prompt_cards.rs` tests went (#261)
+
+All 23 that survived #260 moved to `understanding/tests/turn_writing.rs` under the same name, each now with a card-sized change (two logic files of three lines) so the real offer gives the card, except:
+
+| Old test | Where |
+|---|---|
+| `the_new_card_notice_goes_out_before_the_goal_is_written` | deleted; covered by `the_list_and_the_new_card_notice_go_out_once_the_card_is_stored_and_before_the_goal_is_written` |
+| `a_prompt_that_changes_nothing_makes_no_writer_call_and_one_that_commits_gets_its_card` | moved; its last asserts (one range, empty `code`) described only the stand-in's missing trees and went; card code is covered by `understanding/tests/card_code.rs` |
+| `a_helper_whose_command_changes_its_worktree_becomes_a_worker`, `a_helper_whose_command_changes_nothing_stays_a_helper_after_others_change_its_worktree` | moved to `turn_writing.rs`, since they need a real repository and fingerprints; `core/tests/subagents.rs` covers the rule with a faked change |
+| the parent's card from its workers' summaries, the worker card with an empty summary left out of its parent's input, the promoted helper whose stop writes its card from the workers | gone with the retired card (#260); the first became `a_parent_that_changed_nothing_itself_gets_no_card_though_its_workers_wrote_theirs` |
+
+Nothing moved to the core's or the offer's tests.
+
+### Deviations from the tickets
+
+- **No `prune` entry point.** #250 lists "the set of live sessions when the shell prunes" as an input. Each session's queue thread instead ends itself once its queue is empty, deciding under the lock that adds a job, so a job for an ended session opened from History runs on a fresh queue and leaves no thread. The no-op `prune` went in review.
+- **A job that panics** is caught and logged as one line, and its session's queue goes on to the next job (review fix, not in the tickets).
+- **A deleted session gets nothing** from any job: card, summary, name and Design so far all skip a session that is gone or deleted; an ended session opened from History still gets its summary and design (review fix: only the card job checked).
+- **"Explain more"** keeps one general sentence against invented code for a change that is not a diff, since older parent cards still store their workers' text (review fix of #260's prompt cut).
+- **A backfilled card's `asks`** is judged from the replayed blocks only, not the terminal's blocked state restored from studio-state.json (review fix).
+- **Worker and check cards** also lose their Quiz when their turn ended in Needs you, as the old shell did; #257's first version had exempted them (review fix).
+- **`Session::is_deleted()`** was added to the core for #259, outside its Touches: `session()` still returns a deleted row.
+- **`ui/types.ts`** does not declare `asks` (#257 Touches): the window never reads it.
+- **The two-session cap test** drives both cards on real threads; any interleaving gives the same answer, so it guards the cap but does not force the race on the one lock.
+- **"Read the workers when the card is written"** (#259): with the parent's card retired, the workers are read for the Goal: a worker that started while its card waited has its Goal written from its own prompt.
+
+## Evidence
+
+- **Before:** the stand-in `Shell` in `prompt_cards.rs` skipped the offer, summaries, names and Design so far; a card's Quiz was stored, then dropped; Design so far could be written twice at once.
+  **After:** `cargo nextest run -p studio-understanding --test turn_writing --test turn_trees`: 68 passed. Each new rule's test ran red on an assertion first, among them:
+
+```text
+a_turn_that_ended_in_needs_you: card stored, no Quiz, hour's count unchanged, lone Quiz kept
+a_workers_card_and_a_checks_card_of_a_turn_that_asked_are_stored_without_a_quiz
+a_summary_takes_its_cards_decision_though_the_turns_facts_moved_after_the_card
+two_sessions_whose_cards_arrive_at_the_caps_edge_offer_one_more_quiz_not_two
+opening_a_turn_returns_its_summary_before_design_so_far_is_written_on_the_queue
+two_jobs_queued_for_an_ended_session_run_one_at_a_time_in_order
+two_threads_that_record_the_same_decision_leave_one_line_in_the_offers_record
+a session deleted while its card waited: nothing written, the next job runs
+a_job_that_panics_does_not_stop_the_later_jobs_of_its_session
+a session deleted while its summary or name waited: no offer line, no writer call, nothing stored
+every_entry_point_returns_within_a_few_seconds_against_a_core_with_no_such_turn
+```
+
+- `npm run check` passes on the branch tip.
+
+## Merge Danger
+
+**Door:** two-way
+
+A revert restores the shell's sequence. Card requests stored with `asks` still load in the old code (`CardRequest` does not deny unknown fields), and old requests load in the new code (`asks` defaults to false).
+
+**Blast Radius:** cards
+
+Every card, summary, Goal, Design so far and name goes through the new module. Not run against the real `claude -p`, and the shell's wiring has no test harness: after merge, quit Studio and `npm run start` from the main checkout, then watch a day of cards.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+=== SPEC ===
+#250 Studio: Spec: Turn writing moves from the shell into the understanding layer
+created 2026-11-20T16:34:35Z
+(trimmed to its user stories and implementation decisions)
+
+## User Stories
+
+1. As Daniel, I want the rules of Turn writing tested where they are enforced, so that a rule I decided cannot break while every test passes.
+2. As Daniel, I want a turn's card written only when the offer gives it one, in the tested path, so that the offer table I tuned is the one that runs.
+3. As Daniel, I want a turn's summary written after its card, so that the summary takes the decision its card made and the two never disagree.
+4. As Daniel, I want each session's pieces written one at a time, in the order they were asked for, so that two writer calls never update one Brief at once.
+5. As Daniel, I want sessions to write in parallel with each other, so that one session's slow writer call does not hold another's card.
+6. As Daniel, I want a Quiz that may not show beside a decision never stored with its card, so that I do not see it appear and vanish.
+7. As Daniel, I want such a Quiz not to count toward the 3 an hour, so that a forbidden Quiz does not cost me one I could answer.
+8. As Daniel, I want such a Quiz not to take the place of an unanswered lone Quiz, so that I do not lose a Quiz to one I never see.
+9. As Daniel, I want "never beside a decision" to mean how the turn ended, so that a later turn's permission prompt does not delete an earlier turn's Quiz for good.
+10. As Daniel, I want the same rule for a card's Quiz and a lone Quiz, so that I can predict when a turn has a Quiz.
+11. As Daniel, I want the rail to keep hiding an open Quiz while the session needs me and to show it again after, so that the decision comes first and the Quiz is not lost.
+12. As Daniel, I want a turn whose summary holds an `ask` line to lose its summary's Quiz and its card's Quiz, as today, so that a turn that asks me something has no open Quiz.
+13. As Daniel, I want at most 3 Quizzes offered in an hour across every session, even when two sessions' cards arrive at the same moment, so that the cap I chose holds.
+14. As Daniel, I want the summary of a turn I open to appear as soon as it is written, so that I do not wait for Design so far.
+15. As Daniel, I want Design so far written again after a summary I opened, so that it stays in step with what was written.
+16. As Daniel, I want Design so far never replaced by an older version, so that the Brief I read to resume a session is the latest.
+17. As Daniel, I want a turn I open in an ended session from History to get its summary and its Design so far, so that old sessions resume as well as live ones.
+18. As Daniel, I want a card job whose session was deleted or closed while it waited to end quietly, so that deleting a session never crashes or stalls the studio.
+19. As Daniel, I want a card written for a session whose worker changed during the wait to read the workers as they are when it is written, so that the card names the right ones.
+20. As Daniel, I want the Goal written from my prompts as they are when it is written, so that a prompt I sent during the wait is in it.
+21. As Daniel, I want every offer decided put on record exactly once, so that the week of offers I will tune the table from is true.
+22. As Daniel, I want a turn the studio asks about again after a restart to add no second line to the offers record, so that a restart does not skew it.
+23. As Daniel, I want the turns that ended while the studio was down to get their cards at the next start, as today, so that I lose no card to a restart.
+24. As Daniel, I want a backfilled card's Quiz judged by how its turn ended, not by the session's state at the restart, so that a restart does not change which turns have a Quiz.
+25. As Daniel, I want the "New card" notice and the list to update once the card is stored and before the Goal is rewritten, as today, so that I see the card as soon as it exists.
+26. As Daniel, I want a check that ended while its card was being written settled before the card is drawn, as today, so that a check card never shows a guess the result already answered.
+27. As Daniel, I want a session's name written from my first prompt on the session's queue and replayed after a restart, as today, so that names stay stable.
+28. As Daniel, I want a long check's card and a worker's card to go through the same queue and offer as a turn's card, so that all cards follow one set of rules.
+29. As Daniel, I want the docs to stop describing the parent's card from its workers' summaries, so that the docs say what the studio does.
+30. As Daniel, I want the older cards of that kind to keep showing and to keep answering "explain more", so that retiring the writing loses nothing I already have.
+31. As Daniel, I want the studio never to hold its core locked while a writer call or a `git` diff runs, so that the window never freezes on a slow call.
+32. As Daniel, I want every entry point of Turn writing proven to return while the core is free, so that the deadlock of #236 cannot come back unseen.
+33. As Daniel, I want the turn-file reads the rail uses and the ones Turn writing uses to be the same code, so that a fix to one fixes both.
+34. As Daniel, I want summaries set to write on open to keep waiting for me, as today, so that the setting keeps its meaning.
+35. As Daniel, I want a failed write on open to keep the turn waiting and tell the window, as today, so that the next opening tries again.
+36. As Daniel, I want the notice "no card writer can run" to appear and clear as today, so that a missing `claude` still explains itself.
+37. As an implementer, I want one module to read to change what a turn's end writes, so that a new writer does not add glue to the shell.
+38. As an implementer, I want to test a new rule with the fake writer and replayed hook lines, so that I need no window and no real model.
+39. As an implementer, I want the stand-in that rebuilt the shell's sequence gone, so that no test passes against a sequence production does not run.
+40. As an implementer, I want the move to change no behaviour beyond the five differences named here, so that a regression can only come from a named change.
+
+## Implementation Decisions
+
+Decided with Daniel in the architecture review of 2026-11-20 ([resolution](https://github.com/danielrispler/plotkeeper/issues/3#issuecomment-7044364163), "Candidate 1").
+
+- **One module, Turn writing, in the understanding layer.** It is handed, once: the core behind its lock, the card store, the writer, and a callback for the shell's effects. It takes: a card request (live, or backfilled at start), a Goal-only brief request, a summary request, a name request, "Daniel opened this turn", the summary settings when they change, and the set of live sessions when the shell prunes. It owns the per-session queues, the offers record, and the state that today links a turn's card to its summary: the summary settings, the summaries waiting to be opened, each turn card's own change, what the card path decided for a turn, and the lone Quizzes not yet on record.
+- **What moves.** The card job with its offer, the Goal-only brief job, the backfill of cards at start, the summary job in both modes (written at the turn's end, or parked until opened), the summary written on open, the name job, Design so far, and the reads of a turn's files and facts these need.
+- **What stays in the shell.** Passing the core's outputs to the module. The callback, which does four things: send the session list, raise the "New card" notice, settle check guesses against the core before a new card is drawn, and append a session's name line to the event log. The hourly retests, "explain more", the ask commands and a subagent's summary stay thin shell calls into the functions the understanding layer already has; #215 is about to change retests.
+- **How it reads the core.** Through the same locked core the shell holds, with short locks of one statement each. No lock is held across a writer call, a `git` call or a callback, and no lock is taken in an expression that still holds another. No trait stands between: a core rebuilt by replaying hook lines is the stand-in in tests.
+- **Fresh reads.** The session's workers, the prompts the Goal is written from, and whether a request is a turn's own card are read when the job runs, not copied when it was queued. A job whose session is gone when it runs ends without writing and without a panic.
+- **"A Quiz is never beside a decision" has one home.** One function judges it from two facts: whether the turn ended in Needs you, which the core records at the turn's end, and whether the turn's summary holds an `ask` line. The card request carries the turn-end fact as the summary request already does; a stored request without it reads as "did not". At the card: the rule is judged first, then the hourly cap, then the card is stored, so a forbidden Quiz is never stored, never shown and never counted. At the summary: as today, an `ask` line or the turn-end fact removes the summary's Quiz and its card's Quiz. The module never reads the session's present state for this rule; the rail's display rule for a session that needs Daniel now is unchanged.
+- **The cap and the store are one step.** The card path checks the hourly cap and stores the card under one lock of the store, as the summary path does.
+- **The queue.** One queue per session, first in first out, each on its own thread. A job for a session with no queue starts one. Pruning a session's queue lets its queued jobs finish and then ends its thread, so a job queued for an ended session opened from History runs and leaves no thread behind. The summary job takes the decision its turn's card job made; a summary with no such decision decides for itself with the same function.
+- **Design so far is written only on the queue.** After a card job, a brief job and a written summary, as today. The summary written on open returns the stored summary and queues the design, so two designs of one session never run at once.
+- **The summary written on open** runs off the queue, since Daniel waits for it. Only one opening of a turn takes its parked request; a failed write parks it again and is an error to the window, as today.
+- **The offers record.** The module owns the one record and holds a lock across "is this decision already on record" and the append. The backfill's "already settled" filter asks the module, so the guard is in one place.
+- **The parent's card from its workers' summaries is retired.** A card request with no change of its own writes no card. The branch that built such a card, the function that gathered the workers' summaries for it, and the writer's prompt paragraphs about that input go. Stored cards of that kind are still read, shown and explained. A turn a wake-up opened that changed nothing itself still gets its Goal-only brief.
+- **The turn-file reads move beside the tree diffs.** Diffing a turn's worktrees with the core unlocked, matching its files on a snapshot, and building a turn's facts for the offer move into the understanding layer, in #236's single-lock shape. The warning for an oversized turn becomes a callback, since the understanding layer logs through its callers. The shell's turn-files pass calls the moved functions.
+- **Problems are lines for the caller's log**, as the understanding layer does everywhere else. A new source file of the module joins the list of the test that every "save" log line of the writers reads as lost data.
+- **A pure move, then the named changes.** The move itself changes no behaviour. The five differences in **Solution** are each their own change after it. Retry-once, written three times, and reply parsing, written at nine sites, are de-duplicated last.
+- **No change** to the writer's prompts beyond the retired paragraphs, to the offer table, to the cap's size, to what the core emits beyond the turn-end fact on a card request, or to the window.
+- **Docs.** `docs/studio/behaviour/cards.md` loses the parent's card and gains the order of Turn writing; `docs/studio/question-rules.md` says the rule is judged from how the turn ended and that the rail hides an open Quiz while the session needs Daniel; `docs/studio/behaviour/storage.md` says cards written from workers' summaries are older cards; `docs/studio/development.md` lists the module and its tests. **Turn writing** enters `docs/studio/CONTEXT.md` through PR #248.
+
+=== DIFF NOT SENT ===
+14 files not fully sent; do not guess what they hold:
+- understanding/src/turn_writing.rs (understanding): +471/−0, 1 of 1 hunks not sent
+- src-tauri/src/main.rs (shell): +99/−501, 44 of 47 hunks not sent
+- understanding/tests/writer.rs (understanding): +18/−12, 1 of 1 hunks not sent
+- understanding/tests/store.rs (understanding): +32/−0, 1 of 1 hunks not sent
+- core/tests/cards.rs (core): +55/−0, 1 of 2 hunks not sent
+- core/tests/backfill.rs (core): +56/−0, 1 of 1 hunks not sent
+- understanding/tests/turn_trees.rs (understanding): +114/−2, 2 of 2 hunks not sent
+- understanding/tests/prompt_cards.rs (understanding): +0/−908, 1 of 1 hunks not sent
+- understanding/tests/turn_writing.rs (understanding): +2027/−0, 1 of 1 hunks not sent
+- docs/studio/behaviour/brief.md ((noise)): +1/−1, 1 of 1 hunks not sent
+- docs/studio/behaviour/storage.md ((noise)): +1/−1, 1 of 1 hunks not sent
+- docs/studio/behaviour/cards.md ((noise)): +3/−1, 1 of 1 hunks not sent
+- docs/studio/development.md ((noise)): +2/−2, 2 of 2 hunks not sent
+- docs/studio/question-rules.md ((noise)): +5/−1, 1 of 1 hunks not sent
+
+=== DIFF ===
+diff --git a/understanding/src/brief.rs b/understanding/src/brief.rs
+index c728615e0..fce3ed237 100644
+--- a/understanding/src/brief.rs
++++ b/understanding/src/brief.rs
+@@ -160,7 +160,7 @@ pub fn design_sources(store: &CardStore, owner: &str, turns: &[String]) -> Vec<(
+ /// at most `DESIGN_LINES`. A line with no citation, or one that cites something not in the session,
+ /// is dropped, and so is a line past the fifth. Returns the kept lines and how many were dropped.
+ pub fn design_lines(reply: &str, known: &BTreeSet<&str>) -> Option<(Vec<DesignLine>, usize)> {
+-    let value: serde_json::Value = serde_json::from_str(crate::object(reply)).ok()?;
++    let value: serde_json::Value = crate::parse_object(reply).ok()?;
+     let asked = value["design"].as_array()?;
+     let mut kept = Vec::new();
+     for line in asked {
+diff --git a/understanding/src/offer.rs b/understanding/src/offer.rs
+index 57a4ba531..32504be97 100644
+--- a/understanding/src/offer.rs
++++ b/understanding/src/offer.rs
+@@ -237,12 +237,12 @@ struct Line<'a> {
+ 
+ /// The record of offers (`offers.jsonl`), beside the event log: one JSON line for each offer decided,
+ /// with the table's inputs and how it ended, and no diff and no text of a file. Nothing reads it yet.
+-pub struct Offers(PathBuf);
++pub struct Offers(PathBuf, std::sync::Mutex<()>);
+ 
+ impl Offers {
+     /// The record beside the event log `log`.
+     pub fn beside(log: &Path) -> Offers {
+-        Offers(log.with_file_name("offers.jsonl"))
++        Offers(log.with_file_name("offers.jsonl"), Default::default())
+     }
+ 
+     pub fn path(&self) -> &Path {
+@@ -265,6 +265,8 @@ impl Offers {
+     /// A decision already on record, other than a writer's silence, is not recorded again: a turn
+     /// the app asks about again after a restart adds no line.
+     pub fn record(&self, session: &str, id: &str, decision: &Decision, outcome: Option<Outcome>) {
++        // One lock across "is it on record" and the append: two threads cannot both find it absent.
++        let _held = self.1.lock().unwrap_or_else(|e| e.into_inner());
+         if self.settled(session, id) {
+             return;
+         }
+diff --git a/src-tauri/src/restart.rs b/src-tauri/src/restart.rs
+index ebe763caf..5619c7c6b 100644
+--- a/src-tauri/src/restart.rs
++++ b/src-tauri/src/restart.rs
+@@ -5,13 +5,14 @@ use std::{
+     path::{Path, PathBuf},
+     process::Command,
+     sync::{
+-        LazyLock, Mutex,
++        LazyLock,
+         atomic::{AtomicBool, Ordering},
+     },
+     thread,
+     time::{Duration, SystemTime},
+ };
+-use studio_core::{Revive, Studio, Terminal};
++use studio_core::{Revive, Terminal};
++use studio_understanding::Core;
+ use tauri::{AppHandle, Emitter, Manager, State};
+ 
+ /// Set once the read loop has replayed the event log, so the core knows every session's terminal.
+@@ -20,7 +21,7 @@ pub static REPLAYED: AtomicBool = AtomicBool::new(false);
+ /// How each terminal of the daemon's `list`, or of a dead daemon's record, comes back, and what runs
+ /// in it now; after the event log's replay.
+ #[tauri::command(async)]
+-pub fn revival(terms: Vec<Terminal>, studio: State<Mutex<Studio>>) -> Vec<Revive> {
++pub fn revival(terms: Vec<Terminal>, studio: State<Core>) -> Vec<Revive> {
+     while !REPLAYED.load(Ordering::Acquire) {
+         thread::sleep(Duration::from_millis(50));
+     }
+diff --git a/understanding/src/retest.rs b/understanding/src/retest.rs
+index b6826cf9a..078d5b2de 100644
+--- a/understanding/src/retest.rs
++++ b/understanding/src/retest.rs
+@@ -3,7 +3,7 @@
+ //! (`docs/studio/question-rules.md`) and waits on Home.
+ 
+ use crate::{CardStore, CardWriter, RETESTS_WAITING};
+-use crate::{ClaudeWriter, Quiz, RetestAsk, explanation_language, object, quiz_rules};
++use crate::{ClaudeWriter, Quiz, RetestAsk, explanation_language, quiz_rules};
+ use std::{process::Command, sync::Mutex};
+ 
+ /// The retest writer's instructions.
+@@ -41,7 +41,7 @@ impl ClaudeWriter {
+ 
+ /// The retest in a writer's `reply`, or why it breaks the Quiz rules.
+ pub fn retest_quiz(reply: &str) -> Result<Quiz, String> {
+-    Quiz::from_value(serde_json::from_str(object(reply)).unwrap_or_default())
++    Quiz::from_value(crate::parse_object(reply).unwrap_or_default())
+ }
+ 
+ /// Writes the retests due at `now`, the caller's clock, in `CardStore::retests_to_write`'s order, and keeps each, until
+@@ -68,10 +68,9 @@ pub fn write_retests(
+         // Err holds whether the writer replied, and the line for the log.
+         let attempt = || {
+             let reply = writer.retest(&ask).map_err(|line| (false, line))?;
+-            Quiz::from_value(serde_json::from_str(object(&reply)).unwrap_or_default())
+-                .map_err(|line| (true, line))
++            retest_quiz(&reply).map_err(|line| (true, line))
+         };
+-        let quiz = match attempt().or_else(|_| attempt()) {
++        let quiz = match crate::once_more(attempt(), Result::is_err, attempt, |second, _| second) {
+             Ok(quiz) => Some(quiz),
+             Err((replied, line)) => {
+                 log(format!("no retest on {}: {line}", ask.of));
+diff --git a/understanding/src/summary.rs b/understanding/src/summary.rs
+index 6c05c045a..fafb69c23 100644
+--- a/understanding/src/summary.rs
++++ b/understanding/src/summary.rs
+@@ -3,9 +3,7 @@
+ //! session's last 3 summaries.
+ 
+ use crate::grounding::{HEADLINE_WORDS, agent_says, facts_text, grounded, material, words};
+-use crate::{
+-    CardStore, CardWriter, ClaudeWriter, MAX_CHANGE, Place, Quiz, millis, object, quiz_rules,
+-};
++use crate::{CardStore, CardWriter, ClaudeWriter, MAX_CHANGE, Place, Quiz, millis, quiz_rules};
+ use serde::{Deserialize, Serialize};
+ use std::{process::Command, sync::Mutex};
+ 
+@@ -126,7 +124,7 @@ impl TurnSummary {
+     ) -> Result<(TurnSummary, Option<Unusable>), String> {
+         let card = request.card.is_some();
+         let head: String = reply.chars().take(300).collect();
+-        let value: serde_json::Value = serde_json::from_str(object(reply))
++        let value: serde_json::Value = crate::parse_object(reply)
+             .map_err(|e| format!("the summary reply does not parse ({e}): {head:?}"))?;
+         let headline = value["headline"]
+             .as_str()
+@@ -244,11 +242,11 @@ pub(crate) fn write_held(
+         )
+     };
+     let first = summary();
+-    let retry = match &first {
++    let retry = |first: &Result<_, _>| match first {
+         Err(_) => true,
+         Ok((_, problem)) => matches!(problem, Some(Unusable::Quiz(_) | Unusable::Headline(_))),
+     };
+-    match if retry { summary().or(first) } else { first } {
++    match crate::once_more(first, retry, summary, |second, first| second.or(first)) {
+         Ok((mut summary, problem)) => {
+             if let Some(problem) = problem {
+                 log(format!("no quiz on {}: {problem}", request.id));
+@@ -379,7 +377,7 @@ pub fn write_agent_summary(
+     let summary = writer
+         .summarize_agent(setup, prompt, message)
+         .and_then(|reply| {
+-            let value: serde_json::Value = serde_json::from_str(object(&reply)).unwrap_or_default();
++            let value = crate::parse_object(&reply).unwrap_or_default();
+             match value["summary"].as_str().map(str::trim) {
+                 Some(summary) if !summary.is_empty() => Ok(summary.to_string()),
+                 _ => Err(format!(
+@@ -487,7 +485,7 @@ pub fn write_name(
+     mut log: impl FnMut(String),
+ ) -> Option<String> {
+     let name = writer.name(setup, prompt, response).and_then(|reply| {
+-        let value: serde_json::Value = serde_json::from_str(object(&reply)).unwrap_or_default();
++        let value = crate::parse_object(&reply).unwrap_or_default();
+         let name = value["name"].as_str().unwrap_or_default();
+         let words: Vec<&str> = name.split_whitespace().take(NAME_WORDS).collect();
+         match words.is_empty() {
+diff --git a/core/src/lib.rs b/core/src/lib.rs
+index 479257b1f..32293fae5 100644
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -1383,6 +1383,7 @@ impl Session {
+             workers: since.cards,
+             check: None,
+             ends: BTreeMap::new(),
++            asks: self.needs_you(),
+         }
+     }
+ 
+@@ -1639,6 +1640,8 @@ impl Session {
+             session_id: self.agent.id.clone(),
+             id: card_id(&self.agent.id, at),
+             prompt: daniels.map(|p| p.at),
++            // The blocks the replay saw only: a resumed terminal state is not about this turn.
++            asks: !self.blocks.is_empty(),
+             ..CardRequest::default()
+         };
+         (!trees.is_empty()).then_some(Backfill { request, trees })
+@@ -1652,6 +1655,11 @@ impl Session {
+         }
+     }
+ 
++    /// Whether Daniel deleted it, and it has not started again.
++    pub fn is_deleted(&self) -> bool {
++        self.deleted
++    }
++
+     pub fn needs_you(&self) -> bool {
+         !self.blocks.is_empty() || self.terminal_blocked
+     }
+@@ -1928,9 +1936,9 @@ pub struct CardRequest {
+     /// was written at.
+     pub id: String,
+     pub base: Base,
+-    /// The diff of each file that changed since the base, commits included. The core gives none on
+-    /// a card built from `workers`' cards; the understanding layer fills it with their text before
+-    /// it asks the writer and stores the card.
++    /// The diff of each file that changed since the base, commits included. A request with none of
++    /// its own writes no card (danielrispler/plotkeeper#260); older stored cards hold their workers'
++    /// text here instead.
+     #[serde(default)]
+     pub change: Option<String>,
+     /// When the hook received the prompt of Daniel's that the card belongs to: its session's latest
+@@ -1944,7 +1952,8 @@ pub struct CardRequest {
+     /// The files other subagents edited or wrote in its worktree, by subagent (danielrispler/Falinks#369, story 20).
+     #[serde(default)]
+     pub changed_by: BTreeMap<String, BTreeSet<String>>,
+-    /// A session's workers' cards since its last card, at any depth.
++    /// A session's workers' cards since its last card, at any depth. No longer read to write a card;
++    /// kept because older stored cards carry it.
+     #[serde(default)]
+     pub workers: Vec<String>,
+     /// The command of the check whose start requested it, which the card is on (danielrispler/Falinks#461, decision 15);
+@@ -1955,6 +1964,10 @@ pub struct CardRequest {
+     /// writer runs: where the card's code is pulled from (danielrispler/plotkeeper#121).
+     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+     pub ends: BTreeMap<String, String>,
++    /// Whether the turn ended in Needs you, as the core recorded at its end: a Quiz is never beside a decision
++    /// (danielrispler/plotkeeper#257). A request stored before this reads as "did not".
++    #[serde(default)]
++    pub asks: bool,
+ }
+ 
+ /// A turn that gets a summary (danielrispler/Falinks#517, decisions 12, 13 and 15): what the summary writer reads of it.
+diff --git a/understanding/src/turn_trees.rs b/understanding/src/turn_trees.rs
+index d60ed2c0b..ed3eccfe2 100644
+--- a/understanding/src/turn_trees.rs
++++ b/understanding/src/turn_trees.rs
+@@ -9,8 +9,13 @@
+ //!   `--prune=now`); a ref keeps the tree and every blob it holds, so a turn's hunks stay readable.
+ 
+ use crate::fingerprint::{git, is_own, names, reflog};
++use std::sync::Mutex;
+ use std::{fs, path::Path};
+-use studio_core::{Facts, Numstat, RootDiff, TurnDiff};
++use studio_core::{
++    Facts, Numstat, RootDiff, Studio, TurnDiff, TurnFiles, TurnFilesSnapshot, compute_turn_files,
++};
++
++use crate::offer::TurnFacts;
+ 
+ /// The refs' namespace.
+ const REFS: &str = "refs/plotkeeper/turns";
+@@ -267,6 +272,66 @@ pub fn add_hunks(ask: &TurnDiff, facts: &mut Facts) {
+     }
+ }
+ 
++/// `ask`'s worktrees diffed by `git` with the core unlocked. A turn skipped for holding too many
++/// files is warned of through `warn` and settled, so no pass asks for it again.
++pub fn diff_turn(
++    state: &Mutex<Studio>,
++    ask: &TurnDiff,
++    warn: &mut dyn FnMut(String),
++) -> Option<Vec<RootDiff>> {
++    let mut skipped = false;
++    let diffs = turn_diffs(ask, &mut |warning| {
++        warn(warning);
++        skipped = true;
++    });
++    if skipped && diffs.is_none() {
++        state.lock().unwrap().settle_turn_files(ask);
++    }
++    diffs
++}
++
++/// The files of `ask` among `diffs`, found by `compute` with the core unlocked: the core is locked
++/// only to copy out what the matching reads. `None` when git could not diff the turn.
++pub fn found_files(
++    state: &Mutex<Studio>,
++    ask: &TurnDiff,
++    diffs: Option<Vec<RootDiff>>,
++    compute: impl FnOnce(&TurnFilesSnapshot, Vec<RootDiff>) -> TurnFiles,
++) -> Option<TurnFiles> {
++    let diffs = diffs?;
++    let snapshot = state.lock().unwrap().turn_files_snapshot(ask, &diffs);
++    Some(compute(&snapshot, diffs))
++}
++
++/// What the hooks and git recorded of the turn named `id`, for its summary writer
++/// (danielrispler/plotkeeper#115): its files with their counts and hunks, and its checks. Empty for
++/// a turn with no trees.
++pub fn turn_facts(state: &Mutex<Studio>, id: &str, warn: &mut dyn FnMut(String)) -> Facts {
++    let Some(ask) = state.lock().unwrap().summary_ask(id) else {
++        return Facts::default();
++    };
++    let diffs = diff_turn(state, &ask, warn);
++    let found = found_files(state, &ask, diffs, compute_turn_files);
++    let mut facts = state.lock().unwrap().facts_of(&ask, found);
++    add_hunks(&ask, &mut facts);
++    facts
++}
++
++/// The turn named `id` as the offer reads it (danielrispler/plotkeeper#209): its facts, and whether
++/// it merged.
++pub fn turn_of(state: &Mutex<Studio>, id: &str, warn: &mut dyn FnMut(String)) -> TurnFacts {
++    let facts = turn_facts(state, id, warn);
++    // One lock for the rest: a guard taken in a field lives until the whole struct is built, so a
++    // second `lock()` there would wait on the thread's own first one for ever.
++    let studio = state.lock().unwrap();
++    TurnFacts {
++        facts,
++        merge: studio.turn_merged(id),
++        workers: studio.turn_workers(id),
++        traced: studio.summary_ask(id).is_some(),
++    }
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::{hunk_view, parse};
+diff --git a/understanding/src/lib.rs b/understanding/src/lib.rs
+index 3526bc954..ac8889322 100644
+--- a/understanding/src/lib.rs
++++ b/understanding/src/lib.rs
+@@ -17,7 +17,7 @@ use std::{
+     thread,
+     time::{Duration, Instant},
+ };
+-use studio_core::{CardRequest, Kind, Session, Status, SummaryRequest, Transcript};
++use studio_core::{CardRequest, Session, SummaryRequest, Transcript};
+ 
+ mod brief;
+ mod card_code;
+@@ -30,6 +30,7 @@ mod self_test;
+ mod store;
+ mod summary;
+ mod turn_trees;
++mod turn_writing;
+ mod week;
+ pub use brief::{
+     Answered, DesignLine, OpenItem, OpenKind, answered, design_lines, design_sources, open_items,
+@@ -56,8 +57,10 @@ pub use summary::{
+     Line, LineKind, SummarySetup, TurnSummary, write_agent_summary, write_name, write_summary,
+ };
+ pub use turn_trees::{
+-    Hunk, MAX_TURN_FILES, add_hunks, anchor, hunk, hunk_view, numstat, turn_diffs, turn_hunk,
++    Hunk, MAX_TURN_FILES, add_hunks, anchor, diff_turn, found_files, hunk, hunk_view, numstat,
++    turn_diffs, turn_facts, turn_hunk, turn_of,
+ };
++pub use turn_writing::{Core, Effects, TurnWriting, Writer};
+ pub use week::{Rate, Ratings, Week, week};
+ 
+ /// A card on a change, in the explanation language; code inside its text is in
+@@ -193,7 +196,7 @@ impl Card {
+             let head: String = reply.chars().take(300).collect();
+             format!("the card writer's reply does not parse ({error}): {head:?}")
+         };
+-        let mut value: serde_json::Value = serde_json::from_str(object(reply)).map_err(fail)?;
++        let mut value = parse_object(reply).map_err(fail)?;
+         let quiz = value.get_mut("quiz").map(serde_json::Value::take);
+         let mut card: Card = serde_json::from_value(value).map_err(fail)?;
+         // The writer names ranges, never code: a copy it made anyway is dropped.
+@@ -287,22 +290,21 @@ pub trait CardWriter {
+ 
+ /// The card on a session's or a worker's change, from `session`'s state, and its Goal (danielrispler/Falinks#369,
+ /// decisions 11 and 12; danielrispler/plotkeeper#122). `writer` writes the card on `request` with the
+-/// summaries of the earlier cards of its prompt, and it goes in `store`. A card with no change is a
+-/// session's that changed nothing itself: it is written from its workers' card summaries instead
+-/// (`workers`). The Goal is written after `stored` runs on the card stored, so the shell sends the
++/// summaries of the earlier cards of its prompt, and it goes in `store`. A request with no change
++/// writes no card. The Goal is written after `stored` runs on the card stored, so the shell sends the
+ /// list and the "New card" notice first (danielrispler/Falinks#434, decision 32). The store is not locked while
+ /// the writer runs, which takes seconds. Each problem is one line for `log`. Returns whether a card
+ /// was added.
+ pub fn write_stop(
+     store: &Mutex<CardStore>,
+     writer: &(impl CardWriter + ?Sized),
+-    mut request: CardRequest,
++    request: CardRequest,
+     session: &Session,
+     stored: impl FnOnce(),
+     mut log: impl FnMut(String),
+ ) -> bool {
+     let owner = request.owner().to_owned();
+-    let (earlier, workers) = {
++    let earlier = {
+         let store = store.lock().unwrap();
+         let cards = store
+             .cards()
+@@ -310,44 +312,45 @@ pub fn write_stop(
+             .filter(|kept| kept.request.owner() == owner);
+         let same_prompt =
+             cards.filter(|kept| request.prompt.is_some() && kept.request.prompt == request.prompt);
+-        let earlier: Vec<String> = same_prompt.filter_map(summary).collect();
+-        (earlier, workers(&store, &request, session))
++        same_prompt.filter_map(summary).collect::<Vec<String>>()
+     };
++    // A session that changed nothing itself gets no card, whatever its workers wrote.
+     if request.change.is_none() {
+-        let Some(workers) = workers else {
+-            log(format!(
+-                "no card on {}: its workers' cards are not in the store",
+-                request.id
+-            ));
+-            return false;
+-        };
+-        request.change = Some(workers);
++        return false;
+     }
+     let Some(mut card) = write_card(writer, &request, &earlier, &mut log) else {
+         return false;
+     };
+-    place_card_quiz(store, &request, &mut card, &mut log);
+-    if let Err(e) = store.lock().unwrap().add(request.clone(), card, millis()) {
+-        log(format!("save the card store: {e}"));
++    // The cap check and the store are one step: another session's card cannot slip between them.
++    {
++        let mut store = store.lock().unwrap();
++        place_card_quiz(&mut store, &request, &mut card, &mut log);
++        if let Err(e) = store.add(request.clone(), card, millis()) {
++            log(format!("save the card store: {e}"));
++        }
+     }
+     stored();
+     write_goal(store, writer, &request, session, log);
+     true
+ }
+ 
+-/// Holds `card`'s Quiz to the cap on Quizzes per hour (danielrispler/plotkeeper#119): past it, a session's
+-/// card shows without its Quiz, and takes the place of the oldest unanswered lone Quiz of the hour
+-/// when there is one. A worker's card and a check's are no turn's and are left alone.
++/// Holds `card`'s Quiz to the rules for when a Quiz shows (danielrispler/plotkeeper#119, #257): none beside a
++/// decision, which `request` says by how its turn ended and never by the session's state now; then at most
++/// 3 an hour: past it, a session's card shows without its Quiz, and takes the place of the oldest unanswered lone
++/// Quiz of the hour when there is one. A worker's card and a check's are no turn's: they count for no cap, but keep none beside a decision.
+ fn place_card_quiz(
+-    store: &Mutex<CardStore>,
++    store: &mut CardStore,
+     request: &CardRequest,
+     card: &mut Card,
+     mut log: impl FnMut(String),
+ ) {
++    if request.asks {
++        card.quiz = None;
++        return;
++    }
+     if card.quiz.is_none() || request.agent.is_some() || request.check.is_some() {
+         return;
+     }
+-    let mut store = store.lock().unwrap();
+     match store.place_quiz(true, millis()) {
+         Place::Offer => {}
+         Place::Withhold => card.quiz = None,
+@@ -405,41 +408,6 @@ pub fn write_goal(
+     }
+ }
+ 
+-/// What the workers of `session` did since its last card, for its card or its brief, from the
+-/// summaries of their cards among `request.workers`, not their diffs: each worker that has one of
+-/// those cards or still runs, with its task, its status and those summaries. `None` when none of
+-/// those cards is in the store.
+-fn workers(store: &CardStore, request: &CardRequest, session: &Session) -> Option<String> {
+-    let cards: Vec<&StoredCard> = store
+-        .cards()
+-        .iter()
+-        .filter(|kept| request.workers.contains(&kept.request.id))
+-        .collect();
+-    if cards.is_empty() {
+-        return None;
+-    }
+-    let lines = session.agents.iter().filter_map(|agent| {
+-        let of = cards
+-            .iter()
+-            .filter(|kept| kept.request.owner() == agent.agent.id);
+-        // A card with no summary adds nothing (danielrispler/Falinks#434, decision 35).
+-        let summaries: Vec<String> = of.filter_map(|kept| summary(kept)).collect();
+-        let running = agent.status == Status::Running && agent.kind == Kind::Worker;
+-        let name = &agent.name;
+-        let did = match &summaries[..] {
+-            [] if running => "no card yet".into(),
+-            [] => return None,
+-            summaries => summaries.join(" "),
+-        };
+-        Some(format!("- `{name}` ({}): {did}\n", agent.status))
+-    });
+-    Some(format!("{WORKERS}{}", lines.collect::<String>()))
+-}
+-
+-/// The head of a change built from workers' cards, which the writer's instructions name.
+-const WORKERS: &str = "No diff: the agent changed nothing itself since its last card. Its workers, \
+-                       each with its status and the summaries of its cards since then:\n";
+-
+ /// The answer to Daniel's side `question` on `item` (danielrispler/Falinks#461, decision 20), from one call to `writer`
+ /// with the intentions of `transcript`'s turn, one per response. It stays in the studio: the session
+ /// never sees it. Why there is none when the call failed or its reply holds no answer.
+@@ -450,7 +418,7 @@ pub fn ask_about(
+     question: &str,
+ ) -> Result<String, String> {
+     let reply = writer.ask(item, &transcript.intentions(), question)?;
+-    let value: serde_json::Value = serde_json::from_str(object(&reply)).unwrap_or_default();
++    let value = parse_object(&reply).unwrap_or_default();
+     match value["answer"].as_str().map(str::trim) {
+         Some(answer) if !answer.is_empty() => Ok(answer.into()),
+         _ => Err("the writer's reply holds no answer".into()),
+@@ -507,6 +475,26 @@ fn object(reply: &str) -> &str {
+     object.map_or("", |(start, end)| &reply[start..=end])
+ }
+ 
++/// The JSON object in a writer's reply, parsed: the one place a reply is read.
++pub(crate) fn parse_object(reply: &str) -> Result<serde_json::Value, serde_json::Error> {
++    serde_json::from_str(object(reply))
++}
++
++/// Asks a writer once more when `retry` says the `first` result cannot stand, and `pick` chooses between the second
++/// result and the first. Each writer keeps its own `retry` and `pick`.
++pub(crate) fn once_more<T, E>(
++    first: Result<T, E>,
++    retry: impl FnOnce(&Result<T, E>) -> bool,
++    ask: impl FnOnce() -> Result<T, E>,
++    pick: impl FnOnce(Result<T, E>, Result<T, E>) -> Result<T, E>,
++) -> Result<T, E> {
++    if retry(&first) {
++        pick(ask(), first)
++    } else {
++        first
++    }
++}
++
+ /// Why a reply gave no goal, for the log.
+ const HOLDS_NONE: &str = "the reply holds none";
+ 
+@@ -517,7 +505,7 @@ fn summary(kept: &StoredCard) -> Option<String> {
+ 
+ /// The Goal in a writer's reply, when it holds one that is not empty, or else why not, for the log.
+ fn goal_in(reply: &str) -> Result<String, String> {
+-    let value: serde_json::Value = serde_json::from_str(object(reply)).unwrap_or_default();
++    let value = parse_object(reply).unwrap_or_default();
+     match value["goal"].as_str().map(str::trim) {
+         Some(goal) if !goal.is_empty() => Ok(goal.into()),
+         _ => Err(HOLDS_NONE.into()),
+@@ -588,8 +576,12 @@ pub fn write_card(
+     // A reply with no card, or whose quiz breaks a rule (danielrispler/plotkeeper#118), is asked for once more; the
+     // second stands, with no quiz when it breaks one again, or the first when the second gives no card.
+     let first = card();
+-    let retry = !matches!(&first, Ok((_, None)));
+-    match if retry { card().or(first) } else { first } {
++    match once_more(
++        first,
++        |first| !matches!(first, Ok((_, None))),
++        card,
++        |second, first| second.or(first),
++    ) {
+         Ok((card, problem)) => {
+             if let Some(problem) = problem {
+                 log(format!("no quiz on {}: {problem}", request.id));
+@@ -610,7 +602,7 @@ pub fn write_card(
+ /// `if_it_fails` as the reasons, in that order. Its key is "It passes" until the result settles it
+ /// (`CardStore::settle`).
+ fn check_quiz(check: &str, reply: &str) -> Quiz {
+-    let value: serde_json::Value = serde_json::from_str(object(reply)).unwrap_or_default();
++    let value = parse_object(reply).unwrap_or_default();
+     let why = |field: &str| value[field].as_str().unwrap_or_default().to_owned();
+     let first = check.lines().next().unwrap_or_default();
+     Quiz {
+@@ -1159,10 +1151,7 @@ Reply with one JSON object and nothing else:
+ 
+ "#,
+     quiz_rules!("your `summary`"),
+-    r#"
+-
+-When the change is not a diff but the agent's workers with the summaries of their cards, the agent changed nothing itself and handed the work to them: the card explains what it split up among them, what came back and what is still open, paths and ranges are empty, and the quiz is on how the work was split.
+-"#
++    r#""#
+ );
+ 
+ /// The card writer's instructions for a check's card (danielrispler/Falinks#461, decision 15), written while the check
+@@ -1224,9 +1213,7 @@ Reply with one JSON object and nothing else: {"design": [{"text": string, "cite"
+ const MORE: &str = concat!(
+     r#"A developer read a card that explains a change a coding agent made to his code, and asked for more. Explain the change in more depth than the card: how the changed code works, step by step, and why it was done this way and not another. Do not repeat the card.
+ 
+-Answer from the change below. Use only this input: do not use tools or read files.
+-
+-When the change is not a diff but the agent's workers with the summaries of their cards, the agent changed nothing itself and handed the work to them: explain how the work was split and what came back, and do not invent code you were not shown.
++Answer from the change below. Use only this input: do not use tools or read files. When the change below is not a diff, explain only what it says: do not invent code you were not shown.
+ 
+ "#,
+     explanation_language!(),
+@@ -1250,3 +1237,48 @@ Answer from the input below: the intentions of the item's turn, oldest first, th
+ Reply with one JSON object and nothing else: {"answer": string}, the answer in at most three short paragraphs.
+ "#
+ );
++
++#[cfg(test)]
++mod reply_tests {
++    use super::{once_more, parse_object};
++
++    #[test]
++    fn a_reply_in_a_code_fence_parses_to_its_object() {
++        let value = parse_object("Here:\n```json\n{\"goal\": \"x\"}\n```").unwrap();
++        assert_eq!(value["goal"], "x");
++        assert!(parse_object("no object here").is_err());
++    }
++
++    #[test]
++    fn a_first_result_that_can_stand_is_not_asked_again() {
++        let mut asked = false;
++        let got = once_more(
++            Ok::<_, String>(1),
++            |_| false,
++            || {
++                asked = true;
++                Ok(2)
++            },
++            |second, _| second,
++        );
++        assert_eq!((got, asked), (Ok(1), false));
++    }
++
++    #[test]
++    fn the_picked_result_stands_after_a_second_ask() {
++        let keep_first_when_second_fails = once_more(
++            Ok::<_, String>(1),
++            |_| true,
++            || Err("no".into()),
++            |second, first| second.or(first),
++        );
++        assert_eq!(keep_first_when_second_fails, Ok(1));
++        let second_stands = once_more(
++            Err::<i32, _>("a".to_string()),
++            |_| true,
++            || Err("b".into()),
++            |second, _| second,
++        );
++        assert_eq!(second_stands, Err("b".into()));
++    }
++}
+diff --git a/src-tauri/src/main.rs b/src-tauri/src/main.rs
+index ffa245fca..6ae2d7ecc 100644
+--- a/src-tauri/src/main.rs
++++ b/src-tauri/src/main.rs
+@@ -14,7 +14,7 @@ use std::{
+     path::{Path, PathBuf},
+     process::Command,
+     sync::{
+-        Arc, LazyLock, Mutex,
++        Arc, LazyLock, Mutex, OnceLock,
+         atomic::{AtomicBool, Ordering},
+         mpsc,
+     },
+@@ -22,18 +22,15 @@ use std::{
+     time::{Duration, Instant},
+ };
+ use studio_core::{
+-    CardRequest, Facts, NameRequest, Notifications, Output, RootDiff, Session, Sound,
++    CardRequest, Notifications, Output, Session, Sound,
+     State::{Ended, NeedsYou},
+-    Studio, SummaryRequest, TaskFacts, TaskQuery, TurnDiff, TurnFiles, TurnFilesSnapshot,
+-    compute_turn_files,
++    Studio, TaskFacts, TaskQuery, compute_turn_files,
+ };
+ use studio_understanding::{
+-    AGY_FIXTURE_VERSION, AgyVersions, CardStore, CardWriter, Changed, ClaudeWriter, Decision,
+-    FakeWriter, Fingerprints, Offer, Offers, OpenItem, Rating, Row, SessionCards, StoredSummary,
+-    SummarySetup, Tap, TurnFacts, Versions, add_hunks, backfilled, changed_in, fingerprint_changes,
+-    live_roots, millis, offer_stop, offer_summary, open_items, settle, turn_diffs, turn_hunk,
+-    turns_card, worktree_root, write_agent_summary, write_design, write_goal, write_name,
+-    write_retests,
++    AGY_FIXTURE_VERSION, AgyVersions, CardStore, CardWriter, ClaudeWriter, Core, Effects,
++    FakeWriter, Fingerprints, Offers, OpenItem, Rating, Row, SessionCards, StoredSummary,
++    SummarySetup, Tap, TurnWriting, Versions, diff_turn, fingerprint_changes, found_files,
++    live_roots, millis, open_items, turn_hunk, worktree_root, write_agent_summary, write_retests,
+ };
+ use tauri::{AppHandle, Emitter, Manager, State};
+ use tauri_plugin_notification::NotificationExt;
+@@ -46,29 +43,11 @@ mod skills;
+ mod terminal;
+ 
+ /// The card store, which the log thread adds to and the pane records guesses in.
+-type Cards = Mutex<CardStore>;
++type Cards = Arc<Mutex<CardStore>>;
+ 
+ /// The notices not shown yet, which the log thread and the card writer's threads add to.
+ type Notices = Mutex<Notifications>;
+ 
+-/// The summary writer's setup, from the settings the window sends (danielrispler/Falinks#526), and the turns whose
+-/// summary waits for Daniel to open it while summaries are written on open, by turn id.
+-// shortcut: the waiting turns live in memory, so a restart loses them; keep them in the store if
+-// that bites.
+-#[derive(Default)]
+-struct Summaries {
+-    setup: Mutex<SummarySetup>,
+-    waiting: Mutex<HashMap<String, SummaryRequest>>,
+-    /// The files of each turn card's own change, for a summary of an agent that reports no trees: it is
+-    /// judged on the same change as its card (danielrispler/plotkeeper#209).
+-    changes: Mutex<HashMap<String, Vec<Changed>>>,
+-    /// What the card path decided for each live turn card, by turn id, until the turn's summary takes it:
+-    /// one decision for a turn (danielrispler/plotkeeper#209), however late its summary runs.
+-    decided: Mutex<HashMap<String, Decision>>,
+-    /// The turns whose decision was a lone Quiz, by turn id, until their summary puts it on record.
+-    lone: Mutex<HashMap<String, Decision>>,
+-}
+-
+ /// The settings' `summaries` (danielrispler/Falinks#517, decision 17): the writer's model and effort, and whether a
+ /// summary is written when Daniel opens its turn instead of at the turn's end.
+ #[tauri::command]
+diff --git a/core/tests/cards.rs b/core/tests/cards.rs
+index 3a14baf23..3e43aa95a 100644
+--- a/core/tests/cards.rs
++++ b/core/tests/cards.rs
+@@ -60,6 +60,7 @@ fn a_prompt_whose_worktree_changed_gets_one_card_on_the_whole_change_at_its_stop
+             workers: vec![],
+             check: None,
+             ends: Default::default(),
++            asks: false,
+         }]
+     );
+ }
+

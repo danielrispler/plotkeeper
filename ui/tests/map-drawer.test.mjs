@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { showBanner } from "../../dist/map-history.js";
 import { Field, fakeDocument } from "./dom.mjs";
-import { brokenParts, brokenText, ciDrawer, ciLine, commitDrawer, proofDrawer, scrubBanner, sheetCi, stripOf } from "../../dist/map-model.js";
+import { briefOffer, brokenParts, brokenText, ciDrawer, ciLine, commitDrawer, proofDrawer, scrubBanner, sheetCi, stripOf } from "../../dist/map-model.js";
 
 const ci = (status, extra = {}) => ({ status, run_url: "https://github.com/o/r/actions/runs/9", commit: "abc1234def", earlier: false, parts: [], laws: [], tail: "", note: null, ...extra });
 const broken = ci("broken", { parts: ["shell"], laws: ["wire-types-agree"], tail: "FAIL wire_types_match\nSummary 1 failed" });
@@ -70,7 +70,7 @@ test("the broken-law drill-down shows the log's tail and opens the run on GitHub
   assert.equal(ciDrawer(ci("unreadable", { run_url: null })).jumps.length, 0);
 });
 
-const entry = (commit, extra = {}) => ({ commit, short: commit.slice(0, 7), label: `change ${commit}`, fogged: false, ...extra });
+const entry = (commit, extra = {}) => ({ commit, short: commit.slice(0, 7), label: `change ${commit}`, fogged: false, brief: null, ...extra });
 
 test("the strip marks the commit being viewed and the ones Daniel has not caught up on, oldest first", () => {
   const rows = stripOf([entry("aaaaaaaa"), entry("bbbbbbbb", { fogged: true }), entry("cccccccc", { fogged: true })], "bbbbbbbb");
@@ -105,4 +105,14 @@ test("the banner offers the way back to now while a commit is scrubbed, also whe
   assert.equal(banner.title, "#4 Thing");
   showBanner(banner, null);
   assert.equal(banner.textContent, "");
+});
+
+test("a commit whose PR has a stored brief offers it, and one whose PR has none offers nothing", () => {
+  assert.equal(briefOffer(entry("aaaaaaaa")), null);
+  const offer = briefOffer(entry("bbbbbbbb", { brief: 12 }));
+  assert.equal(offer.number, 12);
+  assert.equal(offer.label, "Brief");
+  assert.match(offer.title, /#12/);
+  const rows = stripOf([entry("aaaaaaaa"), entry("bbbbbbbb", { brief: 12 })], null);
+  assert.deepEqual(rows.map((r) => r.brief), [null, 12]);
 });

@@ -1,27 +1,25 @@
-//! The weekly check on the questions (danielrispler/Falinks#328, module 6): prints the last 7 days' thinking and surprise
-//! rates and Daniel's ratings by level and reason from the card store, then the drift in Claude Code
-//! (danielrispler/Falinks#369, decision 23): the unrecognised wake-ups in the event log and the version changes, then the events the hook dropped (#43, decision 11). Words after the command are Daniel's one-line
-//! verdict, which it appends with the rest to `weekly.txt` beside the store.
+//! The weekly check on Claude Code's drift (danielrispler/Falinks#369, decision 23): prints the unrecognised wake-ups in the
+//! event log and the version changes of the last 7 days, then the events the hook dropped (#43, decision 11). The thinking and
+//! surprise rates and the ratings it printed before cards were retired (danielrispler/plotkeeper#348) are gone. Words after the
+//! command are Daniel's one-line verdict, which it appends with the rest to `weekly.txt` beside the event log.
 
 use std::{fs, fs::OpenOptions, io::Write};
 use studio_core::Studio;
-use studio_understanding::{CardStore, Versions, drift, dropped_events, millis, week};
+use studio_understanding::{Versions, drift, dropped_events, millis};
 
 fn main() -> std::io::Result<()> {
     let log = studio_hook::event_log(&std::env::home_dir().expect("a home directory"));
-    let store = CardStore::open_beside(&log)?;
     let now = millis();
-    let rates = week(store.cards(), now);
     let lines = String::from_utf8_lossy(&fs::read(&log).unwrap_or_default()).into_owned();
     let studio = Studio::replayed(lines.lines());
     let drift = drift(&studio, &Versions::beside(&log), now);
     let drops = format!("dropped events: {}\n", dropped_events(&log, now));
-    print!("{rates}{drift}{drops}");
+    print!("{drift}{drops}");
     let verdict = std::env::args().skip(1).collect::<Vec<_>>().join(" ");
     if !verdict.is_empty() {
         let weekly = log.with_file_name("weekly.txt");
         let mut file = OpenOptions::new().create(true).append(true).open(&weekly)?;
-        writeln!(file, "{rates}{drift}{drops}verdict: {verdict}\n")?;
+        writeln!(file, "{drift}{drops}verdict: {verdict}\n")?;
         println!("Kept your verdict in {}", weekly.display());
     }
     Ok(())

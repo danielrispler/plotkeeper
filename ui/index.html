@@ -89,7 +89,7 @@
             <details id="unavailable" class="unavailable" hidden><summary title="Why only the steps are shown">Steps only</summary><span id="unavailable-why"></span></details>
             <details id="step" class="step"><summary id="step-line" title="The step the agent is on"><span id="tool" class="tool-name"></span> <span id="detail"></span></summary><code id="command"></code></details>
           </div>
-          <!-- The feed of turns, newest first, the first being "now" at your turn: each with its prompt, Headline, Quiz, cards,
+          <!-- The feed of turns, newest first, the first being "now" at your turn: each with its prompt, Headline, cards,
                subagents (danielrispler/Falinks#535), checks and folded response. -->
           <section id="banner-slot"></section>
           <ol id="feed" class="feed"></ol>
@@ -112,8 +112,11 @@
       </header>
       <div class="map-stage">
         <div id="map-body" class="map-body"></div>
+        <!-- The PR brief (#339): over the foot of the map body while one plays; `map-brief.ts` fills it. -->
+        <section id="map-brief" class="map-brief" aria-label="PR brief" hidden></section>
         <aside id="map-side" class="map-side" aria-label="Beside the map" hidden>
           <section id="map-not-placed"></section>
+          <section id="map-tray"></section>
           <section id="map-sheet"></section>
           <section id="map-drawer"></section>
         </aside>

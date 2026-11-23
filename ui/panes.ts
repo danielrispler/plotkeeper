@@ -5,42 +5,25 @@
 import { diffRequest, drawDiff, keepsDiff } from "./diff.js";
 import { drawHistory } from "./history.js";
 import { drawHome, enterHome, landedClear } from "./home.js";
-import { element, failure, invoke, listen, newest, text } from "./dom.js";
+import { element, failure, invoke, text } from "./dom.js";
 import { knownProjects } from "./projects.js";
 import { followLog, showLog, showMissing } from "./log.js";
 import { leaveMap } from "./map.js";
 import { select } from "./selection.js";
 import { studio } from "./state.js";
-import type { Learning, Session } from "./types.js";
+import type { Session } from "./types.js";
 
 const boxes = new Map<string, HTMLElement>();
-let asked: Learning | null = null;
 let shown = "";
 let ready = false;
 
 // The projects Home lists: the repositories the listed sessions ran in.
 const homeProjects = () => knownProjects();
 
-// Asks the card store for the learning item (#240), with the clock and the start of Daniel's local day, and draws Home with it; a
-// failed read leaves the item as it was. Asked when Home is drawn, when a turn ends and after each tap.
-// Only the newest read lands: an older reply, which may predate a tap, is dropped.
-const latestLearning = newest();
-export const readLearning = () => {
-  const now = Date.now();
-  const day = new Date(now);
-  day.setHours(0, 0, 0, 0);
-  return latestLearning(invoke("learning", { now, dayStart: day.getTime() })).then((found) => {
-    if (found === undefined) return;
-    asked = found;
-    redrawHome();
-  }, failure("learning"));
-};
-
-// Shows Home, and again each time the retests change the item the store chooses.
+// Shows Home.
 export function startPanes() {
   ready = true;
   showHome();
-  listen<null>("retests", () => void readLearning());
 }
 
 // A view's box in `#column`, made the first time.
@@ -69,31 +52,24 @@ const HOME = "home";
 export function showHome() {
   const entering = shown !== HOME;
   show(HOME);
-  // Home's expanded groups, "Not now" and the answered item last until it is left; what the store chose before is not shown
-  // again until it answers, since it may be an item set aside.
+  // Home's expanded groups last until it is left.
   enterHome(!entering);
-  if (entering) asked = null;
-  drawHome(box(HOME), studio.listed, homeProjects(), asked, redrawHome, () => void readLearning());
-  void readLearning();
+  drawHome(box(HOME), studio.listed, homeProjects(), redrawHome);
 }
-
-// Forgets the item the store last chose, until it answers again.
-export const forgetAsked = () => void (asked = null);
 
 // Whether Home is the view shown.
 export const homeShown = () => shown === HOME;
 
-// A card or summary was stored, or a turn ended: what the store chooses for the slot, and the Headlines of the rows, may have changed.
+// A summary was stored, or a turn ended: the Headlines of the rows may have changed.
 export function refreshHome() {
   if (shown !== HOME) return;
-  void readLearning();
   redrawHome();
 }
 
 // Draws Home again when the list changed under it.
 export function redrawHome() {
   landedClear.sync();
-  if (shown === HOME) drawHome(box(HOME), studio.listed, homeProjects(), asked, redrawHome, () => void readLearning());
+  if (shown === HOME) drawHome(box(HOME), studio.listed, homeProjects(), redrawHome);
 }
 
 // History (`history.ts`), a view like Home in the terminal column: the ended sessions, searchable. Clicking a row selects

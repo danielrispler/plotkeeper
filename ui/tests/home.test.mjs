@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Field, fakeDocument, tauri } from "./dom.mjs";
-import { homeView } from "../../dist/home.js";
+import { homeView, markTitle } from "../../dist/home.js";
 import { initial } from "../../dist/settings.js";
 import { windowBinding } from "../../dist/keys.js";
 import { listSpace } from "../../dist/home.js";
@@ -13,21 +13,19 @@ const key = (code, k, mods = {}) => ({ key: k, code, metaKey: false, ctrlKey: fa
 
 const turn = (ended_at) => ({ ended_at });
 const live = (id, state, extra = {}) => ({ id, state, unseen: false, landed: false, turns: [], questions: [], transcript: {}, ...extra });
-const fresh = () => ({ expanded: new Set(), cleared: new Set(), quiet: false, held: null });
-const view = (sessions, state = fresh(), extra = {}) => homeView(sessions, extra.learning ?? null, extra.projects ?? [], state, extra.headline);
+const fresh = () => ({ expanded: new Set(), cleared: new Set() });
+const view = (sessions, state = fresh(), extra = {}) => homeView(sessions, extra.projects ?? [], state, extra.headline);
 const keys = (parts) => parts.map((p) => p.key);
 const sessionIds = (part) => part.rows.map((r) => r.session.id);
-const quiz = { text: "q", key: 0, options: [] };
-const retest = (id, quiz_, taps = []) => ({ kind: "retest", id, of: id, session_id: "s", added_at: 1, quiz: quiz_, taps });
 
 test("Home's parts come in order, each absent when empty", () => {
   assert.deepEqual(keys(view([])), []);
   const all = view(
     [live("l", "idle", { landed: true }), live("u", "your_turn", { unseen: true }), live("r", "running"), live("n", "needs_you")],
     undefined,
-    { learning: retest("a", quiz), projects: ["/w/plotkeeper"] },
+    { projects: ["/w/plotkeeper"] },
   );
-  assert.deepEqual(keys(all), ["needs_you", "running", "unseen", "learning", "landed", "projects"]);
+  assert.deepEqual(keys(all), ["needs_you", "running", "unseen", "landed", "projects"]);
   assert.deepEqual(keys(view([live("r", "running")])), ["running"]);
   assert.deepEqual(keys(view([live("d", "your_turn", { unseen: true })])), ["unseen"]);
 });
@@ -80,7 +78,7 @@ test("Needs you is the only part with the colour class", () => {
   const all = view(
     [live("l", "idle", { landed: true }), live("u", "your_turn", { unseen: true }), live("r", "running"), live("n", "needs_you")],
     undefined,
-    { learning: retest("a", quiz), projects: ["/w/plotkeeper"] },
+    { projects: ["/w/plotkeeper"] },
   );
   assert.deepEqual(all.filter((p) => p.colour).map((p) => p.key), ["needs_you"]);
 });
@@ -99,7 +97,7 @@ test("one row per project, named by its folder, in projects.json order", () => {
 });
 
 test("a project whose map shows a fogged Core part is marked, with no count", () => {
-  const start = homeView([], null, ["/w/a", "/w/b"], fresh(), undefined, new Set(["/w/b"]))[0];
+  const start = homeView([], ["/w/a", "/w/b"], fresh(), undefined, new Set(["/w/b"]))[0];
   assert.deepEqual(start.projects.map((p) => [p.path, p.fogged]), [["/w/a", false], ["/w/b", true]]);
 });
 
@@ -117,55 +115,13 @@ test("a click on the list's empty space goes home; a click on a row, a heading o
   assert.equal(listSpace(target("button")), false);
 });
 
-test("quiet hides the learning slot until the Home state is reset", async () => {
-  const { resetHome } = await import("../../dist/home.js");
-  const state = { ...fresh(), quiet: true };
-  assert.deepEqual(keys(view([], state, { learning: retest("a", quiz) })), []);
-  resetHome(state);
-  assert.deepEqual(keys(view([], state, { learning: retest("a", quiz) })), ["learning"]);
-});
-
-test("done for today shows only in its case", () => {
-  const slotOf = (learning) => view([], undefined, { learning }).find((p) => p.key === "learning")?.slot;
-  assert.equal(slotOf({ kind: "done" }).item.kind, "done");
-  assert.equal(slotOf(retest("a", quiz)).item.kind, "retest");
-  assert.equal(slotOf(null), undefined);
-});
-
-test("a fresh Quiz fills the slot as the store chose it", () => {
-  const slotOf = (learning) => view([], undefined, { learning }).find((p) => p.key === "learning")?.slot;
-  assert.equal(slotOf({ kind: "fresh", id: "t1", session_id: "s1", quiz }).item.kind, "fresh");
-});
-
-test("an item answered here stays with its reveal, and Next shows only when another item is due", () => {
-  const answered = retest("a", quiz, [{ kind: "pick", option: 0, at: 2 }]);
-  const slotOf = (learning, held) => view([], { ...fresh(), held }, { learning }).find((p) => p.key === "learning")?.slot;
-  assert.deepEqual([slotOf(retest("b", quiz), answered).item.id, slotOf(retest("b", quiz), answered).next], ["a", true]);
-  assert.equal(slotOf({ kind: "done" }, answered).next, false);
-  assert.equal(slotOf(null, answered).next, false);
-  // The store's answer that is still the answered item (a re-ask that landed before the pick) is not another item.
-  assert.equal(slotOf(retest("a", quiz), answered).next, false);
-  // Unanswered, the slot shows what the store chose, and no Next.
-  assert.equal(slotOf(retest("b", quiz), null).next, false);
-});
-
-test("shown is due once per item, and never for a Retest that has it", async () => {
-  const { shownDue } = await import("../../dist/home.js");
-  const item = retest("s1", quiz);
-  assert.equal(shownDue(item), true);
-  assert.equal(shownDue(null), false);
-  // A fresh Quiz counts too.
-  assert.equal(shownDue({ kind: "fresh", id: "t9", session_id: "s", quiz }), true);
-  assert.equal(shownDue(retest("s2", quiz, [{ kind: "shown", at: 1 }])), false);
-});
-
-test("entering Home from another view starts it afresh, and drawing it again while on it keeps a reveal and the expanded groups", async () => {
+test("entering Home from another view collapses the expanded groups, and drawing it again while on it keeps them", async () => {
   const { enterHome } = await import("../../dist/home.js");
-  const state = { ...fresh(), expanded: new Set(["running"]), quiet: true, held: retest("a", quiz) };
+  const state = { ...fresh(), expanded: new Set(["running"]) };
   enterHome(true, state);
-  assert.deepEqual([[...state.expanded], state.quiet, state.held?.id], [["running"], true, "a"]);
+  assert.deepEqual([...state.expanded], ["running"]);
   enterHome(false, state);
-  assert.deepEqual([[...state.expanded], state.quiet, state.held], [[], false, null]);
+  assert.deepEqual([...state.expanded], []);
 });
 
 test("the newest request wins: a slower, older reply is dropped", async () => {
@@ -177,58 +133,6 @@ test("the newest request wins: a slower, older reply is dropped", async () => {
   second("newer");
   first("older");
   assert.deepEqual([await a, await b], [undefined, "newer"]);
-});
-
-test("building the slot writes nothing; shown is written once the card is seen, in a focused window with Home open", async () => {
-  const { mock } = await import("node:test");
-  const observers = [];
-  globalThis.IntersectionObserver = class {
-    constructor(run) {
-      this.run = run;
-      observers.push(this);
-    }
-    observe() {}
-    disconnect() {}
-  };
-  const scrollTo = (ratio, viewport) =>
-    observers.at(-1).run([{ intersectionRatio: ratio, intersectionRect: { width: 100, height: viewport * 100 }, rootBounds: { width: 100, height: 100 } }]);
-  const calls = [];
-  tauri(calls);
-  globalThis.document = fakeDocument({ visibilityState: "visible", hasFocus: () => true }, Field);
-  mock.timers.enable({ apis: ["setTimeout"] });
-  const { slotNode, drawHome, watchLearningShown } = await import("../../dist/home.js");
-  let home = true;
-  const items = [{ ...retest("w1", quiz) }, { kind: "fresh", id: "t5", session_id: "s", quiz }];
-  for (const item of items) {
-    calls.length = 0;
-    slotNode({ item, next: false }, () => {}, () => {});
-    const box = new Field("div");
-    box.querySelector = () => null;
-    drawHome(box, [], [], item);
-    assert.deepEqual(calls, []);
-    const node = new Field("div");
-    watchLearningShown(node, item, () => home);
-    // Built but off screen, and then seen with Home closed or the window unfocused: nothing.
-    mock.timers.tick(5000);
-    assert.deepEqual(calls, []);
-    scrollTo(1, 1);
-    home = false;
-    mock.timers.tick(5000);
-    assert.deepEqual(calls, []);
-    home = true;
-    document.hasFocus = () => false;
-    mock.timers.tick(5000);
-    assert.deepEqual(calls, []);
-    document.hasFocus = () => true;
-    // Back in a focused window with Home open: written once, however often Home is drawn again.
-    recheckSeen();
-    watchLearningShown(node, item, () => home);
-    mock.timers.tick(5000);
-    watchLearningShown(node, item, () => home);
-    mock.timers.tick(5000);
-    assert.deepEqual(calls, [["quiz_tap", { id: item.id, tap: { kind: "shown" } }]], item.kind);
-  }
-  mock.timers.reset();
 });
 
 test("a project's mark keeps its one watch while a redraw keeps its node, and a new node takes the watch over", async () => {
@@ -264,109 +168,6 @@ test("the window gaining focus draws Home again, which reads the marks and the r
   assert.equal(draws, 0);
   onWindowFocus(true, () => draws++);
   assert.equal(draws, 1);
-});
-
-// The slot's card (#242): the options, then "Not sure" and "Not now" inside it; a pick writes the confidence tap first.
-async function slotCard(id, extra = {}, send = null) {
-  const calls = [];
-  tauri(calls);
-  if (send) globalThis.window.__TAURI__.core.invoke = send;
-  globalThis.document = fakeDocument({ visibilityState: "visible", hasFocus: () => true }, Field);
-  const { slotNode } = await import("../../dist/home.js");
-  const item = retest(id, { text: "q", key: 1, options: [{ text: "A", why: "a" }, { text: "B", why: "b" }] }, []);
-  const node = slotNode({ item: { ...item, ...extra }, next: false }, () => {}, () => {});
-  const buttons = () => node.find("button");
-  const press = (label) => buttons().find((b) => b.textContent === label).listeners.click();
-  const again = () => slotNode({ item: { ...item, ...extra }, next: false }, () => {}, () => {});
-  return { calls, node, again, buttons, press, labels: () => buttons().map((b) => b.textContent) };
-}
-const taps = (calls) => calls.map(([, args]) => args.tap);
-const settle = () => new Promise((r) => setTimeout(r, 30));
-
-test("a confident Home pick is one click: a sure confidence tap for Home, then the pick, and no why", async () => {
-  const { calls, press } = await slotCard("c1");
-  press("A");
-  await settle();
-  assert.deepEqual(taps(calls), [{ kind: "confidence", sure: true, surface: "home" }, { kind: "pick", option: 0 }]);
-});
-
-test("the pick is sent only after the confidence tap has landed", async () => {
-  const events = [];
-  const { press } = await slotCard("c0", {}, async (command, args) => {
-    events.push(`start ${args.tap.kind}`);
-    if (args.tap.kind === "confidence") await new Promise((r) => setTimeout(r, 15));
-    events.push(`end ${args.tap.kind}`);
-    return null;
-  });
-  press("A");
-  await new Promise((r) => setTimeout(r, 60));
-  assert.deepEqual(events, ["start confidence", "end confidence", "start pick", "end pick"]);
-});
-
-test("a pick on a card's fresh Quiz on Home records its guess, and the rail shows it answered", async () => {
-  const { calls, press } = await slotCard("t7", { kind: "fresh", session_id: "s", of: undefined });
-  press("B");
-  await settle();
-  const { quizAnswered } = await import("../../dist/quiz.js");
-  assert.equal(quizAnswered("t7"), true);
-  assert.deepEqual(taps(calls).at(-1), { kind: "pick", option: 1 });
-});
-
-test("with the not sure toggle on, the Home pick writes sure false first", async () => {
-  const { calls, press } = await slotCard("c2");
-  press("Not sure");
-  assert.deepEqual(calls, []);
-  press("B");
-  await settle();
-  assert.deepEqual(taps(calls), [{ kind: "confidence", sure: false, surface: "home" }, { kind: "pick", option: 1 }]);
-});
-
-test("Home's card holds the options, then Not sure and Not now, with no Sure row and no Show the rest anyway", async () => {
-  const { labels } = await slotCard("c3");
-  assert.deepEqual(labels(), ["A", "B", "Not sure", "Not now"]);
-});
-
-test("an item that arrives already answered still offers a way on: Next sets it aside", async () => {
-  const { calls, press, labels } = await slotCard("c5", { taps: [{ kind: "skip", at: 1 }] });
-  assert.ok(labels().includes("Next"), labels().join());
-  press("Next");
-  await settle();
-  assert.deepEqual(taps(calls), [{ kind: "not_now" }]);
-});
-
-test("the reveal shows the turn's date and Key wrong", async () => {
-  const { node, press, labels } = await slotCard("c4", { of_at: Date.UTC(2026, 10, 13, 12) });
-  press("A");
-  assert.ok(node.text.includes("13 November"), node.text);
-  assert.ok(labels().includes("Key wrong"));
-  assert.ok(!labels().includes("Not now"));
-});
-
-test("a fresh Quiz's reveal shows the turn's date from `at`", async () => {
-  const { node, press } = await slotCard("c6", { kind: "fresh", at: Date.UTC(2026, 10, 19, 12) });
-  press("A");
-  assert.ok(node.text.includes("19 November"), node.text);
-});
-
-const stored = ["--- ui/settings.rs", "@@ -1,2 +1,2 @@", "-old line", "+new line", "--- core/lib.rs", "@@ -5 +5 @@", "+other", ""].join("\n");
-
-test("a pick draws the item's stored hunk in place, a caption and code per file, with no git read and no hunk_opened", async () => {
-  const { calls, again, press } = await slotCard("c7", { hunk: stored });
-  press("A");
-  await settle();
-  // Home redraws the slot after the pick.
-  const node = again();
-  const pres = node.find("pre");
-  assert.equal(pres.length, 2);
-  assert.ok(pres[0].textContent.includes("+new line") && !pres[0].textContent.includes("other"), pres[0].textContent);
-  assert.ok(node.text.includes("ui/settings.rs") && node.text.includes("core/lib.rs"), node.text);
-  assert.deepEqual(calls.map(([c]) => c).filter((c) => c === "turn_file_hunk" || c === "hunk_opened"), []);
-});
-
-test("an item with no stored hunk shows no hunk block", async () => {
-  const { again, press } = await slotCard("c8", { hunk: undefined });
-  press("A");
-  assert.equal(again().find("pre").length, 0);
 });
 
 // Clear landed (#244), a state machine on an injected clock (prior art hover.test.mjs).
@@ -487,28 +288,6 @@ test("Home hides the cleared rows, and shows the Landed part again after Undo", 
   assert.deepEqual(sessionIds(view(sessions, { expanded: new Set(), cleared: new Set() })[0]), ["a", "b"]);
 });
 
-test("the card's label names the Retest's age and the session of its first Quiz; a fresh Quiz names its session; done has none", async () => {
-  const { slotLabel } = await import("../../dist/home.js");
-  const now = Date.UTC(2026, 10, 20);
-  const day = 864e5;
-  const session = { name: null, identity: { issue: 44, name: "" }, folder_name: "plotkeeper" };
-  const aged = { ...retest("r", quiz), of_at: now - 8 * day };
-  assert.equal(slotLabel(aged, session, now), "Retest · 8 days after #44");
-  assert.equal(slotLabel({ ...aged, of_at: now - 7 * day }, session, now), "Retest · 7 days after #44");
-  // The session is gone: only the age.
-  assert.equal(slotLabel(aged, undefined, now), "Retest · 8 days ago");
-  assert.equal(slotLabel(retest("r", quiz), undefined, now), "Retest");
-  assert.equal(slotLabel({ kind: "fresh", id: "t1", session_id: "s", quiz }, session, now), "Quiz · #44");
-  assert.equal(slotLabel({ kind: "fresh", id: "t1", session_id: "s", quiz }, undefined, now), "Quiz");
-  assert.equal(slotLabel({ kind: "done" }, session, now), "");
-  // A session with no issue number is named as the list names it.
-  assert.equal(slotLabel({ kind: "fresh", id: "t1", session_id: "s", quiz }, { name: "Row controls", identity: { issue: null, name: "" }, folder_name: "x" }, now), "Quiz · Row controls");
-});
-
-test("the learning part has no heading of its own, as the card carries its label", () => {
-  assert.equal(view([], undefined, { learning: retest("a", quiz) }).find((p) => p.key === "learning").title, "");
-});
-
 test("a mark that was seen is watched again by the next redraw, so a later day is logged while Studio stays open", async () => {
   const observers = [];
   globalThis.IntersectionObserver = class {
@@ -534,4 +313,11 @@ test("a mark that was seen is watched again by the next redraw, so a later day i
   watchMark("/w/seen", node);
   assert.equal(observers.length, 2, "the redraw that keeps the node watches it again once it fired");
   watchMark("/w/seen", null);
+});
+
+test("a project's dot also lights for a waiting PR brief, and says so on hover", () => {
+  // The shell's `map_marks` names the project (a ready PR with a stored brief); Home marks it as it marks fog, with no count.
+  const start = homeView([], ["/w/a", "/w/b"], fresh(), undefined, new Set(["/w/a"]))[0];
+  assert.deepEqual(start.projects.map((p) => [p.path, p.fogged]), [["/w/a", true], ["/w/b", false]]);
+  assert.match(markTitle, /PR brief is waiting/);
 });

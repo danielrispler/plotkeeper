@@ -1,0 +1,68 @@
+{
+ "chapters_mode": true,
+ "required": [
+  "understanding",
+  "shell",
+  "core"
+ ],
+ "also": [],
+ "overview": false,
+ "parts": [
+  "plugins",
+  "hook",
+  "core",
+  "shell",
+  "understanding",
+  "window",
+  "terminal-daemon",
+  "workbench"
+ ],
+ "actors": [
+  "agents",
+  "writer",
+  "github"
+ ],
+ "links": [
+  "agents-plugins",
+  "plugins-hook",
+  "hook-shell",
+  "core-shell",
+  "shell-understanding",
+  "understanding-writer",
+  "shell-window",
+  "shell-terminal-daemon",
+  "shell-workbench",
+  "workbench-github"
+ ],
+ "laws": [
+  "hook-never-makes-agent-wait",
+  "core-reads-only-transcripts",
+  "check-result-is-last-run",
+  "no-notices-lock-on-main-thread",
+  "wire-types-agree",
+  "session-pieces-in-order",
+  "old-stored-files-load",
+  "writer-has-no-tools",
+  "delete-keeps-live-terminal",
+  "colour-only-for-needs-you",
+  "terminals-outlive-app"
+ ],
+ "flows": [
+  "turn-writing"
+ ],
+ "law_texts": [
+  "the hook never makes the agent wait, except for your answer.",
+  "the core does no i/o except reading transcripts.",
+  "a check's result is its last run's.",
+  "nothing on the main thread takes the notices' lock.",
+  "the window's types and the rust wire types agree.",
+  "a session's pieces are written one at a time, in order.",
+  "a stored file of an older format still loads.",
+  "a change is untrusted text: the writer has no tools.",
+  "delete never ends a terminal another live session uses.",
+  "colour is only for what needs you.",
+  "terminals outlive the app."
+ ],
+ "flows_changed": {},
+ "tagged": []
+}

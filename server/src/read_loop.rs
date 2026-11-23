@@ -6,7 +6,7 @@
 use crate::{
     App, CardsKey, PROCESS_CHECK, append_to, ask_notes, cards, current_cards_key, pid_alive,
     process_ends, refresh_landed, report, resume, save_roots, save_state, selected, sessions,
-    settle_checks, unsaved, wanted_notes, warn_log,
+    unsaved, wanted_notes, warn_log,
 };
 use std::{
     collections::HashMap,
@@ -19,7 +19,7 @@ use std::{
     time::{Duration, Instant},
 };
 use studio_core::{
-    CardRequest, Output,
+    Output,
     State::{Ended, NeedsYou},
     compute_turn_files,
 };
@@ -154,17 +154,6 @@ impl Effects for ServerEffects {
             app.events
                 .emit("sessions", serde_json::to_value(sessions(&app)).unwrap());
         }
-    }
-
-    fn new_card(&self, session_id: &str, agent: Option<&str>) {
-        if let Some(app) = self.app() {
-            tell(&app, Notice::Titled("New card"), session_id, agent);
-        }
-    }
-
-    fn settle_checks(&self) {
-        let Some(app) = self.app() else { return };
-        settle_checks(&app.core.lock().unwrap(), &mut app.cards.lock().unwrap());
     }
 
     fn name(&self, session_id: &str, name: &str) {
@@ -317,14 +306,10 @@ impl Follower {
             // goes first, so Daniel sees it while `git` runs.
             if !self.live {
                 let mut studio = state.lock().unwrap();
-                // What the replay made, before the card store's facts and the backfill change it.
+                // What the replay made, before the card store's facts change it.
                 let replayed = studio.save();
                 let store = app.cards.lock().unwrap();
                 store.restore(&mut studio);
-                // The turns that ended while the app was down get their cards now (danielrispler/Falinks#486).
-                let requests: Vec<CardRequest> =
-                    store.cards().iter().map(|k| k.request.clone()).collect();
-                let backfill = studio.backfill(millis(), &requests, crate::settings::catch_up());
                 drop((store, studio));
                 let log = log.to_path_buf();
                 thread::spawn(move || save_state(&log, &replayed));
@@ -333,14 +318,14 @@ impl Follower {
                 // The terminals' revival waits only for the replay, not for this pass's `git` work, which
                 // can take a minute on a long log, while a click's pane waits on it (#182).
                 app.events.replayed();
+                // The first lookup of the PRs, which writes the briefs of the ready ones the start picks (`pr_briefs::Startup`).
+                crate::prs::ask_later(&shared, crate::prs::Trigger::TurnEnd, None);
                 let waiting = state.lock().unwrap().waiting_folders();
                 fingerprint_changes(waiting, &mut self.fingerprints);
-                writing.backfill(backfill);
             }
             for output in outputs {
                 match output {
-                    Output::Card(request) => writing.card(request, true),
-                    Output::Brief(request) => writing.brief(request),
+                    Output::Card(request) | Output::Brief(request) => writing.brief(request),
                     Output::Summary(request) => writing.summary(request),
                     Output::Name(request) => writing.name(request),
                     Output::NeedsYou { session_id, agent } => {
@@ -348,6 +333,7 @@ impl Follower {
                     }
                     Output::YourTurn { session_id } => {
                         refresh_landed(&shared, Some(session_id.clone()));
+                        crate::prs::ask_later(&shared, crate::prs::Trigger::TurnEnd, None);
                         tell(app, Notice::YourTurn, &session_id, None);
                     }
                     Output::CommandBlocked { session_id, agent } => {
@@ -434,7 +420,6 @@ impl Follower {
                 for session in studio.sessions() {
                     unsaved(store.keep_decisions(&session.agent.id, &session.decisions));
                 }
-                settle_checks(&studio, &mut store);
             }
         }
         // A session whose agent is gone ends within about 30 s (#330); the lines are read on the next pass.

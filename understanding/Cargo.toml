@@ -12,17 +12,14 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 similar = "3"
 studio-core = { path = "../core" }
-# The weekly command finds the card store beside the event log.
+# The weekly command finds the event log.
 studio-hook = { path = "../hook" }
+# The brief's facts place a PR's files by the map.
+studio-system-map = { path = "../system-map" }
 
 [dev-dependencies]
 studio-test-support = { path = "../test-support" }
 tempfile = "3"
-
-# Its timing summary has unit tests, which `cargo test` runs without a model call.
-[[example]]
-name = "writer_timing"
-test = true
 
 [[test]]
 name = "it"

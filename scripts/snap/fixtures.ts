@@ -1,7 +1,7 @@
 // Studio state for `npm run snap`: each fixture maps a Tauri command to what it returns.
 // A fixture is a function so that its times are relative to the moment it renders.
 
-import type { Ci, LogEntry, MapState, Session, SessionState, Subagent } from "../../ui/types.ts";
+import type { BriefChapter, BriefFigure, BriefStep, BriefView, Ci, LogEntry, MapState, PrBrief, RatifyRow, Session, SessionState, Subagent } from "../../ui/types.ts";
 import { base, type ByArg, type Fixture } from "./base.ts";
 import { railFixtures } from "./rail-fixtures.ts";
 
@@ -58,45 +58,6 @@ const list = () => {
   return { ...base, sessions, selected: { session: sessions[0], agent: null } } satisfies Fixture;
 };
 
-// Home's answered Retest of session s3, whose older turn (index 0) holds the Quiz: the turn's own (`ofCard` false), or a worker's card placed in
-// that turn. The script clicks "See the code" and checks what the rail shows. Run narrower than 1007px, so the rail is an overlay.
-const seeCode = (ofCard: boolean): Fixture => {
-  const f = fixtures.home();
-  const now = Date.now();
-  const file = { root: "/w/plotkeeper", path: "ui/settings.rs", from: null, added: 1, removed: 1, agent: null };
-  const turn = (i: number, id: string | null, ago: number, files: boolean) => ({ started_at: now - ago * 864e5 + i * 6e4, ended_at: now - ago * 864e5 + 600e3, prompt: `Turn ${i}`, id, message: `Turn ${i} done.`, checks: [], listed: [], files: files ? { files: [file], merged: 0 } : null });
-  // Newer turns enough to push the older one below the fold, so only a scroll brings it into view.
-  const turns = [turn(0, "r1", 8, true), ...Array.from({ length: 30 }, (_, i) => turn(i + 1, `t${i + 1}`, 3, false))];
-  const s3 = { ...f.sessions.find((s) => s.id === "s3")!, turns };
-  const sessions = f.sessions.map((s) => (s.id === "s3" ? s3 : s));
-  const cardId = `s3@${turns[0].started_at + 60e3}`;
-  const worker = { request: { session_id: "s3", id: cardId, agent: "w1", changed_by: {}, check: null }, card: { summary: "The worker fixed the write.", explanation: "It copies the state out.", paths: ["ui/settings.rs"], code: "", why_it_matters: "No lock across the read.", not_checked: "Nothing.", architecture: null, quiz: { text: "Why copy the state out?", key: 0, options: [{ text: "To hold no lock across the read", why: "Right." }, { text: "To save memory", why: "It copies." }] } }, guess: { option: 0, right: true, at: now }, key_wrong: false, more: null, rating: null, check_result: null, shown_at: now };
-  const hunk = ["--- ui/settings.rs", "@@ -41,3 +41,3 @@", "-    let text = self.read_file(&self.state.lock());", "+    let text = { self.state.lock().file.clone() };", ""].join("\n");
-  const learning = { ...f.learning, of: ofCard ? cardId : "r1", hunk, taps: [{ kind: "pick" as const, option: 0, at: now }] };
-  const cards = { ...base.cards, workers: ofCard ? [{ card: worker, turn: 0 }] : [] };
-  const snapScript = `
-    const wait = (ms) => new Promise((done) => setTimeout(done, ms));
-    const link = document.querySelector(".pane.home .slot-card .quiz-code-link");
-    if (!link) return log("snap:fail the reveal has no See the code link");
-    link.click();
-    await wait(300);
-    if (document.body.dataset.layout !== "overlay") log("snap:fail the window is not in the overlay layout: " + document.body.dataset.layout);
-    if (document.querySelector(".pane.home:not([hidden])")) log("snap:fail Home is still shown after See the code");
-    const lines = [...document.querySelectorAll("#feed .turn.past .turn-line")];
-    const first = lines.find((l) => l.textContent.includes("Turn 0"));
-    if (!first) return log("snap:fail the rail does not list the session's older turn: the session is not selected");
-    if (first.getAttribute("aria-expanded") !== "true") log("snap:fail the Quiz's turn is not open");
-    if (lines.some((l) => l !== first && l.getAttribute("aria-expanded") === "true")) log("snap:fail another folded turn is open");
-    const hunk = document.querySelector("#feed .evidence-hunk");
-    if (!hunk || hunk.hidden || !hunk.textContent.includes("self.state.lock().file.clone()")) log("snap:fail the turn's hunk is not open in the rail: " + hunk?.textContent);
-    if (${ofCard} && !document.querySelector("#feed details.answered-card[open] article.card")?.textContent.includes("It copies the state out.")) log("snap:fail the card of the Quiz is not open");
-    if (!document.body.classList.contains("rail-open")) log("snap:fail the overlay rail did not open");
-    const story = document.getElementById("story");
-    const turnTop = first.closest(".turn").getBoundingClientRect().top - story.getBoundingClientRect().top;
-    if (story.scrollTop <= 0 || turnTop < -2 || turnTop > story.clientHeight - 60) log("snap:fail the turn was not scrolled into view: scrollTop " + story.scrollTop + ", top " + turnTop);`;
-  return { ...f, sessions, learning, cards, select: { session: s3, agent: null }, turn_file_hunk: { text: hunk, left_out: 0, binary: false, first_line: 41 }, snapScript };
-};
-
 // The Map view (#309) on a map of plotkeeper's own shape, opened by its key. Positions are saved, as the prototype's Treatment C draws them.
 const mapFile = JSON.stringify({
   version: 1,
@@ -130,9 +91,297 @@ const at = (x: number, y: number): [number, number] => [x, y];
 const mapState = (extra: Partial<MapState> = {}): MapState => ({
   project: "/w/plotkeeper", status: "loaded", source: mapFile, reference: "origin/main", commit: "35745b1693c5d061e5aea891e98a58515942a12d", note: null,
   user: { tiers: {}, positions: { core: at(620, 190), understanding: at(980, 290), plugins: at(300, 430), hook: at(580, 430), shell: at(880, 440), window: at(1180, 560), daemon: at(760, 690), workbench: at(480, 650), agents: at(110, 430), writer: at(1400, 190), github: at(250, 650) } },
-  fog: {}, ci: null,
+  fog: {}, ci: null, ready: [], ratify: [],
   ...extra,
 });
+// The Ready for review tray (#336) with two ready PRs, at the Map view's foot.
+const mapTray = (): Fixture =>
+  mapOpened(`
+      const rows = [...document.querySelectorAll("#map-tray .tray-row")];
+      if (rows.length !== 2) return log("snap:fail expected 2 tray rows, saw " + rows.length);
+      if (rows[0].tagName !== "BUTTON" || rows[1].tagName !== "BUTTON") log("snap:fail a ready PR opens, written or not");
+      if (!document.querySelector("#map-tray .side-title")?.textContent.includes("Ready for review")) log("snap:fail the tray has no title");
+      if (!rows[0].textContent.includes("#334") || !rows[0].textContent.includes("brief ready")) log("snap:fail row text: " + rows[0].textContent);
+      if (!rows[1].textContent.includes("written when you open it")) log("snap:fail row text: " + rows[1].textContent);
+      log("tray ok");`, {
+    map_state: mapState({ fog: { shell: "thick" }, ready: [{ number: 334, title: "PR briefs: the brief written for each ready PR", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }, { number: 336, title: "Ready for review tray", head: "a".repeat(40), brief: null }] }),
+  });
+
+// The PR brief on the map (#339), played from the tray as in the prototype's treatment C: a story about the PR that fogged Shell, Understanding and
+// Window, with a light run along the links, a figure for the change inside Understanding, a quote, and what the checks left unconfirmed.
+const step = (k: string, h: string, b: string, on: string[], extra: Partial<BriefStep> = {}): BriefStep => ({
+  k, h, b, on, hops: [], law: null, covered_by: null, list: [], risks: [], fig: null, check: null, cites: [], flags: [], ...extra,
+});
+const figure = (kind: string): BriefFigure =>
+  kind === "states"
+    ? { kind, frame: "terminal t1", items: [{ label: "old · deleted", tone: null, bad: null }, { label: "now · lost", tone: "lost", bad: true }, { label: "kept · running", tone: "live", bad: null }, { label: "gone · ended", tone: null, bad: null }], before: [], after: [] }
+    : kind === "sequence"
+      ? { kind, frame: null, items: [{ label: "Turn ends", tone: null, bad: null }, { label: "Ask for PRs", tone: null, bad: null }, { label: "Write the brief", tone: "live", bad: null }, { label: "Show in tray", tone: null, bad: null }], before: [], after: [] }
+      : { kind, frame: null, items: [], before: ["asks every 5 min", "from a 5 s loop", "one PR number"], after: ["asks at a turn's end", "and on focus", "ready state, head"] };
+const brief = (steps: BriefStep[], extra: Partial<PrBrief> = {}): PrBrief => ({ title: "PR briefs on the map", overview: [], chapters: [{ behaviour: "story", parts: ["shell", "understanding", "window"], title: "PR briefs on the map", steps, flags: [] }], also: [], unseen: [], decisions: [], flags: [], ...extra });
+const storySteps = (): BriefStep[] => [
+  step("Where", "A ready PR now brings its own brief to the map", "When a pull request is ready for review, the Shell asks the Understanding part to write what changed, and the Window plays it on the map.", ["shell", "understanding", "window"], {
+    hops: [["shell-understanding", false], ["shell-window", false]], cites: [{ from: "the PR body", quote: "writes its brief when it becomes ready" }],
+  }),
+  step("Before", "The map showed fog but never said what changed", "Fog said that files had changed since you last looked. Clearing it only meant \u201cI know this\u201d, which taught nothing.", ["window"]),
+  step("Now", "A new head only marks the brief stale", "A push to a ready PR marks its brief stale. It is written again when you open it, or when the same head is seen twice in a row.", ["shell", "understanding"], {
+    hops: [["shell-understanding", false]], fig: figure("states"), cites: [{ from: "src-tauri/src/pr_briefs.rs", quote: "A new head marks it stale" }],
+  }),
+  step("Must stay true", "A part is not read until its chapter is", "Reading a chapter to its end is what clears the fog of the parts it lit.", ["window"], { law: "window-quiet" }),
+];
+const briefOf = (steps: BriefStep[], partial = false, extra: Partial<PrBrief> = {}): BriefView => ({
+  partial,
+  brief: { version: 1, pr: 334, head: "b".repeat(40), written_at: 1, stale: false, model: "opus", brief: brief(steps, extra) },
+});
+// Opens the brief from the tray, goes `next` steps on, and checks the panel and the map.
+// Chrome runs a snap for about 2 s of virtual time after the page loads and what is left unrun is silent, so a `quick` brief waits the least it can.
+const mapBrief = (view: BriefView, next: number, check = "", quick = false, pause = 500): Fixture => ({
+  ...mapOpened(
+    `
+      // Chrome's virtual time stalls animations: the brief plays as it does under reduced motion, whose end state is the one to review.
+      const media = window.matchMedia.bind(window);
+      window.matchMedia = (query) => (query.includes("prefers-reduced-motion") ? { ...media(query), matches: true } : media(query));
+      const calm = document.createElement("style");
+      calm.textContent = "*, *::before, *::after { transition: none !important; animation: none !important; }";
+      document.head.append(calm);
+      const tray = document.querySelector('#map-tray .tray-row[data-pr="334"]');
+      if (!tray) return log("snap:fail no tray row for the brief");
+      tray.click();
+      await wait(${quick ? 300 : 500});
+      const panel = document.getElementById("map-brief");
+      if (panel.hidden || !panel.classList.contains("open")) return log("snap:fail the brief did not open");
+      for (let i = 0; i < ${next}; i++) { document.getElementById("brief-next").click(); await wait(${quick ? 200 : pause}); }
+      await wait(${quick ? 200 : pause * 3});
+      if (!document.querySelector(".map-world.briefing")) log("snap:fail the map is not in the brief's light");
+      if (!document.querySelector(".plate.lit")) log("snap:fail no part is lit");
+      if (!document.querySelector(".map-world").style.transform.includes("scale")) log("snap:fail the camera did not frame the parts");
+      ${check}
+      log("brief ok");`,
+    {
+      map_state: mapState({ fog: { shell: "thick", understanding: "thin" }, ready: [{ number: 334, title: "PR briefs on the map", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }] }),
+      pr_brief: view,
+      pr_diff: { commit: "b".repeat(40), short: "bbbbbbb", label: "#334 PR briefs on the map", url: null, files: [{ path: "src-tauri/src/pr_briefs.rs", diff: "@@ -1 +1,2 @@\n+the brief" }] },
+    },
+  ),
+  snapDone: "brief ok",
+});
+const escBrief = `
+      const before = document.querySelector(".brief-dots i.at") && [...document.querySelectorAll(".brief-dots i")].findIndex((d) => d.classList.contains("at"));
+      document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", key: "Escape", bubbles: true }));
+      await wait(200);
+      if (!document.getElementById("map-brief").hidden) return log("snap:fail Esc did not close the brief");
+      if (document.getElementById("map").hidden) return log("snap:fail Esc left the Map view with a brief open");
+      document.querySelector('#map-tray .tray-row[data-pr="334"]').click();
+      await wait(700);
+      const after = [...document.querySelectorAll(".brief-dots i")].findIndex((d) => d.classList.contains("at"));
+      if (after !== before) log("snap:fail the brief did not reopen at its step: " + before + " then " + after);`;
+const mapBriefStart = (): Fixture => mapBrief(briefOf(storySteps()), 0, `if (!document.querySelector("#map-brief .brief-title").textContent.includes("brings its own brief")) log("snap:fail first step");`);
+const mapBriefStory = (): Fixture => mapBrief(briefOf(storySteps(), false), 2, `${escBrief}
+      if (!document.querySelector("#map-brief .brief-cites")) log("snap:fail the step shows no citations");
+      document.querySelector("#map-brief .brief-code").click();
+      await wait(250);
+      if (!document.querySelector("#map-drawer .drawer-code")?.textContent.includes("+the brief")) log("snap:fail See the code does not open the PR's diff");`, true);
+const mapBriefFigure = (kind: string): Fixture =>
+  mapBrief(briefOf([step("Now", "What happens inside one part", "The change is inside Understanding, so a small figure shows it.", ["understanding"], { fig: figure(kind) })]), 0, `
+      if (document.querySelectorAll("#map-brief .brief-fig .fig-chip").length < 3) log("snap:fail the figure draws no chips");`);
+const mapBriefUnconfirmed = (): Fixture =>
+  mapBrief(briefOf([step("Now", "Cards are written once per turn", "A turn is written once, whatever the order of events.", ["understanding"], { flags: ["the claim is not in the facts"] })], true), 0, `
+      if (!document.querySelector("#map-brief .brief-unconfirmed")?.textContent.includes("not confirmed from the facts")) log("snap:fail no unconfirmed mark");
+      if (!document.querySelector("#map-brief .brief-partial")?.textContent.includes("Written from part of the diff")) log("snap:fail no partial line");`);
+// The prediction check (#340). A pick on a case inside one part: pick, take back, Check, then the right option and the way on.
+const pickCheck: NonNullable<BriefStep["check"]> = {
+  kind: "pick", q: "A worker's card comes from a turn that ended in Needs you. Is its Quiz stored?", opts: ["Yes: workers skip the rule", "No: the card is stored without its Quiz"], key: 1,
+  yes: "Right: worker and check cards follow the same rule as turns.", no: "Not any more: review made worker and check cards lose it too.", flow: null, test: "a_workers_card_is_stored_without_a_quiz",
+};
+const pickStep = () => step("Your turn", "A worker's card comes from a turn that asked you something", "", ["understanding"], { check: pickCheck, cites: [{ from: "the PR body", quote: "worker cards lose their Quiz" }] });
+const mapBriefPick = (option: number): Fixture =>
+  mapBrief(briefOf([pickStep()]), 0, `
+      const next = document.getElementById("brief-next");
+      const opts = [...document.querySelectorAll("#map-brief .brief-opt")];
+      if (opts.length !== 2 || !next.disabled || next.textContent !== "Check") return log("snap:fail a pick check starts with Check off");
+      opts[${option}].click();
+      if (next.disabled) log("snap:fail a pick did not turn Check on");
+      opts[${option}].click();
+      if (!next.disabled || opts[${option}].getAttribute("aria-pressed") !== "false") log("snap:fail a pick was not taken back");
+      opts[${option}].click();
+      next.click();
+      await wait(100);
+      const body = document.querySelector("#map-brief .brief-check .brief-body").textContent;
+      const done = [...document.querySelectorAll("#map-brief .brief-opt")];
+      if (!done[1].classList.contains("right")) log("snap:fail the right option is not shown");
+      if (${option} === 0 && !done[0].classList.contains("miss")) log("snap:fail the wrong pick is not marked");
+      if (done[0].classList.contains("right")) log("snap:fail the wrong option is shown as right");
+      if (body !== ${JSON.stringify(option === 1 ? pickCheck.yes : pickCheck.no)}) log("snap:fail the answer's words: " + body);
+      if (next.textContent !== "Done" || next.disabled) log("snap:fail the way on after Check: " + next.textContent);`, true);
+
+// An order check on a flow change, answered by tapping parts on the map: the writer-ticket's synthetic flow change as the UI plays it, an
+// overview of two steps that runs the flow's hops, closed by the order check, then the chapter. The key is Core, Shell, Understanding.
+const orderCheck: NonNullable<BriefStep["check"]> = {
+  kind: "order", q: "A turn just ended, and Core has noticed. Tap, in order, the three parts the work passes through before anything is stored.", opts: [], key: ["core", "shell", "understanding"],
+  yes: "Right: Core, then the Shell, then Understanding.", no: "Not quite. It goes Core, then the Shell, then Understanding. Follow the light.", flow: "turn-flow", test: null,
+};
+const flowHops: [string, boolean][] = [["shell-core", true], ["shell-understanding", false]];
+const flowSteps = (): BriefStep[] => [
+  step("Where", "A turn's end now runs through three parts", "The Core notices the end of a turn, the Shell hands it on, and Understanding stores it.", ["core", "shell", "understanding"], { hops: flowHops }),
+  step("Your turn", "A turn just ended, and Core has noticed. Tap, in order, the three parts the work passes through before anything is stored.", "", ["core", "shell", "understanding", "window"], { check: orderCheck }),
+];
+const flowBrief = (): BriefView =>
+  briefOf(storySteps().slice(0, 2), false, { overview: flowSteps(), chapters: [{ behaviour: "story", parts: ["shell", "understanding"], title: "Turn writing", steps: storySteps().slice(0, 2), flags: [] }] });
+const tap = (ids: string[]) => ids.map((id) => `document.querySelector('.plate[data-id="${id}"]').click(); await wait(50);`).join("\n      ");
+const mapBriefOrder = (ids: string[], grade: boolean, check: string): Fixture =>
+  mapBrief(flowBrief(), 1, `
+      const next = document.getElementById("brief-next");
+      if (next.textContent !== "Check" || !next.disabled) return log("snap:fail an order check starts with Check off");
+      if (document.querySelectorAll(".plate.pick").length !== 4) log("snap:fail the parts the step lights cannot be tapped: " + document.querySelectorAll(".plate.pick").length);
+      if (document.querySelectorAll("#map-brief .brief-slot").length !== 3) log("snap:fail the check has no three slots");
+      ${tap(ids)}
+      if (document.querySelector(".plate.open")) log("snap:fail a tap opened the part's sheet");
+      if (document.querySelectorAll(".plate .ord").length !== ${ids.length}) log("snap:fail the taps carry no numbers on the map");
+      if (document.querySelectorAll("#map-brief .brief-slot.full").length !== ${ids.length}) log("snap:fail the slots do not hold the taps");
+      ${grade ? `if (next.disabled) return log("snap:fail Check is off with every slot full");
+      next.click();
+      await wait(250);` : `if (!next.disabled) log("snap:fail Check is on before every slot is full");`}
+      ${check}`, true);
+const orderTakeBack = `
+      document.querySelector('.plate[data-id="shell"]').click();
+      await wait(50);
+      if (document.querySelectorAll(".plate .ord").length !== 1 || document.querySelector(".plate[data-id='core'] .ord")?.textContent !== "1") log("snap:fail a tap on a part did not take it back");
+      document.querySelector('.plate[data-id="shell"]').click();
+      await wait(50);`;
+const mapBriefOrderSlots = (): Fixture => mapBriefOrder(["core", "shell"], false, orderTakeBack);
+const mapBriefOrderWrong = (): Fixture =>
+  mapBriefOrder(["understanding", "shell", "core"], true, `
+      if (document.querySelector("#map-brief .brief-check .brief-body").textContent !== ${JSON.stringify(orderCheck.no)}) log("snap:fail the correction's words");
+      const slots = [...document.querySelectorAll("#map-brief .brief-slot span:last-child")].map((n) => n.textContent);
+      if (slots.join() !== "Core,Shell,Understanding") log("snap:fail the slots do not show the right order: " + slots);
+      if (document.querySelectorAll(".map-light .light-trail").length !== 2) log("snap:fail the right path was not replayed: " + document.querySelectorAll(".map-light .light-trail").length);
+      if (next.textContent !== "Next") log("snap:fail the way on after Check: " + next.textContent);`);
+// Right, and on through the chapter: the brief plays end to end.
+const mapBriefOrderRight = (): Fixture =>
+  mapBriefOrder(["core", "shell", "understanding"], true, `
+      if (document.querySelector("#map-brief .brief-check .brief-body").textContent !== ${JSON.stringify(orderCheck.yes)}) log("snap:fail the right answer's words");
+      next.click();
+      await wait(300);
+      if (!document.querySelector("#map-brief .brief-title").textContent.includes("A ready PR now brings")) log("snap:fail the chapter did not follow the overview");`);
+// The brief's ratify step (#343): a changed law and a link, and the agent's two decisions, one already accepted.
+const ratifyRows: RatifyRow[] = [
+  { pr: 334, kind: "law", id: "window-quiet", text: "Only needs-you has colour.", change: "changed", status: "not-yet" },
+  { pr: 334, kind: "link", id: "shell-understanding", text: "Shell to Understanding", change: "added", status: "not-yet" },
+  { pr: 334, kind: "decision", id: "d1", text: "A brief is stored per project, since PR numbers repeat across repositories.", change: "", status: "not-yet" },
+  { pr: 334, kind: "decision", id: "d2", text: "A merged PR's brief is read as stored, never rewritten.", change: "", status: "accepted" },
+];
+const mapBriefRatify = (): Fixture => ({
+  ...mapBrief(briefOf(storySteps()), 4, `
+      const rows = [...document.querySelectorAll("#map-brief .ratify-row")];
+      if (rows.length !== 4) return log("snap:fail expected 4 ratify rows, saw " + rows.length);
+      if (document.querySelectorAll("#map-brief .ratify-accept").length !== 3) log("snap:fail Accept belongs on the three undecided rows");
+      if (!rows[3].textContent.includes("Accepted")) log("snap:fail the decided row does not say so");
+      document.querySelector("#map-brief .ratify-row .ratify-accept").click();
+      await wait(300);
+      if (!document.querySelector("#map-brief .ratify-row").textContent.includes("Accepted")) log("snap:fail Accept did not mark the row");
+      log("ratify ok");`, false, 100),
+  pr_ratify: ratifyRows,
+});
+// Overturning in the brief's ratify step (port decision Q2): the prompt goes to the clipboard and the step says so, or, when the clipboard
+// refuses, shows the prompt in a box with a Copy button. The page's clipboard is stubbed to take or refuse the write.
+const mapBriefOverturn = (clipboard: "copies" | "refuses"): Fixture => ({
+  ...mapBrief(briefOf(storySteps()), 4, `
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => ${clipboard === "copies" ? "Promise.resolve()" : 'Promise.reject(new Error("blocked"))'} } });
+      document.querySelector("#map-brief .ratify-overturn").click();
+      await wait(400);
+      const note = document.querySelector("#map-brief .ratify-note");
+      if (!note) return log("snap:fail Overturn left no note");
+      if (!note.textContent.includes("Prompt copied, paste it into your agent") === ${clipboard === "copies"}) log("snap:fail the note's line: " + note.textContent);
+      const box = note.querySelector("textarea.ratify-prompt");
+      if (${clipboard === "copies"} ? box : !box || !box.value.includes("#334") || !note.querySelector(".ratify-copy")) log("snap:fail the fallback box: " + note.textContent);
+      log("overturn ok");`, false, 100),
+  pr_ratify: ratifyRows,
+  snapDone: "overturn ok",
+});
+// A brief that takes a while to write (port decision Q5): the panel and the tray row say "Writing the brief…" and the map stays usable.
+const mapBriefWriting = (): Fixture => ({
+  ...mapOpened(`
+      document.querySelector('#map-tray .tray-row[data-pr="334"]').click();
+      await wait(600);
+      const panel = document.getElementById("map-brief");
+      if (panel.hidden || !panel.textContent.includes("Writing the brief…")) return log("snap:fail the panel does not say the brief is being written");
+      if (!document.querySelector('#map-tray .tray-row[data-pr="334"] .tray-note')?.textContent.includes("writing the brief")) log("snap:fail the tray row does not say so");
+      if (document.getElementById("map").hidden) log("snap:fail the map is not usable");
+      log("writing ok");`, {
+    map_state: mapState({ fog: { shell: "thick" }, ready: [{ number: 334, title: "PR briefs on the map", head: "b".repeat(40), brief: null }] }),
+    // The write runs in the background: the open answers at once that it is being written.
+    pr_brief: { writing: true },
+  }),
+  snapDone: "writing ok",
+});
+// The part sheet with one law not yet ratified (#343): it says so, with Accept and Overturn.
+const mapSheetUnratified = (): Fixture =>
+  mapOpened(`
+      document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(300);
+      const laws = [...document.querySelectorAll("#map-sheet .sheet-law")];
+      const open = laws.filter((l) => l.textContent.includes("Not yet ratified"));
+      if (laws.length !== 2 || open.length !== 1 || !open[0].textContent.includes("Notices wait for focus.")) return log("snap:fail laws: " + laws.map((l) => l.textContent).join("|"));
+      if (!open[0].querySelector(".ratify-accept") || !open[0].querySelector(".ratify-overturn")) log("snap:fail no Accept and Overturn");
+      log("sheet ok");`, {
+    map_state: mapState({ ratify: [{ pr: 306, kind: "law", id: "shell-notice" }] }),
+  });
+// A chaptered brief (#341): the tray lists one row per chapter, each chapter opens on its own and the overview plays before the first one opened, once.
+const chapterTitles = ["Fog clears by reading", "Broken laws on the map", "The Seen gate"];
+const chapterOf = (i: number, parts: string[]): BriefChapter => ({
+  behaviour: chapterTitles[i], parts, title: chapterTitles[i], flags: [],
+  steps: [
+    step("Before", `${chapterTitles[i]}: how it was`, "Before this change the map showed the fact but said nothing of why it changed.", [parts[0]]),
+    step("Now", `${chapterTitles[i]}: what happens now`, "The Shell works it out and the Window shows it, with a light along the link.", parts, { hops: [["shell-window", false]] }),
+    step("Could break", `${chapterTitles[i]}: what could break`, "A part read on the way in would look clear before it was.", [parts[parts.length - 1]], { risks: [{ part: parts[0], trigger: "A push lands while the brief is open.", check: "Open the brief again." }] }),
+  ],
+});
+const chapteredView = (): BriefView => ({
+  partial: false,
+  brief: {
+    version: 1, pr: 334, head: "b".repeat(40), written_at: 1, stale: false, model: "opus",
+    brief: {
+      title: "The Map view: fog, broken laws and Seen", overview: [step("Where", "The Map view now says what changed and clears itself", "Three behaviours are new: fog that clears by reading, broken laws and the Seen gate.", ["shell", "window", "core"], { hops: [["shell-window", false]] })],
+      chapters: [chapterOf(0, ["shell", "window"]), chapterOf(1, ["core", "shell", "window"]), chapterOf(2, ["window", "shell"])],
+      also: [{ part: "hook", line: "A wording change in a comment.", flags: [] }], unseen: [], decisions: [], flags: [],
+    },
+  },
+});
+const chapteredState = () =>
+  mapState({ fog: { shell: "thick", window: "thin", core: "thin" }, ready: [{ number: 334, title: "The Map view", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: chapterTitles, quiet: false } }] });
+const mapChaptered = (row: number, next: number, check: string): Fixture =>
+  mapOpened(
+    `
+      const media = window.matchMedia.bind(window);
+      window.matchMedia = (query) => (query.includes("prefers-reduced-motion") ? { ...media(query), matches: true } : media(query));
+      const calm = document.createElement("style");
+      calm.textContent = "*, *::before, *::after { transition: none !important; animation: none !important; }";
+      document.head.append(calm);
+      const rows = [...document.querySelectorAll('#map-tray .tray-row[data-pr="334"]')];
+      if (rows.length !== 3) return log("snap:fail expected 3 chapter rows, saw " + rows.length);
+      if (rows.map((r) => r.querySelector(".tray-title").textContent).join("|") !== ${JSON.stringify(chapterTitles.join("|"))}) return log("snap:fail the chapter rows' titles");
+      ${row < 0 ? "" : `rows[${row}].click();
+      await wait(300);
+      if (document.getElementById("map-brief").hidden) return log("snap:fail the chapter did not open");
+      for (let i = 0; i < ${next}; i++) { document.getElementById("brief-next").click(); await wait(150); }
+      await wait(200);`}
+      ${check}
+      log("brief ok");`,
+    { map_state: chapteredState(), pr_brief: chapteredView() },
+  );
+const mapBriefChapters = (): Fixture => mapChaptered(-1, 0, `if (document.querySelector("#map-tray .tray-note").textContent.includes("1 of 3") === false) log("snap:fail the first row's note");`);
+// Chapter 2 opened first carries the overview: its dots are the overview's one step and its own three; Next once lands on its first step.
+const mapBriefChapterMid = (): Fixture =>
+  mapChaptered(1, 2, `
+      if (document.querySelectorAll("#map-brief .brief-dots i").length !== 4) log("snap:fail the first chapter opened should play the overview and its own steps");
+      if (!document.querySelector("#map-brief .brief-title").textContent.includes("Broken laws on the map: what happens now")) log("snap:fail mid-chapter step: " + document.querySelector("#map-brief .brief-title").textContent);
+      if (document.querySelector("#map-brief .brief-also")) log("snap:fail also-touched shows before the last chapter's end");
+      if (document.querySelectorAll(".plate.lit").length < 2) log("snap:fail the chapter's parts are not lit");`);
+// The last chapter's last step ends with the also-touched lines; another chapter, opened second, has no overview.
+const mapBriefChapterLast = (): Fixture =>
+  mapChaptered(2, 3, `
+      if (document.querySelectorAll("#map-brief .brief-dots i").length !== 4) log("snap:fail the last chapter opened first should carry the overview");
+      if (!document.querySelector("#map-brief .brief-also")?.textContent.includes("A wording change in a comment")) log("snap:fail no also-touched line on the last step: " + document.querySelector("#map-brief .brief-title").textContent);`);
 const homeMarked = (press: boolean): Fixture => ({
   ...(fixtures as Record<string, () => Fixture>).home(),
   map_marks: ["/w/plotkeeper"],
@@ -151,7 +400,19 @@ const homeMarked = (press: boolean): Fixture => ({
 });
 // The stop-rule review (#314): Studio has run 20 active days and merged 25 PRs, and the Map view was opened on one of them and Home's mark
 // never led to it, so the Map view fell below its threshold, and so did the history strip and "See the proof".
-const dueFacts = { active_days: 20, merged_prs: 25, map_days: 1, mark_days: 5, map_on_mark_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: false };
+const dueFacts = { active_days: 20, merged_prs: 25, map_days: 1, mark_days: 5, map_on_mark_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: false, briefs_offered: 0, briefs_opened: 0, chapters_done: 0 };
+// Home's dot for a waiting PR brief (#344): no fog and no broken law, but a ready PR has a brief stored, so the shell's marks name the project.
+const homeBriefWaiting = (): Fixture => ({
+  ...(fixtures as Record<string, () => Fixture>).home(),
+  map_marks: ["/w/plotkeeper"],
+  map_state: mapState({ ready: [{ number: 334, title: "PR briefs on the map", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }] }),
+  snapScript: `
+    await new Promise((done) => setTimeout(done, 300));
+    const marks = [...document.querySelectorAll(".pane.home .fog-mark")];
+    if (marks.length !== 1) return log("snap:fail expected one mark for the waiting brief, saw " + marks.length);
+    if (marks[0].textContent !== "" || !marks[0].title.includes("PR brief")) log("snap:fail the mark has a count or does not name the brief");
+    log("home brief dot ok");`,
+});
 const homeReviewed = (): Fixture => ({
   ...(fixtures as Record<string, () => Fixture>).home(),
   map_marks: ["/w/plotkeeper"],
@@ -273,7 +534,29 @@ const mapBroken = (open: "none" | "proof" | "log"): Fixture => {
 const past = JSON.parse(mapFile);
 past.parts = past.parts.filter((part: { id: string }) => part.id !== "workbench");
 past.links = past.links.filter((link: { from: string; to: string }) => link.from !== "workbench" && link.to !== "workbench");
-const strip = (n: number, label: string, fogged: boolean) => ({ commit: `${n}`.repeat(40), short: `${n}`.repeat(7), label, fogged });
+const strip = (n: number, label: string, fogged: boolean, brief: number | null = null) => ({ commit: `${n}`.repeat(40), short: `${n}`.repeat(7), label, fogged, brief });
+// The rail's quiet row "PR brief ready" in the newest turn of the session whose PR a brief waits for (#344); pressing it opens that brief on the map.
+const railBriefReady = (press: boolean): Fixture => ({
+  ...(railFixtures as Record<string, () => Fixture>).railPlain(),
+  briefs_waiting: { project: "/w/plotkeeper", numbers: [61] },
+  map_state: mapState({ fog: { shell: "thick" }, ready: [{ number: 61, title: "Row controls", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }] }),
+  pr_brief: briefOf(storySteps()),
+  snapScript: `
+    const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+    await wait(300);
+    const rows = [...document.querySelectorAll(".now-turn .brief-ready")];
+    if (rows.length !== 1) return log("snap:fail expected one PR brief row in the newest turn, saw " + rows.length);
+    if (rows[0].textContent !== "PR brief ready") log("snap:fail the row says: " + rows[0].textContent);
+    if (document.querySelector(".turn.past .brief-ready")) log("snap:fail an earlier turn holds the row");
+    document.getElementById("story").scrollTop = 0;
+    if (${press}) {
+      rows[0].click();
+      await wait(900);
+      if (document.getElementById("map").hidden) return log("snap:fail the row did not open the Map view");
+      if (!document.getElementById("map-brief").classList.contains("open")) return log("snap:fail the brief did not open");
+    }
+    log("rail brief row ok");`,
+});
 const mapScrubbed = (): Fixture => {
   const esc = `document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", key: "Escape", bubbles: true }));
       await wait(100);`;
@@ -285,6 +568,8 @@ const mapScrubbed = (): Fixture => {
       const rows = [...document.querySelectorAll("#map-sheet .hist-row")];
       if (rows.length !== 4) return log("snap:fail expected 4 strip rows, saw " + rows.length);
       if (rows.filter((r) => r.classList.contains("fogged")).length !== 2 || !rows[3].classList.contains("fogged") || rows[0].classList.contains("fogged")) log("snap:fail fogged rows");
+      const offers = [...document.querySelectorAll("#map-sheet .hist-brief")];
+      if (offers.length !== 1 || offers[0].closest(".hist-row") !== rows[3] || offers[0].textContent !== "Brief") return log("snap:fail only #306's row offers its brief, saw " + offers.length);
       rows[1].querySelector(".hist-commit").click();
       await wait(200);
       const banner = document.getElementById("map-banner");
@@ -312,7 +597,7 @@ const mapScrubbed = (): Fixture => {
       log("scrubbed ok");`, {
     map_state: mapState({ ci: brokenCi, fog: { shell: "thick", core: "thin" } }),
     map_place: { s1: ["core", "window"], "s1/w1": ["shell"], s2: ["hook"], s6: [] },
-    map_history: [strip(1, "#101 Map first drawn", false), strip(2, "#150 Plates and links", false), strip(3, "#210 Fog engine", true), strip(4, "#306 Live agents on the map", true)],
+    map_history: [strip(1, "#101 Map first drawn", false), strip(2, "#150 Plates and links", false), strip(3, "#210 Fog engine", true), strip(4, "#306 Live agents on the map", true, 306)],
     map_at: { commit: "2".repeat(40), short: "2222222", label: "#150 Plates and links", source: JSON.stringify(past) },
     map_commit: { commit: "2".repeat(40), short: "2222222", label: "#150 Plates and links", url: "https://github.com/danielrispler/plotkeeper/commit/" + "2".repeat(40), files: [{ path: "src-tauri/src/map.rs", diff: "@@ -1,2 +1,2 @@\n-one\n+two" }, { path: "ui/map.ts", diff: "@@ -1 +1,2 @@\n+three" }] },
   });
@@ -321,6 +606,29 @@ const mapScrubbed = (): Fixture => {
 
 export const fixtures = {
   ...railFixtures,
+  mapTray,
+  railBriefRow: () => railBriefReady(false),
+  railBriefOpened: () => railBriefReady(true),
+  homeBriefWaiting,
+  mapBriefStart,
+  mapBriefStory,
+  mapBriefStates: () => mapBriefFigure("states"),
+  mapBriefSequence: () => mapBriefFigure("sequence"),
+  mapBriefCompare: () => mapBriefFigure("compare"),
+  mapBriefUnconfirmed,
+  mapBriefPickRight: () => mapBriefPick(1),
+  mapBriefPickWrong: () => mapBriefPick(0),
+  mapBriefOrderSlots,
+  mapBriefOrderWrong,
+  mapBriefOrderRight,
+  mapBriefRatify,
+  mapBriefOverturnCopied: () => mapBriefOverturn("copies"),
+  mapBriefOverturnFallback: () => mapBriefOverturn("refuses"),
+  mapBriefWriting,
+  mapSheetUnratified,
+  mapBriefChapters,
+  mapBriefChapterMid,
+  mapBriefChapterLast,
   logRunning: () => logFixture("running"),
   logDone: () => logFixture("completed"),
   list,
@@ -348,8 +656,8 @@ export const fixtures = {
     const snapScript = `[...document.querySelectorAll("summary, button")].find((el) => /^Idle/.test(el.textContent.trim()))?.click();`;
     return { ...base, sessions, selected: { session: sessions[1], agent: null }, snapScript };
   },
-  // Home, the waiting room (#238), at 1400x900: 4 running, 1 needs you, 1 unseen, the learning slot with a Retest, 2 landed and
-  // 2 projects. The script checks the Retest sits fully above the fold.
+  // Home, the waiting room (#238), at 1400x900: 4 running, 1 needs you, 1 unseen, 2 landed and 2 projects. It has no Quiz and no
+  // Retest (#347); the script checks none shows.
   home() {
     const now = Date.now();
     const running = (id: string, name: string, minutes: number, intention: string, steps: number) =>
@@ -361,7 +669,7 @@ export const fixtures = {
     const sessions = [
       running("s1", "#56 · Row controls", 14, "Make the row's controls reachable by keyboard.", 2),
       asking,
-      running("s6", "#58 · Retest card", 9, "Draw the quiz region with its options and Not now.", 0),
+      running("s6", "#58 · Sounds row", 9, "Draw the sounds row with its toggle.", 0),
       running("s7", "#59 · Agent deadline", 6, "Stop an agent that outlives its turn.", 7),
       running("s8", "#61 · Sounds setting", 2, "Add the sounds toggle to the settings page.", 1),
       session("s4", "#55 · Delete default", "your_turn", {
@@ -371,56 +679,10 @@ export const fixtures = {
       session("s3", "#54 · Subagent terminal", "idle", { cwd: "/w/plotkeeper", landed: true, identity: { issue: 54, branch: null, pr: null, worktree: "", name: "#54 · Subagent terminal" } }),
       session("s5", "#48 · Agent deadline", "ended", { cwd: "/w/plotkeeper", landed: true }),
     ];
-    const learning = { kind: "retest" as const, id: "r1", of: "r1", session_id: "s3", added_at: now - 7 * 864e5, of_at: now - 8 * 864e5, taps: [], quiz: { text: "The settings write held a lock across a read. Why was it safe?", key: 1, options: [
-      { text: "Keep the lock across the await so nobody reads half a write", why: "A lock across the await deadlocks." },
-      { text: "Release it first and re-read the state after", why: "The read can wait on the writer." },
-      { text: "Copy the state out and work on the copy", why: "It still races." },
-    ] } };
     const snapScript = `
-      const learning = document.querySelector(".pane.home .slot-card");
-      if (!learning) log("snap:fail Home has no learning card");
-      else if (!/^Retest · \\d+ days after #54/.test(learning.querySelector(".label")?.textContent ?? "")) log("snap:fail the card has no Retest label");
-      else if ([...document.querySelectorAll(".pane.home h2")].some((h) => h.textContent === "Retest")) log("snap:fail Home still has a Retest heading");
-      // The window is 900 high; the page reports less while this script runs (headless Chrome counts its frame), so the fold is fixed.
-      else if (learning.getBoundingClientRect().bottom > 900 - 6) log("snap:fail the Retest is below the fold: it ends at " + learning.getBoundingClientRect().bottom);`;
-    return { ...base, sessions, learning, projects: ["/w/plotkeeper", "/w/falinks"], selected: null, snapScript };
-  },
-  // Home's reveal (#242): the script picks the second option of the Retest; the card then shows the turn's date and Key wrong, and no Not now.
-  homeReveal(): Fixture {
-    const snapScript = `
-      const option = document.querySelectorAll(".pane.home .quiz-region .options button")[1];
-      if (!option) log("snap:fail Home's Retest has no options");
-      else {
-        option.click();
-        await new Promise((r) => setTimeout(r, 100));
-        const card = document.querySelector(".pane.home .quiz-region")?.textContent ?? "";
-        if (!/The turn of \\d+ \\w+/.test(card)) log("snap:fail the reveal shows no date of the turn");
-        if (!/Key wrong/.test(card)) log("snap:fail the reveal has no Key wrong");
-        if (/Not now|Show the rest anyway|why\\?/.test(card)) log("snap:fail the reveal shows a rail control");
-      }`;
-    return { ...fixtures.home(), snapScript };
-  },
-  // Home with a Retest answered (#243): the reveal, the link to the code, and the stored hunk in place. The script checks both show.
-  homeReveal243(): Fixture {
-    const f = fixtures.home();
-    const now = Date.now();
-    const file = { root: "/w/plotkeeper", path: "ui/settings.rs", from: null, added: 1, removed: 1, agent: null };
-    const sessions = f.sessions.map((s) =>
-      s.id === "s3" ? { ...s, turns: [{ started_at: now - 8 * 864e5, ended_at: now - 8 * 864e5 + 600e3, prompt: "Fix the settings write", id: "r1", message: null, checks: [], listed: [], files: { files: [file], merged: 0 } }] } : s,
-    );
-    // The hunk is the item's stored text, drawn with no git read (the fixture has no turn_file_hunk).
-    const hunk = ["--- ui/settings.rs", "@@ -41,3 +41,3 @@", "-    let text = self.read_file(&self.state.lock());", "+    let text = { self.state.lock().file.clone() };", "     self.write_file(merge(text, key, value));", ""].join("\n");
-    const learning = { ...f.learning, hunk, taps: [{ kind: "pick" as const, option: 0, at: now }] };
-    const snapScript = `
-      await new Promise((done) => setTimeout(done, 300));
-      const card = document.querySelector(".pane.home .slot-card");
-      if (!card?.querySelector(".quiz-code-link")) log("snap:fail the reveal has no link to the code inside the card");
-      if (!card?.querySelector(".evidence-hunk")?.textContent.includes("self.state.lock().file.clone()")) log("snap:fail the stored hunk is not drawn in place inside the card");
-      if (card?.querySelector(".evidence-caption")?.textContent !== "ui/settings.rs") log("snap:fail the hunk has no file caption");
-      for (const control of card?.querySelectorAll(".evidence-edit, .ask-about") ?? []) if (getComputedStyle(control).display !== "none") log("snap:fail the compact hunk shows " + control.className);
-      // The card sits below the fold of a full page: scroll it into view to see the reveal whole.
-      card?.scrollIntoView({ block: "start" });`;
-    return { ...f, sessions, learning, snapScript };
+      if (document.querySelector(".pane.home .slot-card, .pane.home .quiz-region")) log("snap:fail Home shows a Quiz or a Retest");
+      if ([...document.querySelectorAll(".pane.home h2")].some((h) => h.textContent === "Retest")) log("snap:fail Home still has a Retest heading");`;
+    return { ...base, sessions, projects: ["/w/plotkeeper", "/w/falinks"], selected: null, snapScript };
   },
   // Home after Clear (#244): the landed rows are hidden, the Landed part is gone, and the toast offers Undo. The script clicks Clear on the heading.
   homeClearToast(): Fixture {
@@ -437,31 +699,19 @@ export const fixtures = {
     return { ...fixtures.home(), snapScript };
   },
   // Home refreshes on a stored card or summary (#226): the summary of an Unseen row's turn resolves after the first draw and the row's Headline
-  // changes; the slot answers nothing, then a fresh Quiz, and the `cards` event (a card stored) makes Home show it.
+  // changes once the summary arrives.
   homeRefresh(): Fixture {
     const f = fixtures.home();
-    const now = Date.now();
     const sessions = f.sessions.map((s) => (s.id === "s4" ? { ...s, turns: s.turns.map((t) => ({ ...t, id: "t4" })) } : s));
-    const summary = { summary: { summary: "Delete keeps the branch.", headline: "Delete keeps the branch (summary).", lines: [], quiz: null } };
-    const fresh = { kind: "fresh", id: "f1", session_id: "s3", at: now, hunk: "", quiz: { text: "Why does delete keep the branch?", key: 0, options: [{ text: "The branch holds the work", why: "Right." }, { text: "Git forbids deleting it", why: "It does not." }] } };
+    const summary = { summary: { summary: "Delete keeps the branch.", headline: "Delete keeps the branch (summary).", lines: [] } };
     const snapScript = `
-      // The summary lands 3 s after the first draw (the script runs at 2.5 s), after the learning slot's reply: only a refresh draws its Headline.
+      // The summary lands 3 s after the first draw (the script runs at 2.5 s): only a refresh draws its Headline.
       const headline = () => document.querySelector('.pane.home [data-key="unseen s4"] .row-step')?.textContent;
       if (headline() !== "Delete now removes the worktree and keeps the branch.") log("snap:fail the row does not show the turn's message before its summary: " + headline());
       await new Promise((done) => setTimeout(done, 1000));
-      if (headline() !== "Delete keeps the branch (summary).") log("snap:fail an Unseen row's Headline did not update once its summary arrived: " + headline());
-      if (document.querySelector(".pane.home .slot-card")) log("snap:fail the slot shows an item before the store holds one");
-      const invoke = window.__TAURI__.core.invoke;
-      window.__TAURI__.core.invoke = (command, args) => (command === "learning" ? Promise.resolve(${JSON.stringify(fresh)}) : invoke(command, args));
-      window.__snapEmit("cards", await invoke("cards"));
-      await new Promise((done) => setTimeout(done, 200));
-      if (!document.querySelector(".pane.home .slot-card")?.textContent.includes("Why does delete keep the branch?")) log("snap:fail Home does not show the Quiz a stored card made");`;
-    return { ...f, sessions, learning: null, turn_summary: { __by: "id", values: { t4: { __delay: 3000, value: summary } as never } }, snapScript };
+      if (headline() !== "Delete keeps the branch (summary).") log("snap:fail an Unseen row's Headline did not update once its summary arrived: " + headline());`;
+    return { ...f, sessions, turn_summary: { __by: "id", values: { t4: { __delay: 3000, value: summary } as never } }, snapScript };
   },
-  // "See the code" (#243): from Home's reveal of a Retest whose session is listed, the link selects the session, opens the Quiz's turn (an older
-  // one) and its hunk in the rail, opens the card when the Quiz is a card's, scrolls the turn into view and, in the overlay layout, opens the rail.
-  homeSeeCode: () => seeCode(false),
-  homeSeeCodeCard: () => seeCode(true),
   // Errors in the notice line (#191): two errors and the dismiss control, beside a settings error.
   noticeErrors() {
     const snapScript = `

@@ -78,15 +78,15 @@ test("a link runs from rim to rim, not centre to centre", () => {
   assert.deepEqual(rimPoint(a, plateSize, a), a);
 });
 
-test("Esc closes the drawer, then returns from a scrubbed commit to now, then closes the sheet, then leaves the Map view", () => {
-  const open = { scrubbed: true, drawer: true, sheet: true };
+test("Esc closes the drawer, then the brief, then returns from a scrubbed commit to now, then closes the sheet, then leaves the Map view", () => {
+  const open = { scrubbed: true, drawer: true, brief: true, sheet: true };
   const closed = [];
   const layers = Object.fromEntries(layerOrder.map((name) => [name, { open: () => open[name], close: () => { open[name] = false; closed.push(name); } }]));
-  assert.deepEqual(layerOrder, ["drawer", "scrubbed", "sheet"]);
+  assert.deepEqual(layerOrder, ["drawer", "brief", "scrubbed", "sheet"]);
   const presses = [];
-  for (let i = 0; i < 4; i++) presses.push(escapeMap(layers));
-  assert.deepEqual(closed, ["drawer", "scrubbed", "sheet"]);
-  assert.deepEqual(presses, ["drawer", "scrubbed", "sheet", "leave"]);
+  for (let i = 0; i < 5; i++) presses.push(escapeMap(layers));
+  assert.deepEqual(closed, ["drawer", "brief", "scrubbed", "sheet"]);
+  assert.deepEqual(presses, ["drawer", "brief", "scrubbed", "sheet", "leave"]);
 });
 
 test("Esc skips a layer that is not open, and a layer nobody registered", () => {

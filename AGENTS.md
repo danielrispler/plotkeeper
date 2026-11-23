@@ -30,7 +30,7 @@ The Tauri 2 stack is a settled decision ([scope decision](https://github.com/dan
 
 Before handing off a change, run `npm ci` once, then `npm run check` from the repository's root; it needs `cargo nextest` (`brew install cargo-nextest`). It builds the UI first, which the Tauri crate needs to compile, then runs the checks of `.github/workflows/studio.yml`'s `macos` job. It leaves out the snap fixtures, which that workflow renders in Chrome in a job of its own (`npm run snap:all`).
 
-The app embeds `dist/` when it is built, so a merged change reaches Daniel's open Studio only after a rebuild. After merging a change to the app, tell him to quit Studio and run `npm run start` from the main checkout.
+plotkeeper embeds `dist/` when it is built, so a merged change reaches Daniel's running plotkeeper only after a rebuild. After merging a change to it, tell him to stop plotkeeper (Ctrl+C) and run `npm run start` from the main checkout: it builds the page, the hook and the server, installs `plotkeeper` and starts it. The Tauri desktop app (`src-tauri/`) is archived: it is out of the workspace and no longer builds.
 
 To prove native window or key behaviour without Daniel pressing keys, read `docs/agents/app-probe.md`: a background debug build that never takes his focus.
 

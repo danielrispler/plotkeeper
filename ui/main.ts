@@ -19,6 +19,7 @@ import { listSpace } from "./home.js";
 import { mapEscape, mapShown, startMap, toggleMap } from "./map.js";
 import "./map-history.js";
 import "./map-sheet.js";
+import "./map-tray.js";
 import { startMapAgents } from "./map-agents.js";
 import { showSessions } from "./list.js";
 import { goHome, select, show, toggleHome } from "./selection.js";
@@ -27,7 +28,8 @@ import { showPalette } from "./palette.js";
 import { projectOfCwd, selectedProject, sidebarOrder } from "./projects.js";
 import { reload, type SettingsFiles } from "./settings.js";
 import { studio } from "./state.js";
-import { showBarName, showView } from "./story.js";
+import { drawFeed, showBarName, showView } from "./story.js";
+import { startRailBriefs } from "./rail-brief.js";
 import { jumpToNeedsYou, showToast } from "./toast.js";
 import { askOnce, notifyIfAway, type Alert } from "./alerts.js";
 import { finishedNote, showNote, warnContext, watchNotes } from "./notes.js";
@@ -229,8 +231,7 @@ function applySettings(files: SettingsFiles) {
   setSettingsErrors(errors);
   layout();
   const { model, effort, on_open: onOpen, writer } = settings.summaries;
-  const selfTest = Date.parse(settings.quiz_self_test ?? "");
-  invoke("summary_settings", { model, effort, writer, onOpen, selfTest: Number.isNaN(selfTest) ? null : selfTest }).catch(failure("summary_settings"));
+  invoke("summary_settings", { model, effort, writer, onOpen }).catch(failure("summary_settings"));
   invoke("check_lists", { lists: settings.checks }).catch(failure("check_lists"));
   window.dispatchEvent(new Event("settings"));
 }
@@ -266,6 +267,7 @@ window.addEventListener("focus", () => actions["studio::RefreshLanded"]());
 
 // Home in the centre column.
 startPanes();
+startRailBriefs(drawFeed);
 startMap({ selectedProject });
 startMapAgents({ sessions: () => studio.listed, projectOf: projectOfCwd, select: (id, agent) => void select(id, agent) });
 // The page's own elements whose hover another place shows too (#220); the needs-you toast's adds its key when it shows.

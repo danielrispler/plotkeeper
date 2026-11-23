@@ -109,10 +109,6 @@ fn run(log: &std::path::Path, held: lock::Held) -> std::io::Result<()> {
     app.events.set(page.sink());
     held.publish(page.port(), &token)?;
 
-    let prs = app.clone();
-    thread::spawn(move || studio_server::prs(&prs));
-    let retests = app.clone();
-    thread::spawn(move || studio_server::write_due_retests(&retests));
     studio_server::forward_writer_notices(&app, writer_notice_reader);
     let following = app.clone();
     let log = log.to_path_buf();

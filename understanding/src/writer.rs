@@ -170,7 +170,7 @@ impl WriterError {
         } else {
             String::new()
         };
-        format!("Cards and briefs are off: {head}. {todo}")
+        format!("Summaries and briefs are off: {head}. {todo}")
     }
 }
 

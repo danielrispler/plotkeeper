@@ -190,8 +190,6 @@ h1 { margin: 0 0 var(--sp-4); }
 .pane.home .home-row .l2 { padding-inline-start: calc(var(--icon) + var(--sp-3)); }
 .pane.home .home-row .l1 .clock { color: var(--muted); }
 .pane.home .home-row .l1 .glyph { margin-inline-start: auto; }
-.pane.home .slot-actions { display: flex; gap: var(--sp-3); margin: var(--sp-2) 0 0; }
-.pane.home .slot-actions .quiz-skip { margin-top: 0; color: var(--muted); }
 .pane.home h2 { display: flex; align-items: baseline; }
 .pane.home h2 .clear { margin-inline-start: auto; color: var(--muted); font-weight: 500; }
 .pane.home .row.more { color: var(--muted); font-size: var(--size-small); text-align: start; }
@@ -322,37 +320,17 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .markdown a { color: var(--fg); text-decoration: underline; }
 .markdown a[data-file]:has(> code):not(:hover) { text-decoration: none; }
 .markdown blockquote { margin: var(--sp-4) 0 0; padding-left: var(--sp-5); border-left: var(--halo) solid var(--line); color: var(--muted); }
-/* The session's brief, folded under the feed; its code wraps as a card's does. */
+/* The session's brief, folded under the feed; its code wraps. */
 .brief { margin: var(--sp-5) 0 0; font-size: var(--size-read); }
 .brief p { margin: 0 0 var(--sp-2); overflow-wrap: anywhere; }
 .brief p.slot-title { margin: var(--sp-3) 0 var(--sp-1); font-weight: 600; }
-.brief code, .card code { white-space: normal; overflow-wrap: anywhere; }
+.brief code { white-space: normal; overflow-wrap: anywhere; }
 
-/* A card, told apart by its fill; its code is left to right. No text in it is smaller than 14px. */
-.card, .question { background: var(--surface); border-radius: var(--radius); padding: var(--sp-4) var(--sp-5) var(--sp-5);
-                   margin: 0 0 var(--sp-5); }
-.card { font-size: var(--size-read); line-height: 1.65; }
-.card p { margin: var(--sp-3) 0 0; overflow-wrap: anywhere; }
-.quiz { font-weight: 600; margin: 0; font-size: var(--size-large); }
-.explanation { white-space: pre-wrap; }
-/* The options: one tap each, neutral, since colour is only for "needs you". Each one's reason shows
-   under it after the tap. */
+/* A question, told apart by its fill. */
+.question { background: var(--surface); border-radius: var(--radius); padding: var(--sp-4) var(--sp-5) var(--sp-5);
+            margin: 0 0 var(--sp-5); }
+/* The options of a decision in the history, which the generic rule lays out in a column. */
 .options { list-style: none; margin: var(--sp-4) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
-.options li p { margin: var(--sp-1) 0 var(--sp-2); color: var(--muted); }
-.card .btn { background: var(--bg); }
-.card .btn:hover:not(:disabled) { background: var(--hover); }
-.options .btn { width: 100%; }
-/* The picked one is marked by a line, which carries meaning, and weight. */
-.card .btn[aria-pressed="true"] { font-weight: 600; box-shadow: inset 0 0 0 var(--mark) var(--fg); }
-.options .btn:disabled[aria-pressed="false"] { opacity: .45; }
-.key-wrong { margin-top: var(--sp-5); font-size: var(--size); }
-/* A Quiz's escape and its optional chips (danielrispler/plotkeeper#120): small taps under the options. */
-.quiz-skip { margin-top: var(--sp-4); font-size: var(--size); }
-.quiz-chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); font-size: var(--size); }
-.quiz-region .body-lines { margin: var(--sp-4) 0 0; }
-/* "Explain more" opens the writer's longer explanation under the card; the rating's levels and reasons
-   are small taps, marked like the options. */
-.more summary { margin-top: var(--sp-5); font-size: var(--size); font-weight: 600; color: var(--muted); cursor: pointer; }
 /* "Ask about this" (danielrispler/Falinks#482): a side question under a response, card or intention. An error has no colour,
    as colour is only for "needs you". */
 .ask-about summary { margin-top: var(--sp-3); font-size: var(--size-small); color: var(--muted); cursor: pointer; }
@@ -369,18 +347,6 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .ask-reply > p { font-size: var(--size-read); margin: var(--sp-4) 0 0; }
 .ask-reply .markdown { margin: var(--sp-4) 0 0; }
 .ask-reply .asking, .ask-reply .ask-error { color: var(--muted); font-style: italic; }
-.rating p { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: baseline; }
-.rating span { font-size: var(--size); color: var(--muted); }
-.rating .btn { font-size: var(--size); padding: var(--sp-1) var(--sp-4); margin: 0; }
-.card code { font-size: var(--size); background: var(--raised); padding: var(--sp-1) var(--sp-2); }
-.paths { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
-.card-files { list-style: none; padding: 0; margin: 0; }
-.card-files li:has(.evidence-hunk:not([hidden])) { flex-basis: 100%; }
-.card pre { font: var(--size)/1.6 var(--mono); background: var(--term-bg); color: var(--term-fg); border-radius: var(--radius);
-            padding: var(--sp-4) var(--sp-5); margin: var(--sp-5) 0 0; overflow-x: auto; }
-.card h2 { font-size: var(--size); font-weight: 600; color: var(--muted); margin: var(--sp-5) 0 0; }
-.card h2 + p { margin-top: var(--sp-1); }
-.verdict { font-weight: 600; }
 /* A check line: its outcome, then its command. */
 .checks { list-style: none; margin: 0; padding: 0; }
 .checks li { display: flex; gap: var(--sp-4); align-items: baseline; min-width: 0; margin: 0 0 var(--sp-2); }
@@ -476,14 +442,8 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .turn-line .prompt { flex: 0 1 35%; min-width: 0; margin: 0; }
 .turn-line .headline-text { flex: 1 1 0; min-width: 0; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--size-small); }
 .turn-line .mark { flex: none; font-size: var(--size-small); color: var(--muted); }
-/* An unseen card's title row under a folded turn (#211): one muted line, opening the card in place. */
-.unseen-card { margin: 0 0 var(--sp-2) var(--sp-5); }
-.unseen-card > summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.unseen-card > .card { margin-top: var(--sp-3); }
 .turn .subagents button { flex-direction: row; align-items: baseline; gap: var(--sp-4); white-space: nowrap; overflow: hidden; }
 .turn .subagents button > :nth-child(2) { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.answered-card > summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.answered-card > .card { margin-top: var(--sp-3); }
 
 /* The evidence line (#113): one line of recorded facts that opens in place. */
 .evidence { margin: 0 0 var(--sp-4); font-size: var(--size-small); }
@@ -528,20 +488,6 @@ body[data-layout="overlay"] .spine:not([hidden]) { display: flex; }
 .ask-why-not > p { font-size: var(--size-small); }
 .ask-why-not summary { margin-top: var(--sp-3); font-size: var(--size-small); color: var(--muted); cursor: pointer; }
 .ask-why-not .markdown { margin: var(--sp-3) 0 0; }
-/* Pull ↓N (#164), at the end of the main checkout's line. Disabled, it still takes hover so its title says why. */
-/* The learning item is the one card at the page's centre (#226, "The look"): its label, the Quiz, then after an answer the link to the
-   code, the hunk in place, compact (no "Open in editor", no "Ask"), and Next, all inside it. */
-.pane.home .slot-card { background: var(--surface); box-shadow: inset 0 0 0 var(--hair) var(--edge), var(--shadow); border-radius: var(--radius-pane);
-                        padding: var(--sp-5) var(--sp-6); margin-top: var(--sp-6); }
-.pane.home .slot-card .label { font-size: var(--size-xs); font-weight: 500; color: var(--faint); margin: 0 0 var(--sp-3); }
-.pane.home .slot-card .quiz-box { background: none; padding: 0; margin: 0; }
-.pane.home .slot-card .quiz-code-link { margin-top: var(--sp-4); font-size: var(--size); }
-.pane.home .slot-card .evidence-rows { list-style: none; margin: var(--sp-3) 0 0; padding: 0; }
-.pane.home .slot-card .evidence-rows li { margin: 0; }
-.pane.home .slot-card .evidence-fail { font-size: var(--size-xs); color: var(--faint); background: none; box-shadow: none; padding: var(--sp-3) 0 0; }
-.pane.home .slot-card .evidence-edit, .pane.home .slot-card .ask-about { display: none; }
-.pane.home .slot-card .evidence-hunk { background: var(--bg); font: var(--size-xs)/1.5 var(--mono); padding: var(--sp-3) var(--sp-5); }
-.pane.home .slot-card .evidence-caption { margin: var(--sp-3) 0 0; font-size: var(--size-xs); color: var(--faint); }
 
 /* The Map view (danielrispler/plotkeeper#306, ticket #309): over the rail's and the terminal's columns, which it hides; the list and the top
    bar stay live. Treatment C: plates on a quiet chart. The sizes are tokens, and map-model.ts holds the plate's and the actor's. */
@@ -561,6 +507,16 @@ body.map-open .toasts, body.map-open .toast { visibility: visible !important; }
 .map-stage { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 0; }
 .map-body { position: relative; min-width: 0; min-height: 0; }
 .map-side { width: var(--map-sheet); overflow-y: auto; padding: var(--sp-4) var(--map-gutter) var(--sp-5) var(--sp-5); }
+/* Ready for review (#336): the way into a PR brief, in the side area under Not placed. */
+#map-tray:not(:empty) { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-5); }
+#map-tray .side-title { margin: 0; font-size: var(--size-xs); font-weight: 400; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
+.tray-row { padding: var(--sp-3); border-radius: var(--radius); }
+button.tray-row { display: block; width: 100%; font: inherit; color: inherit; text-align: start; background: none; border: 0; cursor: pointer; }
+.tray-row:hover { background: var(--hover); }
+.tray-title { display: block; font-weight: 500; }
+/* The rail's quiet row for a waiting PR brief (#344): small, muted, no colour. */
+.brief-ready { display: block; margin: 0 0 var(--sp-4); padding: var(--sp-2) 0; font-size: var(--size-small); color: var(--muted); text-align: start; }
+.tray-note { display: block; font-size: var(--size-xs); color: var(--faint); }
 .map-canvas { position: absolute; inset: 0; overflow: auto; }
 .map-world { position: relative; background-image: radial-gradient(var(--map-dot) var(--hair), transparent var(--hair)); background-size: var(--map-grid) var(--map-grid); }
 .map-links { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
@@ -618,6 +574,16 @@ body.map-open .toasts, body.map-open .toast { visibility: visible !important; }
 .sheet-law { display: grid; grid-template-columns: auto 1fr; column-gap: var(--sp-4); align-items: baseline; font-size: var(--size-small); }
 .sheet-law-backing { grid-column: 2; font-size: var(--size-xs); color: var(--faint); }
 .sheet-law-actions { grid-column: 2; }
+.sheet-law.unratified, .sheet-link.unratified { grid-template-columns: auto 1fr; }
+.sheet-links { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--sp-4); }
+.sheet-link { display: grid; grid-template-columns: 1fr; row-gap: var(--sp-1); font-size: var(--size-small); }
+.ratify-mark { grid-column: 2; font-size: var(--size-xs); color: var(--faint); }
+.sheet-link .ratify-mark, .sheet-link .ratify-actions { grid-column: 1; }
+.ratify-actions { grid-column: 2; display: inline-flex; gap: var(--sp-2); }
+.brief-ratify { margin: var(--sp-4) 0 0; padding: 0; list-style: none; max-width: 60ch; display: grid; gap: var(--sp-3); }
+.ratify-row { display: grid; grid-template-columns: auto 1fr auto; column-gap: var(--sp-4); align-items: baseline; font-size: var(--size); line-height: 1.45; color: var(--muted); }
+.ratify-kind { font-size: var(--size-xs); color: var(--faint); text-transform: uppercase; letter-spacing: .04em; }
+.ratify-row .ratify-mark, .ratify-row .ratify-actions { grid-column: auto; }
 .sheet-fog { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
 .sheet-fog-line { margin: 0; font-size: var(--size-small); color: var(--muted); }
 .sheet-fog.thin .sheet-fog-line, .sheet-fog.thick .sheet-fog-line { color: var(--mist); }
@@ -634,7 +600,7 @@ body.map-open .toasts, body.map-open .toast { visibility: visible !important; }
 .hist-commit { text-align: start; padding: 0; color: var(--fg); overflow-wrap: anywhere; }
 .hist-row.fogged .hist-commit { color: var(--mist); }
 .hist-sha { grid-column: 3; font: var(--size-xs) var(--mono); color: var(--faint); }
-.hist-files { grid-column: 2 / 4; justify-self: start; }
+.hist-actions { grid-column: 2 / 4; justify-self: start; display: flex; gap: var(--sp-3); }
 .banner-text { color: var(--fg); }
 /* A broken law (#312): a loud red dot at the plate's top right, the colour that sits beside Needs you's orange and nowhere else. */
 .law-broken { display: inline-block; flex: none; width: var(--sp-5); height: var(--sp-5); border-radius: 50%; background: var(--conflict); }
@@ -661,3 +627,90 @@ body.map-open .toasts, body.map-open .toast { visibility: visible !important; }
 .agent-chip.needs-you { font-weight: 600; color: var(--needs-you); background: var(--needs-you-bg); box-shadow: none; }
 #map-not-placed:not(:empty) { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
 #map-not-placed .side-title { margin: 0; font-size: var(--size-xs); font-weight: 400; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
+
+/* The PR brief (spec #334, ticket #339): treatment C. One focus per step in a panel at the foot of the map, which the camera leaves room for; the
+   parts a step lights stand out and the rest of the map dims; a light runs the step's links. Never a colour of its own: the warm light of a brief. */
+.map-body, .map-brief { grid-column: 1; grid-row: 1; }
+.map-side { grid-column: 2; grid-row: 1; }
+.map-brief { align-self: end; justify-self: center; width: min(var(--brief-width), calc(100% - var(--sp-7) * 2)); margin-bottom: var(--sp-7); box-sizing: border-box;
+             position: relative; display: flex; flex-direction: column; z-index: 5; padding: var(--sp-6) var(--sp-7) var(--sp-5); border-radius: var(--radius-pane);
+             background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(var(--brief-blur)); box-shadow: inset 0 0 0 var(--hair) var(--plate-edge), var(--shadow);
+             opacity: 0; transform: translateY(var(--sp-7)); transition: opacity var(--motion), transform var(--brief-camera); }
+.map-brief[hidden] { display: none; }
+.map-brief.open { opacity: 1; transform: none; }
+.brief-open #map-tray { opacity: .35; }
+.brief-cols { flex: 1; display: flex; transition: opacity var(--motion), transform var(--motion); }
+.brief-cols.swap { opacity: 0; transform: translateY(var(--sp-2)); }
+.brief-step { display: flex; gap: var(--sp-7); align-items: flex-start; width: 100%; }
+.brief-txt { flex: 1; min-width: 0; }
+.brief-kick { display: flex; gap: var(--sp-5); align-items: center; font-size: var(--size-xs); letter-spacing: .09em; text-transform: uppercase; color: var(--faint); }
+.brief-tag { background: var(--selected); color: var(--muted); border-radius: var(--sp-5); padding: 0 var(--sp-4); letter-spacing: .02em; text-transform: none; }
+.brief-title { margin: var(--sp-3) 0; font-size: var(--size-title); line-height: 1.22; font-weight: 650; letter-spacing: -.018em; text-wrap: balance; }
+.brief-body { margin: 0; color: var(--muted); font-size: var(--size-read); line-height: 1.55; max-width: 56ch; text-wrap: pretty; }
+.brief-writing { margin: 0; padding: var(--sp-5) var(--sp-6); color: var(--muted); font-size: var(--size); }
+.ratify-note { margin-top: var(--sp-4); font-size: var(--size-small); color: var(--muted); }
+.ratify-note p { margin: 0; }
+.ratify-prompt { display: block; width: 100%; box-sizing: border-box; margin-top: var(--sp-3); font: var(--size-xs)/1.5 var(--mono); background: var(--bg); color: var(--fg); border: var(--hair) solid var(--edge); border-radius: var(--radius); padding: var(--sp-3) var(--sp-4); }
+.ratify-copy { margin-top: var(--sp-3); }
+.brief-pts { margin: var(--sp-4) 0 0; padding: 0; list-style: none; max-width: 60ch; }
+.brief-pts li { position: relative; padding: var(--sp-2) 0 var(--sp-2) var(--sp-6); color: var(--muted); font-size: var(--size); line-height: 1.45; }
+.brief-pts li::before { content: ""; position: absolute; left: 0; top: .85em; width: var(--law-mark); height: var(--link-width); background: var(--faint); }
+.brief-quiet { margin: var(--sp-5) 0 0; color: var(--faint); font-size: var(--size-small); }
+.brief-unconfirmed { font-style: italic; }
+.brief-also { margin-top: var(--sp-5); }
+.brief-also .brief-quiet { margin-top: var(--sp-2); }
+
+.brief-cites { margin-top: var(--sp-5); color: var(--faint); font-size: var(--size-xs); }
+.brief-cites summary { cursor: pointer; }
+.brief-cite { margin: var(--sp-2) 0 0; font-family: var(--mono); }
+.brief-figure { flex: none; width: var(--brief-fig-w); height: var(--brief-fig-h); margin-top: var(--sp-7); border-radius: var(--radius-pane); background: var(--bg);
+                box-shadow: inset 0 0 0 var(--hair) var(--plate-edge); overflow: clip; }
+.brief-fig { width: 100%; height: 100%; }
+.brief-fig text { font: var(--size-xs) var(--font); fill: var(--muted); }
+.fig-frame { fill: none; stroke: var(--faint); stroke-dasharray: 0; }
+.fig-title { fill: var(--faint); }
+.fig-chip { fill: var(--raised); stroke: none; }
+.fig-chip.live { fill: var(--brief-light); }
+.fig-chip.lost { fill: none; stroke: var(--muted); stroke-dasharray: 3 4; }
+.fig-text.live { fill: var(--bg) !important; }
+.fig-text.lost { fill: var(--fg) !important; }
+.fig-arrow { stroke: var(--faint); stroke-width: var(--hair); }
+.brief-check { margin-top: var(--sp-5); }
+.brief-opts { display: flex; gap: var(--sp-4); margin-top: var(--sp-5); }
+.brief-opt { flex: 1; padding: var(--sp-4) var(--sp-5); }
+.brief-opt[aria-pressed="true"] { background: var(--brief-light); color: var(--bg); }
+.brief-opt.right { background: var(--brief-light); color: var(--bg); }
+.brief-opt.miss { opacity: .45; }
+.brief-slots { display: flex; gap: var(--sp-4); margin-top: var(--sp-5); }
+.brief-slot { flex: 1; display: flex; gap: var(--sp-4); align-items: center; padding: var(--sp-4) var(--sp-5); border-radius: var(--radius-pane); color: var(--faint);
+              font-size: var(--size-read); box-shadow: inset 0 0 0 var(--hair) var(--plate-edge); transition: background var(--motion), color var(--motion); }
+.brief-slot b { width: var(--ord); height: var(--ord); border-radius: 50%; display: grid; place-items: center; font-size: var(--size-xs); font-weight: 700; box-shadow: inset 0 0 0 var(--hair) var(--plate-edge); }
+.brief-slot.full { background: var(--selected); color: var(--fg); box-shadow: none; }
+.brief-slot.full b { background: var(--brief-light); color: var(--bg); box-shadow: none; }
+.brief-foot { display: flex; align-items: center; gap: var(--sp-5); margin-top: var(--sp-5); }
+.brief-dots { display: flex; gap: var(--sp-3); flex: 1; }
+.brief-dots i { width: var(--brief-dot); height: var(--halo); border-radius: var(--sp-1); background: var(--selected); transition: background var(--motion), width var(--motion); }
+.brief-dots i.at { background: var(--brief-light); width: var(--brief-dot-at); }
+.brief-partial { font-size: var(--size-xs); color: var(--faint); }
+.brief-leave { position: absolute; top: var(--sp-5); right: var(--sp-5); color: var(--faint); }
+.btn.primary.brief-next { background: var(--brief-light); color: var(--bg); }
+.map-world { transition: transform var(--brief-camera); }
+.map-world.briefing .plate:not(.lit), .map-world.briefing .actor:not(.lit) { opacity: var(--brief-dim); transition: opacity var(--motion); }
+.map-world.briefing .plate.lit { box-shadow: inset 0 0 0 var(--hair) var(--ring-warm), 0 0 0 var(--sp-2) color-mix(in srgb, var(--ring-warm) 35%, transparent), var(--shadow); }
+.map-world.briefing .actor.lit { color: var(--fg); }
+.plate.arrive { animation: brief-arrive var(--brief-arrive); }
+.plate.pick { cursor: pointer; }
+.plate.picked { box-shadow: inset 0 0 0 var(--mark) var(--brief-light), var(--shadow); animation: brief-arrive var(--brief-arrive); }
+.plate.wrong { animation: brief-nudge var(--brief-arrive); }
+.plate .ord { position: absolute; left: calc(-1 * var(--sp-4)); top: calc(-1 * var(--sp-4)); width: var(--ord); height: var(--ord); border-radius: 50%; background: var(--brief-light);
+              color: var(--bg); font-size: var(--size-xs); font-weight: 700; display: grid; place-items: center; }
+@keyframes brief-nudge { 0%, 100% { transform: translate(-50%, -50%); } 25% { transform: translate(calc(-50% - var(--sp-3)), -50%); } 60% { transform: translate(calc(-50% + var(--sp-3)), -50%); } }
+@keyframes brief-arrive { 0% { transform: translate(-50%, -50%) scale(.97); } 60% { transform: translate(-50%, -50%) scale(1.03); } 100% { transform: translate(-50%, -50%) scale(1); } }
+.map-light { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+.light-trail { stroke: var(--brief-light); stroke-width: 2; opacity: .8; stroke-linecap: round; }
+.light-spark { fill: var(--brief-light); filter: drop-shadow(0 0 var(--sp-3) var(--brief-light)); }
+.brief-open .map-canvas { overflow: clip; }
+@media (prefers-reduced-motion: reduce) {
+  .map-brief, .brief-cols, .map-world, .brief-dots i { transition: none; }
+  .plate.arrive, .plate.picked, .plate.wrong { animation: none; }
+}
