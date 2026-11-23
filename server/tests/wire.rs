@@ -1,7 +1,7 @@
-//! The wire's agreement check (#246, #333) for the Map view's payload: `MapState` and the `UserState` the map's commands
-//! return, written into `scripts/wire/server.ts` (`scripts/wire/samples.rs`). The values are built whole, every status held
-//! once and every optional field filled once and left empty once, so a field added to `MapState` fails to compile here until
-//! it has a sample; still, an optional field no sample fills is not checked.
+//! The wire's agreement check (#246, #333) for the Map view's payload: `MapState`, the `UserState` the map's commands
+//! return and a project header's `Mark`, written into `scripts/wire/server.ts` (`scripts/wire/samples.rs`). The values are
+//! built whole, every status held once and every optional field filled once and left empty once, so a field added to
+//! `MapState` fails to compile here until it has a sample; still, an optional field no sample fills is not checked.
 
 #[path = "../../scripts/wire/samples.rs"]
 mod samples;
@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use studio_server::{
     ci_laws::{self, Ci},
     fog::{ChapterRead, Entry, FogState, PrRead, Strength},
-    map::{MapState, Status, UserState, View},
+    map::{MapState, Mark, MarkWhy, Status, UserState, View},
     pr_briefs::BriefInfo,
     prs::Ready,
     ratify::Pending,
@@ -179,10 +179,17 @@ fn the_wire_samples_of_the_map_view_are_written_for_tsc() {
     }
     samples.push(("UserMap", json(user())));
     samples.push(("UserMap", json(UserState::default())));
+    samples.push((
+        "ProjectMark",
+        json(Mark {
+            project: "/repo".into(),
+            why: vec![MarkWhy::Fog, MarkWhy::Broken, MarkWhy::Brief],
+        }),
+    ));
     write(
         env!("CARGO_MANIFEST_DIR"),
         "server",
-        &["MapState", "UserMap"],
+        &["MapState", "UserMap", "ProjectMark"],
         &samples,
     );
 }

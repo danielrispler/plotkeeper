@@ -119,12 +119,28 @@ impl Projects {
     }
 }
 
+/// What `projects.json` may hold: the list as this build writes it, or the plain array of paths earlier builds wrote
+/// (`workbench::projects`, #93), read as the saved list.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Stored {
+    Saved(Saved),
+    Paths(Vec<String>),
+}
+
 /// The list in `file`; a missing or unreadable file is an empty list.
 fn read(file: &Path) -> Saved {
-    std::fs::read_to_string(file)
+    let stored = std::fs::read_to_string(file)
         .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default()
+        .and_then(|text| serde_json::from_str(&text).ok());
+    match stored {
+        Some(Stored::Saved(saved)) => saved,
+        Some(Stored::Paths(projects)) => Saved {
+            projects,
+            removed: BTreeMap::new(),
+        },
+        None => Saved::default(),
+    }
 }
 
 /// Writes the list by a temporary file and a rename.
@@ -229,6 +245,24 @@ mod tests {
             }]
         );
         assert_eq!(projects.remove(&repo, T + 1).unwrap(), []);
+    }
+
+    #[test]
+    fn a_projects_file_from_earlier_builds_a_list_of_paths_is_read_as_the_saved_list() {
+        let data = tempfile::tempdir().unwrap();
+        let file = data.path().join(FILE);
+        let repo = data.path().display().to_string();
+        std::fs::write(&file, format!("[{repo:?}, \"/w/falinks\"]")).unwrap();
+        let projects = Projects::at(file.clone());
+        let paths = |listed: Vec<Project>| listed.into_iter().map(|p| p.path).collect::<Vec<_>>();
+        assert_eq!(paths(projects.list()), [repo.clone(), "/w/falinks".into()]);
+        // A write keeps them, in the new format.
+        let studio = Studio::replayed(&[line("s1", "SessionStart", "/w/pokedex", T)]);
+        see(&projects, &studio);
+        assert_eq!(
+            paths(Projects::at(file).list()),
+            [repo, "/w/falinks".into(), "/w/pokedex".into()]
+        );
     }
 
     #[test]
