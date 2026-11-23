@@ -1,7 +1,7 @@
 // The Map view's pure logic (spec danielrispler/plotkeeper#306, ticket #309): the map file as the window reads it, where parts
 // are placed, the drag threshold, the link's rim points, the layered Esc and the camera. `map.ts` draws and wires them.
 
-import type { BriefFigure, BriefStep, Camera, Ci, CommitFiles, Fog, HistoricalMap, HistoryEntry, PrBrief, Proof, ReadyPr } from "./types.js";
+import type { BriefFigure, BriefStep, CatchUpOffer, FogListEntry, Camera, Ci, CommitFiles, Fog, HistoricalMap, HistoryEntry, PrBrief, Proof, ReadyPr } from "./types.js";
 
 export type Tier = "core" | "interface" | "black-box";
 export type Point = { x: number; y: number };
@@ -17,10 +17,10 @@ export const plateSize: Size = { w: 264, h: 76 };
 export const actorSize: Size = { w: 120, h: 28 };
 // How far the pointer moves before a press on a plate becomes a drag, so a click never nudges it.
 export const dragThreshold = 6;
-// The layers Esc peels, first to last (user story 5, spec #334 and spec #380): a drawer, a PR brief (closing it keeps its step), a scrubbed past
-// commit (back to now), a part's sheet, then the left panel (#385). The tickets that add them register a `Layer` under its name in `map.ts`; the Map
-// view itself is left only when none is open.
-export const layerOrder = ["drawer", "brief", "scrubbed", "sheet", "panel"] as const;
+// The layers Esc peels, first to last (user story 5, spec #334 and spec #380): an overlay over the map (the pre-flight, #394; spec #378, "Layers and
+// keys"), a drawer, a PR brief (closing it keeps its step), a scrubbed past commit (back to now), a part's sheet, then the left panel (#385). The
+// tickets that add them register a `Layer` under its name in `map.ts`; the Map view itself is left only when none is open.
+export const layerOrder = ["pre-flight", "drawer", "brief", "scrubbed", "sheet", "panel"] as const;
 export type LayerName = (typeof layerOrder)[number];
 export type Layer = { open: () => boolean; close: () => void };
 
@@ -106,6 +106,11 @@ export function rimPoint(center: Point, size: Size, toward: Point): Point {
   if (dx === 0 && dy === 0) return center;
   const reach = Math.min(dx === 0 ? Infinity : size.w / 2 / Math.abs(dx), dy === 0 ? Infinity : size.h / 2 / Math.abs(dy));
   return { x: center.x + dx * reach, y: center.y + dy * reach };
+}
+
+// A project switch: closes the layers that belong to the project shown, whatever the next one draws, since it may have no map to draw.
+export function switchProject(layers: Partial<Record<LayerName, Layer>>) {
+  for (const name of ["pre-flight", "brief"] as const) if (layers[name]?.open()) layers[name].close();
 }
 
 // Esc: closes the first layer that is open, in `layerOrder`, and says which; null when none was: on the bare map Esc does nothing, since the
@@ -603,4 +608,50 @@ export function pressHeader(page: PageView, pressed: string, projectOf: (session
   if (pressed === page.project) return "fold";
   const session = panelSession(page.panel);
   return { project: pressed, panel: session === null || projectOf(session) === pressed ? page.panel : null };
+}
+
+// ---- The part catch-up (spec #378, ticket #391): what a fogged part's sheet offers, from the server's `catch_ups`.
+
+// The sheet's fog buttons, the main one first: the part catch-up (or, for a part fogged by one PR whose brief lights it, that chapter), then
+// the quiet "I know this". A catch-up being written stays pressable: "Writing…" never blocks the sheet or the map.
+export type FogAction = { label: string; title: string; note: string | null; disabled: boolean; open: { kind: "catch-up" } | { kind: "chapter"; pr: number; chapter: number } };
+export function fogActions(fog: Fog | undefined, offer: CatchUpOffer | undefined): { main: FogAction | null; second: "I know this" | null } {
+  if (!fog) return { main: null, second: null };
+  if (!offer) return { main: null, second: "I know this" };
+  const main: FogAction =
+    offer.kind === "chapter"
+      ? { label: `Read #${offer.pr}'s brief`, title: "Open the chapter of this PR's brief that covers this part", note: null, disabled: false, open: { kind: "chapter", pr: offer.pr, chapter: offer.chapter } }
+      : {
+          label: "Part catch-up",
+          title: "One story of everything that landed here since you last caught up; reading it to the end clears this part's fog",
+          note: offer.writing ? "Writing…" : offer.failed ? "The last write failed; press to try again" : null,
+          disabled: false,
+          open: { kind: "catch-up" },
+        };
+  return { main, second: "I know this" };
+}
+
+// What a catch-up opened while it was written waits for, read from the part's offer at each map draw: "wait" while a write runs, then
+// "open" once it is stored for the part's fog, else "stop" (its write failed, the part was cleared meanwhile, or no write runs).
+export function awaitedCatchUp(offer: CatchUpOffer | undefined): "open" | "stop" | "wait" {
+  if (!offer || offer.kind !== "catch-up") return "stop";
+  if (offer.writing) return "wait";
+  return offer.ready ? "open" : "stop";
+}
+
+// The number a part catch-up plays under in `briefPlayer`: a negative one, which no PR has, one per project, part and fog list, so a
+// catch-up rewritten for a new fog list starts at its first step rather than where the old story was left.
+export function catchUpIds(): (project: string, part: string, fog: string[]) => number {
+  const ids = new Map<string, number>();
+  return (project, part, fog) => {
+    const key = `${project}|${part}|${fog.join(",")}`;
+    if (!ids.has(key)) ids.set(key, -(ids.size + 1));
+    return ids.get(key)!;
+  };
+}
+
+// A long part catch-up's full fog list, one line per entry, oldest first: a PR by its number and title, a direct push by its subject and
+// short commit.
+export function fogListLines(entries: FogListEntry[]): string[] {
+  return entries.map((e) => (e.pr === null ? `${e.title} (${e.commit.slice(0, 7)}, no PR)` : `#${e.pr} ${e.title}`));
 }

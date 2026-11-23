@@ -510,6 +510,26 @@ body[data-panel="diff"] .map-stage { --panel-w: min(var(--panel-wide), calc(100%
 /* A worker's log in the left panel (#386): its header clears the panel's Close. */
 .map-panel .pane.subagent-log { position: static; overflow: visible; }
 .map-panel .subagent-log header { background: transparent; border-bottom: 0; padding-right: calc(var(--sp-7) * 2); }
+/* The pre-flight (#394): an overlay over the map in the glass, centred near its top, above the panels, with no rise so it shows at once; the
+   plates it frames carry a quiet "predicted" word and an outline. */
+.map-pre-flight { position: absolute; top: var(--inset); left: 0; right: 0; margin-inline: auto; width: min(var(--rail), calc(100% - 2 * var(--inset))); max-height: calc(100% - 2 * var(--inset));
+                  overflow-y: auto; z-index: 5; padding: var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-4); }
+.map-pre-flight[hidden] { display: none; }
+.pre-flight-title { margin: 0; font-size: var(--size-large); font-weight: 650; }
+.pre-flight-issues { display: flex; flex-direction: column; max-height: 30vh; overflow-y: auto; }
+.pre-flight-issue { text-align: left; }
+.pre-flight-text { font: inherit; padding: var(--sp-3) var(--sp-4); background: var(--chrome); color: var(--fg); border: 0; border-radius: var(--radius); resize: vertical; }
+.pre-flight-foot { display: flex; gap: var(--sp-4); justify-content: flex-end; }
+.pre-flight-parts { display: flex; flex-direction: column; gap: var(--sp-2); }
+.pre-flight-part { display: flex; gap: var(--sp-3); align-items: center; }
+.pre-flight-kind { margin: 0; font-size: var(--size-xs); color: var(--faint); text-transform: uppercase; letter-spacing: .06em; }
+.pre-flight-what, .pre-flight-why { margin: 0; }
+.pre-flight-row { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-3) 0; border-top: var(--hair) solid var(--line); }
+.pre-flight-name { font-weight: 600; }
+.pre-flight-law, .pre-flight-fog, .pre-flight-stale { font-size: var(--size-xs); color: var(--faint); }
+.plate.predicted { outline: var(--hair) dashed var(--faint); outline-offset: var(--sp-2); }
+.plate-predicted { font-size: var(--size-xs); color: var(--faint); }
+.brief-expected { margin: 0 0 var(--sp-3); font-size: var(--size-xs); color: var(--faint); }
 /* The PR brief alone dims the map, and both panels with it (#385): what they hold, not their glass, which still covers the dimmed plates under it. */
 body.brief-open .map-panel > *, body.brief-open .map-side > * > * { opacity: var(--brief-dim); transition: opacity var(--motion); }
 /* The gear (#385): quiet, in the top bar, pressed while Settings shows. */
@@ -621,6 +641,8 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .sheet-fog { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
 .sheet-fog-line { margin: 0; font-size: var(--size-small); color: var(--muted); }
 .sheet-fog.thin .sheet-fog-line, .sheet-fog.thick .sheet-fog-line { color: var(--mist); }
+.sheet-fog .sheet-catch-up { align-self: stretch; text-align: center; background: var(--pressed); font-weight: 600; }
+.sheet-catch-up-note { margin-top: calc(-1 * var(--sp-2)); font-size: var(--size-small); color: var(--muted); }
 .sheet-ci { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
 .sheet-ci-line { margin: 0; font-size: var(--size-small); color: var(--muted); }
 .sheet-ci.broken .sheet-ci-line { color: var(--conflict); }
@@ -723,6 +745,28 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .brief-slot b { width: var(--ord); height: var(--ord); border-radius: 50%; display: grid; place-items: center; font-size: var(--size-xs); font-weight: 700; box-shadow: inset 0 0 0 var(--hair) var(--plate-edge); }
 .brief-slot.full { background: var(--selected); color: var(--fg); box-shadow: none; }
 .brief-slot.full b { background: var(--brief-light); color: var(--bg); box-shadow: none; }
+/* The end-of-story bar (#393): one quiet row under a chapter's last step. */
+.story-bar { display: flex; flex-wrap: wrap; gap: var(--sp-4); align-items: center; margin-top: var(--sp-6); padding-top: var(--sp-5); border-top: var(--hair) solid var(--line);
+             font-size: var(--size-small); color: var(--faint); }
+.story-bar[hidden] { display: none; }
+.bar-slot:empty { display: none; }
+.bar-scale { display: flex; gap: var(--sp-2); }
+.bar-rate { min-width: var(--ord); padding: var(--sp-1) var(--sp-3); font-size: var(--size-small); color: var(--muted); background: none; box-shadow: inset 0 0 0 var(--hair) var(--plate-edge); }
+.bar-rate[aria-pressed="true"] { background: var(--selected); color: var(--fg); box-shadow: none; }
+.bar-note { flex: 1; min-width: 14ch; font: var(--size-small) var(--font); background: var(--bg); color: var(--fg); border: var(--hair) solid var(--edge); border-radius: var(--radius);
+            padding: var(--sp-1) var(--sp-4); }
+.bar-kept { flex: 1; }
+/* Explain-back (#397): on a Core part's story, the bar's first row; after Enter, the line, the gist under it and the three marks. */
+.bar-slot { flex-basis: 100%; }
+.bar-explain { display: flex; flex-direction: column; gap: var(--sp-3); }
+.bar-line { font: var(--size-small) var(--font); background: var(--bg); color: var(--fg); border: var(--hair) solid var(--edge); border-radius: var(--radius);
+            padding: var(--sp-1) var(--sp-4); }
+.bar-said { margin: 0; color: var(--fg); }
+.bar-gist { margin: 0; color: var(--muted); }
+.bar-gist-label { font-weight: 700; color: var(--faint); }
+.bar-marks { display: flex; gap: var(--sp-2); }
+.bar-mark { padding: var(--sp-1) var(--sp-4); font-size: var(--size-small); color: var(--muted); background: none; box-shadow: inset 0 0 0 var(--hair) var(--plate-edge); }
+.bar-mark[aria-pressed="true"] { background: var(--selected); color: var(--fg); box-shadow: none; }
 .brief-foot { display: flex; align-items: center; gap: var(--sp-5); margin-top: var(--sp-5); }
 .brief-dots { display: flex; gap: var(--sp-3); flex: 1; }
 .brief-dots i { width: var(--brief-dot); height: var(--halo); border-radius: var(--sp-1); background: var(--selected); transition: background var(--motion), width var(--motion); }
@@ -751,3 +795,16 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
   .map-brief, .brief-cols, .map-world.glide, .brief-dots i { transition: none; }
   .plate.arrive, .plate.picked, .plate.wrong { animation: none; }
 }
+
+/* Staleness bands (#392): a mild line along a Core plate's foot where Daniel has not engaged for 3, 6 or 12 weeks, firmer with each band.
+   Never a colour of its own: the muted text tone, so it sits under fog and Needs you. */
+.plate-stale { position: absolute; left: var(--sp-5); right: var(--sp-5); bottom: var(--sp-3); height: var(--mark); border-radius: var(--mark); background: var(--muted); }
+.plate.stale-1 .plate-stale { opacity: .3; }
+.plate.stale-2 .plate-stale { opacity: .55; }
+.plate.stale-3 .plate-stale { opacity: .85; }
+.sheet-stale { margin: 0; font-size: var(--size-small); color: var(--muted); }
+/* The refresher (#392): what the map says around the part, in its sheet under the laws. */
+.refresher { display: flex; flex-direction: column; gap: var(--sp-3); }
+.refresher-flows, .refresher-links { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); font-size: var(--size-small); }
+.refresher-flow-name { font-weight: 600; }
+.refresher-hops { margin: var(--sp-1) 0 0; padding-inline-start: var(--sp-6); color: var(--muted); line-height: 1.45; }

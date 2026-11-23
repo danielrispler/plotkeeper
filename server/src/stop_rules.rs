@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     io::Write,
     path::{Path, PathBuf},
     sync::Mutex,
@@ -19,8 +19,11 @@ use std::{
 /// The log's file, in the data folder.
 const LOG_FILE: &str = "stop-rules.jsonl";
 
+/// The modules an older `dismissed` line with no module dismissed: the review's modules when dismissal was one flag per project.
+const LEGACY_MODULES: [&str; 5] = ["map", "history", "proof", "briefs", "skips"];
+
 /// What happened. A kind this build does not know reads as `Other` and counts for nothing, so an older build tolerates a newer log.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Kind {
     /// The session list had a session on the day.
@@ -35,7 +38,8 @@ pub enum Kind {
     Proof,
     /// "I know this" cleared a part's fog; tracked apart, with no threshold in project 2.
     Know,
-    /// The one-time review was dismissed for the project.
+    /// The review of one module (`module`) was dismissed for the project; an older line with no module dismissed the modules of its
+    /// time (`LEGACY_MODULES`).
     Dismissed,
     /// A PR's brief had a row in the tray and the row was seen (once per PR).
     BriefOffered,
@@ -49,6 +53,30 @@ pub enum Kind {
     Ratify,
     /// A step's "not confirmed from the facts" mark was seen.
     UnconfirmedSeen,
+    /// A fogged part's sheet offered its part catch-up (#391).
+    CatchUpOffered,
+    /// A part catch-up was opened from the part's sheet.
+    CatchUpOpened,
+    /// A part catch-up was read to its end, which cleared the part's fog.
+    CatchUpDone,
+    /// The end-of-story bar (`story_bar.rs`) was shown at a story's end; once per bar each time its story is opened.
+    RatingOffered,
+    /// A 1 to 5 rating of the explanation was given in the bar; the line carries it. No threshold: it measures the explanation.
+    RatingGiven,
+    /// The bar was skipped with its key or button before anything was given.
+    RatingSkipped,
+    /// A short note was given in the bar; the line carries it.
+    NoteGiven,
+    /// An explain-back line was given in the bar, on a Core part's story (#397); the line carries it. Kept if at least 3.
+    ExplainBackGiven,
+    /// The explain-back line was marked got it, partly or missed against the gist; the line carries the mark.
+    ExplainBackMarked,
+    /// A part's refresher was entered (#392).
+    RefresherEntered,
+    /// A refresher or a part catch-up was entered from a part with a staleness band (#392); logged beside the entry's own kind.
+    StaleEntered,
+    /// A pre-flight framed its parts on the map, predicted or picked by hand (#394).
+    PreFlightRun,
     #[serde(other)]
     Other,
 }
@@ -66,6 +94,9 @@ pub struct Event {
     /// The PR a brief event is about.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pr: Option<u64>,
+    /// The module a `dismissed` event is about.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module: Option<String>,
 }
 
 /// What the window needs of one project to decide on the review. Counts only; the window shows none of them.
@@ -78,18 +109,26 @@ pub struct Facts {
     pub scrubs: u32,
     pub proofs: u32,
     pub knows: u32,
-    pub dismissed: bool,
+    /// The modules whose review was dismissed, sorted.
+    pub dismissed: Vec<String>,
     /// Merged PRs of the project whose brief was offered, and how many of those had it opened.
     pub briefs_offered: u32,
     pub briefs_opened: u32,
     /// Chapters read to their end, to set against `knows`.
     pub chapters_done: u32,
+    /// Every kind's count for the project (kinds with none are left out), for the review table's bars and offer counts.
+    pub counts: BTreeMap<Kind, u32>,
+    /// The local day of the project's first event, where a module's calendar wait starts at the latest.
+    pub began: Option<String>,
+    /// When the project's staleness baselines were set (unix seconds; `staleness.rs`), where the refresher's and staleness bands'
+    /// calendar wait starts; none before its first map with that build.
+    pub stale_since: Option<u64>,
 }
 
 /// Serialises appends, so two events never share a line.
 static WRITING: Mutex<()> = Mutex::new(());
 
-fn log_file() -> Result<PathBuf, String> {
+pub(crate) fn log_file() -> Result<PathBuf, String> {
     let home = std::env::home_dir().ok_or("no home folder")?;
     Ok(studio_hook::data_dir(&home).join(LOG_FILE))
 }
@@ -100,8 +139,14 @@ pub fn append(file: &Path, event: &Event) -> Result<(), String> {
     append_held(file, event)
 }
 
+/// Appends `line`, any line that reads as an `Event` (one with fields of its own beside them), to `file`.
+pub(crate) fn append_line(file: &Path, line: &impl Serialize) -> Result<(), String> {
+    let _writing = WRITING.lock().unwrap();
+    append_held(file, line)
+}
+
 /// `append`, with `WRITING` held by the caller.
-fn append_held(file: &Path, event: &Event) -> Result<(), String> {
+fn append_held(file: &Path, event: &impl Serialize) -> Result<(), String> {
     let line = serde_json::to_string(event).map_err(|e| e.to_string())?;
     if let Some(dir) = file.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
@@ -142,6 +187,11 @@ fn entered(kind: Kind) -> bool {
             | Kind::ChapterDone
             | Kind::CheckAnswered
             | Kind::Ratify
+            | Kind::CatchUpOpened
+            | Kind::CatchUpDone
+            | Kind::RefresherEntered
+            | Kind::StaleEntered
+            | Kind::PreFlightRun
     )
 }
 
@@ -186,11 +236,41 @@ pub fn facts(events: &[Event], project: &str, merged_prs: u32) -> Facts {
         scrubs: count(Kind::Scrub),
         proofs: count(Kind::Proof),
         knows: count(Kind::Know),
-        dismissed: count(Kind::Dismissed) > 0,
+        dismissed: dismissed(events, project),
         briefs_offered: 0,
         briefs_opened: 0,
         chapters_done: count(Kind::ChapterDone),
+        counts: events
+            .iter()
+            .filter(|e| e.kind != Kind::Other && e.project.as_deref() == Some(project))
+            .fold(BTreeMap::new(), |mut counts, e| {
+                *counts.entry(e.kind).or_insert(0) += 1;
+                counts
+            }),
+        began: events
+            .iter()
+            .filter(|e| e.project.as_deref() == Some(project))
+            .min_by_key(|e| e.at)
+            .map(|e| e.day.clone()),
+        stale_since: None,
     }
+}
+
+/// The modules whose review `project` dismissed, sorted.
+fn dismissed(events: &[Event], project: &str) -> Vec<String> {
+    let mut modules = BTreeSet::new();
+    for e in events
+        .iter()
+        .filter(|e| e.kind == Kind::Dismissed && e.project.as_deref() == Some(project))
+    {
+        match &e.module {
+            Some(module) => {
+                modules.insert(module.clone());
+            }
+            None => modules.extend(LEGACY_MODULES.map(String::from)),
+        }
+    }
+    modules.into_iter().collect()
 }
 
 /// Of the merged PRs `merged` (numbers), how many had a brief offered for `project`, and how many of those had it opened.
@@ -280,6 +360,7 @@ pub fn stop_log(
         kind,
         project,
         pr,
+        module: None,
     };
     let file = log_file()?;
     if kind == Kind::BriefOffered {
@@ -290,7 +371,11 @@ pub fn stop_log(
 
 /// The counts the review is decided from, for `project`.
 pub fn stop_facts(project: String) -> Result<Facts, String> {
-    Ok(facts_in(&log_file()?, &project))
+    let mut found = facts_in(&log_file()?, &project);
+    found.stale_since = crate::map::read_user(&crate::map::state_file()?, &project)
+        .staleness
+        .since;
+    Ok(found)
 }
 
 /// The counts for `project` from the log `file`, with its merged PRs read from git.
@@ -304,20 +389,36 @@ fn facts_in(file: &Path, project: &str) -> Facts {
     found
 }
 
-/// Dismisses the one-time review of each project; the log goes on.
-pub fn stop_dismiss(projects: Vec<String>, day: String) -> Result<(), String> {
-    let file = log_file()?;
+/// Dismisses the review of `modules` in each of `projects`; a module not named is still reviewed when it falls due, and the log goes on.
+pub fn stop_dismiss(
+    projects: Vec<String>,
+    modules: Vec<String>,
+    day: String,
+) -> Result<(), String> {
+    dismiss_in(&log_file()?, &projects, &modules, &day)
+}
+
+/// `stop_dismiss`, into the log `file`.
+fn dismiss_in(
+    file: &Path,
+    projects: &[String],
+    modules: &[String],
+    day: &str,
+) -> Result<(), String> {
     for project in projects {
-        append(
-            &file,
-            &Event {
-                at: now(),
-                day: day.clone(),
-                kind: Kind::Dismissed,
-                project: Some(project),
-                pr: None,
-            },
-        )?;
+        for module in modules {
+            append(
+                file,
+                &Event {
+                    at: now(),
+                    day: day.into(),
+                    kind: Kind::Dismissed,
+                    project: Some(project.clone()),
+                    pr: None,
+                    module: Some(module.clone()),
+                },
+            )?;
+        }
     }
     Ok(())
 }
@@ -334,6 +435,7 @@ mod tests {
             kind,
             project: project.map(String::from),
             pr: None,
+            module: None,
         }
     }
 
@@ -494,8 +596,103 @@ mod tests {
         ];
         let found = facts(&events, "/p", 0);
         assert_eq!((found.proofs, found.knows), (2, 1));
-        assert!(found.dismissed);
-        assert!(!facts(&events, "/q", 0).dismissed);
+        assert!(!found.dismissed.is_empty());
+        assert!(facts(&events, "/q", 0).dismissed.is_empty());
+    }
+
+    #[test]
+    fn a_dismissal_names_its_modules_and_an_older_one_names_the_modules_of_its_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(LOG_FILE);
+        dismiss_in(
+            &file,
+            &["/p".into(), "/q".into()],
+            &["history".into()],
+            "2026-11-20",
+        )
+        .unwrap();
+        dismiss_in(&file, &["/p".into()], &["refresher".into()], "2026-12-20").unwrap();
+        let events = read(&file);
+        assert_eq!(facts(&events, "/p", 0).dismissed, ["history", "refresher"]);
+        assert_eq!(facts(&events, "/q", 0).dismissed, ["history"]);
+        // A project-wide dismissal of the build before per-module dismissal.
+        let mut log = std::fs::read_to_string(&file).unwrap();
+        log.push_str(
+            "{\"at\":1,\"day\":\"2026-11-07\",\"kind\":\"dismissed\",\"project\":\"/q\"}\n",
+        );
+        std::fs::write(&file, log).unwrap();
+        assert_eq!(
+            facts(&read(&file), "/q", 0).dismissed,
+            ["briefs", "history", "map", "proof", "skips"]
+        );
+    }
+
+    #[test]
+    fn a_part_catch_up_opened_or_completed_is_an_entered_action_counted_apart_from_i_know_this() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(LOG_FILE);
+        let line = |day: &str, kind: &str| {
+            format!("{{\"at\":1,\"day\":\"{day}\",\"kind\":\"{kind}\",\"project\":\"/p\"}}\n")
+        };
+        let log = [
+            line("2026-11-01", "map-open"),
+            line("2026-11-01", "catch-up-offered"),
+            line("2026-11-02", "map-open"),
+            line("2026-11-02", "catch-up-opened"),
+            line("2026-11-03", "map-open"),
+            line("2026-11-03", "catch-up-done"),
+            line("2026-11-03", "know"),
+        ]
+        .concat();
+        std::fs::write(&file, log).unwrap();
+        let found = facts_in(&file, "/p");
+        assert_eq!(found.engaged_days, 2, "offered is seen, not entered");
+        let counts = serde_json::to_value(&found).unwrap()["counts"].clone();
+        assert_eq!(counts["catch-up-offered"], 1);
+        assert_eq!(counts["catch-up-opened"], 1);
+        assert_eq!(counts["catch-up-done"], 1);
+        assert_eq!(counts["know"], 1);
+    }
+
+    #[test]
+    fn the_refresher_and_an_entry_from_a_stale_part_are_counted_and_each_makes_an_engaged_day() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(LOG_FILE);
+        let lines = [
+            r#"{"at":1,"day":"2026-11-01","kind":"map-open","project":"/p"}"#,
+            r#"{"at":2,"day":"2026-11-01","kind":"refresher-entered","project":"/p"}"#,
+            r#"{"at":3,"day":"2026-11-02","kind":"map-open","project":"/p"}"#,
+            r#"{"at":4,"day":"2026-11-02","kind":"refresher-entered","project":"/p"}"#,
+            r#"{"at":5,"day":"2026-11-02","kind":"stale-entered","project":"/p"}"#,
+        ];
+        std::fs::write(&file, lines.join("\n") + "\n").unwrap();
+        let json = serde_json::to_value(facts_in(&file, "/p")).unwrap();
+        assert_eq!(json["counts"]["refresher-entered"], 2);
+        assert_eq!(json["counts"]["stale-entered"], 1);
+        assert_eq!(json["engaged_days"], 2);
+    }
+
+    #[test]
+    fn every_kind_is_counted_per_project_and_the_first_day_is_kept() {
+        let at = |at, day, kind, project| Event {
+            at,
+            ..event(day, kind, project)
+        };
+        let events = [
+            at(5, "2026-10-30", Kind::Session, None),
+            at(20, "2026-11-02", Kind::Scrub, Some("/p")),
+            at(10, "2026-11-01", Kind::BriefOffered, Some("/p")),
+            at(30, "2026-11-03", Kind::BriefOffered, Some("/p")),
+            at(40, "2026-11-04", Kind::BriefOffered, Some("/q")),
+        ];
+        let found = facts(&events, "/p", 0);
+        assert_eq!(found.counts.get(&Kind::BriefOffered), Some(&2));
+        assert_eq!(found.counts.get(&Kind::Scrub), Some(&1));
+        assert_eq!(found.counts.get(&Kind::Session), None);
+        assert_eq!(found.began.as_deref(), Some("2026-11-01"));
+        assert_eq!(facts(&events, "/r", 0).began, None);
+        let json = serde_json::to_value(&found).unwrap();
+        assert_eq!(json["counts"]["brief-offered"], 2);
     }
 
     #[test]

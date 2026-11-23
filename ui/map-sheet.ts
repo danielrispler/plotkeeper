@@ -1,6 +1,7 @@
 // The part sheet of the Map view (spec danielrispler/plotkeeper#306, ticket #310): a click on a plate opens it over the map's right, in the
 // side area's `sheet` slot, in the glass the left panel shares (#385). It holds the part's plain description, its tier (changed in place), its laws and its fog, with a quiet
-// "I know this" that lifts the mist. `map-model.ts`'s `sheetOf` is what it shows; Esc closes it (the `sheet` layer).
+// "I know this" that lifts the mist. `map-model.ts`'s `sheetOf` is what it shows; Esc closes it (the `sheet` layer). A fogged part's main
+// button is its part catch-up (#391), or the one PR brief chapter that lights it (`fogActions`); "I know this" is the quiet second.
 //
 // "See the proof" (`.sheet-law-actions` of a law a check backs) and the CI line with its drill-down open the drawer (`map-drawer.ts`).
 // `.sheet-extra` at the foot holds the history strip (`map-history.ts`, #313). While a past commit is shown the sheet is read-only:
@@ -14,12 +15,18 @@ import { drawStrip } from "./map-history.js";
 import { overturnNote, ratifyActions } from "./map-ratify.js";
 import { sheetPending, statusWords } from "./ratify.js";
 import { besideSheet } from "./panel.js";
-import { ciDrawer, effectiveTier, type Part, proofDrawer, sheetCi, sheetOf, type Tier } from "./map-model.js";
+import { enterRefresher, refresherNode, staleLine } from "./map-stale.js";
+import { ciDrawer, effectiveTier, fogActions, type Part, proofDrawer, sheetCi, sheetOf, type Tier } from "./map-model.js";
+import { openBriefOf, openCatchUpOf } from "./map-brief.js";
 
 // The part whose sheet is open, and the project it is in; a sheet never carries over to another project's map.
 let open: { project: string; part: string } | null = null;
+// The parts whose part catch-up the sheet offered, told once per window.
+const offered = new Set<string>();
 // The part as the live map last had it, so the sheet of a part a past commit no longer has still draws.
 let remembered: Part | null = null;
+// The part whose refresher is entered on its open sheet (#392); it shows until the sheet closes or another part's opens.
+let refreshing: string | null = null;
 
 // How long the lifting mist plays before the map is drawn without it: the stylesheet's `--mist-lift`, none under reduced motion.
 const lifted = (node: HTMLElement) =>
@@ -51,6 +58,7 @@ export const sheetPart = () => (open && currentMap()?.project === open.project ?
 export function closeSheet() {
   const view = currentMap();
   open = null;
+  refreshing = null;
   if (view) drawSheet(view);
 }
 
@@ -116,14 +124,48 @@ function drawSheet(view: MapView) {
   });
   const fog = text("div", "", `sheet-fog${!view.scrub && view.state.fog?.[part.id] ? ` ${view.state.fog[part.id]}` : ""}`);
   fog.append(text("p", sheet.fogLine, "sheet-fog-line"));
-  if (sheet.canClear) {
-    const clear = text("button", "I know this", "btn quiet sheet-know") as HTMLButtonElement;
+  const actions = fogActions(view.scrub ? undefined : view.state.fog?.[part.id], view.state.catch_ups?.[part.id]);
+  if (actions.main) {
+    const { open: opens, label, title, note } = actions.main;
+    const main = text("button", label, "btn primary sheet-catch-up") as HTMLButtonElement;
+    main.title = title;
+    main.addEventListener("click", () => {
+      if (opens.kind === "chapter") return void openBriefOf(view.project, opens.pr, opens.chapter);
+      void openCatchUpOf(view.project, part.id);
+    });
+    fog.append(main);
+    if (note) fog.append(text("span", note, "sheet-catch-up-note"));
+    if (opens.kind === "catch-up") {
+      const key = `${view.project}|${part.id}`;
+      if (!offered.has(key)) {
+        offered.add(key);
+        logStop("catch-up-offered", view.project);
+      }
+    }
+  }
+  if (sheet.canClear && actions.second) {
+    const clear = text("button", actions.second, "btn quiet sheet-know") as HTMLButtonElement;
     clear.title = "Clear this part's fog: you have caught up with what changed";
     clear.addEventListener("click", () => {
       clear.disabled = true;
       know(view, part.id).catch(failure("map_know"));
     });
     fog.append(clear);
+  }
+  // A Core part Daniel has not engaged with for weeks says so, and a part with no fog offers the refresher (#392).
+  const stale = staleLine(view, part.id);
+  if (stale) fog.append(stale);
+  const refresher = !view.scrub && refreshing === part.id ? refresherNode(view, part.id) : null;
+  if (!view.scrub && !sheet.canClear && !refresher) {
+    const enter = text("button", "Refresher", "btn quiet sheet-refresher") as HTMLButtonElement;
+    enter.title = "The part as the map has it now: its flows, laws and links";
+    // It shows at once, drawn from the map; the shell records the activity behind it, and the reload drops the band.
+    enter.addEventListener("click", () => {
+      refreshing = part.id;
+      drawSheet(view);
+      enterRefresher(view, part.id).catch(failure("map_refresher"));
+    });
+    fog.append(enter);
   }
   const state = view.scrub ? null : sheetCi(view.state.ci, part.id, sheet.laws.some((law) => law.backing === "check"));
   const ci = text("div", "", `sheet-ci${state?.broken ? " broken" : ""}`);
@@ -150,6 +192,7 @@ function drawSheet(view: MapView) {
     ...(laws.length ? [text("ul", "", "sheet-laws")] : [text("p", "No laws on this part", "empty")]),
     // Fog and CI are of now: a past commit shows neither.
     ...(links.length ? [text("h3", "Links", "sheet-heading"), text("ul", "", "sheet-links")] : []),
+    ...(refresher ? [refresher] : []),
     ...(view.scrub ? [] : [text("h3", "Fog", "sheet-heading"), fog]),
     ...(state ? [text("h3", "CI on main", "sheet-heading"), ci] : []),
   );
@@ -167,6 +210,7 @@ function drawSheet(view: MapView) {
 }
 
 onPlateClick(({ view, part }) => {
+  if (open?.part !== part.id) refreshing = null;
   open = { project: view.project, part: part.id };
   // Below 1007 px, or over the widened diff, the sheet takes the left panel's place (#385).
   besideSheet(part.id);

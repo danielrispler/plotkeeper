@@ -1,0 +1,55 @@
+{
+ "version": 1,
+ "part": "shell",
+ "fog": [
+  "c1",
+  "c2"
+ ],
+ "written_at": 1795000000000,
+ "model": "opus",
+ "partial": false,
+ "brief": {
+  "title": "The shell keeps fog",
+  "overview": [],
+  "chapters": [
+   {
+    "behaviour": "story",
+    "parts": [
+     "shell"
+    ],
+    "title": "Fog stays",
+    "flags": [],
+    "gist": "The shell keeps a part fogged until its catch-up is read.",
+    "gist_flags": [],
+    "steps": [
+     {
+      "k": "Where",
+      "h": "The shell holds the fog",
+      "b": "",
+      "on": [
+       "shell"
+      ],
+      "hops": [],
+      "law": null,
+      "covered_by": null,
+      "list": [],
+      "risks": [],
+      "fig": null,
+      "check": null,
+      "cites": [
+       {
+        "from": "ENTRIES",
+        "quote": "a quote"
+       }
+      ],
+      "flags": []
+     }
+    ]
+   }
+  ],
+  "also": [],
+  "unseen": [],
+  "decisions": [],
+  "flags": []
+ }
+}

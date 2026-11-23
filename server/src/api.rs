@@ -157,6 +157,10 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
         "agent_summary" => out(crate::agent_summary(app, arg(a, "agent_id")?)),
         "map_state" => res(crate::map_state(arc, arg(a, "project")?, arg(a, "fetch")?)),
         "map_know" => res(crate::map::map_know(arg(a, "project")?, arg(a, "part")?)),
+        "map_refresher" => res(crate::map::map_refresher(
+            arg(a, "project")?,
+            arg(a, "part")?,
+        )),
         "map_history" => res(crate::map::map_history(arg(a, "project")?, arg(a, "part")?)),
         "map_at" => res(crate::map::map_at(arg(a, "project")?, arg(a, "commit")?)),
         "map_commit" => res(crate::map::map_commit(
@@ -181,6 +185,30 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "chapter")?,
             arg(a, "head")?,
         )),
+        "part_catch_up" => res(crate::part_catch_ups::part_catch_up(
+            arc,
+            arg(a, "project")?,
+            arg(a, "part")?,
+        )),
+        "part_catch_up_done" => res(crate::part_catch_ups::part_catch_up_done(
+            app,
+            arg(a, "project")?,
+            arg(a, "part")?,
+            arg(a, "fog")?,
+        )),
+        "pre_flight_issues" => res(crate::pre_flight::pre_flight_issues(arg(a, "project")?)),
+        "pre_flight_predict" => res(crate::pre_flight::pre_flight_predict(
+            arc,
+            arg(a, "project")?,
+            arg(a, "issue")?,
+            arg(a, "text")?,
+        )),
+        "pre_flight_pick" => res(crate::pre_flight::pre_flight_pick(
+            app,
+            arg(a, "project")?,
+            arg(a, "parts")?,
+        )),
+        "pre_flight_clear" => res(crate::pre_flight::pre_flight_clear(app, arg(a, "project")?)),
         "briefs_waiting" => out(crate::pr_briefs::briefs_waiting(app, arg(a, "cwd")?)),
         "pr_ratify" => res(crate::ratify::pr_ratify(
             &app.prs,
@@ -225,8 +253,21 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "pr")?,
         )),
         "stop_facts" => res(stop_rules::stop_facts(arg(a, "project")?)),
+        "story_bar" => res(crate::story_bar::story_bar(
+            arg(a, "kind")?,
+            arg(a, "project")?,
+            arg(a, "day")?,
+            arg(a, "about")?,
+            crate::story_bar::Given {
+                rating: arg(a, "rating")?,
+                note: arg(a, "note")?,
+                line: arg(a, "line")?,
+                mark: arg(a, "mark")?,
+            },
+        )),
         "stop_dismiss" => res(stop_rules::stop_dismiss(
             arg(a, "projects")?,
+            arg(a, "modules")?,
             arg(a, "day")?,
         )),
         "answer_blocked_command" => res(server_answer::answer_blocked_command(

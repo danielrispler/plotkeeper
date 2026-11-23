@@ -6,21 +6,32 @@
 // A step's check (#340) is answered in place: a pick in the panel, an order by tapping parts on the map into numbered slots (`pickRun`, `orderRun`);
 // Check grades it, a wrong answer shows the correction, and an order check replays the right path along the links.
 // Esc (`brief` layer) closes it and keeps its step. `map-model.ts` holds the logic: `briefPlayer`, `briefCamera`, `figureShapes`.
+// A part catch-up (#391) plays in the same reader (`openCatchUpOf`): one story of a fogged part, under a negative number of its own (one per
+// fog list, `catchUpIds`) so the player keeps its step apart from the PR briefs and from an older story of the part; read to its end it
+// clears the part's fog (`part_catch_up_done`) and completes no brief.
 
 import { failure, invoke, text } from "./dom.js";
 import { currentMap, currentScrub, giveCameraBack, lendCamera, onDraw, registerLayer, type MapView } from "./map.js";
 import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { watchSeen } from "./seen.js";
 import { logStop } from "./stop-rules.js";
+import { expectedLine } from "./map-pre-flight.js";
 import { scrubTo } from "./map-history.js";
 import { overturnNote, ratifyActions } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
-import { actorSize, alsoAt, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureShapes, figureSize, latestRequest, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
-import type { BriefCheck, BriefStep, BriefView, PrBrief, RatifyRow, ReadyPr } from "./types.js";
+import { type Bar, explainsBack, storyBar } from "./story-bar.js";
+import { actorSize, alsoAt, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
+import type { BriefCheck, BriefStep, BriefView, PrBrief, RatifyRow, ReadyPr, StoredCatchUp } from "./types.js";
 
 const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
 // The brief being played, as `pr_brief` returned it.
 let playing: BriefView | null = null;
+// The part catch-up being played: its part and the fog list it covers; null while a PR brief plays.
+let catchUp: { part: string; fog: string[]; summary?: StoredCatchUp["summary"] } | null = null;
+// Each part's catch-up plays under a negative number of its own, which no PR has.
+const catchUpId = catchUpIds();
+// A stop event's PR: none for a part catch-up.
+const prOf = (pr: number) => (pr < 0 ? null : pr);
 // What the brief offers for accept or overturn (`ratify.rs`), read when it opens; a decision updates its row at once.
 let ratifying: RatifyRow[] = [];
 // What stopped a row from opening, shown in its place until the next try.
@@ -47,6 +58,9 @@ let watching: (() => void) | null = null;
 // The "not confirmed from the facts" marks shown, watched until seen or the brief closes (#346).
 let marks: (() => void)[] = [];
 const stopWatching = () => (watching?.(), (watching = null));
+// The end-of-story bar of each chapter played since the brief opened (#393), kept so a redraw keeps what is typed; a reopened brief starts
+// them empty.
+const bars = new Map<string, Bar>();
 function gateOf(): Gate | null {
   const now = player.current();
   if (!now || !playing) return null;
@@ -55,7 +69,13 @@ function gateOf(): Gate | null {
   if (!gate) {
     const { project, pr, chapter } = now;
     const head = playing.brief.head;
+    const caught = catchUp;
     gate = chapterGate(storySteps(steps()), () => {
+      if (caught) {
+        logStop("catch-up-done", project);
+        void invoke("part_catch_up_done", { project, part: caught.part, fog: caught.fog }).catch(failure("part_catch_up_done"));
+        return;
+      }
       logStop("chapter-done", project, pr);
       void invoke("brief_chapter_done", { project, number: pr, chapter, head }).catch(failure("brief_chapter_done"));
     });
@@ -82,6 +102,7 @@ let awaiting: { project: string; number: number; chapter: number; wanted: () => 
 export async function openBriefOf(project: string, number: number, chapter: number) {
   problems.delete(number);
   awaiting = null;
+  awaitingCatchUp = null;
   const wanted = latest.begin();
   let got: BriefView | { writing: true } | null;
   // An answer that takes a moment shows "Writing the brief…" too.
@@ -108,7 +129,7 @@ export async function openBriefOf(project: string, number: number, chapter: numb
   if (!got || !view || view.project !== project) {
     if (!got && !problems.has(number)) problems.set(number, "the brief is not written yet");
     // The tray says why, in the row's place of its note, until the map is drawn again.
-    const note = document.querySelector(`#map-tray .tray-row[data-pr="${number}"] .tray-note`);
+    const note = number === null ? null : document.querySelector(`#map-tray .tray-row[data-pr="${number}"] .tray-note`);
     if (note && problems.has(number)) note.textContent = problems.get(number)!;
     return;
   }
@@ -128,15 +149,74 @@ export async function openBriefOf(project: string, number: number, chapter: numb
   show(view, false);
 }
 
+// Opens `part`'s catch-up: the stored one for its current fog, or, while it is written, the panel says "Writing the part catch-up…", the map
+// stays usable, and it opens when it lands (`map-landed` draws the map again), unless another open or a close came since.
+let awaitingCatchUp: { project: string; part: string; wanted: () => boolean } | null = null;
+export async function openCatchUpOf(project: string, part: string) {
+  awaiting = null;
+  awaitingCatchUp = null;
+  const wanted = latest.begin();
+  const writing = "Writing the part catch-up…";
+  // A catch-up has no tray row for the wait to mark.
+  const slow = window.setTimeout(() => wanted() && showWriting(null, writing), WRITING_AFTER_MS);
+  let got: StoredCatchUp | { writing: true } | null;
+  try {
+    got = await invoke("part_catch_up", { project, part });
+  } catch (e) {
+    if (wanted()) failure("part_catch_up")(e);
+    got = null;
+  }
+  clearTimeout(slow);
+  if (!wanted()) return;
+  if (got && "writing" in got) {
+    awaitingCatchUp = { project, part, wanted };
+    showWriting(null, writing);
+    return;
+  }
+  if (!briefOpen()) hideWriting();
+  const view = currentMap();
+  if (!got || !view || view.project !== project) return;
+  if (briefOpen()) closeBrief();
+  // A catch-up rewritten for a new fog list is another story, with a number of its own, so it starts at its first step.
+  const id = catchUpId(project, part, got.fog);
+  // The reader plays it as a single story; there is nothing to ratify.
+  playing = { brief: { version: got.version, pr: id, head: got.fog.join(","), written_at: got.written_at, stale: false, model: got.model, brief: got.brief }, partial: got.partial };
+  catchUp = { part, fog: got.fog, summary: got.summary };
+  ratifying = [];
+  logStop("catch-up-opened", project);
+  if (view.state.stale?.[part]) logStop("stale-entered", project);
+  if (!resizing) {
+    resizing = true;
+    addEventListener("resize", onResize);
+  }
+  closeDrawer();
+  player.open(project, id, 0);
+  show(view, false);
+}
+onDraw((view) => {
+  if (!awaitingCatchUp || view.scrub) return;
+  if (!awaitingCatchUp.wanted() || view.project !== awaitingCatchUp.project) {
+    awaitingCatchUp = null;
+    if (!briefOpen()) hideWriting();
+    return;
+  }
+  const { project, part } = awaitingCatchUp;
+  const next = awaitedCatchUp(view.state.catch_ups?.[part]);
+  if (next === "wait") return;
+  awaitingCatchUp = null;
+  if (next === "open") void openCatchUpOf(project, part);
+  else if (!briefOpen()) hideWriting();
+});
+
 // The panel says so while a brief is written for an open: after this long, so a stored brief never flashes it.
 const WRITING_AFTER_MS = 300;
-function showWriting(number: number) {
+function showWriting(number: number | null, words = "Writing the brief…") {
   if (briefOpen()) return;
   const box = panel();
-  box.replaceChildren(text("p", "Writing the brief…", "brief-writing"));
+  box.replaceChildren(text("p", words, "brief-writing"));
   box.classList.add("open");
   box.hidden = false;
-  const note = document.querySelector(`#map-tray .tray-row[data-pr="${number}"] .tray-note`);
+  const note = number === null ? null : document.querySelector(`#map-tray .tray-row[data-pr="${number}"] .tray-note`);
   if (note) note.textContent = `#${number} · writing the brief…`;
 }
 function hideWriting() {
@@ -185,7 +265,9 @@ export function closeBrief() {
   marks = [];
   player.close();
   playing = null;
+  catchUp = null;
   ratifying = [];
+  bars.clear();
   stopLight();
   const view = currentMap();
   panel().hidden = true;
@@ -376,7 +458,7 @@ function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["als
   const part = (id: string) => partName(view, id);
   const words = text("div", "", "brief-txt");
   const kick = text("div", "", "brief-kick");
-  kick.append(text("span", `#${pr}`), text("span", step.k));
+  kick.append(text("span", pr < 0 ? "Part catch-up" : `#${pr}`), text("span", step.k));
   const tag = lawTag(view, step);
   if (tag) kick.append(tag);
   words.append(kick, text("h3", step.h, "brief-title"), text("p", step.b, "brief-body"));
@@ -388,7 +470,7 @@ function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["als
   if (unconfirmed(step)) {
     const mark = text("p", "not confirmed from the facts", "brief-quiet brief-unconfirmed");
     mark.title = step.flags.join("\n");
-    marks.push(watchSeen(mark, { active: () => mark.isConnected && panel().classList.contains("open"), onSeen: () => logStop("unconfirmed-seen", view.project, pr) }));
+    marks.push(watchSeen(mark, { active: () => mark.isConnected && panel().classList.contains("open"), onSeen: () => logStop("unconfirmed-seen", view.project, prOf(pr)) }));
     words.append(mark);
   }
   if (also.length) {
@@ -414,6 +496,19 @@ function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["als
     cols.append(figure);
   }
   return cols;
+}
+
+// A long part catch-up's first step says it summarises the main shifts, with the full fog list behind it (#396).
+function summaryInto(node: HTMLElement) {
+  const summary = catchUp?.summary;
+  const words = node.querySelector(".brief-txt");
+  if (!summary || !words) return;
+  const list = text("details", "", "brief-cites brief-fog-list");
+  const open = text("summary", `The full fog list (${summary.entries.length})`);
+  open.title = "Show every PR and push this catch-up covers";
+  list.append(open);
+  for (const line of fogListLines(summary.entries)) list.append(text("p", line, "brief-cite"));
+  words.append(text("p", summary.line, "brief-quiet brief-summarises"), list);
 }
 
 // The items to ratify, each with where it stands; a not yet ratified one has Accept and Overturn.
@@ -561,7 +656,7 @@ function wireTaps(view: MapView) {
 // A check was graded, right or wrong.
 const answeredCheck = () => {
   const now = player.current();
-  if (now) logStop("check-answered", now.project, now.pr);
+  if (now) logStop("check-answered", now.project, prOf(now.pr));
 };
 
 // Check on a check: graded, its right answer shown, and an order check's right path replayed along the links.
@@ -626,7 +721,10 @@ function show(view: MapView, same: boolean) {
   const also = alsoAt(playing.brief.brief, now.chapter, now.step, storySteps(list).length);
   const fill = () => {
     const node = stepNode(view, step, pr, also);
+    if (now.step === 0) summaryInto(node);
+    const bar = endBar(node, now.step, list.length);
     cols.replaceChildren(node);
+    bar?.offer();
     watchLast(node, now.step);
   };
   clearTimeout(swap);
@@ -638,7 +736,8 @@ function show(view: MapView, same: boolean) {
   }
   box.querySelectorAll(".brief-dots i").forEach((dot, i) => dot.classList.toggle("at", i === now.step));
   const code = box.querySelector<HTMLButtonElement>(".brief-code")!;
-  code.hidden = false;
+  // A part catch-up has no one PR's code to show.
+  code.hidden = catchUp !== null;
   (box.querySelector(".brief-back") as HTMLButtonElement).disabled = now.step === 0;
   if (step.check) runOf(view, step.check);
   syncNext(step);
@@ -646,6 +745,33 @@ function show(view: MapView, same: boolean) {
   light(view, step);
   paintOrder(view, step);
   aim(view, step);
+}
+
+// The end-of-story bar ends the played list's last step: a single story's end, or a chapter's (#393). It goes under the step's words.
+function endBar(node: HTMLElement, index: number, count: number): Bar | null {
+  const now = player.current();
+  if (!now || index !== count - 1) return null;
+  const key = `${now.project}|${now.pr}|${now.chapter}`;
+  let bar = bars.get(key);
+  // A part catch-up's bar is keyed by its part (#391).
+  const about = catchUp ? { project: now.project, part: catchUp.part } : { project: now.project, pr: now.pr, chapter: now.chapter };
+  if (!bar) bars.set(key, (bar = storyBar(about, gistOf(now.chapter))));
+  node.querySelector(".brief-txt")?.append(bar.node);
+  return bar;
+}
+
+// The gist the bar's explain-back compares with (#397): the chapter's, or the part catch-up's one story's, when one of its parts is Core
+// under Daniel's tiers now; none otherwise, so only a Core part's story offers explain-back.
+function gistOf(chapter: number): string | undefined {
+  const view = currentMap();
+  const story = playing?.brief.brief.chapters[chapter];
+  if (!view || !story) return undefined;
+  const parts = catchUp ? [catchUp.part] : [...story.parts, ...story.steps.flatMap((step) => step.on)];
+  const tierOf = (id: string) => {
+    const part = view.doc.parts.find((each) => each.id === id);
+    return part ? effectiveTier(part, view.state.user.tiers) : "";
+  };
+  return explainsBack(story.gist, parts, tierOf) ? story.gist : undefined;
 }
 
 // The panel's frame, built once per brief: it keeps the height of its tallest step, so it never jumps.
@@ -679,13 +805,18 @@ function buildPanel(view: MapView, list: BriefStep[], pr: number) {
   next.addEventListener("click", () => advance());
   const foot = text("div", "", "brief-foot");
   foot.append(dots, partial, code, back, next);
-  box.replaceChildren(leave, cols, foot);
+  // A PR that closes the pre-flighted issue, or a ticket under it (#394): what Daniel expected against what it touched.
+  const line = expectedLine(playing?.expected, view.doc);
+  box.replaceChildren(leave, ...(line ? [text("p", line, "brief-expected")] : []), cols, foot);
   // One height for the whole brief: its tallest step's.
   box.hidden = false;
   let tallest = 0;
   const now = player.current();
   list.forEach((step, i) => {
-    cols.replaceChildren(stepNode(view, step, pr, playing && now ? alsoAt(playing.brief.brief, now.chapter, i, storySteps(list).length) : []));
+    const node = stepNode(view, step, pr, playing && now ? alsoAt(playing.brief.brief, now.chapter, i, storySteps(list).length) : []);
+    if (i === 0) summaryInto(node);
+    endBar(node, i, list.length);
+    cols.replaceChildren(node);
     tallest = Math.max(tallest, box.offsetHeight);
   });
   box.style.minHeight = `${tallest}px`;

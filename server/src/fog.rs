@@ -134,20 +134,30 @@ pub fn effective(user: &UserState, source: &str) -> BTreeMap<String, Strength> {
 
 /// Whether a part whose effective tier is Core shows fog: the project header's quiet dot.
 pub fn core_fogged(user: &UserState, source: &str) -> bool {
+    !core_fogged_parts(user, source).is_empty()
+}
+
+/// The parts whose effective tier is Core and that show fog, in the map's order.
+pub fn core_fogged_parts(user: &UserState, source: &str) -> Vec<String> {
     let shown = effective(user, source);
     let Ok(map) = serde_json::from_str::<Value>(source) else {
-        return false;
+        return vec![];
     };
-    map["parts"].as_array().into_iter().flatten().any(|part| {
-        let id = part["id"].as_str().unwrap_or_default();
-        let tier = user
-            .tiers
-            .get(id)
-            .map(String::as_str)
-            .or(part["tier"].as_str())
-            .unwrap_or("core");
-        shown.contains_key(id) && tier == "core"
-    })
+    map["parts"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|part| {
+            let id = part["id"].as_str().unwrap_or_default();
+            let tier = user
+                .tiers
+                .get(id)
+                .map(String::as_str)
+                .or(part["tier"].as_str())
+                .unwrap_or("core");
+            (shown.contains_key(id) && tier == "core").then(|| id.to_string())
+        })
+        .collect()
 }
 
 /// The items of `map[key]` as a list, empty when the key is missing.
@@ -317,7 +327,7 @@ pub fn refresh(repo: &Path, file: &Path, project: &str, open: bool) -> Result<()
 }
 
 /// The PR a squash-merge commit came from, read from its subject `Title (#N)`.
-fn subject_pr(repo: &Path, commit: &str) -> Option<u64> {
+pub(crate) fn subject_pr(repo: &Path, commit: &str) -> Option<u64> {
     let subject = git(repo, &["log", "-1", "--format=%s", commit]).ok()?;
     let (_, number) = subject.trim_end().strip_suffix(')')?.rsplit_once(" (#")?;
     number.parse().ok()
@@ -435,6 +445,11 @@ pub fn mark_read(
             read.chapters.clear();
             read.lit = lit;
         }
+        // Staleness keeps the read's time too, which a rewritten brief's cleared reads would lose (#392).
+        for part in read.lit.get(chapter).cloned().unwrap_or_default() {
+            crate::staleness::touch(u, &part, crate::staleness::Activity::Chapter, at);
+        }
+        let read = u.fog.reads.entry(pr).or_default();
         read.chapters.insert(
             chapter,
             ChapterRead {

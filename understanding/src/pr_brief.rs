@@ -53,7 +53,7 @@ const LEAKS: &[&str] = &[
     "not shown here",
 ];
 /// Room kept for the "DIFF NOT SENT" section.
-const CUT_NOTE_ROOM: usize = 4096;
+pub(crate) const CUT_NOTE_ROOM: usize = 4096;
 
 // ---------------------------------------------------------------------------------------------------------------
 // The source: what git and gh give, as plain data.
@@ -84,6 +84,9 @@ pub struct PrMeta {
     /// One "name conclusion" line per check.
     pub checks: Vec<String>,
     pub spec: Option<Spec>,
+    /// Every issue the PR closes, lowest first; `spec` is the lowest of them (ticket #394).
+    #[serde(default)]
+    pub closing: Vec<u64>,
 }
 
 /// A test that carries a `@law:` tag.
@@ -272,6 +275,13 @@ pub struct Chapter {
     pub steps: Vec<Step>,
     #[serde(default)]
     pub flags: Vec<String>,
+    /// The chapter's story in one sentence (#397), on a chapter that lights a Core part only; Daniel's explain-back is compared with
+    /// it. Empty on any other chapter, and in a brief written before it existed.
+    #[serde(default)]
+    pub gist: String,
+    /// What the code checks and the claim check found wrong with the gist; a retry can rewrite it.
+    #[serde(default)]
+    pub gist_flags: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -321,6 +331,11 @@ impl Brief {
     pub fn flagged(&self) -> usize {
         self.steps().filter(|s| !s.flags.is_empty()).count()
             + self.chapters.iter().filter(|c| !c.flags.is_empty()).count()
+            + self
+                .chapters
+                .iter()
+                .filter(|c| !c.gist_flags.is_empty())
+                .count()
             + self.also.iter().filter(|a| !a.flags.is_empty()).count()
             + self
                 .decisions
@@ -338,6 +353,11 @@ impl Brief {
                 c.flags
                     .iter()
                     .map(|f| format!("chapter {}: {f}", c.behaviour)),
+            );
+            out.extend(
+                c.gist_flags
+                    .iter()
+                    .map(|f| format!("gist {}: {f}", c.behaviour)),
             );
         }
         for (i, s) in self.overview.iter().enumerate() {
@@ -397,6 +417,9 @@ pub struct CheckContext {
     /// The spec was created the same day as the PR: its "Not in the plan" step comes first in its chapter.
     #[serde(default)]
     pub spec_same_day: bool,
+    /// The Core parts, by Daniel's effective tiers (#397): a chapter that lights one carries a gist, any other chapter none.
+    #[serde(default)]
+    pub core: Vec<String>,
 }
 
 /// How the budget was spent, for the record.
@@ -437,17 +460,19 @@ pub struct Facts {
     pub shape: Shape,
     pub budget: BudgetRecord,
     pub context: CheckContext,
+    /// The writer's instructions when they are not the PR brief's (a part catch-up's, `part_catch_up.rs`).
+    pub instructions: Option<String>,
 }
 
-struct FileDiff {
-    path: String,
-    header: String,
-    hunks: Vec<String>,
-    added: usize,
-    removed: usize,
+pub(crate) struct FileDiff {
+    pub(crate) path: String,
+    pub(crate) header: String,
+    pub(crate) hunks: Vec<String>,
+    pub(crate) added: usize,
+    pub(crate) removed: usize,
 }
 
-fn split_diff(diff: &str) -> Vec<FileDiff> {
+pub(crate) fn split_diff(diff: &str) -> Vec<FileDiff> {
     let mut files = Vec::new();
     for chunk in diff.split("\ndiff --git ").filter(|c| !c.is_empty()) {
         let chunk = chunk.strip_prefix("diff --git ").unwrap_or(chunk);
@@ -537,11 +562,11 @@ pub fn trim_spec(body: &str) -> String {
     out
 }
 
-fn section(name: &str, text: &str) -> String {
+pub(crate) fn section(name: &str, text: &str) -> String {
     format!("=== {name} ===\n{}\n\n", text.trim_end())
 }
 
-fn ids(map: &serde_json::Value, key: &str) -> BTreeSet<String> {
+pub(crate) fn ids(map: &serde_json::Value, key: &str) -> BTreeSet<String> {
     map[key]
         .as_array()
         .into_iter()
@@ -551,7 +576,7 @@ fn ids(map: &serde_json::Value, key: &str) -> BTreeSet<String> {
 }
 
 /// `text` cut to `max` bytes at a character boundary, with a note of what was cut.
-fn cut_to(text: &str, max: usize) -> String {
+pub(crate) fn cut_to(text: &str, max: usize) -> String {
     if text.len() <= max {
         return text.to_string();
     }
@@ -562,7 +587,7 @@ fn cut_to(text: &str, max: usize) -> String {
 /// The parts a flow's hops run through, each once, in the order the flow first reaches it; actors are left out. A hop
 /// that leaves the part the flow is at through a link's `to` end is read backwards. A part the flow revisits is not
 /// repeated: an order check taps each part once, so a key that repeated one could not be answered.
-fn flow_key(
+pub(crate) fn flow_key(
     map: &serde_json::Value,
     flow: &serde_json::Value,
     parts: &BTreeSet<String>,
@@ -677,6 +702,25 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
         .collect();
     let overview = chapters_mode && !flows_changed.is_empty();
     let also = quiet;
+    // The map's Core parts under Daniel's tiers: a chapter lighting one carries a gist (#397).
+    let core: Vec<String> = all_parts
+        .iter()
+        .filter(|id| {
+            source
+                .tier_overrides
+                .get(*id)
+                .map_or_else(|| part_json(id)["tier"] == "core", |tier| tier == "core")
+        })
+        .cloned()
+        .collect();
+    let core_text = format!(
+        "\ncore parts (a chapter lighting one carries a gist): {}",
+        if core.is_empty() {
+            "none".to_string()
+        } else {
+            core.join(", ")
+        }
+    );
     let also_text = if also.is_empty() {
         "none".to_string()
     } else {
@@ -698,6 +742,7 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
             required.join(", "),
         )
     };
+    let shape_text = shape_text + &core_text;
 
     // The tagged tests, and whether this PR's diff changed one.
     let mut tagged = source.tagged.clone();
@@ -1026,12 +1071,14 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
         flows_changed: flow_keys,
         tagged,
         spec_same_day,
+        core,
     };
     Ok(Facts {
         text,
         shape,
         budget,
         context,
+        instructions: None,
     })
 }
 
@@ -1059,7 +1106,7 @@ Reply with ONE JSON object and nothing else:
 {
   "title": "a plain title, at most 9 words",
   "overview": [ step, ... ],   only when SHAPE says an overview: at most 2 steps that run the changed flow's hops; the flow's order check, if any, is its last step
-  "chapters": [ { "behaviour": "the behaviour, at most 4 words (or \"story\" for a single story)", "parts": [ "part ids this chapter covers" ], "title": "at most 6 words", "steps": [ step, ... ] } ],
+  "chapters": [ { "behaviour": "the behaviour, at most 4 words (or \"story\" for a single story)", "parts": [ "part ids this chapter covers" ], "title": "at most 6 words", "gist": "only on a chapter that lights a Core part (SHAPE's core parts); leave it out on any other: the chapter's whole story in ONE plain sentence, at most 30 words, that the owner could say back from memory; it says only what the chapter's steps say", "steps": [ step, ... ] } ],
   "also": [ { "part": "part id from SHAPE's also-touched list, or a required part no chapter could light", "line": "one line, what changed in it" } ],
   "unseen": [ "a gap you noticed in the facts" ],
   "decisions": [ { "id": "the id of the same decision in EARLIER DECISIONS, when there is one; else leave it out", "text": "a decision the agent made that the owner may want to accept or overturn, one sentence, from the PR body or spec" } ]
@@ -1100,7 +1147,8 @@ Checks (at most one per brief; omit when none fits):
 
 /// The prompt for `facts`.
 pub fn prompt(facts: &Facts) -> String {
-    format!("{INSTRUCTIONS}\nFACTS\n\n{}", facts.text)
+    let instructions = facts.instructions.as_deref().unwrap_or(INSTRUCTIONS);
+    format!("{instructions}\nFACTS\n\n{}", facts.text)
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -1451,6 +1499,37 @@ pub fn put_plan_first(brief: &mut Brief, ctx: &CheckContext) -> Vec<usize> {
     moved
 }
 
+/// The longest gist, in words.
+const GIST_WORDS: usize = 30;
+
+/// A chapter lighting a Core part (declared or lit) must carry a one-sentence gist; any other chapter's gist is dropped (#397).
+fn check_gist(c: &mut Chapter, ctx: &CheckContext) {
+    c.gist_flags.clear();
+    let core = c
+        .parts
+        .iter()
+        .chain(c.steps.iter().flat_map(|s| &s.on))
+        .any(|p| ctx.core.contains(p));
+    c.gist = c.gist.trim().to_string();
+    if !core {
+        c.gist.clear();
+        return;
+    }
+    let gist = c.gist.clone();
+    if gist.is_empty() {
+        c.gist_flags.push("a Core chapter without a gist".into());
+        return;
+    }
+    if words(&gist) > GIST_WORDS {
+        c.gist_flags.push(format!("gist {} words", words(&gist)));
+    }
+    let body = gist.trim_end_matches(['.', '!', '?']);
+    if body.contains(". ") || body.contains("! ") || body.contains("? ") {
+        c.gist_flags.push("gist of more than one sentence".into());
+    }
+    prose_flags(&gist, ctx, &mut c.gist_flags);
+}
+
 pub fn check_brief(brief: &mut Brief, ctx: &CheckContext) -> usize {
     let facts_norm = norm_quote(&ctx.facts);
     brief.flags.clear();
@@ -1496,6 +1575,7 @@ pub fn check_brief(brief: &mut Brief, ctx: &CheckContext) -> usize {
         }
         lit_by_chapters.extend(c.steps.iter().flat_map(|s| s.on.iter().cloned()));
         c.flags = f;
+        check_gist(c, ctx);
     }
     for r in &ctx.required {
         if !lit_by_chapters.contains(r) {
@@ -1913,6 +1993,19 @@ pub fn gather(repo: &Path, base: &str, head: &str, meta: PrMeta) -> Result<PrSou
     })
 }
 
+/// Every issue a PR closes, from `gh pr view --json closingIssuesReferences`, lowest first (ticket #394: pre-flight matches through each).
+pub fn closing_numbers(v: &serde_json::Value) -> Vec<u64> {
+    let mut numbers: Vec<u64> = v["closingIssuesReferences"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|i| i["number"].as_u64())
+        .collect();
+    numbers.sort_unstable();
+    numbers.dedup();
+    numbers
+}
+
 /// What `gh` says of PR `number` in `repo`: its text, head, checks and the lowest-numbered issue it closes.
 /// Calls `gh` as a normal user, nothing else.
 pub fn fetch_meta(repo: &Path, number: u64) -> Result<PrMeta, String> {
@@ -1971,6 +2064,7 @@ pub fn fetch_meta(repo: &Path, number: u64) -> Result<PrMeta, String> {
         created_at: v["createdAt"].as_str().unwrap_or("").into(),
         checks,
         spec,
+        closing: closing_numbers(&v),
     })
 }
 

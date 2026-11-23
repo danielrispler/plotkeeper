@@ -271,6 +271,18 @@ _Avoid_: Open PR (a draft is open too), review requested
 To accept or overturn a change the agent made to the system map or a law, or a decision it declared, offered in the **PR brief**. A map change nobody has decided on is **not yet ratified**; it is in effect all the same, since ratifying never blocks. Overturning copies a prompt that quotes the item to the clipboard, for Daniel to paste into his agent.
 _Avoid_: Approve (that is the PR review), sign off
 
+**Part catch-up**:
+One story, in the **PR brief**'s reader and shape (a single story of three or four steps), of everything that landed in one fogged part since Daniel last caught up: every PR and direct push in its **Fog**, ordered by behaviour. A fogged part's sheet offers it as the main button, before "I know this"; reading it to the end clears that part's fog and completes no PR brief.
+_Avoid_: Catch-up (alone — the setting that writes briefs at start is the brief backfill), summary
+
+**Gist**:
+One plain sentence the writer adds to each chapter of a **PR brief** that lights a Core part, and to each **Part catch-up**: the story's whole point, as Daniel could say it back. It is checked by code and by the **Claim check** like every other item, and shown only after **Explain-back**.
+_Avoid_: Summary, tl;dr, takeaway
+
+**Explain-back**:
+The optional one-line field in the end-of-story bar of a Core part's story: Daniel says the story back, then sees its **Gist** under his line and marks himself got it, partly or missed. It measures his understanding, as the rating measures the explanation; neither is ever shown as a number.
+_Avoid_: Quiz, test, recall score
+
 **Claim check**:
 The second sandboxed call that checks each claim of a **PR brief** against the same facts the writer had. An item still flagged after one rewrite carries the mark **not confirmed from the facts**.
 _Avoid_: Fact check, verification
@@ -278,6 +290,10 @@ _Avoid_: Fact check, verification
 **Background run**:
 A headless agent run with scoped tools that plotkeeper starts on Daniel's click, inside Claude Code's OS sandbox, queued one at a time per project and cancellable from the map. It is not a session and has no terminal. [Background runs](behaviour/background-runs.md) has the rules.
 _Avoid_: Session, job, a check sent to the background (a check an agent backgrounds inside its own session)
+
+**Pre-flight**:
+Before work starts, the parts of the **System map** it will likely cross, framed on the map as *predicted*: from an open issue or one or two lines (named by the no-tools writer) or picked by hand. A **PR brief** of a PR that closes the pre-flighted issue, or a ticket under it, says what was expected against what the PR touched. [The system map](behaviour/map.md) has the rules.
+_Avoid_: Plan, forecast, estimate (an **Estimate** is of a task's size)
 
 **Seen**:
 In the viewport (intersecting visibly, not merely built in the DOM), in a visible and focused window, with the view that holds it open. Used for PR brief rows and stop-rule counts.

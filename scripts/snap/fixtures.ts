@@ -1,7 +1,7 @@
 // Studio state for `npm run snap`: each fixture maps a Tauri command to what it returns.
 // A fixture is a function so that its times are relative to the moment it renders.
 
-import type { BriefChapter, BriefFigure, BriefStep, BriefView, Ci, LogEntry, MapState, PrBrief, RatifyRow, Session, SessionState, Subagent } from "../../ui/types.ts";
+import type { BriefChapter, BriefFigure, BriefStep, BriefView, Ci, LogEntry, MapState, PrBrief, RatifyRow, Session, SessionState, StoredCatchUp, Subagent } from "../../ui/types.ts";
 import { base, type ByArg, type Fixture } from "./base.ts";
 import { railFixtures } from "./rail-fixtures.ts";
 
@@ -115,7 +115,7 @@ const at = (x: number, y: number): [number, number] => [x, y];
 const mapState = (extra: Partial<MapState> = {}): MapState => ({
   project: "/w/plotkeeper", status: "loaded", source: mapFile, reference: "origin/main", commit: "35745b1693c5d061e5aea891e98a58515942a12d", note: null,
   user: { tiers: {}, positions: { core: at(620, 190), understanding: at(980, 290), plugins: at(300, 430), hook: at(580, 430), shell: at(880, 440), window: at(1180, 560), daemon: at(760, 690), workbench: at(480, 650), agents: at(110, 430), writer: at(1400, 190), github: at(250, 650) } },
-  fog: {}, ci: null, ready: [], ratify: [], runs: { paused: null, runs: [] },
+  fog: {}, ci: null, ready: [], ratify: [], runs: { paused: null, runs: [] }, stale: {}, catch_ups: {},
   ...extra,
 });
 // The Ready for review tray (#336) with two ready PRs, at the Map view's foot.
@@ -164,6 +164,32 @@ const mapRuns = (): Fixture =>
       },
     }),
     snapDone: "runs ok",
+  });
+// Pre-flight (#394) of spec #378: Core and Understanding framed on the map as predicted, and the overlay listing each with its laws on trust,
+// its fog and its staleness band, opened from the map's Pre-flight button.
+const mapPreFlight = (): Fixture =>
+  mapOpened(`
+      const predicted = [...document.querySelectorAll(".plate.predicted")].map((plate) => plate.dataset.id);
+      if (predicted.join(",") !== "core,understanding") return log("snap:fail the predicted plates: " + predicted.join(","));
+      if (!document.querySelector('.plate[data-id="core"] .plate-predicted')?.textContent.includes("predicted")) log("snap:fail the plate has no predicted chip");
+      document.getElementById("pre-flight-button").click();
+      // Past the glass's rise, so the overlay is drawn whole.
+      await wait(600);
+      const box = document.getElementById("map-pre-flight");
+      if (box.hidden) return log("snap:fail the pre-flight did not open");
+      if (!box.textContent.includes("#378 Studio: Spec: the modules")) log("snap:fail the issue: " + box.textContent);
+      const rows = [...box.querySelectorAll(".pre-flight-row")];
+      if (rows.length !== 2) return log("snap:fail expected 2 rows, saw " + rows.length);
+      if (!rows[0].textContent.includes("On trust: Events apply in order.") || rows[0].textContent.includes("The core reads no file")) log("snap:fail the core's laws: " + rows[0].textContent);
+      if (!rows[1].textContent.includes("fog: laws, links or flows changed")) log("snap:fail the understanding's fog: " + rows[1].textContent);
+      if (!rows[0].textContent.includes("weeks or more ago")) log("snap:fail the core's staleness band: " + rows[0].textContent);
+      log("pre-flight ok");`, {
+    map_state: mapState({
+      fog: { understanding: "thick" },
+      stale: { core: 1 },
+      pre_flight: { issue: 378, title: "Studio: Spec: the modules", parts: ["core", "understanding"], predicted: true, at: runAt },
+    }),
+    snapDone: "pre-flight ok",
   });
 // The queues paused by a login failure: the one indicator with Resume, over the run that failed and the one that waits.
 const mapRunsPaused = (): Fixture =>
@@ -361,6 +387,71 @@ const mapBriefRatify = (): Fixture => ({
       log("ratify ok");`, false, 100),
   pr_ratify: ratifyRows,
 });
+// The end-of-story bar (#393) under the story's last step: 4 picked by its key, an "s" typed in the note that does not skip, the note kept by
+// Enter; each is sent to the shell, and no rating is shown back once the brief is opened again. The screenshot is the bar after the note.
+const mapBriefBar = (): Fixture =>
+  mapBrief(briefOf(storySteps()), 3, `
+      const sent = [];
+      const real = window.fetch;
+      window.fetch = (url, init) => (sent.push(String(url) + " " + (init?.body ?? "")), real(url, init));
+      const bar = () => document.querySelector("#map-brief .story-bar");
+      if (!bar() || bar().hidden) return log("snap:fail no end-of-story bar on the story's last step");
+      const key = (target, k) => target.dispatchEvent(new KeyboardEvent("keydown", { key: k, code: /^[0-9]$/.test(k) ? "Digit" + k : "Key" + k.toUpperCase(), bubbles: true }));
+      key(document, "4");
+      await wait(50);
+      const pressed = [...bar().querySelectorAll(".bar-rate")].filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.textContent);
+      if (pressed.join() !== "4") log("snap:fail the 4 key did not rate: " + pressed.join());
+      const note = bar().querySelector(".bar-note");
+      note.focus();
+      key(note, "s");
+      await wait(50);
+      if (bar().hidden) return log("snap:fail an s typed in the note skipped the bar");
+      note.value = "The second step lost me.";
+      key(note, "Enter");
+      await wait(50);
+      if (!bar().querySelector(".bar-kept")) log("snap:fail Enter did not keep the note");
+      const bars = sent.filter((call) => call.includes("/api/story_bar")).map((call) => JSON.parse(call.slice(call.indexOf(" ") + 1)));
+      const kinds = bars.map((b) => b.kind + (b.rating ? ":" + b.rating : "") + (b.note ? ":" + b.note : "")).join();
+      if (kinds !== "rating-given:4,note-given:The second step lost me.") log("snap:fail the bar sent " + kinds);
+      if (bars.some((b) => b.project !== "/w/plotkeeper" || b.about.pr !== 334 || b.about.chapter !== 0)) log("snap:fail the bar's key: " + JSON.stringify(bars[0]));
+      if (["of 5", "/5", "/ 5"].some((score) => bar().textContent.includes(score))) log("snap:fail the bar shows a score");
+      if (bar().querySelector(".bar-explain")) log("snap:fail explain-back on a story with no gist");`, false, 100);
+// Explain-back (#397): the same story, its chapter carrying a gist and lighting Core parts, ends with the one-line field in the bar's first
+// row, above the rating. Before submit, an "s" and a "2" typed in the line neither skip nor rate, and the gist is not shown yet. After
+// submit (Enter), the line shows with the gist under it and the three marks; Partly is pressed. Each is sent to the shell; no number shows.
+const explainGist = "A ready PR's brief is written in the background and played on the map, and reading a chapter clears its parts' fog.";
+const mapBriefExplainBack = (submit: boolean): Fixture =>
+  mapBrief(briefOf(storySteps(), false, { chapters: [{ ...brief(storySteps()).chapters[0], gist: explainGist }] }), 3, `
+      const sent = [];
+      const real = window.fetch;
+      window.fetch = (url, init) => (sent.push(String(url) + " " + (init?.body ?? "")), real(url, init));
+      const bar = () => document.querySelector("#map-brief .story-bar");
+      const line = bar()?.querySelector(".bar-slot .bar-explain .bar-line");
+      if (!line) return log("snap:fail no explain-back line on a Core story with a gist");
+      if (bar().firstElementChild.className !== "bar-slot") log("snap:fail explain-back is not the bar's first row");
+      if (bar().textContent.includes(${JSON.stringify(explainGist)})) log("snap:fail the gist shows before the line is given");
+      const key = (target, k) => target.dispatchEvent(new KeyboardEvent("keydown", { key: k, code: /^[0-9]$/.test(k) ? "Digit" + k : "Key" + k.toUpperCase(), bubbles: true }));
+      line.focus();
+      key(line, "s");
+      key(line, "2");
+      await wait(50);
+      if (bar().hidden) return log("snap:fail an s typed in the line skipped the bar");
+      if (bar().querySelector('.bar-rate[aria-pressed="true"]')) log("snap:fail a 2 typed in the line rated");
+      line.value = "Briefs get written in the background and reading one clears the fog.";
+      ${submit ? `key(line, "Enter");
+      await wait(50);
+      const said = bar().querySelector(".bar-said");
+      if (said?.textContent !== line.value) log("snap:fail the line is not shown after submit: " + said?.textContent);
+      if (!bar().querySelector(".bar-gist")?.textContent.includes(${JSON.stringify(explainGist)})) log("snap:fail the gist is not shown under the line");
+      const marks = [...bar().querySelectorAll(".bar-mark")];
+      if (marks.map((m) => m.textContent).join() !== "Got it,Partly,Missed") log("snap:fail the marks: " + marks.map((m) => m.textContent).join());
+      marks[1].click();
+      await wait(50);
+      if (marks.filter((m) => m.getAttribute("aria-pressed") === "true").map((m) => m.textContent).join() !== "Partly") log("snap:fail Partly is not pressed");
+      if (/\\d/.test(bar().querySelector(".bar-slot").textContent)) log("snap:fail explain-back shows a number");
+      const bars = sent.filter((call) => call.includes("/api/story_bar")).map((call) => JSON.parse(call.slice(call.indexOf(" ") + 1)));
+      const kinds = bars.map((b) => b.kind + ":" + (b.line ?? b.mark)).join();
+      if (kinds !== "explain-back-given:" + line.value + ",explain-back-marked:partly") log("snap:fail the bar sent " + kinds);` : `await wait(50);`}`, false, 100);
 // Overturning in the brief's ratify step (port decision Q2): the prompt goes to the clipboard and the step says so, or, when the clipboard
 // refuses, shows the prompt in a box with a Copy button. The page's clipboard is stubbed to take or refuse the write.
 const mapBriefOverturn = (clipboard: "copies" | "refuses"): Fixture => ({
@@ -393,6 +484,107 @@ const mapBriefWriting = (): Fixture => ({
   }),
   snapDone: "writing ok",
 });
+// A part catch-up (#391): Understanding was fogged by two PRs and a direct push, so its sheet offers the part catch-up as the main button, with
+// "I know this" quiet beside it; pressing it plays one story of the part in the brief's reader, with no "See the code" and no PR number.
+const catchUpSteps = (): BriefStep[] => [
+  step("Where", "Understanding writes what each turn and PR changed", "It turns a session's events into cards and a ready PR into its brief, with a sandboxed writer that has no tools.", ["understanding"], {
+    cites: [{ from: "ENTRIES", quote: "writes the PR brief in the background" }],
+  }),
+  step("Before", "Opening a brief waited for its writer", "Opening a PR's brief that was not written yet held the panel until the writer answered, minutes at a time.", ["understanding", "window"], {
+    hops: [["shell-understanding", false], ["shell-window", false]],
+  }),
+  step("Now", "A brief is written in the background and lands", "An open answers at once that it is being written; the brief lands on the map when the writer is done. A direct push trimmed the facts' budget.", ["understanding"], {
+    fig: figure("sequence"), cites: [{ from: "DIFF", quote: "open_in_background" }],
+  }),
+  step("Must stay true", "The writer still reads only the facts", "The map's law says the writer is asked at most once per item; the claim check and its one retry keep to it.", ["understanding"], { law: "understanding-asked" }),
+];
+const storedCatchUp = (): StoredCatchUp => ({
+  version: 1, part: "understanding", fog: ["c".repeat(40), "d".repeat(40), "e".repeat(40)], written_at: 1, model: "opus", partial: false,
+  brief: { ...brief(catchUpSteps()), title: "Briefs are written in the background", chapters: [{ behaviour: "story", parts: ["understanding"], title: "Briefs written in the background", steps: catchUpSteps(), flags: [] }] },
+});
+const mapCatchUp = (): Fixture => ({
+  ...mapOpened(`
+      const media = window.matchMedia.bind(window);
+      window.matchMedia = (query) => (query.includes("prefers-reduced-motion") ? { ...media(query), matches: true } : media(query));
+      const calm = document.createElement("style");
+      calm.textContent = "*, *::before, *::after { transition: none !important; animation: none !important; }";
+      document.head.append(calm);
+      document.querySelector("#map .plate[data-id=understanding]").click();
+      await wait(150);
+      const buttons = [...document.querySelectorAll(".sheet .sheet-fog button")].map((b) => b.textContent);
+      if (buttons.join("|") !== "Part catch-up|I know this") return log("snap:fail the sheet's fog buttons: " + buttons.join("|"));
+      if (!document.querySelector(".sheet .sheet-catch-up").classList.contains("primary")) log("snap:fail the part catch-up is not the main button");
+      document.querySelector(".sheet .sheet-catch-up").click();
+      await wait(350);
+      const panel = document.getElementById("map-brief");
+      if (panel.hidden || !panel.classList.contains("open")) return log("snap:fail the part catch-up did not open");
+      if (!panel.querySelector(".brief-kick").textContent.includes("Part catch-up")) log("snap:fail the kick does not say part catch-up");
+      if (!panel.querySelector(".brief-code").hidden) log("snap:fail a part catch-up offers a PR's code");
+      document.getElementById("brief-next").click();
+      await wait(200);
+      document.getElementById("brief-next").click();
+      await wait(450);
+      if (!document.querySelector(".plate.lit[data-id=understanding]")) log("snap:fail the part is not lit");
+      log("catch-up ok");`, {
+    map_state: mapState({
+      fog: { understanding: "thick", shell: "thin" },
+      catch_ups: { understanding: { kind: "catch-up", ready: true, writing: false, failed: false }, shell: { kind: "chapter", pr: 334, chapter: 0 } },
+    }),
+    part_catch_up: storedCatchUp(),
+  }),
+  snapDone: "catch-up ok",
+});
+// A part catch-up over a long fog list (#396): its first step says it summarises the main shifts, with the full fog list behind it.
+const mapCatchUpSummarising = (): Fixture => ({
+  ...mapOpened(`
+      const calm = document.createElement("style");
+      calm.textContent = "*, *::before, *::after { transition: none !important; animation: none !important; }";
+      document.head.append(calm);
+      document.querySelector("#map .plate[data-id=understanding]").click();
+      await wait(150);
+      document.querySelector(".sheet .sheet-catch-up").click();
+      await wait(350);
+      const panel = document.getElementById("map-brief");
+      if (panel.hidden || !panel.classList.contains("open")) return log("snap:fail the part catch-up did not open");
+      if (!panel.querySelector(".brief-summarises")?.textContent.includes("summarises the main shifts of 9 fog entries")) return log("snap:fail no summarising line");
+      const list = panel.querySelector(".brief-fog-list");
+      list.open = true;
+      if (list.querySelectorAll(".brief-cite").length !== 9) log("snap:fail the full fog list does not hold 9 entries");
+      await wait(150);
+      log("catch-up summarising ok");`, {
+    map_state: mapState({ fog: { understanding: "thick" }, catch_ups: { understanding: { kind: "catch-up", ready: true, writing: false, failed: false } } }),
+    part_catch_up: {
+      ...storedCatchUp(),
+      fog: [..."abcdefghi"].map((c) => c.repeat(40)),
+      summary: {
+        line: "This catch-up summarises the main shifts of 9 fog entries; the full list is below.",
+        entries: [..."abcdefghi"].map((c, i) => (i % 3 === 2 ? { commit: c.repeat(40), pr: null, title: "fix pushed straight to main" } : { commit: c.repeat(40), pr: 380 + i, title: `Briefs: change number ${i + 1}` })),
+      },
+    },
+  }),
+  snapDone: "catch-up summarising ok",
+});
+// A part catch-up being written: its button stays pressable and says "Writing…", the panel says so, and the map is not dimmed.
+const mapCatchUpWriting = (): Fixture => ({
+  ...mapOpened(`
+      const calm = document.createElement("style");
+      calm.textContent = "*, *::before, *::after { transition: none !important; animation: none !important; }";
+      document.head.append(calm);
+      document.querySelector("#map .plate[data-id=understanding]").click();
+      await wait(300);
+      if (document.querySelector(".sheet .sheet-catch-up-note")?.textContent !== "Writing…") log("snap:fail the sheet does not say it is being written");
+      if (document.querySelector(".sheet .sheet-catch-up").disabled) log("snap:fail the button is not pressable while it is written");
+      document.querySelector(".sheet .sheet-catch-up").click();
+      await wait(600);
+      const panel = document.getElementById("map-brief");
+      if (panel.hidden || !panel.textContent.includes("Writing the part catch-up…")) return log("snap:fail the panel does not say the catch-up is being written");
+      if (document.body.classList.contains("brief-open")) log("snap:fail the map is dimmed while it is written");
+      log("catch-up writing ok");`, {
+    map_state: mapState({ fog: { understanding: "thick" }, catch_ups: { understanding: { kind: "catch-up", ready: false, writing: true, failed: false } } }),
+    part_catch_up: { writing: true },
+  }),
+  snapDone: "catch-up writing ok",
+});
 // The part sheet with one law not yet ratified (#343): it says so, with Accept and Overturn.
 const mapSheetUnratified = (): Fixture =>
   mapOpened(`
@@ -405,6 +597,53 @@ const mapSheetUnratified = (): Fixture =>
       log("sheet ok");`, {
     map_state: mapState({ ratify: [{ pr: 306, kind: "law", id: "shell-notice" }] }),
   });
+// Staleness bands (#392): Core, Shell and Understanding untouched for 3, 6 and 12 weeks carry a band along their foot, firmer with each;
+// the Interface-only and Black box parts never do. Understanding's sheet says how long and offers the refresher.
+const mapStale = (): Fixture =>
+  mapOpened(`
+      const band = (id) => [1, 2, 3].find((n) => document.querySelector("#map .plate[data-id=" + id + "]").classList.contains("stale-" + n)) ?? 0;
+      const bands = ["core", "shell", "understanding", "plugins", "workbench", "window"].map(band).join(",");
+      if (bands !== "1,2,3,0,0,0") return log("snap:fail bands: " + bands);
+      if (document.querySelectorAll("#map .plate .plate-stale").length !== 3) log("snap:fail a band without its line");
+      document.querySelector("#map .plate[data-id=understanding]").click();
+      await wait(300);
+      if (!document.querySelector("#map-sheet .sheet-stale")?.textContent.includes("12 weeks")) log("snap:fail the sheet does not say how long");
+      if (!document.querySelector("#map-sheet .sheet-refresher")) log("snap:fail no refresher on a stale part with no fog");
+      log("stale ok");`, {
+    map_state: mapState({ stale: { core: 1, shell: 2, understanding: 3 } }),
+  });
+// The refresher (#392) on Shell's sheet, a stale part with no fog: drawn at once from the map file (its caption and description, the flows
+// through it, its laws with their backing and its links; the sheet already shows the first three), with no writer and no "Writing…".
+const mapRefresher = (): Fixture => {
+  const file = JSON.parse(mapFile);
+  file.flows = [{ id: "turn-writing", name: "Turn writing", hops: [
+    { link: "hook-shell", text: "The hook's line reaches the Shell, which reads the log." },
+    { link: "shell-understanding", text: "The Shell asks Understanding to write the turn's summary." },
+    { link: "understanding-writer", text: "Understanding calls the writer." },
+    { link: "shell-window", text: "The Shell tells the Window, which shows the summary." },
+  ] }];
+  file.parts.find((part: { id: string }) => part.id === "shell").description = "Reads the hook's log, feeds the core, writes the summaries through Understanding and serves the Window.";
+  return mapOpened(`
+      document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(300);
+      const enter = document.querySelector("#map-sheet .sheet-refresher");
+      if (!enter) return log("snap:fail no refresher button");
+      enter.click();
+      await wait(400);
+      const node = document.querySelector("#map-sheet .refresher");
+      if (!node) return log("snap:fail the refresher did not show");
+      if (node.previousElementSibling?.classList.contains("sheet-laws") !== true) log("snap:fail the refresher is not under the laws");
+      const words = node.textContent;
+      for (const want of ["Turn writing", "The Shell asks Understanding", "Hook to Shell", "Shell to Window"]) {
+        if (!words.includes(want)) log("snap:fail the refresher lacks " + want);
+      }
+      if (words.includes("Understanding calls the writer.")) log("snap:fail a hop not at the part shows");
+      if (document.querySelector("#map-sheet .sheet-refresher")) log("snap:fail the button stays once the refresher shows");
+      if (document.body.textContent.includes("Writing")) log("snap:fail the refresher waits on a writer");
+      log("refresher ok");`, {
+    map_state: mapState({ source: JSON.stringify(file), stale: { shell: 2 } }),
+  });
+};
 // A chaptered brief (#341): the tray lists one row per chapter, each chapter opens on its own and the overview plays before the first one opened, once.
 const chapterTitles = ["Fog clears by reading", "Broken laws on the map", "The Seen gate"];
 const chapterOf = (i: number, parts: string[]): BriefChapter => ({
@@ -455,15 +694,24 @@ const mapBriefChapterMid = (): Fixture =>
       if (document.querySelectorAll("#map-brief .brief-dots i").length !== 4) log("snap:fail the first chapter opened should play the overview and its own steps");
       if (!document.querySelector("#map-brief .brief-title").textContent.includes("Broken laws on the map: what happens now")) log("snap:fail mid-chapter step: " + document.querySelector("#map-brief .brief-title").textContent);
       if (document.querySelector("#map-brief .brief-also")) log("snap:fail also-touched shows before the last chapter's end");
-      if (document.querySelectorAll(".plate.lit").length < 2) log("snap:fail the chapter's parts are not lit");`);
+      if (document.querySelectorAll(".plate.lit").length < 2) log("snap:fail the chapter's parts are not lit");
+      if (document.querySelector("#map-brief .story-bar")) log("snap:fail the end-of-story bar shows mid-chapter");
+      // This chapter is not the last, and its last step still ends with the bar (#393).
+      document.getElementById("brief-next").click();
+      await wait(200);
+      if (!document.querySelector("#map-brief .story-bar")) log("snap:fail no end-of-story bar at a chapter's end");
+      document.querySelector("#map-brief .brief-back").click();
+      await wait(200);`);
 // The last chapter's last step ends with the also-touched lines; another chapter, opened second, has no overview.
 const mapBriefChapterLast = (): Fixture =>
   mapChaptered(2, 3, `
       if (document.querySelectorAll("#map-brief .brief-dots i").length !== 4) log("snap:fail the last chapter opened first should carry the overview");
-      if (!document.querySelector("#map-brief .brief-also")?.textContent.includes("A wording change in a comment")) log("snap:fail no also-touched line on the last step: " + document.querySelector("#map-brief .brief-title").textContent);`);
+      if (!document.querySelector("#map-brief .brief-also")?.textContent.includes("A wording change in a comment")) log("snap:fail no also-touched line on the last step: " + document.querySelector("#map-brief .brief-title").textContent);
+      if (!document.querySelector("#map-brief .story-bar")) log("snap:fail no end-of-story bar at the last chapter's end");`);
 // The stop-rule review (#314, #384): Studio has run 20 active days and merged 25 PRs, and the Map view was engaged with on one of them, so
 // the Map view fell below its threshold, and so did the history strip and "See the proof".
-const dueFacts = { active_days: 20, merged_prs: 25, engaged_days: 1, scrubs: 0, proofs: 0, knows: 0, dismissed: false, briefs_offered: 0, briefs_opened: 0, chapters_done: 0 };
+// Pre-flight (#394) was run twice and three explain-back lines (#397) were written, so the review lists only the modules of project 2.
+const dueFacts = { active_days: 20, merged_prs: 25, engaged_days: 1, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, counts: { "pre-flight-run": 2, "catch-up-done": 3, "explain-back-given": 3 }, began: "2026-10-01", stale_since: null };
 const mapOpened = (check: string, extra: Fixture = {}): Fixture => ({
   ...list(),
   ...extra,
@@ -1239,6 +1487,7 @@ export const fixtures = {
   writersBriefsNeedClaudeNarrow: (): Fixture => fixtures.writersBriefsNeedClaude(),
   mapTray,
   mapRuns,
+  mapPreFlight,
   mapRunsPaused,
   railBriefRow: () => railBriefReady(false),
   railBriefOpened: () => railBriefReady(true),
@@ -1254,10 +1503,18 @@ export const fixtures = {
   mapBriefOrderWrong,
   mapBriefOrderRight,
   mapBriefRatify,
+  mapBriefBar,
+  mapBriefExplainBack: () => mapBriefExplainBack(false),
+  mapBriefExplainBackDone: () => mapBriefExplainBack(true),
   mapBriefOverturnCopied: () => mapBriefOverturn("copies"),
   mapBriefOverturnFallback: () => mapBriefOverturn("refuses"),
   mapBriefWriting,
+  mapCatchUp,
+  mapCatchUpWriting,
+  mapCatchUpSummarising,
   mapSheetUnratified,
+  mapStale,
+  mapRefresher,
   mapBriefChapters,
   mapBriefChapterMid,
   mapBriefChapterLast,

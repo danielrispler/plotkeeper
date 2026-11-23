@@ -6,9 +6,17 @@ import { tauri } from "./dom.mjs";
 
 const calls = [];
 tauri(calls);
-const { dismissReview, localDay, logStop, reviewOf, reviewWords, unused } = await import("../../dist/stop-rules.js");
+const { dismissReview, judge, localDay, logStop, reviewOf, reviewWords, table, unused } = await import("../../dist/stop-rules.js");
 
-const facts = (extra = {}) => ({ active_days: 14, merged_prs: 20, engaged_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: false, briefs_offered: 0, briefs_opened: 0, chapters_done: 0, ...extra });
+// The rows that wait 5 calendar weeks (#392), part catch-ups (#391), pre-flight (#394) and explain-back (#397) are kept by default, so a
+// test of the other rows, judged today, holds after the wait ends.
+// Noon of a local day, in unix seconds.
+const at = (day) => {
+  const [y, m, d] = day.split("-").map(Number);
+  return new Date(y, m - 1, d, 12).getTime() / 1000;
+};
+const kept = { "refresher-entered": 2, "stale-entered": 1, "catch-up-done": 3, "pre-flight-run": 2, "explain-back-given": 3 };
+const facts = (extra = {}) => ({ active_days: 14, merged_prs: 20, engaged_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, counts: kept, began: "2026-11-01", stale_since: at("2026-11-24"), ...extra });
 
 test("the review waits for both 14 active days and 20 merged PRs, whichever comes last", () => {
   assert.deepEqual(unused(facts()), ["map", "history", "proof"]);
@@ -36,9 +44,62 @@ test("nothing is listed when every module passed, and \"I know this\" has no thr
   assert.equal(unused(facts({ engaged_days: 4, scrubs: 2, proofs: 2, knows: 0 })).includes("know"), false);
 });
 
-test("a dismissed review is not shown again while the logging goes on", () => {
-  assert.equal(unused(facts({ dismissed: true })), null);
-  assert.equal(unused(facts({ dismissed: true, scrubs: 50 })), null);
+test("a dismissed module is not shown again while the logging goes on, and the others stay", () => {
+  assert.deepEqual(unused(facts({ dismissed: ["map", "history", "proof", "briefs", "skips"] })), []);
+  assert.deepEqual(unused(facts({ dismissed: ["map"] })), ["history", "proof"]);
+  assert.deepEqual(unused(facts({ dismissed: ["history"], scrubs: 50 })), ["map", "proof"]);
+});
+
+// Two modules of a later ticket, to drive the table's exceptions: one waits 5 calendar weeks from its rollout, one waits for 3 offers.
+const later = [
+  { module: "refresher", name: "the refresher", kept: (f) => (f.counts["refresher-entered"] ?? 0) >= 2, wait: { from: "2026-12-01", weeks: 5 } },
+  { module: "guard", name: "Guard with a law", kept: (f) => (f.counts["guard-started"] ?? 0) >= 1, offers: { kind: "guard-offered", least: 3 } },
+];
+
+test("a module with a calendar wait is not judged before its date, counted from the later of its rollout and the project's first event", () => {
+  assert.deepEqual(judge(later.slice(0, 1), facts({ counts: {} }), "2027-01-04"), []);
+  assert.deepEqual(judge(later.slice(0, 1), facts({ counts: {} }), "2027-01-05"), ["refresher"]);
+  assert.deepEqual(judge(later.slice(0, 1), facts({ counts: { "refresher-entered": 2 } }), "2027-01-05"), []);
+  // A project whose log began after the rollout waits from its own start.
+  assert.deepEqual(judge(later.slice(0, 1), facts({ counts: {}, began: "2027-01-01" }), "2027-01-05"), []);
+  assert.deepEqual(judge(later.slice(0, 1), facts({ counts: {}, began: "2027-01-01" }), "2027-02-05"), ["refresher"]);
+});
+
+test("a module with an offer count is not judged before that many offers", () => {
+  assert.deepEqual(judge(later.slice(1), facts({ counts: { "guard-offered": 2 } }), "2027-01-05"), []);
+  assert.deepEqual(judge(later.slice(1), facts({ counts: { "guard-offered": 3 } }), "2027-01-05"), ["guard"]);
+  assert.deepEqual(judge(later.slice(1), facts({ counts: { "guard-offered": 3, "guard-started": 1 } }), "2027-01-05"), []);
+});
+
+test("dismissing one module leaves a module that becomes due later to be shown", () => {
+  // Part catch-ups (#391), pre-flight (#394) and explain-back (#397) are dismissed too: with no count they would be listed at once.
+  const once = facts({ dismissed: ["map", "history", "proof", "catch-ups", "pre-flight", "explain-back"], counts: {} });
+  assert.deepEqual(judge(table, once, "2026-12-10"), []);
+  assert.deepEqual(judge(table, once, "2027-01-05"), ["refresher", "staleness"]);
+  assert.deepEqual(judge(table, { ...once, dismissed: [...once.dismissed, "refresher"] }, "2027-01-05"), ["staleness"]);
+  assert.match(reviewWords(["refresher"]), /the refresher/);
+});
+
+test("the refresher needs 2 entries and staleness bands 1 refresher or part catch-up entered from a stale part, each judged from 5 weeks after rollout", () => {
+  const due = (counts, began = "2026-11-01") => facts({ dismissed: ["map", "history", "proof", "catch-ups", "pre-flight", "explain-back"], counts, began });
+  assert.deepEqual(judge(table, due({}), "2026-12-28"), []);
+  assert.deepEqual(judge(table, due({}), "2026-12-29"), ["refresher", "staleness"]);
+  assert.deepEqual(judge(table, due({ "refresher-entered": 1 }), "2026-12-29"), ["refresher", "staleness"]);
+  assert.deepEqual(judge(table, due({ "refresher-entered": 2 }), "2026-12-29"), ["staleness"]);
+  assert.deepEqual(judge(table, due({ "stale-entered": 1 }), "2026-12-29"), ["refresher"]);
+  // A project whose log began after the rollout waits 5 weeks from its own start.
+  assert.deepEqual(judge(table, due({}, "2026-12-01"), "2027-01-04"), []);
+  assert.deepEqual(judge(table, due({}, "2026-12-01"), "2027-01-05"), ["refresher", "staleness"]);
+  assert.match(reviewWords(["refresher", "staleness"]), /the refresher and staleness bands/);
+});
+
+test("the refresher and staleness bands wait 5 weeks from the project's own staleness baseline, and are not judged before it has one", () => {
+  const due = (stale_since) => facts({ dismissed: ["map", "history", "proof", "catch-ups", "pre-flight", "explain-back"], counts: {}, stale_since });
+  // First shown with this build on 10 December, not on the day the build was written.
+  assert.deepEqual(judge(table, due(at("2026-12-10")), "2027-01-13"), []);
+  assert.deepEqual(judge(table, due(at("2026-12-10")), "2027-01-14"), ["refresher", "staleness"]);
+  // A project never shown with this build has no band yet.
+  assert.deepEqual(judge(table, due(null), "2027-06-01"), []);
 });
 
 test("the words name the modules and carry no number", () => {
@@ -69,12 +130,13 @@ test("a day-counting event is told once a day per project, and a use every time"
   assert.ok(calls.every(([, args]) => args.day === localDay()));
 });
 
-test("the review is read from the shell's counts, and a dismissal tells it every project", async () => {
+test("the review is read from the shell's counts, and a dismissal tells it every project and the modules shown", async () => {
   calls.length = 0;
   tauri(calls, () => facts({ engaged_days: 4, scrubs: 2 }));
   assert.deepEqual(await reviewOf("/a"), ["proof"]);
-  await dismissReview(["/a", "/b"]);
+  await dismissReview(["/a", "/b"], ["proof"]);
   assert.deepEqual(calls.at(-1)[1].projects, ["/a", "/b"]);
+  assert.deepEqual(calls.at(-1)[1].modules, ["proof"]);
 });
 
 test("PR briefs are listed when opened for under a quarter of the merged PRs that had one", () => {
@@ -113,4 +175,29 @@ test("a brief offered or an unconfirmed mark seen is told once per PR, other bri
   logStop("brief-opened", "/a", 7);
   const sent = calls.map(([, args]) => `${args.kind} ${args.project} ${args.pr}`);
   assert.deepEqual(sent, ["brief-offered /a 7", "brief-offered /a 8", "brief-offered /b 7", "unconfirmed-seen /a 7", "brief-opened /a 7", "brief-opened /a 7"]);
+});
+
+test("part catch-ups are kept at 3 completed, counted apart from \"I know this\"", () => {
+  const passed = { engaged_days: 4, scrubs: 2, proofs: 2 };
+  assert.deepEqual(unused(facts({ ...passed, counts: { "catch-up-done": 2, "catch-up-opened": 9, know: 9, "pre-flight-run": 2, "explain-back-given": 3 } })), ["catch-ups"]);
+  assert.deepEqual(unused(facts({ ...passed, counts: { "catch-up-done": 3, "pre-flight-run": 2, "explain-back-given": 3 } })), []);
+  assert.match(reviewWords(["catch-ups"]), /part catch-ups/);
+  assert.equal(table.find((row) => row.module === "catch-ups").wait, undefined, "no exception: judged with the review");
+});
+
+test("explain-back is kept at 3 lines written; a mark, a rating or a note does not count", () => {
+  const passed = { engaged_days: 4, scrubs: 2, proofs: 2 };
+  const others = { "catch-up-done": 3, "pre-flight-run": 2 };
+  // (These keep the part catch-ups' and pre-flight's rows out of the list.)
+  assert.deepEqual(unused(facts({ ...passed, counts: { ...others, "explain-back-given": 2, "explain-back-marked": 9, "rating-given": 9, "note-given": 9 } })), ["explain-back"]);
+  assert.deepEqual(unused(facts({ ...passed, counts: { ...others, "explain-back-given": 3 } })), []);
+  assert.match(reviewWords(["explain-back"]), /explain-back/);
+  assert.equal(table.find((row) => row.module === "explain-back").wait, undefined, "no exception: judged with the review");
+});
+
+test("pre-flight is kept once it was run twice in the window, and listed below that (#394)", () => {
+  const rest = { engaged_days: 4, scrubs: 2, proofs: 2 };
+  assert.ok(unused(facts({ ...rest, counts: { "pre-flight-run": 1 } })).includes("pre-flight"));
+  assert.ok(!unused(facts({ ...rest, counts: { "pre-flight-run": 2 } })).includes("pre-flight"));
+  assert.match(reviewWords(["pre-flight"]), /Pre-flight/);
 });

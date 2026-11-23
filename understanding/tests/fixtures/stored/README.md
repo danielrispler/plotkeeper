@@ -17,3 +17,7 @@ When a stored type changes (a field added, renamed or made required), add a new 
 `full-2/` and `minimal-2/` each hold one file, `risk-notes.json`, the store of the risk notes (#298), which `RiskNotes::open`
 reads on its own beside the card store: the full one with two sessions and two levels, the minimal one with one note and only
 its required fields. They also freeze the hash that keys a note (the command, a NUL and its folder, hashed with FNV-1a).
+
+`pr-brief-v4/` holds a stored PR brief and a stored part catch-up as written once chapters carry a gist (#397): `gist` and its
+`gist_flags` on a Core chapter, an empty gist on a chapter of no Core part. `understanding/tests/pr_brief.rs` loads them beside
+`pr-brief-v3/`, whose replies and stored briefs have no gist and still read.

@@ -62,6 +62,13 @@ pub struct MapState {
     /// The project's background runs, queued, running and ended, and the line that says why the queues are paused
     /// (`runner.rs`).
     pub runs: crate::runner::Runs,
+    /// What each fogged part's sheet offers: a part catch-up, or the one PR brief chapter that lights it (`part_catch_ups.rs`).
+    pub catch_ups: BTreeMap<String, crate::part_catch_ups::Offer>,
+    /// The staleness band (1 to 3) of each Core part Daniel has not engaged with for 3, 6 or 12 weeks (`staleness.rs`); a part not listed
+    /// is not stale.
+    pub stale: BTreeMap<String, u8>,
+    /// The project's pre-flight (`pre_flight.rs`): the parts a piece of work will likely cross, framed on the map.
+    pub pre_flight: Option<studio_understanding::pre_flight::PreFlight>,
 }
 
 /// Daniel's choices for one project, kept in the data folder: a saved `(x, y)` per part or actor id, and a tier per part id
@@ -78,6 +85,9 @@ pub struct UserState {
     /// The map's camera as Daniel last left it (#383); none until he first moves it.
     #[serde(default)]
     pub view: Option<View>,
+    /// When Daniel last engaged with each part, and the baseline (`staleness.rs`).
+    #[serde(default)]
+    pub staleness: crate::staleness::Staleness,
 }
 
 /// The Map view's camera: a world point `p` shows at `p * scale + (x, y)` in the map area (`Camera` in `ui/types.ts`).
@@ -140,6 +150,9 @@ pub fn read_map(repo: &Path) -> MapState {
         ready: Vec::new(),
         ratify: Vec::new(),
         runs: crate::runner::Runs::default(),
+        catch_ups: BTreeMap::new(),
+        stale: BTreeMap::new(),
+        pre_flight: None,
     };
     let Some((reference, note)) = default_ref(repo) else {
         state.note = Some("this repository has no default branch to read".into());
@@ -330,10 +343,15 @@ pub fn map_state(project: String, fetch: bool, app: &Arc<crate::App>) -> Result<
     if let Err(why) = crate::fog::refresh(repo, &file, &project, fetch) {
         log::warn!("map: fog of {project} failed: {why}");
     }
+    // The first map with this build is every part's staleness baseline.
+    if let Err(why) = crate::staleness::start(&file, &project, crate::ratify::now()) {
+        log::warn!("map: staleness of {project} failed: {why}");
+    }
     let mut state = read_map(repo);
     state.user = read_user(&file, &project);
     if let Some(source) = &state.source {
         state.fog = crate::fog::effective(&state.user, source);
+        state.stale = crate::staleness::bands(&state.user, source, crate::ratify::now());
     }
     state.ci = cache.get(&project);
     state.ready = app.prs.ready(&project);
@@ -343,12 +361,37 @@ pub fn map_state(project: String, fetch: bool, app: &Arc<crate::App>) -> Result<
         .map(|mine| crate::ratify::pending(repo, &mine))
         .unwrap_or_default();
     state.runs = app.runner.runs(&project);
+    // A shown map starts the part catch-ups of up to three fogged Core parts (#396).
+    if fetch && let Some(source) = &state.source {
+        crate::part_catch_ups::shown(app, &project, &state.user, source);
+    }
+    state.catch_ups = crate::part_catch_ups::offers(app, &project, &state.user, &state.fog);
+    state.pre_flight = crate::pre_flight::current(&project);
     Ok(state)
 }
 
 /// "I know this": clears `part`'s fog.
 pub fn map_know(project: String, part: String) -> Result<UserState, String> {
-    crate::fog::clear(&state_file()?, &project, &part)
+    let file = state_file()?;
+    crate::staleness::record(
+        &file,
+        &project,
+        &part,
+        crate::staleness::Activity::Know,
+        crate::ratify::now(),
+    )?;
+    crate::fog::clear(&file, &project, &part)
+}
+
+/// The refresher of `part` was entered: an activity on the part, which clears its staleness band.
+pub fn map_refresher(project: String, part: String) -> Result<UserState, String> {
+    crate::staleness::record(
+        &state_file()?,
+        &project,
+        &part,
+        crate::staleness::Activity::Refresher,
+        crate::ratify::now(),
+    )
 }
 
 /// A part's history strip: its first-parent commits on the default branch from the map's birth, oldest to newest, the ones Daniel

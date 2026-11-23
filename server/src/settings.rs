@@ -312,21 +312,23 @@ fn names_writer(text: &str) -> bool {
         .is_some()
 }
 
-/// The catch-up at start from `settings.json`: `catchUp.hours` (default 2), how far back a ready PR's head may have moved for its
-/// brief to be written at start (danielrispler/plotkeeper#334); the default where the file leaves it out or gives something else than a
-/// number.
-pub fn catch_up() -> studio_core::CatchUp {
+/// The brief backfill at start from `settings.json`: `briefBackfill.hours` (default 2), how far back a ready PR's head may have moved
+/// for its brief to be written at start (danielrispler/plotkeeper#334); the default where the file leaves it out or gives something
+/// else than a number. The key was `catchUp.hours` until "catch-up" came to mean the part catch-up (#391): the old key is still read
+/// when the new one is absent.
+pub fn brief_backfill() -> studio_core::CatchUp {
     let text = paths().and_then(|[settings, _]| fs::read_to_string(settings).ok());
-    catch_up_in(&text.unwrap_or_default())
+    brief_backfill_in(&text.unwrap_or_default())
 }
 
-fn catch_up_in(text: &str) -> studio_core::CatchUp {
+fn brief_backfill_in(text: &str) -> studio_core::CatchUp {
     let json: serde_json::Value = serde_json::from_str(&plain_json(text)).unwrap_or_default();
-    let mut catch_up = studio_core::CatchUp::default();
-    if let Some(hours) = json["catchUp"]["hours"].as_f64().filter(|h| *h >= 0.0) {
-        catch_up.window_ms = (hours * 3_600_000.0) as u64;
+    let mut backfill = studio_core::CatchUp::default();
+    let hours = |key: &str| json[key]["hours"].as_f64().filter(|h| *h >= 0.0);
+    if let Some(hours) = hours("briefBackfill").or_else(|| hours("catchUp")) {
+        backfill.window_ms = (hours * 3_600_000.0) as u64;
     }
-    catch_up
+    backfill
 }
 
 /// The model of the PR briefs' writer and claim check, `prBriefs.model` (default Opus), read from the file on each call so a saved
@@ -578,8 +580,8 @@ impl ApiKeys for MemoryKeys {
 #[cfg(test)]
 mod tests {
     use super::{
-        catch_up_in, edit_text, plain_json, pr_briefs_model_in, repository_in, run_settings_in,
-        save_writer_in, summary_writer_in, write_in,
+        brief_backfill_in, edit_text, plain_json, pr_briefs_model_in, repository_in,
+        run_settings_in, save_writer_in, summary_writer_in, write_in,
     };
     use serde_json::json;
     use studio_understanding::WriterKind;
@@ -672,16 +674,27 @@ mod tests {
     }
 
     #[test]
-    fn the_catch_up_is_two_hours_unless_the_settings_say_otherwise() {
+    fn the_brief_backfill_is_two_hours_unless_the_settings_say_otherwise() {
         let default = studio_core::CatchUp::default();
         assert_eq!(default.window_ms, 7_200_000);
-        assert_eq!(catch_up_in(""), default);
+        assert_eq!(brief_backfill_in(""), default);
         assert_eq!(
-            catch_up_in("{ \"catchUp\": { \"hours\": \"x\" } }"),
+            brief_backfill_in("{ \"catchUp\": { \"hours\": \"x\" } }"),
             default
         );
-        let set = catch_up_in("{ // wider\n \"catchUp\": { \"hours\": 6, }, }");
+        let set = brief_backfill_in("{ // wider\n \"catchUp\": { \"hours\": 6, }, }");
         assert_eq!(set.window_ms, 21_600_000);
+    }
+
+    #[test]
+    fn the_brief_backfill_reads_its_new_key_first_and_the_old_catch_up_key_when_it_is_absent() {
+        let new = brief_backfill_in(r#"{ "briefBackfill": { "hours": 4 } }"#);
+        assert_eq!(new.window_ms, 14_400_000);
+        let both =
+            brief_backfill_in(r#"{ "briefBackfill": { "hours": 1 }, "catchUp": { "hours": 6 } }"#);
+        assert_eq!(both.window_ms, 3_600_000, "the new key wins");
+        let old = brief_backfill_in(r#"{ "catchUp": { "hours": 6 } }"#);
+        assert_eq!(old.window_ms, 21_600_000, "the old key still works");
     }
 
     #[test]
