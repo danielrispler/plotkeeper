@@ -609,3 +609,55 @@ fn a_replayed_agy_run_gives_each_turn_its_own_final_response() {
         ["I have created", "ok", "I have started", "The subagent has"]
     );
 }
+
+/// The final response each turn of a replayed session gets, for a transcript of `records` and turns
+/// starting at `starts` (their `initialNumSteps`).
+fn replayed_replies(records: &[Value], starts: &[u64]) -> Vec<String> {
+    let dir = tempfile::tempdir().unwrap();
+    let logs = dir.path().join("s/.system_generated/logs");
+    std::fs::create_dir_all(&logs).unwrap();
+    let file = logs.join("transcript_full.jsonl");
+    let text: String = records.iter().map(|r| format!("{r}\n")).collect();
+    std::fs::write(&file, text).unwrap();
+    let at = |event: &str, t: u64, fields: Value| {
+        let mut l: Value = serde_json::from_str(&line("s", event, t, fields)).unwrap();
+        l["transcriptPath"] = file.display().to_string().into();
+        l.to_string()
+    };
+    let mut lines = vec![at("SessionStart", 1, json!({}))];
+    for (n, start) in starts.iter().enumerate() {
+        let t = 10 * (n as u64 + 1);
+        lines.push(at(
+            "PreInvocation",
+            t,
+            json!({ "invocationNum": 0, "initialNumSteps": start, "lastUserInput": format!("p{n}") }),
+        ));
+        lines.push(at("Stop", t + 1, json!({ "fullyIdle": true })));
+    }
+    let studio = Studio::replayed(lines.iter().map(String::as_str));
+    let session = studio.session("s").unwrap();
+    session.turns.iter().map(|t| t.reply.clone()).collect()
+}
+
+#[test]
+fn a_replayed_turn_that_ends_on_a_tool_result_takes_no_later_reply() {
+    let records = [
+        json!({ "step_index": 0, "type": "USER_INPUT" }),
+        json!({ "step_index": 1, "type": "PLANNER_RESPONSE", "content": "", "tool_calls": [{}] }),
+        json!({ "step_index": 2, "type": "GENERIC" }),
+        json!({ "step_index": 3, "type": "USER_INPUT" }),
+        json!({ "step_index": 4, "type": "PLANNER_RESPONSE", "content": "second" }),
+    ];
+    assert_eq!(replayed_replies(&records, &[1, 4]), ["", "second"]);
+}
+
+#[test]
+fn a_system_message_while_a_tool_runs_does_not_end_the_turn() {
+    let records = [
+        json!({ "step_index": 0, "type": "USER_INPUT" }),
+        json!({ "step_index": 1, "type": "PLANNER_RESPONSE", "content": "Starting it now.", "tool_calls": [{}] }),
+        json!({ "step_index": 2, "type": "SYSTEM_MESSAGE" }),
+        json!({ "step_index": 3, "type": "PLANNER_RESPONSE", "content": "All done." }),
+    ];
+    assert_eq!(replayed_replies(&records, &[1]), ["All done."]);
+}

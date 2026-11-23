@@ -421,33 +421,36 @@ impl Adapter {
     }
 
     /// The open turn's last `PLANNER_RESPONSE` with text in conversation `id`'s transcript. The turn's
-    /// steps start at its `initialNumSteps` and stop before the next turn's: a `USER_INPUT` or a
-    /// wake-up's `SYSTEM_MESSAGE` right after a response. A replay reads the final transcript, which
+    /// steps start at its `initialNumSteps` and stop before the next turn's: a `USER_INPUT`, or a
+    /// wake-up's `SYSTEM_MESSAGE` after a response that called no tool (a message while a tool runs
+    /// stays in the turn). A replay reads the final transcript, which
     /// holds later turns too. `None` when no turn is open or it wrote no text.
     fn final_response(&self, id: &str) -> Option<String> {
         let conversation = self.conversations.get(id)?;
         let initial = conversation.turn?.initial;
-        let mut previous = Value::Null;
+        // Whether the turn's latest response called a tool, so a system message is no wake-up.
+        let mut calling = true;
         let mut last = None;
         for record in records(&conversation.transcript)? {
             let Some(step) = record["step_index"].as_u64().filter(|s| *s >= initial) else {
-                previous = record;
                 continue;
             };
-            let starts = matches!(
-                record["type"].as_str(),
-                Some("USER_INPUT" | "SYSTEM_MESSAGE")
-            );
-            if step > initial && starts && previous["type"] == "PLANNER_RESPONSE" {
-                break;
+            let later = step > initial;
+            match record["type"].as_str() {
+                Some("USER_INPUT") if later => break,
+                Some("SYSTEM_MESSAGE") if later && !calling => break,
+                Some("PLANNER_RESPONSE") => {
+                    calling = record["tool_calls"]
+                        .as_array()
+                        .is_some_and(|calls| !calls.is_empty());
+                    if let Some(text) = record["content"].as_str().map(str::trim)
+                        && !text.is_empty()
+                    {
+                        last = Some(text.to_owned());
+                    }
+                }
+                _ => {}
             }
-            if record["type"] == "PLANNER_RESPONSE"
-                && let Some(text) = record["content"].as_str().map(str::trim)
-                && !text.is_empty()
-            {
-                last = Some(text.to_owned());
-            }
-            previous = record;
         }
         last
     }
