@@ -1,5 +1,6 @@
 //! `plotkeeper install` and `uninstall` (#357; #320, "Install and distribution") on a temporary home, with a fake
-//! `claude` and a fake `agy` on the PATH. The real ones are never on it, so nothing here touches Daniel's setup.
+//! `claude`, a fake `agy` and a fake `codex` on the PATH. The real ones are never on it, so nothing here touches
+//! Daniel's setup.
 
 use std::{
     collections::BTreeMap,
@@ -54,6 +55,15 @@ esac"#,
             home,
             tools,
         }
+    }
+
+    /// Puts a fake `codex` on the PATH, which logs any call: install edits Codex's hook file itself, so it calls none.
+    fn with_codex(self) -> Machine {
+        script(
+            &self.tools.join("codex"),
+            r#"echo "$@" >> "$(dirname "$0")/codex-calls""#,
+        );
+        self
     }
 
     fn run(&self, verb: &str) -> Output {
@@ -139,6 +149,9 @@ fn files(dir: &Path) -> BTreeMap<String, Vec<u8>> {
     out
 }
 
+/// A `~/.codex/hooks.json` the user wrote: a hook of their own, in their own layout.
+const CODEX_OWN: &str = "{\n    \"description\": \"mine\",\n    \"hooks\": { \"Stop\": [ { \"hooks\": [ { \"type\": \"command\", \"command\": \"python3 ~/.codex/hooks/stop.py\", \"timeout\": 30 } ] } ] }\n}\n";
+
 const PLOTKEEPER_LINE: &str = "export CLAUDE_CODE_PLUGIN_DIRS=\"$HOME/Library/Application Support/plotkeeper/checkout/plugin\"";
 const FALINKS_LINE: &str = "export CLAUDE_CODE_PLUGIN_DIRS=\"/Users/me/Library/Application Support/dev.falinks.studio/checkout/plugin:/Users/me/own-plugin\"";
 
@@ -173,6 +186,7 @@ fn install_then_uninstall_leaves_every_file_byte_identical() {
     let absent = |_: &Machine| {};
     let present = |m: &Machine| {
         m.write(".zshrc", "alias g=git\n");
+        m.write(".codex/hooks.json", "{}\n");
         m.write(".claude/settings.json", "{ \"theme\": \"dark\" }\n");
         m.write(".gemini/config/plugins/other/plugin.json", "{}");
         m.write(
@@ -184,6 +198,7 @@ fn install_then_uninstall_leaves_every_file_byte_identical() {
         legacy(m, FALINKS_LINE);
         m.write(".claude/settings.json", "{ \"enabledPlugins\": {} }\n");
         m.write(".gemini/config/plugins/other/plugin.json", "{}");
+        m.write(".codex/hooks.json", CODEX_OWN);
     };
     let homes: [(&str, Setup); 3] = [
         ("absent", absent),
@@ -193,6 +208,12 @@ fn install_then_uninstall_leaves_every_file_byte_identical() {
     for (name, setup) in homes {
         for (claude, agy) in [(true, true), (false, false)] {
             let machine = Machine::new(claude, agy);
+            // Codex goes with the others, so its hook file is changed and put back too.
+            let machine = if claude {
+                machine.with_codex()
+            } else {
+                machine
+            };
             setup(&machine);
             let before = files(&machine.home);
             machine.run("install");
@@ -223,6 +244,11 @@ fn a_harness_not_found_is_skipped_with_one_line() {
     );
     assert_eq!(
         text.lines().filter(|l| l.contains("agy")).count(),
+        1,
+        "{text}"
+    );
+    assert_eq!(
+        text.lines().filter(|l| l.contains("Codex")).count(),
         1,
         "{text}"
     );
@@ -265,6 +291,7 @@ fn installed_hooks(machine: &Machine) -> Vec<PathBuf> {
         .filter(|p| {
             p.starts_with("Library/Application Support/plotkeeper/plugins/claude/")
                 || p.starts_with(".gemini/config/plugins/")
+                || p == ".codex/hooks.json"
         })
         .map(|p| machine.home.join(p))
         .collect();
@@ -326,7 +353,7 @@ fn with_the_legacy_setup_present_exactly_one_hook_records_each_event() {
 
 #[test]
 fn after_install_every_hook_command_names_the_data_folders_bin() {
-    let machine = Machine::new(true, true);
+    let machine = Machine::new(true, true).with_codex();
     legacy(&machine, PLOTKEEPER_LINE);
     machine.run("install");
     let hooks = installed_hooks(&machine);
@@ -334,7 +361,8 @@ fn after_install_every_hook_command_names_the_data_folders_bin() {
         hooks.iter().any(|p| p.starts_with(machine.data()))
             && hooks
                 .iter()
-                .any(|p| p.starts_with(machine.home.join(".gemini"))),
+                .any(|p| p.starts_with(machine.home.join(".gemini")))
+            && hooks.contains(&machine.home.join(".codex/hooks.json")),
         "{hooks:?}"
     );
     for path in hooks {
@@ -409,4 +437,72 @@ fn a_second_install_keeps_the_first_backups() {
     machine.run("install");
     machine.run("uninstall");
     assert_eq!(files(&machine.home), before);
+}
+
+/// Commands of a hook file, each with the event it sits under.
+type Commands = Vec<(String, String)>;
+
+/// plotkeeper's commands in `~/.codex/hooks.json`, by event, and every other command.
+fn codex_commands(machine: &Machine) -> (Commands, Commands) {
+    let all = commands(&machine.home.join(".codex/hooks.json"));
+    all.into_iter()
+        .partition(|(_, c)| c.contains("plotkeeper-hook"))
+}
+
+#[test]
+fn codex_gets_one_recording_hook_per_event_beside_the_users_own_and_the_trust_step() {
+    let machine = Machine::new(false, false).with_codex();
+    machine.write(".codex/hooks.json", CODEX_OWN);
+    let out = machine.run("install");
+    machine.run("install");
+
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("/hooks"), "{text}");
+    let (ours, theirs) = codex_commands(&machine);
+    assert_eq!(
+        theirs,
+        [(
+            "Stop".to_owned(),
+            "python3 ~/.codex/hooks/stop.py".to_owned()
+        )]
+    );
+    let events: Vec<_> = ours.iter().map(|(e, _)| e.as_str()).collect();
+    assert_eq!(
+        events,
+        [
+            "Interrupt",
+            "PermissionRequest",
+            "PostToolUse",
+            "PreToolUse",
+            "SessionEnd",
+            "SessionStart",
+            "Stop",
+            "UserPromptSubmit"
+        ]
+    );
+    let command = format!("\"{}/plotkeeper-hook\" --agent codex", machine.bin());
+    assert!(ours.iter().all(|(_, c)| *c == command), "{ours:?}");
+    // Install edits the file itself: Codex has no command for its hooks.
+    assert!(machine.calls("codex").is_empty());
+}
+
+#[test]
+fn a_codex_hook_file_changed_after_install_loses_only_plotkeepers_hooks_at_uninstall() {
+    let machine = Machine::new(false, false).with_codex();
+    machine.run("install");
+    let path = machine.home.join(".codex/hooks.json");
+    let mut file: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    file["hooks"]["Stop"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({ "hooks": [{ "type": "command", "command": "say done" }] }));
+    fs::write(&path, file.to_string()).unwrap();
+
+    let out = machine.run("uninstall");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("Codex"), "{text}");
+    let (ours, theirs) = codex_commands(&machine);
+    assert!(ours.is_empty(), "{ours:?}");
+    assert_eq!(theirs, [("Stop".to_owned(), "say done".to_owned())]);
 }

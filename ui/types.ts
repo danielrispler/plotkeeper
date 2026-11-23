@@ -133,7 +133,7 @@ export type Capabilities = {
   // It records a git tree of each worktree a turn touches, so a turn has files (danielrispler/plotkeeper#111).
   turn_trees: boolean;
   // How its transcript's lines read.
-  transcript_format?: "claude" | "agy";
+  transcript_format?: "claude" | "agy" | "unread";
 };
 export type Session = {
   id: string;

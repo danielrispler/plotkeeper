@@ -74,7 +74,7 @@ pub(crate) enum Happened {
     /// The git branch of the session's workspace.
     Branch(String),
 
-    // Claude only.
+    // Claude's, and Codex's where its hooks share Claude's shape (#359).
     /// How a session started.
     StartedFrom(Start),
     /// The session ended by a `/clear`.
@@ -214,7 +214,7 @@ pub(crate) struct Spawned {
 /// What an adapter reports, which decides what its sessions' views show (decision 4).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Capabilities {
-    /// The agent's name, for its mark and display name: `claude` or `agy`. Nothing in a view hides or
+    /// The agent's name, for its mark and display name: `claude`, `agy` or `codex`. Nothing in a view hides or
     /// picks by it; the views follow the flags below.
     pub agent: &'static str,
     /// It reports a permission or a question that waits on Daniel, with its text.
@@ -240,7 +240,7 @@ pub struct Capabilities {
     pub transcript_format: TranscriptFormat,
 }
 
-/// Saved state finds its agent's capabilities by the agent's name: the two adapters' constants.
+/// Saved state finds its agent's capabilities by the agent's name: each adapter's constant.
 impl<'de> serde::Deserialize<'de> for Capabilities {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         #[derive(serde::Deserialize)]
@@ -252,6 +252,7 @@ impl<'de> serde::Deserialize<'de> for Capabilities {
             "" => Ok(Capabilities::default()),
             "claude" => Ok(crate::claude::CAPABILITIES),
             "agy" => Ok(crate::agy::CAPABILITIES),
+            crate::codex::CODEX => Ok(crate::codex::CAPABILITIES),
             other => Err(serde::de::Error::custom(format!("unknown agent {other}"))),
         }
     }
@@ -264,6 +265,8 @@ pub enum TranscriptFormat {
     #[default]
     Claude,
     Agy,
+    /// plotkeeper has no reader for the agent's transcript (Codex's, #359): its lines are skipped.
+    Unread,
 }
 
 impl Event {

@@ -1,15 +1,21 @@
 //! `plotkeeper install` and `plotkeeper uninstall` (#357; spec #320, "Install and distribution").
 //!
 //! Install copies the hook binaries into the data folder's `bin/`, renders each harness's plugin with that path into
-//! the data folder, and wires the harnesses it finds on the PATH at user level, each through its own CLI: Claude Code
-//! with `claude plugin`, agy with `agy plugin`. It also removes the archived app's setup, so no event is recorded twice:
+//! the data folder, and wires the harnesses it finds on the PATH at user level, each through its own CLI where it has
+//! one: Claude Code with `claude plugin`, agy with `agy plugin`. Codex has none for its hooks, so install adds its
+//! entries to `~/.codex/hooks.json` itself (#359). It also removes the archived app's setup, so no event is recorded twice:
 //! the `CLAUDE_CODE_PLUGIN_DIRS` entries in `~/.zshrc` that name a data folder's `checkout/plugin`, and agy's plugin
 //! `studio`. What it changes it backs up first, and `uninstall` puts it back.
 //!
 //! plotkeeper never opens Claude Code's settings files (AGENTS.md, Hard rules; spec #320, "Install obeys the
-//! credentials rule"): `claude plugin` writes them.
+//! credentials rule"): `claude plugin` writes them. `~/.codex/hooks.json` holds no credentials: Codex's hook docs
+//! (https://learn.chatgpt.com/docs/hooks, read 2026-11-23) give it a `description` and a `hooks` object of handlers
+//! (`type`, `command`, `timeout`, `async`, `statusMessage`, an MCP tool's `server`, `tool` and `input`), and no field
+//! for a key, a token or an environment; Codex keeps its login elsewhere. `~/.codex/config.toml`, which can hold a
+//! provider's token, is never opened.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::{
     ffi::OsStr,
     fs,
@@ -29,6 +35,8 @@ const CLAUDE_ID: &str = "plotkeeper@plotkeeper";
 const PLACEHOLDER: &str = "__PLOTKEEPER_BIN__";
 const PLUGIN_JSON: &str = include_str!("../../plugin/.claude-plugin/plugin.json");
 const HOOKS_JSON: &str = include_str!("../../plugin/hooks/hooks.json");
+/// plotkeeper's entries for Codex's hook file, one recording group per event.
+const CODEX_HOOKS_JSON: &str = include_str!("../../plugin-codex/hooks.json");
 /// The archived app's plugin for agy, by its folder's name.
 const OLD_AGY_PLUGIN: &str = "studio";
 
@@ -43,6 +51,23 @@ struct State {
     zshrc: Option<String>,
     /// agy plugins whose folders were backed up under `backups/agy/<name>` before install replaced or removed them.
     agy_backups: Vec<String>,
+    /// What install did to `~/.codex/hooks.json`.
+    codex: Option<CodexHooks>,
+}
+
+/// Install's record of Codex's hook file.
+#[derive(Serialize, Deserialize)]
+struct CodexHooks {
+    /// The file's text as install last wrote it.
+    written: String,
+    /// The file was there before install; its old bytes are in `backups/codex-hooks.json`.
+    existed: bool,
+    /// Install made `~/.codex` for it.
+    made_dir: bool,
+}
+
+fn codex_hooks(home: &Path) -> PathBuf {
+    home.join(".codex").join("hooks.json")
 }
 
 /// The folders install writes in the data folder: the plugins it renders, and its own record with the backups.
@@ -147,12 +172,16 @@ pub fn without_old_plugin_dirs(profile: &str) -> String {
     lines.concat()
 }
 
+/// `template`, a hook file, with the path of `bin` in place of its placeholder. The path sits in a JSON string, inside
+/// the shell's double quotes, so it is escaped as one.
+fn render(template: &str, bin: &Path) -> Result<String, String> {
+    let path = serde_json::to_string(&bin.display().to_string()).map_err(|e| e.to_string())?;
+    Ok(template.replace(PLACEHOLDER, &path[1..path.len() - 1]))
+}
+
 /// Writes Claude Code's plugin for the binaries in `bin` into `dir`, as a marketplace of one plugin, which is how
 /// `claude plugin install` takes a local folder.
 fn render_claude(dir: &Path, bin: &Path) -> Result<(), String> {
-    // The path sits in a JSON string, inside the shell's double quotes, so it is escaped as one.
-    let path = serde_json::to_string(&bin.display().to_string()).map_err(|e| e.to_string())?;
-    let path = &path[1..path.len() - 1];
     let marketplace = serde_json::json!({
         "name": NAME,
         "owner": { "name": "plotkeeper" },
@@ -168,10 +197,7 @@ fn render_claude(dir: &Path, bin: &Path) -> Result<(), String> {
             format!("{NAME}/.claude-plugin/plugin.json"),
             PLUGIN_JSON.to_owned(),
         ),
-        (
-            format!("{NAME}/hooks/hooks.json"),
-            HOOKS_JSON.replace(PLACEHOLDER, path),
-        ),
+        (format!("{NAME}/hooks/hooks.json"), render(HOOKS_JSON, bin)?),
     ];
     for (name, text) in files {
         let file = dir.join(name);
@@ -179,6 +205,34 @@ fn render_claude(dir: &Path, bin: &Path) -> Result<(), String> {
         fs::write(&file, text).map_err(|e| format!("could not write {}: {e}", file.display()))?;
     }
     Ok(())
+}
+
+/// plotkeeper's hook groups for Codex, by event, for the binaries in `bin`.
+fn codex_groups(bin: &Path) -> Result<serde_json::Map<String, Value>, String> {
+    let rendered: Value =
+        serde_json::from_str(&render(CODEX_HOOKS_JSON, bin)?).map_err(|e| e.to_string())?;
+    match rendered.get("hooks") {
+        Some(Value::Object(groups)) => Ok(groups.clone()),
+        _ => Err("plugin-codex/hooks.json has no hooks".into()),
+    }
+}
+
+/// The events of a Codex hook file `file`, which must be an object whose `hooks`, if any, is an object of arrays.
+fn codex_events<'a>(
+    file: &'a mut Value,
+    path: &Path,
+) -> Result<&'a mut serde_json::Map<String, Value>, String> {
+    let bad = || format!("Codex: {} is not a hook file Codex reads", path.display());
+    let hooks = file.as_object_mut().ok_or_else(bad)?;
+    let events = hooks
+        .entry("hooks")
+        .or_insert_with(|| Value::Object(Default::default()));
+    let events = events.as_object_mut().ok_or_else(bad)?;
+    if events.values().all(Value::is_array) {
+        Ok(events)
+    } else {
+        Err(bad())
+    }
 }
 
 /// Copies the folder `from` to `to`, files and folders only.
@@ -327,6 +381,130 @@ pub fn install(
             say(out, format!("agy: agy plugin install {}", dir.display()));
         }
     }
+
+    match on_path("codex", path) {
+        None => say(out, "Codex: `codex` not found, skipped"),
+        Some(_) => install_codex(home, &bin, &mut state, out)?,
+    }
+    Ok(())
+}
+
+/// Adds plotkeeper's groups to `~/.codex/hooks.json`, once each, beside the user's own, after a backup on the first
+/// install; then says Codex's one-time trust step.
+// shortcut: the file is written back with its keys sorted, as serde_json writes them; uninstall restores its bytes.
+fn install_codex(
+    home: &Path,
+    bin: &Path,
+    state: &mut State,
+    out: &mut dyn Write,
+) -> Result<(), String> {
+    let file = codex_hooks(home);
+    let dir = file.parent().unwrap_or(home);
+    let old = match fs::read_to_string(&file) {
+        Ok(text) => Some(text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(format!("Codex: could not read {}: {e}", file.display())),
+    };
+    let mut hooks: Value = match &old {
+        Some(text) => serde_json::from_str(text)
+            .map_err(|e| format!("Codex: could not read {}: {e}", file.display()))?,
+        None => Value::Object(Default::default()),
+    };
+    let events = codex_events(&mut hooks, &file)?;
+    for (event, ours) in codex_groups(bin)? {
+        let groups = events
+            .entry(event)
+            .or_insert_with(|| Value::Array(Vec::new()));
+        let groups = groups.as_array_mut().expect("checked to be an array");
+        for group in ours.as_array().into_iter().flatten() {
+            if !groups.contains(group) {
+                groups.push(group.clone());
+            }
+        }
+    }
+    let text = serde_json::to_string_pretty(&hooks).map_err(|e| e.to_string())? + "\n";
+    if state.codex.is_none() {
+        let backups = record_dir(home).join("backups");
+        if let Some(old) = &old {
+            fs::create_dir_all(&backups).map_err(|e| e.to_string())?;
+            fs::write(backups.join("codex-hooks.json"), old)
+                .map_err(|e| format!("could not back up {}: {e}", file.display()))?;
+        }
+        state.codex = Some(CodexHooks {
+            written: String::new(),
+            existed: old.is_some(),
+            made_dir: !dir.is_dir(),
+        });
+        save(home, state)?;
+    }
+    fs::create_dir_all(dir).map_err(|e| format!("could not make {}: {e}", dir.display()))?;
+    fs::write(&file, &text).map_err(|e| format!("could not write {}: {e}", file.display()))?;
+    if let Some(codex) = &mut state.codex {
+        codex.written = text;
+    }
+    save(home, state)?;
+    say(
+        out,
+        format!("Codex: added plotkeeper's hooks to {}", file.display()),
+    );
+    say(
+        out,
+        "Codex: once, run `/hooks` in Codex and trust plotkeeper's hooks; Codex skips a hook until it is trusted",
+    );
+    Ok(())
+}
+
+/// Takes install's change to `~/.codex/hooks.json` back: the file as it was when it is as install left it, else the
+/// file without plotkeeper's groups.
+fn uninstall_codex(
+    home: &Path,
+    codex: &CodexHooks,
+    bin: &Path,
+    out: &mut dyn Write,
+) -> Result<(), String> {
+    let file = codex_hooks(home);
+    let Ok(now) = fs::read_to_string(&file) else {
+        return Ok(());
+    };
+    if now == codex.written {
+        if codex.existed {
+            let old = fs::read(record_dir(home).join("backups").join("codex-hooks.json"))
+                .map_err(|e| format!("could not read the backup of {}: {e}", file.display()))?;
+            fs::write(&file, old)
+                .map_err(|e| format!("could not write {}: {e}", file.display()))?;
+        } else {
+            fs::remove_file(&file)
+                .map_err(|e| format!("could not remove {}: {e}", file.display()))?;
+            if codex.made_dir {
+                let _ = fs::remove_dir(file.parent().unwrap_or(home));
+            }
+        }
+        say(out, format!("Codex: {} put back as it was", file.display()));
+        return Ok(());
+    }
+    let mut hooks: Value = serde_json::from_str(&now)
+        .map_err(|e| format!("Codex: could not read {}: {e}", file.display()))?;
+    let ours = codex_groups(bin)?;
+    let events = codex_events(&mut hooks, &file)?;
+    for (event, ours) in ours {
+        let Some(Value::Array(groups)) = events.get_mut(&event) else {
+            continue;
+        };
+        let ours = ours.as_array().cloned().unwrap_or_default();
+        groups.retain(|group| !ours.contains(group));
+        if groups.is_empty() {
+            events.remove(&event);
+        }
+    }
+    let text = serde_json::to_string_pretty(&hooks).map_err(|e| e.to_string())? + "\n";
+    fs::write(&file, text).map_err(|e| format!("could not write {}: {e}", file.display()))?;
+    say(
+        out,
+        format!(
+            "Codex: {} changed since install, so only plotkeeper's hooks were taken out of it",
+            file.display()
+        ),
+    );
     Ok(())
 }
 
@@ -339,6 +517,10 @@ pub fn uninstall(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Resu
     };
     let backups = record_dir(home).join("backups");
     let mut keep_record = false;
+
+    if let Some(codex) = &state.codex {
+        uninstall_codex(home, codex, &studio_hook::bin_dir(home), out)?;
+    }
 
     if state.agy || !state.agy_backups.is_empty() {
         let agy = on_path("agy", path)

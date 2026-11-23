@@ -16,6 +16,7 @@ mod agy;
 mod ask;
 mod checks;
 mod claude;
+mod codex;
 mod event;
 mod ledger;
 mod saved;
@@ -30,6 +31,7 @@ pub use checks::{
     output as check_output,
 };
 pub use claude::CAPABILITIES as CLAUDE_CAPABILITIES;
+pub use codex::CAPABILITIES as CODEX_CAPABILITIES;
 pub use event::{Capabilities, TranscriptFormat};
 use event::{Event, Happened, Origin, Start, ToolKind};
 pub use ledger::{Bytes, Details, Ledger, Outcome, Row};
@@ -41,9 +43,12 @@ pub use turn_files::{
 pub use work::{Estimate, MIN_HISTORY, Phase, PhaseStart, Work, range};
 
 /// Who reads a line that is not Claude's: agy, when its hook entry named agy or named no agent (a
-/// line written before entries named one), or nobody, for another agent (#355).
+/// line written before entries named one), Codex (#359), or nobody, for another agent (#355). A new
+/// harness is one arm here, beside its `Capabilities` constant and its parser.
 enum Named {
     Agy,
+    /// The line's time, for its drift when Codex's parser cannot read it.
+    Codex(u64),
     /// The line's time, for its drift.
     Other(u64),
 }
@@ -60,6 +65,7 @@ impl Named {
         match stamp.studio_agent.as_deref() {
             None => Named::Agy,
             Some(agent) if agent == AGY_CAPABILITIES.agent => Named::Agy,
+            Some(codex::CODEX) => Named::Codex(stamp.studio_received_ms),
             Some(_) => Named::Other(stamp.studio_received_ms),
         }
     }
@@ -2552,13 +2558,20 @@ impl Studio {
     }
 
     /// The events of one log line, read by the agent its hook entry named (#355): Claude's, agy's,
-    /// or none and drift for an agent plotkeeper cannot read. A line that names none is Claude's
-    /// by its shape, or else agy's.
+    /// Codex's, or none and drift for an agent plotkeeper cannot read or a line its agent's parser
+    /// cannot read. A line that names none is Claude's by its shape, or else agy's.
     fn events(&mut self, line: &str) -> Vec<Event> {
         match claude::parse(line) {
             Ok(event) => vec![event],
             Err(_) => match Named::of(line) {
                 Named::Agy => self.agy.events(line).unwrap_or_default(),
+                Named::Codex(at) => match codex::parse(line) {
+                    Ok(event) => vec![event],
+                    Err(_) => {
+                        self.agy.drift(at, AgyDriftKind::Agent);
+                        Vec::new()
+                    }
+                },
                 Named::Other(at) => {
                     self.agy.drift(at, AgyDriftKind::Agent);
                     Vec::new()
@@ -2573,6 +2586,7 @@ impl Studio {
             Ok(event) => Some(event),
             Err(_) => match Named::of(line) {
                 Named::Agy => self.agy.peek(line),
+                Named::Codex(_) => codex::parse(line).ok(),
                 Named::Other(_) => None,
             },
         }
@@ -4558,6 +4572,7 @@ impl Studio {
                 .join("subagents")
                 .join(format!("agent-{agent}.jsonl")),
             TranscriptFormat::Agy => agy::subagent_transcript(transcript, agent)?,
+            TranscriptFormat::Unread => return None,
         };
         transcript::read_subagent_log(&path, agent, format, from, &session.cwd)
     }
