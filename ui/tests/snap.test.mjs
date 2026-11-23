@@ -208,3 +208,36 @@ test("a map brief fixture that never printed its ok line fails: Chrome's time bu
   assert.equal(failed(["snap:fail x", "brief ok"], "brief ok"), true);
   assert.equal(failed([]), false, "a fixture with no ok line is as before");
 });
+
+// snap run end to end against a stand-in Chrome (`CHROME`): one that never ends, and one that ends without writing the screenshot.
+const runSnap = async (chromeBody, env = {}) => {
+  const { mkdtempSync, writeFileSync, chmodSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { spawnSync } = await import("node:child_process");
+  const dir = mkdtempSync(join(tmpdir(), "snap-fake-chrome-"));
+  const chrome = join(dir, "chrome");
+  writeFileSync(chrome, `#!/bin/sh\n${chromeBody}\n`);
+  chmodSync(chrome, 0o755);
+  const out = join(dir, "out.png");
+  const run = spawnSync(process.execPath, ["scripts/snap/snap.mjs", "mapBusy", out], {
+    env: { ...process.env, CHROME: chrome, ...env },
+    encoding: "utf8",
+    timeout: 30000,
+  });
+  return { status: run.status, signal: run.signal, output: run.stdout + run.stderr };
+};
+
+test("a Chrome that never ends is killed after snap's time limit, and the fixture fails", async () => {
+  const run = await runSnap("exec sleep 600", { SNAP_CHROME_TIMEOUT_MS: "1000" });
+  assert.equal(run.signal, null, "snap itself hung");
+  assert.notEqual(run.status, 0);
+  assert.match(run.output, /^snap:fail .*time/m);
+});
+
+test("a Chrome that ends without writing the screenshot fails the fixture", async () => {
+  const run = await runSnap("exit 0");
+  assert.notEqual(run.status, 0);
+  assert.match(run.output, /^snap:fail .*screenshot/m);
+  assert.doesNotMatch(run.output, /^wrote /m);
+});

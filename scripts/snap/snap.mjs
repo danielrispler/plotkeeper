@@ -2,7 +2,7 @@
 // fed by a fixture (scripts/snap/fixtures.ts) to a PNG, with headless Chrome. Run `npm run build` first.
 // Chrome never opens a window, so it takes no focus. Set CHROME to a Chrome binary to override the default.
 import { spawn } from "node:child_process";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
@@ -17,6 +17,9 @@ const [name, out] = process.argv.slice(2);
 const [width, height] = (process.env.SNAP_SIZE ?? "1900x900").split("x");
 // SNAP_SCALE=2 draws at twice the pixel density (the PNG is twice as wide).
 const scale = process.env.SNAP_SCALE ?? "1";
+// SNAP_CHROME_TIMEOUT_MS (default 90 s) is how long Chrome may run: past it Chrome is killed and the fixture fails, so a Chrome that
+// never writes its screenshot (or, with its DevTools port open, never ends) cannot hang a run until CI's own limit.
+const chromeTimeout = Number(process.env.SNAP_CHROME_TIMEOUT_MS ?? 90000);
 const bodyClasses = (process.env.SNAP_BODY ?? "").split(",").filter(Boolean);
 if (!fixtures[name] || !out) {
   console.error(`usage: npm run snap -- <${Object.keys(fixtures).join("|")}> <out.png>`);
@@ -85,10 +88,17 @@ const chromeArgs = [
   "--virtual-time-budget=5000", `--screenshot=${resolve(out)}`, ...(fixture.realPointer ? ["--remote-debugging-port=0"] : []),
   `http://127.0.0.1:${server.address().port}/index.html`,
 ];
+// A screenshot left from an earlier run must not pass for this one's.
+rmSync(resolve(out), { force: true });
 const run = await new Promise((done) => {
   const child = spawn(chrome, chromeArgs, { stdio: ["ignore", "ignore", "pipe"] });
   let stderr = "";
   let shot = false;
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    child.kill("SIGKILL");
+  }, chromeTimeout);
   child.stderr.on("data", (chunk) => {
     stderr += chunk;
     // With its DevTools port open, Chrome stays up after the screenshot: it is ended once the screenshot is written.
@@ -97,19 +107,31 @@ const run = await new Promise((done) => {
       child.kill();
     }
   });
-  child.on("close", (status) => done({ status: shot ? 0 : status, stderr }));
+  child.on("close", (status) => {
+    clearTimeout(timer);
+    done({ status: shot ? 0 : status, stderr, timedOut });
+  });
 });
 server.close();
 rmSync(site, { recursive: true, force: true });
 rmSync(profile, { recursive: true, force: true });
 const log = consoleLines(run.stderr ?? "");
 if (log.length) console.log(log.join("\n"));
+if (run.timedOut) {
+  console.error(`snap:fail Chrome ran past snap's time limit (${chromeTimeout} ms) and was killed`);
+  console.error(chromeFailure(run.status ?? "killed", run.stderr ?? ""));
+  process.exit(1);
+}
 if (run.status !== 0) {
   console.error(chromeFailure(run.status, run.stderr ?? ""));
   process.exit(run.status ?? 1);
 }
 if (failed(log, fixture.snapDone)) {
   if (!log.some((line) => line.startsWith("snap:fail"))) console.error(`snap:fail the script never printed "${fixture.snapDone}": Chrome's time budget cut it off`);
+  process.exit(1);
+}
+if (!existsSync(resolve(out))) {
+  console.error(`snap:fail Chrome wrote no screenshot to ${out}`);
   process.exit(1);
 }
 console.log(`wrote ${out}`);
