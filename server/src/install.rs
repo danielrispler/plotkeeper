@@ -23,6 +23,14 @@
 //!
 //! Copilot's plugin goes in with `copilot plugin install` of the folder install renders, and out with `copilot plugin
 //! uninstall`; no file under `~/.copilot`, where Copilot keeps its settings and may keep its login, is opened (#361).
+//!
+//! Qwen Code's hooks would otherwise go in `~/.qwen/settings.json`, which can hold API keys (its `env` block and
+//! `security.auth.apiKey`), so plotkeeper never opens it (#379). Its hooks go in an extension instead: a native
+//! extension's `qwen-extension.json` may carry a `hooks` object, which Qwen Code loads for every active extension
+//! (QwenLM/qwen-code at c134a03e5, `packages/core/src/extension/extensionManager.ts` `loadExtension`, and
+//! `packages/core/src/hooks/hookRegistry.ts`, "Extension hooks are always loaded"). Install renders `plugin-qwen/` and
+//! runs `qwen extensions install <folder> --consent`, which copies it into Qwen Code's own extension folder; uninstall
+//! runs `qwen extensions uninstall plotkeeper`. No file under `~/.qwen` is opened.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -52,6 +60,8 @@ const COPILOT_PLUGIN_JSON: &str = include_str!("../../plugin-copilot/plugin.json
 const COPILOT_HOOKS_JSON: &str = include_str!("../../plugin-copilot/hooks.json");
 /// plotkeeper's entries for Cursor's user-level hook file, one per event (#362).
 const CURSOR_HOOKS_JSON: &str = include_str!("../../plugin-cursor/hooks.json");
+/// plotkeeper's extension for Qwen Code (#379): its manifest, which holds its hooks.
+const QWEN_EXTENSION_JSON: &str = include_str!("../../plugin-qwen/qwen-extension.json");
 /// The archived app's plugin for agy, by its folder's name.
 const OLD_AGY_PLUGIN: &str = "studio";
 
@@ -81,6 +91,9 @@ struct State {
     /// plotkeeper's Copilot plugin was installed with `copilot plugin` (#361).
     #[serde(default)]
     copilot: bool,
+    /// plotkeeper's Qwen Code extension was installed with `qwen extensions` (#379).
+    #[serde(default)]
+    qwen: bool,
 }
 
 /// The folders install writes in the data folder: the plugins it renders, and its own record with the backups.
@@ -454,6 +467,59 @@ pub fn install(
         None => say(out, "Copilot: `copilot` not found, skipped"),
         Some(copilot) => install_copilot(home, &bin, &copilot, &mut state, out)?,
     }
+
+    match on_path("qwen", path) {
+        None => say(out, "Qwen Code: `qwen` not found, skipped"),
+        Some(qwen) => install_qwen(home, &bin, &qwen, &mut state, out)?,
+    }
+    Ok(())
+}
+
+/// Renders `plugin-qwen/` for the binaries in `bin` into the data folder and installs it with `qwen extensions install
+/// --consent`, which copies it into Qwen Code's own extension folder without a prompt; a second install replaces the
+/// first, as Qwen Code refuses an extension already installed ("Please uninstall it first", `extensionManager.ts`).
+/// plotkeeper opens no file of Qwen Code's.
+fn install_qwen(
+    home: &Path,
+    bin: &Path,
+    qwen: &Path,
+    state: &mut State,
+    out: &mut dyn Write,
+) -> Result<(), String> {
+    let dir = plugins_dir(home).join("qwen").join(NAME);
+    fs::create_dir_all(&dir).map_err(|e| format!("could not make {}: {e}", dir.display()))?;
+    let file = dir.join("qwen-extension.json");
+    fs::write(&file, render(QWEN_EXTENSION_JSON, bin)?)
+        .map_err(|e| format!("could not write {}: {e}", file.display()))?;
+    if state.qwen {
+        // Once it is out, or already gone ("Extension not found.", Qwen Code's `extensionManager.ts`), nothing is
+        // installed until the install below, so one that fails leaves uninstall nothing to undo for Qwen Code. An
+        // uninstall that failed otherwise may have left it in, so the record stays.
+        let gone = run(
+            qwen,
+            &["extensions".as_ref(), "uninstall".as_ref(), NAME.as_ref()],
+        )
+        .map_or_else(|e| e.contains("Extension not found"), |()| true);
+        if gone {
+            state.qwen = false;
+            save(home, state)?;
+        }
+    }
+    run(
+        qwen,
+        &[
+            "extensions".as_ref(),
+            "install".as_ref(),
+            dir.as_os_str(),
+            "--consent".as_ref(),
+        ],
+    )?;
+    state.qwen = true;
+    save(home, state)?;
+    say(
+        out,
+        format!("Qwen Code: qwen extensions install {}", dir.display()),
+    );
     Ok(())
 }
 
@@ -791,6 +857,26 @@ pub fn uninstall(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Resu
             Ok(()) => {
                 say(out, format!("Copilot: copilot plugin uninstall {NAME}"));
                 state.copilot = false;
+            }
+            Err(e) => fail(out, e),
+        }
+    }
+
+    if state.qwen {
+        let done = on_path("qwen", path)
+            .ok_or_else(|| {
+                "Qwen Code: `qwen` not found, so its extension cannot be uninstalled".to_owned()
+            })
+            .and_then(|qwen| {
+                run(
+                    &qwen,
+                    &["extensions".as_ref(), "uninstall".as_ref(), NAME.as_ref()],
+                )
+            });
+        match done {
+            Ok(()) => {
+                say(out, format!("Qwen Code: qwen extensions uninstall {NAME}"));
+                state.qwen = false;
             }
             Err(e) => fail(out, e),
         }
