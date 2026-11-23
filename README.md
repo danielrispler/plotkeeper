@@ -18,7 +18,6 @@ plotkeeper builds Studio, a desktop app for macOS that sits beside your agent se
   ![Where we were](docs/studio/assets/readme/where-we-were.png)
 
 - **See who needs you.** [Every session is in one list](docs/studio/behaviour/sessions.md), only "needs you" is in colour, and you can answer an agent's question from the rail.
-- **Terminals that outlive the app.** A [restart, rebuild or crash](docs/studio/behaviour/terminal.md) loses none of them.
 - **Your subscription, your machine.** The [writer](docs/studio/behaviour/pr-briefs.md#the-writers-limits) runs `claude -p` on your own subscription, with no tools and no MCP servers.
 
 ## Quick start
@@ -30,9 +29,9 @@ You need macOS, Node, the Rust toolchain and Claude Code. `claude` must be on th
     npm ci
     npm start
 
-`npm start` builds the app, which takes a while the first time, and opens it.
+`npm start` builds the page, the hook and the server, which takes a while the first time, installs `plotkeeper` into `~/.cargo/bin`, starts it and opens its page in your browser. Later, start it with `plotkeeper` from any terminal; Ctrl+C stops it.
 
-Studio starts no sessions: for a `claude` you start in your own terminal, see [Load the plugin](docs/studio/plugin.md).
+plotkeeper starts no sessions: for a `claude` you start in your own terminal, see [Load the plugin](docs/studio/plugin.md).
 
 ## Status
 
