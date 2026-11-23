@@ -1220,3 +1220,41 @@ fn a_hook_root_spelled_through_a_symlink_is_the_sessions_own_root() {
         [("h1".into(), "/private/var/w2".into(), Purpose::Base)]
     );
 }
+
+/// A subagent's reply is the subagent's: a main-agent `Stop` with no reply of its own does not take it.
+#[test]
+fn a_subagents_reply_never_becomes_its_parents_turn_reply() {
+    let id = "c0ffee00-0000-4000-8000-000000000001";
+    let at = |name: &str, ms: u64, extra: serde_json::Value| {
+        common::with(common::base(id, name, "/repo", ms), extra)
+    };
+    let mut studio = Studio::default();
+    let mut outputs = Vec::new();
+    for line in [
+        at("SessionStart", 1_000, json!({ "source": "startup" })),
+        at(
+            "UserPromptSubmit",
+            2_000,
+            json!({ "prompt": "Review it.", "prompt_id": "p-1" }),
+        ),
+        at(
+            "SubagentStop",
+            3_000,
+            json!({ "agent_id": "a-review", "agent_type": "general-purpose", "prompt_id": "p-1",
+                "last_assistant_message": "Which option should the parent take, A or B?" }),
+        ),
+        at("Stop", 4_000, json!({ "prompt_id": "p-1" })),
+    ] {
+        outputs.extend(studio.apply(&line));
+    }
+    let taken: Vec<_> = outputs
+        .iter()
+        .filter_map(|o| match o {
+            Output::Summary(request) => Some(request.responses.clone()),
+            Output::Name(request) => request.response.clone().map(|r| vec![r]),
+            _ => None,
+        })
+        .filter(|texts| texts.iter().any(|t| t.contains("A or B")))
+        .collect();
+    assert!(taken.is_empty(), "{taken:?}");
+}

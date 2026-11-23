@@ -3218,8 +3218,14 @@ impl Studio {
                         session.reopen_turn();
                     }
                 }
-                // A reply in an event of its own waits for its turn's end (#362).
-                Happened::Reply(reply) if !event.has(|h| matches!(h, Happened::TurnEnd { .. })) => {
+                // A reply in an event of its own waits for its turn's end (#362). Only the main agent's: a
+                // subagent's reply (Claude Code's `SubagentStop`) is never its parent turn's.
+                Happened::Reply(reply)
+                    if event.agent_id.is_none()
+                        && !event.has(|h| {
+                            matches!(h, Happened::TurnEnd { .. } | Happened::SubagentEnd)
+                        }) =>
+                {
                     session.reply.clone_from(reply);
                 }
                 Happened::TurnEnd { background_pending } => {
