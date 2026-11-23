@@ -1,9 +1,9 @@
-// The projects the list groups by (#97, #326): the page has no project registry, so a project is a repository some session
-// ran in, named by its main checkout: a task's worktree path (`<main>/.claude/worktrees/<task>`) is its main checkout's
-// project, any other folder is its own. A pure function of the listed sessions; the Map view lists the same repositories.
+// The projects the list groups by (#97, #326, #381): a repository named by its main checkout, a task's worktree path
+// (`<main>/.claude/worktrees/<task>`) in its main checkout's project, any other folder its own. The server keeps them as the
+// saved project list (`server/src/projects.rs`), so a project keeps its header after its sessions go; the Map view lists the same.
 
 import { studio } from "./state.js";
-import type { Session, SessionState } from "./types.js";
+import type { SavedProject, Session, SessionState } from "./types.js";
 
 export const liveStates: SessionState[] = ["needs_you", "running", "your_turn", "idle"];
 export type Rollup = "needs_you" | "running" | null;
@@ -14,6 +14,10 @@ export type ProjectGroup<S> = {
   name: string;
   rollup: Rollup;
   states: StateGroup<S>[];
+  // Its folder was moved or deleted.
+  gone: boolean;
+  // It has a live session, also one Clear landed hid from the list.
+  live: boolean;
 };
 
 export const lastSegment = (path: string) => path.split("/").filter(Boolean).pop() ?? "";
@@ -30,14 +34,20 @@ export const sessionProjectName = (session: Pick<Session, "cwd">): string => pro
 const urgency = (sessions: Pick<Session, "state">[]): Rollup =>
   sessions.some(({ state }) => state === "needs_you") ? "needs_you" : sessions.some(({ state }) => state === "running") ? "running" : null;
 
-// The sidebar's groups: one per repository, in the order its first live session is listed. Inside a group the sessions are by
-// state, and the header's rollup is its most urgent state. Ended sessions are in History.
-export function projectGroups<S extends Pick<Session, "cwd" | "state">>(sessions: S[]): ProjectGroup<S>[] {
+// The sidebar's groups: one per repository, in the order its first live session is listed, then each saved project with no
+// live session, as a header only, in the saved order. Inside a group the sessions are by state, and the header's rollup is
+// its most urgent state. Ended sessions are in History. The sessions in `hidden` (Clear landed's, #382) are left out of the groups, but
+// still make their project live.
+export function projectGroups<S extends Pick<Session, "cwd" | "state" | "id">>(sessions: S[], saved: SavedProject[] = [], hidden: ReadonlySet<string> = new Set()): ProjectGroup<S>[] {
   const by = new Map<string, S[]>();
+  const live = new Set<string>();
   for (const session of sessions.filter(({ state }) => liveStates.includes(state))) {
     const key = repositoryOf(session.cwd);
-    by.set(key, [...(by.get(key) ?? []), session]);
+    live.add(key);
+    if (!hidden.has(session.id)) by.set(key, [...(by.get(key) ?? []), session]);
   }
+  const gone = new Set(saved.filter((project) => project.gone).map((project) => project.path));
+  for (const { path } of saved) if (!by.has(path)) by.set(path, []);
   return [...by].map(([key, members]) => ({
     key,
     name: projectName(key),
@@ -46,15 +56,20 @@ export function projectGroups<S extends Pick<Session, "cwd" | "state">>(sessions
       const here = members.filter((session) => session.state === state);
       return here.length ? [{ state, sessions: here }] : [];
     }),
+    gone: gone.has(key),
+    live: live.has(key),
   }));
 }
 
 // The sessions in the sidebar's order: project by project, by state, without ended ones. The session keys step over it.
-export const sidebarOrder = <S extends Pick<Session, "cwd" | "state">>(sessions: S[]): S[] =>
+export const sidebarOrder = <S extends Pick<Session, "cwd" | "state" | "id">>(sessions: S[]): S[] =>
   projectGroups(sessions).flatMap((group) => group.states.flatMap((state) => state.sessions));
 
-// Every repository a listed session ran in, ended ones too, so the Map view reaches a project whose sessions all ended.
-export const knownProjects = (): string[] => [...new Set(studio.listed.map((session) => repositoryOf(session.cwd)))];
+// The saved projects, so the Map view reaches a project whose sessions all ended or were deleted.
+export const knownProjects = (): string[] => studio.projects.map((project) => project.path);
+
+// Whether `path` is a saved project whose folder was moved or deleted.
+export const projectGone = (path: string): boolean => studio.projects.some((project) => project.path === path && project.gone);
 
 // The project a folder belongs to, and the one the selected session belongs to.
 export const projectOfCwd = (cwd: string): string => repositoryOf(cwd);

@@ -75,6 +75,17 @@ pub struct UserState {
     /// What landed on the default branch since Daniel caught up (`fog.rs`).
     #[serde(default)]
     pub fog: crate::fog::FogState,
+    /// The map's camera as Daniel last left it (#383); none until he first moves it.
+    #[serde(default)]
+    pub view: Option<View>,
+}
+
+/// The Map view's camera: a world point `p` shows at `p * scale + (x, y)` in the map area (`Camera` in `ui/types.ts`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct View {
+    pub scale: f64,
+    pub x: f64,
+    pub y: f64,
 }
 
 pub(crate) fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
@@ -382,26 +393,53 @@ pub fn pr_diff(
     crate::history::pr_files(Path::new(&project), &head, &format!("#{number} {title}"))
 }
 
-/// The projects among `projects` that show a fogged Core part, a broken law or a waiting PR brief, for Home's quiet mark. Reads local refs and the
-/// last CI read only: it asks neither `origin` nor GitHub.
+/// Why a project header's quiet dot lights (#344, #386): fog on a Core part, a broken law, a PR brief waiting, in that order.
+#[derive(Debug, PartialEq, Serialize)]
+pub struct Mark {
+    pub project: String,
+    pub why: Vec<MarkWhy>,
+}
+
+/// One reason a header's dot lights; `MarkWhy` in `ui/types.ts`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MarkWhy {
+    Fog,
+    Broken,
+    Brief,
+}
+
+/// The projects among `projects` that show a fogged Core part, a broken law or a waiting PR brief, with which of the three, for the project
+/// header's quiet dot and its hover. Reads local refs and the last CI read only: it asks neither `origin` nor GitHub. A gone folder has
+/// no map to read and gets no mark (#381).
 pub fn map_marks(
     projects: Vec<String>,
     cache: &crate::ci_laws::CiCache,
     prs: &crate::prs::Prs,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<Mark>, String> {
     let file = state_file()?;
     Ok(projects
         .into_iter()
-        .filter(|project| {
-            if cache.broken(project) || crate::pr_briefs::any_waiting(project, &prs.ready(project))
-            {
-                return true;
+        .filter_map(|project| {
+            let repo = Path::new(&project);
+            if !repo.is_dir() {
+                return None;
             }
-            let repo = Path::new(project);
-            let _ = crate::fog::refresh(repo, &file, project, false);
-            read_map(repo)
-                .source
-                .is_some_and(|source| crate::fog::core_fogged(&read_user(&file, project), &source))
+            let _ = crate::fog::refresh(repo, &file, &project, false);
+            let fog = read_map(repo).source.is_some_and(|source| {
+                crate::fog::core_fogged(&read_user(&file, &project), &source)
+            });
+            let broken = cache.broken(&project);
+            let brief = crate::pr_briefs::any_waiting(&project, &prs.ready(&project));
+            let why: Vec<MarkWhy> = [
+                (fog, MarkWhy::Fog),
+                (broken, MarkWhy::Broken),
+                (brief, MarkWhy::Brief),
+            ]
+            .into_iter()
+            .filter_map(|(lit, name)| lit.then_some(name))
+            .collect();
+            (!why.is_empty()).then_some(Mark { project, why })
         })
         .collect())
 }
@@ -422,6 +460,19 @@ pub fn map_save_positions(
     update_user(&state_file()?, &project, |user| {
         user.positions.extend(positions)
     })
+}
+
+/// Saves `project`'s camera in `file`, beside its positions; a camera that is not finite numbers, or has no scale, is refused.
+pub fn save_view(file: &Path, project: &str, view: View) -> Result<UserState, String> {
+    if ![view.scale, view.x, view.y].iter().all(|n| n.is_finite()) || view.scale <= 0.0 {
+        return Err("a view is a positive scale and a finite x and y".into());
+    }
+    update_user(file, project, |user| user.view = Some(view))
+}
+
+/// Saves the Map view's camera for `project` in the data folder.
+pub fn map_save_view(project: String, view: View) -> Result<UserState, String> {
+    save_view(&state_file()?, &project, view)
 }
 
 /// Sets part `part`'s tier, `null` clearing Daniel's choice so the map's own tier applies again.
@@ -503,6 +554,24 @@ mod tests {
     use studio_test_support::{git, origin, repo};
 
     const MAP: &str = r#"{"version":1,"parts":[],"actors":[],"links":[],"ignored":[],"laws":[]}"#;
+
+    #[test]
+    fn a_gone_folder_gets_no_header_mark_and_its_map_is_not_read() {
+        let data = tempfile::tempdir().unwrap();
+        let gone = data.path().join("pokedex").display().to_string();
+        let file = data.path().join("ci-last.json");
+        std::fs::write(
+            &file,
+            serde_json::json!({ &gone: { "status": "broken", "parts": ["shell"] } }).to_string(),
+        )
+        .unwrap();
+        let cache = crate::ci_laws::CiCache::load(file);
+        assert!(cache.broken(&gone));
+        assert_eq!(
+            map_marks(vec![gone], &cache, &crate::prs::Prs::default()).unwrap(),
+            []
+        );
+    }
 
     fn commit_file(dir: &Path, name: &str, text: &str) {
         std::fs::write(dir.join(name), text).unwrap();
@@ -656,6 +725,45 @@ mod tests {
         assert_eq!(p.positions["core"], [10.0, 20.5]);
         assert_eq!(p.tiers["hook"], "black-box");
         assert_eq!(read_user(&file, "/q").positions.len(), 1);
+    }
+
+    #[test]
+    fn a_projects_view_is_saved_beside_its_positions_and_read_back_after_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("map-state.json");
+        update_user(&file, "/p", |u| {
+            u.positions.insert("core".into(), [10.0, 20.0]);
+        })
+        .unwrap();
+        let view = View {
+            scale: 0.75,
+            x: -120.5,
+            y: 40.0,
+        };
+        save_view(&file, "/p", view).unwrap();
+        // A restart keeps nothing in memory: the view is read back from the file alone.
+        let read = read_user(&file, "/p");
+        assert_eq!(read.view, Some(view));
+        assert_eq!(read.positions["core"], [10.0, 20.0], "positions are kept");
+        assert_eq!(
+            read_user(&file, "/q").view,
+            None,
+            "another project has its own view"
+        );
+        let moved = View { scale: 2.0, ..view };
+        save_view(&file, "/p", moved).unwrap();
+        assert_eq!(read_user(&file, "/p").view, Some(moved));
+        let bad = View {
+            scale: f64::NAN,
+            ..view
+        };
+        assert!(save_view(&file, "/p", bad).is_err());
+        assert!(save_view(&file, "/p", View { scale: 0.0, ..view }).is_err());
+        assert_eq!(
+            read_user(&file, "/p").view,
+            Some(moved),
+            "a refused view changes nothing"
+        );
     }
 
     #[test]

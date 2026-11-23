@@ -87,7 +87,7 @@ test("the API key set comes first in the preset order, and the key row says it i
   assert.match(keyLine(set), /: set, kept in the macOS Keychain/);
   assert.deepEqual(preset(set, settings()), { writer: "anthropic", model: "claude-haiku-5-5", effort: "" });
   // A Test of the Anthropic writer reads as any writer's.
-  assert.deepEqual(testLine({ outcome: "not_logged_in", line: "`anthropic` has no working API key. Add or replace the API key under Writer, at the top of the page.", settings: null }).passed, false);
+  assert.deepEqual(testLine({ outcome: "not_logged_in", line: "`anthropic` has no working API key. Add or replace the API key in Settings, under the gear at the top of the page.", settings: null }).passed, false);
 });
 
 test("the OpenAI-compatible API: with no base URL and no key it is listed but cannot be picked", () => {
@@ -114,4 +114,14 @@ test("the OpenAI-compatible writer takes any model id the endpoint serves, but a
   assert.deepEqual(preset(on, settings("openai", "llama3.2", "")), { writer: "openai", model: "llama3.2", effort: "" });
   assert.deepEqual(preset(on, settings("openai", "openai/gpt-6-luna", "low")), { writer: "openai", model: "openai/gpt-6-luna", effort: "low" });
   assert.deepEqual(preset(on, settings("openai", "haiku", "")), { writer: "openai", model: "gpt-6-luna", effort: "" });
+});
+
+// #387: the section lives in the Settings panel (spec #380, "The left panel"), so the top bar keeps no "Writer" entry.
+test("the top bar has no Writer entry: the section is in the Settings panel", async () => {
+  const { readFileSync } = await import("node:fs");
+  const page = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const bar = page.slice(page.indexOf('<header class="top"'), page.indexOf("</header>"));
+  assert.ok(bar.length > 0, "the top bar is found");
+  assert.doesNotMatch(bar, />Writer</);
+  assert.doesNotMatch(bar, /id="writers"/);
 });

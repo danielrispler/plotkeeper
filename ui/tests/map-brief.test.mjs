@@ -110,7 +110,6 @@ test("opening a brief while the map is scrubbed returns it to now first", () => 
 });
 
 test("Esc closes the drawer, then the brief, then returns to now, then the sheet, then leaves", () => {
-  assert.deepEqual(layerOrder, ["drawer", "brief", "scrubbed", "sheet"]);
   const player = briefPlayer({ scrubbed: () => false, backToNow: () => {} });
   player.open("/p", 7, 0);
   player.go(1, 3);
@@ -121,7 +120,7 @@ test("Esc closes the drawer, then the brief, then returns to now, then the sheet
     scrubbed: { open: () => open.scrubbed, close: () => (open.scrubbed = false) },
     sheet: { open: () => open.sheet, close: () => (open.sheet = false) },
   };
-  assert.deepEqual([1, 2, 3, 4, 5].map(() => escapeMap(layers)), ["drawer", "brief", "scrubbed", "sheet", "leave"]);
+  assert.deepEqual([1, 2, 3, 4, 5].map(() => escapeMap(layers)), ["drawer", "brief", "scrubbed", "sheet", null]);
   player.open("/p", 7, 0);
   assert.equal(player.current().step, 1, "closing with Esc kept the step");
 });

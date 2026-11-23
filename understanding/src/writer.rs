@@ -282,16 +282,16 @@ impl WriterError {
                 "Log in to `agy` in a terminal, then it writes again."
             }
             (FailureKind::NotLoggedIn, "anthropic") => {
-                "Add or replace the API key under Writer, at the top of the page."
+                "Add or replace the API key in Settings, under the gear at the top of the page."
             }
             (FailureKind::Other, "anthropic") => {
                 "The API answered with an error; it tries again at the next turn."
             }
             (FailureKind::NotLoggedIn, "openai") => {
-                "Add or replace the API key of the OpenAI-compatible API under Writer, at the top of the page."
+                "Add or replace the API key of the OpenAI-compatible API in Settings, under the gear at the top of the page."
             }
             (FailureKind::Other, "openai") => {
-                "Check the base URL and the model under Writer, at the top of the page, and that the API is running; it tries again at the next turn."
+                "Check the base URL and the model in Settings, under the gear at the top of the page, and that the API is running; it tries again at the next turn."
             }
             (FailureKind::NotLoggedIn, "codex") => {
                 "Run `codex login` in a terminal, then it writes again."
@@ -304,7 +304,7 @@ impl WriterError {
             }
             (FailureKind::NotLoggedIn, _) => "Run `claude` in a terminal and log in with /login.",
             (FailureKind::Quota, _) => {
-                "Wait for the limit to reset, or pick another model or writer under Writer, at the top of the page."
+                "Wait for the limit to reset, or pick another model or writer in Settings, under the gear at the top of the page."
             }
             (FailureKind::Timeout, _) => "Check the connection; it tries again at the next turn.",
             (FailureKind::NotInstalled, "agy") => "Install the Antigravity CLI, or fix its path.",

@@ -11,8 +11,7 @@ import { age, code, element, failure, fullTitle, invoke, logLine, pressable, pro
 import { select } from "./selection.js";
 import { askAnchor } from "./ask.js";
 import { rendered } from "./markdown.js";
-import { agentState, sessionName, showsLanded } from "./list.js";
-import { refreshHome } from "./panes.js";
+import { agentState, drawSidebar, sessionName, showsLanded } from "./list.js";
 import { blockedRequestFor, openDecision, type Ask } from "./answer.js";
 import { blockedElement, docksInDock, fillCardRisk, retryLine, riskLine } from "./blocked.js";
 import { briefNodes } from "./cards.js";
@@ -41,21 +40,12 @@ import {
   type TurnSummary,
 } from "./types.js";
 
-// The top bar's header name, with the full name on the header's hover, where the name is cut (#162), then what a click does (#220).
-export function showBarName(name: string) {
-  element("bar-name").textContent = name;
-  element("session-header").title = [name, titled(studio.files.keymap, "Show or hide the session's story", "studio::ToggleRail")].filter(Boolean).join("\n");
-}
-
 export function showView(selected: Selection | null) {
   element("empty").hidden = selected !== null;
   element("view").hidden = selected === null;
   element("rail-more").hidden = selected === null;
-  element("session-header").hidden = selected === null;
-  element("spine").hidden = selected === null;
   if (selected === null) {
-    for (const id of ["state", "block", "mode", "mark", "session-name", "phase", "bar-state"]) element(id).textContent = "";
-    showBarName("");
+    for (const id of ["state", "block", "mode", "mark", "session-name", "phase"]) element(id).textContent = "";
     showQuestions([], []);
     showCleared([]);
     shownSession = null;
@@ -81,12 +71,6 @@ export function showView(selected: Selection | null) {
   const title = [agent === null ? modelLine(session) : "", noContextNote(session)].filter(Boolean).join("\n");
   element("mark").replaceChildren(logo(key, title || undefined));
   element("session-name").textContent = sessionName(session);
-  // The top bar's header (danielrispler/plotkeeper#127) says the same state and name.
-  element("bar-state").textContent = element("state").textContent;
-  element("bar-state").dataset.state = state;
-  element("bar-dot").dataset.state = state;
-  element("spine-dot").dataset.state = state;
-  showBarName(sessionName(session));
   element("phase").textContent = agent === null && state === "running" ? estimateText(session.work) : "";
   // The model and effort the session runs at (danielrispler/Falinks#517, decision 8); none for a subagent, whose transcript the studio does not read.
   const effort = session.transcript.effort;
@@ -365,8 +349,8 @@ const askSummary = oneAtATime((id) =>
     .finally(() => {
       asking.delete(id);
       drawFeed();
-      // Home's Unseen rows show this Headline.
-      refreshHome();
+      // The list's unseen rows show this Headline (#382).
+      drawSidebar();
     }),
 );
 
@@ -379,7 +363,7 @@ function summaryOf(id: string): TurnSummary | null {
   return null;
 }
 
-// The Headline of a session's latest turn, for Home's Unseen rows; null when it has no turn.
+// The Headline of a session's latest turn, for the list's unseen rows; null when it has no turn.
 export function lastHeadline(session: Pick<Session, "turns">): string | null {
   const turn = session.turns.at(-1);
   return turn ? headlineOf(turn.id ? summaryOf(turn.id) : null, turn.message).headline : null;

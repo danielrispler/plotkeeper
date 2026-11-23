@@ -1,7 +1,7 @@
 // Live agents on the Map view's parts and its "not placed" list (spec danielrispler/plotkeeper#306, ticket #311), run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { arrange, liveAgents } from "../../dist/map-agents.js";
+import { arrange, litAgents, liveAgents } from "../../dist/map-agents.js";
 
 const file = (path, agent = null) => ({ root: "/w/p", path, from: null, added: 1, removed: 0, agent });
 const turn = (files) => ({ started_at: 1, ended_at: null, prompt: "", id: null, message: null, checks: [], listed: [], files: files === null ? null : { files, merged: 0 } });
@@ -78,4 +78,30 @@ test("a path moved to another part moves the chip with it", () => {
   const live = liveAgents([session("a", "running", { turns: [turn([file("a")])] })], here);
   assert.deepEqual(Object.keys(arrange(live, { a: ["one"] }).byPart), ["one"]);
   assert.deepEqual(Object.keys(arrange(live, { a: ["two"] }).byPart), ["two"]);
+});
+
+// Hovering a row in the session list lights that session's chips on the map (#382): its own and its Workers', no other session's.
+test("a hovered row lights its session's chips, its Workers' too, and nothing else", () => {
+  const sessions = [
+    session("a", "running", { agents: [worker("w")], turns: [turn([file("core/x.rs"), file("ui/y.ts", "w")])] }),
+    session("b", "needs_you", { turns: [turn([file("core/z.rs")])] }),
+  ];
+  const live = liveAgents(sessions, here);
+  assert.deepEqual(litAgents(live, "a"), ["a", "a/w"]);
+  assert.deepEqual(litAgents(live, "b"), ["b"]);
+  // A hovered session with no chip, and no hover, light nothing.
+  assert.deepEqual(litAgents(live, "c"), []);
+  assert.deepEqual(litAgents(live, null), []);
+});
+
+// The session open in the left panel keeps its chips lit while it is open (#385), beside a hovered row's.
+test("the session open in the panel keeps its chips lit, with a hovered row's", () => {
+  const sessions = [
+    session("a", "running", { agents: [worker("w")], turns: [turn([file("core/x.rs"), file("ui/y.ts", "w")])] }),
+    session("b", "needs_you", { turns: [turn([file("core/z.rs")])] }),
+  ];
+  const live = liveAgents(sessions, here);
+  assert.deepEqual(litAgents(live, null, "a"), ["a", "a/w"]);
+  assert.deepEqual(litAgents(live, "b", "a"), ["a", "a/w", "b"]);
+  assert.deepEqual(litAgents(live, null, null), []);
 });

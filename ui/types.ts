@@ -374,7 +374,10 @@ export type FogState = {
   parts: Record<string, { commit: string; strength: Fog }[]>;
   reads: Record<string, { lit: string[][]; chapters: Record<string, { head: string; at: number }> }>;
 };
-export type UserMap = { positions: Record<string, [number, number]>; tiers: Record<string, string>; fog?: FogState };
+// The map's camera (#383): a world point `p` shows at `p * scale + (x, y)` in the map area.
+export type Camera = { scale: number; x: number; y: number };
+// `view`: the project's saved camera, none until it was first moved.
+export type UserMap = { positions: Record<string, [number, number]>; tiers: Record<string, string>; fog?: FogState; view?: Camera | null };
 export type MapState = {
   project: string;
   status: "loaded" | "none" | "unreadable";
@@ -452,6 +455,12 @@ export type WaitingBriefs = { project: string; numbers: number[] };
 export type HistoricalMap = { commit: string; short: string; label: string; source: string };
 export type CommitFiles = { commit: string; short: string; label: string; url: string | null; files: { path: string; diff: string }[] };
 
+// A project of the saved list (`server/src/projects.rs`): its main checkout, and whether its folder was moved or deleted.
+export type SavedProject = { path: string; gone: boolean };
+// Why a project header's quiet dot lights (`map.rs`, #386): fog on a Core part, a broken law, a PR brief waiting.
+export type MarkWhy = "fog" | "broken" | "brief";
+export type ProjectMark = { project: string; why: MarkWhy[] };
+
 // The writer section (spec #320): the writers the login shell's `command -v` finds (`understanding/src/writer.rs`), whether
 // summaries are on (off until a writer passes Test for a user who arrived with none) and whether PR briefs can be written,
 // which needs `claude`; and a Test's outcome, with `settings.json`'s new text when the pass saved the choice. An API-key
@@ -485,12 +494,13 @@ export interface Commands {
   failed_check_name: string;
   map_place: Record<string, string[]>;
   map_save_positions: UserMap;
+  map_save_view: void;
   map_set_tier: UserMap;
   map_know: UserMap;
   map_history: HistoryEntry[];
   map_at: HistoricalMap;
   map_commit: CommitFiles;
-  map_marks: string[];
+  map_marks: ProjectMark[];
   stop_log: null;
   stop_facts: StopFacts;
   stop_dismiss: null;
@@ -502,6 +512,8 @@ export interface Commands {
   brief_chapter_done: void;
   briefs_waiting: WaitingBriefs | null;
   pr_ratify: RatifyRow[];
+  projects: SavedProject[];
+  remove_project: SavedProject[];
   ratify_set: void;
   mark_unseen: void;
   open: Selection | null;
@@ -529,13 +541,12 @@ export interface Commands {
 export type Command = keyof Commands;
 
 // What the shell counted of Daniel's use (`stop_rules.rs`), for the one-time review: days, merged PRs and the uses of each module.
-export type StopKind = "session" | "map-open" | "mark-seen" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen";
+export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen";
 export type StopFacts = {
   active_days: number;
   merged_prs: number;
-  map_days: number;
-  mark_days: number;
-  map_on_mark_days: number;
+  // Active days with at least one entered action on the map.
+  engaged_days: number;
   scrubs: number;
   proofs: number;
   knows: number;

@@ -206,6 +206,10 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "project")?,
             arg(a, "positions")?,
         )),
+        "map_save_view" => res(crate::map::map_save_view(
+            arg(a, "project")?,
+            arg(a, "view")?,
+        )),
         "map_set_tier" => res(crate::map::map_set_tier(
             arg(a, "project")?,
             arg(a, "part")?,
@@ -243,6 +247,10 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "answers")?,
             arg(a, "decision")?,
         )),
+        "projects" => out(app.projects.list()),
+        "remove_project" => res(app
+            .projects
+            .remove(&arg::<String>(a, "path")?, studio_understanding::millis())),
         "settings_files" => out(crate::settings::settings_files()),
         "refresh_landed_tasks" => done!(crate::refresh_landed_tasks(arc)),
         "page_focus" => {

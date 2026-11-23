@@ -66,9 +66,11 @@ const defaultKeymap: Keymap = {
     "2": ["studio::Answer", "2"],
     "3": ["studio::Answer", "3"],
     "4": ["studio::Answer", "4"],
-    "shift-cmd-h": "studio::GoHome",
-    // The Map view (danielrispler/plotkeeper#306): the selected session's project, else the first with a map; again, leaves it.
+    // Back to the map (#386): closes the left panel. The old Home key and the old Map key are both this one action.
+    "shift-cmd-h": "studio::ShowMap",
     "shift-cmd-m": "studio::ShowMap",
+    // The map's camera (#383): the whole map in view.
+    "cmd-0": "studio::FitMap",
     // Modifiers in `MODIFIERS` order, as a keystroke reads.
     "shift-cmd-p": "studio::Palette",
   },
@@ -136,6 +138,11 @@ function normal(stroke: string): string | null {
   return [...MODIFIERS.filter((m) => mods.includes(`${m}-`)), key].join("-");
 }
 
+// Old action names a keymap.json may still hold, read as the action that replaced them: `studio::GoHome` merged into `studio::ShowMap` (#386).
+const aliases: Record<string, string> = { "studio::GoHome": "studio::ShowMap" };
+const unaliased = (action: unknown): unknown =>
+  typeof action === "string" ? (aliases[action] ?? action) : Array.isArray(action) && typeof action[0] === "string" && action[0] in aliases ? [aliases[action[0]], ...action.slice(1)] : action;
+
 const isBinding = (v: unknown): v is Binding =>
   typeof v === "string" || (Array.isArray(v) && v.length === 2 && v.every((s) => typeof s === "string"));
 
@@ -153,7 +160,7 @@ function readKeymap(json: unknown, report: Report): Keymap {
     const strokes = Object.entries(entry.bindings).flatMap(([stroke, action]) => {
       const key = normal(stroke);
       if (key === null) report(`${JSON.stringify(stroke)} is not a keystroke`);
-      return key === null ? [] : [[key, action] as const];
+      return key === null ? [] : [[key, unaliased(action)] as const];
     });
     for (const action of strokes.map(([, a]) => a).filter(isBinding)) {
       // Only keys still on their default: an earlier entry's binding stays.

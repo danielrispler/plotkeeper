@@ -3,7 +3,8 @@
 //! one-time review is due (`ui/stop-rules.ts`) from the counts `facts` gives it.
 //!
 //! A day is a local calendar day the window names (`2026-11-03`); the shell has no clock zone of its own. An active day is one with a
-//! `session` or a `map-open` event. Merged PRs are counted on the default branch's first-parent commits since the first event was
+//! `session` or a `map-open` event; an engaged day is an active day with an entered action on the project's map (spec #380, "Stop
+//! rules"), so a day the map was only open on is not one. Merged PRs are counted on the default branch's first-parent commits since the first event was
 //! logged, so the count starts when tracking does.
 
 use serde::{Deserialize, Serialize};
@@ -26,8 +27,8 @@ pub enum Kind {
     Session,
     /// The Map view opened.
     MapOpen,
-    /// Home's quiet mark on a project's row was seen.
-    MarkSeen,
+    /// An entered action on the map with no event of its own: a part's sheet opened, an agent chip clicked (once a day).
+    MapAction,
     /// A part's history strip was scrubbed to a commit.
     Scrub,
     /// "See the proof", a CI log or a commit's files opened in the drawer.
@@ -72,9 +73,8 @@ pub struct Event {
 pub struct Facts {
     pub active_days: u32,
     pub merged_prs: u32,
-    pub map_days: u32,
-    pub mark_days: u32,
-    pub map_on_mark_days: u32,
+    /// Active days with at least one entered action on the project's map.
+    pub engaged_days: u32,
     pub scrubs: u32,
     pub proofs: u32,
     pub knows: u32,
@@ -129,13 +129,20 @@ pub fn read(file: &Path) -> Vec<Event> {
         .collect()
 }
 
-/// The days of `project`'s events of `kind`.
-fn days<'a>(events: &'a [Event], project: &str, kind: Kind) -> BTreeSet<&'a str> {
-    events
-        .iter()
-        .filter(|e| e.kind == kind && e.project.as_deref() == Some(project))
-        .map(|e| e.day.as_str())
-        .collect()
+/// Whether `kind` is an entered action on the map, not something only seen or opened: a part's sheet opened or an agent chip clicked
+/// (`MapAction`), a scrub, a proof, a brief entered and what is done inside a sheet or a brief.
+fn entered(kind: Kind) -> bool {
+    matches!(
+        kind,
+        Kind::MapAction
+            | Kind::Scrub
+            | Kind::Proof
+            | Kind::Know
+            | Kind::BriefOpened
+            | Kind::ChapterDone
+            | Kind::CheckAnswered
+            | Kind::Ratify
+    )
 }
 
 /// When `project`'s first event was logged: merged PRs count from then, not from the first event of any project.
@@ -161,19 +168,21 @@ pub fn facts(events: &[Event], project: &str, merged_prs: u32) -> Facts {
             .filter(|e| e.kind == kind && e.project.as_deref() == Some(project))
             .count() as u32
     };
-    let opened = days(events, project, Kind::MapOpen);
-    let marked = days(events, project, Kind::MarkSeen);
+    let active: BTreeSet<&str> = events
+        .iter()
+        .filter(|e| matches!(e.kind, Kind::Session | Kind::MapOpen))
+        .map(|e| e.day.as_str())
+        .collect();
+    let engaged: BTreeSet<&str> = events
+        .iter()
+        .filter(|e| entered(e.kind) && e.project.as_deref() == Some(project))
+        .map(|e| e.day.as_str())
+        .filter(|day| active.contains(day))
+        .collect();
     Facts {
-        active_days: events
-            .iter()
-            .filter(|e| matches!(e.kind, Kind::Session | Kind::MapOpen))
-            .map(|e| e.day.as_str())
-            .collect::<BTreeSet<_>>()
-            .len() as u32,
+        active_days: active.len() as u32,
         merged_prs,
-        map_days: opened.len() as u32,
-        mark_days: marked.len() as u32,
-        map_on_mark_days: opened.intersection(&marked).count() as u32,
+        engaged_days: engaged.len() as u32,
         scrubs: count(Kind::Scrub),
         proofs: count(Kind::Proof),
         knows: count(Kind::Know),
@@ -281,13 +290,18 @@ pub fn stop_log(
 
 /// The counts the review is decided from, for `project`.
 pub fn stop_facts(project: String) -> Result<Facts, String> {
-    let events = read(&log_file()?);
-    let from = counted_from(&events, &project).unwrap_or(now());
-    let merged = merged_numbers_since(Path::new(&project), from);
-    let mut found = facts(&events, &project, merged.len() as u32);
+    Ok(facts_in(&log_file()?, &project))
+}
+
+/// The counts for `project` from the log `file`, with its merged PRs read from git.
+fn facts_in(file: &Path, project: &str) -> Facts {
+    let events = read(file);
+    let from = counted_from(&events, project).unwrap_or(now());
+    let merged = merged_numbers_since(Path::new(project), from);
+    let mut found = facts(&events, project, merged.len() as u32);
     (found.briefs_offered, found.briefs_opened) =
-        brief_use(&events, &project, &merged.into_iter().collect());
-    Ok(found)
+        brief_use(&events, project, &merged.into_iter().collect());
+    found
 }
 
 /// Dismisses the one-time review of each project; the log goes on.
@@ -400,7 +414,10 @@ mod tests {
         assert_eq!(events.len(), 3);
         assert_eq!(events[1].kind, Kind::Other);
         let found = facts(&events, "/p", 0);
-        assert_eq!((found.active_days, found.scrubs, found.map_days), (1, 1, 0));
+        assert_eq!(
+            (found.active_days, found.scrubs, found.engaged_days),
+            (1, 1, 1)
+        );
         // A later append goes on after a torn last line without losing the lines before it.
         append(&file, &event("2026-11-02", Kind::Proof, Some("/p"))).unwrap();
         assert!(read(&file).iter().any(|e| e.kind == Kind::Proof));
@@ -414,19 +431,57 @@ mod tests {
             event("2026-11-02", Kind::MapOpen, Some("/p")),
             event("2026-11-02", Kind::MapOpen, Some("/p")),
             event("2026-11-03", Kind::MapOpen, Some("/other")),
-            // Seen and used, but neither a session nor a map open: no active day of its own.
-            event("2026-11-04", Kind::MarkSeen, Some("/p")),
-            event("2026-11-02", Kind::MarkSeen, Some("/p")),
+            // Used, but neither a session nor a map open: no active day of its own.
             event("2026-11-05", Kind::Scrub, Some("/p")),
         ];
         let found = facts(&events, "/p", 7);
         assert_eq!(found.active_days, 3);
         assert_eq!(found.merged_prs, 7);
-        assert_eq!(found.map_days, 1);
-        assert_eq!(found.mark_days, 2);
-        assert_eq!(found.map_on_mark_days, 1);
         assert_eq!(found.scrubs, 1);
         assert_eq!(facts(&events, "/other", 0).scrubs, 0);
+    }
+
+    #[test]
+    fn engaged_days_are_counted_from_the_log_in_a_data_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("data").join(LOG_FILE);
+        let briefed = |day, kind| Event {
+            pr: Some(7),
+            ..event(day, kind, Some("/p"))
+        };
+        for e in [
+            // Open, with no entered action: not engaged.
+            event("2026-11-01", Kind::Session, None),
+            event("2026-11-01", Kind::MapOpen, Some("/p")),
+            // A sheet opened or a chip clicked.
+            event("2026-11-02", Kind::MapOpen, Some("/p")),
+            event("2026-11-02", Kind::MapAction, Some("/p")),
+            // Two entered actions on one day: one engaged day.
+            event("2026-11-03", Kind::MapOpen, Some("/p")),
+            event("2026-11-03", Kind::Scrub, Some("/p")),
+            event("2026-11-03", Kind::Proof, Some("/p")),
+            // A brief entered.
+            event("2026-11-04", Kind::Session, None),
+            briefed("2026-11-04", Kind::BriefOpened),
+            // Another project's action.
+            event("2026-11-05", Kind::MapOpen, Some("/other")),
+            event("2026-11-05", Kind::MapAction, Some("/other")),
+            // Seen, not entered.
+            event("2026-11-06", Kind::MapOpen, Some("/p")),
+            briefed("2026-11-06", Kind::BriefOffered),
+            briefed("2026-11-06", Kind::UnconfirmedSeen),
+        ] {
+            append(&file, &e).unwrap();
+        }
+        // A line of the previous build: Home's mark seen reads, and counts for nothing.
+        let mut log = std::fs::read_to_string(&file).unwrap();
+        log.push_str(
+            "{\"at\":1,\"day\":\"2026-11-07\",\"kind\":\"mark-seen\",\"project\":\"/p\"}\n",
+        );
+        std::fs::write(&file, log).unwrap();
+        let found = facts_in(&file, "/p");
+        assert_eq!((found.active_days, found.engaged_days), (6, 3));
+        assert_eq!(facts_in(&file, "/other").engaged_days, 1);
     }
 
     #[test]

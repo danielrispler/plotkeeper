@@ -3,7 +3,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
-  actorSize, autoPlace, draftPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, mapProject, parseMap, plateSize, rimPoint, scrubTickets, sheetOf, scrollToShow,
+  actorSize, autoPlace, cameraRig, draftPrompt, fitCamera, panTo, zoomAt, zoomLimits, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, rimPoint, revealPan, scrubTickets, sheetOf,
+  narrowBelow, withPanel, withSheet, pressRow, panelSession,
 } from "../../dist/map-model.js";
 
 const part = (id, extra = {}) => ({ id, name: id, caption: "", description: "", tier: "core", paths: [], ...extra });
@@ -78,31 +79,68 @@ test("a link runs from rim to rim, not centre to centre", () => {
   assert.deepEqual(rimPoint(a, plateSize, a), a);
 });
 
-test("Esc closes the drawer, then the brief, then returns from a scrubbed commit to now, then closes the sheet, then leaves the Map view", () => {
-  const open = { scrubbed: true, drawer: true, brief: true, sheet: true };
+test("Esc closes the drawer, then the brief, then returns from a scrubbed commit to now, then closes the sheet, then the left panel, then does nothing (#386)", () => {
+  const open = { scrubbed: true, drawer: true, brief: true, sheet: true, panel: true };
   const closed = [];
   const layers = Object.fromEntries(layerOrder.map((name) => [name, { open: () => open[name], close: () => { open[name] = false; closed.push(name); } }]));
-  assert.deepEqual(layerOrder, ["drawer", "brief", "scrubbed", "sheet"]);
   const presses = [];
-  for (let i = 0; i < 5; i++) presses.push(escapeMap(layers));
-  assert.deepEqual(closed, ["drawer", "brief", "scrubbed", "sheet"]);
-  assert.deepEqual(presses, ["drawer", "brief", "scrubbed", "sheet", "leave"]);
+  for (let i = 0; i < 6; i++) presses.push(escapeMap(layers));
+  assert.deepEqual(closed, ["drawer", "brief", "scrubbed", "sheet", "panel"]);
+  assert.deepEqual(presses, ["drawer", "brief", "scrubbed", "sheet", "panel", null]);
+});
+
+// The left panel and the part's sheet (#385): what opens where.
+const story = (session) => ({ kind: "story", session });
+const wide = 1900;
+const narrow = 1000;
+
+test("the window is narrow below 1007 px", () => {
+  assert.equal(narrowBelow, 1007);
+});
+
+test("in a wide window the panel and the sheet stay open together", () => {
+  const both = withPanel({ panel: null, sheet: "core" }, story("s1"), wide);
+  assert.deepEqual(both, { panel: story("s1"), sheet: "core" });
+  assert.deepEqual(withSheet({ panel: { kind: "history" }, sheet: null }, "hook", wide), { panel: { kind: "history" }, sheet: "hook" });
+  assert.deepEqual(withPanel({ panel: story("s1"), sheet: "core" }, { kind: "settings" }, 1007), { panel: { kind: "settings" }, sheet: "core" });
+});
+
+test("below 1007 px only one overlay is open: the panel closes the sheet, and the sheet the panel", () => {
+  assert.deepEqual(withPanel({ panel: null, sheet: "core" }, story("s1"), narrow), { panel: story("s1"), sheet: null });
+  assert.deepEqual(withPanel({ panel: null, sheet: "core" }, { kind: "history" }, 1006), { panel: { kind: "history" }, sheet: null });
+  assert.deepEqual(withSheet({ panel: story("s1"), sheet: null }, "core", narrow), { panel: null, sheet: "core" });
+  // Closing one never opens the other.
+  assert.deepEqual(withPanel({ panel: story("s1"), sheet: null }, null, narrow), { panel: null, sheet: null });
+});
+
+test("the widened diff closes the part's sheet, and a sheet opened over it closes the diff", () => {
+  const diff = { kind: "diff", session: "s1", turn: 2 };
+  assert.deepEqual(withPanel({ panel: story("s1"), sheet: "core" }, diff, wide), { panel: diff, sheet: null });
+  assert.deepEqual(withSheet({ panel: diff, sheet: null }, "hook", wide), { panel: null, sheet: "hook" });
+});
+
+test("a row's press opens its session's story in the panel, and a second press on the same row closes it", () => {
+  assert.deepEqual(pressRow(null, "s1"), story("s1"));
+  assert.equal(pressRow(story("s1"), "s1"), null);
+  assert.deepEqual(pressRow(story("s1"), "s2"), story("s2"));
+  // From History, the diff or Settings, a row's press shows its story.
+  assert.deepEqual(pressRow({ kind: "history" }, "s1"), story("s1"));
+  assert.deepEqual(pressRow({ kind: "diff", session: "s1", turn: 0 }, "s1"), story("s1"));
+});
+
+test("the session whose chips stay lit is the one the panel shows", () => {
+  assert.equal(panelSession(story("s1")), "s1");
+  assert.equal(panelSession({ kind: "diff", session: "s2", turn: 0 }), "s2");
+  assert.equal(panelSession({ kind: "history" }), null);
+  assert.equal(panelSession(null), null);
 });
 
 test("Esc skips a layer that is not open, and a layer nobody registered", () => {
   const open = { drawer: false, sheet: true };
   const layers = { drawer: { open: () => open.drawer, close: () => assert.fail("closed a layer that was not open") }, sheet: { open: () => open.sheet, close: () => (open.sheet = false) } };
   assert.equal(escapeMap(layers), "sheet");
-  assert.equal(escapeMap(layers), "leave");
-  assert.equal(escapeMap({}), "leave");
-});
-
-test("the map opens the selected session's project, else the first project that has a map, else the first", () => {
-  const paths = ["/a", "/b", "/c"];
-  assert.equal(mapProject("/c", paths, new Set(["/b"])), "/c");
-  assert.equal(mapProject(null, paths, new Set(["/c", "/b"])), "/b");
-  assert.equal(mapProject(null, paths, new Set()), "/a");
-  assert.equal(mapProject(null, [], new Set()), null);
+  assert.equal(escapeMap(layers), null);
+  assert.equal(escapeMap({}), null);
 });
 
 test("Daniel's tier beats the map's, and a part with no choice keeps the map's", () => {
@@ -173,11 +211,33 @@ test("a scrub that reads slowly is dropped after Back to now or a later click", 
   assert.equal(tickets.live(tickets.start()), true);
 });
 
-test("when the sheet narrows the map, it scrolls so the plates are not cut mid-plate, and leaves a map that cannot fit where it was", () => {
-  // Plates span 100..1300 in a 1300 wide area: scrolled right by the gutter that would be cut, never past the left edge.
-  assert.equal(scrollToShow(100, 1300, 0, 1300, 32), 32);
-  assert.equal(scrollToShow(100, 1000, 0, 1300, 32), 0, "already inside");
-  assert.equal(scrollToShow(100, 1000, 500, 1300, 32), 68, "cut at the left");
-  assert.equal(scrollToShow(83, 1350, 0, 1300, 32), 66.5, "the gutter shrinks to the room there is");
-  assert.equal(scrollToShow(0, 1350, 500, 1300, 32), 500, "wider than the area: left where it is");
+// Revealing never moves a part: `revealPan` is given no positions and returns only a camera.
+test("revealing plates pans the camera just enough to bring them into the visible band", () => {
+  const at = (x, scale = 1) => ({ scale, x, y: 40 });
+  const band = { left: 0, right: 1300 };
+  // Plates span 100..1300 in a 1300 wide band: panned left by the gutter that would be cut.
+  assert.deepEqual(revealPan(at(0), 100, 1300, band, 32), at(-32));
+  assert.deepEqual(revealPan(at(0), 100, 1000, band, 32), at(0), "already inside");
+  assert.deepEqual(revealPan(at(-500), 100, 1000, band, 32), at(-68), "cut at the left");
+  assert.deepEqual(revealPan(at(0), 83, 1350, band, 32), at(-66.5), "the gutter shrinks to the room there is");
+  assert.deepEqual(revealPan(at(-500), 0, 1350, band, 32), at(-500), "wider than the band: left where it is");
+  // Zoomed out to half, a span of 1000..2000 shows at 500..1000, cut by a sheet at 800.
+  assert.deepEqual(revealPan(at(0, 0.5), 1000, 2000, { left: 0, right: 800 }, 32), at(-232, 0.5));
+  // A panel over the left of the area: the part is panned right, clear of its edge.
+  assert.deepEqual(revealPan(at(0), 100, 500, { left: 300, right: 1300 }, 32), at(232));
+});
+
+test("a PR brief takes the camera while it plays and closes back to the view it found", () => {
+  const mine = { scale: 0.8, x: -120, y: 30 };
+  const rig = cameraRig(mine);
+  assert.equal(rig.move({ scale: 1.2, x: 10, y: 10 }), true, "Daniel moves his view");
+  const found = rig.user();
+  rig.lend({ scale: 1.35, x: 400, y: -90 });
+  rig.lend({ scale: 1.1, x: 200, y: -40 });
+  assert.deepEqual(rig.shown(), { scale: 1.1, x: 200, y: -40 }, "the brief's newest framing shows");
+  assert.equal(rig.lent(), true);
+  assert.equal(rig.move({ scale: 2, x: 0, y: 0 }), false, "a move during the brief is refused");
+  assert.deepEqual(rig.giveBack(), found);
+  assert.deepEqual(rig.shown(), { scale: 1.2, x: 10, y: 10 });
+  assert.equal(rig.lent(), false);
 });

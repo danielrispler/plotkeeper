@@ -1,32 +1,21 @@
-// Home's waiting room, after the outside review of #253. Run: `npm test`.
+// The page's DOM helpers: `patch` keeps nodes by key, and `newest` drops a slower, older reply. Moved from Home's tests (#388).
+// Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Field, fakeDocument, tauri } from "./dom.mjs";
 
-const calls = [];
-tauri(calls);
-const { drawHome, resetHome, homeState } = await import("../../dist/home.js");
+tauri([]);
 globalThis.document = fakeDocument({ visibilityState: "visible", hasFocus: () => true }, Field);
 
-const live = (id, state, extra = {}) => ({ id, state, unseen: false, landed: false, turns: [], questions: [], transcript: {}, identity: { issue: null, name: "" }, folder_name: "p", cwd: "/w/p", capabilities: { agent: "claude" }, name: id, ...extra });
-const settle = () => new Promise((r) => setTimeout(r, 30));
-
-test("a running row's elapsed time and an unseen row's age count up like the list's (C12)", () => {
-  resetHome();
-  const box = new Field("div");
-  const now = Date.now();
-  drawHome(box, [live("r", "running", { turn_span: { start: now - 60_000 } }), live("u", "your_turn", { unseen: true, turns: [{ ended_at: now - 60_000 }] })], []);
-  const clocks = box.find("span").filter((n) => n.className === "clock");
-  assert.equal(clocks.length, 2);
-  for (const c of clocks) assert.match(String(c.dataset.key), /^count /);
-});
-
-test("an unseen row has two lines and the status shape beside the name (S6)", () => {
-  resetHome();
-  const box = new Field("div");
-  drawHome(box, [live("u", "your_turn", { unseen: true, turns: [{ ended_at: Date.now() }] })], []);
-  const row = box.find("button").find((b) => b.dataset.key === "unseen u");
-  assert.ok(row.find("span").some((n) => n.dataset.glyph === "filled"));
+test("the newest request wins: a slower, older reply is dropped", async () => {
+  const { newest } = await import("../../dist/dom.js");
+  const take = newest();
+  let first, second;
+  const a = take(new Promise((r) => (first = r)));
+  const b = take(new Promise((r) => (second = r)));
+  second("newer");
+  first("older");
+  assert.deepEqual([await a, await b], [undefined, "newer"]);
 });
 
 test("patching by key keeps the slot's card when rows above it change (C11)", async () => {

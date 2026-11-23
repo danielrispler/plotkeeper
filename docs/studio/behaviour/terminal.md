@@ -12,8 +12,7 @@ The page's shortcuts (`ui/keys.ts`, from `keymap.json`, see [Settings files](../
 | Up, Down | while the list has focus, selects the row above, below |
 | Cmd+Shift+Enter | focus mode: hides the list and the rail; again to leave |
 | 1 to 4 | while the docked card shows answer buttons and no text box has focus, chooses that answer |
-| Cmd+Shift+H | flips between Home and the session you came from |
-| Cmd+Shift+M | the Map view |
+| Cmd+Shift+M, Cmd+Shift+H | back to the map: closes the left panel (`studio::ShowMap`; a `keymap.json` that still names `studio::GoHome` gets the same) |
 | Cmd+Shift+P | the palette: every action with its key; type to filter, Enter runs |
 
 The page has no zoom key: the browser zooms it. A Cmd shortcut the browser owns stays the browser's.

@@ -1,5 +1,5 @@
 // **Seen** (danielrispler/plotkeeper#306): an element is seen when it is in the viewport, not merely built in the DOM, in a visible
-// and focused window, with the view that holds it open. One helper for Home's marks and the map's events.
+// and focused window, with the view that holds it open. One helper for the map's events.
 //
 // In the viewport means covering at least half of the element or at least half of the viewport (so a card taller than twice the
 // viewport can be seen), for `seenAfter` ms without a break.
@@ -10,7 +10,7 @@ export const seenAfter = 500;
 export type Overlap = { element: number; viewport: number };
 export const covers = ({ element, viewport }: Overlap) => element >= 0.5 || viewport >= 0.5;
 
-// The caller's side: `active` says whether the view holding the element is open (`railShown`, `homeShown`, or the map's own);
+// The caller's side: `active` says whether the view holding the element is open (the map's own);
 // `onSeen` runs once, when the element has been seen. With `interaction`, Daniel must also have pointed at, pressed, scrolled or
 // focused the element (#331), so a card in view on a second screen is not seen while he works elsewhere.
 export type SeenOptions = { active: () => boolean; onSeen: () => void; interaction?: boolean };

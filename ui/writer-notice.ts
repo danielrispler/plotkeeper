@@ -9,7 +9,7 @@ export function withWriterNotice(text: string, notice: string | null): string {
 }
 
 // The writer's line while summaries wait for a Test (spec #320); it starts as a failure notice does, so a later one replaces it.
-export const GATE = "Summaries are off: pick a writer under Writer, at the top of the page, and press Test.";
+export const GATE = "Summaries are off: pick a writer in Settings, under the gear at the top of the page, and press Test.";
 
 // The notice line's text with the gate shown, or, when `gated` is false, without it: a writer's failure notice stays.
 export function withGateNotice(text: string, gated: boolean): string {

@@ -8,26 +8,26 @@
   <script src="vendor/marked.umd.js"></script>
   <script type="module" src="main.js"></script>
 </head>
-<body data-layout="full">
-  <!-- The grid runs right to left: the list on the right, Home, History or a diff in the centre, the rail on the left. -->
+<body data-layout="full" class="map-open">
+  <!-- Treatment C's frame (#386): a 34 px top bar over the map and the session list at the right. The grid runs right to left. -->
   <div class="app">
     <header class="top">
-      <!-- The top bar (danielrispler/plotkeeper#127): the session's header first; a click toggles the rail. Its state is the one the rail's header shows. -->
-      <button id="session-header" class="btn quiet session-header" type="button" aria-label="Session story" hidden><span id="bar-dot" class="dot"></span><span id="bar-state" class="state"></span><span id="bar-name" class="name"></span></button>
+      <!-- The top bar (#386): the shown project's name, the Needs you chip and the gear; the map takes the rest. -->
+      <span id="bar-project" class="bar-project">plotkeeper</span>
+      <span class="sp"></span>
       <!-- How many sessions need Daniel (danielrispler/Falinks#572), anywhere, shown whenever any do; it selects the first. -->
       <button id="needs-you" class="btn small chip" type="button" hidden></button>
-      <!-- How many sessions finished a turn Daniel has not seen, not in colour; it selects the newest. -->
-      <button id="unseen" class="btn small chip unseen" type="button" hidden></button>
-      <span class="sp"></span>
-      <!-- The writer section (spec #320): the program that writes the summaries, picked and tested; `writers.ts` draws it. -->
-      <button id="writer-button" class="btn small" type="button" popovertarget="writers" title="Pick the program that writes the summaries, and test it">Writer</button>
-      <div id="writers" class="menu writers" popover></div>
+      <!-- Settings (#385): a quiet gear that opens the Settings panel over the map, which holds the writer section (#387); the palette's `studio::ShowSettings` does too. -->
+      <button id="settings-button" class="btn quiet small gear" type="button" aria-label="Settings" title="Settings" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1"/></svg></button>
     </header>
 
     <nav class="list" aria-label="Sessions">
       <div class="full">
-        <p id="no-sessions" class="empty">No session yet.</p>
         <div id="groups"></div>
+        <!-- A project header's "⋯" (#381): `list.ts` opens it under the header it was pressed on. -->
+        <div id="project-actions" class="menu project-actions" popover>
+          <button id="remove-project" class="btn small" type="button" title="Take this project off the list; its sessions stay in History">Remove project</button>
+        </div>
         <!-- "History · N" (#94): the ended sessions, which are not in the list. -->
         <div class="list-foot">
           <div id="history-link"></div>
@@ -38,21 +38,6 @@
 
     <!-- The palette (danielrispler/Falinks#575): every action, filtered by what Daniel types. -->
     <div id="palette" class="picker" role="dialog" aria-label="Palette" hidden></div>
-
-    <!-- The centre column (danielrispler/Falinks#467): Home, History, a diff or a subagent's log; `panes.ts` draws it. -->
-    <section id="centre" class="term" aria-label="Centre">
-      <div id="column" class="term-body"></div>
-      <!-- The needs-you toast (danielrispler/Falinks#573) over the centre column's top-right corner, and under it the note toast, for a
-           turn that ended off screen or a context warning; never focused. -->
-      <div class="toasts">
-        <div id="toast" class="toast" role="status" hidden></div>
-        <div id="note-toast" class="toast note" role="status" hidden></div>
-      </div>
-      <div id="clear-toast" class="toast start clear" role="status" hidden></div>
-    </section>
-
-    <!-- The rail's spine (danielrispler/plotkeeper#128): in the overlay layout, resting on it opens the rail; it shows the session's state. -->
-    <div id="spine" class="spine" title="Open the session's story" hidden><span id="spine-dot" class="dot"></span></div>
 
     <aside class="rail" aria-label="Session story">
       <!-- One line (danielrispler/Falinks#574): the verdict, the permission mode unless default (danielrispler/Falinks#541), always shown, and
@@ -104,12 +89,10 @@
       </div>
     </aside>
 
-    <!-- The Map view (danielrispler/plotkeeper#306): over the rail's and the terminal's columns, which it hides; the list and the top bar
-         stay live. `map.ts` draws it. The side area is for the sheet, the drawer and the not-placed list of later tickets. -->
-    <section id="map" class="map-view" aria-label="Map" hidden>
+    <!-- The Map view (danielrispler/plotkeeper#306), the page's base (#386): a project's map beside the session list, whose headers switch it.
+         `map.ts` draws it. Over the map float the tray, the left panel and the side area (the sheet, the drawer, the not-placed list). -->
+    <section id="map" class="map-view" aria-label="Map">
       <header class="map-head">
-        <button id="map-project" class="btn quiet map-project" type="button" popovertarget="map-projects" aria-label="Project" title="Show another project's map"></button>
-        <div id="map-projects" class="menu map-projects" popover></div>
         <span id="map-ref" class="map-ref"></span>
         <div id="map-review" class="map-review" hidden></div>
         <div id="map-banner" class="map-banner"></div>
@@ -118,20 +101,32 @@
         <div id="map-body" class="map-body"></div>
         <!-- The PR brief (#339): over the foot of the map body while one plays; `map-brief.ts` fills it. -->
         <section id="map-brief" class="map-brief" aria-label="PR brief" hidden></section>
+        <!-- Ready for review (#336), over the map's foot on the left; it moves right of the left panel while that is open (#385). -->
+        <section id="map-tray" class="map-tray"></section>
+        <!-- The left panel (#385): a session's story (the rail, moved in), History, a turn's diff (widened) or Settings, floating over the map
+             in the part sheet's glass; `panel.ts` fills it. It never darkens the map. -->
+        <section id="map-panel" class="map-panel glass" aria-label="Panel" hidden>
+          <button id="panel-close" class="btn quiet small panel-close" type="button" title="Close the panel (Esc)">Close</button>
+          <div id="panel-body" class="panel-body"></div>
+        </section>
+        <!-- The right side, floating over the map: the part's sheet and the drawer under it, each in the same glass, then the agents no part holds and the background runs (#390). -->
         <aside id="map-side" class="map-side" aria-label="Beside the map" hidden>
+          <section id="map-sheet" class="glass"></section>
+          <section id="map-drawer" class="glass"></section>
           <section id="map-not-placed"></section>
-          <section id="map-tray"></section>
           <section id="map-runs"></section>
-          <section id="map-sheet"></section>
-          <section id="map-drawer"></section>
         </aside>
       </div>
       <footer id="map-legend" class="map-legend"></footer>
+      <!-- The needs-you toast (danielrispler/Falinks#573) over the map's top-right corner, and under it the note toast, for a turn that ended
+           off screen or a context warning; never focused. -->
+      <div class="toasts">
+        <div id="toast" class="toast" role="status" hidden></div>
+        <div id="note-toast" class="toast note" role="status" hidden></div>
+      </div>
+      <div id="clear-toast" class="toast start clear" role="status" hidden></div>
     </section>
   </div>
-  <!-- The dividers: drag to resize the list and the rail. -->
-  <div id="list-divider" class="divider" role="separator" aria-orientation="vertical" aria-label="Resize the session list"></div>
-  <div id="rail-divider" class="divider" role="separator" aria-orientation="vertical" aria-label="Resize the story rail"></div>
   <!-- The questions of rename and close (danielrispler/Falinks#469). -->
   <dialog id="rename-dialog" class="ask">
     <form method="dialog">
@@ -148,6 +143,5 @@
       <div class="ask-buttons"><button class="btn" value="delete" title="Remove it from the list">Delete</button><button class="btn" value="cancel" autofocus title="Keep it (Esc)">Cancel</button></div>
     </form>
   </dialog>
-  <span id="probe" aria-hidden="true">MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM</span>
 </body>
 </html>

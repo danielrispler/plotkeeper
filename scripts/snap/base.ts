@@ -12,7 +12,7 @@ export type ByArg<T> = { __by: string; values: Record<string, T> };
 type ReadCommand = { [C in Command]: Commands[C] extends void ? never : C }[Command];
 
 // Beside the replies, the harness's own keys: errors for the log and a script that runs once the UI has drawn (page.mjs).
-export type Fixture = { [C in Command]?: Commands[C] | ByArg<Commands[C]> } & { appErrors?: string[]; snapScript?: string; snapDone?: string };
+export type Fixture = { [C in Command]?: Commands[C] | ByArg<Commands[C]> } & { appErrors?: string[]; snapScript?: string; snapDone?: string; realPointer?: boolean };
 
 const noSelection: Selection | null = null;
 
@@ -35,7 +35,7 @@ export const base = {
   map_commit: { commit: "", short: "", label: "", url: null, files: [] },
   map_marks: [],
   stop_log: null,
-  stop_facts: { active_days: 0, merged_prs: 0, map_days: 0, mark_days: 0, map_on_mark_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: true, briefs_offered: 0, briefs_opened: 0, chapters_done: 0 },
+  stop_facts: { active_days: 0, merged_prs: 0, engaged_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: true, briefs_offered: 0, briefs_opened: 0, chapters_done: 0 },
   stop_dismiss: null,
   map_proof: [],
   map_state: { project: "/w/plotkeeper", status: "none", source: null, reference: "origin/main", commit: null, note: null, user: { positions: {}, tiers: {} }, fog: {}, ci: null, ready: [], ratify: [], runs: { paused: null, runs: [] } },
@@ -44,6 +44,8 @@ export const base = {
   pr_diff: { commit: "", short: "", label: "", url: null, files: [] },
   briefs_waiting: null,
   pr_ratify: [],
+  projects: [],
+  remove_project: [],
   select: noSelection,
   selected: noSelection,
   sessions: [],

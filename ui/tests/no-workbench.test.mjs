@@ -24,7 +24,8 @@ test("every command the page calls is served", () => {
 
 test("no workbench module, drag-drop or drag region remains", () => {
   const names = sources.map(([name]) => name);
-  for (const gone of ["terminal", "panel", "daemon", "restart", "picker", "workspaces", "skills", "usage", "settings-page"]) {
+  // `panel.ts` was the terminal's panel; the name is now the map's left panel (#385), which holds no terminal.
+  for (const gone of ["terminal", "daemon", "restart", "picker", "workspaces", "skills", "usage", "settings-page"]) {
     assert.ok(!names.includes(`${gone}.ts`), `${gone}.ts`);
   }
   const text = sources.map(([, source]) => source).join("\n") + html;

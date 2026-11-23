@@ -5,9 +5,12 @@
 import { rewatch } from "./answer.js";
 import { showCards } from "./cards.js";
 import { element, failure, invoke } from "./dom.js";
-import { leaveMap } from "./map.js";
+import { openMap, shownProject } from "./map.js";
+import { pressRow, selectedView } from "./map-model.js";
+import { closePanel, followSelection, panelShown, showPanel } from "./panel.js";
 import { showSessions } from "./list.js";
-import { homeShown, showSession } from "./panes.js";
+import { showSession } from "./panes.js";
+import { projectOfCwd } from "./projects.js";
 import { studio } from "./state.js";
 import { showView } from "./story.js";
 import { showToast } from "./toast.js";
@@ -30,7 +33,14 @@ export function isSelected(session: string, agent?: string | null): boolean {
 // returns. Opening a subagent's line also fades a failed helper. A later press wins over this one's
 // reply.
 export async function select(id: string, agent: string | null = null) {
-  leaveMap(); // a session pressed anywhere leaves the Map view over the rail and the terminal
+  // The map is the page's base (#386): the session's project's map shows, and its story opens in the left panel (#385) at once; a worker's
+  // log opens there once the server has opened it.
+  const session = studio.listed.find((s) => s.id === id);
+  if (session) {
+    const page = selectedView(id, projectOfCwd(session.cwd), agent);
+    if (page.project !== shownProject()) openMap(page.project);
+    if (agent === null) showPanel(page.panel);
+  }
   const pressed = { id, agent };
   studio.pending = pressed;
   showSessions(studio.listed);
@@ -48,6 +58,7 @@ export async function select(id: string, agent: string | null = null) {
       show(selected);
       showCards(cards);
       showSession(selected?.session ?? null, true, selected?.agent ?? null);
+      if (agent !== null && selected?.agent === agent) showPanel(selectedView(id, projectOfCwd(selected.session.cwd), agent).panel);
     }
   } catch (e) {
     if (studio.pending === pressed) {
@@ -59,35 +70,15 @@ export async function select(id: string, agent: string | null = null) {
   await catchUp();
 }
 
-// What the Home key does (#239, like tmux `last-window`): from any view but Home (a session, History, a full diff, a new terminal) it shows
-// Home, remembering the session when one is selected; on Home it selects the remembered session if the list still holds it, else does
-// nothing.
-export function homeToggle(current: string | null, remembered: string | null, listed: { id: string }[], home = current === null): { show: string | null } | { select: string } | null {
-  if (!home) return { show: current };
-  return remembered !== null && listed.some((s) => s.id === remembered) ? { select: remembered } : null;
+// A press on a session's row in the list or its chip on the map: a second press on the session the panel shows closes the panel (#385);
+// otherwise it selects.
+export function pressSession(id: string, agent: string | null = null) {
+  if (agent === null && pressRow(panelShown(), id) === null) return closePanel();
+  return select(id, agent);
 }
 
-// The session Daniel came from when he last went Home.
-let cameFrom: string | null = null;
-
-// The session left behind when the selection goes from `before` to `after`: the one he left when it ends on none, by any route (the
-// Home key, a click on the list's empty space, a Delete), else what was remembered.
-export function leftSession(before: string | null, after: string | null, remembered: string | null): string | null {
-  return before !== null && after === null ? before : remembered;
-}
-
-// The Home key's action.
-export async function toggleHome() {
-  const step = homeToggle(studio.selection?.session.id ?? null, cameFrom, studio.listed, homeShown());
-  if (!step) return;
-  // Leaving a selected session for none remembers it (`show`); from a view with none selected, what was remembered stays.
-  if ("show" in step) await goHome();
-  else await select(step.select);
-}
-
-// Selects no session, which shows Home: the core clears the selection and what is viewed.
-export async function goHome() {
-  leaveMap();
+// Selects no session, as closing the left panel's story does (#385): the core clears the selection and what is viewed, and the bare map stays.
+export async function deselect() {
   studio.pending = null;
   try {
     const selected = await invoke("select", { id: null });
@@ -98,7 +89,7 @@ export async function goHome() {
     showCards(cards);
     showSession(null, true);
   } catch (e) {
-    failure("select home", "error")(e);
+    failure("select none", "error")(e);
   }
 }
 
@@ -114,11 +105,11 @@ async function catchUp() {
 }
 
 export function show(selected: Selection | null) {
-  cameFrom = leftSession(studio.selection?.session.id ?? null, selected?.session.id ?? null, cameFrom);
   studio.selection = selected;
   showSessions(studio.listed);
   showToast();
   showView(selected);
   showSession(selected?.session ?? null, false, selected?.agent ?? null);
+  followSelection(selected?.session.id ?? null);
   rewatch();
 }

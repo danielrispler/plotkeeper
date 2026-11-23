@@ -96,7 +96,7 @@ export class El {
   }
 }
 
-// An element with the form-control fields the Home slot reads and writes.
+// An element with the form-control fields a view reads and writes.
 export class Field extends El {
   title = "";
   disabled = false;

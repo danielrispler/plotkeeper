@@ -1,7 +1,7 @@
 // The Map view's pure logic (spec danielrispler/plotkeeper#306, ticket #309): the map file as the window reads it, where parts
-// are placed, the drag threshold, the link's rim points and the layered Esc. `map.ts` draws and wires them.
+// are placed, the drag threshold, the link's rim points, the layered Esc and the camera. `map.ts` draws and wires them.
 
-import type { BriefFigure, BriefStep, Ci, CommitFiles, Fog, HistoricalMap, HistoryEntry, PrBrief, Proof, ReadyPr } from "./types.js";
+import type { BriefFigure, BriefStep, Camera, Ci, CommitFiles, Fog, HistoricalMap, HistoryEntry, PrBrief, Proof, ReadyPr } from "./types.js";
 
 export type Tier = "core" | "interface" | "black-box";
 export type Point = { x: number; y: number };
@@ -17,9 +17,10 @@ export const plateSize: Size = { w: 264, h: 76 };
 export const actorSize: Size = { w: 120, h: 28 };
 // How far the pointer moves before a press on a plate becomes a drag, so a click never nudges it.
 export const dragThreshold = 6;
-// The layers Esc peels, first to last (user story 5 and spec #334): a drawer, a PR brief (closing it keeps its step), a scrubbed past commit (back
-// to now), a part's sheet. The tickets that add them register a `Layer` under its name in `map.ts`; the Map view itself is left only when none is open.
-export const layerOrder = ["drawer", "brief", "scrubbed", "sheet"] as const;
+// The layers Esc peels, first to last (user story 5, spec #334 and spec #380): a drawer, a PR brief (closing it keeps its step), a scrubbed past
+// commit (back to now), a part's sheet, then the left panel (#385). The tickets that add them register a `Layer` under its name in `map.ts`; the Map
+// view itself is left only when none is open.
+export const layerOrder = ["drawer", "brief", "scrubbed", "sheet", "panel"] as const;
 export type LayerName = (typeof layerOrder)[number];
 export type Layer = { open: () => boolean; close: () => void };
 
@@ -44,10 +45,6 @@ export const effectiveTier = (part: Part, chosen: Record<string, string>): Tier 
   const own = chosen[part.id] as Tier | undefined;
   return own && tiers.includes(own) ? own : part.tier;
 };
-
-// The project the Map view opens on: the selected session's, else the first project with a map, else the first project.
-export const mapProject = (selected: string | null, paths: string[], withMap: Set<string>): string | null =>
-  selected ?? paths.find((path) => withMap.has(path)) ?? paths[0] ?? null;
 
 // The gap kept between plates, and the corner of the world they start from.
 const gap = 48;
@@ -111,8 +108,9 @@ export function rimPoint(center: Point, size: Size, toward: Point): Point {
   return { x: center.x + dx * reach, y: center.y + dy * reach };
 }
 
-// Esc: closes the first layer that is open, in `layerOrder`, and says which; "leave" when none was, so the Map view is left.
-export function escapeMap(layers: Partial<Record<LayerName, Layer>>): LayerName | "leave" {
+// Esc: closes the first layer that is open, in `layerOrder`, and says which; null when none was: on the bare map Esc does nothing, since the
+// map is the page's base (#386).
+export function escapeMap(layers: Partial<Record<LayerName, Layer>>): LayerName | null {
   for (const name of layerOrder) {
     const layer = layers[name];
     if (layer?.open()) {
@@ -120,7 +118,7 @@ export function escapeMap(layers: Partial<Record<LayerName, Layer>>): LayerName 
       return name;
     }
   }
-  return "leave";
+  return null;
 }
 
 // The first prompt of "Draft a map", for a project with no `system-map.json` on its default branch.
@@ -262,16 +260,6 @@ export function scrubTickets() {
   };
 }
 
-// Where a map area `width` wide, scrolled to `scroll`, should scroll so plates spanning `left` to `right` (plus `gutter`) are whole in it: as
-// little as it takes; the gutter shrinks to what the area has to spare, and a span wider than the area is left where it is.
-export function scrollToShow(left: number, right: number, scroll: number, width: number, wanted: number): number {
-  const gutter = Math.min(wanted, (width - (right - left)) / 2);
-  if (gutter < 0) return scroll;
-  if (right + gutter > scroll + width) return Math.max(0, right + gutter - width);
-  if (left - gutter < scroll) return Math.max(0, left - gutter);
-  return scroll;
-}
-
 // ---- The PR brief view (spec danielrispler/plotkeeper#334, ticket #339): what `map-brief.ts` draws, as pure logic.
 
 // The steps a brief plays from one tray row: a chapter's own, with the overview in front when this is the chapter that carries it (`Playing.overview`).
@@ -379,7 +367,7 @@ export function latestRequest() {
 }
 
 export type Rect = { x0: number; y0: number; x1: number; y1: number };
-export type Camera = { scale: number; x: number; y: number };
+export type { Camera };
 // Where the world sits so `box` fills the visible area `area` at the largest scale up to `max`, centred in the room the panel leaves above it
 // (`room.top` clear at the top, `room.bottom` taken by the panel). A point `p` of the world lands at `p * scale + (x, y)`.
 export function briefCamera(box: Rect, area: { w: number; h: number }, room: { top: number; bottom: number }, max: number): Camera {
@@ -514,4 +502,105 @@ export function awaitedWrite(pr: ReadyPr | undefined): "open" | "stop" | "wait" 
   const brief = pr?.brief;
   if (!pr || brief?.quiet || (brief?.failed && !brief.writing)) return "stop";
   return brief && !brief.writing && !brief.stale && brief.chapters.length > 0 ? "open" : "wait";
+}
+
+// ---- The map's camera (spec #380, ticket #383): pan and zoom applied to the world, in place of a scrolling box. A point `p` of the world
+// lands at `p * scale + (x, y)` in the map area, as with `briefCamera`.
+
+export const zoomLimits = { min: 0.4, max: 2 };
+// Zooms `camera` by `factor` around the area's point (px, py), which keeps the world point under it; the scale is held to `zoomLimits`.
+export function zoomAt(camera: Camera, factor: number, px: number, py: number): Camera {
+  const scale = Math.min(zoomLimits.max, Math.max(zoomLimits.min, camera.scale * factor));
+  const r = scale / camera.scale;
+  return { scale, x: px - (px - camera.x) * r, y: py - (py - camera.y) * r };
+}
+// The camera a drag of the empty background gives: `start` moved by the pointer's travel from `from` to `at`, at the same scale.
+export const panTo = (start: Camera, from: Point, at: Point): Camera => ({ scale: start.scale, x: start.x + at.x - from.x, y: start.y + at.y - from.y });
+// The camera that fits `box` (the whole map) into an area `area` large with `gutter` kept around it, centred; never above 125 % (a small map is
+// not blown up) nor outside `zoomLimits`.
+export function fitCamera(box: Rect, area: { w: number; h: number }, gutter: number): Camera {
+  const room = { w: Math.max(1, area.w - 2 * gutter), h: Math.max(1, area.h - 2 * gutter) };
+  const wanted = Math.min(room.w / Math.max(1, box.x1 - box.x0), room.h / Math.max(1, box.y1 - box.y0), 1.25);
+  const scale = Math.min(zoomLimits.max, Math.max(zoomLimits.min, wanted));
+  return { scale, x: area.w / 2 - ((box.x0 + box.x1) / 2) * scale, y: area.h / 2 - ((box.y0 + box.y1) / 2) * scale };
+}
+// Reveals plates spanning `left` to `right` of the world by panning just enough to bring them, with `wanted` gutter, inside the visible band of
+// the area (from the panel's right edge to the sheet's left edge, in area coordinates). The gutter shrinks to the room the band has; a span
+// wider than the band is left where it is. Only the camera moves: no position is written.
+export function revealPan(camera: Camera, left: number, right: number, band: { left: number; right: number }, wanted: number): Camera {
+  const [lo, hi] = [left * camera.scale + camera.x, right * camera.scale + camera.x];
+  const gutter = Math.min(wanted, (band.right - band.left - (hi - lo)) / 2);
+  if (gutter < 0) return camera;
+  if (hi + gutter > band.right) return { ...camera, x: camera.x + band.right - (hi + gutter) };
+  if (lo - gutter < band.left) return { ...camera, x: camera.x + band.left - (lo - gutter) };
+  return camera;
+}
+// The map's one camera, shared by Daniel's view and a PR brief's: a brief borrows it with `lend` while it plays (each step may lend again),
+// and `giveBack` shows Daniel's view as the brief found it. While lent, Daniel's moves are refused (`move` says false), so his view is never
+// the brief's.
+export type CameraRig = { shown: () => Camera; user: () => Camera; lent: () => boolean; move: (to: Camera) => boolean; lend: (to: Camera) => void; giveBack: () => Camera };
+export function cameraRig(start: Camera): CameraRig {
+  let user = start;
+  let borrowed: Camera | null = null;
+  return {
+    shown: () => borrowed ?? user,
+    user: () => user,
+    lent: () => borrowed !== null,
+    move: (to) => {
+      if (borrowed) return false;
+      user = to;
+      return true;
+    },
+    lend: (to) => void (borrowed = to),
+    giveBack: () => {
+      borrowed = null;
+      return user;
+    },
+  };
+}
+
+// ---- The left panel (spec #380, ticket #385): one slot over the map's left side for a session's story, History, a turn's diff (widened) or
+// Settings, beside the part's sheet on the right.
+export type PanelContent =
+  | { kind: "story"; session: string }
+  | { kind: "history" }
+  | { kind: "diff"; session: string; turn: number }
+  | { kind: "settings" }
+  // A worker's or helper's log (#386): it had the centre column, which the map replaced.
+  | { kind: "log"; session: string; agent: string };
+export type Overlays = { panel: PanelContent | null; sheet: string | null };
+// Below this window width only one overlay is open at a time (user story 52).
+export const narrowBelow = 1007;
+// Opens `panel` (null closes it). Below `narrowBelow`, or for the widened diff, the part's sheet closes (user stories 29, 52).
+export const withPanel = (now: Overlays, panel: PanelContent | null, width: number): Overlays => ({
+  panel,
+  sheet: panel && (width < narrowBelow || panel.kind === "diff") ? null : now.sheet,
+});
+// Opens the sheet of part `sheet` (null closes it). Below `narrowBelow`, or over the widened diff, the panel closes.
+export const withSheet = (now: Overlays, sheet: string | null, width: number): Overlays => ({
+  sheet,
+  panel: sheet && (width < narrowBelow || now.panel?.kind === "diff") ? null : now.panel,
+});
+// A press on a session's row or chip: its story, or none when the panel already shows that story (a second click closes it).
+export const pressRow = (panel: PanelContent | null, session: string): PanelContent | null =>
+  panel?.kind === "story" && panel.session === session ? null : { kind: "story", session };
+// The session the panel shows (its story, a turn's diff or a worker's log), whose chips stay lit while it is open, and whose closing selects no session.
+export const panelSession = (panel: PanelContent | null): string | null =>
+  panel?.kind === "story" || panel?.kind === "diff" || panel?.kind === "log" ? panel.session : null;
+// The project the page opens on (#386): the last viewed, while the list still holds it, else the first; none on a fresh install.
+export const startProject = (last: string | null, projects: string[]): string | null =>
+  last !== null && projects.includes(last) ? last : (projects[0] ?? null);
+// What the page shows (#386): a project's map, and what the left panel holds over it.
+export type PageView = { project: string | null; panel: PanelContent | null };
+// Selecting a session shows its project's map, with its story, or a worker's log, in the left panel.
+export const selectedView = (session: string, project: string, agent: string | null): PageView => ({
+  project,
+  panel: agent === null ? { kind: "story", session } : { kind: "log", session, agent },
+});
+// A press on a project header shows that project's map; a session's panel of another project closes with the switch. A press on the shown
+// project's header folds its group, as the header did before it switched projects (#97).
+export function pressHeader(page: PageView, pressed: string, projectOf: (session: string) => string | null): PageView | "fold" {
+  if (pressed === page.project) return "fold";
+  const session = panelSession(page.panel);
+  return { project: pressed, panel: session === null || projectOf(session) === pressed ? page.panel : null };
 }

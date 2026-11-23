@@ -7,7 +7,7 @@
 //! untagged tests only, or with a log that cannot be read, marks nothing and says so in `status`.
 //!
 //! `read` asks GitHub; the shell calls it only when the Map view opens, when the window gains focus while it is open and when a
-//! merge is seen (`refresh_later`), never on a timer, and `CiCache` keeps the last result for the payload and for Home's mark.
+//! merge is seen (`refresh_later`), never on a timer, and `CiCache` keeps the last result for the payload and for the project header's dot.
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -610,8 +610,8 @@ fn gh(repo: &Path, args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-/// The last CI read of each project: the payload and Home's mark read it, and only a trigger replaces it. The last finished
-/// result is also kept in `file` (when there is one), so a restart does not lose Home's mark before the map is opened.
+/// The last CI read of each project: the payload and the project header's dot read it, and only a trigger replaces it. The last finished
+/// result is also kept in `file` (when there is one), so a restart does not lose the header's dot before the map is opened.
 #[derive(Default)]
 pub struct CiCache {
     last: Mutex<BTreeMap<String, Ci>>,

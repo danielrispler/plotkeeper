@@ -37,6 +37,7 @@ pub mod install;
 pub mod lock;
 pub mod map;
 pub mod pr_briefs;
+pub mod projects;
 pub mod prs;
 pub mod ratify;
 mod read_loop;
@@ -124,6 +125,8 @@ pub struct App {
     /// The PRs found for each project's branches (`prs.rs`) and the PR briefs written for the ready ones (`pr_briefs.rs`).
     pub prs: prs::Prs,
     pub briefs: pr_briefs::PrBriefs,
+    /// The saved project list (`projects.rs`), beside the log.
+    pub projects: projects::Projects,
     pub watching: Mutex<answer::Watching>,
     pub events: Arc<Events>,
     /// The notice the card writer last raised and not yet cleared, for a page opened after it (danielrispler/plotkeeper#328).
@@ -234,6 +237,7 @@ impl App {
             ci: Arc::new(ci_laws::load_cache()),
             prs: prs::Prs::default(),
             briefs,
+            projects: projects::Projects::beside(log),
             watching: Mutex::default(),
             events,
             writer_notice: Mutex::new(None),
@@ -604,8 +608,8 @@ pub fn sessions(app: &App) -> Vec<Row> {
     list.into_iter().map(row).collect()
 }
 
-/// Daniel clicked session `id`'s row, or, with no `id`, went Home; returns the selection, which no
-/// longer names a subagent, and is `null` at Home.
+/// Daniel clicked session `id`'s row, or, with no `id`, went back to the bare map; returns the selection,
+/// which no longer names a subagent, and is `null` with none selected.
 pub fn select(app: &App, id: Option<String>) -> serde_json::Value {
     let mut studio = app.core.lock().unwrap();
     match id {
@@ -1169,8 +1173,8 @@ pub fn map_state(app: &Arc<App>, project: String, fetch: bool) -> Result<map::Ma
     map::map_state(project, fetch, app)
 }
 
-/// Home's quiet mark: see [`map::map_marks`].
-pub fn map_marks(app: &App, projects: Vec<String>) -> Result<Vec<String>, String> {
+/// The project header's quiet dot: see [`map::map_marks`].
+pub fn map_marks(app: &App, projects: Vec<String>) -> Result<Vec<map::Mark>, String> {
     map::map_marks(projects, &app.ci, &app.prs)
 }
 

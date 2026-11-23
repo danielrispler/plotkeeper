@@ -1,32 +1,25 @@
-// One selection everywhere (danielrispler/Falinks#567): the Home key and the links into a session's turns. Run: `npm test`.
+// One selection everywhere (danielrispler/Falinks#567): selecting a session over the map, which is the page's base (#386). Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-test("the Home key flips between a session and Home (#239)", async () => {
-  const { homeToggle } = await import("../../dist/selection.js");
-  const listed = [{ id: "a" }, { id: "b" }];
-  // From a session it remembers that session and shows Home.
-  assert.deepEqual(homeToggle("a", null, listed), { show: "a" });
-  // On Home it selects the remembered session.
-  assert.deepEqual(homeToggle(null, "a", listed), { select: "a" });
-  // From a view with no session selected where Home is not shown (History, a full diff, a new terminal), it shows Home.
-  assert.deepEqual(homeToggle(null, "a", listed, false), { show: null });
+// The map is the page's base (#386): selecting a session shows its project's map, with its story, or a worker's log, in the left panel.
+test("selecting a session shows its project's map and opens it in the panel", async () => {
+  const { selectedView } = await import("../../dist/map-model.js");
+  assert.deepEqual(selectedView("s2", "/w/falinks", null), { project: "/w/falinks", panel: { kind: "story", session: "s2" } });
+  assert.deepEqual(selectedView("s1", "/w/plotkeeper", "w1"), { project: "/w/plotkeeper", panel: { kind: "log", session: "s1", agent: "w1" } });
 });
 
-test("on Home with the remembered session gone, the Home key does nothing (#239)", async () => {
-  const { homeToggle } = await import("../../dist/selection.js");
-  assert.equal(homeToggle(null, "gone", [{ id: "b" }]), null);
-  assert.equal(homeToggle(null, null, [{ id: "b" }]), null);
-});
-
-test("the session left is remembered on every way to Home, and kept while a session is selected (#226)", async () => {
-  const { leftSession } = await import("../../dist/selection.js");
-  // Home key, a click on the list's empty space or a Delete all end the selection on none.
-  assert.equal(leftSession("a", null, null), "a");
-  // The last session left wins over a stale one.
-  assert.equal(leftSession("b", null, "a"), "b");
-  // Moving between sessions, or staying on Home, keeps what was remembered.
-  assert.equal(leftSession("a", "b", "x"), "x");
-  assert.equal(leftSession(null, null, "x"), "x");
-  assert.equal(leftSession(null, "a", "x"), "x");
+test("a project header's click shows its map; on the shown project's header it folds the group (#386)", async () => {
+  const { pressHeader } = await import("../../dist/map-model.js");
+  const projectOf = (id) => ({ s1: "/w/plotkeeper", s2: "/w/falinks" })[id] ?? null;
+  const bare = { project: "/w/plotkeeper", panel: null };
+  assert.deepEqual(pressHeader(bare, "/w/falinks", projectOf), { project: "/w/falinks", panel: null });
+  assert.equal(pressHeader(bare, "/w/plotkeeper", projectOf), "fold");
+  // A story of another project closes with the switch; History and Settings, which belong to no project, stay.
+  assert.deepEqual(pressHeader({ project: "/w/plotkeeper", panel: { kind: "story", session: "s1" } }, "/w/falinks", projectOf), { project: "/w/falinks", panel: null });
+  assert.deepEqual(pressHeader({ project: "/w/plotkeeper", panel: { kind: "history" } }, "/w/falinks", projectOf), { project: "/w/falinks", panel: { kind: "history" } });
+  // A story of the project switched to stays open.
+  assert.deepEqual(pressHeader({ project: "/w/plotkeeper", panel: { kind: "story", session: "s2" } }, "/w/falinks", projectOf), { project: "/w/falinks", panel: { kind: "story", session: "s2" } });
+  // A fresh page has no project shown yet: the header shows its map.
+  assert.deepEqual(pressHeader({ project: null, panel: null }, "/w/falinks", projectOf), { project: "/w/falinks", panel: null });
 });

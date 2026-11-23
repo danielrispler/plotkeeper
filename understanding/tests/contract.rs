@@ -695,10 +695,10 @@ fn the_failure_notice_says_summaries_are_off_and_gives_each_writer_its_own_fix()
         assert!(notice(FailureKind::NotLoggedIn, program).contains(login));
         assert!(notice(FailureKind::NotInstalled, program).contains(install));
     }
-    // The quota fix points at the page, where the writer is picked now, not at a hand-edited file.
+    // The quota fix points at the page's Settings panel, where the writer is picked now (#387), not at a hand-edited file.
     let quota = notice(FailureKind::Quota, "claude");
     assert!(
-        !quota.contains("settings.json") && quota.contains("Writer"),
+        !quota.contains("settings.json") && quota.contains("in Settings"),
         "{quota}"
     );
 }
