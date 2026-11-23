@@ -29,11 +29,14 @@ fn append() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
     // The agent the hook entry names, so the line is read by its agent's parser, not its shape (#355).
-    let mut agent = None;
+    // The event it names, for a payload that names none (Copilot's camelCase ones, #361).
+    let (mut agent, mut named) = (None, None);
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
-        if arg == "--agent" {
-            agent = args.next();
+        match arg.as_str() {
+            "--agent" => agent = args.next(),
+            "--event" => named = args.next(),
+            _ => {}
         }
     }
     // Another harness's event, which its own entry records, is dropped here (#362).
@@ -59,6 +62,9 @@ fn append() -> Result<(), Box<dyn Error>> {
     if let Some(agent) = agent {
         event.insert("studio_agent".into(), agent.into());
     }
+    if let Some(named) = named {
+        event.insert("studio_event".into(), named.into());
+    }
     event.insert("studio_received_ms".into(), received_ms.into());
     let home = env::home_dir().ok_or("no home directory")?;
     // The old data folder moves before anything is created in the new one (#322).
@@ -73,7 +79,8 @@ fn append() -> Result<(), Box<dyn Error>> {
     // A lock that never comes must not hold the agent: the event is dropped, with a trace (#43,
     // decision 11).
     let text = |key: &str| event.get(key)?.as_str().map(str::to_owned);
-    let name = text("hook_event_name").or_else(|| text("hookEventName"));
+    let name = (text("hook_event_name").or_else(|| text("hookEventName")))
+        .or_else(|| text("studio_event"));
     let terminal = text("studio_terminal_id");
     // Tests shorten the 5 seconds.
     let patience = env::var("PLOTKEEPER_HOOK_PATIENCE_MS")

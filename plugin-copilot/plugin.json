@@ -1,0 +1,5 @@
+{
+  "name": "plotkeeper",
+  "description": "Appends Copilot hook events to plotkeeper's event log",
+  "hooks": "hooks.json"
+}

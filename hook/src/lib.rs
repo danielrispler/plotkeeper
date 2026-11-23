@@ -177,8 +177,8 @@ pub struct Pruned {
 }
 
 /// What a prune reads of a line: its session, by `session_id` (Claude Code's, Codex's and Qwen Code's), agy's
-/// `conversationId` or Cursor's `conversation_id`, the agent its hook entry named, and when it was
-/// received.
+/// `conversationId`, Cursor's `conversation_id` or Copilot's camelCase `sessionId`, the agent its hook entry
+/// named, and when it was received.
 #[derive(Default, serde::Deserialize)]
 struct Stamp {
     session_id: Option<String>,
@@ -187,6 +187,9 @@ struct Stamp {
     /// Cursor's session (#362).
     #[serde(rename = "conversation_id")]
     cursor_conversation: Option<String>,
+    /// Copilot's session, in its camelCase payloads (#361).
+    #[serde(rename = "sessionId")]
+    copilot_session: Option<String>,
     studio_agent: Option<String>,
     studio_received_ms: Option<u64>,
 }
@@ -204,6 +207,7 @@ impl Stamp {
             Some("agy") => agy,
             Some("claude" | "codex" | "qwen") => claude,
             Some("cursor") => self.cursor_conversation.as_deref(),
+            Some("copilot") => claude.or(self.copilot_session.as_deref()),
             _ => claude.or(agy),
         }
     }
@@ -927,10 +931,23 @@ pub fn foreign(
     agent: Option<&str>,
     event: &serde_json::Map<String, serde_json::Value>,
 ) -> Option<&'static str> {
-    let (marked, name) = event
-        .contains_key("cursor_version")
-        .then_some(("cursor", "Cursor"))?;
+    let (marked, name) = if event.contains_key("cursor_version") {
+        ("cursor", "Cursor")
+    } else if copilot_payload(event) {
+        ("copilot", "Copilot")
+    } else {
+        return None;
+    };
     agent.is_some_and(|a| a != marked).then_some(name)
+}
+
+/// Whether `payload` carries Copilot's marker, for the agent guard above: Copilot reads
+/// `.claude/settings.json`, so a payload of Copilot's could reach Claude Code's entry.
+// HOOK POINT (#361, for wave 1's trial #369): Copilot documents no field that marks its payloads,
+// and its snake_case ones are Claude Code's shape, so none is guessed: the trial records the marker
+// and puts its check here. Until then no payload is told as Copilot's.
+fn copilot_payload(_payload: &serde_json::Map<String, serde_json::Value>) -> bool {
+    false
 }
 
 /// The command and parent pid of process `pid`, from `ps`; `None` when it has gone or `ps` fails.

@@ -139,3 +139,37 @@ fn every_cursor_entry_names_cursor() {
         assert_eq!(c, "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent cursor");
     }
 }
+
+/// A camelCase Copilot payload names no event, so its entry passes it as `--event`, which the hook
+/// stores as `studio_event` (#361).
+#[test]
+fn the_hook_stores_the_event_its_entry_names() {
+    let payload = json!({ "sessionId": "cs-1", "timestamp": 1, "cwd": "/", "prompt": "go" });
+    let line = logged(
+        &["--agent", "copilot", "--event", "userPromptSubmitted"],
+        payload,
+        "copilot-event",
+    );
+    assert_eq!(line["studio_agent"], "copilot");
+    assert_eq!(line["studio_event"], "userPromptSubmitted");
+}
+
+/// Every entry of Copilot's plugin names Copilot and, since its camelCase payloads name no event,
+/// its own event (#361).
+#[test]
+fn every_copilot_entry_names_copilot_and_its_event() {
+    let mut copilot = commands("plugin-copilot");
+    copilot.sort();
+    let mut wired = [
+        "agentStop",
+        "postToolUse",
+        "postToolUseFailure",
+        "preToolUse",
+        "sessionEnd",
+        "sessionStart",
+        "userPromptSubmitted",
+    ]
+    .map(|e| format!("\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent copilot --event {e}"));
+    wired.sort();
+    assert_eq!(copilot, wired);
+}

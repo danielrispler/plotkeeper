@@ -252,3 +252,28 @@ fn a_prune_keeps_a_cursor_sessions_lines_together_by_its_conversation_id() {
 
     assert_eq!(lines(&log), [start, recent]);
 }
+
+/// A camelCase Copilot line has its session in `sessionId` (#361): its old and recent lines stay
+/// together.
+#[test]
+fn a_prune_keeps_a_copilot_sessions_camel_case_lines_together() {
+    let home = scratch("copilot");
+    let log = studio_hook::event_log(&home);
+    let copilot = |ms: u64| {
+        json!({
+            "sessionId": "cs-1",
+            "studio_event": "preToolUse",
+            "studio_agent": "copilot",
+            "studio_received_ms": ms,
+        })
+    };
+    let (old, recent) = (copilot(NOW - 40 * DAY), copilot(NOW - DAY));
+    write(
+        &log,
+        &[old.clone(), at("s-0", NOW - 40 * DAY), recent.clone()],
+    );
+
+    prune(&log, NOW).unwrap();
+
+    assert_eq!(lines(&log), [old, recent]);
+}

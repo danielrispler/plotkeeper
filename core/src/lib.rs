@@ -17,6 +17,7 @@ mod ask;
 mod checks;
 mod claude;
 mod codex;
+mod copilot;
 mod cursor;
 mod event;
 mod ledger;
@@ -34,6 +35,7 @@ pub use checks::{
 };
 pub use claude::CAPABILITIES as CLAUDE_CAPABILITIES;
 pub use codex::CAPABILITIES as CODEX_CAPABILITIES;
+pub use copilot::CAPABILITIES as COPILOT_CAPABILITIES;
 pub use cursor::CAPABILITIES as CURSOR_CAPABILITIES;
 pub use event::{Capabilities, TranscriptFormat};
 use event::{Event, Happened, Origin, Start, ToolKind};
@@ -57,6 +59,8 @@ enum Named {
     Cursor(u64),
     /// The line's time, for its drift when Qwen Code's parser cannot read it.
     Qwen(u64),
+    /// The line's time, for its drift when Copilot's parser cannot read it (#361).
+    Copilot(u64),
     /// The line's time, for its drift.
     Other(u64),
 }
@@ -76,6 +80,7 @@ impl Named {
             Some(codex::CODEX) => Named::Codex(stamp.studio_received_ms),
             Some(cursor::CURSOR) => Named::Cursor(stamp.studio_received_ms),
             Some(qwen::QWEN) => Named::Qwen(stamp.studio_received_ms),
+            Some(copilot::COPILOT) => Named::Copilot(stamp.studio_received_ms),
             Some(_) => Named::Other(stamp.studio_received_ms),
         }
     }
@@ -2593,6 +2598,13 @@ impl Studio {
                         Vec::new()
                     }
                 },
+                Named::Copilot(at) => match copilot::parse(line) {
+                    Ok(event) => vec![event],
+                    Err(_) => {
+                        self.agy.drift(at, AgyDriftKind::Agent);
+                        Vec::new()
+                    }
+                },
                 Named::Qwen(at) => match qwen::parse(line) {
                     Ok(event) => vec![event],
                     Err(_) => {
@@ -2617,6 +2629,7 @@ impl Studio {
                 Named::Codex(_) => codex::parse(line).ok(),
                 Named::Cursor(_) => cursor::parse(line).ok(),
                 Named::Qwen(_) => qwen::parse(line).ok(),
+                Named::Copilot(_) => copilot::parse(line).ok(),
                 Named::Other(_) => None,
             },
         }

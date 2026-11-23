@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent copilot --event sessionStart", "timeoutSec": 5 }],
+    "sessionEnd": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent copilot --event sessionEnd", "timeoutSec": 3 }],
+    "userPromptSubmitted": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent copilot --event userPromptSubmitted", "timeoutSec": 5 }],
+    "preToolUse": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent copilot --event preToolUse", "timeoutSec": 5 }],
+    "postToolUse": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent copilot --event postToolUse", "timeoutSec": 5 }],
+    "postToolUseFailure": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent copilot --event postToolUseFailure", "timeoutSec": 5 }],
+    "agentStop": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent copilot --event agentStop", "timeoutSec": 5 }]
+  }
+}
