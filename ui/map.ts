@@ -18,7 +18,7 @@ import {
   type MapDoc, mapProject, type MapLink, parseMap, type Part, type Point, plateSize, rimPoint, scrollToShow, type Scrub, type Tier,
 } from "./map-model.js";
 import { recheckSeen } from "./seen.js";
-import { knownProjects } from "./projects.js";
+import { knownProjects, projectGone } from "./projects.js";
 import type { MapState } from "./types.js";
 
 export type LoadedMap = Extract<MapDoc, { ok: true }>;
@@ -50,6 +50,8 @@ export const registerLayer = (name: LayerName, layer: Layer) => void (layers[nam
 export type MapDeps = {
   // The project of the selected session, null with none.
   selectedProject: () => string | null;
+  // Remove project (#381): takes a project off the saved list.
+  removeProject: (path: string) => void;
 };
 let deps: MapDeps;
 let project: string | null = null;
@@ -96,7 +98,8 @@ export function openMap(path: string | null) {
   element("map").hidden = false;
   recheckSeen();
   draw();
-  if (path !== null) {
+  // A gone folder has no map to read: its empty state says so, and nothing asks the server about it (#381).
+  if (path !== null && !projectGone(path)) {
     logStop("map-open", path);
     showReview(path).catch(failure("stop_facts"));
     load(path, true).catch(failure("map"));
@@ -112,6 +115,14 @@ async function showReview(path: string) {
   if (!modules?.length || path !== project || !mapShown()) return;
   box.replaceChildren(reviewNode(modules, [path], () => (box.hidden = true)));
   box.hidden = false;
+}
+
+// The saved project list changed (#381): a shown project that was removed gives way to the first saved one, and one whose
+// folder went or came back is drawn again.
+export function projectsChanged() {
+  if (!mapShown() || project === null) return;
+  if (!knownProjects().includes(project)) return openMap(knownProjects()[0] ?? null);
+  if (projectGone(project) !== (element("map-body").querySelector(".map-gone") !== null)) openMap(project);
 }
 
 // Reads the map again, for a change the view itself made (a tier, "I know this"); the payload decides whether it draws.
@@ -133,7 +144,7 @@ export async function toggleMap() {
   const selected = deps.selectedProject();
   const withMap = new Set<string>();
   if (selected === null) {
-    for (const path of paths) {
+    for (const path of paths.filter((path) => !projectGone(path))) {
       const state = await invoke("map_state", { project: path, fetch: false }).catch(() => null);
       if (state?.status === "loaded") {
         withMap.add(path);
@@ -207,7 +218,15 @@ const lawMark = (law: Law) => {
 // The empty states: a project with no map on its default branch, one whose file does not read, and the wait for the first read.
 function drawEmpty(body: HTMLElement, state: MapState | null) {
   const box = text("div", "", "map-empty");
-  if (project === null) {
+  if (project !== null && projectGone(project)) {
+    // A saved project whose folder was moved or deleted (#381): never an error, and Remove project is here.
+    const gone = project;
+    box.classList.add("map-gone");
+    const remove = pressable(text("button", "Remove project", "btn"), false, () => deps.removeProject(gone));
+    remove.removeAttribute("aria-pressed");
+    remove.title = "Take this project off the list; its sessions stay in History";
+    box.append(text("p", "This folder is gone", "map-empty-title"), text("p", `${gone} was moved or deleted. Its ended sessions stay in History.`, "empty"), remove);
+  } else if (project === null) {
     box.append(text("p", "No project yet", "map-empty-title"), text("p", "Add a project and its map shows here.", "empty"));
   } else if (state === null) {
     box.append(text("p", "Reading the map…", "empty"));

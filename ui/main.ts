@@ -16,14 +16,14 @@ import { type Actions, newestUnseen, nextNeedsYou, paletteEntries, run, stepLine
 import { hover, realClock, shownGate } from "./hover.js";
 import { arrange, defaultWidths, type LayoutMode, railShown, resized, type Widths } from "./layout.js";
 import { listSpace } from "./home.js";
-import { mapEscape, mapShown, startMap, toggleMap } from "./map.js";
+import { mapEscape, mapShown, projectsChanged, startMap, toggleMap } from "./map.js";
 import "./map-history.js";
 import "./map-sheet.js";
 import "./map-tray.js";
 import { startMapAgents } from "./map-agents.js";
-import { showSessions } from "./list.js";
+import { drawSidebar, showSessions } from "./list.js";
 import { goHome, select, show, toggleHome } from "./selection.js";
-import { showHistory, startPanes } from "./panes.js";
+import { redrawHome, showHistory, startPanes } from "./panes.js";
 import { showPalette } from "./palette.js";
 import { projectOfCwd, selectedProject, sidebarOrder } from "./projects.js";
 import { reload, type SettingsFiles } from "./settings.js";
@@ -33,7 +33,7 @@ import { startRailBriefs } from "./rail-brief.js";
 import { jumpToNeedsYou, showToast } from "./toast.js";
 import { askOnce, notifyIfAway, type Alert } from "./alerts.js";
 import { finishedNote, showNote, warnContext, watchNotes } from "./notes.js";
-import type { Selection, Session, SessionCards } from "./types.js";
+import type { SavedProject, Selection, Session, SessionCards } from "./types.js";
 import { HOVERS } from "./hovers.js";
 
 // The monospace cell, measured from a probe in its font, sets the columns' layout.
@@ -268,7 +268,7 @@ window.addEventListener("focus", () => actions["studio::RefreshLanded"]());
 // Home in the centre column.
 startPanes();
 startRailBriefs(drawFeed);
-startMap({ selectedProject });
+startMap({ selectedProject, removeProject });
 startMapAgents({ sessions: () => studio.listed, projectOf: projectOfCwd, select: (id, agent) => void select(id, agent) });
 // The page's own elements whose hover another place shows too (#220); the needs-you toast's adds its key when it shows.
 element("toast").title = element("note-toast").title = HOVERS.goToSession;
@@ -285,6 +285,24 @@ element("unseen").addEventListener("click", () => actions["studio::JumpToUnseen"
 document.addEventListener("pointerdown", (event) => {
   if (!element("palette").contains(event.target as Node)) element("palette").hidden = true;
 }, true);
+
+// The saved project list (#381): the list's headers, Home's projects and the Map view's follow it.
+const showProjects = (projects: SavedProject[]) => {
+  studio.projects = projects;
+  drawSidebar();
+  redrawHome();
+  projectsChanged();
+};
+function removeProject(path: string) {
+  invoke("remove_project", { path }).then(showProjects).catch(failure("remove_project"));
+}
+listen<SavedProject[]>("projects", showProjects);
+invoke("projects").then(showProjects);
+element("remove-project").addEventListener("click", () => {
+  const menu = element("project-actions");
+  menu.hidePopover();
+  if (menu.dataset.project) removeProject(menu.dataset.project);
+});
 
 const showList = (sessions: Session[]) => {
   showSessions(sessions);

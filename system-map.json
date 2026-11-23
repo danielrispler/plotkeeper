@@ -19,7 +19,7 @@
     },
     {
       "id": "server", "name": "Server", "caption": "Holds the state, answers the commands",
-      "description": "A library, and the `plotkeeper` program that serves it, with no window in it. It holds the core state, the card store (which keeps the session briefs, the turn summaries and the cards written before cards were retired), the risk notes, the writer and the settings, tells the page why when the writer fails, runs the read loop that follows the event log and sends what changed (the list, the selection, the brief, notices) to a sink the web server sets, serves the learning layer as a local page on 127.0.0.1 (the built page, one POST route for each command and one server-sent event stream, behind a random token, a cookie and a Host check, one server per data folder), and has one function for each learning-layer and session-view command: the PR lookups on a turn's end, the page's focus and the Map view's opening (never on a timer), the PR briefs written for ready PRs and kept per head, the map, the fog a PR's reading clears, the CI result it reads from the default branch, which map changes and agent decisions of a PR you accepted or overturned, and the quiet log of what you use of it.",
+      "description": "A library, and the `plotkeeper` program that serves it, with no window in it. It holds the core state, the card store (which keeps the session briefs, the turn summaries and the cards written before cards were retired), the risk notes, the writer and the settings, tells the page why when the writer fails, runs the read loop that follows the event log and sends what changed (the list, the saved project list, the selection, the brief, notices) to a sink the web server sets, serves the learning layer as a local page on 127.0.0.1 (the built page, one POST route for each command and one server-sent event stream, behind a random token, a cookie and a Host check, one server per data folder), and has one function for each learning-layer and session-view command: the PR lookups on a turn's end, the page's focus and the Map view's opening (never on a timer), the PR briefs written for ready PRs and kept per head, the map, the fog a PR's reading clears, the CI result it reads from the default branch, which map changes and agent decisions of a PR you accepted or overturned, and the quiet log of what you use of it. It keeps the saved project list in the data folder: a repository joins on its first session and leaves only through Remove project.",
       "tier": "core", "paths": ["server/"]
     },
     {
@@ -29,7 +29,7 @@
     },
     {
       "id": "window", "name": "Window", "caption": "Everything you see and press",
-      "description": "The page: the list, the rail, Home, History and the Map view. It shows state and sends your actions to the server; it has no terminals, projects, branches, skills, usage or settings page.",
+      "description": "The page: the list, the rail, Home, History and the Map view. Its list has a header for every saved project, even one with no sessions. It shows state and sends your actions to the server; it has no terminals, branches, skills, usage or settings page.",
       "tier": "core", "paths": ["ui/"]
     },
     {
@@ -64,6 +64,8 @@
   "laws": [
     { "id": "hook-never-makes-agent-wait", "on": "hook", "backing": "trust",
       "text": "The hook never makes the agent wait, except for your answer." },
+    { "id": "projects-leave-only-by-remove", "on": "server", "backing": "check",
+      "text": "A saved project stays after its sessions end or are deleted, and leaves only through Remove project." },
     { "id": "core-reads-only-transcripts", "on": "core", "backing": "trust",
       "text": "The core does no I/O except reading transcripts." },
     { "id": "check-result-is-last-run", "on": "core", "backing": "trust",

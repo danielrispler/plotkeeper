@@ -137,6 +137,12 @@ h1 { margin: 0 0 var(--sp-4); }
 .project-toggle .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-toggle .glyph { margin-inline-start: auto; }
 .project-head[draggable="true"] { cursor: grab; }
+/* A header's "⋯" (#381), shown while the header is hovered or holds the focus; a gone project's name is struck through. */
+.project-more { flex: none; padding: 0 var(--sp-3); color: var(--faint); opacity: 0; }
+.project-head:hover .project-more, .project-more:focus-visible, .project-head:focus-within .project-more { opacity: 1; }
+.project-more:hover { color: var(--fg); }
+.project-head.gone .name { text-decoration: line-through; text-decoration-color: var(--faint); }
+.menu.project-actions[popover] { width: max-content; }
 /* A project's "+" (Zed's, T3 Code's): hidden until its header is hovered or holds the focus. */
 .add-project { margin: var(--sp-4) var(--sp-2); }
 .project.outside { opacity: 0.6; }
