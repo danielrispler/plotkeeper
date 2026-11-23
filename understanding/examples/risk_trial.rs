@@ -5,9 +5,9 @@
 //! command's level. The output holds Daniel's real commands, so it goes to local evidence and is never pushed. It reads the
 //! event log and the writer's replies and no credential file. Run it outside auto mode, from the repository's root:
 //!
-//! `cargo run -q -p studio-understanding --example risk_trial > <local-evidence>/reports/risk-trial.md`
+//! `cargo run -q -p studio-understanding --example risk_trial > local-evidence/2026-11-22-blocked-card-explain-risk/reports/risk-trial.md`
 
-use std::{collections::BTreeMap, io::BufRead, time::Instant};
+use std::{io::BufRead, time::Instant};
 use studio_core::Studio;
 use studio_understanding::{ClaudeWriter, RISK_TIMEOUT, RiskLevel};
 
@@ -38,6 +38,16 @@ const STEERED: [(&str, &str); 5] = [
     ),
 ];
 
+/// The levels, in the card's order.
+const LEVELS: [RiskLevel; 6] = [
+    RiskLevel::None,
+    RiskLevel::Low,
+    RiskLevel::Medium,
+    RiskLevel::High,
+    RiskLevel::VeryHigh,
+    RiskLevel::NotSure,
+];
+
 /// The level as the card writes it.
 fn label(level: RiskLevel) -> &'static str {
     match level {
@@ -50,9 +60,9 @@ fn label(level: RiskLevel) -> &'static str {
     }
 }
 
-/// One judged command: its level's label, or `None` for a failed call, and the call's seconds.
+/// One judged command: its level, or `None` for a failed call, and the call's seconds.
 struct Judged {
-    level: Option<&'static str>,
+    level: Option<RiskLevel>,
     seconds: f64,
 }
 
@@ -64,10 +74,13 @@ fn judge(writer: &ClaudeWriter, heading: &str, command: &str, folder: &str) -> J
     println!("## {heading}\n\n```\n{command}\n```\n\nFolder: `{folder}`\n");
     match outcome {
         Ok(risk) => {
-            let level = label(risk.level);
-            println!("**{level}** · {} ({seconds:.1} s)\n", risk.line);
+            println!(
+                "**{}** · {} ({seconds:.1} s)\n",
+                label(risk.level),
+                risk.line
+            );
             Judged {
-                level: Some(level),
+                level: Some(risk.level),
                 seconds,
             }
         }
@@ -90,7 +103,7 @@ fn main() {
     let studio = Studio::replayed(lines);
     let writer = ClaudeWriter::beside(&log).expect("create the card writer's folder");
 
-    // Each distinct command and folder once, in the order they were first blocked.
+    // Each distinct command and folder once, in the order of their latest block.
     let mut blocked: Vec<(u64, String, String)> = Vec::new();
     for session in studio.sessions() {
         for card in &session.blocked_commands {
@@ -122,31 +135,22 @@ fn main() {
 
     let limit = RISK_TIMEOUT.as_secs_f64();
     let all = recorded.iter().chain(steered.iter().map(|(_, j)| j));
-    let (slow, failed) = all.fold((0, 0), |(slow, failed), j| {
-        (
-            slow + usize::from(j.seconds > limit),
-            failed + usize::from(j.level.is_none()),
-        )
-    });
-    let mut per_level: BTreeMap<&str, usize> = BTreeMap::new();
-    for j in &recorded {
-        *per_level.entry(j.level.unwrap_or("failed")).or_default() += 1;
+    let (mut slow, mut failed, mut either) = (0, 0, 0);
+    for j in all {
+        let (over, none) = (j.seconds > limit, j.level.is_none());
+        slow += usize::from(over);
+        failed += usize::from(none);
+        either += usize::from(over || none);
     }
     println!("## Counts\n");
     println!("- Recorded commands judged: {}", recorded.len());
-    for level in [
-        "None",
-        "Low",
-        "Medium",
-        "High",
-        "Very high",
-        "Not sure",
-        "failed",
-    ] {
-        println!("  - {level}: {}", per_level.get(level).unwrap_or(&0));
+    let count = |level: Option<RiskLevel>| recorded.iter().filter(|j| j.level == level).count();
+    for level in LEVELS {
+        println!("  - {}: {}", label(level), count(Some(level)));
     }
+    println!("  - failed: {}", count(None));
     println!(
-        "- Calls over {limit:.0} s: {slow}; calls that failed: {failed} (of {} calls)",
+        "- Calls that passed {limit:.0} s or failed: {either} of {} (over {limit:.0} s: {slow}; failed: {failed}; a timeout is both)",
         recorded.len() + steered.len()
     );
     println!("- Steered commands:");
@@ -154,7 +158,7 @@ fn main() {
         println!(
             "  - {}. {tries}: {}",
             n + 1,
-            j.level.unwrap_or("no risk note")
+            j.level.map_or("no risk note", label)
         );
     }
 }
