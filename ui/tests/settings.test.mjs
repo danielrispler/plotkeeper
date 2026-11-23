@@ -98,11 +98,12 @@ test("the check lists are commands per project folder, none by default, and anyt
   assert.deepEqual(reload(initial, { settings: `{ "checks": [] }`, keymap: null }).errors.length, 1);
 });
 
-test("summaries.writer chooses agy, defaults to claude, and a name that is neither is reported", () => {
+test("summaries.writer chooses agy or codex, defaults to claude, and a name that is none of them is reported", () => {
   const read = (summaries) => reload(initial, { settings: `{ "summaries": ${summaries} }`, keymap: null });
   assert.equal(read(`{ "writer": "agy" }`).settings.summaries.writer, "agy");
+  assert.equal(read(`{ "writer": "codex" }`).settings.summaries.writer, "codex");
   assert.equal(read(`{}`).settings.summaries.writer, "claude");
-  const bad = read(`{ "writer": "codex" }`);
+  const bad = read(`{ "writer": "copilot" }`);
   assert.equal(bad.settings.summaries.writer, "claude");
   assert.equal(bad.errors.length, 1);
 });
