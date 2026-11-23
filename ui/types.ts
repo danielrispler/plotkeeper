@@ -448,7 +448,7 @@ export type CommitFiles = { commit: string; short: string; label: string; url: s
 // summaries are on (off until a writer passes Test for a user who arrived with none) and whether PR briefs can be written,
 // which needs `claude`; and a Test's outcome, with `settings.json`'s new text when the pass saved the choice. An API-key
 // writer (`anthropic`) is found when its key is set, which is all the page learns of the key.
-export type WriterKind = "anthropic" | "claude" | "agy";
+export type WriterKind = "anthropic" | "claude" | "agy" | "codex";
 export type FoundWriter = { kind: WriterKind; name: string; found: boolean; models: string[]; efforts: string[] };
 export type Writers = { writers: FoundWriter[]; summaries_on: boolean; briefs: boolean };
 export type WriterOutcome = "passed" | "not_logged_in" | "quota" | "timeout" | "not_installed" | "empty" | "other";

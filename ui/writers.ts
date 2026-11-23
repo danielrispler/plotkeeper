@@ -22,10 +22,12 @@ export const keySet = (list: Writers): boolean => list.writers.some((w) => w.kin
 export const keyLine = (list: Writers): string =>
   keySet(list) ? "Anthropic API key: set, kept in the macOS Keychain." : "Anthropic API key: not set.";
 
-// A model as writer `kind` takes it: one agy does not list is its first, as the server reads it (`WriterKind::model`).
+// A model as writer `kind` takes it: one agy or Codex does not list is its first, as the server reads it
+// (`WriterKind::model`); Claude takes any id, and the API key any full `claude-` id.
 function modelOf(list: Writers, kind: WriterKind, model: string): string {
   const models = list.writers.find((w) => w.kind === kind)?.models ?? [];
-  return kind === "agy" && !models.includes(model) ? (models[0] ?? model) : model;
+  const any = kind === "claude" || (kind === "anthropic" && model.startsWith("claude-"));
+  return !any && !models.includes(model) ? (models[0] ?? model) : model;
 }
 
 // The choice the section opens with: the writer that writes now when summaries are on, else the first found in the

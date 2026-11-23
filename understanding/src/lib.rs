@@ -438,6 +438,9 @@ pub struct ClaudeWriter {
     /// The `agy` program and its own neutral folder, for when the settings choose it (#327).
     agy_program: PathBuf,
     agy_folder: PathBuf,
+    /// The same for `codex` (#364).
+    codex_program: PathBuf,
+    codex_folder: PathBuf,
     /// The program that writes now.
     kind: Mutex<WriterKind>,
     /// How long a call may run before it fails and is stopped (danielrispler/Falinks#434, decision 30); unset, the
@@ -521,6 +524,8 @@ impl ClaudeWriter {
         Self {
             agy_program: WriterKind::Agy.program().into(),
             agy_folder: folder.with_file_name(WriterKind::Agy.folder()),
+            codex_program: WriterKind::Codex.program().into(),
+            codex_folder: folder.with_file_name(WriterKind::Codex.folder()),
             kind: Mutex::new(WriterKind::Claude),
             program,
             folder,
@@ -560,6 +565,15 @@ impl ClaudeWriter {
         }
     }
 
+    /// The writer that runs `codex` as `program`, in the neutral folder `folder`.
+    pub fn with_codex(self, program: PathBuf, folder: PathBuf) -> Self {
+        Self {
+            codex_program: program,
+            codex_folder: folder,
+            ..self
+        }
+    }
+
     /// The writer that starts as `kind`; the settings change it later with `use_writer`.
     pub fn with_kind(self, kind: WriterKind) -> Self {
         *self.kind.lock().unwrap() = kind;
@@ -587,11 +601,16 @@ impl ClaudeWriter {
     pub fn beside(log: &Path) -> std::io::Result<Self> {
         let folder = log.with_file_name(WriterKind::Claude.folder());
         let agy_folder = log.with_file_name(WriterKind::Agy.folder());
+        let codex_folder = log.with_file_name(WriterKind::Codex.folder());
         std::fs::create_dir_all(&folder)?;
         std::fs::create_dir_all(&agy_folder)?;
+        std::fs::create_dir_all(&codex_folder)?;
         let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
         let agy = find_program(shell.as_ref(), WriterKind::Agy.program());
-        Ok(Self::new(find_claude(shell.as_ref()), folder).with_agy(agy, agy_folder))
+        let codex = find_program(shell.as_ref(), WriterKind::Codex.program());
+        Ok(Self::new(find_claude(shell.as_ref()), folder)
+            .with_agy(agy, agy_folder)
+            .with_codex(codex, codex_folder))
     }
 
     /// `goal_request` as the process path runs it with the program that writes now.
@@ -731,6 +750,9 @@ impl ClaudeWriter {
             WriterKind::Claude | WriterKind::Anthropic => {
                 build_command(WriterKind::Claude, &self.program, &self.folder, request)
             }
+            kind @ WriterKind::Codex => {
+                build_command(kind, &self.codex_program, &self.codex_folder, request)
+            }
         }
     }
 
@@ -832,6 +854,8 @@ impl ClaudeWriter {
     fn built_for(&self, command: &Command) -> WriterKind {
         if command.get_program() == self.agy_program.as_os_str() {
             WriterKind::Agy
+        } else if command.get_program() == self.codex_program.as_os_str() {
+            WriterKind::Codex
         } else {
             WriterKind::Claude
         }

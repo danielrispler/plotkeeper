@@ -98,6 +98,9 @@ fn agy_writes_with_its_own_model_when_the_setting_names_another_writers() {
     assert_eq!(WriterKind::Claude.model("claude-x-9"), "claude-x-9");
 }
 
+// agy has no flag that turns its tools off, nor a read-only mode that answers plainly (`--mode plan` writes a plan
+// instead): its lockout is the sandboxed terminal and no slash commands or skills, in an empty folder.
+// @law: writer-has-no-tools
 #[test]
 fn the_agy_command_takes_the_schema_runs_in_its_own_folder_and_is_marked_internal() {
     let (command, stdin) = build_command(
@@ -121,6 +124,8 @@ fn the_agy_command_takes_the_schema_runs_in_its_own_folder_and_is_marked_interna
             "gemini-4-neon-medium",
             "--effort",
             "low",
+            "--sandbox",
+            "--disable-slash-commands",
             "--print-timeout",
             "3m",
             "-p",
@@ -137,6 +142,77 @@ fn the_agy_command_takes_the_schema_runs_in_its_own_folder_and_is_marked_interna
         command.get_current_dir(),
         Some(Path::new("/w/card-writer-agy"))
     );
+}
+
+// Codex cannot turn its tools off: its lockout is the read-only sandbox, without the user's config (and so without
+// their MCP servers), in an empty folder.
+// @law: writer-has-no-tools
+#[test]
+fn the_codex_command_is_read_only_takes_the_schema_from_a_file_and_is_marked_internal() {
+    let folder = tempfile::tempdir().unwrap();
+    let (command, stdin) = build_command(
+        WriterKind::Codex,
+        Path::new("/bin/codex"),
+        folder.path(),
+        &WriterRequest {
+            model: Some("gpt-5.6-luna".into()),
+            ..request()
+        },
+    );
+    assert_eq!(command.get_program(), "/bin/codex");
+    let all = args(&command);
+    let (schema, head) = (all[all.len() - 2], &all[..all.len() - 2]);
+    assert_eq!(
+        head,
+        [
+            "exec",
+            "--skip-git-repo-check",
+            "-s",
+            "read-only",
+            "--ephemeral",
+            "--ignore-user-config",
+            "--json",
+            "--model",
+            "gpt-5.6-luna",
+            "-c",
+            r#"model_reasoning_effort="low""#,
+            "--output-schema",
+        ]
+    );
+    // The schema is a file in the neutral folder, and the prompt comes on standard input (`-`).
+    assert!(Path::new(schema).starts_with(folder.path()), "{schema}");
+    assert_eq!(
+        std::fs::read_to_string(schema).unwrap(),
+        r#"{"type":"object"}"#
+    );
+    assert_eq!(command.get_args().last().unwrap(), "-");
+    // No system prompt flag: the system prompt leads the prompt.
+    assert_eq!(stdin, "You write cards.\n\nThe change.");
+    assert_eq!(
+        env(&command),
+        [(OsStr::new("PLOTKEEPER_INTERNAL"), Some(OsStr::new("1")))]
+    );
+    assert_eq!(command.get_current_dir(), Some(folder.path()));
+
+    // Without a schema there is no schema file; a model it does not list (the default `haiku`) is its first.
+    let (command, _) = build_command(
+        WriterKind::Codex,
+        Path::new("/bin/codex"),
+        Path::new("/w/card-writer-codex"),
+        &WriterRequest {
+            schema: None,
+            model: Some("haiku".into()),
+            effort: Some(String::new()),
+            ..request()
+        },
+    );
+    let args = args(&command);
+    assert!(
+        !args.contains(&"--output-schema") && !args.contains(&"-c"),
+        "{args:?}"
+    );
+    let at = args.iter().position(|a| *a == "--model").unwrap();
+    assert_eq!(args[at + 1], WriterKind::Codex.models()[0]);
 }
 
 #[test]
@@ -259,17 +335,74 @@ fn agys_failures_are_told_apart() {
     assert_eq!(kind("segfault", 139), FailureKind::Other);
 }
 
+// What `codex exec --json` printed, as a real run printed it (codex-cli 0.171.0).
+const CODEX_OK: &str = r#"{"type":"thread.started","thread_id":"t"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"{\"answer\":\"pong\"}"}}
+{"type":"turn.completed","usage":{"input_tokens":14574,"cached_input_tokens":0,"output_tokens":15,"reasoning_output_tokens":0}}
+"#;
+
+#[test]
+fn a_codex_reply_is_its_last_agent_message_with_usage() {
+    let reply = read_reply(WriterKind::Codex, true, &exit(0), CODEX_OK).unwrap();
+    assert_eq!(reply.text, r#"{"answer":"pong"}"#);
+    assert_eq!(reply.json, Some(serde_json::json!({ "answer": "pong" })));
+    let usage = reply.usage.unwrap();
+    assert_eq!((usage.input_tokens, usage.output_tokens), (14574, 15));
+
+    // With no schema the message is the text, and a warning item before it is no reply.
+    let out = r#"{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Model metadata not found."}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"first"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"plain words"}}
+{"type":"turn.completed","usage":{"input_tokens":3,"output_tokens":2}}"#;
+    let reply = read_reply(WriterKind::Codex, false, &exit(0), out).unwrap();
+    assert_eq!((reply.text.as_str(), reply.json), ("plain words", None));
+}
+
+#[test]
+fn codexs_failures_are_told_apart() {
+    let kind = |out: &str, code| read(WriterKind::Codex, true, code, out).unwrap_err();
+    // Logged out: it retries, then the turn fails with a 401.
+    let logged_out = r#"{"type":"thread.started","thread_id":"t"}
+{"type":"error","message":"Reconnecting... 5/5 (unexpected status 401 Unauthorized: Missing bearer or basic authentication in header)"}
+{"type":"turn.failed","error":{"message":"unexpected status 401 Unauthorized: Missing bearer or basic authentication in header"}}"#;
+    assert_eq!(kind(logged_out, 1), FailureKind::NotLoggedIn);
+    let limit = r#"{"type":"turn.failed","error":{"message":"You've hit your usage limit. Try again later."}}"#;
+    assert_eq!(kind(limit, 1), FailureKind::Quota);
+    // A failed turn is a failure whatever the exit code says.
+    assert_eq!(kind(limit, 0), FailureKind::Quota);
+    let unsupported = r#"{"type":"error","message":"The 'x' model is not supported when using Codex with a ChatGPT account."}
+{"type":"turn.failed","error":{"message":"The 'x' model is not supported when using Codex with a ChatGPT account."}}"#;
+    assert_eq!(kind(unsupported, 1), FailureKind::Other);
+    // A bad `CODEX_HOME` prints its error on standard error only.
+    assert_eq!(kind("", 1), FailureKind::Other);
+    assert_eq!(kind("", 0), FailureKind::Empty);
+    let silent = r#"{"type":"turn.started"}
+{"type":"turn.completed","usage":{"input_tokens":3,"output_tokens":0}}"#;
+    assert_eq!(kind(silent, 0), FailureKind::Empty);
+    // What it said reaches the log line, not the page.
+    let error = read_reply(WriterKind::Codex, true, &exit(1), limit).unwrap_err();
+    assert!(error.to_string().contains("usage limit"), "{error}");
+    assert!(
+        !error.reason().contains("usage limit"),
+        "{}",
+        error.reason()
+    );
+}
+
 #[test]
 fn a_program_that_is_not_installed_and_one_that_hangs_are_typed_failures() {
     let dir = tempfile::tempdir().unwrap();
     let writer = ClaudeWriter::new(dir.path().join("none"), dir.path().into())
-        .with_agy(dir.path().join("no-agy"), dir.path().into());
+        .with_agy(dir.path().join("no-agy"), dir.path().into())
+        .with_codex(dir.path().join("no-codex"), dir.path().into());
     let request = WriterRequest {
         user: "x".into(),
         timeout: Duration::from_secs(5),
         ..WriterRequest::default()
     };
-    for kind in [WriterKind::Claude, WriterKind::Agy] {
+    // An HTTP writer runs no program: its failures are read in `http_writer.rs`.
+    for kind in WriterKind::ALL.into_iter().filter(|kind| !kind.http()) {
         let writer_kind = kind;
         writer.use_writer(writer_kind);
         let error = writer.complete(&request).unwrap_err();
@@ -319,6 +452,16 @@ fn the_failure_notice_says_summaries_are_off_and_gives_each_writer_its_own_fix()
     assert!(notice(FailureKind::NotInstalled, "agy").contains("Antigravity CLI"));
     assert!(notice(FailureKind::NotLoggedIn, "claude").contains("/login"));
     assert!(notice(FailureKind::NotInstalled, "claude").contains("Install Claude Code"));
+    for kind in [FailureKind::NotLoggedIn, FailureKind::NotInstalled] {
+        let codex = notice(kind, "codex");
+        assert!(codex.starts_with("Summaries are off: `codex` "), "{codex}");
+        assert!(
+            !codex.contains("Claude") && !codex.contains("agy"),
+            "{codex}"
+        );
+    }
+    assert!(notice(FailureKind::NotLoggedIn, "codex").contains("`codex login`"));
+    assert!(notice(FailureKind::NotInstalled, "codex").contains("Install the Codex CLI"));
     // The quota fix points at the page, where the writer is picked now, not at a hand-edited file.
     let quota = notice(FailureKind::Quota, "claude");
     assert!(
@@ -360,32 +503,45 @@ fn the_writers_found_are_the_ones_command_v_finds_in_their_order() {
             .map(|w| (w.kind, w.found))
             .collect::<Vec<_>>()
     };
+    use WriterKind::{Agy, Anthropic, Claude, Codex};
     assert_eq!(
         found(&["agy"]),
         [
-            (WriterKind::Anthropic, false),
-            (WriterKind::Claude, false),
-            (WriterKind::Agy, true)
+            (Anthropic, false),
+            (Claude, false),
+            (Agy, true),
+            (Codex, false)
         ]
     );
     assert_eq!(
         found(&["claude", "agy"]),
         [
-            (WriterKind::Anthropic, false),
-            (WriterKind::Claude, true),
-            (WriterKind::Agy, true)
+            (Anthropic, false),
+            (Claude, true),
+            (Agy, true),
+            (Codex, false)
+        ]
+    );
+    assert_eq!(
+        found(&["codex"]),
+        [
+            (Anthropic, false),
+            (Claude, false),
+            (Agy, false),
+            (Codex, true)
         ]
     );
     assert_eq!(
         found(&[]),
         [
-            (WriterKind::Anthropic, false),
-            (WriterKind::Claude, false),
-            (WriterKind::Agy, false)
+            (Anthropic, false),
+            (Claude, false),
+            (Agy, false),
+            (Codex, false)
         ]
     );
     // An API-key writer runs no program, so none named `anthropic` makes it found: the server says whether its key is set.
-    assert_eq!(found(&["anthropic"])[0], (WriterKind::Anthropic, false));
+    assert_eq!(found(&["anthropic"])[0], (Anthropic, false));
     // Each writer brings its name, models and efforts for the page.
     let shell = faked_path(&dir.path().join("lists"), &["claude"]);
     let writers = studio_understanding::found_writers(&shell);
@@ -398,6 +554,36 @@ fn the_writers_found_are_the_ones_command_v_finds_in_their_order() {
     assert!(
         writers[2].efforts.is_empty(),
         "agy's effort is part of its model id"
+    );
+    assert_eq!(writers[3].name, "Codex");
+    assert!(writers[3].models.contains(&"gpt-6-luna"));
+    assert_eq!(writers[3].efforts, ["", "low", "medium", "high"]);
+}
+
+#[test]
+fn a_test_of_codex_passes_or_fails_with_a_typed_outcome() {
+    let dir = tempfile::tempdir().unwrap();
+    let codex = dir.path().join("codex");
+    let script = |body: &str| {
+        std::fs::write(&codex, format!("#!/bin/sh\ncat > /dev/null\n{body}\n")).unwrap();
+        std::fs::set_permissions(&codex, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+    };
+    let writer = ClaudeWriter::new(dir.path().join("no-claude"), dir.path().into())
+        .with_codex(codex.clone(), dir.path().into());
+    script(&format!("cat <<'EOF'\n{CODEX_OK}EOF"));
+    assert_eq!(writer.test(WriterKind::Codex, "gpt-6-luna", "low"), Ok(()));
+    script(
+        r#"echo '{"type":"turn.failed","error":{"message":"unexpected status 401 Unauthorized"}}'; exit 1"#,
+    );
+    let error = writer
+        .test(WriterKind::Codex, "gpt-6-luna", "")
+        .unwrap_err();
+    assert_eq!(error.kind, FailureKind::NotLoggedIn);
+    assert!(
+        error.reason().contains("`codex login`"),
+        "{}",
+        error.reason()
     );
 }
 

@@ -40,6 +40,31 @@ pub use turn_files::{
 };
 pub use work::{Estimate, MIN_HISTORY, Phase, PhaseStart, Work, range};
 
+/// Who reads a line that is not Claude's: agy, when its hook entry named agy or named no agent (a
+/// line written before entries named one), or nobody, for another agent (#355).
+enum Named {
+    Agy,
+    /// The line's time, for its drift.
+    Other(u64),
+}
+
+impl Named {
+    fn of(line: &str) -> Named {
+        #[derive(Default, Deserialize)]
+        struct Stamp {
+            studio_agent: Option<String>,
+            #[serde(default)]
+            studio_received_ms: u64,
+        }
+        let stamp: Stamp = serde_json::from_str(line).unwrap_or_default();
+        match stamp.studio_agent.as_deref() {
+            None => Named::Agy,
+            Some(agent) if agent == AGY_CAPABILITIES.agent => Named::Agy,
+            Some(_) => Named::Other(stamp.studio_received_ms),
+        }
+    }
+}
+
 #[derive(Default, Serialize, Deserialize)]
 pub struct Studio {
     /// The agy adapter, which keeps its conversations (`agy.rs`).
@@ -2526,11 +2551,19 @@ impl Studio {
         outputs
     }
 
-    /// The events of one log line: Claude's, or else agy's.
+    /// The events of one log line, read by the agent its hook entry named (#355): Claude's, agy's,
+    /// or none and drift for an agent plotkeeper cannot read. A line that names none is Claude's
+    /// by its shape, or else agy's.
     fn events(&mut self, line: &str) -> Vec<Event> {
         match claude::parse(line) {
             Ok(event) => vec![event],
-            Err(_) => self.agy.events(line).unwrap_or_default(),
+            Err(_) => match Named::of(line) {
+                Named::Agy => self.agy.events(line).unwrap_or_default(),
+                Named::Other(at) => {
+                    self.agy.drift(at, AgyDriftKind::Agent);
+                    Vec::new()
+                }
+            },
         }
     }
 
@@ -2538,7 +2571,10 @@ impl Studio {
     fn peek(&self, line: &str) -> Option<Event> {
         match claude::parse(line) {
             Ok(event) => Some(event),
-            Err(_) => self.agy.peek(line),
+            Err(_) => match Named::of(line) {
+                Named::Agy => self.agy.peek(line),
+                Named::Other(_) => None,
+            },
         }
     }
 

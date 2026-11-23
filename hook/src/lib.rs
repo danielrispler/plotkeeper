@@ -25,6 +25,15 @@ pub fn data_dir(home: &Path) -> PathBuf {
 
 const DATA_FOLDER: &str = "plotkeeper";
 
+/// The data folder's `bin/`, where the hooks find their binaries at a path that never moves (#356): copies of
+/// [`HOOK_BINARIES`], which each `plotkeeper` start refreshes from the ones beside its own executable.
+pub fn bin_dir(home: &Path) -> PathBuf {
+    data_dir(home).join("bin")
+}
+
+/// The binaries the hooks run, which ship beside `plotkeeper` and are copied into [`bin_dir`].
+pub const HOOK_BINARIES: [&str; 2] = ["plotkeeper-hook", "plotkeeper-answer"];
+
 /// The folder the data lived in before it was named for plotkeeper (#322).
 const OLD_DATA_FOLDER: &str = "dev.falinks.studio";
 
@@ -167,12 +176,14 @@ pub struct Pruned {
     pub lightened: usize,
 }
 
-/// What a prune reads of a line: its session, Claude Code's or agy's, and when it was received.
+/// What a prune reads of a line: its session, Claude Code's or agy's, the agent its hook entry
+/// named, and when it was received.
 #[derive(Default, serde::Deserialize)]
 struct Stamp {
     session_id: Option<String>,
     #[serde(rename = "conversationId")]
     conversation_id: Option<String>,
+    studio_agent: Option<String>,
     studio_received_ms: Option<u64>,
 }
 
@@ -181,10 +192,15 @@ impl Stamp {
         serde_json::from_slice(line).unwrap_or_default()
     }
 
+    /// The session id the line's agent uses (#355); a line that names no agent, written before
+    /// entries named one or by the server, goes by whichever id it has.
     fn session(&self) -> Option<&str> {
-        self.session_id
-            .as_deref()
-            .or(self.conversation_id.as_deref())
+        let (claude, agy) = (self.session_id.as_deref(), self.conversation_id.as_deref());
+        match self.studio_agent.as_deref() {
+            Some("agy") => agy,
+            Some("claude") => claude,
+            _ => claude.or(agy),
+        }
     }
 }
 

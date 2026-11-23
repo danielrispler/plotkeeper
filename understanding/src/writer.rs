@@ -13,14 +13,15 @@ use std::{
     time::Duration,
 };
 
-/// Which program writes: `claude` by default, or `agy`, chosen by `summaries.writer` in `settings.json`; or `anthropic`,
-/// the Anthropic Messages API called with the key pasted on the page, which runs no program.
+/// Which program writes: `claude` by default, `agy` or `codex`, chosen by `summaries.writer` in `settings.json`; or
+/// `anthropic`, the Anthropic Messages API called with the key pasted on the page, which runs no program.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WriterKind {
     #[default]
     Claude,
     Agy,
+    Codex,
     Anthropic,
 }
 
@@ -30,7 +31,12 @@ pub const AGY_LOGIN_WAIT: Duration = Duration::from_secs(60);
 impl WriterKind {
     /// Every writer, in the order the page presets the first found (spec #320, "Writer settings on the page").
     /// An API key comes first: it is found only when one is set.
-    pub const ALL: [WriterKind; 3] = [WriterKind::Anthropic, WriterKind::Claude, WriterKind::Agy];
+    pub const ALL: [WriterKind; 4] = [
+        WriterKind::Anthropic,
+        WriterKind::Claude,
+        WriterKind::Agy,
+        WriterKind::Codex,
+    ];
 
     /// Whether the writer takes the contract's HTTP path with an API key, instead of running a program.
     pub fn http(self) -> bool {
@@ -42,6 +48,7 @@ impl WriterKind {
         match self {
             WriterKind::Claude => "Claude",
             WriterKind::Agy => "agy",
+            WriterKind::Codex => "Codex",
             WriterKind::Anthropic => "Anthropic API key",
         }
     }
@@ -49,17 +56,18 @@ impl WriterKind {
     /// The efforts the writer takes, the default ("") first; none for `agy`, whose effort is part of each model id.
     pub fn efforts(self) -> &'static [&'static str] {
         match self {
-            WriterKind::Claude | WriterKind::Anthropic => &["", "low", "medium", "high"],
+            WriterKind::Claude => &["", "low", "medium", "high"],
             WriterKind::Agy => &[],
+            WriterKind::Codex | WriterKind::Anthropic => &["", "low", "medium", "high"],
         }
     }
 
-    /// The program's name, as the login shell finds it, and the writer's name in `summaries.writer`. An HTTP writer's
-    /// is no program.
+    /// The program's name, as the login shell finds it.
     pub fn program(self) -> &'static str {
         match self {
             WriterKind::Claude => "claude",
             WriterKind::Agy => "agy",
+            WriterKind::Codex => "codex",
             WriterKind::Anthropic => "anthropic",
         }
     }
@@ -75,16 +83,20 @@ impl WriterKind {
                 "gemini-4-argon-low",
                 "gemini-4-hydrogen-low",
             ],
+            // `codex debug models`, the listed ones, the cheapest first.
+            WriterKind::Codex => &["gpt-6-luna", "gpt-5.6-luna", "gpt-5.6-terra"],
             WriterKind::Anthropic => &["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"],
         }
     }
 
-    /// The model a call asked for `asked`, as this writer takes it. `agy` takes only its own list, so a model it does
-    /// not know (the default `haiku` after `summaries.writer` moved to `agy`) is its first one. `claude` takes any
-    /// id, a full one included. The API takes any full model id, so an alias such as `haiku` is its first one.
+    /// The model a call asked for `asked`, as this writer takes it. `agy` and `codex` take only their own list, so a
+    /// model one does not know (the default `haiku` after `summaries.writer` moved to it) is its first one. `claude`
+    /// takes any id, a full one included. The API takes any full model id, so an alias such as `haiku` is its first one.
     pub fn model(self, asked: &str) -> &str {
         match self {
-            WriterKind::Agy if !self.models().contains(&asked) => self.models()[0],
+            WriterKind::Agy | WriterKind::Codex if !self.models().contains(&asked) => {
+                self.models()[0]
+            }
             WriterKind::Anthropic if !asked.starts_with("claude-") => self.models()[0],
             _ => asked,
         }
@@ -95,6 +107,7 @@ impl WriterKind {
         match self {
             WriterKind::Claude => Duration::from_secs(5 * 60),
             WriterKind::Agy => Duration::from_secs(3 * 60),
+            WriterKind::Codex => Duration::from_secs(3 * 60),
             WriterKind::Anthropic => Duration::from_secs(2 * 60),
         }
     }
@@ -102,7 +115,7 @@ impl WriterKind {
     /// The least a call that is not to be waited for (the risk judge) may be given.
     pub fn floor(self) -> Duration {
         match self {
-            WriterKind::Claude | WriterKind::Anthropic => Duration::ZERO,
+            WriterKind::Claude | WriterKind::Codex | WriterKind::Anthropic => Duration::ZERO,
             WriterKind::Agy => AGY_LOGIN_WAIT + Duration::from_secs(15),
         }
     }
@@ -113,6 +126,7 @@ impl WriterKind {
         match self {
             WriterKind::Claude => "card-writer",
             WriterKind::Agy => "card-writer-agy",
+            WriterKind::Codex => "card-writer-codex",
             WriterKind::Anthropic => "card-writer-anthropic",
         }
     }
@@ -131,8 +145,8 @@ pub struct FoundWriter {
     pub efforts: &'static [&'static str],
 }
 
-/// Today's writers in the order the page presets the first found (#320): an API key, Claude, then agy. An HTTP writer is
-/// listed as not found: no program is looked for, and the server says whether its key is set.
+/// Today's writers in the order the page presets the first found (#320): an API key, Claude, agy, then Codex. An HTTP
+/// writer is listed as not found: no program is looked for, and the server says whether its key is set.
 pub fn found_writers(shell: &Path) -> Vec<FoundWriter> {
     WriterKind::ALL
         .into_iter()
@@ -226,12 +240,16 @@ impl WriterError {
             (FailureKind::Other, "anthropic") => {
                 "The API answered with an error; it tries again at the next turn."
             }
+            (FailureKind::NotLoggedIn, "codex") => {
+                "Run `codex login` in a terminal, then it writes again."
+            }
             (FailureKind::NotLoggedIn, _) => "Run `claude` in a terminal and log in with /login.",
             (FailureKind::Quota, _) => {
                 "Wait for the limit to reset, or pick another model or writer under Writer, at the top of the page."
             }
             (FailureKind::Timeout, _) => "Check the connection; it tries again at the next turn.",
             (FailureKind::NotInstalled, "agy") => "Install the Antigravity CLI, or fix its path.",
+            (FailureKind::NotInstalled, "codex") => "Install the Codex CLI, or fix its path.",
             (FailureKind::NotInstalled, _) => "Install Claude Code, or fix its path.",
             (FailureKind::Empty, _) => {
                 "Run it by hand to see why; it tries again at the next turn."
@@ -330,14 +348,66 @@ pub fn build_command(
             };
             let minutes = request.timeout.as_secs().div_ceil(60).max(1);
             command
+                // No flag turns `agy`'s tools off, and `--mode plan` writes a plan instead of the reply: its lockout is
+                // the sandboxed terminal, with no slash commands or skills, in the empty folder.
+                .args(["--sandbox", "--disable-slash-commands"])
                 .args(["--print-timeout", &format!("{minutes}m"), "-p"])
                 .arg(prompt.replace('\0', ""));
             String::new()
+        }
+        WriterKind::Codex => {
+            // No flag turns Codex's tools off: its lockout is the read-only sandbox, without the user's config (and so
+            // without their MCP servers), in the empty folder. `--json` prints events, which hold the reply and usage.
+            command.args([
+                "exec",
+                "--skip-git-repo-check",
+                "-s",
+                "read-only",
+                "--ephemeral",
+                "--ignore-user-config",
+                "--json",
+            ]);
+            if let Some(model) = &request.model {
+                command.args(["--model", kind.model(model)]);
+            }
+            if let Some(effort) = effort {
+                command.args(["-c", &format!("model_reasoning_effort=\"{effort}\"")]);
+            }
+            if let Some(schema) = &schema {
+                command
+                    .arg("--output-schema")
+                    .arg(schema_file(folder, schema));
+            }
+            // `-`: the prompt on standard input. Codex has no system prompt flag, so the system prompt leads it.
+            command.arg("-");
+            match &request.system {
+                Some(system) => format!("{system}\n\n{}", request.user),
+                None => request.user.clone(),
+            }
         }
         WriterKind::Anthropic => unreachable!("an HTTP writer runs no program"),
     };
     command.env("PLOTKEEPER_INTERNAL", "1").current_dir(folder);
     (command, stdin.replace('\0', ""))
+}
+
+/// The file in `folder` that holds `schema`, which `codex` takes only as a file: one per schema, named by its text, so
+/// calls at once never write over each other's. Not written (the folder is missing), the run fails and says why.
+fn schema_file(folder: &Path, schema: &str) -> std::path::PathBuf {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    schema.hash(&mut hasher);
+    let file = folder.join(format!("schema-{:016x}.json", hasher.finish()));
+    if std::fs::read_to_string(&file).ok().as_deref() != Some(schema) {
+        // Written beside and moved in, so a call reading it never sees half of it.
+        let part = folder.join(format!(
+            ".schema-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::write(&part, schema).and_then(|()| std::fs::rename(&part, &file));
+    }
+    file
 }
 
 /// What a run printed, read into the contract: `kind`'s extractor and failure classifier. `schema` says the call
@@ -348,12 +418,15 @@ pub fn read_reply(
     status: &ExitStatus,
     stdout: &str,
 ) -> Result<WriterReply, WriterError> {
+    if kind == WriterKind::Codex {
+        return read_codex(schema, status, stdout);
+    }
     let head: String = stdout.trim().chars().take(300).collect();
     let fail = |kind_of, detail: &str| Err(WriterError::new(kind_of, kind, detail));
     let envelope = match kind {
         WriterKind::Agy => Some(crate::parse_object(stdout).unwrap_or(Value::Null)),
         WriterKind::Claude if schema => Some(crate::parse_object(stdout).unwrap_or(Value::Null)),
-        WriterKind::Claude => None,
+        WriterKind::Claude | WriterKind::Codex => None,
         WriterKind::Anthropic => unreachable!("an HTTP writer's reply is read by `http_writer`"),
     };
     if let Some(envelope) = &envelope {
@@ -411,6 +484,52 @@ pub fn read_reply(
     }
 }
 
+/// `read_reply` for `codex exec --json`: one JSON event a line. The reply is the last `agent_message` item, the usage the
+/// `turn.completed`'s; a `turn.failed`, or the last `error` event of a run that exited with an error, says why it failed.
+fn read_codex(schema: bool, status: &ExitStatus, stdout: &str) -> Result<WriterReply, WriterError> {
+    let kind = WriterKind::Codex;
+    let (mut text, mut usage, mut failed, mut error) = (None, None, None, None);
+    for event in stdout
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+    {
+        match event["type"].as_str() {
+            Some("item.completed") if event["item"]["type"] == "agent_message" => {
+                text = event["item"]["text"].as_str().map(String::from)
+            }
+            Some("turn.completed") => usage = Some(event["usage"].clone()),
+            Some("turn.failed") => failed = event["error"]["message"].as_str().map(String::from),
+            Some("error") => error = event["message"].as_str().map(String::from),
+            _ => {}
+        }
+    }
+    let head: String = stdout.trim().chars().take(300).collect();
+    let fail = |kind_of, detail: String| Err(WriterError::new(kind_of, kind, detail));
+    if let Some(said) = failed.or(error.filter(|_| !status.success())) {
+        let said: String = said.chars().take(300).collect();
+        return fail(classify(kind, status, &said), format!("{said:?}"));
+    }
+    if !status.success() {
+        return fail(
+            classify(kind, status, &head),
+            format!("({status}): {head:?}"),
+        );
+    }
+    let Some(text) = text.filter(|t| !t.trim().is_empty()) else {
+        return fail(FailureKind::Empty, String::new());
+    };
+    Ok(WriterReply {
+        json: schema.then(|| crate::parse_object(&text).ok()).flatten(),
+        usage: usage.and_then(|usage| {
+            usage["input_tokens"].as_u64().map(|input_tokens| Usage {
+                input_tokens,
+                output_tokens: usage["output_tokens"].as_u64().unwrap_or_default(),
+            })
+        }),
+        text,
+    })
+}
+
 /// The usage a reply's `usage` object gives, when it does: the same field names on both paths.
 pub(crate) fn usage_of(usage: &Value) -> Option<Usage> {
     usage["input_tokens"].as_u64().map(|input_tokens| Usage {
@@ -448,6 +567,8 @@ fn classify(kind: WriterKind, status: &ExitStatus, said: &str) -> FailureKind {
         "please log in",
         "authentication failed",
         "not authenticated",
+        // Codex's, which retries before it fails.
+        "401 unauthorized",
     ]) {
         FailureKind::NotLoggedIn
     } else if has(&[

@@ -1,5 +1,6 @@
 //! The hook plugin's command (danielrispler/Falinks#328, module 1): appends the hook payload on stdin as one line to the
-//! event log, with the terminal's `PLOTKEEPER_TERMINAL_ID` when set and the time it received the event.
+//! event log, with the terminal's `PLOTKEEPER_TERMINAL_ID` when set, the agent its hook entry names
+//! (`--agent claude`, #355) and the time it received the event.
 //! At a turn's start and end it also records the git tree of each worktree the turn touched (danielrispler/Falinks#486).
 //! It does nothing else. It prints nothing on stdout and always exits 0, so it never blocks the agent.
 
@@ -36,6 +37,15 @@ fn append() -> Result<(), Box<dyn Error>> {
     let parent = std::os::unix::process::parent_id();
     if let Some(pid) = studio_hook::agent_pid(wrapper.as_deref(), parent, studio_hook::inspect) {
         event.insert("studio_pid".into(), pid.into());
+    }
+    // The agent the hook entry names, so the line is read by its agent's parser, not its shape (#355).
+    let mut args = env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--agent"
+            && let Some(agent) = args.next()
+        {
+            event.insert("studio_agent".into(), agent.into());
+        }
     }
     event.insert("studio_received_ms".into(), received_ms.into());
     let home = env::home_dir().ok_or("no home directory")?;
