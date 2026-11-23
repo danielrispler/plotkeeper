@@ -1,4 +1,4 @@
-// The writer section (spec #320, "Writer settings on the page", ticket #363): under Writer in the top bar, the writers the login
+// The writer section (spec #320, "Writer settings on the page", ticket #363): in the Settings panel over the map (spec #380, #387), the writers the login
 // shell's `command -v` found, a model and an effort for the one picked, and Test, one tiny call whose typed outcome shows here.
 // Nothing checks a login on its own. A pass saves the choice in `settings.json` and turns summaries on; until a writer
 // passes, a user who arrived with none configured gets no summaries (the Test gate), which the writer's notice line says.
@@ -9,7 +9,7 @@
 // `settings.json` as `summaries.base_url` (none: OpenAI's own), and an optional key, also kept in the Keychain, as a local
 // Ollama needs none.
 
-import { element, failure, invoke, text } from "./dom.js";
+import { failure, invoke, text } from "./dom.js";
 import type { Settings, SettingsFiles } from "./settings.js";
 import type { Writers, WriterKind, WriterTest } from "./types.js";
 import { GATE } from "./writer-notice.js";
@@ -117,7 +117,7 @@ function draw(panel: HTMLElement, hooks: Hooks) {
   const writer = known.writers.find((w) => w.kind === choice.writer);
   const models = writer?.models ?? [];
   const nodes: HTMLElement[] = [
-    text("h3", "Writer", "side-title"),
+    text("h3", "Summary writer", "side-title"),
     text("p", "The program that writes the turn summaries, the Goal and Design so far, and the sessions' names.", "writer-hint"),
     field("Program", select("writer-pick", "The program that writes; one not found on this Mac is listed but cannot be picked",
       choiceOptions(known).map((o) => ({ value: o.kind, label: o.label, disabled: o.disabled })), choice.writer, (value) => {
@@ -347,15 +347,31 @@ function run(panel: HTMLElement, hooks: Hooks) {
     });
 }
 
-// Draws the section into its popover and asks for the list once; each opening presets the choice again from the settings.
+// The section itself: one node, drawn while the Settings panel is closed too, so the list and a Test running carry over.
+let section: HTMLElement | null = null;
+let given: Hooks;
+const sectionNode = () => {
+  if (!section) {
+    section = text("div", "", "writers");
+    section.id = "writers";
+  }
+  return section;
+};
+
+// Draws the section and asks for the list once.
 export function startWriters(hooks: Hooks) {
-  const panel = element("writers");
-  panel.addEventListener("toggle", (event) => {
-    if ((event as ToggleEvent).newState !== "open" || !list || testing) return;
-    choice = preset(list, hooks.summaries());
+  given = hooks;
+  draw(sectionNode(), hooks);
+  void refresh(sectionNode(), hooks);
+}
+
+// The Settings panel opened: the section goes into `box`, its choice preset again from the settings, as each opening of its popover did (#363).
+export function writersIn(box: HTMLElement) {
+  const panel = sectionNode();
+  if (list && !testing) {
+    choice = preset(list, given.summaries());
     outcome = null;
-    draw(panel, hooks);
-  });
-  draw(panel, hooks);
-  void refresh(panel, hooks);
+    draw(panel, given);
+  }
+  box.replaceChildren(panel);
 }
