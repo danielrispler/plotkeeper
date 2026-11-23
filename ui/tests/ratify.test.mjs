@@ -1,7 +1,7 @@
 // Ratifying's pure part (ticket #343), run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { copyOverturn, openRows, overturnPrompt, overturnReport, ratifyStep, sheetPending, statusWords } from "../../dist/ratify.js";
+import { copyOverturn, noteFor, openRows, overturnPrompt, overturnReport, ratifyStep, sheetPending, statusWords } from "../../dist/ratify.js";
 
 const row = (kind, id, status = "not-yet", extra = {}) => ({ pr: 7, kind, id, text: `${id} text`, change: "", status, ...extra });
 
@@ -47,4 +47,15 @@ test("the ratify step exists only when there is something to ratify, and rows sa
   assert.deepEqual(ratifyStep([row("law", "l1")], ["shell"]).on, ["shell"], "it keeps the parts the brief lit");
   assert.deepEqual(openRows([row("law", "l1"), row("law", "l2", "accepted"), row("decision", "d1", "ratified")]).map((r) => r.id), ["l1"]);
   assert.equal(statusWords["not-yet"], "Not yet ratified");
+});
+
+test("an overturn's note shows only where its item is drawn: its project, and the item's PR, kind and id", () => {
+  const last = { project: "/p", pr: 7, kind: "law", id: "l1", line: "Prompt copied, paste it into your agent", manual: null };
+  const brief = (pr, rows) => (item) => rows.some((r) => item.pr === pr && r.kind === item.kind && r.id === item.id);
+  assert.equal(noteFor(null, "/p", () => true), null);
+  assert.equal(noteFor(last, "/p", brief(7, [{ kind: "law", id: "l1" }])), last);
+  assert.equal(noteFor(last, "/q", brief(7, [{ kind: "law", id: "l1" }])), null, "another project");
+  assert.equal(noteFor(last, "/p", brief(8, [{ kind: "law", id: "l1" }])), null, "another PR's brief");
+  assert.equal(noteFor(last, "/p", brief(7, [{ kind: "link", id: "l1" }])), null, "another item");
+  assert.equal(noteFor(last, "/p", () => false), null, "another part's sheet");
 });

@@ -153,7 +153,9 @@ function drawSheet(view: MapView) {
   card.append(extra);
   card.querySelector(".sheet-laws")?.append(...laws);
   card.querySelector(".sheet-links")?.append(...links);
-  const overturned = overturnNote();
+  const overturned = overturnNote(view.project, (item) =>
+    item.kind === "law" ? sheet.laws.some((law) => law.id === item.id) : item.kind === "link" && view.doc.links.some((link) => link.id === item.id && (link.from === part.id || link.to === part.id)),
+  );
   if (overturned) card.append(overturned);
   slot.replaceChildren(card);
   drawStrip(view, part.id, extra);

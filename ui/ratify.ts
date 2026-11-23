@@ -54,6 +54,15 @@ export function overturnReport(outcome: "copied" | "manual", prompt: string): { 
     : { line: "Copy this prompt and paste it into your agent", manual: prompt };
 }
 
+// An overturn's note, kept for the item it was made for: the line, and for a failed copy the prompt to copy by hand.
+export type Overturned = { project: string; pr: number; kind: string; id: string; line: string; manual: string | null };
+
+// The note to show where `holds` says which items are drawn (a part's sheet, a brief's ratify step) in `project`: only the one made
+// for an item there.
+export function noteFor(last: Overturned | null, project: string, holds: (item: Pick<RatifyRow, "pr" | "kind" | "id">) => boolean): Overturned | null {
+  return last && last.project === project && holds(last) ? last : null;
+}
+
 // The brief's last step when there is anything to ratify: it holds the items, drawn by `map-brief.ts`.
 // `on` is the parts the brief lit, so the map stays as the brief left it.
 export const ratifyStep = (rows: RatifyRow[], on: string[] = []): BriefStep | null =>

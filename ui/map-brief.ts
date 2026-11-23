@@ -412,7 +412,7 @@ function ratifyNode(view: MapView, rows: RatifyRow[]) {
     }
     list.append(item);
   }
-  const note = overturnNote();
+  const note = overturnNote(view.project, (item) => rows.some((row) => row.pr === item.pr && row.kind === item.kind && row.id === item.id));
   if (note) list.append(note);
   return list;
 }

@@ -5,7 +5,7 @@
 
 import { failure, invoke, text } from "./dom.js";
 import { currentMap } from "./map.js";
-import { copyOverturn, overturnPrompt, overturnReport } from "./ratify.js";
+import { copyOverturn, noteFor, overturnPrompt, overturnReport, type Overturned } from "./ratify.js";
 import { logStop } from "./stop-rules.js";
 import type { RatifyRow } from "./types.js";
 
@@ -14,25 +14,27 @@ export type Ratifiable = Pick<RatifyRow, "pr" | "kind" | "id" | "text" | "change
 // The branch of PR `pr` while it is open: the Map view's ready PRs name it.
 const branchOf = (pr: number): string | null => currentMap()?.state.ready?.find((ready) => ready.number === pr)?.branch || null;
 
-// What the last overturn did with its prompt, kept so the sheet and the brief, which draw again once the decision is recorded, show it.
-let last: { line: string; manual: string | null } | null = null;
+// What the last overturn did with its prompt, and for which item, kept so the sheet and the brief that hold the item, which draw again
+// once the decision is recorded, show it.
+let last: Overturned | null = null;
 
 // Puts the overturn's prompt on the clipboard (`navigator.clipboard.writeText()`); a refusal leaves it for `overturnNote` to show in a box.
-async function overturnOut(item: Ratifiable) {
+async function overturnOut(project: string, item: Ratifiable) {
   const prompt = overturnPrompt(item, branchOf(item.pr));
   const outcome = await copyOverturn(prompt, navigator.clipboard?.writeText?.bind(navigator.clipboard));
-  last = overturnReport(outcome, prompt);
+  last = { project, pr: item.pr, kind: item.kind, id: item.id, ...overturnReport(outcome, prompt) };
 }
 
-// The note of the last overturn: "Prompt copied, paste it into your agent", or, when the copy failed, the prompt in a small box with a
-// Copy button. Null before any overturn.
-export function overturnNote(): HTMLElement | null {
-  if (!last) return null;
+// The note of the last overturn, where `holds` says its item is drawn in `project`: "Prompt copied, paste it into your agent", or, when
+// the copy failed, the prompt in a small box with a Copy button. Null before any overturn, and on another item's sheet or brief.
+export function overturnNote(project: string, holds: (item: Pick<Ratifiable, "pr" | "kind" | "id">) => boolean): HTMLElement | null {
+  const shown = noteFor(last, project, holds);
+  if (!shown) return null;
   const note = text("div", "", "ratify-note");
-  const line = text("p", last.line, "ratify-copied");
+  const line = text("p", shown.line, "ratify-copied");
   line.setAttribute("role", "status");
   note.append(line);
-  const manual = last.manual;
+  const manual = shown.manual;
   if (manual === null) return note;
   const area = document.createElement("textarea");
   area.className = "ratify-prompt";
@@ -59,7 +61,7 @@ export function ratifyActions(project: string, item: Ratifiable, done: (state: "
     invoke("ratify_set", { project, pr: item.pr, kind: item.kind, id: item.id, state, text: item.text })
       .then(async () => {
         logStop("ratify", project, item.pr);
-        if (state === "overturned") await overturnOut(item);
+        if (state === "overturned") await overturnOut(project, item);
         done(state);
       })
       .catch((e) => {
