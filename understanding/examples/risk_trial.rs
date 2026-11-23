@@ -1,14 +1,14 @@
 //! The risk note's judge on real blocked commands (danielrispler/plotkeeper#300): the card writer's real judge call
-//! (`claude -p`) once on each distinct command and folder blocked in the studio's event log, and on a handful of hand-made
-//! commands written to steer it. It prints Markdown on standard output: each command with its level, its line and the
-//! call's seconds, then the counts: commands at each level, calls that passed 15 seconds or failed, and each steered
-//! command's level. The output holds Daniel's real commands, so it goes to local evidence and is never pushed. It reads the
-//! event log and the writer's replies and no credential file. Run it outside auto mode, from the repository's root:
+//! (`claude -p`) once on each distinct command and folder of the event log's `PermissionDenied` lines, and on a handful
+//! of hand-made commands written to steer it. It prints Markdown on standard output: each command with its level, its
+//! line and the call's seconds, then the counts: commands at each level, calls that passed 15 seconds or failed, and each
+//! steered command's level. The output holds Daniel's real commands, so it goes to local evidence and is never pushed. It
+//! reads the event log and the writer's replies and no credential file. Run it outside auto mode, from the repository's
+//! root:
 //!
 //! `cargo run -q -p studio-understanding --example risk_trial > local-evidence/2026-11-22-blocked-card-explain-risk/reports/risk-trial.md`
 
 use std::{io::BufRead, time::Instant};
-use studio_core::Studio;
 use studio_understanding::{ClaudeWriter, RISK_TIMEOUT, RiskLevel};
 
 /// The folder the hand-made commands are asked to run in.
@@ -100,19 +100,22 @@ fn main() {
     let lines = std::io::BufReader::new(std::fs::File::open(&log).expect("the event log"))
         .lines()
         .map_while(Result::ok);
-    let studio = Studio::replayed(lines);
     let writer = ClaudeWriter::beside(&log).expect("create the card writer's folder");
 
-    // Each distinct command and folder once, in the order of their latest block.
-    let mut blocked: Vec<(u64, String, String)> = Vec::new();
-    for session in studio.sessions() {
-        for card in &session.blocked_commands {
-            blocked.push((card.at, card.command.clone(), card.cwd.clone()));
-        }
-    }
-    blocked.sort();
+    // Each distinct command and folder once, in the order they were first blocked. Read from the log's `PermissionDenied`
+    // lines and not the session list, which leaves out deleted sessions and their cards.
     let mut distinct: Vec<(String, String)> = Vec::new();
-    for (_, command, cwd) in blocked {
+    for line in lines.filter(|l| l.contains("\"PermissionDenied\"")) {
+        let Ok(event) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        let (Some(command), Some(cwd)) = (
+            event["tool_input"]["command"].as_str(),
+            event["cwd"].as_str(),
+        ) else {
+            continue;
+        };
+        let (command, cwd) = (command.to_owned(), cwd.to_owned());
         if !distinct.iter().any(|(c, f)| c == &command && f == &cwd) {
             distinct.push((command, cwd));
         }
