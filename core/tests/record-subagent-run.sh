@@ -15,7 +15,7 @@ session=$(uuidgen | tr '[:upper:]' '[:lower:]')
 repo=$(mktemp -d)
 trap 'rm -rf "$repo"' EXIT
 
-# The plugin runs the studio-hook built in this checkout.
+# The plugin runs the plotkeeper-hook built in this checkout.
 cargo build -q --release --manifest-path "$studio/Cargo.toml" -p studio-hook
 git -C "$repo" init -q
 echo "# Fixture" >"$repo/README.md"

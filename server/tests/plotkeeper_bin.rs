@@ -11,7 +11,7 @@ fn plotkeeper(home: &std::path::Path) -> Child {
     Command::new(env!("CARGO_BIN_EXE_plotkeeper"))
         .env("HOME", home)
         .env("PLOTKEEPER_NO_BROWSER", "1")
-        .env("STUDIO_CARD_WRITER", "fake")
+        .env("PLOTKEEPER_CARD_WRITER", "fake")
         .stdout(Stdio::piped())
         .spawn()
         .unwrap()

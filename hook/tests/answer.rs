@@ -116,9 +116,9 @@ fn decided(name: &str, payload: &Value, answer: Value) -> Value {
 }
 
 fn start(home: &Path, timeout_ms: u64, payload: &Value) -> Child {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_studio-answer"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_plotkeeper-answer"));
     cmd.env("HOME", home)
-        .env("STUDIO_ANSWER_TIMEOUT_MS", timeout_ms.to_string())
+        .env("PLOTKEEPER_ANSWER_TIMEOUT_MS", timeout_ms.to_string())
         .stdout(Stdio::piped());
     feed(cmd, payload)
 }
@@ -188,7 +188,7 @@ fn an_approved_plan_allows_it_with_its_input_and_a_rejected_one_denies_it() {
     assert_eq!(out["hookEventName"], "PreToolUse");
     assert_eq!(out["permissionDecision"], "deny");
     let reason = out["permissionDecisionReason"].as_str().unwrap();
-    assert!(reason.contains("studio card"), "{reason}");
+    assert!(reason.contains("plotkeeper card"), "{reason}");
     assert_eq!(out.get("updatedInput"), None);
 }
 
@@ -208,7 +208,7 @@ fn an_allowed_and_a_denied_permission_each_give_their_decision() {
     );
     assert_eq!(decision["behavior"], "deny");
     let message = decision["message"].as_str().unwrap();
-    assert!(message.contains("studio card"), "{message}");
+    assert!(message.contains("plotkeeper card"), "{message}");
 }
 
 #[test]

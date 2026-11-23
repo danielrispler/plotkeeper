@@ -1,6 +1,6 @@
 {
-  "name": "falinks-studio",
+  "name": "plotkeeper",
   "version": "0.0.0",
-  "description": "Appends Claude Code hook events to the Falinks studio's event log",
+  "description": "Appends Claude Code hook events to plotkeeper's event log",
   "author": { "name": "Daniel Rispler" }
 }
