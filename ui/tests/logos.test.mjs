@@ -165,3 +165,11 @@ test("the rail's #detail has no title when the step has no detail", async () => 
   const get = await railOf({ ...claude, transcript: { ...claude.transcript, model: "claude-opus-5-5" } });
   assert.notEqual(get("detail").title, "");
 });
+
+test("a recorded Cursor session wears Cursor's logo, titled by its name (#362)", () => {
+  const cursor = { ...base, capabilities: caps("cursor"), identity: { issue: null, name: "p" }, transcript: { context: null } };
+  assert.equal(logoKey(cursor), "cursor");
+  const drawn = logoOf(row(cursor, new Map()));
+  assert.equal(drawn.getAttribute("data-logo"), "cursor");
+  assert.equal(logo("cursor").title, "Cursor");
+});

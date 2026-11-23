@@ -17,6 +17,7 @@ mod ask;
 mod checks;
 mod claude;
 mod codex;
+mod cursor;
 mod event;
 mod ledger;
 mod qwen;
@@ -33,6 +34,7 @@ pub use checks::{
 };
 pub use claude::CAPABILITIES as CLAUDE_CAPABILITIES;
 pub use codex::CAPABILITIES as CODEX_CAPABILITIES;
+pub use cursor::CAPABILITIES as CURSOR_CAPABILITIES;
 pub use event::{Capabilities, TranscriptFormat};
 use event::{Event, Happened, Origin, Start, ToolKind};
 pub use ledger::{Bytes, Details, Ledger, Outcome, Row};
@@ -51,6 +53,8 @@ enum Named {
     Agy,
     /// The line's time, for its drift when Codex's parser cannot read it.
     Codex(u64),
+    /// The line's time, for its drift when Cursor's parser cannot read it (#362).
+    Cursor(u64),
     /// The line's time, for its drift when Qwen Code's parser cannot read it.
     Qwen(u64),
     /// The line's time, for its drift.
@@ -70,6 +74,7 @@ impl Named {
             None => Named::Agy,
             Some(agent) if agent == AGY_CAPABILITIES.agent => Named::Agy,
             Some(codex::CODEX) => Named::Codex(stamp.studio_received_ms),
+            Some(cursor::CURSOR) => Named::Cursor(stamp.studio_received_ms),
             Some(qwen::QWEN) => Named::Qwen(stamp.studio_received_ms),
             Some(_) => Named::Other(stamp.studio_received_ms),
         }
@@ -323,6 +328,10 @@ pub struct Session {
     /// When its latest turn ended, which took its workers' cards since its last card.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     stopped_at: u64,
+    /// The reply its running turn's agent sent in an event of its own before the turn's end, as Cursor's
+    /// `afterAgentResponse` does (#362); its turn end takes it when that carries no reply.
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
+    reply: String,
     /// Whether its turn was opened by a wake-up and has had no prompt of Daniel's since.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     woken: bool,
@@ -2577,6 +2586,13 @@ impl Studio {
                         Vec::new()
                     }
                 },
+                Named::Cursor(at) => match cursor::parse(line) {
+                    Ok(event) => vec![event],
+                    Err(_) => {
+                        self.agy.drift(at, AgyDriftKind::Agent);
+                        Vec::new()
+                    }
+                },
                 Named::Qwen(at) => match qwen::parse(line) {
                     Ok(event) => vec![event],
                     Err(_) => {
@@ -2599,6 +2615,7 @@ impl Studio {
             Err(_) => match Named::of(line) {
                 Named::Agy => self.agy.peek(line),
                 Named::Codex(_) => codex::parse(line).ok(),
+                Named::Cursor(_) => cursor::parse(line).ok(),
                 Named::Qwen(_) => qwen::parse(line).ok(),
                 Named::Other(_) => None,
             },
@@ -3103,6 +3120,7 @@ impl Studio {
                 }
                 // A prompt opens a wait, also after an interrupt, which fires no `Stop`.
                 Happened::TurnStart { prompt, origin } => {
+                    session.reply.clear();
                     let sender = match origin {
                         Some(Origin::Daniel) => Sender::Daniel,
                         Some(Origin::WakeUp) => Sender::WakeUp(session.woken_by()),
@@ -3187,10 +3205,19 @@ impl Studio {
                         session.reopen_turn();
                     }
                 }
+                // A reply in an event of its own waits for its turn's end (#362).
+                Happened::Reply(reply) if !event.has(|h| matches!(h, Happened::TurnEnd { .. })) => {
+                    session.reply.clone_from(reply);
+                }
                 Happened::TurnEnd { background_pending } => {
                     // A reply that asks in text blocks nothing, so the turn ends on your turn unless a
                     // subagent's block outlasts it (danielrispler/Falinks#540).
                     let in_turn = session.in_turn();
+                    let waiting = std::mem::take(&mut session.reply);
+                    let full = match event.reply() {
+                        "" => waiting.as_str(),
+                        own => own,
+                    };
                     session.background = *background_pending;
                     let output = session.end_turn(changes.remove(&session.agent.id), at);
                     if in_turn && event.capabilities.turn_trees {
@@ -3209,7 +3236,7 @@ impl Studio {
                         session.versioned = true;
                         outputs.push(Output::AgyVersion);
                     }
-                    let reply = event.reply().trim();
+                    let reply = full.trim();
                     let wanted = wants_summary(reply, session.needs_you());
                     // The turn's card goes first: its summary then finds the card stored.
                     let card = match &output {
@@ -3249,7 +3276,7 @@ impl Studio {
                             response: Some(reply.into()),
                         }));
                     }
-                    let mut lines = event.reply().lines().map(str::trim);
+                    let mut lines = full.lines().map(str::trim);
                     let stopped = Stopped {
                         card: card_id(&event.session_id, at),
                         requested: card.is_some(),
@@ -3258,7 +3285,7 @@ impl Studio {
                     if let Some(turn) = session.turns.last_mut().filter(|_| in_turn) {
                         turn.id = Some(stopped.card.clone());
                         turn.message.clone_from(&stopped.message);
-                        turn.reply = event.reply().trim().into();
+                        turn.reply = full.trim().into();
                     }
                     session.stopped = Some(stopped);
                 }

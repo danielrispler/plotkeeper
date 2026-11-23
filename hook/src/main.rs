@@ -28,6 +28,24 @@ fn append() -> Result<(), Box<dyn Error>> {
     if env::var_os("PLOTKEEPER_INTERNAL").is_some_and(|v| v == "1") {
         return Ok(());
     }
+    // The agent the hook entry names, so the line is read by its agent's parser, not its shape (#355).
+    let mut agent = None;
+    let mut args = env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--agent" {
+            agent = args.next();
+        }
+    }
+    // Another harness's event, which its own entry records, is dropped here (#362).
+    if let Some(harness) = studio_hook::foreign(agent.as_deref(), &event) {
+        let name = event.get("hook_event_name").and_then(Value::as_str);
+        eprintln!(
+            "plotkeeper-hook: dropped {harness}'s {} event on the {} entry; {harness}'s own entry records it",
+            name.unwrap_or("-"),
+            agent.as_deref().unwrap_or("-"),
+        );
+        return Ok(());
+    }
     let terminal = env::var("PLOTKEEPER_TERMINAL_ID");
     if let Ok(terminal) = terminal {
         event.insert("studio_terminal_id".into(), terminal.into());
@@ -38,14 +56,8 @@ fn append() -> Result<(), Box<dyn Error>> {
     if let Some(pid) = studio_hook::agent_pid(wrapper.as_deref(), parent, studio_hook::inspect) {
         event.insert("studio_pid".into(), pid.into());
     }
-    // The agent the hook entry names, so the line is read by its agent's parser, not its shape (#355).
-    let mut args = env::args().skip(1);
-    while let Some(arg) = args.next() {
-        if arg == "--agent"
-            && let Some(agent) = args.next()
-        {
-            event.insert("studio_agent".into(), agent.into());
-        }
+    if let Some(agent) = agent {
+        event.insert("studio_agent".into(), agent.into());
     }
     event.insert("studio_received_ms".into(), received_ms.into());
     let home = env::home_dir().ok_or("no home directory")?;

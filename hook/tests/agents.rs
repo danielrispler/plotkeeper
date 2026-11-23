@@ -92,3 +92,50 @@ fn the_hook_keeps_no_turn_of_an_agent_other_than_claude() {
         assert_eq!(line["studio_agent"], agent);
     }
 }
+
+/// Cursor loads Claude Code's hooks, so one Cursor event can reach plotkeeper's Claude entry and its
+/// Cursor entry (#320, "One event, one record, the right agent"): the Claude entry drops it, with
+/// one line on stderr, and the Cursor entry records it, once, as Cursor's (#362).
+#[test]
+fn a_cursor_payload_is_dropped_by_the_claude_entry_and_recorded_once_by_cursors() {
+    let payload = json!({
+        "conversation_id": "c-1",
+        "generation_id": "g-1",
+        "hook_event_name": "beforeSubmitPrompt",
+        "cursor_version": "2.1.4",
+        "workspace_roots": ["/"],
+        "prompt": "go",
+    });
+    let home = scratch("agents-cursor-twice");
+    let mut stderrs = Vec::new();
+    for agent in ["claude", "cursor"] {
+        let mut cmd = hook(&home);
+        cmd.args(["--agent", agent])
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        let out = feed(cmd, &payload).wait_with_output().unwrap();
+        assert!(out.status.success());
+        stderrs.push(String::from_utf8(out.stderr).unwrap());
+    }
+    let text = fs::read_to_string(studio_hook::event_log(&home)).unwrap();
+    let lines: Vec<Value> = text
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 1, "{text}");
+    assert_eq!(lines[0]["studio_agent"], "cursor");
+    assert_eq!(lines[0]["conversation_id"], "c-1");
+    assert_eq!(stderrs[0].lines().count(), 1, "{}", stderrs[0]);
+    assert!(stderrs[0].contains("Cursor"), "{}", stderrs[0]);
+    assert_eq!(stderrs[1], "");
+}
+
+/// Every entry of Cursor's hook file names Cursor (#362), on the seven events that wait on no answer.
+#[test]
+fn every_cursor_entry_names_cursor() {
+    let cursor = commands("plugin-cursor");
+    assert_eq!(cursor.len(), 7);
+    for c in cursor {
+        assert_eq!(c, "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent cursor");
+    }
+}

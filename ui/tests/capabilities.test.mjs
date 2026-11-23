@@ -69,3 +69,8 @@ test("an agy session at needs you has no question text, so its row shows its lin
   const row = { ...agy, state: "needs_you", line: "Run a command", questions: [] };
   assert.equal(secondLine(row), "Run a command");
 });
+
+test("a recorded Cursor session's model line names Cursor and the model its hooks name (#362)", () => {
+  const cursor = { capabilities: caps("cursor"), model: "gpt-5.5", transcript: { context: null, model: null } };
+  assert.match(modelLine(cursor), /^Cursor · /);
+});
