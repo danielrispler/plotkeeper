@@ -702,3 +702,56 @@ fn a_second_copilot_install_replaces_its_plugin() {
         ]
     );
 }
+
+/// Adds the user's own hook `command` under `event` to the hook file at `rel`, as an entry of `entry`'s shape.
+fn add_own_hook(machine: &Machine, rel: &str, event: &str, entry: serde_json::Value) {
+    let path = machine.home.join(rel);
+    let mut file: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    file["hooks"][event].as_array_mut().unwrap().push(entry);
+    fs::write(&path, serde_json::to_string_pretty(&file).unwrap()).unwrap();
+}
+
+#[test]
+fn a_hook_the_user_added_between_two_installs_stays_at_uninstall() {
+    let machine = Machine::new(false, false).with_codex().with_cursor();
+    machine.write(".codex/hooks.json", CODEX_OWN);
+    machine.write(".cursor/hooks.json", CURSOR_OWN);
+    machine.run("install");
+    add_own_hook(
+        &machine,
+        ".codex/hooks.json",
+        "Stop",
+        serde_json::json!({ "hooks": [{ "type": "command", "command": "say done" }] }),
+    );
+    add_own_hook(
+        &machine,
+        ".cursor/hooks.json",
+        "stop",
+        serde_json::json!({ "command": "say done" }),
+    );
+    machine.run("install");
+    machine.run("uninstall");
+
+    let (ours, theirs) = codex_commands(&machine);
+    assert!(ours.is_empty(), "{ours:?}");
+    assert_eq!(
+        theirs,
+        [
+            (
+                "Stop".to_owned(),
+                "python3 ~/.codex/hooks/stop.py".to_owned()
+            ),
+            ("Stop".to_owned(), "say done".to_owned())
+        ]
+    );
+    let (ours, theirs) = cursor_commands(&machine);
+    assert!(ours.is_empty(), "{ours:?}");
+    assert_eq!(
+        theirs,
+        [
+            ("stop".to_owned(), "./hooks/audit.sh".to_owned()),
+            ("stop".to_owned(), "say done".to_owned())
+        ]
+    );
+}
