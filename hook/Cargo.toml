@@ -6,6 +6,11 @@ publish = false
 # One test binary, `tests/main.rs`, that declares every file beside it.
 autotests = false
 
+# The binaries a user sees are named plotkeeper (#353); the crate keeps its name (#320, Names).
+[[bin]]
+name = "plotkeeper-hook"
+path = "src/main.rs"
+
 [dependencies]
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }

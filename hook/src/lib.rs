@@ -400,7 +400,7 @@ pub fn record_tree(folder: &Path) -> Option<(String, String)> {
 pub fn record_tree_within(folder: &Path, files: usize, bytes: u64) -> Option<(String, String)> {
     let root = worktree_root(folder)?;
     if let Err(why) = untracked_within(Path::new(&root), files, bytes) {
-        eprintln!("studio-hook: no tree of {root}: {why}");
+        eprintln!("plotkeeper-hook: no tree of {root}: {why}");
         return None;
     }
     let index = git(
@@ -411,7 +411,7 @@ pub fn record_tree_within(folder: &Path, files: usize, bytes: u64) -> Option<(St
     // One per call: Studio records trees from several threads at once.
     static CALLS: AtomicU64 = AtomicU64::new(0);
     let call = CALLS.fetch_add(1, Ordering::Relaxed);
-    let scratch = env::temp_dir().join(format!("studio-hook-{}-{call}.index", process::id()));
+    let scratch = env::temp_dir().join(format!("plotkeeper-hook-{}-{call}.index", process::id()));
     // A copy of the real index keeps git's stat cache, so only changed files are hashed again.
     let _ = fs::copy(Path::new(&root).join(index), &scratch);
     let added = git(Path::new(&root), &["add", "-A"], Some(&scratch));
@@ -520,7 +520,7 @@ fn git(folder: &Path, args: &[&str], index: Option<&Path>) -> Option<String> {
             let _ = child.wait();
             let args = args.join(" ");
             eprintln!(
-                "studio-hook: git {args} in {} ran over {GIT_TIMEOUT:?}",
+                "plotkeeper-hook: git {args} in {} ran over {GIT_TIMEOUT:?}",
                 folder.display()
             );
             return None;
@@ -855,7 +855,7 @@ fn first_tree(root: &str, began: Option<u64>) -> Option<(String, serde_json::Val
 }
 
 /// The agent's process for the hook that runs now (#330): `wrapper`, the pid a wrapper script passed in
-/// `STUDIO_AGENT_PID` (agy's, which runs the hook from a backgrounded subshell), else the hook's
+/// `PLOTKEEPER_AGENT_PID` (agy's, which runs the hook from a backgrounded subshell), else the hook's
 /// `parent`, or its parent's parent when that is a shell the agent started the hook through.
 /// `inspect` gives a process's command and parent pid. `None` when no agent can be told, as for a hook
 /// reparented to init; the session then takes the idle path.

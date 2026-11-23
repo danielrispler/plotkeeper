@@ -404,7 +404,7 @@ pub fn pull(repo: &Path) -> Result<(), String> {
 /// sets `CLAUDE_CODE_PLUGIN_DIRS` to the studio plugin at `plugin` alone, as the README loads it,
 /// so a profile that sets it too never loads the hooks twice, and `CLAUDE_CLIENT_PRESENCE_FILE` to
 /// `presence`, which the shell keeps while the window is focused, so Remote Control skips a phone
-/// push then (danielrispler/Falinks#522). The daemon runs it under a login shell with the terminal's `STUDIO_TERMINAL_ID`.
+/// push then (danielrispler/Falinks#522). The daemon runs it under a login shell with the terminal's `PLOTKEEPER_TERMINAL_ID`.
 /// `auto` runs it in Claude Code's auto mode (danielrispler/Falinks#541), which still asks when its classifier blocks a
 /// step; bypass mode is never offered.
 pub fn claude(plugin: &Path, presence: &Path, resume: Option<&str>, auto: bool) -> Vec<String> {
@@ -461,7 +461,7 @@ pub fn loads_plugin(dirs: &str, plugin: &Path) -> bool {
 }
 
 /// `profile` with each `export CLAUDE_CODE_PLUGIN_DIRS=` line ending in `link` (#21). It drops the
-/// entries that are another studio plugin, with `~` or `$HOME` read as `home`, so the hooks never
+/// entries that are another plotkeeper plugin, with `~` or `$HOME` read as `home`, so the hooks never
 /// load twice, and keeps every other entry as written, a missing one too, since Claude Code skips it.
 /// With no such line, one is appended. `None` when such a line uses `${`, `$(` or a backtick, which a
 /// split on `:` could break.
@@ -475,7 +475,8 @@ pub fn fixed_profile(profile: &str, link: &str, home: &Path) -> Option<String> {
             .find_map(|prefix| dir.strip_prefix(prefix))
             .map_or_else(|| PathBuf::from(dir), |rest| home.join(rest));
         std::fs::read_to_string(dir.join(".claude-plugin/plugin.json"))
-            .is_ok_and(|m| m.contains(r#""falinks-studio""#))
+            // Its name before plotkeeper too (#353).
+            .is_ok_and(|m| m.contains(r#""plotkeeper""#) || m.contains(r#""falinks-studio""#))
     };
     let mut found = false;
     let mut lines = Vec::new();
@@ -497,7 +498,7 @@ pub fn fixed_profile(profile: &str, link: &str, home: &Path) -> Option<String> {
         lines.push(format!("{indent}{EXPORT}\"{}\"", dirs.join(":")));
     }
     if !found {
-        lines.push("# The studio plugin's hooks, for every claude session (#21).".into());
+        lines.push("# plotkeeper's hooks, for every claude session (#21).".into());
         lines.push(format!("{EXPORT}\"{link}\""));
     }
     Some(lines.join("\n") + "\n")
@@ -877,16 +878,16 @@ fn run(dir: &Path, args: &[&str]) -> Result<std::process::Output, String> {
         .map_err(|e| format!("git {}: {e}", args[0]))
 }
 
-/// The studio's plugin for agy (#43, decisions 8 and 9; #49). `agy plugin install` copies the
-/// folder, so the app renders the shipped `plugin-agy/` with `studio-hook`'s path, compares it with
+/// plotkeeper's plugin for agy (#43, decisions 8 and 9; #49). `agy plugin install` copies the
+/// folder, so the app renders the shipped `plugin-agy/` with `plotkeeper-hook`'s path, compares it with
 /// the installed copy and installs again when they differ.
 pub mod agy_plugin {
     use std::path::{Path, PathBuf};
     use std::process::{Command, Stdio};
 
     /// The plugin's name in `plugin.json`, and its folder under `~/.gemini/config/plugins/`.
-    const NAME: &str = "studio";
-    const PLACEHOLDER: &str = "__STUDIO_HOOK__";
+    const NAME: &str = "plotkeeper";
+    const PLACEHOLDER: &str = "__PLOTKEEPER_HOOK__";
 
     #[derive(Debug, PartialEq, Eq)]
     pub enum Status {

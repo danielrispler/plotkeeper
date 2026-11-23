@@ -364,8 +364,8 @@ impl CardWriter for FakeWriter {
     }
 
     fn ask(&self, _: &str, intentions: &[String], question: &str) -> Result<String, String> {
-        // `STUDIO_FAKE_ASK=fail` makes it fail, so the error and its retry can be seen.
-        if std::env::var("STUDIO_FAKE_ASK").as_deref() == Ok("fail") {
+        // `PLOTKEEPER_FAKE_ASK=fail` makes it fail, so the error and its retry can be seen.
+        if std::env::var("PLOTKEEPER_FAKE_ASK").as_deref() == Ok("fail") {
             return Ok("Shall I read the file?".into());
         }
         let answer = format!(
