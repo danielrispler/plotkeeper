@@ -176,13 +176,16 @@ pub struct Pruned {
     pub lightened: usize,
 }
 
-/// What a prune reads of a line: its session, by `session_id` (Claude Code's and Codex's) or agy's
-/// `conversationId`, the agent its hook entry named, and when it was received.
+/// What a prune reads of a line: its session, by `session_id` (Claude Code's and Codex's), agy's
+/// `conversationId` or Copilot's camelCase `sessionId`, the agent its hook entry named, and when it
+/// was received.
 #[derive(Default, serde::Deserialize)]
 struct Stamp {
     session_id: Option<String>,
     #[serde(rename = "conversationId")]
     conversation_id: Option<String>,
+    #[serde(rename = "sessionId")]
+    camel_session_id: Option<String>,
     studio_agent: Option<String>,
     studio_received_ms: Option<u64>,
 }
@@ -199,6 +202,7 @@ impl Stamp {
         match self.studio_agent.as_deref() {
             Some("agy") => agy,
             Some("claude" | "codex") => claude,
+            Some("copilot") => claude.or(self.camel_session_id.as_deref()),
             _ => claude.or(agy),
         }
     }
@@ -890,10 +894,37 @@ pub fn agent_pid(
         return Some(pid);
     }
     let parent = real(parent)?;
-    match inspect(parent) {
-        Some((command, up)) if is_shell(&command) => real(up),
-        _ => Some(parent),
+    let (pid, command) = match inspect(parent) {
+        Some((command, up)) if is_shell(&command) => {
+            let up = real(up)?;
+            (up, inspect(up).map(|(command, _)| command))
+        }
+        found => (parent, found.map(|(command, _)| command)),
+    };
+    // An IDE's process outlives its sessions, so it is never taken as the agent (#361).
+    match command {
+        Some(command) if is_ide(&command) => None,
+        _ => Some(pid),
     }
+}
+
+/// Whether `payload` carries Copilot's marker, for the agent guard (spec #320, "One event, one record,
+/// the right agent"): Copilot reads `.claude/settings.json`, so a payload of Copilot's could reach
+/// Claude Code's entry, and is dropped there.
+// HOOK POINT (#361, for wave 1's trial #369): Copilot documents no field that marks its payloads,
+// and its snake_case ones are Claude Code's shape, so none is guessed: the trial records the marker
+// and puts its check here. Until then no payload is told as Copilot's.
+pub fn copilot_payload(_payload: &serde_json::Map<String, serde_json::Value>) -> bool {
+    false
+}
+
+/// Whether `command` is one of VS Code's processes, which run its Copilot agent and that agent's
+/// hooks (#361; spec #320, "IDE-hosted pids"): an executable inside VS Code's app bundle, stable or
+/// Insiders, as `ps -o comm=` names it on macOS.
+// shortcut: told by the bundle's default name; a renamed VS Code app is taken as the agent.
+fn is_ide(command: &str) -> bool {
+    command.contains("/Visual Studio Code.app/")
+        || command.contains("/Visual Studio Code - Insiders.app/")
 }
 
 fn is_shell(command: &str) -> bool {

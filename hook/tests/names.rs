@@ -4,7 +4,8 @@
 use std::{fs, path::Path};
 
 fn old_name(text: &str) -> bool {
-    let text = text.to_lowercase();
+    // VS Code's app is "Visual Studio Code", which is no name of plotkeeper's (#361).
+    let text = text.to_lowercase().replace("visual studio code", "");
     text.contains("studio") || text.contains("falinks")
 }
 
@@ -29,7 +30,7 @@ fn files(dir: &Path) -> Vec<(String, String)> {
 fn the_plugins_name_no_studio() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let mut found = Vec::new();
-    for dir in ["plugin", "plugin-agy", "plugin-codex"] {
+    for dir in ["plugin", "plugin-agy", "plugin-codex", "plugin-copilot"] {
         for (path, text) in files(&root.join(dir)) {
             let lines = text.lines().filter(|l| old_name(l));
             found.extend(lines.map(|line| format!("{path}: {line}")));

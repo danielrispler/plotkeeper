@@ -66,6 +66,16 @@ esac"#,
         self
     }
 
+    /// Puts a fake `copilot` on the PATH, which logs its arguments and writes nothing, as plotkeeper may not look at
+    /// what the real one writes (#361).
+    fn with_copilot(self) -> Machine {
+        script(
+            &self.tools.join("copilot"),
+            r#"echo "$@" >> "$(dirname "$0")/copilot-calls""#,
+        );
+        self
+    }
+
     fn run(&self, verb: &str) -> Output {
         let mut child = Command::new(self.tools.join("plotkeeper"))
             .arg(verb)
@@ -208,9 +218,9 @@ fn install_then_uninstall_leaves_every_file_byte_identical() {
     for (name, setup) in homes {
         for (claude, agy) in [(true, true), (false, false)] {
             let machine = Machine::new(claude, agy);
-            // Codex goes with the others, so its hook file is changed and put back too.
+            // Codex and Copilot go with the others, so Codex's hook file is changed and put back too.
             let machine = if claude {
-                machine.with_codex()
+                machine.with_codex().with_copilot()
             } else {
                 machine
             };
@@ -249,6 +259,11 @@ fn a_harness_not_found_is_skipped_with_one_line() {
     );
     assert_eq!(
         text.lines().filter(|l| l.contains("Codex")).count(),
+        1,
+        "{text}"
+    );
+    assert_eq!(
+        text.lines().filter(|l| l.contains("Copilot")).count(),
         1,
         "{text}"
     );
@@ -505,4 +520,68 @@ fn a_codex_hook_file_changed_after_install_loses_only_plotkeepers_hooks_at_unins
     let (ours, theirs) = codex_commands(&machine);
     assert!(ours.is_empty(), "{ours:?}");
     assert_eq!(theirs, [("Stop".to_owned(), "say done".to_owned())]);
+}
+
+/// Copilot goes through its own plugin channel (#361; #320, "Install obeys the credentials rule"): install renders
+/// `plugin-copilot/` into the data folder and runs `copilot plugin install` on it, uninstall runs `copilot plugin
+/// uninstall`, and neither opens a file of Copilot's: each one that can hold its login or settings is a FIFO here.
+#[test]
+fn copilot_goes_through_copilot_plugin_and_never_opens_its_files() {
+    let machine = Machine::new(false, false).with_copilot();
+    let copilot = machine.home.join(".copilot");
+    fs::create_dir_all(copilot.join("hooks")).unwrap();
+    let files = [
+        copilot.join("config.json"),
+        copilot.join("settings.json"),
+        copilot.join("hooks/own.json"),
+    ];
+    for file in &files {
+        assert!(Command::new("mkfifo").arg(file).status().unwrap().success());
+    }
+
+    machine.run("install");
+    let plugin = machine.data().join("plugins/copilot/plotkeeper");
+    assert_eq!(
+        machine.calls("copilot"),
+        [format!("plugin install {}", plugin.display())]
+    );
+    let manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(plugin.join("plugin.json")).unwrap()).unwrap();
+    assert_eq!(manifest["name"], "plotkeeper");
+    let hooks = commands(&plugin.join("hooks.json"));
+    assert_eq!(hooks.len(), 7, "{hooks:?}");
+    for (_, command) in hooks {
+        let ours = format!(
+            "\"{}/plotkeeper-hook\" --agent copilot --event ",
+            machine.bin()
+        );
+        assert!(command.starts_with(&ours), "{command}");
+    }
+
+    machine.run("uninstall");
+    assert_eq!(
+        machine.calls("copilot")[1..],
+        ["plugin uninstall plotkeeper".to_owned()]
+    );
+    assert!(!machine.data().join("plugins").exists());
+    for file in &files {
+        assert!(fs::symlink_metadata(file).unwrap().file_type().is_fifo());
+    }
+}
+
+#[test]
+fn a_second_copilot_install_replaces_its_plugin() {
+    let machine = Machine::new(false, false).with_copilot();
+    machine.run("install");
+    machine.run("install");
+    let plugin = machine.data().join("plugins/copilot/plotkeeper");
+    let install = format!("plugin install {}", plugin.display());
+    assert_eq!(
+        machine.calls("copilot"),
+        [
+            install.clone(),
+            "plugin uninstall plotkeeper".to_owned(),
+            install
+        ]
+    );
 }

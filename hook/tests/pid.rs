@@ -41,6 +41,26 @@ fn no_pid_when_the_hook_has_no_real_parent() {
     assert_eq!(agent_pid(None, 501, table(&[(501, "zsh", 1)])), None);
 }
 
+/// VS Code runs Copilot's agent in its own processes, so the pid the hook would record is the IDE's,
+/// which outlives every session: none is recorded, and the session takes the "idle?" path (#361; #320,
+/// "IDE-hosted pids").
+#[test]
+fn no_pid_when_the_agent_is_vs_code() {
+    const HELPER: &str = "/Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper (Plugin).app/Contents/MacOS/Code Helper (Plugin)";
+    const INSIDERS: &str =
+        "/Applications/Visual Studio Code - Insiders.app/Contents/MacOS/Electron";
+    for t in [
+        || table(&[(600, "/bin/zsh", 700), (700, HELPER, 1)]),
+        || table(&[(600, "/bin/zsh", 700), (700, INSIDERS, 1)]),
+    ] {
+        assert_eq!(agent_pid(None, 600, t()), None);
+        assert_eq!(agent_pid(None, 700, t()), None);
+    }
+    // Copilot's CLI in VS Code's terminal is the agent, as in any terminal.
+    let t = table(&[(800, "/opt/homebrew/bin/copilot", 700), (700, HELPER, 1)]);
+    assert_eq!(agent_pid(None, 800, t), Some(800));
+}
+
 fn recorded(wrapper: Option<&str>, name: &str) -> serde_json::Value {
     let home = scratch(&format!("pid-{name}"));
     let mut cmd = hook(&home);

@@ -2,7 +2,7 @@
 //!
 //! Install copies the hook binaries into the data folder's `bin/`, renders each harness's plugin with that path into
 //! the data folder, and wires the harnesses it finds on the PATH at user level, each through its own CLI where it has
-//! one: Claude Code with `claude plugin`, agy with `agy plugin`. Codex has none for its hooks, so install adds its
+//! one: Claude Code with `claude plugin`, agy with `agy plugin`, Copilot with `copilot plugin` (#361). Codex has none for its hooks, so install adds its
 //! entries to `~/.codex/hooks.json` itself (#359). It also removes the archived app's setup, so no event is recorded twice:
 //! the `CLAUDE_CODE_PLUGIN_DIRS` entries in `~/.zshrc` that name a data folder's `checkout/plugin`, and agy's plugin
 //! `studio`. What it changes it backs up first, and `uninstall` puts it back.
@@ -12,7 +12,9 @@
 //! (https://learn.chatgpt.com/docs/hooks, read 2026-11-23) give it a `description` and a `hooks` object of handlers
 //! (`type`, `command`, `timeout`, `async`, `statusMessage`, an MCP tool's `server`, `tool` and `input`), and no field
 //! for a key, a token or an environment; Codex keeps its login elsewhere. `~/.codex/config.toml`, which can hold a
-//! provider's token, is never opened.
+//! provider's token, is never opened. Copilot's plugin goes in with `copilot plugin install` of the folder install
+//! renders, and out with `copilot plugin uninstall`; no file under `~/.copilot`, where Copilot keeps its settings and
+//! may keep its login, is opened (#361).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -37,6 +39,9 @@ const PLUGIN_JSON: &str = include_str!("../../plugin/.claude-plugin/plugin.json"
 const HOOKS_JSON: &str = include_str!("../../plugin/hooks/hooks.json");
 /// plotkeeper's entries for Codex's hook file, one recording group per event.
 const CODEX_HOOKS_JSON: &str = include_str!("../../plugin-codex/hooks.json");
+/// plotkeeper's plugin for Copilot (#361): its manifest and its hooks, one camelCase event an entry.
+const COPILOT_PLUGIN_JSON: &str = include_str!("../../plugin-copilot/plugin.json");
+const COPILOT_HOOKS_JSON: &str = include_str!("../../plugin-copilot/hooks.json");
 /// The archived app's plugin for agy, by its folder's name.
 const OLD_AGY_PLUGIN: &str = "studio";
 
@@ -53,6 +58,9 @@ struct State {
     agy_backups: Vec<String>,
     /// What install did to `~/.codex/hooks.json`.
     codex: Option<CodexHooks>,
+    /// plotkeeper's Copilot plugin was installed with `copilot plugin` (#361).
+    #[serde(default)]
+    copilot: bool,
 }
 
 /// Install's record of Codex's hook file.
@@ -386,6 +394,50 @@ pub fn install(
         None => say(out, "Codex: `codex` not found, skipped"),
         Some(_) => install_codex(home, &bin, &mut state, out)?,
     }
+
+    match on_path("copilot", path) {
+        None => say(out, "Copilot: `copilot` not found, skipped"),
+        Some(copilot) => install_copilot(home, &bin, &copilot, &mut state, out)?,
+    }
+    Ok(())
+}
+
+/// Renders `plugin-copilot/` for the binaries in `bin` into the data folder and installs it with `copilot plugin
+/// install`, which copies it into Copilot's own plugin folder; a second install replaces the first. plotkeeper opens
+/// no file of Copilot's: `copilot` writes what it keeps of the install.
+fn install_copilot(
+    home: &Path,
+    bin: &Path,
+    copilot: &Path,
+    state: &mut State,
+    out: &mut dyn Write,
+) -> Result<(), String> {
+    let dir = plugins_dir(home).join("copilot").join(NAME);
+    fs::create_dir_all(&dir).map_err(|e| format!("could not make {}: {e}", dir.display()))?;
+    for (name, text) in [
+        ("plugin.json", COPILOT_PLUGIN_JSON.to_owned()),
+        ("hooks.json", render(COPILOT_HOOKS_JSON, bin)?),
+    ] {
+        let file = dir.join(name);
+        fs::write(&file, text).map_err(|e| format!("could not write {}: {e}", file.display()))?;
+    }
+    if state.copilot {
+        // Already gone is fine: the install below puts it back.
+        let _ = run(
+            copilot,
+            &["plugin".as_ref(), "uninstall".as_ref(), NAME.as_ref()],
+        );
+    }
+    run(
+        copilot,
+        &["plugin".as_ref(), "install".as_ref(), dir.as_os_str()],
+    )?;
+    state.copilot = true;
+    save(home, state)?;
+    say(
+        out,
+        format!("Copilot: copilot plugin install {}", dir.display()),
+    );
     Ok(())
 }
 
@@ -520,6 +572,16 @@ pub fn uninstall(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Resu
 
     if let Some(codex) = &state.codex {
         uninstall_codex(home, codex, &studio_hook::bin_dir(home), out)?;
+    }
+
+    if state.copilot {
+        let copilot = on_path("copilot", path)
+            .ok_or("Copilot: `copilot` not found, so its plugin cannot be uninstalled")?;
+        run(
+            &copilot,
+            &["plugin".as_ref(), "uninstall".as_ref(), NAME.as_ref()],
+        )?;
+        say(out, format!("Copilot: copilot plugin uninstall {NAME}"));
     }
 
     if state.agy || !state.agy_backups.is_empty() {

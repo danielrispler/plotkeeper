@@ -17,6 +17,7 @@ mod ask;
 mod checks;
 mod claude;
 mod codex;
+mod copilot;
 mod event;
 mod ledger;
 mod saved;
@@ -32,6 +33,7 @@ pub use checks::{
 };
 pub use claude::CAPABILITIES as CLAUDE_CAPABILITIES;
 pub use codex::CAPABILITIES as CODEX_CAPABILITIES;
+pub use copilot::CAPABILITIES as COPILOT_CAPABILITIES;
 pub use event::{Capabilities, TranscriptFormat};
 use event::{Event, Happened, Origin, Start, ToolKind};
 pub use ledger::{Bytes, Details, Ledger, Outcome, Row};
@@ -49,6 +51,8 @@ enum Named {
     Agy,
     /// The line's time, for its drift when Codex's parser cannot read it.
     Codex(u64),
+    /// The line's time, for its drift when Copilot's parser cannot read it (#361).
+    Copilot(u64),
     /// The line's time, for its drift.
     Other(u64),
 }
@@ -66,6 +70,7 @@ impl Named {
             None => Named::Agy,
             Some(agent) if agent == AGY_CAPABILITIES.agent => Named::Agy,
             Some(codex::CODEX) => Named::Codex(stamp.studio_received_ms),
+            Some(copilot::COPILOT) => Named::Copilot(stamp.studio_received_ms),
             Some(_) => Named::Other(stamp.studio_received_ms),
         }
     }
@@ -2572,6 +2577,13 @@ impl Studio {
                         Vec::new()
                     }
                 },
+                Named::Copilot(at) => match copilot::parse(line) {
+                    Ok(event) => vec![event],
+                    Err(_) => {
+                        self.agy.drift(at, AgyDriftKind::Agent);
+                        Vec::new()
+                    }
+                },
                 Named::Other(at) => {
                     self.agy.drift(at, AgyDriftKind::Agent);
                     Vec::new()
@@ -2587,6 +2599,7 @@ impl Studio {
             Err(_) => match Named::of(line) {
                 Named::Agy => self.agy.peek(line),
                 Named::Codex(_) => codex::parse(line).ok(),
+                Named::Copilot(_) => copilot::parse(line).ok(),
                 Named::Other(_) => None,
             },
         }

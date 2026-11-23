@@ -72,6 +72,21 @@ fn every_entry_that_records_names_its_agent() {
     for c in codex {
         assert_eq!(c, "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent codex");
     }
+    // Copilot's camelCase payloads name no event, so each entry names its own (#361).
+    let mut copilot = commands("plugin-copilot");
+    copilot.sort();
+    let mut wired = [
+        "agentStop",
+        "postToolUse",
+        "postToolUseFailure",
+        "preToolUse",
+        "sessionEnd",
+        "sessionStart",
+        "userPromptSubmitted",
+    ]
+    .map(|e| format!("\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent copilot --event {e}"));
+    wired.sort();
+    assert_eq!(copilot, wired);
 }
 
 /// The hook records turn trees from Claude Code's event names only, so a harness whose capabilities
@@ -91,4 +106,18 @@ fn the_hook_keeps_no_turn_of_an_agent_other_than_claude() {
         let line: Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
         assert_eq!(line["studio_agent"], agent);
     }
+}
+
+/// A camelCase Copilot payload names no event, so its entry passes it as `--event`, which the hook
+/// stores as `studio_event` (#361).
+#[test]
+fn the_hook_stores_the_event_its_entry_names() {
+    let payload = json!({ "sessionId": "cs-1", "timestamp": 1, "cwd": "/", "prompt": "go" });
+    let line = logged(
+        &["--agent", "copilot", "--event", "userPromptSubmitted"],
+        payload,
+        "copilot-event",
+    );
+    assert_eq!(line["studio_agent"], "copilot");
+    assert_eq!(line["studio_event"], "userPromptSubmitted");
 }

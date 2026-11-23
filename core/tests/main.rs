@@ -10,6 +10,7 @@ mod clear;
 mod close_rename;
 mod codex;
 mod common;
+mod copilot;
 mod decisions;
 mod ending;
 mod feed;
