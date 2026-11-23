@@ -94,6 +94,8 @@
     <section id="map" class="map-view" aria-label="Map">
       <header class="map-head">
         <span id="map-ref" class="map-ref"></span>
+        <!-- Pre-flight (#394): the parts a piece of work will likely cross; the palette's `studio::PreFlight` opens it too. -->
+        <button id="pre-flight-button" class="btn quiet small" type="button" title="Before you start: the parts this work will likely cross">Pre-flight</button>
         <div id="map-review" class="map-review" hidden></div>
         <div id="map-banner" class="map-banner"></div>
       </header>
@@ -101,6 +103,8 @@
         <div id="map-body" class="map-body"></div>
         <!-- The PR brief (#339): over the foot of the map body while one plays; `map-brief.ts` fills it. -->
         <section id="map-brief" class="map-brief" aria-label="PR brief" hidden></section>
+        <!-- The pre-flight (#394): an overlay over the map in the glass, the first layer Esc closes; `map-pre-flight.ts` fills it. -->
+        <section id="map-pre-flight" class="map-pre-flight glass" role="dialog" aria-label="Pre-flight" hidden></section>
         <!-- Ready for review (#336), over the map's foot on the left; it moves right of the left panel while that is open (#385). -->
         <section id="map-tray" class="map-tray"></section>
         <!-- The left panel (#385): a session's story (the rail, moved in), History, a turn's diff (widened) or Settings, floating over the map

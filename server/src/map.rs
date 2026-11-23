@@ -67,6 +67,8 @@ pub struct MapState {
     /// The staleness band (1 to 3) of each Core part Daniel has not engaged with for 3, 6 or 12 weeks (`staleness.rs`); a part not listed
     /// is not stale.
     pub stale: BTreeMap<String, u8>,
+    /// The project's pre-flight (`pre_flight.rs`): the parts a piece of work will likely cross, framed on the map.
+    pub pre_flight: Option<studio_understanding::pre_flight::PreFlight>,
 }
 
 /// Daniel's choices for one project, kept in the data folder: a saved `(x, y)` per part or actor id, and a tier per part id
@@ -150,6 +152,7 @@ pub fn read_map(repo: &Path) -> MapState {
         runs: crate::runner::Runs::default(),
         catch_ups: BTreeMap::new(),
         stale: BTreeMap::new(),
+        pre_flight: None,
     };
     let Some((reference, note)) = default_ref(repo) else {
         state.note = Some("this repository has no default branch to read".into());
@@ -359,6 +362,7 @@ pub fn map_state(project: String, fetch: bool, app: &Arc<crate::App>) -> Result<
         .unwrap_or_default();
     state.runs = app.runner.runs(&project);
     state.catch_ups = crate::part_catch_ups::offers(app, &project, &state.user, &state.fog);
+    state.pre_flight = crate::pre_flight::current(&project);
     Ok(state)
 }
 

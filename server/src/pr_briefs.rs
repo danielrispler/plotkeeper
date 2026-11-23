@@ -179,6 +179,9 @@ pub struct BriefView {
     pub brief: StoredBrief,
     /// The writer did not see the whole diff (files cut, or some of their hunks).
     pub partial: bool,
+    /// The PR matched the project's pre-flight (#394): the parts it expected against the parts the PR touched.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected: Option<studio_understanding::pre_flight::Expected>,
 }
 
 /// What opening a brief answers: the brief, or that it is being written (it comes through `map-landed`).
@@ -283,8 +286,8 @@ impl PrBriefs {
         self.writer.is_some()
     }
 
-    /// The writer, which part catch-ups share (#391); `None` as for briefs.
-    pub(crate) fn writer(&self) -> Option<SharedWriter> {
+    /// The writer, which has no tools; part catch-ups (#391) and pre-flight (`pre_flight.rs`) ask it too.
+    pub fn writer(&self) -> Option<SharedWriter> {
         self.writer.clone()
     }
 
@@ -515,6 +518,7 @@ fn head_time_ms(project: &str, head: &str) -> Option<u64> {
 fn source_of(project: &str, number: u64) -> Result<PrSource, String> {
     let repo = Path::new(project);
     let meta = fetch_meta(repo, number)?;
+    crate::pre_flight::note_closing(project, &meta);
     let (reference, _) =
         crate::map::default_ref(repo).ok_or("the repository has no default branch")?;
     let base = crate::map::git(repo, &["merge-base", &reference, &meta.head])?;
@@ -606,15 +610,17 @@ pub fn pr_brief(app: &Arc<App>, project: String, number: u64) -> Result<Option<O
     let Some(head) = head else {
         return Ok(store
             .latest(number)
-            .map(|b| Opened::Brief(Box::new(view_of(&store, b)))));
+            .map(|b| Opened::Brief(Box::new(view_of(&project, &store, b)))));
     };
     if let Some(stored) = store.get(number, &head).filter(|b| !b.stale) {
-        return Ok(Some(Opened::Brief(Box::new(view_of(&store, stored)))));
+        return Ok(Some(Opened::Brief(Box::new(view_of(
+            &project, &store, stored,
+        )))));
     }
     let Some(writer) = briefs.writer.clone() else {
         return Ok(store
             .latest(number)
-            .map(|b| Opened::Brief(Box::new(view_of(&store, b)))));
+            .map(|b| Opened::Brief(Box::new(view_of(&project, &store, b)))));
     };
     let write = {
         let (app, project) = (app.clone(), project.clone());
@@ -647,15 +653,20 @@ pub fn pr_brief(app: &Arc<App>, project: String, number: u64) -> Result<Option<O
     Ok(Some(opened))
 }
 
-/// A stored brief as the window plays it, with whether the writer saw all of the diff.
-fn view_of(store: &BriefStore, brief: StoredBrief) -> BriefView {
+/// A stored brief as the window plays it, with whether the writer saw all of the diff and the line of a matched pre-flight.
+fn view_of(project: &str, store: &BriefStore, brief: StoredBrief) -> BriefView {
     let partial = store
         .records()
         .iter()
         .rev()
         .find(|r| r.pr == brief.pr && r.head == brief.head)
         .is_some_and(|r| r.budget.files_cut + r.budget.files_partial > 0);
-    BriefView { brief, partial }
+    let expected = crate::pre_flight::expected(project, brief.pr, &brief);
+    BriefView {
+        brief,
+        partial,
+        expected,
+    }
 }
 
 /// Chapter `chapter` of PR `number`'s brief was read to its end (the page saw its last step, focused, and the check was answered): the

@@ -14,6 +14,7 @@ import { currentMap, currentScrub, giveCameraBack, lendCamera, onDraw, registerL
 import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { watchSeen } from "./seen.js";
 import { logStop } from "./stop-rules.js";
+import { expectedLine } from "./map-pre-flight.js";
 import { scrubTo } from "./map-history.js";
 import { overturnNote, ratifyActions } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
@@ -778,7 +779,9 @@ function buildPanel(view: MapView, list: BriefStep[], pr: number) {
   next.addEventListener("click", () => advance());
   const foot = text("div", "", "brief-foot");
   foot.append(dots, partial, code, back, next);
-  box.replaceChildren(leave, cols, foot);
+  // A PR that closes the pre-flighted issue, or a ticket under it (#394): what Daniel expected against what it touched.
+  const line = expectedLine(playing?.expected, view.doc);
+  box.replaceChildren(leave, ...(line ? [text("p", line, "brief-expected")] : []), cols, foot);
   // One height for the whole brief: its tallest step's.
   box.hidden = false;
   let tallest = 0;
