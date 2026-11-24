@@ -397,16 +397,6 @@ pub fn write_name(
 }
 
 impl ClaudeWriter {
-    /// `name_request` as the process path runs it with the program that writes now.
-    pub fn name_command(
-        &self,
-        setup: &SummarySetup,
-        prompt: &str,
-        response: Option<&str>,
-    ) -> (Command, String) {
-        self.build(&self.name_request(setup, prompt, response))
-    }
-
     /// The `claude -p` run for a session's name, at `setup`'s model and effort with the studio's
     /// own system prompt, on Daniel's first `prompt` and the final `response`, each cut at
     /// `MAX_CHANGE`.

@@ -33,8 +33,8 @@
       "tier": "core", "paths": ["ui/"]
     },
     {
-      "id": "workbench", "name": "Workbench", "caption": "Worktrees, PRs and plan usage",
-      "description": "Git worktrees, tasks, PR lookups and plan usage, and agy's plugin: the shipped `plugin-agy/`, embedded, rendered with the hook's path and installed with `agy plugin`. A black box: it never fogs and never asks for your time.",
+      "id": "workbench", "name": "Workbench", "caption": "Worktrees and PRs",
+      "description": "Git worktrees and fetches, the `gh` that PR lookups run, other agents' resume commands, and agy's plugin: the shipped `plugin-agy/`, embedded, rendered with the hook's path and installed with `agy plugin`. A black box: it never fogs and never asks for your time.",
       "tier": "black-box", "paths": ["workbench/"]
     }
   ],
@@ -60,9 +60,9 @@
   ],
   "ignored": [
     ".agents/", ".claude/", ".github/", ".gitignore", "AGENTS.md", "CLAUDE.md", "Cargo.lock", "Cargo.toml", "LICENSE",
-    "README.md", "package-lock.json", "package.json", "npm/", "real-calls.sh", "rust-toolchain.toml", "tsconfig.json",
+    "README.md", "package-lock.json", "package.json", "npm/", "rust-toolchain.toml", "tsconfig.json",
     "system-map.json",
-    "docs/", "scripts/", "terminal-spike/", "v0-spike/", "src-tauri/", "terminal-daemon/",
+    "docs/", "scripts/", "archive/",
     "wayfinder/", "test-support/", "system-map/"
   ],
   "laws": [

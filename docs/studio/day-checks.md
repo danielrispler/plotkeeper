@@ -46,7 +46,7 @@ In a studio terminal, outside auto mode:
 
 ```sh
 cd /Users/danielrispler/work/Falinks
-real-calls.sh
+archive/real-calls.sh
 ```
 
 It writes every output to a new `local-evidence/2026-11-09-round-5/real-calls-<time>/` folder, with its own terminal output in `run.log`. It runs on Daniel's subscription and takes a few minutes; carry on while it runs. It also rebuilds the `StudioRepro` app for danielrispler/Falinks#543 and quits, kills and crashes it. Dismiss the "quit unexpectedly" dialog if it shows; the live app is never touched.

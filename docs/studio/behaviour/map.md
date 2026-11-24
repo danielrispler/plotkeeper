@@ -52,7 +52,7 @@ The checker runs only `git` and, when the map names `cargo`, `cargo`; it reads n
 
 ## plotkeeper's map
 
-Seven parts: the agent plugins, the hook, the core, the server (`server/`), understanding, the window (`ui/`) and workbench; three actors: the agents, the writer and GitHub; one flow, Turn writing. `ignored` holds what is not the running system: the docs, the spikes, the archived desktop app and its terminal daemon (`src-tauri/`, `terminal-daemon/`, #332), `scripts/`, the tooling crates (`wayfinder/`, `test-support/`, `system-map/`), the npm package's manifest (`npm/`, #368) and the repository's own configuration at the root. A change that adds, moves or removes files, changes what a part does or how parts connect, or changes a law changes the map in the same PR (`AGENTS.md`).
+Seven parts: the agent plugins, the hook, the core, the server (`server/`), understanding, the window (`ui/`) and workbench; three actors: the agents, the writer and GitHub; one flow, Turn writing. `ignored` holds what is not the running system: the docs, `archive/` (retired code: the spikes and the desktop app and its terminal daemon, #332, #415), `scripts/`, the tooling crates (`wayfinder/`, `test-support/`, `system-map/`), the npm package's manifest (`npm/`, #368) and the repository's own configuration at the root. A change that adds, moves or removes files, changes what a part does or how parts connect, or changes a law changes the map in the same PR (`AGENTS.md`).
 
 ## The Map view
 

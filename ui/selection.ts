@@ -4,7 +4,7 @@
 
 import { rewatch } from "./answer.js";
 import { showCards } from "./cards.js";
-import { element, failure, invoke } from "./dom.js";
+import { failure, invoke } from "./dom.js";
 import { openMap, shownProject } from "./map.js";
 import { pressRow, selectedView } from "./map-model.js";
 import { closePanel, followSelection, panelShown, showPanel } from "./panel.js";
@@ -15,11 +15,6 @@ import { studio } from "./state.js";
 import { showView } from "./story.js";
 import { showToast } from "./toast.js";
 import type { Selection } from "./types.js";
-
-// Asks the shell for the selected session's cards and draws them.
-export async function refreshCards() {
-  showCards(await invoke("cards"));
-}
 
 // Whether row `session`, or its subagent `agent`'s line, shows selected: the one Daniel just pressed
 // until the shell replies, else the shell's selection, so a reply that disagrees moves the mark back
