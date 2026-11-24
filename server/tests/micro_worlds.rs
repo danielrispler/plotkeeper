@@ -362,3 +362,48 @@ fn dismiss_waits_until_the_host_check_is_done_with_the_runs_folder() {
     assert_eq!(bench.settled("flow:turn").phase, Phase::Ready);
     bench.runner.cancel(&id).unwrap();
 }
+
+#[test]
+fn a_host_check_plotkeeper_stopped_in_fails_with_why_at_the_next_start() {
+    let bench = bench(&writes("<!doctype html><p>VERIFY-SLOW</p>"), true);
+    bench.explore();
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while !fs::read_dir(bench.dir.path().join("runs"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|run| run.path().join("build.log").exists())
+    {
+        assert!(
+            Instant::now() < deadline,
+            "the run's page was never checked"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // plotkeeper stops mid-check and starts again.
+    let data = bench.dir.path().join("data");
+    let runner = Runner::new(Config {
+        data: data.clone(),
+        runs: bench.dir.path().join("runs"),
+        settings: data.join("settings.json"),
+        launcher: env!("CARGO_BIN_EXE_plotkeeper-run").into(),
+        harness: Arc::new(Writes(String::new())),
+    });
+    let worlds = MicroWorlds::new(
+        data.join("micro-worlds"),
+        data.join("settings.json"),
+        &runner,
+    );
+    runner.pick_up();
+    worlds.pick_up();
+    let state = worlds.state(&bench.project(), Some(&bench.head()));
+    let view = &state.worlds["flow:turn"];
+    assert_eq!(view.phase, Phase::Failed, "{view:?}");
+    assert!(
+        view.line
+            .as_deref()
+            .unwrap_or("")
+            .contains("plotkeeper stopped"),
+        "{view:?}"
+    );
+}

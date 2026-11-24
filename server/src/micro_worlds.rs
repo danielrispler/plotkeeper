@@ -580,7 +580,10 @@ impl MicroWorlds {
                         && record.phase == Phase::Building
                     {
                         record.phase = Phase::Failed;
-                        record.why = Some("The run was cancelled".into());
+                        record.why = Some(
+                            "The run is gone: it was dismissed, or plotkeeper stopped before its page was checked"
+                                .into(),
+                        );
                         self.write(project, &record);
                         drop(guard);
                         self.tell(project);

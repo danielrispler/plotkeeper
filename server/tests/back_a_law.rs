@@ -136,7 +136,21 @@ fn bench(agent: &str) -> Bench {
     )
     .unwrap();
     fs::set_permissions(&gh, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let (runner, laws, changes) = start_plotkeeper(&root, agent);
+    Bench {
+        dir,
+        repo,
+        project,
+        laws,
+        runner,
+        changes,
+    }
+}
 
+/// A runner and back a law over the bench in `root`, picked up as plotkeeper's start does; their agent runs `agent`.
+fn start_plotkeeper(root: &Path, agent: &str) -> (Arc<Runner>, Arc<LawRuns>, mpsc::Receiver<()>) {
+    let data = root.join("data");
+    let settings = data.join("settings.json");
     let runner = Runner::new(runner::Config {
         data: data.clone(),
         runs: root.join("runs"),
@@ -149,8 +163,8 @@ fn bench(agent: &str) -> Bench {
         back_a_law::Config {
             data,
             settings,
-            sandbox: Some(srt),
-            gh: Some(gh),
+            sandbox: Some(root.join("srt")),
+            gh: Some(root.join("gh")),
         },
     );
     let (tell, changes) = mpsc::channel();
@@ -158,14 +172,7 @@ fn bench(agent: &str) -> Bench {
         let _ = tell.send(());
     });
     runner.pick_up();
-    Bench {
-        dir,
-        repo,
-        project,
-        laws,
-        runner,
-        changes,
-    }
+    (runner, laws, changes)
 }
 
 impl Bench {
@@ -660,10 +667,10 @@ fn open_draft_pr_leaves_the_record_of_daniels_other_worktrees_alone() {
 }
 
 impl Bench {
-    /// The project's checks, from now on: `sleep 3` first, so a proof takes a while.
-    fn slow_checks(&self) {
+    /// The project's checks, from now on: `sleep <seconds>` first, so a proof takes a while.
+    fn slow_checks(&self, seconds: u32) {
         let checks = serde_json::json!({ "checks": { &self.project: [
-            "sleep 3",
+            format!("sleep {seconds}"),
             "node --check src/add.mjs",
             "node --test --test-reporter=tap tests/*.test.mjs",
         ] } });
@@ -694,7 +701,7 @@ impl Bench {
 #[test]
 fn dismiss_waits_until_the_proof_is_done_with_the_runs_folder() {
     let bench = bench(&format!("set -e\n{TEST}{PLANT}{DONE}"));
-    bench.slow_checks();
+    bench.slow_checks(3);
     let id = bench.start();
     bench.proving(&id);
     assert!(
@@ -703,6 +710,31 @@ fn dismiss_waits_until_the_proof_is_done_with_the_runs_folder() {
     );
     assert_eq!(bench.settled(&id).state, PatchState::Proven);
     bench.runner.cancel(&id).unwrap();
+}
+
+#[test]
+fn a_proof_plotkeeper_stopped_in_is_rejected_at_the_next_start_not_lost() {
+    let bench = bench(&format!("set -e\n{TEST}{PLANT}{DONE}"));
+    bench.slow_checks(30);
+    let id = bench.start();
+    bench.proving(&id);
+    // plotkeeper stops mid-proof and starts again.
+    let root = bench.dir.path().canonicalize().unwrap();
+    let (_runner, laws, _changes) = start_plotkeeper(&root, DONE);
+    let patch = laws
+        .patches(&bench.project)
+        .into_iter()
+        .find(|p| p.id == id);
+    let patch = patch.expect("the patch is still shown");
+    assert_eq!(patch.state, PatchState::Rejected, "{patch:?}");
+    assert!(
+        patch
+            .line
+            .as_deref()
+            .unwrap_or("")
+            .contains("plotkeeper stopped"),
+        "{patch:?}"
+    );
 }
 
 // ---- The new-law variant and Guard with a law (#401) ----

@@ -12,7 +12,9 @@
 //!   plant too (they must fail, and [`ci_laws::parse_failures`] must name the new tagged test). Every git command and
 //!   check in the clone runs in the sandbox: the agent wrote the clone, its git data included.
 //! - **The patch.** A proven run's test patch and proof are kept in the data folder's `law-patches/`, and the clone is
-//!   removed, as it is for a rejected run. [`LawRuns::discard`] deletes a patch.
+//!   removed, as it is for a rejected run. [`LawRuns::discard`] deletes a patch. A proof is written down there as it starts,
+//!   so one plotkeeper stopped in shows rejected at the next start, never lost; Dismiss waits until the proof is done
+//!   ([`Runner::hold`]).
 //! - **Open draft PR** (ticket #400). [`LawRuns::open_pr`] pushes the test patch on a new branch from a temporary worktree
 //!   of the default branch and opens a draft PR with the proof, then records the law change as accepted in ratify. A patch
 //!   that no longer applies is out of date.
@@ -294,7 +296,7 @@ type Changed = Box<dyn Fn(&str) + Send + Sync>;
 pub struct LawRuns {
     runner: Arc<Runner>,
     config: Config,
-    /// The patches being proven or rejected, by run id; proven ones are on disk.
+    /// The rejected patches, by run id; the ones being proven and the proven ones are on disk.
     shown: Mutex<BTreeMap<String, LawPatch>>,
     changed: OnceLock<Changed>,
     /// Serialises Open draft PR, so a second click waits and finds the PR the first opened.
@@ -311,6 +313,7 @@ impl LawRuns {
             changed: OnceLock::new(),
             opening: Mutex::default(),
         });
+        laws.stopped_proofs();
         let me: Weak<LawRuns> = Arc::downgrade(&laws);
         runner.on_end(move |ended| {
             if ended.kind != Kind::BackLaw {
@@ -321,6 +324,35 @@ impl LawRuns {
             }
         });
         laws
+    }
+
+    /// At a start: a proof plotkeeper stopped in is not run again, since the runner removes its clone; it is shown rejected
+    /// with why, as a rejection is, until Daniel discards it or plotkeeper starts again.
+    fn stopped_proofs(&self) {
+        let kept = fs::read_dir(self.config.data.join(PATCHES))
+            .into_iter()
+            .flatten()
+            .flatten();
+        for file in kept.map(|entry| entry.path()) {
+            let Some(patch) = fs::read(&file)
+                .ok()
+                .and_then(|text| serde_json::from_slice::<LawPatch>(&text).ok())
+                .filter(|patch| patch.state == PatchState::Proving)
+            else {
+                continue;
+            };
+            let _ = fs::remove_file(&file);
+            let line = "plotkeeper stopped during the proof: back the law again".to_string();
+            self.shown().insert(
+                patch.id.clone(),
+                LawPatch {
+                    state: PatchState::Rejected,
+                    line: Some(line),
+                    at: millis(),
+                    ..patch
+                },
+            );
+        }
     }
 
     /// Sets what is told the project whose patches changed; the first call wins.
@@ -474,7 +506,7 @@ impl LawRuns {
         let kept = fs::read(&file)
             .ok()
             .and_then(|text| serde_json::from_slice::<LawPatch>(&text).ok());
-        if kept.is_some_and(|p| p.project == project) {
+        if kept.is_some_and(|p| p.project == project && p.state != PatchState::Proving) {
             fs::remove_file(&file).map_err(|e| e.to_string())?;
         } else if !forgot {
             return Err("no such patch".into());
@@ -714,8 +746,16 @@ impl LawRuns {
             text: asked.new.as_ref().map(|new| new.text.clone()),
             guards: asked.guards,
         };
-        self.shown()
-            .insert(ended.id.clone(), patch(PatchState::Proving, None));
+        // The proof is written down as it starts, so a start after plotkeeper stopped in it says so.
+        let folder = self.config.data.join(PATCHES);
+        let file = folder.join(format!("{}.json", ended.id));
+        let proving = serde_json::to_vec(&patch(PatchState::Proving, None)).unwrap_or_default();
+        if let Err(e) = fs::create_dir_all(&folder).and_then(|()| fs::write(&file, proving)) {
+            log::warn!(
+                "back a law: the proof of run {} was not written down: {e}",
+                ended.id
+            );
+        }
         self.tell(&asked.project);
         let proved = match self.sandbox() {
             Some(program) => {
@@ -733,7 +773,6 @@ impl LawRuns {
         };
         let _ = fs::remove_dir_all(&ended.folder);
         let mut shown = self.shown();
-        shown.remove(&ended.id);
         match proved {
             Ok((diff, proof)) => {
                 let kept = LawPatch {
@@ -741,14 +780,10 @@ impl LawRuns {
                     proof: Some(proof),
                     ..patch(PatchState::Proven, None)
                 };
-                let folder = self.config.data.join(PATCHES);
-                let saved = fs::create_dir_all(&folder).and_then(|()| {
-                    fs::write(
-                        folder.join(format!("{}.json", ended.id)),
-                        serde_json::to_vec(&kept).unwrap_or_default(),
-                    )
-                });
+                let saved = fs::create_dir_all(&folder)
+                    .and_then(|()| fs::write(&file, serde_json::to_vec(&kept).unwrap_or_default()));
                 if let Err(e) = saved {
+                    let _ = fs::remove_file(&file);
                     shown.insert(
                         ended.id.clone(),
                         patch(
@@ -759,6 +794,7 @@ impl LawRuns {
                 }
             }
             Err(line) => {
+                let _ = fs::remove_file(&file);
                 shown.insert(ended.id.clone(), patch(PatchState::Rejected, Some(line)));
             }
         }
