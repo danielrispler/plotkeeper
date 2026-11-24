@@ -1158,6 +1158,24 @@ fn a_first_start_answered_yes_wires_every_harness_found_and_serves() {
 }
 
 #[test]
+fn a_yes_says_each_step_once_and_the_question_stands_after_a_blank_line() {
+    let machine = Machine::new(true, false).with_codex();
+    let text = machine.start(&["y"]);
+    assert!(text.contains(&format!("\n\n{ASK}")), "{text}");
+    for line in [
+        "Claude Code: claude plugin install plotkeeper@plotkeeper",
+        "hook binaries:",
+        "run `/hooks` in Codex",
+    ] {
+        assert_eq!(text.matches(line).count(), 1, "{line:?} in:\n{text}");
+    }
+    assert!(
+        text.contains("plotkeeper: wired Claude Code, Codex"),
+        "{text}"
+    );
+}
+
+#[test]
 fn a_first_start_answered_no_wires_nothing_serves_and_never_asks_again() {
     let machine = Machine::new(true, false).with_codex();
     let text = machine.start(&["n"]);

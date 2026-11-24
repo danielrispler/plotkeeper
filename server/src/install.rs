@@ -790,7 +790,7 @@ pub fn wire_on_start(
         "events stay on this machine, in plotkeeper's data folder",
     );
     say(out, "to undo it: plotkeeper uninstall");
-    let _ = write!(out, "Wire these? [Y/n] ");
+    let _ = write!(out, "\nWire these? [Y/n] ");
     let _ = out.flush();
     let mut answer = String::new();
     if terminal.read_line(&mut answer).unwrap_or(0) == 0 {
@@ -800,7 +800,10 @@ pub fn wire_on_start(
         return Ok(());
     }
     if matches!(answer.trim().to_lowercase().as_str(), "" | "y" | "yes") {
-        return wire(home, beside, path, Some(&unasked), out);
+        // The summary above already said each step, so they are not said again as they run.
+        wire(home, beside, path, Some(&unasked), &mut std::io::sink())?;
+        let _ = writeln!(out, "plotkeeper: wired {}", names.join(", "));
+        return Ok(());
     }
     for harness in &unasked {
         state.harnesses.insert(
