@@ -19,7 +19,7 @@ import { logStop, reviewNode, reviewOf } from "./stop-rules.js";
 import { element, failure, invoke, listen, newest, pressable, text } from "./dom.js";
 import {
   actorSize, autoPlace, brokenParts, brokenText, cameraRig, type CameraRig, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, fitCamera, panTo, type Drag,
-  type Law, type Layer, type LayerName, type MapDoc, startProject, switchProject, parseMap, type Part, type Point, plateSize, revealPan, rimPoint, type Scrub, type Tier, zoomAt,
+  type Law, type Layer, type LayerName, type MapDoc, startProject, switchProject, parseMap, type Part, type Point, plateSize, readingOrder, revealPan, rimPoint, type Scrub, type Tier, zoomAt,
 } from "./map-model.js";
 import { recheckSeen } from "./seen.js";
 import { knownProjects, projectGone } from "./projects.js";
@@ -387,7 +387,10 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub
   const nodes = new Map<string, HTMLElement>();
   const elements: HTMLElement[] = [];
 
-  for (const part of doc.parts) {
+  // In reading order, so Tab walks the parts top to bottom, then left to right.
+  const parts = new Map(doc.parts.map((part) => [part.id, part]));
+  const byId = Object.fromEntries(doc.parts.map((part) => [part.id, positions[part.id]]));
+  for (const part of readingOrder(byId).map((id) => parts.get(id)!)) {
     const tier = effectiveTier(part, state.user.tiers);
     // Fog under Daniel's effective tier, as the shell worked it out (`fog.rs`); a part not listed is clear.
     const mist = past ? undefined : state.fog?.[part.id];
@@ -402,7 +405,11 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub
       marks.append(broken);
       plate.classList.add("broken");
     }
-    plate.append(fog, text("span", part.name, "plate-name"), text("span", part.caption, "plate-caption"), marks, chips);
+    // The keyboard's way in (#460): a real button over the text area, named by the name and caption, beside the chips rather than around
+    // them. Its click reaches the plate's own, so Enter and Space open the sheet, or answer a brief's order question, as a tap does.
+    const open = text("button", "", "btn plate-open");
+    open.append(text("span", part.name, "plate-name"), text("span", part.caption, "plate-caption"));
+    plate.append(fog, open, marks, chips);
     plate.title = [part.name, part.caption, part.description].filter(Boolean).join("\n\n");
     const context: PlateContext = { view: current, part, tier, plate, fog, marks, chips };
     plateHooks.forEach((hook) => hook(context));
@@ -479,7 +486,8 @@ function grab(node: HTMLElement, id: string, current: MapView, links: Element, f
   let scale = 1;
   node.addEventListener("pointerdown", (event) => {
     // A press on a control on the plate, such as an agent's chip, is the control's: capturing it here would give its click to the plate.
-    if (event.button !== 0 || (event.target as Element).closest("button")) return;
+    // The part's own open button is the plate's, so a press on its text still drags (#460).
+    if (event.button !== 0 || (event.target as Element).closest("button:not(.plate-open)")) return;
     scale = rig?.shown().scale ?? 1;
     const at = current.positions[id];
     drag = dragStart(id, { x: event.clientX, y: event.clientY }, { x: at.x * scale, y: at.y * scale });
