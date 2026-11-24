@@ -100,12 +100,11 @@ export function hideAgents(hide: boolean) {
 }
 
 const chip = (agent: Live, select: AgentDeps["select"], lit: string[]) => {
-  const button = pressable(text("button", agent.needsYou ? `${agent.label} needs you` : agent.label, `agent-chip${agent.needsYou ? " needs-you" : ""}${lit.includes(agent.key) ? " lit" : ""}`), false, () => {
+  const button = pressable(text("button", agent.needsYou ? `${agent.label} needs you` : agent.label, `agent-chip${agent.needsYou ? " needs-you" : ""}${lit.includes(agent.key) ? " lit" : ""}`), null, () => {
     const view = currentMap();
     if (view) logStop("map-action", view.project);
     select(agent.session, agent.agent);
   });
-  button.removeAttribute("aria-pressed");
   // The chip's press opens its session, not the plate's sheet under it (#385).
   button.addEventListener("click", (event) => event.stopPropagation());
   button.title = `${agent.label}${agent.needsYou ? " needs you" : ""}\nGo to this ${agent.agent === null ? "session" : "worker"}`;

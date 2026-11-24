@@ -9,6 +9,9 @@ code:empty { display: none; }
 .sp { flex: 1; }
 .empty { color: var(--muted); margin: 0; }
 [hidden] { display: none !important; }
+/* Words for assistive tech alone (#456): kept in the page, drawn nowhere. */
+.visually-hidden { position: absolute; width: var(--hair); height: var(--hair); margin: calc(-1 * var(--hair)); padding: 0; border: 0;
+                   clip-path: inset(50%); white-space: nowrap; }
 
 /* Focus: the studio's own grey ring, not macOS blue, and only from the keyboard. */
 :focus { outline: none; }
@@ -371,6 +374,7 @@ h1 { margin: 0 0 var(--sp-4); }
        padding: var(--sp-5); width: var(--popover); }
 .ask::backdrop { background: var(--backdrop); }
 .ask p { margin: 0 0 var(--sp-4); }
+.ask-title { margin: 0 0 var(--sp-4); font-size: var(--size-read); font-weight: 600; }
 .ask label { display: block; margin-bottom: var(--sp-3); }
 .ask input { width: 100%; box-sizing: border-box; font: inherit; padding: var(--sp-3); background: var(--raised); color: var(--fg);
              border: var(--hair) solid var(--field-edge); border-radius: var(--radius); }
@@ -410,8 +414,8 @@ h1 { margin: 0 0 var(--sp-4); }
 .subagent-log .log-call.running { color: var(--muted); }
 .subagent-log .log-call summary { cursor: pointer; list-style: none; padding: var(--sp-2) var(--sp-4); border-radius: var(--radius-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .subagent-log .log-call summary::-webkit-details-marker { display: none; }
-.subagent-log .log-call summary::before { content: "\25B8"; display: inline-block; width: var(--glyph); margin-right: var(--sp-4); color: var(--muted); }
-.subagent-log .log-call[open] summary::before { content: "\25BE"; }
+.subagent-log .log-call summary::before { content: "\25B8" / ""; display: inline-block; width: var(--glyph); margin-right: var(--sp-4); color: var(--muted); }
+.subagent-log .log-call[open] summary::before { content: "\25BE" / ""; }
 .subagent-log .log-call summary:hover { background: var(--hover); }
 .subagent-log .log-error { margin-left: var(--sp-4); font-size: var(--size-xs); color: var(--conflict); }
 .subagent-log .log-result { font: var(--size-small)/var(--term-line) var(--mono); white-space: pre-wrap; margin: var(--sp-2) 0 var(--sp-4) var(--sp-5); padding: var(--sp-4) var(--sp-5); background: var(--surface); border-radius: var(--radius-small); color: var(--muted); max-height: 12em; overflow: auto; }
@@ -429,8 +433,8 @@ h1 { margin: 0 0 var(--sp-4); }
 /* The evidence line (#113): one line of recorded facts that opens in place. */
 .evidence { margin: 0 0 var(--sp-4); font-size: var(--size-small); }
 .evidence-toggle { display: block; width: 100%; text-align: start; background: none; border: 0; padding: var(--sp-2) 0; color: var(--muted); cursor: pointer; }
-.evidence-toggle::before { content: "▸"; display: inline-block; width: var(--sp-5); }
-.evidence-toggle[aria-expanded="true"]::before { content: "▾"; }
+.evidence-toggle::before { content: "▸" / ""; display: inline-block; width: var(--sp-5); }
+.evidence-toggle[aria-expanded="true"]::before { content: "▾" / ""; }
 .evidence-rows { list-style: none; margin: 0; padding: 0 0 0 var(--sp-5); }
 .evidence-rows[hidden], .evidence-output[hidden], .evidence-hunk[hidden], .evidence-edit[hidden] { display: none; }
 .evidence-rows li { margin: 0 0 var(--sp-2); min-width: 0; overflow-wrap: anywhere; }

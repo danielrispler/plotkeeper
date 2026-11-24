@@ -7,7 +7,7 @@
 
 import { modelLine, reports } from "./capabilities.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
-import { age, code, element, failure, fullTitle, invoke, pressable, prose, text } from "./dom.js";
+import { age, code, element, failure, fullTitle, glyphOnly, invoke, pressable, prose, text, unseenWords } from "./dom.js";
 import { select } from "./selection.js";
 import { askAnchor } from "./ask.js";
 import { rendered } from "./markdown.js";
@@ -184,7 +184,7 @@ export function subagentHistory(session: Pick<Session, "agents" | "capabilities"
 
 // A subagent's entry in the turn that ran it; its click opens that subagent.
 function historyElement(session: string, entry: HistoryEntry): HTMLElement {
-  const button = pressable(document.createElement("button"), false, () => select(session, entry.agent));
+  const button = pressable(document.createElement("button"), null, () => select(session, entry.agent));
   button.classList.add("subagent");
   const lines = [text("span", entry.purpose, "asked"), ...(entry.asked ? [prose("span", entry.asked)] : [])];
   button.append(...lines, prose("span", entry.result), text("span", entry.details, "kind"));
@@ -519,19 +519,20 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
     const { headline } = headlineOf(summary, turn.message);
     const open = opened.has(key);
     const line = foldedLine(turn, headline);
-    const button = pressable(document.createElement("button"), open, () => {
+    const button = pressable(document.createElement("button"), null, () => {
       if (opened.has(key)) opened.delete(key);
       else opened.add(key);
       draw();
     });
     button.classList.add("turn-line");
     // The line's prompt and Headline carry their own full text; the rest of the line says what a click does (#220).
-    button.title = open ? "Fold this turn" : "Unfold this turn";
+    button.title = "Fold or unfold this turn";
     button.setAttribute("aria-expanded", String(open));
     button.append(
       fullTitle(text("span", line.prompt, "prompt"), turn.prompt.trim() || line.prompt),
       fullTitle(text("span", line.headline ?? "", "headline-text"), line.headline),
-      ...(line.failed ? [text("span", "✕", "mark check-failed")] : []),
+      // The ✕ is for the eye; assistive tech hears "failed" once (#456).
+      ...(line.failed ? [glyphOnly("✕", "mark check-failed"), unseenWords("failed")] : []),
     );
     if (line.failed) button.querySelector(".check-failed")!.setAttribute("title", "A check ended failed");
     node.replaceChildren(button, ...(open ? [...turnContent(session, block, null).children] : []));

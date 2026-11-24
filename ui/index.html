@@ -139,8 +139,9 @@
     </section>
   </div>
   <!-- The questions of rename and close (danielrispler/Falinks#469). -->
-  <dialog id="rename-dialog" class="ask">
+  <dialog id="rename-dialog" class="ask" aria-labelledby="rename-heading">
     <form method="dialog">
+      <h2 id="rename-heading" class="ask-title">Rename session</h2>
       <label for="rename-field">Name this session</label>
       <input id="rename-field" autocomplete="off" spellcheck="false" autofocus>
       <!-- The default button comes first, so Enter in the field renames. -->
@@ -148,8 +149,9 @@
     </form>
   </dialog>
   <!-- Delete: the row leaves the list; its cards are kept. -->
-  <dialog id="delete-dialog" class="ask">
+  <dialog id="delete-dialog" class="ask" aria-labelledby="delete-heading">
     <form method="dialog">
+      <h2 id="delete-heading" class="ask-title">Delete session?</h2>
       <p>Delete <strong id="delete-name"></strong> from the list? Its cards are kept.</p>
       <div class="ask-buttons"><button type="submit" class="btn" value="delete" title="Remove it from the list">Delete</button><button type="submit" class="btn" value="cancel" autofocus title="Keep it (Esc)">Cancel</button></div>
     </form>

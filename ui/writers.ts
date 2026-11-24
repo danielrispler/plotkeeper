@@ -149,6 +149,7 @@ function draw(panel: HTMLElement, hooks: Hooks) {
     const line = testLine(outcome);
     const shown = text("p", line.text, `writer-outcome ${line.passed ? "passed" : "failed"}`);
     shown.id = "writer-outcome";
+    shown.setAttribute("role", "status");
     nodes.push(shown);
   } else if (!known.summaries_on) {
     nodes.push(text("p", "Summaries are off until a writer passes Test.", "writer-outcome"));
@@ -217,11 +218,21 @@ function keyRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[]
   }
   const nodes = [state, row];
   if (keyErrors.anthropic) {
-    const shown = text("p", keyErrors.anthropic, "writer-outcome failed");
-    shown.id = "writer-key-error";
-    nodes.push(shown);
+    nodes.push(keyError(keyErrors.anthropic, "writer-key-error", [input]));
   }
   return nodes;
+}
+
+// A key's error, announced as a status and tied to the `fields` it is about (#456).
+function keyError(words: string, id: string, fields: HTMLElement[]): HTMLElement {
+  const shown = text("p", words, "writer-outcome failed");
+  shown.id = id;
+  shown.setAttribute("role", "status");
+  for (const field of fields) {
+    field.setAttribute("aria-invalid", "true");
+    field.setAttribute("aria-describedby", id);
+  }
+  return shown;
 }
 
 // The OpenAI-compatible writer's model: any id its endpoint serves, typed, with the listed ones offered.
@@ -314,9 +325,7 @@ function openaiRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElemen
   }
   const nodes = [state, row, keyRow];
   if (keyErrors.openai) {
-    const shown = text("p", keyErrors.openai, "writer-outcome failed");
-    shown.id = "writer-openai-error";
-    nodes.push(shown);
+    nodes.push(keyError(keyErrors.openai, "writer-openai-error", [base, input]));
   }
   return nodes;
 }

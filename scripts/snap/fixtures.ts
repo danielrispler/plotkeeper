@@ -257,6 +257,32 @@ const mapPreFlight = (): Fixture =>
     }),
     snapDone: "pre-flight ok",
   });
+// #456: the pre-flight's reading, predicting and failed states are announced politely (role="status").
+const mapPreFlightStatus = (): Fixture =>
+  mapOpened(`
+      const box = document.getElementById("map-pre-flight");
+      const status = (words, why) => {
+        const node = [...box.querySelectorAll("p")].find((each) => each.textContent.includes(words));
+        if (!node) return log("snap:fail " + why + ": no line with " + JSON.stringify(words) + " in " + JSON.stringify(box.textContent));
+        if (node.getAttribute("role") !== "status") log("snap:fail " + why + " is not a status: " + node.outerHTML);
+      };
+      document.getElementById("pre-flight-button").click();
+      await wait(100);
+      status("Reading the open issues", "the issues' reading");
+      await wait(500);
+      const issue = box.querySelector(".pre-flight-issue");
+      if (!issue) return log("snap:fail the open issues never came");
+      issue.click();
+      await wait(50);
+      status("Asking the writer", "the prediction's wait");
+      await wait(500);
+      status("No prediction", "the failed prediction");
+      log("pre-flight status ok");`, {
+    map_state: mapState(),
+    pre_flight_issues: { __delay: 300, value: base.pre_flight_issues } as never,
+    pre_flight_predict: { __delay: 200, value: { __throw: "the writer is not set" } } as never,
+    snapDone: "pre-flight status ok",
+  });
 // Back a law (#398): Hook's law on trust offers Back a law; Core's law on trust has a proven patch, and Review opens the patch review over
 // the map with the test patch, the output with the test alone and with the plant, and Discard.
 const lawPatchDiff = [
@@ -404,6 +430,29 @@ const escBrief = `
       await wait(700);
       const after = [...document.querySelectorAll(".brief-dots i")].findIndex((d) => d.classList.contains("at"));
       if (after !== before) log("snap:fail the brief did not reopen at its step: " + before + " then " + after);`;
+// #456: a real Next and Back leave only the new step's title in the brief's one live region, the step itself is not live, and the dots
+// say "Step N of M".
+const mapBriefAnnounce = (): Fixture => ({
+  ...mapBrief(briefOf(storySteps()), 0, `
+      const box = document.getElementById("map-brief");
+      const count = ${storySteps().length};
+      const heard = (at, why) => {
+        const live = [...box.querySelectorAll("[aria-live], [role=status], [role=alert]")];
+        if (live.length !== 1 || live[0].getAttribute("aria-live") !== "polite") return log("snap:fail " + why + ": the brief has " + live.length + " live regions, not one polite");
+        const title = box.querySelector(".brief-title").textContent;
+        if (live[0].textContent !== title) log("snap:fail " + why + ": the live region holds " + JSON.stringify(live[0].textContent) + ", not the title " + JSON.stringify(title));
+        if (live[0].checkVisibility() && live[0].offsetWidth > 1) log("snap:fail " + why + ": the live region is drawn");
+        const dots = box.querySelector(".brief-dots");
+        if (dots.getAttribute("role") !== "img" || __snapName(dots) !== "Step " + at + " of " + count) log("snap:fail " + why + ": the dots read " + JSON.stringify(__snapName(dots)));
+      };
+      await __snapClick(document.getElementById("brief-next"));
+      await wait(500);
+      heard(2, "after Next");
+      await __snapClick(box.querySelector(".brief-back"));
+      await wait(500);
+      heard(1, "after Back");`, true),
+  realPointer: true,
+});
 const mapBriefStart = (): Fixture => mapBrief(briefOf(storySteps()), 0, `if (!document.querySelector("#map-brief .brief-title").textContent.includes("brings its own brief")) log("snap:fail first step");`);
 const mapBriefStory = (): Fixture => mapBrief(briefOf(storySteps(), false), 2, `${escBrief}
       if (!document.querySelector("#map-brief .brief-cites")) log("snap:fail the step shows no citations");
@@ -418,6 +467,12 @@ const fullFigure = (kind: string): BriefFigure => {
     : kind === "sequence"
       ? { kind, frame: null, items: [0, 1, 2, 3, 4].map((i) => ({ label: label(i), tone: i === 2 ? "live" : null, bad: null })), before: [], after: [] }
       : { kind, frame: null, items: [], before: [0, 1, 2, 3].map(label), after: [4, 5, 6, 7].map(label) };
+};
+// Each figure kind's accessible name, from `fullFigure`'s items (#456).
+const figureNames: Record<string, string> = {
+  states: "States of a terminal with a long name: a long label 1 here, a long label 2 here, a long label 3 here, a long label 4 here, a long label 5 here, a long label 6 here",
+  sequence: "Sequence: a long label 1 here, then a long label 2 here, then a long label 3 here, then a long label 4 here, then a long label 5 here",
+  compare: "Before: a long label 1 here, a long label 2 here, a long label 3 here, a long label 4 here. After: a long label 5 here, a long label 6 here, a long label 7 here, a long label 8 here",
 };
 // The card's geometry, read in the page: the card, its scrolling step, the step's words and figure, and Back and Next.
 const cardBox = `
@@ -434,7 +489,10 @@ const mapBriefFigure = (kind: string): Fixture =>
       if (figure.top < words.bottom - 1) log("snap:fail the figure is not under the step's words: " + figure.top + " above " + words.bottom);
       if (figure.left < inside.left - 1 || figure.right > inside.right + 1) log("snap:fail the figure overflows the card: " + figure.left + "-" + figure.right + " in " + inside.left + "-" + inside.right);
       if (cols.scrollWidth > cols.clientWidth) log("snap:fail the step scrolls sideways: " + cols.scrollWidth + " in " + cols.clientWidth);
-      if (figure.width < 200) log("snap:fail the figure is cramped: " + figure.width);`);
+      if (figure.width < 200) log("snap:fail the figure is cramped: " + figure.width);
+      // #456: the figure is named by its kind and items.
+      const named = __snapName(document.querySelector("#map-brief .brief-fig"));
+      if (named !== ${JSON.stringify(figureNames[kind])}) log("snap:fail the figure is named " + JSON.stringify(named));`);
 // Each step is as tall as its own words, the card keeps one narrow width, and Back and Next keep their place (#449).
 const mapBriefHeights = (): Fixture =>
   mapBrief(briefOf(storySteps()), 0, `${cardBox}
@@ -2308,7 +2366,8 @@ export const fixtures = {
       test_writer: { outcome: "not_logged_in", line: "`claude` is not logged in. Run `claude` in a terminal and log in with /login.", settings: null },
     }, `
       const outcome = document.getElementById("writer-outcome");
-      if (!outcome?.classList.contains("failed") || !outcome.textContent.includes("/login")) log("snap:fail no failed outcome with its fix: " + outcome?.textContent);`, true),
+      if (!outcome?.classList.contains("failed") || !outcome.textContent.includes("/login")) log("snap:fail no failed outcome with its fix: " + outcome?.textContent);
+      if (outcome?.getAttribute("role") !== "status") log("snap:fail the Test's outcome is not a status");`, true),
   // No API key set (#366): the writer is listed but cannot be picked, and the key row offers to add one.
   writersKeyNotSet: () =>
     writersOpen({ writers: { writers: [anthropicWriter, claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: null } }, `
@@ -2357,6 +2416,20 @@ export const fixtures = {
     }, `
       if (!document.getElementById("writer-briefs")?.textContent.includes("briefs need Claude")) log("snap:fail no briefs need Claude line");
       if (document.getElementById("writer-model").value !== "gemini-4-neon-high") log("snap:fail the model in effect is not shown");`),
+  // #456: a key the Keychain refuses: its error is a status, tied to the key's field.
+  writersKeyError: () =>
+    writersOpen({
+      writers: { writers: [anthropicWriter, claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: null },
+      set_api_key: { __throw: "the Keychain refused the key" } as never,
+    }, `
+      document.getElementById("writer-key").value = "sk-ant-not-a-key";
+      document.getElementById("writer-key-save").click();
+      await wait(300);
+      const error = document.getElementById("writer-key-error");
+      if (!error?.textContent.includes("Keychain refused")) return log("snap:fail no key error: " + error?.textContent);
+      if (error.getAttribute("role") !== "status") log("snap:fail the key error is not a status");
+      const field = document.getElementById("writer-key");
+      if (field.getAttribute("aria-invalid") !== "true" || !(field.getAttribute("aria-describedby") ?? "").split(" ").includes("writer-key-error")) log("snap:fail the key error is not tied to its field");`),
   writersListNarrow: (): Fixture => fixtures.writersList(),
   writersPassedNarrow: (): Fixture => fixtures.writersPassed(),
   writersFailedNarrow: (): Fixture => fixtures.writersFailed(),
@@ -2366,6 +2439,7 @@ export const fixtures = {
   mapRuns,
   // The contrast pass (#455) runs here too.
   mapPreFlight: (): Fixture => ({ ...mapPreFlight(), contrast: true }),
+  mapPreFlightStatus,
   mapMicroWorld,
   mapRunsPaused,
   mapBackLaw,
@@ -2374,6 +2448,7 @@ export const fixtures = {
   mapBriefStart,
   // The contrast pass (#455) runs here too.
   mapBriefStory: (): Fixture => ({ ...mapBriefStory(), contrast: true }),
+  mapBriefAnnounce,
   mapBriefStates: () => mapBriefFigure("states"),
   mapBriefSequence: () => mapBriefFigure("sequence"),
   mapBriefCompare: () => mapBriefFigure("compare"),

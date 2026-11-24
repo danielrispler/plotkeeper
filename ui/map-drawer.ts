@@ -50,6 +50,7 @@ function drawDrawer(view: MapView) {
   const { drawer } = open;
   const closer = text("button", "×", "btn quiet sheet-close");
   closer.title = "Close the drawer";
+  closer.setAttribute("aria-label", "Close");
   closer.addEventListener("click", closeDrawer);
   const card = text("div", "", "drawer");
   card.append(closer, text("h2", drawer.title, "drawer-title"));

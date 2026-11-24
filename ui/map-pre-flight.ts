@@ -72,9 +72,16 @@ const button = (words: string, title: string, click: () => void, kind = "") => {
   return node;
 };
 
+// A line that says what the overlay is doing, or why it failed, announced politely (#456).
+const status = (words: string, className: string) => {
+  const node = text("p", words, className);
+  node.setAttribute("role", "status");
+  return node;
+};
+
 function startNodes(issues: OpenIssue[] | null, act: PreFlightActs): HTMLElement[] {
   const list = text("div", "", "pre-flight-issues");
-  if (issues === null) list.append(text("p", "Reading the open issues…", "empty"));
+  if (issues === null) list.append(status("Reading the open issues…", "empty"));
   else if (!issues.length) list.append(text("p", "No open issues.", "empty"));
   else list.append(...issues.map((issue) => button(`#${issue.number} ${issue.title}`, "Predict the parts this issue will cross", () => act.predict(issue.number, ""), "quiet pre-flight-issue")));
   const field = document.createElement("textarea");
@@ -94,7 +101,7 @@ function startNodes(issues: OpenIssue[] | null, act: PreFlightActs): HTMLElement
 
 function pickNodes(why: string | null, doc: LoadedMap, act: PreFlightActs): HTMLElement[] {
   const nodes: HTMLElement[] = [];
-  if (why) nodes.push(text("p", `No prediction: ${why}. Pick the parts by hand.`, "pre-flight-why"));
+  if (why) nodes.push(status(`No prediction: ${why}. Pick the parts by hand.`, "pre-flight-why"));
   const boxes = doc.parts.map((part) => {
     const box = document.createElement("input");
     box.type = "checkbox";
@@ -139,7 +146,7 @@ export function preFlightNodes(phase: Phase, doc: LoadedMap, state: MapState, ac
     case "start":
       return [head, ...startNodes(phase.issues, act)];
     case "predicting":
-      return [head, text("p", "Asking the writer which parts this will cross…", "empty")];
+      return [head, status("Asking the writer which parts this will cross…", "empty")];
     case "pick":
       return [head, ...pickNodes(phase.why, doc, act)];
     case "result":

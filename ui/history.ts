@@ -36,9 +36,8 @@ let query = "";
 export function historyLink(sessions: Pick<Session, "state">[], open: () => void): HTMLElement[] {
   const count = sessions.filter((s) => s.state === "ended").length;
   if (!count) return [];
-  const link = pressable(text("button", `History · ${count}`, "history-link"), false, open);
+  const link = pressable(text("button", `History · ${count}`, "history-link"), null, open);
   link.title = "Show the ended sessions";
-  link.removeAttribute("aria-pressed");
   link.dataset.key = "history";
   return [link];
 }

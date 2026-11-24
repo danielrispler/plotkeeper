@@ -295,8 +295,7 @@ function drawEmpty(body: HTMLElement, state: MapState | null) {
     // A saved project whose folder was moved or deleted (#381): never an error, and Remove project is here.
     const gone = project;
     box.classList.add("map-gone");
-    const remove = pressable(text("button", "Remove project", "btn"), false, () => deps.removeProject(gone));
-    remove.removeAttribute("aria-pressed");
+    const remove = pressable(text("button", "Remove project", "btn"), null, () => deps.removeProject(gone));
     remove.title = "Take this project off the list; its sessions stay in History";
     box.append(text("p", "This folder is gone", "map-empty-title"), text("p", `${gone} was moved or deleted. Its ended sessions stay in History.`, "empty"), remove);
   } else if (project === null) {

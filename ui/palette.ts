@@ -19,8 +19,7 @@ export function showPalette(entries: Entry[], run: (binding: Binding) => void) {
     picker.hidePopover();
     run(entry.binding);
   };
-  const close = pressable(text("button", "×", "palette-close"), false, () => picker.hidePopover());
-  close.removeAttribute("aria-pressed");
+  const close = pressable(text("button", "×", "palette-close"), null, () => picker.hidePopover());
   close.setAttribute("aria-label", "Close");
   close.title = "Close the palette (esc)";
   const form = document.createElement("form");
@@ -40,8 +39,7 @@ export function showPalette(entries: Entry[], run: (binding: Binding) => void) {
   const draw = () => {
     rows.replaceChildren(
       ...shown().map((entry, index) => {
-        const button = pressable(document.createElement("button"), false, () => choose(entry));
-        button.removeAttribute("aria-pressed");
+        const button = pressable(document.createElement("button"), null, () => choose(entry));
         button.classList.add("row");
         button.id = `palette-option-${index}`;
         button.tabIndex = -1;
