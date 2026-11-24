@@ -201,19 +201,27 @@ h1 { margin: 0 0 var(--sp-4); }
 .toast.note .name { color: var(--fg); }
 #probe { position: absolute; visibility: hidden; white-space: pre; font: var(--term-size)/var(--term-line) var(--mono); }
 
-/* The rail (danielrispler/Falinks#574): one header line, the open question docked under it, then the story: "now" and the
+/* The rail (danielrispler/Falinks#574): a header of two lines (#444), the open question docked under it, then the story: "now" and the
    feed of turns. It shows in the left panel over the map (#385, #386). */
 .rail { display: grid; grid-template-rows: auto auto 1fr; grid-template-columns: minmax(0, 1fr); }
-.rail-h { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-4) var(--sp-5); min-height: var(--sp-7); }
-/* Line 1 the verdict, the block's kind, the mode and the agent's mark; line 2 the session's name; line 3 the estimate while it
-   runs. They wrap, never cut; the times and the model are the hover text. */
-.headline { flex: 1; min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.rail-h { display: flex; align-items: flex-start; gap: var(--sp-4); padding: var(--sp-4) var(--sp-5); min-height: var(--sp-7); }
+/* Two lines (#444). Line 1 the agent's mark and the session's name, on one line: a name too long for the rail ends in a CSS ellipsis,
+   never a cut in script, with its full text in the page and on hover. Line 2, muted, one line too: the verdict, the block's kind, the
+   mode and, while it runs, the estimate, joined by "·". The verdict and the mode never shrink, a safety fact (danielrispler/Falinks#541);
+   the block's kind and the estimate end in "…" when the rail is too narrow. The times and the model are the headline's hover text. */
+.headline { flex: 1; min-width: 0; margin: 0; }
 .headline p { margin: 0; }
-.line-1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2) var(--sp-4); }
-.session-name { font-weight: 500; }
+.line-1 { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.line-1 .mark { flex: none; display: inline-flex; }
+.session-name { flex: 1; min-width: 0; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.line-2 { display: flex; align-items: baseline; gap: var(--sp-3); min-width: 0; margin-top: var(--sp-1); color: var(--muted);
+          font-size: var(--size-small); white-space: nowrap; }
+.line-2 > * { flex: none; }
+.line-2 > .block, .line-2 > .phase { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.line-2 > :empty { display: none; }
+.line-2 > :not(:empty) ~ :not(:empty)::before { content: "·" / ""; margin-inline-end: var(--sp-3); color: var(--muted); font-weight: 400; }
 .block, .mark { color: var(--muted); font-size: var(--size-small); }
 .phase { color: var(--muted); font-size: var(--size-small); }
-.phase:empty { display: none; }
 /* The permission mode (danielrispler/Falinks#541): a safety fact, so it reads at a glance, before the phase. */
 .mode { font-size: var(--size-small); font-weight: 600; }
 /* The "⋯" menu: Open, Rename, Close, Open all, Close all and Delete, under the button, over the story. */
@@ -230,7 +238,7 @@ h1 { margin: 0 0 var(--sp-4); }
 .notice-row .btn { flex: none; }
 /* Colour only on "needs you" (danielrispler/Falinks#328, module 3; danielrispler/Falinks#565, decision 1): "your turn" stays as neutral as "running". */
 .state { font-size: var(--size); font-weight: 600; margin: 0 0 var(--sp-3); }
-.headline .state { margin: 0; }
+.headline .state { margin: 0; font-size: var(--size-small); }
 .label { margin: 0 0 var(--sp-2); color: var(--muted); font-size: var(--size-small); }
 .dock .question > .state:not(.kept) { display: none; }
 #intention-label:not([hidden]) + p { font-size: var(--size); font-weight: 400; }

@@ -7,6 +7,8 @@ use serde_json::{Value, json};
 use studio_core::{NameRequest, Output, Studio};
 
 const ID: &str = "8c2f4b6d-1a3e-4d57-9b80-7e5a2c1f3d96";
+/// A written name of 7 words, which the 6-word cut ended mid-phrase before #444.
+const SEVEN: &str = "Merge the hook event types into one";
 const CWD: &str = "/Users/danielrispler/work/plotkeeper/.claude/worktrees/issue-37-one-event";
 
 fn event(name: &str, at: u64, extra: Value) -> String {
@@ -103,17 +105,15 @@ fn a_replayed_prompt_asks_for_nothing() {
 
 #[test]
 fn the_written_name_shows_loses_to_a_rename_and_survives_a_replay() {
-    let log = [
-        prompt(1_000, "Merge the event types"),
-        written("One event type"),
-    ];
+    // A written name of 7 words is kept whole: the writer's reply is no longer cut at 6 (#444).
+    let log = [prompt(1_000, "Merge the event types"), written(SEVEN)];
     let mut studio = Studio::replayed(&log);
     assert_eq!(
         studio.session(ID).unwrap().prompt_name.as_deref(),
-        Some("One event type")
+        Some(SEVEN)
     );
     let row = serde_json::to_value(studio.session(ID).unwrap()).unwrap();
-    assert_eq!(row["prompt_name"], "One event type");
+    assert_eq!(row["prompt_name"], SEVEN);
     assert_eq!(row["name"], Value::Null);
 
     // His rename is kept beside it; an empty one gives the prompt name back.
@@ -123,12 +123,12 @@ fn the_written_name_shows_loses_to_a_rename_and_survives_a_replay() {
     studio.replay(&rename("my name"));
     let session = studio.session(ID).unwrap();
     assert_eq!(session.name.as_deref(), Some("my name"));
-    assert_eq!(session.prompt_name.as_deref(), Some("One event type"));
+    assert_eq!(session.prompt_name.as_deref(), Some(SEVEN));
     studio.replay(&rename(""));
     assert_eq!(studio.session(ID).unwrap().name, None);
     assert_eq!(
         studio.session(ID).unwrap().prompt_name.as_deref(),
-        Some("One event type")
+        Some(SEVEN)
     );
 
     // A name for an unknown session adds no row.
