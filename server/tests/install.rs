@@ -5,9 +5,11 @@
 use std::{
     collections::BTreeMap,
     fs,
+    io::{Read, Write},
     os::unix::fs::{FileTypeExt, PermissionsExt},
     path::{Path, PathBuf},
-    process::{Command, Output, Stdio},
+    process::{Child, Command, Output, Stdio},
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -97,10 +99,21 @@ esac"#,
         out
     }
 
+    fn run_args(&self, args: &[&str]) -> Output {
+        let out = self.run_with(args);
+        assert!(out.status.success(), "plotkeeper {args:?} failed: {out:?}");
+        out
+    }
+
     /// Runs `plotkeeper verb`, which may fail.
     fn run_any(&self, verb: &str) -> Output {
+        self.run_with(&[verb])
+    }
+
+    fn run_with(&self, args: &[&str]) -> Output {
+        let verb = args.join(" ");
         let mut child = Command::new(self.tools.join("plotkeeper"))
-            .arg(verb)
+            .args(args)
             .env("HOME", &self.home)
             .env("PATH", format!("{}:/usr/bin:/bin", self.tools.display()))
             .env("PLOTKEEPER_NO_BROWSER", "1")
@@ -119,6 +132,59 @@ esac"#,
             std::thread::sleep(Duration::from_millis(20));
         }
         child.wait_with_output().unwrap()
+    }
+
+    fn starting(&self, terminal: bool) -> Command {
+        let mut command = if terminal {
+            let mut script = Command::new("/usr/bin/script");
+            script
+                .args(["-q", "/dev/null"])
+                .arg(self.tools.join("plotkeeper"));
+            script
+        } else {
+            Command::new(self.tools.join("plotkeeper"))
+        };
+        command
+            .env("HOME", &self.home)
+            .env("PATH", format!("{}:/usr/bin:/bin", self.tools.display()))
+            .env("PLOTKEEPER_NO_BROWSER", "1")
+            .env("PLOTKEEPER_CARD_WRITER", "fake")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        command
+    }
+
+    /// A bare `plotkeeper` start in a terminal, given through macOS's `/usr/bin/script`: each `Wire these? [Y/n]` it
+    /// asks is answered with the next of `answers`, and once it prints its address it is stopped with Ctrl+C. Returns
+    /// all it printed, with the terminal's line endings made plain.
+    fn start(&self, answers: &[&str]) -> String {
+        let mut child = self.starting(true).stdin(Stdio::piped()).spawn().unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        let mut answered = 0;
+        let text = served(&mut child, |text, up| {
+            let asked = text.matches("Wire these? [Y/n]").count();
+            while answered < asked.min(answers.len()) {
+                writeln!(stdin, "{}", answers[answered]).unwrap();
+                answered += 1;
+            }
+            if up {
+                // Ctrl+C, through the terminal.
+                let _ = stdin.write_all(b"\x03");
+            }
+        });
+        text.replace("\r\n", "\n")
+    }
+
+    /// A bare `plotkeeper` start with no terminal: its stdin is not one. Stopped with SIGINT once it prints its
+    /// address; returns all it printed.
+    fn start_without_terminal(&self) -> String {
+        let mut child = self.starting(false).stdin(Stdio::null()).spawn().unwrap();
+        let pid = child.id().to_string();
+        served(&mut child, |_, up| {
+            if up {
+                let _ = Command::new("kill").args(["-INT", &pid]).status();
+            }
+        })
     }
 
     fn calls(&self, tool: &str) -> Vec<String> {
@@ -142,6 +208,56 @@ esac"#,
     fn bin(&self) -> String {
         self.data().join("bin").display().to_string()
     }
+}
+
+/// Reads what `child` prints, its stdout and stderr, until it exits, calling `each` with all of it so far and whether
+/// the server's address is in it, so `each` can answer and, once the server serves, stop it. A start that does not
+/// end within 30 seconds fails.
+fn served(child: &mut Child, mut each: impl FnMut(&str, bool)) -> String {
+    let text = Arc::new(Mutex::new(String::new()));
+    let readers: Vec<_> = [
+        child
+            .stdout
+            .take()
+            .map(|o| Box::new(o) as Box<dyn Read + Send>),
+        child
+            .stderr
+            .take()
+            .map(|e| Box::new(e) as Box<dyn Read + Send>),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|mut from| {
+        let text = text.clone();
+        std::thread::spawn(move || {
+            let mut buf = [0; 4096];
+            while let Ok(n @ 1..) = from.read(&mut buf) {
+                text.lock()
+                    .unwrap()
+                    .push_str(&String::from_utf8_lossy(&buf[..n]));
+            }
+        })
+    })
+    .collect();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut stopped = false;
+    while child.try_wait().unwrap().is_none() {
+        let now = text.lock().unwrap().clone();
+        let up = now.contains("plotkeeper: http");
+        if !stopped {
+            each(&now, up);
+            stopped = up;
+        }
+        if Instant::now() > deadline {
+            child.kill().unwrap();
+            panic!("the start did not end:\n{now}");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    for reader in readers {
+        reader.join().unwrap();
+    }
+    text.lock().unwrap().clone()
 }
 
 fn script(path: &Path, body: &str) {
@@ -1003,4 +1119,170 @@ fn every_codex_recording_hook_runs_in_the_background() {
     for handler in handlers {
         assert_eq!(handler["async"], true, "{handler}");
     }
+}
+
+/// What a start says when it wires nothing and asks nothing, so a test can tell a start that asked.
+const ASK: &str = "Wire these? [Y/n]";
+
+#[test]
+fn a_first_start_answered_yes_wires_every_harness_found_and_serves() {
+    let machine = Machine::new(true, false).with_codex();
+    let text = machine.start(&["y"]);
+    assert!(text.contains(ASK), "{text}");
+    for line in [
+        "Claude Code: claude plugin install plotkeeper@plotkeeper",
+        "Codex: add plotkeeper's hooks to",
+        "agy: `agy` not found, skipped",
+        &machine.bin(),
+        "events stay on this machine",
+        "plotkeeper uninstall",
+    ] {
+        assert!(text.contains(line), "{line:?} not in:\n{text}");
+    }
+    assert!(text.contains("plotkeeper: http"), "{text}");
+    assert!(
+        machine
+            .calls("claude")
+            .contains(&"plugin install plotkeeper@plotkeeper".to_owned()),
+        "{:?}",
+        machine.calls("claude")
+    );
+    assert!(!codex_commands(&machine).0.is_empty());
+
+    // Both are answered, so the next start asks nothing and runs no harness CLI.
+    let calls = machine.calls("claude").len();
+    let text = machine.start(&[]);
+    assert!(!text.contains(ASK), "{text}");
+    assert!(text.contains("plotkeeper: http"), "{text}");
+    assert_eq!(machine.calls("claude").len(), calls);
+}
+
+#[test]
+fn a_first_start_answered_no_wires_nothing_serves_and_never_asks_again() {
+    let machine = Machine::new(true, false).with_codex();
+    let text = machine.start(&["n"]);
+    assert!(text.contains(ASK), "{text}");
+    assert!(text.contains("plotkeeper: http"), "{text}");
+    assert!(
+        machine.calls("claude").is_empty(),
+        "{:?}",
+        machine.calls("claude")
+    );
+    assert!(!machine.home.join(".codex/hooks.json").exists());
+
+    let text = machine.start(&[]);
+    assert!(!text.contains(ASK), "{text}");
+    assert!(text.contains("plotkeeper: http"), "{text}");
+    assert!(machine.calls("claude").is_empty());
+}
+
+#[test]
+fn a_harness_found_after_the_first_start_is_asked_about_alone() {
+    let machine = Machine::new(true, false);
+    machine.start(&["y"]);
+    let calls = machine.calls("claude").len();
+    let machine = machine.with_codex();
+
+    let text = machine.start(&["y"]);
+    assert_eq!(text.matches(ASK).count(), 1, "{text}");
+    assert!(text.contains("Codex: add plotkeeper's hooks to"), "{text}");
+    assert!(!text.contains("Claude Code: claude plugin"), "{text}");
+    assert_eq!(
+        machine.calls("claude").len(),
+        calls,
+        "Claude Code is not wired again"
+    );
+    assert!(!codex_commands(&machine).0.is_empty());
+}
+
+#[test]
+fn a_start_with_no_terminal_never_asks_wires_or_stores_an_answer() {
+    let machine = Machine::new(true, false).with_codex();
+    let text = machine.start_without_terminal();
+    assert!(!text.contains(ASK), "{text}");
+    assert!(text.contains("plotkeeper install --yes"), "{text}");
+    assert!(text.contains("plotkeeper: http"), "{text}");
+    assert!(machine.calls("claude").is_empty());
+    assert!(!machine.home.join(".codex/hooks.json").exists());
+
+    // No answer was stored, so a start in a terminal asks.
+    let text = machine.start(&["n"]);
+    assert!(text.contains(ASK), "{text}");
+}
+
+#[test]
+fn install_yes_wires_without_a_question_and_after_uninstall_a_start_asks_again() {
+    let machine = Machine::new(true, false).with_codex();
+    let out = machine.run_args(&["install", "--yes"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(!text.contains(ASK), "{text}");
+    assert!(
+        machine
+            .calls("claude")
+            .contains(&"plugin install plotkeeper@plotkeeper".to_owned())
+    );
+    assert!(!machine.start(&[]).contains(ASK));
+
+    machine.run("uninstall");
+    let text = machine.start(&["n"]);
+    assert!(text.contains(ASK), "{text}");
+    assert!(
+        text.contains("Claude Code: claude plugin install"),
+        "{text}"
+    );
+    assert!(text.contains("Codex: add plotkeeper's hooks to"), "{text}");
+}
+
+#[test]
+fn a_declined_harness_is_wired_by_install_and_the_round_trip_stays_byte_identical() {
+    let machine = Machine::new(true, false).with_codex();
+    machine.write(".codex/hooks.json", CODEX_OWN);
+    machine.start(&["n"]);
+    let before = files(&machine.home);
+    machine.run("install");
+    assert!(
+        !codex_commands(&machine).0.is_empty(),
+        "install wires declined harnesses too"
+    );
+    machine.run("uninstall");
+    let after = files(&machine.home);
+    // Outside the data folder, which the start's server writes in, every file is as it was.
+    let outside = |files: &BTreeMap<String, Vec<u8>>| {
+        files
+            .iter()
+            .filter(|(p, _)| !p.starts_with("Library/Application Support/plotkeeper/"))
+            .map(|(p, b)| (p.clone(), b.clone()))
+            .collect::<BTreeMap<_, _>>()
+    };
+    assert_eq!(outside(&after), outside(&before));
+    // Uninstall forgot the answers too, so a start asks again.
+    assert!(machine.start(&["n"]).contains(ASK));
+}
+
+#[test]
+fn a_second_start_never_asks() {
+    let machine = Machine::new(true, false);
+    let mut first = machine
+        .starting(false)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    let mut lines = std::io::BufReader::new(first.stdout.take().unwrap());
+    while !line.starts_with("plotkeeper: http") {
+        line.clear();
+        assert_ne!(
+            std::io::BufRead::read_line(&mut lines, &mut line).unwrap(),
+            0,
+            "the first start printed no address"
+        );
+    }
+
+    let text = machine.start(&["y"]);
+    let _ = first.kill();
+    let _ = first.wait();
+    assert!(text.contains(line.trim()), "{text}");
+    assert!(!text.contains(ASK), "{text}");
+    assert!(machine.calls("claude").is_empty());
 }

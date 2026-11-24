@@ -35,9 +35,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
+    collections::BTreeMap,
     ffi::OsStr,
     fs,
-    io::Write,
+    io::{BufRead, Write},
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -94,6 +95,24 @@ struct State {
     /// plotkeeper's Qwen Code extension was installed with `qwen extensions` (#379).
     #[serde(default)]
     qwen: bool,
+    /// Each harness the user answered for, by its id (`claude`, `agy`, `codex`, `cursor`, `copilot`, `qwen`); a harness
+    /// with none has not been asked (#434).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    harnesses: BTreeMap<String, HarnessRecord>,
+}
+
+/// Install's record of one harness.
+#[derive(Serialize, Deserialize)]
+struct HarnessRecord {
+    answer: Answer,
+}
+
+/// The user's answer for a harness: `plotkeeper install` and a yes record it wired, a no declined.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Answer {
+    Wired,
+    Declined,
 }
 
 /// The folders install writes in the data folder: the plugins it renders, and its own record with the backups.
@@ -315,6 +334,18 @@ pub fn install(
     path: Option<&OsStr>,
     out: &mut dyn Write,
 ) -> Result<(), String> {
+    wire(home, beside, path, None, out)
+}
+
+/// Wires the harnesses found on `path`, or of those only the ones in `only`, and records each as wired. With `only`,
+/// the harnesses not found are not said.
+fn wire(
+    home: &Path,
+    beside: &Path,
+    path: Option<&OsStr>,
+    only: Option<&[Harness]>,
+    out: &mut dyn Write,
+) -> Result<(), String> {
     let bin = studio_hook::bin_dir(home);
     match hook_copies::refresh(beside, &bin)
         .map_err(|e| format!("could not copy the hook binaries: {e}"))?
@@ -354,11 +385,44 @@ pub fn install(
     }
     save(home, &state)?;
 
-    match on_path("claude", path) {
-        None => say(out, "Claude Code: `claude` not found, skipped"),
-        Some(claude) => {
+    for harness in HARNESSES {
+        if !harness.found(home, path) {
+            if only.is_none() {
+                say(out, harness.skipped());
+            }
+            continue;
+        }
+        if only.is_some_and(|only| !only.contains(&harness)) {
+            continue;
+        }
+        wire_one(harness, home, &bin, path, &backups, &mut state, out)?;
+        state.harnesses.insert(
+            harness.id().to_owned(),
+            HarnessRecord {
+                answer: Answer::Wired,
+            },
+        );
+        save(home, &state)?;
+    }
+    Ok(())
+}
+
+/// Wires one harness found on `path` to the hook binaries in `bin`, recording each step in `state` for uninstall.
+fn wire_one(
+    harness: Harness,
+    home: &Path,
+    bin: &Path,
+    path: Option<&OsStr>,
+    backups: &Path,
+    state: &mut State,
+    out: &mut dyn Write,
+) -> Result<(), String> {
+    let found = |name: &str| on_path(name, path).ok_or_else(|| format!("`{name}` not found"));
+    match harness {
+        Harness::Claude => {
+            let claude = found("claude")?;
             let dir = plugins_dir(home).join("claude");
-            render_claude(&dir, &bin)?;
+            render_claude(&dir, bin)?;
             if state.claude {
                 // A second install starts from none; either may already be gone.
                 let _ = run(
@@ -385,7 +449,7 @@ pub fn install(
                 ],
             )?;
             state.claude = true;
-            save(home, &state)?;
+            save(home, state)?;
             say(
                 out,
                 format!(
@@ -398,17 +462,14 @@ pub fn install(
                 &["plugin".as_ref(), "install".as_ref(), CLAUDE_ID.as_ref()],
             )?;
             state.claude_plugin_gone = false;
-            save(home, &state)?;
+            save(home, state)?;
             say(
                 out,
                 format!("Claude Code: claude plugin install {CLAUDE_ID}"),
             );
         }
-    }
-
-    match on_path("agy", path) {
-        None => say(out, "agy: `agy` not found, skipped"),
-        Some(agy) => {
+        Harness::Agy => {
+            let agy = found("agy")?;
             for name in [OLD_AGY_PLUGIN, agy_plugin::NAME] {
                 let installed = agy_plugin::installed(home, name);
                 let ours = name == agy_plugin::NAME && state.agy;
@@ -418,7 +479,7 @@ pub fn install(
                 copy_dir(&installed, &backups.join("agy").join(name))
                     .map_err(|e| format!("could not back up {}: {e}", installed.display()))?;
                 state.agy_backups.push(name.to_owned());
-                save(home, &state)?;
+                save(home, state)?;
                 if name == OLD_AGY_PLUGIN {
                     agy_plugin::uninstall(&agy, name, home)?;
                     say(
@@ -433,45 +494,228 @@ pub fn install(
             let dir = plugins_dir(home).join("agy").join(agy_plugin::NAME);
             agy_plugin::render(&dir, &bin.join("plotkeeper-hook"))?;
             state.agy = true;
-            save(home, &state)?;
+            save(home, state)?;
             agy_plugin::install(&agy, &dir, home)?;
             say(out, format!("agy: agy plugin install {}", dir.display()));
         }
+        Harness::Codex => {
+            codex_file(home).install(home, bin, state, |s| &mut s.codex, out)?;
+            say(out, CODEX_TRUST);
+        }
+        Harness::Cursor => {
+            cursor_file(home).install(home, bin, state, |s| &mut s.cursor, out)?;
+        }
+        Harness::Copilot => install_copilot(home, bin, &found("copilot")?, state, out)?,
+        Harness::Qwen => install_qwen(home, bin, &found("qwen")?, state, out)?,
     }
+    Ok(())
+}
 
-    match on_path("codex", path) {
-        None => say(out, "Codex: `codex` not found, skipped"),
-        Some(_) => {
-            codex_file(home).install(home, &bin, &mut state, |s| &mut s.codex, out)?;
-            say(
-                out,
-                "Codex: once, run `/hooks` in Codex and trust plotkeeper's hooks; Codex skips a hook until it is trusted",
-            );
+/// The harnesses plotkeeper wires, in the order install goes through them.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Harness {
+    Claude,
+    Agy,
+    Codex,
+    Cursor,
+    Copilot,
+    Qwen,
+}
+
+const HARNESSES: [Harness; 6] = [
+    Harness::Claude,
+    Harness::Agy,
+    Harness::Codex,
+    Harness::Cursor,
+    Harness::Copilot,
+    Harness::Qwen,
+];
+
+const CODEX_TRUST: &str = "Codex: once, run `/hooks` in Codex and trust plotkeeper's hooks; Codex skips a hook until it is trusted";
+
+impl Harness {
+    /// Its key in install's record.
+    fn id(self) -> &'static str {
+        match self {
+            Harness::Claude => "claude",
+            Harness::Agy => "agy",
+            Harness::Codex => "codex",
+            Harness::Cursor => "cursor",
+            Harness::Copilot => "copilot",
+            Harness::Qwen => "qwen",
         }
     }
 
-    // Cursor is found by its folder, which its IDE and its CLI make, or by its programs: the IDE's
-    // `cursor` and the CLI's `agent`.
-    let cursor = home.join(".cursor").is_dir()
-        || on_path("cursor", path).is_some()
-        || on_path("agent", path).is_some();
-    match cursor {
-        false => say(
+    fn label(self) -> &'static str {
+        match self {
+            Harness::Claude => "Claude Code",
+            Harness::Agy => "agy",
+            Harness::Codex => "Codex",
+            Harness::Cursor => "Cursor",
+            Harness::Copilot => "Copilot",
+            Harness::Qwen => "Qwen Code",
+        }
+    }
+
+    /// Whether it is on this machine: its program on `path`, or for Cursor its folder, which its IDE and its CLI
+    /// make, or its programs, the IDE's `cursor` and the CLI's `agent`.
+    fn found(self, home: &Path, path: Option<&OsStr>) -> bool {
+        match self {
+            Harness::Cursor => {
+                home.join(".cursor").is_dir()
+                    || on_path("cursor", path).is_some()
+                    || on_path("agent", path).is_some()
+            }
+            _ => on_path(self.id(), path).is_some(),
+        }
+    }
+
+    /// The line install prints when it is not found.
+    fn skipped(self) -> String {
+        match self {
+            Harness::Cursor => {
+                "Cursor: `~/.cursor`, `cursor` and `agent` not found, skipped".into()
+            }
+            _ => format!("{}: `{}` not found, skipped", self.label(), self.id()),
+        }
+    }
+
+    /// What wiring it would change, in the words install prints when it does.
+    fn plan(self, home: &Path) -> Vec<String> {
+        let plugins = plugins_dir(home);
+        match self {
+            Harness::Claude => vec![
+                format!(
+                    "Claude Code: claude plugin marketplace add {}",
+                    plugins.join("claude").display()
+                ),
+                format!("Claude Code: claude plugin install {CLAUDE_ID}"),
+            ],
+            Harness::Agy => vec![format!(
+                "agy: agy plugin install {}",
+                plugins.join("agy").join(agy_plugin::NAME).display()
+            )],
+            Harness::Codex => vec![
+                format!(
+                    "Codex: add plotkeeper's hooks to {} (a backup is kept)",
+                    codex_file(home).shown()
+                ),
+                CODEX_TRUST.to_owned(),
+            ],
+            Harness::Cursor => vec![format!(
+                "Cursor: add plotkeeper's hooks to {} (a backup is kept)",
+                cursor_file(home).shown()
+            )],
+            Harness::Copilot => vec![format!(
+                "Copilot: copilot plugin install {}",
+                plugins.join("copilot").join(NAME).display()
+            )],
+            Harness::Qwen => vec![format!(
+                "Qwen Code: qwen extensions install {}",
+                plugins.join("qwen").join(NAME).display()
+            )],
+        }
+    }
+
+    /// Its answer in `state`. A record from before answers were kept counts what install did there as wired.
+    fn answer(self, state: &State) -> Option<Answer> {
+        if let Some(record) = state.harnesses.get(self.id()) {
+            return Some(record.answer);
+        }
+        let wired = match self {
+            Harness::Claude => state.claude,
+            Harness::Agy => state.agy,
+            Harness::Codex => state.codex.is_some(),
+            Harness::Cursor => state.cursor.is_some(),
+            Harness::Copilot => state.copilot,
+            Harness::Qwen => state.qwen,
+        };
+        wired.then_some(Answer::Wired)
+    }
+}
+
+/// The consent step of a bare `plotkeeper` start (#434): for the harnesses found on `path` that have no answer yet, it
+/// prints what wiring them would change and asks `Wire these? [Y/n]` on `terminal`, then wires them on yes, with the
+/// hook binaries from `beside`, or records them as declined on no. With no terminal it asks nothing, wires nothing,
+/// records nothing and prints the command that wires. When every harness found has an answer, it does nothing.
+pub fn wire_on_start(
+    home: &Path,
+    beside: &Path,
+    path: Option<&OsStr>,
+    terminal: Option<&mut dyn BufRead>,
+    out: &mut dyn Write,
+) -> Result<(), String> {
+    let mut state = load(home)?.unwrap_or_default();
+    let unasked: Vec<Harness> = HARNESSES
+        .into_iter()
+        .filter(|h| h.found(home, path) && h.answer(&state).is_none())
+        .collect();
+    if unasked.is_empty() {
+        return Ok(());
+    }
+    let names: Vec<_> = unasked.iter().map(|h| h.label()).collect();
+    let not_asked = |out: &mut dyn Write| {
+        let _ = writeln!(
             out,
-            "Cursor: `~/.cursor`, `cursor` and `agent` not found, skipped",
+            "plotkeeper: {} not wired, as there is no terminal to ask in; to wire, run: plotkeeper install --yes",
+            names.join(", ")
+        );
+    };
+    let Some(terminal) = terminal else {
+        not_asked(out);
+        return Ok(());
+    };
+    let _ = writeln!(
+        out,
+        "plotkeeper can record these agents by wiring its hooks into them:"
+    );
+    for harness in &unasked {
+        for line in harness.plan(home) {
+            say(out, line);
+        }
+    }
+    for harness in HARNESSES {
+        if !harness.found(home, path) {
+            say(out, harness.skipped());
+        }
+    }
+    say(
+        out,
+        format!(
+            "hook binaries: copied into {}",
+            studio_hook::bin_dir(home).display()
         ),
-        true => cursor_file(home).install(home, &bin, &mut state, |s| &mut s.cursor, out)?,
+    );
+    say(
+        out,
+        "events stay on this machine, in plotkeeper's data folder",
+    );
+    say(out, "to undo it: plotkeeper uninstall");
+    let _ = write!(out, "Wire these? [Y/n] ");
+    let _ = out.flush();
+    let mut answer = String::new();
+    if terminal.read_line(&mut answer).unwrap_or(0) == 0 {
+        // The terminal closed before an answer.
+        let _ = writeln!(out);
+        not_asked(out);
+        return Ok(());
     }
-
-    match on_path("copilot", path) {
-        None => say(out, "Copilot: `copilot` not found, skipped"),
-        Some(copilot) => install_copilot(home, &bin, &copilot, &mut state, out)?,
+    if matches!(answer.trim().to_lowercase().as_str(), "" | "y" | "yes") {
+        return wire(home, beside, path, Some(&unasked), out);
     }
-
-    match on_path("qwen", path) {
-        None => say(out, "Qwen Code: `qwen` not found, skipped"),
-        Some(qwen) => install_qwen(home, &bin, &qwen, &mut state, out)?,
+    for harness in &unasked {
+        state.harnesses.insert(
+            harness.id().to_owned(),
+            HarnessRecord {
+                answer: Answer::Declined,
+            },
+        );
     }
+    save(home, &state)?;
+    let _ = writeln!(
+        out,
+        "plotkeeper: not wired; plotkeeper will not ask again. To wire later, run: plotkeeper install"
+    );
     Ok(())
 }
 
@@ -821,6 +1065,8 @@ pub fn uninstall(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Resu
         say(out, "plotkeeper install has not run here; nothing to undo");
         return Ok(());
     };
+    // Every answer is forgotten, so the next start asks again as on a first run.
+    state.harnesses.clear();
     let backups = record_dir(home).join("backups");
     let bin = studio_hook::bin_dir(home);
     let mut failed = 0;

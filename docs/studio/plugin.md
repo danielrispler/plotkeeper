@@ -1,12 +1,18 @@
 # Install and uninstall
 
-plotkeeper records an agent's sessions through hooks, which run on each of its events. Wire them once, from any terminal:
+plotkeeper records an agent's sessions through hooks, which run on each of its events. One command downloads plotkeeper, wires them and starts it:
 
-    plotkeeper install
+    npx plotkeeper
+
+`npm i -g plotkeeper` and then `plotkeeper` does the same with a fixed version on your `PATH`. A start of the server (#434), whichever way it was reached, asks before it wires anything. After taking the data folder's lock and refreshing the hook copies, it prints a summary: one line per harness found, in the words install prints when it wires it; the harnesses not found, as skipped; where the hook binaries go; that events stay on this machine; and that `plotkeeper uninstall` undoes it. Then it asks `Wire these? [Y/n]`, yes by default. On yes it wires those harnesses as install does; on no it wires nothing. It serves the page either way.
+
+- **The answers.** Install's record (`install/state.json` in the data folder) keeps one answer per harness, `wired` or `declined`, under `harnesses`. A start asks only about the harnesses it finds with no answer: a harness installed later is asked about on its own, and when every harness found has an answer the start asks nothing. A harness an install from before #434 wired counts as wired. A second start, one that finds a server running, never asks.
+- **No terminal.** When stdin is not a terminal, as from a script, a service or a pipe, the start never asks and never wires. It prints `plotkeeper install --yes`, stores no answer, so a later start in a terminal still asks, and serves.
+- **The verbs.** `plotkeeper install` wires every harness it finds, declined ones included, and records each as wired; running it is the consent, so it never asks. `plotkeeper install --yes` is the same, for scripts. `plotkeeper uninstall` also forgets every answer, so the next start asks again as on a first run.
 
 v1 supports Claude Code, Codex, agy and Cursor. Install wires Copilot and Qwen Code too, but they have not been trialled end to end, so they are v2, as are OpenCode and Cline, which nothing records yet ([decision](https://github.com/danielrispler/plotkeeper/issues/320#issuecomment-7127930696), #423).
 
-Install works at user level, never in a repository, so your git trees stay clean. It prints each step, and a harness it does not find on the `PATH` is skipped with one line:
+Install, whether from a start's yes or from `plotkeeper install`, works at user level, never in a repository, so your git trees stay clean. It prints each step, and a harness it does not find on the `PATH` is skipped with one line:
 
 - It copies `plotkeeper-hook` and `plotkeeper-answer`, from beside the `plotkeeper` executable, into the data folder's `bin/` (`~/Library/Application Support/plotkeeper/bin/`). Every hook names that folder, in quotes since the path has a space, never a checkout or an npm folder, and each `plotkeeper` start brings the copies up to the binaries beside it (#356), so an upgrade reaches the hooks at the next start.
 - **Claude Code**: it renders `plugin/` with that path into `plugins/claude/` in the data folder, as a local marketplace of one plugin, and runs `claude plugin marketplace add` on it and `claude plugin install plotkeeper@plotkeeper`. `claude` writes `enabledPlugins` and `extraKnownMarketplaces` into `~/.claude/settings.json`; plotkeeper never opens that file (AGENTS.md, Hard rules), and puts no hook in any `settings.json`. The plugin shows as `plotkeeper@plotkeeper` in `claude plugin list`.

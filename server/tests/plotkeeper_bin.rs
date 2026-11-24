@@ -7,9 +7,13 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// A start with no harness on the PATH and no terminal, so it neither asks nor wires (#434) and its first line is the
+/// address.
 fn plotkeeper(home: &std::path::Path) -> Child {
     Command::new(env!("CARGO_BIN_EXE_plotkeeper"))
         .env("HOME", home)
+        .env("PATH", "/usr/bin:/bin")
+        .stdin(Stdio::null())
         .env("PLOTKEEPER_NO_BROWSER", "1")
         .env("PLOTKEEPER_CARD_WRITER", "fake")
         .stdout(Stdio::piped())
