@@ -1705,3 +1705,57 @@ fn a_start_with_no_terminal_says_what_it_did_not_wire_on_stderr_and_prints_only_
     assert!(first.starts_with("plotkeeper: http"), "{first}");
     assert!(errors.contains("Claude Code not wired"), "{errors}");
 }
+
+/// Leaves install's record as a build before answers (#434) wrote it: its flags, no answers and no marker.
+fn as_before_answers(machine: &Machine) {
+    let state = machine.data().join("install/state.json");
+    let mut record: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&state).unwrap()).unwrap();
+    let record_map = record.as_object_mut().unwrap();
+    record_map.remove("harnesses");
+    record_map.remove("answers_kept");
+    fs::write(&state, record.to_string()).unwrap();
+}
+
+#[test]
+fn a_harness_wired_before_answers_stays_wired_when_a_start_saves_without_it_on_the_path() {
+    let machine = Machine::new(true, false).with_codex();
+    machine.run("install");
+    as_before_answers(&machine);
+    let codex = machine.tools.join("codex");
+    let kept = machine.tools.join("codex-kept");
+    fs::rename(&codex, &kept).unwrap();
+    // Claude Code's rewire saves the record while Codex is off the PATH.
+    assert!(
+        machine
+            .start_without_terminal()
+            .contains("rewired Claude Code")
+    );
+    fs::rename(&kept, &codex).unwrap();
+
+    let text = machine.start_without_terminal();
+
+    assert!(!text.contains("not wired"), "{text}");
+    assert!(text.contains("plotkeeper: rewired Codex"), "{text}");
+}
+
+#[test]
+fn a_decline_keeps_a_harness_wired_before_answers_that_is_off_the_path() {
+    let machine = Machine::new(false, false).with_codex();
+    machine.run("install");
+    as_before_answers(&machine);
+    let codex = machine.tools.join("codex");
+    let kept = machine.tools.join("codex-kept");
+    fs::rename(&codex, &kept).unwrap();
+    script(
+        &machine.tools.join("claude"),
+        r#"echo "$@" >> "$(dirname "$0")/claude-calls""#,
+    );
+    assert!(machine.start(&["n"]).contains(ASK));
+    fs::rename(&kept, &codex).unwrap();
+
+    let text = machine.start_without_terminal();
+
+    assert!(!text.contains("not wired"), "{text}");
+    assert!(text.contains("plotkeeper: rewired Codex"), "{text}");
+}

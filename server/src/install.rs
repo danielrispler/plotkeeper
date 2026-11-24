@@ -101,7 +101,7 @@ struct State {
     harnesses: BTreeMap<String, HarnessRecord>,
     /// Written by a build that keeps answers (#434), on every save, and kept through uninstall, so a harness with no
     /// answer here is unasked even when an uninstall that failed partway left its old-style flag set. Without it, the
-    /// record is from before answers, and those flags count as wired.
+    /// record is from before answers, and reading it gives each flagged harness a wired answer (`State::with_answers`).
     #[serde(default)]
     answers_kept: bool,
 }
@@ -127,6 +127,28 @@ fn fingerprint(files: &[(String, String)]) -> String {
         }
     }
     format!("{hash:016x}")
+}
+
+impl State {
+    /// A record from before answers were kept (no `answers_kept`) gets an answer, wired with no fingerprint, for each
+    /// harness its flags say install wired, so the first save keeps them and the next start rewires each once. A later
+    /// record is taken as it is: a harness with no answer there is unasked, whatever an uninstall that failed partway
+    /// left flagged.
+    fn with_answers(mut self) -> State {
+        if !self.answers_kept {
+            for harness in HARNESSES {
+                if harness.flagged(&self) {
+                    self.harnesses
+                        .entry(harness.id().to_owned())
+                        .or_insert(HarnessRecord {
+                            answer: Answer::Wired,
+                            fingerprint: None,
+                        });
+                }
+            }
+        }
+        self
+    }
 }
 
 impl HarnessRecord {
@@ -160,7 +182,7 @@ fn load(home: &Path) -> Result<Option<State>, String> {
     let path = record_dir(home).join("state.json");
     match fs::read_to_string(&path) {
         Ok(text) => serde_json::from_str(&text)
-            .map(Some)
+            .map(|state: State| Some(state.with_answers()))
             .map_err(|e| format!("could not read {}: {e}", path.display())),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(format!("could not read {}: {e}", path.display())),
@@ -680,24 +702,21 @@ impl Harness {
         Ok(fingerprint(&files))
     }
 
-    /// Its answer in `state`. A record from before answers were kept counts what install did there as wired; in a
-    /// later one, a harness with no answer is unasked, whatever an uninstall that failed partway left recorded.
+    /// Its answer in `state`; none when it has not been asked.
     fn answer(self, state: &State) -> Option<Answer> {
-        if let Some(record) = state.harnesses.get(self.id()) {
-            return Some(record.answer);
-        }
-        if state.answers_kept {
-            return None;
-        }
-        let wired = match self {
+        state.harnesses.get(self.id()).map(|record| record.answer)
+    }
+
+    /// Whether install's flags in `state` say it wired this harness.
+    fn flagged(self, state: &State) -> bool {
+        match self {
             Harness::Claude => state.claude,
             Harness::Agy => state.agy,
             Harness::Codex => state.codex.is_some(),
             Harness::Cursor => state.cursor.is_some(),
             Harness::Copilot => state.copilot,
             Harness::Qwen => state.qwen,
-        };
-        wired.then_some(Answer::Wired)
+        }
     }
 }
 
@@ -1500,12 +1519,14 @@ mod tests {
     #[test]
     fn a_record_from_before_answers_counts_its_flags_as_wired_and_a_later_one_does_not() {
         let before = r#"{"claude":true,"agy":false,"agy_backups":[],"codex":null,"cursor":null}"#;
-        let state: State = serde_json::from_str(before).unwrap();
+        let state = serde_json::from_str::<State>(before)
+            .unwrap()
+            .with_answers();
         assert_eq!(Harness::Claude.answer(&state), Some(Answer::Wired));
         assert_eq!(Harness::Agy.answer(&state), None);
 
         let after = r#"{"claude":true,"claude_plugin_gone":true,"agy":false,"agy_backups":[],"codex":null,"cursor":null,"answers_kept":true}"#;
-        let state: State = serde_json::from_str(after).unwrap();
+        let state = serde_json::from_str::<State>(after).unwrap().with_answers();
         assert_eq!(Harness::Claude.answer(&state), None);
     }
 }
