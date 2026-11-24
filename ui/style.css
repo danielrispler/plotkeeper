@@ -12,6 +12,12 @@ code:empty { display: none; }
 /* Words for assistive tech alone (#456): kept in the page, drawn nowhere. */
 .visually-hidden { position: absolute; width: var(--hair); height: var(--hair); margin: calc(-1 * var(--hair)); padding: 0; border: 0;
                    clip-path: inset(50%); white-space: nowrap; }
+/* "Skip to the map" (#461): off screen until the keyboard reaches it, then over the top bar's start; it moves focus into the map. */
+.skip-link { position: fixed; top: var(--sp-2); left: var(--sp-4); z-index: 10; padding: var(--sp-2) var(--sp-5); border-radius: var(--radius);
+             background: var(--raised); color: var(--fg); box-shadow: var(--shadow); text-decoration: none; translate: 0 calc(-100% - var(--bar)); }
+.skip-link:focus { translate: none; }
+/* The map takes focus from the skip link; its ring sits inside its box, which clips what overflows. */
+#map:focus-visible { outline-offset: calc(-1 * var(--mark)); }
 
 /* Focus: the studio's own grey ring, not macOS blue, and only from the keyboard. */
 :focus { outline: none; }

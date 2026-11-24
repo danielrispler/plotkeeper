@@ -41,6 +41,10 @@ export function overturnNote(project: string, holds: (item: Pick<Ratifiable, "pr
   area.value = manual;
   area.readOnly = true;
   area.rows = 4;
+  area.name = "prompt";
+  area.autocomplete = "off";
+  area.spellcheck = false;
+  area.setAttribute("aria-label", "The prompt, to copy by hand");
   const copy = text("button", "Copy", "btn quiet ratify-copy");
   copy.setAttribute("type", "button");
   copy.title = "Copy the prompt to paste into your agent";

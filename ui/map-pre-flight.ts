@@ -88,7 +88,9 @@ function startNodes(issues: OpenIssue[] | null, act: PreFlightActs): HTMLElement
   field.className = "pre-flight-text";
   field.rows = 2;
   field.maxLength = 400;
-  field.placeholder = "Or one or two lines of what you are about to build";
+  field.name = "about-to-build";
+  field.autocomplete = "off";
+  field.placeholder = "Or one or two lines of what you are about to build…";
   field.setAttribute("aria-label", "What you are about to build");
   const predict = button("Predict", "Predict the parts these lines will cross", () => {
     const words = field.value.trim();
@@ -105,6 +107,7 @@ function pickNodes(why: string | null, doc: LoadedMap, act: PreFlightActs): HTML
   const boxes = doc.parts.map((part) => {
     const box = document.createElement("input");
     box.type = "checkbox";
+    box.name = "part";
     box.value = part.id;
     const label = text("label", "", "pre-flight-part");
     label.append(box, text("span", part.name));

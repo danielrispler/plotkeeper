@@ -47,7 +47,9 @@ export function drawHistory(box: HTMLElement, sessions: Session[]) {
   box.classList.add("history");
   const search = document.createElement("input");
   search.type = "search";
-  search.placeholder = "Search by name, project or branch";
+  search.name = "history-search";
+  search.autocomplete = "off";
+  search.placeholder = "Search by name, project or branch…";
   search.setAttribute("aria-label", "Search history");
   search.dataset.key = "search";
   search.value = query;

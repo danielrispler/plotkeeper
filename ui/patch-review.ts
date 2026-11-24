@@ -135,6 +135,10 @@ export function refusedNodes(line: string, prompt: string, close: () => void): H
   area.value = prompt;
   area.readOnly = true;
   area.rows = 6;
+  area.name = "prompt";
+  area.autocomplete = "off";
+  area.spellcheck = false;
+  area.setAttribute("aria-label", "The prompt, to copy by hand");
   const foot = text("div", "", "patch-foot");
   foot.append(button("Close", "Close", close));
   return [text("h2", "The run did not start", "patch-title"), text("p", `${line}. ${overturnReport("manual", prompt).line}`, "patch-law"), area, foot];
@@ -287,11 +291,18 @@ export function confirmNodes(draft: NewLaw | null, parts: { id: string; name: st
     part.append(option);
   }
   part.value = draft.on;
+  part.name = "law-part";
+  part.setAttribute("aria-label", "The part the law is on");
   const id = text("input", "", "guard-id") as HTMLInputElement;
   id.value = draft.id;
+  id.name = "law-id";
+  id.autocomplete = "off";
+  id.spellcheck = false;
   id.setAttribute("aria-label", "The law's id");
   const sentence = text("textarea", "", "guard-sentence") as HTMLTextAreaElement;
   sentence.value = draft.text;
+  sentence.name = "law-sentence";
+  sentence.autocomplete = "off";
   sentence.setAttribute("aria-label", "The law's sentence");
   sentence.setAttribute("rows", "2");
   // What Daniel types is kept in the draft, so the step drawn again (a map-landed, a resize) shows it.

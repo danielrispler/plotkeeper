@@ -70,11 +70,17 @@ const keys = {
   ArrowUp: { key: "ArrowUp", code: "ArrowUp", windowsVirtualKeyCode: 38 },
   ArrowDown: { key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 },
 };
-const realKey = (name) => {
-  const key = keys[name];
-  if (!key) throw new Error(`no such key: ${name}; snap presses ${Object.keys(keys).join(", ")}`);
+const realKey = async (name) => {
+  // "Composing Enter" is Enter pressed to confirm an input method's word (#461): a composition of "か" is begun in the focused field
+  // (`Input.imeSetComposition`), so Chrome reports the key down with `isComposing`, as with a Japanese input method, and the word is
+  // committed after it (`Input.insertText`), as the Enter does in use.
+  const composing = name === "Composing Enter";
+  if (composing) await devtools("Input.imeSetComposition", [{ text: "か", selectionStart: 1, selectionEnd: 1 }]);
+  const key = keys[composing ? "Enter" : name];
+  if (!key) throw new Error(`no such key: ${name}; snap presses ${Object.keys(keys).join(", ")} and Composing Enter`);
   const { text, ...rest } = key;
-  return devtools("Input.dispatchKeyEvent", [{ type: text ? "keyDown" : "rawKeyDown", ...key }, { type: "keyUp", ...rest }]);
+  await devtools("Input.dispatchKeyEvent", [{ type: text ? "keyDown" : "rawKeyDown", ...key }, { type: "keyUp", ...rest }]);
+  if (composing) await devtools("Input.insertText", [{ text: "か" }]);
 };
 const press = (x, y, clickCount = 1) => [
   { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount },

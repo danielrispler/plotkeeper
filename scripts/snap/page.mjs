@@ -25,7 +25,7 @@ export const stubSource = (fixture) => `(() => {
   window.__snapDoubleClick = (node) => real("dblclick", middle(node));
   // A fixture with \`realKeys\` presses keys as a person does: \`await __snapKey("Tab")\` asks snap to send Chrome a real key down and up
   // (\`Input.dispatchKeyEvent\`), so Tab moves focus and Esc closes a native popover. The keys: Tab, Shift+Tab, Enter, Space, Escape,
-  // ArrowUp and ArrowDown.
+  // ArrowUp, ArrowDown and "Composing Enter", Enter while an input method composes a word (snap.mjs).
   window.__snapKey = (key) => real("key", { key });
   // \`await __snapDrag(node, dx, dy)\` presses at the node's middle, moves by (dx, dy) with the button held and lets go there. With
   // \`midway\`, an async function, the button stays held halfway while it runs, then the rest of the move and the release follow.

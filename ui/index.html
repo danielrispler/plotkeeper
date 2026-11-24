@@ -12,6 +12,10 @@
   <script type="module" src="main.js"></script>
 </head>
 <body data-layout="full" class="map-open">
+  <!-- The page's structure (#461): a heading for the page, hidden but read, and a link, shown on focus and first in the tab order, that
+       jumps past the session list into the map, the page's main content. -->
+  <h1 class="visually-hidden">plotkeeper</h1>
+  <a class="skip-link" href="#map" title="Jump past the session list into the map">Skip to the map</a>
   <!-- Treatment C's frame (#386): a 34 px top bar over the map and the session list at the right. The grid runs right to left. -->
   <div class="app">
     <header class="top">
@@ -92,7 +96,7 @@
 
     <!-- The Map view (danielrispler/plotkeeper#306), the page's base (#386): a project's map beside the session list, whose headers switch it.
          `map.ts` draws it. Over the map float the tray, the left panel and the side area (the sheet, the drawer, the not-placed list). -->
-    <section id="map" class="map-view" aria-label="Map">
+    <main id="map" class="map-view" aria-label="Map" tabindex="-1">
       <header class="map-head">
         <span id="map-ref" class="map-ref"></span>
         <!-- Pre-flight (#394): the parts a piece of work will likely cross; the palette's `studio::PreFlight` opens it too. -->
@@ -136,14 +140,14 @@
         <div id="note-toast" class="toast note" popover="manual" hidden></div>
         <div id="clear-toast" class="toast start clear" popover="manual" hidden></div>
       </section>
-    </section>
+    </main>
   </div>
   <!-- The questions of rename and close (danielrispler/Falinks#469). -->
   <dialog id="rename-dialog" class="ask" aria-labelledby="rename-heading">
     <form method="dialog">
       <h2 id="rename-heading" class="ask-title">Rename session</h2>
       <label for="rename-field">Name this session</label>
-      <input id="rename-field" autocomplete="off" spellcheck="false" autofocus>
+      <input id="rename-field" name="session-name" autocomplete="off" spellcheck="false" autofocus>
       <!-- The default button comes first, so Enter in the field renames. -->
       <div class="ask-buttons"><button type="submit" class="btn" value="rename" title="Save this name (↩)">Rename</button><button type="submit" class="btn" value="cancel" title="Keep the old name (Esc)">Cancel</button></div>
     </form>

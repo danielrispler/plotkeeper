@@ -8,6 +8,7 @@
 - Each start has a random token. The browser opens `http://127.0.0.1:<port>/?token=<token>`; the server answers with a cookie (`plotkeeper`, HttpOnly, SameSite=Strict) and sends the browser on to `/`, so the token leaves the address bar. Every other request needs the cookie.
 - A request whose Host is not `127.0.0.1:<port>` or `localhost:<port>`, or whose Origin, when it has one, is not one of those, is refused with 403, as is a request with no cookie or a wrong token.
 - The page is the built `dist/`, embedded in the program when it is built (a build without `dist/` serves nothing).
+- The map is the page's main content, under a heading read only by assistive tech. The page's first Tab shows a "Skip to the map" link at the top bar's start; Enter on it moves focus past the session list into the map (#461).
 
 ## Commands and events
 
