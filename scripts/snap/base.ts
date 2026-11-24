@@ -61,6 +61,7 @@ export const base = {
   set_api_key: null,
   settings_files: { settings: null, keymap: null },
   subagent_log: null,
+  back_a_law: { kind: "run", id: "19a2f-9" },
   turn_file_hunk: null,
   turn_reply: null,
   turn_summary: null,

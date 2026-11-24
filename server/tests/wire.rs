@@ -9,6 +9,7 @@ mod samples;
 use samples::{Sample, json, write};
 use std::collections::BTreeMap;
 use studio_server::{
+    back_a_law::{LawPatch, PatchState, Proof},
     ci_laws::{self, Ci},
     fog::{ChapterRead, Entry, FogState, PrRead, Strength},
     map::{MapState, Mark, MarkWhy, Status, UserState, View},
@@ -153,6 +154,7 @@ fn empty(status: Status) -> MapState {
         stale: BTreeMap::new(),
         pre_flight: None,
         micro_worlds: WorldsState::default(),
+        law_patches: Vec::new(),
     }
 }
 
@@ -179,6 +181,38 @@ fn worlds() -> WorldsState {
             ),
         ]),
     }
+}
+
+/// A back a law run's patch in each state: being proven, rejected, and proven with its diff and proof.
+fn law_patches() -> Vec<LawPatch> {
+    let patch = |id: &str, state, line: Option<&str>| LawPatch {
+        id: id.into(),
+        project: "/repo".into(),
+        law: "core-order".into(),
+        state,
+        line: line.map(String::from),
+        at: 1_761_743_990_000,
+        diff: None,
+        proof: None,
+    };
+    vec![
+        patch("19a2f-1", PatchState::Proving, None),
+        patch(
+            "19a2f-2",
+            PatchState::Rejected,
+            Some("The test patch touches src/a.rs"),
+        ),
+        LawPatch {
+            diff: Some("diff --git a/tests/a.rs b/tests/a.rs\n".into()),
+            proof: Some(Proof {
+                test: "events_apply_in_order".into(),
+                file: "core/tests/order.rs".into(),
+                passed: "PASS [ 0.01s] studio-core::it order::events_apply_in_order".into(),
+                failed: "FAIL [ 0.01s] studio-core::it order::events_apply_in_order".into(),
+            }),
+            ..patch("19a2f-3", PatchState::Proven, None)
+        },
+    ]
 }
 
 /// The background runs paused, with a run in each state, of each kind and with each end.
@@ -276,6 +310,7 @@ fn the_wire_samples_of_the_map_view_are_written_for_tsc() {
                     at: 1_761_743_990_000,
                 }),
                 micro_worlds: worlds(),
+                law_patches: law_patches(),
                 ..empty(Status::Loaded)
             }),
         ));

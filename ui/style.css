@@ -537,6 +537,19 @@ body[data-panel="diff"] .map-stage { --panel-w: min(var(--panel-wide), calc(100%
 .micro-world-frame { flex: 1; min-height: 0; width: 100%; border: 0; border-radius: var(--radius); background: var(--chrome); }
 .micro-world-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin-top: var(--sp-2); }
 .micro-world-stale, .micro-world-why { margin: 0; font-size: var(--size-xs); color: var(--faint); }
+/* The patch review of back a law (#398): an overlay like the pre-flight's, as wide as the settings dialog, so a test patch reads whole. */
+.map-patch-review { position: absolute; top: var(--inset); left: 0; right: 0; margin-inline: auto; width: min(var(--settings), calc(100% - 2 * var(--inset))); max-height: calc(100% - 2 * var(--inset));
+                    overflow-y: auto; z-index: 5; padding: var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-4); }
+.map-patch-review[hidden] { display: none; }
+.patch-title { margin: 0; font-size: var(--size-large); font-weight: 650; }
+.patch-law, .patch-test { margin: 0; }
+.patch-test { font-size: var(--size-small); color: var(--muted); }
+.patch-heading { margin: 0; font-size: var(--size-xs); font-weight: 400; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
+.patch-diff { overflow-x: auto; border-radius: var(--radius); background: var(--chrome); padding: var(--sp-3) 0; }
+.patch-output { margin: 0; max-height: 30vh; overflow: auto; padding: var(--sp-3) var(--sp-4); border-radius: var(--radius); background: var(--chrome);
+                font: var(--size-small)/var(--term-line) var(--mono); white-space: pre; }
+.patch-foot { display: flex; gap: var(--sp-4); justify-content: flex-end; }
+.law-patch-note { font-size: var(--size-xs); color: var(--faint); }
 .plate.predicted { outline: var(--hair) dashed var(--faint); outline-offset: var(--sp-2); }
 .plate-predicted { font-size: var(--size-xs); color: var(--faint); }
 .brief-expected { margin: 0 0 var(--sp-3); font-size: var(--size-xs); color: var(--faint); }

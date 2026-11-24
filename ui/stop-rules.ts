@@ -58,6 +58,8 @@ export const table: Row[] = [
   { module: "explain-back", name: "explain-back", kept: (f) => (f.counts["explain-back-given"] ?? 0) >= 3 },
   // Micro-worlds (#399): a checked page opened in its overlay at least twice.
   { module: "micro-worlds", name: "micro-worlds", kept: (f) => (f.counts["micro-world-opened"] ?? 0) >= 2 },
+  // Back a law (#398): at least 1 run started from a law on trust.
+  { module: "back-a-law", name: "Back a law", kept: (f) => (f.counts["back-law-started"] ?? 0) >= 1 },
 ];
 
 // `day` plus `n` days, both local days (`2026-11-03`).

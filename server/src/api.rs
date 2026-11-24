@@ -256,6 +256,12 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
         )),
         "run_cancel" => res(app.runner.cancel(&arg::<String>(a, "id")?)),
         "runs_resume" => done!(app.runner.resume()),
+        "back_a_law" => res(app
+            .laws
+            .start(&arg::<String>(a, "project")?, &arg::<String>(a, "law")?)),
+        "law_patch_discard" => res(app
+            .laws
+            .discard(&arg::<String>(a, "project")?, &arg::<String>(a, "id")?)),
         "stop_log" => res(stop_rules::stop_log(
             arg(a, "kind")?,
             arg(a, "project")?,

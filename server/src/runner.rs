@@ -1,5 +1,5 @@
 //! Background runs (spec danielrispler/plotkeeper#378, ticket #390): a headless agent run with scoped tools, started by
-//! Daniel's click and never a session. This is the runner; micro-worlds start runs (`micro_worlds.rs`).
+//! Daniel's click and never a session. This is the runner; back a law (`back_a_law.rs`) and micro-worlds (`micro_worlds.rs`) start runs.
 //!
 //! - **The seam.** A [`Request`] (run kind, working folder, prompt, limits) goes in through [`Runner::submit`]; an
 //!   [`Outcome`] (result text, denials, cost, exit) comes out through [`Runner::outcome`]. The [`Harness`] builds the
@@ -231,7 +231,7 @@ pub fn allowed_tools(kind: Kind, folder: &Path, checks: &[String]) -> Vec<String
 }
 
 /// How many cores a run's builds and tests get: a third, so a run leaves room for the sessions.
-fn cores() -> usize {
+pub(crate) fn cores() -> usize {
     (thread::available_parallelism().map_or(1, |n| n.get()) / 3).max(1)
 }
 
@@ -933,11 +933,25 @@ struct State {
 
 type Changed = Box<dyn Fn(&str) + Send + Sync>;
 
+/// A run that ended, as told to the module that asked for it ([`Runner::on_end`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Ended {
+    pub id: String,
+    pub kind: Kind,
+    pub project: String,
+    /// Its working folder, which stays until the run is dismissed or plotkeeper starts again.
+    pub folder: PathBuf,
+    pub end: End,
+}
+
+type EndTold = Box<dyn Fn(Ended) + Send + Sync>;
+
 /// The background runs of every project: their queue, their processes and their outcomes.
 pub struct Runner {
     config: Config,
     state: Mutex<State>,
     changed: OnceLock<Changed>,
+    ended: OnceLock<EndTold>,
     /// For the threads that wait on a run's end: a runner that is gone is told nothing.
     me: Weak<Runner>,
     ids: AtomicU64,
@@ -950,6 +964,7 @@ impl Runner {
             config,
             state: Mutex::default(),
             changed: OnceLock::new(),
+            ended: OnceLock::new(),
             me: me.clone(),
             ids: AtomicU64::new(0),
         })
@@ -958,6 +973,12 @@ impl Runner {
     /// Sets what is told the project whose runs changed; the first call wins.
     pub fn on_change(&self, changed: impl Fn(&str) + Send + Sync + 'static) {
         let _ = self.changed.set(Box::new(changed));
+    }
+
+    /// Sets what is told when a run ends on its own, as it ends or when [`Runner::pick_up`] finds it ended; never for a
+    /// cancelled run. Set it before `pick_up`; the first call wins.
+    pub fn on_end(&self, ended: impl Fn(Ended) + Send + Sync + 'static) {
+        let _ = self.ended.set(Box::new(ended));
     }
 
     fn tell(&self, project: &str) {
@@ -1193,7 +1214,9 @@ impl Runner {
             return;
         }
         let project = run.stored.project.clone();
-        let pause = self.finish(run).pause();
+        let end = self.finish(run);
+        let ended = Self::ended_of(&run.stored, end);
+        let pause = end.pause();
         if pause.is_some() {
             self.pause(&mut state, pause);
         }
@@ -1201,7 +1224,24 @@ impl Runner {
         // A pause holds every project's queue, so each project with runs draws again.
         let told = Self::told(&state, pause, &project);
         drop(state);
+        self.tell_end(ended);
         told.iter().for_each(|project| self.tell(project));
+    }
+
+    fn ended_of(stored: &Stored, end: End) -> Ended {
+        Ended {
+            id: stored.id.clone(),
+            kind: stored.kind,
+            project: stored.project.clone(),
+            folder: stored.folder.clone(),
+            end,
+        }
+    }
+
+    fn tell_end(&self, ended: Ended) {
+        if let Some(tell) = self.ended.get() {
+            tell(ended);
+        }
     }
 
     /// The projects that have a run, each once.
@@ -1407,6 +1447,7 @@ impl Runner {
             .flatten();
         let mut runs = Vec::new();
         let mut paused = None;
+        let mut ended = Vec::new();
         for dir in folders
             .map(|entry| entry.path())
             .filter(|path| path.is_dir())
@@ -1432,7 +1473,9 @@ impl Runner {
             };
             if let Some(launch) = read_json::<Launch>(&dir.join(LAUNCH)) {
                 if lock_free(&dir) {
-                    paused = self.finish(&mut run).pause().or(paused);
+                    let end = self.finish(&mut run);
+                    ended.push(Self::ended_of(&run.stored, end));
+                    paused = end.pause().or(paused);
                 } else {
                     run.phase = Phase::Running {
                         since_ms: launch.at_ms,
@@ -1450,6 +1493,8 @@ impl Runner {
             self.pause(&mut state, paused);
         }
         self.advance(&mut state);
+        drop(state);
+        ended.into_iter().for_each(|ended| self.tell_end(ended));
     }
 
     /// `project`'s runs as the map shows them, and the pause line.

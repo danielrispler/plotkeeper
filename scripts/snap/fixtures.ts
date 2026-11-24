@@ -191,6 +191,63 @@ const mapPreFlight = (): Fixture =>
     }),
     snapDone: "pre-flight ok",
   });
+// Back a law (#398): Hook's law on trust offers Back a law; Core's law on trust has a proven patch, and Review opens the patch review over
+// the map with the test patch, the output with the test alone and with the plant, and Discard.
+const lawPatchDiff = [
+  "diff --git a/core/tests/order.rs b/core/tests/order.rs",
+  "new file mode 100644",
+  "--- /dev/null",
+  "+++ b/core/tests/order.rs",
+  "@@ -0,0 +1,6 @@",
+  "+// @law: core-order",
+  "+#[test]",
+  "+fn events_apply_in_order() {",
+  "+    let state = apply(&[started(), ended()]);",
+  "+    assert_eq!(state.last(), Some(Ended));",
+  "+}",
+  "diff --git a/system-map.json b/system-map.json",
+  "--- a/system-map.json",
+  "+++ b/system-map.json",
+  "@@ -4,1 +4,1 @@",
+  '-    { "id": "core-order", "on": "core", "backing": "trust", "text": "Events apply in order." },',
+  '+    { "id": "core-order", "on": "core", "backing": "check", "text": "Events apply in order." },',
+].join("\n");
+const mapBackLaw = (): Fixture =>
+  mapOpened(`
+      document.querySelector("#map .plate[data-id=hook]").click();
+      await wait(300);
+      const held = document.querySelector('#map-sheet .sheet-law[data-law="hook-held"]');
+      if (![...(held?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Back a law")) return log("snap:fail Hook's law on trust has no Back a law");
+      document.querySelector("#map .plate[data-id=core]").click();
+      await wait(300);
+      const pure = document.querySelector('#map-sheet .sheet-law[data-law="core-pure"]');
+      if ([...pure.querySelectorAll("button")].some((b) => b.textContent === "Back a law")) log("snap:fail a law a check backs offers Back a law");
+      const review = [...document.querySelectorAll('#map-sheet .sheet-law[data-law="core-order"] button')].find((b) => b.textContent === "Review the patch");
+      if (!review) return log("snap:fail the proven patch has no Review");
+      review.click();
+      await wait(300);
+      const box = document.getElementById("map-patch-review");
+      if (box.hidden) return log("snap:fail the patch review did not open");
+      if (!box.textContent.includes("Events apply in order.") || !box.textContent.includes("events_apply_in_order in core/tests/order.rs")) log("snap:fail the law or the test: " + box.textContent);
+      if (box.querySelectorAll(".patch-diff .diff-line.add").length !== 7) log("snap:fail the test patch's added lines: " + box.querySelectorAll(".patch-diff .diff-line.add").length);
+      const outputs = [...box.querySelectorAll(".patch-output")].map((pre) => pre.textContent);
+      if (outputs.length !== 2 || !outputs[0].includes("PASS") || !outputs[1].includes("FAIL")) log("snap:fail the outputs: " + outputs.join(" / "));
+      if ([...box.querySelectorAll("button")].map((b) => b.textContent).join(",") !== "Discard,Close") log("snap:fail the review's buttons");
+      log("back a law ok");`, {
+    map_state: mapState({
+      law_patches: [
+        {
+          id: "19a2f-5", project: "/w/plotkeeper", law: "core-order", state: "proven", line: null, at: runAt, diff: lawPatchDiff,
+          proof: {
+            test: "events_apply_in_order", file: "core/tests/order.rs",
+            passed: "$ cargo nextest run -p studio-core\n        PASS [   0.004s] studio-core::it order::events_apply_in_order\n     Summary [   0.912s] 214 tests run: 214 passed, 0 skipped",
+            failed: "$ cargo nextest run -p studio-core\n        FAIL [   0.004s] studio-core::it order::events_apply_in_order\n     Summary [   0.917s] 214 tests run: 213 passed, 1 failed, 0 skipped",
+          },
+        },
+      ],
+    }),
+    snapDone: "back a law ok",
+  });
 // The queues paused by a login failure: the one indicator with Resume, over the run that failed and the one that waits.
 const mapRunsPaused = (): Fixture =>
   mapOpened(`
@@ -758,7 +815,7 @@ const mapBriefChapterLast = (): Fixture =>
 // The stop-rule review (#314, #384): Studio has run 20 active days and merged 25 PRs, and the Map view was engaged with on one of them, so
 // the Map view fell below its threshold, and so did the history strip and "See the proof".
 // Pre-flight (#394) was run twice and three explain-back lines (#397) were written, so the review lists only the modules of project 2.
-const dueFacts = { active_days: 20, merged_prs: 25, engaged_days: 1, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, counts: { "pre-flight-run": 2, "catch-up-done": 3, "explain-back-given": 3, "micro-world-opened": 2 }, began: "2026-10-01", stale_since: null };
+const dueFacts = { active_days: 20, merged_prs: 25, engaged_days: 1, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, counts: { "pre-flight-run": 2, "catch-up-done": 3, "explain-back-given": 3, "micro-world-opened": 2, "back-law-started": 1 }, began: "2026-10-01", stale_since: null };
 const mapOpened = (check: string, extra: Fixture = {}): Fixture => ({
   ...list(),
   ...extra,
@@ -830,7 +887,8 @@ const mapBroken = (open: "none" | "proof" | "log"): Fixture => {
       await wait(300);
       const see = [...document.querySelectorAll("#map-sheet .sheet-law button")].find((b) => b.textContent === "See the proof");
       if (!see) return log("snap:fail no See the proof on a check-backed law");
-      if (document.querySelectorAll("#map-sheet .sheet-law button").length !== 1) log("snap:fail See the proof is on a law no check backs");
+      // A law on trust has Back a law instead (#398), never See the proof.
+      if ([...document.querySelectorAll("#map-sheet .sheet-law button")].filter((b) => b.textContent === "See the proof").length !== 1) log("snap:fail See the proof is on a law no check backs");
       see.click();
       await wait(300);
       const code = document.querySelector("#map-drawer .drawer-code");
@@ -1537,6 +1595,7 @@ export const fixtures = {
   mapPreFlight,
   mapMicroWorld,
   mapRunsPaused,
+  mapBackLaw,
   railBriefRow: () => railBriefReady(false),
   railBriefOpened: () => railBriefReady(true),
   mapBriefStart,

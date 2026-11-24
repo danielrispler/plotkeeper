@@ -29,6 +29,7 @@ use studio_understanding::{
 
 pub mod answer;
 pub mod api;
+pub mod back_a_law;
 pub mod ci_laws;
 pub mod fog;
 pub mod history;
@@ -156,6 +157,8 @@ pub struct App {
     pub runner: Arc<runner::Runner>,
     /// The micro-worlds (`micro_worlds.rs`): built by background runs, checked on the host and kept per project.
     pub worlds: Arc<micro_worlds::MicroWorlds>,
+    /// Back a law (`back_a_law.rs`): its runs' proofs and the patches kept.
+    pub laws: Arc<back_a_law::LawRuns>,
 }
 
 impl App {
@@ -249,6 +252,9 @@ impl App {
                 worlds.runs_changed(project);
             }
         });
+        let laws = back_a_law::LawRuns::new(runner.clone(), back_a_law::Config::beside(log));
+        let told = events.clone();
+        laws.on_change(move |project| told.emit("map-landed", project.into()));
         Ok(App {
             core,
             cards,
@@ -274,6 +280,7 @@ impl App {
             key_set: Mutex::new(Vec::new()),
             runner,
             worlds,
+            laws,
         })
     }
 

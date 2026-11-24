@@ -1365,3 +1365,71 @@ fn cancel_of_a_run_that_ends_at_that_moment_never_fails() {
     // Each run is recorded once, as cancelled or as it ended.
     assert_eq!(bench.records().len(), 40);
 }
+
+#[test]
+fn the_module_that_asked_for_a_run_is_told_its_end_once_also_at_a_pick_up() {
+    let dir = tempfile::tempdir().unwrap();
+    settings(dir.path(), r#"{ "checks": { "/p/app": ["cargo test"] } }"#);
+    fs::create_dir_all(dir.path().join("data")).unwrap();
+    let ends = |runner: &Runner| {
+        let (tell, told) = mpsc::channel();
+        runner.on_end(move |end| drop(tell.send(end)));
+        told
+    };
+    let runner = Runner::new(config(dir.path(), Arc::new(Script)));
+    let told = ends(&runner);
+    runner.pick_up();
+    let folder = runner.new_folder().unwrap();
+    let id = runner
+        .submit(Request {
+            kind: Kind::BackLaw,
+            project: PROJECT.into(),
+            folder: folder.clone(),
+            prompt: "echo done".into(),
+            limits: Limits::of(Kind::BackLaw),
+        })
+        .unwrap();
+    let end = told.recv_timeout(Duration::from_secs(30)).unwrap();
+    assert_eq!(
+        (
+            end.id.as_str(),
+            end.kind,
+            end.project.as_str(),
+            &end.folder,
+            end.end
+        ),
+        (id.as_str(), Kind::BackLaw, PROJECT, &folder, End::Done)
+    );
+    assert!(told.recv_timeout(Duration::from_millis(300)).is_err());
+
+    // A run that ends while plotkeeper is stopped is told at the next start, when it is picked up.
+    let waiting = runner.new_folder().unwrap();
+    let id = runner
+        .submit(Request {
+            kind: Kind::BackLaw,
+            project: PROJECT.into(),
+            folder: waiting.clone(),
+            prompt: waits("later"),
+            limits: Limits::of(Kind::BackLaw),
+        })
+        .unwrap();
+    drop((runner, told));
+    fs::write(waiting.join("go"), "").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !dir
+        .path()
+        .join("runs")
+        .join(&id)
+        .join("status.json")
+        .exists()
+    {
+        assert!(Instant::now() < deadline, "the run never ended");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    let runner = Runner::new(config(dir.path(), Arc::new(Script)));
+    let told = ends(&runner);
+    runner.pick_up();
+    let end = told.recv_timeout(Duration::from_secs(30)).unwrap();
+    assert_eq!((end.id.as_str(), end.end), (id.as_str(), End::Done));
+}

@@ -79,6 +79,8 @@ pub enum Kind {
     PreFlightRun,
     /// A micro-world's page was opened in its overlay (#399). Kept if at least 2.
     MicroWorldOpened,
+    /// A back a law run was started from a law on trust in a part's sheet (#398). Kept if at least 1.
+    BackLawStarted,
     #[serde(other)]
     Other,
 }
@@ -195,6 +197,7 @@ fn entered(kind: Kind) -> bool {
             | Kind::StaleEntered
             | Kind::PreFlightRun
             | Kind::MicroWorldOpened
+            | Kind::BackLawStarted
     )
 }
 
@@ -673,6 +676,20 @@ mod tests {
         assert_eq!(json["counts"]["refresher-entered"], 2);
         assert_eq!(json["counts"]["stale-entered"], 1);
         assert_eq!(json["engaged_days"], 2);
+    }
+
+    #[test]
+    fn a_back_a_law_run_started_is_counted_and_makes_an_engaged_day() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(LOG_FILE);
+        let lines = [
+            r#"{"at":1,"day":"2026-11-01","kind":"map-open","project":"/p"}"#,
+            r#"{"at":2,"day":"2026-11-01","kind":"back-law-started","project":"/p"}"#,
+        ];
+        std::fs::write(&file, lines.join("\n") + "\n").unwrap();
+        let json = serde_json::to_value(facts_in(&file, "/p")).unwrap();
+        assert_eq!(json["counts"]["back-law-started"], 1);
+        assert_eq!(json["engaged_days"], 1);
     }
 
     #[test]
