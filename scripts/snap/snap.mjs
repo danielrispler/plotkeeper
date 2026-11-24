@@ -39,7 +39,7 @@ writeFileSync(join(site, "index.html"), snapPage(readFileSync(join(dist, "index.
 // A fixture with `realPointer` or `realKeys` runs Chrome with its DevTools port open, and the page's `__snapClick`, `__snapDrag`,
 // `__snapDoubleClick` and `__snapKey` ask here for real input, sent as Chrome's own (`Input.dispatchMouseEvent`, `Input.dispatchKeyEvent`):
 // what `element.click()` or a synthetic KeyboardEvent skips, such as pointer capture, Tab moving focus or Esc closing a popover, then
-// happens as in use. `events` are that method's params in order.
+// happens as in use. `events` are that method's params in order; it returns Chrome's replies in that order.
 async function devtools(method, events) {
   const port = readFileSync(join(profile, "DevToolsActivePort"), "utf8").split("\n")[0];
   const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
@@ -55,8 +55,10 @@ async function devtools(method, events) {
     waiting.set(++id, done);
     socket.send(JSON.stringify({ id, method, params }));
   });
-  for (const event of events) await send(event);
+  const replies = [];
+  for (const event of events) replies.push(await send(event));
   socket.close();
+  return replies;
 }
 const realMouse = (events) => devtools("Input.dispatchMouseEvent", events);
 // The keys a fixture may press: each a key down and up, with `text` for the keys that type (Enter, Space) so Chrome presses a focused
@@ -108,15 +110,7 @@ const realDragEnd = (x, y, toX, toY) => realMouse(dragEnd(x, y, toX, toY));
 // time pass between asks, while each ask waits up to 100 ms of the clock's.
 let shot = null;
 async function realShot() {
-  const port = readFileSync(join(profile, "DevToolsActivePort"), "utf8").split("\n")[0];
-  const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
-  const socket = new WebSocket(targets.find((target) => target.type === "page").webSocketDebuggerUrl);
-  await new Promise((open, fail) => ((socket.onopen = open), (socket.onerror = fail)));
-  const reply = await new Promise((done) => {
-    socket.onmessage = (message) => done(JSON.parse(message.data));
-    socket.send(JSON.stringify({ id: 1, method: "Page.captureScreenshot", params: { format: "png" } }));
-  });
-  socket.close();
+  const [reply] = await devtools("Page.captureScreenshot", [{ format: "png" }]);
   if (!reply.result) throw new Error(JSON.stringify(reply.error));
   return pixels(Buffer.from(reply.result.data, "base64"));
 }
@@ -145,11 +139,13 @@ function pixels(png) {
   for (let y = 0; y < height; y++) {
     const filter = raw[y * (row + 1)];
     const line = Uint8Array.from(raw.subarray(y * (row + 1) + 1, (y + 1) * (row + 1)));
-    for (let x = 0; x < row; x++) {
-      const [left, up, corner] = [x >= step ? line[x - step] : 0, previous[x], x >= step ? previous[x - step] : 0];
-      const guess = left + up - corner;
-      const paeth = Math.abs(guess - left) <= Math.abs(guess - up) && Math.abs(guess - left) <= Math.abs(guess - corner) ? left : Math.abs(guess - up) <= Math.abs(guess - corner) ? up : corner;
-      line[x] = (line[x] + [0, left, up, (left + up) >> 1, paeth][filter]) & 255;
+    // The row's filter undone byte by byte; a filter of 0 left the row as it is.
+    if (filter !== 0) {
+      for (let x = 0; x < row; x++) {
+        const left = x >= step ? line[x - step] : 0;
+        const up = previous[x];
+        line[x] = (line[x] + predict(filter, left, up, x >= step ? previous[x - step] : 0)) & 255;
+      }
     }
     for (let x = 0; x < width; x++) {
       const into = 8 + (y * width + x) * 4;
@@ -161,6 +157,18 @@ function pixels(png) {
     previous = line;
   }
   return out;
+}
+
+// PNG's predictor of a byte from the bytes to its left, above, and above-left, by the row's filter.
+function predict(filter, left, up, corner) {
+  if (filter === 1) return left;
+  if (filter === 2) return up;
+  if (filter === 3) return (left + up) >> 1;
+  const guess = left + up - corner;
+  const toLeft = Math.abs(guess - left);
+  const toUp = Math.abs(guess - up);
+  const toCorner = Math.abs(guess - corner);
+  return toLeft <= toUp && toLeft <= toCorner ? left : toUp <= toCorner ? up : corner;
 }
 
 const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css" };

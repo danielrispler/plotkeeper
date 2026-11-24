@@ -103,31 +103,20 @@ export const stubSource = (fixture) => `(() => {
 // gets `log`; what it logs reaches snap's output, and a line that starts `snap:fail` makes snap exit non-zero. A script that
 // throws logs a `snap:fail` line. The hover rule's check, then the accessibility pass, run after it in every page, also after a script
 // that returned early or threw (hover.mjs, a11y.mjs). A fixture with `contrast` runs the contrast pass (contrast.mjs) before them.
-export const headSource = ({ bodyClasses = [], script = null, contrast = false } = {}) => `
+export const headSource = ({ bodyClasses = [], script = null, contrast = false } = {}) => {
+  const passes = [["script", script ?? ""], ...(contrast ? [["contrast pass", contrastAudit]] : []), ["hover check", hoverAudit], ["accessibility pass", a11yAudit]];
+  const run = ([what, source]) => `
+    try {
+      await (async (log) => {\n${source}\n})(log);
+    } catch (error) {
+      log("snap:fail the ${what} threw: " + error);
+    }`;
+  return `
   addEventListener("DOMContentLoaded", () => document.body.classList.add(...${JSON.stringify(bodyClasses)}));
   addEventListener("load", () => setTimeout(async () => {
-    const log = (...parts) => console.log(parts.join(" "));
-    try {
-      await (async (log) => {\n${script ?? ""}\n})(log);
-    } catch (error) {
-      log("snap:fail the script threw: " + error);
-    }${contrast ? `
-    try {
-      await (async (log) => {\n${contrastAudit}\n})(log);
-    } catch (error) {
-      log("snap:fail the contrast pass threw: " + error);
-    }` : ""}
-    try {
-      await (async (log) => {\n${hoverAudit}\n})(log);
-    } catch (error) {
-      log("snap:fail the hover check threw: " + error);
-    }
-    try {
-      await (async (log) => {\n${a11yAudit}\n})(log);
-    } catch (error) {
-      log("snap:fail the accessibility pass threw: " + error);
-    }
+    const log = (...parts) => console.log(parts.join(" "));${passes.map(run).join("")}
   }, 2500));`;
+};
 
 export const snapPage = (index, fixture, options = {}) =>
   index.replace(

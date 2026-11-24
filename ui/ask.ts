@@ -4,7 +4,7 @@
 // those facts and, for a file, its hunk; the answer stays here, labelled as interpretation under the facts as recorded and the session never sees it. A failed call or a reply with no answer shows why, with
 // a retry.
 
-import { failure, fullTitle, invoke, text } from "./dom.js";
+import { failure, fullTitle, invoke, onEnter, text } from "./dom.js";
 import { rendered } from "./markdown.js";
 
 // What Ask is opened on: the core's `Anchor`.
@@ -184,12 +184,7 @@ function whyNotBox(session: string, turn: number): HTMLElement {
     go.title = goHover;
   };
   go.addEventListener("click", run);
-  // Enter asks, except the Enter that confirms an input method's word (#461); Safari's out-of-order confirming key down reports 229.
-  field.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter") return;
-    event.preventDefault();
-    if (!event.isComposing && event.keyCode !== 229) run();
-  });
+  onEnter(field, run);
   node.append(field, go, out);
   return node;
 }
