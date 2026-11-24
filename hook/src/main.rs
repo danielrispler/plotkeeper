@@ -94,8 +94,13 @@ fn append() -> Result<(), Box<dyn Error>> {
         event.get("studio_agent").and_then(Value::as_str),
         Some("codex" | "cursor")
     );
+    // Tests that check what the trees hold, not their budget, set a longer one.
+    let budget = env::var("PLOTKEEPER_HOOK_TREES_BUDGET_MS")
+        .ok()
+        .and_then(|ms| ms.parse().ok())
+        .map_or(TREES_BUDGET, Duration::from_millis);
     let mut given_up = None;
-    if let Err(e) = trees(&mut event, data, timed, &mut given_up) {
+    if let Err(e) = trees(&mut event, data, timed.then_some(budget), &mut given_up) {
         eprintln!("plotkeeper-hook: record the trees: {e}");
     }
     // A lock that never comes must not hold the agent: the event is dropped, with a trace (#43,
@@ -132,7 +137,7 @@ fn append() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// `studio_hook::trees` on `event`, given `TREES_BUDGET` when `timed`; past it the line keeps none
+/// `studio_hook::trees` on `event`, given `budget` when there is one; past it the line keeps none
 /// of the trees, which are given up (`studio_hook::abandon_trees`), and `given_up` gets what says
 /// their work has stopped.
 type Recorded = (Map<String, Value>, Result<(), String>);
@@ -140,23 +145,23 @@ type Recorded = (Map<String, Value>, Result<(), String>);
 fn trees(
     event: &mut Map<String, Value>,
     data: &Path,
-    timed: bool,
+    budget: Option<Duration>,
     given_up: &mut Option<mpsc::Receiver<Recorded>>,
 ) -> Result<(), String> {
-    if !timed {
+    let Some(budget) = budget else {
         return studio_hook::trees(event, data).map_err(|e| e.to_string());
-    }
+    };
     let (mut copy, data) = (event.clone(), data.to_owned());
     let (done, recorded) = mpsc::channel();
     thread::spawn(move || {
         let result = studio_hook::trees(&mut copy, &data).map_err(|e| e.to_string());
         let _ = done.send((copy, result));
     });
-    let (copy, result) = match recorded.recv_timeout(TREES_BUDGET) {
+    let (copy, result) = match recorded.recv_timeout(budget) {
         Ok(recorded) => recorded,
         Err(_) if studio_hook::abandon_trees() => {
             *given_up = Some(recorded);
-            return Err(format!("they took over {TREES_BUDGET:?}"));
+            return Err(format!("they took over {budget:?}"));
         }
         // They were kept as the budget ran out: only their record's write is left.
         Err(_) => recorded.recv().map_err(|e| e.to_string())?,
