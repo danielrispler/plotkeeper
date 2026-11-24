@@ -126,13 +126,13 @@
         </aside>
       </div>
       <footer id="map-legend" class="map-legend"></footer>
-      <!-- The needs-you toast (danielrispler/Falinks#573) over the map's top-right corner, and under it the note toast, for a turn that ended
-           off screen; never focused. -->
-      <div class="toasts">
-        <div id="toast" class="toast" role="status" hidden></div>
-        <div id="note-toast" class="toast note" role="status" hidden></div>
-      </div>
-      <div id="clear-toast" class="toast start clear" role="status" hidden></div>
+      <!-- The toasts (#457), manual popovers in one region (a named section): the needs-you toast (danielrispler/Falinks#573) over the map's top-right
+           corner, under it the note toast, for a turn that ended off screen, and the Clear toast in the bottom-left corner. -->
+      <section id="toasts" class="toasts" aria-label="Notifications">
+        <div id="toast" class="toast" popover="manual" hidden></div>
+        <div id="note-toast" class="toast note" popover="manual" hidden></div>
+        <div id="clear-toast" class="toast start clear" popover="manual" hidden></div>
+      </section>
     </section>
   </div>
   <!-- The questions of rename and close (danielrispler/Falinks#469). -->

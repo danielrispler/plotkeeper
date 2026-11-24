@@ -180,22 +180,28 @@ h1 { margin: 0 0 var(--sp-4); }
 .pane[hidden] { visibility: hidden; }
 /* A split's divider (danielrispler/Falinks#529), in the gap between its two panes. */
 /* The terminal panel (danielrispler/Falinks#542): a band under the panes, its height set by `panel.ts`; its divider on its top edge. */
-/* The needs-you toast (danielrispler/Falinks#573): over the terminal's top-right corner, taking none of its space. */
-.toasts { position: absolute; top: var(--sp-5); right: var(--sp-5); z-index: 11; max-width: var(--toast); display: flex;
-          flex-direction: column; align-items: flex-end; gap: var(--sp-3); pointer-events: none; }
-.toasts > .toast { position: static; pointer-events: auto; }
-.toast { position: absolute; top: var(--sp-5); right: var(--sp-5); z-index: 11; max-width: var(--toast); display: grid;
-         grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--sp-1) var(--sp-4); align-items: baseline;
-         padding: var(--sp-4) var(--sp-5); border-radius: var(--radius); background: var(--needs-you-bg); color: var(--fg);
-         box-shadow: inset 0 0 0 var(--hair) var(--needs-you-line), var(--shadow); font-size: var(--size-small); cursor: pointer; }
+/* The toasts (#457): manual popovers in the top layer, so no z-index; the region spans the map's box less a margin, and
+   `toast.ts` places each open toast in it: the needs-you and the note toasts down its top-right corner, the Clear toast at its
+   bottom-left. The needs-you toast (danielrispler/Falinks#573) takes none of the map's space. */
+.toasts { position: absolute; inset: var(--sp-5); pointer-events: none; }
+.toast { position: fixed; inset: auto; margin: 0; border: 0; padding: 0; overflow: visible; pointer-events: auto; max-width: var(--toast); display: grid;
+         grid-template-columns: minmax(0, 1fr) auto; align-items: start; border-radius: var(--radius); background: var(--needs-you-bg);
+         color: var(--fg); box-shadow: inset 0 0 0 var(--hair) var(--needs-you-line), var(--shadow); font-size: var(--size-small); }
+.toast:not(:popover-open) { display: none; }
+/* Its main action: a full-size button beside its ×, holding the name, the count and the line. */
+.toast .toast-main { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-4); align-items: baseline;
+                     min-width: 0; border-radius: var(--radius) 0 0 var(--radius); }
+.toast > .btn.quiet.small { margin: var(--sp-3) var(--sp-3) 0 0; }
 .toast .name { color: var(--needs-you); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .toast .count { color: var(--muted); }
 .toast .btn { padding: 0 var(--sp-2); }
+.toast .btn.toast-main { padding: var(--sp-4) var(--sp-2) var(--sp-4) var(--sp-5); }
 .toast .line { grid-column: 1 / -1; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* The start-failure toast (danielrispler/Falinks#558): the bottom-right corner, so it never covers the needs-you one; not in colour. */
-.toast.start { top: auto; bottom: var(--sp-5); background: var(--raised); cursor: default;
-               box-shadow: inset 0 0 0 var(--hair) var(--edge), var(--shadow); }
-.toast.clear { right: auto; left: var(--sp-5); grid-template-columns: minmax(0, 1fr) auto; }
+/* The start-failure toast (danielrispler/Falinks#558): not in colour. */
+.toast.start { background: var(--raised); box-shadow: inset 0 0 0 var(--hair) var(--edge), var(--shadow); }
+/* The Clear toast: its message, Undo and ×, on one line. */
+.toast.clear { grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--sp-4); padding: var(--sp-4) var(--sp-3) var(--sp-4) var(--sp-5); }
+.toast.clear > .btn.quiet.small { margin: 0; }
 /* The note toast: a turn that ended off screen; not in colour. */
 .toast.note { background: var(--raised); box-shadow: inset 0 0 0 var(--hair) var(--edge), var(--shadow); }
 .toast.note .name { color: var(--fg); }

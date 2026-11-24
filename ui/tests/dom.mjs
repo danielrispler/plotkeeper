@@ -89,6 +89,26 @@ export class El {
   get text() {
     return this.childNodes.map((c) => c.text).join("");
   }
+  // A popover's state, and the geometry and focus a toast's placing reads (all zero here).
+  popoverOpen = false;
+  showPopover() {
+    this.popoverOpen = true;
+  }
+  hidePopover() {
+    this.popoverOpen = false;
+  }
+  matches(selector) {
+    return selector === ":popover-open" && this.popoverOpen;
+  }
+  contains(other) {
+    return other === this || this.childNodes.some((c) => c instanceof El && c.contains(other));
+  }
+  getBoundingClientRect() {
+    return { top: 0, right: 0, bottom: 0, left: 0, width: 0, height: 0 };
+  }
+  offsetWidth = 0;
+  offsetHeight = 0;
+  focus() {}
   find(tag, out = []) {
     if (this.tag === tag) out.push(this);
     for (const c of this.childNodes) if (c instanceof El) c.find(tag, out);
@@ -107,6 +127,8 @@ export class Field extends El {
 export const fakeDocument = (extra = {}, Element = El) => ({
   createElement: (tag) => new Element(tag),
   getElementById: () => new Element("div"),
+  querySelector: () => null,
+  activeElement: null,
   ...extra,
 });
 

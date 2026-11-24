@@ -36,7 +36,7 @@ import { drawFeed, showView } from "./story.js";
 import { startRailBriefs } from "./rail-brief.js";
 import { barKeyDown } from "./story-bar.js";
 import { startWriters } from "./writers.js";
-import { jumpToNeedsYou, showToast } from "./toast.js";
+import { jumpToNeedsYou, showToast, watchToasts } from "./toast.js";
 import { askOnce, notifyIfAway, type Alert } from "./alerts.js";
 import { finishedNote, showNote, watchNotes } from "./notes.js";
 import type { SavedProject, Selection, Session, SessionCards } from "./types.js";
@@ -262,9 +262,8 @@ const showList = (sessions: Session[]) => {
 };
 listen<Session[]>("sessions", showList);
 invoke("sessions").then(showList);
-// A press on the toast jumps to its session; the press itself keeps the keyboard focus.
-element("toast").addEventListener("pointerdown", (event) => event.preventDefault());
-element("toast").addEventListener("click", jumpToNeedsYou);
+// The toasts' presses keep the keyboard's focus, and a modal dialog holds them back (#457).
+watchToasts();
 // A turn that ended off screen in the focused window (the server's notices): the note toast names it.
 watchNotes();
 listen<string[]>("finished", (ids) => {

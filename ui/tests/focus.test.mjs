@@ -2,10 +2,25 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { questionLine, toastFor, toastShows } from "../../dist/toast.js";
+import { El, fakeDocument } from "./dom.mjs";
+import { questionLine, showClearToast, showToast, toastFor, toastShows } from "../../dist/toast.js";
+import { showNote } from "../../dist/notes.js";
+import { studio } from "../../dist/state.js";
 
 const ui = new URL("../", import.meta.url);
 const read = (name) => fs.readFileSync(new URL(name, ui), "utf8");
+
+// The stand-in page: elements by id, as index.html has them, and a modal dialog open or not.
+const page = new Map();
+let modal = false;
+// The note's fade never falls due here.
+globalThis.window = { setTimeout: () => 0, clearTimeout() {} };
+globalThis.document = fakeDocument({
+  getElementById: (id) => page.get(id) ?? page.set(id, new El("div")).get(id),
+  querySelector: (selector) => (selector === "dialog:modal" && modal ? new El("dialog") : null),
+  activeElement: null,
+  body: { dataset: { layout: "focus" } },
+});
 
 const session = (id, state = "running", questions = []) => ({
   id, state, questions, name: null, folder_name: id, identity: { name: id }, last_step: null,
@@ -42,14 +57,53 @@ test("a dismissed block stays dismissed; the toast goes once Daniel acts", () =>
   assert.equal(toastFor([session("b", "your_turn")], "a", new Set()), null);
 });
 
-test("the toast never takes keyboard focus", () => {
-  // shortcut: a line check, not a DOM; upgrade to a DOM test if the toast grows controls.
-  const html = read("index.html").match(/<div id="toast"[^>]*>/)[0];
-  assert.match(html, /role="status"/);
-  assert.doesNotMatch(html, /tabindex|autofocus/);
-  const script = read("toast.ts");
-  assert.match(script, /tabIndex = -1/);
-  assert.doesNotMatch(script, /\.focus\(\)/);
-  // A press on it keeps the terminal's focus.
-  assert.match(read("main.ts"), /element\("toast"\)\.addEventListener\("pointerdown", \(event\) => event\.preventDefault\(\)\)/);
+// The rule reversed (#457; #452's "Toasts", decided with Daniel): toasts kept out of the keyboard to keep the terminal's focus, and the
+// terminal was archived (#332, #415). Now Undo, each × and each main action are buttons Tab reaches; a pointer press still keeps the
+// keyboard's focus where it was, and a real Tab, Enter and press are checked in the snap fixture `toastKeys`.
+test("toasts take keyboard focus: each main action is a button beside its ×, and none is out of the tab order (#457)", () => {
+  studio.selection = null;
+  studio.listed = [asking("b", "Which branch?")];
+  showToast();
+  const needs = page.get("toast");
+  assert.equal(needs.hidden, false);
+  showNote({ session: session("c"), count: "", line: "It finished" });
+  const note = page.get("note-toast");
+  let undone = 0;
+  showClearToast(2, () => undone++);
+  const clear = page.get("clear-toast");
+  for (const [toast, names] of [[needs, ["main", "×"]], [note, ["main", "×"]], [clear, ["Undo", "×"]]]) {
+    const buttons = toast.find("button");
+    assert.deepEqual(buttons.map((b) => (b.className.includes("toast-main") ? "main" : b.getAttribute("aria-label") === "Dismiss" ? "×" : b.text)), names);
+    for (const button of buttons) {
+      assert.notEqual(button.tabIndex, -1, `<button> ${button.text} is out of the tab order`);
+      // A button beside the ×, never around it: each is the toast's own child.
+      assert.ok(toast.childNodes.includes(button), `<button> ${button.text} is nested`);
+    }
+  }
+  // A pointer press keeps focus where it was.
+  assert.match(read("toast.ts"), /addEventListener\("pointerdown", \(event\) => event\.preventDefault\(\)\)/);
+});
+
+test("the toasts are manual popovers in one region named Notifications, and none is a status (#457)", () => {
+  // A named <section> is a region.
+  const region = read("index.html").match(/<section id="toasts"[^>]*>([\s\S]*?)<\/section>/);
+  assert.ok(region, "a region holds the toasts");
+  assert.match(region[0], /aria-label="Notifications"/);
+  for (const id of ["toast", "note-toast", "clear-toast"]) {
+    const toast = region[1].match(new RegExp(`<div id="${id}"[^>]*>`))?.[0];
+    assert.ok(toast, `#${id} is in the region`);
+    assert.match(toast, /popover="manual"/);
+    assert.doesNotMatch(toast, /role="status"/);
+  }
+});
+
+test("no toast shows while a modal dialog is open, and it shows once the dialog closes (#457)", () => {
+  studio.selection = null;
+  studio.listed = [asking("b", "Which branch?")];
+  modal = true;
+  showToast();
+  assert.equal(page.get("toast").matches(":popover-open"), false);
+  modal = false;
+  showToast();
+  assert.equal(page.get("toast").matches(":popover-open"), true);
 });
