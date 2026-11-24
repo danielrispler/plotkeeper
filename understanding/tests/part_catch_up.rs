@@ -4,7 +4,7 @@
 use serde_json::json;
 use std::cell::RefCell;
 use studio_understanding::part_catch_up::*;
-use studio_understanding::pr_brief::{BriefReply, BriefWriter, CallUsage, TaggedTest};
+use studio_understanding::pr_brief::{BriefReply, BriefWriter, CallKind, CallUsage, TaggedTest};
 
 const MAP: &str = r#"{
   "version": 1,
@@ -292,12 +292,12 @@ fn the_entry_runs_the_claim_check_and_one_retry_and_stores_the_catch_up_by_part_
         flagged.to_string(),
         retry.to_string(),
     ]);
-    let stored = write_part_catch_up(&writer, "opus", &source(), &store, |_| {}).unwrap();
+    let stored = write_part_catch_up(&writer, "opus", &source(), &store, |_| {}, |_| {}).unwrap();
 
     let prompts = writer.prompts.borrow();
     assert_eq!(prompts.len(), 3, "writer, claim check, retry");
     assert!(prompts[1].contains("You check a written PR brief"));
-    assert!(prompts[2].starts_with("You write a part catch-up") && prompts[2].contains("RETRY"));
+    assert!(prompts[2].contains("You write a part catch-up") && prompts[2].contains("RETRY"));
     assert_eq!(stored.brief.chapters[0].steps[2].h, "Alpha keeps order now");
     assert!(
         stored.brief.all_flags().is_empty(),
@@ -313,6 +313,75 @@ fn the_entry_runs_the_claim_check_and_one_retry_and_stores_the_catch_up_by_part_
     let records = store.records();
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].claim_flags_before.len(), 1);
+}
+
+/// A writer that keeps each call's shared facts and its own prompt apart, as `claude -p` gets them.
+struct Fenced {
+    replies: RefCell<Vec<String>>,
+    calls: RefCell<Vec<(String, String)>>,
+    kinds: RefCell<Vec<CallKind>>,
+}
+
+impl BriefWriter for Fenced {
+    fn write(&self, model: &str, prompt: &str) -> Result<BriefReply, String> {
+        self.write_with_facts(model, CallKind::Write, "", prompt)
+    }
+    fn write_with_facts(
+        &self,
+        _model: &str,
+        kind: CallKind,
+        facts: &str,
+        prompt: &str,
+    ) -> Result<BriefReply, String> {
+        self.calls.borrow_mut().push((facts.into(), prompt.into()));
+        self.kinds.borrow_mut().push(kind);
+        Ok(BriefReply {
+            text: self.replies.borrow_mut().remove(0),
+            usage: CallUsage::default(),
+        })
+    }
+}
+
+#[test]
+fn the_three_calls_share_the_facts_as_fenced_system_text_and_send_only_their_own_rules_as_the_prompt()
+ {
+    let data = tempfile::tempdir().unwrap();
+    let store = CatchUpStore::open(data.path()).unwrap();
+    let flagged = json!({ "items": [ { "id": "step 3", "supported": false, "phrase": "keeps the order", "why": "the facts say nothing" } ] });
+    let writer = Fenced {
+        replies: RefCell::new(vec![
+            reply().to_string(),
+            flagged.to_string(),
+            json!({ "items": [] }).to_string(),
+        ]),
+        calls: RefCell::new(vec![]),
+        kinds: RefCell::new(vec![]),
+    };
+    write_part_catch_up(&writer, "opus", &source(), &store, |_| {}, |_| {}).unwrap();
+    let facts = build_catch_up_facts(&source()).unwrap();
+    let block = studio_understanding::pr_brief::facts_block(&facts);
+    let calls = writer.calls.borrow();
+    assert_eq!(calls.len(), 3, "writer, claim check, retry");
+    for (i, (shared, prompt)) in calls.iter().enumerate() {
+        assert_eq!(shared, &block, "call {i}'s shared facts");
+        assert!(
+            !prompt.contains(&facts.text),
+            "call {i}'s prompt repeats the facts"
+        );
+    }
+    assert!(
+        block.contains(&facts.text) && block.contains("untrusted"),
+        "{}",
+        &block[..200]
+    );
+    assert!(calls[0].1.starts_with("You write a part catch-up"));
+    assert!(calls[1].1.starts_with("You check a written PR brief"));
+    assert!(calls[2].1.contains("RETRY"));
+    // The writer and the retry run at the brief effort; the claim check at claude's own (#450).
+    assert_eq!(
+        *writer.kinds.borrow(),
+        [CallKind::Write, CallKind::Check, CallKind::Write]
+    );
 }
 
 fn long_source(n: usize) -> CatchUpSource {
@@ -340,7 +409,7 @@ fn a_long_fog_lists_catch_up_says_it_summarises_the_main_shifts_with_the_full_li
             no_claims.clone(),
             no_claims.clone(),
         ]);
-        write_part_catch_up(&writer, "opus", &long_source(n), &store, |_| {}).unwrap()
+        write_part_catch_up(&writer, "opus", &long_source(n), &store, |_| {}, |_| {}).unwrap()
     };
 
     let long = write(9);

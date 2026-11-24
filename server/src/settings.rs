@@ -346,6 +346,25 @@ fn pr_briefs_model_in(text: &str) -> String {
     }
 }
 
+const PR_BRIEFS_EFFORT: &str = "low";
+
+/// The effort of the PR briefs' and part catch-ups' writer and retry calls, `prBriefs.effort`, read on each call: `low` by
+/// default, kept by #450's measurement (`docs/studio/behaviour/pr-briefs.md`); `default` or empty gives `claude`'s own (no
+/// `--effort`); a value `claude` does not take reads as the default. The claim check always runs at `claude`'s own.
+pub fn pr_briefs_effort() -> String {
+    let text = paths().and_then(|[settings, _]| fs::read_to_string(settings).ok());
+    pr_briefs_effort_in(&text.unwrap_or_default())
+}
+
+fn pr_briefs_effort_in(text: &str) -> String {
+    let json: serde_json::Value = serde_json::from_str(&plain_json(text)).unwrap_or_default();
+    match json["prBriefs"]["effort"].as_str().map(str::trim) {
+        Some("default") => String::new(),
+        Some(effort) if WriterKind::Claude.efforts().contains(&effort) => effort.to_string(),
+        _ => PR_BRIEFS_EFFORT.to_string(),
+    }
+}
+
 /// What a background run reads from `settings.json` (spec danielrispler/plotkeeper#378): the harness and model of
 /// `backgroundRuns`, and the project's `checks` and `setup`.
 #[derive(Debug, Default, PartialEq)]
@@ -592,8 +611,8 @@ impl ApiKeys for MemoryKeys {
 #[cfg(test)]
 mod tests {
     use super::{
-        brief_backfill_in, edit_text, plain_json, pr_briefs_model_in, repository_in,
-        run_settings_in, save_writer_in, summary_writer_in, write_in,
+        brief_backfill_in, edit_text, plain_json, pr_briefs_effort_in, pr_briefs_model_in,
+        repository_in, run_settings_in, save_writer_in, summary_writer_in, write_in,
     };
     use serde_json::json;
     use studio_understanding::WriterKind;
@@ -749,6 +768,34 @@ mod tests {
         assert_eq!(
             pr_briefs_model_in(r#"{ "summaries": { "model": "haiku" } }"#),
             "opus"
+        );
+    }
+
+    #[test]
+    fn the_pr_briefs_effort_is_low_unless_the_settings_name_another_or_claudes_own() {
+        assert_eq!(pr_briefs_effort_in(""), "low");
+        assert_eq!(
+            pr_briefs_effort_in(r#"{ "prBriefs": { "model": "opus" } }"#),
+            "low"
+        );
+        let medium = "{ // slower, more thought\n \"prBriefs\": { \"effort\": \"medium\", }, }";
+        assert_eq!(pr_briefs_effort_in(medium), "medium");
+        // Claude's own effort: no --effort at all.
+        assert_eq!(
+            pr_briefs_effort_in(r#"{ "prBriefs": { "effort": "default" } }"#),
+            ""
+        );
+        assert_eq!(
+            pr_briefs_effort_in(r#"{ "prBriefs": { "effort": "" } }"#),
+            ""
+        );
+        assert_eq!(
+            pr_briefs_effort_in(r#"{ "prBriefs": { "effort": "turbo" } }"#),
+            "low"
+        );
+        assert_eq!(
+            pr_briefs_effort_in(r#"{ "summaries": { "effort": "high" } }"#),
+            "low"
         );
     }
 

@@ -1,6 +1,6 @@
 //! Part catch-ups (spec danielrispler/plotkeeper#378, tickets #391 and #396): a fogged part offers one story of everything that
-//! landed in it since Daniel last caught up. When a project's map is shown, the catch-ups of up to three fogged Core parts are
-//! written, oldest fog first; any other is written when he clicks it. A part fogged by exactly one PR whose brief lights it opens
+//! landed in it since Daniel last caught up. When a project's map is shown, the catch-ups of up to eight fogged Core parts are
+//! written, oldest fog first (#450); any other is written when he clicks it. A part fogged by exactly one PR whose brief lights it opens
 //! that chapter instead.
 
 use crate::App;
@@ -16,6 +16,7 @@ use studio_understanding::part_catch_up::{
     CatchUpStore, StoredCatchUp, gather_catch_up, write_part_catch_up,
 };
 use studio_understanding::pr_brief::BriefWriter;
+use studio_understanding::pr_brief_check::Stage;
 
 /// What a fogged part's sheet offers.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -24,11 +25,13 @@ pub enum Offer {
     /// The one PR's brief has a chapter that lights the part: that chapter opens.
     Chapter { pr: u64, chapter: usize },
     /// A part catch-up: `ready` when one is stored for the part's current fog list, `writing` while one is written, `failed` when
-    /// the last write for this fog list failed.
+    /// the last write for this fog list failed. `stage`: which call of the write runs now (#450).
     CatchUp {
         ready: bool,
         writing: bool,
         failed: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        stage: Option<Stage>,
     },
 }
 
@@ -54,6 +57,7 @@ pub fn offer(
         ready: false,
         writing: false,
         failed: false,
+        stage: None,
     })
 }
 
@@ -81,7 +85,16 @@ pub struct CatchUps {
     busy: Arc<Mutex<Busy>>,
     /// The fog list whose write failed, per project and part: the sheet says so, and a click tries again.
     failed: Arc<Mutex<Failed>>,
+    /// Which call of its write runs now, per project and part being written.
+    stages: Arc<Mutex<Stages>>,
+    /// Told the project whose write moved on to its next call, so the page draws the new stage.
+    on_stage: Option<Tell>,
 }
+
+type Stages = HashMap<(String, String), Stage>;
+
+/// Told a project's name.
+type Tell = Arc<dyn Fn(&str) + Send + Sync>;
 
 /// The fog list whose write failed, by project and part.
 type Failed = HashMap<(String, String), Vec<String>>;
@@ -92,6 +105,7 @@ type Busy = HashMap<(String, String), (Vec<String>, Option<Vec<String>>)>;
 struct Claim {
     busy: Arc<Mutex<Busy>>,
     failed: Arc<Mutex<Failed>>,
+    stages: Arc<Mutex<Stages>>,
     key: (String, String),
     released: bool,
     /// Runs when the claim drops, so the page hears the writes ended even when one panicked.
@@ -117,6 +131,7 @@ impl Claim {
 
 impl Drop for Claim {
     fn drop(&mut self) {
+        self.stages.lock().unwrap().remove(&self.key);
         // A write panicked: the newest list asked for is marked failed, so the sheet says so and a click tries it again.
         if !self.released
             && let Some((writing, queued)) = self.busy.lock().unwrap().remove(&self.key)
@@ -131,6 +146,14 @@ impl Drop for Claim {
 }
 
 impl CatchUps {
+    /// The catch-ups, telling `on_stage` the project whose write moved on to its next call.
+    pub fn telling(on_stage: impl Fn(&str) + Send + Sync + 'static) -> Self {
+        Self {
+            on_stage: Some(Arc::new(on_stage)),
+            ..Self::default()
+        }
+    }
+
     /// Claims `part`'s write over `fog`; while another list is being written, `fog` waits its turn after it instead.
     fn claim(&self, project: &str, part: &str, fog: &[String]) -> Option<Claim> {
         let key = (project.to_string(), part.to_string());
@@ -145,6 +168,7 @@ impl CatchUps {
         Some(Claim {
             busy: self.busy.clone(),
             failed: self.failed.clone(),
+            stages: self.stages.clone(),
             key,
             released: false,
             done: None,
@@ -156,6 +180,14 @@ impl CatchUps {
             .lock()
             .unwrap()
             .contains_key(&(project.to_string(), part.to_string()))
+    }
+
+    fn stage(&self, project: &str, part: &str) -> Option<Stage> {
+        self.stages
+            .lock()
+            .unwrap()
+            .get(&(project.to_string(), part.to_string()))
+            .cloned()
     }
 
     fn failed(&self, project: &str, part: &str, fog: &[String]) -> bool {
@@ -216,6 +248,7 @@ pub fn offers(
                             .is_some_and(|s| fresh(s, part, &list).is_some()),
                         writing: app.catch_ups.writing(project, part),
                         failed: app.catch_ups.failed(project, part, &list),
+                        stage: app.catch_ups.stage(project, part),
                     }
                 }
                 chapter => chapter,
@@ -235,9 +268,9 @@ pub enum Opened {
 
 type SharedWriter = Arc<dyn BriefWriter + Send + Sync>;
 
-/// At most this many fogged Core parts get their catch-up written when a project's map is shown (spec #378, "When it is
-/// written").
-pub const ON_SHOW: usize = 3;
+/// At most this many fogged Core parts get their catch-up written when a project's map is shown (spec #443, "Part catch-up
+/// writing", which raised #396's 3).
+pub const ON_SHOW: usize = 8;
 
 /// Starts writing `part`'s catch-up over `fog` in the background. While one over another list is being written, `fog` is written
 /// once that one ends, so the part is never left with neither a write nor a catch-up for its list. `done` runs when the writes end,
@@ -258,14 +291,27 @@ fn start(
     };
     claim.done = Some(Box::new(done));
     let failed = catch_ups.failed.clone();
+    let (stages, on_stage) = (catch_ups.stages.clone(), catch_ups.on_stage.clone());
     let (project, part) = (project.to_string(), part.to_string());
     std::thread::spawn(move || {
         let mut fog = fog;
+        let key = (project.clone(), part.clone());
+        let staged = |stage: Stage| {
+            stages.lock().unwrap().insert(key.clone(), stage);
+            if let Some(tell) = &on_stage {
+                tell(&project);
+            }
+        };
         loop {
             let written = gather_catch_up(Path::new(&project), &part, &fog).and_then(|source| {
-                write_part_catch_up(writer.as_ref(), &model, &source, &store, |line| {
-                    log::warn!("part catch-up of {part}: {line}")
-                })
+                write_part_catch_up(
+                    writer.as_ref(),
+                    &model,
+                    &source,
+                    &store,
+                    |line| log::warn!("part catch-up of {part}: {line}"),
+                    staged,
+                )
             });
             if let Err(why) = written {
                 log::warn!("write the part catch-up of {part}: {why}");
@@ -512,6 +558,7 @@ mod tests {
         ready: false,
         writing: false,
         failed: false,
+        stage: None,
     };
     fn lit(chapters: &[&[&str]]) -> Option<Vec<Vec<String>>> {
         Some(
@@ -653,6 +700,11 @@ mod tests {
         gate: (Mutex<bool>, std::sync::Condvar),
         /// Past its gate, the writer panics instead of writing.
         panics: bool,
+        /// The claim check finds the first step unsupported, so a retry runs.
+        flags: bool,
+        /// Read as each call starts: the stage the part's state carries then.
+        probe: Option<Arc<Mutex<Stages>>>,
+        seen: Mutex<Vec<Option<Stage>>>,
     }
 
     impl Fake {
@@ -676,8 +728,11 @@ mod tests {
             _model: &str,
             prompt: &str,
         ) -> Result<studio_understanding::pr_brief::BriefReply, String> {
-            let text = if prompt.starts_with("You write a part catch-up")
-                && !prompt.contains("RETRY")
+            if let Some(stages) = &self.probe {
+                let stage = stages.lock().unwrap().values().next().cloned();
+                self.seen.lock().unwrap().push(stage);
+            }
+            let text = if prompt.contains("You write a part catch-up") && !prompt.contains("RETRY")
             {
                 let mut shut = self.gate.0.lock().unwrap();
                 while *shut {
@@ -696,6 +751,9 @@ mod tests {
                 serde_json::json!({ "title": "t", "chapters": [ { "behaviour": "story", "parts": [part], "title": "t",
                     "steps": [step("Where"), step("Before"), step("Now")] } ], "also": [], "unseen": [], "decisions": [] })
                 .to_string()
+            } else if self.flags && !prompt.contains("RETRY") {
+                r#"{"items":[{"id":"step 1","supported":false,"phrase":"h","why":"the facts say nothing"}]}"#
+                    .to_string()
             } else {
                 r#"{"items":[]}"#.to_string()
             };
@@ -707,6 +765,7 @@ mod tests {
     }
 
     struct Shows {
+        map: &'static str,
         rig: Rig,
         data: tempfile::TempDir,
         catch_ups: CatchUps,
@@ -716,12 +775,22 @@ mod tests {
 
     impl Shows {
         fn new() -> Shows {
-            let files: Vec<(String, &str)> =
-                "abcdef".chars().map(|p| (format!("{p}/x"), "1")).collect();
+            Shows::over(FIVE)
+        }
+        /// Over `map`, each of whose parts owns the folder named by its id.
+        fn over(map: &'static str) -> Shows {
+            let parsed: serde_json::Value = serde_json::from_str(map).unwrap();
+            let files: Vec<(String, &str)> = parsed["parts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|p| (format!("{}/x", p["id"].as_str().unwrap()), "1"))
+                .collect();
             let files: Vec<(&str, &str)> = files.iter().map(|(n, t)| (n.as_str(), *t)).collect();
             let (ended, ends) = std::sync::mpsc::channel();
             Shows {
-                rig: Rig::with(FIVE, &files),
+                map,
+                rig: Rig::with(map, &files),
                 data: tempfile::tempdir().unwrap(),
                 catch_ups: CatchUps::default(),
                 ended,
@@ -753,7 +822,7 @@ mod tests {
                 "opus",
                 &self.rig.main,
                 &user,
-                FIVE,
+                self.map,
                 &|_| None,
                 &self.store(),
                 move || ended.send(()).unwrap(),
@@ -772,28 +841,16 @@ mod tests {
     }
 
     #[test]
-    fn showing_the_map_writes_three_fogged_core_parts_oldest_fog_first_and_a_fourth_on_click() {
+    fn a_part_that_is_not_core_is_written_only_when_clicked() {
         let shows = Shows::new();
-        // The interface part's thin fog shows nothing; then five Core parts, c's fog the oldest.
         shows.push("f", "2");
-        for part in ["c", "a", "e", "b", "d"] {
-            shows.push(part, "2");
-        }
+        shows.push("a", "2");
         let writer = Arc::new(Fake::default());
-        assert_eq!(shows.show(&writer), ["c", "a", "e"]);
-        shows.wait(3);
-        let mut wrote = writer.wrote();
-        wrote.sort();
-        assert_eq!(wrote, ["a", "c", "e"]);
-        for part in ["c", "a", "e"] {
-            assert!(
-                fresh(&shows.store(), part, &shows.fog(part)).is_some(),
-                "{part}"
-            );
-        }
-        assert!(shows.store().get("b").is_none());
+        assert_eq!(shows.show(&writer), ["a"]);
+        shows.wait(1);
+        assert!(shows.store().get("f").is_none());
 
-        // b is written when clicked.
+        // The interface part is written when clicked.
         let ended = shows.ended.clone();
         let writer_: SharedWriter = writer.clone();
         let opened = ask(
@@ -801,16 +858,58 @@ mod tests {
             Some(writer_),
             "opus".into(),
             &shows.rig.main,
-            "b",
-            shows.fog("b"),
+            "f",
+            shows.fog("f"),
             shows.store(),
             move || ended.send(()).unwrap(),
         )
         .unwrap();
         assert!(matches!(opened, Opened::Writing { writing: true }));
         shows.wait(1);
-        assert!(fresh(&shows.store(), "b", &shows.fog("b")).is_some());
-        assert_eq!(writer.wrote().len(), 4);
+        assert!(fresh(&shows.store(), "f", &shows.fog("f")).is_some());
+        assert_eq!(writer.wrote(), ["a", "f"]);
+    }
+
+    /// Ten Core parts, `c0` to `c9`, and two interface parts, `i0` and `i1`.
+    const TWELVE: &str = r#"{"version":1,
+      "parts":[
+        {"id":"c0","name":"C0","caption":"c","description":"d","tier":"core","paths":["c0/"]},
+        {"id":"c1","name":"C1","caption":"c","description":"d","tier":"core","paths":["c1/"]},
+        {"id":"c2","name":"C2","caption":"c","description":"d","tier":"core","paths":["c2/"]},
+        {"id":"c3","name":"C3","caption":"c","description":"d","tier":"core","paths":["c3/"]},
+        {"id":"c4","name":"C4","caption":"c","description":"d","tier":"core","paths":["c4/"]},
+        {"id":"c5","name":"C5","caption":"c","description":"d","tier":"core","paths":["c5/"]},
+        {"id":"c6","name":"C6","caption":"c","description":"d","tier":"core","paths":["c6/"]},
+        {"id":"c7","name":"C7","caption":"c","description":"d","tier":"core","paths":["c7/"]},
+        {"id":"c8","name":"C8","caption":"c","description":"d","tier":"core","paths":["c8/"]},
+        {"id":"c9","name":"C9","caption":"c","description":"d","tier":"core","paths":["c9/"]},
+        {"id":"i0","name":"I0","caption":"c","description":"d","tier":"interface","paths":["i0/"]},
+        {"id":"i1","name":"I1","caption":"c","description":"d","tier":"interface","paths":["i1/"]}],
+      "actors":[],"links":[],"ignored":[],"laws":[]}"#;
+
+    #[test]
+    fn showing_the_map_writes_eight_fogged_core_parts_oldest_fog_first_none_of_the_others_and_none_again()
+     {
+        let shows = Shows::over(TWELVE);
+        // The interface parts' fog is the oldest; then the Core parts, c7's fog the oldest of them.
+        for part in [
+            "i0", "i1", "c7", "c2", "c9", "c0", "c5", "c1", "c8", "c3", "c6", "c4",
+        ] {
+            shows.push(part, "2");
+        }
+        let writer = Fake::shut();
+        let started = shows.show(&writer);
+        assert_eq!(started, ["c7", "c2", "c9", "c0", "c5", "c1", "c8", "c3"]);
+        // Showing the map again while they are written starts none.
+        assert_eq!(shows.show(&writer), Vec::<String>::new());
+        writer.open();
+        shows.wait(8);
+        let mut wrote = writer.wrote();
+        wrote.sort();
+        assert_eq!(wrote, ["c0", "c1", "c2", "c3", "c5", "c7", "c8", "c9"]);
+        // Nor once they are stored.
+        assert_eq!(shows.show(&writer), Vec::<String>::new());
+        assert_eq!(writer.wrote().len(), 8);
     }
 
     #[test]
@@ -879,6 +978,28 @@ mod tests {
         wrote.sort();
         assert_eq!(wrote, ["a", "b"]);
         assert_eq!(shows.show(&writer), Vec::<String>::new());
+    }
+
+    #[test]
+    fn the_catch_ups_state_carries_the_stage_as_each_call_starts() {
+        let shows = Shows::new();
+        shows.push("a", "2");
+        let writer = Arc::new(Fake {
+            flags: true,
+            probe: Some(shows.catch_ups.stages.clone()),
+            ..Default::default()
+        });
+        assert_eq!(shows.show(&writer), ["a"]);
+        shows.wait(1);
+        let seen = writer.seen.lock().unwrap().clone();
+        assert_eq!(seen.len(), 3, "writer, claim check, retry: {seen:?}");
+        assert_eq!(seen[0], Some(Stage::Writing));
+        assert_eq!(seen[1], Some(Stage::Checking));
+        assert!(
+            matches!(seen[2], Some(Stage::Fixing { claims }) if claims >= 1),
+            "{seen:?}"
+        );
+        assert_eq!(shows.catch_ups.stage(&shows.rig.main, "a"), None);
     }
 
     #[test]

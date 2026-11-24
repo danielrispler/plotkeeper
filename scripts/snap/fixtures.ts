@@ -1,7 +1,7 @@
 // Studio state for `npm run snap`: each fixture maps a server command (`POST /api/<command>`) to what it returns.
 // A fixture is a function so that its times are relative to the moment it renders.
 
-import type { BriefChapter, BriefFigure, BriefStep, BriefView, Ci, LogEntry, MapState, PrBrief, RatifyRow, Session, SessionState, StoredCatchUp, Subagent } from "../../ui/types.ts";
+import type { BriefChapter, BriefFigure, BriefStep, BriefView, CatchUpStage, Ci, LogEntry, MapState, PrBrief, RatifyRow, Session, SessionState, StoredCatchUp, Subagent } from "../../ui/types.ts";
 import { base, type Fixture } from "./base.ts";
 import { railFixtures } from "./rail-fixtures.ts";
 
@@ -738,13 +738,44 @@ const mapCatchUpWriting = (): Fixture => ({
       document.querySelector(".sheet .sheet-catch-up").click();
       await wait(600);
       const panel = document.getElementById("map-brief");
-      if (panel.hidden || !panel.textContent.includes("Writing the part catch-up…")) return log("snap:fail the panel does not say the catch-up is being written");
+      if (panel.hidden || !panel.textContent.includes("Writing…") || panel.querySelector("progress")?.getAttribute("aria-label") !== "Writing the part catch-up") return log("snap:fail the panel does not say the catch-up is being written");
       if (document.body.classList.contains("brief-open")) log("snap:fail the map is dimmed while it is written");
       log("catch-up writing ok");`, {
     map_state: mapState({ fog: { understanding: "thick" }, catch_ups: { understanding: { kind: "catch-up", ready: false, writing: true, failed: false } } }),
     part_catch_up: { writing: true },
   }),
   snapDone: "catch-up writing ok",
+});
+// While a part catch-up is written, the waiting card says which call runs (#450): the stage's label beside a named, indeterminate
+// progress bar, both in a polite live region, at the story card's narrow width.
+const mapCatchUpStage = (stage: CatchUpStage, label: string): Fixture => ({
+  ...mapOpened(`
+      const calm = document.createElement("style");
+      calm.textContent = "*, *::before, *::after { transition: none !important; }";
+      document.head.append(calm);
+      document.querySelector("#map .plate[data-id=understanding]").click();
+      await wait(300);
+      document.querySelector(".sheet .sheet-catch-up").click();
+      await wait(600);
+      const panel = document.getElementById("map-brief");
+      if (panel.hidden) return log("snap:fail the waiting card is not shown");
+      const live = panel.querySelector('[aria-live="polite"]');
+      if (!live) return log("snap:fail the waiting card has no polite live region");
+      if (!live.textContent.includes(${JSON.stringify(label)})) log("snap:fail the stage reads: " + live.textContent);
+      const bar = live.querySelector("progress");
+      if (!bar) log("snap:fail no progress element in the live region");
+      else {
+        if (bar.hasAttribute("value")) log("snap:fail the progress is not indeterminate");
+        if (!bar.getAttribute("aria-label") && !bar.labels?.length && !bar.getAttribute("aria-labelledby")) log("snap:fail the progress has no name");
+      }
+      const narrow = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--brief-width"));
+      const width = panel.getBoundingClientRect().width;
+      if (Math.abs(width - narrow) > 1) log("snap:fail the waiting card is not the story card's width: " + width + " against " + narrow);
+      log("catch-up stage ok");`, {
+    map_state: mapState({ fog: { understanding: "thick" }, catch_ups: { understanding: { kind: "catch-up", ready: false, writing: true, failed: false, stage } } }),
+    part_catch_up: { writing: true },
+  }),
+  snapDone: "catch-up stage ok",
 });
 // A step's bold phrase (#446): the writer may wrap one phrase in <b>...</b>; the reader shows it as one bold element and never the tag.
 const boldBody = "No process is recorded, so the session <b>goes idle</b> until its next event.";
@@ -1912,6 +1943,9 @@ export const fixtures = {
   mapBriefWriting,
   mapCatchUp,
   mapCatchUpWriting,
+  mapCatchUpWritingStage: () => mapCatchUpStage({ kind: "writing" }, "Writing…"),
+  mapCatchUpCheckingStage: () => mapCatchUpStage({ kind: "checking" }, "Checking claims…"),
+  mapCatchUpFixingStage: () => mapCatchUpStage({ kind: "fixing", claims: 2 }, "Fixing 2 claims…"),
   mapCatchUpSummarising,
   mapCatchUpBold,
   mapBriefBold,

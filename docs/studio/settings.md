@@ -8,7 +8,7 @@ The page has no terminal (danielrispler/plotkeeper#326) and no project list to e
 {
   "summaries": { "model": "haiku", "effort": "low", "on_open": false, "writer": "claude", "base_url": "http://localhost:11434/v1" }, // writer: "claude", "agy", "codex", "copilot", "cursor", "anthropic" (the API key) or "openai" (any OpenAI-compatible API); base_url: the OpenAI-compatible API's, set in Settings
   "briefBackfill": { "hours": 2 }, // at start, write PR briefs for ready PRs whose head moved within the hours, the newest first and at most 3; the older name `catchUp.hours` is still read when this key is absent
-  "prBriefs": { "model": "opus" }, // the model that writes a PR brief and a part catch-up and checks their claims; default: opus
+  "prBriefs": { "model": "opus", "effort": "low" }, // the model that writes a PR brief and a part catch-up and checks their claims; default: opus. effort: low (the default), medium, high, or "default" for claude's own, for the writer's and the retry's calls, never the claim check's, which runs at claude's own
   "checks": { "/path/to/app": ["make verify"] }, // per project folder, the commands that are checks; default: `cargo test` and the like, and `npm run check`. A background run allows only the project's own entry and has no default
   "setup": { "/path/to/app": "npm ci" },         // per project folder, one command a background run runs in its working folder before its agent starts; default: none
   "backgroundRuns": { "harness": "claude", "model": "sonnet" }, // the agent program of a background run (only "claude") and its model; default model: the CLI's own

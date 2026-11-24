@@ -224,7 +224,7 @@ impl App {
                     .ok()
                     .filter(ClaudeWriter::claude_found)
                     .map(|w| {
-                        Arc::new(w)
+                        Arc::new(w.with_brief_effort(settings::pr_briefs_effort))
                             as Arc<dyn studio_understanding::pr_brief::BriefWriter + Send + Sync>
                     }),
             });
@@ -255,6 +255,11 @@ impl App {
         let laws = back_a_law::LawRuns::new(runner.clone(), back_a_law::Config::beside(log));
         let told = events.clone();
         laws.on_change(move |project| told.emit("map-landed", project.into()));
+        // A part catch-up's write that moves on to its next call draws its stage on the waiting card (#450).
+        let told = events.clone();
+        let catch_ups = part_catch_ups::CatchUps::telling(move |project| {
+            told.emit("map-landed", project.into())
+        });
         Ok(App {
             core,
             cards,
@@ -267,7 +272,7 @@ impl App {
             ci: Arc::new(ci_laws::load_cache()),
             prs: prs::Prs::default(),
             briefs,
-            catch_ups: part_catch_ups::CatchUps::default(),
+            catch_ups,
             projects: projects::Projects::beside(log),
             watching: Mutex::default(),
             events,

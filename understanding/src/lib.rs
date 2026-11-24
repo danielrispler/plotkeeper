@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{
-        Mutex,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
@@ -469,6 +469,8 @@ pub struct ClaudeWriter {
     api_keys: Mutex<HashMap<WriterKind, String>>,
     api_url: String,
     openai_url: Mutex<Option<String>>,
+    /// The effort of a PR brief's and a part catch-up's calls, read as each call starts; empty: `claude`'s own (#450).
+    brief_effort: Option<Arc<dyn Fn() -> String + Send + Sync>>,
 }
 
 /// The Test's one tiny call.
@@ -554,6 +556,17 @@ impl ClaudeWriter {
             api_keys: Mutex::new(HashMap::new()),
             api_url: http_writer::ANTHROPIC_URL.into(),
             openai_url: Mutex::new(None),
+            brief_effort: None,
+        }
+    }
+
+    /// The writer whose PR brief and part catch-up calls run at the effort `effort` gives as each starts (#450); empty, or
+    /// without it, `claude`'s own. Every call of one write runs at the same effort, so the later ones can read its facts from
+    /// cache.
+    pub fn with_brief_effort(self, effort: impl Fn() -> String + Send + Sync + 'static) -> Self {
+        Self {
+            brief_effort: Some(Arc::new(effort)),
+            ..self
         }
     }
 
@@ -823,20 +836,52 @@ impl ClaudeWriter {
 
     /// What `claude -p --output-format json` printed for a PR brief's call at `model` on `prompt`: always Claude, whatever
     /// `summaries.writer` says (danielrispler/plotkeeper#334, port decision Q4). One line for the log when the call failed.
-    pub(crate) fn brief_stdout(&self, model: &str, prompt: &str) -> Result<String, String> {
+    pub(crate) fn brief_stdout(
+        &self,
+        model: &str,
+        kind: pr_brief::CallKind,
+        facts: Option<&str>,
+        prompt: &str,
+    ) -> Result<String, String> {
+        let timeout = self.timeout.unwrap_or(WriterKind::Claude.timeout());
+        match self.call(
+            timeout,
+            self.brief_command(model, kind, facts, prompt),
+            false,
+        ) {
+            Ok(reply) => Ok(reply.text),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    /// The `claude -p --output-format json` run of a PR brief's call of kind `kind` at `model` on `prompt`, with `facts` appended to
+    /// the system prompt, and its standard input. A write's and a retry's call runs at the brief effort; a claim check's at
+    /// `claude`'s own (#450).
+    pub fn brief_command(
+        &self,
+        model: &str,
+        kind: pr_brief::CallKind,
+        facts: Option<&str>,
+        prompt: &str,
+    ) -> (Command, String) {
         let request = WriterRequest {
             user: prompt.into(),
             model: Some(model.into()),
+            effort: match kind {
+                pr_brief::CallKind::Write => self.brief_effort.as_ref().map(|effort| effort()),
+                pr_brief::CallKind::Check => None,
+            },
             timeout: self.timeout.unwrap_or(WriterKind::Claude.timeout()),
             ..WriterRequest::default()
         };
         let (mut command, stdin) =
             build_command(WriterKind::Claude, &self.program, &self.folder, &request);
         command.args(["--output-format", "json"]);
-        match self.call(request.timeout, (command, stdin), false) {
-            Ok(reply) => Ok(reply.text),
-            Err(error) => Err(error.to_string()),
+        // Appended, so `claude`'s own system prompt stays and the facts follow it, the same text on every call of a write.
+        if let Some(facts) = facts {
+            command.args(["--append-system-prompt", facts]);
         }
+        (command, stdin)
     }
 
     /// The contract's one call: `request` made and its reply read, or why not.

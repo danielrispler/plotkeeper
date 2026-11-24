@@ -748,7 +748,22 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .brief-tag { background: var(--selected); color: var(--muted); border-radius: var(--sp-5); padding: 0 var(--sp-4); letter-spacing: .02em; text-transform: none; }
 .brief-title { margin: var(--sp-3) 0; font-size: var(--size-title); line-height: 1.22; font-weight: 650; letter-spacing: -.018em; text-wrap: balance; }
 .brief-body { margin: 0; color: var(--muted); font-size: var(--size-read); line-height: 1.55; max-width: 56ch; text-wrap: pretty; }
-.brief-writing { margin: 0; padding: var(--sp-5) var(--sp-6); color: var(--muted); font-size: var(--size); }
+/* The waiting card (#450): a thin indeterminate bar over what the write is doing. The bar's segment slides along its track; under reduced
+   motion it slides slowly rather than stopping, since a still bar reads as stuck. */
+.brief-writing { display: flex; flex-direction: column; gap: var(--sp-4); padding: var(--sp-3) 0; }
+.brief-writing-stage { margin: 0; color: var(--muted); font-size: var(--size); }
+.brief-wait { --wait-track: var(--selected); --wait-fill: var(--brief-light); --wait-time: 1.6s; appearance: none; border: 0 solid; overflow: clip; container-type: inline-size;
+              inline-size: 100%; block-size: var(--sp-2); border-radius: var(--sp-2); background: var(--wait-track); }
+@media (prefers-reduced-motion: reduce) { .brief-wait { --wait-time: 10s; } }
+.brief-wait::-webkit-progress-bar { background: transparent; }
+.brief-wait::-webkit-progress-value { background: var(--wait-fill); border-radius: var(--sp-2); }
+.brief-wait::-moz-progress-bar { background: var(--wait-fill); border-radius: var(--sp-2); }
+.brief-wait:indeterminate::-webkit-progress-value { animation: brief-wait var(--wait-time) infinite linear; }
+.brief-wait:indeterminate::-moz-progress-bar { animation: brief-wait var(--wait-time) infinite linear; }
+@keyframes brief-wait {
+  from { inline-size: 30%; margin-right: auto; translate: -100%; }
+  to { inline-size: 30%; margin-right: auto; translate: 100cqi; }
+}
 .ratify-note { margin-top: var(--sp-4); font-size: var(--size-small); color: var(--muted); }
 .ratify-note p { margin: 0; }
 .ratify-prompt { display: block; width: 100%; box-sizing: border-box; margin-top: var(--sp-3); font: var(--size-xs)/1.5 var(--mono); background: var(--bg); color: var(--fg); border: var(--hair) solid var(--edge); border-radius: var(--radius); padding: var(--sp-3) var(--sp-4); }
