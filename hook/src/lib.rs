@@ -664,18 +664,115 @@ pub const INTERRUPTED: &str = "StudioInterrupted";
 /// has none of, and an end of each worktree it touched at the later of that turn's end and its own
 /// stop. What it knows of the turn and its workers is kept in `turns/` in the data directory `data`,
 /// until the session ends or, if its end never comes, for 7 days.
+/// Codex's and Cursor's turns are mapped by their lines in Claude Code's names (#426); another
+/// agent's line records none, as its capabilities' `turn_trees: false` says, though its payload may
+/// be Claude-shaped (#359).
 pub fn trees(
     event: &mut serde_json::Map<String, serde_json::Value>,
     data: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let agent = event.get("studio_agent").and_then(|a| a.as_str());
+    let mut shaped = match agent {
+        None | Some("claude") => return claude_trees(event, data),
+        Some("codex") => codex_shaped(event),
+        Some("cursor") => cursor_shaped(event),
+        Some(_) => return Ok(()),
+    };
+    claude_trees(&mut shaped, data)?;
+    for key in [
+        "studio_touched_roots",
+        "studio_turn_end",
+        "studio_turn_start",
+    ] {
+        if let Some(value) = shaped.remove(key) {
+            event.insert(key.into(), value);
+        }
+    }
+    Ok(())
+}
+
+type Line = serde_json::Map<String, serde_json::Value>;
+
+/// Codex line `event` in the names `claude_trees` reads: its turn's `turn_id` is the prompt id, an
+/// `Interrupt` ends its turn as the studio's `INTERRUPTED` line does, and an `apply_patch` edits the
+/// first file its patch names (as `studio_core`'s Codex adapter reads it).
+fn codex_shaped(event: &Line) -> Line {
+    use serde_json::{Value, json};
+    let mut shaped = event.clone();
+    shaped.remove("studio_agent");
+    if let Some(turn) = event.get("turn_id") {
+        shaped.insert("prompt_id".into(), turn.clone());
+    }
+    if event.get("hook_event_name").and_then(Value::as_str) == Some("Interrupt") {
+        shaped.insert("hook_event_name".into(), INTERRUPTED.into());
+    }
+    if event.get("tool_name").and_then(Value::as_str) == Some("apply_patch") {
+        let patch = event.get("tool_input").and_then(|i| i["command"].as_str());
+        let file = patch.and_then(|patch| {
+            patch.lines().find_map(|line| {
+                let line = line.trim_start().strip_prefix("*** ")?;
+                Some(line.split_once(" File: ")?.1.trim())
+            })
+        });
+        // A path from the folder the call ran in.
+        let cwd = event.get("cwd").and_then(Value::as_str).unwrap_or_default();
+        let file = file.map(|f| Path::new(cwd).join(f).to_string_lossy().into_owned());
+        shaped.insert("tool_name".into(), "Edit".into());
+        shaped.insert("tool_input".into(), json!({ "file_path": file }));
+    }
+    shaped
+}
+
+/// Cursor line `event` in the names `claude_trees` reads: its `conversation_id` is the session, its
+/// `generation_id` the prompt id, an event with no folder works in its first workspace root, and a
+/// `Write` or `Delete` edits its file and a `Shell` call runs its command.
+fn cursor_shaped(event: &Line) -> Line {
+    use serde_json::Value;
+    let text = |key: &str| event.get(key).and_then(Value::as_str);
+    let mut shaped = event.clone();
+    shaped.remove("studio_agent");
+    let name = match text("hook_event_name").unwrap_or_default() {
+        "sessionStart" => "SessionStart",
+        "sessionEnd" => "SessionEnd",
+        "beforeSubmitPrompt" => "UserPromptSubmit",
+        "stop" => "Stop",
+        "postToolUse" | "postToolUseFailure" => "PostToolUse",
+        other => other,
+    };
+    shaped.insert("hook_event_name".into(), name.into());
+    if let Some(session) = event.get("conversation_id") {
+        shaped.insert("session_id".into(), session.clone());
+    }
+    if let Some(generation) = text("generation_id").filter(|g| !g.is_empty()) {
+        shaped.insert("prompt_id".into(), generation.into());
+    }
+    let root = event.get("workspace_roots").and_then(|r| r[0].as_str());
+    if let Some(cwd) = text("cwd").filter(|c| !c.is_empty()).or(root) {
+        shaped.insert("cwd".into(), cwd.into());
+    }
+    let tool = match text("tool_name") {
+        Some("Write" | "Delete") => Some("Edit"),
+        Some("Shell") => Some("Bash"),
+        _ => None,
+    };
+    if let Some(tool) = tool {
+        shaped.insert("tool_name".into(), tool.into());
+    }
+    // A `Delete` may name its file by `path`.
+    if tool == Some("Edit")
+        && let Some(input) = shaped.get_mut("tool_input").and_then(Value::as_object_mut)
+        && !input.contains_key("file_path")
+        && let Some(path) = input.get("path").cloned()
+    {
+        input.insert("file_path".into(), path);
+    }
+    shaped
+}
+
+fn claude_trees(event: &mut Line, data: &Path) -> Result<(), Box<dyn std::error::Error>> {
     use serde_json::{Map, Value, json};
     use std::io::{Seek, Write};
     let text = |key: &str| event.get(key).and_then(Value::as_str);
-    // Only Claude Code's turns are mapped here: a line another agent's entry named records none, as
-    // its capabilities' `turn_trees: false` says, though its payload may be Claude-shaped (#359).
-    if text("studio_agent").is_some_and(|agent| agent != "claude") {
-        return Ok(());
-    }
     let name = text("hook_event_name").unwrap_or_default();
     let idle = name == "Notification" && text("notification_type") == Some("idle_prompt")
         || name == INTERRUPTED;
