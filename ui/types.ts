@@ -11,10 +11,10 @@ import type { SettingsFiles } from "./settings.js";
 export type Step = { tool: string; detail: string | null; command?: string | null };
 // What the transcript says of the latest turn (danielrispler/Falinks#472): the agent's latest line, the steps since it,
 // its full texts, and why the transcript cannot be read, when it cannot.
-// `context`: as Claude Code's status line measures it, from its snapshot: the tokens, the window,
-// the percent used and left; with no snapshot, the transcript's tokens only (danielrispler/Falinks#517, decisions 1 and 2; danielrispler/Falinks#519).
+// `context`: the input tokens of the agent's latest message; its window and share went with the status line
+// snapshots (#416).
 // `model` and `effort`: what the session runs at, null when the transcript names none (danielrispler/Falinks#517, decision 8).
-export type Context = { tokens: number; window: number | null; share: number | null; left: number | null };
+export type Context = { tokens: number };
 export type Transcript = {
   intention: string | null;
   steps_ago: number;

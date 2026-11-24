@@ -41,9 +41,9 @@ const marks: Record<string, Mark> = {
   generic: { title: "Another agent, followed by its reported status only", box: "0 0 14 14", path: "M12 7a5 5 0 1 1-10 0a5 5 0 1 1 10 0M8.2 7a1.2 1.2 0 1 1-2.4 0a1.2 1.2 0 1 1 2.4 0", stroke: true },
 };
 
-// The note on the logo of an agent that reports no context share, taken from its capabilities (never its name); a status-only row has no agent of its own.
+// The note on the logo of an agent that reports no context size, taken from its capabilities (never its name); a status-only row has no agent of its own.
 export const noContextNote = (session: Pick<Session, "capabilities">): string =>
-  session.capabilities.agent && !session.capabilities.context ? "This agent reports no context share" : "";
+  session.capabilities.agent && !session.capabilities.context ? "This agent reports no context size" : "";
 
 // The logo's element, named by its title so the shape is never alone.
 export function logo(key: LogoKey, title = (marks[key] ?? marks.generic).title): HTMLElement {

@@ -28,9 +28,9 @@ test("a status-only row shows its name and \"status only\", and no step, intenti
     assert.equal(rowMark(row), "status only");
     assert.equal(secondLine(row), null);
   }
-  // A Claude session's mark is its context share, and its running row keeps its step.
-  const claude = { ...codex("running"), status_only: false, capabilities: { agent: "claude" }, transcript: { context: { tokens: 9000, share: 9 } } };
-  assert.equal(rowMark(claude), "context 9%");
+  // A Claude session's mark is its context size, and its running row keeps its step.
+  const claude = { ...codex("running"), status_only: false, capabilities: { agent: "claude" }, transcript: { context: { tokens: 9000 } } };
+  assert.equal(rowMark(claude), "9k");
   assert.equal(secondLine(claude), "No step yet");
 });
 

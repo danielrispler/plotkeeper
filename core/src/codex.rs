@@ -18,7 +18,7 @@ pub const CODEX: &str = "codex";
 
 /// What Codex reports. Its `PermissionRequest` waits on Daniel, and every turn's event names the
 /// permission mode and the model. Its transcript (a rollout file) has no reader here, so no version,
-/// model or context share comes from it; no call durations, no background task ids, and no turn
+/// model or context size comes from it; no call durations, no background task ids, and no turn
 /// trees until the hook maps its turns (spec #320, "Turn trees and pruning per harness").
 pub const CAPABILITIES: Capabilities = Capabilities {
     agent: CODEX,

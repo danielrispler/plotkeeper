@@ -81,3 +81,22 @@ fn merges(command: &str) -> bool {
         .map(str::trim)
         .any(|c| word(c, "git merge") || word(c, "gh pr merge"))
 }
+
+// Removed from core/src/lib.rs in #416: `Studio::set_snapshot`, which the read loop called with each running session's status line snapshot. Fragment, kept verbatim.
+
+    /// The shell read `snapshot`, the `context_window` of session `id`'s status line snapshot, `None`
+    /// with no snapshot (danielrispler/Falinks#517, decisions 1 and 2; danielrispler/Falinks#519); returns whether it changed, and with it
+    /// maybe the context's tokens or percentages.
+    pub fn set_snapshot(&mut self, id: &str, snapshot: Option<serde_json::Value>) -> bool {
+        let context = self
+            .sessions
+            .get_mut(id)
+            .and_then(|s| s.transcript.context.as_mut());
+        match context {
+            Some(context) if context.snapshot != snapshot => {
+                *context = Context::new(context.measured, snapshot);
+                true
+            }
+            _ => false,
+        }
+    }
