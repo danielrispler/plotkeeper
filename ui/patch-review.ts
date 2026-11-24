@@ -4,6 +4,11 @@
 // map, in the glass, the second layer Esc closes (`layerOrder`): the law, the new tagged test, the test patch, and the checks' output with
 // the test alone (passing) and with the plant (failing on that test), with Open draft PR and Discard, which deletes the patch. Open draft PR
 // (#400) opens a draft PR from a temporary worktree; the row then says its PR, or "Out of date, run again" when the patch no longer applies.
+//
+// Guard with a law (#401): the brief of a PR that closed a bug-labelled issue and added or changed no tagged test (the server reads both
+// from the brief's facts) ends with a row beside Ratify, before and after the PR merges. It offers back a law on each on-trust law of a part
+// the PR touched, or a new law: the no-tools writer drafts its sentence from the PR's facts, Daniel confirms or edits it, and only what he
+// confirmed reaches the run, which adds the law to the map with its tagged test in one patch, proven and reviewed like back a law.
 
 import { failure, invoke, text } from "./dom.js";
 import { diffLines } from "./diff.js";
@@ -11,7 +16,9 @@ import { currentMap, onDraw, registerLayer, reloadMap, shownProject } from "./ma
 import { copyOverturn, overturnReport } from "./ratify.js";
 import { showNotice } from "./notice.js";
 import { logStop } from "./stop-rules.js";
-import type { LawPatch, LawPatchOpened } from "./types.js";
+import type { MapView } from "./map.js";
+import type { Law } from "./map-model.js";
+import type { BackLawStarted, Guard, LawPatch, LawPatchOpened, NewLaw } from "./types.js";
 
 // What a law's row offers: a new run, a patch being proven, a rejected one (its first line), a proven one to review, one whose draft PR
 // is open, or one out of date.
@@ -50,19 +57,20 @@ const button = (words: string, title: string, click: () => void, kind = "quiet")
   return node;
 };
 
-// The nodes of a law's action, for its row in the part's sheet.
-export function lawActionNodes(action: LawAction, act: Pick<PatchActs, "start" | "review" | "discard">): HTMLElement[] {
-  const start = () => button("Back a law", "Start a background run that writes a test for this law, then prove it here", () => act.start(action.law));
+// The nodes of a law's action, for its row in the part's sheet. `again` is the words of the button that starts a run; none for a new law,
+// which the map does not have to back.
+export function lawActionNodes(action: LawAction, act: Pick<PatchActs, "start" | "review" | "discard">, again: string | null = "Back a law"): HTMLElement[] {
+  const start = () => (again === null ? [] : [button(again, "Start a background run that writes a test for this law, then prove it here", () => act.start(action.law))]);
   switch (action.kind) {
     case "start":
-      return [start()];
+      return start();
     case "proving":
       return [text("span", "Proving the patch…", "law-patch-note")];
     case "rejected":
       return [
         text("span", `Rejected: ${action.line}`, "law-patch-note"),
         button("Dismiss", "Forget this rejected run", () => act.discard(action.id)),
-        start(),
+        ...start(),
       ];
     case "opened": {
       const link = text("a", `Draft PR #${action.pr} opened`, "law-patch-note");
@@ -72,7 +80,7 @@ export function lawActionNodes(action: LawAction, act: Pick<PatchActs, "start" |
       return [link];
     }
     case "out-of-date":
-      return [text("span", "Out of date, run again", "law-patch-note"), button("Discard", "Delete this patch", () => act.discard(action.id)), start()];
+      return [text("span", "Out of date, run again", "law-patch-note"), button("Discard", "Delete this patch", () => act.discard(action.id)), ...start()];
     case "proven":
       return [button("Review the patch", "See the test this run wrote and the proof plotkeeper ran", () => act.review(action.id), "primary")];
   }
@@ -91,7 +99,7 @@ export function reviewNodes(patch: LawPatch, law: string, act: Pick<PatchActs, "
     button("Close", "Close the review", act.close),
   );
   return [
-    text("h2", "Back a law", "patch-title"),
+    text("h2", patch.text ? "A new law" : "Back a law", "patch-title"),
     text("p", law, "patch-law"),
     ...(proof ? [text("p", `The new test: ${proof.test} in ${proof.file}`, "patch-test")] : []),
     text("h3", "The test patch", "patch-heading"),
@@ -99,6 +107,16 @@ export function reviewNodes(patch: LawPatch, law: string, act: Pick<PatchActs, "
     ...(proof ? [...output("With the test alone, the checks pass", proof.passed), ...output("With the plant, the new test fails", proof.failed)] : []),
     foot,
   ];
+}
+
+// A run started: told to the stop-rule log and the map drawn again. A run that cannot start copies its prompt, as a failed run's row does.
+async function afterStart(started: BackLawStarted, told: () => void) {
+  if (started.kind === "run") {
+    told();
+    return void reloadMap();
+  }
+  const copied = await copyOverturn(started.prompt, navigator.clipboard?.writeText?.bind(navigator.clipboard));
+  showNotice(`The run did not start: ${started.line}. ${overturnReport(copied, started.prompt).line}`);
 }
 
 // The patch under review, by its run's id; null while closed.
@@ -116,7 +134,7 @@ function paint() {
     box.replaceChildren();
     return;
   }
-  const law = view.doc.laws.find((each) => each.id === patch.law)?.text ?? patch.law;
+  const law = patch.text ?? view.doc.laws.find((each) => each.id === patch.law)?.text ?? patch.law;
   box.hidden = false;
   box.replaceChildren(...reviewNodes(patch, law, acts));
 }
@@ -126,15 +144,7 @@ const acts: PatchActs = {
     const project = shownProject();
     if (project === null) return;
     invoke("back_a_law", { project, law })
-      .then(async (started) => {
-        if (started.kind === "run") {
-          logStop("back-law-started", project);
-          return void reloadMap();
-        }
-        // A run that cannot start copies its prompt, as a failed run's row does.
-        const copied = await copyOverturn(started.prompt, navigator.clipboard?.writeText?.bind(navigator.clipboard));
-        showNotice(`Back a law did not start: ${started.line}. ${overturnReport(copied, started.prompt).line}`);
-      })
+      .then((started) => afterStart(started, () => logStop("back-law-started", project)))
       .catch(failure("back_a_law", "error"));
   },
   review: (id) => {
@@ -173,3 +183,121 @@ export const patchActs = acts;
 
 onDraw(paint);
 registerLayer("patch-review", { open: () => shown !== null, close: acts.close });
+
+
+// ---- Guard with a law (#401).
+
+// What a bug fix's Guard with a law offers: backing each on-trust law of a part PR `pr` touched, and the new laws its guard's runs add
+// (the newest patch of each).
+export type GuardOffer = { back: { id: string; text: string }[]; added: LawPatch[] };
+export function guardOffer(guard: Guard, pr: number, laws: Law[], patches: LawPatch[] | null | undefined): GuardOffer {
+  const added = new Map<string, LawPatch>();
+  for (const patch of patches ?? []) {
+    if (patch.guards !== pr || !patch.text) continue;
+    const seen = added.get(patch.law);
+    if (!seen || seen.at < patch.at) added.set(patch.law, patch);
+  }
+  return {
+    back: laws.filter((law) => law.backing === "trust" && guard.parts.includes(law.on)).map((law) => ({ id: law.id, text: law.text })),
+    added: [...added.values()],
+  };
+}
+
+// What the guard's buttons do: back an on-trust law, start a new law's confirm step, and a patch's review and discard.
+export type GuardActs = Pick<PatchActs, "review" | "discard"> & { back: (law: string) => void; add: () => void };
+
+// The guard's row: each on-trust law with Back this law (or where its patch stands), each new law with where its patch stands, and Add a
+// new law. `patches` are the project's, for the state of each law's newest one.
+export function guardNodes(offer: GuardOffer, patches: LawPatch[] | null | undefined, act: GuardActs, adding: HTMLElement[] | null = null): HTMLElement {
+  const row = text("div", "", "guard-row");
+  row.append(text("p", "Guard with a law", "guard-title"), text("p", "Back a law on trust of a part it touched, or add a new one.", "brief-quiet"));
+  const list = text("ul", "", "guard-laws");
+  for (const law of offer.back) {
+    const item = text("li", "", "guard-law");
+    item.dataset.law = law.id;
+    item.append(text("span", law.text, "guard-text"), ...lawActionNodes(lawAction(law.id, patches), { ...act, start: act.back }, "Back this law"));
+    list.append(item);
+  }
+  for (const patch of offer.added) {
+    const item = text("li", "", "guard-law");
+    item.dataset.law = patch.law;
+    item.append(text("span", `New law: ${patch.text}`, "guard-text"), ...lawActionNodes(lawAction(patch.law, offer.added), { ...act, start: () => {} }, null));
+    list.append(item);
+  }
+  if (list.children.length) row.append(list);
+  if (adding) row.append(...adding);
+  else row.append(button("Add a new law", "The writer drafts a law from this PR's facts; you confirm or edit it before a run adds it with its test", act.add));
+  return row;
+}
+
+// The confirm step of a new law: the writer's draft (null while it drafts) in fields Daniel may edit, the part among the ones the PR
+// touched, and Start the run with what the fields hold. `line` says why the writer gave no draft, so he writes the law himself.
+export function confirmNodes(draft: NewLaw | null, parts: { id: string; name: string }[], line: string | null, act: { start: (law: NewLaw) => void; cancel: () => void }): HTMLElement[] {
+  const cancel = button("Cancel", "Leave the new law", act.cancel);
+  if (!draft) return [text("p", "Drafting the law…", "brief-quiet guard-drafting"), cancel];
+  const box = text("div", "", "guard-confirm");
+  if (line) box.append(text("p", `The writer could not draft one: ${line}. Write the law yourself.`, "brief-quiet"));
+  const part = text("select", "", "guard-part") as HTMLSelectElement;
+  for (const each of parts) {
+    const option = text("option", each.name, "") as HTMLOptionElement;
+    option.value = each.id;
+    part.append(option);
+  }
+  part.value = draft.on;
+  const id = text("input", "", "guard-id") as HTMLInputElement;
+  id.value = draft.id;
+  id.setAttribute("aria-label", "The law's id");
+  const sentence = text("textarea", "", "guard-sentence") as HTMLTextAreaElement;
+  sentence.value = draft.text;
+  sentence.setAttribute("aria-label", "The law's sentence");
+  sentence.setAttribute("rows", "2");
+  const foot = text("div", "", "guard-foot");
+  foot.append(
+    button("Start the run", "Start a background run that adds this law, as written here, with its test", () => act.start({ id: id.value.trim(), on: part.value, text: sentence.value.trim() }), "primary"),
+    cancel,
+  );
+  box.append(text("p", "Confirm or edit the law. Only what you confirm here reaches the run.", "brief-quiet"), part, id, sentence, foot);
+  return [box];
+}
+
+// The new law being confirmed, by project and PR: its draft (null while the writer drafts) and why there is none.
+let confirming: { project: string; pr: number; draft: NewLaw | null; line: string | null } | null = null;
+
+// The guard's row on PR `pr`'s brief in `view`; `redraw` draws the brief again after a change of the confirm step.
+export function guardRow(view: MapView, pr: number, guard: Guard, redraw: () => void): HTMLElement {
+  const project = view.project;
+  logStop("guard-offered", project, pr);
+  const mine = () => confirming?.project === project && confirming.pr === pr;
+  const started = (started: BackLawStarted) => afterStart(started, () => logStop("guard-started", project, pr));
+  const act: GuardActs = {
+    review: acts.review,
+    discard: acts.discard,
+    back: (law) => {
+      invoke("back_a_law", { project, law, guards: pr }).then(started).catch(failure("back_a_law", "error"));
+    },
+    add: () => {
+      const asked: NonNullable<typeof confirming> = { project, pr, draft: null, line: null };
+      confirming = asked;
+      redraw();
+      invoke("guard_draft", { project, number: pr })
+        .then((draft) => (asked.draft = draft))
+        .catch((e) => Object.assign(asked, { draft: { id: "", on: guard.parts[0] ?? "", text: "" }, line: String(e) }))
+        .finally(() => confirming === asked && redraw());
+    },
+  };
+  const parts = guard.parts.map((id) => ({ id, name: view.doc.parts.find((p) => p.id === id)?.name ?? id }));
+  const adding = mine()
+    ? confirmNodes(confirming!.draft, parts, confirming!.line, {
+        start: (law) => {
+          confirming = null;
+          redraw();
+          invoke("new_law", { project, law, guards: pr }).then(started).catch(failure("new_law", "error"));
+        },
+        cancel: () => {
+          confirming = null;
+          redraw();
+        },
+      })
+    : null;
+  return guardNodes(guardOffer(guard, pr, view.doc.laws, view.state.law_patches), view.state.law_patches, act, adding);
+}

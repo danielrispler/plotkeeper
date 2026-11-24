@@ -444,6 +444,41 @@ const mapBriefRatify = (): Fixture => ({
       log("ratify ok");`, false, 100),
   pr_ratify: ratifyRows,
 });
+// Guard with a law (#401): a bug fix's brief, with nothing to ratify, ends with the guard's row: the on-trust laws of Core and Shell, the
+// parts it touched, with Back this law, a new law of an earlier run being proven, and Add a new law. `confirm` presses Add a new law and
+// shows the confirm step with the writer's draft.
+const guardedBrief = (): BriefView => {
+  const view = briefOf(storySteps());
+  return { ...view, brief: { ...view.brief, guard: { parts: ["core", "shell"] } } };
+};
+const mapBriefGuard = (confirm: boolean): Fixture => ({
+  ...mapBrief(guardedBrief(), 4, `
+      const row = document.querySelector("#map-brief .guard-row");
+      if (!row) return log("snap:fail the brief has no Guard with a law row");
+      if (document.querySelector("#map-brief .brief-title").textContent !== "Guard with a law") log("snap:fail the step's heading: " + document.querySelector("#map-brief .brief-title").textContent);
+      const laws = [...row.querySelectorAll(".guard-law")].map((li) => li.dataset.law).join(",");
+      if (laws !== "core-order,shell-notice,shell-ordered") log("snap:fail the guard's laws: " + laws);
+      if (row.querySelectorAll(".guard-law button").length !== 2) log("snap:fail Back this law belongs on the two laws on trust");
+      if (!row.textContent.includes("Proving the patch")) log("snap:fail the new law's run does not say where it stands");
+      const add = [...row.querySelectorAll("button")].find((b) => b.textContent === "Add a new law");
+      if (!add) return log("snap:fail no Add a new law");
+      if (${confirm}) {
+        add.click();
+        await wait(300);
+        const sentence = document.querySelector("#map-brief .guard-sentence");
+        if (!sentence || sentence.value !== "The shell applies events in the order they were made.") return log("snap:fail the drafted sentence is not shown to confirm: " + sentence?.value);
+        if (document.querySelector("#map-brief .guard-id").value !== "shell-keeps-order") log("snap:fail the drafted id");
+        if (document.querySelector("#map-brief .guard-part").value !== "shell") log("snap:fail the drafted part");
+        if (![...document.querySelectorAll("#map-brief .guard-confirm button")].some((b) => b.textContent === "Start the run")) log("snap:fail no Start the run");
+      }
+      log("guard ok");`, false, 100),
+  map_state: mapState({
+    fog: { shell: "thick", understanding: "thin" },
+    ready: [{ number: 334, title: "PR briefs on the map", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }],
+    law_patches: [{ id: "19a2f-11", project: "/w/plotkeeper", law: "shell-ordered", state: "proving", line: null, at: runAt, diff: null, proof: null, text: "The shell reads the log in order.", guards: 334 }],
+  }),
+  snapDone: "guard ok",
+});
 // The end-of-story bar (#393) under the story's last step: 4 picked by its key, an "s" typed in the note that does not skip, the note kept by
 // Enter; each is sent to the shell, and no rating is shown back once the brief is opened again. The screenshot is the bar after the note.
 const mapBriefBar = (): Fixture =>
@@ -1610,6 +1645,8 @@ export const fixtures = {
   mapBriefOrderWrong,
   mapBriefOrderRight,
   mapBriefRatify,
+  mapBriefGuard: () => mapBriefGuard(false),
+  mapBriefGuardConfirm: () => mapBriefGuard(true),
   mapBriefBar,
   mapBriefExplainBack: () => mapBriefExplainBack(false),
   mapBriefExplainBackDone: () => mapBriefExplainBack(true),

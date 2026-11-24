@@ -1,0 +1,32 @@
+{
+ "version": 1,
+ "pr": 388,
+ "head": "fixbeef",
+ "written_at": 1795100000000,
+ "stale": false,
+ "model": "opus",
+ "shape": {
+  "chapters": false,
+  "required": [
+   "shell"
+  ],
+  "also": [
+   "hook"
+  ],
+  "overview": false,
+  "flows_changed": []
+ },
+ "brief": {
+  "title": "A fix",
+  "overview": [],
+  "chapters": [],
+  "also": [],
+  "decisions": []
+ },
+ "guard": {
+  "parts": [
+   "hook",
+   "shell"
+  ]
+ }
+}

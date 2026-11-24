@@ -217,3 +217,23 @@ test("back a law is kept once a run was started in the window, and listed below 
   assert.deepEqual(unused(facts({ ...rest, counts: { ...others, "back-law-started": 1 } })), []);
   assert.match(reviewWords(["back-a-law"]), /Back a law/);
 });
+
+test("Guard with a law is kept at 1 run started, and judged only after it was offered 3 times", () => {
+  const passed = { engaged_days: 4, scrubs: 2, proofs: 2 };
+  const counts = (extra) => ({ ...kept, ...extra });
+  assert.deepEqual(unused(facts({ ...passed, counts: counts({ "guard-offered": 2 }) })), [], "offered twice: not judged");
+  assert.deepEqual(unused(facts({ ...passed, counts: counts({ "guard-offered": 3 }) })), ["guard"]);
+  assert.deepEqual(unused(facts({ ...passed, counts: counts({ "guard-offered": 3, "guard-started": 1 }) })), []);
+  assert.match(reviewWords(["guard"]), /Guard with a law/);
+  assert.deepEqual(table.find((row) => row.module === "guard").offers, { kind: "guard-offered", least: 3 });
+});
+
+test("Guard with a law's offer is told once per PR", () => {
+  calls.length = 0;
+  logStop("guard-offered", "/p", 7);
+  logStop("guard-offered", "/p", 7);
+  logStop("guard-offered", "/p", 8);
+  logStop("guard-started", "/p", 7);
+  logStop("guard-started", "/p", 7);
+  assert.deepEqual(calls.filter(([c]) => c === "stop_log").map(([, a]) => [a.kind, a.pr]), [["guard-offered", 7], ["guard-offered", 8], ["guard-started", 7], ["guard-started", 7]]);
+});

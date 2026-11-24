@@ -647,6 +647,18 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .ratify-row { display: grid; grid-template-columns: auto 1fr auto; column-gap: var(--sp-4); align-items: baseline; font-size: var(--size); line-height: 1.45; color: var(--muted); }
 .ratify-kind { font-size: var(--size-xs); color: var(--faint); text-transform: uppercase; letter-spacing: .04em; }
 .ratify-row .ratify-mark, .ratify-row .ratify-actions { grid-column: auto; }
+/* Guard with a law (#401): a bug fix's row beside Ratify, and the confirm step of a new law's drafted sentence. */
+.guard-row { margin: var(--sp-5) 0 0; max-width: 60ch; display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
+.guard-title { margin: 0; font-size: var(--size-xs); color: var(--faint); text-transform: uppercase; letter-spacing: .04em; }
+.guard-row > .brief-quiet { margin: 0; }
+.guard-laws { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--sp-3); align-self: stretch; }
+.guard-law { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2) var(--sp-4); font-size: var(--size); line-height: 1.45; color: var(--muted); }
+.guard-text { flex: 1 1 24ch; }
+.guard-confirm { align-self: stretch; display: flex; flex-direction: column; gap: var(--sp-3); }
+.guard-confirm .brief-quiet { margin: 0; }
+.guard-part, .guard-id, .guard-sentence { font: inherit; font-size: var(--size); padding: var(--sp-2) var(--sp-3); background: var(--chrome); color: var(--fg); border: 0; border-radius: var(--radius); }
+.guard-sentence { resize: vertical; }
+.guard-foot { display: flex; gap: var(--sp-2); }
 .sheet-fog { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
 .sheet-fog-line { margin: 0; font-size: var(--size-small); color: var(--muted); }
 .sheet-fog.thin .sheet-fog-line, .sheet-fog.thick .sheet-fog-line { color: var(--mist); }

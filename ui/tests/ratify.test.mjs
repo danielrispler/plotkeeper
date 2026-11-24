@@ -49,6 +49,14 @@ test("the ratify step exists only when there is something to ratify, and rows sa
   assert.equal(statusWords["not-yet"], "Not yet ratified");
 });
 
+test("a brief with Guard with a law ends with the step even with nothing to ratify, before and after its PR merges", () => {
+  const step = ratifyStep([], ["core"], true);
+  assert.equal(step.k, "Ratify");
+  assert.equal(step.h, "Guard with a law");
+  assert.equal(ratifyStep([row("law", "l1")], [], true).h, "Accept or overturn", "beside Ratify's items");
+  assert.equal(ratifyStep([], [], false), null);
+});
+
 test("an overturn's note shows only where its item is drawn: its project, and the item's PR, kind and id", () => {
   const last = { project: "/p", pr: 7, kind: "law", id: "l1", line: "Prompt copied, paste it into your agent", manual: null };
   const brief = (pr, rows) => (item) => rows.some((r) => item.pr === pr && r.kind === item.kind && r.id === item.id);

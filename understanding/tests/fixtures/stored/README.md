@@ -21,3 +21,6 @@ its required fields. They also freeze the hash that keys a note (the command, a 
 `pr-brief-v4/` holds a stored PR brief and a stored part catch-up as written once chapters carry a gist (#397): `gist` and its
 `gist_flags` on a Core chapter, an empty gist on a chapter of no Core part. `understanding/tests/pr_brief.rs` loads them beside
 `pr-brief-v3/`, whose replies and stored briefs have no gist and still read.
+
+`pr-brief-v5/` holds a stored PR brief as written once a bug fix's brief carries Guard with a law's offer (#401): `guard` with the parts
+the PR touched. `understanding/tests/pr_brief.rs` loads it; the older samples, with no `guard`, read with none.
