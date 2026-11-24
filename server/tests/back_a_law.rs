@@ -659,6 +659,52 @@ fn open_draft_pr_leaves_the_record_of_daniels_other_worktrees_alone() {
     assert_eq!(listed.matches("worktree ").count(), 2, "{listed}");
 }
 
+impl Bench {
+    /// The project's checks, from now on: `sleep 3` first, so a proof takes a while.
+    fn slow_checks(&self) {
+        let checks = serde_json::json!({ "checks": { &self.project: [
+            "sleep 3",
+            "node --check src/add.mjs",
+            "node --test --test-reporter=tap tests/*.test.mjs",
+        ] } });
+        let settings = self
+            .dir
+            .path()
+            .canonicalize()
+            .unwrap()
+            .join("data/settings.json");
+        fs::write(settings, checks.to_string()).unwrap();
+    }
+
+    /// Waits until run `id`'s patch is being proven.
+    fn proving(&self, id: &str) {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while !self
+            .laws
+            .patches(&self.project)
+            .iter()
+            .any(|p| p.id == id && p.state == PatchState::Proving)
+        {
+            assert!(Instant::now() < deadline, "run {id} was never proven");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+}
+
+#[test]
+fn dismiss_waits_until_the_proof_is_done_with_the_runs_folder() {
+    let bench = bench(&format!("set -e\n{TEST}{PLANT}{DONE}"));
+    bench.slow_checks();
+    let id = bench.start();
+    bench.proving(&id);
+    assert!(
+        bench.runner.cancel(&id).is_err(),
+        "Dismiss is refused while the patch is proven"
+    );
+    assert_eq!(bench.settled(&id).state, PatchState::Proven);
+    bench.runner.cancel(&id).unwrap();
+}
+
 // ---- The new-law variant and Guard with a law (#401) ----
 
 /// The new law Daniel confirmed, edited from the writer's draft.

@@ -682,6 +682,10 @@ impl LawRuns {
 
     /// Proves the patches of the back a law run that just ended, and keeps or rejects them; the clone goes either way.
     fn prove_run(&self, ended: Ended) {
+        // Dismiss waits until the proof is done with the run's folder; a run already dismissed left nothing to prove.
+        let Some(_hold) = self.runner.hold(&ended.id) else {
+            return;
+        };
         let Some(dir) = ended.folder.parent() else {
             return;
         };

@@ -929,6 +929,28 @@ struct State {
     runs: Vec<Run>,
     /// Why the queues are paused, until Daniel resumes them.
     paused: Option<Pause>,
+    /// The ended runs whose folder a module is still reading, by id, with how many holds each has ([`Runner::hold`]).
+    held: BTreeMap<String, usize>,
+}
+
+/// A module's hold on an ended run's folder: Dismiss is refused until it is dropped.
+pub struct Hold {
+    runner: Weak<Runner>,
+    id: String,
+}
+
+impl Drop for Hold {
+    fn drop(&mut self) {
+        if let Some(runner) = self.runner.upgrade() {
+            let mut state = runner.state();
+            if let Some(count) = state.held.get_mut(&self.id) {
+                *count -= 1;
+                if *count == 0 {
+                    state.held.remove(&self.id);
+                }
+            }
+        }
+    }
 }
 
 type Changed = Box<dyn Fn(&str) + Send + Sync>;
@@ -1332,11 +1354,25 @@ impl Runner {
         projects.iter().for_each(|project| self.tell(project));
     }
 
+    /// Holds run `id`'s folder for a module that reads what the run made, such as a proof or a host check: Dismiss is
+    /// refused while the hold lasts. None when the run is gone, its folder with it.
+    pub fn hold(&self, id: &str) -> Option<Hold> {
+        let mut state = self.state();
+        if !state.runs.iter().any(|run| run.stored.id == id) {
+            return None;
+        }
+        *state.held.entry(id.to_string()).or_default() += 1;
+        Some(Hold {
+            runner: self.me.clone(),
+            id: id.to_string(),
+        })
+    }
+
     /// Cancel: a queued run is dropped, a running one has its process group killed, and either way the run's folder is
     /// removed and the next run of its project starts. An ended run is only removed, and so is a run that ended on its own
     /// at that moment, which is recorded as it ended. A running run is killed only when its lock is held and the process
     /// its folder names still has the start time written down, so a process id that was reused is never signalled;
-    /// otherwise nothing is stopped or removed.
+    /// otherwise nothing is stopped or removed. A run a module holds ([`Runner::hold`]) is refused.
     pub fn cancel(&self, id: &str) -> Result<(), String> {
         let mut state = self.state();
         let at = state
@@ -1344,6 +1380,12 @@ impl Runner {
             .iter()
             .position(|run| run.stored.id == id)
             .ok_or("no such run")?;
+        if state.held.contains_key(id) {
+            return Err(
+                "plotkeeper is still checking what this run made: dismiss it once that is done"
+                    .into(),
+            );
+        }
         let dir = self.dir(id);
         let mut pause = None;
         if matches!(state.runs[at].phase, Phase::Running { .. }) && !Self::stop(&dir)? {

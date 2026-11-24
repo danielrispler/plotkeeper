@@ -327,3 +327,38 @@ fn a_change_to_a_part_on_the_flow_marks_the_world_out_of_date_and_rebuild_starts
     assert_eq!(view.phase, Phase::Ready);
     assert!(!view.stale);
 }
+
+#[test]
+fn dismiss_waits_until_the_host_check_is_done_with_the_runs_folder() {
+    let bench = bench(&writes("<!doctype html><p>VERIFY-SLOW</p>"), true);
+    bench.explore();
+    // The run ends, and its page is being checked on the host: the check's log is in the run's folder.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let id = loop {
+        let runs = bench.runner.runs(&bench.project()).runs;
+        let checking = runs.iter().find(|run| {
+            run.outcome.is_some()
+                && bench
+                    .dir
+                    .path()
+                    .join("runs")
+                    .join(&run.id)
+                    .join("build.log")
+                    .exists()
+        });
+        if let Some(run) = checking {
+            break run.id.clone();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the run's page was never checked"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert!(
+        bench.runner.cancel(&id).is_err(),
+        "Dismiss is refused while the page is checked"
+    );
+    assert_eq!(bench.settled("flow:turn").phase, Phase::Ready);
+    bench.runner.cancel(&id).unwrap();
+}

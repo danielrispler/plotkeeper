@@ -600,6 +600,11 @@ impl MicroWorlds {
         if record.run.as_deref() != Some(id) || record.phase != Phase::Building {
             return;
         }
+        // Dismiss waits until the check and a rewrite are done with the run's folder; a run already dismissed is gone, and
+        // the next look finds it so.
+        let Some(_hold) = self.runner.upgrade().and_then(|runner| runner.hold(id)) else {
+            return;
+        };
         use crate::runner::End;
         let checked = match (outcome.end, self.scripts(), &record.folder) {
             (End::Done | End::Denied, Some(scripts), Some(folder)) => Some(host_check(
