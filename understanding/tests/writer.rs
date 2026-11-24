@@ -14,7 +14,7 @@ use std::{
 use studio_core::{Check, CheckRun, CheckStatus, FactFile, Facts, SummaryRequest, TurnFile};
 use studio_understanding::{
     CardStore, CardWriter, ClaudeWriter, LineKind, RISK_TIMEOUT, Risk, RiskLevel, SummarySetup,
-    TurnSummary, find_claude, write_agent_summary, write_summary,
+    TurnSummary, find_claude, write_agent_summary, write_name, write_summary,
 };
 
 const CLAUDE: &str = "/opt/homebrew/bin/claude";
@@ -166,6 +166,47 @@ fn a_name_request_says_here_is_the_sessions_folder_not_the_writers() {
         system.contains("never name the folder you run in"),
         "{system}"
     );
+}
+
+// #443 (#444): the 6-word cut ended "Check Snap CI UI pages in" mid-phrase. The writer asks for a short title; code keeps a
+// slightly long reply whole and only stops a runaway one at 60 characters, at a space, with "…".
+#[test]
+fn a_written_name_is_kept_whole_and_only_a_runaway_one_is_cut_at_a_space() {
+    let named = |reply: &str| {
+        let writer = Scripted::fake();
+        let writer = Scripted {
+            name: Answer::ok(serde_json::json!({ "name": reply }).to_string()),
+            ..writer
+        };
+        write_name(&writer, &setup(), "Check the snap CI", None, "", |_| {}).unwrap()
+    };
+
+    assert_eq!(
+        named("Check Snap CI UI pages in Chrome"),
+        "Check Snap CI UI pages in Chrome"
+    );
+    let runaway =
+        "Check that every snap fixture of the rail renders in headless Chrome on both shards";
+    let cut = named(runaway);
+    assert_eq!(cut, "Check that every snap fixture of the rail renders in…");
+    assert!(cut.chars().count() <= 61, "{cut}");
+    // A word longer than the bound has no space to cut at, so it is cut at the bound.
+    let word = "x".repeat(70);
+    assert_eq!(named(&word), format!("{}…", "x".repeat(60)));
+}
+
+#[test]
+fn the_name_writer_asks_for_a_short_title_not_the_start_of_the_prompt() {
+    let writer = ClaudeWriter::new(CLAUDE.into(), "/w".into());
+    let system = writer
+        .name_request(&setup(), "Fix it", None, "")
+        .system
+        .unwrap();
+    assert!(
+        system.contains("at most 5 words and 36 characters"),
+        "{system}"
+    );
+    assert!(system.contains("not the start of the prompt"), "{system}");
 }
 
 #[test]

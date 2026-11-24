@@ -136,7 +136,7 @@ Open the sessions for the day's work: at least two in parallel, one in a task wo
 - [x] Retired in #416, with the context share: **danielrispler/Falinks#519:** a row and the rail show `context N%` with the same number as Claude's status line. The hover reads "… tokens used · Claude's status line shows this as M% left".
 - [ ] **danielrispler/Falinks#523:** the rail header shows the model and effort, such as `claude-opus-5-5 · effort medium`, on hover.
 - [ ] **danielrispler/Falinks#574:** select a session with a few turns and cards, without scrolling the rail: the newest card is at the top, then the boxed intention and the latest turn's summary.
-- [ ] **danielrispler/Falinks#574:** the rail's header is one line, the verdict and the phase; hovering shows the times and the model. Rename, Close and Delete (and Open all, Close all) are in its "⋯" menu, which closes on a choice or a click outside.
+- [ ] **danielrispler/Falinks#574:** the rail's header is one line, the verdict and the phase; hovering shows the times and the model. Rename, Mark unseen and Delete are in its "⋯" menu, which opens under its button (#447) and closes on a choice or a click outside.
 - [ ] **danielrispler/Falinks#574:** below, the turns read newest first, each with its prompt in one line, its summary, its learning question (folded), its cards, subagents, checks and full response (folded). Opening an older turn's full response shows its final reply. Each turn shows one "Ask about this", only on hover, and asking works as before.
 - [ ] **danielrispler/Falinks#472:** a working session's intention updates live; judge the dimming.
 
