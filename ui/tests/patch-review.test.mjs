@@ -15,13 +15,17 @@ const proven = (id = "r3") =>
     diff: "diff --git a/core/tests/order.rs b/core/tests/order.rs\n--- /dev/null\n+++ b/core/tests/order.rs\n@@ -0,0 +1,2 @@\n+// @law: core-order\n+fn events_apply_in_order() {}\n",
     proof: { test: "events_apply_in_order", file: "core/tests/order.rs", passed: "PASS [ 0.01s] studio-core::it order::events_apply_in_order", failed: "FAIL [ 0.01s] studio-core::it order::events_apply_in_order" },
   });
-const acts = (calls) => ({
+// `confirm` answers a confirm dialog with `yes`, and notes what it asked.
+const acts = (calls, yes = true) => ({
   start: (law) => calls.push(["start", law]),
   review: (id) => calls.push(["review", id]),
   open: (id) => calls.push(["open", id]),
   discard: (id) => calls.push(["discard", id]),
   close: () => calls.push(["close"]),
+  confirm: async (ask) => (calls.push(["confirm", ask.verb]), yes),
 });
+// Lets the confirm's answer land.
+const settle = () => new Promise((done) => setTimeout(done));
 const button = (nodes, words) => nodes.flatMap((node) => node.find("button")).find((each) => each.text === words);
 const texts = (nodes) => nodes.map((node) => node.text).join("\n");
 
@@ -51,7 +55,7 @@ test("the law's newest patch decides: being proven, rejected with why and Dismis
   assert.deepEqual(calls, [["discard", "r2"], ["start", "core-order"], ["review", "r3"]]);
 });
 
-test("the review shows the law, the new test, the test patch and both outputs, with Open draft PR and Discard", () => {
+test("the review shows the law, the new test, the test patch and both outputs, with Open draft PR and Discard", async () => {
   const calls = [];
   const nodes = reviewNodes(proven(), "Events apply in order.", acts(calls));
   const all = texts(nodes);
@@ -67,9 +71,20 @@ test("the review shows the law, the new test, the test patch and both outputs, w
   assert.match(all, /With the plant, the new test fails/);
   assert.match(all, /FAIL \[ 0\.01s\] studio-core::it order::events_apply_in_order/);
   button(nodes, "Open draft PR").listeners.click();
-  button(nodes, "Discard").listeners.click();
   button(nodes, "Close").listeners.click();
-  assert.deepEqual(calls, [["open", "r3"], ["discard", "r3"], ["close"]]);
+  button(nodes, "Discard").listeners.click();
+  await settle();
+  assert.deepEqual(calls, [["open", "r3"], ["close"], ["confirm", "Discard patch"], ["discard", "r3"]], "Discard asks first");
+});
+
+test("Discard declined sends nothing; Dismiss on a rejected run acts at once", async () => {
+  const calls = [];
+  button(reviewNodes(proven(), "Events apply in order.", acts(calls, false)), "Discard").listeners.click();
+  button(lawActionNodes(lawAction("core-order", [patch("r5", "out-of-date", { at: 5 })]), acts(calls, false)), "Discard").listeners.click();
+  await settle();
+  assert.deepEqual(calls, [["confirm", "Discard patch"], ["confirm", "Discard patch"]]);
+  button(lawActionNodes(lawAction("core-order", [patch("r2", "rejected", { line: "no" })]), acts(calls, false)), "Dismiss").listeners.click();
+  assert.deepEqual(calls.at(-1), ["discard", "r2"]);
 });
 
 test("an opened patch says its draft PR, and offers no second run", () => {
@@ -83,15 +98,16 @@ test("an opened patch says its draft PR, and offers no second run", () => {
   assert.equal(link?.href, "https://github.com/someone/app/pull/412");
 });
 
-test("a stale patch says Out of date, run again, with Discard and Back a law", () => {
+test("a stale patch says Out of date, run again, with Discard and Back a law", async () => {
   const stale = patch("r5", "out-of-date", { at: 5 });
   assert.deepEqual(lawAction("core-order", [proven(), stale]), { law: "core-order", kind: "out-of-date", id: "r5" });
   const calls = [];
   const nodes = lawActionNodes(lawAction("core-order", [stale]), acts(calls));
   assert.match(texts(nodes), /Out of date, run again/);
-  button(nodes, "Discard").listeners.click();
   button(nodes, "Back a law").listeners.click();
-  assert.deepEqual(calls, [["discard", "r5"], ["start", "core-order"]]);
+  button(nodes, "Discard").listeners.click();
+  await settle();
+  assert.deepEqual(calls, [["start", "core-order"], ["confirm", "Discard patch"], ["discard", "r5"]]);
 });
 
 test("the outcome of Open draft PR is said in one line", () => {
