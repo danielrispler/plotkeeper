@@ -6,8 +6,6 @@ use crate::{Studio, checks::output, ledger::Row};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// Tools whose call changes a file.
-const EDITS: [&str; 4] = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
 /// The most steps listed before a first edit, and the most listed for a subagent.
 const BEFORE: usize = 8;
 const STEPS: usize = 30;
@@ -88,7 +86,7 @@ impl AskFacts {
 }
 
 fn edits(row: &Row) -> bool {
-    EDITS.contains(&row.tool.as_str())
+    crate::turn_files::edits(&row.tool)
 }
 
 /// Whether `row` works on `path` of worktree `root`.

@@ -143,6 +143,33 @@ fn a_cursor_turn_that_writes_in_its_second_workspace_root_lists_the_file() {
     assert_eq!(files, "f.py");
 }
 
+/// The prompt's start trees of every workspace root are no touch of the roots it did not work in:
+/// it touches only its folder's, so another session's change in a root this turn never touched is
+/// not fingerprinted as this turn's (#426 review).
+#[test]
+fn a_cursor_prompt_starts_every_workspace_root_but_touches_only_its_folders() {
+    let base = std::env::temp_dir().join(format!("studio-cursor-touch-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let home = base.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let (a, b) = (repository(&base, "a"), repository(&base, "b"));
+    let prompt = cursor(
+        &home,
+        serde_json::json!({
+            "conversation_id": "c-1", "generation_id": "g-1", "hook_event_name": "beforeSubmitPrompt",
+            "cursor_version": "3.31.15", "workspace_roots": [a, b],
+        }),
+    );
+    let _ = fs::remove_dir_all(&base);
+
+    assert_eq!(prompt["studio_touched_roots"], serde_json::json!([a]));
+    let started = prompt["studio_turn_start"].as_object().unwrap();
+    assert!(
+        started.contains_key(&a) && started.contains_key(&b),
+        "{prompt}"
+    );
+}
+
 /// A `Shell` call names the folder it ran in, which it touches, though it lies outside every
 /// workspace root.
 #[test]
@@ -197,4 +224,62 @@ fn a_cursor_line_is_logged_in_time_when_git_hangs() {
 
     assert!(took < std::time::Duration::from_secs(5), "took {took:?}");
     assert_eq!(log.lines().count(), 1, "{log}");
+}
+
+/// A turn's start trees that finish past the budget, while the line waits for the log's lock, are
+/// not kept for a line logged without them: the turn's next touch of the worktree records its start
+/// tree, so its end tree has a start to go with (#426 review).
+#[test]
+fn a_cursor_prompts_late_trees_leave_the_worktrees_start_to_its_next_touch() {
+    let base = std::env::temp_dir().join(format!("studio-cursor-late-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let (home, bin) = (base.join("home"), base.join("bin"));
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&bin).unwrap();
+    let a = repository(&base, "a");
+    // A `git` whose `write-tree` is slow, past the budget but before the hook gives up the lock.
+    let real = std::process::Command::new("sh")
+        .args(["-c", "command -v git"])
+        .output()
+        .unwrap();
+    let real = String::from_utf8(real.stdout).unwrap();
+    let fake = bin.join("git");
+    let script = format!(
+        "#!/bin/sh\nfor a in \"$@\"; do [ \"$a\" = write-tree ] && sleep 3.5; done\nexec {} \"$@\"\n",
+        real.trim()
+    );
+    fs::write(&fake, script).unwrap();
+    fs::set_permissions(&fake, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+    let event = |name: &str| {
+        serde_json::json!({
+            "conversation_id": "c-1", "generation_id": "g-1", "hook_event_name": name,
+            "cursor_version": "3.31.15", "workspace_roots": [a],
+        })
+    };
+    // Another hook holds the log's lock meanwhile.
+    let log = studio_hook::event_log(&home);
+    fs::create_dir_all(log.parent().unwrap()).unwrap();
+    let held = fs::File::create(&log).unwrap();
+    held.lock().unwrap();
+    let mut cmd = hook(&home);
+    cmd.args(["--agent", "cursor"])
+        .env("PATH", path)
+        .env("PLOTKEEPER_HOOK_PATIENCE_MS", "2000");
+    assert!(
+        feed(cmd, &event("beforeSubmitPrompt"))
+            .wait()
+            .unwrap()
+            .success()
+    );
+    drop(held);
+    let file = format!("{a}/f.py");
+    fs::write(&file, "print(1)\n").unwrap();
+    let mut write = event("postToolUse");
+    write["tool_name"] = "Write".into();
+    write["tool_input"] = serde_json::json!({ "file_path": file });
+    let written = cursor(&home, write);
+    let _ = fs::remove_dir_all(&base);
+
+    assert!(written["studio_turn_start"][&a].is_string(), "{written}");
 }

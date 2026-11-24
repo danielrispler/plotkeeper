@@ -11,6 +11,7 @@ use std::{
     path::{Path, PathBuf},
     process::{self, Command, Stdio},
     sync::{
+        Mutex,
         atomic::{AtomicU64, Ordering},
         mpsc::{self, RecvTimeoutError},
     },
@@ -404,6 +405,48 @@ pub fn worktree_root(folder: &Path) -> Option<String> {
     git(existing, &["rev-parse", "--show-toplevel"], None)
 }
 
+/// Whether the trees this process records still count: the hook gives them up when they run past
+/// its budget, and their line is logged without them (#426 review).
+#[derive(Clone, Copy, PartialEq)]
+enum Fate {
+    Open,
+    Kept,
+    Abandoned,
+}
+
+static FATE: Mutex<Fate> = Mutex::new(Fate::Open);
+
+fn fate() -> std::sync::MutexGuard<'static, Fate> {
+    FATE.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Gives up the trees this process is still recording: its `git` calls are killed, and `trees`
+/// keeps no record of them, so the turn's next touch of their worktrees records them again.
+/// `false` when `trees` has already kept its record, which then lands in a moment.
+pub fn abandon_trees() -> bool {
+    let mut fate = fate();
+    if *fate == Fate::Kept {
+        return false;
+    }
+    *fate = Fate::Abandoned;
+    true
+}
+
+/// Whether the trees were given up (`abandon_trees`).
+fn abandoned() -> bool {
+    *fate() == Fate::Abandoned
+}
+
+/// Whether `trees` may keep its record: the trees were not given up, and now never will be.
+fn keep_trees() -> bool {
+    let mut fate = fate();
+    if *fate == Fate::Abandoned {
+        return false;
+    }
+    *fate = Fate::Kept;
+    true
+}
+
 /// The most untracked files, and bytes of them, that a tree is recorded with: past either, hashing
 /// them costs more than a hook may (#141).
 pub const MAX_UNTRACKED_FILES: usize = 10_000;
@@ -470,14 +513,16 @@ fn untracked_within(root: &Path, files: usize, bytes: u64) -> Result<(), String>
     let deadline = Instant::now() + GIT_TIMEOUT;
     let (mut count, mut size) = (0, 0);
     let passed = loop {
-        let path = match listed.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+        let path = match listed.recv_timeout(Duration::from_millis(20)) {
             Ok(path) => path,
             Err(RecvTimeoutError::Disconnected) => break None,
-            Err(RecvTimeoutError::Timeout) => {
+            Err(RecvTimeoutError::Timeout) if abandoned() => break Some("given up".into()),
+            Err(RecvTimeoutError::Timeout) if Instant::now() > deadline => {
                 break Some(format!(
                     "listing its untracked files took over {GIT_TIMEOUT:?}"
                 ));
             }
+            Err(RecvTimeoutError::Timeout) => continue,
         };
         count += 1;
         size += fs::symlink_metadata(root.join(OsStr::from_bytes(&path))).map_or(0, |m| m.len());
@@ -524,6 +569,9 @@ fn command(folder: &Path, args: &[&str], index: Option<&Path>) -> Command {
 /// `git`'s trimmed output in `folder`, with `index` as its index when given, or `None` when it
 /// fails or runs past `GIT_TIMEOUT`, when it is killed.
 fn git(folder: &Path, args: &[&str], index: Option<&Path>) -> Option<String> {
+    if abandoned() {
+        return None;
+    }
     let mut child = command(folder, args, index)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -539,6 +587,11 @@ fn git(folder: &Path, args: &[&str], index: Option<&Path>) -> Option<String> {
     let status = loop {
         if let Some(status) = child.try_wait().ok()? {
             break status;
+        }
+        if abandoned() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
         }
         if Instant::now() > deadline {
             let _ = child.kill();
@@ -852,10 +905,15 @@ fn claude_trees(event: &mut Line, data: &Path) -> Result<(), Box<dyn std::error:
     let command = text("tool_name")
         .filter(|t| *t == "Bash")
         .and_then(|_| event.get("tool_input")?.get("command")?.as_str());
-    let mut named = command.map(named_paths).unwrap_or_default();
-    // The folders a turn starts in, which Cursor's prompt names (`cursor_shaped`).
+    let named = command.map(named_paths).unwrap_or_default();
+    // The folders a turn starts in, which Cursor's prompt names (`cursor_shaped`): each gets its
+    // start tree, but is no touch of the call.
     let starts = event.get("studio_turn_roots").and_then(Value::as_array);
-    named.extend(starts.into_iter().flatten().filter_map(Value::as_str));
+    let starts: Vec<&str> = starts
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
     let mut known = strings(&kept["worktrees"]);
     // The worktrees the call touches, listed once: the folder's, an `Edit` or `Write` path's, and
     // those a Bash command names.
@@ -876,6 +934,14 @@ fn claude_trees(event: &mut Line, data: &Path) -> Result<(), Box<dyn std::error:
         }
         found
     };
+    let started = |known: &mut Vec<String>| {
+        let mut names = Named {
+            lists: Vec::new(),
+            known,
+        };
+        let roots = starts.iter().filter_map(|p| names.root(Path::new(p)));
+        roots.collect::<Vec<String>>()
+    };
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as u64);
@@ -894,7 +960,13 @@ fn claude_trees(event: &mut Line, data: &Path) -> Result<(), Box<dyn std::error:
             end = ended.iter().filter_map(|root| record(root)).collect();
             if in_turn {
                 touches = touched(&mut known);
-                for root in touches.clone() {
+                let mut firsts = touches.clone();
+                for root in started(&mut known) {
+                    if !firsts.contains(&root) {
+                        firsts.push(root);
+                    }
+                }
+                for root in firsts {
                     if !turn.roots.contains(&root)
                         && let Some((root, tree)) = first_tree(&root, began)
                     {
@@ -935,6 +1007,10 @@ fn claude_trees(event: &mut Line, data: &Path) -> Result<(), Box<dyn std::error:
             }
             worker["roots"] = roots.into();
         }
+    }
+    // Trees given up are logged with none, so the record must not say they were taken.
+    if !keep_trees() {
+        return Ok(());
     }
     let kept = json!({
         "prompt_id": turn.prompt_id, "roots": turn.roots, "ended": turn.ended, "began": began,
