@@ -123,13 +123,14 @@ fn bench(agent: &str) -> Bench {
     )
     .unwrap();
     fs::set_permissions(&srt, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-    // The recorded `gh`: it keeps its arguments, its folder, the branch there and the body it was given, and answers with a
-    // PR's address, as `gh pr create` does. No test reaches GitHub.
+    // The recorded `gh`: `pr create` keeps its arguments, its folder, the branch there and the body it was given, and answers
+    // with a PR's address, as it does; `pr list` answers with the PRs it opened. `gh.fail` makes the next `pr create` fail
+    // before it opens one, and `gh.garbled` makes it open one but answer with no address. No test reaches GitHub.
     let gh = root.join("gh");
     fs::write(
         &gh,
         format!(
-            "#!/bin/sh\necho \"$@\" > '{0}/gh.args'\npwd -P > '{0}/gh.cwd'\ngit branch --show-current > '{0}/gh.branch'\ncat > '{0}/gh.body'\necho https://github.com/someone/app/pull/7\n",
+            "#!/bin/sh\nif [ \"$1 $2\" = 'pr list' ]; then echo \"$@\" > '{0}/gh.list'; cat '{0}/gh.opened' 2>/dev/null; exit 0; fi\necho \"$@\" > '{0}/gh.args'\necho created >> '{0}/gh.created'\npwd -P > '{0}/gh.cwd'\ngit branch --show-current > '{0}/gh.branch'\ncat > '{0}/gh.body'\nif [ -e '{0}/gh.fail' ]; then rm '{0}/gh.fail'; echo 'could not create' >&2; exit 1; fi\necho https://github.com/someone/app/pull/7 > '{0}/gh.opened'\nif [ -e '{0}/gh.garbled' ]; then rm '{0}/gh.garbled'; echo 'Warning: 1 uncommitted change'; exit 0; fi\necho https://github.com/someone/app/pull/7\n",
             root.display()
         ),
     )
@@ -567,6 +568,95 @@ fn a_patch_a_later_commit_made_stale_is_out_of_date() {
     // Discard still deletes it.
     bench.laws.discard(&bench.project, &id).unwrap();
     assert!(bench.laws.patches(&bench.project).is_empty());
+}
+
+/// Run `id`'s patch, as the map shows it.
+fn patch_of(bench: &Bench, id: &str) -> back_a_law::LawPatch {
+    bench
+        .laws
+        .patches(&bench.project)
+        .into_iter()
+        .find(|p| p.id == id)
+        .unwrap()
+}
+
+#[test]
+fn open_draft_pr_tried_again_after_gh_failed_past_the_push_opens_the_pr() {
+    let bench = bench(&format!("set -e\n{TEST}{PLANT}{DONE}"));
+    let id = bench.start();
+    assert_eq!(bench.settled(&id).state, PatchState::Proven);
+    let root = bench.dir.path().canonicalize().unwrap();
+    // The push lands, then `gh pr create` fails: the branch is on origin and no PR is open.
+    fs::write(root.join("gh.fail"), "").unwrap();
+    assert!(bench.laws.open_pr(&bench.project, &id).is_err());
+    assert_eq!(patch_of(&bench, &id).state, PatchState::Proven);
+
+    let again = bench.laws.open_pr(&bench.project, &id);
+    assert!(
+        matches!(again, Ok(Opened::Pr { number: 7, .. })),
+        "a second click opens the PR: {again:?}"
+    );
+    assert_eq!(patch_of(&bench, &id).state, PatchState::Opened);
+    let origin = root.join("origin.git");
+    let pushed = git(&origin, &["rev-parse", &format!("back-a-law/{LAW}-{id}")]);
+    assert_eq!(
+        git(&origin, &["diff", "--name-only", "main", &pushed]),
+        "system-map.json\ntests/add.test.mjs"
+    );
+}
+
+#[test]
+fn a_pr_gh_opened_without_saying_its_number_is_found_and_recorded_on_the_next_click() {
+    let bench = bench(&format!("set -e\n{TEST}{PLANT}{DONE}"));
+    let id = bench.start();
+    assert_eq!(bench.settled(&id).state, PatchState::Proven);
+    let root = bench.dir.path().canonicalize().unwrap();
+    fs::write(root.join("gh.garbled"), "").unwrap();
+    assert!(bench.laws.open_pr(&bench.project, &id).is_err());
+
+    let again = bench.laws.open_pr(&bench.project, &id);
+    assert!(
+        matches!(again, Ok(Opened::Pr { number: 7, .. })),
+        "the PR already open is found: {again:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("gh.created"))
+            .unwrap()
+            .lines()
+            .count(),
+        1,
+        "no second PR is created"
+    );
+    let patch = patch_of(&bench, &id);
+    assert_eq!((patch.state, patch.pr), (PatchState::Opened, Some(7)));
+    let ratified = ratify::read(&root.join("data").join(ratify::FILE), &bench.project);
+    assert_eq!(
+        ratified.status(&ratify::Item::new(7, "law", LAW), None),
+        ratify::Status::Accepted
+    );
+}
+
+#[test]
+fn open_draft_pr_leaves_the_record_of_daniels_other_worktrees_alone() {
+    let bench = bench(&format!("set -e\n{TEST}{PLANT}{DONE}"));
+    let id = bench.start();
+    assert_eq!(bench.settled(&id).state, PatchState::Proven);
+    // Daniel's other worktree, its folder away for now (an unmounted disk, say).
+    let root = bench.dir.path().canonicalize().unwrap();
+    let other = root.join("other");
+    git(
+        &bench.repo,
+        &["worktree", "add", "-q", "--detach", other.to_str().unwrap()],
+    );
+    fs::rename(&other, root.join("other-away")).unwrap();
+
+    bench.laws.open_pr(&bench.project, &id).unwrap();
+    let listed = git(&bench.repo, &["worktree", "list", "--porcelain"]);
+    assert!(
+        listed.contains(&format!("worktree {}", other.display())),
+        "{listed}"
+    );
+    assert_eq!(listed.matches("worktree ").count(), 2, "{listed}");
 }
 
 // ---- The new-law variant and Guard with a law (#401) ----

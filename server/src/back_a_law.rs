@@ -529,6 +529,32 @@ impl LawRuns {
             .clone()
             .unwrap_or_else(|| law_text(repo, &reference, &patch.law));
         let branch = format!("back-a-law/{}-{id}", patch.law);
+        // An earlier click may have pushed the branch and stopped short: a PR it opened is recorded now, and a branch with no
+        // PR is pushed anew.
+        let listed = gh(
+            self.gh(),
+            repo,
+            &[
+                "pr", "list", "--head", &branch, "--state", "all", "--json", "url", "--jq",
+                ".[].url",
+            ],
+            "",
+        )?;
+        if !listed.is_empty() {
+            return self.opened(project, &file, patch, &law, &listed);
+        }
+        if host_git(
+            repo,
+            &["ls-remote", "--exit-code", "--heads", &remote, &branch],
+        )
+        .is_ok()
+        {
+            host_git(
+                repo,
+                &["push", "-q", "--no-verify", &remote, "--delete", &branch],
+            )
+            .map_err(|e| format!("the branch an earlier click pushed was not removed: {e}"))?;
+        }
         let tmp = tempfile::Builder::new()
             .prefix("law-pr-")
             .tempdir_in(&self.config.data)
@@ -578,9 +604,16 @@ impl LawRuns {
             )
             .map(Some)
         })();
-        // Deleting the temporary folder and pruning drops the worktree, dirty or not, without forcing git.
+        // The temporary worktree is emptied of what a failed step left and removed by its path, without forcing git and
+        // without pruning, which would drop the records of Daniel's own worktrees whose folders are away.
+        if work.exists() {
+            let _ = host_git(&work, &["reset", "-q", "--hard"]);
+            let _ = host_git(&work, &["clean", "-fdq"]);
+            if let Err(e) = host_git(repo, &["worktree", "remove", &work_text]) {
+                log::warn!("back a law: the temporary worktree {work_text} was not removed: {e}");
+            }
+        }
         drop(tmp);
-        let _ = host_git(repo, &["worktree", "prune"]);
         let _ = host_git(repo, &["branch", "-q", "-D", &branch]);
         let Some(url) = made? else {
             self.keep(
@@ -594,12 +627,25 @@ impl LawRuns {
             self.tell(project);
             return Ok(Opened::OutOfDate);
         };
+        self.opened(project, &file, patch, &law, &url)
+    }
+
+    /// The draft PR at `url` is open for `patch`, kept in `file`: the patch says it, and the law change is accepted in ratify.
+    fn opened(
+        &self,
+        project: &str,
+        file: &Path,
+        patch: LawPatch,
+        law: &str,
+        url: &str,
+    ) -> Result<Opened, String> {
+        let url = url.lines().next().unwrap_or_default().trim().to_string();
         let number = url
             .rsplit_once("/pull/")
             .and_then(|(_, n)| n.trim().parse::<u64>().ok())
             .ok_or_else(|| format!("gh did not say the PR's number: {url}"))?;
         self.keep(
-            &file,
+            file,
             LawPatch {
                 state: PatchState::Opened,
                 at: millis(),
@@ -613,7 +659,7 @@ impl LawRuns {
             project,
             &crate::ratify::Item::new(number, "law", &patch.law),
             crate::ratify::Decided::Accepted,
-            &law,
+            law,
             crate::ratify::now(),
         );
         if let Err(e) = ratified {
@@ -884,7 +930,8 @@ fn gh(program: PathBuf, dir: &Path, args: &[&str], input: &str) -> Result<String
     let out = child.wait_with_output().map_err(|e| e.to_string())?;
     if !out.status.success() {
         return Err(format!(
-            "gh pr create failed: {}",
+            "gh {} failed: {}",
+            args.iter().take(2).copied().collect::<Vec<_>>().join(" "),
             String::from_utf8_lossy(&out.stderr).trim()
         ));
     }
