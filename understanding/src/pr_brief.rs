@@ -1232,19 +1232,29 @@ pub struct BriefReply {
     pub usage: CallUsage,
 }
 
+/// Which call of a write runs (#450): the writer's and the retry's write the brief and run at the brief effort
+/// (`prBriefs.effort`); the claim check always runs at `claude`'s own, so a lower effort never weakens the checker.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CallKind {
+    Write,
+    Check,
+}
+
 /// What writes a brief: `ClaudeWriter` in the app, a canned reply in a test.
 pub trait BriefWriter {
     /// The reply to `prompt` at `model`, or one line for the log when the call failed.
     fn write(&self, model: &str, prompt: &str) -> Result<BriefReply, String>;
 
     /// The reply to `prompt` with `facts`, a write's shared facts block, as the system text every call of the write shares
-    /// (#450). By default the two go as one prompt, the facts first.
+    /// (#450), for a call of kind `kind`. By default the two go as one prompt, the facts first.
     fn write_with_facts(
         &self,
         model: &str,
+        kind: CallKind,
         facts: &str,
         prompt: &str,
     ) -> Result<BriefReply, String> {
+        let _ = kind;
         self.write(model, &format!("{facts}{prompt}"))
     }
 }
@@ -1265,11 +1275,12 @@ pub fn timed_write(
 pub fn timed_write_facts(
     writer: &(impl BriefWriter + ?Sized),
     model: &str,
+    kind: CallKind,
     facts: &str,
     prompt: &str,
 ) -> Result<BriefReply, String> {
     let started = std::time::Instant::now();
-    let mut reply = writer.write_with_facts(model, facts, prompt)?;
+    let mut reply = writer.write_with_facts(model, kind, facts, prompt)?;
     reply.usage.duration_ms = started.elapsed().as_millis() as u64;
     Ok(reply)
 }
@@ -1322,17 +1333,18 @@ pub fn read_envelope(output: &str) -> Result<BriefReply, String> {
 
 impl BriefWriter for ClaudeWriter {
     fn write(&self, model: &str, prompt: &str) -> Result<BriefReply, String> {
-        let out = self.brief_stdout(model, None, prompt)?;
+        let out = self.brief_stdout(model, CallKind::Write, None, prompt)?;
         read_envelope(&out)
     }
 
     fn write_with_facts(
         &self,
         model: &str,
+        kind: CallKind,
         facts: &str,
         prompt: &str,
     ) -> Result<BriefReply, String> {
-        let out = self.brief_stdout(model, Some(facts), prompt)?;
+        let out = self.brief_stdout(model, kind, Some(facts), prompt)?;
         read_envelope(&out)
     }
 }
@@ -1888,7 +1900,13 @@ pub fn write_pr_brief(
     mut log: impl FnMut(String),
 ) -> Result<StoredBrief, String> {
     let facts = build_facts(source)?;
-    let reply = timed_write_facts(writer, model, &facts_block(&facts), &prompt(&facts))?;
+    let reply = timed_write_facts(
+        writer,
+        model,
+        CallKind::Write,
+        &facts_block(&facts),
+        &prompt(&facts),
+    )?;
     let mut brief = parse_reply(&reply.text)?;
     assign_decision_ids(&mut brief, &source.earlier_decisions);
     check_brief(&mut brief, &facts.context);

@@ -17,7 +17,7 @@ use crate::pr_brief::{
     Shape, TaggedTest, check_brief, cut_to, facts_block, flow_key, gather, ids, parse_reply,
     prompt, section, split_diff, timed_write_facts,
 };
-use crate::pr_brief::{Brief, INSTRUCTIONS};
+use crate::pr_brief::{Brief, CallKind, INSTRUCTIONS};
 use crate::pr_brief_check::Stage;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -537,7 +537,13 @@ pub fn write_part_catch_up(
 ) -> Result<StoredCatchUp, String> {
     let facts = build_catch_up_facts(source)?;
     stage(Stage::Writing);
-    let reply = timed_write_facts(writer, model, &facts_block(&facts), &prompt(&facts))?;
+    let reply = timed_write_facts(
+        writer,
+        model,
+        CallKind::Write,
+        &facts_block(&facts),
+        &prompt(&facts),
+    )?;
     let mut brief = parse_reply(&reply.text)?;
     // A catch-up ratifies nothing and has no overview.
     brief.decisions.clear();

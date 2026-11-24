@@ -4,7 +4,7 @@
 use serde_json::json;
 use std::cell::RefCell;
 use studio_understanding::part_catch_up::*;
-use studio_understanding::pr_brief::{BriefReply, BriefWriter, CallUsage, TaggedTest};
+use studio_understanding::pr_brief::{BriefReply, BriefWriter, CallKind, CallUsage, TaggedTest};
 
 const MAP: &str = r#"{
   "version": 1,
@@ -319,19 +319,22 @@ fn the_entry_runs_the_claim_check_and_one_retry_and_stores_the_catch_up_by_part_
 struct Fenced {
     replies: RefCell<Vec<String>>,
     calls: RefCell<Vec<(String, String)>>,
+    kinds: RefCell<Vec<CallKind>>,
 }
 
 impl BriefWriter for Fenced {
     fn write(&self, model: &str, prompt: &str) -> Result<BriefReply, String> {
-        self.write_with_facts(model, "", prompt)
+        self.write_with_facts(model, CallKind::Write, "", prompt)
     }
     fn write_with_facts(
         &self,
         _model: &str,
+        kind: CallKind,
         facts: &str,
         prompt: &str,
     ) -> Result<BriefReply, String> {
         self.calls.borrow_mut().push((facts.into(), prompt.into()));
+        self.kinds.borrow_mut().push(kind);
         Ok(BriefReply {
             text: self.replies.borrow_mut().remove(0),
             usage: CallUsage::default(),
@@ -352,6 +355,7 @@ fn the_three_calls_share_the_facts_as_fenced_system_text_and_send_only_their_own
             json!({ "items": [] }).to_string(),
         ]),
         calls: RefCell::new(vec![]),
+        kinds: RefCell::new(vec![]),
     };
     write_part_catch_up(&writer, "opus", &source(), &store, |_| {}, |_| {}).unwrap();
     let facts = build_catch_up_facts(&source()).unwrap();
@@ -373,6 +377,11 @@ fn the_three_calls_share_the_facts_as_fenced_system_text_and_send_only_their_own
     assert!(calls[0].1.starts_with("You write a part catch-up"));
     assert!(calls[1].1.starts_with("You check a written PR brief"));
     assert!(calls[2].1.contains("RETRY"));
+    // The writer and the retry run at the brief effort; the claim check at claude's own (#450).
+    assert_eq!(
+        *writer.kinds.borrow(),
+        [CallKind::Write, CallKind::Check, CallKind::Write]
+    );
 }
 
 fn long_source(n: usize) -> CatchUpSource {

@@ -8,8 +8,8 @@
 //! can rewrite and are left as `check_brief` set them.
 
 use crate::pr_brief::{
-    Also, Brief, BriefRecord, BriefWriter, CallUsage, CheckContext, Decision, Facts, Step,
-    check_brief, facts_block, prompt, put_plan_first, timed_write_facts,
+    Also, Brief, BriefRecord, BriefWriter, CallKind, CallUsage, CheckContext, Decision, Facts,
+    Step, check_brief, facts_block, prompt, put_plan_first, timed_write_facts,
 };
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -322,7 +322,13 @@ pub fn claim_check_and_retry(
     let mut claims = Vec::new();
     stage(Stage::Checking);
     let shared = facts_block(facts);
-    match timed_write_facts(writer, model, &shared, &claim_prompt(brief)) {
+    match timed_write_facts(
+        writer,
+        model,
+        CallKind::Check,
+        &shared,
+        &claim_prompt(brief),
+    ) {
         Err(e) => record.claim_error = Some(e),
         Ok(reply) => {
             record.calls.push(with_role(reply.usage, "claim check"));
@@ -348,7 +354,7 @@ pub fn claim_check_and_retry(
         .count();
     stage(Stage::Fixing { claims: flagged });
     let mut rewritten = BTreeSet::new();
-    match timed_write_facts(writer, model, &shared, &request) {
+    match timed_write_facts(writer, model, CallKind::Write, &shared, &request) {
         Err(e) => record.retry_error = Some(e),
         Ok(reply) => {
             record.calls.push(with_role(reply.usage, "retry"));

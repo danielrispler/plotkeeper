@@ -1,7 +1,8 @@
 //! The writer bench (#450): one real part catch-up or PR brief write, with `claude -p` as the app runs it, on a recorded input,
 //! into a folder of its own (never the data folder). It appends one JSON line to `<out>/results.jsonl` and prints it: each call's
 //! time, cost and tokens (those read from the cache and written to it), the claim check's flags before the retry, whether the
-//! retry ran, the figures, and the arguments the calls ran with. `dry=1` builds the facts only, calls nothing and costs nothing.
+//! retry ran, the figures, and the arguments the calls ran with (the writer's and the retry's, then the claim check's, which
+//! runs at claude's own effort). `dry=1` builds the facts only, calls nothing and costs nothing.
 //!
 //!   cargo run --release -p studio-understanding --example writer_bench -- catch-up repo=<repo> part=<id> fog=<c1,c2,...> \
 //!       out=<dir> label=<name> [effort=low] [model=opus] [dry=1]
@@ -20,7 +21,7 @@ use studio_understanding::part_catch_up::{
     CatchUpStore, build_catch_up_facts, gather_catch_up, write_part_catch_up,
 };
 use studio_understanding::pr_brief::{
-    Brief, BriefRecord, BriefStore, build_facts, fetch_meta, gather, write_pr_brief,
+    Brief, BriefRecord, BriefStore, CallKind, build_facts, fetch_meta, gather, write_pr_brief,
 };
 
 fn main() {
@@ -51,14 +52,16 @@ fn main() {
             .expect("the writer's folder")
             .with_brief_effort(move || effort.clone())
     };
-    let argv: Vec<String> = writer
-        .brief_command(&model, Some("FACTS"), "")
-        .0
-        .get_args()
-        .map(|a| a.to_string_lossy().into_owned())
-        .collect();
-    let mut result =
-        json!({ "label": label, "kind": kind, "effort": effort, "model": model, "argv": argv });
+    let argv = |call| -> Vec<String> {
+        writer
+            .brief_command(&model, call, Some("FACTS"), "")
+            .0
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    };
+    let mut result = json!({ "label": label, "kind": kind, "effort": effort, "model": model,
+        "argv": argv(CallKind::Write), "argv_check": argv(CallKind::Check) });
 
     let (record, brief): (Option<BriefRecord>, Option<Brief>) = match kind.as_str() {
         "catch-up" => {

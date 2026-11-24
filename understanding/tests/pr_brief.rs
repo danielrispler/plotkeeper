@@ -1092,7 +1092,7 @@ fn a_failed_call_or_an_unreadable_reply_stores_and_records_nothing() {
 fn a_briefs_call_runs_at_the_brief_effort_and_at_claudes_own_without_one() {
     use studio_understanding::ClaudeWriter;
     let args = |w: &ClaudeWriter| -> Vec<String> {
-        w.brief_command("opus", None, "p")
+        w.brief_command("opus", CallKind::Write, None, "p")
             .0
             .get_args()
             .map(|a| a.to_string_lossy().into_owned())
@@ -1118,7 +1118,8 @@ fn a_briefs_call_runs_at_the_brief_effort_and_at_claudes_own_without_one() {
 fn a_briefs_call_carries_its_facts_as_appended_system_text_and_its_own_rules_as_the_prompt() {
     use studio_understanding::ClaudeWriter;
     let writer = ClaudeWriter::new("/bin/claude".into(), "/w/card-writer".into());
-    let (command, stdin) = writer.brief_command("opus", Some("FACTS text"), "the rules");
+    let (command, stdin) =
+        writer.brief_command("opus", CallKind::Write, Some("FACTS text"), "the rules");
     let args: Vec<String> = command
         .get_args()
         .map(|a| a.to_string_lossy().into_owned())
@@ -1134,6 +1135,25 @@ fn a_briefs_call_carries_its_facts_as_appended_system_text_and_its_own_rules_as_
         "the default system prompt stays"
     );
     assert_eq!(stdin, "the rules");
+}
+
+#[test]
+fn the_claim_checks_call_runs_at_claudes_own_effort_whatever_the_brief_effort() {
+    use studio_understanding::ClaudeWriter;
+    let writer = ClaudeWriter::new("/bin/claude".into(), "/w/card-writer".into())
+        .with_brief_effort(|| "low".into());
+    let effort = |kind| -> Option<String> {
+        let args: Vec<String> = writer
+            .brief_command("opus", kind, Some("FACTS"), "p")
+            .0
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let at = args.iter().position(|a| a == "--effort")?;
+        Some(args[at + 1].clone())
+    };
+    assert_eq!(effort(CallKind::Write), Some("low".into()));
+    assert_eq!(effort(CallKind::Check), None);
 }
 
 #[test]

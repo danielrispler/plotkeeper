@@ -839,28 +839,38 @@ impl ClaudeWriter {
     pub(crate) fn brief_stdout(
         &self,
         model: &str,
+        kind: pr_brief::CallKind,
         facts: Option<&str>,
         prompt: &str,
     ) -> Result<String, String> {
         let timeout = self.timeout.unwrap_or(WriterKind::Claude.timeout());
-        match self.call(timeout, self.brief_command(model, facts, prompt), false) {
+        match self.call(
+            timeout,
+            self.brief_command(model, kind, facts, prompt),
+            false,
+        ) {
             Ok(reply) => Ok(reply.text),
             Err(error) => Err(error.to_string()),
         }
     }
 
-    /// The `claude -p --output-format json` run of a PR brief's call at `model` on `prompt`, with `facts` appended to the system
-    /// prompt, and its standard input.
+    /// The `claude -p --output-format json` run of a PR brief's call of kind `kind` at `model` on `prompt`, with `facts` appended to
+    /// the system prompt, and its standard input. A write's and a retry's call runs at the brief effort; a claim check's at
+    /// `claude`'s own (#450).
     pub fn brief_command(
         &self,
         model: &str,
+        kind: pr_brief::CallKind,
         facts: Option<&str>,
         prompt: &str,
     ) -> (Command, String) {
         let request = WriterRequest {
             user: prompt.into(),
             model: Some(model.into()),
-            effort: self.brief_effort.as_ref().map(|effort| effort()),
+            effort: match kind {
+                pr_brief::CallKind::Write => self.brief_effort.as_ref().map(|effort| effort()),
+                pr_brief::CallKind::Check => None,
+            },
             timeout: self.timeout.unwrap_or(WriterKind::Claude.timeout()),
             ..WriterRequest::default()
         };
