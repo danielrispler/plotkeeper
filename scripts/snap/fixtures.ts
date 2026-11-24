@@ -737,7 +737,7 @@ const mapRefresher = (): Fixture => {
   });
 };
 // A micro-world (#399) in its overlay: from the refresher on Shell's sheet, the Turn writing flow's world is ready but may be out of date, so its
-// row offers Open and Rebuild; Open shows the checked page in a frame sandboxed to scripts alone, in the wide glass overlay. The page's script is
+// row offers Open and Rebuild; Open shows the checked page in a frame sandboxed to scripts alone, in the glass overlay the size of the settings dialog. The page's script is
 // an inline handler: a closing script tag would end the snap page's own.
 const worldPage = `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:">
 <title>Turn writing</title><style>:root{color-scheme:light dark}body{margin:0;padding:24px;font:15px system-ui;background:#f6f5f2;color:#1a1a1a}

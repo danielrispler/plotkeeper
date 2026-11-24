@@ -513,9 +513,10 @@ body[data-panel="diff"] .map-stage { --panel-w: min(var(--panel-wide), calc(100%
 .pre-flight-row { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-3) 0; border-top: var(--hair) solid var(--line); }
 .pre-flight-name { font-weight: 600; }
 .pre-flight-law, .pre-flight-fog, .pre-flight-stale { font-size: var(--size-xs); color: var(--faint); }
-/* A micro-world (#399): a wide overlay in the glass, the left panel's widest, over the panels, holding the page's sandboxed frame; and the row
-   under a flow or a figure that offers it. */
-.map-micro-world { position: absolute; inset: var(--inset); margin-inline: auto; width: min(var(--panel-wide), calc(100% - 2 * var(--inset))); z-index: 6;
+/* A micro-world (#399): an overlay in the glass the size of the settings dialog, over the panels, holding the page's sandboxed frame; and the
+   row under a flow or a figure that offers it. */
+.map-micro-world { position: absolute; top: var(--inset); left: 0; right: 0; margin-inline: auto; z-index: 6;
+                   width: min(var(--settings), calc(100% - 2 * var(--inset))); height: min(var(--settings-height), calc(100% - 2 * var(--inset)));
                    padding: var(--sp-5) var(--sp-6) var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-4); box-sizing: border-box; }
 .map-micro-world[hidden] { display: none; }
 .micro-world-head { display: flex; align-items: center; gap: var(--sp-4); }
