@@ -2050,6 +2050,10 @@ pub struct NameRequest {
     pub prompt: String,
     /// The final response of its turn, for a prompt that is a bare slash command; `None` otherwise.
     pub response: Option<String>,
+    /// The session's folder, which "here" in the prompt means: the writer runs in a folder of its own, which its
+    /// harness names to it (#408).
+    #[serde(default)]
+    pub cwd: String,
 }
 
 /// Whether `prompt` is a slash command with nothing after it, such as `/wayfinder`.
@@ -3165,6 +3169,7 @@ impl Studio {
                                 session_id: session.agent.id.clone(),
                                 prompt: prompt.clone(),
                                 response: None,
+                                cwd: session.cwd.clone(),
                             }));
                         }
                     }
@@ -3297,6 +3302,7 @@ impl Studio {
                             session_id: session.agent.id.clone(),
                             prompt,
                             response: Some(reply.into()),
+                            cwd: session.cwd.clone(),
                         }));
                     }
                     let mut lines = full.lines().map(str::trim);
@@ -4450,7 +4456,13 @@ impl Studio {
     /// The session list: every session Daniel has not deleted, grouped in `State` order, the newest first in each group.
     /// A session with no prompt is no row while its terminal's live session has prompts: a session
     /// loaded beside it, as by the `/resume` picker backed out of, until its first prompt (danielrispler/Falinks#562).
+    /// Nor is a session with no folder and no prompt of an agent whose capabilities say it starts
+    /// sessions from an empty window: the one Cursor.app's empty window starts at its launch, until its
+    /// first prompt (#427).
     pub fn sessions(&self) -> Vec<&Session> {
+        let empty_window = |s: &Session| {
+            s.capabilities.empty_window_starts && s.cwd.is_empty() && s.prompts.is_empty()
+        };
         let beside_live = |s: &Session| {
             s.prompts.is_empty()
                 && s.terminal.is_some()
@@ -4462,7 +4474,7 @@ impl Studio {
                 })
         };
         let mut sessions: Vec<&Session> = (self.sessions.values())
-            .filter(|s| !s.deleted && !beside_live(s))
+            .filter(|s| !s.deleted && !beside_live(s) && !empty_window(s))
             .collect();
         sessions.sort_by_key(|s| (s.state, Reverse(s.agent.started_at), &s.agent.id));
         sessions

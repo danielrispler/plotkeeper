@@ -8,8 +8,16 @@ use crate::ledger::Row;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-/// The tools whose call changes the file its input names.
-const EDITS: [&str; 4] = ["Edit", "MultiEdit", "Write", "NotebookEdit"];
+/// The tools whose call changes the file its input names: Claude Code's, Codex's `apply_patch` and
+/// Cursor's `Delete` (its `Write` is Claude Code's name too, #426).
+const EDITS: [&str; 6] = [
+    "Edit",
+    "MultiEdit",
+    "Write",
+    "NotebookEdit",
+    "apply_patch",
+    "Delete",
+];
 
 /// Whether a call of `tool` edits the file it names.
 pub(crate) fn edits(tool: &str) -> bool {

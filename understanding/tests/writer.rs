@@ -147,6 +147,27 @@ fn shell(dir: &Path, name: &str, script: &str) -> std::path::PathBuf {
     path
 }
 
+// #408: in #358's trial "list the files here and say hi" was named "List card-writer files and greet": `claude -p`
+// still names its own working directory to the model, which read "here" as the writer's folder.
+#[test]
+fn a_name_request_says_here_is_the_sessions_folder_not_the_writers() {
+    let writer_folder = Path::new("/h/Library/Application Support/plotkeeper/card-writer");
+    let writer = ClaudeWriter::new(CLAUDE.into(), writer_folder.into());
+    let request = writer.name_request(
+        &setup(),
+        "list the files here and say hi",
+        None,
+        "/tmp/agy-trial",
+    );
+
+    assert!(request.user.contains("/tmp/agy-trial"), "{}", request.user);
+    let system = request.system.unwrap();
+    assert!(
+        system.contains("never name the folder you run in"),
+        "{system}"
+    );
+}
+
 #[test]
 fn the_login_shell_finds_claude_and_without_its_answer_the_path_does() {
     let dir = tempfile::tempdir().unwrap();

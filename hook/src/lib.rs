@@ -11,6 +11,7 @@ use std::{
     path::{Path, PathBuf},
     process::{self, Command, Stdio},
     sync::{
+        Mutex,
         atomic::{AtomicU64, Ordering},
         mpsc::{self, RecvTimeoutError},
     },
@@ -404,6 +405,48 @@ pub fn worktree_root(folder: &Path) -> Option<String> {
     git(existing, &["rev-parse", "--show-toplevel"], None)
 }
 
+/// Whether the trees this process records still count: the hook gives them up when they run past
+/// its budget, and their line is logged without them (#426 review).
+#[derive(Clone, Copy, PartialEq)]
+enum Fate {
+    Open,
+    Kept,
+    Abandoned,
+}
+
+static FATE: Mutex<Fate> = Mutex::new(Fate::Open);
+
+fn fate() -> std::sync::MutexGuard<'static, Fate> {
+    FATE.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Gives up the trees this process is still recording: its `git` calls are killed, and `trees`
+/// keeps no record of them, so the turn's next touch of their worktrees records them again.
+/// `false` when `trees` has already kept its record, which then lands in a moment.
+pub fn abandon_trees() -> bool {
+    let mut fate = fate();
+    if *fate == Fate::Kept {
+        return false;
+    }
+    *fate = Fate::Abandoned;
+    true
+}
+
+/// Whether the trees were given up (`abandon_trees`).
+fn abandoned() -> bool {
+    *fate() == Fate::Abandoned
+}
+
+/// Whether `trees` may keep its record: the trees were not given up, and now never will be.
+fn keep_trees() -> bool {
+    let mut fate = fate();
+    if *fate == Fate::Abandoned {
+        return false;
+    }
+    *fate = Fate::Kept;
+    true
+}
+
 /// The most untracked files, and bytes of them, that a tree is recorded with: past either, hashing
 /// them costs more than a hook may (#141).
 pub const MAX_UNTRACKED_FILES: usize = 10_000;
@@ -470,14 +513,16 @@ fn untracked_within(root: &Path, files: usize, bytes: u64) -> Result<(), String>
     let deadline = Instant::now() + GIT_TIMEOUT;
     let (mut count, mut size) = (0, 0);
     let passed = loop {
-        let path = match listed.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+        let path = match listed.recv_timeout(Duration::from_millis(20)) {
             Ok(path) => path,
             Err(RecvTimeoutError::Disconnected) => break None,
-            Err(RecvTimeoutError::Timeout) => {
+            Err(RecvTimeoutError::Timeout) if abandoned() => break Some("given up".into()),
+            Err(RecvTimeoutError::Timeout) if Instant::now() > deadline => {
                 break Some(format!(
                     "listing its untracked files took over {GIT_TIMEOUT:?}"
                 ));
             }
+            Err(RecvTimeoutError::Timeout) => continue,
         };
         count += 1;
         size += fs::symlink_metadata(root.join(OsStr::from_bytes(&path))).map_or(0, |m| m.len());
@@ -524,6 +569,9 @@ fn command(folder: &Path, args: &[&str], index: Option<&Path>) -> Command {
 /// `git`'s trimmed output in `folder`, with `index` as its index when given, or `None` when it
 /// fails or runs past `GIT_TIMEOUT`, when it is killed.
 fn git(folder: &Path, args: &[&str], index: Option<&Path>) -> Option<String> {
+    if abandoned() {
+        return None;
+    }
     let mut child = command(folder, args, index)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -539,6 +587,11 @@ fn git(folder: &Path, args: &[&str], index: Option<&Path>) -> Option<String> {
     let status = loop {
         if let Some(status) = child.try_wait().ok()? {
             break status;
+        }
+        if abandoned() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
         }
         if Instant::now() > deadline {
             let _ = child.kill();
@@ -664,18 +717,139 @@ pub const INTERRUPTED: &str = "StudioInterrupted";
 /// has none of, and an end of each worktree it touched at the later of that turn's end and its own
 /// stop. What it knows of the turn and its workers is kept in `turns/` in the data directory `data`,
 /// until the session ends or, if its end never comes, for 7 days.
+/// Codex's and Cursor's turns are mapped by their lines in Claude Code's names (#426); another
+/// agent's line records none, as its capabilities' `turn_trees: false` says, though its payload may
+/// be Claude-shaped (#359).
 pub fn trees(
     event: &mut serde_json::Map<String, serde_json::Value>,
     data: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let agent = event.get("studio_agent").and_then(|a| a.as_str());
+    let mut shaped = match agent {
+        None | Some("claude") => return claude_trees(event, data),
+        Some("codex") => codex_shaped(event),
+        Some("cursor") => cursor_shaped(event),
+        Some(_) => return Ok(()),
+    };
+    claude_trees(&mut shaped, data)?;
+    for key in [
+        "studio_touched_roots",
+        "studio_turn_end",
+        "studio_turn_start",
+    ] {
+        if let Some(value) = shaped.remove(key) {
+            event.insert(key.into(), value);
+        }
+    }
+    Ok(())
+}
+
+type Line = serde_json::Map<String, serde_json::Value>;
+
+/// Codex line `event` in the names `claude_trees` reads: its turn's `turn_id` is the prompt id, an
+/// `Interrupt` ends its turn as the studio's `INTERRUPTED` line does, and an `apply_patch` edits the
+/// first file its patch names (as `studio_core`'s Codex adapter reads it).
+// The patch reading copies `patched_file` in core/src/codex.rs, as the hook does not depend on core.
+// shortcut: a patch that changes several files is taken as touching its first.
+// shortcut: Codex runs its hooks with `"async": true` (plugin-codex/hooks.json), so the `PreToolUse`
+// of a call that first touches a worktree other than the session's folder may record its start tree
+// after the call changed it, and the turn loses that change.
+fn codex_shaped(event: &Line) -> Line {
+    use serde_json::{Value, json};
+    let mut shaped = event.clone();
+    shaped.remove("studio_agent");
+    if let Some(turn) = event.get("turn_id") {
+        shaped.insert("prompt_id".into(), turn.clone());
+    }
+    if event.get("hook_event_name").and_then(Value::as_str) == Some("Interrupt") {
+        shaped.insert("hook_event_name".into(), INTERRUPTED.into());
+    }
+    if event.get("tool_name").and_then(Value::as_str) == Some("apply_patch") {
+        let patch = event.get("tool_input").and_then(|i| i["command"].as_str());
+        let file = patch.and_then(|patch| {
+            patch.lines().find_map(|line| {
+                let line = line.trim_start().strip_prefix("*** ")?;
+                Some(line.split_once(" File: ")?.1.trim())
+            })
+        });
+        // A path from the folder the call ran in.
+        let cwd = event.get("cwd").and_then(Value::as_str).unwrap_or_default();
+        let file = file.map(|f| Path::new(cwd).join(f).to_string_lossy().into_owned());
+        shaped.insert("tool_name".into(), "Edit".into());
+        shaped.insert("tool_input".into(), json!({ "file_path": file }));
+    }
+    shaped
+}
+
+/// Cursor line `event` in the names `claude_trees` reads: its `conversation_id` is the session, its
+/// `generation_id` the prompt id, an event with no folder works in its first workspace root, and a
+/// `Write` or `Delete` edits its file and a `Shell` call runs its command, in the folder it names.
+// The tool names copy `tool` in core/src/cursor.rs, as the hook does not depend on core.
+fn cursor_shaped(event: &Line) -> Line {
+    use serde_json::Value;
+    let text = |key: &str| event.get(key).and_then(Value::as_str);
+    let mut shaped = event.clone();
+    shaped.remove("studio_agent");
+    let name = match text("hook_event_name").unwrap_or_default() {
+        "sessionStart" => "SessionStart",
+        "sessionEnd" => "SessionEnd",
+        "beforeSubmitPrompt" => "UserPromptSubmit",
+        "stop" => "Stop",
+        "postToolUse" | "postToolUseFailure" => "PostToolUse",
+        other => other,
+    };
+    shaped.insert("hook_event_name".into(), name.into());
+    if let Some(session) = event.get("conversation_id") {
+        shaped.insert("session_id".into(), session.clone());
+    }
+    if let Some(generation) = text("generation_id").filter(|g| !g.is_empty()) {
+        shaped.insert("prompt_id".into(), generation.into());
+    }
+    let roots = event.get("workspace_roots").and_then(Value::as_array);
+    let root = roots.and_then(|r| r.first()?.as_str());
+    // A `Shell` call names the folder it ran in, which may lie outside every root.
+    let ran_in = (text("tool_name") == Some("Shell"))
+        .then(|| event.get("tool_input")?.get("cwd")?.as_str())
+        .flatten();
+    let cwd = ran_in.filter(|c| !c.is_empty());
+    if let Some(cwd) = cwd.or(text("cwd").filter(|c| !c.is_empty())).or(root) {
+        shaped.insert("cwd".into(), cwd.into());
+    }
+    // Cursor sends no event before a call, only `postToolUse` after it, so a worktree's first touch
+    // would record its start tree after the call changed it: the turn's start takes the trees of
+    // every workspace root.
+    // shortcut: a worktree outside every root still records its start after its first call, so a file
+    // its first call changes is lost. Cursor's events before a call (`preToolUse`,
+    // `beforeShellExecution`) are permission hooks, not wired: Cursor blocks the call when one replies
+    // with nothing (docs/studio/plugin.md).
+    if name == "UserPromptSubmit"
+        && let Some(roots) = roots
+    {
+        shaped.insert("studio_turn_roots".into(), roots.clone().into());
+    }
+    let tool = match text("tool_name") {
+        Some("Write" | "Delete") => Some("Edit"),
+        Some("Shell") => Some("Bash"),
+        _ => None,
+    };
+    if let Some(tool) = tool {
+        shaped.insert("tool_name".into(), tool.into());
+    }
+    // A `Delete` may name its file by `path`.
+    if tool == Some("Edit")
+        && let Some(input) = shaped.get_mut("tool_input").and_then(Value::as_object_mut)
+        && !input.contains_key("file_path")
+        && let Some(path) = input.get("path").cloned()
+    {
+        input.insert("file_path".into(), path);
+    }
+    shaped
+}
+
+fn claude_trees(event: &mut Line, data: &Path) -> Result<(), Box<dyn std::error::Error>> {
     use serde_json::{Map, Value, json};
     use std::io::{Seek, Write};
     let text = |key: &str| event.get(key).and_then(Value::as_str);
-    // Only Claude Code's turns are mapped here: a line another agent's entry named records none, as
-    // its capabilities' `turn_trees: false` says, though its payload may be Claude-shaped (#359).
-    if text("studio_agent").is_some_and(|agent| agent != "claude") {
-        return Ok(());
-    }
     let name = text("hook_event_name").unwrap_or_default();
     let idle = name == "Notification" && text("notification_type") == Some("idle_prompt")
         || name == INTERRUPTED;
@@ -732,6 +906,14 @@ pub fn trees(
         .filter(|t| *t == "Bash")
         .and_then(|_| event.get("tool_input")?.get("command")?.as_str());
     let named = command.map(named_paths).unwrap_or_default();
+    // The folders a turn starts in, which Cursor's prompt names (`cursor_shaped`): each gets its
+    // start tree, but is no touch of the call.
+    let starts = event.get("studio_turn_roots").and_then(Value::as_array);
+    let starts: Vec<&str> = starts
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
     let mut known = strings(&kept["worktrees"]);
     // The worktrees the call touches, listed once: the folder's, an `Edit` or `Write` path's, and
     // those a Bash command names.
@@ -752,6 +934,14 @@ pub fn trees(
         }
         found
     };
+    let started = |known: &mut Vec<String>| {
+        let mut names = Named {
+            lists: Vec::new(),
+            known,
+        };
+        let roots = starts.iter().filter_map(|p| names.root(Path::new(p)));
+        roots.collect::<Vec<String>>()
+    };
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as u64);
@@ -770,7 +960,13 @@ pub fn trees(
             end = ended.iter().filter_map(|root| record(root)).collect();
             if in_turn {
                 touches = touched(&mut known);
-                for root in touches.clone() {
+                let mut firsts = touches.clone();
+                for root in started(&mut known) {
+                    if !firsts.contains(&root) {
+                        firsts.push(root);
+                    }
+                }
+                for root in firsts {
                     if !turn.roots.contains(&root)
                         && let Some((root, tree)) = first_tree(&root, began)
                     {
@@ -811,6 +1007,10 @@ pub fn trees(
             }
             worker["roots"] = roots.into();
         }
+    }
+    // Trees given up are logged with none, so the record must not say they were taken.
+    if !keep_trees() {
+        return Ok(());
     }
     let kept = json!({
         "prompt_id": turn.prompt_id, "roots": turn.roots, "ended": turn.ended, "began": began,

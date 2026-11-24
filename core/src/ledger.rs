@@ -35,6 +35,13 @@ pub enum Outcome {
     Rejected,
 }
 
+/// The file an edit `tool` of `event` works on when its input names it under no key of its own, as a
+/// Codex `apply_patch` does in its patch (#426): from the folder the call ran in.
+fn file_of(event: &Event, tool: &Tool) -> Option<String> {
+    let path = std::path::Path::new(&event.cwd).join(tool.path.as_deref()?);
+    Some(path.to_string_lossy().into_owned())
+}
+
 /// One tool call of a session.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Row {
@@ -222,7 +229,8 @@ impl Ledger {
                     tool: tool.name.clone(),
                     file: ["file_path", "notebook_path", "path"]
                         .iter()
-                        .find_map(|k| text(k)),
+                        .find_map(|k| text(k))
+                        .or_else(|| file_of(event, tool)),
                     command: tool.command.clone(),
                     pattern: text("pattern"),
                     turn,

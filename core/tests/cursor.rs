@@ -9,9 +9,11 @@
 //! sessions run at once: the first from the CLI, with its pid, the second from the IDE, whose pid the
 //! hook does not record.
 
+use crate::common;
 use studio_core::{CURSOR_CAPABILITIES, Change, Output, State, Studio};
 
 const RUN: &str = include_str!("fixtures/cursor/run.jsonl");
+const TRIAL: &str = include_str!("fixtures/cursor/trial.jsonl");
 const FIRST: &str = "c7a1e2f0-3b4d-4c5e-9f60-1a2b3c4d5e6f";
 const SECOND: &str = "d81f9c3a-6e2b-47d0-8a15-0f9e8d7c6b5a";
 
@@ -104,12 +106,15 @@ fn an_aborted_stop_ends_its_turn() {
     assert!(session.turns[1].ended_at.is_some());
 }
 
+/// Wave 1's trial (#369): a Cursor CLI turn that ran `calc.py`, rewrote it and ran it again, its
+/// `stop` landing before its reply, as Cursor 2026.11.22 sent its lines
+/// (`fixtures/cursor/trial.jsonl`, the trial's folder written `/w/trial`). Its summary said nothing
+/// was recorded, as Cursor recorded no turn trees (#426).
 #[test]
-fn a_cursor_session_records_no_turn_trees() {
-    let studio = Studio::replayed(fixture());
-    let session = studio.session(FIRST).unwrap();
-    assert!(!session.capabilities.turn_trees);
-    assert!(session.turns.iter().all(|t| t.files.is_none()));
+fn a_cursor_turn_that_writes_a_file_lists_it_and_its_summarys_facts_carry_it() {
+    let (listed, carried) = common::trial_files(TRIAL, "beforeSubmitPrompt", "stop");
+    assert_eq!(listed, ["calc.py"]);
+    assert_eq!(carried, ["calc.py"]);
 }
 
 /// The IDE's pid is not recorded (#320, "IDE-hosted pids"), so a running IDE session with no event for
@@ -240,4 +245,31 @@ fn a_reply_that_lands_after_its_stop_is_still_its_turns_and_asks_for_its_summary
             Some(reply.lines().next().unwrap().trim())
         );
     }
+}
+
+/// The `sessionStart` Cursor.app 3.31.15 sent at its launch from its empty window's extension host,
+/// recorded in wave 1's trial (#369, 2026-11-24): no workspace root, and no prompt or other event
+/// followed (#427).
+const EMPTY_WINDOW_START: &str = r#"{"composer_mode":"agent","conversation_id":"bbd8f88b-43db-4dca-8bfd-1a0514008205","cursor_version":"3.31.15","generation_id":"","hook_event_name":"sessionStart","is_background_agent":false,"model":"grok-4.7-medium","model_id":"grok-4.7","model_params":[{"id":"context","value":"256k"},{"id":"reasoning_effort","value":"medium"},{"id":"fast","value":"false"}],"session_id":"bbd8f88b-43db-4dca-8bfd-1a0514008205","studio_agent":"cursor","studio_pid":31033,"studio_received_ms":1795514644253,"transcript_path":null,"workspace_roots":[]}"#;
+const EMPTY_WINDOW: &str = "bbd8f88b-43db-4dca-8bfd-1a0514008205";
+
+#[test]
+fn cursor_apps_empty_window_adds_no_row() {
+    let studio = Studio::replayed([EMPTY_WINDOW_START]);
+
+    assert!(studio.sessions().is_empty(), "{:?}", studio.sessions());
+}
+
+/// A prompt in that window shows its session as usual, recorded from its start.
+#[test]
+fn a_prompt_after_cursor_apps_empty_window_start_shows_its_session_from_its_start() {
+    let prompt = r#"{"conversation_id":"bbd8f88b-43db-4dca-8bfd-1a0514008205","cursor_version":"3.31.15","generation_id":"g-1","hook_event_name":"beforeSubmitPrompt","model":"grok-4.7-medium","prompt":"What is 2 + 2?","session_id":"bbd8f88b-43db-4dca-8bfd-1a0514008205","studio_agent":"cursor","studio_pid":31033,"studio_received_ms":1795514700000,"workspace_roots":[]}"#;
+    let studio = Studio::replayed([EMPTY_WINDOW_START, prompt]);
+
+    let rows = studio.sessions();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].agent.id, EMPTY_WINDOW);
+    assert_eq!(rows[0].agent.started_at, 1_795_514_644_253);
+    assert_eq!(rows[0].turns[0].prompt, "What is 2 + 2?");
+    assert_eq!(rows[0].state, State::Running);
 }

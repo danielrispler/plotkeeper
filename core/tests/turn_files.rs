@@ -1133,3 +1133,88 @@ fn a_summarys_facts_hold_only_the_checks_and_runs_that_ended() {
     assert_eq!(shown, [("cargo test", CheckStatus::Passed, 1)]);
     assert!(!serde_json::to_string(&facts).unwrap().contains("running"));
 }
+
+/// The files, with their agents, of the turn of harness session `id` whose lines are `lines`, when
+/// another session's `Edit` names `src/a.rs` during it and the trees differ in `src/a.rs`.
+fn harness_files(id: &str, lines: Vec<String>) -> Vec<(String, Option<String>)> {
+    let mut lines = lines;
+    lines.insert(1, other_prompt());
+    let edit = json!({ "file_path": "/w/repo/src/a.rs" });
+    lines.insert(2, other_call(2_000, "x1", "Edit", edit, ROOT, None));
+    let mut studio = Studio::replayed(lines);
+    let asks = ask(&mut studio, AT + 20_000);
+    let mine = asks
+        .iter()
+        .find(|a| a.session_id == id)
+        .expect("its turn's diff");
+    studio.set_turn_files(mine, Some(diffs(mine, &[(ROOT, "src/a.rs")])));
+    let found = studio.session(id).unwrap().turns[0].files.clone();
+    let found = found.expect("files").files;
+    found.into_iter().map(|f| (f.path, f.agent)).collect()
+}
+
+/// A Codex `apply_patch` is the turn's own edit of the file it patches, named from the folder it
+/// ran in, though another session's call names that file too (#426 review).
+#[test]
+fn a_codex_turns_patch_keeps_its_file_from_another_sessions_edit() {
+    let codex = |name: &str, ms: u64, extra: Value| {
+        let base = json!({
+            "session_id": "thr_1", "hook_event_name": name, "cwd": ROOT, "turn_id": "t1",
+            "studio_agent": "codex", "studio_received_ms": AT + ms,
+        });
+        common::with(base, extra)
+    };
+    let patch = "*** Begin Patch\n*** Update File: src/a.rs\n@@\n-a\n+b\n*** End Patch";
+    let lines = vec![
+        codex(
+            "UserPromptSubmit",
+            0,
+            json!({ "prompt": "go", "studio_turn_start": { ROOT: "s1" } }),
+        ),
+        codex(
+            "PostToolUse",
+            3_000,
+            json!({ "tool_name": "apply_patch",
+            "tool_input": { "command": patch }, "tool_use_id": "p1", "tool_response": {} }),
+        ),
+        codex("Stop", 9_000, json!({ "studio_turn_end": { ROOT: "e1" } })),
+    ];
+    let found = harness_files("thr_1", lines);
+    assert_eq!(found, [("src/a.rs".to_string(), Some("codex".to_string()))]);
+}
+
+/// A Cursor `Delete` is the turn's own edit of the file it names, as its `Write` is.
+#[test]
+fn a_cursor_turns_delete_keeps_its_file_from_another_sessions_edit() {
+    let cursor = |name: &str, ms: u64, extra: Value| {
+        let base = json!({
+            "conversation_id": "c-1", "hook_event_name": name, "generation_id": "g-1",
+            "workspace_roots": [ROOT], "cursor_version": "3.31.15",
+            "studio_agent": "cursor", "studio_received_ms": AT + ms,
+        });
+        common::with(base, extra)
+    };
+    let lines = vec![
+        cursor(
+            "beforeSubmitPrompt",
+            0,
+            json!({ "prompt": "go", "studio_turn_start": { ROOT: "s1" } }),
+        ),
+        cursor(
+            "postToolUse",
+            3_000,
+            json!({ "tool_name": "Delete", "cwd": ROOT,
+            "tool_input": { "path": "/w/repo/src/a.rs" }, "tool_use_id": "d1" }),
+        ),
+        cursor(
+            "stop",
+            9_000,
+            json!({ "status": "completed", "studio_turn_end": { ROOT: "e1" } }),
+        ),
+    ];
+    let found = harness_files("c-1", lines);
+    assert_eq!(
+        found,
+        [("src/a.rs".to_string(), Some("cursor".to_string()))]
+    );
+}

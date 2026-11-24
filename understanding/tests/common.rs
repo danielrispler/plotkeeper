@@ -188,8 +188,14 @@ impl CardWriter for Scripted {
         self.answer("summarize_agent", &self.summarize_agent, prompt, fake)
     }
 
-    fn name(&self, setup: &SummarySetup, prompt: &str, response: Option<&str>) -> Reply {
-        let fake = || FakeWriter.name(setup, prompt, response);
+    fn name(
+        &self,
+        setup: &SummarySetup,
+        prompt: &str,
+        response: Option<&str>,
+        folder: &str,
+    ) -> Reply {
+        let fake = || FakeWriter.name(setup, prompt, response, folder);
         self.answer("name", &self.name, prompt, fake)
     }
 

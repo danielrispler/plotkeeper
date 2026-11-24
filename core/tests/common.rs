@@ -90,3 +90,62 @@ pub fn temp_file(contents: &str) -> tempfile::NamedTempFile {
     std::io::Write::write_all(&mut file, contents.as_bytes()).expect("write the temp file");
     file
 }
+
+/// What a trial turn that fixed `calc.py` in `/w/trial` (wave 1's trial, #369;
+/// `fixtures/{codex,cursor}/trial.jsonl`) shows, taken live with the trees the hook records for it
+/// (#426): `start` names the line its start tree lands on, `stop` the one its end tree does. Returns
+/// the path of each file the page lists for the turn, and of each file its summary's facts carry.
+pub fn trial_files(recorded: &str, start: &str, stop: &str) -> (Vec<String>, Vec<String>) {
+    use studio_core::{Numstat, Output, RootDiff, compute_turn_files};
+    const ROOT: &str = "/w/trial";
+    let mut studio = Studio::default();
+    let (mut requests, mut now) = (Vec::new(), 0);
+    for line in recorded.lines() {
+        let mut line: Value = serde_json::from_str(line).unwrap();
+        now = now.max(line["studio_received_ms"].as_u64().unwrap_or_default());
+        let name = line["hook_event_name"].clone();
+        if name == start {
+            line["studio_turn_start"] = json!({ ROOT: "start-tree" });
+        }
+        if name == stop {
+            line["studio_turn_end"] = json!({ ROOT: "end-tree" });
+        }
+        for output in studio.apply(&line.to_string()) {
+            if let Output::Summary(request) = output {
+                requests.push(request);
+            }
+        }
+    }
+    // What `git diff --numstat start-tree end-tree` gives for the fix.
+    let diffs = || {
+        vec![RootDiff {
+            root: ROOT.into(),
+            moved: vec![],
+            files: vec![Numstat {
+                path: "calc.py".into(),
+                from: None,
+                added: Some(1),
+                removed: Some(1),
+            }],
+        }]
+    };
+    let asks = studio.turn_diffs(now + 20_000, 10);
+    for ask in &asks {
+        studio.set_turn_files(ask, Some(diffs()));
+    }
+    let session = studio.sessions()[0];
+    let listed = (session.turns.iter())
+        .flat_map(|t| t.files.iter().flat_map(|f| f.files.iter()))
+        .map(|f| f.path.clone())
+        .collect();
+    let request = requests.last().expect("a summary request");
+    let carried = match studio.summary_ask(&request.id) {
+        Some(ask) => {
+            let found = compute_turn_files(&studio.turn_files_snapshot(&ask, &diffs()), diffs());
+            let facts = studio.facts_of(&ask, Some(found));
+            facts.files.into_iter().map(|f| f.file.path).collect()
+        }
+        None => Vec::new(),
+    };
+    (listed, carried)
+}

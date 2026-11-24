@@ -12,14 +12,15 @@ use crate::event::{Capabilities, Event, Happened, Start, Tool, ToolKind, Transcr
 use crate::ledger::Bytes;
 use serde::Deserialize;
 use serde_json::Value;
+use std::collections::BTreeMap;
 
 /// The name Codex's hook entries pass (`--agent codex`), which its lines carry.
 pub const CODEX: &str = "codex";
 
 /// What Codex reports. Its `PermissionRequest` waits on Daniel, and every turn's event names the
 /// permission mode and the model. Its transcript (a rollout file) has no reader here, so no version,
-/// model or context size comes from it; no call durations, no background task ids, and no turn
-/// trees until the hook maps its turns (spec #320, "Turn trees and pruning per harness").
+/// model or context size comes from it; no call durations and no background task ids. The hook maps
+/// its turns, so they have trees (#426; spec #320, "Turn trees and pruning per harness").
 pub const CAPABILITIES: Capabilities = Capabilities {
     agent: CODEX,
     asks: true,
@@ -30,7 +31,8 @@ pub const CAPABILITIES: Capabilities = Capabilities {
     transcript_version: false,
     transcript_model: false,
     context: false,
-    turn_trees: false,
+    turn_trees: true,
+    empty_window_starts: false,
     transcript_format: TranscriptFormat::Unread,
 };
 
@@ -63,6 +65,12 @@ struct Raw {
     studio_received_ms: u64,
     studio_terminal_id: Option<String>,
     studio_pid: Option<u32>,
+    /// The trees the hook recorded for the turn, as for Claude Code's (#426).
+    #[serde(default)]
+    studio_turn_start: BTreeMap<String, String>,
+    #[serde(default)]
+    studio_turn_end: BTreeMap<String, String>,
+    studio_touched_roots: Option<Vec<String>>,
 }
 
 /// The event of Codex hook line `line`; an error when it has no Codex payload's shape.
@@ -72,6 +80,7 @@ pub(crate) fn parse(line: &str) -> Result<Event, serde_json::Error> {
 
 /// The first file a patch names (`*** Update File: …`, `*** Add File: …`, `*** Delete File: …`).
 // shortcut: a patch that changes several files is taken as touching its first.
+// hook/src/lib.rs's `codex_shaped` keeps a copy, as the hook does not depend on core.
 fn patched_file(patch: &str) -> Option<String> {
     patch.lines().find_map(|line| {
         let line = line.trim_start().strip_prefix("*** ")?;
@@ -160,9 +169,9 @@ fn adapt(raw: Raw) -> Event {
         studio_received_ms: raw.studio_received_ms,
         studio_terminal_id: raw.studio_terminal_id,
         studio_pid: raw.studio_pid,
-        studio_turn_start: Default::default(),
-        studio_turn_end: Default::default(),
-        studio_touched_roots: None,
+        studio_turn_start: raw.studio_turn_start,
+        studio_turn_end: raw.studio_turn_end,
+        studio_touched_roots: raw.studio_touched_roots,
         capabilities: CAPABILITIES,
         line: Bytes::default(),
         happened,

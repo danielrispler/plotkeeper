@@ -217,7 +217,7 @@ The state of an agent session left at your turn with no events for 2 hours or mo
 The state of an agent session from its own end event until it starts again under its id. The control room never guesses that a session is gone.
 
 **Agent session**:
-One worker runtime session running one agent on a task, such as a Claude Code session in a terminal. The unit the control room watches. Claude Code and agy sessions are followed fully, from their hooks and transcripts; Codex, Qwen Code, Cursor and Copilot sessions from their hooks only (sessions, turns, prompts and calls; no transcript is read and no turn trees are recorded); each as far as its **agent adapter**'s **capabilities** reach. A session of another agent has its status only.
+One worker runtime session running one agent on a task, such as a Claude Code session in a terminal. The unit the control room watches. Claude Code and agy sessions are followed fully, from their hooks and transcripts; Codex, Qwen Code, Cursor and Copilot sessions from their hooks only (sessions, turns, prompts and calls; no transcript is read, and turn trees are recorded for Codex and Cursor only); each as far as its **agent adapter**'s **capabilities** reach. A session of another agent has its status only.
 _Avoid_: Run (alone)
 
 **Agent adapter**:

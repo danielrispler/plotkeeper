@@ -36,6 +36,7 @@ pub const CAPABILITIES: Capabilities = Capabilities {
     transcript_model: false,
     context: false,
     turn_trees: false,
+    empty_window_starts: false,
     transcript_format: TranscriptFormat::Unread,
 };
 

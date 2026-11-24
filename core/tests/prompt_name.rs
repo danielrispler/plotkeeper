@@ -7,10 +7,10 @@ use serde_json::{Value, json};
 use studio_core::{NameRequest, Output, Studio};
 
 const ID: &str = "8c2f4b6d-1a3e-4d57-9b80-7e5a2c1f3d96";
+const CWD: &str = "/Users/danielrispler/work/plotkeeper/.claude/worktrees/issue-37-one-event";
 
 fn event(name: &str, at: u64, extra: Value) -> String {
-    let cwd = "/Users/danielrispler/work/plotkeeper/.claude/worktrees/issue-37-one-event";
-    common::event(ID, name, cwd, at, extra)
+    common::event(ID, name, CWD, at, extra)
 }
 
 fn prompt(at: u64, text: &str) -> String {
@@ -45,6 +45,7 @@ fn the_first_prompt_asks_for_a_name_once() {
             session_id: ID.into(),
             prompt: "Merge the event types into one".into(),
             response: None,
+            cwd: CWD.into(),
         }]
     );
     studio.apply(&stop(2_000, "Done."));
@@ -76,6 +77,7 @@ fn a_bare_slash_command_asks_at_its_turns_end_with_the_response() {
             session_id: ID.into(),
             prompt: "/wayfinder".into(),
             response: Some("Claimed #37, One event internal.".into()),
+            cwd: CWD.into(),
         }]
     );
     // Only once.
