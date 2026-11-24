@@ -266,7 +266,8 @@ fn prune(value: &mut serde_json::Value, known: &[&str]) {
     }
 }
 
-fn is_id(id: &str) -> bool {
+/// Whether `id` is an id the map takes: lowercase words of letters and digits joined by hyphens.
+pub fn is_id(id: &str) -> bool {
     !id.is_empty()
         && id.split('-').all(|word| {
             !word.is_empty()

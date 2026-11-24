@@ -226,14 +226,7 @@ pub fn draft(
 
 /// Whether `new` can join `map`: a well-formed id no law has, on a part of the map, with a sentence of one line.
 fn check_new(map: &serde_json::Value, new: &NewLaw) -> Result<(), String> {
-    let id_ok = !new.id.is_empty()
-        && new.id.split('-').all(|word| {
-            !word.is_empty()
-                && word
-                    .chars()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
-        });
-    if !id_ok {
+    if !system_map::is_id(&new.id) {
         return Err(format!(
             "`{}` is not a law id: lowercase words joined by hyphens",
             new.id
@@ -828,7 +821,56 @@ fn prompt(source: &str, law: &str) -> Result<String, String> {
     if found["backing"] != "trust" {
         return Err(format!("the law `{law}` is not on trust"));
     }
+    let text = found["text"].as_str().unwrap_or_default();
+    let head = format!(
+        "Back a law of this repository's system map with a test.\n\nThe law `{law}`, on trust: {text}"
+    );
+    let flip = "2. In `system-map.json`, change this law's `\"backing\": \"trust\"` to `\"backing\": \"check\"`. Change \
+                nothing else there.";
     let on = found["on"].as_str().unwrap_or_default();
+    Ok(run_prompt(
+        &map,
+        on,
+        &head,
+        [test_step(1, law), flip.into()],
+    ))
+}
+
+/// The prompt of a run that adds `new`, as Daniel confirmed it, to the map `source`: its id, sentence and part, and the part's
+/// name, caption, description and paths. Nothing else: no issue, PR or comment text ever reaches a run.
+fn new_prompt(source: &str, new: &NewLaw) -> Result<String, String> {
+    let map: serde_json::Value =
+        serde_json::from_str(source).map_err(|e| format!("system-map.json does not read: {e}"))?;
+    check_new(&map, new)?;
+    let entry =
+        serde_json::json!({ "id": new.id, "on": new.on, "backing": "check", "text": new.text });
+    let head = format!(
+        "Add a new law to this repository's system map, with a test that holds it.\n\nThe new law `{}`: {}",
+        new.id, new.text
+    );
+    let add = format!(
+        "1. In `system-map.json`, add this entry to `laws`, as it is: {entry}. Change nothing else there."
+    );
+    Ok(run_prompt(
+        &map,
+        &new.on,
+        &head,
+        [add, test_step(2, &new.id)],
+    ))
+}
+
+/// The step, numbered `n`, that asks for a test of `law` tagged for it.
+fn test_step(n: u8, law: &str) -> String {
+    format!(
+        "{n}. Write a test that holds this law, in a file under a `tests` folder. Put the comment line `@law: {law}`, in the \
+         file's own comment style (such as `// @law: {law}`), on a line of its own right above the test: a Rust `fn` or \
+         Node's `test(\"...\")`. Where a crate's tests are one binary, declare the new file in its root, under `tests` too."
+    )
+}
+
+/// A run's prompt about the part `on` of `map`: `head`, the part's name, caption, description and paths, then `first`, the
+/// test and map steps, and the steps every run shares.
+fn run_prompt(map: &serde_json::Value, on: &str, head: &str, first: [String; 2]) -> String {
     let part = map["parts"]
         .as_array()
         .into_iter()
@@ -845,16 +887,12 @@ fn prompt(source: &str, law: &str) -> Result<String, String> {
         .flatten()
         .filter_map(|path| path.as_str())
         .collect();
-    let text = found["text"].as_str().unwrap_or_default();
-    Ok(format!(
-        "Back a law of this repository's system map with a test.\n\n\
-         The law `{law}`, on trust: {text}\n\
+    let [one, two] = first;
+    format!(
+        "{head}\n\
          It is on the part {name} ({caption}): {description}\n\
          The part's paths: {paths}\n\n\
-         1. Write a test that holds this law, in a file under a `tests` folder. Put the comment line `@law: {law}`, in the \
-         file's own comment style (such as `// @law: {law}`), on a line of its own right above the test: a Rust `fn` or \
-         Node's `test(\"...\")`. Where a crate's tests are one binary, declare the new file in its root, under `tests` too.\n\
-         2. In `system-map.json`, change this law's `\"backing\": \"trust\"` to `\"backing\": \"check\"`. Change nothing else there.\n\
+         {one}\n{two}\n\
          3. Run the project's checks and make them pass. Change no file outside a `tests` folder but `system-map.json`.\n\
          4. Stage the test and the map with `git add`: what is staged is the test patch.\n\
          5. Then make the plant: change the code under the part's paths so that it breaks the law and the new test fails on \
@@ -864,54 +902,7 @@ fn prompt(source: &str, law: &str) -> Result<String, String> {
         caption = words("caption"),
         description = words("description"),
         paths = paths.join(", "),
-    ))
-}
-
-/// The prompt of a run that adds `new`, as Daniel confirmed it, to the map `source`: its id, sentence and part, and the part's
-/// name, caption, description and paths. Nothing else: no issue, PR or comment text ever reaches a run.
-fn new_prompt(source: &str, new: &NewLaw) -> Result<String, String> {
-    let map: serde_json::Value =
-        serde_json::from_str(source).map_err(|e| format!("system-map.json does not read: {e}"))?;
-    check_new(&map, new)?;
-    let part = map["parts"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|each| each["id"] == new.on.as_str());
-    let words = |key: &str| {
-        part.and_then(|p| p[key].as_str())
-            .unwrap_or_default()
-            .to_string()
-    };
-    let paths: Vec<&str> = part
-        .and_then(|p| p["paths"].as_array())
-        .into_iter()
-        .flatten()
-        .filter_map(|path| path.as_str())
-        .collect();
-    let entry =
-        serde_json::json!({ "id": new.id, "on": new.on, "backing": "check", "text": new.text });
-    let law = &new.id;
-    Ok(format!(
-        "Add a new law to this repository's system map, with a test that holds it.\n\n\
-         The new law `{law}`: {text}\n\
-         It is on the part {name} ({caption}): {description}\n\
-         The part's paths: {paths}\n\n\
-         1. In `system-map.json`, add this entry to `laws`, as it is: {entry}. Change nothing else there.\n\
-         2. Write a test that holds this law, in a file under a `tests` folder. Put the comment line `@law: {law}`, in the \
-         file's own comment style (such as `// @law: {law}`), on a line of its own right above the test: a Rust `fn` or \
-         Node's `test(\"...\")`. Where a crate's tests are one binary, declare the new file in its root, under `tests` too.\n\
-         3. Run the project's checks and make them pass. Change no file outside a `tests` folder but `system-map.json`.\n\
-         4. Stage the test and the map with `git add`: what is staged is the test patch.\n\
-         5. Then make the plant: change the code under the part's paths so that it breaks the law and the new test fails on \
-         it, while the code still builds. Leave the plant unstaged, and touch no `tests` folder or `system-map.json` in it.\n\
-         Do not commit. plotkeeper proves both patches itself afterwards.\n",
-        text = new.text,
-        name = words("name"),
-        caption = words("caption"),
-        description = words("description"),
-        paths = paths.join(", "),
-    ))
+    )
 }
 
 /// Clones `repo` at `commit` into the empty folder `work`, with no remote: Daniel's repository is only read.
