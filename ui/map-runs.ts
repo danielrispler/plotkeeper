@@ -3,7 +3,7 @@
 // on Daniel's click (`server/src/runner.rs`), never a session; no module starts one yet. A run that failed, or finished with tool calls
 // denied, offers its prompt to copy into his own agent, as an overturn does (`ratify.ts`).
 
-import { confirmed, failure, invoke, promptBox, text, type Confirm } from "./dom.js";
+import { confirmed, drawWithStatus, failure, invoke, promptBox, sayAction, text, type Confirm } from "./dom.js";
 import { onDraw, reloadMap, syncSide, type MapView } from "./map.js";
 import { copyOverturn, overturnReport } from "./ratify.js";
 import type { RunView, Runs } from "./types.js";
@@ -49,10 +49,10 @@ const button = (words: string, title: string, click: () => unknown) => {
   return node;
 };
 
-// The note of a copy: its line, and the prompt in a box when it has to be copied by hand.
+// The note of a copy: its line, and the prompt in a box when it has to be copied by hand. The line is drawn again with the runs, so it is
+// not live: the click says it (`sayAction`, #465).
 function noteNodes(note: Pick<CopyNote, "line" | "manual">): HTMLElement[] {
   const line = text("p", note.line, "run-copied");
-  line.setAttribute("role", "status");
   if (note.manual === null) return [line];
   const area = promptBox(note.manual);
   return [line, area];
@@ -84,6 +84,7 @@ function rowNode(row: RunRow, act: RunActs, note: CopyNote | null): HTMLElement 
       const made = { id: row.id, ...overturnReport(await act.copy(prompt), prompt) };
       copy.disabled = false;
       show(made);
+      sayAction(made.line);
       act.noted?.(made);
     }) as HTMLButtonElement;
     actions.append(copy);
@@ -102,6 +103,9 @@ function rowNode(row: RunRow, act: RunActs, note: CopyNote | null): HTMLElement 
   return node;
 }
 
+// What the runs area's status region says, and its indicator shows: the pause, if any (#465).
+export const pauseWords = (runs: Runs | null | undefined) => (runs?.paused == null ? "" : `Background runs are paused. ${runs.paused}.`);
+
 // What the runs area holds: nothing with no run and no pause; else its title, the pause's one indicator with Resume, and a row per run.
 // `note` is what the last copy left, drawn under its run's row.
 export function runsNodes(runs: Runs | null | undefined, act: RunActs, note: CopyNote | null = null): HTMLElement[] {
@@ -111,11 +115,19 @@ export function runsNodes(runs: Runs | null | undefined, act: RunActs, note: Cop
   const nodes = [text("h3", "Background runs", "side-title")];
   if (paused !== null) {
     const indicator = text("p", "", "runs-paused");
-    indicator.setAttribute("role", "status");
-    indicator.append(text("span", `Background runs are paused. ${paused}.`), button("Resume", "Start the queued runs again", act.resume));
+    indicator.append(text("span", pauseWords(runs)), button("Resume", "Start the queued runs again", act.resume));
     nodes.push(indicator);
   }
   return [...nodes, ...rows.map((row) => rowNode(row, act, note))];
+}
+
+// Draws the runs area into `box`. While it holds anything, its one status region stays in it across draws, so the pause is said when it
+// starts and not again at each draw (#465); with nothing to show the box is empty, so the side area can hide, and the region comes back
+// empty with the next runs.
+export function paintRuns(box: HTMLElement, runs: Runs | null | undefined, act: RunActs, note: CopyNote | null = null) {
+  const nodes = runsNodes(runs, act, note);
+  if (nodes.length) drawWithStatus(box, nodes, pauseWords(runs));
+  else box.replaceChildren();
 }
 
 // What the last copy left, kept so the row shows it again when the map is drawn anew; a run's id is never reused, so it shows only there.
@@ -133,7 +145,7 @@ const acts: RunActs = {
 
 function paint(view: MapView) {
   // A past commit's map is read-only and shows no runs.
-  view.slots.runs.replaceChildren(...(view.scrub ? [] : runsNodes(view.state.runs, acts, copied)));
+  paintRuns(view.slots.runs, view.scrub ? null : view.state.runs, acts, copied);
   syncSide(view.slots);
 }
 

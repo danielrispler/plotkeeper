@@ -155,6 +155,21 @@ export function drawWithStatus(box: HTMLElement, nodes: Node[], words: string) {
   else say();
 }
 
+// The page's one status region for what a click just did (#465): a copied prompt, an overturn. Lines drawn again with every map draw,
+// such as a run's or a world's copy note, are not live; their words are said here, once, by the click. The region is put in the body at
+// its first use and never moved or drawn again, so a draw says nothing. It is emptied first and takes the words a moment later, so the
+// same words said by a second click are heard again, and a region the page did not hold yet is known before its words come.
+let actionRegion: HTMLElement | null = null;
+export function sayAction(words: string) {
+  if (!actionRegion) {
+    actionRegion = statusRegion();
+    document.body.append(actionRegion);
+  }
+  const live = actionRegion;
+  live.textContent = "";
+  setTimeout(() => (live.textContent = words), 100);
+}
+
 // `node` with `full` as its native hover title: the full text of what the layout cuts (#162). No title for an empty text,
 // which would hide the tooltip of the element under it.
 export function fullTitle<T extends HTMLElement>(node: T, full: string | null | undefined): T {

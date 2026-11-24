@@ -6,7 +6,7 @@
 // `frame-src 'none'` (`server/src/web.rs`): no frame of it loads a URL. The frame sits in an overlay in the glass the size of the settings
 // dialog, the first layer Esc closes.
 
-import { element, failure, invoke, promptBox, text } from "./dom.js";
+import { element, failure, invoke, promptBox, sayAction, text } from "./dom.js";
 import { onDraw, registerLayer, reloadMap, shownProject } from "./map.js";
 import { copyOverturn, overturnReport } from "./ratify.js";
 import { logStop } from "./stop-rules.js";
@@ -135,18 +135,19 @@ function noteNodes(key: string): HTMLElement[] {
   const note = copied.get(key);
   if (!note) return [];
   const line = text("p", note.line, "run-copied");
-  line.setAttribute("role", "status");
   if (note.manual === null) return [line];
   const area = promptBox(note.manual);
   return [line, area];
 }
 
 // The copy's outcome is drawn in `row` at once: a copy changes nothing on the server, so the map is not drawn again; later draws read it
-// from `copied`.
+// from `copied`. Its line is said once, here (`sayAction`, #465), as the row and its note are drawn again with the map.
 async function copyPrompt(key: string, prompt: string, row: HTMLElement) {
-  copied.set(key, overturnReport(await copyOverturn(prompt, navigator.clipboard?.writeText?.bind(navigator.clipboard)), prompt));
+  const note = overturnReport(await copyOverturn(prompt, navigator.clipboard?.writeText?.bind(navigator.clipboard)), prompt);
+  copied.set(key, note);
   for (const child of [...row.children]) if (child.className === "run-copied" || child.className === "ratify-prompt") row.removeChild(child);
   row.append(...noteNodes(key));
+  sayAction(note.line);
 }
 
 // "Explore this" (or Rebuild, or Try again) on `subject` of `project`: a run starts, or the server gives the prompt to copy, shown in `row`.

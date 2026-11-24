@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { El, fakeDocument } from "./dom.mjs";
 
-globalThis.document = fakeDocument();
+globalThis.document = fakeDocument({ body: new El("body") });
 const { exploreOffers, exploreNode, exploreRow, frameNode, paintWorld, worldNodes } = await import("../../dist/micro-world.js");
 
 const view = (phase, extra = {}) => ({ phase, page: false, stale: false, line: null, prompt: null, ...extra });
@@ -96,4 +96,26 @@ test("a map drawn while a world is open redraws its head and keeps its frame, so
   // Another page is a new frame.
   paintWorld(box, "A turn", "<p>y</p>", view("ready", { page: true }), act);
   assert.notEqual(box.find("iframe")[0], frame);
+});
+
+test("a copy says its line once, in the page's action region; the row's note is drawn again with the map and is not live (#465)", async () => {
+  const all = (node) => [node, ...node.childNodes.filter((child) => child instanceof El).flatMap(all)];
+  const statuses = (node) => all(node).filter((each) => each.getAttribute("role") === "status");
+  const failed = worlds(true, { "flow:world-465": view("failed", { line: "verify.mjs failed", prompt: "In the repository…" }) });
+  const row = exploreRow("/w/app", failed, "flow:world-465", "A turn", { kind: "flow", id: "world-465" });
+  row.find("button").find((b) => b.text === "Copy prompt").listeners.click();
+  await new Promise((done) => setTimeout(done, 10));
+  assert.match(row.text, /Copy this prompt and paste it into your agent/);
+  assert.deepEqual(statuses(row), [], "the row's note is not live");
+  const [live] = statuses(document.body);
+  assert.ok(live, "the page has an action region");
+  assert.equal(live.text, "", "the region is empty before the words");
+  await new Promise((done) => setTimeout(done, 150));
+  assert.equal(live.text, "Copy this prompt and paste it into your agent");
+  // The map drawn again draws the row and its note anew; the region keeps its node and says nothing new.
+  const again = exploreRow("/w/app", failed, "flow:world-465", "A turn", { kind: "flow", id: "world-465" });
+  assert.match(again.text, /Copy this prompt and paste it into your agent/);
+  assert.deepEqual(statuses(again), []);
+  assert.deepEqual(statuses(document.body), [live]);
+  assert.equal(live.text, "Copy this prompt and paste it into your agent");
 });
