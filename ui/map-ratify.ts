@@ -3,7 +3,7 @@
 // too, then copies a prompt that quotes the item to the clipboard for him to paste into his agent (port decision Q2); when the clipboard
 // refuses, the prompt shows in a small box with a Copy button.
 
-import { failure, invoke, promptBox, text } from "./dom.js";
+import { failure, invoke, promptBox, sayAction, text } from "./dom.js";
 import { currentMap } from "./map.js";
 import { copyOverturn, decideWith, noteFor, overturnPrompt, overturnReport, type Overturned } from "./ratify.js";
 import { logStop } from "./stop-rules.js";
@@ -26,14 +26,13 @@ async function overturnOut(project: string, item: Ratifiable): Promise<Overturne
 }
 
 // The note of the last overturn, where `holds` says its item is drawn in `project`: "Prompt copied, paste it into your agent", or, when
-// the copy failed, the prompt in a small box with a Copy button. Null before any overturn, and on another item's sheet or brief.
+// the copy failed, the prompt in a small box with a Copy button. Null before any overturn, and on another item's sheet or brief. The note
+// is drawn again with its sheet or brief, so it is not live: the overturn says its line (`sayAction`, #465).
 export function overturnNote(project: string, holds: (item: Pick<Ratifiable, "pr" | "kind" | "id">) => boolean): HTMLElement | null {
   const shown = noteFor(last, project, holds);
   if (!shown) return null;
   const note = text("div", "", "ratify-note");
-  const line = text("p", shown.line, "ratify-copied");
-  line.setAttribute("role", "status");
-  note.append(line);
+  note.append(text("p", shown.line, "ratify-copied"));
   const manual = shown.manual;
   if (manual === null) return note;
   const area = promptBox(manual);
@@ -61,7 +60,10 @@ export function ratifyActions(project: string, item: Ratifiable, done: (state: "
     )
       .then((overturned) => {
         logStop("ratify", project, item.pr);
-        if (overturned) last = overturned;
+        if (overturned) {
+          last = overturned;
+          sayAction(overturned.line);
+        }
         done(state);
       })
       .catch((e) => {

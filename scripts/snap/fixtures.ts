@@ -380,6 +380,41 @@ const mapRunsPaused = (): Fixture =>
     }),
     snapDone: "paused ok",
   });
+// #465: the pause is said in the runs area's one status region, which a redraw (Resume reads the map back) keeps in place; a copied
+// prompt is said once in the page's action region, drawn empty before its words, and the row's note itself is not live.
+const mapRunsAnnounced = (): Fixture => ({
+  ...mapRunsPaused(),
+  snapScript: mapOpened(`
+      const runs = document.getElementById("map-runs");
+      const live = [...runs.children].filter((node) => node.getAttribute("role") === "status");
+      if (live.length !== 1 || !live[0].classList.contains("visually-hidden")) return log("snap:fail the runs area has " + live.length + " status regions, not one hidden");
+      if (!live[0].textContent.includes("Background runs are paused. Claude is not logged in")) log("snap:fail the runs' region says " + JSON.stringify(live[0].textContent));
+      if (runs.querySelectorAll("[role=status], [aria-live]").length !== 1) log("snap:fail another line of the runs area is live");
+      let left = false;
+      new MutationObserver((changes) => (left ||= changes.some((change) => [...change.removedNodes].includes(live[0])))).observe(runs, { childList: true });
+      const said = [];
+      const action = () => [...document.body.children].find((node) => node.getAttribute("role") === "status");
+      new MutationObserver(() => {
+        const now = action()?.textContent;
+        if (now !== undefined && said.at(-1) !== now) said.push(now);
+      }).observe(document.body, { childList: true, subtree: true, characterData: true });
+      if (action()) log("snap:fail the action region is there before any action");
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => Promise.resolve() } });
+      [...runs.querySelectorAll(".run-row button")].find((b) => b.textContent === "Copy prompt").click();
+      await wait(400);
+      const line = runs.querySelector(".run-copied");
+      if (!line) return log("snap:fail the copy left no note");
+      if (line.hasAttribute("role") || line.hasAttribute("aria-live")) log("snap:fail the copy's note is live itself");
+      if (said.length !== 2 || said[0] !== "" || said[1] !== "Prompt copied, paste it into your agent") log("snap:fail the action region said " + JSON.stringify(said) + ", not empty then the copy's line");
+      const region = action();
+      [...runs.querySelectorAll(".runs-paused button")].find((b) => b.textContent === "Resume").click();
+      await wait(400);
+      const now = [...runs.children].filter((node) => node.getAttribute("role") === "status");
+      if (now.length !== 1 || now[0] !== live[0] || left) log("snap:fail the runs' region did not stay in the area across the redraw");
+      if (action() !== region || said.length !== 2) log("snap:fail the redraw touched the action region: " + JSON.stringify(said));
+      log("announced ok");`).snapScript,
+  snapDone: "announced ok",
+});
 
 // The PR brief on the map (#339), played from the tray as in the prototype's treatment C: a story about the PR that fogged Shell, Understanding and
 // Window, with a light run along the links, a figure for the change inside Understanding, a quote, and what the checks left unconfirmed.
@@ -2546,6 +2581,7 @@ ${writerStatusAfter("Keychain refused")}
   mapPreFlightStatus,
   mapMicroWorld,
   mapRunsPaused,
+  mapRunsAnnounced,
   mapBackLaw,
   railBriefRow: () => railBriefReady(false),
   railBriefOpened: () => railBriefReady(true),
@@ -2795,7 +2831,15 @@ ${writerStatusAfter("Keychain refused")}
       if (document.getElementById("map").hidden) log("snap:fail the first Esc left the Map view");
       document.querySelector("#map .plate[data-id=shell]").click();
       await wait(300);
-      log("thin " + thin + ", thick " + thick);`, { map_state: mapState({ fog: { shell: "thick", window: "thick", core: "thin", hook: "thin" } }), map_know: { positions: {}, tiers: {} } }),
+      // With the sheet open, the not placed list's title sits over no plate (#466).
+      const title = document.querySelector("#map-not-placed .side-title");
+      if (!title) return log("snap:fail no Not placed title");
+      const at = title.getBoundingClientRect();
+      for (const plate of document.querySelectorAll("#map .plate")) {
+        const box = plate.getBoundingClientRect();
+        if (at.left < box.right && box.left < at.right && at.top < box.bottom && box.top < at.bottom) log("snap:fail the Not placed title is over the " + plate.dataset.id + " plate");
+      }
+      log("thin " + thin + ", thick " + thick);`, { map_state: mapState({ fog: { shell: "thick", window: "thick", core: "thin", hook: "thin" } }), map_know: { positions: {}, tiers: {} }, contrast: true }),
   // The dark page (#455): the metas, the root's colour scheme, no ::-webkit-scrollbar rule left, and the pre-flight's hand picker,
   // whose native checkbox draws dark, sampled from Chrome's own screenshot.
   mapPreFlightPick: (): Fixture => ({

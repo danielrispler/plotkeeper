@@ -2,10 +2,10 @@
 // one indicator and the prompt a failed run copies.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fakeDocument } from "./dom.mjs";
+import { El, fakeDocument } from "./dom.mjs";
 
-globalThis.document = fakeDocument();
-const { runRows, runsNodes } = await import("../../dist/map-runs.js");
+globalThis.document = fakeDocument({ body: new El("body") });
+const { paintRuns, runRows, runsNodes } = await import("../../dist/map-runs.js");
 
 const run = (id, state, extra = {}) => ({ id, kind: "back-law", state, at: Date.UTC(2026, 10, 23, 12, 0), outcome: null, line: null, denials: [], prompt: null, ...extra });
 const ended = (id, outcome, line, extra = {}) => run(id, "ended", { outcome, line, prompt: outcome === "done" ? null : "Write a test that backs the law.", ...extra });
@@ -156,4 +156,69 @@ test("Cancel waits for the server's answer, so a second click asks nothing twice
   await clicked;
   assert.equal(cancel.disabled, false, "a refused Cancel can be tried again");
   assert.deepEqual(calls, [["cancel", "a"]]);
+});
+
+// The status regions under `node`, itself among them.
+const all = (node) => [node, ...node.childNodes.filter((child) => child instanceof El).flatMap(all)];
+const statuses = (node) => all(node).filter((each) => each.getAttribute("role") === "status");
+const later = () => new Promise((done) => setTimeout(done, 150));
+
+test("the runs area says the pause in one status region, drawn empty before its words and kept across redraws (#465)", async () => {
+  const box = new El("section");
+  const paused = "Claude is not logged in";
+  paintRuns(box, { paused: null, runs: [run("a", "running")] }, acts([]));
+  const [live] = statuses(box);
+  assert.ok(live, "the runs area has a status region");
+  assert.equal(live.text, "", "the region is drawn empty, so the pause is a change a screen reader hears");
+  paintRuns(box, { paused, runs: [run("a", "running")] }, acts([]));
+  assert.deepEqual(statuses(box), [live], "the same region, and the indicator itself is not live");
+  assert.equal(live.text, "Background runs are paused. Claude is not logged in.");
+  paintRuns(box, { paused, runs: [run("a", "running")] }, acts([]));
+  assert.deepEqual(statuses(box), [live], "a redraw keeps the region");
+  assert.equal(live.text, "Background runs are paused. Claude is not logged in.");
+  // With nothing to show the area is empty, so the side area can hide; the region comes back empty with the next pause, then says it.
+  paintRuns(box, { paused: null, runs: [] }, acts([]));
+  assert.deepEqual(box.childNodes, []);
+  paintRuns(box, { paused, runs: [] }, acts([]));
+  assert.deepEqual(statuses(box), [live]);
+  assert.equal(live.text, "", "back in the area, the region is empty first");
+  await later();
+  assert.equal(live.text, "Background runs are paused. Claude is not logged in.");
+});
+
+test("a copy says its line in the page's one action region, which a redraw of the runs leaves as it is (#465)", async () => {
+  const box = new El("section");
+  const failed = ended("f", "failed", "Failed: the build broke");
+  let note = null;
+  const act = { ...acts([]), noted: (made) => (note = made) };
+  paintRuns(box, { paused: null, runs: [failed] }, act);
+  const copy = () => button(box.childNodes.find((node) => node.dataset?.run === "f"), "Copy prompt").listeners.click();
+  await copy();
+  const [live] = statuses(document.body);
+  assert.ok(live, "the page has an action region");
+  assert.equal(live.text, "", "the region is empty before the words");
+  await later();
+  assert.equal(live.text, "Prompt copied, paste it into your agent");
+  paintRuns(box, { paused: null, runs: [failed] }, act, note);
+  assert.match(box.text, /Prompt copied/, "the redrawn row shows the note");
+  assert.deepEqual(statuses(box).map((each) => each.text), [""], "the note's line is not live; only the area's region, empty");
+  assert.deepEqual(statuses(document.body), [live], "the redraw left the action region alone");
+  assert.equal(live.text, "Prompt copied, paste it into your agent");
+  // The same words again are heard again: the region empties first.
+  await copy();
+  assert.equal(live.text, "");
+  await later();
+  assert.equal(live.text, "Prompt copied, paste it into your agent");
+});
+
+test("a second click within the delay drops the first click's words, so only the last are said (#465's review)", async () => {
+  const { sayAction } = await import("../../dist/dom.js");
+  sayAction("first");
+  const [live] = statuses(document.body);
+  await new Promise((done) => setTimeout(done, 60));
+  sayAction("second");
+  await new Promise((done) => setTimeout(done, 70));
+  assert.equal(live.text, "", "the first click's words never land after the second click emptied the region");
+  await later();
+  assert.equal(live.text, "second");
 });

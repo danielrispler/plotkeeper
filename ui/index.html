@@ -124,11 +124,13 @@
           <button id="panel-close" class="btn quiet small panel-close" type="button" title="Close the panel (Esc)">Close</button>
           <div id="panel-body" class="panel-body"></div>
         </section>
-        <!-- The right side, floating over the map: the part's sheet and the drawer under it, each in the same glass, then the agents no part holds and the background runs (#390). -->
+        <!-- The right side, floating over the map: the agents no part holds, then the part's sheet and the drawer under it, each in the same glass,
+             then the background runs (#390). The agents come first, so their list keeps the map's top right whether a sheet is open or not, and a
+             sheet never pushes it down over a part (#466). -->
         <aside id="map-side" class="map-side" aria-label="Beside the map" hidden>
+          <section id="map-not-placed"></section>
           <section id="map-sheet" class="glass"></section>
           <section id="map-drawer" class="glass"></section>
-          <section id="map-not-placed"></section>
           <section id="map-runs"></section>
         </aside>
       </div>
