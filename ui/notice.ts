@@ -59,11 +59,5 @@ export function setSettingsErrors(settingsErrors: string[]) {
   else if (!others.length) notice.hidden = true;
 }
 
-// The line while no harness is wired (#437): the user declined at the first start, or it had no terminal to ask in.
+// The map head's line while no harness is wired (#437): the user declined at the first start, or it had no terminal to ask in.
 export const NOT_RECORDING = "Not recording: no agent is wired. Run `plotkeeper install` in a terminal to wire them.";
-
-// The notice line's text with the "not recording" line shown while nothing is wired, and removed once a harness is.
-export function withWiringNotice(text: string, wired: boolean): string {
-  const others = linesOf(text).filter((l) => l !== NOT_RECORDING);
-  return (wired ? others : [...others, NOT_RECORDING]).join("\n");
-}
