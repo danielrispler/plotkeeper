@@ -29,6 +29,7 @@ use studio_understanding::{
 
 pub mod answer;
 pub mod api;
+pub mod back_a_law;
 pub mod ci_laws;
 pub mod fog;
 pub mod history;
@@ -153,6 +154,8 @@ pub struct App {
     pub key_set: Mutex<Vec<WriterKind>>,
     /// The background runs (`runner.rs`): their queues, their processes and their outcomes.
     pub runner: Arc<runner::Runner>,
+    /// Back a law (`back_a_law.rs`): its runs' proofs and the patches kept.
+    pub laws: Arc<back_a_law::LawRuns>,
 }
 
 impl App {
@@ -231,6 +234,9 @@ impl App {
         let runner = runner::Runner::new(runner::Config::beside(log));
         let told = events.clone();
         runner.on_change(move |project| told.emit("map-landed", project.into()));
+        let laws = back_a_law::LawRuns::new(runner.clone(), back_a_law::Config::beside(log));
+        let told = events.clone();
+        laws.on_change(move |project| told.emit("map-landed", project.into()));
         Ok(App {
             core,
             cards,
@@ -255,6 +261,7 @@ impl App {
             keys: Arc::new(settings::MemoryKeys::default()),
             key_set: Mutex::new(Vec::new()),
             runner,
+            laws,
         })
     }
 

@@ -56,6 +56,8 @@ export const table: Row[] = [
   { module: "staleness", name: "staleness bands", kept: (f) => (f.counts["stale-entered"] ?? 0) >= 1, wait: { from: staleRollout, weeks: 5 } },
   // Explain-back (#397): at least 3 lines said back in the end-of-story bar; the marks, the rating and the note have no threshold.
   { module: "explain-back", name: "explain-back", kept: (f) => (f.counts["explain-back-given"] ?? 0) >= 3 },
+  // Back a law (#398): at least 1 run started from a law on trust.
+  { module: "back-a-law", name: "Back a law", kept: (f) => (f.counts["back-law-started"] ?? 0) >= 1 },
 ];
 
 // `day` plus `n` days, both local days (`2026-11-03`).

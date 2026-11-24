@@ -1,10 +1,10 @@
 # Background runs
 
-A **background run** is a headless agent run with scoped tools that plotkeeper starts on Daniel's click (spec #378, ticket #390). It is never a session or a terminal: plotkeeper still starts no session. The runner is `server/src/runner.rs` and its launcher is `plotkeeper-run` (`server/src/bin/plotkeeper-run.rs`). No module starts a run yet; back a law and micro-worlds will. The sandbox gate (#395, below) proved the containment on a real `claude`.
+A **background run** is a headless agent run with scoped tools that plotkeeper starts on Daniel's click (spec #378, ticket #390). It is never a session or a terminal: plotkeeper still starts no session. The runner is `server/src/runner.rs` and its launcher is `plotkeeper-run` (`server/src/bin/plotkeeper-run.rs`). Back a law starts one ([below](#back-a-law)); micro-worlds will. The sandbox gate (#395, below) proved the containment on a real `claude`.
 
 ## The seam
 
-A run goes in as a request: its kind, its working folder, its prompt and its limits. It comes out as an outcome: the result text, the tool calls it was denied, its cost and its exit code. The harness, the agent program, only builds the command: `claude` is the one harness, and the tests' harness is a shell script.
+A run goes in as a request: its kind, its working folder, its prompt and its limits. It comes out as an outcome: the result text, the tool calls it was denied, its cost and its exit code. The module that asked for a run is told how it ended (`Runner::on_end`), as it ends or when a start finds it ended. The harness, the agent program, only builds the command: `claude` is the one harness, and the tests' harness is a shell script.
 
 There are two kinds. **Back a law** has `Bash`, `Read`, `Edit`, `Write`, `Glob` and `Grep`. **Micro-world** has the same without `Bash`. The command carries only the flags spec #378 gives; how a micro-world reads the project is left to its own ticket.
 
@@ -125,6 +125,23 @@ What the gate found on the way, and changed here:
 - **`failIfUnavailable` does not stop such a run.** Inside another sandbox Claude Code starts, every command fails with `sandbox_apply: Operation not permitted`, and the run exits 0 as a success. Hence the launcher's check, and the reading of those words as a failure. An `(allow default)` profile still applies inside another sandbox, so the check's profile denies something.
 
 The raw output of each round is in `local-evidence/2026-11-24-issue-395-sandbox-gate/` on Daniel's machine. Rerun the gate after a Claude Code update: its behaviour here changed between the versions tried.
+
+## Back a law
+
+A law on trust in a part's sheet has **Back a law** (`ui/patch-review.ts`, `server/src/back_a_law.rs`, ticket #398). It starts a background run that ends in a patch plotkeeper proves itself, for Daniel to review on the map. His repository is only read.
+
+- **The clone.** plotkeeper clones the project's default branch as last fetched (the ref the map is read from) with `git clone --local --no-hardlinks` into the new run's working folder, checks out that commit with a detached HEAD and removes the clone's remote. Its git data is inside the run's writable folder, so the agent may stage its files. The run's folder keeps `back-a-law.json`: the project, the law and the commit.
+- **The prompt** holds only map text: the law's id and text, and its part's name, caption, description and paths. It asks the agent to write a test under a `tests` folder tagged `@law: <id>` on the line above it (declaring it in the crate's test binary root where needed), flip the law to `"backing": "check"` in `system-map.json`, make the checks pass, stage both with `git add` (the **test patch**), then make the **plant**, a break of the law in the part's code that still builds, and leave it unstaged. It never commits.
+- **The proof.** When the run finishes (cleanly or with denials), plotkeeper proves its patches with no model. Every git command and check in the clone runs in `srt`, the host-side sandbox, since the agent wrote the clone, its git data included: no network, loopback open, writes only to the clone and a private temp folder, and no reading of the data folder or the credential folders of the run's deny list. Its settings file sits in the run's folder, outside the clone, so no check can loosen the next. In order, a run is rejected when:
+  - its HEAD moved, or it staged nothing, or left no plant;
+  - the test patch touches a file outside a `tests` folder (a crate's test binary root, under `tests`, is inside) and `system-map.json`, or the plant touches one inside;
+  - with the clone reset (build folders kept) and the test patch applied and staged, the map check, run on the files the sandboxed `git ls-files` lists, names the law, the law is still on trust, or no test of the test patch is tagged for it;
+  - the project's checks do not all pass with the test patch;
+  - with the plant applied too, the checks all pass, or the failing tests `ci_laws::parse_failures` reads from their output do not include the new tagged test: a build, lint or other test failure alone is not red.
+- **The patch.** A proven run's test patch and proof (the new test, and the checks' output with the test alone and with the plant, the last 400 lines of each) are kept in the data folder as `law-patches/<run id>.json`. The plant is never kept. The clone is removed whether the run was proven or rejected. A proof stops at 30 minutes.
+- **On the map.** The law's row in the part's sheet says where its newest patch stands: "Proving the patch…", "Rejected:" with why, Dismiss and Back a law again, or **Review the patch**. The review is an overlay over the map, as wide as the settings dialog: the law, the new test, the test patch, both outputs, **Discard** (deletes the patch) and Close. Esc closes it after the pre-flight and before the drawer. A past commit's map shows neither. Open draft PR is the next ticket.
+- **Refused.** With no `srt` installed (`npm install -g @anthropic-ai/sandbox-runtime`), no default branch, no map there or a law not on trust, nothing starts and the notice line says why. A run the runner refuses copies its prompt, as a failed run's row does.
+- **Limits.** The proof runs in plotkeeper's own process: a plotkeeper stopped during a proof loses it, and its next start removes the run's folder. A run that ended while plotkeeper was stopped is proven when the next start picks it up. The tests prove all of this with a fake agent and a fake `srt` that runs its command as it is (`server/tests/back_a_law.rs`); the well-formed and the red-but-not-named cases also passed by hand against the real `srt` 2026-11-24.
 
 ## Limits v1 accepts
 
