@@ -2095,7 +2095,7 @@ const mapSheetClose = (): Fixture => ({
 });
 
 // Real keys (#454): \`await __snapKey(key)\` presses a key as Chrome's own input, so Tab moves focus and Esc closes a native popover, which a
-// synthetic KeyboardEvent does neither of. From the page's start, Tab reaches the top bar's first control and Shift+Tab leaves it; Enter
+// synthetic KeyboardEvent does neither of. From the page's start, Tab reaches the page's first control and Shift+Tab leaves it; Enter
 // and Space press a focused button; the arrows reach the page as trusted keys; Esc closes an open popover.
 const snapRealKeys = (): Fixture => ({
   ...base,
@@ -2104,12 +2104,13 @@ const snapRealKeys = (): Fixture => ({
       const press = async (key) => { await __snapKey(key); await wait(50); };
       const named = (node) => node?.id || node?.tagName;
       document.activeElement?.blur();
-      const first = [...document.querySelectorAll("header.top button, header.top a[href], header.top input")].find((node) => !node.hidden && node.offsetParent);
-      if (!first) return log("snap:fail the top bar has no control");
+      // The page's first control is the skip link (#461).
+      const first = document.querySelector("a.skip-link");
+      if (!first) return log("snap:fail the page has no skip link");
       await press("Tab");
-      if (document.activeElement !== first) log("snap:fail Tab from the page's start focused " + named(document.activeElement) + ", not " + first.id);
+      if (document.activeElement !== first) log("snap:fail Tab from the page's start focused " + named(document.activeElement) + ", not the skip link");
       await press("Shift+Tab");
-      if (document.activeElement === first) log("snap:fail Shift+Tab left focus on " + first.id);
+      if (document.activeElement === first) log("snap:fail Shift+Tab left focus on the skip link");
       // A button made for the check, taken out again before the hover check runs.
       const button = Object.assign(document.createElement("button"), { type: "button", textContent: "Pressed" });
       const clicks = [];
@@ -2318,6 +2319,27 @@ const mapSmallGaps = (): Fixture => ({
   realKeys: true, snapDone: "small gaps ok",
 });
 
+// The page's structure (#461): from the page's start the first real Tab reaches "Skip to the map", shown, and a real Enter on it puts
+// the focus in the map, the page's one `main`.
+const skipLink = (): Fixture => ({
+  ...list(),
+  snapScript: `
+      const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+      const named = (node) => node ? node.tagName + (node.id ? "#" + node.id : "") + " " + JSON.stringify((node.textContent ?? "").trim().slice(0, 30)) : "nothing";
+      await __snapKey("Tab");
+      await wait(50);
+      const link = document.activeElement;
+      if (link?.textContent !== "Skip to the map") return log("snap:fail the first Tab focused " + named(link) + ", not the skip link");
+      const box = link.getBoundingClientRect();
+      if (box.bottom <= 0 || box.top >= innerHeight || box.width < 24) log("snap:fail the focused skip link is not on screen: " + JSON.stringify(box));
+      await __snapKey("Enter");
+      await wait(50);
+      const main = document.querySelector("main");
+      if (!main?.contains(document.activeElement)) return log("snap:fail Enter on the skip link focused " + named(document.activeElement) + ", not the map");
+      log("skip link ok");`,
+  realKeys: true, snapDone: "skip link ok",
+});
+
 // At 1000x800 (`…Narrow`) with the story panel open, the empty map's prompt sits beside the panel, not under it (#462).
 const listNarrow = (): Fixture => ({
   ...list(),
@@ -2343,6 +2365,8 @@ export const fixtures = {
   // The small keyboard, pointer and layout gaps (#462).
   mapSmallGaps,
   listNarrow,
+  // The page's structure: the skip link (#461).
+  skipLink,
   // Unconfigured, with both writers found: preset to Claude, summaries off until a Test passes.
   writersList: () =>
     writersOpen({ writers: { writers: [claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: null } }, `
@@ -2375,7 +2399,7 @@ export const fixtures = {
       const first = document.querySelector("#writer-pick option");
       if (first?.textContent !== "Anthropic API key (not set)" || !first.disabled) log("snap:fail the unset key is not listed first and unpickable: " + first?.textContent);
       if (!document.getElementById("writer-key-state")?.textContent.includes("not set")) log("snap:fail the key row does not say not set");
-      if (document.getElementById("writer-key")?.placeholder !== "Add an API key") log("snap:fail no field to add an API key");
+      if (document.getElementById("writer-key")?.placeholder !== "Add an API key…") log("snap:fail no field to add an API key");
       if (document.getElementById("writer-key-remove")) log("snap:fail Remove shown with no key set");`),
   // An API key set: it comes first in the preset order, and a Test of the Anthropic writer passes.
   writersKeySet: () =>
@@ -2386,7 +2410,7 @@ export const fixtures = {
       if (document.getElementById("writer-pick").value !== "anthropic") log("snap:fail the preset is not the API key");
       if (document.getElementById("writer-model").value !== "claude-haiku-5-5") log("snap:fail the preset model is not the first");
       if (!document.getElementById("writer-key-state")?.textContent.includes(": set")) log("snap:fail the key row does not say set");
-      if (document.getElementById("writer-key")?.placeholder !== "Replace the API key" || !document.getElementById("writer-key-remove")) log("snap:fail no replace or remove");
+      if (document.getElementById("writer-key")?.placeholder !== "Replace the API key…" || !document.getElementById("writer-key-remove")) log("snap:fail no replace or remove");
       const outcome = document.getElementById("writer-outcome");
       if (!outcome?.classList.contains("passed")) log("snap:fail no passed outcome: " + outcome?.textContent);
       ${confirmFirst(`document.getElementById("writer-key-remove").click()`, "remove_api_key", "Remove key", ["Keychain"])}`, true),

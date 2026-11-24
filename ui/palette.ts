@@ -24,7 +24,7 @@ export function showPalette(entries: Entry[], run: (binding: Binding) => void) {
   close.title = "Close the palette (esc)";
   const form = document.createElement("form");
   form.className = "new-task";
-  const field = Object.assign(document.createElement("input"), { placeholder: "Run an action", spellcheck: false });
+  const field = Object.assign(document.createElement("input"), { name: "action", autocomplete: "off", placeholder: "Run an action…", spellcheck: false });
   field.setAttribute("aria-label", "Run an action");
   const rows = document.createElement("div");
   rows.id = "palette-rows";

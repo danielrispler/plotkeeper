@@ -91,13 +91,13 @@ test("an argument-keyed reply answers by that argument", async () => {
 });
 
 // Runs a page's head script in a stand-in page: `load` fires, then the timers run.
-// `nodes`: what the page's hover check finds, by selector (none by default).
+// `nodes`: what the page's hover check finds, by selector (none by default). The page has its one `main` and `h1` (#461).
 const runHead = (options, nodes = { controls: [], titled: [] }) => {
   const logged = [];
   const added = [];
   const handlers = {};
   const timers = [];
-  const querySelectorAll = (selector) => (selector === "[title]" ? nodes.titled : nodes.controls);
+  const querySelectorAll = (selector) => (selector === "[title]" ? nodes.titled : selector === "main" || selector === "h1" ? [{}] : nodes.controls);
   const document = { body: { classList: { add: (...names) => added.push(...names) } }, marker: "drawn", querySelectorAll };
   vm.runInNewContext(headSource(options), {
     document, console: { log: (line) => logged.push(line) }, getComputedStyle: (node) => ({ pointerEvents: node.pointer ?? "auto" }),

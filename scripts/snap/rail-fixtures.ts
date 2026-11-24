@@ -458,6 +458,31 @@ const askScript = (selectors: string[]) => `
   log("rail scrollTop " + at + " -> " + story.scrollTop);
   if (story.scrollTop !== at) log("snap:fail the rail's scrollTop moved from " + at + " to " + story.scrollTop);`;
 
+// #461: in a file's Ask, Enter that confirms an input method's word in the why-not field asks nothing; a plain Enter then asks once.
+const whyNotImeScript = `
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  document.querySelector(".evidence-toggle").click();
+  await wait(200);
+  const box = document.querySelector(".evidence-file .ask-about");
+  if (!box) return log("snap:fail there is no Ask on a file");
+  box.open = true;
+  await wait(200);
+  const field = box.querySelector(".ask-why input");
+  if (!field) return log("snap:fail the file's Ask has no why-not field");
+  const asked = [];
+  const fetched = window.fetch;
+  window.fetch = (url, init) => (String(url).endsWith("/api/ask_why_not") && asked.push(url), fetched(url, init));
+  field.focus();
+  field.value = "main.ts";
+  await __snapKey("Composing Enter");
+  await wait(200);
+  if (asked.length) log("snap:fail Enter mid-composition asked " + asked.length + " time(s)");
+  await __snapKey("Enter");
+  await wait(200);
+  window.fetch = fetched;
+  if (asked.length !== 1) log("snap:fail a plain Enter after the composition asked " + asked.length + " time(s), not once");
+  log("why-not ime ok");`;
+
 // `npm run snap:readme` (scripts/snap/readme.mjs): the README's rail crops. Each script scrolls the rail to its top, finds
 // its target (a missing one is a `snap:fail`) and logs `snap:crop x y width height`, the box in page pixels that the crop keeps.
 const cropScript = (setup: string, from: string, to: string) => `
@@ -565,6 +590,7 @@ export const railFixtures = {
   railDiff: () => ({ ...build("your_turn"), snapScript: diffScript }),
   railAsk: () => ({ ...build("your_turn"), snapScript: askScript([".evidence-file", ".evidence-check"]) }),
   railAskCheck: () => ({ ...build("your_turn"), snapScript: askScript([".evidence-check"]) }),
+  railAskWhyNotIme: () => ({ ...build("your_turn"), snapScript: whyNotImeScript, realKeys: true, snapDone: "why-not ime ok" }),
   railHunk: () => ({ ...build("your_turn"), snapScript: hunkScript }),
   railMerged: () => {
     const fixture = build("your_turn");

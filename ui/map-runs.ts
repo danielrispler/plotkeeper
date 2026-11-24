@@ -59,6 +59,10 @@ function noteNodes(note: Pick<CopyNote, "line" | "manual">): HTMLElement[] {
   area.value = note.manual;
   area.readOnly = true;
   area.rows = 4;
+  area.name = "prompt";
+  area.autocomplete = "off";
+  area.spellcheck = false;
+  area.setAttribute("aria-label", "The prompt, to copy by hand");
   return [line, area];
 }
 
