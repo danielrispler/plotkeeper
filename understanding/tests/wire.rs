@@ -223,7 +223,39 @@ fn the_wire_samples_of_the_understanding_layer_are_written_for_tsc() {
         )),
     ));
 
-    let types = ["Session", "SessionCards", "OpenItem", "TurnSummary", "Hunk"];
+    // Why it didn't touch a name, as `ask_why_not` sends it: with the writer's reasons, and with nothing recorded.
+    let facts = studio_core::AskFacts {
+        sections: vec![studio_core::AskSection {
+            label: "Reads".into(),
+            facts: vec![studio_core::AskFact {
+                at: Some(AT),
+                text: "Read src/lib.rs".into(),
+            }],
+        }],
+    };
+    samples.push((
+        "WhyNot",
+        json(studio_understanding::WhyNot {
+            facts,
+            reasons: Some("It read the file but the plan did not name it.".into()),
+        }),
+    ));
+    samples.push((
+        "WhyNot",
+        json(studio_understanding::WhyNot {
+            facts: studio_core::AskFacts::default(),
+            reasons: None,
+        }),
+    ));
+
+    let types = [
+        "Session",
+        "SessionCards",
+        "OpenItem",
+        "TurnSummary",
+        "Hunk",
+        "WhyNot",
+    ];
     write(
         env!("CARGO_MANIFEST_DIR"),
         "understanding",
