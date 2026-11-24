@@ -22,6 +22,10 @@ use std::{
 /// (plugin-codex/hooks.json, plugin-cursor/hooks.json), and one `git` call may take 20: the three
 /// add up to 2.4 seconds, so past the budget the line is logged without its trees rather than killed
 /// with them.
+// shortcut: the budget counts from the thread's start, its wait for the turns file's lock included,
+// so a second hook of one session that overlaps the first (Codex runs them async) can run out
+// waiting; a `Stop` given up so leaves its end trees to the next prompt (`Turn::take`), which then
+// also see the edits made between the turns.
 const TREES_BUDGET: Duration = Duration::from_millis(1200);
 const TIMED_PATIENCE: Duration = Duration::from_secs(1);
 const STOP_BUDGET: Duration = Duration::from_millis(200);
