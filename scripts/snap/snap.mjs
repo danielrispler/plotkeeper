@@ -1,4 +1,4 @@
-// `npm run snap -- <fixture> <out.png>`: renders the studio UI from dist/ against a stub Tauri API
+// `npm run snap -- <fixture> <out.png>`: renders the studio UI from dist/ against a stubbed server (scripts/snap/page.mjs)
 // fed by a fixture (scripts/snap/fixtures.ts) to a PNG, with headless Chrome. Run `npm run build` first.
 // Chrome never opens a window, so it takes no focus. Set CHROME to a Chrome binary to override the default.
 import { spawn } from "node:child_process";
