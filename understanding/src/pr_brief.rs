@@ -895,13 +895,17 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
         None => "none".into(),
     };
     let tags = added_tags(&files);
-    // Guard with a law (#401): a bug fix that added no tag and changed no tagged test.
-    let guard =
-        (source.meta.bug && tags.is_empty() && !tagged.iter().any(|t| t.changed)).then(|| {
-            let mut parts: Vec<String> = touched.parts.iter().map(|p| p.id.clone()).collect();
-            parts.sort();
-            Guard { parts }
-        });
+    // Guard with a law (#401): a bug fix that added no tag and changed no tagged test, on a part of the map (with none, no law is there to
+    // back and no part to add one on).
+    let guard = (source.meta.bug
+        && tags.is_empty()
+        && !tagged.iter().any(|t| t.changed)
+        && !touched.parts.is_empty())
+    .then(|| {
+        let mut parts: Vec<String> = touched.parts.iter().map(|p| p.id.clone()).collect();
+        parts.sort();
+        Guard { parts }
+    });
     let mut sections: Vec<(String, String)> = vec![
         ("SHAPE (decided by code)".into(), shape_text),
         ("SYSTEM MAP".into(), source.map_text.clone()),

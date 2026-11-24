@@ -272,6 +272,11 @@ fn guard_with_a_law_is_offered_for_a_bug_fix_that_adds_or_changes_no_tagged_test
         concat!("@", "law")
     );
     assert_eq!(build_facts(&added).unwrap().guard, None);
+
+    // The fix touched no part of the map: there is no law to back and no part to add one on, so no offer.
+    let mut unmapped = bug_fix();
+    unmapped.diff = file_diff("elsewhere/notes.txt", 3);
+    assert_eq!(build_facts(&unmapped).unwrap().guard, None);
 }
 
 #[test]
