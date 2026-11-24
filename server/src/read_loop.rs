@@ -18,11 +18,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use studio_core::{
-    Output,
-    State::{Ended, NeedsYou},
-    compute_turn_files,
-};
+use studio_core::{Output, State::NeedsYou, compute_turn_files};
 use studio_understanding::{
     AGY_FIXTURE_VERSION, AgyVersions, Effects, Fingerprints, Versions, diff_turn,
     fingerprint_changes, found_files, millis,
@@ -446,22 +442,9 @@ impl Follower {
         }
         // Reads the transcripts' lines and nothing else (`AGENTS.md`).
         let transcripts_changed = state.lock().unwrap().follow_transcripts(report);
-        // Each live session's context, from its status line snapshot (danielrispler/Falinks#517, decision 1; danielrispler/Falinks#519); the
-        // snapshot is named by the conversation's id, which a `/clear` changes.
-        let running: Vec<_> = (state.lock().unwrap().sessions().into_iter())
-            .filter(|s| s.state != Ended && !s.status_only)
-            .map(|s| (s.agent.id.clone(), s.resume_id.clone()))
-            .collect();
-        let home = std::env::home_dir().unwrap_or_default();
-        let usage = studio_hook::data_dir(&home).join("usage");
-        let windows_changed = running.into_iter().fold(false, |changed, (id, resume_id)| {
-            let snapshot = studio_workbench::context_window(&usage, &resume_id);
-            state.lock().unwrap().set_snapshot(&id, snapshot) | changed
-        });
         let list_changed = app.list_changed.swap(false, Ordering::AcqRel);
         let files_changed = turn_files(state);
-        let changed =
-            read || transcripts_changed || windows_changed || list_changed || files_changed;
+        let changed = read || transcripts_changed || list_changed || files_changed;
         // The open request goes in the same pass as the list that shows "needs you" (danielrispler/Falinks#569).
         if let Ok(data) = crate::answer::data()
             && let Some(ask) = app

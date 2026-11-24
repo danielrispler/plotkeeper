@@ -8,7 +8,7 @@ import { subagentHistory } from "../../dist/story.js";
 const caps = (agent, rest = {}) => ({
   agent, asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, transcript_model: false, context: false, turn_trees: false, ...rest,
 });
-const claude = { capabilities: caps("claude", { asks: true, replies: true, permission_mode: true, transcript_version: true, transcript_model: true, context: true, turn_trees: true }), model: null, transcript: { context: { tokens: 9000, share: 9 }, model: "claude-opus-5-5" } };
+const claude = { capabilities: caps("claude", { asks: true, replies: true, permission_mode: true, transcript_version: true, transcript_model: true, context: true, turn_trees: true }), model: null, transcript: { context: { tokens: 9000 }, model: "claude-opus-5-5" } };
 const agy = { capabilities: caps("agy"), model: "gemini-3.8-flash-high", transcript: { context: null, model: null } };
 const codex = { capabilities: caps(""), model: null, status_only: true, transcript: { context: null, model: null } };
 
@@ -21,9 +21,9 @@ test("a part of the view shows only when the session's capabilities report it", 
   assert.equal(reports(agy, "turn_trees"), false);
 });
 
-test("an agy row shows no text mark (its logo says it), a Claude row its context share, a status-only row its own", () => {
+test("an agy row shows no text mark (its logo says it), a Claude row its context size, a status-only row its own", () => {
   assert.equal(rowMark({ ...agy, status_only: false }), "");
-  assert.equal(rowMark({ ...claude, status_only: false }), "context 9%");
+  assert.equal(rowMark({ ...claude, status_only: false }), "9k");
   assert.equal(rowMark(codex), "status only");
 });
 

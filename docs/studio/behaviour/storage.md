@@ -29,11 +29,9 @@ The app also keeps `roots.json` beside the log: the git worktree root of each fo
 
 `background-runs.jsonl` in the data folder holds one line per [background run](background-runs.md): its time, id, kind, project, outcome, denials, cost and duration. The runs themselves, each a folder with its working folder, its lock and its status, live outside the data folder, in `~/Library/Caches/plotkeeper/runs/`, because a run may not read the data folder.
 
-## Plan usage
+## Usage snapshots (retired)
 
-Claude Code gives the plan's 5-hour and weekly usage, and the context window's size, only to the status line command, on its stdin. Sessions the studio starts run `claude --settings` with `workbench/statusline.sh` as their status line, so you edit nothing. On every refresh it saves that stdin as `usage/<session_id>.json` beside the event log, by temp file and rename, readable only by you (mode 0600, in a folder of mode 0700), with the line in `workbench/statusline-usage.sh`.
-
-Then it reads `statusLine.command` from `~/.claude/settings.json`, runs it on the same stdin, and passes its output and exit status through; with none set, it prints nothing. The page has no usage button or popover (danielrispler/plotkeeper#326): the snapshot is still saved, and the Tauri app's top bar read it. Sessions started outside the studio save no snapshot, and since the terminal went (danielrispler/plotkeeper#335) the studio starts none, so no snapshot is saved now; #416 decides whether to revive it. Snapshots are never deleted; remove the folder at any time.
+The desktop app ran the sessions it started with `workbench/statusline.sh` as their status line, which saved Claude Code's status line stdin, with the plan's usage and the context window's size, as `usage/<session_id>.json` beside the event log, mode 0600 in a folder of mode 0700. Sessions are started by hand now, so none saves one, and plotkeeper reads none (#416); the scripts and their reader are in `archive/workbench/`. Old snapshots stay in `usage/` until you remove the folder.
 
 ## The card store
 

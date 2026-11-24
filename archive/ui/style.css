@@ -14,3 +14,5 @@
 .skill > summary .l2 { font-size: var(--size-small); color: var(--muted); }
 .skill > .btn { margin: var(--sp-2) 0; }
 .fog-mark { display: inline-block; flex: none; width: var(--sp-4); height: var(--sp-4); margin-inline-start: auto; border-radius: 50%; background: var(--mist); cursor: pointer; }
+/* Removed from ui/style.css in #416 with the context warning: a row's mark past the warning's share read at full strength. */
+.row .id.past { color: var(--fg); font-weight: 600; }

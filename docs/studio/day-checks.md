@@ -72,7 +72,7 @@ Check the results when it ends:
   ps -o args= -p <claude pid>
   ```
 
-  The arguments show `--settings` with `workbench/statusline.sh`. The session's usage file updates after a turn:
+  The arguments show `--settings` with `workbench/statusline.sh` (archived in #416). The session's usage file updates after a turn:
 
   ```sh
   ls -l ~/Library/Application\ Support/plotkeeper/usage/
@@ -316,7 +316,7 @@ Save everything in a new folder: `local-evidence/<date>-ui-ux-recheck/` (for exa
 
   The terminal comes back running `agy --continue`, in the same conversation: ask for the word. Its row, once `agy` reports a status, ends in "latest conversation". If the daemon that died was older than this build, it kept no foreground program and the terminal comes back as a plain shell: run the check again.
 
-- [ ] **#50 (#43):** in a studio terminal, run `agy` on a task that edits a file, runs a check and spawns a subagent. Its row shows the "agy" mark (no context share) and its steps, the card appears at the turn's end, and the subagent nests under it. Ask for a command that agy asks permission for: the row shows "needs you" with no question text, and clears when you answer in agy's terminal. The session's header shows "agy · " and a short model name (for example "agy · Flash high"), and no permission mode. Run a Claude session beside it: its header shows "Claude · " and its model.
+- [ ] **#50 (#43):** in a studio terminal, run `agy` on a task that edits a file, runs a check and spawns a subagent. Its row shows the "agy" mark (no context size) and its steps, the card appears at the turn's end, and the subagent nests under it. Ask for a command that agy asks permission for: the row shows "needs you" with no question text, and clears when you answer in agy's terminal. The session's header shows "agy · " and a short model name (for example "agy · Flash high"), and no permission mode. Run a Claude session beside it: its header shows "Claude · " and its model.
 
 ## 5. End of the day (danielrispler/Falinks#599)
 

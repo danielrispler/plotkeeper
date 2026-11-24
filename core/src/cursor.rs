@@ -18,7 +18,7 @@ pub const CURSOR: &str = "cursor";
 
 /// What Cursor reports. No permission or question reaches plotkeeper, as its permission hooks are not
 /// wired; every event names the model. Its transcript has no reader here, so no version, model or
-/// context share comes from it; no background task ids, and no turn trees until the hook maps its
+/// context size comes from it; no background task ids, and no turn trees until the hook maps its
 /// turns (spec #320, "Turn trees and pruning per harness").
 pub const CAPABILITIES: Capabilities = Capabilities {
     agent: CURSOR,

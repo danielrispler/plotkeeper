@@ -3,6 +3,4 @@
 mod agy_plugin;
 mod fetch;
 mod revival;
-mod statusline;
 mod tasks;
-mod wrapper;

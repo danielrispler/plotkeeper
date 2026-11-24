@@ -19,7 +19,7 @@ pub const QWEN: &str = "qwen";
 
 /// What Qwen Code reports. Its `PermissionRequest` waits on Daniel, every event names the
 /// permission mode, `SessionStart` names the model, and a call's end says how long it took. Its
-/// transcript has no reader here, so no version or context share comes from it; no background task
+/// transcript has no reader here, so no version or context size comes from it; no background task
 /// ids (the docs give `Stop`'s `background_tasks` no shape), no subagents' replies, and no turn
 /// trees (spec #320, "Turn trees and pruning per harness").
 pub const CAPABILITIES: Capabilities = Capabilities {
