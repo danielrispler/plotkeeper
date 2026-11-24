@@ -91,20 +91,28 @@ const chromeArgs = [
 // A screenshot left from an earlier run must not pass for this one's.
 rmSync(resolve(out), { force: true });
 const run = await new Promise((done) => {
-  const child = spawn(chrome, chromeArgs, { stdio: ["ignore", "ignore", "pipe"] });
+  // Chrome leads its own process group, so ending it ends its helper processes too, and none is left holding stderr open.
+  const child = spawn(chrome, chromeArgs, { stdio: ["ignore", "ignore", "pipe"], detached: true });
+  const end = () => {
+    try {
+      process.kill(-child.pid, "SIGKILL");
+    } catch {}
+  };
   let stderr = "";
   let shot = false;
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
-    child.kill("SIGKILL");
+    end();
   }, chromeTimeout);
   child.stderr.on("data", (chunk) => {
     stderr += chunk;
-    // With its DevTools port open, Chrome stays up after the screenshot: it is ended once the screenshot is written.
-    if (fixture.realPointer && !shot && /bytes written to file/.test(stderr)) {
+    // Chrome is ended once the screenshot is written: the page's console lines came before it, and its teardown is of no use to a
+    // throwaway profile. On a starved CPU that teardown can outlast Chrome's own watchdog, which then exits 2 (#413); with its
+    // DevTools port open, Chrome would not end at all.
+    if (!shot && /bytes written to file/.test(stderr)) {
       shot = true;
-      child.kill();
+      end();
     }
   });
   child.on("close", (status) => {
