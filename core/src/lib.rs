@@ -1469,7 +1469,6 @@ impl Session {
         }
     }
 
-    /// Whether it is in a turn: prompted, and neither stopped nor ended since.
     /// The summary request for the turn that just ended with `reply`, its card id `id`.
     fn summary_request(
         &self,
@@ -1498,6 +1497,7 @@ impl Session {
         }
     }
 
+    /// Whether it is in a turn: prompted, and neither stopped nor ended since.
     fn in_turn(&self) -> bool {
         !self.turn_ended && !self.ended
     }

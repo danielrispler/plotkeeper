@@ -685,7 +685,7 @@ fn read_copilot(
     finish(kind, schema, text.into(), None, None)
 }
 
-/// The usage a reply's `usage` object gives, when it does: the same field names on both paths.
+/// The usage a reply's `usage` object gives, when it does: snake_case field names, or Cursor's camelCase.
 pub(crate) fn usage_of(usage: &Value) -> Option<Usage> {
     // Cursor's names are in camelCase.
     let field = |snake: &str, camel: &str| usage[snake].as_u64().or(usage[camel].as_u64());
