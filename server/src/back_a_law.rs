@@ -370,11 +370,15 @@ impl LawRuns {
         self.shown.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// `srt`: the one configured, when it is there, or the login shell's.
     fn sandbox(&self) -> Option<PathBuf> {
-        self.config.sandbox.clone().or_else(|| {
-            let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
-            studio_understanding::find(shell.as_ref(), "srt")
-        })
+        match &self.config.sandbox {
+            Some(path) => Some(path.clone()).filter(|path| path.is_file()),
+            None => {
+                let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
+                studio_understanding::find(shell.as_ref(), "srt")
+            }
+        }
     }
 
     /// Starts a run that backs `law`, on trust in `project`'s map on its default branch: the clone, then the run.
@@ -408,9 +412,6 @@ impl LawRuns {
         target: Target,
         guards: Option<u64>,
     ) -> Result<Started, String> {
-        if self.sandbox().is_none() {
-            return Err("`srt` was not found, so plotkeeper cannot prove a patch: install it with `npm install -g @anthropic-ai/sandbox-runtime`".into());
-        }
         let repo = Path::new(project);
         let (reference, _) =
             crate::map::default_ref(repo).ok_or("the project has no default branch")?;
@@ -432,6 +433,16 @@ impl LawRuns {
             Target::Back(law) => (prompt(&source, &law)?, law, None),
             Target::New(new) => (new_prompt(&source, &new)?, new.id.clone(), Some(new)),
         };
+        // A run that cannot start copies its prompt instead, as the runner's refusals do.
+        let refuse = |line: String| {
+            Ok(Started::Refused {
+                line,
+                prompt: prompt.clone(),
+            })
+        };
+        if self.sandbox().is_none() {
+            return refuse("`srt` was not found, so plotkeeper cannot prove a patch: install it with `npm install -g @anthropic-ai/sandbox-runtime`".into());
+        }
         let work = self.runner.new_folder()?;
         let dir = work.parent().unwrap_or(&work).to_path_buf();
         let cloned = clone(repo, &commit, &work).and_then(|()| {
@@ -450,7 +461,7 @@ impl LawRuns {
         });
         if let Err(e) = cloned {
             let _ = fs::remove_dir_all(&dir);
-            return Err(format!("the clone failed: {e}"));
+            return refuse(format!("the clone failed: {e}"));
         }
         let request = Request {
             kind: Kind::BackLaw,

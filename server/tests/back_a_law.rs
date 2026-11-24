@@ -405,6 +405,23 @@ fn discard_deletes_the_patch() {
 }
 
 #[test]
+fn without_srt_back_a_law_copies_the_runs_prompt_instead() {
+    let bench = bench(DONE);
+    let root = bench.dir.path().canonicalize().unwrap();
+    fs::remove_file(root.join("srt")).unwrap();
+    let started = bench.laws.start(&bench.project, LAW).unwrap();
+    let Started::Refused { line, prompt } = started else {
+        panic!("a run started with no srt: {started:?}");
+    };
+    assert!(line.contains("srt"), "{line}");
+    assert!(
+        prompt.contains("@law: adds") && prompt.contains("add sums its two numbers."),
+        "{prompt}"
+    );
+    assert!(bench.runner.runs(&bench.project).runs.is_empty());
+}
+
+#[test]
 fn a_law_not_on_the_map_starts_no_run() {
     let bench = bench(DONE);
     assert!(bench.laws.start(&bench.project, "no-such-law").is_err());
