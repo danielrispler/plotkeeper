@@ -17,8 +17,6 @@ export interface Settings {
   // writes its summary, and the program that writes cards: Claude Code, the Antigravity CLI (#327), Codex (#364),
   // Copilot or Cursor's `agent` (#365).
   summaries: { model: string; effort: string; on_open: boolean; writer: WriterKind };
-  // The context share, a whole percent, past which a session raises its context warning; 0: never.
-  context_warning: number;
   // The commands that are checks, per project folder (danielrispler/plotkeeper#112): each a command such as
   // "make verify", matched when a session's command runs it. A project not here uses the studio's list.
   checks: Record<string, string[]>;
@@ -45,7 +43,6 @@ function writerKind(value: unknown, report: (line: string) => void): WriterKind 
 const defaultSettings: Settings = {
   // Haiku at its default effort (danielrispler/Falinks#517, decision 14).
   summaries: { model: "haiku", effort: "", on_open: false, writer: "claude" },
-  context_warning: 30,
   checks: {},
 };
 
@@ -108,7 +105,6 @@ function readSettings(json: unknown, report: Report): Settings {
       on_open: pick("summaries.on_open", summaries.on_open, d.summaries.on_open),
       writer: writerKind(summaries.writer, report) ?? d.summaries.writer,
     },
-    context_warning: Math.min(100, Math.max(0, Math.round(pick("context_warning", json.context_warning, d.context_warning)))),
     checks: readChecks(json.checks, report),
   };
 }

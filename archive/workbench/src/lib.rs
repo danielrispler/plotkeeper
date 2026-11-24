@@ -722,3 +722,55 @@ pub fn switch_branch(repo: &Path, branch: &str, remote: bool) -> Result<(), Stri
             .output()
             .is_ok_and(|o| o.status.success())
     }
+
+// Removed from workbench/src/lib.rs in #416, with the context share they fed: the `claude` command a studio terminal ran, its status line wrapper's `--settings`, and the snapshot reader. Nothing has started a session since the terminal went (#335). Fragments, kept verbatim.
+
+/// The command a studio terminal runs for a new session, or for `resume`, an ended session's id. It
+/// sets `CLAUDE_CODE_PLUGIN_DIRS` to the studio plugin at `plugin` alone, as the README loads it,
+/// so a profile that sets it too never loads the hooks twice, and `CLAUDE_CLIENT_PRESENCE_FILE` to
+/// `presence`, which the shell keeps while the window is focused, so Remote Control skips a phone
+/// push then (danielrispler/Falinks#522). The daemon runs it under a login shell with the terminal's `PLOTKEEPER_TERMINAL_ID`.
+/// `auto` runs it in Claude Code's auto mode (danielrispler/Falinks#541), which still asks when its classifier blocks a
+/// step; bypass mode is never offered.
+pub fn claude(plugin: &Path, presence: &Path, resume: Option<&str>, auto: bool) -> Vec<String> {
+    let mut argv = vec![
+        "env".into(),
+        format!("CLAUDE_CODE_PLUGIN_DIRS={}", plugin.display()),
+        format!("CLAUDE_CLIENT_PRESENCE_FILE={}", presence.display()),
+        "claude".into(),
+        "--settings".into(),
+        status_line(plugin),
+    ];
+    if auto {
+        argv.extend(["--permission-mode".into(), "auto".into()]);
+    }
+    if let Some(id) = resume {
+        argv.extend(["--resume".into(), id.into()]);
+    }
+    argv
+}
+
+/// `--settings` that make the session's status line the studio's wrapper, `workbench/statusline.sh`
+/// beside the plugin (danielrispler/Falinks#521; danielrispler/Falinks#517, decision 5): it saves the usage snapshot, then runs the user's own
+/// status line. The path is single-quoted, as Claude Code runs the command in a shell.
+fn status_line(plugin: &Path) -> String {
+    let wrapper = plugin.with_file_name("workbench").join("statusline.sh");
+    let quoted = format!("'{}'", wrapper.display().to_string().replace('\'', r"'\''"));
+    serde_json::json!({ "statusLine": { "type": "command", "command": quoted } }).to_string()
+}
+
+/// The `context_window` of session `id`'s status line snapshot in `dir`: its window size, current
+/// usage and percentages (danielrispler/Falinks#517, decision 1; danielrispler/Falinks#519). `None` when there is no snapshot, it has no window
+/// size, or `id` is no plain session id, as the status line saves only those.
+pub fn context_window(dir: &Path, id: &str) -> Option<serde_json::Value> {
+    let plain = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
+    if id.is_empty() || !id.chars().all(plain) {
+        return None;
+    }
+    let snapshot = std::fs::read(dir.join(format!("{id}.json"))).ok()?;
+    let snapshot: serde_json::Value = serde_json::from_slice(&snapshot).ok()?;
+    let window = snapshot.get("context_window")?;
+    window["context_window_size"].as_u64()?;
+    Some(window.clone())
+}
+

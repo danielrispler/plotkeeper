@@ -1679,7 +1679,7 @@ export const fixtures = {
     const agy = { capabilities: { agent: "agy", asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, transcript_model: false, context: false, turn_trees: false }, model: "gemini-3.8-flash-high" };
     const only = (program: string, extra: Partial<Session> = {}) => ({ status_only: true, capabilities: { agent: "", asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, transcript_model: false, context: false, turn_trees: false }, ...extra, identity: { issue: null, branch: null, pr: null, worktree: "", name: `${program} · plotkeeper` } });
     const sessions = [
-      session("s1", "#56 · Row controls", "running", { transcript: { ...session("x", "x", "idle").transcript, context: { tokens: 90000, share: 9, window: 1000000, left: 91 } } }),
+      session("s1", "#56 · Row controls", "running", { transcript: { ...session("x", "x", "idle").transcript, context: { tokens: 90000 } } }),
       session("s2", "agy · Name from the prompt", "needs_you", agy),
       session("s3", "#54 · Subagent terminal", "your_turn", { unseen: true }),
       session("s4", "codex · plotkeeper", "running", only("codex")),
@@ -1706,10 +1706,9 @@ export const fixtures = {
     ];
     return { ...list(), settings_files: { settings: "{ bad", keymap: null }, appErrors, snapScript };
   },
-  // Alerts: two sessions' turns ended off screen (the note toast), and one session past the 30% context
-  // warning, whose row mark reads at full strength.
+  // Alerts: two sessions' turns ended off screen (the note toast).
   alerts() {
-    const context = (share: number) => ({ ...session("x", "x", "idle").transcript, context: { tokens: share * 10000, share, window: 1000000, left: 100 - share } });
+    const context = (k: number) => ({ ...session("x", "x", "idle").transcript, context: { tokens: k * 1000 } });
     const sessions = [
       session("s1", "#56 · Row controls", "running", { transcript: context(34) }),
       session("s2", "#57 · Name from the prompt", "running", { transcript: context(12) }),
@@ -1723,9 +1722,7 @@ export const fixtures = {
       if (note.hidden || !note.textContent.includes("2 finished")) log("snap:fail the note toast should say 2 finished");
       // The top bar has no unseen chip (#386): the unseen rows carry their mark in the list.
       if (document.getElementById("unseen")) log("snap:fail the top bar still has an unseen chip");
-      const past = [...document.querySelectorAll(".row .id.past")].map((mark) => mark.textContent);
-      if (past.join() !== "context 34%") log("snap:fail only the 34% mark should be past the warning: " + past.join());
-      log("note: " + note.textContent + " · past: " + past.join());`;
+      log("note: " + note.textContent);`;
     return { ...base, sessions, selected: { session: sessions[1], agent: null }, snapScript };
   },
   // The saved project list (#381): a project with no sessions keeps its header, after the one with sessions; a gone one is

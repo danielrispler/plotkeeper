@@ -1,8 +1,8 @@
 //! Workbench git (danielrispler/Falinks#328, module 7; danielrispler/Falinks#461, decision 8): a folder's main
 //! checkout, `origin`'s fetch and what removing a task's worktree would lose, with no call passing git's force
-//! option; the `gh` to run; the resume commands of agents other than Claude Code; the `claude` command and status
-//! line wrapper a studio terminal ran, and the context window its snapshots hold (#416); and the agy plugin.
-//! What only its own tests used is in `archive/workbench/` (#415).
+//! option; the `gh` to run; the resume commands of agents other than Claude Code; and the agy plugin. What
+//! only its own tests used is in `archive/workbench/` (#415), with the `claude` command and status line wrapper
+//! a studio terminal ran and the context window its snapshots held (#416).
 
 use serde::Serialize;
 use std::{path::Path, process::Command, sync::OnceLock};
@@ -28,31 +28,6 @@ pub fn fetch(repo: &Path) -> Result<(), String> {
     git(repo, &["fetch", "--quiet", "origin"]).map(drop)
 }
 
-/// The command a studio terminal runs for a new session, or for `resume`, an ended session's id. It
-/// sets `CLAUDE_CODE_PLUGIN_DIRS` to the studio plugin at `plugin` alone, as the README loads it,
-/// so a profile that sets it too never loads the hooks twice, and `CLAUDE_CLIENT_PRESENCE_FILE` to
-/// `presence`, which the shell keeps while the window is focused, so Remote Control skips a phone
-/// push then (danielrispler/Falinks#522). The daemon runs it under a login shell with the terminal's `PLOTKEEPER_TERMINAL_ID`.
-/// `auto` runs it in Claude Code's auto mode (danielrispler/Falinks#541), which still asks when its classifier blocks a
-/// step; bypass mode is never offered.
-pub fn claude(plugin: &Path, presence: &Path, resume: Option<&str>, auto: bool) -> Vec<String> {
-    let mut argv = vec![
-        "env".into(),
-        format!("CLAUDE_CODE_PLUGIN_DIRS={}", plugin.display()),
-        format!("CLAUDE_CLIENT_PRESENCE_FILE={}", presence.display()),
-        "claude".into(),
-        "--settings".into(),
-        status_line(plugin),
-    ];
-    if auto {
-        argv.extend(["--permission-mode".into(), "auto".into()]);
-    }
-    if let Some(id) = resume {
-        argv.extend(["--resume".into(), id.into()]);
-    }
-    argv
-}
-
 /// The command that brings back an agent other than Claude Code (danielrispler/Falinks#561), by the name of the program a
 /// revived terminal had in its foreground: conversation `id` when it is known, else the latest one
 /// in the terminal's folder. `None` for any other program, which revives as a plain shell. Checked
@@ -75,30 +50,6 @@ pub fn resume(program: &str, id: Option<&str>) -> Option<Vec<String>> {
 pub fn resumes_latest(argv: &[String]) -> bool {
     argv.first()
         .is_some_and(|program| resume(program, None).as_deref() == Some(argv))
-}
-
-/// `--settings` that make the session's status line the studio's wrapper, `workbench/statusline.sh`
-/// beside the plugin (danielrispler/Falinks#521; danielrispler/Falinks#517, decision 5): it saves the usage snapshot, then runs the user's own
-/// status line. The path is single-quoted, as Claude Code runs the command in a shell.
-fn status_line(plugin: &Path) -> String {
-    let wrapper = plugin.with_file_name("workbench").join("statusline.sh");
-    let quoted = format!("'{}'", wrapper.display().to_string().replace('\'', r"'\''"));
-    serde_json::json!({ "statusLine": { "type": "command", "command": quoted } }).to_string()
-}
-
-/// The `context_window` of session `id`'s status line snapshot in `dir`: its window size, current
-/// usage and percentages (danielrispler/Falinks#517, decision 1; danielrispler/Falinks#519). `None` when there is no snapshot, it has no window
-/// size, or `id` is no plain session id, as the status line saves only those.
-pub fn context_window(dir: &Path, id: &str) -> Option<serde_json::Value> {
-    let plain = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
-    if id.is_empty() || !id.chars().all(plain) {
-        return None;
-    }
-    let snapshot = std::fs::read(dir.join(format!("{id}.json"))).ok()?;
-    let snapshot: serde_json::Value = serde_json::from_slice(&snapshot).ok()?;
-    let window = snapshot.get("context_window")?;
-    window["context_window_size"].as_u64()?;
-    Some(window.clone())
 }
 
 /// The `gh` to run: the first on Daniel's login shell's `PATH`, found once; bare `gh` when it

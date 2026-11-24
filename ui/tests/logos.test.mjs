@@ -12,7 +12,7 @@ const make = (tag) => document.createElement(tag);
 
 const base = { id: "s", name: null, prompt_name: null, folder_name: "p", state: "idle", line: "", questions: [], shell: false, status_only: false, unseen: false, landed: false };
 const caps = (agent) => ({ agent, context: agent === "claude", transcript_model: agent === "claude" });
-const claude = { ...base, capabilities: caps("claude"), identity: { issue: null, name: "p" }, transcript: { context: { tokens: 9000, share: 9 } } };
+const claude = { ...base, capabilities: caps("claude"), identity: { issue: null, name: "p" }, transcript: { context: { tokens: 9000 } } };
 const agy = { ...base, capabilities: caps("agy"), identity: { issue: null, name: "p" }, transcript: { context: null } };
 const statusOnly = (program) => ({ ...base, status_only: true, capabilities: caps(""), identity: { issue: null, name: `${program} · p` }, transcript: { context: null } });
 const shell = { ...statusOnly("zsh"), shell: true };
@@ -48,7 +48,7 @@ test("a recorded Codex session wears Codex's logo, titled by its name (#359)", (
   const drawn = logoOf(row(codex, new Map()));
   assert.equal(drawn.getAttribute("data-logo"), "codex");
   // Its row's title is the note on what it reports; the mark's own title names Codex, no longer as status only.
-  assert.match(drawn.title, /no context share/);
+  assert.match(drawn.title, /no context size/);
   assert.equal(logo("codex").title, "Codex");
 });
 
@@ -57,7 +57,7 @@ test("a recorded Qwen Code session wears Qwen's logo, titled by its name (#360)"
   assert.equal(logoKey(qwen), "qwen");
   const drawn = logoOf(row(qwen, new Map()));
   assert.equal(drawn.getAttribute("data-logo"), "qwen");
-  assert.match(drawn.title, /no context share/);
+  assert.match(drawn.title, /no context size/);
   assert.equal(logo("qwen").title, "Qwen Code");
 });
 
@@ -77,10 +77,10 @@ test("a session row in the list and History shows the logo before its name; an a
   assert.equal(logoOf(drawn).getAttribute("data-logo"), "claude");
   const agyRow = row(agy, new Map());
   assert.equal(logoOf(agyRow).getAttribute("data-logo"), "agy");
-  assert.match(logoOf(agyRow).title, /no context share/);
+  assert.match(logoOf(agyRow).title, /no context size/);
   assert.equal(agyRow.text.includes("agy"), false);
   assert.equal(rowMark(agy), "");
-  assert.equal(rowMark(claude), "context 9%");
+  assert.equal(rowMark(claude), "9k");
 });
 
 test("the strip, the project header's rollup and a subagent row draw no logo", () => {
@@ -124,7 +124,7 @@ test("the rail header shows the logo, titled with the model line", async () => {
   assert.equal(mark.childNodes[0].title, "Claude · Opus 5.5");
 });
 
-test("the rail header's logo for agy keeps the note that it has no context share, after the model line", async () => {
+test("the rail header's logo for agy keeps the note that it has no context size, after the model line", async () => {
   const { showView } = await import("../../dist/story.js");
   const els = new Map();
   const get = (id) => els.get(id) ?? (els.set(id, make("div")), els.get(id));
@@ -136,8 +136,8 @@ test("the rail header's logo for agy keeps the note that it has no context share
     // The rest of the rail needs more of a page than the stand-in has; the header is drawn first.
   }
   const title = get("mark").childNodes[0].title;
-  assert.match(title, /no context share/);
-  assert.ok(title.length > "no context share".length);
+  assert.match(title, /no context size/);
+  assert.ok(title.length > "no context size".length);
 });
 
 const railOf = (session, agent = null) => {
@@ -154,13 +154,13 @@ const railOf = (session, agent = null) => {
 test("the no-context note follows the session's capabilities, not the agent's name", async () => {
   const other = { ...agy, capabilities: { agent: "newagent", context: false }, model: null };
   const get = await railOf(other);
-  assert.match(get("mark").childNodes[0].title, /no context share/);
-  assert.match(logoOf(row(other, new Map())).title, /no context share/);
+  assert.match(get("mark").childNodes[0].title, /no context size/);
+  assert.match(logoOf(row(other, new Map())).title, /no context size/);
   const noNote = await railOf({ ...agy, capabilities: { agent: "agy", context: true } });
-  assert.doesNotMatch(noNote("mark").childNodes[0].title, /no context share/);
-  assert.doesNotMatch(logoOf(row({ ...agy, capabilities: { agent: "agy", context: true } }, new Map())).title, /no context share/);
+  assert.doesNotMatch(noNote("mark").childNodes[0].title, /no context size/);
+  assert.doesNotMatch(logoOf(row({ ...agy, capabilities: { agent: "agy", context: true } }, new Map())).title, /no context size/);
   // A status-only row has no agent of its own to note.
-  assert.doesNotMatch(logoOf(row(statusOnly("codex"), new Map())).title, /no context share/);
+  assert.doesNotMatch(logoOf(row(statusOnly("codex"), new Map())).title, /no context size/);
 });
 
 test("a selected subagent's rail logo carries no model line", async () => {
