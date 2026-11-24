@@ -9,16 +9,28 @@
 
 use crate::pr_brief::{
     Also, Brief, BriefRecord, BriefWriter, CallUsage, CheckContext, Decision, Facts, Step,
-    check_brief, prompt, put_plan_first, timed_write,
+    check_brief, facts_block, prompt, put_plan_first, timed_write,
 };
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
+
+/// Which call of a write runs now (#450): the page's waiting card says it.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum Stage {
+    Writing,
+    Checking,
+    /// The retry, rewriting this many flagged items.
+    Fixing {
+        claims: usize,
+    },
+}
 
 /// What an item still flagged after the retry carries.
 pub const UNCONFIRMED: &str = "not confirmed from the facts";
 const CLAIM_PREFIX: &str = "claim check: ";
 
-const CHECK_INSTRUCTIONS: &str = r#"You check a written PR brief against the facts it was written from. You have no tools: everything you may rely on is in FACTS below.
+const CHECK_INSTRUCTIONS: &str = r#"You check a written PR brief against the facts it was written from. You have no tools: everything you may rely on is in FACTS above.
 
 For every item of the brief, decide whether FACTS support each claim it makes, at the strength it states it:
 - a step: its heading and body, its law and covered_by, its list lines, every risk (part, trigger, check), and, when it holds a check, the check's question, its options and its yes and no text;
@@ -111,15 +123,15 @@ fn item_json(brief: &Brief, item: Item) -> Value {
     }
 }
 
-/// The claim check's request: the rules, the facts, and every item with its id.
+/// The claim check's request: the facts block the writer's prompt starts with (#450), the rules, and every item with its id.
 pub fn claim_prompt(facts: &Facts, brief: &Brief) -> String {
     let list: Vec<Value> = items(brief)
         .into_iter()
         .map(|(id, item)| json!({ "id": id, "item": item_json(brief, item) }))
         .collect();
     format!(
-        "{CHECK_INSTRUCTIONS}\nFACTS\n\n{}\n\nBRIEF ITEMS\n\n{}\n",
-        facts.text,
+        "{}{CHECK_INSTRUCTIONS}\nBRIEF ITEMS\n\n{}\n",
+        facts_block(facts),
         serde_json::to_string_pretty(&list).unwrap_or_default()
     )
 }
@@ -295,7 +307,8 @@ fn labelled(claims: &[ClaimFlag], skip: &BTreeSet<String>) -> Vec<String> {
 
 /// Runs the claim check on `brief` (already code-checked), then the one retry, and fills the record's claim
 /// fields and calls. A call that fails or a reply that does not read is recorded and logged and leaves the
-/// brief as it was.
+/// brief as it was. `stage` hears each call as it starts.
+#[allow(clippy::too_many_arguments)]
 pub fn claim_check_and_retry(
     writer: &(impl BriefWriter + ?Sized),
     model: &str,
@@ -304,8 +317,10 @@ pub fn claim_check_and_retry(
     brief: &mut Brief,
     record: &mut BriefRecord,
     log: &mut impl FnMut(String),
+    stage: &mut impl FnMut(Stage),
 ) {
     let mut claims = Vec::new();
+    stage(Stage::Checking);
     match timed_write(writer, model, &claim_prompt(facts, brief)) {
         Err(e) => record.claim_error = Some(e),
         Ok(reply) => {
@@ -326,6 +341,11 @@ pub fn claim_check_and_retry(
     let Some(request) = retry_prompt(facts, brief) else {
         return;
     };
+    let flagged = items(brief)
+        .into_iter()
+        .filter(|(_, item)| !flags_of(brief, *item).is_empty())
+        .count();
+    stage(Stage::Fixing { claims: flagged });
     let mut rewritten = BTreeSet::new();
     match timed_write(writer, model, &request) {
         Err(e) => record.retry_error = Some(e),

@@ -156,7 +156,12 @@ fn the_check_follows_the_brief_rule_a_changed_tagged_test_allows_a_pick_and_a_ch
 fn the_prompt_is_the_catch_ups_and_keeps_the_briefs_step_rules() {
     let facts = build_catch_up_facts(&source()).unwrap();
     let p = studio_understanding::pr_brief::prompt(&facts);
-    assert!(p.starts_with("You write a part catch-up"), "{}", &p[..80]);
+    let rules = &p[studio_understanding::pr_brief::facts_block(&facts).len()..];
+    assert!(
+        rules.starts_with("You write a part catch-up"),
+        "{}",
+        &rules[..80]
+    );
     assert!(p.contains("\"Must stay true\""), "the brief's step kinds");
     assert!(p.contains("\"kind\": \"pick\""), "the brief's checks");
     assert!(!p.contains("You write a PR brief"));
@@ -292,12 +297,12 @@ fn the_entry_runs_the_claim_check_and_one_retry_and_stores_the_catch_up_by_part_
         flagged.to_string(),
         retry.to_string(),
     ]);
-    let stored = write_part_catch_up(&writer, "opus", &source(), &store, |_| {}).unwrap();
+    let stored = write_part_catch_up(&writer, "opus", &source(), &store, |_| {}, |_| {}).unwrap();
 
     let prompts = writer.prompts.borrow();
     assert_eq!(prompts.len(), 3, "writer, claim check, retry");
     assert!(prompts[1].contains("You check a written PR brief"));
-    assert!(prompts[2].starts_with("You write a part catch-up") && prompts[2].contains("RETRY"));
+    assert!(prompts[2].contains("You write a part catch-up") && prompts[2].contains("RETRY"));
     assert_eq!(stored.brief.chapters[0].steps[2].h, "Alpha keeps order now");
     assert!(
         stored.brief.all_flags().is_empty(),
@@ -313,6 +318,27 @@ fn the_entry_runs_the_claim_check_and_one_retry_and_stores_the_catch_up_by_part_
     let records = store.records();
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].claim_flags_before.len(), 1);
+}
+
+#[test]
+fn the_writer_the_claim_check_and_the_retry_start_with_the_same_facts_block_byte_for_byte() {
+    let data = tempfile::tempdir().unwrap();
+    let store = CatchUpStore::open(data.path()).unwrap();
+    let flagged = json!({ "items": [ { "id": "step 3", "supported": false, "phrase": "keeps the order", "why": "the facts say nothing" } ] });
+    let retry = json!({ "items": [] });
+    let writer = Canned::new(vec![
+        reply().to_string(),
+        flagged.to_string(),
+        retry.to_string(),
+    ]);
+    write_part_catch_up(&writer, "opus", &source(), &store, |_| {}, |_| {}).unwrap();
+    let block =
+        studio_understanding::pr_brief::facts_block(&build_catch_up_facts(&source()).unwrap());
+    let prompts = writer.prompts.borrow();
+    assert_eq!(prompts.len(), 3, "writer, claim check, retry");
+    for (i, p) in prompts.iter().enumerate() {
+        assert!(p.starts_with(&block), "call {i} starts: {}", &p[..80]);
+    }
 }
 
 fn long_source(n: usize) -> CatchUpSource {
@@ -340,7 +366,7 @@ fn a_long_fog_lists_catch_up_says_it_summarises_the_main_shifts_with_the_full_li
             no_claims.clone(),
             no_claims.clone(),
         ]);
-        write_part_catch_up(&writer, "opus", &long_source(n), &store, |_| {}).unwrap()
+        write_part_catch_up(&writer, "opus", &long_source(n), &store, |_| {}, |_| {}).unwrap()
     };
 
     let long = write(9);

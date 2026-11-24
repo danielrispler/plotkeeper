@@ -1,7 +1,7 @@
 // The Map view's pure logic (spec danielrispler/plotkeeper#306, ticket #309): the map file as the window reads it, where parts
 // are placed, the drag threshold, the link's rim points, the layered Esc and the camera. `map.ts` draws and wires them.
 
-import type { BriefFigure, BriefStep, CatchUpOffer, FogListEntry, Camera, Ci, CommitFiles, Fog, HistoricalMap, HistoryEntry, PrBrief, Proof, ReadyPr } from "./types.js";
+import type { BriefFigure, BriefStep, CatchUpOffer, CatchUpStage, FogListEntry, Camera, Ci, CommitFiles, Fog, HistoricalMap, HistoryEntry, PrBrief, Proof, ReadyPr } from "./types.js";
 
 export type Tier = "core" | "interface" | "black-box";
 export type Point = { x: number; y: number };
@@ -637,6 +637,13 @@ export function awaitedCatchUp(offer: CatchUpOffer | undefined): "open" | "stop"
   if (!offer || offer.kind !== "catch-up") return "stop";
   if (offer.writing) return "wait";
   return offer.ready ? "open" : "stop";
+}
+
+// What the waiting card says of a part catch-up's write (#450): the call that runs now, "Writing…" until the server says.
+export function stageLabel(stage: CatchUpStage | undefined): string {
+  if (stage?.kind === "checking") return "Checking claims…";
+  if (stage?.kind === "fixing") return `Fixing ${stage.claims} ${stage.claims === 1 ? "claim" : "claims"}…`;
+  return "Writing…";
 }
 
 // The number a part catch-up plays under in `briefPlayer`: a negative one, which no PR has, one per project, part and fog list, so a

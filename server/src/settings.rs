@@ -346,6 +346,22 @@ fn pr_briefs_model_in(text: &str) -> String {
     }
 }
 
+/// The effort of the PR briefs' and part catch-ups' calls, `prBriefs.effort`, read on each call: empty (the default) leaves
+/// `claude`'s own (#450). A value `claude` does not take is dropped.
+pub fn pr_briefs_effort() -> String {
+    let text = paths().and_then(|[settings, _]| fs::read_to_string(settings).ok());
+    pr_briefs_effort_in(&text.unwrap_or_default())
+}
+
+fn pr_briefs_effort_in(text: &str) -> String {
+    let json: serde_json::Value = serde_json::from_str(&plain_json(text)).unwrap_or_default();
+    let effort = json["prBriefs"]["effort"].as_str().unwrap_or("").trim();
+    match WriterKind::Claude.efforts().contains(&effort) {
+        true => effort.to_string(),
+        false => String::new(),
+    }
+}
+
 /// What a background run reads from `settings.json` (spec danielrispler/plotkeeper#378): the harness and model of
 /// `backgroundRuns`, and the project's `checks` and `setup`.
 #[derive(Debug, Default, PartialEq)]
@@ -592,8 +608,8 @@ impl ApiKeys for MemoryKeys {
 #[cfg(test)]
 mod tests {
     use super::{
-        brief_backfill_in, edit_text, plain_json, pr_briefs_model_in, repository_in,
-        run_settings_in, save_writer_in, summary_writer_in, write_in,
+        brief_backfill_in, edit_text, plain_json, pr_briefs_effort_in, pr_briefs_model_in,
+        repository_in, run_settings_in, save_writer_in, summary_writer_in, write_in,
     };
     use serde_json::json;
     use studio_understanding::WriterKind;
@@ -749,6 +765,29 @@ mod tests {
         assert_eq!(
             pr_briefs_model_in(r#"{ "summaries": { "model": "haiku" } }"#),
             "opus"
+        );
+    }
+
+    #[test]
+    fn the_pr_briefs_effort_is_claudes_own_unless_the_settings_name_one_it_takes() {
+        assert_eq!(pr_briefs_effort_in(""), "");
+        assert_eq!(
+            pr_briefs_effort_in(r#"{ "prBriefs": { "model": "opus" } }"#),
+            ""
+        );
+        let low = "{ // faster writes\n \"prBriefs\": { \"effort\": \"low\", }, }";
+        assert_eq!(pr_briefs_effort_in(low), "low");
+        assert_eq!(
+            pr_briefs_effort_in(r#"{ "prBriefs": { "effort": "medium" } }"#),
+            "medium"
+        );
+        assert_eq!(
+            pr_briefs_effort_in(r#"{ "prBriefs": { "effort": "turbo" } }"#),
+            ""
+        );
+        assert_eq!(
+            pr_briefs_effort_in(r#"{ "summaries": { "effort": "low" } }"#),
+            ""
         );
     }
 

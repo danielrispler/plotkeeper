@@ -23,8 +23,8 @@ import { scrubTo } from "./map-history.js";
 import { overturnNote, ratifyActions } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
-import { actorSize, alsoAt, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
-import type { BriefCheck, BriefStep, BriefView, PrBrief, RatifyRow, ReadyPr, StoredCatchUp } from "./types.js";
+import { actorSize, alsoAt, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, stageLabel, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
+import type { BriefCheck, BriefStep, BriefView, CatchUpOffer, PrBrief, RatifyRow, ReadyPr, StoredCatchUp } from "./types.js";
 
 const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
 // The brief being played, as `pr_brief` returned it.
@@ -152,16 +152,17 @@ export async function openBriefOf(project: string, number: number, chapter: numb
   show(view, false);
 }
 
-// Opens `part`'s catch-up: the stored one for its current fog, or, while it is written, the panel says "Writing the part catch-up…", the map
+// Opens `part`'s catch-up: the stored one for its current fog, or, while it is written, the panel says which call of the write runs, the map
 // stays usable, and it opens when it lands (`map-landed` draws the map again), unless another open or a close came since.
 let awaitingCatchUp: { project: string; part: string; wanted: () => boolean } | null = null;
 export async function openCatchUpOf(project: string, part: string) {
   awaiting = null;
   awaitingCatchUp = null;
   const wanted = latest.begin();
-  const writing = "Writing the part catch-up…";
+  // The card says which call of the write runs (#450), as the map's last state has it.
+  const writing = () => stageOf(currentMap()?.state.catch_ups?.[part]);
   // A catch-up has no tray row for the wait to mark.
-  const slow = window.setTimeout(() => wanted() && showWriting(null, writing), WRITING_AFTER_MS);
+  const slow = window.setTimeout(() => wanted() && showWriting(null, writing(), CATCH_UP_WAIT), WRITING_AFTER_MS);
   let got: StoredCatchUp | { writing: true } | null;
   try {
     got = await invoke("part_catch_up", { project, part });
@@ -173,7 +174,7 @@ export async function openCatchUpOf(project: string, part: string) {
   if (!wanted()) return;
   if (got && "writing" in got) {
     awaitingCatchUp = { project, part, wanted };
-    showWriting(null, writing);
+    showWriting(null, writing(), CATCH_UP_WAIT);
     return;
   }
   if (!briefOpen()) hideWriting();
@@ -205,7 +206,7 @@ onDraw((view) => {
   }
   const { project, part } = awaitingCatchUp;
   const next = awaitedCatchUp(view.state.catch_ups?.[part]);
-  if (next === "wait") return;
+  if (next === "wait") return showWriting(null, stageOf(view.state.catch_ups?.[part]), CATCH_UP_WAIT);
   awaitingCatchUp = null;
   if (next === "open") void openCatchUpOf(project, part);
   else if (!briefOpen()) hideWriting();
@@ -213,10 +214,26 @@ onDraw((view) => {
 
 // The panel says so while a brief is written for an open: after this long, so a stored brief never flashes it.
 const WRITING_AFTER_MS = 300;
-function showWriting(number: number | null, words = "Writing the brief…") {
+const CATCH_UP_WAIT = "Writing the part catch-up";
+const stageOf = (offer: CatchUpOffer | undefined) => stageLabel(offer?.kind === "catch-up" ? offer.stage : undefined);
+// The waiting card (#450): at the story card's width, a named indeterminate progress bar and what the write is doing, in a polite live
+// region so a screen reader hears each new stage. A new stage changes the words in place, so the region announces it.
+function showWriting(number: number | null, words = "Writing the brief…", name = "Writing the brief") {
   if (briefOpen()) return;
   const box = panel();
-  box.replaceChildren(text("p", words, "brief-writing"));
+  let stage = box.querySelector<HTMLElement>(".brief-writing-stage");
+  if (!stage || box.querySelector("progress")?.getAttribute("aria-label") !== name) {
+    const wait = document.createElement("div");
+    wait.className = "brief-writing";
+    wait.setAttribute("role", "status");
+    wait.setAttribute("aria-live", "polite");
+    const bar = document.createElement("progress");
+    bar.className = "brief-wait";
+    bar.setAttribute("aria-label", name);
+    stage = text("p", words, "brief-writing-stage");
+    wait.append(bar, stage);
+    box.replaceChildren(wait);
+  } else if (stage.textContent !== words) stage.textContent = words;
   box.classList.add("open");
   box.hidden = false;
   const note = number === null ? null : document.querySelector(`#map-tray .tray-row[data-pr="${number}"] .tray-note`);
