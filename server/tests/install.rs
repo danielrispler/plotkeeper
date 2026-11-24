@@ -1406,3 +1406,131 @@ fn a_hook_the_user_added_after_an_older_template_stays_alone_at_uninstall() {
         ]
     );
 }
+
+/// Sets the fingerprint install's record holds for `harness` to `value`, or takes it out with `None`, as a record
+/// from another build would have it.
+fn set_fingerprint(machine: &Machine, harness: &str, value: Option<&str>) {
+    let state = machine.data().join("install/state.json");
+    let mut record: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&state).unwrap()).unwrap();
+    let entry = record["harnesses"][harness].as_object_mut().unwrap();
+    match value {
+        Some(v) => entry.insert("fingerprint".into(), v.into()),
+        None => entry.remove("fingerprint"),
+    };
+    fs::write(&state, record.to_string()).unwrap();
+}
+
+const RETRUST: &str = "run `/hooks` in Codex";
+
+#[test]
+fn a_start_rewires_only_the_wired_harnesses_whose_rendered_entries_changed() {
+    let machine = Machine::new(true, false).with_codex().with_cursor();
+    machine.write(".codex/hooks.json", CODEX_OWN);
+    machine.write(".cursor/hooks.json", CURSOR_OWN);
+    machine.start(&["y"]);
+    let codex_new = codex_commands(&machine);
+    let cursor_new = cursor_commands(&machine);
+    let claude_calls = machine.calls("claude").len();
+    // An older build rendered other entries for Codex and Cursor, and wired them.
+    as_an_older_template_left_it(&machine, ".codex/hooks.json", "codex", "Notification");
+    as_an_older_template_left_it(&machine, ".cursor/hooks.json", "cursor", "afterFileEdit");
+    set_fingerprint(&machine, "codex", Some("older"));
+    set_fingerprint(&machine, "cursor", Some("older"));
+
+    let text = machine.start(&[]);
+
+    assert!(!text.contains(ASK), "{text}");
+    assert!(text.contains("plotkeeper: rewired Codex"), "{text}");
+    assert!(text.contains("plotkeeper: rewired Cursor"), "{text}");
+    assert!(text.contains(RETRUST), "{text}");
+    assert!(!text.contains("rewired Claude Code"), "{text}");
+    assert_eq!(machine.calls("claude").len(), claude_calls);
+    assert_eq!(codex_commands(&machine), codex_new);
+    assert_eq!(cursor_commands(&machine), cursor_new);
+
+    // Rewired, they hold this build's fingerprints: the next start rewires nothing.
+    let text = machine.start(&[]);
+    assert!(!text.contains("rewired"), "{text}");
+}
+
+const TOOLS: [&str; 5] = ["claude", "agy", "codex", "copilot", "qwen"];
+
+#[test]
+fn a_start_with_nothing_changed_runs_no_harness_cli() {
+    let machine = Machine::new(true, true)
+        .with_codex()
+        .with_cursor()
+        .with_copilot()
+        .with_qwen();
+    machine.start(&["y"]);
+    let calls: Vec<_> = TOOLS.iter().map(|t| machine.calls(t)).collect();
+    assert!(!calls[0].is_empty(), "the first start wired Claude Code");
+
+    let text = machine.start(&[]);
+
+    assert!(!text.contains(ASK), "{text}");
+    assert!(!text.contains("rewired"), "{text}");
+    assert_eq!(
+        TOOLS.iter().map(|t| machine.calls(t)).collect::<Vec<_>>(),
+        calls
+    );
+}
+
+#[test]
+fn a_record_without_fingerprints_is_rewired_once_without_asking() {
+    let machine = Machine::new(true, false).with_codex();
+    machine.start(&["y"]);
+    // As a build before #438 left it: answers, no fingerprints.
+    set_fingerprint(&machine, "claude", None);
+    set_fingerprint(&machine, "codex", None);
+    let calls = machine.calls("claude").len();
+
+    let text = machine.start(&[]);
+    assert!(!text.contains(ASK), "{text}");
+    assert!(text.contains("plotkeeper: rewired Claude Code"), "{text}");
+    assert!(text.contains("plotkeeper: rewired Codex"), "{text}");
+    assert!(machine.calls("claude").len() > calls);
+
+    let calls = machine.calls("claude").len();
+    let text = machine.start(&[]);
+    assert!(!text.contains("rewired"), "{text}");
+    assert_eq!(machine.calls("claude").len(), calls);
+}
+
+#[test]
+fn a_declined_harness_whose_entries_changed_is_not_rewired() {
+    let machine = Machine::new(true, false).with_codex();
+    machine.start(&["n"]);
+    set_fingerprint(&machine, "claude", Some("older"));
+    set_fingerprint(&machine, "codex", Some("older"));
+
+    let text = machine.start(&[]);
+
+    assert!(!text.contains("rewired"), "{text}");
+    assert!(machine.calls("claude").is_empty());
+    assert!(!machine.home.join(".codex/hooks.json").exists());
+}
+
+#[test]
+fn install_then_a_rewire_on_start_then_uninstall_leaves_every_file_outside_the_data_folder_byte_identical()
+ {
+    let machine = Machine::new(true, false).with_codex().with_cursor();
+    machine.write(".codex/hooks.json", CODEX_OWN);
+    machine.write(".cursor/hooks.json", CURSOR_OWN);
+    let before = files(&machine.home);
+    machine.run("install");
+    as_an_older_template_left_it(&machine, ".codex/hooks.json", "codex", "Notification");
+    as_an_older_template_left_it(&machine, ".cursor/hooks.json", "cursor", "afterFileEdit");
+    set_fingerprint(&machine, "codex", Some("older"));
+    set_fingerprint(&machine, "cursor", Some("older"));
+    assert!(machine.start(&[]).contains("rewired Codex"));
+    machine.run("uninstall");
+    let outside = |files: BTreeMap<String, Vec<u8>>| {
+        files
+            .into_iter()
+            .filter(|(p, _)| !p.starts_with("Library/Application Support/plotkeeper/"))
+            .collect::<BTreeMap<_, _>>()
+    };
+    assert_eq!(outside(files(&machine.home)), outside(before));
+}

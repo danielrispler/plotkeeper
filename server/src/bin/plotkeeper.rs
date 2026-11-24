@@ -152,8 +152,9 @@ fn wire(verb: &str, home: &std::path::Path) -> ExitCode {
     }
 }
 
-/// The first start's consent step (#434): asks in the terminal, when stdin is one, about the harnesses found with no
-/// answer, and wires them on yes. A failure is said and the server starts anyway.
+/// The first start's wiring step (#434): rewires the wired harnesses whose fingerprint changed (#438), then asks in the
+/// terminal, when stdin is one, about the harnesses found with no answer, and wires them on yes. A failure is said and
+/// the server starts anyway.
 fn wire_on_start(home: &std::path::Path) {
     let beside = match beside() {
         Ok(beside) => beside,
