@@ -467,14 +467,24 @@ body[data-panel="diff"] .map-stage { --panel-w: min(var(--panel-wide), calc(100%
    faint edge, a deep shadow and a round corner. It never darkens the map under it. */
 .glass { background: var(--glass); backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur)); border-radius: var(--glass-radius);
          box-shadow: var(--glass-shadow); }
-/* The side area, over the map's right: the part's sheet, the drawer under it, then the agents no part holds and the background runs. Only its cards take the pointer. */
-.map-side { position: absolute; top: var(--inset); right: var(--inset); width: var(--map-sheet); max-height: calc(100% - 2 * var(--inset)); z-index: 3;
-            display: flex; flex-direction: column; gap: var(--sp-5); pointer-events: none; }
+/* The side area, over the map's right: the part's sheet, the drawer under it, then the agents no part holds and the background runs.
+   It is one scroll column at most the map's height less its insets (#445): its cards keep their own height, so the sheet and the drawer never
+   scroll on their own, and a wheel at its end never reaches the map. It hugs its cards, so it takes the pointer, its scrollbar with it. Its width is the sheet's, `--sheet-w` as Daniel resized it
+   (`map-sheet.ts`), between `--map-sheet-min` and half the map. */
+.map-side { position: absolute; top: var(--inset); right: var(--inset); width: clamp(var(--map-sheet-min), var(--sheet-w, var(--map-sheet)), 50%);
+            max-height: calc(100% - 2 * var(--inset)); z-index: 3; display: flex; flex-direction: column; gap: var(--sp-5); overflow-y: auto; overscroll-behavior: contain; }
 .map-side[hidden] { display: none; }
-.map-side > * { pointer-events: auto; min-height: 0; flex: 0 1 auto; }
+.map-side > * { flex: none; }
 #map-sheet:empty, #map-drawer:empty, #map-not-placed:empty, #map-runs:empty { display: none; }
-#map-sheet, #map-drawer { overflow-y: auto; padding: var(--sp-6) var(--sp-6) var(--sp-5); animation: glass-in var(--glass-in) var(--glass-ease); }
-#map-sheet { flex-shrink: 0; max-height: 70%; }
+#map-sheet, #map-drawer { padding: var(--sp-6) var(--sp-6) var(--sp-5); animation: glass-in var(--glass-in) var(--glass-ease); }
+#map-sheet { position: relative; }
+/* The sheet's left edge resizes it (#445): a thin focusable bar, lit on hover, while dragged and with the focus ring; the page selects no
+   text while it is dragged. */
+.sheet-resize { position: absolute; top: 0; bottom: 0; left: 0; width: var(--sheet-handle); padding: 0; border: 0; border-radius: var(--glass-radius) 0 0 var(--glass-radius);
+                background: transparent; cursor: col-resize; touch-action: none; -webkit-user-select: none; user-select: none; transition: background var(--motion); }
+.sheet-resize:hover, .sheet-resize.dragging { background: var(--selected); }
+.sheet-resize:focus-visible { outline-offset: calc(-1 * var(--mark)); background: var(--selected); }
+body.resizing { -webkit-user-select: none; user-select: none; cursor: col-resize; }
 /* The left panel (#385): the story, History, the diff (widened to at most 780 px) or Settings, inset like the sheet and in its glass. */
 .map-panel { position: absolute; left: var(--inset); top: var(--inset); bottom: var(--inset); width: var(--panel-w); z-index: 4; display: flex; flex-direction: column;
              overflow: hidden; animation: panel-in var(--glass-in) var(--glass-ease); }

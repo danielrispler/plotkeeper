@@ -1551,6 +1551,150 @@ const mapPanelBrief = (): Fixture =>
   pr_brief: briefOf(storySteps()),
 });
 
+// The part sheet in the map (#445). A long description on the shell, whose check-backed law opens a long proof in the drawer.
+const longSheet = (() => {
+  const doc = JSON.parse(mapFile);
+  doc.parts.find((p: { id: string }) => p.id === "shell").description = "Reads the event log, feeds each line to the core and acts on what the core says. ".repeat(12);
+  return JSON.stringify(doc);
+})();
+const longProof = [{ file: "workbench/tests/wire.rs", line: 11, test: "wire_types_match", first: 11, snippet: ["// @law: wire-types-agree", "#[test]", "fn wire_types_match() {", ...Array.from({ length: 40 }, (_, i) => `    let sample_${i} = studio_test_support::sample(${i});`), "}"].join("\n") }];
+const sheetHelpers = `
+      const esc = async () => { document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", key: "Escape", bubbles: true })); await wait(100); };
+      const sheetOf = () => document.querySelector("#map-sheet .sheet");
+      const drawerOf = () => document.querySelector("#map-drawer .drawer");
+      const plate = (id) => document.querySelector("#map .plate[data-id=" + id + "]");
+      const proof = async () => {
+        [...document.querySelectorAll("#map-sheet .sheet-law button")].find((b) => b.textContent === "See the proof").click();
+        await wait(100);
+      };`;
+// At 1300x700 (`…Short`): the side column, not the sheet or the drawer, scrolls, so the sheet's last button and the drawer's end are reachable;
+// the drawer's code block keeps its own scroll (danielrispler/plotkeeper#443, issue 2a).
+const mapSheetScrollShort = (): Fixture =>
+  mapOpened(`${sheetHelpers}
+      plate("shell").click();
+      await wait(300);
+      const side = document.getElementById("map-side"), sheet = document.getElementById("map-sheet");
+      const inWindow = (node) => { const r = node.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; };
+      side.scrollTop = 1e6;
+      await wait(50);
+      const last = [...sheet.querySelectorAll("button")].at(-1);
+      if (!inWindow(last)) log("snap:fail the sheet's last button (" + last.textContent + ") is outside the window with the side column scrolled to its end: bottom " + Math.round(last.getBoundingClientRect().bottom) + " of " + innerHeight);
+      await proof();
+      const drawer = document.getElementById("map-drawer"), code = drawer.querySelector(".drawer-code");
+      if (!code) return log("snap:fail the proof drawer did not open");
+      side.scrollTop = 1e6;
+      await wait(50);
+      if (side.scrollHeight <= side.clientHeight) log("snap:fail the side column does not scroll: " + side.scrollHeight + " <= " + side.clientHeight);
+      if (side.getBoundingClientRect().bottom > innerHeight) log("snap:fail the side column runs below the window");
+      if (!inWindow([...drawer.querySelectorAll("button")].at(-1) ?? code)) log("snap:fail the drawer's end is outside the window with the side column scrolled to its end");
+      for (const [name, box] of [["sheet", sheet], ["drawer", drawer]]) if (box.scrollHeight > box.clientHeight + 1) log("snap:fail the " + name + " is a scroll box of its own: " + box.scrollHeight + " > " + box.clientHeight);
+      if (code.scrollHeight <= code.clientHeight) log("snap:fail the drawer's code block does not scroll on its own");
+      // The glass's rise ends before the picture is taken.
+      await wait(400);
+      log("sheet scroll ok");`, { map_state: mapState({ source: longSheet }), map_proof: longProof });
+// The sheet's width (#445): a real drag of its left edge, within 300 px and half the map, arrow keys on the focused handle, a double-click
+// back to 360, and the width kept in this browser.
+const mapSheetWidth = (): Fixture => ({
+  ...mapOpened(`${sheetHelpers}
+      plate("shell").click();
+      await wait(300);
+      const sheet = document.getElementById("map-sheet"), stage = document.querySelector(".map-stage");
+      const width = () => Math.round(sheet.getBoundingClientRect().width);
+      const near = (a, b) => Math.abs(a - b) <= 2;
+      if (!near(width(), 360)) log("snap:fail the sheet opens " + width() + " px wide, not 360");
+      const handle = sheet.querySelector(".sheet-resize");
+      if (!handle) return log("snap:fail the sheet has no resize handle");
+      await __snapDrag(handle, -100, 0);
+      await wait(100);
+      if (!near(width(), 460)) log("snap:fail a 100 px drag left made the sheet " + width() + " px wide, not 460");
+      if (Number(localStorage.getItem("map-sheet-width")) !== width()) log("snap:fail the dragged width is not kept: " + localStorage.getItem("map-sheet-width"));
+      await __snapDrag(handle, -2000, 0);
+      await wait(100);
+      const half = Math.floor(stage.getBoundingClientRect().width / 2);
+      if (!near(width(), half)) log("snap:fail a long drag left made the sheet " + width() + " px wide, not half the map, " + half);
+      await __snapDrag(handle, 2000, 0);
+      await wait(100);
+      if (!near(width(), 300)) log("snap:fail a long drag right made the sheet " + width() + " px wide, not 300");
+      handle.focus();
+      const before = width();
+      handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", code: "ArrowLeft", bubbles: true }));
+      await wait(50);
+      if (width() <= before) log("snap:fail ArrowLeft on the handle did not widen the sheet: " + before + " to " + width());
+      const wider = width();
+      handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", code: "ArrowRight", bubbles: true }));
+      await wait(50);
+      if (width() >= wider) log("snap:fail ArrowRight on the handle did not narrow the sheet: " + wider + " to " + width());
+      if (!sheetOf()) log("snap:fail the arrow keys closed the sheet");
+      await __snapDrag(handle, -60, 0);
+      await __snapDoubleClick(handle);
+      await wait(100);
+      if (!near(width(), 360)) log("snap:fail a double-click on the handle left the sheet " + width() + " px wide, not 360");
+      log("sheet width ok");`, { map_state: mapState() }),
+  realPointer: true, snapDone: "sheet width ok",
+});
+// A width kept from an earlier visit opens the sheet at that width.
+const mapSheetKeptWidth = (): Fixture => ({
+  ...mapOpened(`${sheetHelpers}
+      plate("shell").click();
+      await wait(300);
+      const width = Math.round(document.getElementById("map-sheet").getBoundingClientRect().width);
+      if (Math.abs(width - 480) > 2) log("snap:fail the kept width 480 opened the sheet " + width + " px wide");
+      await wait(400);
+      log("kept width ok");`, { map_state: mapState() }),
+  storage: { "map-sheet-width": "480" }, snapDone: "kept width ok",
+});
+// Closing the sheet (#445): a real click, or a press of 3 px, on the empty map closes the sheet and its drawer; a longer drag pans and keeps
+// them; a click on another part switches the sheet; × (named "Close") and Esc close it.
+const mapSheetClose = (): Fixture => ({
+  ...mapOpened(`${sheetHelpers}
+      const side = document.getElementById("map-side").getBoundingClientRect();
+      // A point of the empty map, clear of the plates, the tray, the legend and the side column.
+      let spot = null;
+      for (let y = 120; y < innerHeight - 160 && !spot; y += 40) for (let x = 80; x < side.left - 80 && !spot; x += 40) {
+        const hit = document.elementFromPoint(x, y);
+        if (hit && (hit.classList.contains("map-world") || hit.classList.contains("map-canvas"))) spot = { getBoundingClientRect: () => ({ left: x - 1, top: y - 1, width: 2, height: 2 }) };
+      }
+      if (!spot) return log("snap:fail no empty spot of the map found");
+      const opened = async () => {
+        await __snapClick(plate("shell"));
+        await wait(100);
+        if (sheetOf()?.dataset.part !== "shell") log("snap:fail a click on the shell did not open its sheet");
+        await proof();
+        if (!drawerOf()) log("snap:fail the proof drawer did not open");
+      };
+      await opened();
+      await __snapClick(spot);
+      await wait(80);
+      if (sheetOf() || drawerOf()) log("snap:fail a click on the empty map left the sheet " + !!sheetOf() + " or the drawer " + !!drawerOf() + " open");
+      await opened();
+      await __snapDrag(spot, 3, 0);
+      await wait(80);
+      if (sheetOf() || drawerOf()) log("snap:fail a 3 px press on the empty map left the sheet or the drawer open");
+      await opened();
+      const was = plate("hook").getBoundingClientRect().left;
+      await __snapDrag(spot, 40, 0);
+      await wait(80);
+      if (Math.abs(plate("hook").getBoundingClientRect().left - was - 40) > 2) log("snap:fail a 40 px drag did not pan the map");
+      if (!sheetOf() || !drawerOf()) log("snap:fail a 40 px drag on the empty map closed the sheet or the drawer");
+      await __snapClick(plate("hook"));
+      await wait(100);
+      if (sheetOf()?.dataset.part !== "hook") log("snap:fail a click on another part did not switch the sheet: " + sheetOf()?.dataset.part);
+      // The shell's proof drawer stays open over the switch; Esc peels it first.
+      await esc();
+      if (drawerOf() || !sheetOf()) log("snap:fail the first Esc did not close the drawer alone");
+      const close = document.querySelector("#map-sheet .sheet-close");
+      if (close?.getAttribute("aria-label") !== "Close") log("snap:fail × is not named Close: " + close?.getAttribute("aria-label"));
+      close.click();
+      await wait(100);
+      if (sheetOf()) log("snap:fail × did not close the sheet");
+      await __snapClick(plate("hook"));
+      await wait(100);
+      await esc();
+      if (sheetOf()) log("snap:fail Esc did not close the sheet");
+      log("sheet close ok");`, { map_state: mapState(), map_proof: longProof }),
+  realPointer: true, snapDone: "sheet close ok",
+});
+
 export const fixtures = {
   ...railFixtures,
   // Unconfigured, with both writers found: preset to Claude, summaries off until a Test passes.
@@ -1923,6 +2067,11 @@ export const fixtures = {
   mapFreshNarrow: mapFresh,
   mapNoMap,
   mapNoMapNarrow: mapNoMap,
+  // The part sheet in the map: one scrolling column, a resizable width, and a click on the empty map closes it (#445).
+  mapSheetScrollShort,
+  mapSheetWidth,
+  mapSheetKeptWidth,
+  mapSheetClose,
   mapEmpty: () =>
     mapOpened(`
       const draft = document.querySelector("#map .map-empty .map-draft");
