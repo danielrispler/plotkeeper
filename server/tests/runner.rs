@@ -342,8 +342,9 @@ fn a_runs_private_temp_folder_is_made_new_and_private_and_removed_after() {
     assert_eq!(runner.outcome(&id).unwrap().result, "700");
     assert!(!tmp.exists(), "the temp folder outlived the run");
 
-    // A folder already there is never handed to a run.
+    // A folder already there is never handed to a run, and never removed by it.
     fs::create_dir(&tmp).unwrap();
+    fs::write(tmp.join("theirs"), "").unwrap();
     let id = submit(&runner, PROJECT, "touch \"$PK_TMP/ran\"");
     until(&runner, &changes, ended(&id));
     assert_eq!(runner.outcome(&id).unwrap().end, End::Failed);
@@ -351,6 +352,76 @@ fn a_runs_private_temp_folder_is_made_new_and_private_and_removed_after() {
         !tmp.join("ran").exists(),
         "the harness ran in a shared folder"
     );
+    assert!(
+        tmp.join("theirs").exists(),
+        "the run removed a folder it did not make"
+    );
+}
+
+#[test]
+fn a_run_whose_check_fails_leaves_a_folder_of_its_temp_folders_name_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    settings(dir.path(), r#"{ "checks": { "/p/app": ["cargo test"] } }"#);
+    let tmp = dir.path().join("pk-tmp");
+    fs::create_dir(&tmp).unwrap();
+    fs::write(tmp.join("theirs"), "").unwrap();
+    let harness = Checked {
+        check: "exit 3",
+        tmp: Some(tmp.clone()),
+    };
+    let (runner, changes) = open(dir.path(), Arc::new(harness));
+    let id = submit(&runner, PROJECT, "true");
+    until(&runner, &changes, ended(&id));
+    let outcome = runner.outcome(&id).unwrap();
+    assert_eq!(outcome.end, End::Failed);
+    // A check that prints nothing still says why.
+    assert_eq!(
+        outcome.result,
+        format!("{SANDBOX_DOWN}: the check exited 3")
+    );
+    assert!(
+        tmp.join("theirs").exists(),
+        "the run removed a folder it did not make"
+    );
+}
+
+#[test]
+fn cancel_removes_the_temp_folder_of_the_run_it_kills() {
+    let dir = tempfile::tempdir().unwrap();
+    settings(dir.path(), r#"{ "checks": { "/p/app": ["cargo test"] } }"#);
+    let tmp = dir.path().join("pk-tmp");
+    let harness = Checked {
+        check: "true",
+        tmp: Some(tmp.clone()),
+    };
+    let (runner, changes) = open(dir.path(), Arc::new(harness));
+    let id = submit(&runner, PROJECT, "touch \"$PK_TMP/made\"; sleep 60");
+    until(&runner, &changes, |r| {
+        state(r, &id) == Some(RunState::Running)
+    });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !tmp.join("made").exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the run never wrote its temp folder"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    runner.cancel(&id).unwrap();
+    assert!(
+        !tmp.exists(),
+        "a cancelled run's temp folder was left behind"
+    );
+}
+
+#[test]
+fn a_result_that_only_names_the_sandbox_settings_is_no_failure() {
+    let bench = bench();
+    let id = bench.run(&says(
+        r#"{"type":"result","subtype":"success","is_error":false,"result":"The runner reads sandbox_apply: and Sandbox is required from a run's output."}"#,
+    ));
+    bench.until(ended(&id));
+    assert_eq!(bench.runner.outcome(&id).unwrap().end, End::Done);
 }
 
 #[test]

@@ -20,7 +20,7 @@ claude --restricted --safe-mode --strict-mcp-config --permission-mode dontAsk --
   --settings <the sandbox block> --output-format json -p <the prompt>
 ```
 
-Standard input is closed, so the prompt is the last argument. `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are removed, so the run uses the CLI's own login, and `PLOTKEEPER_INTERNAL=1` keeps the hook from recording it, as for the writer. `CLAUDE_CODE_TMPDIR` names the run's private temp folder, `/tmp/pk-<8 hex>`: the sandbox then gives the tools `/tmp/pk-<8 hex>/claude-<uid>` as `TMPDIR`. Without it the tools' `TMPDIR` is the shared `/tmp/claude-<uid>`, where every session keeps its scratchpad, and the sandbox lets them write there. Claude Code uses the folder only while `<it>/claude-<uid>` is at most 44 bytes, so the name is short and of fixed length. `--restricted` drops the user's, the project's and the local settings files; `--safe-mode` drops hooks, plugins, skills and `CLAUDE.md`.
+Standard input is closed, so the prompt is the last argument. `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are removed, so the run uses the CLI's own login, and `PLOTKEEPER_INTERNAL=1` keeps the hook from recording it, as for the writer. `CLAUDE_CODE_TMPDIR` names the run's private temp folder, `/tmp/pk-<16 hex>`: the sandbox then gives the tools `/tmp/pk-<16 hex>/claude-<uid>` as `TMPDIR`. Without it the tools' `TMPDIR` is the shared `/tmp/claude-<uid>`, where every session keeps its scratchpad, and the sandbox lets them write there. Claude Code uses the folder only while `<it>/claude-<uid>` is at most 44 bytes, so the name is of fixed length, 42 bytes with the longest uid. `--restricted` drops the user's, the project's and the local settings files; `--safe-mode` drops hooks, plugins, skills and `CLAUDE.md`.
 
 The sandbox block is this, with plotkeeper's data folder first in `denyRead`, since it holds the page's token:
 
@@ -70,7 +70,7 @@ Runs live in the runs folder, `~/Library/Caches/plotkeeper/runs/`, outside plotk
 
 plotkeeper starts each run through the launcher, `plotkeeper-run <run's folder>`, in a process group of its own, so the run outlives plotkeeper: stopping plotkeeper to rebuild it does not kill a run.
 
-- **The start.** The launcher first checks that the sandbox can start, by running `/usr/bin/true` under `sandbox-exec`. It cannot inside another sandbox, such as a plotkeeper started from a sandboxed shell, and Claude Code then keeps the run going with every command refused and exits 0. A failed check ends the run as failed, "The sandbox could not start", before setup and before the harness. Then the setup command, then the run's private temp folder, made new and `0700` (a folder already there fails the run), then the harness. The folder is removed when the harness exits.
+- **The start.** The launcher first checks that the sandbox can start, by running `/usr/bin/true` under `sandbox-exec`. It cannot inside another sandbox, such as a plotkeeper started from a sandboxed shell, and Claude Code then keeps the run going with every command refused and exits 0. A failed check ends the run as failed, "The sandbox could not start", before setup and before the harness; the check counts against the run's time limit. Then the setup command, then the run's private temp folder, made new and `0700`, then the harness. A folder already there fails the run and is left alone. The launcher removes the folder it made when the harness exits, and Cancel removes the folder of a run it kills.
 
 - **The lock.** plotkeeper takes an exclusive lock on the folder's `lock` and hands it to the launcher as its standard input. The launcher gives it to no child and holds it until it exits, however it exits. A run is alive exactly while that lock is held, which plotkeeper asks without waiting.
 - **The status.** When the harness exits, or the time limit passes, the launcher writes `status.json` whole, by a temporary file and a rename. Its last act is then to kill its own process group, itself included, so nothing a run started outlives it: not a run stopped at its limit, and not a stray child of a run that finished.
@@ -88,7 +88,7 @@ plotkeeper starts each run through the launcher, `plotkeeper-run <run's folder>`
 
 ## Outcome
 
-A run ends as one of: finished; finished with tool calls denied; failed; stopped at its limit; died; setup failed; not logged in; rate limited. A run that exits 0 with denials in its result is reported with them, never as a clean success. A result that says it is an error, by `is_error` or by a `subtype` such as `error_max_turns`, is a failure whatever the exit code, and so is a run whose result or error output shows the sandbox failing (`sandbox_apply:` or `Sandbox is required`). Only a failed run's words are read for a login or a limit, with the writer's own word list, so a good result that mentions a rate limit pauses nothing; a failed run that only mentions one does pause, which costs one Resume.
+A run ends as one of: finished; finished with tool calls denied; failed; stopped at its limit; died; setup failed; not logged in; rate limited. A run that exits 0 with denials in its result is reported with them, never as a clean success. A result that says it is an error, by `is_error` or by a `subtype` such as `error_max_turns`, is a failure whatever the exit code, and so is a run whose result or error output shows the sandbox failing (`sandbox_apply: Operation not permitted` or `Sandbox is required but`). A result that only names the settings does not match. Only a failed run's words are read for a login or a limit, with the writer's own word list, so a good result that mentions a rate limit pauses nothing; a failed run that only mentions one does pause, which costs one Resume.
 
 Each run appends one line to `background-runs.jsonl` in the data folder: the time, its id, kind, project, outcome, denials, cost and duration. A cancelled run is recorded as `cancelled`.
 
@@ -132,5 +132,6 @@ v1 is one user on his own Mac, runs start only on his click, and a prompt holds 
 
 - A run's tools can connect to any server on the Mac's loopback. plotkeeper's own server needs its cookie or token, which a run cannot read.
 - Only the shell is sandboxed, not the whole `claude` process, which Anthropic's docs ask of fully unattended runs.
-- The private temp folder holds only while `<it>/claude-<uid>` is at most 44 bytes; past that, Claude Code falls back to the shared folder without a word. The name is of fixed length, 34 bytes with the longest uid.
+- The private temp folder holds only while `<it>/claude-<uid>` is at most 44 bytes; past that, Claude Code falls back to the shared folder without a word. The name is of fixed length, 42 bytes with the longest uid.
+- A run whose launcher dies leaves its temp folder in `/tmp` (private, `0700`) until the Mac restarts.
 - Tools may read the home folder outside the deny list.

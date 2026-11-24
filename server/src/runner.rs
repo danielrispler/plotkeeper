@@ -134,8 +134,12 @@ pub const SANDBOX_CHECK: [&str; 4] = [
     "/usr/bin/true",
 ];
 
-/// What Claude Code prints when its sandbox fails after the start: a run that shows one failed, whatever its exit.
-const SANDBOX_FAILURES: [&str; 2] = ["sandbox_apply:", "Sandbox is required"];
+/// What Claude Code and Seatbelt print when the sandbox fails after the start: a run that shows one failed, whatever its
+/// exit. Whole phrases, so a result that only names the setting does not match.
+const SANDBOX_FAILURES: [&str; 2] = [
+    "sandbox_apply: Operation not permitted",
+    "Sandbox is required but",
+];
 
 /// What a harness builds its command from.
 pub struct Plan<'a> {
@@ -276,15 +280,15 @@ pub fn claude_command(program: &Path, plan: &Plan) -> HarnessCommand {
     }
 }
 
-/// The run's own temp folder, `/tmp/pk-<8 hex>` named from its working `folder`. Claude Code gives the sandboxed tools
+/// The run's own temp folder, `/tmp/pk-<16 hex>` named from its working `folder`. Claude Code gives the sandboxed tools
 /// `<CLAUDE_CODE_TMPDIR>/claude-<uid>` as their `TMPDIR` only while that path is at most 44 bytes, and otherwise falls
-/// back to the shared `/tmp/claude-<uid>` (2.1.325; research `sandbox-loopback-preflight-temp.md`), so the name is short
-/// and of fixed length: 34 bytes with the longest uid.
+/// back to the shared `/tmp/claude-<uid>` (2.1.325; research `sandbox-loopback-preflight-temp.md`), so the name is of
+/// fixed length, 42 bytes with the longest uid, and long enough (64 bits) that two runs never share it.
 pub fn private_tmp(folder: &Path) -> PathBuf {
     use std::hash::{DefaultHasher, Hash, Hasher};
     let mut hasher = DefaultHasher::new();
     folder.hash(&mut hasher);
-    PathBuf::from(format!("/tmp/pk-{:08x}", hasher.finish() as u32))
+    PathBuf::from(format!("/tmp/pk-{:016x}", hasher.finish()))
 }
 
 /// How a run ended.
@@ -560,9 +564,11 @@ pub fn launch(dir: &Path) -> Result<(), String> {
     let started_ms = millis();
     let deadline = Instant::now() + Duration::from_secs(stored.timeout_secs);
     let tmp = stored.command.private_tmp.as_deref();
-    let status = match run_check(&stored)
+    // Only a folder this launcher made is removed: never one that was there before, which fails the run.
+    let mut made = None;
+    let status = match run_check(&stored, deadline)
         .and_then(|()| run_setup(dir, &stored, deadline))
-        .and_then(|()| make_private(tmp))
+        .and_then(|()| make_private(tmp).map(|()| made = tmp))
         .and_then(|()| run_harness(dir, &stored, deadline))
     {
         Ok(exit) => Status {
@@ -571,7 +577,7 @@ pub fn launch(dir: &Path) -> Result<(), String> {
         },
         Err(status) => status,
     };
-    if let Some(tmp) = tmp {
+    if let Some(tmp) = made {
         let _ = fs::remove_dir_all(tmp);
     }
     let status = Status {
@@ -608,24 +614,45 @@ fn wait_until(mut child: Child, deadline: Instant) -> Waited {
     }
 }
 
-/// Runs the command's sandbox check: a failure is [`SANDBOX_DOWN`], with what the check printed.
-fn run_check(stored: &Launched) -> Result<(), Status> {
+/// Runs the command's sandbox check within the run's time limit: a failure is [`SANDBOX_DOWN`], with what the check
+/// printed, or its exit code when it printed nothing.
+fn run_check(stored: &Launched, deadline: Instant) -> Result<(), Status> {
+    use std::io::Read;
     let Some((program, args)) = stored.command.check.split_first() else {
         return Ok(());
     };
     let down = |why: String| Status {
-        error: Some(format!("{SANDBOX_DOWN}: {}", why.trim())),
+        error: Some(format!("{SANDBOX_DOWN}: {why}")),
         ..Status::default()
     };
-    let out = Command::new(program)
+    let mut child = Command::new(program)
         .args(args)
         .stdin(Stdio::null())
-        .output()
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|e| down(e.to_string()))?;
-    if out.status.success() {
-        return Ok(());
+    let stderr = child.stderr.take();
+    let code = match wait_until(child, deadline) {
+        Waited::Exited(Some(0)) => return Ok(()),
+        Waited::Exited(code) => code,
+        Waited::TimedOut => {
+            return Err(Status {
+                timed_out: true,
+                ..Status::default()
+            });
+        }
+    };
+    let mut said = String::new();
+    if let Some(mut stderr) = stderr {
+        let _ = stderr.read_to_string(&mut said);
     }
-    Err(down(String::from_utf8_lossy(&out.stderr).into_owned()))
+    Err(down(match said.trim() {
+        "" => code.map_or("the check was stopped by a signal".into(), |code| {
+            format!("the check exited {code}")
+        }),
+        said => said.to_string(),
+    }))
 }
 
 /// Makes the run's private temp folder, which must be new: a folder already there is never shared with a run.
@@ -1284,6 +1311,12 @@ impl Runner {
                 _ => 0,
             };
             self.record(&run.stored, "cancelled".into(), None, since);
+        }
+        // A launcher killed here never removed its temp folder. Its name is the run's own, so no other run holds it.
+        if matches!(run.phase, Phase::Running { .. })
+            && let Some(tmp) = &run.stored.command.private_tmp
+        {
+            let _ = fs::remove_dir_all(tmp);
         }
         if let Err(e) = fs::remove_dir_all(&dir) {
             log::warn!("background run {id}: its folder was not removed: {e}");
