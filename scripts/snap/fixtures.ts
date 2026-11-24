@@ -131,8 +131,47 @@ const mapTray = (): Fixture =>
     map_state: mapState({ fog: { shell: "thick" }, ready: [{ number: 334, title: "PR briefs: the brief written for each ready PR", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }, { number: 336, title: "Ready for review tray", head: "a".repeat(40), brief: null }] }),
   });
 
-// Background runs (#390) beside the map: a running run, the queue behind it, and an ended run that was denied a tool call. Cancel asks the
-// server for that run.
+// The confirm dialog (#459) a destructive button opens: modal, named by its heading, Cancel focused, the confirm button saying `verb`, and
+// naming each of `lost`. Nothing reaches the server's `api` until it is confirmed: Esc and Cancel send nothing. `press` is the script that
+// presses the button, found anew each time, since a refresh redraws it.
+const confirmFirst = (press: string, api: string, verb: string, lost: string[]) => `
+      {
+        const pause = () => new Promise((done) => setTimeout(done, 100));
+        const sent = [];
+        const real = window.fetch;
+        window.fetch = (url, init) => (sent.push(String(url)), real(url, init));
+        const asked = () => sent.filter((call) => call.includes("/api/${api}")).length;
+        const dialog = document.getElementById("confirm-dialog");
+        // A step that closes the dialog, then lets the answer land. Snap's Chrome draws no frame inside its time budget, so the dialog's
+        // close event never fires here; the answer comes from the form's submit and the dialog's cancel, which fire at once.
+        const closing = async (close) => {
+          close();
+          await pause();
+        };
+        ${press};
+        await pause();
+        if (!dialog?.matches(":modal")) log("snap:fail ${api}: no modal confirm opened");
+        else {
+          if (!document.getElementById(dialog.getAttribute("aria-labelledby") ?? "")?.textContent) log("snap:fail ${api}: the confirm has no name");
+          if (document.activeElement?.textContent !== "Cancel") log("snap:fail ${api}: Cancel is not focused but " + document.activeElement?.textContent);
+          if (document.getElementById("confirm-yes")?.textContent !== ${JSON.stringify(verb)}) log("snap:fail ${api}: the confirm button says " + document.getElementById("confirm-yes")?.textContent);
+          for (const word of ${JSON.stringify(lost)}) if (!dialog.textContent.includes(word)) log("snap:fail ${api}: the confirm does not name " + word + ": " + dialog.textContent);
+          if (asked()) log("snap:fail ${api} reached the server before the confirm");
+          await closing(() => dialog.requestClose());
+          if (dialog.open || asked()) log("snap:fail ${api}: Esc did not close the confirm, or sent it");
+          ${press};
+          await pause();
+          await closing(() => [...dialog.querySelectorAll("button")].find((b) => b.textContent === "Cancel").click());
+          if (dialog.open || asked()) log("snap:fail ${api}: Cancel did not close the confirm, or sent it");
+          ${press};
+          await pause();
+          await closing(() => document.getElementById("confirm-yes").click());
+          if (asked() !== 1) log("snap:fail ${api}: confirmed, it reached the server " + asked() + " times");
+        }
+        window.fetch = real;
+      }`;
+// Background runs (#390) beside the map: a running run, the queue behind it, and an ended run that was denied a tool call. Cancel on the
+// running run asks first (#459), naming its worktree and changes; Cancel on a queued run and Dismiss on the ended one ask the server at once.
 const runAt = Date.UTC(2026, 10, 23, 12, 4);
 const mapRuns = (): Fixture =>
   mapOpened(`
@@ -148,9 +187,15 @@ const mapRuns = (): Fixture =>
       const words = (row) => [...row.querySelectorAll("button")].map((button) => button.textContent).join(",");
       if (words(rows[0]) !== "Cancel" || words(rows[1]) !== "Cancel" || words(rows[3]) !== "Copy prompt,Dismiss") log("snap:fail the buttons: " + rows.map(words).join(" / "));
       if (document.querySelector("#map-runs .runs-paused")) log("snap:fail a pause shows with no pause");
-      rows[0].querySelector("button").click();
+      const press = (id, words) => [...document.querySelectorAll(\`#map-runs .run-row[data-run="\${id}"] button\`)].find((b) => b.textContent === words).click();
+      press("19a2f-2", "Cancel");
+      press("19a2f-0", "Dismiss");
       await new Promise((done) => setTimeout(done, 50));
-      if (!sent.some((call) => call.includes("/api/run_cancel") && call.includes("19a2f-1"))) log("snap:fail Cancel did not ask the server: " + sent.join(" | "));
+      if (document.getElementById("confirm-dialog").open) log("snap:fail a queued run's Cancel or an ended run's Dismiss asked first");
+      if (!sent.some((call) => call.includes("/api/run_cancel") && call.includes("19a2f-2"))) log("snap:fail Cancel on a queued run did not ask the server at once: " + sent.join(" | "));
+      if (!sent.some((call) => call.includes("/api/run_cancel") && call.includes("19a2f-0"))) log("snap:fail Dismiss did not ask the server at once: " + sent.join(" | "));
+      ${confirmFirst(`press("19a2f-1", "Cancel")`, "run_cancel", "Cancel run", ["worktree", "changes"])}
+      if (!sent.some((call) => call.includes("/api/run_cancel") && call.includes("19a2f-1"))) log("snap:fail confirmed, Cancel did not ask the server for the running run: " + sent.join(" | "));
       log("runs ok");`, {
     map_state: mapState({
       runs: {
@@ -233,6 +278,7 @@ const mapBackLaw = (): Fixture =>
       const outputs = [...box.querySelectorAll(".patch-output")].map((pre) => pre.textContent);
       if (outputs.length !== 2 || !outputs[0].includes("PASS") || !outputs[1].includes("FAIL")) log("snap:fail the outputs: " + outputs.join(" / "));
       if ([...box.querySelectorAll("button")].map((b) => b.textContent).join(",") !== "Open draft PR,Discard,Close") log("snap:fail the review's buttons");
+      ${confirmFirst(`[...document.querySelectorAll("#map-patch-review button")].find((b) => b.textContent === "Discard").click()`, "law_patch_discard", "Discard patch", ["patch"])}
       log("back a law ok");`, {
     map_state: mapState({
       law_patches: [
@@ -2054,7 +2100,8 @@ export const fixtures = {
       if (!document.getElementById("writer-key-state")?.textContent.includes(": set")) log("snap:fail the key row does not say set");
       if (document.getElementById("writer-key")?.placeholder !== "Replace the API key" || !document.getElementById("writer-key-remove")) log("snap:fail no replace or remove");
       const outcome = document.getElementById("writer-outcome");
-      if (!outcome?.classList.contains("passed")) log("snap:fail no passed outcome: " + outcome?.textContent);`, true),
+      if (!outcome?.classList.contains("passed")) log("snap:fail no passed outcome: " + outcome?.textContent);
+      ${confirmFirst(`document.getElementById("writer-key-remove").click()`, "remove_api_key", "Remove key", ["Keychain"])}`, true),
   // A local Ollama set by its base URL alone (#367): the OpenAI-compatible API is preset before Claude, its model is typed,
   // its row shows the base URL and no key, and a Test of it passes.
   writersOpenAI: () =>
@@ -2069,7 +2116,8 @@ export const fixtures = {
       if (!document.getElementById("writer-openai-state")?.textContent.includes("no key")) log("snap:fail the row does not say no key");
       if (!document.getElementById("writer-openai-remove")) log("snap:fail no Remove with a base URL set");
       const outcome = document.getElementById("writer-outcome");
-      if (!outcome?.classList.contains("passed")) log("snap:fail no passed outcome: " + outcome?.textContent);`, true),
+      if (!outcome?.classList.contains("passed")) log("snap:fail no passed outcome: " + outcome?.textContent);
+      ${confirmFirst(`document.getElementById("writer-openai-remove").click()`, "remove_api_key", "Remove", ["http://localhost:11434/v1", "Keychain"])}`, true),
   // No claude: agy writes the summaries, and the section says PR briefs need Claude.
   writersBriefsNeedClaude: () =>
     writersOpen({
