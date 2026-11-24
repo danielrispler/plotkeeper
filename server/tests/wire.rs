@@ -390,3 +390,379 @@ fn the_wire_samples_of_the_writer_section_are_written_for_tsc() {
         &samples,
     );
 }
+
+/// A story with every field filled: an overview step and a chapter whose step carries a figure, a check, risks and cites.
+fn story() -> studio_understanding::pr_brief::Brief {
+    use studio_understanding::pr_brief::*;
+    let step = Step {
+        k: "Now".into(),
+        h: "The map's replies are sampled".into(),
+        b: "Each reply has a sample `tsc` checks.".into(),
+        on: vec!["server".into(), "window".into()],
+        hops: vec![Hop("server-window".into(), true)],
+        law: Some("wire-types-agree".into()),
+        covered_by: Some("server/tests/wire.rs".into()),
+        list: vec!["map_history".into()],
+        risks: vec![RiskItem {
+            part: "window".into(),
+            trigger: "a field renamed".into(),
+            check: "tsc -p scripts/wire".into(),
+        }],
+        fig: Some(Figure {
+            kind: "before-after".into(),
+            frame: Some("The replies".into()),
+            items: vec![FigItem {
+                label: "map_at".into(),
+                tone: Some("good".into()),
+                bad: Some(false),
+            }],
+            before: vec!["unsampled".into()],
+            after: vec!["sampled".into()],
+        }),
+        check: Some(BriefCheck {
+            kind: "pick".into(),
+            q: "Which reply is sampled?".into(),
+            opts: vec!["map_at".into(), "watch".into()],
+            key: serde_json::json!(0),
+            yes: "Right.".into(),
+            no: "Not that one.".into(),
+            flow: Some("look".into()),
+            test: Some("the_wire_samples_of_the_replies_are_written_for_tsc".into()),
+        }),
+        cites: vec![Cite {
+            from: "server/tests/wire.rs".into(),
+            quote: "@law: wire-types-agree".into(),
+        }],
+        flags: vec!["not confirmed from the facts".into()],
+    };
+    Brief {
+        title: "The wire's replies".into(),
+        overview: vec![step.clone()],
+        chapters: vec![Chapter {
+            behaviour: "The replies agree".into(),
+            parts: vec!["server".into()],
+            title: "Samples".into(),
+            steps: vec![step],
+            flags: vec!["one chapter".into()],
+            gist: "Every reply has a sample.".into(),
+            gist_flags: vec!["too long".into()],
+        }],
+        also: vec![Also {
+            part: "core".into(),
+            line: "Nothing changed in core.".into(),
+            flags: Vec::new(),
+        }],
+        unseen: vec!["Cargo.lock".into()],
+        decisions: vec![Decision {
+            id: Some("d1".into()),
+            text: "Bare JSON replies stay outside the law.".into(),
+            flags: Vec::new(),
+        }],
+        flags: vec!["a required part no chapter lights".into()],
+    }
+}
+
+/// A stored brief with every field filled.
+fn brief() -> studio_understanding::pr_brief::StoredBrief {
+    use studio_understanding::pr_brief::*;
+    StoredBrief {
+        version: 3,
+        pr: 334,
+        head: COMMIT.into(),
+        written_at: 1_761_743_990,
+        stale: true,
+        model: "claude-opus".into(),
+        shape: Shape {
+            chapters: true,
+            required: vec!["server".into()],
+            also: vec!["core".into()],
+            overview: true,
+            flows_changed: vec!["look".into()],
+        },
+        brief: story(),
+        guard: Some(Guard {
+            parts: vec!["server".into()],
+        }),
+    }
+}
+
+// @law: wire-types-agree
+#[test]
+fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
+    use studio_server::{
+        back_a_law::{NewLaw, Opened as LawOpened, Started},
+        ci_laws::Proof as TaggedTest,
+        history::{At, Commit, Entry as HistoryEntry, File},
+        micro_worlds::Explored,
+        part_catch_ups::Opened as CatchUpOpened,
+        pr_briefs::{BriefView, Opened as BriefOpened, Waiting},
+        pre_flight::OpenIssue,
+        projects::Project,
+        ratify::{Row, Status as Ratified},
+        stop_rules::{Facts, Kind as StopKind},
+    };
+    use studio_understanding::part_catch_up::{FogEntry, StoredCatchUp, Summary};
+    let entry = |fogged, brief| HistoryEntry {
+        commit: COMMIT.into(),
+        short: "0123456".into(),
+        label: "#334 PR briefs".into(),
+        fogged,
+        brief,
+    };
+    let commit = |url: Option<&str>| Commit {
+        commit: COMMIT.into(),
+        short: "0123456".into(),
+        label: "#334 PR briefs".into(),
+        url: url.map(String::from),
+        files: vec![File {
+            path: "server/src/map.rs".into(),
+            diff: "@@ -1 +1 @@\n-a\n+b\n".into(),
+        }],
+    };
+    let proof = |test: Option<&str>| TaggedTest {
+        file: "server/tests/wire.rs".into(),
+        line: 12,
+        test: test.map(String::from),
+        first: 12,
+        snippet: "// @law: wire-types-agree\n#[test]\nfn f() {}".into(),
+    };
+    let row = |status, change: &str| Row {
+        pr: 334,
+        kind: "law".into(),
+        id: "wire-types-agree".into(),
+        text: "The window's types and the Rust wire types agree.".into(),
+        change: change.into(),
+        status,
+    };
+    let view = |expected| BriefView {
+        brief: brief(),
+        partial: true,
+        expected,
+    };
+    let kinds = [
+        StopKind::Session,
+        StopKind::MapOpen,
+        StopKind::MapAction,
+        StopKind::Scrub,
+        StopKind::Proof,
+        StopKind::Know,
+        StopKind::BriefOffered,
+        StopKind::BriefOpened,
+        StopKind::ChapterDone,
+        StopKind::CheckAnswered,
+        StopKind::Ratify,
+        StopKind::UnconfirmedSeen,
+        StopKind::CatchUpOffered,
+        StopKind::CatchUpOpened,
+        StopKind::CatchUpDone,
+        StopKind::RatingOffered,
+        StopKind::RatingGiven,
+        StopKind::RatingSkipped,
+        StopKind::NoteGiven,
+        StopKind::ExplainBackGiven,
+        StopKind::ExplainBackMarked,
+        StopKind::RefresherEntered,
+        StopKind::StaleEntered,
+        StopKind::PreFlightRun,
+        StopKind::MicroWorldOpened,
+        StopKind::BackLawStarted,
+        StopKind::GuardOffered,
+        StopKind::GuardStarted,
+    ];
+    let catch_up = |summary| StoredCatchUp {
+        version: 1,
+        part: "server".into(),
+        fog: vec![COMMIT.into()],
+        written_at: 1_761_743_990,
+        model: "claude-opus".into(),
+        partial: true,
+        brief: story(),
+        summary,
+    };
+    let fog_entry = |pr: Option<u64>| FogEntry {
+        commit: COMMIT.into(),
+        pr,
+        title: "PR briefs".into(),
+        body: String::new(),
+    };
+    let samples: Vec<Sample> = vec![
+        ("HistoryEntry", json(entry(true, Some(334)))),
+        ("HistoryEntry", json(entry(false, None))),
+        (
+            "HistoricalMap",
+            json(At {
+                commit: COMMIT.into(),
+                short: "0123456".into(),
+                label: "#334 PR briefs".into(),
+                source: "{ \"parts\": [] }".into(),
+            }),
+        ),
+        (
+            "CommitFiles",
+            json(commit(Some("https://github.com/o/r/commit/0123456"))),
+        ),
+        ("CommitFiles", json(commit(None))),
+        ("Proof", json(proof(Some("the_wire_samples")))),
+        ("Proof", json(proof(None))),
+        (
+            "BriefView",
+            json(view(Some(studio_understanding::pre_flight::Expected {
+                expected: vec!["server".into()],
+                touched: vec!["server".into(), "window".into()],
+            }))),
+        ),
+        (
+            "BriefView",
+            json(BriefView {
+                brief: studio_understanding::pr_brief::StoredBrief {
+                    guard: None,
+                    ..brief()
+                },
+                ..view(None)
+            }),
+        ),
+        (
+            "WaitingBriefs",
+            json(Waiting {
+                project: "/repo".into(),
+                numbers: vec![334, 336],
+            }),
+        ),
+        ("RatifyRow", json(row(Ratified::Ratified, "added"))),
+        ("RatifyRow", json(row(Ratified::Accepted, "changed"))),
+        ("RatifyRow", json(row(Ratified::Overturned, "removed"))),
+        ("RatifyRow", json(row(Ratified::NotYet, ""))),
+        (
+            "StopFacts",
+            json(Facts {
+                active_days: 5,
+                merged_prs: 4,
+                engaged_days: 3,
+                scrubs: 2,
+                proofs: 1,
+                knows: 1,
+                dismissed: vec!["history".into()],
+                briefs_offered: 4,
+                briefs_opened: 2,
+                chapters_done: 3,
+                counts: kinds.into_iter().map(|k| (k, 1)).collect(),
+                began: Some("2026-11-03".into()),
+                stale_since: Some(1_761_743_990),
+            }),
+        ),
+        ("StopFacts", json(Facts::default())),
+        (
+            "BriefOpened",
+            json(BriefOpened::Brief(Box::new(view(None)))),
+        ),
+        ("BriefOpened", json(BriefOpened::Writing { writing: true })),
+        (
+            "CatchUpOpened",
+            json(CatchUpOpened::CatchUp(Box::new(catch_up(Some(Summary {
+                line: "This catch-up summarises the main shifts of 4 fog entries".into(),
+                entries: vec![fog_entry(Some(334)), fog_entry(None)],
+            }))))),
+        ),
+        (
+            "CatchUpOpened",
+            json(CatchUpOpened::CatchUp(Box::new(catch_up(None)))),
+        ),
+        (
+            "CatchUpOpened",
+            json(CatchUpOpened::Writing { writing: true }),
+        ),
+        (
+            "OpenIssue",
+            json(OpenIssue {
+                number: 374,
+                title: "Studio: the law wire-types-agree".into(),
+            }),
+        ),
+        (
+            "PreFlight",
+            json(studio_understanding::pre_flight::PreFlight {
+                issue: None,
+                title: "Parts picked by hand".into(),
+                parts: vec!["server".into()],
+                predicted: false,
+                at: 1_761_743_990_000,
+            }),
+        ),
+        (
+            "Explored",
+            json(Explored {
+                started: false,
+                line: Some("A run is already going".into()),
+                prompt: Some("In the repository at /repo, build a micro-world".into()),
+            }),
+        ),
+        (
+            "Explored",
+            json(Explored {
+                started: true,
+                line: None,
+                prompt: None,
+            }),
+        ),
+        (
+            "SavedProject",
+            json(Project {
+                path: "/repo".into(),
+                gone: true,
+            }),
+        ),
+        (
+            "BackLawStarted",
+            json(Started::Run {
+                id: "19a2f-1".into(),
+            }),
+        ),
+        (
+            "BackLawStarted",
+            json(Started::Refused {
+                line: "Claude hit its usage or rate limit".into(),
+                prompt: "Write a test that backs the law.".into(),
+            }),
+        ),
+        (
+            "LawPatchOpened",
+            json(LawOpened::Pr {
+                number: 412,
+                url: "https://github.com/someone/app/pull/412".into(),
+            }),
+        ),
+        ("LawPatchOpened", json(LawOpened::OutOfDate)),
+        (
+            "NewLaw",
+            json(NewLaw {
+                id: "core-keeps-order".into(),
+                on: "core".into(),
+                text: "Events apply in the order they were made.".into(),
+            }),
+        ),
+    ];
+    write(
+        env!("CARGO_MANIFEST_DIR"),
+        "server-replies",
+        &[
+            "HistoryEntry",
+            "HistoricalMap",
+            "CommitFiles",
+            "Proof",
+            "BriefView",
+            "WaitingBriefs",
+            "RatifyRow",
+            "StopFacts",
+            "BriefOpened",
+            "CatchUpOpened",
+            "OpenIssue",
+            "PreFlight",
+            "Explored",
+            "SavedProject",
+            "BackLawStarted",
+            "LawPatchOpened",
+            "NewLaw",
+        ],
+        &samples,
+    );
+}

@@ -445,7 +445,8 @@ export type BackLawStarted = { kind: "run"; id: string } | { kind: "refused"; li
 export type CatchUpOffer = { kind: "catch-up"; ready: boolean; writing: boolean; failed: boolean } | { kind: "chapter"; pr: number; chapter: number };
 // A part catch-up as `part_catch_up` returns it (`understanding/src/part_catch_up.rs`): the story in the PR brief's shape and the fog list it covers.
 // Over more than a few fog entries it carries `summary`: the line saying it summarises the main shifts, and the full fog list, oldest first.
-export type FogListEntry = { commit: string; pr: number | null; title: string };
+// `body`: always empty in a summary's list; the window never reads it.
+export type FogListEntry = { commit: string; pr: number | null; title: string; body?: string };
 export type StoredCatchUp = {
   version: number;
   part: string;
@@ -456,6 +457,8 @@ export type StoredCatchUp = {
   brief: PrBrief;
   summary?: { line: string; entries: FogListEntry[] };
 };
+// What `part_catch_up` answers: the catch-up, or that its write has started.
+export type CatchUpOpened = StoredCatchUp | { writing: true };
 // A pre-flight (#394): the issue it started from (none for free text or parts picked by hand), the issue's title or the text, the part
 // ids, and whether the writer named them or Daniel picked them.
 export type PreFlight = { issue: number | null; title: string; parts: string[]; predicted: boolean; at: number };
@@ -491,13 +494,17 @@ export type PrBrief = {
   decisions: { id: string | null; text: string; flags: string[] }[]; flags: string[];
 };
 // `guard`: Guard with a law's offer (#401), the parts a bug fix touched; none when the PR offers none, or in a brief from before it.
-export type StoredBrief = { version: number; pr: number; head: string; written_at: number; stale: boolean; model: string; brief: PrBrief; guard?: Guard | null };
+// `shape`: what code decided the brief's shape would be; the window never reads it.
+export type BriefShape = { chapters: boolean; required: string[]; also: string[]; overview: boolean; flows_changed: string[] };
+export type StoredBrief = { version: number; pr: number; head: string; written_at: number; stale: boolean; model: string; shape?: BriefShape; brief: PrBrief; guard?: Guard | null };
 export type Guard = { parts: string[] };
 // A new law (#401): drafted by the writer from a PR's facts, confirmed or edited by Daniel, then added with its test by a run.
 export type NewLaw = { id: string; on: string; text: string };
 // `partial`: the writer did not see the whole diff.
 // `expected`: the PR matched the project's pre-flight (#394).
 export type BriefView = { brief: StoredBrief; partial: boolean; expected?: Expected };
+// What `pr_brief` answers: the brief, or that its write has started (it comes through `map-landed`).
+export type BriefOpened = BriefView | { writing: true };
 export type Fog = "thin" | "thick";
 // What a finished run of the default branch's CI says of the laws: `unknown` (nothing to read), `passed`, `broken` (a test that backs a
 // law failed), `not-run` (it failed, but not in a test that backs a law), `unreadable` (it failed and its log cannot be read).
@@ -579,9 +586,8 @@ export interface Commands {
   story_bar: void;
   map_proof: Proof[];
   map_state: MapState;
-  // The brief, or that its write has started (it comes through `map-landed`).
-  pr_brief: BriefView | { writing: true } | null;
-  part_catch_up: StoredCatchUp | { writing: true } | null;
+  pr_brief: BriefOpened | null;
+  part_catch_up: CatchUpOpened | null;
   part_catch_up_done: void;
   pr_diff: CommitFiles;
   pre_flight_issues: OpenIssue[];
