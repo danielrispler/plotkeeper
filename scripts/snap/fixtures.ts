@@ -1706,6 +1706,24 @@ export const fixtures = {
     ];
     return { ...list(), settings_files: { settings: "{ bad", keymap: null }, appErrors, snapScript };
   },
+  // No harness wired (#437): the notice line says it is not recording and names `plotkeeper install`.
+  notRecording: () => ({
+    ...list(),
+    wired: false,
+    snapScript: `
+      await new Promise((r) => setTimeout(r, 100));
+      const notice = document.getElementById("notice");
+      if (notice.hidden || !/^Not recording: .*\`plotkeeper install\`/.test(notice.textContent)) log("snap:fail the not-recording notice is not shown: " + notice.textContent);`,
+  }),
+  // A harness wired (#437): no not-recording notice, and the notice line stays hidden.
+  recording: () => ({
+    ...list(),
+    wired: true,
+    snapScript: `
+      await new Promise((r) => setTimeout(r, 100));
+      const notice = document.getElementById("notice");
+      if (!notice.hidden || notice.textContent.includes("Not recording")) log("snap:fail the notice line shows: " + notice.textContent);`,
+  }),
   // Alerts: two sessions' turns ended off screen (the note toast).
   alerts() {
     const context = (k: number) => ({ ...session("x", "x", "idle").transcript, context: { tokens: k * 1000 } });

@@ -632,6 +632,7 @@ export interface Commands {
   turn_reply: string | null;
   turn_summary: TurnSummary | null;
   watch: Ask | null;
+  wired: boolean;
   writer_notice: string | null;
   writers: Writers;
 }
