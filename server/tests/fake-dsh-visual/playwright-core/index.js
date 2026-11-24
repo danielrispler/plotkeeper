@@ -4,7 +4,7 @@ class Context {
   constructor() {
     this.routes = [];
   }
-  async route(pattern, handler) {
+  async route(_pattern, handler) {
     this.routes.push(handler);
   }
   async request(url) {
