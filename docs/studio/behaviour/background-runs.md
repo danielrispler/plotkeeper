@@ -1,6 +1,6 @@
 # Background runs
 
-A **background run** is a headless agent run with scoped tools that plotkeeper starts on Daniel's click (spec #378, ticket #390). It is never a session or a terminal: plotkeeper still starts no session. The runner is `server/src/runner.rs` and its launcher is `plotkeeper-run` (`server/src/bin/plotkeeper-run.rs`). No module starts a run yet; back a law and micro-worlds will.
+A **background run** is a headless agent run with scoped tools that plotkeeper starts on Daniel's click (spec #378, ticket #390). It is never a session or a terminal: plotkeeper still starts no session. The runner is `server/src/runner.rs` and its launcher is `plotkeeper-run` (`server/src/bin/plotkeeper-run.rs`). No module starts a run yet; back a law and micro-worlds will. The sandbox gate (#395, below) proved the containment on a real `claude`.
 
 ## The seam
 
@@ -20,7 +20,7 @@ claude --restricted --safe-mode --strict-mcp-config --permission-mode dontAsk --
   --settings <the sandbox block> --output-format json -p <the prompt>
 ```
 
-Standard input is closed, so the prompt is the last argument. `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are removed, so the run uses the CLI's own login, and `PLOTKEEPER_INTERNAL=1` keeps the hook from recording it, as for the writer. `--restricted` drops the user's, the project's and the local settings files; `--safe-mode` drops hooks, plugins, skills and `CLAUDE.md`.
+Standard input is closed, so the prompt is the last argument. `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are removed, so the run uses the CLI's own login, and `PLOTKEEPER_INTERNAL=1` keeps the hook from recording it, as for the writer. `CLAUDE_CODE_TMPDIR` names the run's private temp folder, `/tmp/pk-<8 hex>`: the sandbox then gives the tools `/tmp/pk-<8 hex>/claude-<uid>` as `TMPDIR`. Without it the tools' `TMPDIR` is the shared `/tmp/claude-<uid>`, where every session keeps its scratchpad, and the sandbox lets them write there. Claude Code uses the folder only while `<it>/claude-<uid>` is at most 44 bytes, so the name is short and of fixed length. `--restricted` drops the user's, the project's and the local settings files; `--safe-mode` drops hooks, plugins, skills and `CLAUDE.md`.
 
 The sandbox block is this, with plotkeeper's data folder first in `denyRead`, since it holds the page's token:
 
@@ -29,12 +29,13 @@ The sandbox block is this, with plotkeeper's data folder first in `denyRead`, si
  "sandbox": {"enabled": true, "failIfUnavailable": true,
              "allowUnsandboxedCommands": false,
              "autoAllowBashIfSandboxed": false,
+             "network": {"allowLocalBinding": true},
              "filesystem": {"denyRead": ["<plotkeeper data folder>", "~/.claude", "~/.claude.json",
                                          "~/.ssh", "~/.aws", "~/.config/gh", "~/.npmrc", "~/.netrc",
                                          "~/.cargo/credentials.toml", "~/.gnupg", "~/.kube"]}}}
 ```
 
-`autoAllowBashIfSandboxed` must stay `false`: with `true`, probes ran commands outside the allow list.
+`autoAllowBashIfSandboxed` must stay `false`: with `true`, probes ran commands outside the allow list. `allowLocalBinding` lets a project's tests serve on loopback, as plotkeeper's own do (`understanding/tests/http_writer.rs`, `fake_all`); without it they fail in every run, whatever the agent changed. On macOS it also lets a run's tools connect to any server on the Mac's loopback: a limit v1 accepts (below).
 
 ## The allow list
 
@@ -45,7 +46,7 @@ The sandbox block is this, with plotkeeper's data folder first in `denyRead`, si
 
 A `checks` entry with `git` or `gh` as any of its words is left out, such as `make verify && git push`, so no list ever allows a push or `gh`.
 
-**`--allowedTools` is not a security boundary.** Once a run can write files and run a check, an allowed check runs code the agent wrote. What bounds a run is the OS sandbox (writes only inside the working folder, no network for its tools, no reading of the denied folders) and that only trusted text reaches it. Tools may still read the home folder outside the deny list.
+**`--allowedTools` is not a security boundary.** Once a run can write files and run a check, an allowed check runs code the agent wrote. What bounds a run is the OS sandbox (writes only inside the working folder and its private temp folder, no network for its tools beyond loopback, no reading of the denied folders) and that only trusted text reaches it. Tools may still read the home folder outside the deny list.
 
 ## Settings
 
@@ -61,13 +62,15 @@ All in `settings.json` ([Settings files](../settings.md)), read by the server an
 Runs live in the runs folder, `~/Library/Caches/plotkeeper/runs/`, outside plotkeeper's data folder, which a run may not read. A run's folder is `<id>/`, and it holds:
 
 - `work/`: the working folder, the agent's current folder and the only place it writes. The module that asks for the run fills it first, with a clone or nothing.
-- `run.json`: the run as asked for, with its built command.
+- `run.json`: the run as asked for, with its built command, its sandbox check and its private temp folder.
 - `lock`, `launch.json`, `status.json`: the lifecycle, below.
 - `stdout`, `stderr`, `setup.log`: what the harness and the setup command printed.
 
 ## Lifecycle
 
 plotkeeper starts each run through the launcher, `plotkeeper-run <run's folder>`, in a process group of its own, so the run outlives plotkeeper: stopping plotkeeper to rebuild it does not kill a run.
+
+- **The start.** The launcher first checks that the sandbox can start, by running `/usr/bin/true` under `sandbox-exec`. It cannot inside another sandbox, such as a plotkeeper started from a sandboxed shell, and Claude Code then keeps the run going with every command refused and exits 0. A failed check ends the run as failed, "The sandbox could not start", before setup and before the harness. Then the setup command, then the run's private temp folder, made new and `0700` (a folder already there fails the run), then the harness. The folder is removed when the harness exits.
 
 - **The lock.** plotkeeper takes an exclusive lock on the folder's `lock` and hands it to the launcher as its standard input. The launcher gives it to no child and holds it until it exits, however it exits. A run is alive exactly while that lock is held, which plotkeeper asks without waiting.
 - **The status.** When the harness exits, or the time limit passes, the launcher writes `status.json` whole, by a temporary file and a rename. Its last act is then to kill its own process group, itself included, so nothing a run started outlives it: not a run stopped at its limit, and not a stray child of a run that finished.
@@ -85,7 +88,7 @@ plotkeeper starts each run through the launcher, `plotkeeper-run <run's folder>`
 
 ## Outcome
 
-A run ends as one of: finished; finished with tool calls denied; failed; stopped at its limit; died; setup failed; not logged in; rate limited. A run that exits 0 with denials in its result is reported with them, never as a clean success. A result that says it is an error, by `is_error` or by a `subtype` such as `error_max_turns`, is a failure whatever the exit code. Only a failed run's words are read for a login or a limit, with the writer's own word list, so a good result that mentions a rate limit pauses nothing; a failed run that only mentions one does pause, which costs one Resume.
+A run ends as one of: finished; finished with tool calls denied; failed; stopped at its limit; died; setup failed; not logged in; rate limited. A run that exits 0 with denials in its result is reported with them, never as a clean success. A result that says it is an error, by `is_error` or by a `subtype` such as `error_max_turns`, is a failure whatever the exit code, and so is a run whose result or error output shows the sandbox failing (`sandbox_apply:` or `Sandbox is required`). Only a failed run's words are read for a login or a limit, with the writer's own word list, so a good result that mentions a rate limit pauses nothing; a failed run that only mentions one does pause, which costs one Resume.
 
 Each run appends one line to `background-runs.jsonl` in the data folder: the time, its id, kind, project, outcome, denials, cost and duration. A cancelled run is recorded as `cancelled`.
 
@@ -97,10 +100,37 @@ A run that cannot start is refused at the click with why and its prompt: the har
 
 The Map view's side area lists the project's runs under **Background runs** (`ui/map-runs.ts`): a running run with when it started, the queued ones, and each ended run with how it ended and the calls it was denied. A queued or running run has **Cancel**; an ended one has **Dismiss**, and **Copy prompt** unless it finished cleanly. An ended run stays until it is dismissed or plotkeeper starts again. A copied prompt's note stays under its row when the map is drawn again. The server tells the page when a run starts or ends, so the rows change with no timer. A past commit's map shows no runs.
 
-## Not yet proven on a real `claude`
+## The sandbox gate
 
-The tests never start `claude`: they prove the lifecycle with a fake harness and read the built command. Spec #378's sandbox gate is run by hand, with a real `claude`, and its results are not recorded yet. Until they are, no module should start a run. Three things the gate must settle bear on this code:
+The tests never start `claude`: they prove the lifecycle with a fake harness and read the built command. The sandbox gate (#395) runs each run through `Runner::submit` with a real `claude` and with `srt`, by hand and outside auto mode: `server/examples/sandbox_gate.rs`, whose header says how. Each verdict is read from the disk after the run (a file that must not exist, a marker that must not show), never from what the agent says, and a probe makes its escapes from an allowed check, `sh ./probe.sh`, so the OS sandbox and not the permission layer is what refuses them. Its last run, on Claude Code 2.1.325 with Sonnet, passed every check:
 
-- **The temp folder is open.** A probe showed the sandbox lets a run's tools write into Claude Code's per-user temp folder, where sessions keep the scripts Daniel runs by hand. The block above is spec #378's, and it has no rule that denies that write. The gate must show a write-deny rule that closes it, and that rule then joins the block; if none does, runs stay off, copy-prompt only.
-- Whether `Bash(<entry> *)` also matches the bare command. Both forms are listed here.
-- Whether the `Edit` rule on the working folder is what lets a run under `dontAsk` write there. Spec #378's allow list does not name it; a probe needed it for a micro-world.
+| Check | Result |
+|---|---|
+| A write outside the clone | Refused: the home folder, `/private/tmp`, the run's own folder, a folder beside the runs. |
+| A write into Claude Code's per-user temp folder | Refused: its root, an existing session's scratchpad, a new folder. The tools' `TMPDIR` is the run's private folder. |
+| A network call from a tool | Refused: `curl` gets a 403 from the proxy, also for `api.anthropic.com`, and raw TCP fails. The CLI itself reaches the API. |
+| A read of each `denyRead` folder | Refused, for every folder and file of the block; a file outside it still reads. The CLI's login works with `~/.claude` and `~/.claude.json` denied. |
+| `--restricted` and Read, Glob and Grep outside the clone | Denied, each listed in the result's denials. |
+| A sandbox that cannot start | The launcher's check fails the run before the harness, "The sandbox could not start". |
+| An offline build and test of plotkeeper after `setup` (`npm ci && cargo fetch --locked`) | `npm run build`, `cargo build --workspace`, `cargo nextest run -p studio-understanding` and `npm run test:node` pass. |
+| `Bash(<entry> *)` and the bare command | The `*` form alone allows the bare command; both forms are still listed. |
+| `autoAllowBashIfSandboxed: false` | `python3` and `touch`, outside the allow list, are denied and write nothing. |
+| The `Edit` rule on the working folder | Needed: without it, Write is denied under `dontAsk`. |
+| `srt` with no network | A check command writes only to its clone and its private temp folder (passed to `srt` as `CLAUDE_CODE_TMPDIR` and listed in `allowWrite`), has no network, cannot read the data folder, and binds loopback with `network.allowLocalBinding`. |
+
+What the gate found on the way, and changed here:
+
+- **The temp folder.** The tools' `TMPDIR` was the shared `/tmp/claude-<uid>`. A `denyWrite` on it breaks every build, since it is their `TMPDIR`; a long `CLAUDE_CODE_TMPDIR` moves only the CLI's own files. A short one, under the 44-byte limit, moves the tools' `TMPDIR` too.
+- **Loopback.** With it closed, plotkeeper's own tests fail in every run; `allowLocalBinding` is on for runs and for the `srt` proof step.
+- **`failIfUnavailable` does not stop such a run.** Inside another sandbox Claude Code starts, every command fails with `sandbox_apply: Operation not permitted`, and the run exits 0 as a success. Hence the launcher's check, and the reading of those words as a failure. An `(allow default)` profile still applies inside another sandbox, so the check's profile denies something.
+
+The raw output of each round is in `local-evidence/2026-11-24-issue-395-sandbox-gate/` on Daniel's machine. Rerun the gate after a Claude Code update: its behaviour here changed between the versions tried.
+
+## Limits v1 accepts
+
+v1 is one user on his own Mac, runs start only on his click, and a prompt holds only trusted text. Hardening past that is #411 ([research](../research/sandbox-loopback-preflight-temp.md)):
+
+- A run's tools can connect to any server on the Mac's loopback. plotkeeper's own server needs its cookie or token, which a run cannot read.
+- Only the shell is sandboxed, not the whole `claude` process, which Anthropic's docs ask of fully unattended runs.
+- The private temp folder holds only while `<it>/claude-<uid>` is at most 44 bytes; past that, Claude Code falls back to the shared folder without a word. The name is of fixed length, 34 bytes with the longest uid.
+- Tools may read the home folder outside the deny list.

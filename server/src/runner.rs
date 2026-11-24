@@ -102,7 +102,7 @@ pub struct Request {
 }
 
 /// The command the launcher starts for a run, with what it adds to and takes from plotkeeper's own environment.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct HarnessCommand {
     pub program: PathBuf,
     pub args: Vec<String>,
@@ -110,7 +110,32 @@ pub struct HarnessCommand {
     pub env: BTreeMap<String, String>,
     #[serde(default)]
     pub env_remove: Vec<String>,
+    /// A command the launcher runs first, which must exit 0: whether the sandbox can start. When it fails, the run fails
+    /// with [`SANDBOX_DOWN`] and the harness never starts. Empty: no check.
+    #[serde(default)]
+    pub check: Vec<String>,
+    /// A folder the launcher makes before the harness, new and private (`0700`), and removes when the harness exits: the
+    /// run's own temp folder.
+    #[serde(default)]
+    pub private_tmp: Option<PathBuf>,
 }
+
+/// What a run that found no working sandbox ends with.
+pub const SANDBOX_DOWN: &str = "The sandbox could not start";
+
+/// Whether Seatbelt can apply a profile here: it cannot inside another sandbox, such as a plotkeeper started from a
+/// sandboxed shell. Claude Code keeps such a run going with every command refused and exits 0 (sandbox gate, #395). The
+/// profile must deny something: inside another sandbox, an `(allow default)` profile still applies, and only one that
+/// restricts fails, as Claude Code's does.
+pub const SANDBOX_CHECK: [&str; 4] = [
+    "/usr/bin/sandbox-exec",
+    "-p",
+    "(version 1)(allow default)(deny network-outbound)",
+    "/usr/bin/true",
+];
+
+/// What Claude Code prints when its sandbox fails after the start: a run that shows one failed, whatever its exit.
+const SANDBOX_FAILURES: [&str; 2] = ["sandbox_apply:", "Sandbox is required"];
 
 /// What a harness builds its command from.
 pub struct Plan<'a> {
@@ -145,9 +170,11 @@ impl Harness for Claude {
     }
 }
 
-/// The sandbox block a run's `--settings` carries, exactly as spec #378 gives it: the user's hooks off, Claude Code's OS
-/// sandbox on and required, no way out of it, and no reading of plotkeeper's data folder (`data`, which holds its token) or
-/// of a credential folder. `autoAllowBashIfSandboxed` must stay `false`: with `true`, commands outside the allow list ran.
+/// The sandbox block a run's `--settings` carries, as spec #378 gives it and the sandbox gate (#395) settled: the user's
+/// hooks off, Claude Code's OS sandbox on and required, no way out of it, and no reading of plotkeeper's data folder
+/// (`data`, which holds its token) or of a credential folder. `autoAllowBashIfSandboxed` must stay `false`: with `true`,
+/// commands outside the allow list ran. `allowLocalBinding` lets a project's tests serve on loopback, which plotkeeper's
+/// own need; it also lets a run's tools reach any server on the Mac's loopback, a limit v1 accepts.
 pub fn sandbox_settings(data: &Path) -> serde_json::Value {
     serde_json::json!({
         "disableAllHooks": true,
@@ -156,6 +183,7 @@ pub fn sandbox_settings(data: &Path) -> serde_json::Value {
             "failIfUnavailable": true,
             "allowUnsandboxedCommands": false,
             "autoAllowBashIfSandboxed": false,
+            "network": { "allowLocalBinding": true },
             "filesystem": { "denyRead": [
                 data.to_string_lossy(), "~/.claude", "~/.claude.json", "~/.ssh", "~/.aws", "~/.config/gh", "~/.npmrc",
                 "~/.netrc", "~/.cargo/credentials.toml", "~/.gnupg", "~/.kube",
@@ -198,7 +226,9 @@ fn cores() -> usize {
 /// (`--restricted --safe-mode --strict-mcp-config`), nothing asked and nothing allowed that the list does not name
 /// (`dontAsk`), the kind's tools, the sandbox block, and the prompt as its last argument since standard input is closed.
 /// It runs on the CLI's own login, as the writer does: the API key variables are removed, and `PLOTKEEPER_INTERNAL=1`
-/// keeps the hook from recording it.
+/// keeps the hook from recording it. The launcher first checks that the sandbox can start ([`SANDBOX_CHECK`]), and gives
+/// the run a private temp folder, [`private_tmp`], as `CLAUDE_CODE_TMPDIR`: without it, the sandbox lets the tools write
+/// into `/tmp/claude-<uid>`, where every session keeps its scratchpad.
 pub fn claude_command(program: &Path, plan: &Plan) -> HarnessCommand {
     let mut args: Vec<String> = [
         "--restricted",
@@ -222,10 +252,18 @@ pub fn claude_command(program: &Path, plan: &Plan) -> HarnessCommand {
     args.extend(["--output-format".into(), "json".into()]);
     // NUL bytes, which no argument can hold, are dropped.
     args.extend(["-p".into(), plan.prompt.replace('\0', "")]);
+    let tmp = private_tmp(plan.folder);
     HarnessCommand {
         program: program.into(),
         args,
-        env: [("PLOTKEEPER_INTERNAL".to_string(), "1".to_string())].into(),
+        env: [
+            ("PLOTKEEPER_INTERNAL".to_string(), "1".to_string()),
+            (
+                "CLAUDE_CODE_TMPDIR".to_string(),
+                tmp.to_string_lossy().into_owned(),
+            ),
+        ]
+        .into(),
         env_remove: [
             "ANTHROPIC_API_KEY",
             "ANTHROPIC_AUTH_TOKEN",
@@ -233,7 +271,20 @@ pub fn claude_command(program: &Path, plan: &Plan) -> HarnessCommand {
         ]
         .map(String::from)
         .into(),
+        check: SANDBOX_CHECK.map(String::from).into(),
+        private_tmp: Some(tmp),
     }
+}
+
+/// The run's own temp folder, `/tmp/pk-<8 hex>` named from its working `folder`. Claude Code gives the sandboxed tools
+/// `<CLAUDE_CODE_TMPDIR>/claude-<uid>` as their `TMPDIR` only while that path is at most 44 bytes, and otherwise falls
+/// back to the shared `/tmp/claude-<uid>` (2.1.325; research `sandbox-loopback-preflight-temp.md`), so the name is short
+/// and of fixed length: 34 bytes with the longest uid.
+pub fn private_tmp(folder: &Path) -> PathBuf {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    folder.hash(&mut hasher);
+    PathBuf::from(format!("/tmp/pk-{:08x}", hasher.finish() as u32))
 }
 
 /// How a run ended.
@@ -508,7 +559,10 @@ pub fn launch(dir: &Path) -> Result<(), String> {
     let stored: Launched = read_json(&dir.join(RUN)).ok_or("the folder holds no run")?;
     let started_ms = millis();
     let deadline = Instant::now() + Duration::from_secs(stored.timeout_secs);
-    let status = match run_setup(dir, &stored, deadline)
+    let tmp = stored.command.private_tmp.as_deref();
+    let status = match run_check(&stored)
+        .and_then(|()| run_setup(dir, &stored, deadline))
+        .and_then(|()| make_private(tmp))
         .and_then(|()| run_harness(dir, &stored, deadline))
     {
         Ok(exit) => Status {
@@ -517,6 +571,9 @@ pub fn launch(dir: &Path) -> Result<(), String> {
         },
         Err(status) => status,
     };
+    if let Some(tmp) = tmp {
+        let _ = fs::remove_dir_all(tmp);
+    }
     let status = Status {
         started_ms,
         ended_ms: millis(),
@@ -549,6 +606,41 @@ fn wait_until(mut child: Child, deadline: Instant) -> Waited {
         Ok(status) => Waited::Exited(status.ok().and_then(|status| status.code())),
         Err(_) => Waited::TimedOut,
     }
+}
+
+/// Runs the command's sandbox check: a failure is [`SANDBOX_DOWN`], with what the check printed.
+fn run_check(stored: &Launched) -> Result<(), Status> {
+    let Some((program, args)) = stored.command.check.split_first() else {
+        return Ok(());
+    };
+    let down = |why: String| Status {
+        error: Some(format!("{SANDBOX_DOWN}: {}", why.trim())),
+        ..Status::default()
+    };
+    let out = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| down(e.to_string()))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    Err(down(String::from_utf8_lossy(&out.stderr).into_owned()))
+}
+
+/// Makes the run's private temp folder, which must be new: a folder already there is never shared with a run.
+fn make_private(tmp: Option<&Path>) -> Result<(), Status> {
+    use std::os::unix::fs::DirBuilderExt;
+    let Some(tmp) = tmp else {
+        return Ok(());
+    };
+    fs::DirBuilder::new()
+        .mode(0o700)
+        .create(tmp)
+        .map_err(|e| Status {
+            error: Some(format!("the run's temp folder {}: {e}", tmp.display())),
+            ..Status::default()
+        })
 }
 
 /// Runs the project's setup command, outside any sandbox and with the network, before the agent starts.
@@ -709,7 +801,12 @@ fn read_outcome(dir: &Path) -> (Outcome, Option<Status>) {
             denials,
         } = read_result(&text(STDOUT));
         let errors = text(STDERR);
-        let end = if status.exit != Some(0) || is_error {
+        let sandbox_failed = [&result, &errors]
+            .iter()
+            .any(|said| SANDBOX_FAILURES.iter().any(|word| said.contains(word)));
+        let end = if sandbox_failed {
+            End::Failed
+        } else if status.exit != Some(0) || is_error {
             // Only a failure's words are read for a login or a limit: a good result may talk about either.
             match login_or_quota(&format!("{result}\n{errors}")) {
                 Some(FailureKind::NotLoggedIn) => End::NotLoggedIn,
@@ -721,10 +818,15 @@ fn read_outcome(dir: &Path) -> (Outcome, Option<Status>) {
         } else {
             End::Denied
         };
+        let result = if result.is_empty() {
+            tail(&errors, 20)
+        } else {
+            result
+        };
         Outcome {
             end,
-            result: if result.is_empty() {
-                tail(&errors, 20)
+            result: if sandbox_failed {
+                format!("{SANDBOX_DOWN}\n{result}")
             } else {
                 result
             },
