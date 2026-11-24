@@ -435,6 +435,24 @@ fn story() -> studio_understanding::pr_brief::Brief {
         }],
         flags: vec!["not confirmed from the facts".into()],
     };
+    // A step with every optional field left empty, one with an empty figure item and check, and one with neither.
+    let bare = Step {
+        fig: Some(Figure {
+            items: vec![FigItem {
+                label: "watch".into(),
+                tone: None,
+                bad: None,
+            }],
+            ..Figure::default()
+        }),
+        check: Some(BriefCheck::default()),
+        ..Step::default()
+    };
+    let unset = Step {
+        fig: None,
+        check: None,
+        ..bare.clone()
+    };
     Brief {
         title: "The wire's replies".into(),
         overview: vec![step.clone()],
@@ -442,7 +460,7 @@ fn story() -> studio_understanding::pr_brief::Brief {
             behaviour: "The replies agree".into(),
             parts: vec!["server".into()],
             title: "Samples".into(),
-            steps: vec![step],
+            steps: vec![step, bare, unset],
             flags: vec!["one chapter".into()],
             gist: "Every reply has a sample.".into(),
             gist_flags: vec!["too long".into()],
@@ -453,11 +471,18 @@ fn story() -> studio_understanding::pr_brief::Brief {
             flags: Vec::new(),
         }],
         unseen: vec!["Cargo.lock".into()],
-        decisions: vec![Decision {
-            id: Some("d1".into()),
-            text: "Bare JSON replies stay outside the law.".into(),
-            flags: Vec::new(),
-        }],
+        decisions: vec![
+            Decision {
+                id: Some("d1".into()),
+                text: "Bare JSON replies stay outside the law.".into(),
+                flags: Vec::new(),
+            },
+            Decision {
+                id: None,
+                text: "A bare sentence from the writer.".into(),
+                flags: vec!["no id yet".into()],
+            },
+        ],
         flags: vec!["a required part no chapter lights".into()],
     }
 }
@@ -546,6 +571,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
         StopKind::Scrub,
         StopKind::Proof,
         StopKind::Know,
+        StopKind::Dismissed,
         StopKind::BriefOffered,
         StopKind::BriefOpened,
         StopKind::ChapterDone,
@@ -651,6 +677,8 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
             }),
         ),
         ("StopFacts", json(Facts::default())),
+        ("BlockedAnswer", json(studio_server::answer::Answered::Hook)),
+        ("BlockedAnswer", json(studio_server::answer::Answered::Late)),
         (
             "BriefOpened",
             json(BriefOpened::Brief(Box::new(view(None)))),
@@ -753,6 +781,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
             "WaitingBriefs",
             "RatifyRow",
             "StopFacts",
+            "BlockedAnswer",
             "BriefOpened",
             "CatchUpOpened",
             "OpenIssue",

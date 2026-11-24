@@ -551,6 +551,11 @@ export type Writers = { writers: FoundWriter[]; summaries_on: boolean; briefs: b
 export type WriterOutcome = "passed" | "not_logged_in" | "quota" | "timeout" | "not_installed" | "empty" | "other";
 export type WriterTest = { outcome: WriterOutcome; line: string; settings: string | null };
 
+// Why the session didn't touch a name (`ask_why_not`): its recorded facts, and the writer's possible reasons when it has any.
+export type WhyNot = { facts: Facts; reasons: string | null };
+// Who took Daniel's answer to a blocked command (`answer_blocked_command`, `server/src/answer.rs`): its hook, or the studio itself.
+export type BlockedAnswer = "hook" | "late";
+
 // Every command the window invokes, with what the server replies (`server/src/api.rs`): `void` where the
 // window ignores the reply, `null` where the shell may answer none. `invoke` takes only these names, and the snap fixtures
 // (`scripts/snap/`) are typed against it, and `scripts/snap/base.ts` answers every command that is not `void`, so a fixture
@@ -559,12 +564,12 @@ export interface Commands {
   agent_summary: string | null;
   alive: void;
   answer: void;
-  answer_blocked_command: "hook" | "late";
+  answer_blocked_command: BlockedAnswer;
   ask: string;
   ask_again: void;
   ask_anchor: string;
   ask_facts: Facts | null;
-  ask_why_not: { facts: Facts; reasons: string | null };
+  ask_why_not: WhyNot;
   cards: SessionCards;
   check_lists: void;
   check_output: CheckOutput | null;
@@ -648,7 +653,8 @@ export type StopFacts = {
   briefs_opened: number;
   chapters_done: number;
   // Every kind's count for the project, for the table's bars and offer-count exceptions.
-  counts: Partial<Record<StopKind, number>>;
+  // `dismissed` counts too: a review dismissed through `stop_dismiss`, never through `logStop`.
+  counts: Partial<Record<StopKind | "dismissed", number>>;
   // The local day of the project's first event, where a calendar wait starts at the latest; null when it has none.
   began: string | null;
   // When the project's staleness baselines were set (unix seconds): its first map shown with the staleness build (#392); null before.
