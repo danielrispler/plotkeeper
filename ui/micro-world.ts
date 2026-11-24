@@ -90,6 +90,14 @@ type Shown = { project: string; key: string; name: string; html: string; explore
 let shown: Shown | null = null;
 const overlay = () => element("map-micro-world");
 
+// Draws the world into `box`, the overlay; a box that already shows the same page keeps its frame and gets a new head alone.
+export function paintWorld(box: HTMLElement, name: string, html: string, world: MicroWorldView | undefined, act: WorldActs) {
+  const [head, frame] = worldNodes(name, html, world, act);
+  const [shownHead, shownFrame] = box.children;
+  if (shownHead && shownFrame?.getAttribute("srcdoc") === html) box.replaceChild(head, shownHead);
+  else box.replaceChildren(head, frame);
+}
+
 function paint(worlds?: MicroWorlds) {
   const box = overlay();
   if (!shown) {
@@ -98,7 +106,7 @@ function paint(worlds?: MicroWorlds) {
     return;
   }
   const now = shown;
-  box.replaceChildren(...worldNodes(now.name, now.html, worlds?.worlds[now.key], { rebuild: () => (close(), now.explore()), close }));
+  paintWorld(box, now.name, now.html, worlds?.worlds[now.key], { rebuild: () => (close(), now.explore()), close });
   box.hidden = false;
 }
 
@@ -165,7 +173,8 @@ export function exploreRow(project: string, worlds: MicroWorlds | undefined, key
 }
 
 registerLayer("micro-world", { open: () => shown !== null, close });
-// Another project closes the overlay; otherwise its head is drawn again over the new payload, so "may be out of date" follows the map.
+// Another project closes the overlay; otherwise its head is drawn again over the new payload, so "may be out of date" follows the map, and
+// its frame stays.
 onDraw((view) => {
   if (shown && (view.project !== shown.project || view.scrub)) shown = null;
   paint(view.state.micro_worlds);

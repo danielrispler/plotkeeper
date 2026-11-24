@@ -2,10 +2,10 @@
 // locked-down frame a checked page is shown in.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fakeDocument } from "./dom.mjs";
+import { El, fakeDocument } from "./dom.mjs";
 
 globalThis.document = fakeDocument();
-const { exploreOffers, exploreNode, exploreRow, frameNode, worldNodes } = await import("../../dist/micro-world.js");
+const { exploreOffers, exploreNode, exploreRow, frameNode, paintWorld, worldNodes } = await import("../../dist/micro-world.js");
 
 const view = (phase, extra = {}) => ({ phase, page: false, stale: false, line: null, prompt: null, ...extra });
 const worlds = (on, entries = {}) => ({ on, worlds: entries });
@@ -82,4 +82,18 @@ test("Copy prompt shows its outcome at once, and the prompt to copy by hand when
   copy();
   await new Promise((done) => setTimeout(done, 10));
   assert.equal(row.find("textarea").length, 1);
+});
+
+test("a map drawn while a world is open redraws its head and keeps its frame, so the world keeps its state", () => {
+  const box = new El("section");
+  const act = { rebuild() {}, close() {} };
+  paintWorld(box, "A turn", "<p>x</p>", view("ready", { page: true }), act);
+  const [frame] = box.find("iframe");
+  paintWorld(box, "A turn", "<p>x</p>", view("ready", { page: true, stale: true }), act);
+  assert.match(box.text, /may be out of date/, "the head follows the map");
+  assert.equal(box.find("iframe").length, 1);
+  assert.equal(box.find("iframe")[0], frame, "the same frame, not a new one that reloads the page");
+  // Another page is a new frame.
+  paintWorld(box, "A turn", "<p>y</p>", view("ready", { page: true }), act);
+  assert.notEqual(box.find("iframe")[0], frame);
 });
