@@ -5,9 +5,11 @@
 use std::{
     collections::BTreeMap,
     fs,
+    io::{Read, Write},
     os::unix::fs::{FileTypeExt, PermissionsExt},
     path::{Path, PathBuf},
-    process::{Command, Output, Stdio},
+    process::{Child, Command, Output, Stdio},
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -97,10 +99,21 @@ esac"#,
         out
     }
 
+    fn run_args(&self, args: &[&str]) -> Output {
+        let out = self.run_with(args);
+        assert!(out.status.success(), "plotkeeper {args:?} failed: {out:?}");
+        out
+    }
+
     /// Runs `plotkeeper verb`, which may fail.
     fn run_any(&self, verb: &str) -> Output {
+        self.run_with(&[verb])
+    }
+
+    fn run_with(&self, args: &[&str]) -> Output {
+        let verb = args.join(" ");
         let mut child = Command::new(self.tools.join("plotkeeper"))
-            .arg(verb)
+            .args(args)
             .env("HOME", &self.home)
             .env("PATH", format!("{}:/usr/bin:/bin", self.tools.display()))
             .env("PLOTKEEPER_NO_BROWSER", "1")
@@ -119,6 +132,59 @@ esac"#,
             std::thread::sleep(Duration::from_millis(20));
         }
         child.wait_with_output().unwrap()
+    }
+
+    fn starting(&self, terminal: bool) -> Command {
+        let mut command = if terminal {
+            let mut script = Command::new("/usr/bin/script");
+            script
+                .args(["-q", "/dev/null"])
+                .arg(self.tools.join("plotkeeper"));
+            script
+        } else {
+            Command::new(self.tools.join("plotkeeper"))
+        };
+        command
+            .env("HOME", &self.home)
+            .env("PATH", format!("{}:/usr/bin:/bin", self.tools.display()))
+            .env("PLOTKEEPER_NO_BROWSER", "1")
+            .env("PLOTKEEPER_CARD_WRITER", "fake")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        command
+    }
+
+    /// A bare `plotkeeper` start in a terminal, given through macOS's `/usr/bin/script`: each `Wire these? [Y/n]` it
+    /// asks is answered with the next of `answers`, and once it prints its address it is stopped with Ctrl+C. Returns
+    /// all it printed, with the terminal's line endings made plain.
+    fn start(&self, answers: &[&str]) -> String {
+        let mut child = self.starting(true).stdin(Stdio::piped()).spawn().unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        let mut answered = 0;
+        let text = served(&mut child, |text, up| {
+            let asked = text.matches("Wire these? [Y/n]").count();
+            while answered < asked.min(answers.len()) {
+                writeln!(stdin, "{}", answers[answered]).unwrap();
+                answered += 1;
+            }
+            if up {
+                // Ctrl+C, through the terminal.
+                let _ = stdin.write_all(b"\x03");
+            }
+        });
+        text.replace("\r\n", "\n")
+    }
+
+    /// A bare `plotkeeper` start with no terminal: its stdin is not one. Stopped with SIGINT once it prints its
+    /// address; returns all it printed.
+    fn start_without_terminal(&self) -> String {
+        let mut child = self.starting(false).stdin(Stdio::null()).spawn().unwrap();
+        let pid = child.id().to_string();
+        served(&mut child, |_, up| {
+            if up {
+                let _ = Command::new("kill").args(["-INT", &pid]).status();
+            }
+        })
     }
 
     fn calls(&self, tool: &str) -> Vec<String> {
@@ -142,6 +208,56 @@ esac"#,
     fn bin(&self) -> String {
         self.data().join("bin").display().to_string()
     }
+}
+
+/// Reads what `child` prints, its stdout and stderr, until it exits, calling `each` with all of it so far and whether
+/// the server's address is in it, so `each` can answer and, once the server serves, stop it. A start that does not
+/// end within 30 seconds fails.
+fn served(child: &mut Child, mut each: impl FnMut(&str, bool)) -> String {
+    let text = Arc::new(Mutex::new(String::new()));
+    let readers: Vec<_> = [
+        child
+            .stdout
+            .take()
+            .map(|o| Box::new(o) as Box<dyn Read + Send>),
+        child
+            .stderr
+            .take()
+            .map(|e| Box::new(e) as Box<dyn Read + Send>),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|mut from| {
+        let text = text.clone();
+        std::thread::spawn(move || {
+            let mut buf = [0; 4096];
+            while let Ok(n @ 1..) = from.read(&mut buf) {
+                text.lock()
+                    .unwrap()
+                    .push_str(&String::from_utf8_lossy(&buf[..n]));
+            }
+        })
+    })
+    .collect();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut stopped = false;
+    while child.try_wait().unwrap().is_none() {
+        let now = text.lock().unwrap().clone();
+        let up = now.contains("plotkeeper: http");
+        if !stopped {
+            each(&now, up);
+            stopped = up;
+        }
+        if Instant::now() > deadline {
+            child.kill().unwrap();
+            panic!("the start did not end:\n{now}");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    for reader in readers {
+        reader.join().unwrap();
+    }
+    text.lock().unwrap().clone()
 }
 
 fn script(path: &Path, body: &str) {
@@ -1003,4 +1119,687 @@ fn every_codex_recording_hook_runs_in_the_background() {
     for handler in handlers {
         assert_eq!(handler["async"], true, "{handler}");
     }
+}
+
+/// What a start says when it wires nothing and asks nothing, so a test can tell a start that asked.
+const ASK: &str = "Wire these? [Y/n]";
+
+#[test]
+fn a_first_start_answered_yes_wires_every_harness_found_and_serves() {
+    let machine = Machine::new(true, false).with_codex();
+    let text = machine.start(&["y"]);
+    assert!(text.contains(ASK), "{text}");
+    for line in [
+        "Claude Code: claude plugin install plotkeeper@plotkeeper",
+        "Codex: add plotkeeper's hooks to",
+        "agy: `agy` not found, skipped",
+        &machine.bin(),
+        "events stay on this machine",
+        "plotkeeper uninstall",
+    ] {
+        assert!(text.contains(line), "{line:?} not in:\n{text}");
+    }
+    assert!(text.contains("plotkeeper: http"), "{text}");
+    assert!(
+        machine
+            .calls("claude")
+            .contains(&"plugin install plotkeeper@plotkeeper".to_owned()),
+        "{:?}",
+        machine.calls("claude")
+    );
+    assert!(!codex_commands(&machine).0.is_empty());
+
+    // Both are answered, so the next start asks nothing and runs no harness CLI.
+    let calls = machine.calls("claude").len();
+    let text = machine.start(&[]);
+    assert!(!text.contains(ASK), "{text}");
+    assert!(text.contains("plotkeeper: http"), "{text}");
+    assert_eq!(machine.calls("claude").len(), calls);
+}
+
+#[test]
+fn a_yes_says_each_step_once_and_the_question_stands_after_a_blank_line() {
+    let machine = Machine::new(true, false).with_codex();
+    let text = machine.start(&["y"]);
+    assert!(text.contains(&format!("\n\n{ASK}")), "{text}");
+    for line in [
+        "Claude Code: claude plugin install plotkeeper@plotkeeper",
+        "hook binaries:",
+        "run `/hooks` in Codex",
+    ] {
+        assert_eq!(text.matches(line).count(), 1, "{line:?} in:\n{text}");
+    }
+    assert!(
+        text.contains("plotkeeper: wired Claude Code, Codex"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_first_start_answered_no_wires_nothing_serves_and_never_asks_again() {
+    let machine = Machine::new(true, false).with_codex();
+    let text = machine.start(&["n"]);
+    assert!(text.contains(ASK), "{text}");
+    assert!(text.contains("plotkeeper: http"), "{text}");
+    assert!(
+        machine.calls("claude").is_empty(),
+        "{:?}",
+        machine.calls("claude")
+    );
+    assert!(!machine.home.join(".codex/hooks.json").exists());
+
+    let text = machine.start(&[]);
+    assert!(!text.contains(ASK), "{text}");
+    assert!(text.contains("plotkeeper: http"), "{text}");
+    assert!(machine.calls("claude").is_empty());
+}
+
+#[test]
+fn a_harness_found_after_the_first_start_is_asked_about_alone() {
+    let machine = Machine::new(true, false);
+    machine.start(&["y"]);
+    let calls = machine.calls("claude").len();
+    let machine = machine.with_codex();
+
+    let text = machine.start(&["y"]);
+    assert_eq!(text.matches(ASK).count(), 1, "{text}");
+    assert!(text.contains("Codex: add plotkeeper's hooks to"), "{text}");
+    assert!(!text.contains("Claude Code: claude plugin"), "{text}");
+    assert_eq!(
+        machine.calls("claude").len(),
+        calls,
+        "Claude Code is not wired again"
+    );
+    assert!(!codex_commands(&machine).0.is_empty());
+}
+
+#[test]
+fn a_start_with_no_terminal_never_asks_wires_or_stores_an_answer() {
+    let machine = Machine::new(true, false).with_codex();
+    let text = machine.start_without_terminal();
+    assert!(!text.contains(ASK), "{text}");
+    assert!(text.contains("plotkeeper install --yes"), "{text}");
+    assert!(text.contains("plotkeeper: http"), "{text}");
+    assert!(machine.calls("claude").is_empty());
+    assert!(!machine.home.join(".codex/hooks.json").exists());
+
+    // No answer was stored, so a start in a terminal asks.
+    let text = machine.start(&["n"]);
+    assert!(text.contains(ASK), "{text}");
+}
+
+#[test]
+fn install_yes_wires_without_a_question_and_after_uninstall_a_start_asks_again() {
+    let machine = Machine::new(true, false).with_codex();
+    let out = machine.run_args(&["install", "--yes"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(!text.contains(ASK), "{text}");
+    assert!(
+        machine
+            .calls("claude")
+            .contains(&"plugin install plotkeeper@plotkeeper".to_owned())
+    );
+    assert!(!machine.start(&[]).contains(ASK));
+
+    machine.run("uninstall");
+    let text = machine.start(&["n"]);
+    assert!(text.contains(ASK), "{text}");
+    assert!(
+        text.contains("Claude Code: claude plugin install"),
+        "{text}"
+    );
+    assert!(text.contains("Codex: add plotkeeper's hooks to"), "{text}");
+}
+
+#[test]
+fn uninstall_says_what_it_keeps_and_how_to_remove_the_rest() {
+    let machine = Machine::new(true, false);
+    machine.run("install");
+    machine.write(
+        "Library/Application Support/plotkeeper/events.jsonl",
+        "{}\n",
+    );
+    let out = machine.run("uninstall");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("your recorded history stays in")
+            && text.contains("Library/Application Support/plotkeeper")
+            && text.contains("npm uninstall -g plotkeeper"),
+        "{text}"
+    );
+
+    // With nothing recorded, the data folder goes too, and nothing stays to be said.
+    let machine = Machine::new(true, false);
+    machine.run("install");
+    let out = machine.run("uninstall");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(!text.contains("recorded history"), "{text}");
+    assert!(text.contains("npm uninstall -g plotkeeper"), "{text}");
+}
+
+#[test]
+fn a_declined_harness_is_wired_by_install_and_the_round_trip_stays_byte_identical() {
+    let machine = Machine::new(true, false).with_codex();
+    machine.write(".codex/hooks.json", CODEX_OWN);
+    machine.start(&["n"]);
+    let before = files(&machine.home);
+    machine.run("install");
+    assert!(
+        !codex_commands(&machine).0.is_empty(),
+        "install wires declined harnesses too"
+    );
+    machine.run("uninstall");
+    let after = files(&machine.home);
+    // Outside the data folder, which the start's server writes in, every file is as it was.
+    let outside = |files: &BTreeMap<String, Vec<u8>>| {
+        files
+            .iter()
+            .filter(|(p, _)| !p.starts_with("Library/Application Support/plotkeeper/"))
+            .map(|(p, b)| (p.clone(), b.clone()))
+            .collect::<BTreeMap<_, _>>()
+    };
+    assert_eq!(outside(&after), outside(&before));
+    // Uninstall forgot the answers too, so a start asks again.
+    assert!(machine.start(&["n"]).contains(ASK));
+}
+
+#[test]
+fn a_second_start_never_asks() {
+    let machine = Machine::new(true, false);
+    let mut first = machine
+        .starting(false)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    let mut lines = std::io::BufReader::new(first.stdout.take().unwrap());
+    while !line.starts_with("plotkeeper: http") {
+        line.clear();
+        assert_ne!(
+            std::io::BufRead::read_line(&mut lines, &mut line).unwrap(),
+            0,
+            "the first start printed no address"
+        );
+    }
+
+    let text = machine.start(&["y"]);
+    let _ = first.kill();
+    let _ = first.wait();
+    assert!(text.contains(line.trim()), "{text}");
+    assert!(!text.contains(ASK), "{text}");
+    assert!(machine.calls("claude").is_empty());
+}
+
+/// Leaves `rel`, the hook file whose record is `key` in install's `state.json`, as an install from an older template
+/// would have: each of plotkeeper's commands with other args, and one more event plotkeeper no longer hooks, `extra`,
+/// with the record saying install wrote that text (#435).
+fn as_an_older_template_left_it(machine: &Machine, rel: &str, key: &str, extra: &str) {
+    fn older(v: &mut serde_json::Value) {
+        match v {
+            serde_json::Value::Object(o) => {
+                if let Some(serde_json::Value::String(c)) = o.get_mut("command")
+                    && c.contains("plotkeeper-hook")
+                {
+                    c.push_str(" --old");
+                }
+                o.values_mut().for_each(older);
+            }
+            serde_json::Value::Array(a) => a.iter_mut().for_each(older),
+            _ => {}
+        }
+    }
+    let path = machine.home.join(rel);
+    let mut file: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    let events = file["hooks"].as_object_mut().unwrap();
+    let mut gone = events
+        .values()
+        .flat_map(|entries| entries.as_array().unwrap())
+        .find(|entry| entry.to_string().contains("plotkeeper-hook"))
+        .unwrap()
+        .clone();
+    older(&mut gone);
+    for entries in events.values_mut() {
+        older(entries);
+    }
+    events.insert(extra.to_owned(), serde_json::json!([gone]));
+    let text = serde_json::to_string_pretty(&file).unwrap() + "\n";
+    fs::write(&path, &text).unwrap();
+    let state = machine.data().join("install/state.json");
+    let mut record: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&state).unwrap()).unwrap();
+    record[key]["written"] = serde_json::Value::String(text);
+    fs::write(&state, record.to_string()).unwrap();
+}
+
+#[test]
+fn a_reinstall_after_a_template_change_leaves_only_the_new_entries_beside_the_users_own() {
+    let machine = Machine::new(false, false).with_codex().with_cursor();
+    machine.write(".codex/hooks.json", CODEX_OWN);
+    machine.write(".cursor/hooks.json", CURSOR_OWN);
+    machine.run("install");
+    let codex_new = codex_commands(&machine);
+    let cursor_new = cursor_commands(&machine);
+    as_an_older_template_left_it(&machine, ".codex/hooks.json", "codex", "Notification");
+    as_an_older_template_left_it(&machine, ".cursor/hooks.json", "cursor", "afterFileEdit");
+
+    machine.run("install");
+
+    assert_eq!(codex_commands(&machine), codex_new);
+    assert_eq!(cursor_commands(&machine), cursor_new);
+}
+
+#[test]
+fn install_then_a_reinstall_after_a_template_change_then_uninstall_leaves_the_hook_files_byte_identical()
+ {
+    let machine = Machine::new(false, false).with_codex().with_cursor();
+    machine.write(".codex/hooks.json", CODEX_OWN);
+    machine.write(".cursor/hooks.json", CURSOR_OWN);
+    let before = files(&machine.home);
+    machine.run("install");
+    as_an_older_template_left_it(&machine, ".codex/hooks.json", "codex", "Notification");
+    as_an_older_template_left_it(&machine, ".cursor/hooks.json", "cursor", "afterFileEdit");
+    machine.run("install");
+    machine.run("uninstall");
+    assert_eq!(files(&machine.home), before);
+}
+
+#[test]
+fn a_hook_the_user_added_after_an_older_template_stays_alone_at_uninstall() {
+    let machine = Machine::new(false, false).with_codex().with_cursor();
+    machine.write(".codex/hooks.json", CODEX_OWN);
+    machine.write(".cursor/hooks.json", CURSOR_OWN);
+    machine.run("install");
+    as_an_older_template_left_it(&machine, ".codex/hooks.json", "codex", "Notification");
+    as_an_older_template_left_it(&machine, ".cursor/hooks.json", "cursor", "afterFileEdit");
+    add_own_hook(
+        &machine,
+        ".codex/hooks.json",
+        "Stop",
+        serde_json::json!({ "hooks": [{ "type": "command", "command": "say done" }] }),
+    );
+    add_own_hook(
+        &machine,
+        ".cursor/hooks.json",
+        "stop",
+        serde_json::json!({ "command": "say done" }),
+    );
+    machine.run("install");
+    machine.run("uninstall");
+
+    let (ours, theirs) = codex_commands(&machine);
+    assert!(ours.is_empty(), "{ours:?}");
+    assert_eq!(
+        theirs,
+        [
+            (
+                "Stop".to_owned(),
+                "python3 ~/.codex/hooks/stop.py".to_owned()
+            ),
+            ("Stop".to_owned(), "say done".to_owned())
+        ]
+    );
+    let (ours, theirs) = cursor_commands(&machine);
+    assert!(ours.is_empty(), "{ours:?}");
+    assert_eq!(
+        theirs,
+        [
+            ("stop".to_owned(), "./hooks/audit.sh".to_owned()),
+            ("stop".to_owned(), "say done".to_owned())
+        ]
+    );
+}
+
+/// Sets the fingerprint install's record holds for `harness` to `value`, or takes it out with `None`, as a record
+/// from another build would have it.
+fn set_fingerprint(machine: &Machine, harness: &str, value: Option<&str>) {
+    let state = machine.data().join("install/state.json");
+    let mut record: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&state).unwrap()).unwrap();
+    let entry = record["harnesses"][harness].as_object_mut().unwrap();
+    match value {
+        Some(v) => entry.insert("fingerprint".into(), v.into()),
+        None => entry.remove("fingerprint"),
+    };
+    fs::write(&state, record.to_string()).unwrap();
+}
+
+const RETRUST: &str = "run `/hooks` in Codex";
+
+#[test]
+fn a_start_rewires_only_the_wired_harnesses_whose_rendered_entries_changed() {
+    let machine = Machine::new(true, false).with_codex().with_cursor();
+    machine.write(".codex/hooks.json", CODEX_OWN);
+    machine.write(".cursor/hooks.json", CURSOR_OWN);
+    machine.start(&["y"]);
+    let codex_new = codex_commands(&machine);
+    let cursor_new = cursor_commands(&machine);
+    let claude_calls = machine.calls("claude").len();
+    // An older build rendered other entries for Codex and Cursor, and wired them.
+    as_an_older_template_left_it(&machine, ".codex/hooks.json", "codex", "Notification");
+    as_an_older_template_left_it(&machine, ".cursor/hooks.json", "cursor", "afterFileEdit");
+    set_fingerprint(&machine, "codex", Some("older"));
+    set_fingerprint(&machine, "cursor", Some("older"));
+
+    let text = machine.start(&[]);
+
+    assert!(!text.contains(ASK), "{text}");
+    assert!(text.contains("plotkeeper: rewired Codex"), "{text}");
+    assert!(text.contains("plotkeeper: rewired Cursor"), "{text}");
+    assert!(text.contains(RETRUST), "{text}");
+    assert!(!text.contains("rewired Claude Code"), "{text}");
+    assert_eq!(machine.calls("claude").len(), claude_calls);
+    assert_eq!(codex_commands(&machine), codex_new);
+    assert_eq!(cursor_commands(&machine), cursor_new);
+
+    // Rewired, they hold this build's fingerprints: the next start rewires nothing.
+    let text = machine.start(&[]);
+    assert!(!text.contains("rewired"), "{text}");
+}
+
+const TOOLS: [&str; 5] = ["claude", "agy", "codex", "copilot", "qwen"];
+
+#[test]
+fn a_start_with_nothing_changed_runs_no_harness_cli() {
+    let machine = Machine::new(true, true)
+        .with_codex()
+        .with_cursor()
+        .with_copilot()
+        .with_qwen();
+    machine.start(&["y"]);
+    let calls: Vec<_> = TOOLS.iter().map(|t| machine.calls(t)).collect();
+    assert!(!calls[0].is_empty(), "the first start wired Claude Code");
+
+    let text = machine.start(&[]);
+
+    assert!(!text.contains(ASK), "{text}");
+    assert!(!text.contains("rewired"), "{text}");
+    assert_eq!(
+        TOOLS.iter().map(|t| machine.calls(t)).collect::<Vec<_>>(),
+        calls
+    );
+}
+
+#[test]
+fn a_record_without_fingerprints_is_rewired_once_without_asking() {
+    let machine = Machine::new(true, false).with_codex();
+    machine.start(&["y"]);
+    // As a build before #438 left it: answers, no fingerprints.
+    set_fingerprint(&machine, "claude", None);
+    set_fingerprint(&machine, "codex", None);
+    let calls = machine.calls("claude").len();
+
+    let text = machine.start(&[]);
+    assert!(!text.contains(ASK), "{text}");
+    assert!(text.contains("plotkeeper: rewired Claude Code"), "{text}");
+    assert!(text.contains("plotkeeper: rewired Codex"), "{text}");
+    assert!(machine.calls("claude").len() > calls);
+
+    let calls = machine.calls("claude").len();
+    let text = machine.start(&[]);
+    assert!(!text.contains("rewired"), "{text}");
+    assert_eq!(machine.calls("claude").len(), calls);
+}
+
+#[test]
+fn a_declined_harness_whose_entries_changed_is_not_rewired() {
+    let machine = Machine::new(true, false).with_codex();
+    machine.start(&["n"]);
+    set_fingerprint(&machine, "claude", Some("older"));
+    set_fingerprint(&machine, "codex", Some("older"));
+
+    let text = machine.start(&[]);
+
+    assert!(!text.contains("rewired"), "{text}");
+    assert!(machine.calls("claude").is_empty());
+    assert!(!machine.home.join(".codex/hooks.json").exists());
+}
+
+#[test]
+fn install_then_a_rewire_on_start_then_uninstall_leaves_every_file_outside_the_data_folder_byte_identical()
+ {
+    let machine = Machine::new(true, false).with_codex().with_cursor();
+    machine.write(".codex/hooks.json", CODEX_OWN);
+    machine.write(".cursor/hooks.json", CURSOR_OWN);
+    let before = files(&machine.home);
+    machine.run("install");
+    as_an_older_template_left_it(&machine, ".codex/hooks.json", "codex", "Notification");
+    as_an_older_template_left_it(&machine, ".cursor/hooks.json", "cursor", "afterFileEdit");
+    set_fingerprint(&machine, "codex", Some("older"));
+    set_fingerprint(&machine, "cursor", Some("older"));
+    assert!(machine.start(&[]).contains("rewired Codex"));
+    machine.run("uninstall");
+    let outside = |files: BTreeMap<String, Vec<u8>>| {
+        files
+            .into_iter()
+            .filter(|(p, _)| !p.starts_with("Library/Application Support/plotkeeper/"))
+            .collect::<BTreeMap<_, _>>()
+    };
+    assert_eq!(outside(files(&machine.home)), outside(before));
+}
+
+/// Asks the server at `url` (the address a start printed, with its token) whether any harness is wired (#437), as the
+/// page does.
+fn wired(url: &str) -> bool {
+    let rest = url.strip_prefix("http://").unwrap();
+    let (host, query) = rest.split_once("/?token=").unwrap();
+    let mut stream = std::net::TcpStream::connect(host).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    write!(
+        stream,
+        "POST /api/wired HTTP/1.1\r\nHost: {host}\r\nCookie: plotkeeper={query}\r\nConnection: close\r\nContent-Length: 2\r\n\r\n{{}}"
+    )
+    .unwrap();
+    let mut raw = String::new();
+    stream.read_to_string(&mut raw).unwrap();
+    let (head, body) = raw.split_once("\r\n\r\n").unwrap_or((&raw, ""));
+    assert!(head.starts_with("HTTP/1.1 200"), "{raw}");
+    serde_json::from_str(body).unwrap_or_else(|e| panic!("{e}: {raw}"))
+}
+
+#[test]
+fn the_server_says_nothing_is_wired_after_a_declined_start_and_wired_after_install() {
+    let machine = Machine::new(true, false).with_codex();
+    machine.start(&["n"]);
+    let mut server = machine
+        .starting(false)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    let mut lines = std::io::BufReader::new(server.stdout.take().unwrap());
+    while !line.starts_with("plotkeeper: http") {
+        line.clear();
+        assert_ne!(
+            std::io::BufRead::read_line(&mut lines, &mut line).unwrap(),
+            0,
+            "the start printed no address"
+        );
+    }
+    let url = line.trim().strip_prefix("plotkeeper: ").unwrap().to_owned();
+    let before = wired(&url);
+    machine.run("install");
+    let after = wired(&url);
+    let _ = server.kill();
+    let _ = server.wait();
+    assert!(!before, "nothing is wired after a no");
+    assert!(after, "install wired, and the running server says so");
+}
+
+#[test]
+fn a_start_after_an_uninstall_that_failed_partway_never_rewires_and_asks_again() {
+    let machine = Machine::new(true, false);
+    machine.run_args(&["install", "--yes"]);
+    // Claude Code's marketplace cannot be removed: the plugin goes, the record keeps the marketplace.
+    script(
+        &machine.tools.join("claude"),
+        r#"echo "$@" >> "$(dirname "$0")/claude-calls"
+[ "$2 $3" = "marketplace remove" ] && exit 1
+exit 0"#,
+    );
+    assert!(!machine.run_any("uninstall").status.success());
+    let calls = machine.calls("claude").len();
+
+    let text = machine.start_without_terminal();
+
+    assert!(!text.contains("rewired"), "{text}");
+    assert_eq!(
+        machine.calls("claude")[calls..],
+        [] as [String; 0],
+        "{text}"
+    );
+    assert!(text.contains("Claude Code not wired"), "{text}");
+}
+
+#[test]
+fn a_rewire_that_fails_for_one_harness_still_rewires_the_others_and_asks_about_new_ones() {
+    let machine = Machine::new(true, false).with_codex();
+    machine.write(".codex/hooks.json", CODEX_OWN);
+    machine.start(&["y"]);
+    let codex_new = codex_commands(&machine);
+    as_an_older_template_left_it(&machine, ".codex/hooks.json", "codex", "Notification");
+    set_fingerprint(&machine, "claude", Some("older"));
+    set_fingerprint(&machine, "codex", Some("older"));
+    // Claude Code's plugin cannot be installed now, and Cursor is new.
+    script(
+        &machine.tools.join("claude"),
+        r#"echo "$@" >> "$(dirname "$0")/claude-calls"
+[ "$2" = "install" ] && { echo "no network" >&2; exit 1; }
+exit 0"#,
+    );
+    let machine = machine.with_cursor();
+
+    let text = machine.start_without_terminal();
+
+    assert!(text.contains("Claude Code"), "{text}");
+    assert!(text.contains("no network"), "{text}");
+    assert!(text.contains("plotkeeper: rewired Codex"), "{text}");
+    assert_eq!(codex_commands(&machine), codex_new);
+    assert!(text.contains("Cursor not wired"), "{text}");
+}
+
+#[test]
+fn with_stdout_sent_to_a_file_the_question_still_reaches_the_terminal_and_stdout_holds_the_address()
+{
+    let machine = Machine::new(true, false);
+    let log = machine.home.join("log");
+    // As `plotkeeper > log` in a terminal: stdin and stderr are the terminal, stdout the file.
+    let mut command = Command::new("/usr/bin/script");
+    command
+        .args(["-q", "/dev/null", "/bin/sh", "-c", r#"exec "$0" > "$1""#])
+        .arg(machine.tools.join("plotkeeper"))
+        .arg(&log);
+    for (key, value) in machine.starting(true).get_envs() {
+        command.env(key, value.unwrap());
+    }
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let (mut answered, mut stopped) = (false, false);
+    let text = served(&mut child, |text, _| {
+        if !answered && text.contains(ASK) {
+            writeln!(stdin, "n").unwrap();
+            answered = true;
+        }
+        let logged = fs::read_to_string(&log).unwrap_or_default();
+        if !stopped && logged.contains("plotkeeper: http") {
+            let _ = stdin.write_all(b"\x03");
+            stopped = true;
+        }
+    });
+    let logged = fs::read_to_string(&log).unwrap();
+    assert!(text.contains(ASK), "{text}");
+    assert!(text.contains("plotkeeper: not wired"), "{text}");
+    assert!(logged.starts_with("plotkeeper: http"), "{logged}");
+    assert!(!logged.contains("Claude Code"), "{logged}");
+}
+
+#[test]
+fn a_start_with_no_terminal_says_what_it_did_not_wire_on_stderr_and_prints_only_the_address_on_stdout()
+ {
+    let machine = Machine::new(true, false);
+    let mut child = machine
+        .starting(false)
+        .stdin(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut first = String::new();
+    std::io::BufRead::read_line(
+        &mut std::io::BufReader::new(child.stdout.take().unwrap()),
+        &mut first,
+    )
+    .unwrap();
+    let _ = child.kill();
+    let mut errors = String::new();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut errors)
+        .unwrap();
+    let _ = child.wait();
+    assert!(first.starts_with("plotkeeper: http"), "{first}");
+    assert!(errors.contains("Claude Code not wired"), "{errors}");
+}
+
+/// Leaves install's record as a build before answers (#434) wrote it: its flags, no answers and no marker.
+fn as_before_answers(machine: &Machine) {
+    let state = machine.data().join("install/state.json");
+    let mut record: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&state).unwrap()).unwrap();
+    let record_map = record.as_object_mut().unwrap();
+    record_map.remove("harnesses");
+    record_map.remove("answers_kept");
+    fs::write(&state, record.to_string()).unwrap();
+}
+
+#[test]
+fn a_harness_wired_before_answers_stays_wired_when_a_start_saves_without_it_on_the_path() {
+    let machine = Machine::new(true, false).with_codex();
+    machine.run("install");
+    as_before_answers(&machine);
+    let codex = machine.tools.join("codex");
+    let kept = machine.tools.join("codex-kept");
+    fs::rename(&codex, &kept).unwrap();
+    // Claude Code's rewire saves the record while Codex is off the PATH.
+    assert!(
+        machine
+            .start_without_terminal()
+            .contains("rewired Claude Code")
+    );
+    fs::rename(&kept, &codex).unwrap();
+
+    let text = machine.start_without_terminal();
+
+    assert!(!text.contains("not wired"), "{text}");
+    assert!(text.contains("plotkeeper: rewired Codex"), "{text}");
+}
+
+#[test]
+fn a_decline_keeps_a_harness_wired_before_answers_that_is_off_the_path() {
+    let machine = Machine::new(false, false).with_codex();
+    machine.run("install");
+    as_before_answers(&machine);
+    let codex = machine.tools.join("codex");
+    let kept = machine.tools.join("codex-kept");
+    fs::rename(&codex, &kept).unwrap();
+    script(
+        &machine.tools.join("claude"),
+        r#"echo "$@" >> "$(dirname "$0")/claude-calls""#,
+    );
+    assert!(machine.start(&["n"]).contains(ASK));
+    fs::rename(&kept, &codex).unwrap();
+
+    let text = machine.start_without_terminal();
+
+    assert!(!text.contains("not wired"), "{text}");
+    assert!(text.contains("plotkeeper: rewired Codex"), "{text}");
 }

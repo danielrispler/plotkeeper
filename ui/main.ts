@@ -4,7 +4,7 @@
 // server's events to the regions and lays the list out by the width rule in `layout.ts`.
 
 import "./transport.js";
-import { dismissNotice, onLogRecord, setSettingsErrors, showNotice } from "./notice.js";
+import { dismissNotice, NOT_RECORDING, onLogRecord, setSettingsErrors, showNotice } from "./notice.js";
 import { withGateNotice, withWriterNotice } from "./writer-notice.js";
 import { startWatching } from "./answer.js";
 import { openAsk } from "./ask.js";
@@ -302,6 +302,17 @@ listen<string | null>("writer-notice", showWriterNotice);
 invoke("writer_notice")
   .then((notice) => notice && showWriterNotice(notice))
   .catch(() => {});
+// No harness wired (#437): "not recording" in the map's head until one is. `plotkeeper install` runs in a terminal, so the page asks again at its focus.
+const checkWired = () =>
+  invoke("wired")
+    .then((wired) => {
+      const line = element("map-wiring");
+      line.textContent = wired ? "" : NOT_RECORDING;
+      line.hidden = wired;
+    })
+    .catch(() => {});
+checkWired();
+window.addEventListener("focus", checkWired);
 invoke("cards").then(showCards);
 // The writer section in the Settings panel (spec #320, #387): its gate notice shares the writer's line, and a passed Test's save applies as one.
 startWriters({

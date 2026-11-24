@@ -136,6 +136,10 @@ _Avoid_: Server (the program that serves the page, below), multiplexer
 The `server/` library and its `plotkeeper` program, which has no window: it holds the core state, the card store and the writer, follows the event log, writes the summaries and the PR briefs, and serves the learning layer as a page on 127.0.0.1 (one per data folder, behind a token) that Daniel opens in a browser tab. It owns no terminals: the **Terminal daemon** and the Tauri app's shell that also hosted the library are retired (#332, #415).
 _Avoid_: Backend, daemon (the terminal daemon is another process)
 
+**Wiring**:
+plotkeeper putting its hooks into an agent, such as Claude Code or Codex, only with the user's consent. Each agent found is wired, declined or not yet asked: a start in a terminal asks only about the agents not yet asked, a start with no terminal never asks or wires, `plotkeeper install` wires every agent found, and `plotkeeper uninstall` unwires them all and forgets the answers.
+_Avoid_: Setup, registering
+
 **Pane** (retired):
 Retired with the terminal (danielrispler/plotkeeper#335); its code is in `archive/` (#415). The window's view of one terminal of the terminal daemon. Up to two panes show at a time, when the terminal column is split; the others keep running hidden.
 _Avoid_: Tab

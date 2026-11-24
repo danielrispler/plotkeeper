@@ -2,6 +2,7 @@
 //! Started by hand in a terminal. A second one for the same data folder opens the browser on the first and exits; Ctrl+C stops it.
 //!
 //! `plotkeeper install` wires the agents it finds to plotkeeper's hooks, and `plotkeeper uninstall` reverses it (#357).
+//! A first start asks in the terminal before it wires the agents found with no answer yet, and serves either way (#434).
 //!
 //! Each start refreshes the hooks' copies of `plotkeeper-hook` and `plotkeeper-answer` in the data folder's `bin/` (#356).
 //!
@@ -10,6 +11,7 @@
 //! `PLOTKEEPER_NO_BROWSER=1` leaves the browser closed (the URL is printed either way), for tests.
 
 use std::{
+    io::IsTerminal,
     process::{Command, ExitCode},
     sync::{Arc, mpsc},
     thread,
@@ -78,12 +80,16 @@ fn main() -> ExitCode {
         eprintln!("plotkeeper: could not move the old data folder: {e}");
         return ExitCode::FAILURE;
     }
-    match std::env::args().nth(1).as_deref() {
-        None => {}
-        Some(verb @ ("install" | "uninstall")) => return wire(verb, &home),
-        Some(other) => {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
+        [] => {}
+        // `--yes` is for scripts: install never asks, as running it is the consent.
+        ["install"] | ["install", "--yes"] => return wire("install", &home),
+        ["uninstall"] => return wire("uninstall", &home),
+        _ => {
             eprintln!(
-                "plotkeeper: unknown command {other:?}; run plotkeeper, plotkeeper install, plotkeeper uninstall or plotkeeper --version"
+                "plotkeeper: unknown command {:?}; run plotkeeper, plotkeeper install [--yes], plotkeeper uninstall or plotkeeper --version",
+                args.join(" ")
             );
             return ExitCode::FAILURE;
         }
@@ -93,6 +99,9 @@ fn main() -> ExitCode {
     let held = match lock::acquire(&data) {
         Ok(Instance::First(held)) => held,
         Ok(Instance::Second(running)) => {
+            if let Some(line) = running.version_notice(env!("CARGO_PKG_VERSION")) {
+                eprintln!("{line}");
+            }
             show(&address(running.port, &running.token));
             return ExitCode::SUCCESS;
         }
@@ -102,6 +111,7 @@ fn main() -> ExitCode {
         }
     };
     refresh_hook_copies(&home);
+    wire_on_start(&home);
     let _ = log::set_logger(&Stderr).map(|()| log::set_max_level(log::LevelFilter::Warn));
     match run(&log, held) {
         Ok(()) => ExitCode::SUCCESS,
@@ -139,6 +149,39 @@ fn wire(verb: &str, home: &std::path::Path) -> ExitCode {
             eprintln!("plotkeeper {verb}: {e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// The first start's wiring step (#434): rewires the wired harnesses whose fingerprint changed (#438), then asks in the
+/// terminal, when stdin is one, about the harnesses found with no answer, and wires them on yes. A failure is said and
+/// the server starts anyway.
+fn wire_on_start(home: &std::path::Path) {
+    let beside = match beside() {
+        Ok(beside) => beside,
+        Err(e) => {
+            eprintln!("plotkeeper: could not find its own executable ({e}); nothing was wired");
+            return;
+        }
+    };
+    let stdin = std::io::stdin();
+    let mut lock;
+    let terminal: Option<&mut dyn std::io::BufRead> = if stdin.is_terminal() {
+        lock = stdin.lock();
+        Some(&mut lock)
+    } else {
+        None
+    };
+    let path = std::env::var_os("PATH");
+    if let Err(e) = install::wire_on_start(
+        home,
+        &beside,
+        path.as_deref(),
+        terminal,
+        // What it would change, its question and what it did go to stderr, as plotkeeper's reports do, so stdout's
+        // first line stays the page's address and `plotkeeper > log` still shows the question.
+        &mut std::io::stderr(),
+    ) {
+        eprintln!("plotkeeper: wiring stopped: {e}; run plotkeeper install to retry");
     }
 }
 

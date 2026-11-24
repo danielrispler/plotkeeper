@@ -44,5 +44,9 @@ jobs:
           tool: cargo-nextest
       - run: npm ci
       # The same command an agent runs locally (package.json, `check`).
+      # The runner has 3 cores and most tests wait on git, processes and timers, so nextest runs 5 at once, not 3.
+      # Not more: the hook gives up on its trees after 1.2s, and at twice the cores its tests fail on a loaded machine.
       - run: npm run check
+        env:
+          NEXTEST_TEST_THREADS: 5
 

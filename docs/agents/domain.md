@@ -8,7 +8,7 @@ The studio, a control room for understanding agent work, keeps its vocabulary in
 
 Read `docs/studio/CONTEXT.md` and any ADRs relevant to the area you are exploring.
 If they do not exist, proceed silently. The domain-modeling skill creates them when terms or decisions are resolved.
-To measure the real event log, use `~/Library/Application Support/plotkeeper/events.jsonl`. For what the studio itself reported (errors, warnings, panics), read the Studio log, `~/Library/Logs/dev.falinks.studio/studio.log`.
+To measure the real event log, use `~/Library/Application Support/plotkeeper/events.jsonl`. plotkeeper writes what it reports itself (errors, warnings, panics, and the page's log lines) to the stderr of the terminal it was started in; it keeps no log file.
 
 ## Behaviour docs
 
