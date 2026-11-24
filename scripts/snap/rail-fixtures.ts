@@ -228,6 +228,44 @@ export const railStates = {
   railIdle: () => build("idle", { withBrief: true }),
 };
 
+// #444: the rail's header in two lines, at a narrow rail. Line 1 the logo, then the name on one line with an ellipsis, its full text
+// in the page and on hover; line 2 the verdict, the mode and the phase, the needs-you verdict in its colour.
+const longName = "Check that every snap fixture of the rail renders in…";
+const headerScript = (phase: boolean) => `
+  document.querySelector(".map-stage").style.setProperty("--panel-w", "320px");
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const name = document.getElementById("session-name");
+  const full = "#56 · ${longName}";
+  const box = (id) => document.getElementById(id).getBoundingClientRect();
+  const nameBox = name.getBoundingClientRect();
+  if (name.textContent !== full) log("snap:fail the name's text is " + JSON.stringify(name.textContent));
+  if (name.title !== full) log("snap:fail the name's hover text is " + JSON.stringify(name.title));
+  if (nameBox.height >= 2 * parseFloat(getComputedStyle(name).fontSize)) log("snap:fail the name's line is " + nameBox.height + "px high, more than one line");
+  if (name.scrollWidth <= name.clientWidth) log("snap:fail the name does not overflow its line: " + name.scrollWidth + " <= " + name.clientWidth);
+  const mark = box("mark");
+  if (!(document.getElementById("mark").compareDocumentPosition(name) & Node.DOCUMENT_POSITION_FOLLOWING) || mark.right > nameBox.left + 0.5
+      || mark.bottom <= nameBox.top || mark.top >= nameBox.bottom) log("snap:fail the logo does not precede the name on its line");
+  for (const id of ["state", "mode"${phase ? ', "phase"' : ""}]) {
+    const item = box(id);
+    if (!document.getElementById(id).textContent) log("snap:fail line 2 has no " + id);
+    if (item.top < nameBox.bottom - 0.5) log("snap:fail #" + id + " is not on the line under the name");
+  }
+  const [state, mode] = [box("state"), box("mode")];
+  if (mode.top >= state.bottom || mode.bottom <= state.top) log("snap:fail the verdict and the mode are not on one line");
+  ${phase ? 'const p = box("phase"); if (p.top >= state.bottom || p.bottom <= state.top) log("snap:fail the phase is not on the verdict\'s line");' : `
+  const probe = document.createElement("span");
+  probe.style.color = "var(--needs-you)";
+  document.body.append(probe);
+  const want = getComputedStyle(probe).color;
+  probe.remove();
+  const got = getComputedStyle(document.getElementById("state")).color;
+  if (got !== want) log("snap:fail the needs-you verdict is " + got + ", not " + want);`}
+  log("header: " + [...document.querySelectorAll("#headline p")].map((p) => p.textContent.trim()).join(" | "));`;
+const withHeader = (fixture: ReturnType<typeof build>, phase: boolean) => {
+  fixture.selected.session.prompt_name = longName;
+  return { ...fixture, snapScript: headerScript(phase) };
+};
+
 // #124: the banner opens an idle session, right above the newest turn, with the Brief inside it and not below the feed.
 const bannerScript = `
   const banner = document.getElementById("banner");
@@ -473,6 +511,8 @@ export const railFixtures = {
   railNamedFailure: () => ({ ...build("your_turn"), failed_check_name: "Window tests failed: delete keeps a live terminal (+1 more)", snapScript: namedFailureScript }),
   railEvidence: () => ({ ...build("your_turn"), snapScript: evidenceScript }),
   ...railStates,
+  railHeaderNeeds: () => withHeader(build("needs_you", { ask: questionAsk }), false),
+  railHeaderRunning: () => withHeader(build("running"), true),
   railBanner: () => ({ ...build("idle", { withBrief: true }), snapScript: bannerScript }),
   railIdleScroll: () => ({ ...build("idle", { withBrief: true }), snapScript: scrollScript }),
   railIdleOpened: () => ({ ...build("idle", { withBrief: true }), snapScript: openTurnScript }),
