@@ -105,6 +105,33 @@ struct State {
 #[derive(Serialize, Deserialize)]
 struct HarnessRecord {
     answer: Answer,
+    /// For a wired harness, the fingerprint of what install rendered for it (#438), which a start compares with what
+    /// it would render now. A wired record with none, from a build before #438 or rewritten by one, is rewired once by
+    /// the next start, which then stores it. An older build ignores the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fingerprint: Option<String>,
+}
+
+/// A fingerprint of `files`, (name, text) pairs: their 64-bit FNV-1a hash in hex, which, unlike std's hasher, stays the
+/// same across builds.
+fn fingerprint(files: &[(String, String)]) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for (name, text) in files {
+        for byte in name.bytes().chain([0]).chain(text.bytes()).chain([0]) {
+            hash = (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+    format!("{hash:016x}")
+}
+
+impl HarnessRecord {
+    /// The record of `harness` just wired to the hook binaries in `bin`.
+    fn wired(harness: Harness, home: &Path, bin: &Path) -> Result<HarnessRecord, String> {
+        Ok(HarnessRecord {
+            answer: Answer::Wired,
+            fingerprint: Some(harness.fingerprint(home, bin)?),
+        })
+    }
 }
 
 /// The user's answer for a harness: `plotkeeper install` and a yes record it wired, a no declined.
@@ -282,9 +309,9 @@ fn render(template: &str, bin: &Path) -> Result<String, String> {
     Ok(template.replace(PLACEHOLDER, &path[1..path.len() - 1]))
 }
 
-/// Writes Claude Code's plugin for the binaries in `bin` into `dir`, as a marketplace of one plugin, which is how
-/// `claude plugin install` takes a local folder.
-fn render_claude(dir: &Path, bin: &Path) -> Result<(), String> {
+/// Claude Code's plugin for the binaries in `bin`, as a marketplace of one plugin, which is how `claude plugin
+/// install` takes a local folder: each file by its path in that folder.
+fn claude_files(bin: &Path) -> Result<Vec<(String, String)>, String> {
     let marketplace = serde_json::json!({
         "name": NAME,
         "owner": { "name": "plotkeeper" },
@@ -302,7 +329,12 @@ fn render_claude(dir: &Path, bin: &Path) -> Result<(), String> {
         ),
         (format!("{NAME}/hooks/hooks.json"), render(HOOKS_JSON, bin)?),
     ];
-    for (name, text) in files {
+    Ok(files.into())
+}
+
+/// Writes Claude Code's plugin for the binaries in `bin` into `dir`.
+fn render_claude(dir: &Path, bin: &Path) -> Result<(), String> {
+    for (name, text) in claude_files(bin)? {
         let file = dir.join(name);
         fs::create_dir_all(file.parent().unwrap_or(dir)).map_err(|e| e.to_string())?;
         fs::write(&file, text).map_err(|e| format!("could not write {}: {e}", file.display()))?;
@@ -398,9 +430,7 @@ fn wire(
         wire_one(harness, home, &bin, path, &backups, &mut state, out)?;
         state.harnesses.insert(
             harness.id().to_owned(),
-            HarnessRecord {
-                answer: Answer::Wired,
-            },
+            HarnessRecord::wired(harness, home, &bin)?,
         );
         save(home, &state)?;
     }
@@ -531,6 +561,8 @@ const HARNESSES: [Harness; 6] = [
     Harness::Qwen,
 ];
 
+const CODEX_RETRUST: &str = "Codex: once, run `/hooks` in Codex and trust plotkeeper's changed hooks; Codex skips a changed hook until it is trusted again";
+
 const CODEX_TRUST: &str = "Codex: once, run `/hooks` in Codex and trust plotkeeper's hooks; Codex skips a hook until it is trusted";
 
 impl Harness {
@@ -617,6 +649,30 @@ impl Harness {
         }
     }
 
+    /// The fingerprint of what install renders for it with the hook binaries in `bin`: Claude Code's, agy's and
+    /// Copilot's plugin folders, Codex's and Cursor's entries, Qwen Code's extension. It changes when a template does,
+    /// and when the binaries' path does.
+    fn fingerprint(self, home: &Path, bin: &Path) -> Result<String, String> {
+        let entries = |file: HookFile| -> Result<Vec<(String, String)>, String> {
+            let ours = Value::Object(file.ours(bin)?);
+            Ok(vec![("hooks".into(), ours.to_string())])
+        };
+        let files = match self {
+            Harness::Claude => claude_files(bin)?,
+            Harness::Agy => agy_plugin::rendered(&bin.join("plotkeeper-hook"))?
+                .map(|(name, text)| (name.to_owned(), text))
+                .into(),
+            Harness::Codex => entries(codex_file(home))?,
+            Harness::Cursor => entries(cursor_file(home))?,
+            Harness::Copilot => copilot_files(bin)?,
+            Harness::Qwen => vec![(
+                "qwen-extension.json".into(),
+                render(QWEN_EXTENSION_JSON, bin)?,
+            )],
+        };
+        Ok(fingerprint(&files))
+    }
+
     /// Its answer in `state`. A record from before answers were kept counts what install did there as wired.
     fn answer(self, state: &State) -> Option<Answer> {
         if let Some(record) = state.harnesses.get(self.id()) {
@@ -644,10 +700,12 @@ pub fn any_wired(home: &Path) -> bool {
     })
 }
 
-/// The consent step of a bare `plotkeeper` start (#434): for the harnesses found on `path` that have no answer yet, it
+/// The wiring step of a bare `plotkeeper` start (#434). First it rewires, without asking, each wired harness whose
+/// fingerprint changed (#438), with or without a terminal. Then, for the harnesses found on `path` that have no answer yet, it
 /// prints what wiring them would change and asks `Wire these? [Y/n]` on `terminal`, then wires them on yes, with the
 /// hook binaries from `beside`, or records them as declined on no. With no terminal it asks nothing, wires nothing,
-/// records nothing and prints the command that wires. When every harness found has an answer, it does nothing.
+/// records nothing and prints the command that wires. When every harness found has an answer and an equal fingerprint, it
+/// runs no harness CLI.
 pub fn wire_on_start(
     home: &Path,
     beside: &Path,
@@ -655,6 +713,7 @@ pub fn wire_on_start(
     terminal: Option<&mut dyn BufRead>,
     out: &mut dyn Write,
 ) -> Result<(), String> {
+    rewire_changed(home, path, out)?;
     let mut state = load(home)?.unwrap_or_default();
     let unasked: Vec<Harness> = HARNESSES
         .into_iter()
@@ -718,6 +777,7 @@ pub fn wire_on_start(
             harness.id().to_owned(),
             HarnessRecord {
                 answer: Answer::Declined,
+                fingerprint: None,
             },
         );
     }
@@ -726,6 +786,54 @@ pub fn wire_on_start(
         out,
         "plotkeeper: not wired; plotkeeper will not ask again. To wire later, run: plotkeeper install"
     );
+    Ok(())
+}
+
+/// Rewires, without asking, each harness found on `path` that is wired and whose fingerprint differs from what install
+/// would render for it now, or that has none (#438), saying so in one line each; for Codex, also that its hooks must
+/// be trusted again. Runs no harness CLI when every fingerprint is equal. A declined harness is never rewired.
+fn rewire_changed(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Result<(), String> {
+    let Some(mut state) = load(home)? else {
+        return Ok(());
+    };
+    let bin = studio_hook::bin_dir(home);
+    let backups = record_dir(home).join("backups");
+    for harness in HARNESSES {
+        if harness.answer(&state) != Some(Answer::Wired) || !harness.found(home, path) {
+            continue;
+        }
+        let now = harness.fingerprint(home, &bin)?;
+        let stored = state
+            .harnesses
+            .get(harness.id())
+            .and_then(|r| r.fingerprint.as_deref());
+        if stored == Some(now.as_str()) {
+            continue;
+        }
+        // Its steps are install's; the start says it in one line.
+        wire_one(
+            harness,
+            home,
+            &bin,
+            path,
+            &backups,
+            &mut state,
+            &mut std::io::sink(),
+        )?;
+        state.harnesses.insert(
+            harness.id().to_owned(),
+            HarnessRecord::wired(harness, home, &bin)?,
+        );
+        save(home, &state)?;
+        let _ = writeln!(
+            out,
+            "plotkeeper: rewired {}, as plotkeeper's hooks for it changed",
+            harness.label()
+        );
+        if harness == Harness::Codex {
+            let _ = writeln!(out, "  {CODEX_RETRUST}");
+        }
+    }
     Ok(())
 }
 
@@ -789,10 +897,7 @@ fn install_copilot(
 ) -> Result<(), String> {
     let dir = plugins_dir(home).join("copilot").join(NAME);
     fs::create_dir_all(&dir).map_err(|e| format!("could not make {}: {e}", dir.display()))?;
-    for (name, text) in [
-        ("plugin.json", COPILOT_PLUGIN_JSON.to_owned()),
-        ("hooks.json", render(COPILOT_HOOKS_JSON, bin)?),
-    ] {
+    for (name, text) in copilot_files(bin)? {
         let file = dir.join(name);
         fs::write(&file, text).map_err(|e| format!("could not write {}: {e}", file.display()))?;
     }
@@ -814,6 +919,14 @@ fn install_copilot(
         format!("Copilot: copilot plugin install {}", dir.display()),
     );
     Ok(())
+}
+
+/// Copilot's plugin for the binaries in `bin`, each file by its name in the plugin's folder.
+fn copilot_files(bin: &Path) -> Result<Vec<(String, String)>, String> {
+    Ok(vec![
+        ("plugin.json".into(), COPILOT_PLUGIN_JSON.to_owned()),
+        ("hooks.json".into(), render(COPILOT_HOOKS_JSON, bin)?),
+    ])
 }
 
 /// Install's record of a hook file it edits itself, Codex's or Cursor's.
@@ -1315,4 +1428,45 @@ pub fn uninstall(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Resu
     // A data folder install made and left empty goes too.
     let _ = fs::remove_dir(studio_hook::data_dir(home));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A record of `harnesses` as #436's build reads and writes it: an answer, nothing else.
+    #[derive(Deserialize)]
+    struct Before438 {
+        harnesses: BTreeMap<String, Before438Record>,
+    }
+
+    #[derive(Deserialize)]
+    struct Before438Record {
+        answer: Answer,
+    }
+
+    #[test]
+    fn a_record_with_fingerprints_reads_in_a_build_before_them_and_one_without_reads_here() {
+        let mut state = State::default();
+        state.harnesses.insert(
+            "codex".into(),
+            HarnessRecord {
+                answer: Answer::Wired,
+                fingerprint: Some("0123456789abcdef".into()),
+            },
+        );
+        let text = serde_json::to_string(&state).unwrap();
+        assert!(
+            text.contains("\"fingerprint\":\"0123456789abcdef\""),
+            "{text}"
+        );
+        let old: Before438 = serde_json::from_str(&text).unwrap();
+        assert_eq!(old.harnesses["codex"].answer, Answer::Wired);
+
+        let text = r#"{"claude":false,"agy":false,"agy_backups":[],"codex":null,"cursor":null,"harnesses":{"codex":{"answer":"wired"},"agy":{"answer":"declined"}}}"#;
+        let state: State = serde_json::from_str(text).unwrap();
+        assert_eq!(state.harnesses["codex"].answer, Answer::Wired);
+        assert_eq!(state.harnesses["codex"].fingerprint, None);
+        assert_eq!(state.harnesses["agy"].answer, Answer::Declined);
+    }
 }
