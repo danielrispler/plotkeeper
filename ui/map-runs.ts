@@ -3,7 +3,7 @@
 // on Daniel's click (`server/src/runner.rs`), never a session; no module starts one yet. A run that failed, or finished with tool calls
 // denied, offers its prompt to copy into his own agent, as an overturn does (`ratify.ts`).
 
-import { failure, invoke, text } from "./dom.js";
+import { confirmed, failure, invoke, text, type Confirm } from "./dom.js";
 import { onDraw, reloadMap, syncSide, type MapView } from "./map.js";
 import { copyOverturn, overturnReport } from "./ratify.js";
 import type { RunView, Runs } from "./types.js";
@@ -12,8 +12,17 @@ export type RunRow = { id: string; state: RunView["state"]; title: string; note:
 // What a copy left to show under its run's row: the line, and for a clipboard that refused, the prompt to copy by hand.
 export type CopyNote = { id: string; line: string; manual: string | null };
 // What the rows' buttons do: `cancel` stops a queued or running run and removes an ended one, and settles when the server has answered;
-// `noted` is told what a copy left to show, to keep it across a redraw.
-export type RunActs = { cancel: (id: string) => unknown; resume: () => void; copy: (prompt: string) => Promise<"copied" | "manual">; noted?: (note: CopyNote) => void };
+// `confirm` asks before a running run's Cancel (#459) and resolves true when confirmed; `noted` is told what a copy left to show, to keep
+// it across a redraw.
+export type RunActs = {
+  cancel: (id: string) => unknown;
+  confirm: (ask: Confirm) => Promise<boolean>;
+  resume: () => void;
+  copy: (prompt: string) => Promise<"copied" | "manual">;
+  noted?: (note: CopyNote) => void;
+};
+// The question before a running run's Cancel: a queued run made nothing yet and an ended one was cleaned up, so they leave at once.
+const cancelRunning: Confirm = { heading: "Cancel this run?", lost: "The run stops, and its worktree and the changes it made there are removed.", verb: "Cancel run" };
 
 const kindWords: Record<RunView["kind"], string> = { "back-law": "Back a law", "micro-world": "Micro-world" };
 const clock = (at: number) => {
@@ -86,6 +95,7 @@ function rowNode(row: RunRow, act: RunActs, note: CopyNote | null): HTMLElement 
   const title = row.state === "ended" ? "Remove this run from the list" : row.state === "running" ? "Stop this run and remove what it made" : "Take this run out of the queue";
   // The button waits for the server's answer: a second click asks nothing twice, and a Cancel the server refused can be tried again.
   const cancel = button(row.action, title, async () => {
+    if (row.state === "running" && !(await act.confirm(cancelRunning))) return;
     cancel.disabled = true;
     await act.cancel(row.id);
     cancel.disabled = false;
@@ -119,6 +129,7 @@ let copied: CopyNote | null = null;
 // refuses is an action Daniel asked for that failed, so it shows in the notice line.
 const acts: RunActs = {
   cancel: (id) => invoke("run_cancel", { id }).then(reloadMap).catch(failure("run_cancel", "error")),
+  confirm: confirmed,
   resume: () => void invoke("runs_resume").then(reloadMap).catch(failure("runs_resume", "error")),
   copy: (prompt) => copyOverturn(prompt, navigator.clipboard?.writeText?.bind(navigator.clipboard)),
   noted: (note) => (copied = note),
