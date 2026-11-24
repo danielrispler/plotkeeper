@@ -117,6 +117,10 @@ function drawRow(row: LogRow): HTMLElement {
   fold.className = failed ? "log-call failed" : "log-call";
   const summary = fullTitle(text("summary", callTitle(row)), `Show or hide this call's result: ${callTitle(row)}`);
   if (failed) summary.append(text("span", "error", "log-error"));
-  fold.append(summary, text("pre", out + (cut ? "\n… cut" : ""), "log-result"));
+  // The result scrolls on its own, so it takes focus, with a name, for the keys to scroll it (#462).
+  const result = text("pre", out + (cut ? "\n… cut" : ""), "log-result");
+  result.setAttribute("tabindex", "0");
+  result.setAttribute("aria-label", `Result of ${callTitle(row)}`);
+  fold.append(summary, result);
   return fold;
 }

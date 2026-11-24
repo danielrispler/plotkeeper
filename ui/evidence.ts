@@ -94,6 +94,9 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
   }
   const key = `${session} ${row.agent ?? ""} ${row.call}`;
   const pre = text("pre", outputs.get(key) ?? "", "evidence-output");
+  // The output scrolls on its own, so it takes focus, with a name, for the keys to scroll it (#462).
+  pre.setAttribute("tabindex", "0");
+  pre.setAttribute("aria-label", `Output of ${row.label}`);
   const show = () => (openOutputs.has(key) ? pre.removeAttribute("hidden") : pre.setAttribute("hidden", ""));
   const fetch = () => {
     if (outputs.has(key)) return;
@@ -145,6 +148,8 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
     return entry && (entry.ended || (!ended && same)) ? entry : undefined;
   };
   const pre = text("pre", kept() ? hunkText(kept()!.hunk, false) : "", "evidence-hunk");
+  pre.setAttribute("tabindex", "0");
+  pre.setAttribute("aria-label", `Changes to ${file.path}`);
   const left = (h: Hunk | null) => {
     more.textContent = `${h?.left_out ?? 0} more lines`;
     if (openHunks.has(openKey) && h?.left_out) more.removeAttribute("hidden");

@@ -154,5 +154,13 @@
       <div class="ask-buttons"><button type="submit" class="btn" value="delete" title="Remove it from the list">Delete</button><button type="submit" class="btn" value="cancel" autofocus title="Keep it (Esc)">Cancel</button></div>
     </form>
   </dialog>
+  <!-- A confirm before a button destroys something (#459): its heading, what is lost and the verb come from \`confirmed\` in dom.ts. -->
+  <dialog id="confirm-dialog" class="ask" aria-labelledby="confirm-heading">
+    <form method="dialog">
+      <h2 id="confirm-heading" class="ask-heading">Go ahead?</h2>
+      <p id="confirm-lost"></p>
+      <div class="ask-buttons"><button type="submit" class="btn" id="confirm-yes" value="confirm" title="Go ahead; this cannot be undone">Go ahead</button><button type="submit" class="btn" value="cancel" autofocus title="Keep it (Esc)">Cancel</button></div>
+    </form>
+  </dialog>
 </body>
 </html>

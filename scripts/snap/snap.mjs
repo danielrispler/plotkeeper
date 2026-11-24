@@ -36,10 +36,11 @@ cpSync(dist, site, { recursive: true });
 const fixture = fixtures[name]();
 writeFileSync(join(site, "index.html"), snapPage(readFileSync(join(dist, "index.html"), "utf8"), fixture, { bodyClasses }));
 
-// A fixture with `realPointer` runs Chrome with its DevTools port open, and the page's `__snapClick`, `__snapDrag` and `__snapDoubleClick`
-// ask here for real mouse input, sent as Chrome's own (`Input.dispatchMouseEvent`): what `element.click()` skips, such as pointer capture,
-// then happens as in use. `events` are that call's params in order.
-async function realMouse(events) {
+// A fixture with `realPointer` or `realKeys` runs Chrome with its DevTools port open, and the page's `__snapClick`, `__snapDrag`,
+// `__snapDoubleClick` and `__snapKey` ask here for real input, sent as Chrome's own (`Input.dispatchMouseEvent`, `Input.dispatchKeyEvent`):
+// what `element.click()` or a synthetic KeyboardEvent skips, such as pointer capture, Tab moving focus or Esc closing a popover, then
+// happens as in use. `events` are that method's params in order.
+async function devtools(method, events) {
   const port = readFileSync(join(profile, "DevToolsActivePort"), "utf8").split("\n")[0];
   const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
   const socket = new WebSocket(targets.find((target) => target.type === "page").webSocketDebuggerUrl);
@@ -52,11 +53,29 @@ async function realMouse(events) {
   };
   const send = (params) => new Promise((done) => {
     waiting.set(++id, done);
-    socket.send(JSON.stringify({ id, method: "Input.dispatchMouseEvent", params }));
+    socket.send(JSON.stringify({ id, method, params }));
   });
   for (const event of events) await send(event);
   socket.close();
 }
+const realMouse = (events) => devtools("Input.dispatchMouseEvent", events);
+// The keys a fixture may press: each a key down and up, with `text` for the keys that type (Enter, Space) so Chrome presses a focused
+// button with them as it does in use. Shift+Tab holds Shift (modifier 8) over the Tab.
+const keys = {
+  Tab: { key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 },
+  "Shift+Tab": { key: "Tab", code: "Tab", windowsVirtualKeyCode: 9, modifiers: 8 },
+  Enter: { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" },
+  Space: { key: " ", code: "Space", windowsVirtualKeyCode: 32, text: " " },
+  Escape: { key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 },
+  ArrowUp: { key: "ArrowUp", code: "ArrowUp", windowsVirtualKeyCode: 38 },
+  ArrowDown: { key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 },
+};
+const realKey = (name) => {
+  const key = keys[name];
+  if (!key) throw new Error(`no such key: ${name}; snap presses ${Object.keys(keys).join(", ")}`);
+  const { text, ...rest } = key;
+  return devtools("Input.dispatchKeyEvent", [{ type: text ? "keyDown" : "rawKeyDown", ...key }, { type: "keyUp", ...rest }]);
+};
 const press = (x, y, clickCount = 1) => [
   { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount },
   { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount },
@@ -166,10 +185,12 @@ const server = createServer(async (req, res) => {
     return;
   }
   const input = { "/__snap/click": realClick, "/__snap/dblclick": realDoubleClick, "/__snap/drag": realDrag, "/__snap/drag-start": realDragStart, "/__snap/drag-end": realDragEnd }[url.pathname];
-  if (input) {
+  if (input || url.pathname === "/__snap/key") {
     try {
-      if (!fixture.realPointer) throw new Error("the fixture has no realPointer");
-      await input(...["x", "y", "toX", "toY"].map((key) => Number(url.searchParams.get(key))));
+      if (input && !fixture.realPointer) throw new Error("the fixture has no realPointer");
+      if (!input && !fixture.realKeys) throw new Error("the fixture has no realKeys");
+      if (input) await input(...["x", "y", "toX", "toY"].map((key) => Number(url.searchParams.get(key))));
+      else await realKey(url.searchParams.get("key"));
       res.end("done");
     } catch (why) {
       res.statusCode = 500;
@@ -192,7 +213,7 @@ await new Promise((done) => server.listen(0, "127.0.0.1", done));
 const budget = fixture.contrast ? 6000 : 5000;
 const chromeArgs = [
   "--headless=new", "--enable-logging=stderr", "--v=0", "--disable-gpu", `--force-device-scale-factor=${scale}`, `--user-data-dir=${profile}`, `--window-size=${width},${height}`,
-  `--virtual-time-budget=${budget}`, `--screenshot=${resolve(out)}`, ...(fixture.realPointer || fixture.contrast ? ["--remote-debugging-port=0"] : []),
+  `--virtual-time-budget=${budget}`, `--screenshot=${resolve(out)}`, ...(fixture.realPointer || fixture.realKeys || fixture.contrast ? ["--remote-debugging-port=0"] : []),
   `http://127.0.0.1:${server.address().port}/index.html`,
 ];
 // A screenshot left from an earlier run must not pass for this one's.

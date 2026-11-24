@@ -1,7 +1,7 @@
 // The page `npm run snap` renders: dist's index.html with the page's transport stubbed in front of the app's module script: `fetch`
 // answers `POST /api/<command>` from the fixture's key of that name, else null, and `EventSource` takes the page's listeners, which
 // `window.__snapEmit(name, payload)` and the fixture's `appErrors` raise as the server's stream would; `window.__snapClick(node)`, `__snapDoubleClick(node)` and
-// `__snapDrag(node, dx, dy)` are real mouse input, which snap sends (`realPointer`), and the fixture's `storage` is put in localStorage first.
+// `__snapDrag(node, dx, dy)` are real mouse input, which snap sends (`realPointer`), `__snapKey(key)` a real key press (`realKeys`), and the fixture's `storage` is put in localStorage first.
 // It exists only in the page written to a temp directory, never in dist or the shipped page.
 
 import { contrastAudit } from "./contrast.mjs";
@@ -22,6 +22,10 @@ export const stubSource = (fixture) => `(() => {
   };
   window.__snapClick = (node) => real("click", middle(node));
   window.__snapDoubleClick = (node) => real("dblclick", middle(node));
+  // A fixture with \`realKeys\` presses keys as a person does: \`await __snapKey("Tab")\` asks snap to send Chrome a real key down and up
+  // (\`Input.dispatchKeyEvent\`), so Tab moves focus and Esc closes a native popover. The keys: Tab, Shift+Tab, Enter, Space, Escape,
+  // ArrowUp and ArrowDown.
+  window.__snapKey = (key) => real("key", { key });
   // \`await __snapDrag(node, dx, dy)\` presses at the node's middle, moves by (dx, dy) with the button held and lets go there. With
   // \`midway\`, an async function, the button stays held halfway while it runs, then the rest of the move and the release follow.
   window.__snapDrag = async (node, dx, dy, midway) => {

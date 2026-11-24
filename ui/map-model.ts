@@ -664,3 +664,15 @@ export function catchUpIds(): (project: string, part: string, fog: string[]) => 
 export function fogListLines(entries: FogListEntry[]): string[] {
   return entries.map((e) => (e.pr === null ? `${e.title} (${e.commit.slice(0, 7)}, no PR)` : `#${e.pr} ${e.title}`));
 }
+
+// The parts' tab order (#460): top to bottom, then left to right. A plate within half a plate's height of a row's first (highest) plate
+// reads on that row, so one dragged a little out of line keeps its place.
+export function readingOrder(positions: Record<string, Point>): string[] {
+  const rows: [string, Point][][] = [];
+  for (const entry of Object.entries(positions).sort(([, a], [, b]) => a.y - b.y || a.x - b.x)) {
+    const row = rows.at(-1);
+    if (row && entry[1].y - row[0][1].y < plateSize.h / 2) row.push(entry);
+    else rows.push([entry]);
+  }
+  return rows.flatMap((row) => row.sort(([, a], [, b]) => a.x - b.x).map(([id]) => id));
+}
