@@ -23,7 +23,7 @@ import { scrubTo } from "./map-history.js";
 import { overturnNote, ratifyActions } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
-import { actorSize, alsoAt, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, stageLabel, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
+import { actorSize, alsoAt, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureMax, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, stageLabel, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
 import type { BriefCheck, BriefFigure, BriefStep, BriefView, CatchUpOffer, PrBrief, RatifyRow, ReadyPr, StoredCatchUp } from "./types.js";
 
 const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
@@ -448,12 +448,12 @@ function light(view: MapView, step: BriefStep) {
 
 // ---- the panel.
 
-// A figure's name for assistive tech (#456): its kind and the items it draws, as many as `figureShapes` draws.
+// A figure's name for assistive tech (#456): its kind and the items it draws, the ones `figureShapes` draws (`figureMax`).
 function figureLabel(fig: BriefFigure): string {
   const labels = (items: { label: string }[]) => items.map((item) => item.label);
-  if (fig.kind === "states") return `States${fig.frame ? ` of ${fig.frame}` : ""}: ${labels(fig.items.slice(0, 6)).join(", ")}`;
-  if (fig.kind === "sequence") return `Sequence: ${labels(fig.items.slice(0, 5)).join(", then ")}`;
-  return `Before: ${fig.before.slice(0, 4).join(", ")}. After: ${fig.after.slice(0, 4).join(", ")}`;
+  if (fig.kind === "states") return `States${fig.frame ? ` of ${fig.frame}` : ""}: ${labels(fig.items.slice(0, figureMax.states)).join(", ")}`;
+  if (fig.kind === "sequence") return `Sequence: ${labels(fig.items.slice(0, figureMax.sequence)).join(", then ")}`;
+  return `Before: ${fig.before.slice(0, figureMax.compare).join(", ")}. After: ${fig.after.slice(0, figureMax.compare).join(", ")}`;
 }
 
 function figureNode(shapes: Shape[], fig: BriefFigure) {

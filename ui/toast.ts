@@ -96,20 +96,23 @@ export function stackToasts() {
 
 // Top-layer popovers leave the region's layout, so each open toast is placed in the region's box by hand: the first two down its
 // top-right corner, one under the other, and the Clear toast in its bottom-left corner.
+// With none open, nothing is measured, so a resize or an update with no toast forces no layout; every size is read before any is set.
 function placeToasts(toasts: HTMLElement[]) {
+  const [needs, note, clear] = toasts.map((toast) => (toast.matches(":popover-open") ? { toast, w: toast.offsetWidth, h: toast.offsetHeight } : null));
+  if (!needs && !note && !clear) return;
   const box = element("toasts").getBoundingClientRect();
-  const [needs, note, clear] = toasts;
   let top = 0;
   let above = 0;
-  for (const toast of [needs, note]) {
-    if (!toast.matches(":popover-open")) continue;
-    toast.style.top = `calc(${box.top + top}px + ${above} * var(--sp-3))`;
-    toast.style.left = `${box.right - toast.offsetWidth}px`;
-    top += toast.offsetHeight;
+  for (const open of [needs, note]) {
+    if (!open) continue;
+    open.toast.style.top = `calc(${box.top + top}px + ${above} * var(--sp-3))`;
+    open.toast.style.left = `${box.right - open.w}px`;
+    top += open.h;
     above++;
   }
-  clear.style.top = `${box.bottom - clear.offsetHeight}px`;
-  clear.style.left = `${box.left}px`;
+  if (!clear) return;
+  clear.toast.style.top = `${box.bottom - clear.h}px`;
+  clear.toast.style.left = `${box.left}px`;
 }
 
 // The toasts' press, focus and the modal dialogs; once, at start.
@@ -189,9 +192,8 @@ export function showClearToast(count: number, undo: () => void) {
     toastButtons(toast, () => undoButton, hideClearToast, "Hide this toast; the clear goes on");
     clearName = name;
   }
-  const name = clearName;
-  name.textContent = message;
-  fullTitle(name, message);
+  clearName.textContent = message;
+  fullTitle(clearName, message);
   toast.dataset.say = toastSays([message]);
   toast.hidden = false;
   stackToasts();

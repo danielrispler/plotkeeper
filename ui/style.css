@@ -370,7 +370,7 @@ h1 { margin: 0 0 var(--sp-4); }
 .picker { position: fixed; inset: auto; top: calc(var(--bar) + var(--sp-2)); right: var(--sp-5); margin: 0; border: 0; color: var(--fg);
           width: var(--popover); max-height: 70vh; overflow-y: auto; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); padding: var(--sp-3); }
 .picker .row[aria-selected="true"] { background: var(--selected); box-shadow: inset var(--mark) 0 0 var(--fg); }
-.palette-close { flex: none; padding: 0 var(--sp-3); color: var(--muted); background: none; border: 0; font: inherit; cursor: pointer; }
+.palette-close { flex: none; padding: 0 var(--sp-3); color: var(--muted); background: none; }
 .palette-close:hover { color: var(--fg); }
 .picker .row .l2 { font-family: var(--mono); font-size: var(--size-xs); }
 .picker .new-task { display: flex; gap: var(--sp-3); margin: var(--sp-4) var(--sp-2) var(--sp-1); padding-top: var(--sp-4); }
@@ -390,7 +390,7 @@ h1 { margin: 0 0 var(--sp-4); }
 .ask-buttons .btn:first-child { background: var(--selected); }
 /* The confirm before a destructive button (#459): its heading, and its scroll kept in the dialog, never chained to the page under it. */
 .ask-heading { margin: 0 0 var(--sp-4); font-size: var(--size); font-weight: 600; }
-#confirm-dialog:modal { max-height: 80dvh; overflow-y: auto; overscroll-behavior: contain; }
+#confirm-dialog:modal { max-height: 80dvh; overflow-y: auto; }
 #confirm-dialog::backdrop { overscroll-behavior: contain; }
 /* The decision history (danielrispler/Falinks#479), collapsed above the turns: one muted entry per answer, newest first. A
    cleared marker is dashed, so its edge carries meaning. */

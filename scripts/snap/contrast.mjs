@@ -74,22 +74,29 @@ export const contrastAudit = `
     const fogged = !!node.closest(".plate.fog-thin, .plate.fog-thick");
     texts.push({ node, ink, alpha, box, label, need: (large ? 3 : 4.5) - (fogged ? 0.1 : 0) });
   };
+  // A rect of a node as cut by its clipping ancestors, when any of it is left and shown.
+  const drawn = (node, rect) => {
+    const cut = clipped(node, rect);
+    return cut && shown(node, cut);
+  };
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   for (let text = walker.nextNode(); text; text = walker.nextNode()) {
     const node = text.parentElement;
     if (!node || !words(text.data) || exempt(node)) continue;
     const range = document.createRange();
     range.selectNodeContents(text);
+    const colour = getComputedStyle(node).color;
+    const label = words(text.data).slice(0, 40);
     for (const rect of range.getClientRects()) {
-      const box = clipped(node, rect) && shown(node, clipped(node, rect));
-      if (box) add(node, getComputedStyle(node).color, box, words(text.data).slice(0, 40));
+      const box = drawn(node, rect);
+      if (box) add(node, colour, box, label);
     }
   }
   const fields = [...document.querySelectorAll("input, textarea, select")].filter((field) => !exempt(field) && !["checkbox", "radio", "range", "hidden", "color", "file"].includes(field.type));
   const borders = [];
   for (const field of fields) {
     const rect = field.getBoundingClientRect();
-    const box = clipped(field, rect) && shown(field, clipped(field, rect));
+    const box = drawn(field, rect);
     if (!box) continue;
     const style = getComputedStyle(field);
     const inner = { columns: null, left: box.left + parseFloat(style.borderLeftWidth) + 2, top: box.top + parseFloat(style.borderTopWidth) + 2, right: box.right - parseFloat(style.borderRightWidth) - 2, bottom: box.bottom - parseFloat(style.borderBottomWidth) - 2 };

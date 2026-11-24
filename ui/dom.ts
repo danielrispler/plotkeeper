@@ -93,6 +93,16 @@ export function glyphOnly(glyph: string, className = ""): HTMLElement {
 // Words for assistive tech alone, not drawn (#456), such as "failed" beside a ✕.
 export const unseenWords = (words: string): HTMLElement => text("span", words, "visually-hidden");
 
+// Enter in `field` runs `run`, except the Enter that confirms an input method's word (#461); Safari's out-of-order confirming key
+// down reports keyCode 229 with isComposing false.
+export function onEnter(field: HTMLElement, run: () => void) {
+  field.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    if (!event.isComposing && event.keyCode !== 229) run();
+  });
+}
+
 // The prompt in a read-only box, to copy by hand when the clipboard refused it.
 export function promptBox(prompt: string, rows = 4): HTMLTextAreaElement {
   const area = document.createElement("textarea");
