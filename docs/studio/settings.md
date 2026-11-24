@@ -12,11 +12,12 @@ The page has no terminal (danielrispler/plotkeeper#326) and no project list to e
   "context_warning": 30,         // the context share, 0 to 100, past which a session warns once; 0: never
   "checks": { "/path/to/app": ["make verify"] }, // per project folder, the commands that are checks; default: `cargo test` and the like, and `npm run check`. A background run allows only the project's own entry and has no default
   "setup": { "/path/to/app": "npm ci" },         // per project folder, one command a background run runs in its working folder before its agent starts; default: none
-  "backgroundRuns": { "harness": "claude", "model": "sonnet" } // the agent program of a background run (only "claude") and its model; default model: the CLI's own
+  "backgroundRuns": { "harness": "claude", "model": "sonnet" }, // the agent program of a background run (only "claude") and its model; default model: the CLI's own
+  "microWorlds": { "dshVisual": "~/work/dsh-skills/skills/dsh-visual/scripts" } // the folder holding dsh-visual's build.py and verify.mjs (with `npm install` run in it), which check a micro-world's page; unset: "Explore this" only copies a prompt
 }
 ```
 
-`checks`, `setup` and `backgroundRuns` are read by the server from the file each time a [background run](behaviour/background-runs.md) is asked for, so a saved change counts from the next run with no restart.
+`checks`, `setup`, `backgroundRuns` and `microWorlds` are read by the server from the file each time a [background run](behaviour/background-runs.md) is asked for, so a saved change counts from the next run with no restart. `microWorlds.dshVisual` is also read each time the map is drawn, which decides whether Explore this starts a run ([Micro-worlds](behaviour/background-runs.md#micro-worlds)); a leading `~/` is your home folder.
 
 ## The writer section
 

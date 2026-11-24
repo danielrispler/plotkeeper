@@ -390,6 +390,18 @@ pub fn run_settings_in(text: &str, project: &str) -> RunSettings {
     }
 }
 
+/// `microWorlds.dshVisual` in `settings.json`'s `text`: the folder that holds dsh-visual's `build.py` and `verify.mjs`, which
+/// a micro-world's host check runs (#399), a leading `~/` read as `home`. None when it is unset, empty or not a string: then
+/// "Explore this" offers only the prompt to copy.
+pub fn micro_worlds_dsh_visual_in(text: &str, home: &Path) -> Option<PathBuf> {
+    let json: serde_json::Value = serde_json::from_str(&plain_json(text)).unwrap_or_default();
+    let folder = json["microWorlds"]["dshVisual"].as_str()?.trim();
+    match folder.strip_prefix("~/") {
+        Some(rest) => Some(home.join(rest)),
+        None => (!folder.is_empty()).then(|| PathBuf::from(folder)),
+    }
+}
+
 /// Zed's format as plain JSON: comments and trailing commas outside strings dropped, as
 /// `ui/settings.ts`'s `parseJsonc` does.
 fn plain_json(text: &str) -> String {
@@ -610,6 +622,28 @@ mod tests {
             (empty.harness.as_str(), empty.model, empty.checks.len()),
             ("claude", None, 0)
         );
+    }
+
+    #[test]
+    fn micro_worlds_read_dsh_visuals_folder_with_the_home_folder_for_a_tilde() {
+        let home = std::path::Path::new("/Users/d");
+        let at = |text: &str| super::micro_worlds_dsh_visual_in(text, home);
+        assert_eq!(
+            at(r#"{ "microWorlds": { "dshVisual": "~/work/dsh-visual/scripts", }, }"#),
+            Some("/Users/d/work/dsh-visual/scripts".into())
+        );
+        assert_eq!(
+            at(r#"{ "microWorlds": { "dshVisual": " /opt/dsh/scripts " } }"#),
+            Some("/opt/dsh/scripts".into())
+        );
+        for unset in [
+            r#"{}"#,
+            r#"{ "microWorlds": { "dshVisual": "" } }"#,
+            r#"{ "microWorlds": { "dshVisual": 3 } }"#,
+            "{ broken",
+        ] {
+            assert_eq!(at(unset), None, "{unset}");
+        }
     }
 
     #[test]

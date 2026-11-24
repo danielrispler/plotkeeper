@@ -405,7 +405,16 @@ export type MapState = {
   stale: Record<string, number>;
   // The project's pre-flight (`pre_flight.rs`, #394): the parts a piece of work will likely cross; null when none is run.
   pre_flight?: PreFlight | null;
+  // The project's micro-worlds (`micro_worlds.rs`, #399) by subject key (`flow:<id>`, `figure:<pr>:<chapter>:<step>`), and whether a run can
+  // build one (`microWorlds.dshVisual` is set); absent in a payload from before them.
+  micro_worlds?: MicroWorlds;
 };
+// A micro-world as the map shows it: `building` while its run is queued, running or checked, `ready` with a checked page, `failed` with why
+// (`line`) and the prompt to copy. `page`: a checked page is stored to open; `stale`: a part on it changed since it was built.
+export type MicroWorldView = { phase: "building" | "ready" | "failed"; page: boolean; stale: boolean; line: string | null; prompt: string | null };
+export type MicroWorlds = { on: boolean; worlds: Record<string, MicroWorldView> };
+// What "Explore this" did: started a run, or gave the prompt to copy and why.
+export type Explored = { started: boolean; line: string | null; prompt: string | null };
 // A fogged part's offer (#391): a part catch-up, `ready` when one is stored for its current fog list, `writing` while one is written, `failed`
 // when the last write for it failed; or the chapter of the one PR's brief that lights the part.
 export type CatchUpOffer = { kind: "catch-up"; ready: boolean; writing: boolean; failed: boolean } | { kind: "chapter"; pr: number; chapter: number };
@@ -550,6 +559,8 @@ export interface Commands {
   pre_flight_predict: PreFlight;
   pre_flight_pick: PreFlight;
   pre_flight_clear: null;
+  micro_world_explore: Explored;
+  micro_world_page: string;
   brief_chapter_done: void;
   briefs_waiting: WaitingBriefs | null;
   pr_ratify: RatifyRow[];
@@ -582,7 +593,7 @@ export interface Commands {
 export type Command = keyof Commands;
 
 // What the shell counted of Daniel's use (`stop_rules.rs`), for the one-time review: days, merged PRs and the uses of each module.
-export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen" | "rating-offered" | "rating-given" | "rating-skipped" | "note-given" | "explain-back-given" | "explain-back-marked" | "refresher-entered" | "stale-entered" | "catch-up-offered" | "catch-up-opened" | "catch-up-done" | "pre-flight-run";
+export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen" | "rating-offered" | "rating-given" | "rating-skipped" | "note-given" | "explain-back-given" | "explain-back-marked" | "refresher-entered" | "stale-entered" | "catch-up-offered" | "catch-up-opened" | "catch-up-done" | "pre-flight-run" | "micro-world-opened";
 export type StopFacts = {
   active_days: number;
   merged_prs: number;

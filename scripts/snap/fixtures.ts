@@ -644,6 +644,53 @@ const mapRefresher = (): Fixture => {
     map_state: mapState({ source: JSON.stringify(file), stale: { shell: 2 } }),
   });
 };
+// A micro-world (#399) in its overlay: from the refresher on Shell's sheet, the Turn writing flow's world is ready but may be out of date, so its
+// row offers Open and Rebuild; Open shows the checked page in a frame sandboxed to scripts alone, in the wide glass overlay. The page's script is
+// an inline handler: a closing script tag would end the snap page's own.
+const worldPage = `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:">
+<title>Turn writing</title><style>:root{color-scheme:light dark}body{margin:0;padding:24px;font:15px system-ui;background:#f6f5f2;color:#1a1a1a}
+@media (prefers-color-scheme: dark){body{background:#17181b;color:#e8e6e1}}.hops{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}
+.hop{padding:8px 12px;border-radius:8px;border:1px solid #8884}.hop.on{background:#4a7dff;color:#fff;border-color:#4a7dff}</style>
+<h1>Turn writing, as a model</h1><p>An illustrative model of how a turn's summary is written. Step through the hops.</p>
+<div class="hops"><span class="hop on">Hook</span><span class="hop">Shell</span><span class="hop">Understanding</span><span class="hop">Writer</span><span class="hop">Window</span></div>
+<button onclick="const hops=[...document.querySelectorAll('.hop')];const at=hops.findIndex((h)=>h.classList.contains('on'));hops[at].classList.remove('on');hops[(at+1)%hops.length].classList.add('on')">Next hop</button>
+<p>The hook's line reaches the Shell, which reads the log.</p>`;
+const mapMicroWorld = (): Fixture => {
+  const file = JSON.parse(mapFile);
+  file.flows = [{ id: "turn-writing", name: "Turn writing", hops: [
+    { link: "hook-shell", text: "The hook's line reaches the Shell, which reads the log." },
+    { link: "shell-window", text: "The Shell tells the Window, which shows the summary." },
+  ] }];
+  return mapOpened(`
+      document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(300);
+      document.querySelector("#map-sheet .sheet-refresher")?.click();
+      await wait(400);
+      const row = document.querySelector('#map-sheet .micro-world-row[data-world="flow:turn-writing"]');
+      if (!row) return log("snap:fail the flow has no micro-world row");
+      const words = [...row.querySelectorAll("button")].map((button) => button.textContent).join(",");
+      if (words !== "Open,Rebuild") log("snap:fail the row offers " + words);
+      if (!row.textContent.includes("may be out of date")) log("snap:fail the row does not say it may be out of date");
+      row.querySelector("button").click();
+      await wait(600);
+      const box = document.getElementById("map-micro-world");
+      if (box.hidden) return log("snap:fail the micro-world did not open");
+      const frame = box.querySelector("iframe");
+      if (!frame) return log("snap:fail no frame");
+      if (frame.getAttribute("sandbox") !== "allow-scripts") log("snap:fail the frame's sandbox: " + frame.getAttribute("sandbox"));
+      if (frame.hasAttribute("src") || !frame.getAttribute("srcdoc")?.includes("Content-Security-Policy")) log("snap:fail the frame is not the checked page by srcdoc");
+      if (!box.querySelector(".micro-world-title")?.textContent.includes("Turn writing")) log("snap:fail the title: " + box.textContent);
+      if (box.getBoundingClientRect().width < 600) log("snap:fail the overlay is not wide: " + box.getBoundingClientRect().width);
+      log("micro-world ok");`, {
+    map_state: mapState({
+      source: JSON.stringify(file),
+      stale: { shell: 2 },
+      micro_worlds: { on: true, worlds: { "flow:turn-writing": { phase: "ready", page: true, stale: true, line: null, prompt: null } } },
+    }),
+    micro_world_page: worldPage,
+    snapDone: "micro-world ok",
+  });
+};
 // A chaptered brief (#341): the tray lists one row per chapter, each chapter opens on its own and the overview plays before the first one opened, once.
 const chapterTitles = ["Fog clears by reading", "Broken laws on the map", "The Seen gate"];
 const chapterOf = (i: number, parts: string[]): BriefChapter => ({
@@ -711,7 +758,7 @@ const mapBriefChapterLast = (): Fixture =>
 // The stop-rule review (#314, #384): Studio has run 20 active days and merged 25 PRs, and the Map view was engaged with on one of them, so
 // the Map view fell below its threshold, and so did the history strip and "See the proof".
 // Pre-flight (#394) was run twice and three explain-back lines (#397) were written, so the review lists only the modules of project 2.
-const dueFacts = { active_days: 20, merged_prs: 25, engaged_days: 1, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, counts: { "pre-flight-run": 2, "catch-up-done": 3, "explain-back-given": 3 }, began: "2026-10-01", stale_since: null };
+const dueFacts = { active_days: 20, merged_prs: 25, engaged_days: 1, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, counts: { "pre-flight-run": 2, "catch-up-done": 3, "explain-back-given": 3, "micro-world-opened": 2 }, began: "2026-10-01", stale_since: null };
 const mapOpened = (check: string, extra: Fixture = {}): Fixture => ({
   ...list(),
   ...extra,
@@ -1488,6 +1535,7 @@ export const fixtures = {
   mapTray,
   mapRuns,
   mapPreFlight,
+  mapMicroWorld,
   mapRunsPaused,
   railBriefRow: () => railBriefReady(false),
   railBriefOpened: () => railBriefReady(true),

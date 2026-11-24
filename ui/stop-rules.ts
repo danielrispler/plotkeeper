@@ -56,6 +56,8 @@ export const table: Row[] = [
   { module: "staleness", name: "staleness bands", kept: (f) => (f.counts["stale-entered"] ?? 0) >= 1, wait: { from: staleRollout, weeks: 5 } },
   // Explain-back (#397): at least 3 lines said back in the end-of-story bar; the marks, the rating and the note have no threshold.
   { module: "explain-back", name: "explain-back", kept: (f) => (f.counts["explain-back-given"] ?? 0) >= 3 },
+  // Micro-worlds (#399): a checked page opened in its overlay at least twice.
+  { module: "micro-worlds", name: "micro-worlds", kept: (f) => (f.counts["micro-world-opened"] ?? 0) >= 2 },
 ];
 
 // `day` plus `n` days, both local days (`2026-11-03`).

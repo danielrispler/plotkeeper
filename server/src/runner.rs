@@ -1,5 +1,5 @@
 //! Background runs (spec danielrispler/plotkeeper#378, ticket #390): a headless agent run with scoped tools, started by
-//! Daniel's click and never a session. This is the runner; no module starts a run yet.
+//! Daniel's click and never a session. This is the runner; micro-worlds start runs (`micro_worlds.rs`).
 //!
 //! - **The seam.** A [`Request`] (run kind, working folder, prompt, limits) goes in through [`Runner::submit`]; an
 //!   [`Outcome`] (result text, denials, cost, exit) comes out through [`Runner::outcome`]. The [`Harness`] builds the
@@ -199,13 +199,22 @@ pub fn sandbox_settings(data: &Path) -> serde_json::Value {
 /// The git commands a run's shell may use: reading, and staging inside its own clone. Never a commit, a push or `gh`.
 const GIT: [&str; 4] = ["git status", "git diff", "git log", "git add"];
 
-/// What `--allowedTools` lists for a run: edits inside its working `folder`, and for a kind with a shell the read-only
+/// The folder inside a micro-world's working folder that the agent writes its page into, and the only place it may write: the
+/// rest of the working folder is the project's files at the commit the page is built at, to read (#399).
+pub const MICRO_WORLD_OUT: &str = ".micro-world";
+
+/// What `--allowedTools` lists for a run: edits inside its working `folder` (a micro-world's only inside
+/// [`MICRO_WORLD_OUT`] there), and for a kind with a shell the read-only
 /// git commands and one entry per command of the project's `checks`, each bare and with arguments. An entry of `checks`
 /// that has `git` or `gh` as any of its words is left out, so no list ever allows a push. This list is not a security
 /// boundary: an allowed check runs code the agent wrote. The OS sandbox and trusted input are.
 pub fn allowed_tools(kind: Kind, folder: &Path, checks: &[String]) -> Vec<String> {
     // The rule's own form for an absolute path: `//` and the path.
-    let mut allowed = vec![format!("Edit(/{}/**)", folder.display())];
+    let writes = match kind {
+        Kind::MicroWorld => folder.join(MICRO_WORLD_OUT),
+        _ => folder.to_path_buf(),
+    };
+    let mut allowed = vec![format!("Edit(/{}/**)", writes.display())];
     if kind.shell() {
         let checks = checks.iter().map(|check| check.trim()).filter(|check| {
             !check.is_empty()

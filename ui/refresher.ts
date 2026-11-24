@@ -3,14 +3,14 @@
 // description and laws with their backing, and the refresher adds the flows through the part and its links. `map-stale.ts` draws it.
 
 export type Refresher = {
-  // Each flow with a hop on a link at the part, and those hops' sentences, in the flow's order.
-  flows: { name: string; hops: string[] }[];
+  // Each flow with a hop on a link at the part, and those hops' sentences, in the flow's order; its id is what a micro-world is built from.
+  flows: { id: string; name: string; hops: string[] }[];
   // "From to To", by name.
   links: string[];
 };
 
 type Named = { id: string; name: string };
-type Flow = { name: string; hops: { link: string; text: string }[] };
+type Flow = { id: string; name: string; hops: { link: string; text: string }[] };
 const list = <T>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : []);
 
 // The refresher of `part` from the map file's text; null when the text does not read or has no such part.
@@ -27,7 +27,7 @@ export function refresherOf(source: string, part: string): Refresher | null {
   const at = list<{ id: string; from: string; to: string }>(file.links).filter((link) => link.from === part || link.to === part);
   const ids = new Set(at.map((link) => link.id));
   const flows = list<Flow>(file.flows)
-    .map((flow) => ({ name: flow.name, hops: list<Flow["hops"][number]>(flow.hops).filter((hop) => ids.has(hop.link)).map((hop) => hop.text) }))
+    .map((flow) => ({ id: flow.id, name: flow.name, hops: list<Flow["hops"][number]>(flow.hops).filter((hop) => ids.has(hop.link)).map((hop) => hop.text) }))
     .filter((flow) => flow.hops.length > 0);
   return {
     flows,

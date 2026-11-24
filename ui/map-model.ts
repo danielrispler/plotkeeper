@@ -17,10 +17,10 @@ export const plateSize: Size = { w: 264, h: 76 };
 export const actorSize: Size = { w: 120, h: 28 };
 // How far the pointer moves before a press on a plate becomes a drag, so a click never nudges it.
 export const dragThreshold = 6;
-// The layers Esc peels, first to last (user story 5, spec #334 and spec #380): an overlay over the map (the pre-flight, #394; spec #378, "Layers and
-// keys"), a drawer, a PR brief (closing it keeps its step), a scrubbed past commit (back to now), a part's sheet, then the left panel (#385). The
+// The layers Esc peels, first to last (user story 5, spec #334 and spec #380): an overlay over the map (a micro-world, #399, then the pre-flight,
+// #394; spec #378, "Layers and keys"), a drawer, a PR brief (closing it keeps its step), a scrubbed past commit (back to now), a part's sheet, then the left panel (#385). The
 // tickets that add them register a `Layer` under its name in `map.ts`; the Map view itself is left only when none is open.
-export const layerOrder = ["pre-flight", "drawer", "brief", "scrubbed", "sheet", "panel"] as const;
+export const layerOrder = ["micro-world", "pre-flight", "drawer", "brief", "scrubbed", "sheet", "panel"] as const;
 export type LayerName = (typeof layerOrder)[number];
 export type Layer = { open: () => boolean; close: () => void };
 
@@ -110,7 +110,7 @@ export function rimPoint(center: Point, size: Size, toward: Point): Point {
 
 // A project switch: closes the layers that belong to the project shown, whatever the next one draws, since it may have no map to draw.
 export function switchProject(layers: Partial<Record<LayerName, Layer>>) {
-  for (const name of ["pre-flight", "brief"] as const) if (layers[name]?.open()) layers[name].close();
+  for (const name of ["micro-world", "pre-flight", "brief"] as const) if (layers[name]?.open()) layers[name].close();
 }
 
 // Esc: closes the first layer that is open, in `layerOrder`, and says which; null when none was: on the bare map Esc does nothing, since the

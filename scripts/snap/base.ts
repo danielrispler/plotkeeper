@@ -48,6 +48,8 @@ export const base = {
   pre_flight_predict: { issue: 394, title: "Studio: pre-flight", parts: ["core"], predicted: true, at: 0 },
   pre_flight_pick: { issue: null, title: "", parts: ["core"], predicted: false, at: 0 },
   pre_flight_clear: null,
+  micro_world_explore: { started: true, line: null, prompt: null },
+  micro_world_page: "",
   briefs_waiting: null,
   pr_ratify: [],
   projects: [],

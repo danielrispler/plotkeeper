@@ -77,6 +77,8 @@ pub enum Kind {
     StaleEntered,
     /// A pre-flight framed its parts on the map, predicted or picked by hand (#394).
     PreFlightRun,
+    /// A micro-world's page was opened in its overlay (#399). Kept if at least 2.
+    MicroWorldOpened,
     #[serde(other)]
     Other,
 }
@@ -192,6 +194,7 @@ fn entered(kind: Kind) -> bool {
             | Kind::RefresherEntered
             | Kind::StaleEntered
             | Kind::PreFlightRun
+            | Kind::MicroWorldOpened
     )
 }
 

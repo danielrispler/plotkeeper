@@ -16,6 +16,7 @@ import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { watchSeen } from "./seen.js";
 import { logStop } from "./stop-rules.js";
 import { expectedLine } from "./map-pre-flight.js";
+import { exploreRow } from "./micro-world.js";
 import { scrubTo } from "./map-history.js";
 import { overturnNote, ratifyActions } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
@@ -498,6 +499,16 @@ function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["als
   return cols;
 }
 
+// "Explore this" under a PR brief's figure (#399): a micro-world of the parts its step lights, kept by the step's place in its chapter. A part
+// catch-up's figure (no PR) and a step that is not its chapter's own offer none.
+function figureExplore(view: MapView, node: HTMLElement, step: BriefStep, pr: number, chapter: number) {
+  const figure = node.querySelector(".brief-figure");
+  const at = playing?.brief.brief.chapters[chapter]?.steps.indexOf(step) ?? -1;
+  if (!figure || pr <= 0 || at < 0 || view.scrub) return;
+  const name = step.on.map((id) => partName(view, id)).join(", ") || `#${pr}`;
+  figure.append(exploreRow(view.project, view.state.micro_worlds, `figure:${pr}:${chapter}:${at}`, name, { kind: "figure", pr, chapter, step: at }));
+}
+
 // A long part catch-up's first step says it summarises the main shifts, with the full fog list behind it (#396).
 function summaryInto(node: HTMLElement) {
   const summary = catchUp?.summary;
@@ -721,6 +732,7 @@ function show(view: MapView, same: boolean) {
   const also = alsoAt(playing.brief.brief, now.chapter, now.step, storySteps(list).length);
   const fill = () => {
     const node = stepNode(view, step, pr, also);
+    figureExplore(view, node, step, pr, now.chapter);
     if (now.step === 0) summaryInto(node);
     const bar = endBar(node, now.step, list.length);
     cols.replaceChildren(node);

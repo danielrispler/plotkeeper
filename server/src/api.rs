@@ -244,6 +244,16 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "tier")?,
         )),
         "map_place" => out(crate::map::map_place(arg(a, "project")?, arg(a, "groups")?)),
+        "micro_world_explore" => res(crate::micro_worlds::micro_world_explore(
+            app,
+            arg(a, "project")?,
+            arg(a, "subject")?,
+        )),
+        "micro_world_page" => res(crate::micro_worlds::micro_world_page(
+            app,
+            arg(a, "project")?,
+            arg(a, "key")?,
+        )),
         "run_cancel" => res(app.runner.cancel(&arg::<String>(a, "id")?)),
         "runs_resume" => done!(app.runner.resume()),
         "stop_log" => res(stop_rules::stop_log(

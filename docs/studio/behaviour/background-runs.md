@@ -1,12 +1,12 @@
 # Background runs
 
-A **background run** is a headless agent run with scoped tools that plotkeeper starts on Daniel's click (spec #378, ticket #390). It is never a session or a terminal: plotkeeper still starts no session. The runner is `server/src/runner.rs` and its launcher is `plotkeeper-run` (`server/src/bin/plotkeeper-run.rs`). No module starts a run yet; back a law and micro-worlds will. The sandbox gate (#395, below) proved the containment on a real `claude`.
+A **background run** is a headless agent run with scoped tools that plotkeeper starts on Daniel's click (spec #378, ticket #390). It is never a session or a terminal: plotkeeper still starts no session. The runner is `server/src/runner.rs` and its launcher is `plotkeeper-run` (`server/src/bin/plotkeeper-run.rs`). Micro-worlds start runs ([below](#micro-worlds)); back a law will. The sandbox gate (#395, below) proved the containment on a real `claude`.
 
 ## The seam
 
 A run goes in as a request: its kind, its working folder, its prompt and its limits. It comes out as an outcome: the result text, the tool calls it was denied, its cost and its exit code. The harness, the agent program, only builds the command: `claude` is the one harness, and the tests' harness is a shell script.
 
-There are two kinds. **Back a law** has `Bash`, `Read`, `Edit`, `Write`, `Glob` and `Grep`. **Micro-world** has the same without `Bash`. The command carries only the flags spec #378 gives; how a micro-world reads the project is left to its own ticket.
+There are two kinds. **Back a law** has `Bash`, `Read`, `Edit`, `Write`, `Glob` and `Grep`. **Micro-world** has the same without `Bash`. The command carries only the flags spec #378 gives; a micro-world reads the project from its working folder and writes only into `.micro-world/` there ([Micro-worlds](#micro-worlds)).
 
 A prompt holds only text plotkeeper wrote or Daniel confirmed. An issue's, a PR's or a comment's text never goes into a run, since strangers can write it on a public repository.
 
@@ -39,7 +39,7 @@ The sandbox block is this, with plotkeeper's data folder first in `denyRead`, si
 
 ## The allow list
 
-`--allowedTools` lists edits inside the working folder, and for a kind with `Bash`:
+`--allowedTools` lists edits inside the working folder (for a micro-world, only inside its `.micro-world/`), and for a kind with `Bash`:
 
 - read-only git, `git status`, `git diff` and `git log`, plus `git add`, since the working folder is a clone;
 - one entry per command of the project's `checks`, each bare and with arguments (`Bash(cargo test)` and `Bash(cargo test *)`).
@@ -99,6 +99,18 @@ A run that cannot start is refused at the click with why and its prompt: the har
 ## On the map
 
 The Map view's side area lists the project's runs under **Background runs** (`ui/map-runs.ts`): a running run with when it started, the queued ones, and each ended run with how it ended and the calls it was denied. A queued or running run has **Cancel**; an ended one has **Dismiss**, and **Copy prompt** unless it finished cleanly. An ended run stays until it is dismissed or plotkeeper starts again. A copied prompt's note stays under its row when the map is drawn again. The server tells the page when a run starts or ends, so the rows change with no timer. A past commit's map shows no runs.
+
+## Micro-worlds
+
+**Explore this** builds a micro-world: a small interactive page that simulates a mechanism of the project from its real code (spec #378, ticket #399; `server/src/micro_worlds.rs`, `ui/micro-world.ts`). It is offered under each flow of a part's refresher, and under a PR brief's figure, where it is about the parts that step lights. The figure's own labels are the writer's words from a PR, so they never go into the run.
+
+- **The run.** A micro-world run's working folder holds the project's files at the map's commit (`git archive`, so no git data and nothing untracked), and an empty `.micro-world/`, the only place it may write. Its prompt is map text only (the flow's hops, the parts' captions, descriptions and paths, their laws) and dsh-visual's rules, inline, since `--safe-mode` loads no skill: one self-contained page in `.micro-world/template.html`, no request of any kind, code cited as `{{ref:path|start text}}`, a light and a dark background, no sideways overflow. It needs no `checks`.
+- **The host checks.** When the run ends, plotkeeper runs dsh-visual's `build.py` from the folder `microWorlds.dshVisual` names ([Settings](../settings.md)), which resolves every `{{ref:…}}` against git at the commit and fails on one that matches no line or several. It then puts `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:">` first in the page and runs `verify.mjs` on that page in headless Chrome (script and console errors, overflow at 390 and 1280 px, broken `#` links, light and dark backgrounds). `verify.mjs` runs as `node --import micro_world_guard.mjs`, which makes every context of its Chrome abort each request that is not a local file and sends Chrome through a proxy that leads nowhere, so model-written script never reaches the network; an aborted request fails the check. Without playwright-core where `verify.mjs` finds it, the guard throws and the check fails. `build.py` may take 2 minutes and `verify.mjs` 5; their output is in the run's folder, `build.log` and `verify.log`.
+- **A failing page** is rewritten once: a second run finds the first template in its `.micro-world/` and is told the failing checks. Failing again, or a run that ends any other way than finished (denials included are still checked), the world shows why and offers the prompt to copy, with Try again. A cancelled run fails its world.
+- **Without `microWorlds.dshVisual`**, no run starts: Explore this copies a prompt for Daniel's own agent, which uses the dsh-visual skill in his checkout. A page built before still opens.
+- **Kept** in the data folder, `micro-worlds/<project>/`, one file per world by its key (`flow:<id>`, or `figure:<pr>:<chapter>:<step>`), with the commit it was built at; only a page that passed the checks is stored, and the API (`micro_world_page`) serves only a stored page. A world whose stored page was built before a change, between that commit and the map's commit now, to a path of a part on it says **This may be out of date**, with **Rebuild**, which starts a run as Explore this does; the older page opens meanwhile.
+- **Shown** in a wide overlay in the glass, as wide as the left panel's widest: the page is fetched through the API and put in a frame by `srcdoc`, with `sandbox="allow-scripts"` and never `allow-same-origin`. The frame has an opaque origin, no network and no way to plotkeeper's API, and `srcdoc` sends no cookie. Esc closes it before any other layer of the map; another project closes it.
+- **Stop rule**: micro-worlds are kept if opened at least twice in the review's window (`micro-world-opened`).
 
 ## The sandbox gate
 

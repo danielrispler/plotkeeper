@@ -29,9 +29,10 @@ const map = JSON.stringify({
   ],
 });
 
+// Each flow carries its id, which "Explore this" builds its micro-world from (#399).
 test("the refresher adds to the part's sheet what the map says around it: the flows through it, hop by hop, and its links", () => {
   assert.deepEqual(refresherOf(map, "server"), {
-    flows: [{ name: "Turn writing", hops: ["The hook's line reaches the server.", "The server tells the page."] }],
+    flows: [{ id: "turn", name: "Turn writing", hops: ["The hook's line reaches the server.", "The server tells the page."] }],
     links: ["Hook to Server", "Server to Window"],
   });
   // An outside actor is named in a link; a map with no flows has none.
