@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { fakeDocument } from "./dom.mjs";
 
 globalThis.document = fakeDocument();
-const { exploreOffers, exploreNode, frameNode, worldNodes } = await import("../../dist/micro-world.js");
+const { exploreOffers, exploreNode, exploreRow, frameNode, worldNodes } = await import("../../dist/micro-world.js");
 
 const view = (phase, extra = {}) => ({ phase, page: false, stale: false, line: null, prompt: null, ...extra });
 const worlds = (on, entries = {}) => ({ on, worlds: entries });
@@ -67,4 +67,19 @@ test("the overlay of an out-of-date world offers Rebuild beside Close", () => {
   buttons.forEach((b) => b.listeners.click());
   assert.deepEqual(calls, ["rebuild", "close"]);
   assert.match(nodes.map((node) => node.text).join(" "), /may be out of date/);
+});
+
+test("Copy prompt shows its outcome at once, and the prompt to copy by hand when the clipboard refuses it, though the map is unchanged", async () => {
+  const failed = worlds(true, { "flow:turn": view("failed", { line: "verify.mjs failed", prompt: "In the repository…" }) });
+  const row = exploreRow("/w/app", failed, "flow:turn", "A turn", { kind: "flow", id: "turn" });
+  // No clipboard here, as when a browser refuses it; nothing on the server changes, so the map is not drawn again.
+  const copy = () => row.find("button").find((b) => b.text === "Copy prompt").listeners.click();
+  copy();
+  await new Promise((done) => setTimeout(done, 10));
+  assert.match(row.text, /Copy this prompt and paste it into your agent/);
+  assert.deepEqual(row.find("textarea").map((area) => area.value), ["In the repository…"]);
+  // A second copy shows one note, not two.
+  copy();
+  await new Promise((done) => setTimeout(done, 10));
+  assert.equal(row.find("textarea").length, 1);
 });

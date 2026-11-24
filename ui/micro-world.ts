@@ -123,40 +123,44 @@ export async function openMicroWorld(project: string, key: string, name: string,
 // What a copy left to show, by world: its line, and the prompt in a box when the clipboard refused.
 const copied = new Map<string, { line: string; manual: string | null }>();
 
-async function copyPrompt(key: string, prompt: string) {
-  copied.set(key, overturnReport(await copyOverturn(prompt, navigator.clipboard?.writeText?.bind(navigator.clipboard)), prompt));
-  await reloadMap();
+function noteNodes(key: string): HTMLElement[] {
+  const note = copied.get(key);
+  if (!note) return [];
+  const line = text("p", note.line, "run-copied");
+  line.setAttribute("role", "status");
+  if (note.manual === null) return [line];
+  const area = document.createElement("textarea");
+  area.className = "ratify-prompt";
+  area.value = note.manual;
+  area.readOnly = true;
+  area.rows = 4;
+  return [line, area];
 }
 
-// "Explore this" (or Rebuild, or Try again) on `subject` of `project`: a run starts, or the server gives the prompt to copy.
-export function exploreSubject(project: string, key: string, subject: { kind: "flow"; id: string } | { kind: "figure"; pr: number; chapter: number; step: number }) {
+// The copy's outcome is drawn in `row` at once: a copy changes nothing on the server, so the map is not drawn again; later draws read it
+// from `copied`.
+async function copyPrompt(key: string, prompt: string, row: HTMLElement) {
+  copied.set(key, overturnReport(await copyOverturn(prompt, navigator.clipboard?.writeText?.bind(navigator.clipboard)), prompt));
+  for (const child of [...row.children]) if (child.className === "run-copied" || child.className === "ratify-prompt") row.removeChild(child);
+  row.append(...noteNodes(key));
+}
+
+// "Explore this" (or Rebuild, or Try again) on `subject` of `project`: a run starts, or the server gives the prompt to copy, shown in `row`.
+export function exploreSubject(project: string, key: string, subject: { kind: "flow"; id: string } | { kind: "figure"; pr: number; chapter: number; step: number }, row: HTMLElement) {
   invoke("micro_world_explore", { project, subject })
-    .then((explored) => (explored.started || !explored.prompt ? reloadMap() : copyPrompt(key, explored.prompt)))
+    .then((explored) => (explored.started || !explored.prompt ? reloadMap() : copyPrompt(key, explored.prompt, row)))
     .catch(failure("micro_world_explore", "error"));
 }
 
 // The row of world `key` on the map `worlds`, wired to the page's commands; `subject` is what the server builds it from.
 export function exploreRow(project: string, worlds: MicroWorlds | undefined, key: string, name: string, subject: Parameters<typeof exploreSubject>[2]): HTMLElement {
-  const explore = () => exploreSubject(project, key, subject);
-  const node = exploreNode(worlds, key, {
+  const explore = () => exploreSubject(project, key, subject, node);
+  const node: HTMLElement = exploreNode(worlds, key, {
     explore,
     open: () => void openMicroWorld(project, key, name, worlds, explore),
-    copy: (prompt) => void copyPrompt(key, prompt),
+    copy: (prompt) => void copyPrompt(key, prompt, node),
   });
-  const note = copied.get(key);
-  if (note) {
-    const line = text("p", note.line, "run-copied");
-    line.setAttribute("role", "status");
-    node.append(line);
-    if (note.manual !== null) {
-      const area = document.createElement("textarea");
-      area.className = "ratify-prompt";
-      area.value = note.manual;
-      area.readOnly = true;
-      area.rows = 4;
-      node.append(area);
-    }
-  }
+  node.append(...noteNodes(key));
   return node;
 }
 
