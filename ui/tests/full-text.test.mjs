@@ -170,6 +170,7 @@ const covered = {
   ".plate-caption": "map.ts: the plate's title holds the name, caption and description",
   ".agent-chip": "map-agents.ts: a chip's title holds its full label",
   ".risk-note": "blocked.ts: the note's title holds all of it",
+  ".ask::backdrop": "style.css: a dialog's backdrop holds no text; overflow hidden only makes it a scroll container that keeps its scroll",
   code: "a check's command has its own title (story.ts); any other code span wraps or sits in a text that wraps",
 };
 

@@ -2380,6 +2380,13 @@ const mapSmallGaps = (): Fixture => ({
       const loose = contained.filter((selector) => getComputedStyle(document.querySelector(selector)).overscrollBehaviorY !== "contain");
       document.body.classList.remove("list-open");
       if (loose.length) log("snap:fail these scroll the page behind them at their ends: " + loose.join(", "));
+      // A ::backdrop honours overscroll-behavior only as a scroll container, so it needs overflow hidden too (modern-web-guidance,
+      // prevent-page-scroll-under-modal-dialog).
+      const leaky = ["#rename-dialog", "#delete-dialog", "#confirm-dialog"].filter((selector) => {
+        const backdrop = getComputedStyle(document.querySelector(selector), "::backdrop");
+        return backdrop.overflowY !== "hidden" || backdrop.overscrollBehaviorY !== "contain";
+      });
+      if (leaky.length) log("snap:fail these dialogs' backdrops scroll the page behind them: " + leaky.join(", "));
       log("small gaps ok");`, {
     map_state: mapState({ ci: brokenCi }),
     map_place: { s1: ["core", "window"], s2: ["hook"] },

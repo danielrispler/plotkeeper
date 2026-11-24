@@ -378,7 +378,8 @@ h1 { margin: 0 0 var(--sp-4); }
 /* The questions of rename and close (danielrispler/Falinks#469). */
 .ask { background: var(--surface); color: var(--fg); border: 0; border-radius: var(--radius); box-shadow: var(--shadow);
        padding: var(--sp-5); width: var(--popover); }
-.ask::backdrop { background: var(--backdrop); }
+/* A backdrop honours overscroll-behavior only as a scroll container, hence overflow hidden: a scroll over it never reaches the page. */
+.ask::backdrop { background: var(--backdrop); overflow: hidden; overscroll-behavior: contain; }
 .ask p { margin: 0 0 var(--sp-4); }
 .ask-title { margin: 0 0 var(--sp-4); font-size: var(--size-read); font-weight: 600; }
 .ask label { display: block; margin-bottom: var(--sp-3); }
@@ -391,7 +392,6 @@ h1 { margin: 0 0 var(--sp-4); }
 /* The confirm before a destructive button (#459): its heading, and its scroll kept in the dialog, never chained to the page under it. */
 .ask-heading { margin: 0 0 var(--sp-4); font-size: var(--size); font-weight: 600; }
 #confirm-dialog:modal { max-height: 80dvh; overflow-y: auto; }
-#confirm-dialog::backdrop { overscroll-behavior: contain; }
 /* The decision history (danielrispler/Falinks#479), collapsed above the turns: one muted entry per answer, newest first. A
    cleared marker is dashed, so its edge carries meaning. */
 .decisions { margin: var(--sp-4) 0; }
