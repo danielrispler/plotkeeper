@@ -26,14 +26,14 @@ You need macOS and Node. In any terminal, run:
 
     npx plotkeeper
 
-The first time, it lists the agents it found and what wiring each would change, then asks once: `Wire these? [Y/n]`. Yes wires them and opens the page; for Codex, run `/hooks` in Codex once to trust plotkeeper's hooks.
+The first time, it lists the agents it found and what wiring each would change, then asks once: `Wire these? [Y/n]`. Yes wires them and opens the page; in Codex, run `/hooks` once to trust its hooks.
 
 No starts it anyway, and the page says it is not recording. Your answer is kept: later starts ask only about an agent you installed since. Ctrl+C stops plotkeeper.
 
 Summaries are written by `claude -p` by default, so `claude` must be on your login shell's `PATH` (`~/.zprofile`); the page's settings pick another writer.
 
-- **Daily use:** `npm i -g plotkeeper`, then `plotkeeper`. Offline, `npx plotkeeper` waits about 70 seconds for the registry, so use the global install or `npx --prefer-offline plotkeeper`.
-- **By hand:** `plotkeeper install` wires every agent found, declined ones included; `plotkeeper install --yes` is the same for scripts. `plotkeeper uninstall` undoes it and forgets your answers ([install and uninstall](docs/studio/plugin.md)).
+- **Daily use:** `npm i -g plotkeeper`, then `plotkeeper`. Offline, `npx plotkeeper` waits about 70 seconds, so use the global install or `npx --prefer-offline plotkeeper`.
+- **By hand:** `plotkeeper install` wires every agent found, declined ones included; `install --yes` does it for scripts. `plotkeeper uninstall` undoes it and forgets your answers, but keeps your recorded history ([install and uninstall](docs/studio/plugin.md)).
 - **From source**, with the Rust toolchain: clone the repository, then `npm ci` and `npm start`.
 
 plotkeeper starts no sessions; it records yours. On your click only, it starts a [background run](docs/studio/behaviour/background-runs.md): one `claude -p` on a copy of your project, to back a law of your system map with a test or explain a mechanism.

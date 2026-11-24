@@ -1475,7 +1475,22 @@ pub fn uninstall(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Resu
         }
     }
     // A data folder install made and left empty goes too.
-    let _ = fs::remove_dir(studio_hook::data_dir(home));
+    let data = studio_hook::data_dir(home);
+    let _ = fs::remove_dir(&data);
+    // Uninstall keeps what was recorded, and cannot remove the package it runs from: it says both.
+    if data.exists() {
+        say(
+            out,
+            format!(
+                "your recorded history stays in {}; delete that folder to remove it too",
+                data.display()
+            ),
+        );
+    }
+    say(
+        out,
+        "if you installed plotkeeper with npm i -g, remove it with: npm uninstall -g plotkeeper",
+    );
     Ok(())
 }
 

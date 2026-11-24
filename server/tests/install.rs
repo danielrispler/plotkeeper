@@ -1252,6 +1252,32 @@ fn install_yes_wires_without_a_question_and_after_uninstall_a_start_asks_again()
 }
 
 #[test]
+fn uninstall_says_what_it_keeps_and_how_to_remove_the_rest() {
+    let machine = Machine::new(true, false);
+    machine.run("install");
+    machine.write(
+        "Library/Application Support/plotkeeper/events.jsonl",
+        "{}\n",
+    );
+    let out = machine.run("uninstall");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("your recorded history stays in")
+            && text.contains("Library/Application Support/plotkeeper")
+            && text.contains("npm uninstall -g plotkeeper"),
+        "{text}"
+    );
+
+    // With nothing recorded, the data folder goes too, and nothing stays to be said.
+    let machine = Machine::new(true, false);
+    machine.run("install");
+    let out = machine.run("uninstall");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(!text.contains("recorded history"), "{text}");
+    assert!(text.contains("npm uninstall -g plotkeeper"), "{text}");
+}
+
+#[test]
 fn a_declined_harness_is_wired_by_install_and_the_round_trip_stays_byte_identical() {
     let machine = Machine::new(true, false).with_codex();
     machine.write(".codex/hooks.json", CODEX_OWN);
