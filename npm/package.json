@@ -1,6 +1,6 @@
 {
   "name": "plotkeeper",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Turns your coding agents' sessions into a learning layer on a local page",
   "license": "MIT",
   "repository": {
