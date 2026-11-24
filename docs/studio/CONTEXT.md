@@ -137,7 +137,7 @@ The `server/` library and its `plotkeeper` program, which has no window: it hold
 _Avoid_: Backend, daemon (the terminal daemon is another process)
 
 **Wiring**:
-plotkeeper putting its hooks into a harness, only with the user's consent. Each harness found is wired, declined or not yet asked: a start in a terminal asks only about the harnesses not yet asked, a start with no terminal never asks or wires, `plotkeeper install` wires every harness found, and `plotkeeper uninstall` unwires them all and forgets the answers.
+plotkeeper putting its hooks into an agent, such as Claude Code or Codex, only with the user's consent. Each agent found is wired, declined or not yet asked: a start in a terminal asks only about the agents not yet asked, a start with no terminal never asks or wires, `plotkeeper install` wires every agent found, and `plotkeeper uninstall` unwires them all and forgets the answers.
 _Avoid_: Setup, registering
 
 **Pane** (retired):

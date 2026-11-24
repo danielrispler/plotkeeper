@@ -145,3 +145,25 @@ fn a_second_start_against_a_running_file_without_a_version_opens_the_page() {
     let out = second_start_against(serde_json::json!({ "port": 4321, "token": "abc" }));
     assert_eq!(String::from_utf8_lossy(&out.stderr), "");
 }
+
+/// A first start waiting on its question holds the lock but has no address yet (#434): a second start says the first
+/// may be waiting for an answer in its terminal.
+#[test]
+fn a_second_start_while_the_first_has_no_address_says_it_may_be_waiting_for_an_answer() {
+    let home = tempfile::tempdir().unwrap();
+    let data = home.path().join("Library/Application Support/plotkeeper");
+    std::fs::create_dir_all(&data).unwrap();
+    let lock = std::fs::File::create(data.join("plotkeeper.lock")).unwrap();
+    lock.try_lock().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_plotkeeper"))
+        .env("HOME", home.path())
+        .env("PLOTKEEPER_NO_BROWSER", "1")
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        text.contains("waiting for an answer in its terminal"),
+        "{text}"
+    );
+}

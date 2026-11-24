@@ -26,17 +26,21 @@ You need macOS and Node. In any terminal, run:
 
     npx plotkeeper
 
-The first time, it lists the agents it found and what wiring each would change, then asks once: `Wire these? [Y/n]`. Yes wires them, starts plotkeeper and opens its page; for Codex, run `/hooks` in Codex once to trust plotkeeper's hooks.
+The first time, it lists the agents it found and what wiring each would change, then asks once: `Wire these? [Y/n]`. Yes wires them and opens the page; for Codex, run `/hooks` in Codex once to trust plotkeeper's hooks.
 
-No starts it anyway, and the page says it is not recording. Your answer is kept: later starts ask only about an agent you installed since. With no terminal to ask in, a start never wires and prints `plotkeeper install --yes`. A start that finds an older plotkeeper running says so and opens its page. Ctrl+C stops plotkeeper.
+No starts it anyway, and the page says it is not recording. Your answer is kept: later starts ask only about an agent you installed since. Ctrl+C stops plotkeeper.
 
 Summaries are written by `claude -p` by default, so `claude` must be on your login shell's `PATH` (`~/.zprofile`); the page's settings pick another writer.
 
-- **Daily use:** `npm i -g plotkeeper`, then `plotkeeper`. Offline, `npx plotkeeper` waits about 70 seconds for the registry before it runs its cached copy, so use the global install or `npx --prefer-offline plotkeeper`.
+- **Daily use:** `npm i -g plotkeeper`, then `plotkeeper`. Offline, `npx plotkeeper` waits about 70 seconds for the registry, so use the global install or `npx --prefer-offline plotkeeper`.
 - **By hand:** `plotkeeper install` wires every agent found, declined ones included; `plotkeeper install --yes` is the same for scripts. `plotkeeper uninstall` undoes it and forgets your answers ([install and uninstall](docs/studio/plugin.md)).
-- **From source**, with the Rust toolchain: clone the repository, then `npm ci` and `npm start`, which builds plotkeeper, installs it into `~/.cargo/bin` and starts it.
+- **From source**, with the Rust toolchain: clone the repository, then `npm ci` and `npm start`.
 
-plotkeeper starts no sessions; it records yours. On your click only, it starts a [background run](docs/studio/behaviour/background-runs.md): one sandboxed `claude -p` on a copy of your project, to back a law of your system map with a test or explain a mechanism. What it makes becomes a draft PR only when you press Open draft PR.
+plotkeeper starts no sessions; it records yours. On your click only, it starts a [background run](docs/studio/behaviour/background-runs.md): one `claude -p` on a copy of your project, to back a law of your system map with a test or explain a mechanism.
+
+Claude Code's sandbox keeps it to writing in that copy and a temp folder, with no network beyond loopback, no commit, push or `gh`, and no reading of plotkeeper's data, Claude Code's login or the usual credential folders. It can still read other files in your home folder.
+
+Its prompt holds only text plotkeeper wrote or you confirmed, never an issue's or a PR's. What it makes becomes a draft PR only when you press Open draft PR.
 
 ## Status
 

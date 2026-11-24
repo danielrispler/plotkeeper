@@ -1585,3 +1585,123 @@ fn the_server_says_nothing_is_wired_after_a_declined_start_and_wired_after_insta
     assert!(!before, "nothing is wired after a no");
     assert!(after, "install wired, and the running server says so");
 }
+
+#[test]
+fn a_start_after_an_uninstall_that_failed_partway_never_rewires_and_asks_again() {
+    let machine = Machine::new(true, false);
+    machine.run_args(&["install", "--yes"]);
+    // Claude Code's marketplace cannot be removed: the plugin goes, the record keeps the marketplace.
+    script(
+        &machine.tools.join("claude"),
+        r#"echo "$@" >> "$(dirname "$0")/claude-calls"
+[ "$2 $3" = "marketplace remove" ] && exit 1
+exit 0"#,
+    );
+    assert!(!machine.run_any("uninstall").status.success());
+    let calls = machine.calls("claude").len();
+
+    let text = machine.start_without_terminal();
+
+    assert!(!text.contains("rewired"), "{text}");
+    assert_eq!(
+        machine.calls("claude")[calls..],
+        [] as [String; 0],
+        "{text}"
+    );
+    assert!(text.contains("Claude Code not wired"), "{text}");
+}
+
+#[test]
+fn a_rewire_that_fails_for_one_harness_still_rewires_the_others_and_asks_about_new_ones() {
+    let machine = Machine::new(true, false).with_codex();
+    machine.write(".codex/hooks.json", CODEX_OWN);
+    machine.start(&["y"]);
+    let codex_new = codex_commands(&machine);
+    as_an_older_template_left_it(&machine, ".codex/hooks.json", "codex", "Notification");
+    set_fingerprint(&machine, "claude", Some("older"));
+    set_fingerprint(&machine, "codex", Some("older"));
+    // Claude Code's plugin cannot be installed now, and Cursor is new.
+    script(
+        &machine.tools.join("claude"),
+        r#"echo "$@" >> "$(dirname "$0")/claude-calls"
+[ "$2" = "install" ] && { echo "no network" >&2; exit 1; }
+exit 0"#,
+    );
+    let machine = machine.with_cursor();
+
+    let text = machine.start_without_terminal();
+
+    assert!(text.contains("Claude Code"), "{text}");
+    assert!(text.contains("no network"), "{text}");
+    assert!(text.contains("plotkeeper: rewired Codex"), "{text}");
+    assert_eq!(codex_commands(&machine), codex_new);
+    assert!(text.contains("Cursor not wired"), "{text}");
+}
+
+#[test]
+fn with_stdout_sent_to_a_file_the_question_still_reaches_the_terminal_and_stdout_holds_the_address()
+{
+    let machine = Machine::new(true, false);
+    let log = machine.home.join("log");
+    // As `plotkeeper > log` in a terminal: stdin and stderr are the terminal, stdout the file.
+    let mut command = Command::new("/usr/bin/script");
+    command
+        .args(["-q", "/dev/null", "/bin/sh", "-c", r#"exec "$0" > "$1""#])
+        .arg(machine.tools.join("plotkeeper"))
+        .arg(&log);
+    for (key, value) in machine.starting(true).get_envs() {
+        command.env(key, value.unwrap());
+    }
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let (mut answered, mut stopped) = (false, false);
+    let text = served(&mut child, |text, _| {
+        if !answered && text.contains(ASK) {
+            writeln!(stdin, "n").unwrap();
+            answered = true;
+        }
+        let logged = fs::read_to_string(&log).unwrap_or_default();
+        if !stopped && logged.contains("plotkeeper: http") {
+            let _ = stdin.write_all(b"\x03");
+            stopped = true;
+        }
+    });
+    let logged = fs::read_to_string(&log).unwrap();
+    assert!(text.contains(ASK), "{text}");
+    assert!(text.contains("plotkeeper: not wired"), "{text}");
+    assert!(logged.starts_with("plotkeeper: http"), "{logged}");
+    assert!(!logged.contains("Claude Code"), "{logged}");
+}
+
+#[test]
+fn a_start_with_no_terminal_says_what_it_did_not_wire_on_stderr_and_prints_only_the_address_on_stdout()
+ {
+    let machine = Machine::new(true, false);
+    let mut child = machine
+        .starting(false)
+        .stdin(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut first = String::new();
+    std::io::BufRead::read_line(
+        &mut std::io::BufReader::new(child.stdout.take().unwrap()),
+        &mut first,
+    )
+    .unwrap();
+    let _ = child.kill();
+    let mut errors = String::new();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut errors)
+        .unwrap();
+    let _ = child.wait();
+    assert!(first.starts_with("plotkeeper: http"), "{first}");
+    assert!(errors.contains("Claude Code not wired"), "{errors}");
+}

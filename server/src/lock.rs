@@ -65,7 +65,8 @@ pub fn acquire(dir: &Path) -> io::Result<Instance> {
             }))
         }
         Err(TryLockError::WouldBlock) => {
-            // The first may still be starting: its address is written once it listens.
+            // The first may still be starting: its address is written once it listens, after its wiring step, which
+            // may wait on its question (#434).
             for _ in 0..40 {
                 if let Some(running) = read_running(&dir.join(RUNNING)) {
                     return Ok(Instance::Second(running));
@@ -73,7 +74,7 @@ pub fn acquire(dir: &Path) -> io::Result<Instance> {
                 thread::sleep(Duration::from_millis(50));
             }
             Err(io::Error::other(
-                "another plotkeeper holds the data folder but does not say where it serves",
+                "another plotkeeper holds the data folder but does not say where it serves yet; it may still be starting, or waiting for an answer in its terminal",
             ))
         }
         Err(TryLockError::Error(e)) => Err(e),

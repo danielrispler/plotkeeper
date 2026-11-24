@@ -99,6 +99,11 @@ struct State {
     /// with none has not been asked (#434).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     harnesses: BTreeMap<String, HarnessRecord>,
+    /// Written by a build that keeps answers (#434), on every save, and kept through uninstall, so a harness with no
+    /// answer here is unasked even when an uninstall that failed partway left its old-style flag set. Without it, the
+    /// record is from before answers, and those flags count as wired.
+    #[serde(default)]
+    answers_kept: bool,
 }
 
 /// Install's record of one harness.
@@ -165,7 +170,9 @@ fn load(home: &Path) -> Result<Option<State>, String> {
 fn save(home: &Path, state: &State) -> Result<(), String> {
     let dir = record_dir(home);
     fs::create_dir_all(&dir).map_err(|e| format!("could not make {}: {e}", dir.display()))?;
-    let text = serde_json::to_string_pretty(state).map_err(|e| e.to_string())?;
+    let mut value = serde_json::to_value(state).map_err(|e| e.to_string())?;
+    value["answers_kept"] = Value::Bool(true);
+    let text = serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?;
     fs::write(dir.join("state.json"), text)
         .map_err(|e| format!("could not record the install: {e}"))
 }
@@ -673,10 +680,14 @@ impl Harness {
         Ok(fingerprint(&files))
     }
 
-    /// Its answer in `state`. A record from before answers were kept counts what install did there as wired.
+    /// Its answer in `state`. A record from before answers were kept counts what install did there as wired; in a
+    /// later one, a harness with no answer is unasked, whatever an uninstall that failed partway left recorded.
     fn answer(self, state: &State) -> Option<Answer> {
         if let Some(record) = state.harnesses.get(self.id()) {
             return Some(record.answer);
+        }
+        if state.answers_kept {
+            return None;
         }
         let wired = match self {
             Harness::Claude => state.claude,
@@ -791,7 +802,8 @@ pub fn wire_on_start(
 
 /// Rewires, without asking, each harness found on `path` that is wired and whose fingerprint differs from what install
 /// would render for it now, or that has none (#438), saying so in one line each; for Codex, also that its hooks must
-/// be trusted again. Runs no harness CLI when every fingerprint is equal. A declined harness is never rewired.
+/// be trusted again. Runs no harness CLI when every fingerprint is equal. A declined harness is never rewired. One
+/// that fails to rewire is said, and the rest are still rewired.
 fn rewire_changed(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Result<(), String> {
     let Some(mut state) = load(home)? else {
         return Ok(());
@@ -802,29 +814,44 @@ fn rewire_changed(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Res
         if harness.answer(&state) != Some(Answer::Wired) || !harness.found(home, path) {
             continue;
         }
-        let now = harness.fingerprint(home, &bin)?;
-        let stored = state
-            .harnesses
-            .get(harness.id())
-            .and_then(|r| r.fingerprint.as_deref());
-        if stored == Some(now.as_str()) {
-            continue;
+        let rewired = harness.fingerprint(home, &bin).and_then(|now| {
+            let stored = state
+                .harnesses
+                .get(harness.id())
+                .and_then(|r| r.fingerprint.as_deref());
+            if stored == Some(now.as_str()) {
+                return Ok(false);
+            }
+            // Its steps are install's; the start says it in one line.
+            wire_one(
+                harness,
+                home,
+                &bin,
+                path,
+                &backups,
+                &mut state,
+                &mut std::io::sink(),
+            )?;
+            state.harnesses.insert(
+                harness.id().to_owned(),
+                HarnessRecord::wired(harness, home, &bin)?,
+            );
+            save(home, &state)?;
+            Ok(true)
+        });
+        match rewired {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(e) => {
+                // The others are still rewired, and the asking step still runs.
+                let _ = writeln!(
+                    out,
+                    "plotkeeper: could not rewire {}: {e}; run plotkeeper install to retry",
+                    harness.label()
+                );
+                continue;
+            }
         }
-        // Its steps are install's; the start says it in one line.
-        wire_one(
-            harness,
-            home,
-            &bin,
-            path,
-            &backups,
-            &mut state,
-            &mut std::io::sink(),
-        )?;
-        state.harnesses.insert(
-            harness.id().to_owned(),
-            HarnessRecord::wired(harness, home, &bin)?,
-        );
-        save(home, &state)?;
         let _ = writeln!(
             out,
             "plotkeeper: rewired {}, as plotkeeper's hooks for it changed",
@@ -1468,5 +1495,17 @@ mod tests {
         assert_eq!(state.harnesses["codex"].answer, Answer::Wired);
         assert_eq!(state.harnesses["codex"].fingerprint, None);
         assert_eq!(state.harnesses["agy"].answer, Answer::Declined);
+    }
+
+    #[test]
+    fn a_record_from_before_answers_counts_its_flags_as_wired_and_a_later_one_does_not() {
+        let before = r#"{"claude":true,"agy":false,"agy_backups":[],"codex":null,"cursor":null}"#;
+        let state: State = serde_json::from_str(before).unwrap();
+        assert_eq!(Harness::Claude.answer(&state), Some(Answer::Wired));
+        assert_eq!(Harness::Agy.answer(&state), None);
+
+        let after = r#"{"claude":true,"claude_plugin_gone":true,"agy":false,"agy_backups":[],"codex":null,"cursor":null,"answers_kept":true}"#;
+        let state: State = serde_json::from_str(after).unwrap();
+        assert_eq!(Harness::Claude.answer(&state), None);
     }
 }
