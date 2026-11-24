@@ -135,7 +135,7 @@ pub mod agy_plugin {
     }
 
     /// The plugin's two files as installed: the shipped ones, with `hook` where the hooks name it.
-    fn rendered(hook: &Path) -> Result<[(&'static str, String); 2], String> {
+    pub fn rendered(hook: &Path) -> Result<[(&'static str, String); 2], String> {
         // The path sits in a JSON string, so it is escaped as one.
         let path = serde_json::to_string(&hook.display().to_string()).map_err(|e| e.to_string())?;
         let path = &path[1..path.len() - 1];

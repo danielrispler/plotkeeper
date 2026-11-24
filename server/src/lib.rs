@@ -1057,6 +1057,12 @@ pub fn forward_writer_notices(app: &Arc<App>, notices: mpsc::Receiver<Option<Str
     });
 }
 
+/// Whether any harness is wired (#437), from install's record, read on each ask: the page shows "not recording: run
+/// `plotkeeper install`" while none is, and asks again at its focus. No home folder counts as nothing wired.
+pub fn wired() -> bool {
+    std::env::home_dir().is_some_and(|home| install::any_wired(&home))
+}
+
 // The event log and what is kept beside it.
 
 /// The worktree roots file beside the event log `log` (danielrispler/plotkeeper#132).

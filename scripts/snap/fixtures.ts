@@ -2000,6 +2000,24 @@ export const fixtures = {
     ];
     return { ...list(), settings_files: { settings: "{ bad", keymap: null }, appErrors, snapScript };
   },
+  // No harness wired (#437): a first start declined, so no sessions and no story open; the base Map view still shows the
+  // not-recording line, naming `plotkeeper install`.
+  notRecording: () => ({
+    ...base,
+    wired: false,
+    snapScript: `
+      await new Promise((r) => setTimeout(r, 100));
+      const shown = [...document.querySelectorAll("[role=status]")].filter((el) => el.checkVisibility() && /^Not recording: .*\`plotkeeper install\`/.test(el.textContent));
+      if (shown.length !== 1) log("snap:fail the not-recording line is not visible once on the base Map view: " + shown.length);`,
+  }),
+  // A harness wired (#437): no not-recording line anywhere on the page.
+  recording: () => ({
+    ...base,
+    wired: true,
+    snapScript: `
+      await new Promise((r) => setTimeout(r, 100));
+      if (document.body.textContent.includes("Not recording")) log("snap:fail a not-recording line is on the page");`,
+  }),
   // Alerts: two sessions' turns ended off screen (the note toast).
   alerts() {
     const context = (k: number) => ({ ...session("x", "x", "idle").transcript, context: { tokens: k * 1000 } });
