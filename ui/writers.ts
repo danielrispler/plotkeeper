@@ -9,7 +9,7 @@
 // `settings.json` as `summaries.base_url` (none: OpenAI's own), and an optional key, also kept in the Keychain, as a local
 // Ollama needs none.
 
-import { failure, invoke, text } from "./dom.js";
+import { confirmed, failure, invoke, text } from "./dom.js";
 import type { Settings, SettingsFiles } from "./settings.js";
 import type { Writers, WriterKind, WriterTest } from "./types.js";
 import { GATE } from "./writer-notice.js";
@@ -202,7 +202,9 @@ function keyRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[]
     remove.id = "writer-key-remove";
     remove.setAttribute("type", "button");
     remove.title = "Remove the key from the macOS Keychain; the API-key writer then cannot write";
-    remove.addEventListener("click", () => {
+    remove.addEventListener("click", async () => {
+      const lost = "The Anthropic API key is deleted from the macOS Keychain; the API-key writer cannot write until a key is pasted again.";
+      if (!(await confirmed({ heading: "Remove the API key?", lost, verb: "Remove key" }))) return;
       invoke("remove_api_key", { writer: "anthropic", expected: null })
         .then(() => {
           delete keyErrors.anthropic;
@@ -295,7 +297,10 @@ function openaiRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElemen
     remove.id = "writer-openai-remove";
     remove.setAttribute("type", "button");
     remove.title = "Remove the base URL from settings.json and the key from the macOS Keychain";
-    remove.addEventListener("click", () => {
+    remove.addEventListener("click", async () => {
+      const url = known.base_url ? `The base URL ${known.base_url}` : "The base URL";
+      const lost = `${url} is removed from settings.json, and the endpoint's key, if one is set, from the macOS Keychain.`;
+      if (!(await confirmed({ heading: "Remove the OpenAI-compatible API?", lost, verb: "Remove" }))) return;
       invoke("remove_api_key", { writer: "openai", expected: hooks.texts().settings })
         .then((settings) => {
           delete keyErrors.openai;
