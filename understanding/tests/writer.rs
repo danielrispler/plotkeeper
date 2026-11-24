@@ -1014,9 +1014,10 @@ fn an_unreadable_reply_is_a_failure_of_one_line() {
 fn the_judge_stops_after_its_own_limit_and_leaves_nothing_running_while_other_calls_keep_theirs() {
     assert_eq!(RISK_TIMEOUT, Duration::from_secs(15));
     let dir = tempfile::tempdir().unwrap();
-    // A hung call whose own child also hangs; the writer's own limit is 30 s.
+    // A hung call whose own child also hangs; the writer's own limit is 30 s. The judge's limit leaves `sh` time to write
+    // `child` on a loaded machine: at 800 ms, 165 of 180 parallel runs stopped it first (#469); at 5 s, none did.
     let hung = stub(dir.path(), "sleep 600 & echo $! > child; sleep 600")
-        .with_risk_timeout(Duration::from_millis(800));
+        .with_risk_timeout(Duration::from_secs(5));
     let started = std::time::Instant::now();
 
     let risk = hung.risk("sleep 1", "/work/repo");
