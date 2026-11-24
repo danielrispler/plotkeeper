@@ -915,32 +915,47 @@ impl HookFile {
         }
     }
 
-    /// `text` without plotkeeper's entries; `text` itself, byte for byte, when it has none.
+    /// `text` without plotkeeper's entries, any template's (#435); `text` itself, byte for byte, when it has none.
     // shortcut: a file that had some is written back with its keys sorted, as serde_json writes them.
     fn without_ours(&self, text: &str, bin: &Path) -> Result<String, String> {
         let mut hooks = self.parse(text)?;
-        let ours = self.ours(bin)?;
-        let events = self.events(&mut hooks)?;
-        let mut removed = false;
-        for (event, ours) in ours {
-            let Some(Value::Array(entries)) = events.get_mut(&event) else {
-                continue;
-            };
-            let ours = ours.as_array().cloned().unwrap_or_default();
-            let before = entries.len();
-            entries.retain(|entry| !ours.contains(entry));
-            removed |= entries.len() != before;
-            if entries.is_empty() {
-                events.remove(&event);
-            }
-        }
-        if !removed {
+        if !self.remove_ours(&mut hooks, bin)? {
             return Ok(text.to_owned());
         }
         Ok(serde_json::to_string_pretty(&hooks).map_err(|e| e.to_string())? + "\n")
     }
 
-    /// Adds plotkeeper's entries, once each, beside the user's own. Before the first install, and before one that finds
+    /// Takes plotkeeper's entries out of `hooks`: those whose command names `bin`, whatever template wrote them, so a
+    /// rewire leaves no stale entry (#434, "The fingerprint"). An event left empty goes. Whether any was taken out.
+    fn remove_ours(&self, hooks: &mut Value, bin: &Path) -> Result<bool, String> {
+        let bin = format!("{}/", bin.display());
+        let names_bin = |handler: &Value| {
+            handler
+                .get("command")
+                .and_then(Value::as_str)
+                .is_some_and(|c| c.contains(&bin))
+        };
+        // Cursor's entry is a handler; Codex's is a group of handlers.
+        let ours = |entry: &Value| {
+            names_bin(entry)
+                || entry
+                    .get("hooks")
+                    .and_then(Value::as_array)
+                    .is_some_and(|handlers| handlers.iter().any(names_bin))
+        };
+        let events = self.events(hooks)?;
+        let mut removed = false;
+        events.retain(|_, entries| {
+            let entries = entries.as_array_mut().expect("checked to be an array");
+            let before = entries.len();
+            entries.retain(|entry| !ours(entry));
+            removed |= entries.len() != before;
+            entries.len() == before || !entries.is_empty()
+        });
+        Ok(removed)
+    }
+
+    /// Puts plotkeeper's current entries beside the user's own, in place of any it had there. Before the first install, and before one that finds
     /// the file changed since install last wrote it, the file is backed up without plotkeeper's entries, so uninstall
     /// gives back the user's latest hooks.
     // shortcut: the file is written back with its keys sorted, as serde_json writes them; uninstall restores its bytes.
@@ -958,17 +973,14 @@ impl HookFile {
             Some(text) => self.parse(text)?,
             None => (self.fresh)(),
         };
+        self.remove_ours(&mut hooks, bin)?;
         let events = self.events(&mut hooks)?;
         for (event, ours) in self.ours(bin)? {
             let entries = events
                 .entry(event)
                 .or_insert_with(|| Value::Array(Vec::new()));
             let entries = entries.as_array_mut().expect("checked to be an array");
-            for entry in ours.as_array().into_iter().flatten() {
-                if !entries.contains(entry) {
-                    entries.push(entry.clone());
-                }
-            }
+            entries.extend(ours.as_array().into_iter().flatten().cloned());
         }
         let text = serde_json::to_string_pretty(&hooks).map_err(|e| e.to_string())? + "\n";
         let changed = record(state)

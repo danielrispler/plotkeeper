@@ -99,6 +99,9 @@ fn main() -> ExitCode {
     let held = match lock::acquire(&data) {
         Ok(Instance::First(held)) => held,
         Ok(Instance::Second(running)) => {
+            if let Some(line) = running.version_notice(env!("CARGO_PKG_VERSION")) {
+                eprintln!("{line}");
+            }
             show(&address(running.port, &running.token));
             return ExitCode::SUCCESS;
         }

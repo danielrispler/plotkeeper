@@ -2,7 +2,8 @@ name: npm package
 
 # Builds the npm package with universal macOS binaries, packs it, and installs the tarball on an Apple silicon and an
 # Intel runner with no Rust on the PATH (scripts/npm/smoke.sh, #368), on every run. It publishes to the npm registry
-# only when Daniel runs it by hand from main with "publish" ticked (docs/studio/development.md, "Cutting a release").
+# only when Daniel runs it by hand from main with "publish" ticked, by npm trusted publishing with no token
+# (docs/studio/development.md, "Cutting a release").
 # It runs on each push to main, by hand, and for a ready pull request that touches what the package is built from:
 # the dependencies, the toolchain, the package, its scripts and the plugins `plotkeeper install` renders. A pull
 # request's other changes, an Intel-only build break among them, show here only after the merge to main.
@@ -90,18 +91,20 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-      # npm's provenance statement.
+      # npm trusted publishing authenticates through the job's OIDC token, and npm's provenance statement needs it.
       id-token: write
     steps:
+      # No `registry-url`: npm's default registry is npmjs.org, and setup-node would write an `.npmrc` that sends
+      # `NODE_AUTH_TOKEN`, a token this job does not have.
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm 11.5.1 or later; Node 22's npm is 10.
+      - run: npm install -g npm@^11.5.1
       - uses: actions/download-artifact@v8
         with:
           name: npm-package
           path: out
-      # The tarball the smoke job tested, not a rebuild.
+      # The tarball the smoke job tested, not a rebuild. No token: npm trusted publishing, configured on npmjs.com for
+      # this repository's release.yml, authenticates it (docs/studio/development.md, "Cutting a release").
       - run: npm publish out/*.tgz --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
