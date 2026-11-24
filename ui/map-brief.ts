@@ -455,6 +455,20 @@ const lawTag = (view: MapView, step: BriefStep) => {
 
 const partName = (view: MapView, id: string) => view.doc.parts.find((p) => p.id === id)?.name ?? view.doc.actors.find((a) => a.id === id)?.name ?? id;
 
+// A step's body (#446): the writer may wrap a phrase in <b>...</b>. Each paired span becomes a bold element and every other run plain
+// text, so an unpaired tag shows as written. The body is never parsed as HTML.
+function bodyNode(body: string) {
+  const node = text("p", "", "brief-body");
+  const runs = body.split(/(<\/?b>)/);
+  for (let i = 0; i < runs.length; i++) {
+    if (runs[i] === "<b>" && runs[i + 2] === "</b>") {
+      node.append(text("b", runs[i + 1]!));
+      i += 2;
+    } else if (runs[i]) node.append(runs[i]!);
+  }
+  return node;
+}
+
 // One step's words and figure. The panel around them stays put.
 function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["also"] = []) {
   const part = (id: string) => partName(view, id);
@@ -463,7 +477,7 @@ function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["als
   kick.append(text("span", pr < 0 ? "Part catch-up" : `#${pr}`), text("span", step.k));
   const tag = lawTag(view, step);
   if (tag) kick.append(tag);
-  words.append(kick, text("h3", step.h, "brief-title"), text("p", step.b, "brief-body"));
+  words.append(kick, text("h3", step.h, "brief-title"), bodyNode(step.b));
   if (step.list.length) words.append(listNode(step.list));
   if (step.risks.length) words.append(listNode(step.risks.map((r) => `${part(r.part)}: ${r.trigger} To see it: ${r.check}`)));
   if (step.covered_by) words.append(text("p", `Covered by the test ${step.covered_by}.`, "brief-quiet"));

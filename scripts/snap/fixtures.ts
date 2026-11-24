@@ -677,6 +677,48 @@ const mapCatchUpWriting = (): Fixture => ({
   }),
   snapDone: "catch-up writing ok",
 });
+// A step's bold phrase (#446): the writer may wrap one phrase in <b>...</b>; the reader shows it as one bold element and never the tag.
+const boldBody = "No process is recorded, so the session <b>goes idle</b> until its next event.";
+const boldCheck = (done: string) => `
+      const body = document.querySelector("#map-brief .brief-body");
+      const bold = [...body.querySelectorAll("b")];
+      if (body.textContent !== "No process is recorded, so the session goes idle until its next event.") log("snap:fail the step body reads: " + body.textContent);
+      if (bold.length !== 1 || bold[0].textContent !== "goes idle") log("snap:fail bold elements: " + bold.map((b) => b.textContent).join("|"));
+      if (body.children.length !== bold.length) log("snap:fail the step body holds another element");
+      log("${done}");`;
+const mapCatchUpBold = (): Fixture => ({
+  ...mapOpened(`
+      const calm = document.createElement("style");
+      calm.textContent = "*, *::before, *::after { transition: none !important; animation: none !important; }";
+      document.head.append(calm);
+      document.querySelector("#map .plate[data-id=understanding]").click();
+      await wait(150);
+      document.querySelector(".sheet .sheet-catch-up").click();
+      await wait(350);
+      if (!document.querySelector("#map-brief .brief-kick")?.textContent.includes("Part catch-up")) return log("snap:fail the part catch-up did not open");
+      ${boldCheck("catch-up bold ok")}`, {
+    map_state: mapState({ fog: { understanding: "thick" }, catch_ups: { understanding: { kind: "catch-up", ready: true, writing: false, failed: false } } }),
+    part_catch_up: { ...storedCatchUp(), brief: { ...storedCatchUp().brief, chapters: [{ behaviour: "story", parts: ["understanding"], title: "Idle sessions", steps: [step("Now", "Each line names its agent", boldBody, ["understanding"])], flags: [] }] } },
+  }),
+  snapDone: "catch-up bold ok",
+});
+const mapBriefBold = (): Fixture => ({
+  ...mapBrief(briefOf([step("Now", "Each line names its agent", boldBody, ["shell"])]), 0, boldCheck("brief bold ok"), true),
+  snapDone: "brief bold ok",
+});
+// An unpaired <b> and an <img onerror> string stay text: no element is made from them and nothing runs.
+const mapBriefBoldUnpaired = (): Fixture => {
+  const body = 'A lone <b>tag and <img src="x" onerror="window.__boldRan = 1"> stay text.';
+  return {
+    ...mapBrief(briefOf([step("Now", "Tags the writer did not pair", body, ["shell"])]), 0, `
+      const node = document.querySelector("#map-brief .brief-body");
+      if (node.textContent !== ${JSON.stringify(body)}) log("snap:fail the step body reads: " + node.textContent);
+      if (node.children.length) log("snap:fail the step body made elements: " + [...node.children].map((c) => c.tagName).join("|"));
+      if (window.__boldRan) log("snap:fail the onerror ran");
+      log("brief unpaired ok");`, true),
+    snapDone: "brief unpaired ok",
+  };
+};
 // The part sheet with one law not yet ratified (#343): it says so, with Accept and Overturn.
 const mapSheetUnratified = (): Fixture =>
   mapOpened(`
@@ -1656,6 +1698,9 @@ export const fixtures = {
   mapCatchUp,
   mapCatchUpWriting,
   mapCatchUpSummarising,
+  mapCatchUpBold,
+  mapBriefBold,
+  mapBriefBoldUnpaired,
   mapSheetUnratified,
   mapStale,
   mapRefresher,
