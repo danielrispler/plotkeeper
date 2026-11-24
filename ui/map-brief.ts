@@ -1,7 +1,8 @@
 // The PR brief on the Map view (spec danielrispler/plotkeeper#334, ticket #339), as the prototype's treatment C plays it: opening a tray row plays
 // a brief's steps one at a time under the map. A light runs the step's links at one speed and a part lights as it arrives; the camera frames the
-// parts the brief lights; the panel keeps its tallest step's height and crossfades between steps; a figure for a change inside one part is drawn
-// by `figureShapes` from the writer's labels; citations sit in quiet type, and the panel says when the writer saw only part of the diff and which
+// parts the brief lights; the panel is one narrow width, as tall as the step it shows (its CSS scrolls a taller step inside it, #449), and
+// crossfades between steps; a figure for a change inside one part is drawn under the step's words by `figureShapes` from the writer's labels;
+// citations sit in quiet type, and the panel says when the writer saw only part of the diff and which
 // items are not confirmed from the facts. "See the code" opens the drawer (`map-drawer.ts`) above it. Opening a brief returns the map to now.
 // A step's check (#340) is answered in place: a pick in the panel, an order by tapping parts on the map into numbered slots (`pickRun`, `orderRun`);
 // Check grades it, a wrong answer shows the correction, and an order check replays the right path along the links.
@@ -455,6 +456,20 @@ const lawTag = (view: MapView, step: BriefStep) => {
 
 const partName = (view: MapView, id: string) => view.doc.parts.find((p) => p.id === id)?.name ?? view.doc.actors.find((a) => a.id === id)?.name ?? id;
 
+// A step's body (#446): the writer may wrap a phrase in <b>...</b>. Each paired span becomes a bold element and every other run plain
+// text, so an unpaired tag shows as written. The body is never parsed as HTML.
+function bodyNode(body: string) {
+  const node = text("p", "", "brief-body");
+  const runs = body.split(/(<\/?b>)/);
+  for (let i = 0; i < runs.length; i++) {
+    if (runs[i] === "<b>" && runs[i + 2] === "</b>") {
+      node.append(text("b", runs[i + 1]!));
+      i += 2;
+    } else if (runs[i]) node.append(runs[i]!);
+  }
+  return node;
+}
+
 // One step's words and figure. The panel around them stays put.
 function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["also"] = []) {
   const part = (id: string) => partName(view, id);
@@ -463,7 +478,7 @@ function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["als
   kick.append(text("span", pr < 0 ? "Part catch-up" : `#${pr}`), text("span", step.k));
   const tag = lawTag(view, step);
   if (tag) kick.append(tag);
-  words.append(kick, text("h3", step.h, "brief-title"), text("p", step.b, "brief-body"));
+  words.append(kick, text("h3", step.h, "brief-title"), bodyNode(step.b));
   if (step.list.length) words.append(listNode(step.list));
   if (step.risks.length) words.append(listNode(step.risks.map((r) => `${part(r.part)}: ${r.trigger} To see it: ${r.check}`)));
   if (step.covered_by) words.append(text("p", `Covered by the test ${step.covered_by}.`, "brief-quiet"));
@@ -731,7 +746,7 @@ function show(view: MapView, same: boolean) {
   if (!now || !step || !playing) return closeBrief();
   const pr = now.pr;
   document.body.classList.add("brief-open");
-  if (!box.classList.contains("open") || !box.firstElementChild) buildPanel(view, list, pr);
+  if (!box.classList.contains("open") || !box.firstElementChild) buildPanel(view, list);
   box.hidden = false;
   // A reflow first, so the panel rises from where it was hidden.
   void box.offsetWidth;
@@ -767,7 +782,7 @@ function show(view: MapView, same: boolean) {
   aim(view, step);
 }
 
-// The end-of-story bar ends the played list's last step: a single story's end, or a chapter's (#393). It goes under the step's words.
+// The end-of-story bar ends the played list's last step: a single story's end, or a chapter's (#393). It goes under the step's words and figure.
 function endBar(node: HTMLElement, index: number, count: number): Bar | null {
   const now = player.current();
   if (!now || index !== count - 1) return null;
@@ -776,7 +791,7 @@ function endBar(node: HTMLElement, index: number, count: number): Bar | null {
   // A part catch-up's bar is keyed by its part (#391).
   const about = catchUp ? { project: now.project, part: catchUp.part } : { project: now.project, pr: now.pr, chapter: now.chapter };
   if (!bar) bars.set(key, (bar = storyBar(about, gistOf(now.chapter))));
-  node.querySelector(".brief-txt")?.append(bar.node);
+  node.append(bar.node);
   return bar;
 }
 
@@ -794,10 +809,9 @@ function gistOf(chapter: number): string | undefined {
   return explainsBack(story.gist, parts, tierOf) ? story.gist : undefined;
 }
 
-// The panel's frame, built once per brief: it keeps the height of its tallest step, so it never jumps.
-function buildPanel(view: MapView, list: BriefStep[], pr: number) {
+// The panel's frame, built once per brief. Its height follows the step it shows, and Back and Next end it (#449).
+function buildPanel(view: MapView, list: BriefStep[]) {
   const box = panel();
-  box.style.minHeight = "";
   const leave = text("button", "Leave", "btn quiet brief-leave");
   leave.title = "Close the brief; it opens again at this step";
   leave.addEventListener("click", closeBrief);
@@ -828,18 +842,6 @@ function buildPanel(view: MapView, list: BriefStep[], pr: number) {
   // A PR that closes the pre-flighted issue, or a ticket under it (#394): what Daniel expected against what it touched.
   const line = expectedLine(playing?.expected, view.doc);
   box.replaceChildren(leave, ...(line ? [text("p", line, "brief-expected")] : []), cols, foot);
-  // One height for the whole brief: its tallest step's.
-  box.hidden = false;
-  let tallest = 0;
-  const now = player.current();
-  list.forEach((step, i) => {
-    const node = stepNode(view, step, pr, playing && now ? alsoAt(playing.brief.brief, now.chapter, i, storySteps(list).length) : []);
-    if (i === 0) summaryInto(node);
-    endBar(node, i, list.length);
-    cols.replaceChildren(node);
-    tallest = Math.max(tallest, box.offsetHeight);
-  });
-  box.style.minHeight = `${tallest}px`;
 }
 
 function move(by: number) {

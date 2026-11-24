@@ -343,9 +343,70 @@ const mapBriefStory = (): Fixture => mapBrief(briefOf(storySteps(), false), 2, `
       document.querySelector("#map-brief .brief-code").click();
       await wait(250);
       if (!document.querySelector("#map-drawer .drawer-code")?.textContent.includes("+the brief")) log("snap:fail See the code does not open the PR's diff");`, true);
+// Each figure kind filled to the limits `figureShapes` draws (#449): six states, five steps, four lines a side, each label long.
+const fullFigure = (kind: string): BriefFigure => {
+  const label = (i: number) => `a long label ${i + 1} here`;
+  return kind === "states"
+    ? { kind, frame: "a terminal with a long name", items: [0, 1, 2, 3, 4, 5].map((i) => ({ label: label(i), tone: i === 1 ? "lost" : i === 2 ? "live" : null, bad: i === 1 ? true : null })), before: [], after: [] }
+    : kind === "sequence"
+      ? { kind, frame: null, items: [0, 1, 2, 3, 4].map((i) => ({ label: label(i), tone: i === 2 ? "live" : null, bad: null })), before: [], after: [] }
+      : { kind, frame: null, items: [], before: [0, 1, 2, 3].map(label), after: [4, 5, 6, 7].map(label) };
+};
+// The card's geometry, read in the page: the card, its scrolling step, the step's words and figure, and Back and Next.
+const cardBox = `
+      const box = (node) => node.getBoundingClientRect();
+      const card = () => document.getElementById("map-brief");`;
+// The figure sits under the step's words, inside the card, never in a column beside them (#449).
 const mapBriefFigure = (kind: string): Fixture =>
-  mapBrief(briefOf([step("Now", "What happens inside one part", "The change is inside Understanding, so a small figure shows it.", ["understanding"], { fig: figure(kind) })]), 0, `
-      if (document.querySelectorAll("#map-brief .brief-fig .fig-chip").length < 3) log("snap:fail the figure draws no chips");`);
+  mapBrief(briefOf([step("Now", "What happens inside one part", "The change is inside Understanding, so a small figure shows it.", ["understanding"], { fig: fullFigure(kind) })]), 0, `${cardBox}
+      if (document.querySelectorAll("#map-brief .brief-fig .fig-chip").length < 3) log("snap:fail the figure draws no chips");
+      const words = box(document.querySelector("#map-brief .brief-txt"));
+      const figure = box(document.querySelector("#map-brief .brief-figure"));
+      const cols = document.querySelector("#map-brief .brief-cols");
+      const inside = box(cols);
+      if (figure.top < words.bottom - 1) log("snap:fail the figure is not under the step's words: " + figure.top + " above " + words.bottom);
+      if (figure.left < inside.left - 1 || figure.right > inside.right + 1) log("snap:fail the figure overflows the card: " + figure.left + "-" + figure.right + " in " + inside.left + "-" + inside.right);
+      if (cols.scrollWidth > cols.clientWidth) log("snap:fail the step scrolls sideways: " + cols.scrollWidth + " in " + cols.clientWidth);
+      if (figure.width < 200) log("snap:fail the figure is cramped: " + figure.width);`);
+// Each step is as tall as its own words, the card keeps one narrow width, and Back and Next keep their place (#449).
+const mapBriefHeights = (): Fixture =>
+  mapBrief(briefOf(storySteps()), 0, `${cardBox}
+      const seen = [];
+      for (let i = 0; i < 4; i++) {
+        if (i) { document.getElementById("brief-next").click(); await wait(50); }
+        seen.push({ card: box(card()), back: box(document.querySelector("#map-brief .brief-back")), next: box(document.getElementById("brief-next")) });
+      }
+      const [where, before] = seen;
+      if (!(before.card.height < where.card.height - 20)) log("snap:fail the short step's card is not shorter: " + before.card.height + " against " + where.card.height);
+      for (const at of seen) {
+        if (Math.abs(at.card.width - where.card.width) > 0.5) log("snap:fail the card's width changes: " + at.card.width + " against " + where.card.width);
+        for (const key of ["back", "next"]) if (Math.abs(at[key].top - where[key].top) > 0.5 || Math.abs(at[key].left - where[key].left) > 0.5) log("snap:fail " + key + " moved: " + JSON.stringify(at[key]) + " against " + JSON.stringify(where[key]));
+      }
+      if (!(where.card.width < 820)) log("snap:fail the card is not narrow: " + where.card.width);
+      if (card().style.minHeight) log("snap:fail the card's height is set in script: " + card().style.minHeight);`, true);
+// A step taller than the card's maximum scrolls inside the card, with Back and Next outside the scroll and in view (#449).
+const tallStep = (): BriefStep =>
+  step("Now", "A step with a great deal to say", "Every line below is one more thing the step says, so the step is taller than the card may be.", ["understanding"], {
+    list: Array.from({ length: 30 }, (_, i) => `Line ${i + 1} of what changed, long enough to read as a sentence.`),
+  });
+const mapBriefTall = (): Fixture =>
+  mapBrief(briefOf([tallStep(), storySteps()[1]]), 0, `${cardBox}
+      const cols = document.querySelector("#map-brief .brief-cols");
+      const map = box(document.querySelector(".map-stage"));
+      const next = document.getElementById("brief-next");
+      const back = document.querySelector("#map-brief .brief-back");
+      if (!(cols.scrollHeight > cols.clientHeight + 20)) log("snap:fail the tall step does not scroll inside the card: " + cols.scrollHeight + " in " + cols.clientHeight);
+      if (getComputedStyle(cols).overscrollBehaviorY !== "contain") log("snap:fail the step's scroll chains to the map: " + getComputedStyle(cols).overscrollBehaviorY);
+      if (box(card()).top < map.top) log("snap:fail the card runs above the map: " + box(card()).top + " above " + map.top);
+      if (cols.contains(next) || cols.contains(back)) log("snap:fail Back and Next scroll with the step");
+      for (const button of [back, next]) {
+        const at = box(button);
+        if (at.bottom > innerHeight || at.top < map.top || document.elementFromPoint(at.left + at.width / 2, at.top + at.height / 2) !== button) log("snap:fail " + button.textContent + " is not in view");
+      }
+      const place = box(next);
+      cols.scrollTop = cols.scrollHeight;
+      await wait(100);
+      if (box(next).top !== place.top) log("snap:fail Next moved with the scroll");`);
 const mapBriefUnconfirmed = (): Fixture =>
   mapBrief(briefOf([step("Now", "Cards are written once per turn", "A turn is written once, whatever the order of events.", ["understanding"], { flags: ["the claim is not in the facts"] })], true), 0, `
       if (!document.querySelector("#map-brief .brief-unconfirmed")?.textContent.includes("not confirmed from the facts")) log("snap:fail no unconfirmed mark");
@@ -569,6 +630,7 @@ const mapBriefWriting = (): Fixture => ({
       if (panel.hidden || !panel.textContent.includes("Writing the brief…")) return log("snap:fail the panel does not say the brief is being written");
       if (!document.querySelector('#map-tray .tray-row[data-pr="334"] .tray-note')?.textContent.includes("writing the brief")) log("snap:fail the tray row does not say so");
       if (document.getElementById("map").hidden) log("snap:fail the map is not usable");
+      if (!(panel.getBoundingClientRect().width < 820)) log("snap:fail the waiting card is not narrow: " + panel.getBoundingClientRect().width);
       log("writing ok");`, {
     map_state: mapState({ fog: { shell: "thick" }, ready: [{ number: 334, title: "PR briefs on the map", head: "b".repeat(40), brief: null }] }),
     // The write runs in the background: the open answers at once that it is being written.
@@ -677,6 +739,48 @@ const mapCatchUpWriting = (): Fixture => ({
   }),
   snapDone: "catch-up writing ok",
 });
+// A step's bold phrase (#446): the writer may wrap one phrase in <b>...</b>; the reader shows it as one bold element and never the tag.
+const boldBody = "No process is recorded, so the session <b>goes idle</b> until its next event.";
+const boldCheck = (done: string) => `
+      const body = document.querySelector("#map-brief .brief-body");
+      const bold = [...body.querySelectorAll("b")];
+      if (body.textContent !== "No process is recorded, so the session goes idle until its next event.") log("snap:fail the step body reads: " + body.textContent);
+      if (bold.length !== 1 || bold[0].textContent !== "goes idle") log("snap:fail bold elements: " + bold.map((b) => b.textContent).join("|"));
+      if (body.children.length !== bold.length) log("snap:fail the step body holds another element");
+      log("${done}");`;
+const mapCatchUpBold = (): Fixture => ({
+  ...mapOpened(`
+      const calm = document.createElement("style");
+      calm.textContent = "*, *::before, *::after { transition: none !important; animation: none !important; }";
+      document.head.append(calm);
+      document.querySelector("#map .plate[data-id=understanding]").click();
+      await wait(150);
+      document.querySelector(".sheet .sheet-catch-up").click();
+      await wait(350);
+      if (!document.querySelector("#map-brief .brief-kick")?.textContent.includes("Part catch-up")) return log("snap:fail the part catch-up did not open");
+      ${boldCheck("catch-up bold ok")}`, {
+    map_state: mapState({ fog: { understanding: "thick" }, catch_ups: { understanding: { kind: "catch-up", ready: true, writing: false, failed: false } } }),
+    part_catch_up: { ...storedCatchUp(), brief: { ...storedCatchUp().brief, chapters: [{ behaviour: "story", parts: ["understanding"], title: "Idle sessions", steps: [step("Now", "Each line names its agent", boldBody, ["understanding"])], flags: [] }] } },
+  }),
+  snapDone: "catch-up bold ok",
+});
+const mapBriefBold = (): Fixture => ({
+  ...mapBrief(briefOf([step("Now", "Each line names its agent", boldBody, ["shell"])]), 0, boldCheck("brief bold ok"), true),
+  snapDone: "brief bold ok",
+});
+// An unpaired <b> and an <img onerror> string stay text: no element is made from them and nothing runs.
+const mapBriefBoldUnpaired = (): Fixture => {
+  const body = 'A lone <b>tag and <img src="x" onerror="window.__boldRan = 1"> stay text.';
+  return {
+    ...mapBrief(briefOf([step("Now", "Tags the writer did not pair", body, ["shell"])]), 0, `
+      const node = document.querySelector("#map-brief .brief-body");
+      if (node.textContent !== ${JSON.stringify(body)}) log("snap:fail the step body reads: " + node.textContent);
+      if (node.children.length) log("snap:fail the step body made elements: " + [...node.children].map((c) => c.tagName).join("|"));
+      if (window.__boldRan) log("snap:fail the onerror ran");
+      log("brief unpaired ok");`, true),
+    snapDone: "brief unpaired ok",
+  };
+};
 // The part sheet with one law not yet ratified (#343): it says so, with Accept and Overturn.
 const mapSheetUnratified = (): Fixture =>
   mapOpened(`
@@ -1782,6 +1886,8 @@ export const fixtures = {
   mapBriefStates: () => mapBriefFigure("states"),
   mapBriefSequence: () => mapBriefFigure("sequence"),
   mapBriefCompare: () => mapBriefFigure("compare"),
+  mapBriefHeights,
+  mapBriefTall,
   mapBriefUnconfirmed,
   mapBriefPickRight: () => mapBriefPick(1),
   mapBriefPickWrong: () => mapBriefPick(0),
@@ -1800,6 +1906,9 @@ export const fixtures = {
   mapCatchUp,
   mapCatchUpWriting,
   mapCatchUpSummarising,
+  mapCatchUpBold,
+  mapBriefBold,
+  mapBriefBoldUnpaired,
   mapSheetUnratified,
   mapStale,
   mapRefresher,
