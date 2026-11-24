@@ -505,7 +505,8 @@ body[data-panel="diff"] .map-stage { --panel-w: min(var(--panel-wide), calc(100%
    faint edge, a deep shadow and a round corner. It never darkens the map under it. */
 .glass { background: var(--glass); backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur)); border-radius: var(--glass-radius);
          box-shadow: var(--glass-shadow); }
-/* The side area, over the map's right: the part's sheet, the drawer under it, then the agents no part holds and the background runs.
+/* The side area, over the map's right: the agents no part holds (first, so a sheet never pushes them down over a part, #466), the part's sheet,
+   the drawer under it, then the background runs.
    It is one scroll column at most the map's height less its insets (#445): its cards keep their own height, so the sheet and the drawer never
    scroll on their own, and a wheel at its end never reaches the map. It hugs its cards, so it takes the pointer, its scrollbar with it. Its width is the sheet's, `--sheet-w` as Daniel resized it
    (`map-sheet.ts`), between `--map-sheet-min` and half the map. */
