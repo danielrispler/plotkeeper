@@ -12,7 +12,7 @@ use std::{
 };
 use studio_server::runner::{
     Config, End, Harness, HarnessCommand, Kind, Limits, Plan, Request, RunState, Runner,
-    allowed_tools, claude_command, sandbox_settings,
+    SANDBOX_CHECK, SANDBOX_DOWN, allowed_tools, claude_command, private_tmp, sandbox_settings,
 };
 
 const PROJECT: &str = "/p/app";
@@ -26,7 +26,7 @@ impl Harness for Script {
             program: "/bin/sh".into(),
             args: vec!["-c".into(), plan.prompt.to_string()],
             env: [("CHECKS".to_string(), plan.checks.join("|"))].into(),
-            env_remove: Vec::new(),
+            ..HarnessCommand::default()
         })
     }
 }
@@ -227,6 +227,7 @@ fn the_claude_command_holds_the_flags_the_tools_and_the_sandbox_block() {
                 "failIfUnavailable": true,
                 "allowUnsandboxedCommands": false,
                 "autoAllowBashIfSandboxed": false,
+                "network": { "allowLocalBinding": true },
                 "filesystem": { "denyRead": [
                     "/home/d/Library/Application Support/plotkeeper", "~/.claude", "~/.claude.json", "~/.ssh", "~/.aws",
                     "~/.config/gh", "~/.npmrc", "~/.netrc", "~/.cargo/credentials.toml", "~/.gnupg", "~/.kube",
@@ -245,6 +246,198 @@ fn the_claude_command_holds_the_flags_the_tools_and_the_sandbox_block() {
     for name in ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"] {
         assert!(command.env_remove.iter().any(|n| n == name), "{name} stays");
     }
+    // The launcher checks the sandbox first, and the run's tools get a temp folder of its own.
+    assert_eq!(command.check, SANDBOX_CHECK.map(String::from));
+    // Inside another sandbox only a profile that denies something fails to apply (#395's gate, probe `unavailable`).
+    assert!(SANDBOX_CHECK[2].contains("(deny "), "{}", SANDBOX_CHECK[2]);
+    let tmp = command.private_tmp.clone().expect("no private temp folder");
+    assert_eq!(
+        command.env.get("CLAUDE_CODE_TMPDIR").map(String::as_str),
+        Some(tmp.to_str().unwrap())
+    );
+}
+
+#[test]
+fn a_runs_temp_folder_is_its_own_and_short_enough_for_claude_code_to_use() {
+    let one = private_tmp(Path::new("/runs/r1/work"));
+    let two = private_tmp(Path::new("/runs/r2/work"));
+    assert_ne!(one, two);
+    assert_eq!(one, private_tmp(Path::new("/runs/r1/work")));
+    assert!(one.starts_with("/tmp"), "{}", one.display());
+    // Claude Code falls back to the shared `/tmp/claude-<uid>` when `<dir>/claude-<uid>` is over 44 bytes.
+    let longest = format!("{}/claude-{}", one.display(), u32::MAX);
+    assert!(longest.len() <= 44, "{longest} is {} bytes", longest.len());
+}
+
+/// The fake harness, with a sandbox check of `check` (a shell script) and, under `tmp`, a private temp folder named in
+/// `PK_TMP`.
+struct Checked {
+    check: &'static str,
+    tmp: Option<PathBuf>,
+}
+
+impl Harness for Checked {
+    fn command(&self, plan: &Plan) -> Result<HarnessCommand, String> {
+        let mut command = Script.command(plan)?;
+        command.check = ["/bin/sh", "-c", self.check].map(String::from).into();
+        if let Some(tmp) = &self.tmp {
+            command
+                .env
+                .insert("PK_TMP".into(), tmp.to_string_lossy().into_owned());
+            command.private_tmp = Some(tmp.clone());
+        }
+        Ok(command)
+    }
+}
+
+#[test]
+fn a_run_whose_sandbox_cannot_start_fails_before_its_harness_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    settings(dir.path(), r#"{ "checks": { "/p/app": ["cargo test"] } }"#);
+    let harness = Checked {
+        check: "echo 'sandbox_apply: Operation not permitted' >&2; exit 71",
+        tmp: None,
+    };
+    let (runner, changes) = open(dir.path(), Arc::new(harness));
+    let id = submit(&runner, PROJECT, "touch ran");
+    until(&runner, &changes, ended(&id));
+    let outcome = runner.outcome(&id).unwrap();
+    assert_eq!(outcome.end, End::Failed);
+    assert!(
+        outcome.result.starts_with(SANDBOX_DOWN),
+        "{}",
+        outcome.result
+    );
+    assert!(
+        outcome.result.contains("sandbox_apply"),
+        "{}",
+        outcome.result
+    );
+    assert!(
+        !dir.path().join("runs").join(&id).join("work/ran").exists(),
+        "the harness ran"
+    );
+    // A failed run keeps its prompt to copy.
+    let view = runner
+        .runs(PROJECT)
+        .runs
+        .into_iter()
+        .find(|run| run.id == id)
+        .unwrap();
+    assert_eq!(view.prompt.as_deref(), Some("touch ran"));
+}
+
+#[test]
+fn a_runs_private_temp_folder_is_made_new_and_private_and_removed_after() {
+    let dir = tempfile::tempdir().unwrap();
+    settings(dir.path(), r#"{ "checks": { "/p/app": ["cargo test"] } }"#);
+    let tmp = dir.path().join("pk-tmp");
+    let harness = Checked {
+        check: "true",
+        tmp: Some(tmp.clone()),
+    };
+    let (runner, changes) = open(dir.path(), Arc::new(harness));
+    let id = submit(&runner, PROJECT, "stat -f %Lp \"$PK_TMP\"");
+    until(&runner, &changes, ended(&id));
+    assert_eq!(runner.outcome(&id).unwrap().result, "700");
+    assert!(!tmp.exists(), "the temp folder outlived the run");
+
+    // A folder already there is never handed to a run, and never removed by it.
+    fs::create_dir(&tmp).unwrap();
+    fs::write(tmp.join("theirs"), "").unwrap();
+    let id = submit(&runner, PROJECT, "touch \"$PK_TMP/ran\"");
+    until(&runner, &changes, ended(&id));
+    assert_eq!(runner.outcome(&id).unwrap().end, End::Failed);
+    assert!(
+        !tmp.join("ran").exists(),
+        "the harness ran in a shared folder"
+    );
+    assert!(
+        tmp.join("theirs").exists(),
+        "the run removed a folder it did not make"
+    );
+}
+
+#[test]
+fn a_run_whose_check_fails_leaves_a_folder_of_its_temp_folders_name_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    settings(dir.path(), r#"{ "checks": { "/p/app": ["cargo test"] } }"#);
+    let tmp = dir.path().join("pk-tmp");
+    fs::create_dir(&tmp).unwrap();
+    fs::write(tmp.join("theirs"), "").unwrap();
+    let harness = Checked {
+        check: "exit 3",
+        tmp: Some(tmp.clone()),
+    };
+    let (runner, changes) = open(dir.path(), Arc::new(harness));
+    let id = submit(&runner, PROJECT, "true");
+    until(&runner, &changes, ended(&id));
+    let outcome = runner.outcome(&id).unwrap();
+    assert_eq!(outcome.end, End::Failed);
+    // A check that prints nothing still says why.
+    assert_eq!(
+        outcome.result,
+        format!("{SANDBOX_DOWN}: the check exited 3")
+    );
+    assert!(
+        tmp.join("theirs").exists(),
+        "the run removed a folder it did not make"
+    );
+}
+
+#[test]
+fn cancel_removes_the_temp_folder_of_the_run_it_kills() {
+    let dir = tempfile::tempdir().unwrap();
+    settings(dir.path(), r#"{ "checks": { "/p/app": ["cargo test"] } }"#);
+    let tmp = dir.path().join("pk-tmp");
+    let harness = Checked {
+        check: "true",
+        tmp: Some(tmp.clone()),
+    };
+    let (runner, changes) = open(dir.path(), Arc::new(harness));
+    let id = submit(&runner, PROJECT, "touch \"$PK_TMP/made\"; sleep 60");
+    until(&runner, &changes, |r| {
+        state(r, &id) == Some(RunState::Running)
+    });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !tmp.join("made").exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the run never wrote its temp folder"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    runner.cancel(&id).unwrap();
+    assert!(
+        !tmp.exists(),
+        "a cancelled run's temp folder was left behind"
+    );
+}
+
+#[test]
+fn a_result_that_only_names_the_sandbox_settings_is_no_failure() {
+    let bench = bench();
+    let id = bench.run(&says(
+        r#"{"type":"result","subtype":"success","is_error":false,"result":"The runner reads sandbox_apply: and Sandbox is required from a run's output."}"#,
+    ));
+    bench.until(ended(&id));
+    assert_eq!(bench.runner.outcome(&id).unwrap().end, End::Done);
+}
+
+#[test]
+fn a_run_that_shows_a_failed_sandbox_is_a_failure_even_at_exit_zero() {
+    let bench = bench();
+    let id = bench.run(&says(
+        r#"{"type":"result","subtype":"success","is_error":false,"result":"Every command failed: sandbox_apply: Operation not permitted"}"#,
+    ));
+    bench.until(ended(&id));
+    let outcome = bench.runner.outcome(&id).unwrap();
+    assert_eq!(outcome.end, End::Failed);
+    assert!(
+        outcome.result.starts_with(SANDBOX_DOWN),
+        "{}",
+        outcome.result
+    );
 }
 
 #[test]
