@@ -336,6 +336,13 @@ const mapBackLaw = (): Fixture =>
       const outputs = [...box.querySelectorAll(".patch-output")].map((pre) => pre.textContent);
       if (outputs.length !== 2 || !outputs[0].includes("PASS") || !outputs[1].includes("FAIL")) log("snap:fail the outputs: " + outputs.join(" / "));
       if ([...box.querySelectorAll("button")].map((b) => b.textContent).join(",") !== "Open draft PR,Discard,Close") log("snap:fail the review's buttons");
+      // A real Esc in the confirm closes the confirm alone: the window's Esc, which peels the map's layers, never sees it.
+      [...box.querySelectorAll("button")].find((b) => b.textContent === "Discard").click();
+      await wait(100);
+      await __snapKey("Escape");
+      await wait(100);
+      if (document.getElementById("confirm-dialog").open) log("snap:fail a real Esc did not close the confirm");
+      if (box.hidden) log("snap:fail a real Esc in the confirm also closed the patch review under it");
       ${confirmFirst(`[...document.querySelectorAll("#map-patch-review button")].find((b) => b.textContent === "Discard").click()`, "law_patch_discard", "Discard patch", ["patch"])}
       log("back a law ok");`, {
     map_state: mapState({
@@ -350,6 +357,7 @@ const mapBackLaw = (): Fixture =>
         },
       ],
     }),
+    realKeys: true,
     snapDone: "back a law ok",
   });
 // The queues paused by a login failure: the one indicator with Resume, over the run that failed and the one that waits.
