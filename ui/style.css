@@ -2,7 +2,7 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--chrome); color: var(--fg); font: var(--size)/1.55 var(--font);
              overflow: hidden; font-variant-numeric: lining-nums tabular-nums; }
-code, .mono { font-family: var(--mono); font-size: var(--size-mono); unicode-bidi: isolate; direction: ltr; }
+code { font-family: var(--mono); font-size: var(--size-mono); unicode-bidi: isolate; direction: ltr; }
 code { background: var(--raised); border-radius: var(--radius-small); padding: 0 var(--sp-2); white-space: nowrap; overflow: hidden;
        text-overflow: ellipsis; min-width: 0; }
 code:empty { display: none; }
@@ -48,7 +48,7 @@ body[data-layout="focus"] .list { visibility: hidden; }
 .top { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--sp-5); padding: 0 var(--sp-5) 0 var(--sp-6);
        white-space: nowrap; overflow: hidden; }
 .bar-project { font-size: var(--size-small); font-weight: 600; color: var(--fg); overflow: hidden; text-overflow: ellipsis; }
-/* The top bar's items show whole or sit in the "⋯" menu, so none shrinks (danielrispler/plotkeeper#127, bar.ts). The spacer takes the rest. */
+/* The top bar's items never shrink (danielrispler/plotkeeper#127). The spacer takes the rest. */
 .top > :not(.sp):not(.menu) { flex: none; }
 .top .sp { flex: 1; }
 .top .menu[popover] { top: var(--bar); right: var(--sp-5); left: auto; width: max-content; max-width: calc(100vw - 2 * var(--sp-5)); }
@@ -132,8 +132,6 @@ h1 { margin: 0 0 var(--sp-4); }
 .project-more:hover { color: var(--fg); }
 .project-head.gone .name { text-decoration: line-through; text-decoration-color: var(--faint); }
 .menu.project-actions[popover] { width: max-content; }
-/* A project's "+" (Zed's, T3 Code's): hidden until its header is hovered or holds the focus. */
-.add-project { margin: var(--sp-4) var(--sp-2); }
 .project.outside { opacity: 0.6; }
 .row .token { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 /* A list row with its fold toggle in a column before the name and its delete after the glyph, shown
@@ -165,13 +163,6 @@ h1 { margin: 0 0 var(--sp-4); }
 @keyframes spin { to { transform: rotate(1turn); } }
 @media (prefers-reduced-motion: reduce) { .glyph[data-glyph="spinner"] { animation: none; } }
 
-/* The terminal, the stage: an inset, rounded pane on the frame, left to right; its header shows a
-   program's title, and the grid size on hover (danielrispler/Falinks#571). The inset and the body's padding add up to layout.ts's padding. */
-.term { background: var(--term-bg); color: var(--term-fg); display: grid; grid-template-rows: auto auto 1fr auto; min-width: 0;
-        margin: 0 var(--sp-4) var(--sp-4); border-radius: var(--radius-pane); box-shadow: inset 0 0 0 var(--hair) var(--edge);
-        overflow: hidden; }
-.term > .term-body { grid-row: 3; }
-.term-body { min-height: 0; min-width: 0; overflow: hidden; padding: var(--sp-3); position: relative; }
 /* The panes lie on top of each other, the hidden ones invisible but still laid out, so each stays
    fitted to the body and a switch shows it as it is, with no resize and redraw after (danielrispler/Falinks#570). A new
    pane stays invisible until its first replay is written and fitted. */
@@ -187,11 +178,10 @@ h1 { margin: 0 0 var(--sp-4); }
 .clear-landed { display: block; margin: 0 var(--sp-4) var(--sp-3); font-size: var(--size-xs); color: var(--faint); }
 .clear-landed:hover { color: var(--fg); }
 .pane[hidden] { display: block; }
-.pane[hidden], .pane.fitting { visibility: hidden; }
+.pane[hidden] { visibility: hidden; }
 /* A split's divider (danielrispler/Falinks#529), in the gap between its two panes. */
 /* The terminal panel (danielrispler/Falinks#542): a band under the panes, its height set by `panel.ts`; its divider on its top edge. */
 /* The needs-you toast (danielrispler/Falinks#573): over the terminal's top-right corner, taking none of its space. */
-.term { position: relative; }
 .toasts { position: absolute; top: var(--sp-5); right: var(--sp-5); z-index: 11; max-width: var(--toast); display: flex;
           flex-direction: column; align-items: flex-end; gap: var(--sp-3); pointer-events: none; }
 .toasts > .toast { position: static; pointer-events: auto; }
@@ -239,10 +229,6 @@ h1 { margin: 0 0 var(--sp-4); }
 .notice-row:has(#notice[hidden]) { display: none; }
 #notice { flex: 1; min-width: 0; margin: 0; color: var(--muted); white-space: pre-line; overflow-wrap: anywhere; }
 .notice-row .btn { flex: none; }
-/* The skills browser (danielrispler/Falinks#528) takes the whole rail while open. */
-.skill > summary { display: flex; flex-direction: column; padding: var(--sp-2) 0; cursor: pointer; }
-.skill > summary .l2 { font-size: var(--size-small); color: var(--muted); }
-.skill > .btn { margin: var(--sp-2) 0; }
 /* Colour only on "needs you" (danielrispler/Falinks#328, module 3; danielrispler/Falinks#565, decision 1): "your turn" stays as neutral as "running". */
 .state { font-size: var(--size); font-weight: 600; margin: 0 0 var(--sp-3); }
 .headline .state { margin: 0; }
@@ -357,7 +343,7 @@ h1 { margin: 0 0 var(--sp-4); }
 .picker { position: fixed; top: calc(var(--bar) + var(--sp-2)); right: var(--sp-5); z-index: 8; width: var(--popover); max-height: 70vh;
           overflow-y: auto; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); padding: var(--sp-3); }
 .picker .row .l2 { font-family: var(--mono); font-size: var(--size-xs); }
-:is(.picker, .project-workspaces) .new-task { display: flex; gap: var(--sp-3); margin: var(--sp-4) var(--sp-2) var(--sp-1); padding-top: var(--sp-4); }
+.picker .new-task { display: flex; gap: var(--sp-3); margin: var(--sp-4) var(--sp-2) var(--sp-1); padding-top: var(--sp-4); }
 /* Workspaces (danielrispler/Falinks#576): a clicked workspace's actions, under its row. */
 /* The questions of rename and close (danielrispler/Falinks#469). */
 .ask { background: var(--surface); color: var(--fg); border: 0; border-radius: var(--radius); box-shadow: var(--shadow);
@@ -682,7 +668,6 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .drawer-block { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); align-self: stretch; }
 .drawer-code { margin: 0; align-self: stretch; max-height: var(--drawer-code); overflow: auto; padding: var(--sp-4) var(--sp-5); border-radius: var(--radius-small);
                background: var(--raised); font: var(--size-xs)/1.5 var(--mono); white-space: pre; user-select: text; }
-.fog-mark { display: inline-block; flex: none; width: var(--sp-4); height: var(--sp-4); margin-inline-start: auto; border-radius: 50%; background: var(--mist); cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   .plate, .btn { transition: none; }
   .plate-fog, .plate-fog.lifting { animation: none; }

@@ -5,7 +5,6 @@
 use std::{
     fs, io::Write, os::unix::fs::PermissionsExt, path::Path, process::Command, process::Stdio,
 };
-use studio_workbench::claude_usage;
 
 const LINE: &str = include_str!("../statusline-usage.sh");
 
@@ -65,10 +64,6 @@ fn the_line_saves_the_snapshot_and_leaves_the_output_unchanged() {
         .permissions()
         .mode();
     assert_eq!(mode & 0o777, 0o600);
-    assert_eq!(
-        claude_usage(&dir).groups[0].windows[0].used_percentage,
-        23.5
-    );
 }
 
 #[test]

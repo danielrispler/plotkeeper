@@ -1,6 +1,6 @@
 # Probing the real app in the background
 
-> **Archived (danielrispler/plotkeeper#332).** This probe drives the Tauri desktop app (`src-tauri/`), which is archived, out of the build and unmaintained. plotkeeper is a local web page now: prove it with the snap fixtures (`npm run snap`) and a real browser. The steps below are kept for reference only.
+> **Archived (danielrispler/plotkeeper#332).** This probe drives the Tauri desktop app (`archive/src-tauri/`), which is archived, out of the build and unmaintained. plotkeeper is a local web page now: prove it with the snap fixtures (`npm run snap`) and a real browser. The steps below are kept for reference only.
 
 A **probe** is a throwaway debug build of Studio that runs itself through one scenario and logs what happened. It runs beside Daniel's open Studio, touches none of his data, and never takes his focus. Use it when the evidence you need sits below the page, in AppKit, tao or wry, such as which view is first responder (#23).
 

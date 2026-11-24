@@ -139,8 +139,6 @@ test("a project group's toggle has a title, also for the home folder", () => {
 
 // Every CSS rule that cuts text, by selector, with where its full text is: a new one fails this test until it is covered.
 const covered = {
-  ".term": "the centre column, not a text",
-  ".term-body": "the centre column's grid, not a text",
   ".top": "a container: its items are the session header and two chips",
   ".strip .btn": "list.ts: the button's title holds the name and state",
   ".row .l1": "a container: its name, token and glyph carry the titles",

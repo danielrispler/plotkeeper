@@ -33,9 +33,6 @@ export function times(session: Pick<Session, "state" | "started_at" | "last_even
   return parts;
 }
 
-// Time `time`'s node, which counts up.
-export const timeNode = ([title, draw]: Time) => Object.assign(counts(document.createElement("span"), draw), { title });
-
 // A check's time: how long it took, or while it runs, against its typical time ("3m of usually 7m").
 export function checkTime(line: ListedCheck, now: number): string {
   const took = duration((line.ended_at ?? now) - line.started_at);

@@ -2,7 +2,7 @@
 // offset and the pane keeps that offset, reading on when the shell re-sends the selection. Tool calls show as rows,
 // folded once they have a result. The header's name and state come from the core's tracking, never from the log.
 
-import { element, fullTitle, invoke, pressable, text } from "./dom.js";
+import { fullTitle, invoke, pressable, text } from "./dom.js";
 import type { LogCall, LogEntry, LogResult, LogRow, Subagent, SubagentLog } from "./types.js";
 
 // Pairs each result with its call by id, in order of the calls. A call without a result yet is running

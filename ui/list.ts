@@ -556,7 +556,7 @@ export const landedClear = clearing(
         failure("delete_session", "error")(e);
         throw e;
       }),
-    changed: (pending, writing) => {
+    changed: (pending) => {
       if (pending.length) showClearToast(pending.length, () => landedClear.undo());
       else hideClearToast();
       drawShown();

@@ -120,7 +120,7 @@ impl Projects {
 }
 
 /// What `projects.json` may hold: the list as this build writes it, or the plain array of paths earlier builds wrote
-/// (`workbench::projects`, #93), read as the saved list.
+/// (`workbench::projects`, #93, now in `archive/workbench/`), read as the saved list.
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum Stored {

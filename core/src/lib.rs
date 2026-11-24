@@ -451,7 +451,7 @@ fn claimed(command: &str) -> Option<u64> {
 }
 
 /// A terminal of the daemon, as its `list` gives it, or as its record of the terminals it ran gives
-/// them after it died (`terminal-daemon/src/lib.rs`). Fields the record lacks are empty.
+/// them after it died (`archive/terminal-daemon/src/lib.rs`). Fields the record lacks are empty.
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct Terminal {
     pub id: String,
@@ -1671,11 +1671,6 @@ impl Session {
         self.blocked_commands.iter().filter(waits).count()
     }
 
-    /// Whether the Dock badge counts it: it needs you, or a blocked command waits, unless it has ended.
-    pub fn wants_you(&self) -> bool {
-        self.state == State::NeedsYou || (self.state != State::Ended && self.blocked_waiting() > 0)
-    }
-
     /// Its workers that failed: they ended with a status other than `completed`, such as `killed`.
     fn failed_workers(&self) -> Vec<String> {
         self.agents
@@ -2059,14 +2054,6 @@ impl Default for CatchUp {
             window_ms: 2 * 60 * 60 * 1000,
         }
     }
-}
-
-/// The git trees the hook recorded for worktree `root` at a turn's start and end, which differ.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Trees {
-    pub root: String,
-    pub start: String,
-    pub end: String,
 }
 
 impl CardRequest {
@@ -3758,52 +3745,6 @@ impl Studio {
         })
     }
 
-    /// Whether the turn named `id` ran a merge, by `git merge` or `gh pr merge`, which the offer of a
-    /// card's offer leaves out (danielrispler/plotkeeper#119).
-    pub fn turn_merged(&self, id: &str) -> bool {
-        let found = self.sessions.values().find_map(|s| {
-            let at = s.turns.iter().position(|t| t.id.as_deref() == Some(id))?;
-            Some(
-                s.ledger
-                    .turn(at)
-                    .filter_map(|r| r.command.as_deref())
-                    .any(merges),
-            )
-        });
-        found.unwrap_or(false)
-    }
-
-    /// The worktrees that were the home of one of the session's workers during the turn named `id`: a worker
-    /// spawned in an earlier turn that still worked during it counts.
-    pub fn turn_workers(&self, id: &str) -> Vec<String> {
-        let found = self.sessions.values().find_map(|s| {
-            let at = s.turns.iter().position(|t| t.id.as_deref() == Some(id))?;
-            let turn = &s.turns[at];
-            let (since, until) = (turn.started_at, turn.ended_at.unwrap_or(u64::MAX));
-            // Spawned in this turn or an earlier one, and working at some time during it.
-            let working = s.agents.iter().filter(|a| {
-                a.turn.is_some_and(|spawned| spawned <= at)
-                    && a.agent.started_at <= until
-                    && a.ended_at.is_none_or(|end| end >= since)
-            });
-            let homes = working.filter(|a| s.has_cards(&a.agent.id));
-            let mut roots: Vec<String> = homes.map(|a| a.root.clone()).collect();
-            roots.dedup();
-            Some(roots)
-        });
-        found.unwrap_or_default()
-    }
-
-    /// The facts of the turn `ask` names, from the numstat the shell found (`None` when git could
-    /// not diff it): its files without their hunks, which the shell adds, and its checks.
-    pub fn summary_facts(&self, ask: &TurnDiff, diffs: Option<Vec<RootDiff>>) -> Facts {
-        let found = diffs.map(|diffs| {
-            let snapshot = self.turn_files_snapshot(ask, &diffs);
-            compute_turn_files(&snapshot, diffs)
-        });
-        self.facts_of(ask, found)
-    }
-
     /// The facts of the turn `ask` names, from the files `compute_turn_files` found for it.
     pub fn facts_of(&self, ask: &TurnDiff, found: Option<TurnFiles>) -> Facts {
         let Some(session) = self.sessions.get(&ask.session_id) else {
@@ -4400,16 +4341,6 @@ impl Studio {
         self.tasks.get(path).copied()
     }
 
-    /// The git half of a task's facts, read again with its workspace's git state (no GitHub): a new
-    /// commit or file clears the mark at once. A task never looked up has no facts to change.
-    /// Returns whether the facts changed.
-    pub fn set_task_safe(&mut self, path: &str, safe: bool) -> bool {
-        let Some(facts) = self.tasks.get_mut(path) else {
-            return false;
-        };
-        std::mem::replace(&mut facts.safe, safe) != safe
-    }
-
     /// Drops the facts of tasks no listed session works in any more, whose worktree is gone with them.
     pub fn forget_gone_tasks(&mut self) {
         let kept: Vec<String> = self.task_queries().into_iter().map(|q| q.path).collect();
@@ -4642,19 +4573,6 @@ impl Studio {
         }
         body
     }
-}
-
-/// Whether a shell command merges: `git merge` or `gh pr merge`, alone or in a chain.
-fn merges(command: &str) -> bool {
-    let parts = command.split(['&', ';', '|', '\n']);
-    // The word ends there: `git merge-base` is no merge.
-    let word = |c: &str, start: &str| {
-        let rest = c.strip_prefix(start);
-        rest.is_some_and(|r| r.is_empty() || r.starts_with(char::is_whitespace))
-    };
-    parts
-        .map(str::trim)
-        .any(|c| word(c, "git merge") || word(c, "gh pr merge"))
 }
 
 /// The id of `owner`'s card written at `at`, a worker's or else a session's (`CardRequest::id`).

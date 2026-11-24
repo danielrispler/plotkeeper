@@ -1,8 +1,8 @@
 # The studio's own workspace, kept apart from the engine's (danielrispler/Falinks#328, "Where the code lives").
 [workspace]
 members = ["core", "wayfinder", "hook", "understanding", "workbench", "system-map", "server", "test-support"]
-# The Tauri shell and its terminal daemon are archived (danielrispler/plotkeeper#332): out of the workspace, kept as they were, no longer built.
-exclude = ["src-tauri", "terminal-daemon"]
+# `archive/` holds retired code, the Tauri shell and its terminal daemon among them (#332, #415): never built.
+exclude = ["archive"]
 default-members = ["core", "wayfinder", "hook", "understanding", "workbench", "system-map", "server"]
 resolver = "3"
 

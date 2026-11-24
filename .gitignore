@@ -3,7 +3,7 @@ target/
 /target-*/
 node_modules/
 dist/
-src-tauri/gen/
+archive/src-tauri/gen/
 # Daniel's real-run evidence: never pushed (AGENTS.md, "Local evidence").
 /local-evidence/
 # The npm package's binaries, built by scripts/npm/pack.sh (#368).

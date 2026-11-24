@@ -33,7 +33,7 @@ The app also keeps `roots.json` beside the log: the git worktree root of each fo
 
 Claude Code gives the plan's 5-hour and weekly usage, and the context window's size, only to the status line command, on its stdin. Sessions the studio starts run `claude --settings` with `workbench/statusline.sh` as their status line, so you edit nothing. On every refresh it saves that stdin as `usage/<session_id>.json` beside the event log, by temp file and rename, readable only by you (mode 0600, in a folder of mode 0700), with the line in `workbench/statusline-usage.sh`.
 
-Then it reads `statusLine.command` from `~/.claude/settings.json`, runs it on the same stdin, and passes its output and exit status through; with none set, it prints nothing. The page has no usage button or popover (danielrispler/plotkeeper#326): the snapshot is still saved, and the Tauri app's top bar read it. Sessions started outside the studio save no snapshot. Snapshots are never deleted; remove the folder at any time.
+Then it reads `statusLine.command` from `~/.claude/settings.json`, runs it on the same stdin, and passes its output and exit status through; with none set, it prints nothing. The page has no usage button or popover (danielrispler/plotkeeper#326): the snapshot is still saved, and the Tauri app's top bar read it. Sessions started outside the studio save no snapshot, and since the terminal went (danielrispler/plotkeeper#335) the studio starts none, so no snapshot is saved now; #416 decides whether to revive it. Snapshots are never deleted; remove the folder at any time.
 
 ## The card store
 

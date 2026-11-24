@@ -1,5 +1,4 @@
-//! danielrispler/Falinks#561: an agent other than Claude Code comes back from revival with its own resume command,
-//! and starts from the picker with its own start command.
+//! danielrispler/Falinks#561: an agent other than Claude Code comes back from revival with its own resume command.
 
 use studio_workbench::{resume, resumes_latest};
 
@@ -48,17 +47,4 @@ fn a_command_that_resumes_the_latest_conversation_is_told_apart() {
     ));
     assert!(!resumes_latest(&argv(&["agy"]).unwrap()));
     assert!(!resumes_latest(&[]));
-}
-
-#[test]
-fn the_picker_starts_agy_and_codex_with_a_first_prompt_and_nothing_else() {
-    use studio_workbench::start;
-    assert_eq!(start("agy", ""), argv(&["agy"]));
-    assert_eq!(
-        start("agy", "-p fix it"),
-        argv(&["agy", "--prompt-interactive=-p fix it"])
-    );
-    assert_eq!(start("codex", ""), argv(&["codex"]));
-    assert_eq!(start("codex", "-p x"), argv(&["codex", "--", "-p x"]));
-    assert_eq!(start("vim", ""), None);
 }

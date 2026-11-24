@@ -3,7 +3,7 @@
 // the drawing below them reads the sessions the window already has, and `map_place` (the shell, `studio-system-map`) says which parts a
 // list of paths touches.
 
-import { element, failure, invoke, newest, pressable, text } from "./dom.js";
+import { failure, invoke, newest, pressable, text } from "./dom.js";
 import { currentMap, onDraw, syncSide } from "./map.js";
 import { logStop } from "./stop-rules.js";
 import type { Session } from "./types.js";
