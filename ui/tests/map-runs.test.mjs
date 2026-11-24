@@ -210,3 +210,15 @@ test("a copy says its line in the page's one action region, which a redraw of th
   await later();
   assert.equal(live.text, "Prompt copied, paste it into your agent");
 });
+
+test("a second click within the delay drops the first click's words, so only the last are said (#465's review)", async () => {
+  const { sayAction } = await import("../../dist/dom.js");
+  sayAction("first");
+  const [live] = statuses(document.body);
+  await new Promise((done) => setTimeout(done, 60));
+  sayAction("second");
+  await new Promise((done) => setTimeout(done, 70));
+  assert.equal(live.text, "", "the first click's words never land after the second click emptied the region");
+  await later();
+  assert.equal(live.text, "second");
+});

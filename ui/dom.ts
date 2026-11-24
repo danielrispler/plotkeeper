@@ -159,7 +159,9 @@ export function drawWithStatus(box: HTMLElement, nodes: Node[], words: string) {
 // such as a run's or a world's copy note, are not live; their words are said here, once, by the click. The region is put in the body at
 // its first use and never moved or drawn again, so a draw says nothing. It is emptied first and takes the words a moment later, so the
 // same words said by a second click are heard again, and a region the page did not hold yet is known before its words come.
+// A second click within that moment drops the first one's words, so only the last are said.
 let actionRegion: HTMLElement | null = null;
+let actionTimer: ReturnType<typeof setTimeout> | undefined;
 export function sayAction(words: string) {
   if (!actionRegion) {
     actionRegion = statusRegion();
@@ -167,7 +169,8 @@ export function sayAction(words: string) {
   }
   const live = actionRegion;
   live.textContent = "";
-  setTimeout(() => (live.textContent = words), 100);
+  clearTimeout(actionTimer);
+  actionTimer = setTimeout(() => (live.textContent = words), 100);
 }
 
 // `node` with `full` as its native hover title: the full text of what the layout cuts (#162). No title for an empty text,
