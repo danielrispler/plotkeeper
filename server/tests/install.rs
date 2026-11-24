@@ -1004,3 +1004,123 @@ fn every_codex_recording_hook_runs_in_the_background() {
         assert_eq!(handler["async"], true, "{handler}");
     }
 }
+
+/// Leaves `rel`, the hook file whose record is `key` in install's `state.json`, as an install from an older template
+/// would have: each of plotkeeper's commands with other args, and one more event plotkeeper no longer hooks, `extra`,
+/// with the record saying install wrote that text (#435).
+fn as_an_older_template_left_it(machine: &Machine, rel: &str, key: &str, extra: &str) {
+    fn older(v: &mut serde_json::Value) {
+        match v {
+            serde_json::Value::Object(o) => {
+                if let Some(serde_json::Value::String(c)) = o.get_mut("command")
+                    && c.contains("plotkeeper-hook")
+                {
+                    c.push_str(" --old");
+                }
+                o.values_mut().for_each(older);
+            }
+            serde_json::Value::Array(a) => a.iter_mut().for_each(older),
+            _ => {}
+        }
+    }
+    let path = machine.home.join(rel);
+    let mut file: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    let events = file["hooks"].as_object_mut().unwrap();
+    let mut gone = events
+        .values()
+        .flat_map(|entries| entries.as_array().unwrap())
+        .find(|entry| entry.to_string().contains("plotkeeper-hook"))
+        .unwrap()
+        .clone();
+    older(&mut gone);
+    for entries in events.values_mut() {
+        older(entries);
+    }
+    events.insert(extra.to_owned(), serde_json::json!([gone]));
+    let text = serde_json::to_string_pretty(&file).unwrap() + "\n";
+    fs::write(&path, &text).unwrap();
+    let state = machine.data().join("install/state.json");
+    let mut record: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&state).unwrap()).unwrap();
+    record[key]["written"] = serde_json::Value::String(text);
+    fs::write(&state, record.to_string()).unwrap();
+}
+
+#[test]
+fn a_reinstall_after_a_template_change_leaves_only_the_new_entries_beside_the_users_own() {
+    let machine = Machine::new(false, false).with_codex().with_cursor();
+    machine.write(".codex/hooks.json", CODEX_OWN);
+    machine.write(".cursor/hooks.json", CURSOR_OWN);
+    machine.run("install");
+    let codex_new = codex_commands(&machine);
+    let cursor_new = cursor_commands(&machine);
+    as_an_older_template_left_it(&machine, ".codex/hooks.json", "codex", "Notification");
+    as_an_older_template_left_it(&machine, ".cursor/hooks.json", "cursor", "afterFileEdit");
+
+    machine.run("install");
+
+    assert_eq!(codex_commands(&machine), codex_new);
+    assert_eq!(cursor_commands(&machine), cursor_new);
+}
+
+#[test]
+fn install_then_a_reinstall_after_a_template_change_then_uninstall_leaves_the_hook_files_byte_identical()
+ {
+    let machine = Machine::new(false, false).with_codex().with_cursor();
+    machine.write(".codex/hooks.json", CODEX_OWN);
+    machine.write(".cursor/hooks.json", CURSOR_OWN);
+    let before = files(&machine.home);
+    machine.run("install");
+    as_an_older_template_left_it(&machine, ".codex/hooks.json", "codex", "Notification");
+    as_an_older_template_left_it(&machine, ".cursor/hooks.json", "cursor", "afterFileEdit");
+    machine.run("install");
+    machine.run("uninstall");
+    assert_eq!(files(&machine.home), before);
+}
+
+#[test]
+fn a_hook_the_user_added_after_an_older_template_stays_alone_at_uninstall() {
+    let machine = Machine::new(false, false).with_codex().with_cursor();
+    machine.write(".codex/hooks.json", CODEX_OWN);
+    machine.write(".cursor/hooks.json", CURSOR_OWN);
+    machine.run("install");
+    as_an_older_template_left_it(&machine, ".codex/hooks.json", "codex", "Notification");
+    as_an_older_template_left_it(&machine, ".cursor/hooks.json", "cursor", "afterFileEdit");
+    add_own_hook(
+        &machine,
+        ".codex/hooks.json",
+        "Stop",
+        serde_json::json!({ "hooks": [{ "type": "command", "command": "say done" }] }),
+    );
+    add_own_hook(
+        &machine,
+        ".cursor/hooks.json",
+        "stop",
+        serde_json::json!({ "command": "say done" }),
+    );
+    machine.run("install");
+    machine.run("uninstall");
+
+    let (ours, theirs) = codex_commands(&machine);
+    assert!(ours.is_empty(), "{ours:?}");
+    assert_eq!(
+        theirs,
+        [
+            (
+                "Stop".to_owned(),
+                "python3 ~/.codex/hooks/stop.py".to_owned()
+            ),
+            ("Stop".to_owned(), "say done".to_owned())
+        ]
+    );
+    let (ours, theirs) = cursor_commands(&machine);
+    assert!(ours.is_empty(), "{ours:?}");
+    assert_eq!(
+        theirs,
+        [
+            ("stop".to_owned(), "./hooks/audit.sh".to_owned()),
+            ("stop".to_owned(), "say done".to_owned())
+        ]
+    );
+}
