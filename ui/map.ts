@@ -444,8 +444,8 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub
 // How far, in screen pixels, a press on the empty map may move and still be a click (#445, tldraw's threshold).
 const clickSlop = 4;
 
-// The map area's own input: a drag of the empty background pans Daniel's view, ⌘+wheel and a pinch (a wheel with Ctrl held, as Chrome
-// reports it) zoom around the pointer, and a plain wheel or two-finger scroll does nothing and never scrolls the page.
+// The map area's own input: a drag of the empty background pans Daniel's view, and a wheel, a two-finger scroll or a pinch (a wheel
+// with Ctrl held, as Chrome reports it) zooms around the pointer and never scrolls the page.
 // A press that never moved past `clickSlop` before its release is a click on the empty map: it closes the part's sheet and its drawer (#445).
 function pan(canvas: HTMLElement) {
   canvas.addEventListener("pointerdown", (event) => {
@@ -472,10 +472,10 @@ function pan(canvas: HTMLElement) {
   });
   canvas.addEventListener("wheel", (event) => {
     event.preventDefault();
-    if (!(event.ctrlKey || event.metaKey) || !rig || rig.lent()) return;
+    if (!rig || rig.lent()) return;
     const box = canvas.getBoundingClientRect();
     // A pinch sends small steps, a mouse wheel large ones: the prototype's rates.
-    const factor = Math.exp(-event.deltaY * (event.ctrlKey && !event.metaKey ? 0.012 : 0.004));
+    const factor = Math.exp(-event.deltaY * (event.ctrlKey ? 0.012 : 0.004));
     moveCamera(zoomAt(rig.user(), factor, event.clientX - box.left, event.clientY - box.top), false);
   }, { passive: false });
 }
