@@ -45,7 +45,7 @@ The installed skill remains unchanged. Where it and this file differ, follow thi
 
 - **Sourcing.** Each number, code reference and decision claim that a decision, scope or estimate depends on cites its source: a `path:line` at a named commit SHA, a comment permalink, or a command that reproduces the number. A decision claim links the resolution comment, not a bare issue number. A decision recorded in a spec body has no resolution comment; cite that spec's section by name instead (e.g. "#45, Out of Scope"). Prose reasoning and background figures that no decision rests on need no citation.
 - **Session logs, retros only.** A retro may cite a session log as `<session-id> L<line>`. Logs live only on the maintainer's machine, so quote or summarise the cited content inline. Other specs cite durable sources only.
-- **Nested agents.** A ticket that launches nested agents (`claude -p`, Codex) needs a session outside auto mode. In auto mode these runs arrive as a blocked command on a studio card for Daniel's Allow, so they work only while he is at the studio. Say so in the ticket, and raise it with the user before you start the work.
+- **Nested agents.** A ticket that launches nested agents (`claude -p`, Codex) still runs in auto mode. Its nested runs arrive as blocked commands: the agent stops at each one and guides Daniel through it, then carries on (`issue-tracker.md`, Claim). Say in the ticket which commands will need him.
 
 ## Ticket context
 
@@ -56,7 +56,7 @@ Every new Wayfinder ticket must include `## Reading` before linking it to the ma
 Every new ticket must also include `## Touches`, so parallel planning can spot conflicts without reading the code. List two things, one line each:
 
 - **Files:** the main files or modules it edits, each in backticks. This is a best-effort planning hint, not a scope limit. Write `new` right before a path the ticket creates (a new `core/src/ledger.rs`): `wayfinder-startup` warns about any other path of a claimed or ready ticket that is not in the checkout.
-- **Session:** `outside auto mode` when it launches nested agents (see **Nested agents** above), else `auto mode`.
+- **Session:** `auto mode`. Every ticket runs in auto mode; a ticket that launches nested agents adds `, with blocked commands` (see **Nested agents** above).
 
 Add or refresh `## Touches` alongside `## Reading` before starting an existing ticket.
 
