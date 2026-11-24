@@ -13,11 +13,12 @@ code:empty { display: none; }
 /* Focus: the studio's own grey ring, not macOS blue, and only from the keyboard. */
 :focus { outline: none; }
 :focus-visible { outline: var(--mark) solid var(--focus); outline-offset: var(--sp-1); }
-/* Thin scrollbars that show only their thumb. */
-::-webkit-scrollbar { width: var(--scrollbar); height: var(--scrollbar); background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--selected); border-radius: var(--radius); }
-::-webkit-scrollbar-thumb:hover { background: var(--pressed); }
-::-webkit-scrollbar-corner { background: transparent; }
+/* The page is dark from its first paint (#455): native controls and scrollbars draw dark, a checkbox ticks in grey, not the system
+   blue. Scrollbars are thin and show only their thumb: its colour inherits from the root, its width, which does not, is on every element.
+   A field's placeholder is in the faint tone, which passes on every field's fill. */
+:root { color-scheme: dark; accent-color: var(--muted); scrollbar-color: var(--thumb) transparent; }
+* { scrollbar-width: thin; }
+::placeholder { color: var(--faint); }
 
 /* The button component: one look for every button, a fill and no border, with hover, pressed,
    selected (`aria-pressed`) and disabled states. A variant changes its layout, never its states. */
@@ -59,10 +60,10 @@ body[data-layout="focus"] .list { visibility: hidden; }
 .writers .side-title { margin: 0; font-size: var(--size-small); font-weight: 500; color: var(--faint); }
 .writer-hint, .writer-outcome, .writer-briefs { margin: 0; color: var(--muted); font-size: var(--size-small); overflow-wrap: anywhere; }
 .writer-field { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); font-size: var(--size-small); }
-.writer-field select, .writer-model-input input { width: calc(var(--select) * 1.6); font: inherit; color: var(--fg); background: var(--raised); border: var(--hair) solid var(--edge); border-radius: var(--radius-small); padding: var(--sp-1) var(--sp-3); }
+.writer-field select, .writer-model-input input { width: calc(var(--select) * 1.6); font: inherit; color: var(--fg); background: var(--raised); border: var(--hair) solid var(--field-edge); border-radius: var(--radius-small); padding: var(--sp-1) var(--sp-3); }
 .writers .writer-test { align-self: flex-start; }
 .writer-key { display: flex; gap: var(--sp-3); }
-.writer-key input { flex: 1; min-width: 0; font: inherit; font-size: var(--size-small); color: var(--fg); background: var(--raised); border: var(--hair) solid var(--edge); border-radius: var(--radius-small); padding: var(--sp-1) var(--sp-3); }
+.writer-key input { flex: 1; min-width: 0; font: inherit; font-size: var(--size-small); color: var(--fg); background: var(--raised); border: var(--hair) solid var(--field-edge); border-radius: var(--radius-small); padding: var(--sp-1) var(--sp-3); }
 .writer-outcome.passed, .writer-outcome.failed, .writer-briefs { color: var(--fg); }
 /* The needs-you chip (danielrispler/Falinks#572): the count of sessions that need Daniel, in the needs-you colour. */
 .top .chip { color: var(--needs-you); background: var(--needs-you-bg); font-weight: 600; }
@@ -169,7 +170,7 @@ h1 { margin: 0 0 var(--sp-4); }
 .pane { position: absolute; inset: var(--sp-3); }
 /* History (#94): its search box above the rows; it adds no colour. */
 .pane.history { overflow-y: auto; padding: var(--sp-5) var(--sp-6); max-width: var(--dialog); margin: 0 auto; }
-.pane.history input { width: 100%; box-sizing: border-box; margin-bottom: var(--sp-3); font: inherit; padding: var(--sp-3); background: var(--raised); color: var(--fg); border: var(--hair) solid var(--edge); border-radius: var(--radius-small); }
+.pane.history input { width: 100%; box-sizing: border-box; margin-bottom: var(--sp-3); font: inherit; padding: var(--sp-3); background: var(--raised); color: var(--fg); border: var(--hair) solid var(--field-edge); border-radius: var(--radius-small); }
 .pane.history .row:hover { background: var(--hover); }
 .pane.history .item .delete { opacity: 1; }
 .list-foot { display: flex; align-items: center; justify-content: space-between; }
@@ -301,7 +302,7 @@ h1 { margin: 0 0 var(--sp-4); }
    as colour is only for "needs you". */
 .ask-about summary { margin-top: var(--sp-3); font-size: var(--size-small); color: var(--muted); cursor: pointer; }
 .ask-about textarea { display: block; width: 100%; box-sizing: border-box; margin-top: var(--sp-3); font: inherit; font-size: var(--size);
-                background: var(--bg); color: var(--fg); border: var(--hair) solid var(--edge); border-radius: var(--radius);
+                background: var(--bg); color: var(--fg); border: var(--hair) solid var(--field-edge); border-radius: var(--radius);
                 padding: var(--sp-3) var(--sp-4); }
 .ask-about .btn { margin-top: var(--sp-3); }
 /* The recorded facts (danielrispler/plotkeeper#125), shown at once under an open "Ask", then the suggested questions. */
@@ -362,7 +363,7 @@ h1 { margin: 0 0 var(--sp-4); }
 .ask p { margin: 0 0 var(--sp-4); }
 .ask label { display: block; margin-bottom: var(--sp-3); }
 .ask input { width: 100%; box-sizing: border-box; font: inherit; padding: var(--sp-3); background: var(--raised); color: var(--fg);
-             border: var(--hair) solid var(--edge); border-radius: var(--radius); }
+             border: var(--hair) solid var(--field-edge); border-radius: var(--radius); }
 .ask input[type="checkbox"] { width: auto; }
 #delete-losses ul { margin: 0 0 var(--sp-3); padding-left: var(--sp-6); overflow-wrap: anywhere; }
 .ask-buttons { display: flex; flex-direction: row-reverse; gap: var(--sp-4); margin-top: var(--sp-5); }
@@ -643,15 +644,15 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .map-install:hover { color: var(--fg); }
 .map-legend { display: flex; justify-content: flex-end; align-items: center; gap: var(--sp-3); padding: var(--sp-4) var(--map-gutter); font-size: var(--size-xs); color: var(--faint); }
 .map-legend .law-mark { margin-inline: var(--sp-2); }
-/* Fog (#310): a cool-grey mist behind the plate's text, so the name stays at full strength. Thin is the plain halo; thick is the denser
+/* Fog (#310): a cool-grey mist around the plate, under its text. Thin is the plain halo; thick is the denser
    halo with a rim and a slow drift, so the two read apart at a glance without a number. "I know this" lifts it. */
 .plate.fog-thin .plate-fog, .plate.fog-thick .plate-fog { inset: calc(-1 * var(--sp-7)); border-radius: var(--sp-7); filter: blur(var(--sp-5)); }
 .plate.fog-thin .plate-fog { background: var(--mist-thin); }
 .plate.fog-thick .plate-fog { background: var(--mist-thick); animation: mist-drift var(--mist-drift) ease-in-out infinite alternate; }
 .plate.fog-thick { box-shadow: inset 0 0 0 var(--hair) var(--mist), var(--shadow); }
-/* The mist lies over the plate and dims what it says apart from the part's name, as in the prototype. */
-.plate.fog-thin .plate-caption { opacity: .75; }
-.plate.fog-thick .plate-caption { opacity: .55; }
+/* The mist keeps to the plate's edges and beyond (#455): it thins to nothing over the text, so the name, caption and chips read at
+   full contrast, and the drift never carries it under them. Thin and thick still differ by density, rim and drift. */
+.plate.fog-thin .plate-fog, .plate.fog-thick .plate-fog { mask-image: var(--mist-mask); }
 .plate-fog.lifting { animation: mist-lift var(--mist-lift) forwards; }
 @keyframes mist-drift { from { transform: translateX(calc(-1 * var(--sp-2))); } to { transform: translateX(var(--sp-2)); } }
 @keyframes mist-lift { to { opacity: 0; transform: translateY(calc(-1 * var(--sp-6))); } }
@@ -780,7 +781,7 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 }
 .ratify-note { margin-top: var(--sp-4); font-size: var(--size-small); color: var(--muted); }
 .ratify-note p { margin: 0; }
-.ratify-prompt { display: block; width: 100%; box-sizing: border-box; margin-top: var(--sp-3); font: var(--size-xs)/1.5 var(--mono); background: var(--bg); color: var(--fg); border: var(--hair) solid var(--edge); border-radius: var(--radius); padding: var(--sp-3) var(--sp-4); }
+.ratify-prompt { display: block; width: 100%; box-sizing: border-box; margin-top: var(--sp-3); font: var(--size-xs)/1.5 var(--mono); background: var(--bg); color: var(--fg); border: var(--hair) solid var(--field-edge); border-radius: var(--radius); padding: var(--sp-3) var(--sp-4); }
 .ratify-copy { margin-top: var(--sp-3); }
 .brief-pts { margin: var(--sp-4) 0 0; padding: 0; list-style: none; max-width: 60ch; }
 .brief-pts li { position: relative; padding: var(--sp-2) 0 var(--sp-2) var(--sp-6); color: var(--muted); font-size: var(--size); line-height: 1.45; }

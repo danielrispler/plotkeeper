@@ -6,10 +6,12 @@
      surfaces hold cards and pop-overs. */
   --chrome: #0e0f11; --term-bg: #161719; --term-fg: #d4d2cc;
   --bg: #161719; --surface: #1d1e21; --raised: #24262a;
-  --fg: #e7e5df; --muted: #a09d95; --faint: #6f6c66;
+  --fg: #e7e5df; --muted: #a09d95; --faint: #8f8d88;
   /* Fills tell sections apart; a line stays only where it means something. */
   --hover: #ffffff0e; --selected: #ffffff17; --pressed: #ffffff21; --edge: #ffffff17; --line: #31343a;
   --focus: #8b887f;
+  /* At least 3:1 on every surface (#455): a field's border and a scrollbar's thumb. */
+  --field-edge: #ffffff60; --thumb: #ffffff60;
   --needs-you: #ff8f5e; --needs-you-bg: #3a2318; --needs-you-line: #6b3a24;
   --conflict: #ff6b6b;
   --shadow: 0 8px 24px #0008; --shadow-start: -8px 0 24px #0008; --shadow-end: 8px 0 24px #0008; --backdrop: #0008;
@@ -28,7 +30,6 @@
   --hair: 1px; --mark: 2px; --halo: 3px;
   --radius-small: 4px; --radius: 6px; --radius-pane: 10px;
   --motion: 120ms ease-out; --slide-in: 150ms; --slide-out: 100ms; --spin: 900ms;
-  --scrollbar: 8px;
 
   /* The window's parts (Treatment C's frame, #386). The list's and the strip's widths are layout.ts's too; the rail's is the left panel's. */
   --list: 252px; --strip: 56px; --rail: 380px; --bar: 34px; --term-head: 26px;
@@ -56,5 +57,9 @@
   /* The catch-up card (#449): its text's 56ch measure at reading size plus its padding, a share of the map's height above which its step
      scrolls, and one width for Next, Check and Done so Back never shifts. */
   --brief-width: 528px; --brief-max: 62%; --brief-next: 64px; --brief-blur: 22px; --brief-arrive: 320ms ease-out; --brief-dot: 18px; --brief-dot-at: 30px; --brief-fig-w: 292px; --brief-fig-ratio: 292 / 150; --brief-light: #f0ece1; --ord: 20px; --brief-dim: .38; --brief-camera: 450ms cubic-bezier(.2,.7,.2,1);
+  /* The mist's mask (#455), on the mist's box, which overhangs the plate by --sp-7: opaque out to the plate's edge, clear over the text
+     (the plate less --sp-4 at its sides and top, its lower third at the foot); the sides' clear band is wider by the drift's --sp-2. */
+  --mist-mask: linear-gradient(to right, #000 calc(var(--sp-7) - var(--sp-2)), #0000 calc(var(--sp-7) + var(--sp-4)), #0000 calc(100% - var(--sp-7) - var(--sp-4)), #000 calc(100% - var(--sp-7) + var(--sp-2))),
+               linear-gradient(to bottom, #000 var(--sp-7), #0000 calc(var(--sp-7) + var(--sp-4)), #0000 calc(100% - 2 * var(--sp-7)), #000 calc(100% - var(--sp-7)));
   --strip-height: 240px; --mist-lift: 900ms ease-out; --mist-drift: 14s; --plate-move: 160ms ease-out;
 }
