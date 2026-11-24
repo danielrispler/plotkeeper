@@ -87,6 +87,9 @@ pub struct PrMeta {
     /// Every issue the PR closes, lowest first; `spec` is the lowest of them (ticket #394).
     #[serde(default)]
     pub closing: Vec<u64>,
+    /// One of the issues it closes is labelled `bug` (#401: Guard with a law).
+    #[serde(default)]
+    pub bug: bool,
 }
 
 /// A test that carries a `@law:` tag.
@@ -454,6 +457,14 @@ impl Shape {
     }
 }
 
+/// Guard with a law (#401): a PR that closes an issue labelled `bug` and adds or changes no `@law:`-tagged test offers to leave a
+/// law behind it, on one of the parts it touched.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Guard {
+    /// The map's parts the PR touched, sorted: their laws on trust can be backed, and a new law goes on one of them.
+    pub parts: Vec<String>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Facts {
     pub text: String,
@@ -462,6 +473,8 @@ pub struct Facts {
     pub context: CheckContext,
     /// The writer's instructions when they are not the PR brief's (a part catch-up's, `part_catch_up.rs`).
     pub instructions: Option<String>,
+    /// Guard with a law's offer, when the PR fixed a bug and left no tagged test behind.
+    pub guard: Option<Guard>,
 }
 
 pub(crate) struct FileDiff {
@@ -882,6 +895,17 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
         None => "none".into(),
     };
     let tags = added_tags(&files);
+    // Guard with a law (#401): a bug fix that added no tag and changed no tagged test, on a part of the map (with none, no law is there to
+    // back and no part to add one on).
+    let guard = (source.meta.bug
+        && tags.is_empty()
+        && !tagged.iter().any(|t| t.changed)
+        && !touched.parts.is_empty())
+    .then(|| {
+        let mut parts: Vec<String> = touched.parts.iter().map(|p| p.id.clone()).collect();
+        parts.sort();
+        Guard { parts }
+    });
     let mut sections: Vec<(String, String)> = vec![
         ("SHAPE (decided by code)".into(), shape_text),
         ("SYSTEM MAP".into(), source.map_text.clone()),
@@ -1079,6 +1103,7 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
         budget,
         context,
         instructions: None,
+        guard,
     })
 }
 
@@ -1665,6 +1690,9 @@ pub struct StoredBrief {
     pub shape: Shape,
     #[serde(default)]
     pub brief: Brief,
+    /// Guard with a law's offer (#401), from the facts it was written from; kept after the PR merges.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guard: Option<Guard>,
 }
 
 /// One line per brief written, for tuning prompts, caps and models from real data.
@@ -1829,6 +1857,7 @@ pub fn write_pr_brief(
         model: model.to_string(),
         shape: facts.shape.clone(),
         brief,
+        guard: facts.guard.clone(),
     };
     store
         .put(&stored)
@@ -2064,8 +2093,21 @@ pub fn fetch_meta(repo: &Path, number: u64) -> Result<PrMeta, String> {
         created_at: v["createdAt"].as_str().unwrap_or("").into(),
         checks,
         spec,
+        bug: closing_numbers(&v).iter().any(|i| {
+            json(&["issue", "view", &i.to_string(), "--json", "labels"])
+                .is_ok_and(|issue| labelled_bug(&issue))
+        }),
         closing: closing_numbers(&v),
     })
+}
+
+/// Whether `gh issue view --json labels` says the issue is labelled `bug`.
+pub fn labelled_bug(issue: &serde_json::Value) -> bool {
+    issue["labels"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|label| label["name"].as_str() == Some("bug"))
 }
 
 #[cfg(test)]

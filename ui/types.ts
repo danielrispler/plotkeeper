@@ -405,7 +405,41 @@ export type MapState = {
   stale: Record<string, number>;
   // The project's pre-flight (`pre_flight.rs`, #394): the parts a piece of work will likely cross; null when none is run.
   pre_flight?: PreFlight | null;
+  // The project's micro-worlds (`micro_worlds.rs`, #399) by subject key (`flow:<id>`, `figure:<pr>:<chapter>:<step>`), and whether a run can
+  // build one (`microWorlds.dshVisual` is set); absent in a payload from before them.
+  micro_worlds?: MicroWorlds;
+  // The patches of the project's back a law runs (`back_a_law.rs`, #398): being proven, rejected with why, or proven with the test patch
+  // and the proof; a past payload has none.
+  law_patches?: LawPatch[];
 };
+// A micro-world as the map shows it: `building` while its run is queued, running or checked, `ready` with a checked page, `failed` with why
+// (`line`) and the prompt to copy. `page`: a checked page is stored to open; `stale`: a part on it changed since it was built.
+export type MicroWorldView = { phase: "building" | "ready" | "failed"; page: boolean; stale: boolean; line: string | null; prompt: string | null };
+export type MicroWorlds = { on: boolean; worlds: Record<string, MicroWorldView> };
+// What "Explore this" did: started a run, or gave the prompt to copy and why.
+export type Explored = { started: boolean; line: string | null; prompt: string | null };
+// A back a law run's patch: its run's id, the law, where it stands, and for a proven one the test patch and the checks' output with the
+// test alone (passing) and with the plant (failing on the new test).
+export type LawPatch = {
+  id: string;
+  project: string;
+  law: string;
+  state: "proving" | "rejected" | "proven" | "opened" | "out-of-date";
+  line: string | null;
+  at: number;
+  diff: string | null;
+  proof: { test: string; file: string; passed: string; failed: string } | null;
+  // The draft PR Open draft PR opened (#400), and its address; a past payload has none.
+  pr?: number | null;
+  url?: string | null;
+  // A new law's sentence as Daniel confirmed it, and the PR whose Guard with a law started the run (#401).
+  text?: string | null;
+  guards?: number | null;
+};
+// What Open draft PR did: a draft PR opened, or the patch no longer applies to the default branch.
+export type LawPatchOpened = { kind: "pr"; number: number; url: string } | { kind: "out-of-date" };
+// What a click on Back a law did: a run started, or refused with the prompt to copy instead.
+export type BackLawStarted = { kind: "run"; id: string } | { kind: "refused"; line: string; prompt: string };
 // A fogged part's offer (#391): a part catch-up, `ready` when one is stored for its current fog list, `writing` while one is written, `failed`
 // when the last write for it failed; or the chapter of the one PR's brief that lights the part.
 export type CatchUpOffer = { kind: "catch-up"; ready: boolean; writing: boolean; failed: boolean } | { kind: "chapter"; pr: number; chapter: number };
@@ -456,7 +490,11 @@ export type PrBrief = {
   title: string; overview: BriefStep[]; chapters: BriefChapter[]; also: { part: string; line: string; flags: string[] }[]; unseen: string[];
   decisions: { id: string | null; text: string; flags: string[] }[]; flags: string[];
 };
-export type StoredBrief = { version: number; pr: number; head: string; written_at: number; stale: boolean; model: string; brief: PrBrief };
+// `guard`: Guard with a law's offer (#401), the parts a bug fix touched; none when the PR offers none, or in a brief from before it.
+export type StoredBrief = { version: number; pr: number; head: string; written_at: number; stale: boolean; model: string; brief: PrBrief; guard?: Guard | null };
+export type Guard = { parts: string[] };
+// A new law (#401): drafted by the writer from a PR's facts, confirmed or edited by Daniel, then added with its test by a run.
+export type NewLaw = { id: string; on: string; text: string };
 // `partial`: the writer did not see the whole diff.
 // `expected`: the PR matched the project's pre-flight (#394).
 export type BriefView = { brief: StoredBrief; partial: boolean; expected?: Expected };
@@ -550,6 +588,8 @@ export interface Commands {
   pre_flight_predict: PreFlight;
   pre_flight_pick: PreFlight;
   pre_flight_clear: null;
+  micro_world_explore: Explored;
+  micro_world_page: string;
   brief_chapter_done: void;
   briefs_waiting: WaitingBriefs | null;
   pr_ratify: RatifyRow[];
@@ -563,6 +603,11 @@ export interface Commands {
   remove_api_key: string | null;
   rename: void;
   run_cancel: void;
+  back_a_law: BackLawStarted;
+  law_patch_discard: void;
+  law_patch_open: LawPatchOpened;
+  new_law: BackLawStarted;
+  guard_draft: NewLaw;
   runs_resume: void;
   select: Selection | null;
   selected: Selection | null;
@@ -582,7 +627,7 @@ export interface Commands {
 export type Command = keyof Commands;
 
 // What the shell counted of Daniel's use (`stop_rules.rs`), for the one-time review: days, merged PRs and the uses of each module.
-export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen" | "rating-offered" | "rating-given" | "rating-skipped" | "note-given" | "explain-back-given" | "explain-back-marked" | "refresher-entered" | "stale-entered" | "catch-up-offered" | "catch-up-opened" | "catch-up-done" | "pre-flight-run";
+export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen" | "rating-offered" | "rating-given" | "rating-skipped" | "note-given" | "explain-back-given" | "explain-back-marked" | "refresher-entered" | "stale-entered" | "catch-up-offered" | "catch-up-opened" | "catch-up-done" | "pre-flight-run" | "micro-world-opened" | "back-law-started" | "guard-offered" | "guard-started";
 export type StopFacts = {
   active_days: number;
   merged_prs: number;

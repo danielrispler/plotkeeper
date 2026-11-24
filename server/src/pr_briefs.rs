@@ -669,6 +669,32 @@ fn view_of(project: &str, store: &BriefStore, brief: StoredBrief) -> BriefView {
     }
 }
 
+/// Guard with a law's new law (#401): the PR briefs' writer, which has no tools, drafts one from PR `number`'s stored brief, on a part
+/// it touched, for Daniel to confirm or edit. The PR's text goes only to that writer; the run gets what Daniel confirms.
+pub fn guard_draft(
+    app: &App,
+    project: String,
+    number: u64,
+) -> Result<crate::back_a_law::NewLaw, String> {
+    let writer = app
+        .briefs
+        .writer()
+        .ok_or("no writer: plotkeeper found no `claude` to ask")?;
+    let brief = store_of(&project)
+        .and_then(|store| store.latest(number))
+        .filter(|brief| brief.guard.is_some())
+        .ok_or("that brief offers no Guard with a law")?;
+    let map_text = crate::map::read_map(Path::new(&project))
+        .source
+        .ok_or("this project has no map")?;
+    crate::back_a_law::draft(
+        writer.as_ref(),
+        &crate::settings::pr_briefs_model(),
+        &map_text,
+        &brief,
+    )
+}
+
 /// Chapter `chapter` of PR `number`'s brief was read to its end (the page saw its last step, focused, and the check was answered): the
 /// read is kept as "read at head", and the fog the PR's merged commits filed leaves every part whose chapters are all read.
 pub fn brief_chapter_done(

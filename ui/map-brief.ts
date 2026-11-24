@@ -16,6 +16,8 @@ import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { watchSeen } from "./seen.js";
 import { logStop } from "./stop-rules.js";
 import { expectedLine } from "./map-pre-flight.js";
+import { exploreRow } from "./micro-world.js";
+import { guardRow } from "./patch-review.js";
 import { scrubTo } from "./map-history.js";
 import { overturnNote, ratifyActions } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
@@ -281,8 +283,8 @@ const steps = (): BriefStep[] => {
   const now = player.current();
   if (!playing || !now) return [];
   const list = playlist(playing.brief.brief, now.chapter, now.overview);
-  // The ratify step ends the last chapter (the only one of a single story).
-  const ratify = now.chapter >= Math.max(0, playing.brief.brief.chapters.length - 1) ? ratifyStep(ratifying.filter((row) => row.status !== "ratified"), [...new Set(list.flatMap((step) => step.on))]) : null;
+  // The ratify step ends the last chapter (the only one of a single story), and holds Guard with a law's row when the brief offers it (#401).
+  const ratify = now.chapter >= Math.max(0, playing.brief.brief.chapters.length - 1) ? ratifyStep(ratifying.filter((row) => row.status !== "ratified"), [...new Set(list.flatMap((step) => step.on))], !!playing.brief.guard) : null;
   return ratify ? [...list, ratify] : list;
 };
 
@@ -466,7 +468,14 @@ function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["als
   if (step.risks.length) words.append(listNode(step.risks.map((r) => `${part(r.part)}: ${r.trigger} To see it: ${r.check}`)));
   if (step.covered_by) words.append(text("p", `Covered by the test ${step.covered_by}.`, "brief-quiet"));
   if (step.check) words.append(checkNode(view, step));
-  if (step.k === "Ratify") words.append(ratifyNode(view, ratifying));
+  if (step.k === "Ratify") {
+    words.append(ratifyNode(view, ratifying));
+    const guard = playing?.brief.guard;
+    if (guard && pr > 0 && !view.scrub) words.append(guardRow(view, pr, guard, () => {
+      const now = currentMap();
+      if (now) show(now, true);
+    }));
+  }
   if (unconfirmed(step)) {
     const mark = text("p", "not confirmed from the facts", "brief-quiet brief-unconfirmed");
     mark.title = step.flags.join("\n");
@@ -496,6 +505,16 @@ function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["als
     cols.append(figure);
   }
   return cols;
+}
+
+// "Explore this" under a PR brief's figure (#399): a micro-world of the parts its step lights, kept by the step's place in its chapter. A part
+// catch-up's figure (no PR) and a step that is not its chapter's own offer none.
+function figureExplore(view: MapView, node: HTMLElement, step: BriefStep, pr: number, chapter: number) {
+  const figure = node.querySelector(".brief-figure");
+  const at = playing?.brief.brief.chapters[chapter]?.steps.indexOf(step) ?? -1;
+  if (!figure || pr <= 0 || at < 0 || view.scrub) return;
+  const name = step.on.map((id) => partName(view, id)).join(", ") || `#${pr}`;
+  figure.append(exploreRow(view.project, view.state.micro_worlds, `figure:${pr}:${chapter}:${at}`, name, { kind: "figure", pr, chapter, step: at }));
 }
 
 // A long part catch-up's first step says it summarises the main shifts, with the full fog list behind it (#396).
@@ -721,6 +740,7 @@ function show(view: MapView, same: boolean) {
   const also = alsoAt(playing.brief.brief, now.chapter, now.step, storySteps(list).length);
   const fill = () => {
     const node = stepNode(view, step, pr, also);
+    figureExplore(view, node, step, pr, now.chapter);
     if (now.step === 0) summaryInto(node);
     const bar = endBar(node, now.step, list.length);
     cols.replaceChildren(node);

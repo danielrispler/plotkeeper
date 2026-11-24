@@ -56,6 +56,12 @@ export const table: Row[] = [
   { module: "staleness", name: "staleness bands", kept: (f) => (f.counts["stale-entered"] ?? 0) >= 1, wait: { from: staleRollout, weeks: 5 } },
   // Explain-back (#397): at least 3 lines said back in the end-of-story bar; the marks, the rating and the note have no threshold.
   { module: "explain-back", name: "explain-back", kept: (f) => (f.counts["explain-back-given"] ?? 0) >= 3 },
+  // Micro-worlds (#399): a checked page opened in its overlay at least twice.
+  { module: "micro-worlds", name: "micro-worlds", kept: (f) => (f.counts["micro-world-opened"] ?? 0) >= 2 },
+  // Back a law (#398): at least 1 run started from a law on trust.
+  { module: "back-a-law", name: "Back a law", kept: (f) => (f.counts["back-law-started"] ?? 0) >= 1 },
+  // Guard with a law (#401): at least 1 run started from a bug fix's brief, judged only once it was offered at least 3 times.
+  { module: "guard", name: "Guard with a law", kept: (f) => (f.counts["guard-started"] ?? 0) >= 1, offers: { kind: "guard-offered", least: 3 } },
 ];
 
 // `day` plus `n` days, both local days (`2026-11-03`).
@@ -104,7 +110,7 @@ export const localDay = (at: Date = new Date()) => {
 // entered action on the map with no event of its own: a part's sheet opened, an agent chip clicked.
 const dayKinds = new Set<StopKind>(["session", "map-open", "map-action"]);
 // A kind about a PR's brief that is told once per PR (the shell also keeps a brief's offer to once, across restarts).
-const prKinds = new Set<StopKind>(["brief-offered", "unconfirmed-seen"]);
+const prKinds = new Set<StopKind>(["brief-offered", "unconfirmed-seen", "guard-offered"]);
 const told = new Set<string>();
 
 // Tells the shell that Daniel used something; brief events name their PR. Fire and forget: a failure is logged quietly, never shown.

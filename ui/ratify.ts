@@ -72,12 +72,14 @@ export function noteFor(last: Overturned | null, project: string, holds: (item: 
   return last && last.project === project && holds(last) ? last : null;
 }
 
-// The brief's last step when there is anything to ratify: it holds the items, drawn by `map-brief.ts`.
-// `on` is the parts the brief lit, so the map stays as the brief left it.
-export const ratifyStep = (rows: RatifyRow[], on: string[] = []): BriefStep | null =>
-  rows.length === 0
-    ? null
-    : { k: "Ratify", h: "Accept or overturn", b: "What changed the map, and what the agent decided. Nothing waits on this.", on, hops: [], law: null, covered_by: null, list: [], risks: [], fig: null, check: null, cites: [], flags: [] };
+// The brief's last step when there is anything to ratify, or Guard with a law to offer (#401, a bug fix's brief, before and after it
+// merges): it holds the items and the guard's row, drawn by `map-brief.ts`. `on` is the parts the brief lit, so the map stays as the brief
+// left it.
+export const ratifyStep = (rows: RatifyRow[], on: string[] = [], guard = false): BriefStep | null => {
+  const step = { k: "Ratify", on, hops: [], law: null, covered_by: null, list: [], risks: [], fig: null, check: null, cites: [], flags: [] };
+  if (rows.length) return { ...step, h: "Accept or overturn", b: "What changed the map, and what the agent decided. Nothing waits on this." };
+  return guard ? { ...step, h: "Guard with a law", b: "This PR fixed a bug and left no law behind it." } : null;
+};
 
 // The rows still to ratify.
 export const openRows = (rows: RatifyRow[]) => rows.filter((row) => row.status === "not-yet");

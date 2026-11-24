@@ -1,5 +1,5 @@
 //! Background runs (spec danielrispler/plotkeeper#378, ticket #390): a headless agent run with scoped tools, started by
-//! Daniel's click and never a session. This is the runner; no module starts a run yet.
+//! Daniel's click and never a session. This is the runner; back a law (`back_a_law.rs`) and micro-worlds (`micro_worlds.rs`) start runs.
 //!
 //! - **The seam.** A [`Request`] (run kind, working folder, prompt, limits) goes in through [`Runner::submit`]; an
 //!   [`Outcome`] (result text, denials, cost, exit) comes out through [`Runner::outcome`]. The [`Harness`] builds the
@@ -199,13 +199,22 @@ pub fn sandbox_settings(data: &Path) -> serde_json::Value {
 /// The git commands a run's shell may use: reading, and staging inside its own clone. Never a commit, a push or `gh`.
 const GIT: [&str; 4] = ["git status", "git diff", "git log", "git add"];
 
-/// What `--allowedTools` lists for a run: edits inside its working `folder`, and for a kind with a shell the read-only
+/// The folder inside a micro-world's working folder that the agent writes its page into, and the only place it may write: the
+/// rest of the working folder is the project's files at the commit the page is built at, to read (#399).
+pub const MICRO_WORLD_OUT: &str = ".micro-world";
+
+/// What `--allowedTools` lists for a run: edits inside its working `folder` (a micro-world's only inside
+/// [`MICRO_WORLD_OUT`] there), and for a kind with a shell the read-only
 /// git commands and one entry per command of the project's `checks`, each bare and with arguments. An entry of `checks`
 /// that has `git` or `gh` as any of its words is left out, so no list ever allows a push. This list is not a security
 /// boundary: an allowed check runs code the agent wrote. The OS sandbox and trusted input are.
 pub fn allowed_tools(kind: Kind, folder: &Path, checks: &[String]) -> Vec<String> {
     // The rule's own form for an absolute path: `//` and the path.
-    let mut allowed = vec![format!("Edit(/{}/**)", folder.display())];
+    let writes = match kind {
+        Kind::MicroWorld => folder.join(MICRO_WORLD_OUT),
+        _ => folder.to_path_buf(),
+    };
+    let mut allowed = vec![format!("Edit(/{}/**)", writes.display())];
     if kind.shell() {
         let checks = checks.iter().map(|check| check.trim()).filter(|check| {
             !check.is_empty()
@@ -222,7 +231,7 @@ pub fn allowed_tools(kind: Kind, folder: &Path, checks: &[String]) -> Vec<String
 }
 
 /// How many cores a run's builds and tests get: a third, so a run leaves room for the sessions.
-fn cores() -> usize {
+pub(crate) fn cores() -> usize {
     (thread::available_parallelism().map_or(1, |n| n.get()) / 3).max(1)
 }
 
@@ -920,15 +929,51 @@ struct State {
     runs: Vec<Run>,
     /// Why the queues are paused, until Daniel resumes them.
     paused: Option<Pause>,
+    /// The ended runs whose folder a module is still reading, by id, with how many holds each has ([`Runner::hold`]).
+    held: BTreeMap<String, usize>,
+}
+
+/// A module's hold on an ended run's folder: Dismiss is refused until it is dropped.
+pub struct Hold {
+    runner: Weak<Runner>,
+    id: String,
+}
+
+impl Drop for Hold {
+    fn drop(&mut self) {
+        if let Some(runner) = self.runner.upgrade() {
+            let mut state = runner.state();
+            if let Some(count) = state.held.get_mut(&self.id) {
+                *count -= 1;
+                if *count == 0 {
+                    state.held.remove(&self.id);
+                }
+            }
+        }
+    }
 }
 
 type Changed = Box<dyn Fn(&str) + Send + Sync>;
+
+/// A run that ended, as told to the module that asked for it ([`Runner::on_end`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Ended {
+    pub id: String,
+    pub kind: Kind,
+    pub project: String,
+    /// Its working folder, which stays until the run is dismissed or plotkeeper starts again.
+    pub folder: PathBuf,
+    pub end: End,
+}
+
+type EndTold = Box<dyn Fn(Ended) + Send + Sync>;
 
 /// The background runs of every project: their queue, their processes and their outcomes.
 pub struct Runner {
     config: Config,
     state: Mutex<State>,
     changed: OnceLock<Changed>,
+    ended: OnceLock<EndTold>,
     /// For the threads that wait on a run's end: a runner that is gone is told nothing.
     me: Weak<Runner>,
     ids: AtomicU64,
@@ -941,6 +986,7 @@ impl Runner {
             config,
             state: Mutex::default(),
             changed: OnceLock::new(),
+            ended: OnceLock::new(),
             me: me.clone(),
             ids: AtomicU64::new(0),
         })
@@ -949,6 +995,12 @@ impl Runner {
     /// Sets what is told the project whose runs changed; the first call wins.
     pub fn on_change(&self, changed: impl Fn(&str) + Send + Sync + 'static) {
         let _ = self.changed.set(Box::new(changed));
+    }
+
+    /// Sets what is told when a run ends on its own, as it ends or when [`Runner::pick_up`] finds it ended; never for a
+    /// cancelled run. Set it before `pick_up`; the first call wins.
+    pub fn on_end(&self, ended: impl Fn(Ended) + Send + Sync + 'static) {
+        let _ = self.ended.set(Box::new(ended));
     }
 
     fn tell(&self, project: &str) {
@@ -1184,7 +1236,9 @@ impl Runner {
             return;
         }
         let project = run.stored.project.clone();
-        let pause = self.finish(run).pause();
+        let end = self.finish(run);
+        let ended = Self::ended_of(&run.stored, end);
+        let pause = end.pause();
         if pause.is_some() {
             self.pause(&mut state, pause);
         }
@@ -1192,7 +1246,24 @@ impl Runner {
         // A pause holds every project's queue, so each project with runs draws again.
         let told = Self::told(&state, pause, &project);
         drop(state);
+        self.tell_end(ended);
         told.iter().for_each(|project| self.tell(project));
+    }
+
+    fn ended_of(stored: &Stored, end: End) -> Ended {
+        Ended {
+            id: stored.id.clone(),
+            kind: stored.kind,
+            project: stored.project.clone(),
+            folder: stored.folder.clone(),
+            end,
+        }
+    }
+
+    fn tell_end(&self, ended: Ended) {
+        if let Some(tell) = self.ended.get() {
+            tell(ended);
+        }
     }
 
     /// The projects that have a run, each once.
@@ -1283,11 +1354,25 @@ impl Runner {
         projects.iter().for_each(|project| self.tell(project));
     }
 
+    /// Holds run `id`'s folder for a module that reads what the run made, such as a proof or a host check: Dismiss is
+    /// refused while the hold lasts. None when the run is gone, its folder with it.
+    pub fn hold(&self, id: &str) -> Option<Hold> {
+        let mut state = self.state();
+        if !state.runs.iter().any(|run| run.stored.id == id) {
+            return None;
+        }
+        *state.held.entry(id.to_string()).or_default() += 1;
+        Some(Hold {
+            runner: self.me.clone(),
+            id: id.to_string(),
+        })
+    }
+
     /// Cancel: a queued run is dropped, a running one has its process group killed, and either way the run's folder is
     /// removed and the next run of its project starts. An ended run is only removed, and so is a run that ended on its own
     /// at that moment, which is recorded as it ended. A running run is killed only when its lock is held and the process
     /// its folder names still has the start time written down, so a process id that was reused is never signalled;
-    /// otherwise nothing is stopped or removed.
+    /// otherwise nothing is stopped or removed. A run a module holds ([`Runner::hold`]) is refused.
     pub fn cancel(&self, id: &str) -> Result<(), String> {
         let mut state = self.state();
         let at = state
@@ -1295,6 +1380,12 @@ impl Runner {
             .iter()
             .position(|run| run.stored.id == id)
             .ok_or("no such run")?;
+        if state.held.contains_key(id) {
+            return Err(
+                "plotkeeper is still checking what this run made: dismiss it once that is done"
+                    .into(),
+            );
+        }
         let dir = self.dir(id);
         let mut pause = None;
         if matches!(state.runs[at].phase, Phase::Running { .. }) && !Self::stop(&dir)? {
@@ -1398,6 +1489,7 @@ impl Runner {
             .flatten();
         let mut runs = Vec::new();
         let mut paused = None;
+        let mut ended = Vec::new();
         for dir in folders
             .map(|entry| entry.path())
             .filter(|path| path.is_dir())
@@ -1423,7 +1515,9 @@ impl Runner {
             };
             if let Some(launch) = read_json::<Launch>(&dir.join(LAUNCH)) {
                 if lock_free(&dir) {
-                    paused = self.finish(&mut run).pause().or(paused);
+                    let end = self.finish(&mut run);
+                    ended.push(Self::ended_of(&run.stored, end));
+                    paused = end.pause().or(paused);
                 } else {
                     run.phase = Phase::Running {
                         since_ms: launch.at_ms,
@@ -1441,6 +1535,8 @@ impl Runner {
             self.pause(&mut state, paused);
         }
         self.advance(&mut state);
+        drop(state);
+        ended.into_iter().for_each(|ended| self.tell_end(ended));
     }
 
     /// `project`'s runs as the map shows them, and the pause line.

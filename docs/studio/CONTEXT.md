@@ -277,6 +277,14 @@ _Avoid_: Approve (that is the PR review), sign off
 One story, in the **PR brief**'s reader and shape (a single story of three or four steps), of everything that landed in one fogged part since Daniel last caught up: every PR and direct push in its **Fog**, ordered by behaviour. A fogged part's sheet offers it as the main button, before "I know this"; reading it to the end clears that part's fog and completes no PR brief.
 _Avoid_: Catch-up (alone — the setting that writes briefs at start is the brief backfill), summary
 
+**Refresher**:
+A part as the **System map** has it now, offered in the sheet of a part with no **Fog**: its flows, in order, and what it is linked with, drawn from the map itself and never written by a model. It is for a part Daniel once knew and has not looked at in a while.
+_Avoid_: Recap, summary, catch-up (a **Part catch-up** tells what changed)
+
+**Staleness band**:
+A mild band along the foot of a Core part Daniel has not engaged with in a while: one band after 3 weeks, two after 6, three after 12. Staleness is time since Daniel last engaged with the part, not time since its code changed; engaging with it clears the band.
+_Avoid_: Stale fog, age (**Fog** is what changed unseen; a band is what went unvisited)
+
 **Gist**:
 One plain sentence the writer adds to each chapter of a **PR brief** that lights a Core part, and to each **Part catch-up**: the story's whole point, as Daniel could say it back. It is checked by code and by the **Claim check** like every other item, and shown only after **Explain-back**.
 _Avoid_: Summary, tl;dr, takeaway
@@ -292,6 +300,14 @@ _Avoid_: Fact check, verification
 **Background run**:
 A headless agent run with scoped tools that plotkeeper starts on Daniel's click, inside Claude Code's OS sandbox, queued one at a time per project and cancellable from the map. It is not a session and has no terminal. [Background runs](behaviour/background-runs.md) has the rules.
 _Avoid_: Session, job, a check sent to the background (a check an agent backgrounds inside its own session)
+
+**Micro-world**:
+A small interactive page, built by a **Background run** from the project's real code, that lets Daniel play with one mechanism: a flow of a part's **Refresher**, or the parts a step of a **PR brief** lights. plotkeeper checks the page before keeping it and shows it walled off from everything else it serves.
+_Avoid_: Demo, simulation, explainer (an explainer is the dsh-visual page of a diff)
+
+**Guard with a law**:
+The offer at the end of the **PR brief** of a bug fix that neither adds nor changes a test tied to a **Law**: back a law on trust of a part the PR touched, or add a new law, so a check keeps the bug from coming back. Either starts a back a law **Background run**, and Daniel sees its test only once plotkeeper has proved it fails when the law is broken.
+_Avoid_: Regression test (alone), incident drill (deferred)
 
 **Pre-flight**:
 Before work starts, the parts of the **System map** it will likely cross, framed on the map as *predicted*: from an open issue or one or two lines (named by the no-tools writer) or picked by hand. A **PR brief** of a PR that closes the pre-flighted issue, or a ticket under it, says what was expected against what the PR touched. [The system map](behaviour/map.md) has the rules.
@@ -354,11 +370,11 @@ A repository on plotkeeper's saved project list: added the first time a session 
 _Avoid_: Workspace (a checkout inside a project), repository list (it is plotkeeper's own list)
 
 **Engaged day**:
-An active day with at least one entered action on that project's map: a part's sheet opened, a PR brief or catch-up entered, an agent chip clicked, a law or proof opened, or a scrub. A day the map was only on screen is not one. The Map view's stop rule counts them: it passes at 4 or more in the review window (14 active days and 20 merged PRs).
+An active day with at least one entered action on that project's map: a part's sheet opened, a PR brief or part catch-up entered, an agent chip clicked, a law or proof opened, or a scrub. A day the map was only on screen is not one. The Map view's stop rule counts them: it passes at 4 or more in the review window (14 active days and 20 merged PRs).
 _Avoid_: Map opened (opening is no longer engagement, since the map is the page)
 
 **Settings**:
-Daniel's choices for the studio, kept in `settings.json` in its data folder, in Zed's format: zoom, the terminal's font size, the summary writer with its model and effort (`summaries`), the OpenAI-compatible API's base URL (`summaries.base_url`), the catch-up window and the PR brief writer's model (`prBriefs.model`). The page sets only the writer's: its writer section (`ui/writers.ts`, in the Settings panel the top bar's gear opens) saves the writer, model and effort once its Test passes, and the base URL; it also takes the Anthropic and OpenAI-compatible API keys, which are kept in the macOS Keychain, never in `settings.json`. Daniel edits the rest in the files, in his editor. "Settings files" means `settings.json` and `keymap.json` together: the studio reloads either when saved, and a file that does not parse is reported while its last good version stays in effect.
+Daniel's choices for the studio, kept in `settings.json` in its data folder, in Zed's format: zoom, the terminal's font size, the summary writer with its model and effort (`summaries`), the OpenAI-compatible API's base URL (`summaries.base_url`), the brief backfill's window (`briefBackfill`) and the PR brief writer's model (`prBriefs.model`). The page sets only the writer's: its writer section (`ui/writers.ts`, in the Settings panel the top bar's gear opens) saves the writer, model and effort once its Test passes, and the base URL; it also takes the Anthropic and OpenAI-compatible API keys, which are kept in the macOS Keychain, never in `settings.json`. Daniel edits the rest in the files, in his editor. "Settings files" means `settings.json` and `keymap.json` together: the studio reloads either when saved, and a file that does not parse is reported while its last good version stays in effect.
 _Avoid_: Preferences, config
 
 **Sounds**:

@@ -131,6 +131,17 @@ struct Hop {
 
 /// Reads the map in `root` and checks it against the files git tracks there.
 pub fn check(root: &Path) -> Report {
+    check_with(root, tracked_files(root))
+}
+
+/// `check` against `files`, the tracked files as a caller listed them: plotkeeper lists a clone's inside its sandbox, since
+/// git outside it would read the clone's own config (back a law, #398).
+pub fn check_files(root: &Path, files: Vec<String>) -> Report {
+    let files: BTreeSet<String> = files.into_iter().collect();
+    check_with(root, Ok(files.into_iter().collect()))
+}
+
+fn check_with(root: &Path, files: Result<Vec<String>, String>) -> Report {
     let mut report = Report::default();
     let map = match load(root) {
         Ok(map) => map,
@@ -141,7 +152,7 @@ pub fn check(root: &Path) -> Report {
     };
     report.links = map.links.clone();
     report.problems.extend(check_ids_and_references(&map));
-    match tracked_files(root) {
+    match files {
         Ok(files) => {
             let (parts, problems) = ownership(&map, &files);
             report.problems.extend(problems);
@@ -255,7 +266,8 @@ fn prune(value: &mut serde_json::Value, known: &[&str]) {
     }
 }
 
-fn is_id(id: &str) -> bool {
+/// Whether `id` is an id the map takes: lowercase words of letters and digits joined by hyphens.
+pub fn is_id(id: &str) -> bool {
     !id.is_empty()
         && id.split('-').all(|word| {
             !word.is_empty()

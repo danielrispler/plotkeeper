@@ -191,6 +191,63 @@ const mapPreFlight = (): Fixture =>
     }),
     snapDone: "pre-flight ok",
   });
+// Back a law (#398): Hook's law on trust offers Back a law; Core's law on trust has a proven patch, and Review opens the patch review over
+// the map with the test patch, the output with the test alone and with the plant, and Discard.
+const lawPatchDiff = [
+  "diff --git a/core/tests/order.rs b/core/tests/order.rs",
+  "new file mode 100644",
+  "--- /dev/null",
+  "+++ b/core/tests/order.rs",
+  "@@ -0,0 +1,6 @@",
+  "+// @law: core-order",
+  "+#[test]",
+  "+fn events_apply_in_order() {",
+  "+    let state = apply(&[started(), ended()]);",
+  "+    assert_eq!(state.last(), Some(Ended));",
+  "+}",
+  "diff --git a/system-map.json b/system-map.json",
+  "--- a/system-map.json",
+  "+++ b/system-map.json",
+  "@@ -4,1 +4,1 @@",
+  '-    { "id": "core-order", "on": "core", "backing": "trust", "text": "Events apply in order." },',
+  '+    { "id": "core-order", "on": "core", "backing": "check", "text": "Events apply in order." },',
+].join("\n");
+const mapBackLaw = (): Fixture =>
+  mapOpened(`
+      document.querySelector("#map .plate[data-id=hook]").click();
+      await wait(300);
+      const held = document.querySelector('#map-sheet .sheet-law[data-law="hook-held"]');
+      if (![...(held?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Back a law")) return log("snap:fail Hook's law on trust has no Back a law");
+      document.querySelector("#map .plate[data-id=core]").click();
+      await wait(300);
+      const pure = document.querySelector('#map-sheet .sheet-law[data-law="core-pure"]');
+      if ([...pure.querySelectorAll("button")].some((b) => b.textContent === "Back a law")) log("snap:fail a law a check backs offers Back a law");
+      const review = [...document.querySelectorAll('#map-sheet .sheet-law[data-law="core-order"] button')].find((b) => b.textContent === "Review the patch");
+      if (!review) return log("snap:fail the proven patch has no Review");
+      review.click();
+      await wait(300);
+      const box = document.getElementById("map-patch-review");
+      if (box.hidden) return log("snap:fail the patch review did not open");
+      if (!box.textContent.includes("Events apply in order.") || !box.textContent.includes("events_apply_in_order in core/tests/order.rs")) log("snap:fail the law or the test: " + box.textContent);
+      if (box.querySelectorAll(".patch-diff .diff-line.add").length !== 7) log("snap:fail the test patch's added lines: " + box.querySelectorAll(".patch-diff .diff-line.add").length);
+      const outputs = [...box.querySelectorAll(".patch-output")].map((pre) => pre.textContent);
+      if (outputs.length !== 2 || !outputs[0].includes("PASS") || !outputs[1].includes("FAIL")) log("snap:fail the outputs: " + outputs.join(" / "));
+      if ([...box.querySelectorAll("button")].map((b) => b.textContent).join(",") !== "Open draft PR,Discard,Close") log("snap:fail the review's buttons");
+      log("back a law ok");`, {
+    map_state: mapState({
+      law_patches: [
+        {
+          id: "19a2f-5", project: "/w/plotkeeper", law: "core-order", state: "proven", line: null, at: runAt, diff: lawPatchDiff,
+          proof: {
+            test: "events_apply_in_order", file: "core/tests/order.rs",
+            passed: "$ cargo nextest run -p studio-core\n        PASS [   0.004s] studio-core::it order::events_apply_in_order\n     Summary [   0.912s] 214 tests run: 214 passed, 0 skipped",
+            failed: "$ cargo nextest run -p studio-core\n        FAIL [   0.004s] studio-core::it order::events_apply_in_order\n     Summary [   0.917s] 214 tests run: 213 passed, 1 failed, 0 skipped",
+          },
+        },
+      ],
+    }),
+    snapDone: "back a law ok",
+  });
 // The queues paused by a login failure: the one indicator with Resume, over the run that failed and the one that waits.
 const mapRunsPaused = (): Fixture =>
   mapOpened(`
@@ -386,6 +443,41 @@ const mapBriefRatify = (): Fixture => ({
       if (!document.querySelector("#map-brief .ratify-row").textContent.includes("Accepted")) log("snap:fail Accept did not mark the row");
       log("ratify ok");`, false, 100),
   pr_ratify: ratifyRows,
+});
+// Guard with a law (#401): a bug fix's brief, with nothing to ratify, ends with the guard's row: the on-trust laws of Core and Shell, the
+// parts it touched, with Back this law, a new law of an earlier run being proven, and Add a new law. `confirm` presses Add a new law and
+// shows the confirm step with the writer's draft.
+const guardedBrief = (): BriefView => {
+  const view = briefOf(storySteps());
+  return { ...view, brief: { ...view.brief, guard: { parts: ["core", "shell"] } } };
+};
+const mapBriefGuard = (confirm: boolean): Fixture => ({
+  ...mapBrief(guardedBrief(), 4, `
+      const row = document.querySelector("#map-brief .guard-row");
+      if (!row) return log("snap:fail the brief has no Guard with a law row");
+      if (document.querySelector("#map-brief .brief-title").textContent !== "Guard with a law") log("snap:fail the step's heading: " + document.querySelector("#map-brief .brief-title").textContent);
+      const laws = [...row.querySelectorAll(".guard-law")].map((li) => li.dataset.law).join(",");
+      if (laws !== "core-order,shell-notice,shell-ordered") log("snap:fail the guard's laws: " + laws);
+      if (row.querySelectorAll(".guard-law button").length !== 2) log("snap:fail Back this law belongs on the two laws on trust");
+      if (!row.textContent.includes("Proving the patch")) log("snap:fail the new law's run does not say where it stands");
+      const add = [...row.querySelectorAll("button")].find((b) => b.textContent === "Add a new law");
+      if (!add) return log("snap:fail no Add a new law");
+      if (${confirm}) {
+        add.click();
+        await wait(300);
+        const sentence = document.querySelector("#map-brief .guard-sentence");
+        if (!sentence || sentence.value !== "The shell applies events in the order they were made.") return log("snap:fail the drafted sentence is not shown to confirm: " + sentence?.value);
+        if (document.querySelector("#map-brief .guard-id").value !== "shell-keeps-order") log("snap:fail the drafted id");
+        if (document.querySelector("#map-brief .guard-part").value !== "shell") log("snap:fail the drafted part");
+        if (![...document.querySelectorAll("#map-brief .guard-confirm button")].some((b) => b.textContent === "Start the run")) log("snap:fail no Start the run");
+      }
+      log("guard ok");`, false, 100),
+  map_state: mapState({
+    fog: { shell: "thick", understanding: "thin" },
+    ready: [{ number: 334, title: "PR briefs on the map", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }],
+    law_patches: [{ id: "19a2f-11", project: "/w/plotkeeper", law: "shell-ordered", state: "proving", line: null, at: runAt, diff: null, proof: null, text: "The shell reads the log in order.", guards: 334 }],
+  }),
+  snapDone: "guard ok",
 });
 // The end-of-story bar (#393) under the story's last step: 4 picked by its key, an "s" typed in the note that does not skip, the note kept by
 // Enter; each is sent to the shell, and no rating is shown back once the brief is opened again. The screenshot is the bar after the note.
@@ -644,6 +736,53 @@ const mapRefresher = (): Fixture => {
     map_state: mapState({ source: JSON.stringify(file), stale: { shell: 2 } }),
   });
 };
+// A micro-world (#399) in its overlay: from the refresher on Shell's sheet, the Turn writing flow's world is ready but may be out of date, so its
+// row offers Open and Rebuild; Open shows the checked page in a frame sandboxed to scripts alone, in the glass overlay the size of the settings dialog. The page's script is
+// an inline handler: a closing script tag would end the snap page's own.
+const worldPage = `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:">
+<title>Turn writing</title><style>:root{color-scheme:light dark}body{margin:0;padding:24px;font:15px system-ui;background:#f6f5f2;color:#1a1a1a}
+@media (prefers-color-scheme: dark){body{background:#17181b;color:#e8e6e1}}.hops{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}
+.hop{padding:8px 12px;border-radius:8px;border:1px solid #8884}.hop.on{background:#4a7dff;color:#fff;border-color:#4a7dff}</style>
+<h1>Turn writing, as a model</h1><p>An illustrative model of how a turn's summary is written. Step through the hops.</p>
+<div class="hops"><span class="hop on">Hook</span><span class="hop">Shell</span><span class="hop">Understanding</span><span class="hop">Writer</span><span class="hop">Window</span></div>
+<button onclick="const hops=[...document.querySelectorAll('.hop')];const at=hops.findIndex((h)=>h.classList.contains('on'));hops[at].classList.remove('on');hops[(at+1)%hops.length].classList.add('on')">Next hop</button>
+<p>The hook's line reaches the Shell, which reads the log.</p>`;
+const mapMicroWorld = (): Fixture => {
+  const file = JSON.parse(mapFile);
+  file.flows = [{ id: "turn-writing", name: "Turn writing", hops: [
+    { link: "hook-shell", text: "The hook's line reaches the Shell, which reads the log." },
+    { link: "shell-window", text: "The Shell tells the Window, which shows the summary." },
+  ] }];
+  return mapOpened(`
+      document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(300);
+      document.querySelector("#map-sheet .sheet-refresher")?.click();
+      await wait(400);
+      const row = document.querySelector('#map-sheet .micro-world-row[data-world="flow:turn-writing"]');
+      if (!row) return log("snap:fail the flow has no micro-world row");
+      const words = [...row.querySelectorAll("button")].map((button) => button.textContent).join(",");
+      if (words !== "Open,Rebuild") log("snap:fail the row offers " + words);
+      if (!row.textContent.includes("may be out of date")) log("snap:fail the row does not say it may be out of date");
+      row.querySelector("button").click();
+      await wait(600);
+      const box = document.getElementById("map-micro-world");
+      if (box.hidden) return log("snap:fail the micro-world did not open");
+      const frame = box.querySelector("iframe");
+      if (!frame) return log("snap:fail no frame");
+      if (frame.getAttribute("sandbox") !== "allow-scripts") log("snap:fail the frame's sandbox: " + frame.getAttribute("sandbox"));
+      if (frame.hasAttribute("src") || !frame.getAttribute("srcdoc")?.includes("Content-Security-Policy")) log("snap:fail the frame is not the checked page by srcdoc");
+      if (!box.querySelector(".micro-world-title")?.textContent.includes("Turn writing")) log("snap:fail the title: " + box.textContent);
+      if (box.getBoundingClientRect().width < 600) log("snap:fail the overlay is not wide: " + box.getBoundingClientRect().width);
+      log("micro-world ok");`, {
+    map_state: mapState({
+      source: JSON.stringify(file),
+      stale: { shell: 2 },
+      micro_worlds: { on: true, worlds: { "flow:turn-writing": { phase: "ready", page: true, stale: true, line: null, prompt: null } } },
+    }),
+    micro_world_page: worldPage,
+    snapDone: "micro-world ok",
+  });
+};
 // A chaptered brief (#341): the tray lists one row per chapter, each chapter opens on its own and the overview plays before the first one opened, once.
 const chapterTitles = ["Fog clears by reading", "Broken laws on the map", "The Seen gate"];
 const chapterOf = (i: number, parts: string[]): BriefChapter => ({
@@ -711,7 +850,7 @@ const mapBriefChapterLast = (): Fixture =>
 // The stop-rule review (#314, #384): Studio has run 20 active days and merged 25 PRs, and the Map view was engaged with on one of them, so
 // the Map view fell below its threshold, and so did the history strip and "See the proof".
 // Pre-flight (#394) was run twice and three explain-back lines (#397) were written, so the review lists only the modules of project 2.
-const dueFacts = { active_days: 20, merged_prs: 25, engaged_days: 1, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, counts: { "pre-flight-run": 2, "catch-up-done": 3, "explain-back-given": 3 }, began: "2026-10-01", stale_since: null };
+const dueFacts = { active_days: 20, merged_prs: 25, engaged_days: 1, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, counts: { "pre-flight-run": 2, "catch-up-done": 3, "explain-back-given": 3, "micro-world-opened": 2, "back-law-started": 1 }, began: "2026-10-01", stale_since: null };
 const mapOpened = (check: string, extra: Fixture = {}): Fixture => ({
   ...list(),
   ...extra,
@@ -783,7 +922,8 @@ const mapBroken = (open: "none" | "proof" | "log"): Fixture => {
       await wait(300);
       const see = [...document.querySelectorAll("#map-sheet .sheet-law button")].find((b) => b.textContent === "See the proof");
       if (!see) return log("snap:fail no See the proof on a check-backed law");
-      if (document.querySelectorAll("#map-sheet .sheet-law button").length !== 1) log("snap:fail See the proof is on a law no check backs");
+      // A law on trust has Back a law instead (#398), never See the proof.
+      if ([...document.querySelectorAll("#map-sheet .sheet-law button")].filter((b) => b.textContent === "See the proof").length !== 1) log("snap:fail See the proof is on a law no check backs");
       see.click();
       await wait(300);
       const code = document.querySelector("#map-drawer .drawer-code");
@@ -1488,7 +1628,9 @@ export const fixtures = {
   mapTray,
   mapRuns,
   mapPreFlight,
+  mapMicroWorld,
   mapRunsPaused,
+  mapBackLaw,
   railBriefRow: () => railBriefReady(false),
   railBriefOpened: () => railBriefReady(true),
   mapBriefStart,
@@ -1503,6 +1645,8 @@ export const fixtures = {
   mapBriefOrderWrong,
   mapBriefOrderRight,
   mapBriefRatify,
+  mapBriefGuard: () => mapBriefGuard(false),
+  mapBriefGuardConfirm: () => mapBriefGuard(true),
   mapBriefBar,
   mapBriefExplainBack: () => mapBriefExplainBack(false),
   mapBriefExplainBackDone: () => mapBriefExplainBack(true),

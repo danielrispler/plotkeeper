@@ -9,9 +9,11 @@ mod samples;
 use samples::{Sample, json, write};
 use std::collections::BTreeMap;
 use studio_server::{
+    back_a_law::{LawPatch, PatchState, Proof},
     ci_laws::{self, Ci},
     fog::{ChapterRead, Entry, FogState, PrRead, Strength},
     map::{MapState, Mark, MarkWhy, Status, UserState, View},
+    micro_worlds::{Phase, View as WorldView, WorldsState},
     pr_briefs::BriefInfo,
     prs::Ready,
     ratify::Pending,
@@ -151,7 +153,83 @@ fn empty(status: Status) -> MapState {
         catch_ups: BTreeMap::new(),
         stale: BTreeMap::new(),
         pre_flight: None,
+        micro_worlds: WorldsState::default(),
+        law_patches: Vec::new(),
     }
+}
+
+/// A micro-world in each phase: building over an older page, ready and out of date, and failed with its prompt.
+fn worlds() -> WorldsState {
+    let view = |phase, page, stale, failed: bool| WorldView {
+        phase,
+        page,
+        stale,
+        line: failed.then(|| "verify.mjs failed:\nFAIL no horizontal overflow @390/light".into()),
+        prompt: failed.then(|| "In the repository at /repo, build a micro-world".into()),
+    };
+    WorldsState {
+        on: true,
+        worlds: BTreeMap::from([
+            (
+                "flow:turn".into(),
+                view(Phase::Building, true, false, false),
+            ),
+            ("flow:look".into(), view(Phase::Ready, true, true, false)),
+            (
+                "figure:334:0:1".into(),
+                view(Phase::Failed, false, false, true),
+            ),
+        ]),
+    }
+}
+
+/// A back a law run's patch in each state: being proven, rejected, proven with its diff and proof, out of date, and opened
+/// as a draft PR; and a new law's, started from a brief's Guard with a law (#401).
+fn law_patches() -> Vec<LawPatch> {
+    let patch = |id: &str, state, line: Option<&str>| LawPatch {
+        id: id.into(),
+        project: "/repo".into(),
+        law: "core-order".into(),
+        state,
+        line: line.map(String::from),
+        at: 1_761_743_990_000,
+        diff: None,
+        proof: None,
+        pr: None,
+        url: None,
+        text: None,
+        guards: None,
+    };
+    vec![
+        patch("19a2f-1", PatchState::Proving, None),
+        patch(
+            "19a2f-2",
+            PatchState::Rejected,
+            Some("The test patch touches src/a.rs"),
+        ),
+        LawPatch {
+            diff: Some("diff --git a/tests/a.rs b/tests/a.rs\n".into()),
+            proof: Some(Proof {
+                test: "events_apply_in_order".into(),
+                file: "core/tests/order.rs".into(),
+                passed: "PASS [ 0.01s] studio-core::it order::events_apply_in_order".into(),
+                failed: "FAIL [ 0.01s] studio-core::it order::events_apply_in_order".into(),
+            }),
+            ..patch("19a2f-3", PatchState::Proven, None)
+        },
+        patch("19a2f-5", PatchState::OutOfDate, None),
+        LawPatch {
+            pr: Some(412),
+            url: Some("https://github.com/someone/app/pull/412".into()),
+            ..patch("19a2f-6", PatchState::Opened, None)
+        },
+        LawPatch {
+            law: "core-keeps-order".into(),
+            text: Some("Events apply in the order they were made.".into()),
+            guards: Some(334),
+            ..patch("19a2f-7", PatchState::Proving, None)
+        },
+    ]
 }
 
 /// The background runs paused, with a run in each state, of each kind and with each end.
@@ -248,6 +326,8 @@ fn the_wire_samples_of_the_map_view_are_written_for_tsc() {
                     predicted: true,
                     at: 1_761_743_990_000,
                 }),
+                micro_worlds: worlds(),
+                law_patches: law_patches(),
                 ..empty(Status::Loaded)
             }),
         ));

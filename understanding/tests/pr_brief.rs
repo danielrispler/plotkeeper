@@ -230,6 +230,85 @@ fn the_parts_table_gives_tier_laws_with_their_tests_and_whether_this_pr_changed_
     assert!(!ctx.tagged.iter().any(|t| t.law == "seen-gate" && t.changed));
 }
 
+// ---- Guard with a law (#401): read by code from the facts ----
+
+/// A bug fix's source: it closes an issue labelled `bug` and touches Alpha and Beta, whose law `seen-gate` has a tagged test.
+fn bug_fix() -> PrSource {
+    let mut s = source(&["alpha/a.rs", "beta/b.rs"]);
+    s.meta.bug = true;
+    s.tagged = vec![TaggedTest {
+        law: "seen-gate".into(),
+        path: "beta/tests/s.rs".into(),
+        test: "gate_holds".into(),
+        changed: false,
+    }];
+    s
+}
+
+#[test]
+fn guard_with_a_law_is_offered_for_a_bug_fix_that_adds_or_changes_no_tagged_test() {
+    let guard = build_facts(&bug_fix()).unwrap().guard;
+    assert_eq!(
+        guard,
+        Some(Guard {
+            parts: vec!["alpha".into(), "beta".into()]
+        })
+    );
+
+    // No issue labelled `bug` is closed: no offer.
+    let mut plain = bug_fix();
+    plain.meta.bug = false;
+    assert_eq!(build_facts(&plain).unwrap().guard, None);
+
+    // The fix changed a tagged test: no offer.
+    let mut tested = bug_fix();
+    tested.diff += "diff --git a/beta/tests/s.rs b/beta/tests/s.rs\n--- a/beta/tests/s.rs\n+++ b/beta/tests/s.rs\n@@ -1,1 +1,2 @@\n fn gate_holds() {\n+    assert!(true);\n";
+    assert_eq!(build_facts(&tested).unwrap().guard, None);
+
+    // The fix added a tagged test: no offer. The tag is built in two pieces so the map check does not read it as one.
+    let mut added = bug_fix();
+    added.diff += &format!(
+        "diff --git a/alpha/tests/t.rs b/alpha/tests/t.rs\n--- /dev/null\n+++ b/alpha/tests/t.rs\n@@ -0,0 +1,2 @@\n+// {}: alpha-keeps-order\n+fn order_is_kept() {{}}\n",
+        concat!("@", "law")
+    );
+    assert_eq!(build_facts(&added).unwrap().guard, None);
+
+    // The fix touched no part of the map: there is no law to back and no part to add one on, so no offer.
+    let mut unmapped = bug_fix();
+    unmapped.diff = file_diff("elsewhere/notes.txt", 3);
+    assert_eq!(build_facts(&unmapped).unwrap().guard, None);
+}
+
+#[test]
+fn a_closing_issue_is_a_bug_when_gh_says_it_is_labelled_bug() {
+    assert!(labelled_bug(
+        &json!({"labels": [{"name": "studio"}, {"name": "bug"}]})
+    ));
+    assert!(!labelled_bug(
+        &json!({"labels": [{"name": "enhancement"}, {"name": "bugfix"}]})
+    ));
+    assert!(!labelled_bug(&json!({})));
+}
+
+#[test]
+fn the_stored_brief_keeps_its_guard_so_it_stays_after_merge() {
+    let data = tempfile::tempdir().unwrap();
+    let store = BriefStore::open(data.path()).unwrap();
+    let writer = Canned::new(vec![
+        Ok(single_story().to_string()),
+        Ok(none_unsupported()),
+        Ok(no_rewrites()),
+    ]);
+    let mut fix = bug_fix();
+    fix.diff = file_diff("alpha/a.rs", 3);
+    let stored = write_pr_brief(&writer, "opus", &fix, &store, drop).unwrap();
+    let guard = Some(Guard {
+        parts: vec!["alpha".into()],
+    });
+    assert_eq!(stored.guard, guard);
+    assert_eq!(store.latest(7).unwrap().guard, guard);
+}
+
 #[test]
 fn the_spec_is_trimmed_to_user_stories_and_decisions_and_a_ticket_to_what_to_build() {
     let spec = "## Problem\nlong\n## User Stories\nstory\n## Implementation Decisions\ndecision\n## Out of scope\nno";
@@ -1075,6 +1154,24 @@ fn a_stored_brief_with_gists_reads_with_them_and_a_part_catch_up_with_its_gist()
             "The shell keeps a part fogged until its catch-up is read."
         )
     );
+}
+
+// @law: old-stored-files-load
+#[test]
+fn a_stored_brief_with_a_guard_reads_with_it_and_an_older_one_has_none() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/stored");
+    let read = |name: &str| std::fs::read_to_string(dir.join(name)).unwrap();
+    let guarded: StoredBrief =
+        serde_json::from_str(&read("pr-brief-v5/stored-brief-guard.json")).unwrap();
+    assert_eq!(
+        guarded.guard,
+        Some(Guard {
+            parts: vec!["hook".into(), "shell".into()]
+        })
+    );
+    let older: StoredBrief =
+        serde_json::from_str(&read("pr-brief-v4/stored-brief-full.json")).unwrap();
+    assert_eq!(older.guard, None);
 }
 
 // ---- gather: git only ----

@@ -393,3 +393,19 @@ fn the_tests_run_in_an_empty_home_not_daniels() {
         "{home:?}"
     );
 }
+
+#[test]
+fn the_page_is_served_with_a_policy_that_lets_no_frame_load_a_url() {
+    // A micro-world's frame is a `srcdoc` page, which the policy allows; a frame that navigates itself to a network URL,
+    // carrying what it read in the address, is refused (checked by hand in headless Chrome, 2026-11-24).
+    let f = fixture();
+    let cookie = cookie();
+    let page = get(&f, "/", &[&cookie]);
+    assert_eq!(page.status, 200);
+    let policy = page
+        .head
+        .lines()
+        .find_map(|line| line.strip_prefix("Content-Security-Policy: "))
+        .unwrap_or_else(|| panic!("no policy: {}", page.head));
+    assert_eq!(policy, "frame-src 'none'");
+}

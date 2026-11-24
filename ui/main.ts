@@ -20,6 +20,7 @@ import "./map-history.js";
 import "./map-sheet.js";
 import "./map-tray.js";
 import "./map-runs.js";
+import "./micro-world.js";
 import { openPreFlight } from "./map-pre-flight.js";
 import { startMapAgents } from "./map-agents.js";
 import { drawSidebar, listSpace, showSessions, staleDots } from "./list.js";
