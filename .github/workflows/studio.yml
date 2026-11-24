@@ -1,13 +1,15 @@
 name: Studio checks
 
 # A change to Markdown files alone skips the checks; README.md still runs them, as `ui/tests/readme.test.mjs` reads it.
+# `archive/` is out of the build (#415). Paths apply in order, so `!archive/**` comes last.
+# A draft pull request runs nothing: its jobs start when it is marked ready, then on each push while it stays ready.
 on:
   pull_request:
-    paths: ["**", "!**.md", "README.md"]
-  # `issue-*` covers integration branches, which take merges with no pull request.
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths: ["**", "!**.md", "README.md", "!archive/**"]
   push:
-    branches: [main, "issue-*"]
-    paths: ["**", "!**.md", "README.md"]
+    branches: [main]
+    paths: ["**", "!**.md", "README.md", "!archive/**"]
 
 # A new push cancels the older run on its branch or pull request; every main commit runs to completion.
 concurrency:
@@ -20,8 +22,8 @@ permissions:
 jobs:
   macos:
     # plotkeeper is built and used on macOS only.
-    # A pull request from an `issue-*` branch skips both jobs: the push to that branch already runs them.
-    if: github.event_name == 'push' || !startsWith(github.head_ref, 'issue-')
+    # A draft pull request skips both jobs.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -47,7 +49,7 @@ jobs:
   # Every snap fixture rendered in the runner's Chrome; it fails on an uncaught page error. Left out of `check`,
   # which stays fast for agents running it in parallel (#144), and a job of its own, as it needs only the built UI.
   snap:
-    if: github.event_name == 'push' || !startsWith(github.head_ref, 'issue-')
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: macos-latest
     timeout-minutes: 30
     steps:

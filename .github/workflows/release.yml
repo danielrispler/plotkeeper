@@ -3,6 +3,9 @@ name: npm package
 # Builds the npm package with universal macOS binaries, packs it, and installs the tarball on an Apple silicon and an
 # Intel runner with no Rust on the PATH (scripts/npm/smoke.sh, #368), on every run. It publishes to the npm registry
 # only when Daniel runs it by hand from main with "publish" ticked (docs/studio/development.md, "Cutting a release").
+# It runs on each push to main, by hand, and for a ready pull request that touches what the package is built from:
+# the dependencies, the toolchain, the package, its scripts and the plugins `plotkeeper install` renders. A pull
+# request's other changes, an Intel-only build break among them, show here only after the merge to main.
 on:
   workflow_dispatch:
     inputs:
@@ -11,10 +14,21 @@ on:
         type: boolean
         default: false
   pull_request:
-    paths: ["**", "!**.md", "README.md"]
+    types: [opened, synchronize, reopened, ready_for_review]
+    # Paths apply in order, so `!archive/**` comes last: an archived Cargo.toml does not run it.
+    paths:
+      - Cargo.lock
+      - "**/Cargo.toml"
+      - rust-toolchain.toml
+      - "package*.json"
+      - "npm/**"
+      - "scripts/npm/**"
+      - "plugin*/**"
+      - .github/workflows/release.yml
+      - "!archive/**"
   push:
-    branches: [main, "issue-*"]
-    paths: ["**", "!**.md", "README.md"]
+    branches: [main]
+    paths: ["**", "!**.md", "README.md", "!archive/**"]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
@@ -25,8 +39,8 @@ permissions:
 
 jobs:
   pack:
-    # As in studio.yml: a pull request from an `issue-*` branch skips, as the push to that branch already runs.
-    if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'issue-')
+    # As in studio.yml: a draft pull request skips, and `smoke` and `publish` after it.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
