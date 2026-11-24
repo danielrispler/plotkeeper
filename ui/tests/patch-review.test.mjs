@@ -3,10 +3,10 @@
 // and Discard (#400). An opened patch says its PR; a stale one says "Out of date, run again".
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fakeDocument } from "./dom.mjs";
+import { El, fakeDocument, tauri } from "./dom.mjs";
 
 globalThis.document = fakeDocument();
-const { confirmNodes, guardNodes, guardOffer, lawAction, lawActionNodes, openedLine, reviewNodes } = await import("../../dist/patch-review.js");
+const { confirmNodes, guardNodes, guardOffer, guardRow, lawAction, lawActionNodes, openedLine, reviewNodes } = await import("../../dist/patch-review.js");
 
 const patch = (id, state, extra = {}) => ({ id, project: "/w/app", law: "core-order", state, line: null, at: 1, diff: null, proof: null, ...extra });
 const proven = (id = "r3") =>
@@ -179,4 +179,24 @@ test("while the writer drafts, the confirm step says so; when it cannot, Daniel 
   const failed = confirmNodes({ id: "", on: "core", text: "" }, [{ id: "core", name: "Core" }], "the writer's reply holds no JSON", act);
   assert.match(texts(failed), /the writer's reply holds no JSON/);
   assert.ok(button(failed, "Start the run"));
+});
+
+test("a run that cannot start, whose prompt the clipboard refuses, shows the prompt to copy by hand", async () => {
+  const box = new El("section");
+  globalThis.document = fakeDocument({ getElementById: (id) => (id === "map-patch-review" ? box : new El("div")) });
+  tauri([], (command) => (command === "back_a_law" ? { kind: "refused", line: "srt is not installed", prompt: "Write a test for core-order…" } : null));
+  const view = {
+    project: "/w/app",
+    scrub: null,
+    doc: { parts: [{ id: "core", name: "Core" }], laws: [{ id: "core-order", on: "core", backing: "trust", text: "Events apply in order." }] },
+    state: { law_patches: [] },
+  };
+  const row = guardRow(view, 7, { parts: ["core"] }, () => {});
+  // No clipboard here, as when a browser refuses it after the round trip.
+  button([row], "Back this law").listeners.click();
+  await new Promise((done) => setTimeout(done, 10));
+  assert.equal(box.hidden, false);
+  assert.match(box.text, /srt is not installed/);
+  assert.deepEqual(box.find("textarea").map((area) => area.value), ["Write a test for core-order…"]);
+  globalThis.document = fakeDocument();
 });

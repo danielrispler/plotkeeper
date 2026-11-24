@@ -109,23 +109,45 @@ export function reviewNodes(patch: LawPatch, law: string, act: Pick<PatchActs, "
   ];
 }
 
-// A run started: told to the stop-rule log and the map drawn again. A run that cannot start copies its prompt, as a failed run's row does.
+// A run that could not start and whose prompt the clipboard refused: its line, and the prompt in the overlay to copy by hand.
+export function refusedNodes(line: string, prompt: string, close: () => void): HTMLElement[] {
+  const area = document.createElement("textarea");
+  area.className = "ratify-prompt";
+  area.value = prompt;
+  area.readOnly = true;
+  area.rows = 6;
+  const foot = text("div", "", "patch-foot");
+  foot.append(button("Close", "Close", close));
+  return [text("h2", "The run did not start", "patch-title"), text("p", `${line}. ${overturnReport("manual", prompt).line}`, "patch-law"), area, foot];
+}
+
+// A run started: told to the stop-rule log and the map drawn again. A run that cannot start copies its prompt, as a failed run's row does;
+// when the clipboard refuses, the overlay shows the prompt.
 async function afterStart(started: BackLawStarted, told: () => void) {
   if (started.kind === "run") {
     told();
     return void reloadMap();
   }
   const copied = await copyOverturn(started.prompt, navigator.clipboard?.writeText?.bind(navigator.clipboard));
-  showNotice(`The run did not start: ${started.line}. ${overturnReport(copied, started.prompt).line}`);
+  if (copied === "copied") return showNotice(`The run did not start: ${started.line}. ${overturnReport(copied, started.prompt).line}`);
+  [shown, refused] = [null, { line: started.line, prompt: started.prompt }];
+  paint();
 }
 
 // The patch under review, by its run's id; null while closed.
 let shown: string | null = null;
+// The refused run whose prompt the overlay shows; null while closed.
+let refused: { line: string; prompt: string } | null = null;
 const overlay = () => document.getElementById("map-patch-review");
 
 function paint() {
   const box = overlay();
   if (!box) return;
+  if (refused) {
+    box.hidden = false;
+    box.replaceChildren(...refusedNodes(refused.line, refused.prompt, acts.close));
+    return;
+  }
   const view = currentMap();
   const patch = view && !view.scrub ? view.state.law_patches?.find((each) => each.id === shown && each.state === "proven") : undefined;
   if (!view || !patch) {
@@ -148,7 +170,7 @@ const acts: PatchActs = {
       .catch(failure("back_a_law", "error"));
   },
   review: (id) => {
-    shown = id;
+    [shown, refused] = [id, null];
     paint();
   },
   open: (id) => {
@@ -173,7 +195,7 @@ const acts: PatchActs = {
       .catch(failure("law_patch_discard", "error"));
   },
   close: () => {
-    shown = null;
+    [shown, refused] = [null, null];
     paint();
   },
 };
@@ -182,7 +204,7 @@ const acts: PatchActs = {
 export const patchActs = acts;
 
 onDraw(paint);
-registerLayer("patch-review", { open: () => shown !== null, close: acts.close });
+registerLayer("patch-review", { open: () => shown !== null || refused !== null, close: acts.close });
 
 
 // ---- Guard with a law (#401).
