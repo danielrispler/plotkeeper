@@ -1469,6 +1469,34 @@ impl Session {
         }
     }
 
+    /// The summary request for the turn that just ended with `reply`, its card id `id`.
+    fn summary_request(
+        &self,
+        id: String,
+        reply: &str,
+        card: Option<String>,
+        wanted: bool,
+    ) -> SummaryRequest {
+        // shortcut: the transcript may lag the `Stop` by one poll, so the final reply
+        // is taken from the `Stop`; read the transcript first if earlier texts go missing.
+        let mut turn = self.transcript.clone();
+        if !reply.is_empty() && turn.responses.last().map(String::as_str) != Some(reply) {
+            turn.responses.push(reply.into());
+        }
+        turn.ended = true;
+        let daniels = self.prompts.iter().rfind(|p| p.sender.is_daniels());
+        SummaryRequest {
+            session_id: self.agent.id.clone(),
+            id,
+            prompt: daniels.map(|p| p.text.clone()).unwrap_or_default(),
+            intentions: turn.intentions(),
+            responses: turn.responses,
+            card,
+            facts: Facts::default(),
+            wanted,
+        }
+    }
+
     /// Whether it is in a turn: prompted, and neither stopped nor ended since.
     fn in_turn(&self) -> bool {
         !self.turn_ended && !self.ended
@@ -3187,7 +3215,31 @@ impl Studio {
                             matches!(h, Happened::TurnEnd { .. } | Happened::SubagentEnd)
                         }) =>
                 {
-                    session.reply.clone_from(reply);
+                    // Cursor's reply can land just after its turn's `stop` (#369): it is that turn's,
+                    // unless the turn has one or another has started. The `stop` asked for no wanted
+                    // summary, having no reply, so a long reply asks now, with the card it raised.
+                    let ended = session
+                        .turns
+                        .last()
+                        .filter(|t| !session.in_turn() && t.reply.is_empty() && t.id.is_some());
+                    match (ended.and_then(|t| t.id.clone()), &mut session.stopped) {
+                        (Some(id), Some(stopped)) if stopped.card == id => {
+                            let card = stopped.requested.then(|| id.clone());
+                            let reply = reply.trim();
+                            let message = reply.lines().map(str::trim).find(|l| !l.is_empty());
+                            stopped.message = message.map(Into::into);
+                            if let Some(turn) = session.turns.last_mut() {
+                                turn.reply = reply.into();
+                                turn.message = message.map(Into::into);
+                            }
+                            if !replay && wants_summary(reply, session.needs_you()) {
+                                outputs.push(Output::Summary(
+                                    session.summary_request(id, reply, card, true),
+                                ));
+                            }
+                        }
+                        _ => session.reply.clone_from(reply),
+                    }
                 }
                 Happened::TurnEnd { background_pending } => {
                     // A reply that asks in text blocks nothing, so the turn ends on your turn unless a
@@ -3231,26 +3283,12 @@ impl Studio {
                     outputs.extend(output);
                     // A turn that changed code has its summary requested, which is written only when it is wanted.
                     if !replay && (wanted || card.is_some()) {
-                        // shortcut: the transcript may lag the `Stop` by one poll, so the final reply
-                        // is taken from the `Stop`; read the transcript first if earlier texts go missing.
-                        let mut turn = session.transcript.clone();
-                        if !reply.is_empty()
-                            && turn.responses.last().map(String::as_str) != Some(reply)
-                        {
-                            turn.responses.push(reply.into());
-                        }
-                        turn.ended = true;
-                        let daniels = session.prompts.iter().rfind(|p| p.sender.is_daniels());
-                        outputs.push(Output::Summary(SummaryRequest {
-                            session_id: session.agent.id.clone(),
-                            id: card_id(&event.session_id, at),
-                            prompt: daniels.map(|p| p.text.clone()).unwrap_or_default(),
-                            intentions: turn.intentions(),
-                            responses: turn.responses,
-                            card: card.clone(),
-                            facts: Facts::default(),
+                        outputs.push(Output::Summary(session.summary_request(
+                            card_id(&event.session_id, at),
+                            reply,
+                            card.clone(),
                             wanted,
-                        }));
+                        )));
                     }
                     if let Some(prompt) = session.name_after.take()
                         && !replay

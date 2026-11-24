@@ -9,8 +9,8 @@ use std::{
     time::Duration,
 };
 use studio_understanding::{
-    CardWriter, ClaudeWriter, FailureKind, SummarySetup, WriterKind, WriterRequest, build_command,
-    read_reply,
+    CardWriter, ClaudeWriter, FailureKind, SummarySetup, Usage, WriterKind, WriterRequest,
+    build_command, read_reply,
 };
 
 fn exit(code: i32) -> ExitStatus {
@@ -215,8 +215,8 @@ fn the_codex_command_is_read_only_takes_the_schema_from_a_file_and_is_marked_int
     assert_eq!(args[at + 1], WriterKind::Codex.models()[0]);
 }
 
-// Copilot's tools are turned off by an empty `--available-tools` allow-list (its docs; that an empty list turns all of
-// them off is not verified), it never stops to ask, and it runs in an empty folder.
+// Copilot's tools are turned off by an allow-list naming no tool, with its built-in MCP servers off (an empty list left
+// them on in wave 1's trial, #369), it never stops to ask, and it runs in an empty folder.
 // @law: writer-has-no-tools
 #[test]
 fn the_copilot_command_allows_no_tools_takes_the_prompt_as_an_argument_and_is_marked_internal() {
@@ -235,7 +235,8 @@ fn the_copilot_command_allows_no_tools_takes_the_prompt_as_an_argument_and_is_ma
         [
             "-s",
             "--output-format=json",
-            "--available-tools=",
+            "--available-tools=none",
+            "--disable-builtin-mcps",
             "--no-ask-user",
             "--model=gpt-6-astra",
             "-p",
@@ -263,6 +264,9 @@ fn the_copilot_command_allows_no_tools_takes_the_prompt_as_an_argument_and_is_ma
         },
     );
     let model = format!("--model={}", WriterKind::Copilot.models()[0]);
+    // Its first is `auto`, Copilot's own pick: in wave 1's trial (#369) every named model failed on a plan that
+    // runs `auto` ("Model \"claude-haiku-4.5\" is not available").
+    assert_eq!(model, "--model=auto");
     assert!(
         args(&command).contains(&model.as_str()),
         "{:?}",
@@ -281,7 +285,7 @@ fn the_cursor_command_is_in_ask_mode_takes_the_prompt_as_an_argument_and_is_mark
         Path::new("/bin/agent"),
         Path::new("/w/card-writer-cursor"),
         &WriterRequest {
-            model: Some("gpt-5.6-luna".into()),
+            model: Some("gpt-5.6-luna-low".into()),
             ..request()
         },
     );
@@ -296,7 +300,7 @@ fn the_cursor_command_is_in_ask_mode_takes_the_prompt_as_an_argument_and_is_mark
             "ask",
             "--trust",
             "--model",
-            "gpt-5.6-luna",
+            "gpt-5.6-luna-low",
             "You write cards.\n\nThe change."
         ]
     );
@@ -322,6 +326,12 @@ fn the_cursor_command_is_in_ask_mode_takes_the_prompt_as_an_argument_and_is_mark
     let at = args.iter().position(|a| *a == "--model").unwrap();
     assert_eq!(args[at + 1], WriterKind::Cursor.models()[0]);
     assert!(WriterKind::Cursor.efforts().is_empty());
+    // Ids `agent models` lists (CLI 2026.11.22, wave 1's trial #369): it has no bare `claude-haiku-5-5`, only ids
+    // with their effort, and `auto` is the one a free plan runs.
+    assert_eq!(
+        WriterKind::Cursor.models(),
+        ["auto", "claude-haiku-5-5-low", "gpt-5.6-luna-low"]
+    );
 }
 
 #[test]
@@ -499,13 +509,21 @@ fn codexs_failures_are_told_apart() {
     );
 }
 
-// What `copilot -p -s --output-format=json` prints is JSONL whose records its docs do not describe: these are guesses,
-// for wave 1's trial to confirm or fix. The reply is the last `assistant.message`'s content; output with no JSON line at
-// all (`-s` printing the reply alone) is the reply.
-const COPILOT_OK: &str = r#"{"type":"session.start","data":{"model":"claude-haiku-4.5"}}
-{"type":"assistant.message","data":{"content":"{\"answer\":\"pong\"}"}}
-{"type":"session.idle","data":{}}
+// What `copilot -p -s --output-format=json` printed in wave 1's trial (#369), Copilot CLI 1.0.114, cut to the records
+// the reading meets: a reasoning `assistant.message` with no content, then the final one. The reply is the last
+// `assistant.message`'s content; output with no JSON line at all (`-s` printing the reply alone) is the reply.
+const COPILOT_OK: &str = r#"{"type":"session.start","data":{"sessionId":"bb32729f","version":1,"producer":"copilot-agent","copilotVersion":"1.0.114"},"id":"64d5","timestamp":"2026-11-24T09:16:42.896Z","parentId":null}
+{"type":"session.model_change","data":{"source":"startup","contextTier":null,"newModel":"auto","reasoningEffort":null},"id":"88e5","timestamp":"2026-11-24T09:16:45.124Z","parentId":"64d5"}
+{"type":"assistant.message_delta","data":{"messageId":"1071","deltaContent":"{\""},"id":"a1","timestamp":"2026-11-24T09:16:46.000Z","parentId":"88e5"}
+{"type":"assistant.message","data":{"messageId":"0b74","model":"gpt-6-luna","providerId":"copilot","content":"","toolRequests":[]},"id":"a2","timestamp":"2026-11-24T09:16:46.100Z","parentId":"88e5"}
+{"type":"assistant.message","data":{"messageId":"1071","model":"mai-code-2-flash","providerId":"copilot","content":"{\"answer\":\"pong\"}","toolRequests":[],"phase":"final_answer"},"id":"a3","timestamp":"2026-11-24T09:16:46.200Z","parentId":"88e5"}
+{"type":"assistant.turn_end","data":{"turnId":"0"},"id":"a4","timestamp":"2026-11-24T09:16:46.300Z","parentId":"a3"}
+{"type":"assistant.idle","data":{},"id":"a5","timestamp":"2026-11-24T09:16:46.400Z","parentId":"a4"}
+{"type":"result","data":null}
 "#;
+
+// A model the plan lacks, as wave 1's trial (#369) printed it: a `session.error`, exit 1.
+const COPILOT_NO_MODEL: &str = r#"{"type":"session.error","data":{"errorType":"query","message":"Execution failed: Model \"claude-haiku-4.5\" is not available."}}"#;
 
 #[test]
 fn a_copilot_reply_is_its_last_assistant_message_and_the_object_is_read_from_its_text() {
@@ -538,6 +556,7 @@ fn copilots_failures_are_told_apart() {
     );
     // An error record is a failure whatever the exit code says.
     assert_eq!(kind(&error("quota exceeded"), 0), FailureKind::Quota);
+    assert_eq!(kind(COPILOT_NO_MODEL, 1), FailureKind::Other);
     assert_eq!(kind("Error: Not logged in", 1), FailureKind::NotLoggedIn);
     // Its docs: non-zero when interrupted or the final response is empty.
     assert_eq!(kind("", 1), FailureKind::Other);
@@ -559,16 +578,22 @@ fn copilots_failures_are_told_apart() {
     assert!(!error.reason().contains("gpt-x"), "{}", error.reason());
 }
 
-// `agent -p --output-format json`'s one object, as Cursor's output-format page documents it.
-const CURSOR_OK: &str = r#"{"type":"result","subtype":"success","is_error":false,"duration_ms":1234,"duration_api_ms":1234,"result":"{\"answer\":\"pong\"}","session_id":"s","request_id":"r"}"#;
+// `agent -p --output-format json`'s one object, as Cursor's CLI 2026.11.22 printed it in wave 1's trial (#369).
+const CURSOR_OK: &str = r#"{"type":"result","subtype":"success","is_error":false,"duration_ms":6560,"duration_api_ms":6560,"result":"{\"answer\":\"pong\"}","session_id":"c8174df9","request_id":"a01f0297","usage":{"inputTokens":8801,"outputTokens":40,"cacheReadTokens":3968,"cacheWriteTokens":0,"reasoningTokens":29}}"#;
 
 #[test]
 fn a_cursor_reply_is_its_result_and_the_object_is_read_from_its_text() {
     let reply = read_reply(WriterKind::Cursor, true, &exit(0), CURSOR_OK).unwrap();
     assert_eq!(reply.text, r#"{"answer":"pong"}"#);
     assert_eq!(reply.json, Some(serde_json::json!({ "answer": "pong" })));
-    // Its object has no usage.
-    assert_eq!(reply.usage, None);
+    // Its usage is in camelCase.
+    assert_eq!(
+        reply.usage,
+        Some(Usage {
+            input_tokens: 8801,
+            output_tokens: 40
+        })
+    );
     let out = r#"{"type":"result","subtype":"success","is_error":false,"result":"plain words"}"#;
     assert_eq!(
         read(WriterKind::Cursor, false, 0, out),

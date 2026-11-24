@@ -102,10 +102,10 @@ impl WriterKind {
             ],
             // `codex debug models`, the listed ones, the cheapest first.
             WriterKind::Codex => &["gpt-6-luna", "gpt-5.6-luna", "gpt-5.6-terra"],
-            // Copilot's and Cursor's from their docs, not run (`delivery-writer-facts.md`): the cheapest first, and
-            // Cursor's own `auto`.
-            WriterKind::Copilot => &["claude-haiku-4.5", "gpt-6-astra", "gpt-5.3-codex"],
-            WriterKind::Cursor => &["auto", "claude-haiku-5-5", "gpt-5.6-luna"],
+            // Each one's own `auto` first: in wave 1's trial (#369) Copilot ran no named model on Daniel's plan, and a
+            // free Cursor runs only `auto` and Grok. Copilot's others are from its docs; Cursor's from `agent models`.
+            WriterKind::Copilot => &["auto", "claude-haiku-4.5", "gpt-6-astra", "gpt-5.3-codex"],
+            WriterKind::Cursor => &["auto", "claude-haiku-5-5-low", "gpt-5.6-luna-low"],
             WriterKind::Anthropic => &["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"],
             // Suggestions only: the endpoint takes any id it serves, such as a local Ollama's `llama3.2`.
             WriterKind::OpenAI => &["gpt-6-luna", "gpt-5.6-luna", "gpt-5.6-terra"],
@@ -444,13 +444,15 @@ pub fn build_command(
             lead(request)
         }
         WriterKind::Copilot => {
-            // An empty allow-list turns Copilot's tools off (its docs; that an empty one leaves none is not verified),
-            // and it never stops to ask. `-s` keeps only the reply; `json` prints it as JSON lines. No schema flag: the
-            // object is read from the text.
+            // An allow-list naming no tool turns Copilot's tools off, and its built-in MCP servers go too: an empty one
+            // left every tool on in wave 1's trial (#369), bash and edits only refused for want of an answer. It never
+            // stops to ask. `-s` keeps only the reply; `json` prints it as JSON lines. No schema flag: the object is
+            // read from the text.
             command.args([
                 "-s",
                 "--output-format=json",
-                "--available-tools=",
+                "--available-tools=none",
+                "--disable-builtin-mcps",
                 "--no-ask-user",
             ]);
             if let Some(model) = &request.model {
@@ -683,11 +685,13 @@ fn read_copilot(
     finish(kind, schema, text.into(), None, None)
 }
 
-/// The usage a reply's `usage` object gives, when it does: the same field names on both paths.
+/// The usage a reply's `usage` object gives, when it does: snake_case field names, or Cursor's camelCase.
 pub(crate) fn usage_of(usage: &Value) -> Option<Usage> {
-    usage["input_tokens"].as_u64().map(|input_tokens| Usage {
+    // Cursor's names are in camelCase.
+    let field = |snake: &str, camel: &str| usage[snake].as_u64().or(usage[camel].as_u64());
+    field("input_tokens", "inputTokens").map(|input_tokens| Usage {
         input_tokens,
-        output_tokens: usage["output_tokens"].as_u64().unwrap_or_default(),
+        output_tokens: field("output_tokens", "outputTokens").unwrap_or_default(),
     })
 }
 

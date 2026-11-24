@@ -88,16 +88,22 @@ fn the_logged_line_carries_the_parent_pid_or_the_wrappers() {
     assert_eq!(recorded(Some("4242"), "wrapper")["studio_pid"], 4242);
 }
 
-/// A hook run by an IDE app reports the IDE's pid, which lives on past the session, so none is
-/// recorded and the session takes the "idle?" path (#320, "IDE-hosted pids"; #362).
+/// A hook run by an IDE app's own process reports a pid that lives on past the session, so none is
+/// recorded and the session takes the "idle?" path (#320, "IDE-hosted pids"). Cursor's per-window
+/// extension host renames itself (`ps` shows its title, as in wave 1's trial, #369), so it is
+/// recorded, and its session ends when its window closes, as Daniel chose in #369.
 #[test]
-fn no_pid_when_the_agent_is_an_ide_app() {
+fn an_ide_bundle_gives_no_pid_but_cursors_window_does() {
     const HELPER: &str = "/Applications/Cursor.app/Contents/Frameworks/Cursor Helper (Plugin).app/Contents/MacOS/Cursor Helper (Plugin)";
     let t = table(&[(600, HELPER, 100)]);
     assert_eq!(agent_pid(None, 600, t), None);
     // Through a shell too.
     let t = table(&[(601, "/bin/zsh", 600), (600, HELPER, 100)]);
     assert_eq!(agent_pid(None, 601, t), None);
+    // What `ps` showed for Cursor's extension host.
+    const WINDOW: &str = "Cursor Helper (Plugin): extension-host cursor-ide [1-2]";
+    let t = table(&[(31034, WINDOW, 29702)]);
+    assert_eq!(agent_pid(None, 31034, t), Some(31034));
     // Cursor's CLI is a program of its own, whose pid ends with the session.
     let t = table(&[(
         700,
@@ -105,4 +111,24 @@ fn no_pid_when_the_agent_is_an_ide_app() {
         100,
     )]);
     assert_eq!(agent_pid(None, 700, t), Some(700));
+}
+
+/// Codex's TUI runs its hooks from its shared `app-server` daemon, which serves every session and
+/// outlives them (wave 1's trial, #369, Codex 0.172.0), so none is recorded and the session takes the
+/// "idle?" path; `codex exec` runs them itself, and its pid ends with the run.
+#[test]
+fn no_pid_when_the_agent_is_codexs_shared_daemon() {
+    const DAEMON: &str = "/Users/me/.codex/packages/app-server-daemon/releases/0.172.0-aarch64-apple-darwin/bin/codex";
+    let t = table(&[(37109, DAEMON, 70019), (70019, DAEMON, 1)]);
+    assert_eq!(agent_pid(None, 37109, t), None);
+    let t = table(&[(601, "/bin/zsh", 37109), (37109, DAEMON, 70019)]);
+    assert_eq!(agent_pid(None, 601, t), None);
+    // Under a `CODEX_HOME` of its own too.
+    const ELSEWHERE: &str = "/Users/me/codex-home/packages/app-server-daemon/releases/0.172.0-aarch64-apple-darwin/bin/codex";
+    assert_eq!(
+        agent_pid(None, 37110, table(&[(37110, ELSEWHERE, 70019)])),
+        None
+    );
+    let t = table(&[(9735, "/opt/homebrew/bin/codex", 100)]);
+    assert_eq!(agent_pid(None, 9735, t), Some(9735));
 }

@@ -551,7 +551,8 @@ fn read_jsonl(path: &str) -> Option<String> {
     fs::read_to_string(path).ok()
 }
 
-fn records(path: &str) -> Option<Vec<Value>> {
+/// The JSON records of JSONL transcript `path`; `None` when it cannot be read.
+pub(crate) fn records(path: &str) -> Option<Vec<Value>> {
     let text = read_jsonl(path)?;
     Some(
         text.lines()

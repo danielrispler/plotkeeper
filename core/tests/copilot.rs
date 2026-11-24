@@ -12,7 +12,7 @@
 //! transcript paths are made up: the docs give no example of them.
 
 use serde_json::json;
-use studio_core::{COPILOT_CAPABILITIES, State, Studio};
+use studio_core::{COPILOT_CAPABILITIES, Output, State, Studio};
 
 const RUN: &str = include_str!("fixtures/copilot/run.jsonl");
 const CAMEL: &str = "cs-7a1f";
@@ -138,5 +138,84 @@ fn a_copilot_session_ended_by_the_process_check_or_interrupted_stays_copilot() {
         let session = studio.session(CAMEL).unwrap();
         assert_eq!(session.state, State::Ended);
         assert_eq!(session.capabilities, COPILOT_CAPABILITIES);
+    }
+}
+
+/// Copilot's `agentStop` carries no reply, so each turn's is read from its transcript: the last
+/// `assistant.message` with text before the `hook.start` that logged this `agentStop`'s input, found
+/// by its `timestamp` (records as Copilot CLI 1.0.114 wrote them in wave 1's trial, #369). A live
+/// long reply asks for its summary, and a replay, whose transcript holds the later turns too, gives
+/// each turn its own.
+#[test]
+fn each_copilot_turn_takes_its_reply_from_the_transcript_and_a_long_one_asks_for_its_summary() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("events.jsonl");
+    let long = format!("The add function subtracted. {}", "word ".repeat(200));
+    let message = |content: &str| json!({ "type": "assistant.message", "data": { "content": content, "phase": "final_answer" } });
+    let stop_hook = |ts: u64| json!({ "type": "hook.start", "data": { "hookType": "agentStop", "input": { "sessionId": "s", "timestamp": ts } } });
+    let user = json!({ "type": "user.message", "data": { "content": "go" } });
+    let records = [
+        user.clone(),
+        message("I'll run calc.py first."),
+        message(""),
+        message("Fixed: 2+3 is 5."),
+        stop_hook(1000),
+        user,
+        message(&long),
+        stop_hook(2000),
+    ];
+    let text: String = records.iter().map(|r| format!("{r}\n")).collect();
+    std::fs::write(&path, text).unwrap();
+    let line = |event: &str, ts: u64, extra: serde_json::Value| {
+        let mut l = json!({
+            "sessionId": "s", "cwd": "/w/calc", "timestamp": ts, "studio_event": event,
+            "studio_agent": "copilot", "studio_pid": 84386, "studio_received_ms": ts,
+        });
+        l.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        l.to_string()
+    };
+    let stop = |ts| {
+        line(
+            "agentStop",
+            ts,
+            json!({ "transcriptPath": path.display().to_string(), "stopReason": "end_turn" }),
+        )
+    };
+    let lines = [
+        line("sessionStart", 1, json!({ "source": "new" })),
+        line("userPromptSubmitted", 2, json!({ "prompt": "fix calc" })),
+        stop(1000),
+        line("userPromptSubmitted", 1500, json!({ "prompt": "explain" })),
+        stop(2000),
+    ];
+
+    let mut studio = Studio::default();
+    let outputs: Vec<_> = lines.iter().flat_map(|l| studio.apply(l)).collect();
+    let summaries: Vec<_> = outputs
+        .iter()
+        .filter_map(|o| match o {
+            Output::Summary(request) => Some(request),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(summaries.len(), 1, "only the long reply asks");
+    assert!(summaries[0].wanted);
+    assert_eq!(
+        summaries[0].responses.last().map(|r| r.trim()),
+        Some(long.trim())
+    );
+
+    let replayed = Studio::replayed(lines.iter().map(String::as_str));
+    for studio in [&studio, &replayed] {
+        let replies: Vec<_> = studio
+            .session("s")
+            .unwrap()
+            .turns
+            .iter()
+            .map(|t| t.reply.clone())
+            .collect();
+        assert_eq!(replies, ["Fixed: 2+3 is 5.", long.trim()]);
     }
 }

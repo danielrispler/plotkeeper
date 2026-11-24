@@ -9,7 +9,7 @@
 //! sessions run at once: the first from the CLI, with its pid, the second from the IDE, whose pid the
 //! hook does not record.
 
-use studio_core::{CURSOR_CAPABILITIES, State, Studio};
+use studio_core::{CURSOR_CAPABILITIES, Change, Output, State, Studio};
 
 const RUN: &str = include_str!("fixtures/cursor/run.jsonl");
 const FIRST: &str = "c7a1e2f0-3b4d-4c5e-9f60-1a2b3c4d5e6f";
@@ -167,5 +167,77 @@ fn a_cursor_session_ended_by_the_process_check_or_interrupted_stays_cursor() {
         let session = studio.session(FIRST).unwrap();
         assert_eq!(session.state, State::Ended);
         assert_eq!(session.capabilities, CURSOR_CAPABILITIES);
+    }
+}
+
+/// Cursor runs `afterAgentResponse` and `stop` as hooks of their own a few milliseconds apart, so
+/// their lines land in either order (wave 1's trial, #369: reply first in one run, `stop` first in
+/// the next, 4 ms apart). The reply is the turn's either way, and a long one asks for its wanted
+/// summary once, also when the turn changed code, so its `stop` raised a card and asked for a summary
+/// it did not yet want (the live case the trial met). Lines as Cursor CLI 2026.11.22 sent them, cut to
+/// the fields read.
+#[test]
+fn a_reply_that_lands_after_its_stop_is_still_its_turns_and_asks_for_its_summary() {
+    let line = |event: &str, t: u64, extra: &str| {
+        format!(
+            r#"{{"conversation_id":"d07b","cursor_version":"2026.11.22-e9042b2","generation_id":"db6e","hook_event_name":"{event}","model":"default","session_id":"d07b","studio_agent":"cursor","studio_pid":86263,"studio_received_ms":{t},"workspace_roots":["/w/calc"]{extra}}}"#
+        )
+    };
+    let reply = format!("The add function subtracted. {}", "word ".repeat(200));
+    let start = line("sessionStart", 1, "");
+    let prompt = line(
+        "beforeSubmitPrompt",
+        2,
+        r#","prompt":"Fix calc.py and explain""#,
+    );
+    let stop = line("stop", 3, r#","status":"completed","loop_count":0"#);
+    let answer = line(
+        "afterAgentResponse",
+        4,
+        &format!(r#","text":{}"#, serde_json::to_string(&reply).unwrap()),
+    );
+    let edited = || {
+        let change = Change {
+            base: Default::default(),
+            diff: "--- a/calc.py\n+++ b/calc.py\n".into(),
+            head: None,
+        };
+        [("d07b".to_owned(), change)].into_iter().collect()
+    };
+    let orders = [[&stop, &answer], [&answer, &stop]];
+    for (order, changed) in orders.iter().flat_map(|o| [(o, false), (o, true)]) {
+        let mut studio = Studio::default();
+        let mut outputs = Vec::new();
+        for l in [&start, &prompt, order[0], order[1]] {
+            let changes = match changed && *l == stop {
+                true => edited(),
+                false => Default::default(),
+            };
+            outputs.extend(studio.apply_with_changes(l, changes));
+        }
+        let summaries: Vec<_> = outputs
+            .iter()
+            .filter_map(|o| match o {
+                Output::Summary(request) if request.wanted => Some(request),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            summaries.len(),
+            1,
+            "one wanted summary request, changed: {changed}"
+        );
+        assert_eq!(summaries[0].card.is_some(), changed);
+        assert_eq!(
+            summaries[0].responses.last().map(|r| r.trim()),
+            Some(reply.trim())
+        );
+        let session = studio.session("d07b").unwrap();
+        assert_eq!(session.state, State::YourTurn);
+        assert_eq!(session.turns[0].reply, reply.trim());
+        assert_eq!(
+            session.turns[0].message.as_deref(),
+            Some(reply.lines().next().unwrap().trim())
+        );
     }
 }
