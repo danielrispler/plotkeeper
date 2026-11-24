@@ -634,6 +634,16 @@ impl Harness {
     }
 }
 
+/// Whether install's record says any harness is wired, read afresh, so the page's "not recording" notice (#437) goes as
+/// soon as `plotkeeper install` wires one. A record that cannot be read counts as nothing wired.
+pub fn any_wired(home: &Path) -> bool {
+    load(home).ok().flatten().is_some_and(|state| {
+        HARNESSES
+            .into_iter()
+            .any(|h| h.answer(&state) == Some(Answer::Wired))
+    })
+}
+
 /// The consent step of a bare `plotkeeper` start (#434): for the harnesses found on `path` that have no answer yet, it
 /// prints what wiring them would change and asks `Wire these? [Y/n]` on `terminal`, then wires them on yes, with the
 /// hook binaries from `beside`, or records them as declined on no. With no terminal it asks nothing, wires nothing,
