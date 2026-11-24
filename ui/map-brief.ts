@@ -1,7 +1,8 @@
 // The PR brief on the Map view (spec danielrispler/plotkeeper#334, ticket #339), as the prototype's treatment C plays it: opening a tray row plays
 // a brief's steps one at a time under the map. A light runs the step's links at one speed and a part lights as it arrives; the camera frames the
-// parts the brief lights; the panel keeps its tallest step's height and crossfades between steps; a figure for a change inside one part is drawn
-// by `figureShapes` from the writer's labels; citations sit in quiet type, and the panel says when the writer saw only part of the diff and which
+// parts the brief lights; the panel is one narrow width, as tall as the step it shows (its CSS scrolls a taller step inside it, #449), and
+// crossfades between steps; a figure for a change inside one part is drawn under the step's words by `figureShapes` from the writer's labels;
+// citations sit in quiet type, and the panel says when the writer saw only part of the diff and which
 // items are not confirmed from the facts. "See the code" opens the drawer (`map-drawer.ts`) above it. Opening a brief returns the map to now.
 // A step's check (#340) is answered in place: a pick in the panel, an order by tapping parts on the map into numbered slots (`pickRun`, `orderRun`);
 // Check grades it, a wrong answer shows the correction, and an order check replays the right path along the links.
@@ -22,8 +23,8 @@ import { scrubTo } from "./map-history.js";
 import { overturnNote, ratifyActions } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
-import { actorSize, alsoAt, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
-import type { BriefCheck, BriefStep, BriefView, PrBrief, RatifyRow, ReadyPr, StoredCatchUp } from "./types.js";
+import { actorSize, alsoAt, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, stageLabel, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
+import type { BriefCheck, BriefStep, BriefView, CatchUpOffer, PrBrief, RatifyRow, ReadyPr, StoredCatchUp } from "./types.js";
 
 const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
 // The brief being played, as `pr_brief` returned it.
@@ -151,16 +152,17 @@ export async function openBriefOf(project: string, number: number, chapter: numb
   show(view, false);
 }
 
-// Opens `part`'s catch-up: the stored one for its current fog, or, while it is written, the panel says "Writing the part catch-up…", the map
+// Opens `part`'s catch-up: the stored one for its current fog, or, while it is written, the panel says which call of the write runs, the map
 // stays usable, and it opens when it lands (`map-landed` draws the map again), unless another open or a close came since.
 let awaitingCatchUp: { project: string; part: string; wanted: () => boolean } | null = null;
 export async function openCatchUpOf(project: string, part: string) {
   awaiting = null;
   awaitingCatchUp = null;
   const wanted = latest.begin();
-  const writing = "Writing the part catch-up…";
+  // The card says which call of the write runs (#450), as the map's last state has it.
+  const writing = () => stageOf(currentMap()?.state.catch_ups?.[part]);
   // A catch-up has no tray row for the wait to mark.
-  const slow = window.setTimeout(() => wanted() && showWriting(null, writing), WRITING_AFTER_MS);
+  const slow = window.setTimeout(() => wanted() && showWriting(null, writing(), CATCH_UP_WAIT), WRITING_AFTER_MS);
   let got: StoredCatchUp | { writing: true } | null;
   try {
     got = await invoke("part_catch_up", { project, part });
@@ -172,7 +174,7 @@ export async function openCatchUpOf(project: string, part: string) {
   if (!wanted()) return;
   if (got && "writing" in got) {
     awaitingCatchUp = { project, part, wanted };
-    showWriting(null, writing);
+    showWriting(null, writing(), CATCH_UP_WAIT);
     return;
   }
   if (!briefOpen()) hideWriting();
@@ -204,7 +206,7 @@ onDraw((view) => {
   }
   const { project, part } = awaitingCatchUp;
   const next = awaitedCatchUp(view.state.catch_ups?.[part]);
-  if (next === "wait") return;
+  if (next === "wait") return showWriting(null, stageOf(view.state.catch_ups?.[part]), CATCH_UP_WAIT);
   awaitingCatchUp = null;
   if (next === "open") void openCatchUpOf(project, part);
   else if (!briefOpen()) hideWriting();
@@ -212,10 +214,26 @@ onDraw((view) => {
 
 // The panel says so while a brief is written for an open: after this long, so a stored brief never flashes it.
 const WRITING_AFTER_MS = 300;
-function showWriting(number: number | null, words = "Writing the brief…") {
+const CATCH_UP_WAIT = "Writing the part catch-up";
+const stageOf = (offer: CatchUpOffer | undefined) => stageLabel(offer?.kind === "catch-up" ? offer.stage : undefined);
+// The waiting card (#450): at the story card's width, a named indeterminate progress bar and what the write is doing, in a polite live
+// region so a screen reader hears each new stage. A new stage changes the words in place, so the region announces it.
+function showWriting(number: number | null, words = "Writing the brief…", name = "Writing the brief") {
   if (briefOpen()) return;
   const box = panel();
-  box.replaceChildren(text("p", words, "brief-writing"));
+  let stage = box.querySelector<HTMLElement>(".brief-writing-stage");
+  if (!stage || box.querySelector("progress")?.getAttribute("aria-label") !== name) {
+    const wait = document.createElement("div");
+    wait.className = "brief-writing";
+    wait.setAttribute("role", "status");
+    wait.setAttribute("aria-live", "polite");
+    const bar = document.createElement("progress");
+    bar.className = "brief-wait";
+    bar.setAttribute("aria-label", name);
+    stage = text("p", words, "brief-writing-stage");
+    wait.append(bar, stage);
+    box.replaceChildren(wait);
+  } else if (stage.textContent !== words) stage.textContent = words;
   box.classList.add("open");
   box.hidden = false;
   const note = number === null ? null : document.querySelector(`#map-tray .tray-row[data-pr="${number}"] .tray-note`);
@@ -455,6 +473,20 @@ const lawTag = (view: MapView, step: BriefStep) => {
 
 const partName = (view: MapView, id: string) => view.doc.parts.find((p) => p.id === id)?.name ?? view.doc.actors.find((a) => a.id === id)?.name ?? id;
 
+// A step's body (#446): the writer may wrap a phrase in <b>...</b>. Each paired span becomes a bold element and every other run plain
+// text, so an unpaired tag shows as written. The body is never parsed as HTML.
+function bodyNode(body: string) {
+  const node = text("p", "", "brief-body");
+  const runs = body.split(/(<\/?b>)/);
+  for (let i = 0; i < runs.length; i++) {
+    if (runs[i] === "<b>" && runs[i + 2] === "</b>") {
+      node.append(text("b", runs[i + 1]!));
+      i += 2;
+    } else if (runs[i]) node.append(runs[i]!);
+  }
+  return node;
+}
+
 // One step's words and figure. The panel around them stays put.
 function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["also"] = []) {
   const part = (id: string) => partName(view, id);
@@ -463,7 +495,7 @@ function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["als
   kick.append(text("span", pr < 0 ? "Part catch-up" : `#${pr}`), text("span", step.k));
   const tag = lawTag(view, step);
   if (tag) kick.append(tag);
-  words.append(kick, text("h3", step.h, "brief-title"), text("p", step.b, "brief-body"));
+  words.append(kick, text("h3", step.h, "brief-title"), bodyNode(step.b));
   if (step.list.length) words.append(listNode(step.list));
   if (step.risks.length) words.append(listNode(step.risks.map((r) => `${part(r.part)}: ${r.trigger} To see it: ${r.check}`)));
   if (step.covered_by) words.append(text("p", `Covered by the test ${step.covered_by}.`, "brief-quiet"));
@@ -731,7 +763,7 @@ function show(view: MapView, same: boolean) {
   if (!now || !step || !playing) return closeBrief();
   const pr = now.pr;
   document.body.classList.add("brief-open");
-  if (!box.classList.contains("open") || !box.firstElementChild) buildPanel(view, list, pr);
+  if (!box.classList.contains("open") || !box.firstElementChild) buildPanel(view, list);
   box.hidden = false;
   // A reflow first, so the panel rises from where it was hidden.
   void box.offsetWidth;
@@ -744,8 +776,11 @@ function show(view: MapView, same: boolean) {
     if (now.step === 0) summaryInto(node);
     const bar = endBar(node, now.step, list.length);
     cols.replaceChildren(node);
+    // A new step opens at its top, and the camera frames once the step's words set the card's height (#443 review).
+    if (!same) cols.scrollTop = 0;
     bar?.offer();
     watchLast(node, now.step);
+    aim(view, step);
   };
   clearTimeout(swap);
   if (same || reduced()) {
@@ -764,10 +799,9 @@ function show(view: MapView, same: boolean) {
   wireTaps(view);
   light(view, step);
   paintOrder(view, step);
-  aim(view, step);
 }
 
-// The end-of-story bar ends the played list's last step: a single story's end, or a chapter's (#393). It goes under the step's words.
+// The end-of-story bar ends the played list's last step: a single story's end, or a chapter's (#393). It goes under the step's words and figure.
 function endBar(node: HTMLElement, index: number, count: number): Bar | null {
   const now = player.current();
   if (!now || index !== count - 1) return null;
@@ -776,7 +810,7 @@ function endBar(node: HTMLElement, index: number, count: number): Bar | null {
   // A part catch-up's bar is keyed by its part (#391).
   const about = catchUp ? { project: now.project, part: catchUp.part } : { project: now.project, pr: now.pr, chapter: now.chapter };
   if (!bar) bars.set(key, (bar = storyBar(about, gistOf(now.chapter))));
-  node.querySelector(".brief-txt")?.append(bar.node);
+  node.append(bar.node);
   return bar;
 }
 
@@ -794,10 +828,9 @@ function gistOf(chapter: number): string | undefined {
   return explainsBack(story.gist, parts, tierOf) ? story.gist : undefined;
 }
 
-// The panel's frame, built once per brief: it keeps the height of its tallest step, so it never jumps.
-function buildPanel(view: MapView, list: BriefStep[], pr: number) {
+// The panel's frame, built once per brief. Its height follows the step it shows, and Back and Next end it (#449).
+function buildPanel(view: MapView, list: BriefStep[]) {
   const box = panel();
-  box.style.minHeight = "";
   const leave = text("button", "Leave", "btn quiet brief-leave");
   leave.title = "Close the brief; it opens again at this step";
   leave.addEventListener("click", closeBrief);
@@ -828,18 +861,6 @@ function buildPanel(view: MapView, list: BriefStep[], pr: number) {
   // A PR that closes the pre-flighted issue, or a ticket under it (#394): what Daniel expected against what it touched.
   const line = expectedLine(playing?.expected, view.doc);
   box.replaceChildren(leave, ...(line ? [text("p", line, "brief-expected")] : []), cols, foot);
-  // One height for the whole brief: its tallest step's.
-  box.hidden = false;
-  let tallest = 0;
-  const now = player.current();
-  list.forEach((step, i) => {
-    const node = stepNode(view, step, pr, playing && now ? alsoAt(playing.brief.brief, now.chapter, i, storySteps(list).length) : []);
-    if (i === 0) summaryInto(node);
-    endBar(node, i, list.length);
-    cols.replaceChildren(node);
-    tallest = Math.max(tallest, box.offsetHeight);
-  });
-  box.style.minHeight = `${tallest}px`;
 }
 
 function move(by: number) {

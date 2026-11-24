@@ -5,7 +5,8 @@
 // Where the next tickets plug in, so they add to this file rather than reshape it:
 // - `onPlate(fn)`: runs for each plate each time it is drawn, with the plate's slots: `fog` behind the name, `marks` at its top
 //   right (law marks sit there; a broken-law mark joins them), `chips` along its foot (live agents). A ticket fills a slot.
-// - `onPlateClick(fn)`: a click on a plate that was not a drag, such as one that opens the part's sheet.
+// - `onPlateClick(fn)`: a click on a plate that was not a drag, such as one that opens the part's sheet. A click on the empty map closes
+//   the `drawer` and `sheet` layers (#445).
 // - `onDraw(fn)`: runs after each draw with the whole `MapView`, for what is not on a plate: the side area (`slots.notPlaced`,
 //   `slots.sheet`, `slots.drawer`, `slots.runs`, shown by `syncSide`), the tray (`slots.tray`) and the banner (`slots.banner`).
 // - `registerLayer(name, layer)`: Esc's layers, `drawer`, `brief`, `scrubbed`, `sheet` and `panel` (#385), peeled in that order; on the bare map Esc does nothing.
@@ -430,20 +431,30 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub
   syncSide(slots);
 }
 
+// How far, in screen pixels, a press on the empty map may move and still be a click (#445, tldraw's threshold).
+const clickSlop = 4;
+
 // The map area's own input: a drag of the empty background pans Daniel's view, ⌘+wheel and a pinch (a wheel with Ctrl held, as Chrome
 // reports it) zoom around the pointer, and a plain wheel or two-finger scroll does nothing and never scrolls the page.
+// A press that never moved past `clickSlop` before its release is a click on the empty map: it closes the part's sheet and its drawer (#445).
 function pan(canvas: HTMLElement) {
   canvas.addEventListener("pointerdown", (event) => {
     if (event.button !== 0 || !rig || rig.lent() || (event.target as Element).closest(".plate, .actor")) return;
     const [start, from] = [rig.user(), { x: event.clientX, y: event.clientY }];
+    let far = 0;
     canvas.setPointerCapture(event.pointerId);
     canvas.classList.add("panning");
-    const move = (moved: PointerEvent) => moveCamera(panTo(start, from, { x: moved.clientX, y: moved.clientY }), false);
-    const end = () => {
+    const move = (moved: PointerEvent) => {
+      far = Math.max(far, Math.hypot(moved.clientX - from.x, moved.clientY - from.y));
+      moveCamera(panTo(start, from, { x: moved.clientX, y: moved.clientY }), false);
+    };
+    const end = (ended: PointerEvent) => {
       canvas.classList.remove("panning");
       canvas.removeEventListener("pointermove", move);
       canvas.removeEventListener("pointerup", end);
       canvas.removeEventListener("pointercancel", end);
+      if (ended.type !== "pointerup" || Math.max(far, Math.hypot(ended.clientX - from.x, ended.clientY - from.y)) > clickSlop) return;
+      for (const name of ["drawer", "sheet"] as const) if (layers[name]?.open()) layers[name]!.close();
     };
     canvas.addEventListener("pointermove", move);
     canvas.addEventListener("pointerup", end);

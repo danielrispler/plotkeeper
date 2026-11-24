@@ -442,7 +442,9 @@ export type LawPatchOpened = { kind: "pr"; number: number; url: string } | { kin
 export type BackLawStarted = { kind: "run"; id: string } | { kind: "refused"; line: string; prompt: string };
 // A fogged part's offer (#391): a part catch-up, `ready` when one is stored for its current fog list, `writing` while one is written, `failed`
 // when the last write for it failed; or the chapter of the one PR's brief that lights the part.
-export type CatchUpOffer = { kind: "catch-up"; ready: boolean; writing: boolean; failed: boolean } | { kind: "chapter"; pr: number; chapter: number };
+export type CatchUpOffer = { kind: "catch-up"; ready: boolean; writing: boolean; failed: boolean; stage?: CatchUpStage } | { kind: "chapter"; pr: number; chapter: number };
+// Which call of a part catch-up's write runs now (#450): the writer, the claim check, or the retry rewriting `claims` flagged items.
+export type CatchUpStage = { kind: "writing" } | { kind: "checking" } | { kind: "fixing"; claims: number };
 // A part catch-up as `part_catch_up` returns it (`understanding/src/part_catch_up.rs`): the story in the PR brief's shape and the fog list it covers.
 // Over more than a few fog entries it carries `summary`: the line saying it summarises the main shifts, and the full fog list, oldest first.
 // `body`: always empty in a summary's list; the window never reads it.
@@ -639,7 +641,7 @@ export interface Commands {
 export type Command = keyof Commands;
 
 // What the shell counted of Daniel's use (`stop_rules.rs`), for the one-time review: days, merged PRs and the uses of each module.
-export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen" | "rating-offered" | "rating-given" | "rating-skipped" | "note-given" | "explain-back-given" | "explain-back-marked" | "refresher-entered" | "stale-entered" | "catch-up-offered" | "catch-up-opened" | "catch-up-done" | "pre-flight-run" | "micro-world-opened" | "back-law-started" | "guard-offered" | "guard-started";
+export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen" | "explain-back-given" | "explain-back-marked" | "refresher-entered" | "stale-entered" | "catch-up-offered" | "catch-up-opened" | "catch-up-done" | "pre-flight-run" | "micro-world-opened" | "back-law-started" | "guard-offered" | "guard-started";
 export type StopFacts = {
   active_days: number;
   merged_prs: number;

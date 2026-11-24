@@ -24,3 +24,8 @@ its required fields. They also freeze the hash that keys a note (the command, a 
 
 `pr-brief-v5/` holds a stored PR brief as written once a bug fix's brief carries Guard with a law's offer (#401): `guard` with the parts
 the PR touched. `understanding/tests/pr_brief.rs` loads it; the older samples, with no `guard`, read with none.
+
+`pr-brief-v6/` holds `pr-brief-records.jsonl`, the PR brief records `BriefStore::records` reads, as written once each call's usage
+carries the tokens read from and written to the cache (#450): the first record from before, its calls with no
+`cache_read_tokens` or `cache_write_tokens`, which read as 0; the second with both on each call. `understanding/tests/pr_brief.rs`
+loads it.

@@ -308,6 +308,18 @@ fn the_wire_samples_of_the_map_view_are_written_for_tsc() {
                             ready: true,
                             writing: false,
                             failed: false,
+                            stage: None,
+                        },
+                    ),
+                    (
+                        "hook".into(),
+                        studio_server::part_catch_ups::Offer::CatchUp {
+                            ready: false,
+                            writing: true,
+                            failed: false,
+                            stage: Some(studio_understanding::pr_brief_check::Stage::Fixing {
+                                claims: 2,
+                            }),
                         },
                     ),
                     (
@@ -581,10 +593,6 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
         StopKind::CatchUpOffered,
         StopKind::CatchUpOpened,
         StopKind::CatchUpDone,
-        StopKind::RatingOffered,
-        StopKind::RatingGiven,
-        StopKind::RatingSkipped,
-        StopKind::NoteGiven,
         StopKind::ExplainBackGiven,
         StopKind::ExplainBackMarked,
         StopKind::RefresherEntered,

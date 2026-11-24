@@ -16,8 +16,8 @@ const failsOnPurpose = new Set(["railIdleFail"]);
 
 // The map fixtures and the writer section are drawn at 1900x1180, the rest at snap's default size.
 // A fixture named `…Narrow` is drawn at 1000x800, below the 1007 px where the map keeps one overlay open (#385); the map's and the
-// writer section's, in the Settings panel over the map (#387), at 1900x1180.
-const sizeOf = (name) => (name.endsWith("Narrow") ? "1000x800" : name.startsWith("map") || name.startsWith("writers") ? "1900x1180" : undefined);
+// writer section's, in the Settings panel over the map (#387), at 1900x1180. A fixture named `…Short` is drawn at 1300x700, a short window.
+const sizeOf = (name) => (name.endsWith("Narrow") ? "1000x800" : name.endsWith("Short") ? "1300x700" : name.startsWith("map") || name.startsWith("writers") ? "1900x1180" : undefined);
 
 const shardFlag = process.argv.slice(2).find((arg) => arg.startsWith("--shard="))?.slice("--shard=".length);
 let queue;

@@ -1088,6 +1088,132 @@ fn a_failed_call_or_an_unreadable_reply_stores_and_records_nothing() {
     assert!(writer.prompts.borrow().is_empty());
 }
 
+#[test]
+fn a_briefs_call_runs_at_the_brief_effort_and_at_claudes_own_without_one() {
+    use studio_understanding::ClaudeWriter;
+    let args = |w: &ClaudeWriter| -> Vec<String> {
+        w.brief_command("opus", CallKind::Write, None, "p")
+            .0
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    };
+    let plain = ClaudeWriter::new("/bin/claude".into(), "/w/card-writer".into());
+    assert!(
+        !args(&plain).contains(&"--effort".to_string()),
+        "{:?}",
+        args(&plain)
+    );
+    let low = ClaudeWriter::new("/bin/claude".into(), "/w/card-writer".into())
+        .with_brief_effort(|| "low".into());
+    let got = args(&low);
+    let at = got.iter().position(|a| a == "--effort");
+    assert_eq!(at.map(|i| got[i + 1].as_str()), Some("low"), "{got:?}");
+    let unset = ClaudeWriter::new("/bin/claude".into(), "/w/card-writer".into())
+        .with_brief_effort(String::new);
+    assert!(!args(&unset).contains(&"--effort".to_string()));
+}
+
+#[test]
+fn a_briefs_call_carries_its_facts_as_appended_system_text_and_its_own_rules_as_the_prompt() {
+    use studio_understanding::ClaudeWriter;
+    let writer = ClaudeWriter::new("/bin/claude".into(), "/w/card-writer".into());
+    let (command, stdin) =
+        writer.brief_command("opus", CallKind::Write, Some("FACTS text"), "the rules");
+    let args: Vec<String> = command
+        .get_args()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    let at = args.iter().position(|a| a == "--append-system-prompt");
+    assert_eq!(
+        at.map(|i| args[i + 1].as_str()),
+        Some("FACTS text"),
+        "{args:?}"
+    );
+    assert!(
+        !args.contains(&"--system-prompt".to_string()),
+        "the default system prompt stays"
+    );
+    assert_eq!(stdin, "the rules");
+}
+
+// No argument can hold a NUL byte: the facts drop theirs, as standard input does, so the spawn starts (#443 review).
+#[test]
+fn a_briefs_facts_with_a_nul_byte_still_spawn() {
+    use studio_understanding::ClaudeWriter;
+    let folder = tempfile::tempdir().unwrap();
+    let writer = ClaudeWriter::new("/usr/bin/true".into(), folder.path().into());
+    let (mut command, _) =
+        writer.brief_command("opus", CallKind::Write, Some("FACTS\0 from a diff"), "p");
+    let args: Vec<String> = command
+        .get_args()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    let at = args.iter().position(|a| a == "--append-system-prompt");
+    assert_eq!(at.map(|i| args[i + 1].as_str()), Some("FACTS from a diff"));
+    let spawned = command.spawn();
+    assert!(spawned.is_ok(), "{:?}", spawned.err());
+    spawned.unwrap().wait().unwrap();
+}
+
+#[test]
+fn the_claim_checks_call_runs_at_claudes_own_effort_whatever_the_brief_effort() {
+    use studio_understanding::ClaudeWriter;
+    let writer = ClaudeWriter::new("/bin/claude".into(), "/w/card-writer".into())
+        .with_brief_effort(|| "low".into());
+    let effort = |kind| -> Option<String> {
+        let args: Vec<String> = writer
+            .brief_command("opus", kind, Some("FACTS"), "p")
+            .0
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let at = args.iter().position(|a| a == "--effort")?;
+        Some(args[at + 1].clone())
+    };
+    assert_eq!(effort(CallKind::Write), Some("low".into()));
+    assert_eq!(effort(CallKind::Check), None);
+}
+
+// The brief effort covers the brief and catch-up writer and its retry only: pre-flight and the law draft call plain
+// `write`, which runs at `claude`'s own effort (#443 review).
+#[test]
+fn a_plain_write_runs_at_claudes_own_effort_whatever_the_brief_effort() {
+    use std::os::unix::fs::PermissionsExt;
+    use studio_understanding::ClaudeWriter;
+    let dir = tempfile::tempdir().unwrap();
+    let args = dir.path().join("args");
+    let claude = dir.path().join("claude");
+    std::fs::write(
+        &claude,
+        format!(
+            "#!/bin/sh\ncat > /dev/null\necho \"$@\" > '{}'\necho '{{\"result\":\"ok\"}}'\n",
+            args.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let writer = ClaudeWriter::new(claude, dir.path().into()).with_brief_effort(|| "low".into());
+
+    assert_eq!(writer.write("opus", "p").unwrap().text, "ok");
+    let got = std::fs::read_to_string(&args).unwrap();
+    assert!(got.contains("--model opus"), "{got}");
+    assert!(!got.contains("--effort"), "{got}");
+}
+
+#[test]
+fn a_calls_usage_keeps_the_tokens_read_from_the_cache_and_written_to_it() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/stored/pr-brief-v3");
+    let reply =
+        read_envelope(&std::fs::read_to_string(dir.join("317-reply.json")).unwrap()).unwrap();
+    let usage = reply.usage;
+    assert_eq!(usage.input_tokens, 2 + 29986 + 1760);
+    assert_eq!(
+        (usage.cache_read_tokens, usage.cache_write_tokens),
+        (1760, 29986)
+    );
+}
+
 // @law: old-stored-files-load
 #[test]
 fn a_stored_brief_reads_in_an_older_or_newer_build_which_ignores_what_it_does_not_know() {
@@ -1172,6 +1298,40 @@ fn a_stored_brief_with_a_guard_reads_with_it_and_an_older_one_has_none() {
     let older: StoredBrief =
         serde_json::from_str(&read("pr-brief-v4/stored-brief-full.json")).unwrap();
     assert_eq!(older.guard, None);
+}
+
+// @law: old-stored-files-load
+#[test]
+fn stored_records_read_with_their_calls_cache_tokens_and_older_ones_with_none() {
+    let sample = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/stored/pr-brief-v6/pr-brief-records.jsonl");
+    let data = tempfile::tempdir().unwrap();
+    let store = BriefStore::open(data.path()).unwrap();
+    std::fs::copy(sample, data.path().join("pr-briefs/pr-brief-records.jsonl")).unwrap();
+
+    let records = store.records();
+    let prs: Vec<u64> = records.iter().map(|r| r.pr).collect();
+    assert_eq!(prs, vec![402, 455]);
+    // Written before #450: its calls carry no cache tokens and read with none.
+    let older: Vec<(u64, u64)> = records[0]
+        .calls
+        .iter()
+        .map(|c| (c.cache_read_tokens, c.cache_write_tokens))
+        .collect();
+    assert_eq!(older, vec![(0, 0), (0, 0)]);
+    let newer: Vec<(&str, u64, u64)> = records[1]
+        .calls
+        .iter()
+        .map(|c| (c.role.as_str(), c.cache_read_tokens, c.cache_write_tokens))
+        .collect();
+    assert_eq!(
+        newer,
+        vec![
+            ("write", 0, 29986),
+            ("check", 29986, 1760),
+            ("retry", 29986, 0)
+        ]
+    );
 }
 
 // ---- gather: git only ----
@@ -1327,6 +1487,11 @@ fn a_flagged_step_is_rewritten_unflagged_steps_are_kept_and_a_step_still_flagged
     assert!(prompts[1].1.contains("=== SHAPE (decided by code) ==="));
     assert!(prompts[2].1.contains("banned word"));
     assert!(prompts[2].1.contains("the PR never says it is kept"));
+    // The three calls get the same facts block, byte for byte (#450); a writer with no system text of its own gets it first.
+    let block = facts_block(&build_facts(&source(&["alpha/a.rs"])).unwrap());
+    for (i, (_, p)) in prompts.iter().enumerate() {
+        assert!(p.starts_with(&block), "call {i} starts: {}", &p[..80]);
+    }
     assert!(
         prompts.iter().all(|(m, _)| m == "opus"),
         "the PR briefs model, all three calls"

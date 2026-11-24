@@ -40,23 +40,21 @@
     <div id="palette" class="picker" role="dialog" aria-label="Palette" hidden></div>
 
     <aside class="rail" aria-label="Session story">
-      <!-- One line (danielrispler/Falinks#574): the verdict, the permission mode unless default (danielrispler/Falinks#541), always shown, and
-           the phase (danielrispler/Falinks#475); the times (danielrispler/Falinks#473) and the model show on hover. Rename, Close and Delete
-           wait in the "⋯" menu. -->
+      <!-- Two lines (#444). Line 1: the agent's logo, the session's name on one line, cut by CSS with "…" (the full name stays in the page
+           and is its hover text), then "⋯". Line 2, muted: the verdict, the block's kind, the permission mode unless default
+           (danielrispler/Falinks#541), always shown, and the phase (danielrispler/Falinks#475); the times (danielrispler/Falinks#473) and the
+           model show on hover. Rename, Mark unseen and Delete wait in the "⋯" menu. -->
       <div class="rail-h">
         <div id="headline" class="headline">
-          <p class="line-1"><span id="state" class="state"></span> <span id="block" class="block"></span> <span id="mode" class="mode"></span> <span id="mark" class="mark"></span></p>
-          <p id="session-name" class="session-name"></p>
-          <p id="phase" class="phase"></p>
+          <p class="line-1"><span id="mark" class="mark"></span><span id="session-name" class="session-name"></span></p>
+          <p class="line-2"><span id="state" class="state"></span><span id="block" class="block"></span><span id="mode" class="mode"></span><span id="phase" class="phase"></span></p>
         </div>
-        <button id="rail-more" class="btn small" type="button" popovertarget="rail-actions" aria-label="More actions" title="Rename, mark unseen, close or delete this session" hidden>⋯</button>
+        <button id="rail-more" class="btn small" type="button" popovertarget="rail-actions" aria-label="More actions" title="Rename, mark unseen or delete this session" hidden>⋯</button>
         <div id="rail-actions" class="menu" popover>
           <!-- Rename and close (danielrispler/Falinks#469). -->
           <button id="rename" class="btn small" type="button" title="Give this session a name of your own" hidden>Rename</button>
           <!-- Unseen (danielrispler/Falinks#556): the row's mark comes back until Daniel selects it again. -->
           <button id="mark-unseen" class="btn small" type="button" title="Mark this session unseen, to come back to it" hidden>Mark unseen</button>
-          <button id="open-all" class="btn small" type="button" title="Unfold every turn and section in the story">Open all</button>
-          <button id="close-all" class="btn small" type="button" title="Fold every turn and section in the story">Close all</button>
           <button id="delete" class="btn small" type="button" title="Remove this session from the list; its cards are kept" hidden>Delete</button>
         </div>
       </div>

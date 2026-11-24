@@ -35,9 +35,10 @@ cpSync(dist, site, { recursive: true });
 const fixture = fixtures[name]();
 writeFileSync(join(site, "index.html"), snapPage(readFileSync(join(dist, "index.html"), "utf8"), fixture, { bodyClasses }));
 
-// A fixture with `realPointer` runs Chrome with its DevTools port open, and the page's `__snapClick` asks here for a real mouse click,
-// sent as Chrome's own input (`Input.dispatchMouseEvent`): what `element.click()` skips, such as pointer capture, then happens as in use.
-async function realClick(x, y) {
+// A fixture with `realPointer` runs Chrome with its DevTools port open, and the page's `__snapClick`, `__snapDrag` and `__snapDoubleClick`
+// ask here for real mouse input, sent as Chrome's own (`Input.dispatchMouseEvent`): what `element.click()` skips, such as pointer capture,
+// then happens as in use. `events` are that call's params in order.
+async function realMouse(events) {
   const port = readFileSync(join(profile, "DevToolsActivePort"), "utf8").split("\n")[0];
   const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
   const socket = new WebSocket(targets.find((target) => target.type === "page").webSocketDebuggerUrl);
@@ -50,22 +51,40 @@ async function realClick(x, y) {
   };
   const send = (params) => new Promise((done) => {
     waiting.set(++id, done);
-    socket.send(JSON.stringify({ id, method: "Input.dispatchMouseEvent", params: { x, y, ...params } }));
+    socket.send(JSON.stringify({ id, method: "Input.dispatchMouseEvent", params }));
   });
-  await send({ type: "mouseMoved" });
-  await send({ type: "mousePressed", button: "left", buttons: 1, clickCount: 1 });
-  await send({ type: "mouseReleased", button: "left", buttons: 0, clickCount: 1 });
+  for (const event of events) await send(event);
   socket.close();
 }
+const press = (x, y, clickCount = 1) => [
+  { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount },
+  { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount },
+];
+const realClick = (x, y) => realMouse([{ type: "mouseMoved", x, y }, ...press(x, y)]);
+const realDoubleClick = (x, y) => realMouse([{ type: "mouseMoved", x, y }, ...press(x, y, 1), ...press(x, y, 2)]);
+// A press at (x, y), a move to (toX, toY) in eight steps with the button held, and the release there; `realDragStart` is the press and
+// the first four steps, `realDragEnd` the last four and the release, so the page can act with the button held halfway.
+const steps = (x, y, toX, toY, from, to) =>
+  Array.from({ length: to - from }, (_, i) => ({ type: "mouseMoved", x: x + ((toX - x) * (from + i + 1)) / 8, y: y + ((toY - y) * (from + i + 1)) / 8, button: "left", buttons: 1 }));
+const dragStart = (x, y, toX, toY) => [
+  { type: "mouseMoved", x, y },
+  { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 },
+  ...steps(x, y, toX, toY, 0, 4),
+];
+const dragEnd = (x, y, toX, toY) => [...steps(x, y, toX, toY, 4, 8), { type: "mouseReleased", x: toX, y: toY, button: "left", buttons: 0, clickCount: 1 }];
+const realDrag = (x, y, toX, toY) => realMouse([...dragStart(x, y, toX, toY), ...dragEnd(x, y, toX, toY)]);
+const realDragStart = (x, y, toX, toY) => realMouse(dragStart(x, y, toX, toY));
+const realDragEnd = (x, y, toX, toY) => realMouse(dragEnd(x, y, toX, toY));
 
 const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css" };
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");
-  if (url.pathname === "/__snap/click") {
+  const input = { "/__snap/click": realClick, "/__snap/dblclick": realDoubleClick, "/__snap/drag": realDrag, "/__snap/drag-start": realDragStart, "/__snap/drag-end": realDragEnd }[url.pathname];
+  if (input) {
     try {
       if (!fixture.realPointer) throw new Error("the fixture has no realPointer");
-      await realClick(Number(url.searchParams.get("x")), Number(url.searchParams.get("y")));
-      res.end("clicked");
+      await input(...["x", "y", "toX", "toY"].map((key) => Number(url.searchParams.get(key))));
+      res.end("done");
     } catch (why) {
       res.statusCode = 500;
       res.end(String(why));

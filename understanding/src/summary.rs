@@ -367,12 +367,13 @@ A number taken from the input keeps its bound or condition, such as "upper bound
 "#
 );
 
-/// How many words a session's name may have at most.
-const NAME_WORDS: usize = 6;
+/// How many characters a stored session name may have before its "…": a bound on a writer that ignores its rules
+/// (#443), not a layout device. The page fits the name to its width with a CSS ellipsis.
+const NAME_CHARS: usize = 60;
 
 /// The name of a session from `writer`, on Daniel's first `prompt` and, for a bare slash command,
-/// the turn's final `response`: the reply's `name`, cut to a few words. One line goes to `log`
-/// when the call gives none.
+/// the turn's final `response`: the reply's `name`, whole, or cut at the last space before
+/// `NAME_CHARS` with "…" when it runs longer. One line goes to `log` when the call gives none.
 pub fn write_name(
     writer: &(impl CardWriter + ?Sized),
     setup: &SummarySetup,
@@ -386,17 +387,32 @@ pub fn write_name(
         .and_then(|reply| {
             let value = crate::parse_object(&reply).unwrap_or_default();
             let name = value["name"].as_str().unwrap_or_default();
-            let words: Vec<&str> = name.split_whitespace().take(NAME_WORDS).collect();
-            match words.is_empty() {
+            let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+            match name.is_empty() {
                 true => Err(format!(
                     "the reply holds none: {:?}",
                     reply.chars().take(300).collect::<String>()
                 )),
-                false => Ok(words.join(" ")),
+                false => Ok(bounded_name(name)),
             }
         });
     name.map_err(|line| log(format!("no session name: {line}")))
         .ok()
+}
+
+/// `name` when it has at most `NAME_CHARS` characters; otherwise its first `NAME_CHARS`, cut back to the last space
+/// when there is one and the next character is not a space, and "…".
+fn bounded_name(name: String) -> String {
+    let Some((end, _)) = name.char_indices().nth(NAME_CHARS) else {
+        return name;
+    };
+    let head = &name[..end];
+    // A space right after the head means the head ends on a whole word.
+    let head = match name[end..].starts_with(' ') {
+        true => head,
+        false => head.rfind(' ').map_or(head, |space| &head[..space]),
+    };
+    format!("{}…", head.trim_end())
 }
 
 impl ClaudeWriter {
@@ -436,7 +452,7 @@ impl ClaudeWriter {
 
 /// The session name writer's system prompt, which replaces Claude Code's own.
 const NAME: &str = concat!(
-    r#"You name one session of a coding agent in a few words, so that the developer who runs it can tell it from his other sessions in a list.
+    r#"You give one session of a coding agent a short title, so that the developer who runs it can tell it from his other sessions in a list.
 
 Answer from the input: his first prompt and, when the prompt is only a slash command, the agent's final response to it. Use only this input: do not use tools or read files. Name what the session is about, not the command.
 
@@ -448,6 +464,6 @@ You run in a folder of your own, not the session's: never name the folder you ru
 
 Reply with one JSON object and nothing else:
 {"name": string}
-- name: at most 6 words, with no issue number and no quotes.
+- name: a title of at most 5 words and 36 characters, with no issue number and no quotes. Say what the session is about in your own words: not the start of the prompt, and never its first words cut short.
 "#
 );

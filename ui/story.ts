@@ -1,5 +1,5 @@
-// The story rail, on the window's left (danielrispler/Falinks#574). One header line: the verdict and the phase, with the
-// times and the model on hover, and a "⋯" menu. Then "now": the open question, docked, or else the
+// The story rail, on the window's left (danielrispler/Falinks#574). A header of two lines (#444): the agent's logo, the
+// session's name and a "⋯" menu, then the verdict, the mode and the phase, with the times and the model on hover. Then "now": the open question, docked, or else the
 // newest summary; the current intention, boxed; the latest turn's summary. Below, a feed of turns,
 // newest first, each with its prompt, summary, questions, subagents,
 // checks and folded response. "Ask" sits on a file, a failed check, a subagent line and the Headline. A subagent's view shows its own line,
@@ -45,6 +45,7 @@ export function showView(selected: Selection | null) {
   element("rail-more").hidden = selected === null;
   if (selected === null) {
     for (const id of ["state", "block", "mode", "mark", "session-name", "phase"]) element(id).textContent = "";
+    for (const id of ["session-name", "block", "phase"]) element(id).removeAttribute("title");
     showQuestions([], []);
     showCleared([]);
     shownSession = null;
@@ -56,9 +57,10 @@ export function showView(selected: Selection | null) {
   const [label, state] = agent === null ? [stateLabels[session.state], session.state] : agentState(session, agent);
   const step = (agent ?? session).last_step;
   const stepSpan = (agent ?? session).step_span;
-  // Line 1: the verdict, the kind of block when the session needs Daniel, the permission mode and the agent's
-  // mark. Line 2: the session's name. Line 3, only while it runs: the estimate. The times and the model show on hover,
-  // counted at the hover. A landed task's session at your turn, idle or ended says so in words (#53, Landed).
+  // Line 1: the agent's mark and the session's name, whole: CSS ends it in "…" when it is too long, and the full name is its
+  // hover text (#444). Line 2: the verdict, the kind of block when the session needs Daniel, the permission mode and, only
+  // while it runs, the estimate. The times and the model show on hover, counted at the hover.
+  // A landed task's session at your turn, idle or ended says so in words (#53, Landed).
   element("state").textContent = agent === null && showsLanded(state, session.landed) ? "Landed" : label;
   element("state").dataset.state = state;
   const open = session.questions.filter((question) => question.agent === (agent?.id ?? null));
@@ -69,8 +71,13 @@ export function showView(selected: Selection | null) {
   const key = logoKey(session);
   const title = [agent === null ? modelLine(session) : "", noContextNote(session)].filter(Boolean).join("\n");
   element("mark").replaceChildren(logo(key, title || undefined));
-  element("session-name").textContent = sessionName(session);
+  for (const id of ["block", "phase"]) element(id).removeAttribute("title");
+  const name = sessionName(session);
+  element("session-name").textContent = name;
+  element("session-name").title = name;
   element("phase").textContent = agent === null && state === "running" ? estimateText(session.work) : "";
+  // The block's kind and the estimate may end in "…" at a narrow rail: each is its own hover text.
+  for (const id of ["block", "phase"]) fullTitle(element(id), element(id).textContent);
   // The model and effort the session runs at (danielrispler/Falinks#517, decision 8); none for a subagent, whose transcript the studio does not read.
   const effort = session.transcript.effort;
   const runsAt = agent === null ? [modelLine(session), effort && `effort ${effort}`].filter(Boolean).join(" · ") : "";
