@@ -2,7 +2,9 @@
 // figure asks the server to build a small simulator of the mechanism with a background run (`server/src/micro_worlds.rs`); the map's payload says
 // where each stands (`MapState.micro_worlds`). Without `microWorlds.dshVisual` it offers only the prompt to copy. A checked page is fetched
 // through the API and shown by `srcdoc` in a frame sandboxed to `allow-scripts`, never `allow-same-origin`, so the page has an opaque origin, no
-// network (its policy says so too) and no way to plotkeeper's API; the frame sits in a wide overlay in the glass, the first layer Esc closes.
+// network (its policy says so too) and no way to plotkeeper's API. A frame can still navigate itself, so plotkeeper's page is served with
+// `frame-src 'none'` (`server/src/web.rs`): no frame of it loads a URL. The frame sits in an overlay in the glass the size of the settings
+// dialog, the first layer Esc closes.
 
 import { element, failure, invoke, text } from "./dom.js";
 import { onDraw, registerLayer, reloadMap, shownProject } from "./map.js";

@@ -271,9 +271,16 @@ fn handle(context: &Context, mut request: Request) {
             }
             match context.assets.iter().find(|(name, _)| *name == file) {
                 Some((name, bytes)) => {
-                    let response = Response::from_data(*bytes).with_header(
-                        Header::from_bytes("Content-Type", content_type(name)).unwrap(),
-                    );
+                    // No frame of the page loads a URL: a micro-world's `srcdoc` frame, sandboxed to scripts, can still
+                    // navigate itself, and the policy is what keeps it from sending what it read to the network.
+                    let response = Response::from_data(*bytes)
+                        .with_header(
+                            Header::from_bytes("Content-Type", content_type(name)).unwrap(),
+                        )
+                        .with_header(
+                            Header::from_bytes("Content-Security-Policy", "frame-src 'none'")
+                                .unwrap(),
+                        );
                     let _ = request.respond(response);
                 }
                 None => refuse(request, 404, "Not found"),
