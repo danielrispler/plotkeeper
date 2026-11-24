@@ -20,5 +20,12 @@ mkdir npm/bin
 for name in plotkeeper plotkeeper-hook plotkeeper-answer plotkeeper-run; do
   lipo -create -output "npm/bin/$name" \
     "target/aarch64-apple-darwin/release/$name" "target/x86_64-apple-darwin/release/$name"
+  # Apple silicon refuses an unsigned binary; the linker's ad-hoc signature is enough, and lipo keeps it. The x86_64
+  # slice is unsigned by design (the linker does not sign x86_64 output, and macOS does not require it), so it is not
+  # checked (#440).
+  if ! codesign -v -a arm64 "npm/bin/$name"; then
+    echo "pack: the arm64 slice of npm/bin/$name is not validly signed" >&2
+    exit 1
+  fi
 done
 npm pack ./npm --pack-destination "$out"
