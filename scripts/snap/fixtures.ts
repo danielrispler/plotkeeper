@@ -520,27 +520,34 @@ const flowSteps = (): BriefStep[] => [
 const flowBrief = (): BriefView =>
   briefOf(storySteps().slice(0, 2), false, { overview: flowSteps(), chapters: [{ behaviour: "story", parts: ["shell", "understanding"], title: "Turn writing", steps: storySteps().slice(0, 2), flags: [] }] });
 const tap = (ids: string[]) => ids.map((id) => `document.querySelector('.plate[data-id="${id}"]').click(); await wait(50);`).join("\n      ");
-const mapBriefOrder = (ids: string[], grade: boolean, check: string): Fixture =>
-  mapBrief(flowBrief(), 1, `
+// The same taps from the keyboard (#460): real Enter on each part's open button.
+const keyTap = (ids: string[]) =>
+  ids.map((id) => `if (!document.querySelector('.plate[data-id="${id}"] .plate-open')) return log("snap:fail ${id} has no open button");
+      document.querySelector('.plate[data-id="${id}"] .plate-open').focus(); await __snapKey("Enter"); await wait(50);`).join("\n      ");
+const mapBriefOrder = (ids: string[], grade: boolean, check: string, keys = false): Fixture => ({
+  ...mapBrief(flowBrief(), 1, `
       const next = document.getElementById("brief-next");
       if (next.textContent !== "Check" || !next.disabled) return log("snap:fail an order check starts with Check off");
       if (document.querySelectorAll(".plate.pick").length !== 4) log("snap:fail the parts the step lights cannot be tapped: " + document.querySelectorAll(".plate.pick").length);
       if (document.querySelectorAll("#map-brief .brief-slot").length !== 3) log("snap:fail the check has no three slots");
-      ${tap(ids)}
+      ${(keys ? keyTap : tap)(ids)}
       if (document.querySelector(".plate.open")) log("snap:fail a tap opened the part's sheet");
       if (document.querySelectorAll(".plate .ord").length !== ${ids.length}) log("snap:fail the taps carry no numbers on the map");
       if (document.querySelectorAll("#map-brief .brief-slot.full").length !== ${ids.length}) log("snap:fail the slots do not hold the taps");
       ${grade ? `if (next.disabled) return log("snap:fail Check is off with every slot full");
       next.click();
       await wait(250);` : `if (!next.disabled) log("snap:fail Check is on before every slot is full");`}
-      ${check}`, true);
+      ${check}`, true),
+  ...(keys && { realKeys: true }),
+});
 const orderTakeBack = `
       document.querySelector('.plate[data-id="shell"]').click();
       await wait(50);
       if (document.querySelectorAll(".plate .ord").length !== 1 || document.querySelector(".plate[data-id='core'] .ord")?.textContent !== "1") log("snap:fail a tap on a part did not take it back");
       document.querySelector('.plate[data-id="shell"]').click();
       await wait(50);`;
-const mapBriefOrderSlots = (): Fixture => mapBriefOrder(["core", "shell"], false, orderTakeBack);
+// The parts are tapped with real Enter on their open buttons (#460).
+const mapBriefOrderSlots = (): Fixture => mapBriefOrder(["core", "shell"], false, orderTakeBack, true);
 const mapBriefOrderWrong = (): Fixture =>
   mapBriefOrder(["understanding", "shell", "core"], true, `
       if (document.querySelector("#map-brief .brief-check .brief-body").textContent !== ${JSON.stringify(orderCheck.no)}) log("snap:fail the correction's words");
@@ -548,13 +555,13 @@ const mapBriefOrderWrong = (): Fixture =>
       if (slots.join() !== "Core,Shell,Understanding") log("snap:fail the slots do not show the right order: " + slots);
       if (document.querySelectorAll(".map-light .light-trail").length !== 2) log("snap:fail the right path was not replayed: " + document.querySelectorAll(".map-light .light-trail").length);
       if (next.textContent !== "Next") log("snap:fail the way on after Check: " + next.textContent);`);
-// Right, and on through the chapter: the brief plays end to end.
+// Right, and on through the chapter: the brief plays end to end, its parts tapped with real Enter (#460).
 const mapBriefOrderRight = (): Fixture =>
   mapBriefOrder(["core", "shell", "understanding"], true, `
       if (document.querySelector("#map-brief .brief-check .brief-body").textContent !== ${JSON.stringify(orderCheck.yes)}) log("snap:fail the right answer's words");
       next.click();
       await wait(300);
-      if (!document.querySelector("#map-brief .brief-title").textContent.includes("A ready PR now brings")) log("snap:fail the chapter did not follow the overview");`);
+      if (!document.querySelector("#map-brief .brief-title").textContent.includes("A ready PR now brings")) log("snap:fail the chapter did not follow the overview");`, true);
 // The brief's ratify step (#343): a changed law and a link, and the agent's two decisions, one already accepted.
 const ratifyRows: RatifyRow[] = [
   { pr: 334, kind: "law", id: "window-quiet", text: "Only needs-you has colour.", change: "changed", status: "not-yet" },
@@ -1123,6 +1130,68 @@ const mapBusy = (jump: boolean): Fixture => {
     });
     return { ...f, sessions, selected: { session: sessions[6], agent: null }, ...(jump && { realPointer: true, snapDone: "jump ok" }) };
   };
+
+// The map from the keyboard (#460), at the busy fixture: each plate's open button, named by the part's name and caption, sits beside
+// its chips in reading order; real Tab reaches a part and then its chips, never an actor; real Enter and Space open its sheet.
+const mapPartKeys = (): Fixture => {
+  const f = mapBusy(false);
+  return {
+    ...f,
+    snapScript: f.snapScript!.replace(/log\("chips ok, not placed " \+ rest\.length\);/, `
+      const press = async (key) => { await __snapKey(key); await wait(80); };
+      const sheetPart = () => document.querySelector("#map-sheet .sheet")?.dataset.part;
+      const plates = [...document.querySelectorAll("#map .plate[data-id]")];
+      for (const plate of plates) {
+        const open = plate.querySelector(":scope > button.plate-open");
+        const words = [".plate-name", ".plate-caption"].map((at) => plate.querySelector(at)?.textContent ?? "").filter(Boolean);
+        if (!open) { log("snap:fail " + plate.dataset.id + " has no open button"); continue; }
+        if (plate.hasAttribute("role") || plate.hasAttribute("tabindex")) log("snap:fail the plate " + plate.dataset.id + " takes a role or a tabindex");
+        if (open.parentElement !== plate.querySelector(".plate-chips")?.parentElement) log("snap:fail " + plate.dataset.id + "'s open button is not a sibling of its chips");
+        if (open.contains(plate.querySelector(".agent-chip"))) log("snap:fail " + plate.dataset.id + "'s open button holds a chip");
+        if (!words.length || words.some((word) => !open.textContent.includes(word))) log("snap:fail " + plate.dataset.id + "'s open button is not named " + words.join(", "));
+      }
+      // Reading order: each next button is a row lower (half a plate or more), or on the same row and to the right.
+      const boxes = [...document.querySelectorAll("#map .plate-open")].map((b) => ({ id: b.closest(".plate").dataset.id, box: b.closest(".plate").getBoundingClientRect() }));
+      boxes.slice(1).forEach(({ id, box }, i) => {
+        const before = boxes[i].box;
+        if (!(box.top - before.top >= box.height / 2 || (Math.abs(box.top - before.top) < box.height / 2 && box.left > before.left))) log("snap:fail " + id + " comes after " + boxes[i].id + " out of reading order");
+      });
+      // Real Tab from the first part's button walks the map: every part's button, then its chips, and no actor.
+      const first = document.querySelector("#map .plate-open");
+      if (!first) return log("snap:fail the map has no open button");
+      first.focus();
+      const walked = [first];
+      while (walked.length < 40) {
+        await press("Tab");
+        if (!document.activeElement?.closest("#map .map-world")) break;
+        walked.push(document.activeElement);
+      }
+      const expected = [...document.querySelectorAll("#map .plate-open, #map .plate .agent-chip")];
+      const named = (node) => node.closest(".plate, .actor")?.dataset.id + (node.matches(".agent-chip") ? " chip" : "");
+      if (walked.map(named).join() !== expected.map(named).join()) log("snap:fail Tab walked " + walked.map(named).join() + ", not " + expected.map(named).join());
+      if (walked.some((node) => node.closest(".actor"))) log("snap:fail Tab reached an actor");
+      const core = document.querySelector("#map .plate[data-id=core] .plate-open");
+      const at = walked.indexOf(core);
+      if (at < 0 || !walked[at + 1]?.matches("#map .plate[data-id=core] .agent-chip")) log("snap:fail Tab did not reach core's button and then its chip");
+      // Real Enter, then real Space, on the focused button open the part's sheet, and the focus ring shows.
+      core.focus();
+      await press("Tab");
+      await press("Shift+Tab");
+      if (document.activeElement !== core || !core.matches(":focus-visible") || getComputedStyle(core).outlineStyle === "none") log("snap:fail the focused part shows no focus ring");
+      await press("Enter");
+      if (sheetPart() !== "core") log("snap:fail Enter did not open core's sheet: " + sheetPart());
+      await press("Escape");
+      if (sheetPart()) log("snap:fail Esc left the sheet open");
+      const hook = document.querySelector("#map .plate[data-id=hook] .plate-open");
+      hook.focus();
+      await press("Space");
+      if (sheetPart() !== "hook") log("snap:fail Space did not open hook's sheet: " + sheetPart());
+      hook.focus();
+      log("part keys ok");`),
+    realKeys: true,
+    snapDone: "part keys ok",
+  };
+};
 
 // A map whose default branch's CI failed in a test that backs a law of the shell (#312): the red mark beside the Needs you chip, at the
 // size of the busy fixture; `drawer` opens the proof of a law, `log` the broken-law drill-down.
@@ -2399,6 +2468,8 @@ export const fixtures = {
     };
   },
   mapChipJump: () => mapBusy(true),
+  // The map from the keyboard (#460).
+  mapPartKeys,
   // Story 34: every card over the map, the left panel and the sheet and drawer alike, arrives by a 12 px slide with a fade.
   mapGlassMotion: () =>
     mapOpened(`
