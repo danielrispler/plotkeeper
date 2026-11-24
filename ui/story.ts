@@ -7,7 +7,7 @@
 
 import { modelLine, reports } from "./capabilities.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
-import { age, code, element, failure, fullTitle, invoke, logLine, pressable, prose, text } from "./dom.js";
+import { age, code, element, failure, fullTitle, invoke, pressable, prose, text } from "./dom.js";
 import { select } from "./selection.js";
 import { askAnchor } from "./ask.js";
 import { rendered } from "./markdown.js";
@@ -23,7 +23,6 @@ import { decisionElement, questionElement } from "./questions.js";
 import { shortPaths } from "./paths.js";
 import { checkTime, counts, estimateText, times } from "./times.js";
 import { studio } from "./state.js";
-import { titled } from "./keys.js";
 import {
   askKind,
   stateLabels,

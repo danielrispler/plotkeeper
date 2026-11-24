@@ -171,7 +171,7 @@ fn a_denied_call_of_another_tool_raises_no_card() {
 }
 
 #[test]
-fn a_session_wants_you_while_a_card_is_blocked_and_not_once_it_is_allowed_or_declined() {
+fn a_card_waits_while_blocked_and_not_once_it_is_allowed_or_declined() {
     let step = line(
         "PreToolUse",
         5_000,
@@ -185,10 +185,7 @@ fn a_session_wants_you_while_a_card_is_blocked_and_not_once_it_is_allowed_or_dec
     );
     // The agent went on, so the session shows its real state, but two cards wait.
     let s = session(&blocked);
-    assert_eq!(
-        (s.state, s.blocked_waiting(), s.wants_you()),
-        (State::Running, 2, true)
-    );
+    assert_eq!((s.state, s.blocked_waiting()), (State::Running, 2));
     let allowed = then(
         blocked.clone(),
         vec![answer(6_000, "toolu_1", "first", "allow")],
@@ -468,13 +465,13 @@ fn a_card_blocked_again_is_blocked_at_the_time_of_the_new_block() {
     assert_eq!((card.at, card.run_at), (8_000, None));
 }
 
+/// An ended session's card still counts as waiting; only `wants_you`, archived in #415, left it out.
 #[test]
-fn an_ended_session_does_not_want_you_for_its_waiting_cards() {
+fn an_ended_session_keeps_its_waiting_cards() {
     let end = line("SessionEnd", 8_000, json!({ "reason": "other" }));
     let lines = then(allowed(), vec![stop(6_000, None), end]);
     let s = session(&lines);
-    assert_eq!(s.state, State::Ended);
-    assert_eq!((s.blocked_waiting(), s.wants_you()), (1, false));
+    assert_eq!((s.state, s.blocked_waiting()), (State::Ended, 1));
 }
 
 /// A subagent `a-7aaaa`'s block of `COMMAND`, which Daniel allowed.
@@ -857,10 +854,9 @@ fn a_wake_up_reporting_two_background_retries_finishes_both_cards() {
     );
 }
 
-/// How many blocked commands wait, and whether the Dock badge counts the session, after `lines`.
-fn waiting(lines: &[String]) -> (usize, bool) {
-    let s = session(lines);
-    (s.blocked_waiting(), s.wants_you())
+/// How many blocked commands wait after `lines`.
+fn waiting(lines: &[String]) -> usize {
+    session(lines).blocked_waiting()
 }
 
 /// The count through one card's life: a card waits only while it has a button (Blocked, Blocked again, Allowed not run).
@@ -876,24 +872,24 @@ fn count_through_a_cards_life(agent: Option<&str>) {
         started(),
         vec![denied(3_000, "toolu_1", COMMAND, agent), step],
     );
-    assert_eq!(waiting(&blocked), (1, true));
+    assert_eq!(waiting(&blocked), 1);
     let allowed = then(blocked, vec![answer(4_000, "toolu_1", COMMAND, "allow")]);
-    assert_eq!(waiting(&allowed), (0, false));
+    assert_eq!(waiting(&allowed), 0);
     // Its retry starts and ends: still nothing waits.
     let running = then(allowed.clone(), vec![retry(5_000, "toolu_2", COMMAND)]);
-    assert_eq!(waiting(&running), (0, false));
+    assert_eq!(waiting(&running), 0);
     let done = ended(
         6_000,
         "toolu_2",
         json!({ "tool_response": { "stdout": "ok" } }),
     );
-    assert_eq!(waiting(&then(running, vec![done])), (0, false));
+    assert_eq!(waiting(&then(running, vec![done])), 0);
     // A turn that ends with no retry returns the card to Daniel with Ask again.
     let unused = then(allowed.clone(), vec![stop(6_000, agent)]);
-    assert_eq!(waiting(&unused), (1, true));
+    assert_eq!(waiting(&unused), 1);
     // A second block of the command returns it too.
     let again = then(allowed, vec![denied(7_000, "toolu_3", COMMAND, agent)]);
-    assert_eq!(waiting(&again), (1, true));
+    assert_eq!(waiting(&again), 1);
 }
 
 #[test]

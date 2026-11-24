@@ -24,7 +24,7 @@ Raw evidence from finished real runs (run directories, screenshots, terminal out
 
 ## Implementation language
 
-plotkeeper is a Rust server (`server/`) that serves the TypeScript page (`ui/`) on 127.0.0.1, started by hand in any terminal (spec #319, "Solution"); don't propose switching. The Tauri 2 desktop app it replaced (`src-tauri/`) and its terminal daemon (`terminal-daemon/`) are archived, unmaintained and out of the build (#332).
+plotkeeper is a Rust server (`server/`) that serves the TypeScript page (`ui/`) on 127.0.0.1, started by hand in any terminal (spec #319, "Solution"); don't propose switching. The Tauri 2 desktop app it replaced (`archive/src-tauri/`) and its terminal daemon (`archive/terminal-daemon/`) are archived, unmaintained and out of the build (#332, #415).
 
 ## Checks
 

@@ -17,8 +17,8 @@
 import { logStop, reviewNode, reviewOf } from "./stop-rules.js";
 import { element, failure, invoke, listen, newest, pressable, text } from "./dom.js";
 import {
-  actorSize, autoPlace, brokenParts, brokenText, cameraRig, type CameraRig, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, fitCamera, panTo, type Actor, type Drag,
-  type Law, type Layer, type LayerName, type MapDoc, type MapLink, startProject, switchProject, parseMap, type Part, type Point, plateSize, revealPan, rimPoint, type Scrub, type Tier, zoomAt,
+  actorSize, autoPlace, brokenParts, brokenText, cameraRig, type CameraRig, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, fitCamera, panTo, type Drag,
+  type Law, type Layer, type LayerName, type MapDoc, startProject, switchProject, parseMap, type Part, type Point, plateSize, revealPan, rimPoint, type Scrub, type Tier, zoomAt,
 } from "./map-model.js";
 import { recheckSeen } from "./seen.js";
 import { knownProjects, projectGone } from "./projects.js";

@@ -14,8 +14,7 @@ pub fn json(value: impl serde::Serialize) -> Value {
 }
 
 /// The mirrors that live in another module of `ui/` than `types.ts`, by type.
-const ELSEWHERE: [(&str, &str); 4] = [
-    ("AgentUsage", "usage.ts"),
+const ELSEWHERE: [(&str, &str); 3] = [
     ("CheckOutput", "evidence.ts"),
     ("Facts", "ask.ts"),
     ("Hunk", "ask.ts"),

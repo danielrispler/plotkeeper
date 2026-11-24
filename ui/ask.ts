@@ -6,7 +6,6 @@
 
 import { failure, fullTitle, invoke, text } from "./dom.js";
 import { rendered } from "./markdown.js";
-import { studio } from "./state.js";
 
 // What Ask is opened on: the core's `Anchor`.
 export type Anchor =
@@ -20,16 +19,6 @@ export type Facts = { sections: { label: string; facts: { at: number | null; tex
 
 export type Hunk = { text: string; left_out: number; binary: boolean; first_line: number };
 // A hunk as plain text; `more` ends it with "… N more lines" when the cap left some out, for a view with no button of its own.
-// A stored hunk (`--- path`, then that file's lines, per file) as its files in order; none for an empty text.
-export function hunkFiles(stored: string): { path: string; lines: string }[] {
-  const files: { path: string; lines: string }[] = [];
-  for (const line of stored.split("\n")) {
-    if (line.startsWith("--- ")) files.push({ path: line.slice(4), lines: "" });
-    else if (files.length) files.at(-1)!.lines += `${line}\n`;
-  }
-  return files.map((f) => ({ ...f, lines: f.lines.replace(/\n+$/, "") }));
-}
-
 export const hunkText = (h: Hunk | null, more = true) =>
   h === null ? "The hunk could not be read." : h.binary ? "Binary file: no lines to show." : h.text + (more && h.left_out ? `… ${h.left_out} more lines` : "");
 
@@ -113,7 +102,6 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
     reply.replaceChildren(text("p", "Asking…", "asking"));
     try {
       const answer = await invoke("ask_anchor", { session, anchor, what, question });
-      const cwd = studio.listed.find((s) => s.id === session)?.cwd ?? null;
       // The recorded facts are above; the answer is the model's reading of them.
       reply.replaceChildren(text("p", "Interpretation", "label"), rendered("div", answer, ""));
     } catch (e) {
@@ -145,7 +133,7 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
 
 // What was recorded about `name`, then the writer's possible reasons folded under their own label, so a guess never reads as a
 // fact. With nothing recorded there are no reasons, as there was no call.
-export function whyNotElement(name: string, result: { facts: Facts; reasons: string | null }, cwd: string | null = null): HTMLElement {
+export function whyNotElement(name: string, result: { facts: Facts; reasons: string | null }): HTMLElement {
   const node = document.createElement("div");
   node.className = "ask-why-not";
   const sections = result.facts.sections;
@@ -182,8 +170,7 @@ function whyNotBox(session: string, turn: number): HTMLElement {
     out.replaceChildren(text("p", "Reading what was recorded…", "asking"));
     try {
       const result = await invoke("ask_why_not", { session, turn, name });
-      const cwd = studio.listed.find((s) => s.id === session)?.cwd ?? null;
-      out.replaceChildren(whyNotElement(name, result, cwd));
+      out.replaceChildren(whyNotElement(name, result));
     } catch (e) {
       failure("ask_why_not", "error")(e);
       out.replaceChildren(text("p", `No answer: ${e}.`, "ask-error"));

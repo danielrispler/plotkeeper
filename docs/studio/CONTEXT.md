@@ -100,8 +100,8 @@ _Avoid_: Home for the page as it is now (it is the Map view), start page, dashbo
 The view in the left panel over the **Map view** that holds the ended sessions, newest first by their last event, opened from the session list's "History · N" link or the palette's "Show history". One search box filters by session name, project name and branch, as a case-insensitive substring. Clicking a row selects the session, with its story as in the list; each row has a Delete, which opens the delete dialog. A session that starts again under its id is no longer ended and leaves History by itself. It adds no colour.
 _Avoid_: Archive
 
-**Workspaces**:
-The rows under each project's sessions in its **Session list** group, the home of tasks: one row per workspace of that project, each on one line: its name, then its **upstream** and **main distance**, its uncommitted files and its number of sessions. A task's branch shows only when it differs from the task's name; the main checkout's row keeps its branch and, when its default branch is behind `origin`, carries **Pull main**'s button "Pull ↓N". Clicking a workspace offers a new session there and, for a task, Remove; tasks are created here too. The sessions themselves show only in their project's group.
+**Workspaces** (retired):
+Retired from the page (danielrispler/plotkeeper#335); its code is in `archive/workbench/` (#415). The rows under each project's sessions in its **Session list** group, the home of tasks: one row per workspace of that project, each on one line: its name, then its **upstream** and **main distance**, its uncommitted files and its number of sessions. A task's branch shows only when it differs from the task's name; the main checkout's row keeps its branch and, when its default branch is behind `origin`, carries **Pull main**'s button "Pull ↓N". Clicking a workspace offers a new session there and, for a task, Remove; tasks are created here too. The sessions themselves show only in their project's group.
 _Formerly_: Places
 _Avoid_: Board (an earlier plan for a view of its own, which Workspaces replaces)
 
@@ -109,39 +109,39 @@ _Avoid_: Board (an earlier plan for a view of its own, which Workspaces replaces
 The state of a task whose work has shipped, so removing its worktree loses nothing: nothing uncommitted, nothing unpushed, its PR merged, and its issue closed when it has one, while none of its sessions is running or needs you. Once its PR is merged, its CI is not checked. Only tasks land, never the main checkout. The control room asks GitHub when a turn ends, when the window gains focus, or on a refresh, never on a timer. It shows as "Landed — safe to delete".
 _Avoid_: Done (a turn's end), finished
 
-**Upstream**:
-A workspace's branch as `origin` has it. Its distance says whether Daniel's work is pushed: commits not pushed yet and commits not pulled yet. A branch never pushed has none, and shows "not pushed".
+**Upstream** (retired):
+Retired with Workspaces (danielrispler/plotkeeper#335); its code is in `archive/workbench/` (#415). A workspace's branch as `origin` has it. Its distance says whether Daniel's work is pushed: commits not pushed yet and commits not pulled yet. A branch never pushed has none, and shows "not pushed".
 _Avoid_: Sync, remote (alone)
 
-**Main distance**:
-How far a workspace's branch is from `origin`'s default branch: the commits it adds, and the commits it is behind, which a rebase would take in. On the default branch itself, it is the upstream distance.
+**Main distance** (retired):
+Retired with Workspaces (danielrispler/plotkeeper#335); its code is in `archive/workbench/` (#415). How far a workspace's branch is from `origin`'s default branch: the commits it adds, and the commits it is behind, which a rebase would take in. On the default branch itself, it is the upstream distance.
 _Avoid_: Base (a retired card's starting point)
 
-**Git line**:
-The line in the top bar on the git state of the selected session's workspace, or the main checkout's with none: its workspace and branch, its upstream and main distance, its uncommitted files and any operation in progress. The branch shows once: for a task whose branch is its name, only the name does; the main checkout's branch always shows. The tokens that say nothing are hidden. Workspaces rows carry the same tokens.
+**Git line** (retired):
+Retired from the page (danielrispler/plotkeeper#335); its code is in `archive/workbench/` (#415). The line in the top bar on the git state of the selected session's workspace, or the main checkout's with none: its workspace and branch, its upstream and main distance, its uncommitted files and any operation in progress. The branch shows once: for a task whose branch is its name, only the name does; the main checkout's branch always shows. The tokens that say nothing are hidden. Workspaces rows carry the same tokens.
 _Avoid_: Git panel (a view of its own, which the studio does not have), status bar
 
-**Plan usage**:
-An agent's plan limits: its windows, such as the 5-hour and the weekly one, each with the share used and when it resets. A window of another length, such as the 30 days of Codex's free plan, shows as its own, named by its length. An agent with several limits, such as agy's model groups, has one group each, most used first, never merged into one and never mixed with another agent's. It is read without any credential, from what the agent itself reports. The page shows no plan usage yet: the top bar spec danielrispler/plotkeeper#380 describes (story 47) names it, but it is not built. When it is, the bar's glance shows the tightest window across every agent and group, with that agent's logo; one that cannot be read says why instead of showing an old number, and a window past its reset time is hidden.
+**Plan usage** (retired):
+Retired from the page (danielrispler/plotkeeper#335); its code is in `archive/workbench/` (#415). An agent's plan limits: its windows, such as the 5-hour and the weekly one, each with the share used and when it resets. A window of another length, such as the 30 days of Codex's free plan, shows as its own, named by its length. An agent with several limits, such as agy's model groups, has one group each, most used first, never merged into one and never mixed with another agent's. It is read without any credential, from what the agent itself reports. The page shows no plan usage yet: the top bar spec danielrispler/plotkeeper#380 describes (story 47) names it, but it is not built. When it is, the bar's glance shows the tightest window across every agent and group, with that agent's logo; one that cannot be read says why instead of showing an old number, and a window past its reset time is hidden.
 
-**Pull main**:
-A fast-forward of a project's main checkout's default branch to `origin`'s, from the "Pull ↓N" button on its row in **Workspaces** or the palette's action for every project. It never merges, rebases or stashes, and never touches a task's branch. With the default branch checked out it is refused, the button disabled with the reason as its title, when a session in the main checkout is running or needs Daniel, when local main has commits `origin` lacks, or when the incoming commits would overwrite a changed file; a project with nothing to pull is skipped.
+**Pull main** (retired):
+Retired with Workspaces (danielrispler/plotkeeper#335); its code is in `archive/workbench/` (#415). A fast-forward of a project's main checkout's default branch to `origin`'s, from the "Pull ↓N" button on its row in **Workspaces** or the palette's action for every project. It never merges, rebases or stashes, and never touches a task's branch. With the default branch checked out it is refused, the button disabled with the reason as its title, when a session in the main checkout is running or needs Daniel, when local main has commits `origin` lacks, or when the incoming commits would overwrite a changed file; a project with nothing to pull is skipped.
 _Avoid_: Sync (see **Upstream**)
 
-**Terminal daemon**:
-The background process that owns the workbench's terminals, so they outlive the app. The app connects to it over a socket.
+**Terminal daemon** (retired):
+Retired with the Tauri app (#332); it is in `archive/terminal-daemon/` (#415). The background process that owns the workbench's terminals, so they outlive the app. The app connects to it over a socket.
 _Avoid_: Server (the program that serves the page, below), multiplexer
 
 **Server**:
-The `server/` library and its `plotkeeper` program, which has no window: it holds the core state, the card store and the writer, follows the event log, writes the summaries and the PR briefs, and serves the learning layer as a page on 127.0.0.1 (one per data folder, behind a token) that Daniel opens in a browser tab. The app's shell is another host of the same library. It does not own terminals, which stay with the **Terminal daemon**.
+The `server/` library and its `plotkeeper` program, which has no window: it holds the core state, the card store and the writer, follows the event log, writes the summaries and the PR briefs, and serves the learning layer as a page on 127.0.0.1 (one per data folder, behind a token) that Daniel opens in a browser tab. It owns no terminals: the **Terminal daemon** and the Tauri app's shell that also hosted the library are retired (#332, #415).
 _Avoid_: Backend, daemon (the terminal daemon is another process)
 
-**Pane**:
-The window's view of one terminal of the terminal daemon. Up to two panes show at a time, when the terminal column is split; the others keep running hidden.
+**Pane** (retired):
+Retired with the terminal (danielrispler/plotkeeper#335); its code is in `archive/` (#415). The window's view of one terminal of the terminal daemon. Up to two panes show at a time, when the terminal column is split; the others keep running hidden.
 _Avoid_: Tab
 
-**Terminal panel**:
-A band under the terminal column that holds a plain login shell in the folder of the session shown, or the main checkout's with none, like the terminal panel of VS Code or Zed. One key shows and hides it. It sits under the pane, or under both panes of a split, at most 40 % of the column's height; it never spans the list or the rail. Each folder has one panel shell, kept by the **Terminal daemon**, so it survives restarts and keeps its scrollback when Daniel switches away and back.
+**Terminal panel** (retired):
+Retired with the terminal (danielrispler/plotkeeper#335); its code is in `archive/` (#415). A band under the terminal column that holds a plain login shell in the folder of the session shown, or the main checkout's with none, like the terminal panel of VS Code or Zed. One key shows and hides it. It sits under the pane, or under both panes of a split, at most 40 % of the column's height; it never spans the list or the rail. Each folder has one panel shell, kept by the **Terminal daemon**, so it survives restarts and keeps its scrollback when Daniel switches away and back.
 _Avoid_: Bottom terminal, console
 
 **Palette**:

@@ -3,9 +3,8 @@
 // whole from git (`turn_file_hunk`, `all`), added and removed lines marked by a sign and a tint. The other changes in the
 // worktree are one folded line at the end. The pane is drawn once when it opens, so folding a file moves nothing else.
 
-import { failure, fullTitle, invoke, pressable, text } from "./dom.js";
+import { fullTitle, invoke, pressable, text } from "./dom.js";
 import type { Capabilities, Session, Turn, TurnFile } from "./types.js";
-import { HOVERS } from "./hovers.js";
 
 export type DiffLineKind = "add" | "del" | "hunk" | "meta" | "ctx";
 export type DiffLine = { kind: DiffLineKind; text: string };
@@ -43,7 +42,6 @@ export const keepsDiff = (shown: { session: string } | null, session: Pick<Sessi
 export const diffRequest = { open: (_session: string, _turn: number) => {} };
 
 const counts = (f: TurnFile) => (f.added === null || f.removed === null ? "" : ` +${f.added} −${f.removed}`);
-const unfolded = new Set<string>();
 const folded = new Set<string>();
 
 function fileFold(session: string, index: number, file: TurnFile): HTMLElement {
