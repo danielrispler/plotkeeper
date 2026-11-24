@@ -1,8 +1,8 @@
-// Studio state for `npm run snap`: each fixture maps a Tauri command to what it returns.
+// Studio state for `npm run snap`: each fixture maps a server command (`POST /api/<command>`) to what it returns.
 // A fixture is a function so that its times are relative to the moment it renders.
 
 import type { BriefChapter, BriefFigure, BriefStep, BriefView, Ci, LogEntry, MapState, PrBrief, RatifyRow, Session, SessionState, StoredCatchUp, Subagent } from "../../ui/types.ts";
-import { base, type ByArg, type Fixture } from "./base.ts";
+import { base, type Fixture } from "./base.ts";
 import { railFixtures } from "./rail-fixtures.ts";
 
 const session = (id: string, name: string, state: SessionState, extra: Partial<Session> = {}): Session => {
