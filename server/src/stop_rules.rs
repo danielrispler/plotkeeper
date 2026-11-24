@@ -81,6 +81,10 @@ pub enum Kind {
     MicroWorldOpened,
     /// A back a law run was started from a law on trust in a part's sheet (#398). Kept if at least 1.
     BackLawStarted,
+    /// A brief's Guard with a law row was seen (#401), once per PR. Guard with a law is judged only after 3 offers.
+    GuardOffered,
+    /// A run was started from a brief's Guard with a law: backing a law on trust or adding a new one. Kept if at least 1.
+    GuardStarted,
     #[serde(other)]
     Other,
 }
@@ -198,6 +202,7 @@ fn entered(kind: Kind) -> bool {
             | Kind::PreFlightRun
             | Kind::MicroWorldOpened
             | Kind::BackLawStarted
+            | Kind::GuardStarted
     )
 }
 
@@ -369,7 +374,7 @@ pub fn stop_log(
         module: None,
     };
     let file = log_file()?;
-    if kind == Kind::BriefOffered {
+    if matches!(kind, Kind::BriefOffered | Kind::GuardOffered) {
         return append_once(&file, &event).map(drop);
     }
     append(&file, &event)
@@ -690,6 +695,24 @@ mod tests {
         let json = serde_json::to_value(facts_in(&file, "/p")).unwrap();
         assert_eq!(json["counts"]["back-law-started"], 1);
         assert_eq!(json["engaged_days"], 1);
+    }
+
+    #[test]
+    fn guard_with_a_law_counts_its_offers_and_its_runs_started_and_a_run_makes_an_engaged_day() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(LOG_FILE);
+        let lines = [
+            r#"{"at":1,"day":"2026-11-01","kind":"map-open","project":"/p"}"#,
+            r#"{"at":1,"day":"2026-11-02","kind":"map-open","project":"/p"}"#,
+            r#"{"at":1,"day":"2026-11-01","kind":"guard-offered","project":"/p","pr":7}"#,
+            r#"{"at":2,"day":"2026-11-01","kind":"guard-offered","project":"/p","pr":8}"#,
+            r#"{"at":3,"day":"2026-11-02","kind":"guard-started","project":"/p","pr":8}"#,
+        ];
+        std::fs::write(&file, lines.join("\n") + "\n").unwrap();
+        let json = serde_json::to_value(facts_in(&file, "/p")).unwrap();
+        assert_eq!(json["counts"]["guard-offered"], 2);
+        assert_eq!(json["counts"]["guard-started"], 1);
+        assert_eq!(json["engaged_days"], 1, "an offer is seen, not entered");
     }
 
     #[test]

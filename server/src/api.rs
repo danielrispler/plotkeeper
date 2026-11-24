@@ -256,9 +256,21 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
         )),
         "run_cancel" => res(app.runner.cancel(&arg::<String>(a, "id")?)),
         "runs_resume" => done!(app.runner.resume()),
-        "back_a_law" => res(app
-            .laws
-            .start(&arg::<String>(a, "project")?, &arg::<String>(a, "law")?)),
+        "back_a_law" => res(app.laws.start_for(
+            &arg::<String>(a, "project")?,
+            &arg::<String>(a, "law")?,
+            arg(a, "guards")?,
+        )),
+        "new_law" => res(app.laws.start_new(
+            &arg::<String>(a, "project")?,
+            &arg(a, "law")?,
+            arg(a, "guards")?,
+        )),
+        "guard_draft" => res(crate::pr_briefs::guard_draft(
+            app,
+            arg(a, "project")?,
+            arg(a, "number")?,
+        )),
         "law_patch_open" => res(app
             .laws
             .open_pr(&arg::<String>(a, "project")?, &arg::<String>(a, "id")?)),

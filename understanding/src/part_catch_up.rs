@@ -381,6 +381,7 @@ pub fn build_catch_up_facts(source: &CatchUpSource) -> Result<Facts, String> {
         budget,
         context,
         instructions: Some(instructions()),
+        guard: None,
     })
 }
 

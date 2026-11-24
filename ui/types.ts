@@ -432,6 +432,9 @@ export type LawPatch = {
   // The draft PR Open draft PR opened (#400), and its address; a past payload has none.
   pr?: number | null;
   url?: string | null;
+  // A new law's sentence as Daniel confirmed it, and the PR whose Guard with a law started the run (#401).
+  text?: string | null;
+  guards?: number | null;
 };
 // What Open draft PR did: a draft PR opened, or the patch no longer applies to the default branch.
 export type LawPatchOpened = { kind: "pr"; number: number; url: string } | { kind: "out-of-date" };
@@ -487,7 +490,11 @@ export type PrBrief = {
   title: string; overview: BriefStep[]; chapters: BriefChapter[]; also: { part: string; line: string; flags: string[] }[]; unseen: string[];
   decisions: { id: string | null; text: string; flags: string[] }[]; flags: string[];
 };
-export type StoredBrief = { version: number; pr: number; head: string; written_at: number; stale: boolean; model: string; brief: PrBrief };
+// `guard`: Guard with a law's offer (#401), the parts a bug fix touched; none when the PR offers none, or in a brief from before it.
+export type StoredBrief = { version: number; pr: number; head: string; written_at: number; stale: boolean; model: string; brief: PrBrief; guard?: Guard | null };
+export type Guard = { parts: string[] };
+// A new law (#401): drafted by the writer from a PR's facts, confirmed or edited by Daniel, then added with its test by a run.
+export type NewLaw = { id: string; on: string; text: string };
 // `partial`: the writer did not see the whole diff.
 // `expected`: the PR matched the project's pre-flight (#394).
 export type BriefView = { brief: StoredBrief; partial: boolean; expected?: Expected };
@@ -599,6 +606,8 @@ export interface Commands {
   back_a_law: BackLawStarted;
   law_patch_discard: void;
   law_patch_open: LawPatchOpened;
+  new_law: BackLawStarted;
+  guard_draft: NewLaw;
   runs_resume: void;
   select: Selection | null;
   selected: Selection | null;
@@ -618,7 +627,7 @@ export interface Commands {
 export type Command = keyof Commands;
 
 // What the shell counted of Daniel's use (`stop_rules.rs`), for the one-time review: days, merged PRs and the uses of each module.
-export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen" | "rating-offered" | "rating-given" | "rating-skipped" | "note-given" | "explain-back-given" | "explain-back-marked" | "refresher-entered" | "stale-entered" | "catch-up-offered" | "catch-up-opened" | "catch-up-done" | "pre-flight-run" | "micro-world-opened" | "back-law-started";
+export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen" | "rating-offered" | "rating-given" | "rating-skipped" | "note-given" | "explain-back-given" | "explain-back-marked" | "refresher-entered" | "stale-entered" | "catch-up-offered" | "catch-up-opened" | "catch-up-done" | "pre-flight-run" | "micro-world-opened" | "back-law-started" | "guard-offered" | "guard-started";
 export type StopFacts = {
   active_days: number;
   merged_prs: number;

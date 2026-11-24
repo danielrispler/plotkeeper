@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { fakeDocument } from "./dom.mjs";
 
 globalThis.document = fakeDocument();
-const { lawAction, lawActionNodes, openedLine, reviewNodes } = await import("../../dist/patch-review.js");
+const { confirmNodes, guardNodes, guardOffer, lawAction, lawActionNodes, openedLine, reviewNodes } = await import("../../dist/patch-review.js");
 
 const patch = (id, state, extra = {}) => ({ id, project: "/w/app", law: "core-order", state, line: null, at: 1, diff: null, proof: null, ...extra });
 const proven = (id = "r3") =>
@@ -97,4 +97,66 @@ test("a stale patch says Out of date, run again, with Discard and Back a law", (
 test("the outcome of Open draft PR is said in one line", () => {
   assert.equal(openedLine({ kind: "pr", number: 412, url: "https://github.com/someone/app/pull/412" }), "Draft PR #412 opened: https://github.com/someone/app/pull/412");
   assert.equal(openedLine({ kind: "out-of-date" }), "Out of date, run again: the patch no longer applies to the default branch");
+});
+
+// ---- Guard with a law (#401): a row of a bug fix's brief, beside Ratify.
+
+const laws = [
+  { id: "core-order", on: "core", backing: "trust", text: "Events apply in order." },
+  { id: "core-backed", on: "core", backing: "check", text: "Backed already." },
+  { id: "shell-only", on: "shell", backing: "trust", text: "Not touched." },
+];
+const guardActs = (calls) => ({
+  ...acts(calls),
+  back: (law) => calls.push(["back", law]),
+  add: () => calls.push(["add"]),
+});
+
+test("Guard with a law offers backing an on-trust law of a part the PR touched, or adding a new law", () => {
+  const offer = guardOffer({ parts: ["core", "hook"] }, 7, laws, [patch("n1", "proven", { law: "core-new", text: "A new one.", guards: 7 }), patch("n2", "proven", { law: "other-new", text: "Another PR's.", guards: 8 })]);
+  assert.deepEqual(offer.back.map((law) => law.id), ["core-order"], "on trust and on a touched part only");
+  assert.deepEqual(offer.added.map((p) => p.id), ["n1"], "the new laws this PR's guard started");
+  const calls = [];
+  const row = guardNodes(offer, [], guardActs(calls));
+  assert.match(row.text, /Guard with a law/);
+  assert.match(row.text, /Events apply in order\./);
+  assert.match(row.text, /A new one\./);
+  button([row], "Back this law").listeners.click();
+  button([row], "Add a new law").listeners.click();
+  button([row], "Review the patch").listeners.click();
+  assert.deepEqual(calls, [["back", "core-order"], ["add"], ["review", "n1"]]);
+});
+
+test("a new law's rejected run offers Dismiss, not a back a law run of a law the map does not have", () => {
+  const offer = guardOffer({ parts: ["core"] }, 7, [], [patch("n1", "rejected", { law: "core-new", text: "A new one.", guards: 7, line: "no" })]);
+  const row = guardNodes(offer, offer.added, guardActs([]));
+  assert.ok(button([row], "Dismiss"));
+  assert.equal(button([row], "Back a law"), undefined);
+});
+
+test("the drafted sentence is shown for confirmation, and the edited one is what starts the run", () => {
+  const calls = [];
+  const draft = { id: "core-keeps-order", on: "core", text: "Events never reorder." };
+  const nodes = confirmNodes(draft, [{ id: "core", name: "Core" }, { id: "hook", name: "Hook" }], null, {
+    start: (law) => calls.push(["start", law]),
+    cancel: () => calls.push(["cancel"]),
+  });
+  const fields = nodes.flatMap((node) => [...node.find("input"), ...node.find("textarea"), ...node.find("select")]);
+  const sentence = fields.find((field) => field.tag === "textarea");
+  assert.equal(sentence.value, "Events never reorder.", "the writer's draft, to confirm or edit");
+  assert.equal(fields.find((field) => field.tag === "input").value, "core-keeps-order");
+  sentence.value = "Events apply in the order they were made.";
+  button(nodes, "Start the run").listeners.click();
+  button(nodes, "Cancel").listeners.click();
+  assert.deepEqual(calls, [["start", { id: "core-keeps-order", on: "core", text: "Events apply in the order they were made." }], ["cancel"]]);
+});
+
+test("while the writer drafts, the confirm step says so; when it cannot, Daniel writes the law himself", () => {
+  const act = { start: () => {}, cancel: () => {} };
+  const drafting = confirmNodes(null, [{ id: "core", name: "Core" }], null, act);
+  assert.match(texts(drafting), /Drafting the law/);
+  assert.equal(button(drafting, "Start the run"), undefined);
+  const failed = confirmNodes({ id: "", on: "core", text: "" }, [{ id: "core", name: "Core" }], "the writer's reply holds no JSON", act);
+  assert.match(texts(failed), /the writer's reply holds no JSON/);
+  assert.ok(button(failed, "Start the run"));
 });

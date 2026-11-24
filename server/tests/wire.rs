@@ -184,7 +184,7 @@ fn worlds() -> WorldsState {
 }
 
 /// A back a law run's patch in each state: being proven, rejected, proven with its diff and proof, out of date, and opened
-/// as a draft PR.
+/// as a draft PR; and a new law's, started from a brief's Guard with a law (#401).
 fn law_patches() -> Vec<LawPatch> {
     let patch = |id: &str, state, line: Option<&str>| LawPatch {
         id: id.into(),
@@ -197,6 +197,8 @@ fn law_patches() -> Vec<LawPatch> {
         proof: None,
         pr: None,
         url: None,
+        text: None,
+        guards: None,
     };
     vec![
         patch("19a2f-1", PatchState::Proving, None),
@@ -220,6 +222,12 @@ fn law_patches() -> Vec<LawPatch> {
             pr: Some(412),
             url: Some("https://github.com/someone/app/pull/412".into()),
             ..patch("19a2f-6", PatchState::Opened, None)
+        },
+        LawPatch {
+            law: "core-keeps-order".into(),
+            text: Some("Events apply in the order they were made.".into()),
+            guards: Some(334),
+            ..patch("19a2f-7", PatchState::Proving, None)
         },
     ]
 }

@@ -17,6 +17,7 @@ import { watchSeen } from "./seen.js";
 import { logStop } from "./stop-rules.js";
 import { expectedLine } from "./map-pre-flight.js";
 import { exploreRow } from "./micro-world.js";
+import { guardRow } from "./patch-review.js";
 import { scrubTo } from "./map-history.js";
 import { overturnNote, ratifyActions } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
@@ -282,8 +283,8 @@ const steps = (): BriefStep[] => {
   const now = player.current();
   if (!playing || !now) return [];
   const list = playlist(playing.brief.brief, now.chapter, now.overview);
-  // The ratify step ends the last chapter (the only one of a single story).
-  const ratify = now.chapter >= Math.max(0, playing.brief.brief.chapters.length - 1) ? ratifyStep(ratifying.filter((row) => row.status !== "ratified"), [...new Set(list.flatMap((step) => step.on))]) : null;
+  // The ratify step ends the last chapter (the only one of a single story), and holds Guard with a law's row when the brief offers it (#401).
+  const ratify = now.chapter >= Math.max(0, playing.brief.brief.chapters.length - 1) ? ratifyStep(ratifying.filter((row) => row.status !== "ratified"), [...new Set(list.flatMap((step) => step.on))], !!playing.brief.guard) : null;
   return ratify ? [...list, ratify] : list;
 };
 
@@ -467,7 +468,14 @@ function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["als
   if (step.risks.length) words.append(listNode(step.risks.map((r) => `${part(r.part)}: ${r.trigger} To see it: ${r.check}`)));
   if (step.covered_by) words.append(text("p", `Covered by the test ${step.covered_by}.`, "brief-quiet"));
   if (step.check) words.append(checkNode(view, step));
-  if (step.k === "Ratify") words.append(ratifyNode(view, ratifying));
+  if (step.k === "Ratify") {
+    words.append(ratifyNode(view, ratifying));
+    const guard = playing?.brief.guard;
+    if (guard && pr > 0 && !view.scrub) words.append(guardRow(view, pr, guard, () => {
+      const now = currentMap();
+      if (now) show(now, true);
+    }));
+  }
   if (unconfirmed(step)) {
     const mark = text("p", "not confirmed from the facts", "brief-quiet brief-unconfirmed");
     mark.title = step.flags.join("\n");
