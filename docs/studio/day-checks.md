@@ -190,7 +190,7 @@ With a real `claude` session in the pane (danielrispler/Falinks#466, danielrispl
 
 - [ ] **danielrispler/Falinks#573:** ⇧⌘↩ folds the list and the rail and gives the terminal the window; ⇧⌘↩ again brings them back.
 - [ ] **danielrispler/Falinks#573:** in focus mode, let another session ask a question. A toast shows its name and the question's first line over the terminal's top-right corner, with a sound, and typing in the terminal goes on: nothing moves and no key is lost. A second block shows "+1 more" in the same toast.
-- [ ] **danielrispler/Falinks#573:** click the toast: focus mode ends and that session is selected. Its × dismisses it without taking the terminal's focus. In focus mode, ⌘J also jumps to the toast's session and leaves focus mode.
+- [ ] **danielrispler/Falinks#573:** click the toast: focus mode ends and that session is selected. Its × dismisses it; a press of the pointer on it leaves the keyboard's focus where it was, and Tab reaches the toast's action and its × (#457). In focus mode, ⌘J also jumps to the toast's session and leaves focus mode.
 - [ ] **danielrispler/Falinks#573:** a question from the session in the focused terminal shows no toast and makes no sound.
 - [ ] **danielrispler/Falinks#556 and the 6c fix:** focused, another session that newly needs you plays one sound (Glass) as its toast shows, in any layout, and never twice. The session you are viewing plays none, and a your-turn plays none.
 - [ ] **danielrispler/Falinks#556:** in the background, needs you plays Glass and your turn plays Tink, each only with its notification. The sounds feel right, not alarming.
