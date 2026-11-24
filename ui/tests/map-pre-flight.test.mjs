@@ -120,3 +120,28 @@ test("a map redraw keeps what was typed and ticked in the overlay, and its focus
   paintPreFlight(box, { kind: "result", pre: pre() }, doc, state, acts([]));
   assert.equal(box.find("textarea").length + box.find("input").length, 0);
 });
+
+test("the overlay says its status in one live region that outlives its redraws and exists before its words change (#452's review)", async () => {
+  const { El } = await import("./dom.mjs");
+  const box = new El("div");
+  const later = () => new Promise((done) => setTimeout(done, 150));
+  const region = () => box.childNodes.filter((node) => node instanceof El && node.getAttribute("role") === "status");
+  const all = (node) => [node, ...node.childNodes.filter((c) => c instanceof El).flatMap(all)];
+  paintPreFlight(box, { kind: "start", issues: null }, doc, state, acts([]));
+  const [live] = region();
+  assert.ok(live, "the overlay has a status region");
+  assert.equal(region().length, 1);
+  assert.equal(live.text, "", "the region is drawn empty, so its first words are a change a screen reader hears");
+  await later();
+  assert.equal(live.text, "Reading the open issues…");
+  paintPreFlight(box, { kind: "predicting" }, doc, state, acts([]));
+  assert.deepEqual(region(), [live], "the same region, still in the overlay");
+  assert.equal(live.text, "Asking the writer which parts this will cross…");
+  paintPreFlight(box, { kind: "pick", why: "the writer is not set" }, doc, state, acts([]));
+  assert.deepEqual(region(), [live]);
+  assert.equal(live.text, "No prediction: the writer is not set. Pick the parts by hand.");
+  paintPreFlight(box, { kind: "result", pre: pre() }, doc, state, acts([]));
+  assert.deepEqual(region(), [live]);
+  assert.equal(live.text, "");
+  assert.equal(all(box).filter((node) => node.getAttribute("role") === "status").length, 1, "no other line is a status");
+});

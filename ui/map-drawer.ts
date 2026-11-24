@@ -7,7 +7,7 @@
 // different project's map closes it.
 
 import { logStop } from "./stop-rules.js";
-import { text } from "./dom.js";
+import { scrollingPre, text } from "./dom.js";
 import { currentMap, onDraw, registerLayer, syncSide, type MapView } from "./map.js";
 import type { Drawer, Jump } from "./map-model.js";
 
@@ -58,10 +58,7 @@ function drawDrawer(view: MapView) {
   for (const block of drawer.blocks) {
     const part = text("div", "", "drawer-block");
     if (block.label) part.append(text("p", block.label, "drawer-label"));
-    // The code scrolls on its own, so it takes focus, with a name, for the keys to scroll it (#462).
-    const code = text("pre", block.code, "drawer-code");
-    code.setAttribute("tabindex", "0");
-    code.setAttribute("aria-label", block.label ?? drawer.title);
+    const code = scrollingPre(block.code, "drawer-code", block.label ?? drawer.title);
     part.append(code);
     if (block.jumps.length) part.append(...block.jumps.map(jumpLink));
     card.append(part);

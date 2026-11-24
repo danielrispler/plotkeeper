@@ -10,7 +10,7 @@
 // the PR touched, or a new law: the no-tools writer drafts its sentence from the PR's facts, Daniel confirms or edits it, and only what he
 // confirmed reaches the run, which adds the law to the map with its tagged test in one patch, proven and reviewed like back a law.
 
-import { confirmed, failure, invoke, text, type Confirm } from "./dom.js";
+import { confirmed, failure, invoke, promptBox, scrollingPre, text, type Confirm } from "./dom.js";
 import { diffLines } from "./diff.js";
 import { currentMap, onDraw, registerLayer, reloadMap, shownProject } from "./map.js";
 import { copyOverturn, overturnReport } from "./ratify.js";
@@ -104,13 +104,8 @@ export function reviewNodes(patch: LawPatch, law: string, act: Pick<PatchActs, "
   const proof = patch.proof;
   const diff = text("div", "", "patch-diff");
   diff.append(...diffLines(patch.diff ?? "").map((line) => text("pre", line.text, `diff-line ${line.kind}`)));
-  // An output scrolls on its own, so it takes focus, named by its heading, for the keys to scroll it (#462).
-  const output = (heading: string, out: string) => {
-    const pre = text("pre", out, "patch-output");
-    pre.setAttribute("tabindex", "0");
-    pre.setAttribute("aria-label", heading);
-    return [text("h3", heading, "patch-heading"), pre];
-  };
+  // An output, named by its heading.
+  const output = (heading: string, out: string) => [text("h3", heading, "patch-heading"), scrollingPre(out, "patch-output", heading)];
   const foot = text("div", "", "patch-foot");
   foot.append(
     button("Open draft PR", "Push a branch with this test patch from the default branch and open a draft PR with the proof", () => act.open(patch.id), "primary"),
@@ -130,15 +125,7 @@ export function reviewNodes(patch: LawPatch, law: string, act: Pick<PatchActs, "
 
 // A run that could not start and whose prompt the clipboard refused: its line, and the prompt in the overlay to copy by hand.
 export function refusedNodes(line: string, prompt: string, close: () => void): HTMLElement[] {
-  const area = document.createElement("textarea");
-  area.className = "ratify-prompt";
-  area.value = prompt;
-  area.readOnly = true;
-  area.rows = 6;
-  area.name = "prompt";
-  area.autocomplete = "off";
-  area.spellcheck = false;
-  area.setAttribute("aria-label", "The prompt, to copy by hand");
+  const area = promptBox(prompt, 6);
   const foot = text("div", "", "patch-foot");
   foot.append(button("Close", "Close", close));
   return [text("h2", "The run did not start", "patch-title"), text("p", `${line}. ${overturnReport("manual", prompt).line}`, "patch-law"), area, foot];

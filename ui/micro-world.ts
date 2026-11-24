@@ -6,7 +6,7 @@
 // `frame-src 'none'` (`server/src/web.rs`): no frame of it loads a URL. The frame sits in an overlay in the glass the size of the settings
 // dialog, the first layer Esc closes.
 
-import { element, failure, invoke, text } from "./dom.js";
+import { element, failure, invoke, promptBox, text } from "./dom.js";
 import { onDraw, registerLayer, reloadMap, shownProject } from "./map.js";
 import { copyOverturn, overturnReport } from "./ratify.js";
 import { logStop } from "./stop-rules.js";
@@ -137,15 +137,7 @@ function noteNodes(key: string): HTMLElement[] {
   const line = text("p", note.line, "run-copied");
   line.setAttribute("role", "status");
   if (note.manual === null) return [line];
-  const area = document.createElement("textarea");
-  area.className = "ratify-prompt";
-  area.value = note.manual;
-  area.readOnly = true;
-  area.rows = 4;
-  area.name = "prompt";
-  area.autocomplete = "off";
-  area.spellcheck = false;
-  area.setAttribute("aria-label", "The prompt, to copy by hand");
+  const area = promptBox(note.manual);
   return [line, area];
 }
 

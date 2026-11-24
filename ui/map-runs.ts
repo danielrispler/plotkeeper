@@ -3,7 +3,7 @@
 // on Daniel's click (`server/src/runner.rs`), never a session; no module starts one yet. A run that failed, or finished with tool calls
 // denied, offers its prompt to copy into his own agent, as an overturn does (`ratify.ts`).
 
-import { confirmed, failure, invoke, text, type Confirm } from "./dom.js";
+import { confirmed, failure, invoke, promptBox, text, type Confirm } from "./dom.js";
 import { onDraw, reloadMap, syncSide, type MapView } from "./map.js";
 import { copyOverturn, overturnReport } from "./ratify.js";
 import type { RunView, Runs } from "./types.js";
@@ -54,15 +54,7 @@ function noteNodes(note: Pick<CopyNote, "line" | "manual">): HTMLElement[] {
   const line = text("p", note.line, "run-copied");
   line.setAttribute("role", "status");
   if (note.manual === null) return [line];
-  const area = document.createElement("textarea");
-  area.className = "ratify-prompt";
-  area.value = note.manual;
-  area.readOnly = true;
-  area.rows = 4;
-  area.name = "prompt";
-  area.autocomplete = "off";
-  area.spellcheck = false;
-  area.setAttribute("aria-label", "The prompt, to copy by hand");
+  const area = promptBox(note.manual);
   return [line, area];
 }
 

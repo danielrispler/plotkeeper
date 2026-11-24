@@ -568,16 +568,23 @@ export const sidebarSessions = <T extends Pick<Session, "state" | "id">>(session
 export const landedToClear = <T extends Pick<Session, "state" | "id" | "landed">>(sessions: T[], hidden: ReadonlySet<string>): T[] =>
   sessions.filter((session) => showsLanded(session.state, session.landed) && !hidden.has(session.id));
 
-// A project's "⋯" (#381): the one menu of the list's headers, opened under it for its project, flipped at the window's edges (#458); Remove
-// project is in it. It is drawn only for a project with no live session: the server saves a project again for its sessions' next event, so
+// A project's "⋯" (#381): the one menu of the list's headers, opened under it for its project, flipped at the window's edges (#458), and
+// closed by a second press, as the rail's "⋯" toggles its menu (#452's review); Remove project is in it. It is drawn only for a project with no live session: the server saves a project again for its sessions' next event, so
 // removing one with live sessions would undo itself (#380's review).
 function projectMore(group: ProjectGroup<Session>): HTMLElement {
+  const openHere = () => element("project-actions").matches(":popover-open") && element("project-actions").dataset.project === group.key;
+  // A pointer's press outside the menu light-dismisses it before the click, so whether it was open here is read at the press.
+  let wasOpen = false;
   const more = pressable(text("button", "⋯", "project-more"), null, () => {
     const menu = element("project-actions");
+    const close = wasOpen || openHere();
+    wasOpen = false;
+    if (close) return menu.hidePopover();
     menu.dataset.project = group.key;
     // Its button is its implicit anchor (#458), which places it by CSS as the rail's "⋯" menu.
     menu.showPopover({ source: more });
   });
+  more.addEventListener("pointerdown", () => (wasOpen = openHere()));
   more.title = "Project";
   more.setAttribute("aria-label", `More actions for ${group.name}`);
   return more;

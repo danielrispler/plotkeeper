@@ -371,10 +371,13 @@ const evidenceScript = `
   await wait();
   const output = document.querySelector(".evidence-output");
   if (!output || output.hidden || !/exit code 1/.test(output.textContent)) log("snap:fail the failed check's output did not open");
+  // Only an error is live: the output itself is not read aloud as it loads (#452's review).
+  if (output?.closest("[aria-live], [role=status]")) log("snap:fail the failed check's output is in a live region");
   log("rail scrollTop " + at + " -> " + story.scrollTop);
   if (story.scrollTop !== at) log("snap:fail the rail's scrollTop moved from " + at + " to " + story.scrollTop);`;
 
-// #456: a failed check's output and a file's hunk that cannot be read say so in a polite live region.
+// #456: a failed check's output and a file's hunk that cannot be read say so in the row's status region, which the row held before the
+// read failed; the output's box itself is not live (#452's review).
 const unreadScript = `
   const wait = () => new Promise((resolve) => setTimeout(resolve, 200));
   const toggle = document.querySelector(".evidence-toggle");
@@ -386,7 +389,9 @@ const unreadScript = `
     return wait().then(() => {
       const pre = row.parentElement.querySelector(shown);
       if (!pre?.textContent.includes("could not be read")) return log("snap:fail " + why + " shows " + JSON.stringify(pre?.textContent));
-      if (pre.closest("[aria-live=polite], [role=status]") === null) log("snap:fail " + why + "'s error is not in a polite live region");
+      if (pre.closest("[aria-live], [role=status]")) log("snap:fail " + why + "'s box is in a live region");
+      const live = row.parentElement.querySelectorAll("[role=status]");
+      if (live.length !== 1 || !live[0].textContent.includes("could not be read")) log("snap:fail " + why + "'s error is not said in the row's status region: " + JSON.stringify([...live].map((node) => node.textContent)));
     });
   };
   await heard(document.querySelector(".evidence-check .evidence-fail"), ".evidence-output", "the check's output");
@@ -421,6 +426,8 @@ const hunkScript = `
   await wait();
   const hunk = document.querySelector(".evidence-hunk");
   if (!hunk || hunk.hidden || !/gap: var/.test(hunk.textContent)) log("snap:fail the file's hunk did not open");
+  // Only an error is live: the hunk itself is not read aloud as it loads (#452's review).
+  if (hunk?.closest("[aria-live], [role=status]")) log("snap:fail the file's hunk is in a live region");
   log("rail scrollTop " + at + " -> " + story.scrollTop);
   if (story.scrollTop !== at) log("snap:fail the rail's scrollTop moved from " + at + " to " + story.scrollTop);`;
 

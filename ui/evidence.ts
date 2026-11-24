@@ -4,7 +4,7 @@
 // and the tail of its output. Opening changes only the nodes it opens: the open state is kept by key, so a redraw of the rail
 // draws the line open again.
 
-import { code, failure, fullTitle, glyphOnly, invoke, pressable, text } from "./dom.js";
+import { code, failure, fullTitle, glyphOnly, invoke, pressable, scrollingPre, statusRegion, text } from "./dom.js";
 import { askAnchor, type Hunk, hunkText } from "./ask.js";
 import { diffRequest } from "./diff.js";
 import type { Capabilities, Check, Turn, TurnFile } from "./types.js";
@@ -93,23 +93,21 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
     return item;
   }
   const key = `${session} ${row.agent ?? ""} ${row.call}`;
-  const pre = text("pre", outputs.get(key) ?? "", "evidence-output");
-  // What the read says, the output or why it could not be read, is announced politely (#456).
-  pre.setAttribute("aria-live", "polite");
-  // The output scrolls on its own, so it takes focus, with a name, for the keys to scroll it (#462).
-  pre.setAttribute("tabindex", "0");
-  pre.setAttribute("aria-label", `Output of ${row.label}`);
+  const pre = scrollingPre(outputs.get(key) ?? "", "evidence-output", `Output of ${row.label}`);
+  // Why the output could not be read is said aloud, in a region the row holds before the read (#456); the output itself is not.
+  const live = statusRegion();
   const show = () => (openOutputs.has(key) ? pre.removeAttribute("hidden") : pre.setAttribute("hidden", ""));
   const fetch = () => {
     if (outputs.has(key)) return;
     pre.textContent = "Reading the output…";
+    live.textContent = "";
     invoke("check_output", { session, agent: row.agent, call: row.call })
       .then((output) => {
         outputs.set(key, output ? outputText(output) : "No output was recorded.");
         pre.textContent = outputs.get(key)!;
       })
       .catch((e) => {
-        pre.textContent = `The output could not be read: ${e}`;
+        pre.textContent = live.textContent = `The output could not be read: ${e}`;
       });
   };
   const button = pressable(document.createElement("button"), null, () => {
@@ -126,7 +124,7 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
   button.append(glyphOnly("✗", "mark"), code(row.label), ...(row.agent ? [text("span", row.agent, "evidence-agent")] : []));
   show();
   if (openOutputs.has(key)) fetch();
-  item.append(button, pre, askAnchor(session, { kind: "check", agent: row.agent ?? null, call: row.call }, "this failed check"));
+  item.append(button, pre, live, askAnchor(session, { kind: "check", agent: row.agent ?? null, call: row.call }, "this failed check"));
   return item;
 }
 
@@ -150,10 +148,9 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
     const same = entry && entry.added === file.added && entry.removed === file.removed;
     return entry && (entry.ended || (!ended && same)) ? entry : undefined;
   };
-  const pre = text("pre", kept() ? hunkText(kept()!.hunk, false) : "", "evidence-hunk");
-  pre.setAttribute("aria-live", "polite");
-  pre.setAttribute("tabindex", "0");
-  pre.setAttribute("aria-label", `Changes to ${file.path}`);
+  const pre = scrollingPre(kept() ? hunkText(kept()!.hunk, false) : "", "evidence-hunk", `Changes to ${file.path}`);
+  // As a check's output: only why the hunk could not be read is said aloud.
+  const live = statusRegion();
   const left = (h: Hunk | null) => {
     more.textContent = `${h?.left_out ?? 0} more lines`;
     if (openHunks.has(openKey) && h?.left_out) more.removeAttribute("hidden");
@@ -170,6 +167,7 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
   const fetch = () => {
     if (kept()) return;
     pre.textContent = "Reading the hunk…";
+    live.textContent = "";
     invoke("turn_file_hunk", { session, turn: index, root: file.root, path: file.path, from: file.from })
       .then((h) => {
         hunks.set(key, { hunk: h, ended, added: file.added, removed: file.removed });
@@ -177,7 +175,7 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
         left(h);
       })
       .catch((e) => {
-        pre.textContent = `The hunk could not be read: ${e}`;
+        pre.textContent = live.textContent = `The hunk could not be read: ${e}`;
       });
   };
   const button = pressable(document.createElement("button"), null, () => {
@@ -195,7 +193,7 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
   button.append(text("span", row.label), ...(row.agent ? [text("span", row.agent, "evidence-agent")] : []));
   show();
   if (openHunks.has(openKey)) fetch();
-  item.append(button, pre, more, askAnchor(session, { kind: "file", turn: index, root: file.root, path: file.path, from: file.from }, `the file ${file.path}`, scope));
+  item.append(button, pre, live, more, askAnchor(session, { kind: "file", turn: index, root: file.root, path: file.path, from: file.from }, `the file ${file.path}`, scope));
   return item;
 }
 

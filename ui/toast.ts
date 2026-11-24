@@ -28,9 +28,12 @@ export function questionLine(session: Pick<Session, "questions" | "last_step">):
   return (open?.questions[0]?.question ?? session.last_step?.detail ?? "").split("\n")[0];
 }
 
+// Whether `session` is a block the toast is about: it needs Daniel and is not the `focused` one.
+const toasted = (session: Session, focused: string | null) => session.state === "needs_you" && session.id !== focused;
+
 // The toast for the sessions that need Daniel, less the `focused` one and those he dismissed.
 export function toastFor(listed: Session[], focused: string | null, dismissed: Set<string>): Toast | null {
-  const blocked = listed.filter((s) => s.state === "needs_you" && s.id !== focused && !dismissed.has(s.id));
+  const blocked = listed.filter((s) => toasted(s, focused) && !dismissed.has(s.id));
   return blocked.length ? { session: blocked[0], count: blocked.length } : null;
 }
 
@@ -153,7 +156,7 @@ export function showToast() {
 // The ×: every block shown is dismissed, so the toast comes back only for a new one.
 function dismissToast() {
   const focused = studio.selection?.session.id ?? null;
-  for (const s of studio.listed) if (s.state === "needs_you" && s.id !== focused) dismissed.add(s.id);
+  for (const s of studio.listed) if (toasted(s, focused)) dismissed.add(s.id);
   showToast();
 }
 
@@ -171,18 +174,22 @@ export function jumpToNeedsYou(): boolean {
 
 // The Clear toast (#244): "Cleared N landed", Undo and ×, for the window `clearing` holds open. Its × hides it; the clear goes on.
 let undoClear = () => {};
+// Its message, made with its buttons at its first showing.
+let clearName: HTMLElement | null = null;
 export function showClearToast(count: number, undo: () => void) {
   const toast = element("clear-toast");
   undoClear = undo;
   const message = `Cleared ${count} landed`;
-  if (!made.has(toast)) {
+  if (!clearName) {
+    const name = text("strong", "", "name");
     const undoButton = text("button", "Undo", "btn small");
     undoButton.title = "Bring the cleared sessions back";
     undoButton.addEventListener("click", () => undoClear());
-    toast.replaceChildren(text("strong", "", "name"), undoButton);
+    toast.replaceChildren(name, undoButton);
+    toastButtons(toast, () => undoButton, hideClearToast, "Hide this toast; the clear goes on");
+    clearName = name;
   }
-  toastButtons(toast, () => toast.childNodes[1] as HTMLElement, hideClearToast, "Hide this toast; the clear goes on");
-  const name = toast.childNodes[0] as HTMLElement;
+  const name = clearName;
   name.textContent = message;
   fullTitle(name, message);
   toast.dataset.say = toastSays([message]);

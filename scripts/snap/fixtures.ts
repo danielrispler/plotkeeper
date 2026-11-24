@@ -101,6 +101,10 @@ const projectMenuScript = (nearBottom: boolean) => `
       ? 'if (m.bottom > b.top + 0.5 || b.top - m.bottom > 16) log("snap:fail the menu is not right over its button: menu bottom " + m.bottom + ", button top " + b.top);'
       : 'if (m.top < b.bottom - 0.5 || m.top - b.bottom > 16) log("snap:fail the menu is not right under its button: menu top " + m.top + ", button bottom " + b.bottom);'}
     log("project menu at " + [m.left, m.top, m.right, m.bottom].map(Math.round) + "; button at " + [b.left, b.top, b.right, b.bottom].map(Math.round));
+    // A real second click on its "⋯" closes it, as the rail's "⋯" does (#452's review).
+    await __snapClick(more);
+    await wait(50);
+    if (menu.matches(":popover-open")) log("snap:fail a second click on its ⋯ left the menu open");
     log("project menu ok");`;
 
 // The Map view (#309) on a map of plotkeeper's own shape, opened by its key. Positions are saved, as the prototype's Treatment C draws them.
@@ -262,15 +266,21 @@ const mapPreFlight = (): Fixture =>
 const mapPreFlightStatus = (): Fixture =>
   mapOpened(`
       const box = document.getElementById("map-pre-flight");
+      // Each status shows as a line and is said in the overlay's one status region, the same node from the first (#452's review).
+      let first = null;
       const status = (words, why) => {
-        const node = [...box.querySelectorAll("p")].find((each) => each.textContent.includes(words));
+        const node = [...box.querySelectorAll("p:not([role=status])")].find((each) => each.textContent.includes(words));
         if (!node) return log("snap:fail " + why + ": no line with " + JSON.stringify(words) + " in " + JSON.stringify(box.textContent));
-        if (node.getAttribute("role") !== "status") log("snap:fail " + why + " is not a status: " + node.outerHTML);
+        const live = [...box.querySelectorAll("[role=status], [aria-live]")];
+        first ??= live[0];
+        if (live.length !== 1 || live[0] !== first || !live[0].isConnected) log("snap:fail " + why + ": the overlay's status region is not the one it had");
+        if (!live[0]?.textContent.includes(words)) log("snap:fail " + why + " is not said: the region holds " + JSON.stringify(live[0]?.textContent));
       };
       document.getElementById("pre-flight-button").click();
-      await wait(100);
+      // A region new to the overlay takes its first words a moment after it is drawn.
+      await wait(200);
       status("Reading the open issues", "the issues' reading");
-      await wait(500);
+      await wait(400);
       const issue = box.querySelector(".pre-flight-issue");
       if (!issue) return log("snap:fail the open issues never came");
       issue.click();
@@ -1273,6 +1283,25 @@ const mapPartKeys = (): Fixture => {
   };
 };
 
+// A map redraw, here at a landed push that thins Core's fog, keeps the keyboard on the same part's button (#452's review).
+const mapPartRedraw = (): Fixture => {
+  const f = mapBusy(false);
+  return {
+    ...f,
+    map_state: { __by: "fetch", values: { true: mapState(), false: mapState({ fog: { core: "thin" } }) } } as never,
+    snapScript: f.snapScript!.replace(/log\("chips ok, not placed " \+ rest\.length\);/, `
+      const hook = document.querySelector("#map .plate[data-id=hook] > .plate-open");
+      hook.focus();
+      __snapEmit("map-landed", "/w/plotkeeper");
+      await wait(300);
+      const redrawn = document.activeElement;
+      if (hook.isConnected) log("snap:fail the landed push did not draw the map again");
+      if (!redrawn?.matches("#map .plate[data-id=hook] > .plate-open")) log("snap:fail after a map redraw focus is on " + (redrawn?.className || redrawn?.tagName) + ", not hook's button");
+      log("part redraw ok");`),
+    snapDone: "part redraw ok",
+  };
+};
+
 // A map whose default branch's CI failed in a test that backs a law of the shell (#312): the red mark beside the Needs you chip, at the
 // size of the busy fixture; `drawer` opens the proof of a law, `log` the broken-law drill-down.
 const brokenCi: Ci = {
@@ -1475,6 +1504,20 @@ const claudeWriter = { kind: "claude" as const, name: "Claude", found: true, mod
 const agyWriter = { kind: "agy" as const, name: "agy", found: true, models: ["gemini-4-neon-low", "gemini-4-neon-medium", "gemini-4-neon-high", "gemini-4-argon-low", "gemini-4-hydrogen-low"], efforts: [] };
 const anthropicWriter = { kind: "anthropic" as const, name: "Anthropic API key", found: false, models: ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"], efforts: ["", "low", "medium", "high"] };
 const openaiWriter = { kind: "openai" as const, name: "OpenAI-compatible API", found: false, models: ["gpt-6-luna", "gpt-5.6-luna", "gpt-5.6-terra"], efforts: ["", "low", "medium", "high"] };
+// The writer section's one status region (#452's review): before an action, the region and a watch on the section that fails when the
+// region leaves it; after, the same region, still in the section, holding `words`.
+const writerStatusBefore = `
+      const section = document.getElementById("writers");
+      const live = [...section.children].filter((node) => node.getAttribute("role") === "status");
+      if (live.length !== 1 || live[0].textContent !== "") log("snap:fail the writer section has " + live.length + " status regions before the action, not one empty: " + live.map((node) => node.textContent));
+      let left = false;
+      new MutationObserver((changes) => (left ||= changes.some((change) => [...change.removedNodes].includes(live[0])))).observe(section, { childList: true });`;
+const writerStatusAfter = (words: string) => `
+      const now = [...section.children].filter((node) => node.getAttribute("role") === "status");
+      if (now.length !== 1 || now[0] !== live[0] || left) log("snap:fail the status region did not stay in the section across the redraw");
+      if (!now[0]?.textContent.includes(${JSON.stringify(words)})) log("snap:fail the status region says " + JSON.stringify(now[0]?.textContent));
+      if (section.querySelectorAll("[role=status], [aria-live]").length !== 1) log("snap:fail another line of the section is live");`;
+
 const writersOpen = (extra: Partial<Fixture>, check: string, press = false): Fixture => ({
   ...list(),
   map_state: mapState(),
@@ -2264,6 +2307,16 @@ const paletteFocus = (): Fixture => ({
       await __snapClick(document.querySelector(".bar-project") ?? document.querySelector("header.top"));
       await wait(100);
       back("an outside click");
+      // A real click on a focusable control outside closes it and leaves the focus on that control (#452's review).
+      await open();
+      const outside = Object.assign(document.createElement("input"), { name: "outside", autocomplete: "off" });
+      outside.setAttribute("aria-label", "A field outside the palette");
+      document.querySelector("header.top").append(outside);
+      await __snapClick(outside);
+      await wait(100);
+      if (palette.checkVisibility()) log("snap:fail a click on a field outside left the palette open");
+      if (document.activeElement !== outside) log("snap:fail after a click on a field outside focus is on " + named(document.activeElement) + ", not the field");
+      outside.remove();
       await open();
       const close = palette.querySelector('button[aria-label="Close"]');
       if (!close?.checkVisibility()) return log("snap:fail the palette has no visible close button");
@@ -2389,10 +2442,11 @@ export const fixtures = {
     writersOpen({
       writers: { writers: [claudeWriter, agyWriter], summaries_on: true, briefs: true, keys: [], base_url: null },
       test_writer: { outcome: "not_logged_in", line: "`claude` is not logged in. Run `claude` in a terminal and log in with /login.", settings: null },
-    }, `
+    }, `${writerStatusBefore}
+      document.getElementById("writer-test").click();
+      await wait(300);
       const outcome = document.getElementById("writer-outcome");
-      if (!outcome?.classList.contains("failed") || !outcome.textContent.includes("/login")) log("snap:fail no failed outcome with its fix: " + outcome?.textContent);
-      if (outcome?.getAttribute("role") !== "status") log("snap:fail the Test's outcome is not a status");`, true),
+      if (!outcome?.classList.contains("failed") || !outcome.textContent.includes("/login")) log("snap:fail no failed outcome with its fix: " + outcome?.textContent);${writerStatusAfter("/login")}`),
   // No API key set (#366): the writer is listed but cannot be picked, and the key row offers to add one.
   writersKeyNotSet: () =>
     writersOpen({ writers: { writers: [anthropicWriter, claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: null } }, `
@@ -2400,7 +2454,10 @@ export const fixtures = {
       if (first?.textContent !== "Anthropic API key (not set)" || !first.disabled) log("snap:fail the unset key is not listed first and unpickable: " + first?.textContent);
       if (!document.getElementById("writer-key-state")?.textContent.includes("not set")) log("snap:fail the key row does not say not set");
       if (document.getElementById("writer-key")?.placeholder !== "Add an API key…") log("snap:fail no field to add an API key");
-      if (document.getElementById("writer-key-remove")) log("snap:fail Remove shown with no key set");`),
+      if (document.getElementById("writer-key-remove")) log("snap:fail Remove shown with no key set");
+      // An empty base URL's placeholder reads as an example, not as part of the URL (#452's review).
+      const example = document.getElementById("writer-base-url")?.placeholder;
+      if (example !== "e.g. https://api.openai.com/v1…") log("snap:fail the base URL's placeholder is " + JSON.stringify(example));`),
   // An API key set: it comes first in the preset order, and a Test of the Anthropic writer passes.
   writersKeySet: () =>
     writersOpen({
@@ -2441,18 +2498,18 @@ export const fixtures = {
     }, `
       if (!document.getElementById("writer-briefs")?.textContent.includes("briefs need Claude")) log("snap:fail no briefs need Claude line");
       if (document.getElementById("writer-model").value !== "gemini-4-neon-high") log("snap:fail the model in effect is not shown");`),
-  // #456: a key the Keychain refuses: its error is a status, tied to the key's field.
+  // #456: a key the Keychain refuses: its error is said in the section's status region, and tied to the key's field.
   writersKeyError: () =>
     writersOpen({
       writers: { writers: [anthropicWriter, claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: null },
       set_api_key: { __throw: "the Keychain refused the key" } as never,
-    }, `
+    }, `${writerStatusBefore}
       document.getElementById("writer-key").value = "sk-ant-not-a-key";
       document.getElementById("writer-key-save").click();
       await wait(300);
       const error = document.getElementById("writer-key-error");
       if (!error?.textContent.includes("Keychain refused")) return log("snap:fail no key error: " + error?.textContent);
-      if (error.getAttribute("role") !== "status") log("snap:fail the key error is not a status");
+${writerStatusAfter("Keychain refused")}
       const field = document.getElementById("writer-key");
       if (field.getAttribute("aria-invalid") !== "true" || !(field.getAttribute("aria-describedby") ?? "").split(" ").includes("writer-key-error")) log("snap:fail the key error is not tied to its field");`),
   writersListNarrow: (): Fixture => fixtures.writersList(),
@@ -2585,7 +2642,7 @@ export const fixtures = {
       await new Promise((r) => setTimeout(r, 100));
       if (document.body.textContent.includes("Not recording")) log("snap:fail a not-recording line is on the page");`,
   }),
-  // Alerts: two sessions' turns ended off screen (the note toast).
+  // Alerts: two sessions' turns ended off screen (the note toast). The contrast pass (#455) runs here too: the toast's buttons.
   alerts() {
     const context = (k: number) => ({ ...session("x", "x", "idle").transcript, context: { tokens: k * 1000 } });
     const sessions = [
@@ -2602,7 +2659,7 @@ export const fixtures = {
       // The top bar has no unseen chip (#386): the unseen rows carry their mark in the list.
       if (document.getElementById("unseen")) log("snap:fail the top bar still has an unseen chip");
       log("note: " + note.textContent);`;
-    return { ...base, sessions, selected: { session: sessions[1], agent: null }, snapScript };
+    return { ...base, sessions, selected: { session: sessions[1], agent: null }, snapScript, contrast: true };
   },
   // The saved project list (#381): a project with no sessions keeps its header, after the one with sessions; a gone one is
   // struck through; a header's "⋯" offers Remove project.
@@ -2620,8 +2677,8 @@ export const fixtures = {
       if (!menu.matches(":popover-open") || menu.textContent.trim() !== "Remove project") log("snap:fail the header's menu does not offer Remove project");
       log("headers " + order);`),
   // A header's "⋯" menu (#458) opens under its button and inside the window, and flips over it near the window's bottom edge.
-  projectMenu: () => withSaved(projectMenuScript(false), { snapDone: "project menu ok" }),
-  projectMenuBottom: () => withSaved(projectMenuScript(true), { snapDone: "project menu ok" }),
+  projectMenu: () => withSaved(projectMenuScript(false), { realPointer: true, snapDone: "project menu ok" }),
+  projectMenuBottom: () => withSaved(projectMenuScript(true), { realPointer: true, snapDone: "project menu ok" }),
   // A saved project whose folder is gone, in the map's place: its words, its path and Remove project, never an error (#381).
   mapProjectGone: () => withSaved(openGone + `
     log("gone: " + gone.textContent);`),
@@ -2792,6 +2849,7 @@ export const fixtures = {
   mapChipJump: () => mapBusy(true),
   // The map from the keyboard (#460).
   mapPartKeys,
+  mapPartRedraw,
   // Story 34: every card over the map, the left panel and the sheet and drawer alike, arrives by a 12 px slide with a fade.
   mapGlassMotion: () =>
     mapOpened(`

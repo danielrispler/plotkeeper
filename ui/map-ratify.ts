@@ -3,7 +3,7 @@
 // too, then copies a prompt that quotes the item to the clipboard for him to paste into his agent (port decision Q2); when the clipboard
 // refuses, the prompt shows in a small box with a Copy button.
 
-import { failure, invoke, text } from "./dom.js";
+import { failure, invoke, promptBox, text } from "./dom.js";
 import { currentMap } from "./map.js";
 import { copyOverturn, decideWith, noteFor, overturnPrompt, overturnReport, type Overturned } from "./ratify.js";
 import { logStop } from "./stop-rules.js";
@@ -36,15 +36,7 @@ export function overturnNote(project: string, holds: (item: Pick<Ratifiable, "pr
   note.append(line);
   const manual = shown.manual;
   if (manual === null) return note;
-  const area = document.createElement("textarea");
-  area.className = "ratify-prompt";
-  area.value = manual;
-  area.readOnly = true;
-  area.rows = 4;
-  area.name = "prompt";
-  area.autocomplete = "off";
-  area.spellcheck = false;
-  area.setAttribute("aria-label", "The prompt, to copy by hand");
+  const area = promptBox(manual);
   const copy = text("button", "Copy", "btn quiet ratify-copy");
   copy.setAttribute("type", "button");
   copy.title = "Copy the prompt to paste into your agent";

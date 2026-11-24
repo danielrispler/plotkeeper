@@ -426,7 +426,11 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub
   for (const [id, node] of nodes) place(node, positions[id]);
   world.append(...elements);
   canvas.append(world);
+  // The keyboard on a part's button stays on that part's new button (#452's review).
+  const focused = document.activeElement;
+  const kept = focused?.matches(".plate-open") && body.contains(focused) ? focused.closest<HTMLElement>(".plate")?.dataset.id : undefined;
   body.replaceChildren(canvas);
+  if (kept) nodes.get(kept)?.querySelector<HTMLElement>(".plate-open")?.focus({ preventScroll: true });
   fit();
   drawLinks(links, current);
   view = current;

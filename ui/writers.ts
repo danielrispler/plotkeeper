@@ -9,7 +9,7 @@
 // `settings.json` as `summaries.base_url` (none: OpenAI's own), and an optional key, also kept in the Keychain, as a local
 // Ollama needs none.
 
-import { confirmed, failure, invoke, text } from "./dom.js";
+import { confirmed, drawWithStatus, failure, invoke, text } from "./dom.js";
 import type { Settings, SettingsFiles } from "./settings.js";
 import type { Writers, WriterKind, WriterTest } from "./types.js";
 import { GATE } from "./writer-notice.js";
@@ -113,7 +113,7 @@ export type Hooks = {
 };
 
 function draw(panel: HTMLElement, hooks: Hooks) {
-  if (!list) return panel.replaceChildren(text("p", "Looking for writers…", "writer-hint"));
+  if (!list) return drawWithStatus(panel, [text("p", "Looking for writers…", "writer-hint")], "");
   const known = list;
   const writer = known.writers.find((w) => w.kind === choice.writer);
   const models = writer?.models ?? [];
@@ -150,7 +150,6 @@ function draw(panel: HTMLElement, hooks: Hooks) {
     const line = testLine(outcome);
     const shown = text("p", line.text, `writer-outcome ${line.passed ? "passed" : "failed"}`);
     shown.id = "writer-outcome";
-    shown.setAttribute("role", "status");
     nodes.push(shown);
   } else if (!known.summaries_on) {
     nodes.push(text("p", "Summaries are off until a writer passes Test.", "writer-outcome"));
@@ -162,7 +161,9 @@ function draw(panel: HTMLElement, hooks: Hooks) {
     shown.id = "writer-briefs";
     nodes.push(shown);
   }
-  panel.replaceChildren(...nodes);
+  // The Test's outcome and the keys' errors are said in the section's one status region (#456, #452's review).
+  const said = [outcome ? testLine(outcome).text : "", keyErrors.anthropic ?? "", keyErrors.openai ?? ""].filter(Boolean).join(" ");
+  drawWithStatus(panel, nodes, said);
 }
 
 // The key row: whether a key is set, a field to add one or replace it, and Remove once one is set.
@@ -226,11 +227,10 @@ function keyRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[]
   return nodes;
 }
 
-// A key's error, announced as a status and tied to the `fields` it is about (#456).
+// A key's error, tied to the `fields` it is about (#456); the section's status region says it.
 function keyError(words: string, id: string, fields: HTMLElement[]): HTMLElement {
   const shown = text("p", words, "writer-outcome failed");
   shown.id = id;
-  shown.setAttribute("role", "status");
   for (const field of fields) {
     field.setAttribute("aria-invalid", "true");
     field.setAttribute("aria-describedby", id);
@@ -277,7 +277,7 @@ function openaiRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElemen
   base.autocomplete = "off";
   base.spellcheck = false;
   base.value = known.base_url ?? "";
-  base.placeholder = `${OPENAI_URL}…`;
+  base.placeholder = `e.g. ${OPENAI_URL}…`;
   base.setAttribute("aria-label", "Base URL");
   base.title = "The API's base URL, such as https://openrouter.ai/api/v1 or http://localhost:11434/v1 for Ollama; empty: OpenAI's own";
   const input = document.createElement("input");

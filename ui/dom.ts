@@ -93,6 +93,54 @@ export function glyphOnly(glyph: string, className = ""): HTMLElement {
 // Words for assistive tech alone, not drawn (#456), such as "failed" beside a ✕.
 export const unseenWords = (words: string): HTMLElement => text("span", words, "visually-hidden");
 
+// The prompt in a read-only box, to copy by hand when the clipboard refused it.
+export function promptBox(prompt: string, rows = 4): HTMLTextAreaElement {
+  const area = document.createElement("textarea");
+  area.className = "ratify-prompt";
+  area.value = prompt;
+  area.readOnly = true;
+  area.rows = rows;
+  area.name = "prompt";
+  area.autocomplete = "off";
+  area.spellcheck = false;
+  area.setAttribute("aria-label", "The prompt, to copy by hand");
+  return area;
+}
+
+// A `<pre>` that scrolls on its own, so it takes focus, named `name`, for the keys to scroll it (#462).
+export function scrollingPre(words: string, className: string, name: string): HTMLElement {
+  const pre = text("pre", words, className);
+  pre.setAttribute("tabindex", "0");
+  pre.setAttribute("aria-label", name);
+  return pre;
+}
+
+// An empty polite live region, drawn for assistive tech alone (#456): made before its words, so each change of them is heard.
+export function statusRegion(): HTMLElement {
+  const live = text("p", "", "visually-hidden");
+  live.setAttribute("role", "status");
+  return live;
+}
+
+// `box`'s children become `nodes`, then its one status region saying `words` (#452's review). The region is made once and never leaves
+// the box while the rest is drawn afresh, so a redraw that keeps the words says nothing again. A region the box did not hold yet takes
+// its words a moment after it is drawn, once a screen reader knows it is there.
+const regions = new WeakMap<HTMLElement, HTMLElement>();
+export function drawWithStatus(box: HTMLElement, nodes: Node[], words: string) {
+  const live = regions.get(box) ?? statusRegion();
+  regions.set(box, live);
+  const fresh = ![...box.childNodes].includes(live);
+  for (const child of [...box.childNodes]) if (child !== live) box.removeChild(child);
+  if (fresh) box.appendChild(live);
+  for (const node of nodes) box.insertBefore(node, live);
+  live.dataset.words = words;
+  const say = () => {
+    if (live.textContent !== live.dataset.words) live.textContent = live.dataset.words ?? "";
+  };
+  if (fresh && words) setTimeout(say, 100);
+  else say();
+}
+
 // `node` with `full` as its native hover title: the full text of what the layout cuts (#162). No title for an empty text,
 // which would hide the tooltip of the element under it.
 export function fullTitle<T extends HTMLElement>(node: T, full: string | null | undefined): T {

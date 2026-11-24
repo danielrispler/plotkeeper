@@ -7,7 +7,8 @@ import type { Binding } from "./settings.js";
 // The palette (danielrispler/Falinks#575), a native popover (#458): every action with its keys, filtered by what Daniel types. The
 // filter is a combobox over a listbox: ↑ and ↓ move the active option while the focus stays in the field (#24), announced through
 // `aria-activedescendant`. Enter or a click runs one, from where the focus was. Opening it again, Esc, a click outside it and its ×
-// close it, and every close returns the focus to where it was before it opened, as no button opened it for the browser to go back to.
+// close it, and a close returns the focus to where it was before it opened, as no button opened it for the browser to go back to; a click
+// outside on something that takes the focus, such as a text field, keeps the focus there.
 export function showPalette(entries: Entry[], run: (binding: Binding) => void) {
   const picker = element("palette");
   if (picker.matches(":popover-open")) {
@@ -80,9 +81,12 @@ export function showPalette(entries: Entry[], run: (binding: Binding) => void) {
   picker.onkeydown = (event) => {
     if (event.key === "Escape") event.stopPropagation();
   };
-  // Before every close, so the focus is back before a chosen action moves it.
+  // Before every close, so the focus is back before a chosen action moves it. Only from inside the palette, or from nowhere after a click
+  // outside on something that takes no focus: a click outside that focused a control leaves it there (#452's review).
   picker.onbeforetoggle = (event) => {
-    if ((event as ToggleEvent).newState === "closed") back?.focus();
+    if ((event as ToggleEvent).newState !== "closed") return;
+    const now = document.activeElement;
+    if (!now || now === document.body || picker.contains(now)) back?.focus();
   };
   picker.showPopover();
   field.focus();
