@@ -18,7 +18,7 @@
 
 ## One plotkeeper per data folder
 
-The first start holds a lock on `plotkeeper.lock` in the data folder and writes its port and token to `plotkeeper.running.json` there (mode 0600). A second start finds the lock held, opens the browser on the first one's address and exits. Ctrl+C (or SIGTERM) stops the server, removes that file and frees the lock; the stores write by temp file and rename, so a stop never leaves one half written.
+The first start holds a lock on `plotkeeper.lock` in the data folder and writes its port, token and version to `plotkeeper.running.json` there (mode 0600). A second start finds the lock held, opens the browser on the first one's address and exits. When the first one's version differs from its own, it first prints "plotkeeper <old> is still running; stop it (Ctrl+C) and run again to use <new>" (#439); it never stops the first one, whose background runs go on. A running file from before #439, with no version, opens the page with no notice. Ctrl+C (or SIGTERM) stops the server, removes that file and frees the lock; the stores write by temp file and rename, so a stop never leaves one half written.
 
 At start it applies the writer `settings.json` names (`summaries.writer`, `claude` by default), so summaries are written with it before any page opens. A start asks `gh` about the PRs of the sessions' repositories once and writes the PR briefs of at most 3 ready PRs whose head moved within the catch-up window (`briefBackfill.hours`, 2 by default; the older `catchUp.hours` is still read), the newest first, always with `claude -p`; any other ready PR is written when its brief is opened (see [PR briefs](pr-briefs.md)). The writer's failures reach the page as `writer-notice`; see [cards](cards.md).
 

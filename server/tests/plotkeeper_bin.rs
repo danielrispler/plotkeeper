@@ -50,6 +50,13 @@ fn a_second_start_opens_the_first_and_ctrl_c_stops_it() {
         "{url}"
     );
 
+    // The running file says the version, for a second start of another version (#439).
+    let data = home.path().join("Library/Application Support/plotkeeper");
+    let running: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(data.join("plotkeeper.running.json")).unwrap())
+            .unwrap();
+    assert_eq!(running["version"], env!("CARGO_PKG_VERSION"));
+
     let mut second = plotkeeper(home.path());
     assert_eq!(address(&mut second), url);
     assert!(wait(&mut second).success());
@@ -60,7 +67,6 @@ fn a_second_start_opens_the_first_and_ctrl_c_stops_it() {
         .unwrap();
     assert!(kill.success());
     assert!(wait(&mut first).success(), "Ctrl+C is a clean stop");
-    let data = home.path().join("Library/Application Support/plotkeeper");
     assert!(!data.join("plotkeeper.running.json").exists());
 }
 
@@ -83,4 +89,55 @@ fn version_is_the_npm_packages() {
     let expected = format!("plotkeeper {}\n", package["version"].as_str().unwrap());
     assert_eq!(String::from_utf8_lossy(&out.stdout), expected);
     assert_eq!(std::fs::read_dir(home.path()).unwrap().count(), 0);
+}
+
+/// Holds the data folder's lock as a running plotkeeper would, with `running` as its running file, and starts a second
+/// plotkeeper against it.
+fn second_start_against(running: serde_json::Value) -> std::process::Output {
+    let home = tempfile::tempdir().unwrap();
+    let data = home.path().join("Library/Application Support/plotkeeper");
+    std::fs::create_dir_all(&data).unwrap();
+    let lock = std::fs::File::create(data.join("plotkeeper.lock")).unwrap();
+    lock.try_lock().unwrap();
+    std::fs::write(data.join("plotkeeper.running.json"), running.to_string()).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_plotkeeper"))
+        .env("HOME", home.path())
+        .env("PLOTKEEPER_NO_BROWSER", "1")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "plotkeeper: http://127.0.0.1:4321/?token=abc\n",
+        "the page is opened"
+    );
+    out
+}
+
+/// A second start against an older server says so and still opens its page (#439); it never stops it.
+#[test]
+fn a_second_start_against_another_version_says_so() {
+    let out = second_start_against(serde_json::json!({
+        "port": 4321, "token": "abc", "version": "0.0.1"
+    }));
+    let expected = format!(
+        "plotkeeper 0.0.1 is still running; stop it (Ctrl+C) and run again to use {}\n",
+        env!("CARGO_PKG_VERSION")
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stderr), expected);
+}
+
+#[test]
+fn a_second_start_against_the_same_version_says_nothing() {
+    let out = second_start_against(serde_json::json!({
+        "port": 4321, "token": "abc", "version": env!("CARGO_PKG_VERSION")
+    }));
+    assert_eq!(String::from_utf8_lossy(&out.stderr), "");
+}
+
+/// A running file from before #439 has no version: the page opens as before, with no notice.
+#[test]
+fn a_second_start_against_a_running_file_without_a_version_opens_the_page() {
+    let out = second_start_against(serde_json::json!({ "port": 4321, "token": "abc" }));
+    assert_eq!(String::from_utf8_lossy(&out.stderr), "");
 }
