@@ -45,17 +45,21 @@ const MAP: &str = r#"{
 "#;
 
 /// The well-formed agent: a test tagged for the law, the law flipped to check, both staged; then the plant, unstaged.
-const TEST: &str = r#"cat > tests/add.test.mjs <<'EOF'
+/// The tag line is its own piece, so the map check does not read it as a tag of this file.
+const TEST: &str = concat!(
+    r#"cat > tests/add.test.mjs <<'EOF'
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { add } from "../src/add.mjs";
 
-// @law: adds
-test("add sums its two numbers", () => assert.equal(add(2, 3), 5));
+"#,
+    "// @law: adds\n",
+    r#"test("add sums its two numbers", () => assert.equal(add(2, 3), 5));
 EOF
 sed -i '' 's/"backing": "trust"/"backing": "check"/' system-map.json
 git add tests/add.test.mjs system-map.json
-"#;
+"#
+);
 const PLANT: &str = "echo 'export const add = (a, b) => a - b;' > src/add.mjs\n";
 const DONE: &str = r#"echo '{"type":"result","subtype":"success","is_error":false,"result":"Backed.","permission_denials":[]}'"#;
 
