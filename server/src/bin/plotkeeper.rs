@@ -177,7 +177,9 @@ fn wire_on_start(home: &std::path::Path) {
         &beside,
         path.as_deref(),
         terminal,
-        &mut std::io::stdout(),
+        // What it would change, its question and what it did go to stderr, as plotkeeper's reports do, so stdout's
+        // first line stays the page's address and `plotkeeper > log` still shows the question.
+        &mut std::io::stderr(),
     ) {
         eprintln!("plotkeeper: wiring stopped: {e}; run plotkeeper install to retry");
     }

@@ -48,11 +48,12 @@ serves() {
 }
 
 # The one command, as a first-time user runs it. CI gives it no terminal, so it never asks or wires: it serves and
-# prints the command that wires (#434).
-npx --yes --package "$tarball" plotkeeper < /dev/null > "$work/npx-out" 2>&1 &
+# prints the command that wires (#434), on stderr: stdout's first line is the address.
+npx --yes --package "$tarball" plotkeeper < /dev/null > "$work/npx-out" 2> "$work/npx-err" &
 server=$!
 serves "$work/npx-out"
-grep -q "plotkeeper install --yes" "$work/npx-out" || fail "npx plotkeeper did not print the command that wires: $(cat "$work/npx-out")"
+head -n 1 "$work/npx-out" | grep -q "^plotkeeper: http" || fail "npx plotkeeper's first line on stdout is not its address: $(cat "$work/npx-out")"
+grep -q "plotkeeper install --yes" "$work/npx-err" || fail "npx plotkeeper did not print the command that wires on stderr: $(cat "$work/npx-err")"
 [ ! -e "$HOME/claude-calls" ] || fail "npx plotkeeper with no terminal ran claude: $(cat "$HOME/claude-calls")"
 [ ! -e "$data/install" ] || fail "npx plotkeeper with no terminal wired or stored an answer"
 kill -INT "$server"
