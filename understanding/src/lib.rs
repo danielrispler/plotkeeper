@@ -201,6 +201,7 @@ pub trait CardWriter {
         _setup: &SummarySetup,
         _prompt: &str,
         _response: Option<&str>,
+        _folder: &str,
     ) -> Result<String, String> {
         Err("this writer writes no summaries".into())
     }
@@ -422,7 +423,7 @@ impl CardWriter for FakeWriter {
         Ok(serde_json::json!({ "summary": summary }).to_string())
     }
 
-    fn name(&self, _: &SummarySetup, _: &str, _: Option<&str>) -> Result<String, String> {
+    fn name(&self, _: &SummarySetup, _: &str, _: Option<&str>, _: &str) -> Result<String, String> {
         Ok(serde_json::json!({ "name": "Sample session name" }).to_string())
     }
 
@@ -1111,8 +1112,9 @@ impl CardWriter for ClaudeWriter {
         setup: &SummarySetup,
         prompt: &str,
         response: Option<&str>,
+        folder: &str,
     ) -> Result<String, String> {
-        self.text(self.name_request(setup, prompt, response))
+        self.text(self.name_request(setup, prompt, response, folder))
     }
 
     fn risk(&self, command: &str, folder: &str) -> Result<Risk, String> {

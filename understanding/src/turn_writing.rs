@@ -336,7 +336,8 @@ impl State {
         }
         let setup = self.setup.lock().unwrap().clone();
         let response = request.response.as_deref();
-        let name = write_name(&*self.writer, &setup, &request.prompt, response, |l| {
+        let (prompt, folder) = (&request.prompt, &request.cwd);
+        let name = write_name(&*self.writer, &setup, prompt, response, folder, |l| {
             self.effects.log(l);
         });
         if let Some(name) = name {
