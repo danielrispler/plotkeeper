@@ -34,7 +34,7 @@ test("the shell's re-sent selection keeps the diff; a click or another session e
 test("the pane lists the agent's files with counts, each hunk read whole, and no external fold", async () => {
   const calls = [];
   const hunks = { "a.rs": "@@ -1 +1,2 @@\n a\n+b\n", "img.png": null };
-  tauri(calls, (command, args) => (args.path === "img.png" ? { text: "", binary: true, first_line: 1 } : { text: hunks[args.path], binary: false, first_line: 2 }));
+  tauri(calls, (_command, args) => (args.path === "img.png" ? { text: "", binary: true, first_line: 1 } : { text: hunks[args.path], binary: false, first_line: 2 }));
   const place = new El("div");
   let back = 0;
   drawDiff(place, { id: "s", turns: [turn([file("a.rs", 1, 0), file("img.png", null, null)])] }, 0, () => back++);

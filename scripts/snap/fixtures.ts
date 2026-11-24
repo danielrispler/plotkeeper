@@ -1565,7 +1565,7 @@ export const fixtures = {
   writersPassed: () =>
     writersOpen({
       writers: { writers: [{ ...claudeWriter, found: false }, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: null },
-      test_writer: { outcome: "passed", line: "Passed: \`agy\` answered. Summaries are written with it.", settings: null },
+      test_writer: { outcome: "passed", line: "Passed: `agy` answered. Summaries are written with it.", settings: null },
     }, `
       if (document.getElementById("writer-pick").value !== "agy") log("snap:fail the preset is not agy, the first found");
       const outcome = document.getElementById("writer-outcome");
@@ -1574,7 +1574,7 @@ export const fixtures = {
   writersFailed: () =>
     writersOpen({
       writers: { writers: [claudeWriter, agyWriter], summaries_on: true, briefs: true, keys: [], base_url: null },
-      test_writer: { outcome: "not_logged_in", line: "\`claude\` is not logged in. Run \`claude\` in a terminal and log in with /login.", settings: null },
+      test_writer: { outcome: "not_logged_in", line: "`claude` is not logged in. Run `claude` in a terminal and log in with /login.", settings: null },
     }, `
       const outcome = document.getElementById("writer-outcome");
       if (!outcome?.classList.contains("failed") || !outcome.textContent.includes("/login")) log("snap:fail no failed outcome with its fix: " + outcome?.textContent);`, true),
@@ -1590,7 +1590,7 @@ export const fixtures = {
   writersKeySet: () =>
     writersOpen({
       writers: { writers: [{ ...anthropicWriter, found: true }, claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: ["anthropic"], base_url: null },
-      test_writer: { outcome: "passed", line: "Passed: \`anthropic\` answered. Summaries are written with it.", settings: null },
+      test_writer: { outcome: "passed", line: "Passed: `anthropic` answered. Summaries are written with it.", settings: null },
     }, `
       if (document.getElementById("writer-pick").value !== "anthropic") log("snap:fail the preset is not the API key");
       if (document.getElementById("writer-model").value !== "claude-haiku-5-5") log("snap:fail the preset model is not the first");
@@ -1603,7 +1603,7 @@ export const fixtures = {
   writersOpenAI: () =>
     writersOpen({
       writers: { writers: [anthropicWriter, { ...openaiWriter, found: true }, claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: "http://localhost:11434/v1" },
-      test_writer: { outcome: "passed", line: "Passed: \`openai\` answered. Summaries are written with it.", settings: null },
+      test_writer: { outcome: "passed", line: "Passed: `openai` answered. Summaries are written with it.", settings: null },
     }, `
       if (document.getElementById("writer-pick").value !== "openai") log("snap:fail the preset is not the OpenAI-compatible API");
       const model = document.getElementById("writer-model");

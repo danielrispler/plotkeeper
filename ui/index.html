@@ -141,14 +141,14 @@
       <label for="rename-field">Name this session</label>
       <input id="rename-field" autocomplete="off" spellcheck="false" autofocus>
       <!-- The default button comes first, so Enter in the field renames. -->
-      <div class="ask-buttons"><button class="btn" value="rename" title="Save this name (↩)">Rename</button><button class="btn" value="cancel" title="Keep the old name (Esc)">Cancel</button></div>
+      <div class="ask-buttons"><button type="submit" class="btn" value="rename" title="Save this name (↩)">Rename</button><button type="submit" class="btn" value="cancel" title="Keep the old name (Esc)">Cancel</button></div>
     </form>
   </dialog>
   <!-- Delete: the row leaves the list; its cards are kept. -->
   <dialog id="delete-dialog" class="ask">
     <form method="dialog">
       <p>Delete <strong id="delete-name"></strong> from the list? Its cards are kept.</p>
-      <div class="ask-buttons"><button class="btn" value="delete" title="Remove it from the list">Delete</button><button class="btn" value="cancel" autofocus title="Keep it (Esc)">Cancel</button></div>
+      <div class="ask-buttons"><button type="submit" class="btn" value="delete" title="Remove it from the list">Delete</button><button type="submit" class="btn" value="cancel" autofocus title="Keep it (Esc)">Cancel</button></div>
     </form>
   </dialog>
 </body>
