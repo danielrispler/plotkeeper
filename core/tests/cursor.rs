@@ -9,9 +9,11 @@
 //! sessions run at once: the first from the CLI, with its pid, the second from the IDE, whose pid the
 //! hook does not record.
 
+use crate::common;
 use studio_core::{CURSOR_CAPABILITIES, Change, Output, State, Studio};
 
 const RUN: &str = include_str!("fixtures/cursor/run.jsonl");
+const TRIAL: &str = include_str!("fixtures/cursor/trial.jsonl");
 const FIRST: &str = "c7a1e2f0-3b4d-4c5e-9f60-1a2b3c4d5e6f";
 const SECOND: &str = "d81f9c3a-6e2b-47d0-8a15-0f9e8d7c6b5a";
 
@@ -104,12 +106,15 @@ fn an_aborted_stop_ends_its_turn() {
     assert!(session.turns[1].ended_at.is_some());
 }
 
+/// Wave 1's trial (#369): a Cursor CLI turn that ran `calc.py`, rewrote it and ran it again, its
+/// `stop` landing before its reply, as Cursor 2026.11.22 sent its lines
+/// (`fixtures/cursor/trial.jsonl`, the trial's folder written `/w/trial`). Its summary said nothing
+/// was recorded, as Cursor recorded no turn trees (#426).
 #[test]
-fn a_cursor_session_records_no_turn_trees() {
-    let studio = Studio::replayed(fixture());
-    let session = studio.session(FIRST).unwrap();
-    assert!(!session.capabilities.turn_trees);
-    assert!(session.turns.iter().all(|t| t.files.is_none()));
+fn a_cursor_turn_that_writes_a_file_lists_it_and_its_summarys_facts_carry_it() {
+    let (listed, carried) = common::trial_files(TRIAL, "beforeSubmitPrompt", "stop");
+    assert_eq!(listed, ["calc.py"]);
+    assert_eq!(carried, ["calc.py"]);
 }
 
 /// The IDE's pid is not recorded (#320, "IDE-hosted pids"), so a running IDE session with no event for

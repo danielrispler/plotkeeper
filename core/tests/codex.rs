@@ -6,10 +6,12 @@
 //! names (`Bash`, `apply_patch`, `mcp__…`) are the docs'; the ids, the `tool_response` values and the
 //! rollout path are made up, since the docs give no example of them. Two sessions run at once.
 
+use crate::common;
 use serde_json::{Value, json};
 use studio_core::{CODEX_CAPABILITIES, State, Studio};
 
 const RUN: &str = include_str!("fixtures/codex/run.jsonl");
+const TRIAL: &str = include_str!("fixtures/codex/trial.jsonl");
 const FIRST: &str = "thr_7f3c2a";
 const SECOND: &str = "thr_9b41d0";
 
@@ -101,12 +103,14 @@ fn an_interrupt_ends_its_turn() {
     assert!(session.turns[1].ended_at.is_some());
 }
 
+/// Wave 1's trial (#369): a Codex TUI turn that ran `calc.py`, patched it and ran it again, as Codex
+/// sent its lines (`fixtures/codex/trial.jsonl`, the trial's folder written `/w/trial`). Its
+/// summary said nothing was recorded, as Codex recorded no turn trees (#426).
 #[test]
-fn a_codex_session_records_no_turn_trees() {
-    let studio = Studio::replayed(fixture());
-    let session = studio.session(FIRST).unwrap();
-    assert!(!session.capabilities.turn_trees);
-    assert!(session.turns.iter().all(|t| t.files.is_none()));
+fn a_codex_turn_that_patches_a_file_lists_it_and_its_summarys_facts_carry_it() {
+    let (listed, carried) = common::trial_files(TRIAL, "UserPromptSubmit", "Stop");
+    assert_eq!(listed, ["calc.py"]);
+    assert_eq!(carried, ["calc.py"]);
 }
 
 /// A line the server writes itself for session `id`, shaped as Claude Code's lines are.

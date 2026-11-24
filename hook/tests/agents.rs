@@ -74,13 +74,13 @@ fn every_entry_that_records_names_its_agent() {
     }
 }
 
-/// The hook records turn trees from Claude Code's event names only, so a harness whose capabilities
-/// say `turn_trees: false` gets none, though its payload is Claude-shaped (#359; spec #320, "Turn
-/// trees and pruning per harness").
+/// The hook records turn trees from Claude Code's, Codex's and Cursor's lines only (#426), so a
+/// harness whose capabilities say `turn_trees: false` gets none, though its payload is Claude-shaped
+/// (#359; spec #320, "Turn trees and pruning per harness").
 #[test]
-fn the_hook_keeps_no_turn_of_an_agent_other_than_claude() {
+fn the_hook_keeps_no_turn_of_an_agent_whose_turns_it_does_not_map() {
     let prompt = json!({ "session_id": "s-1", "hook_event_name": "UserPromptSubmit", "cwd": "/", "turn_id": "t-1", "prompt": "go" });
-    for (agent, kept) in [("claude", true), ("codex", false), ("qwen", false)] {
+    for (agent, kept) in [("claude", true), ("codex", true), ("qwen", false)] {
         let home = scratch(&format!("agents-turns-{agent}"));
         let mut cmd = hook(&home);
         cmd.args(["--agent", agent]).stdout(Stdio::null());
