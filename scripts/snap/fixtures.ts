@@ -82,6 +82,27 @@ const openGone = `
     const remove = [...gone.querySelectorAll("button")].find((b) => b.textContent === "Remove project");
     if (!remove) return log("snap:fail the gone state has no Remove project");`;
 
+// #458: the project "⋯" menu, placed through the popover's implicit anchor as the rail's (#447): under its button and inside the window, and
+// right over it when the button is near the window's bottom edge, where the flipped case pads the list until the header sits there.
+const projectMenuScript = (nearBottom: boolean) => `
+    const more = named("pokedex").querySelector(".project-more");
+    // The list is padded until the button's bottom is 16 px over the window's, too near for the menu under it. In \`vh\`, as headless
+    // Chrome's window takes its full height only at its first frame; in a style sheet, as the list's redraws reset its own style.
+    ${nearBottom ? 'document.head.appendChild(document.createElement("style")).textContent = "#groups { padding-top: calc(100vh - 16px - " + more.getBoundingClientRect().bottom + "px); }"; await wait(50);' : ""}
+    const menu = document.getElementById("project-actions");
+    more.click();
+    await wait(50);
+    if (!menu.matches(":popover-open")) return log("snap:fail the menu did not open");
+    const b = more.getBoundingClientRect(), m = menu.getBoundingClientRect();
+    if (b.bottom > innerHeight) return log("snap:fail the button is outside the window: " + b.bottom);
+    if (m.left < 0 || m.top < 0 || m.right > innerWidth || m.bottom > innerHeight) log("snap:fail the menu leaves the window: " + JSON.stringify(m));
+    if (m.right < b.left || m.left > b.right) log("snap:fail the menu is not in line with its button: menu " + m.left + "–" + m.right + ", button " + b.left + "–" + b.right);
+    ${nearBottom
+      ? 'if (m.bottom > b.top + 0.5 || b.top - m.bottom > 16) log("snap:fail the menu is not right over its button: menu bottom " + m.bottom + ", button top " + b.top);'
+      : 'if (m.top < b.bottom - 0.5 || m.top - b.bottom > 16) log("snap:fail the menu is not right under its button: menu top " + m.top + ", button bottom " + b.bottom);'}
+    log("project menu at " + [m.left, m.top, m.right, m.bottom].map(Math.round) + "; button at " + [b.left, b.top, b.right, b.bottom].map(Math.round));
+    log("project menu ok");`;
+
 // The Map view (#309) on a map of plotkeeper's own shape, opened by its key. Positions are saved, as the prototype's Treatment C draws them.
 const mapFile = JSON.stringify({
   version: 1,
@@ -1937,10 +1958,59 @@ const snapRealKeys = (): Fixture => ({
   realKeys: true, snapDone: "keys ok",
 });
 
+// The palette (#458): a real Esc, a real click outside it and its close button each close it with focus back on the element that had it
+// before ⌘⇧P; its filter is a combobox whose real ↓ moves `aria-activedescendant` to an option, and no row is a pressed button.
+const paletteFocus = (): Fixture => ({
+  ...list(),
+  snapScript: `
+      const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+      const palette = document.getElementById("palette");
+      const before = document.getElementById("settings-button");
+      const named = (node) => node?.id || node?.className || node?.tagName;
+      const open = async () => {
+        before.focus();
+        document.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyP", key: "P", metaKey: true, shiftKey: true, bubbles: true }));
+        await wait(100);
+        if (!palette.matches(":popover-open")) log("snap:fail the palette did not open as a popover");
+      };
+      const back = (how) => {
+        if (palette.checkVisibility()) log("snap:fail " + how + " left the palette open");
+        if (document.activeElement !== before) log("snap:fail after " + how + " focus is on " + named(document.activeElement) + ", not the settings button");
+      };
+      await open();
+      const field = palette.querySelector("input");
+      if (field?.getAttribute("role") !== "combobox") log("snap:fail the filter's role is " + field?.getAttribute("role"));
+      const list = document.getElementById(field?.getAttribute("aria-controls"));
+      if (list?.getAttribute("role") !== "listbox") log("snap:fail the filter controls " + named(list) + ", not a listbox");
+      if (palette.querySelector("[aria-pressed]")) log("snap:fail a palette row carries aria-pressed");
+      await __snapKey("ArrowDown");
+      await wait(50);
+      const active = document.getElementById(field?.getAttribute("aria-activedescendant"));
+      if (active?.getAttribute("role") !== "option") log("snap:fail after ↓ the active descendant is " + named(active) + ", not an option");
+      if (active && active !== list?.children[1]) log("snap:fail ↓ did not move to the second row");
+      await __snapKey("Escape");
+      await wait(100);
+      back("a real Esc");
+      await open();
+      await __snapClick(document.querySelector(".bar-project") ?? document.querySelector("header.top"));
+      await wait(100);
+      back("an outside click");
+      await open();
+      const close = palette.querySelector('button[aria-label="Close"]');
+      if (!close?.checkVisibility()) return log("snap:fail the palette has no visible close button");
+      await __snapClick(close);
+      await wait(100);
+      back("the close button");
+      log("palette ok");`,
+  realKeys: true, realPointer: true, snapDone: "palette ok",
+});
+
 export const fixtures = {
   ...railFixtures,
   // Real keys from a fixture (#454).
   snapRealKeys,
+  // The palette as a popover listbox (#458).
+  paletteFocus,
   // Unconfigured, with both writers found: preset to Claude, summaries off until a Test passes.
   writersList: () =>
     writersOpen({ writers: { writers: [claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: null } }, `
@@ -2156,6 +2226,9 @@ export const fixtures = {
       const menu = document.getElementById("project-actions");
       if (!menu.matches(":popover-open") || menu.textContent.trim() !== "Remove project") log("snap:fail the header's menu does not offer Remove project");
       log("headers " + order);`),
+  // A header's "⋯" menu (#458) opens under its button and inside the window, and flips over it near the window's bottom edge.
+  projectMenu: () => withSaved(projectMenuScript(false), { snapDone: "project menu ok" }),
+  projectMenuBottom: () => withSaved(projectMenuScript(true), { snapDone: "project menu ok" }),
   // A saved project whose folder is gone, in the map's place: its words, its path and Remove project, never an error (#381).
   mapProjectGone: () => withSaved(openGone + `
     log("gone: " + gone.textContent);`),

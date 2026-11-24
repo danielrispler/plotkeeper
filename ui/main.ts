@@ -134,11 +134,11 @@ const actions: Actions = {
     openAsk(selectedId()!, { kind: "headline", turn });
   },
   "studio::Dismiss": () => {
-    // Esc peels the map's layers (`map.ts`) and on the bare map does nothing (#386); the list or the palette open over it closes first.
-    const overlaid = ["list-open", "list-peek"].some((name) => document.body.classList.contains(name)) || !element("palette").hidden;
+    // Esc peels the map's layers (`map.ts`) and on the bare map does nothing (#386); the list open over it closes first. The palette, a
+    // popover, closes on Esc itself (#458).
+    const overlaid = ["list-open", "list-peek"].some((name) => document.body.classList.contains(name));
     if (!overlaid) return mapEscape();
     document.body.classList.remove("list-open", "list-peek");
-    element("palette").hidden = true;
   },
   "studio::ToggleFocus": () => {
     studio.focus = !studio.focus;
@@ -233,10 +233,6 @@ element("needs-you").addEventListener("click", () => {
   const first = studio.listed.find((session) => session.state === "needs_you");
   if (first) select(first.id);
 });
-// A click outside the palette closes it.
-document.addEventListener("pointerdown", (event) => {
-  if (!element("palette").contains(event.target as Node)) element("palette").hidden = true;
-}, true);
 
 // The saved project list (#381): the list's headers and the map follow it; its first arrival opens the last viewed project's map (#386).
 const showProjects = (projects: SavedProject[]) => {
