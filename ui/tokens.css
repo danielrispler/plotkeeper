@@ -53,6 +53,8 @@
      edges, the diff widens the panel, and a card slides in 12 px with a fade on Treatment C's ease. */
   --glass: #1c1d20f2; --glass-blur: 18px; --glass-radius: 14px; --glass-shadow: inset 0 1px 0 #ffffff14, 0 0 0 1px #ffffff10, 0 24px 60px #000b;
   --inset: 22px; --panel-wide: 780px; --panel-slide: 12px; --glass-in: 350ms; --glass-ease: cubic-bezier(.2,.7,.2,1);
-  --brief-width: 820px; --brief-blur: 22px; --brief-arrive: 320ms ease-out; --brief-dot: 18px; --brief-dot-at: 30px; --brief-fig-w: 292px; --brief-fig-h: 150px; --brief-light: #f0ece1; --ord: 20px; --brief-dim: .38; --brief-camera: 450ms cubic-bezier(.2,.7,.2,1);
+  /* The catch-up card (#449): its text's 56ch measure at reading size plus its padding, a share of the map's height above which its step
+     scrolls, and one width for Next, Check and Done so Back never shifts. */
+  --brief-width: 528px; --brief-max: 62%; --brief-next: 64px; --brief-blur: 22px; --brief-arrive: 320ms ease-out; --brief-dot: 18px; --brief-dot-at: 30px; --brief-fig-w: 292px; --brief-fig-ratio: 292 / 150; --brief-light: #f0ece1; --ord: 20px; --brief-dim: .38; --brief-camera: 450ms cubic-bezier(.2,.7,.2,1);
   --strip-height: 240px; --mist-lift: 900ms ease-out; --mist-drift: 14s; --plate-move: 160ms ease-out;
 }
