@@ -1,7 +1,7 @@
 // The page `npm run snap` renders: dist's index.html with the page's transport stubbed in front of the app's module script: `fetch`
 // answers `POST /api/<command>` from the fixture's key of that name, else null, and `EventSource` takes the page's listeners, which
-// `window.__snapEmit(name, payload)` and the fixture's `appErrors` raise as the server's stream would; `window.__snapClick(node)` is a real
-// mouse click, which snap sends (`realPointer`).
+// `window.__snapEmit(name, payload)` and the fixture's `appErrors` raise as the server's stream would; `window.__snapClick(node)`, `__snapDoubleClick(node)` and
+// `__snapDrag(node, dx, dy)` are real mouse input, which snap sends (`realPointer`), and the fixture's `storage` is put in localStorage first.
 // It exists only in the page written to a temp directory, never in dist or the shipped page.
 
 import { hoverAudit } from "./hover.mjs";
@@ -11,11 +11,23 @@ export const stubSource = (fixture) => `(() => {
   // A fixture with \`realPointer\` clicks as a person does: \`await __snapClick(node)\` asks snap to send Chrome a real mouse press and
   // release at the node's middle (\`Input.dispatchMouseEvent\`), so pointer capture and the click's target are the browser's own.
   const serverFetch = window.fetch?.bind(window);
-  window.__snapClick = async (node) => {
-    const box = node.getBoundingClientRect();
-    const reply = await serverFetch("/__snap/click?x=" + (box.left + box.width / 2) + "&y=" + (box.top + box.height / 2));
-    if (!reply.ok) throw new Error("no real click: " + (await reply.text()));
+  const real = async (kind, query) => {
+    const reply = await serverFetch("/__snap/" + kind + "?" + new URLSearchParams(query));
+    if (!reply.ok) throw new Error("no real " + kind + ": " + (await reply.text()));
   };
+  const middle = (node) => {
+    const box = node.getBoundingClientRect();
+    return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+  };
+  window.__snapClick = (node) => real("click", middle(node));
+  window.__snapDoubleClick = (node) => real("dblclick", middle(node));
+  // \`await __snapDrag(node, dx, dy)\` presses at the node's middle, moves by (dx, dy) with the button held and lets go there.
+  window.__snapDrag = (node, dx, dy) => {
+    const { x, y } = middle(node);
+    return real("drag", { x, y, toX: x + dx, toY: y + dy });
+  };
+  // A fixture's \`storage\` is what this browser had kept from an earlier visit, written before the app starts.
+  for (const [key, value] of Object.entries(fixture.storage ?? {})) localStorage.setItem(key, value);
   const listeners = {};
   const fire = (name, payload) => (listeners[name] ?? []).forEach((h) => h({ data: JSON.stringify(payload) }));
   // The app's errors are the fixture's appErrors key (none by default), sent on \`log://log\` as the page's log target sends them.
