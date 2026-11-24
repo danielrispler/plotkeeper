@@ -4,6 +4,8 @@ plotkeeper records an agent's sessions through hooks, which run on each of its e
 
     plotkeeper install
 
+v1 supports Claude Code, Codex, agy and Cursor. Install wires Copilot and Qwen Code too, but they have not been trialled end to end, so they are v2, as are OpenCode and Cline, which nothing records yet ([decision](https://github.com/danielrispler/plotkeeper/issues/320#issuecomment-7127930696), #423).
+
 Install works at user level, never in a repository, so your git trees stay clean. It prints each step, and a harness it does not find on the `PATH` is skipped with one line:
 
 - It copies `plotkeeper-hook` and `plotkeeper-answer`, from beside the `plotkeeper` executable, into the data folder's `bin/` (`~/Library/Application Support/plotkeeper/bin/`). Every hook names that folder, in quotes since the path has a space, never a checkout or an npm folder, and each `plotkeeper` start brings the copies up to the binaries beside it (#356), so an upgrade reaches the hooks at the next start.
