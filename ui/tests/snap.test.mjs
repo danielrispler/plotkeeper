@@ -209,7 +209,8 @@ test("a map brief fixture that never printed its ok line fails: Chrome's time bu
   assert.equal(failed([]), false, "a fixture with no ok line is as before");
 });
 
-// snap run end to end against a stand-in Chrome (`CHROME`): one that never ends, and one that ends without writing the screenshot.
+// snap run end to end against a stand-in Chrome (`CHROME`): one that never ends, one that ends without writing the screenshot, and
+// one slow to tear down after writing it (#413).
 const runSnap = async (chromeBody, env = {}) => {
   const { mkdtempSync, writeFileSync, chmodSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
@@ -240,4 +241,32 @@ test("a Chrome that ends without writing the screenshot fails the fixture", asyn
   assert.notEqual(run.status, 0);
   assert.match(run.output, /^snap:fail .*screenshot/m);
   assert.doesNotMatch(run.output, /^wrote /m);
+});
+
+// A stand-in Chrome that writes the screenshot, then sits in its teardown as a CPU-starved Chrome does, until its own watchdog ends
+// it with status 2 (#413). `before` is what it prints first, such as a page console line.
+const slowTeardown = (before = "") => `for a in "$@"; do case "$a" in --screenshot=*) out="\${a#--screenshot=}";; esac; done
+${before}
+printf png > "$out"
+echo "3 bytes written to file $out" >&2
+sleep 20
+echo "Teardown watchdog expired; recording dump and terminating." >&2
+exit 2`;
+
+test("a Chrome slow to tear down after writing the screenshot passes, without snap waiting for its teardown (#413)", async () => {
+  const started = Date.now();
+  const run = await runSnap(slowTeardown());
+  assert.equal(run.status, 0, run.output);
+  assert.match(run.output, /^wrote /m);
+  assert.ok(Date.now() - started < 10000, `snap waited ${Date.now() - started} ms for Chrome's teardown`);
+});
+
+test("a page that logged snap:fail still fails when Chrome is ended at its screenshot (#413)", async () => {
+  const line = `echo '[1124/103501.828596:INFO:CONSOLE:61] "snap:fail the card never drew", source: http://127.0.0.1:1/index.html (61)' >&2`;
+  const started = Date.now();
+  const run = await runSnap(slowTeardown(line));
+  assert.notEqual(run.status, 0);
+  assert.match(run.output, /^snap:fail the card never drew/m);
+  assert.doesNotMatch(run.output, /^wrote /m);
+  assert.ok(Date.now() - started < 10000, `snap waited ${Date.now() - started} ms for Chrome's teardown`);
 });
