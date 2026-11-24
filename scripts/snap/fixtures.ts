@@ -1983,10 +1983,72 @@ const snapRealKeys = (): Fixture => ({
   realKeys: true, snapDone: "keys ok",
 });
 
+// Small gaps (#462): a real Shift+Tab from a row reaches the row before's delete, hidden only by opacity; the fold and delete boxes are
+// at least 24×24; the drawer's jumps are links to a new tab; a real Tab reaches the drawer's code block, which has a name; and the panels,
+// overlays and dialogs keep their scroll to themselves.
+const mapSmallGaps = (): Fixture => ({
+  ...mapOpened(`
+      const press = async (key) => { await __snapKey(key); await wait(50); };
+      const named = (node) => (node?.className || node?.tagName) + " " + (node?.getAttribute?.("aria-label") ?? "");
+      const items = [...document.querySelectorAll("#groups .item")];
+      const pair = items.findIndex((item, i) => item.querySelector(":scope > .delete") && !item.querySelector(":scope > .row[aria-pressed=true]")
+        && items[i + 1] === item.nextElementSibling && items[i + 1].firstElementChild?.matches(".row"));
+      if (pair < 0) return log("snap:fail no unselected row with a delete before a row with no fold");
+      const remove = items[pair].querySelector(":scope > .delete");
+      if (getComputedStyle(remove).opacity !== "0") log("snap:fail an unselected row's delete shows before hover or focus: opacity " + getComputedStyle(remove).opacity);
+      items[pair + 1].firstElementChild.focus();
+      await press("Shift+Tab");
+      if (document.activeElement !== remove) log("snap:fail Shift+Tab from the next row focused " + named(document.activeElement) + ", not the row before's delete");
+      for (const control of document.querySelectorAll("#groups .item > .fold, #groups .item > .delete")) {
+        const box = control.getBoundingClientRect();
+        if (box.width < 24 || box.height < 24) { log("snap:fail a row's " + control.className + " is " + box.width + "x" + box.height + ", under 24x24"); break; }
+      }
+      document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(300);
+      [...document.querySelectorAll("#map-sheet .sheet-ci button")].find((b) => b.textContent === "See the CI log")?.click();
+      await wait(300);
+      const jumps = [...document.querySelectorAll("#map-drawer .drawer-jump")];
+      if (!jumps.length) return log("snap:fail the CI log's drawer has no jump");
+      for (const jump of jumps)
+        if (!jump.matches("a[href]") || jump.target !== "_blank" || !jump.relList.contains("noopener")) log("snap:fail the drawer's jump " + jump.textContent + " is not a link to a new tab: " + jump.outerHTML);
+      const code = document.querySelector("#map-drawer .drawer-code");
+      document.querySelector("#map-drawer .sheet-close").focus();
+      await press("Tab");
+      if (document.activeElement !== code) log("snap:fail Tab from the drawer's × focused " + named(document.activeElement) + ", not its code block");
+      if (!code.getAttribute("aria-label")) log("snap:fail the drawer's code block has no name");
+      document.body.classList.add("list-open");
+      const contained = ["#panel-body", "#map-pre-flight", "#map-patch-review", "#palette", "nav.list", "nav.list .full", "#rename-dialog", "#delete-dialog"];
+      const loose = contained.filter((selector) => getComputedStyle(document.querySelector(selector)).overscrollBehaviorY !== "contain");
+      document.body.classList.remove("list-open");
+      if (loose.length) log("snap:fail these scroll the page behind them at their ends: " + loose.join(", "));
+      log("small gaps ok");`, {
+    map_state: mapState({ ci: brokenCi }),
+    map_place: { s1: ["core", "window"], s2: ["hook"] },
+  }),
+  realKeys: true, snapDone: "small gaps ok",
+});
+
+// At 1000x800 (`…Narrow`) with the story panel open, the empty map's prompt sits beside the panel, not under it (#462).
+const listNarrow = (): Fixture => ({
+  ...list(),
+  snapScript: `
+      const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+      await wait(500);
+      const panel = document.getElementById("map-panel"), draft = document.querySelector("#map .map-draft");
+      if (panel.hidden || !draft) return log("snap:fail the story panel or the empty map's prompt is not shown");
+      const a = panel.getBoundingClientRect(), b = draft.getBoundingClientRect();
+      if (a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom) log("snap:fail the prompt (" + Math.round(b.left) + "–" + Math.round(b.right) + ") is under the left panel (" + Math.round(a.left) + "–" + Math.round(a.right) + ")");
+      log("narrow ok");`,
+  snapDone: "narrow ok",
+});
+
 export const fixtures = {
   ...railFixtures,
   // Real keys from a fixture (#454).
   snapRealKeys,
+  // The small keyboard, pointer and layout gaps (#462).
+  mapSmallGaps,
+  listNarrow,
   // Unconfigured, with both writers found: preset to Claude, summaries off until a Test passes.
   writersList: () =>
     writersOpen({ writers: { writers: [claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: null } }, `
@@ -2109,7 +2171,18 @@ export const fixtures = {
   mapBriefChapterMid,
   mapBriefChapterLast,
   logRunning: () => logFixture("running"),
-  logDone: () => logFixture("completed"),
+  // A call's result scrolls on its own, so it takes focus with a name (#462).
+  logDone: () => ({
+    ...logFixture("completed"),
+    snapScript: `
+      const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+      await wait(300);
+      const results = [...document.querySelectorAll(".log-result")];
+      if (!results.length) return log("snap:fail the log shows no call's result");
+      for (const result of results) if (result.tabIndex !== 0 || !result.getAttribute("aria-label")) log("snap:fail a call's result takes no focus or has no name: " + result.outerHTML.slice(0, 80));
+      log("log ok");`,
+    snapDone: "log ok",
+  }),
   list,
   listSecondLines,
   listClearLanded,
