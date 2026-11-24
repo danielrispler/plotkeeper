@@ -37,6 +37,7 @@ pub mod hook_copies;
 pub mod install;
 pub mod lock;
 pub mod map;
+pub mod micro_worlds;
 pub mod part_catch_ups;
 pub mod pr_briefs;
 pub mod pre_flight;
@@ -154,6 +155,8 @@ pub struct App {
     pub key_set: Mutex<Vec<WriterKind>>,
     /// The background runs (`runner.rs`): their queues, their processes and their outcomes.
     pub runner: Arc<runner::Runner>,
+    /// The micro-worlds (`micro_worlds.rs`): built by background runs, checked on the host and kept per project.
+    pub worlds: Arc<micro_worlds::MicroWorlds>,
     /// Back a law (`back_a_law.rs`): its runs' proofs and the patches kept.
     pub laws: Arc<back_a_law::LawRuns>,
 }
@@ -232,8 +235,23 @@ impl App {
         let events: Arc<Events> = Arc::default();
         // A run that starts or ends draws its project's map again, as a brief that lands does.
         let runner = runner::Runner::new(runner::Config::beside(log));
+        let data = log.parent().unwrap_or(Path::new(""));
+        let worlds = micro_worlds::MicroWorlds::new(
+            data.join("micro-worlds"),
+            data.join("settings.json"),
+            &runner,
+        );
         let told = events.clone();
-        runner.on_change(move |project| told.emit("map-landed", project.into()));
+        worlds.on_change(move |project| told.emit("map-landed", project.into()));
+        let told = events.clone();
+        // A run that ends may be a micro-world's, which is checked then.
+        let building = Arc::downgrade(&worlds);
+        runner.on_change(move |project| {
+            told.emit("map-landed", project.into());
+            if let Some(worlds) = building.upgrade() {
+                worlds.runs_changed(project);
+            }
+        });
         let laws = back_a_law::LawRuns::new(runner.clone(), back_a_law::Config::beside(log));
         let told = events.clone();
         laws.on_change(move |project| told.emit("map-landed", project.into()));
@@ -261,6 +279,7 @@ impl App {
             keys: Arc::new(settings::MemoryKeys::default()),
             key_set: Mutex::new(Vec::new()),
             runner,
+            worlds,
             laws,
         })
     }

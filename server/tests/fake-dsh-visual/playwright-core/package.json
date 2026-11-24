@@ -1,0 +1,1 @@
+{ "name": "playwright-core", "version": "0.0.0-fake", "main": "index.js", "exports": { ".": { "import": "./index.mjs", "require": "./index.js" } } }

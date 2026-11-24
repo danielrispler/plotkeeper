@@ -6,6 +6,7 @@
 import { logStop } from "./stop-rules.js";
 import { invoke, text } from "./dom.js";
 import { onPlate, reloadMap, type MapView } from "./map.js";
+import { exploreRow } from "./micro-world.js";
 import { refresherOf, staleWords } from "./refresher.js";
 
 onPlate(({ view, part, plate }) => {
@@ -44,6 +45,8 @@ export function refresherNode(view: MapView, part: string): HTMLElement | null {
     const hops = text("ol", "", "refresher-hops");
     hops.append(...flow.hops.map((hop) => text("li", hop, "refresher-hop")));
     row.append(text("span", flow.name, "refresher-flow-name"), hops);
+    // "Explore this" (#399): a micro-world of the flow; a past commit's map offers none.
+    if (!view.scrub) row.append(exploreRow(view.project, view.state.micro_worlds, `flow:${flow.id}`, flow.name, { kind: "flow", id: flow.id }));
     flows.append(row);
   }
   const links = text("ul", "", "refresher-links");

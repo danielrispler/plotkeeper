@@ -69,6 +69,8 @@ pub struct MapState {
     pub stale: BTreeMap<String, u8>,
     /// The project's pre-flight (`pre_flight.rs`): the parts a piece of work will likely cross, framed on the map.
     pub pre_flight: Option<studio_understanding::pre_flight::PreFlight>,
+    /// The project's micro-worlds and whether a run can build one (`micro_worlds.rs`).
+    pub micro_worlds: crate::micro_worlds::WorldsState,
     /// The patches of the project's back a law runs: being proven, rejected, or proven and kept (`back_a_law.rs`).
     pub law_patches: Vec<crate::back_a_law::LawPatch>,
 }
@@ -155,6 +157,7 @@ pub fn read_map(repo: &Path) -> MapState {
         catch_ups: BTreeMap::new(),
         stale: BTreeMap::new(),
         pre_flight: None,
+        micro_worlds: crate::micro_worlds::WorldsState::default(),
         law_patches: Vec::new(),
     };
     let Some((reference, note)) = default_ref(repo) else {
@@ -370,6 +373,7 @@ pub fn map_state(project: String, fetch: bool, app: &Arc<crate::App>) -> Result<
     }
     state.catch_ups = crate::part_catch_ups::offers(app, &project, &state.user, &state.fog);
     state.pre_flight = crate::pre_flight::current(&project);
+    state.micro_worlds = app.worlds.state(&project, state.commit.as_deref());
     state.law_patches = app.laws.patches(&project);
     Ok(state)
 }

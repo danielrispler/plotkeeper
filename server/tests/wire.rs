@@ -13,6 +13,7 @@ use studio_server::{
     ci_laws::{self, Ci},
     fog::{ChapterRead, Entry, FogState, PrRead, Strength},
     map::{MapState, Mark, MarkWhy, Status, UserState, View},
+    micro_worlds::{Phase, View as WorldView, WorldsState},
     pr_briefs::BriefInfo,
     prs::Ready,
     ratify::Pending,
@@ -152,7 +153,33 @@ fn empty(status: Status) -> MapState {
         catch_ups: BTreeMap::new(),
         stale: BTreeMap::new(),
         pre_flight: None,
+        micro_worlds: WorldsState::default(),
         law_patches: Vec::new(),
+    }
+}
+
+/// A micro-world in each phase: building over an older page, ready and out of date, and failed with its prompt.
+fn worlds() -> WorldsState {
+    let view = |phase, page, stale, failed: bool| WorldView {
+        phase,
+        page,
+        stale,
+        line: failed.then(|| "verify.mjs failed:\nFAIL no horizontal overflow @390/light".into()),
+        prompt: failed.then(|| "In the repository at /repo, build a micro-world".into()),
+    };
+    WorldsState {
+        on: true,
+        worlds: BTreeMap::from([
+            (
+                "flow:turn".into(),
+                view(Phase::Building, true, false, false),
+            ),
+            ("flow:look".into(), view(Phase::Ready, true, true, false)),
+            (
+                "figure:334:0:1".into(),
+                view(Phase::Failed, false, false, true),
+            ),
+        ]),
     }
 }
 
@@ -282,6 +309,7 @@ fn the_wire_samples_of_the_map_view_are_written_for_tsc() {
                     predicted: true,
                     at: 1_761_743_990_000,
                 }),
+                micro_worlds: worlds(),
                 law_patches: law_patches(),
                 ..empty(Status::Loaded)
             }),

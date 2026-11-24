@@ -501,10 +501,10 @@ fn a_micro_world_has_no_bash_and_writes_only_its_own_folder() {
     let checks = vec!["cargo test".to_string()];
     let command = claude_command(Path::new("/bin/claude"), &plan(Kind::MicroWorld, &checks));
     assert_eq!(after(&command.args, "--tools"), "Read,Edit,Write,Glob,Grep");
-    // Only the flags spec #378 gives: how a micro-world reads the project is its own ticket's.
+    // The working folder holds the project's files to read; the agent writes only into its output folder there (#399).
     assert!(!command.args.iter().any(|a| a == "--add-dir"));
     let allowed = allowed_tools(Kind::MicroWorld, Path::new("/runs/r1/work"), &checks);
-    assert_eq!(allowed, ["Edit(//runs/r1/work/**)"]);
+    assert_eq!(allowed, ["Edit(//runs/r1/work/.micro-world/**)"]);
     assert_eq!(
         Limits::of(Kind::MicroWorld).timeout,
         Duration::from_secs(10 * 60)

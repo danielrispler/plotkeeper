@@ -79,21 +79,21 @@ test("a link runs from rim to rim, not centre to centre", () => {
   assert.deepEqual(rimPoint(a, plateSize, a), a);
 });
 
-test("Esc closes the overlays (the pre-flight, the patch review), then the drawer, then the brief, then returns from a scrubbed commit to now, then closes the sheet, then the left panel, then does nothing (#386, #394, #398)", () => {
-  const open = { scrubbed: true, drawer: true, brief: true, sheet: true, panel: true, "pre-flight": true, "patch-review": true };
+test("Esc closes the overlays (a micro-world, the pre-flight, the patch review), then the drawer, then the brief, then returns from a scrubbed commit to now, then closes the sheet, then the left panel, then does nothing (#386, #394, #398, #399)", () => {
+  const open = { scrubbed: true, drawer: true, brief: true, sheet: true, panel: true, "pre-flight": true, "patch-review": true, "micro-world": true };
   const closed = [];
   const layers = Object.fromEntries(layerOrder.map((name) => [name, { open: () => open[name], close: () => { open[name] = false; closed.push(name); } }]));
   const presses = [];
-  for (let i = 0; i < 8; i++) presses.push(escapeMap(layers));
-  assert.deepEqual(closed, ["pre-flight", "patch-review", "drawer", "brief", "scrubbed", "sheet", "panel"]);
-  assert.deepEqual(presses, ["pre-flight", "patch-review", "drawer", "brief", "scrubbed", "sheet", "panel", null]);
+  for (let i = 0; i < 9; i++) presses.push(escapeMap(layers));
+  assert.deepEqual(closed, ["micro-world", "pre-flight", "patch-review", "drawer", "brief", "scrubbed", "sheet", "panel"]);
+  assert.deepEqual(presses, ["micro-world", "pre-flight", "patch-review", "drawer", "brief", "scrubbed", "sheet", "panel", null]);
 });
 
-test("a project switch closes the PR brief, the pre-flight and the patch review, and leaves the other layers", () => {
+test("a project switch closes the PR brief, the pre-flight, the patch review and a micro-world, and leaves the other layers", () => {
   const open = Object.fromEntries(layerOrder.map((name) => [name, true]));
   const layers = Object.fromEntries(layerOrder.map((name) => [name, { open: () => open[name], close: () => void (open[name] = false) }]));
   switchProject(layers);
-  assert.deepEqual(open, { "pre-flight": false, "patch-review": false, drawer: true, brief: false, scrubbed: true, sheet: true, panel: true });
+  assert.deepEqual(open, { "micro-world": false, "pre-flight": false, "patch-review": false, drawer: true, brief: false, scrubbed: true, sheet: true, panel: true });
 });
 
 // The left panel and the part's sheet (#385): what opens where.
