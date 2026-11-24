@@ -396,10 +396,10 @@ impl LawRuns {
             )
             .map(Some)
         })();
-        let _ = host_git(repo, &["worktree", "remove", "--force", &work_text]);
+        // Deleting the temporary folder and pruning drops the worktree, dirty or not, without forcing git.
+        drop(tmp);
         let _ = host_git(repo, &["worktree", "prune"]);
         let _ = host_git(repo, &["branch", "-q", "-D", &branch]);
-        drop(tmp);
         let Some(url) = made? else {
             self.keep(
                 &file,
