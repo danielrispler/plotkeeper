@@ -392,12 +392,19 @@ impl MicroWorlds {
         crate::settings::micro_worlds_dsh_visual_in(&text, &home)
     }
 
+    /// `project`'s folder: its path, readable, and a hash of it, so two paths that read alike never share one.
     fn folder(&self, project: &str) -> PathBuf {
         let name: String = project
             .chars()
             .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
             .collect();
-        self.store.join(name)
+        // FNV-1a: the same in every build, as a folder name kept across builds must be.
+        let hash = project
+            .bytes()
+            .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+                (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+            });
+        self.store.join(format!("{name}-{hash:016x}"))
     }
 
     fn file(&self, project: &str, key: &str) -> PathBuf {

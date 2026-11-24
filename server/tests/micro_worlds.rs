@@ -407,3 +407,19 @@ fn a_host_check_plotkeeper_stopped_in_fails_with_why_at_the_next_start() {
         "{view:?}"
     );
 }
+
+#[test]
+fn a_project_whose_path_differs_only_in_punctuation_has_worlds_of_its_own() {
+    let bench = bench(&writes(GOOD), true);
+    bench.explore();
+    assert_eq!(bench.settled("flow:turn").phase, Phase::Ready);
+    // Another project whose path differs from this one's only where a character is not a letter or a digit.
+    let project = bench.project();
+    let at = project.rfind('/').unwrap();
+    let other = format!("{}_{}", &project[..at], &project[at + 1..]);
+    assert!(
+        bench.worlds.state(&other, None).worlds.is_empty(),
+        "{other} shows none of {project}'s worlds"
+    );
+    assert!(bench.worlds.page(&other, "flow:turn").is_err());
+}
