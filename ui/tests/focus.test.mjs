@@ -3,8 +3,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { El, fakeDocument } from "./dom.mjs";
-import { questionLine, showClearToast, showToast, toastFor, toastShows } from "../../dist/toast.js";
-import { showNote } from "../../dist/notes.js";
+import { questionLine, showClearToast, showToast, stackToasts, toastFor, toastShows } from "../../dist/toast.js";
+import { showNote, watchNotes } from "../../dist/notes.js";
 import { studio } from "../../dist/state.js";
 
 const ui = new URL("../", import.meta.url);
@@ -13,9 +13,20 @@ const read = (name) => fs.readFileSync(new URL(name, ui), "utf8");
 // The stand-in page: elements by id, as index.html has them, and a modal dialog open or not.
 const page = new Map();
 let modal = false;
-// The note's fade never falls due here.
-globalThis.window = { setTimeout: () => 0, clearTimeout() {} };
+// The note's fade falls due only when a test runs the timers.
+const timers = new Map();
+let nextTimer = 1;
+globalThis.window = { setTimeout: (run) => (timers.set(nextTimer, run), nextTimer++), clearTimeout: (id) => timers.delete(id) };
+const runTimers = () => {
+  for (const [id, run] of [...timers]) {
+    timers.delete(id);
+    run();
+  }
+};
+// The document's listeners, by event name.
+const heard = {};
 globalThis.document = fakeDocument({
+  addEventListener: (name, run) => (heard[name] = run),
   getElementById: (id) => page.get(id) ?? page.set(id, new El("div")).get(id),
   querySelector: (selector) => (selector === "dialog:modal" && modal ? new El("dialog") : null),
   activeElement: null,
@@ -106,4 +117,22 @@ test("no toast shows while a modal dialog is open, and it shows once the dialog 
   modal = false;
   showToast();
   assert.equal(page.get("toast").matches(":popover-open"), true);
+});
+
+// A note that came while a modal dialog was open waits for it, however long it stays open, and fades only once it has shown
+// (#452's outside review).
+test("a note held back by a modal dialog does not fade before it shows", () => {
+  const note = page.get("note-toast");
+  watchNotes();
+  modal = true;
+  showNote({ session: session("d"), count: "", line: "Done meanwhile" });
+  runTimers();
+  assert.equal(note.matches(":popover-open"), false, "no note over the dialog");
+  // The dialog closes: its toggle reaches the document, where the toasts' own listener stacks them.
+  modal = false;
+  heard.toggle?.({ target: null });
+  stackToasts();
+  assert.equal(note.matches(":popover-open"), true, "the note shows once the dialog closes");
+  runTimers();
+  assert.equal(note.matches(":popover-open"), false, "then it fades");
 });

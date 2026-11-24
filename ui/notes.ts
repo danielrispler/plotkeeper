@@ -22,10 +22,10 @@ export function finishedNote(ids: string[], listed: Session[]): Note | null {
   return { session: sessions[0], count, line: sessions[0].transcript.intention ?? "" };
 }
 
-export type Hold = "pointer" | "focus";
+export type Hold = "pointer" | "focus" | "modal";
 
-// The note's fade on `clock`: `start` (a note shows) fades it in 6 s unless something holds it, the pointer resting on it or the
-// keyboard's focus in it; once neither does, it fades 6 s later. `stop`: the note was closed, and nothing holds it any more.
+// The note's fade on `clock`: `start` (a note shows) fades it in 6 s unless something holds it, the pointer resting on it, the
+// keyboard's focus in it or a modal dialog holding it back; once none does, it fades 6 s later. `stop`: the note was closed, and nothing holds it any more.
 export function noteFade(clock: Clock, hide: () => void) {
   const holds = new Set<Hold>();
   let timer: number | undefined;
@@ -67,6 +67,9 @@ const close = () => {
   fade.stop();
   hide();
 };
+// A modal dialog holds the note back (`stackToasts`), so it holds the fade too: a note never fades before it has shown (#452's outside
+// review).
+const modalHolds = () => (document.querySelector("dialog:modal") ? fade.hold("modal") : fade.release("modal"));
 
 // Shows `note` in place of the one showing.
 export function showNote(note: Note) {
@@ -87,12 +90,14 @@ export function showNote(note: Note) {
   toast.dataset.say = toastSays([name, note.count, note.line]);
   toast.hidden = false;
   stackToasts();
+  modalHolds();
   fade.start();
 }
 
-// The toast's hover and focus hold its fade; once, at start.
+// The toast's hover, focus and a modal dialog hold its fade; once, at start.
 export function watchNotes() {
   const toast = element("note-toast");
+  document.addEventListener("toggle", modalHolds, true);
   toast.addEventListener("pointerenter", () => fade.hold("pointer"));
   toast.addEventListener("pointerleave", () => fade.release("pointer"));
   toast.addEventListener("focusin", () => fade.hold("focus"));

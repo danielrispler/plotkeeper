@@ -2263,6 +2263,13 @@ const toastKeys = (): Fixture => {
       await press("Tab");
       await press("Enter");
       if (open("note-toast") || document.body.dataset.panel !== "story") log("snap:fail Enter on the note did not open its session: panel " + document.body.dataset.panel);
+      // A real Esc in Delete's question closes the question alone, and the story under it stays.
+      byId("delete").click();
+      await wait(50);
+      await press("Escape");
+      await wait(50);
+      if (dialog.open) log("snap:fail a real Esc did not close Delete's question");
+      if (document.body.dataset.panel !== "story") log("snap:fail a real Esc in Delete's question also closed the story: panel " + document.body.dataset.panel);
       // Enter on the needs-you toast of a new block jumps to it and leaves focus mode.
       window.__snapEmit("sessions", ${JSON.stringify([...sessions, blocked])});
       await wait(50);

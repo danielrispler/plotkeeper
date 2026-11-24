@@ -141,7 +141,11 @@ export function drawWithStatus(box: HTMLElement, nodes: Node[], words: string) {
   regions.set(box, live);
   const fresh = ![...box.childNodes].includes(live);
   for (const child of [...box.childNodes]) if (child !== live) box.removeChild(child);
-  if (fresh) box.appendChild(live);
+  // A region the box dropped, as a closed overlay's emptied box does, comes back empty, so its words are heard again.
+  if (fresh) {
+    live.textContent = "";
+    box.appendChild(live);
+  }
   for (const node of nodes) box.insertBefore(node, live);
   live.dataset.words = words;
   const say = () => {

@@ -145,3 +145,20 @@ test("the overlay says its status in one live region that outlives its redraws a
   assert.equal(live.text, "");
   assert.equal(all(box).filter((node) => node.getAttribute("role") === "status").length, 1, "no other line is a status");
 });
+
+// Closing the overlay empties its box (`paint`) and leaves the region detached with its last words; opened again, the region is drawn
+// empty once more, so its words are a change a screen reader hears, never a stale line (#452's outside review).
+test("the overlay opened again draws its status region empty before its words", async () => {
+  const { El } = await import("./dom.mjs");
+  const box = new El("div");
+  const later = () => new Promise((done) => setTimeout(done, 150));
+  const region = () => box.childNodes.find((node) => node instanceof El && node.getAttribute("role") === "status");
+  paintPreFlight(box, { kind: "start", issues: null }, doc, state, acts([]));
+  await later();
+  assert.equal(region().text, "Reading the open issues…");
+  box.replaceChildren();
+  paintPreFlight(box, { kind: "pick", why: "the writer is not set" }, doc, state, acts([]));
+  assert.equal(region().text, "", "the region opened again is empty");
+  await later();
+  assert.equal(region().text, "No prediction: the writer is not set. Pick the parts by hand.");
+});

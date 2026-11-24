@@ -135,7 +135,7 @@ const actions: Actions = {
   },
   "studio::Dismiss": () => {
     // Esc peels the map's layers (`map.ts`) and on the bare map does nothing (#386); the list open over it closes first. The palette, a
-    // popover, closes on Esc itself (#458).
+    // popover, and a modal dialog close on Esc themselves (#458).
     const overlaid = ["list-open", "list-peek"].some((name) => document.body.classList.contains(name));
     if (!overlaid) return mapEscape();
     document.body.classList.remove("list-open", "list-peek");
@@ -175,6 +175,13 @@ const actions: Actions = {
     showPalette(paletteEntries(studio.files.keymap, Object.keys(actions)), (binding) => run(actions, binding));
   },
 };
+// Esc in a modal dialog (rename, delete, confirm) is the dialog's, as the palette's is (#458): it closes the dialog, and the window's Esc,
+// which peels the map's layers, does not see it (#452's outside review).
+for (const dialog of document.querySelectorAll("dialog")) {
+  dialog.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") event.stopPropagation();
+  });
+}
 window.addEventListener("keydown", (event) => {
   const target = event.target as HTMLElement;
   const typing = target.isContentEditable || target.matches?.("input, textarea, select") === true;
