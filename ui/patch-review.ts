@@ -231,7 +231,8 @@ export function guardNodes(offer: GuardOffer, patches: LawPatch[] | null | undef
 }
 
 // The confirm step of a new law: the writer's draft (null while it drafts) in fields Daniel may edit, the part among the ones the PR
-// touched, and Start the run with what the fields hold. `line` says why the writer gave no draft, so he writes the law himself.
+// touched, and Start the run with what the fields hold, which are kept in `draft` as he types. `line` says why the writer gave no draft, so
+// he writes the law himself.
 export function confirmNodes(draft: NewLaw | null, parts: { id: string; name: string }[], line: string | null, act: { start: (law: NewLaw) => void; cancel: () => void }): HTMLElement[] {
   const cancel = button("Cancel", "Leave the new law", act.cancel);
   if (!draft) return [text("p", "Drafting the law…", "brief-quiet guard-drafting"), cancel];
@@ -251,6 +252,10 @@ export function confirmNodes(draft: NewLaw | null, parts: { id: string; name: st
   sentence.value = draft.text;
   sentence.setAttribute("aria-label", "The law's sentence");
   sentence.setAttribute("rows", "2");
+  // What Daniel types is kept in the draft, so the step drawn again (a map-landed, a resize) shows it.
+  part.addEventListener("change", () => (draft.on = part.value));
+  id.addEventListener("input", () => (draft.id = id.value));
+  sentence.addEventListener("input", () => (draft.text = sentence.value));
   const foot = text("div", "", "guard-foot");
   foot.append(
     button("Start the run", "Start a background run that adds this law, as written here, with its test", () => act.start({ id: id.value.trim(), on: part.value, text: sentence.value.trim() }), "primary"),

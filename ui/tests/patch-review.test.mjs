@@ -151,6 +151,26 @@ test("the drafted sentence is shown for confirmation, and the edited one is what
   assert.deepEqual(calls, [["start", { id: "core-keeps-order", on: "core", text: "Events apply in the order they were made." }], ["cancel"]]);
 });
 
+test("what Daniel typed in the confirm step stays when the map draws the brief again", () => {
+  const draft = { id: "core-keeps-order", on: "core", text: "Events never reorder." };
+  const parts = [{ id: "core", name: "Core" }, { id: "hook", name: "Hook" }];
+  const act = { start: () => {}, cancel: () => {} };
+  const fields = (nodes) => nodes.flatMap((node) => [...node.find("input"), ...node.find("textarea"), ...node.find("select")]);
+  const [part, id, sentence] = ["select", "input", "textarea"].map((tag) => fields(confirmNodes(draft, parts, null, act)).find((f) => f.tag === tag));
+  // Daniel types into each field; then a redraw (a map-landed, a resize) builds the step again from the same draft.
+  part.value = "hook";
+  part.listeners.change();
+  id.value = "hook-keeps-order";
+  id.listeners.input();
+  sentence.value = "Hooks fire in order.";
+  sentence.listeners.input();
+  const again = fields(confirmNodes(draft, parts, null, act));
+  assert.deepEqual(
+    ["select", "input", "textarea"].map((tag) => again.find((f) => f.tag === tag).value),
+    ["hook", "hook-keeps-order", "Hooks fire in order."],
+  );
+});
+
 test("while the writer drafts, the confirm step says so; when it cannot, Daniel writes the law himself", () => {
   const act = { start: () => {}, cancel: () => {} };
   const drafting = confirmNodes(null, [{ id: "core", name: "Core" }], null, act);
