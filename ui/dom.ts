@@ -61,6 +61,16 @@ export function text(tag: string, content: string, className = ""): HTMLElement 
   return node;
 }
 
+// A glyph drawn for the eye alone, such as ☰ or ✗, hidden from assistive tech (#456); its button or row is named in words.
+export function glyphOnly(glyph: string, className = ""): HTMLElement {
+  const node = text("span", glyph, className);
+  node.setAttribute("aria-hidden", "true");
+  return node;
+}
+
+// Words for assistive tech alone, not drawn (#456), such as "failed" beside a ✕.
+export const unseenWords = (words: string): HTMLElement => text("span", words, "visually-hidden");
+
 // `node` with `full` as its native hover title: the full text of what the layout cuts (#162). No title for an empty text,
 // which would hide the tooltip of the element under it.
 export function fullTitle<T extends HTMLElement>(node: T, full: string | null | undefined): T {
@@ -76,11 +86,12 @@ export function age(from: number, to = Date.now()): string {
   return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h`;
 }
 
-// A button: the one button component (danielrispler/Falinks#566), its type, pressed state and click.
-export function pressable<T extends HTMLElement>(button: T, pressed: boolean, click: (event: MouseEvent) => void): T {
+// A button: the one button component (danielrispler/Falinks#566), its type, pressed state and click. Only a real toggle has a pressed
+// state; any other button, a disclosure among them (which says `aria-expanded`), passes null and has no `aria-pressed` (#456).
+export function pressable<T extends HTMLElement>(button: T, pressed: boolean | null, click: (event: MouseEvent) => void): T {
   button.classList.add("btn");
   button.setAttribute("type", "button");
-  button.setAttribute("aria-pressed", String(pressed));
+  if (pressed !== null) button.setAttribute("aria-pressed", String(pressed));
   button.addEventListener("click", click);
   return button;
 }

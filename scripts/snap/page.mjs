@@ -4,6 +4,7 @@
 // `__snapDrag(node, dx, dy)` are real mouse input, which snap sends (`realPointer`), `__snapKey(key)` a real key press (`realKeys`), and the fixture's `storage` is put in localStorage first.
 // It exists only in the page written to a temp directory, never in dist or the shipped page.
 
+import { a11yAudit, nameSource } from "./a11y.mjs";
 import { hoverAudit } from "./hover.mjs";
 
 export const stubSource = (fixture) => `(() => {
@@ -56,9 +57,11 @@ export const stubSource = (fixture) => `(() => {
     const found = reply?.__by ? (reply.values[args?.[reply.__by]] ?? null) : reply;
     // A reply of { __throw: "why" } is a command that fails with that reason.
     if (found?.__throw) throw found.__throw;
-    // A reply of { __delay: ms, value } comes after ms: a command whose answer lands after the page has drawn.
+    // A reply of { __delay: ms, value } comes after ms: a command whose answer lands after the page has drawn. A value of
+    // { __throw: "why" } fails then.
     if (found?.__delay) {
       await new Promise((done) => setTimeout(done, found.__delay));
+      if (found.value?.__throw) throw found.value.__throw;
       return found.value ?? null;
     }
     return found ?? null;
@@ -76,13 +79,15 @@ export const stubSource = (fixture) => `(() => {
   };
   // A fixture's script raises a server event with __snapEmit, as the stream would.
   window.__snapEmit = fire;
+  // \`__snapName(node)\`: a node's accessible name, as the accessibility pass reads it (a11y.mjs).
+  ${nameSource}
 })();`;
 
 // What runs in the page's head, after the stub: the body's classes (set once the body exists), then the fixture's script once
 // the UI has drawn (the page has loaded and its first replies have landed). The script is the body of an async function that
 // gets `log`; what it logs reaches snap's output, and a line that starts `snap:fail` makes snap exit non-zero. A script that
-// throws logs a `snap:fail` line. The hover rule's check runs after it in every page, also after a script that returned early or
-// threw (hover.mjs).
+// throws logs a `snap:fail` line. The hover rule's check, then the accessibility pass, run after it in every page, also after a script
+// that returned early or threw (hover.mjs, a11y.mjs).
 export const headSource = ({ bodyClasses = [], script = null } = {}) => `
   addEventListener("DOMContentLoaded", () => document.body.classList.add(...${JSON.stringify(bodyClasses)}));
   addEventListener("load", () => setTimeout(async () => {
@@ -96,6 +101,11 @@ export const headSource = ({ bodyClasses = [], script = null } = {}) => `
       await (async (log) => {\n${hoverAudit}\n})(log);
     } catch (error) {
       log("snap:fail the hover check threw: " + error);
+    }
+    try {
+      await (async (log) => {\n${a11yAudit}\n})(log);
+    } catch (error) {
+      log("snap:fail the accessibility pass threw: " + error);
     }
   }, 2500));`;
 

@@ -99,7 +99,7 @@ function drawLog(place: HTMLElement, agent: Subagent | null, log: SubagentLog | 
     fullTitle(text("span", agent?.name ?? "Subagent", "log-title"), agent?.name ?? "Subagent"),
     ...(agent?.agent_type ? [text("span", agent.agent_type, "log-type")] : []),
     ...(agent ? [text("span", stateLabel(agent.status), `log-state ${agent.status === "running" ? "running" : "done"}`)] : []),
-    fullTitle(pressable(text("button", "Parent's terminal"), false, toParent), "Back to the terminal of the session that started this subagent"),
+    fullTitle(pressable(text("button", "Parent's terminal"), null, toParent), "Back to the terminal of the session that started this subagent"),
   );
   const note = logNote(log, agent?.status ?? "");
   const body = note ? [text("p", note, "empty")] : logRows(log!.entries).map(drawRow);

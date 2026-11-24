@@ -4,7 +4,7 @@
 // and the tail of its output. Opening changes only the nodes it opens: the open state is kept by key, so a redraw of the rail
 // draws the line open again.
 
-import { code, failure, fullTitle, invoke, pressable, text } from "./dom.js";
+import { code, failure, fullTitle, glyphOnly, invoke, pressable, text } from "./dom.js";
 import { askAnchor, type Hunk, hunkText } from "./ask.js";
 import { diffRequest } from "./diff.js";
 import type { Capabilities, Check, Turn, TurnFile } from "./types.js";
@@ -94,6 +94,8 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
   }
   const key = `${session} ${row.agent ?? ""} ${row.call}`;
   const pre = text("pre", outputs.get(key) ?? "", "evidence-output");
+  // What the read says, the output or why it could not be read, is announced politely (#456).
+  pre.setAttribute("aria-live", "polite");
   const show = () => (openOutputs.has(key) ? pre.removeAttribute("hidden") : pre.setAttribute("hidden", ""));
   const fetch = () => {
     if (outputs.has(key)) return;
@@ -107,7 +109,7 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
         pre.textContent = `The output could not be read: ${e}`;
       });
   };
-  const button = pressable(document.createElement("button"), openOutputs.has(key), () => {
+  const button = pressable(document.createElement("button"), null, () => {
     if (openOutputs.has(key)) openOutputs.delete(key);
     else openOutputs.add(key);
     button.setAttribute("aria-expanded", String(openOutputs.has(key)));
@@ -117,7 +119,8 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
   button.classList.add("evidence-fail");
   button.title = `Show or hide the output of ${row.label}`;
   button.setAttribute("aria-expanded", String(openOutputs.has(key)));
-  button.append(text("span", "✗", "mark"), code(row.label), ...(row.agent ? [text("span", row.agent, "evidence-agent")] : []));
+  // The label already says "failed": the ✗ is for the eye alone (#456).
+  button.append(glyphOnly("✗", "mark"), code(row.label), ...(row.agent ? [text("span", row.agent, "evidence-agent")] : []));
   show();
   if (openOutputs.has(key)) fetch();
   item.append(button, pre, askAnchor(session, { kind: "check", agent: row.agent ?? null, call: row.call }, "this failed check"));
@@ -145,12 +148,13 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
     return entry && (entry.ended || (!ended && same)) ? entry : undefined;
   };
   const pre = text("pre", kept() ? hunkText(kept()!.hunk, false) : "", "evidence-hunk");
+  pre.setAttribute("aria-live", "polite");
   const left = (h: Hunk | null) => {
     more.textContent = `${h?.left_out ?? 0} more lines`;
     if (openHunks.has(openKey) && h?.left_out) more.removeAttribute("hidden");
     else more.setAttribute("hidden", "");
   };
-  const more = pressable(document.createElement("button"), false, () => diffRequest.open(session, index));
+  const more = pressable(document.createElement("button"), null, () => diffRequest.open(session, index));
   more.classList.add("evidence-more");
   more.title = HOVERS.wholeDiff;
   const show = () => {
@@ -171,7 +175,7 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
         pre.textContent = `The hunk could not be read: ${e}`;
       });
   };
-  const button = pressable(document.createElement("button"), openHunks.has(openKey), () => {
+  const button = pressable(document.createElement("button"), null, () => {
     if (openHunks.has(openKey)) openHunks.delete(openKey);
     else openHunks.add(openKey);
     button.setAttribute("aria-expanded", String(openHunks.has(openKey)));
@@ -198,8 +202,13 @@ function mergedRow(row: EvidenceRow): HTMLElement {
 // "Open full diff": the turn's whole diff in the terminal column (`diff.ts`).
 function fullDiffRow(session: string, index: number): HTMLElement {
   const item = document.createElement("li");
-  item.append(fullTitle(pressable(text("button", "Open full diff", "evidence-edit"), false, () => diffRequest.open(session, index)), HOVERS.wholeDiff));
+  item.append(fullTitle(pressable(text("button", "Open full diff", "evidence-edit"), null, () => diffRequest.open(session, index)), HOVERS.wholeDiff));
   return item;
+}
+
+// The evidence line into `node`, each failed check's ✗ hidden from assistive tech, as its words already say "failed" (#456).
+function lineInto(node: HTMLElement, line: string) {
+  node.replaceChildren(...line.split("✗").flatMap((part, i) => (i ? [glyphOnly("✗"), part] : [part])));
 }
 
 // The line for turn `index` of `session`. `only: "failed"` is the running turn's: just the checks whose last run failed.
@@ -224,7 +233,7 @@ export function evidenceElement(session: string, index: number, turn: Facts & En
     ...(facts.files?.files.length ? [fullDiffRow(session, index)] : []),
   );
   const show = () => (openLines.has(key) ? list.removeAttribute("hidden") : list.setAttribute("hidden", ""));
-  const button = pressable(document.createElement("button"), openLines.has(key), () => {
+  const button = pressable(document.createElement("button"), null, () => {
     if (openLines.has(key)) openLines.delete(key);
     else openLines.add(key);
     button.setAttribute("aria-expanded", String(openLines.has(key)));
@@ -233,7 +242,8 @@ export function evidenceElement(session: string, index: number, turn: Facts & En
   button.classList.add("evidence-toggle");
   button.title = "Show or hide this turn's files and checks";
   button.setAttribute("aria-expanded", String(openLines.has(key)));
-  const label = text("span", line);
+  const label = text("span", "");
+  lineInto(label, line);
   button.append(label);
   // A failed check's words come from its output: read it once, then say the line again.
   for (const c of facts.checks.filter((c) => c.status === "failed")) {
@@ -245,7 +255,7 @@ export function evidenceElement(session: string, index: number, turn: Facts & En
       .then((named) => {
         if (!named) return;
         failedWords.set(key, named);
-        label.textContent = evidenceLine(facts, words);
+        lineInto(label, evidenceLine(facts, words));
       })
       .catch(failure("failed_check_name"));
   }

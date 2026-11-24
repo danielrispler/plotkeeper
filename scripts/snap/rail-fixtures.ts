@@ -320,6 +320,13 @@ const openTurnScript = `
   log("folded turns " + lines.length + ", open " + lines.filter((l) => l.getAttribute("aria-expanded") === "true").length);
   if (lines.length !== 4 || lines[1].getAttribute("aria-expanded") !== "true") log("snap:fail one turn should be open of four folded");`;
 
+// #456: a failed row's accessible text says "failed" exactly once, and no ✕ or ✗ mark is read out beside it.
+const saysFailedOnce = `
+  const failedOnce = (node, what) => {
+    const name = __snapName(node);
+    if ((name.match(/failed/gi) ?? []).length !== 1 || /[✕✗]/.test(name)) log("snap:fail " + what + " is read as " + JSON.stringify(name));
+  };`;
+
 // #345: the evidence line names the failed check by what broke, and keeps the command behind the drill-down.
 const namedFailureScript = `
   const wait = () => new Promise((resolve) => setTimeout(resolve, 300));
@@ -329,7 +336,13 @@ const namedFailureScript = `
   if (!/✗ Window tests failed: delete keeps a live terminal \\(\\+1 more\\)/.test(toggle.textContent)) log("snap:fail the failed check is not named by its test: " + toggle.textContent);
   toggle.click();
   await wait();
-  if (!document.querySelector(".evidence-check .evidence-fail code")) log("snap:fail the command is not behind the drill-down");`;
+  if (!document.querySelector(".evidence-check .evidence-fail code")) log("snap:fail the command is not behind the drill-down");
+  ${saysFailedOnce}
+  failedOnce(toggle, "the evidence line");
+  failedOnce(document.querySelector(".evidence-check .evidence-fail"), "the failed check's row");
+  const folded = document.querySelector(".turn-line .check-failed")?.closest(".turn-line");
+  if (!folded) log("snap:fail no folded turn is marked failed");
+  else failedOnce(folded, "the folded failed turn");`;
 
 // #113: scrolls the rail, opens the evidence line, then a failed check's output, and fails when the rail's scrollTop moved.
 const evidenceScript = `
@@ -349,12 +362,32 @@ const evidenceScript = `
   if (toggle.parentElement.querySelectorAll(".evidence-check .evidence-agent").length !== 1) log("snap:fail the worker's check does not name its worker");
   const row = document.querySelector(".evidence-check .evidence-fail");
   if (!row) log("snap:fail the opened line has no failed check");
+  ${saysFailedOnce}
+  failedOnce(row, "the failed check's row");
   row.click();
   await wait();
   const output = document.querySelector(".evidence-output");
   if (!output || output.hidden || !/exit code 1/.test(output.textContent)) log("snap:fail the failed check's output did not open");
   log("rail scrollTop " + at + " -> " + story.scrollTop);
   if (story.scrollTop !== at) log("snap:fail the rail's scrollTop moved from " + at + " to " + story.scrollTop);`;
+
+// #456: a failed check's output and a file's hunk that cannot be read say so in a polite live region.
+const unreadScript = `
+  const wait = () => new Promise((resolve) => setTimeout(resolve, 200));
+  const toggle = document.querySelector(".evidence-toggle");
+  if (!toggle) return log("snap:fail there is no evidence line");
+  toggle.click();
+  await wait();
+  const heard = (row, shown, why) => {
+    row.click();
+    return wait().then(() => {
+      const pre = row.parentElement.querySelector(shown);
+      if (!pre?.textContent.includes("could not be read")) return log("snap:fail " + why + " shows " + JSON.stringify(pre?.textContent));
+      if (pre.closest("[aria-live=polite], [role=status]") === null) log("snap:fail " + why + "'s error is not in a polite live region");
+    });
+  };
+  await heard(document.querySelector(".evidence-check .evidence-fail"), ".evidence-output", "the check's output");
+  await heard(document.querySelector(".evidence-file .evidence-fail"), ".evidence-hunk", "the file's hunk");`;
 
 // #208: opens the evidence line of a turn that merged a branch, and fails unless the line counts 3 files and "+2 merged",
 // and the opened rows end their files with a "+2 merged" row that is no file.
@@ -537,6 +570,7 @@ export const railFixtures = {
   },
   railNamedFailure: () => ({ ...build("your_turn"), failed_check_name: "Window tests failed: delete keeps a live terminal (+1 more)", snapScript: namedFailureScript }),
   railEvidence: () => ({ ...build("your_turn"), snapScript: evidenceScript }),
+  railEvidenceUnread: () => ({ ...build("your_turn"), check_output: { __throw: "the transcript is gone" } as never, turn_file_hunk: { __throw: "the tree is gone" } as never, snapScript: unreadScript }),
   ...railStates,
   railHeaderNeeds: () => withHeader(build("needs_you", { ask: questionAsk }), false),
   railHeaderRunning: () => withHeader(build("running"), true),

@@ -151,7 +151,8 @@ test("the hover check fails a control with no hover, one whose hover repeats its
   const fine = control("+", { title: "Start a new session (⌘N)" });
   const inherited = control("Open", { hover: "Resume this session" });
   const { logged } = await runHead({}, { controls: [silent, repeats, fine, inherited, unreachable], titled: [repeats, fine, unreachable] });
-  assert.deepEqual(logged.map((line) => line.replace(/ on .*/, "")), ["snap:fail hover: no hover", "snap:fail hover: repeats its label", "snap:fail hover: out of the pointer's reach"]);
+  // The accessibility pass runs after it on the same page (a11y.mjs); only the hover rule's lines are this test's.
+  assert.deepEqual(logged.filter((line) => line.startsWith("snap:fail hover")).map((line) => line.replace(/ on .*/, "")), ["snap:fail hover: no hover", "snap:fail hover: repeats its label", "snap:fail hover: out of the pointer's reach"]);
   assert.ok(failed(logged));
 });
 
