@@ -290,7 +290,7 @@ One plain sentence the writer adds to each chapter of a **PR brief** that lights
 _Avoid_: Summary, tl;dr, takeaway
 
 **Explain-back**:
-The optional one-line field in the end-of-story bar of a Core part's story: Daniel says the story back, then sees its **Gist** under his line and marks himself got it, partly or missed. It measures his understanding, as the rating measures the explanation; neither is ever shown as a number.
+The optional one-line field in the end-of-story bar of a Core part's story: Daniel says the story back, then sees its **Gist** under his line and marks himself got it, partly or missed. It measures his understanding and is never shown as a number.
 _Avoid_: Quiz, test, recall score
 
 **Claim check**:

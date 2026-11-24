@@ -22,7 +22,9 @@ const LOG_FILE: &str = "stop-rules.jsonl";
 /// The modules an older `dismissed` line with no module dismissed: the review's modules when dismissal was one flag per project.
 const LEGACY_MODULES: [&str; 5] = ["map", "history", "proof", "briefs", "skips"];
 
-/// What happened. A kind this build does not know reads as `Other` and counts for nothing, so an older build tolerates a newer log.
+/// What happened. A kind this build does not know reads as `Other` and counts for nothing, so an older build tolerates a newer log, and
+/// the kinds of the bar's rating and note, removed by #448 (`rating-offered`, `rating-given`, `rating-skipped`, `note-given`), read as
+/// `Other` from an older log and are refused when sent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Kind {
@@ -59,14 +61,6 @@ pub enum Kind {
     CatchUpOpened,
     /// A part catch-up was read to its end, which cleared the part's fog.
     CatchUpDone,
-    /// The end-of-story bar (`story_bar.rs`) was shown at a story's end; once per bar each time its story is opened.
-    RatingOffered,
-    /// A 1 to 5 rating of the explanation was given in the bar; the line carries it. No threshold: it measures the explanation.
-    RatingGiven,
-    /// The bar was skipped with its key or button before anything was given.
-    RatingSkipped,
-    /// A short note was given in the bar; the line carries it.
-    NoteGiven,
     /// An explain-back line was given in the bar, on a Core part's story (#397); the line carries it. Kept if at least 3.
     ExplainBackGiven,
     /// The explain-back line was marked got it, partly or missed against the gist; the line carries the mark.
