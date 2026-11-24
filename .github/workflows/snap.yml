@@ -1,0 +1,44 @@
+name: Snap
+
+# Every snap fixture rendered in the runner's Chrome (`npm run snap:all`); it fails on an uncaught page error or a `snap:fail` line.
+# Left out of `npm run check`, which stays fast for agents running it in parallel (#144). It runs only when what it reads changes:
+# the page (`ui/`), the fixtures and harness (`scripts/snap/`), the build's inputs and this file (#432).
+# A draft pull request runs nothing: its jobs start when it is marked ready, then on each push while it stays ready.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths: ["ui/**", "scripts/snap/**", "package.json", "package-lock.json", "tsconfig.json", ".github/workflows/snap.yml"]
+  push:
+    branches: [main]
+    paths: ["ui/**", "scripts/snap/**", "package.json", "package-lock.json", "tsconfig.json", ".github/workflows/snap.yml"]
+
+# A new push cancels the older run on its branch or pull request; every main commit runs to completion.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # Two shards on macOS, the platform plotkeeper runs on, each rendering every other fixture (`--shard`, scripts/snap/shard.mjs),
+  # so snap ends within `studio.yml`'s check job (#432). One red shard leaves the other running.
+  snap:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: macos-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    name: snap (${{ matrix.shard }}/2)
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npm run snap:all -- --shard=${{ matrix.shard }}/2

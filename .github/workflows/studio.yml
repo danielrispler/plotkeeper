@@ -22,7 +22,7 @@ permissions:
 jobs:
   macos:
     # plotkeeper is built and used on macOS only.
-    # A draft pull request skips both jobs.
+    # A draft pull request skips it. The snap fixtures run in `snap.yml`.
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: macos-latest
     timeout-minutes: 30
@@ -46,19 +46,3 @@ jobs:
       # The same command an agent runs locally (package.json, `check`).
       - run: npm run check
 
-  # Every snap fixture rendered in the runner's Chrome; it fails on an uncaught page error. Left out of `check`,
-  # which stays fast for agents running it in parallel (#144), and a job of its own, as it needs only the built UI.
-  snap:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: macos-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: package-lock.json
-      - run: npm ci
-      - run: npm run build
-      - run: npm run snap:all

@@ -6,6 +6,7 @@ import vm from "node:vm";
 import { chromeFailure, consoleLines, failed, headSource, snapPage, stubSource } from "../../scripts/snap/page.mjs";
 import { fixtures } from "../../scripts/snap/fixtures.ts";
 import { railStates } from "../../scripts/snap/rail-fixtures.ts";
+import { shard } from "../../scripts/snap/shard.mjs";
 
 // The stub answers what the page's transport asks: `fetch` of `/api/<command>`, read as the transport reads it.
 const stubbed = (source, extra = {}) => {
@@ -269,4 +270,16 @@ test("a page that logged snap:fail still fails when Chrome is ended at its scree
   assert.match(run.output, /^snap:fail the card never drew/m);
   assert.doesNotMatch(run.output, /^wrote /m);
   assert.ok(Date.now() - started < 10000, `snap waited ${Date.now() - started} ms for Chrome's teardown`);
+});
+
+// CI renders the fixtures in two jobs (#432): `snap:all --shard=i/n` takes every n-th fixture from the i-th.
+test("the shards of snap:all render every fixture exactly once, and no flag renders them all (#432)", () => {
+  const names = Object.keys(fixtures);
+  assert.deepEqual(shard(names, undefined), names);
+  const one = shard(names, "1/2");
+  const two = shard(names, "2/2");
+  assert.deepEqual([...one, ...two].sort(), [...names].sort());
+  assert.equal(new Set([...one, ...two]).size, names.length);
+  assert.deepEqual(shard(["a", "b", "c", "d", "e"], "2/2"), ["b", "d"]);
+  for (const bad of ["0/2", "3/2", "a/b", "1/0", "1", "1/2/3", ""]) assert.throws(() => shard(names, bad), /--shard=<i>\/<n>/, bad);
 });
