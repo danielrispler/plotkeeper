@@ -54,7 +54,7 @@ export const table: Row[] = [
   // calendar weeks. "stale-entered" is a refresher or a part catch-up entered from a part with a band.
   { module: "refresher", name: "the refresher", kept: (f) => (f.counts["refresher-entered"] ?? 0) >= 2, wait: { from: staleRollout, weeks: 5 } },
   { module: "staleness", name: "staleness bands", kept: (f) => (f.counts["stale-entered"] ?? 0) >= 1, wait: { from: staleRollout, weeks: 5 } },
-  // Explain-back (#397): at least 3 lines said back in the end-of-story bar; the marks, the rating and the note have no threshold.
+  // Explain-back (#397): at least 3 lines said back in the end-of-story bar; the marks have no threshold.
   { module: "explain-back", name: "explain-back", kept: (f) => (f.counts["explain-back-given"] ?? 0) >= 3 },
   // Micro-worlds (#399): a checked page opened in its overlay at least twice.
   { module: "micro-worlds", name: "micro-worlds", kept: (f) => (f.counts["micro-world-opened"] ?? 0) >= 2 },

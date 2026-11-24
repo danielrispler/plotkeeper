@@ -185,11 +185,11 @@ test("part catch-ups are kept at 3 completed, counted apart from \"I know this\"
   assert.equal(table.find((row) => row.module === "catch-ups").wait, undefined, "no exception: judged with the review");
 });
 
-test("explain-back is kept at 3 lines written; a mark, a rating or a note does not count", () => {
+test("explain-back is kept at 3 lines written; a mark does not count", () => {
   const passed = { engaged_days: 4, scrubs: 2, proofs: 2 };
   const others = { "catch-up-done": 3, "pre-flight-run": 2, "back-law-started": 1, "micro-world-opened": 2 };
   // (These keep the part catch-ups' and pre-flight's rows out of the list.)
-  assert.deepEqual(unused(facts({ ...passed, counts: { ...others, "explain-back-given": 2, "explain-back-marked": 9, "rating-given": 9, "note-given": 9 } })), ["explain-back"]);
+  assert.deepEqual(unused(facts({ ...passed, counts: { ...others, "explain-back-given": 2, "explain-back-marked": 9 } })), ["explain-back"]);
   assert.deepEqual(unused(facts({ ...passed, counts: { ...others, "explain-back-given": 3 } })), []);
   assert.match(reviewWords(["explain-back"]), /explain-back/);
   assert.equal(table.find((row) => row.module === "explain-back").wait, undefined, "no exception: judged with the review");

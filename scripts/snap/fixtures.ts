@@ -540,8 +540,8 @@ const mapBriefGuard = (confirm: boolean): Fixture => ({
   }),
   snapDone: "guard ok",
 });
-// The end-of-story bar (#393) under the story's last step: 4 picked by its key, an "s" typed in the note that does not skip, the note kept by
-// Enter; each is sent to the shell, and no rating is shown back once the brief is opened again. The screenshot is the bar after the note.
+// The end-of-story bar (#393, restyled by #448) under the story's last step: on a story with no gist it holds only Skip, with no rating
+// and no note (#443). The S key skips it, closing it and sending nothing to the shell. The screenshot is the story before the skip.
 const mapBriefBar = (): Fixture =>
   mapBrief(briefOf(storySteps()), 3, `
       const sent = [];
@@ -549,29 +549,26 @@ const mapBriefBar = (): Fixture =>
       window.fetch = (url, init) => (sent.push(String(url) + " " + (init?.body ?? "")), real(url, init));
       const bar = () => document.querySelector("#map-brief .story-bar");
       if (!bar() || bar().hidden) return log("snap:fail no end-of-story bar on the story's last step");
+      if (bar().querySelector(".bar-rate, .bar-note, .bar-scale")) log("snap:fail the bar still has a rating or a note");
+      if (/clear|rate|note/i.test(bar().textContent)) log("snap:fail the bar still asks for a rating or a note: " + bar().textContent);
+      if (bar().querySelector(".bar-explain")) log("snap:fail explain-back on a story with no gist");
+      const skip = bar().querySelector(".bar-skip");
+      if (skip?.textContent !== "Skip") log("snap:fail no Skip on the bar");
       const key = (target, k) => target.dispatchEvent(new KeyboardEvent("keydown", { key: k, code: /^[0-9]$/.test(k) ? "Digit" + k : "Key" + k.toUpperCase(), bubbles: true }));
       key(document, "4");
       await wait(50);
-      const pressed = [...bar().querySelectorAll(".bar-rate")].filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.textContent);
-      if (pressed.join() !== "4") log("snap:fail the 4 key did not rate: " + pressed.join());
-      const note = bar().querySelector(".bar-note");
-      note.focus();
-      key(note, "s");
+      if (bar().hidden) log("snap:fail a digit closed the bar");
+      key(document, "s");
       await wait(50);
-      if (bar().hidden) return log("snap:fail an s typed in the note skipped the bar");
-      note.value = "The second step lost me.";
-      key(note, "Enter");
-      await wait(50);
-      if (!bar().querySelector(".bar-kept")) log("snap:fail Enter did not keep the note");
-      const bars = sent.filter((call) => call.includes("/api/story_bar")).map((call) => JSON.parse(call.slice(call.indexOf(" ") + 1)));
-      const kinds = bars.map((b) => b.kind + (b.rating ? ":" + b.rating : "") + (b.note ? ":" + b.note : "")).join();
-      if (kinds !== "rating-given:4,note-given:The second step lost me.") log("snap:fail the bar sent " + kinds);
-      if (bars.some((b) => b.project !== "/w/plotkeeper" || b.about.pr !== 334 || b.about.chapter !== 0)) log("snap:fail the bar's key: " + JSON.stringify(bars[0]));
-      if (["of 5", "/5", "/ 5"].some((score) => bar().textContent.includes(score))) log("snap:fail the bar shows a score");
-      if (bar().querySelector(".bar-explain")) log("snap:fail explain-back on a story with no gist");`, false, 100);
-// Explain-back (#397): the same story, its chapter carrying a gist and lighting Core parts, ends with the one-line field in the bar's first
-// row, above the rating. Before submit, an "s" and a "2" typed in the line neither skip nor rate, and the gist is not shown yet. After
-// submit (Enter), the line shows with the gist under it and the three marks; Partly is pressed. Each is sent to the shell; no number shows.
+      if (!bar().hidden) log("snap:fail the S key did not skip the bar");
+      const bars = sent.filter((call) => call.includes("/api/story_bar"));
+      if (bars.length) log("snap:fail the bar sent " + bars.join());
+      bar().hidden = false;`, false, 100);
+// Explain-back (#397, restyled by #448): the same story, its chapter carrying a gist and lighting Core parts, ends with the one-line field
+// in the bar's first row: autocomplete off, a placeholder that shows an example and ends with "…". Before submit, an "s" and a "2" typed
+// in the line do not skip, the gist is not shown yet, and an Enter while an input method is composing does not submit. After submit
+// (Enter), the line shows with the gist under it and the three marks as radios in a fieldset with a legend, each radio inside its label;
+// a click on Partly's label checks it. Each is sent to the shell; no number shows.
 const explainGist = "A ready PR's brief is written in the background and played on the map, and reading a chapter clears its parts' fog.";
 const mapBriefExplainBack = (submit: boolean): Fixture =>
   mapBrief(briefOf(storySteps(), false, { chapters: [{ ...brief(storySteps()).chapters[0], gist: explainGist }] }), 3, `
@@ -582,25 +579,35 @@ const mapBriefExplainBack = (submit: boolean): Fixture =>
       const line = bar()?.querySelector(".bar-slot .bar-explain .bar-line");
       if (!line) return log("snap:fail no explain-back line on a Core story with a gist");
       if (bar().firstElementChild.className !== "bar-slot") log("snap:fail explain-back is not the bar's first row");
+      if (bar().querySelector(".bar-rate, .bar-note, .bar-scale")) log("snap:fail the bar still has a rating or a note");
+      if (bar().querySelector(".bar-skip")?.textContent !== "Skip") log("snap:fail no Skip on the bar");
+      if (line.getAttribute("autocomplete") !== "off") log("snap:fail the line's autocomplete is not off");
+      if (!line.placeholder.endsWith("…") || !/e\\.g\\./.test(line.placeholder)) log("snap:fail the placeholder shows no example ending in …: " + line.placeholder);
       if (bar().textContent.includes(${JSON.stringify(explainGist)})) log("snap:fail the gist shows before the line is given");
-      const key = (target, k) => target.dispatchEvent(new KeyboardEvent("keydown", { key: k, code: /^[0-9]$/.test(k) ? "Digit" + k : "Key" + k.toUpperCase(), bubbles: true }));
+      const key = (target, k, init = {}) => target.dispatchEvent(new KeyboardEvent("keydown", { key: k, code: /^[0-9]$/.test(k) ? "Digit" + k : "Key" + k.toUpperCase(), bubbles: true, cancelable: true, ...init }));
       line.focus();
       key(line, "s");
       key(line, "2");
       await wait(50);
       if (bar().hidden) return log("snap:fail an s typed in the line skipped the bar");
-      if (bar().querySelector('.bar-rate[aria-pressed="true"]')) log("snap:fail a 2 typed in the line rated");
       line.value = "Briefs get written in the background and reading one clears the fog.";
+      key(line, "Enter", { isComposing: true });
+      await wait(50);
+      if (bar().querySelector(".bar-said") || sent.some((call) => call.includes("/api/story_bar"))) log("snap:fail an Enter while composing submitted the line");
       ${submit ? `key(line, "Enter");
       await wait(50);
       const said = bar().querySelector(".bar-said");
       if (said?.textContent !== line.value) log("snap:fail the line is not shown after submit: " + said?.textContent);
       if (!bar().querySelector(".bar-gist")?.textContent.includes(${JSON.stringify(explainGist)})) log("snap:fail the gist is not shown under the line");
-      const marks = [...bar().querySelectorAll(".bar-mark")];
-      if (marks.map((m) => m.textContent).join() !== "Got it,Partly,Missed") log("snap:fail the marks: " + marks.map((m) => m.textContent).join());
-      marks[1].click();
+      const group = bar().querySelector("fieldset.bar-marks");
+      if (!group?.querySelector(":scope > legend")?.textContent.trim()) log("snap:fail the marks are not a fieldset with a legend");
+      const radios = [...bar().querySelectorAll('.bar-marks input[type="radio"]')];
+      const labels = radios.map((r) => r.closest("label"));
+      if (labels.map((l) => l?.textContent.trim()).join() !== "Got it,Partly,Missed") log("snap:fail the marks: " + labels.map((l) => l?.textContent.trim()).join());
+      if (new Set(radios.map((r) => r.name)).size !== 1 || !radios[0]?.name) log("snap:fail the radios are not one group");
+      labels[1]?.querySelector(".bar-mark-word")?.click();
       await wait(50);
-      if (marks.filter((m) => m.getAttribute("aria-pressed") === "true").map((m) => m.textContent).join() !== "Partly") log("snap:fail Partly is not pressed");
+      if (radios.filter((r) => r.checked).map((r) => r.value).join() !== "partly") log("snap:fail Partly is not checked by its label");
       if (/\\d/.test(bar().querySelector(".bar-slot").textContent)) log("snap:fail explain-back shows a number");
       const bars = sent.filter((call) => call.includes("/api/story_bar")).map((call) => JSON.parse(call.slice(call.indexOf(" ") + 1)));
       const kinds = bars.map((b) => b.kind + ":" + (b.line ?? b.mark)).join();
@@ -1655,6 +1662,150 @@ const mapPanelBrief = (): Fixture =>
   pr_brief: briefOf(storySteps()),
 });
 
+// The part sheet in the map (#445). A long description on the shell, whose check-backed law opens a long proof in the drawer.
+const longSheet = (() => {
+  const doc = JSON.parse(mapFile);
+  doc.parts.find((p: { id: string }) => p.id === "shell").description = "Reads the event log, feeds each line to the core and acts on what the core says. ".repeat(12);
+  return JSON.stringify(doc);
+})();
+const longProof = [{ file: "workbench/tests/wire.rs", line: 11, test: "wire_types_match", first: 11, snippet: ["// @law: wire-types-agree", "#[test]", "fn wire_types_match() {", ...Array.from({ length: 40 }, (_, i) => `    let sample_${i} = studio_test_support::sample(${i});`), "}"].join("\n") }];
+const sheetHelpers = `
+      const esc = async () => { document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", key: "Escape", bubbles: true })); await wait(100); };
+      const sheetOf = () => document.querySelector("#map-sheet .sheet");
+      const drawerOf = () => document.querySelector("#map-drawer .drawer");
+      const plate = (id) => document.querySelector("#map .plate[data-id=" + id + "]");
+      const proof = async () => {
+        [...document.querySelectorAll("#map-sheet .sheet-law button")].find((b) => b.textContent === "See the proof").click();
+        await wait(100);
+      };`;
+// At 1300x700 (`…Short`): the side column, not the sheet or the drawer, scrolls, so the sheet's last button and the drawer's end are reachable;
+// the drawer's code block keeps its own scroll (danielrispler/plotkeeper#443, issue 2a).
+const mapSheetScrollShort = (): Fixture =>
+  mapOpened(`${sheetHelpers}
+      plate("shell").click();
+      await wait(300);
+      const side = document.getElementById("map-side"), sheet = document.getElementById("map-sheet");
+      const inWindow = (node) => { const r = node.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; };
+      side.scrollTop = 1e6;
+      await wait(50);
+      const last = [...sheet.querySelectorAll("button")].at(-1);
+      if (!inWindow(last)) log("snap:fail the sheet's last button (" + last.textContent + ") is outside the window with the side column scrolled to its end: bottom " + Math.round(last.getBoundingClientRect().bottom) + " of " + innerHeight);
+      await proof();
+      const drawer = document.getElementById("map-drawer"), code = drawer.querySelector(".drawer-code");
+      if (!code) return log("snap:fail the proof drawer did not open");
+      side.scrollTop = 1e6;
+      await wait(50);
+      if (side.scrollHeight <= side.clientHeight) log("snap:fail the side column does not scroll: " + side.scrollHeight + " <= " + side.clientHeight);
+      if (side.getBoundingClientRect().bottom > innerHeight) log("snap:fail the side column runs below the window");
+      if (!inWindow([...drawer.querySelectorAll("button")].at(-1) ?? code)) log("snap:fail the drawer's end is outside the window with the side column scrolled to its end");
+      for (const [name, box] of [["sheet", sheet], ["drawer", drawer]]) if (box.scrollHeight > box.clientHeight + 1) log("snap:fail the " + name + " is a scroll box of its own: " + box.scrollHeight + " > " + box.clientHeight);
+      if (code.scrollHeight <= code.clientHeight) log("snap:fail the drawer's code block does not scroll on its own");
+      // The glass's rise ends before the picture is taken.
+      await wait(400);
+      log("sheet scroll ok");`, { map_state: mapState({ source: longSheet }), map_proof: longProof });
+// The sheet's width (#445): a real drag of its left edge, within 300 px and half the map, arrow keys on the focused handle, a double-click
+// back to 360, and the width kept in this browser.
+const mapSheetWidth = (): Fixture => ({
+  ...mapOpened(`${sheetHelpers}
+      plate("shell").click();
+      await wait(300);
+      const sheet = document.getElementById("map-sheet"), stage = document.querySelector(".map-stage");
+      const width = () => Math.round(sheet.getBoundingClientRect().width);
+      const near = (a, b) => Math.abs(a - b) <= 2;
+      if (!near(width(), 360)) log("snap:fail the sheet opens " + width() + " px wide, not 360");
+      const handle = sheet.querySelector(".sheet-resize");
+      if (!handle) return log("snap:fail the sheet has no resize handle");
+      await __snapDrag(handle, -100, 0);
+      await wait(100);
+      if (!near(width(), 460)) log("snap:fail a 100 px drag left made the sheet " + width() + " px wide, not 460");
+      if (Number(localStorage.getItem("map-sheet-width")) !== width()) log("snap:fail the dragged width is not kept: " + localStorage.getItem("map-sheet-width"));
+      await __snapDrag(handle, -2000, 0);
+      await wait(100);
+      const half = Math.floor(stage.getBoundingClientRect().width / 2);
+      if (!near(width(), half)) log("snap:fail a long drag left made the sheet " + width() + " px wide, not half the map, " + half);
+      await __snapDrag(handle, 2000, 0);
+      await wait(100);
+      if (!near(width(), 300)) log("snap:fail a long drag right made the sheet " + width() + " px wide, not 300");
+      handle.focus();
+      const before = width();
+      handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", code: "ArrowLeft", bubbles: true }));
+      await wait(50);
+      if (width() <= before) log("snap:fail ArrowLeft on the handle did not widen the sheet: " + before + " to " + width());
+      const wider = width();
+      handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", code: "ArrowRight", bubbles: true }));
+      await wait(50);
+      if (width() >= wider) log("snap:fail ArrowRight on the handle did not narrow the sheet: " + wider + " to " + width());
+      if (!sheetOf()) log("snap:fail the arrow keys closed the sheet");
+      await __snapDrag(handle, -60, 0);
+      await __snapDoubleClick(handle);
+      await wait(100);
+      if (!near(width(), 360)) log("snap:fail a double-click on the handle left the sheet " + width() + " px wide, not 360");
+      log("sheet width ok");`, { map_state: mapState() }),
+  realPointer: true, snapDone: "sheet width ok",
+});
+// A width kept from an earlier visit opens the sheet at that width.
+const mapSheetKeptWidth = (): Fixture => ({
+  ...mapOpened(`${sheetHelpers}
+      plate("shell").click();
+      await wait(300);
+      const width = Math.round(document.getElementById("map-sheet").getBoundingClientRect().width);
+      if (Math.abs(width - 480) > 2) log("snap:fail the kept width 480 opened the sheet " + width + " px wide");
+      await wait(400);
+      log("kept width ok");`, { map_state: mapState() }),
+  storage: { "map-sheet-width": "480" }, snapDone: "kept width ok",
+});
+// Closing the sheet (#445): a real click, or a press of 3 px, on the empty map closes the sheet and its drawer; a longer drag pans and keeps
+// them; a click on another part switches the sheet; × (named "Close") and Esc close it.
+const mapSheetClose = (): Fixture => ({
+  ...mapOpened(`${sheetHelpers}
+      const side = document.getElementById("map-side").getBoundingClientRect();
+      // A point of the empty map, clear of the plates, the tray, the legend and the side column.
+      let spot = null;
+      for (let y = 120; y < innerHeight - 160 && !spot; y += 40) for (let x = 80; x < side.left - 80 && !spot; x += 40) {
+        const hit = document.elementFromPoint(x, y);
+        if (hit && (hit.classList.contains("map-world") || hit.classList.contains("map-canvas"))) spot = { getBoundingClientRect: () => ({ left: x - 1, top: y - 1, width: 2, height: 2 }) };
+      }
+      if (!spot) return log("snap:fail no empty spot of the map found");
+      const opened = async () => {
+        await __snapClick(plate("shell"));
+        await wait(100);
+        if (sheetOf()?.dataset.part !== "shell") log("snap:fail a click on the shell did not open its sheet");
+        await proof();
+        if (!drawerOf()) log("snap:fail the proof drawer did not open");
+      };
+      await opened();
+      await __snapClick(spot);
+      await wait(80);
+      if (sheetOf() || drawerOf()) log("snap:fail a click on the empty map left the sheet " + !!sheetOf() + " or the drawer " + !!drawerOf() + " open");
+      await opened();
+      await __snapDrag(spot, 3, 0);
+      await wait(80);
+      if (sheetOf() || drawerOf()) log("snap:fail a 3 px press on the empty map left the sheet or the drawer open");
+      await opened();
+      const was = plate("hook").getBoundingClientRect().left;
+      await __snapDrag(spot, 40, 0);
+      await wait(80);
+      if (Math.abs(plate("hook").getBoundingClientRect().left - was - 40) > 2) log("snap:fail a 40 px drag did not pan the map");
+      if (!sheetOf() || !drawerOf()) log("snap:fail a 40 px drag on the empty map closed the sheet or the drawer");
+      await __snapClick(plate("hook"));
+      await wait(100);
+      if (sheetOf()?.dataset.part !== "hook") log("snap:fail a click on another part did not switch the sheet: " + sheetOf()?.dataset.part);
+      // The shell's proof drawer stays open over the switch; Esc peels it first.
+      await esc();
+      if (drawerOf() || !sheetOf()) log("snap:fail the first Esc did not close the drawer alone");
+      const close = document.querySelector("#map-sheet .sheet-close");
+      if (close?.getAttribute("aria-label") !== "Close") log("snap:fail × is not named Close: " + close?.getAttribute("aria-label"));
+      close.click();
+      await wait(100);
+      if (sheetOf()) log("snap:fail × did not close the sheet");
+      await __snapClick(plate("hook"));
+      await wait(100);
+      await esc();
+      if (sheetOf()) log("snap:fail Esc did not close the sheet");
+      log("sheet close ok");`, { map_state: mapState(), map_proof: longProof }),
+  realPointer: true, snapDone: "sheet close ok",
+});
+
 export const fixtures = {
   ...railFixtures,
   // Unconfigured, with both writers found: preset to Claude, summaries off until a Test passes.
@@ -2032,6 +2183,11 @@ export const fixtures = {
   mapFreshNarrow: mapFresh,
   mapNoMap,
   mapNoMapNarrow: mapNoMap,
+  // The part sheet in the map: one scrolling column, a resizable width, and a click on the empty map closes it (#445).
+  mapSheetScrollShort,
+  mapSheetWidth,
+  mapSheetKeptWidth,
+  mapSheetClose,
   mapEmpty: () =>
     mapOpened(`
       const draft = document.querySelector("#map .map-empty .map-draft");

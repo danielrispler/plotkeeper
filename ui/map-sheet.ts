@@ -7,9 +7,11 @@
 // A law on trust has Back a law there instead, or its run's patch (`patch-review.ts`, #398).
 // `.sheet-extra` at the foot holds the history strip (`map-history.ts`, #313). While a past commit is shown the sheet is read-only:
 // no tier change, no proof, no CI section, no fog section.
+//
+// The sheet's left edge resizes it (#445), and a click on the empty map closes it and its drawer (`map.ts`'s `pan`).
 
 import { logStop } from "./stop-rules.js";
-import { failure, invoke, pressable, text } from "./dom.js";
+import { element, failure, invoke, pressable, text } from "./dom.js";
 import { currentMap, onDraw, onPlateClick, reloadMap, registerLayer, syncSide, type MapView } from "./map.js";
 import { openDrawer } from "./map-drawer.js";
 import { drawStrip } from "./map-history.js";
@@ -54,6 +56,68 @@ async function setTier(view: MapView, part: string, tier: Tier) {
   await reloadMap();
 }
 
+// The sheet's width (#445): 360 px at first, never under 300 px or over half the map, kept in this browser; it reaches the stylesheet as
+// `--sheet-w` on the side area, whose width is the sheet's.
+const widthKey = "map-sheet-width";
+const [firstWidth, leastWidth, widthStep] = [360, 300, 16];
+const keptWidth = () => {
+  try {
+    return Number(localStorage.getItem(widthKey)) || firstWidth;
+  } catch {
+    return firstWidth;
+  }
+};
+const showWidth = (px: number) => element("map-side").style.setProperty("--sheet-w", `${px}px`);
+// Sets the width, bounded, and keeps it; null goes back to the first width and forgets the kept one.
+function resize(px: number | null) {
+  const side = element("map-side");
+  const most = Math.max(leastWidth, (side.parentElement?.clientWidth ?? 0) / 2);
+  const width = px === null ? firstWidth : Math.round(Math.min(most, Math.max(leastWidth, px)));
+  showWidth(width);
+  try {
+    if (px === null) localStorage.removeItem(widthKey);
+    else localStorage.setItem(widthKey, String(width));
+  } catch {
+    // A browser that keeps nothing still resizes.
+  }
+}
+// The handle on the sheet's left edge, made once and moved into each drawn sheet: a drag, the arrow keys while it has the focus, and a
+// double-click back to the first width.
+let resizeHandle: HTMLButtonElement | null = null;
+function handle() {
+  if (resizeHandle) return resizeHandle;
+  const bar = text("button", "", "btn quiet sheet-resize") as HTMLButtonElement;
+  bar.type = "button";
+  bar.setAttribute("aria-label", "Resize the sheet: the left arrow widens it, the right arrow narrows it");
+  bar.title = "Drag to resize the sheet; double-click for its first width";
+  const width = () => element("map-side").getBoundingClientRect().width;
+  let from = { x: 0, width: 0 };
+  bar.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    from = { x: event.clientX, width: width() };
+    bar.setPointerCapture(event.pointerId);
+    bar.classList.add("dragging");
+    document.body.classList.add("resizing");
+  });
+  // The edge is on the left, so a move left widens the sheet.
+  bar.addEventListener("pointermove", (event) => {
+    if (bar.hasPointerCapture(event.pointerId)) resize(from.width + from.x - event.clientX);
+  });
+  bar.addEventListener("lostpointercapture", () => {
+    bar.classList.remove("dragging");
+    document.body.classList.remove("resizing");
+  });
+  bar.addEventListener("dblclick", () => resize(null));
+  bar.addEventListener("keydown", (event) => {
+    const step = { ArrowLeft: widthStep, ArrowRight: -widthStep }[event.key];
+    if (step === undefined) return;
+    event.preventDefault();
+    event.stopPropagation();
+    resize(width() + step);
+  });
+  return (resizeHandle = bar);
+}
+
 // The part whose sheet is open on the shown map, null with none.
 export const sheetPart = () => (open && currentMap()?.project === open.project ? open.part : null);
 
@@ -81,7 +145,8 @@ function drawSheet(view: MapView) {
   const sheet = sheetOf(part, view.doc.laws, tier, view.scrub ? undefined : view.state.fog?.[part.id]);
 
   const closer = text("button", "×", "btn quiet sheet-close");
-  closer.title = "Close the sheet";
+  closer.setAttribute("aria-label", "Close");
+  closer.title = "Close the sheet (Esc)";
   closer.addEventListener("click", closeSheet);
   const tiers = text("div", "", "sheet-tiers");
   for (const each of sheet.tiers) {
@@ -208,7 +273,8 @@ function drawSheet(view: MapView) {
     item.kind === "law" ? sheet.laws.some((law) => law.id === item.id) : item.kind === "link" && view.doc.links.some((link) => link.id === item.id && (link.from === part.id || link.to === part.id)),
   );
   if (overturned) card.append(overturned);
-  slot.replaceChildren(card);
+  showWidth(keptWidth());
+  slot.replaceChildren(handle(), card);
   drawStrip(view, part.id, extra);
   syncSide(view.slots);
 }
