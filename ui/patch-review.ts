@@ -10,7 +10,7 @@
 // the PR touched, or a new law: the no-tools writer drafts its sentence from the PR's facts, Daniel confirms or edits it, and only what he
 // confirmed reaches the run, which adds the law to the map with its tagged test in one patch, proven and reviewed like back a law.
 
-import { failure, invoke, text } from "./dom.js";
+import { confirmed, failure, invoke, promptBox, scrollingPre, text, type Confirm } from "./dom.js";
 import { diffLines } from "./diff.js";
 import { currentMap, onDraw, registerLayer, reloadMap, shownProject } from "./map.js";
 import { copyOverturn, overturnReport } from "./ratify.js";
@@ -30,8 +30,21 @@ export type LawAction = { law: string } & (
   | { kind: "opened"; id: string; pr: number; url: string }
   | { kind: "out-of-date"; id: string }
 );
-// What the buttons do: start a run for a law, open a patch's review, open its draft PR, discard a patch, close the review.
-export type PatchActs = { start: (law: string) => void; review: (id: string) => void; open: (id: string) => void; discard: (id: string) => void; close: () => void };
+// What the buttons do: start a run for a law, open a patch's review, open its draft PR, discard a patch, close the review, and ask before
+// Discard (#459), resolving true when confirmed.
+export type PatchActs = {
+  start: (law: string) => void;
+  review: (id: string) => void;
+  open: (id: string) => void;
+  discard: (id: string) => void;
+  close: () => void;
+  confirm: (ask: Confirm) => Promise<boolean>;
+};
+
+// Discard asks first, naming the patch; Dismiss on a rejected run, which has no patch to lose, acts at once.
+const discardPatch: Confirm = { heading: "Discard this patch?", lost: "The test patch this run wrote, and its proof, are deleted.", verb: "Discard patch" };
+const discardButton = (id: string, act: Pick<PatchActs, "discard" | "confirm">) =>
+  button("Discard", "Delete this patch", () => void act.confirm(discardPatch).then((yes) => yes && act.discard(id)));
 
 // The action of `law` by its newest patch; a law with none, or a payload from before back a law, offers a new run.
 export function lawAction(law: string, patches: LawPatch[] | null | undefined): LawAction {
@@ -59,7 +72,7 @@ const button = (words: string, title: string, click: () => void, kind = "quiet")
 
 // The nodes of a law's action, for its row in the part's sheet. `again` is the words of the button that starts a run; none for a new law,
 // which the map does not have to back.
-export function lawActionNodes(action: LawAction, act: Pick<PatchActs, "start" | "review" | "discard">, again: string | null = "Back a law"): HTMLElement[] {
+export function lawActionNodes(action: LawAction, act: Pick<PatchActs, "start" | "review" | "discard" | "confirm">, again: string | null = "Back a law"): HTMLElement[] {
   const start = () => (again === null ? [] : [button(again, "Start a background run that writes a test for this law, then prove it here", () => act.start(action.law))]);
   switch (action.kind) {
     case "start":
@@ -80,22 +93,23 @@ export function lawActionNodes(action: LawAction, act: Pick<PatchActs, "start" |
       return [link];
     }
     case "out-of-date":
-      return [text("span", "Out of date, run again", "law-patch-note"), button("Discard", "Delete this patch", () => act.discard(action.id)), ...start()];
+      return [text("span", "Out of date, run again", "law-patch-note"), discardButton(action.id, act), ...start()];
     case "proven":
       return [button("Review the patch", "See the test this run wrote and the proof plotkeeper ran", () => act.review(action.id), "primary")];
   }
 }
 
 // The review of a proven `patch` of the law whose text is `law`.
-export function reviewNodes(patch: LawPatch, law: string, act: Pick<PatchActs, "open" | "discard" | "close">): HTMLElement[] {
+export function reviewNodes(patch: LawPatch, law: string, act: Pick<PatchActs, "open" | "discard" | "close" | "confirm">): HTMLElement[] {
   const proof = patch.proof;
   const diff = text("div", "", "patch-diff");
   diff.append(...diffLines(patch.diff ?? "").map((line) => text("pre", line.text, `diff-line ${line.kind}`)));
-  const output = (heading: string, out: string) => [text("h3", heading, "patch-heading"), text("pre", out, "patch-output")];
+  // An output, named by its heading.
+  const output = (heading: string, out: string) => [text("h3", heading, "patch-heading"), scrollingPre(out, "patch-output", heading)];
   const foot = text("div", "", "patch-foot");
   foot.append(
     button("Open draft PR", "Push a branch with this test patch from the default branch and open a draft PR with the proof", () => act.open(patch.id), "primary"),
-    button("Discard", "Delete this patch", () => act.discard(patch.id)),
+    discardButton(patch.id, act),
     button("Close", "Close the review", act.close),
   );
   return [
@@ -111,11 +125,7 @@ export function reviewNodes(patch: LawPatch, law: string, act: Pick<PatchActs, "
 
 // A run that could not start and whose prompt the clipboard refused: its line, and the prompt in the overlay to copy by hand.
 export function refusedNodes(line: string, prompt: string, close: () => void): HTMLElement[] {
-  const area = document.createElement("textarea");
-  area.className = "ratify-prompt";
-  area.value = prompt;
-  area.readOnly = true;
-  area.rows = 6;
+  const area = promptBox(prompt, 6);
   const foot = text("div", "", "patch-foot");
   foot.append(button("Close", "Close", close));
   return [text("h2", "The run did not start", "patch-title"), text("p", `${line}. ${overturnReport("manual", prompt).line}`, "patch-law"), area, foot];
@@ -198,6 +208,7 @@ const acts: PatchActs = {
     [shown, refused] = [null, null];
     paint();
   },
+  confirm: confirmed,
 };
 
 // The sheet's law rows use these acts.
@@ -226,7 +237,7 @@ export function guardOffer(guard: Guard, pr: number, laws: Law[], patches: LawPa
 }
 
 // What the guard's buttons do: back an on-trust law, start a new law's confirm step, and a patch's review and discard.
-export type GuardActs = Pick<PatchActs, "review" | "discard"> & { back: (law: string) => void; add: () => void };
+export type GuardActs = Pick<PatchActs, "review" | "discard" | "confirm"> & { back: (law: string) => void; add: () => void };
 
 // The guard's row: each on-trust law with Back this law (or where its patch stands), each new law with where its patch stands, and Add a
 // new law. `patches` are the project's, for the state of each law's newest one.
@@ -267,11 +278,18 @@ export function confirmNodes(draft: NewLaw | null, parts: { id: string; name: st
     part.append(option);
   }
   part.value = draft.on;
+  part.name = "law-part";
+  part.setAttribute("aria-label", "The part the law is on");
   const id = text("input", "", "guard-id") as HTMLInputElement;
   id.value = draft.id;
+  id.name = "law-id";
+  id.autocomplete = "off";
+  id.spellcheck = false;
   id.setAttribute("aria-label", "The law's id");
   const sentence = text("textarea", "", "guard-sentence") as HTMLTextAreaElement;
   sentence.value = draft.text;
+  sentence.name = "law-sentence";
+  sentence.autocomplete = "off";
   sentence.setAttribute("aria-label", "The law's sentence");
   sentence.setAttribute("rows", "2");
   // What Daniel types is kept in the draft, so the step drawn again (a map-landed, a resize) shows it.
@@ -299,6 +317,7 @@ export function guardRow(view: MapView, pr: number, guard: Guard, redraw: () => 
   const act: GuardActs = {
     review: acts.review,
     discard: acts.discard,
+    confirm: acts.confirm,
     back: (law) => {
       invoke("back_a_law", { project, law, guards: pr }).then(started).catch(failure("back_a_law", "error"));
     },

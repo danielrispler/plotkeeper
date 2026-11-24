@@ -8,7 +8,7 @@
 // by project and by PR and chapter or by part. The line is an input, so the window's single keys stay off while it is typed, and an
 // Enter that confirms an input method's composition does not submit it. Nothing is read back: a bar opened again starts empty.
 
-import { failure, invoke, text } from "./dom.js";
+import { failure, invoke, onEnter, text } from "./dom.js";
 import { localDay } from "./stop-rules.js";
 
 export type BarKind = "explain-back-given" | "explain-back-marked";
@@ -126,11 +126,7 @@ function explainBack(model: Model, gist: string): HTMLElement {
   field.placeholder = "Say it back in one line, e.g. “Reading a brief clears its parts’ fog”…";
   field.title = "Optional: say the story back in your own words, then Enter compares it with its gist";
   field.setAttribute("aria-label", "Say this story back in one line");
-  field.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter") return;
-    event.preventDefault();
-    // An Enter that confirms an input method's composition is not a submit (keyCode 229 covers Safari's late isComposing).
-    if (event.isComposing || event.keyCode === 229) return;
+  onEnter(field, () => {
     if (model.explain(field.value)) box.replaceChildren(...compared(model, gist));
   });
   box.append(field);

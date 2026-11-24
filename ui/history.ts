@@ -36,9 +36,8 @@ let query = "";
 export function historyLink(sessions: Pick<Session, "state">[], open: () => void): HTMLElement[] {
   const count = sessions.filter((s) => s.state === "ended").length;
   if (!count) return [];
-  const link = pressable(text("button", `History · ${count}`, "history-link"), false, open);
+  const link = pressable(text("button", `History · ${count}`, "history-link"), null, open);
   link.title = "Show the ended sessions";
-  link.removeAttribute("aria-pressed");
   link.dataset.key = "history";
   return [link];
 }
@@ -48,7 +47,9 @@ export function drawHistory(box: HTMLElement, sessions: Session[]) {
   box.classList.add("history");
   const search = document.createElement("input");
   search.type = "search";
-  search.placeholder = "Search by name, project or branch";
+  search.name = "history-search";
+  search.autocomplete = "off";
+  search.placeholder = "Search by name, project or branch…";
   search.setAttribute("aria-label", "Search history");
   search.dataset.key = "search";
   search.value = query;

@@ -91,13 +91,13 @@ test("an argument-keyed reply answers by that argument", async () => {
 });
 
 // Runs a page's head script in a stand-in page: `load` fires, then the timers run.
-// `nodes`: what the page's hover check finds, by selector (none by default).
+// `nodes`: what the page's hover check finds, by selector (none by default). The page has its one `main` and `h1` (#461).
 const runHead = (options, nodes = { controls: [], titled: [] }) => {
   const logged = [];
   const added = [];
   const handlers = {};
   const timers = [];
-  const querySelectorAll = (selector) => (selector === "[title]" ? nodes.titled : nodes.controls);
+  const querySelectorAll = (selector) => (selector === "[title]" ? nodes.titled : selector === "main" || selector === "h1" ? [{}] : nodes.controls);
   const document = { body: { classList: { add: (...names) => added.push(...names) } }, marker: "drawn", querySelectorAll };
   vm.runInNewContext(headSource(options), {
     document, console: { log: (line) => logged.push(line) }, getComputedStyle: (node) => ({ pointerEvents: node.pointer ?? "auto" }),
@@ -151,7 +151,8 @@ test("the hover check fails a control with no hover, one whose hover repeats its
   const fine = control("+", { title: "Start a new session (⌘N)" });
   const inherited = control("Open", { hover: "Resume this session" });
   const { logged } = await runHead({}, { controls: [silent, repeats, fine, inherited, unreachable], titled: [repeats, fine, unreachable] });
-  assert.deepEqual(logged.map((line) => line.replace(/ on .*/, "")), ["snap:fail hover: no hover", "snap:fail hover: repeats its label", "snap:fail hover: out of the pointer's reach"]);
+  // The accessibility pass runs after it on the same page (a11y.mjs); only the hover rule's lines are this test's.
+  assert.deepEqual(logged.filter((line) => line.startsWith("snap:fail hover")).map((line) => line.replace(/ on .*/, "")), ["snap:fail hover: no hover", "snap:fail hover: repeats its label", "snap:fail hover: out of the pointer's reach"]);
   assert.ok(failed(logged));
 });
 
@@ -212,7 +213,7 @@ test("a map brief fixture that never printed its ok line fails: Chrome's time bu
 
 // snap run end to end against a stand-in Chrome (`CHROME`): one that never ends, one that ends without writing the screenshot, and
 // one slow to tear down after writing it (#413).
-const runSnap = async (chromeBody, env = {}) => {
+const runSnap = async (chromeBody, env = {}, fixture = "mapBusy") => {
   const { mkdtempSync, writeFileSync, chmodSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
@@ -222,12 +223,12 @@ const runSnap = async (chromeBody, env = {}) => {
   writeFileSync(chrome, `#!/bin/sh\n${chromeBody}\n`);
   chmodSync(chrome, 0o755);
   const out = join(dir, "out.png");
-  const run = spawnSync(process.execPath, ["scripts/snap/snap.mjs", "mapBusy", out], {
+  const run = spawnSync(process.execPath, ["scripts/snap/snap.mjs", fixture, out], {
     env: { ...process.env, CHROME: chrome, ...env },
     encoding: "utf8",
     timeout: 30000,
   });
-  return { status: run.status, signal: run.signal, output: run.stdout + run.stderr };
+  return { status: run.status, signal: run.signal, output: run.stdout + run.stderr, out };
 };
 
 test("a Chrome that never ends is killed after snap's time limit, and the fixture fails", async () => {
@@ -270,6 +271,25 @@ test("a page that logged snap:fail still fails when Chrome is ended at its scree
   assert.match(run.output, /^snap:fail the card never drew/m);
   assert.doesNotMatch(run.output, /^wrote /m);
   assert.ok(Date.now() - started < 10000, `snap waited ${Date.now() - started} ms for Chrome's teardown`);
+});
+
+// Chrome's DevTools port opens only for a fixture that asks for real input (#454): real pointer or real keys.
+test("a fixture with real keys runs Chrome with its DevTools port, and one with neither real pointer nor real keys runs without it", async () => {
+  const { readFileSync } = await import("node:fs");
+  // A stand-in Chrome that writes its arguments as the screenshot, and logs the demo's ok line.
+  const argsAsShot = `for a in "$@"; do case "$a" in --screenshot=*) out="\${a#--screenshot=}";; esac; done
+echo '[1124/103501.828596:INFO:CONSOLE:61] "keys ok", source: http://127.0.0.1:1/index.html (61)' >&2
+printf '%s\\n' "$@" > "$out"
+echo "1 bytes written to file $out" >&2`;
+  const port = (fixture) => readFileSync(runSnapOut[fixture], "utf8").split("\n").includes("--remote-debugging-port=0");
+  const runSnapOut = {};
+  for (const fixture of ["mapBusy", "snapRealKeys"]) {
+    const run = await runSnap(argsAsShot, {}, fixture);
+    assert.equal(run.status, 0, run.output);
+    runSnapOut[fixture] = run.out;
+  }
+  assert.equal(port("mapBusy"), false, "a fixture with neither opened the DevTools port");
+  assert.equal(port("snapRealKeys"), true, "a fixture with real keys has no DevTools port");
 });
 
 // CI renders the fixtures in two jobs (#432): `snap:all --shard=i/n` takes every n-th fixture from the i-th.

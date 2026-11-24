@@ -9,8 +9,10 @@ const { runRows, runsNodes } = await import("../../dist/map-runs.js");
 
 const run = (id, state, extra = {}) => ({ id, kind: "back-law", state, at: Date.UTC(2026, 10, 23, 12, 0), outcome: null, line: null, denials: [], prompt: null, ...extra });
 const ended = (id, outcome, line, extra = {}) => run(id, "ended", { outcome, line, prompt: outcome === "done" ? null : "Write a test that backs the law.", ...extra });
-const acts = (calls, copy = async () => "copied") => ({
+// `confirm` answers a confirm dialog with `yes`, and notes what it asked.
+const acts = (calls, copy = async () => "copied", yes = true) => ({
   cancel: (id) => calls.push(["cancel", id]),
+  confirm: async (ask) => (calls.push(["confirm", ask]), yes),
   resume: () => calls.push(["resume"]),
   copy: (prompt) => (calls.push(["copy", prompt]), copy(prompt)),
 });
@@ -33,16 +35,31 @@ test("with no run and no pause nothing is drawn", () => {
   assert.deepEqual(runsNodes(undefined, acts([])), []);
 });
 
-test("Cancel on a running or a queued run asks the server to cancel that run", () => {
+test("Cancel on a queued run asks the server at once; on a running run it asks first, naming the worktree and its changes", async () => {
   const calls = [];
   const nodes = runsNodes({ paused: null, runs: [run("a", "running"), run("b", "queued")] }, acts(calls));
   assert.match(nodes[0].text, /Background runs/);
   const rows = nodes.filter((node) => node.dataset.run);
   assert.deepEqual(rows.map((row) => [row.dataset.run, row.dataset.state]), [["a", "running"], ["b", "queued"]]);
-  button(rows[0], "Cancel").listeners.click();
   button(rows[1], "Cancel").listeners.click();
-  assert.deepEqual(calls, [["cancel", "a"], ["cancel", "b"]]);
+  assert.deepEqual(calls, [["cancel", "b"]], "a queued run leaves at once");
+  await button(rows[0], "Cancel").listeners.click();
+  const [asked, ask] = calls[1] ?? [];
+  assert.equal(asked, "confirm", "a running run asks before it is cancelled");
+  assert.equal(ask.verb, "Cancel run", "the confirm button repeats the verb");
+  assert.match(ask.lost, /worktree/);
+  assert.match(ask.lost, /changes/);
+  assert.deepEqual(calls[2], ["cancel", "a"], "confirmed, it asks the server");
   assert.equal(button(rows[0], "Copy prompt"), undefined, "a run that has not failed has no prompt to copy");
+});
+
+test("Cancel on a running run, declined, sends nothing and can be pressed again", async () => {
+  const calls = [];
+  const rows = runsNodes({ paused: null, runs: [run("a", "running")] }, acts(calls, undefined, false)).filter((node) => node.dataset.run);
+  const cancel = button(rows[0], "Cancel");
+  await cancel.listeners.click();
+  assert.deepEqual(calls.map(([kind]) => kind), ["confirm"]);
+  assert.notEqual(cancel.disabled, true);
 });
 
 test("an ended run says how it ended, and denials in a finished run are listed, never shown as a clean success", () => {
@@ -131,7 +148,7 @@ test("Cancel waits for the server's answer, so a second click asks nothing twice
   const calls = [];
   let answer;
   const act = { ...acts(calls), cancel: (id) => (calls.push(["cancel", id]), new Promise((done) => (answer = done))) };
-  const [row] = runsNodes({ paused: null, runs: [run("a", "running")] }, act).filter((node) => node.dataset.run);
+  const [row] = runsNodes({ paused: null, runs: [run("a", "queued")] }, act).filter((node) => node.dataset.run);
   const cancel = button(row, "Cancel");
   const clicked = cancel.listeners.click();
   assert.equal(cancel.disabled, true);

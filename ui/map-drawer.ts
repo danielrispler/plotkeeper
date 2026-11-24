@@ -7,7 +7,7 @@
 // different project's map closes it.
 
 import { logStop } from "./stop-rules.js";
-import { text } from "./dom.js";
+import { scrollingPre, text } from "./dom.js";
 import { currentMap, onDraw, registerLayer, syncSide, type MapView } from "./map.js";
 import type { Drawer, Jump } from "./map-model.js";
 
@@ -30,14 +30,14 @@ export function closeDrawer() {
 
 export const drawerOpen = () => open !== null && currentMap()?.project === open.project;
 
-// A jump out of the drawer: a link, opened in a new tab.
-const jumpTo = (jump: Jump) => window.open(jump.to.url, "_blank", "noopener");
-
-function jumpButton(jump: Jump) {
-  const button = text("button", jump.label, "btn quiet drawer-jump");
-  button.title = jump.title;
-  button.addEventListener("click", () => jumpTo(jump));
-  return button;
+// A jump out of the drawer: a real link, opened in a new tab, so ⌘-click and middle-click work as on any link (#462).
+function jumpLink(jump: Jump) {
+  const link = text("a", jump.label, "btn quiet drawer-jump");
+  link.setAttribute("href", jump.to.url);
+  link.setAttribute("target", "_blank");
+  link.setAttribute("rel", "noopener");
+  link.title = jump.title;
+  return link;
 }
 
 function drawDrawer(view: MapView) {
@@ -50,6 +50,7 @@ function drawDrawer(view: MapView) {
   const { drawer } = open;
   const closer = text("button", "×", "btn quiet sheet-close");
   closer.title = "Close the drawer";
+  closer.setAttribute("aria-label", "Close");
   closer.addEventListener("click", closeDrawer);
   const card = text("div", "", "drawer");
   card.append(closer, text("h2", drawer.title, "drawer-title"));
@@ -57,11 +58,12 @@ function drawDrawer(view: MapView) {
   for (const block of drawer.blocks) {
     const part = text("div", "", "drawer-block");
     if (block.label) part.append(text("p", block.label, "drawer-label"));
-    part.append(text("pre", block.code, "drawer-code"));
-    if (block.jumps.length) part.append(...block.jumps.map(jumpButton));
+    const code = scrollingPre(block.code, "drawer-code", block.label ?? drawer.title);
+    part.append(code);
+    if (block.jumps.length) part.append(...block.jumps.map(jumpLink));
     card.append(part);
   }
-  if (drawer.jumps.length) card.append(...drawer.jumps.map(jumpButton));
+  if (drawer.jumps.length) card.append(...drawer.jumps.map(jumpLink));
   slot.replaceChildren(card);
   syncSide(view.slots);
 }

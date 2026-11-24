@@ -40,3 +40,29 @@ test("patching by key keeps the slot's card when rows above it change (C11)", as
   assert.equal(p2.childNodes[0], t);
 });
 
+
+// Chrome fires a dialog's close event at the next frame, so a close from an earlier ask can land after the dialog was opened again: in
+// snap's loaded runs (#459) Cancel's late close answered the next ask before its confirm was pressed. A close while the dialog is open is
+// an earlier ask's, and leaves this ask waiting.
+test("an earlier ask's late close does not answer the confirm opened after it", async () => {
+  const { confirmed } = await import("../../dist/dom.js");
+  const form = { onsubmit: null };
+  const dialog = Object.assign(new Field("dialog"), { open: false, querySelector: () => form, showModal: () => (dialog.open = true) });
+  const fields = new Map([["confirm-dialog", dialog]]);
+  const was = document.getElementById;
+  document.getElementById = (id) => (fields.has(id) ? fields.get(id) : fields.set(id, new Field("div")).get(id));
+  try {
+    const ask = { heading: "Remove?", lost: "The key.", verb: "Remove" };
+    const first = confirmed(ask);
+    dialog.open = false;
+    form.onsubmit({ submitter: { value: "cancel" } });
+    assert.equal(await first, false);
+    const second = confirmed(ask);
+    dialog.onclose();
+    dialog.open = false;
+    form.onsubmit({ submitter: { value: "confirm" } });
+    assert.equal(await second, true, "the first ask's close, landing late, answered the second");
+  } finally {
+    document.getElementById = was;
+  }
+});

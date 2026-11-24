@@ -23,8 +23,8 @@ import { scrubTo } from "./map-history.js";
 import { overturnNote, ratifyActions } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
-import { actorSize, alsoAt, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, stageLabel, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
-import type { BriefCheck, BriefStep, BriefView, CatchUpOffer, PrBrief, RatifyRow, ReadyPr, StoredCatchUp } from "./types.js";
+import { actorSize, alsoAt, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureMax, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, stageLabel, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
+import type { BriefCheck, BriefFigure, BriefStep, BriefView, CatchUpOffer, PrBrief, RatifyRow, ReadyPr, StoredCatchUp } from "./types.js";
 
 const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
 // The brief being played, as `pr_brief` returned it.
@@ -448,8 +448,16 @@ function light(view: MapView, step: BriefStep) {
 
 // ---- the panel.
 
-function figureNode(shapes: Shape[]) {
-  const box = svg("svg", { viewBox: `0 0 ${figureSize.w} ${figureSize.h}`, class: "brief-fig", role: "img" });
+// A figure's name for assistive tech (#456): its kind and the items it draws, the ones `figureShapes` draws (`figureMax`).
+function figureLabel(fig: BriefFigure): string {
+  const labels = (items: { label: string }[]) => items.map((item) => item.label);
+  if (fig.kind === "states") return `States${fig.frame ? ` of ${fig.frame}` : ""}: ${labels(fig.items.slice(0, figureMax.states)).join(", ")}`;
+  if (fig.kind === "sequence") return `Sequence: ${labels(fig.items.slice(0, figureMax.sequence)).join(", then ")}`;
+  return `Before: ${fig.before.slice(0, figureMax.compare).join(", ")}. After: ${fig.after.slice(0, figureMax.compare).join(", ")}`;
+}
+
+function figureNode(shapes: Shape[], fig: BriefFigure) {
+  const box = svg("svg", { viewBox: `0 0 ${figureSize.w} ${figureSize.h}`, class: "brief-fig", role: "img", "aria-label": figureLabel(fig) });
   for (const s of shapes) {
     if (s.kind === "frame") {
       box.append(svg("rect", { class: "fig-frame", x: String(s.x), y: String(s.y), width: String(s.w), height: String(s.h), rx: "12" }));
@@ -531,9 +539,9 @@ function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["als
   const cols = text("div", "", "brief-step");
   cols.append(words);
   const shapes = step.fig ? figureShapes(step.fig) : [];
-  if (shapes.length) {
+  if (step.fig && shapes.length) {
     const figure = text("div", "", "brief-figure");
-    figure.append(figureNode(shapes));
+    figure.append(figureNode(shapes, step.fig));
     cols.append(figure);
   }
   return cols;
@@ -790,6 +798,7 @@ function show(view: MapView, same: boolean) {
     swap = window.setTimeout(() => (fill(), cols.classList.remove("swap")), 130);
   }
   box.querySelectorAll(".brief-dots i").forEach((dot, i) => dot.classList.toggle("at", i === now.step));
+  box.querySelector(".brief-dots")!.setAttribute("aria-label", `Step ${now.step + 1} of ${list.length}`);
   const code = box.querySelector<HTMLButtonElement>(".brief-code")!;
   // A part catch-up has no one PR's code to show.
   code.hidden = catchUp !== null;
@@ -836,7 +845,11 @@ function buildPanel(view: MapView, list: BriefStep[]) {
   leave.addEventListener("click", closeBrief);
   const cols = text("div", "", "brief-cols");
   const dots = text("div", "", "brief-dots");
+  dots.setAttribute("role", "img");
   dots.append(...list.map(() => document.createElement("i")));
+  // The brief's one live region (#456): Back and Next put the new step's title in it, and nothing else; the step itself is not live.
+  const live = text("p", "", "visually-hidden brief-live");
+  live.setAttribute("aria-live", "polite");
   const partial = playing?.partial ? text("span", "Written from part of the diff", "brief-partial") : text("span", "", "brief-partial");
   const code = text("button", "See the code", "btn quiet brief-code");
   code.title = "Open the PR's changed files, above the brief";
@@ -860,7 +873,7 @@ function buildPanel(view: MapView, list: BriefStep[]) {
   foot.append(dots, partial, code, back, next);
   // A PR that closes the pre-flighted issue, or a ticket under it (#394): what Daniel expected against what it touched.
   const line = expectedLine(playing?.expected, view.doc);
-  box.replaceChildren(leave, ...(line ? [text("p", line, "brief-expected")] : []), cols, foot);
+  box.replaceChildren(leave, ...(line ? [text("p", line, "brief-expected")] : []), cols, foot, live);
 }
 
 function move(by: number) {
@@ -868,6 +881,8 @@ function move(by: number) {
   if (!view || !player.current()) return;
   if (player.go(by, steps().length) === "done") return closeBrief();
   show(view, false);
+  const live = panel().querySelector(".brief-live");
+  if (live) live.textContent = steps()[player.current()?.step ?? 0]?.h ?? "";
 }
 
 // Next on a check grades it first: the right answer and the other ones, then the way on.

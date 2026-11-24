@@ -5,7 +5,7 @@
 // layer Esc closes (`layerOrder`), and its field is a text field, so single-key shortcuts do not fire while Daniel types (`windowBinding`).
 // A brief of a PR that closes the pre-flighted issue, or a ticket under it, carries `expectedLine` (`map-brief.ts`).
 
-import { element, failure, invoke, text } from "./dom.js";
+import { drawWithStatus, element, failure, invoke, text } from "./dom.js";
 import { currentMap, onDraw, onPlate, registerLayer, reloadMap, shownProject, type LoadedMap } from "./map.js";
 import { staleWords } from "./refresher.js";
 import { logStop } from "./stop-rules.js";
@@ -72,16 +72,27 @@ const button = (words: string, title: string, click: () => void, kind = "") => {
   return node;
 };
 
+// What the overlay is doing, or why it failed, for `phase`: shown as a line and said in the overlay's status region (#456); none for the
+// rest.
+function statusWords(phase: Phase): string {
+  if (phase.kind === "start" && phase.issues === null) return "Reading the open issues…";
+  if (phase.kind === "predicting") return "Asking the writer which parts this will cross…";
+  if (phase.kind === "pick" && phase.why) return `No prediction: ${phase.why}. Pick the parts by hand.`;
+  return "";
+}
+
 function startNodes(issues: OpenIssue[] | null, act: PreFlightActs): HTMLElement[] {
   const list = text("div", "", "pre-flight-issues");
-  if (issues === null) list.append(text("p", "Reading the open issues…", "empty"));
+  if (issues === null) list.append(text("p", statusWords({ kind: "start", issues }), "empty"));
   else if (!issues.length) list.append(text("p", "No open issues.", "empty"));
   else list.append(...issues.map((issue) => button(`#${issue.number} ${issue.title}`, "Predict the parts this issue will cross", () => act.predict(issue.number, ""), "quiet pre-flight-issue")));
   const field = document.createElement("textarea");
   field.className = "pre-flight-text";
   field.rows = 2;
   field.maxLength = 400;
-  field.placeholder = "Or one or two lines of what you are about to build";
+  field.name = "about-to-build";
+  field.autocomplete = "off";
+  field.placeholder = "Or one or two lines of what you are about to build…";
   field.setAttribute("aria-label", "What you are about to build");
   const predict = button("Predict", "Predict the parts these lines will cross", () => {
     const words = field.value.trim();
@@ -94,10 +105,11 @@ function startNodes(issues: OpenIssue[] | null, act: PreFlightActs): HTMLElement
 
 function pickNodes(why: string | null, doc: LoadedMap, act: PreFlightActs): HTMLElement[] {
   const nodes: HTMLElement[] = [];
-  if (why) nodes.push(text("p", `No prediction: ${why}. Pick the parts by hand.`, "pre-flight-why"));
+  if (why) nodes.push(text("p", statusWords({ kind: "pick", why }), "pre-flight-why"));
   const boxes = doc.parts.map((part) => {
     const box = document.createElement("input");
     box.type = "checkbox";
+    box.name = "part";
     box.value = part.id;
     const label = text("label", "", "pre-flight-part");
     label.append(box, text("span", part.name));
@@ -139,7 +151,7 @@ export function preFlightNodes(phase: Phase, doc: LoadedMap, state: MapState, ac
     case "start":
       return [head, ...startNodes(phase.issues, act)];
     case "predicting":
-      return [head, text("p", "Asking the writer which parts this will cross…", "empty")];
+      return [head, text("p", statusWords(phase), "empty")];
     case "pick":
       return [head, ...pickNodes(phase.why, doc, act)];
     case "result":
@@ -159,7 +171,7 @@ export function paintPreFlight(box: HTMLElement, phase: Phase, doc: LoadedMap, s
   if (was === phase && phase.kind !== "result") return;
   const field = box.querySelector?.<HTMLTextAreaElement>("textarea.pre-flight-text") ?? null;
   const typed = was?.kind === "start" && phase.kind === "start" && field ? { value: field.value, focused: document.activeElement === field } : null;
-  box.replaceChildren(...preFlightNodes(phase, doc, state, act));
+  drawWithStatus(box, preFlightNodes(phase, doc, state, act), statusWords(phase));
   painted.set(box, phase);
   const next = typed && box.querySelector?.<HTMLTextAreaElement>("textarea.pre-flight-text");
   if (typed && next) {

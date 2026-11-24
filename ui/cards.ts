@@ -2,7 +2,7 @@
 // worker's explanation (danielrispler/plotkeeper#348); the PR brief is. This file keeps the brief and the one place the shell's
 // session payload is taken in (`showCards`).
 
-import { element, pressable, prose, text } from "./dom.js";
+import { element, glyphOnly, pressable, prose, text } from "./dom.js";
 import { drawSidebar } from "./list.js";
 import { studio } from "./state.js";
 import { showDecisions } from "./decisions.js";
@@ -24,8 +24,10 @@ export function briefSlots(cards: SessionCards): BriefSlot[] {
 
 // A design line's citation: a button that opens the turn it came from in the rail (an older line may cite a card, which opens its turn).
 function citation(id: string): HTMLElement {
-  const button = pressable(text("button", "↗", "cite") as HTMLButtonElement, false, () => openCitation(id));
+  const button = pressable(text("button", "", "cite") as HTMLButtonElement, null, () => openCitation(id));
   button.title = "Open the turn it came from";
+  button.setAttribute("aria-label", "Open the turn it came from");
+  button.append(glyphOnly("↗"));
   return button;
 }
 

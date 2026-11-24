@@ -4,7 +4,7 @@
 // those facts and, for a file, its hunk; the answer stays here, labelled as interpretation under the facts as recorded and the session never sees it. A failed call or a reply with no answer shows why, with
 // a retry.
 
-import { failure, fullTitle, invoke, text } from "./dom.js";
+import { failure, fullTitle, invoke, onEnter, text } from "./dom.js";
 import { rendered } from "./markdown.js";
 
 // What Ask is opened on: the core's `Anchor`.
@@ -87,7 +87,9 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
   };
   const field = document.createElement("textarea");
   field.rows = 2;
-  field.placeholder = "Your question. The session never sees it.";
+  field.name = "question";
+  field.autocomplete = "off";
+  field.placeholder = "Your question; the session never sees it…";
   field.setAttribute("aria-label", `Your question about ${what}`);
   const sendHover = "Ask about this, from what was recorded; the session never sees it (⌘↩)";
   const send = button("Ask", sendHover);
@@ -156,7 +158,10 @@ function whyNotBox(session: string, turn: number): HTMLElement {
   const node = document.createElement("div");
   node.className = "ask-why";
   const field = document.createElement("input");
-  field.placeholder = "a file or a name";
+  field.name = "not-touched";
+  field.autocomplete = "off";
+  field.spellcheck = false;
+  field.placeholder = "A file or a name, e.g. main.ts…";
   field.setAttribute("aria-label", "A file or a name it did not touch");
   const goHover = "Find what was recorded about the name you typed, and why the turn did not touch it (↩)";
   const go = button("Why didn't it touch this?", goHover);
@@ -179,7 +184,7 @@ function whyNotBox(session: string, turn: number): HTMLElement {
     go.title = goHover;
   };
   go.addEventListener("click", run);
-  field.addEventListener("keydown", (event) => event.key === "Enter" && run());
+  onEnter(field, run);
   node.append(field, go, out);
   return node;
 }

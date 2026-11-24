@@ -224,7 +224,8 @@ const barScript = `
 export const railStates = {
   railRunning: () => build("running"),
   railYourTurn: () => ({ ...build("your_turn"), snapScript: barScript }),
-  railNeeds: () => ({ ...build("needs_you", { ask: questionAsk }), snapScript: barScript }),
+  // The contrast pass (#455) runs here too.
+  railNeeds: () => ({ ...build("needs_you", { ask: questionAsk }), snapScript: barScript, contrast: true }),
   railIdle: () => build("idle", { withBrief: true }),
 };
 
@@ -269,9 +270,11 @@ const withHeader = (fixture: ReturnType<typeof build>, phase: boolean) => {
 // #447: the "⋯" menu opens at its button, under it and inside the window, and flips over it when the button is near the window's
 // bottom edge; it lists only Rename, Mark unseen and Delete, as they apply. The rail's header does not scroll in the panel, so the
 // flipped case moves the panel down until the button is near the bottom edge, as a rail scrolled there would put it.
+// Near the bottom, the panel's slide-in is turned off too: a render that starts late under load would otherwise animate its transform
+// up from 0 while the menu is measured.
 const menuScript = (want: string[], nearBottom: boolean) => `
   const frame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-  ${nearBottom ? 'Object.assign(document.getElementById("map-panel").style, { top: "auto", bottom: "auto", height: "120px", transform: "translateY(" + (innerHeight - 90) + "px)" }); await frame();' : ""}
+  ${nearBottom ? 'Object.assign(document.getElementById("map-panel").style, { top: "auto", bottom: "auto", height: "120px", animation: "none", transform: "translateY(" + (innerHeight - 90) + "px)" }); await frame();' : ""}
   const more = document.getElementById("rail-more");
   const menu = document.getElementById("rail-actions");
   more.click();
@@ -320,6 +323,13 @@ const openTurnScript = `
   log("folded turns " + lines.length + ", open " + lines.filter((l) => l.getAttribute("aria-expanded") === "true").length);
   if (lines.length !== 4 || lines[1].getAttribute("aria-expanded") !== "true") log("snap:fail one turn should be open of four folded");`;
 
+// #456: a failed row's accessible text says "failed" exactly once, and no ✕ or ✗ mark is read out beside it.
+const saysFailedOnce = `
+  const failedOnce = (node, what) => {
+    const name = __snapName(node);
+    if ((name.match(/failed/gi) ?? []).length !== 1 || /[✕✗]/.test(name)) log("snap:fail " + what + " is read as " + JSON.stringify(name));
+  };`;
+
 // #345: the evidence line names the failed check by what broke, and keeps the command behind the drill-down.
 const namedFailureScript = `
   const wait = () => new Promise((resolve) => setTimeout(resolve, 300));
@@ -329,7 +339,13 @@ const namedFailureScript = `
   if (!/✗ Window tests failed: delete keeps a live terminal \\(\\+1 more\\)/.test(toggle.textContent)) log("snap:fail the failed check is not named by its test: " + toggle.textContent);
   toggle.click();
   await wait();
-  if (!document.querySelector(".evidence-check .evidence-fail code")) log("snap:fail the command is not behind the drill-down");`;
+  if (!document.querySelector(".evidence-check .evidence-fail code")) log("snap:fail the command is not behind the drill-down");
+  ${saysFailedOnce}
+  failedOnce(toggle, "the evidence line");
+  failedOnce(document.querySelector(".evidence-check .evidence-fail"), "the failed check's row");
+  const folded = document.querySelector(".turn-line .check-failed")?.closest(".turn-line");
+  if (!folded) log("snap:fail no folded turn is marked failed");
+  else failedOnce(folded, "the folded failed turn");`;
 
 // #113: scrolls the rail, opens the evidence line, then a failed check's output, and fails when the rail's scrollTop moved.
 const evidenceScript = `
@@ -349,12 +365,37 @@ const evidenceScript = `
   if (toggle.parentElement.querySelectorAll(".evidence-check .evidence-agent").length !== 1) log("snap:fail the worker's check does not name its worker");
   const row = document.querySelector(".evidence-check .evidence-fail");
   if (!row) log("snap:fail the opened line has no failed check");
+  ${saysFailedOnce}
+  failedOnce(row, "the failed check's row");
   row.click();
   await wait();
   const output = document.querySelector(".evidence-output");
   if (!output || output.hidden || !/exit code 1/.test(output.textContent)) log("snap:fail the failed check's output did not open");
+  // Only an error is live: the output itself is not read aloud as it loads (#452's review).
+  if (output?.closest("[aria-live], [role=status]")) log("snap:fail the failed check's output is in a live region");
   log("rail scrollTop " + at + " -> " + story.scrollTop);
   if (story.scrollTop !== at) log("snap:fail the rail's scrollTop moved from " + at + " to " + story.scrollTop);`;
+
+// #456: a failed check's output and a file's hunk that cannot be read say so in the row's status region, which the row held before the
+// read failed; the output's box itself is not live (#452's review).
+const unreadScript = `
+  const wait = () => new Promise((resolve) => setTimeout(resolve, 200));
+  const toggle = document.querySelector(".evidence-toggle");
+  if (!toggle) return log("snap:fail there is no evidence line");
+  toggle.click();
+  await wait();
+  const heard = (row, shown, why) => {
+    row.click();
+    return wait().then(() => {
+      const pre = row.parentElement.querySelector(shown);
+      if (!pre?.textContent.includes("could not be read")) return log("snap:fail " + why + " shows " + JSON.stringify(pre?.textContent));
+      if (pre.closest("[aria-live], [role=status]")) log("snap:fail " + why + "'s box is in a live region");
+      const live = row.parentElement.querySelectorAll("[role=status]");
+      if (live.length !== 1 || !live[0].textContent.includes("could not be read")) log("snap:fail " + why + "'s error is not said in the row's status region: " + JSON.stringify([...live].map((node) => node.textContent)));
+    });
+  };
+  await heard(document.querySelector(".evidence-check .evidence-fail"), ".evidence-output", "the check's output");
+  await heard(document.querySelector(".evidence-file .evidence-fail"), ".evidence-hunk", "the file's hunk");`;
 
 // #208: opens the evidence line of a turn that merged a branch, and fails unless the line counts 3 files and "+2 merged",
 // and the opened rows end their files with a "+2 merged" row that is no file.
@@ -385,6 +426,8 @@ const hunkScript = `
   await wait();
   const hunk = document.querySelector(".evidence-hunk");
   if (!hunk || hunk.hidden || !/gap: var/.test(hunk.textContent)) log("snap:fail the file's hunk did not open");
+  // Only an error is live: the hunk itself is not read aloud as it loads (#452's review).
+  if (hunk?.closest("[aria-live], [role=status]")) log("snap:fail the file's hunk is in a live region");
   log("rail scrollTop " + at + " -> " + story.scrollTop);
   if (story.scrollTop !== at) log("snap:fail the rail's scrollTop moved from " + at + " to " + story.scrollTop);`;
 
@@ -421,6 +464,31 @@ const askScript = (selectors: string[]) => `
   for (const selector of ${JSON.stringify(selectors)}) await open(selector);
   log("rail scrollTop " + at + " -> " + story.scrollTop);
   if (story.scrollTop !== at) log("snap:fail the rail's scrollTop moved from " + at + " to " + story.scrollTop);`;
+
+// #461: in a file's Ask, Enter that confirms an input method's word in the why-not field asks nothing; a plain Enter then asks once.
+const whyNotImeScript = `
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  document.querySelector(".evidence-toggle").click();
+  await wait(200);
+  const box = document.querySelector(".evidence-file .ask-about");
+  if (!box) return log("snap:fail there is no Ask on a file");
+  box.open = true;
+  await wait(200);
+  const field = box.querySelector(".ask-why input");
+  if (!field) return log("snap:fail the file's Ask has no why-not field");
+  const asked = [];
+  const fetched = window.fetch;
+  window.fetch = (url, init) => (String(url).endsWith("/api/ask_why_not") && asked.push(url), fetched(url, init));
+  field.focus();
+  field.value = "main.ts";
+  await __snapKey("Composing Enter");
+  await wait(200);
+  if (asked.length) log("snap:fail Enter mid-composition asked " + asked.length + " time(s)");
+  await __snapKey("Enter");
+  await wait(200);
+  window.fetch = fetched;
+  if (asked.length !== 1) log("snap:fail a plain Enter after the composition asked " + asked.length + " time(s), not once");
+  log("why-not ime ok");`;
 
 // `npm run snap:readme` (scripts/snap/readme.mjs): the README's rail crops. Each script scrolls the rail to its top, finds
 // its target (a missing one is a `snap:fail`) and logs `snap:crop x y width height`, the box in page pixels that the crop keeps.
@@ -529,6 +597,7 @@ export const railFixtures = {
   railDiff: () => ({ ...build("your_turn"), snapScript: diffScript }),
   railAsk: () => ({ ...build("your_turn"), snapScript: askScript([".evidence-file", ".evidence-check"]) }),
   railAskCheck: () => ({ ...build("your_turn"), snapScript: askScript([".evidence-check"]) }),
+  railAskWhyNotIme: () => ({ ...build("your_turn"), snapScript: whyNotImeScript, realKeys: true, snapDone: "why-not ime ok" }),
   railHunk: () => ({ ...build("your_turn"), snapScript: hunkScript }),
   railMerged: () => {
     const fixture = build("your_turn");
@@ -537,6 +606,7 @@ export const railFixtures = {
   },
   railNamedFailure: () => ({ ...build("your_turn"), failed_check_name: "Window tests failed: delete keeps a live terminal (+1 more)", snapScript: namedFailureScript }),
   railEvidence: () => ({ ...build("your_turn"), snapScript: evidenceScript }),
+  railEvidenceUnread: () => ({ ...build("your_turn"), check_output: { __throw: "the transcript is gone" } as never, turn_file_hunk: { __throw: "the tree is gone" } as never, snapScript: unreadScript }),
   ...railStates,
   railHeaderNeeds: () => withHeader(build("needs_you", { ask: questionAsk }), false),
   railHeaderRunning: () => withHeader(build("running"), true),

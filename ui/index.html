@@ -3,12 +3,19 @@
 <head>
   <meta charset="utf-8">
   <title>Plotkeeper</title>
+  <!-- Dark from the first paint, and the browser's frame in the top bar's tone, --chrome (#455). -->
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0e0f11">
   <link rel="stylesheet" href="tokens.css">
   <link rel="stylesheet" href="style.css">
   <script src="vendor/marked.umd.js"></script>
   <script type="module" src="main.js"></script>
 </head>
 <body data-layout="full" class="map-open">
+  <!-- The page's structure (#461): a heading for the page, hidden but read, and a link, shown on focus and first in the tab order, that
+       jumps past the session list into the map, the page's main content. -->
+  <h1 class="visually-hidden">plotkeeper</h1>
+  <a class="skip-link" href="#map" title="Jump past the session list into the map">Skip to the map</a>
   <!-- Treatment C's frame (#386): a 34 px top bar over the map and the session list at the right. The grid runs right to left. -->
   <div class="app">
     <header class="top">
@@ -36,8 +43,8 @@
       <div id="strip" class="strip"></div>
     </nav>
 
-    <!-- The palette (danielrispler/Falinks#575): every action, filtered by what Daniel types. -->
-    <div id="palette" class="picker" role="dialog" aria-label="Palette" hidden></div>
+    <!-- The palette (danielrispler/Falinks#575): every action, filtered by what Daniel types; a native popover with a close button (#458). -->
+    <dialog id="palette" class="picker" popover aria-label="Palette"></dialog>
 
     <aside class="rail" aria-label="Session story">
       <!-- Two lines (#444). Line 1: the agent's logo, the session's name on one line, cut by CSS with "…" (the full name stays in the page
@@ -89,7 +96,7 @@
 
     <!-- The Map view (danielrispler/plotkeeper#306), the page's base (#386): a project's map beside the session list, whose headers switch it.
          `map.ts` draws it. Over the map float the tray, the left panel and the side area (the sheet, the drawer, the not-placed list). -->
-    <section id="map" class="map-view" aria-label="Map">
+    <main id="map" class="map-view" aria-label="Map" tabindex="-1">
       <header class="map-head">
         <span id="map-ref" class="map-ref"></span>
         <!-- Pre-flight (#394): the parts a piece of work will likely cross; the palette's `studio::PreFlight` opens it too. -->
@@ -126,29 +133,39 @@
         </aside>
       </div>
       <footer id="map-legend" class="map-legend"></footer>
-      <!-- The needs-you toast (danielrispler/Falinks#573) over the map's top-right corner, and under it the note toast, for a turn that ended
-           off screen; never focused. -->
-      <div class="toasts">
-        <div id="toast" class="toast" role="status" hidden></div>
-        <div id="note-toast" class="toast note" role="status" hidden></div>
-      </div>
-      <div id="clear-toast" class="toast start clear" role="status" hidden></div>
-    </section>
+      <!-- The toasts (#457), manual popovers in one region (a named section): the needs-you toast (danielrispler/Falinks#573) over the map's top-right
+           corner, under it the note toast, for a turn that ended off screen, and the Clear toast in the bottom-left corner. -->
+      <section id="toasts" class="toasts" aria-label="Notifications">
+        <div id="toast" class="toast" popover="manual" hidden></div>
+        <div id="note-toast" class="toast note" popover="manual" hidden></div>
+        <div id="clear-toast" class="toast start clear" popover="manual" hidden></div>
+      </section>
+    </main>
   </div>
   <!-- The questions of rename and close (danielrispler/Falinks#469). -->
-  <dialog id="rename-dialog" class="ask">
+  <dialog id="rename-dialog" class="ask" aria-labelledby="rename-heading">
     <form method="dialog">
+      <h2 id="rename-heading" class="ask-title">Rename session</h2>
       <label for="rename-field">Name this session</label>
-      <input id="rename-field" autocomplete="off" spellcheck="false" autofocus>
+      <input id="rename-field" name="session-name" autocomplete="off" spellcheck="false" autofocus>
       <!-- The default button comes first, so Enter in the field renames. -->
       <div class="ask-buttons"><button type="submit" class="btn" value="rename" title="Save this name (↩)">Rename</button><button type="submit" class="btn" value="cancel" title="Keep the old name (Esc)">Cancel</button></div>
     </form>
   </dialog>
   <!-- Delete: the row leaves the list; its cards are kept. -->
-  <dialog id="delete-dialog" class="ask">
+  <dialog id="delete-dialog" class="ask" aria-labelledby="delete-heading">
     <form method="dialog">
+      <h2 id="delete-heading" class="ask-title">Delete session?</h2>
       <p>Delete <strong id="delete-name"></strong> from the list? Its cards are kept.</p>
       <div class="ask-buttons"><button type="submit" class="btn" value="delete" title="Remove it from the list">Delete</button><button type="submit" class="btn" value="cancel" autofocus title="Keep it (Esc)">Cancel</button></div>
+    </form>
+  </dialog>
+  <!-- A confirm before a button destroys something (#459): its heading, what is lost and the verb come from \`confirmed\` in dom.ts. -->
+  <dialog id="confirm-dialog" class="ask" aria-labelledby="confirm-heading">
+    <form method="dialog">
+      <h2 id="confirm-heading" class="ask-heading">Go ahead?</h2>
+      <p id="confirm-lost"></p>
+      <div class="ask-buttons"><button type="submit" class="btn" id="confirm-yes" value="confirm" title="Go ahead; this cannot be undone">Go ahead</button><button type="submit" class="btn" value="cancel" autofocus title="Keep it (Esc)">Cancel</button></div>
     </form>
   </dialog>
 </body>

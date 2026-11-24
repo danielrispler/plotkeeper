@@ -54,11 +54,105 @@ export function logUncaught(target: Pick<Window, "addEventListener">) {
 
 export const element = (id: string) => document.getElementById(id)!;
 
+// A question before a button destroys something (#459): the dialog's heading, what is lost, and the confirm button's words, which repeat
+// the button's verb.
+export type Confirm = { heading: string; lost: string; verb: string };
+// Opens the confirm dialog with Cancel focused, as Delete's is (`story.ts`), and resolves to true only when Daniel confirms; Cancel, Esc
+// or any other close resolve to false. The answer comes from the button that submitted the form and from the dialog's cancel, which fire
+// with the press, not from its close event, which Chrome fires at the next frame and snap's Chrome never draws. Since it comes a frame
+// late, a close that finds the dialog open is an earlier ask's, after the dialog was opened again; it leaves this ask waiting.
+export function confirmed(ask: Confirm): Promise<boolean> {
+  const dialog = element("confirm-dialog") as HTMLDialogElement;
+  element("confirm-heading").textContent = ask.heading;
+  element("confirm-lost").textContent = ask.lost;
+  element("confirm-yes").textContent = ask.verb;
+  return new Promise((resolve) => {
+    dialog.querySelector("form")!.onsubmit = (event) => resolve((event.submitter as HTMLButtonElement | null)?.value === "confirm");
+    dialog.oncancel = () => resolve(false);
+    dialog.onclose = () => {
+      if (!dialog.open) resolve(false);
+    };
+    dialog.showModal();
+  });
+}
+
 export function text(tag: string, content: string, className = ""): HTMLElement {
   const node = document.createElement(tag);
   node.className = className;
   node.textContent = content;
   return node;
+}
+
+// A glyph drawn for the eye alone, such as ☰ or ✗, hidden from assistive tech (#456); its button or row is named in words.
+export function glyphOnly(glyph: string, className = ""): HTMLElement {
+  const node = text("span", glyph, className);
+  node.setAttribute("aria-hidden", "true");
+  return node;
+}
+
+// Words for assistive tech alone, not drawn (#456), such as "failed" beside a ✕.
+export const unseenWords = (words: string): HTMLElement => text("span", words, "visually-hidden");
+
+// Enter in `field` runs `run`, except the Enter that confirms an input method's word (#461); Safari's out-of-order confirming key
+// down reports keyCode 229 with isComposing false.
+export function onEnter(field: HTMLElement, run: () => void) {
+  field.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    if (!event.isComposing && event.keyCode !== 229) run();
+  });
+}
+
+// The prompt in a read-only box, to copy by hand when the clipboard refused it.
+export function promptBox(prompt: string, rows = 4): HTMLTextAreaElement {
+  const area = document.createElement("textarea");
+  area.className = "ratify-prompt";
+  area.value = prompt;
+  area.readOnly = true;
+  area.rows = rows;
+  area.name = "prompt";
+  area.autocomplete = "off";
+  area.spellcheck = false;
+  area.setAttribute("aria-label", "The prompt, to copy by hand");
+  return area;
+}
+
+// A `<pre>` that scrolls on its own, so it takes focus, named `name`, for the keys to scroll it (#462).
+export function scrollingPre(words: string, className: string, name: string): HTMLElement {
+  const pre = text("pre", words, className);
+  pre.setAttribute("tabindex", "0");
+  pre.setAttribute("aria-label", name);
+  return pre;
+}
+
+// An empty polite live region, drawn for assistive tech alone (#456): made before its words, so each change of them is heard.
+export function statusRegion(): HTMLElement {
+  const live = text("p", "", "visually-hidden");
+  live.setAttribute("role", "status");
+  return live;
+}
+
+// `box`'s children become `nodes`, then its one status region saying `words` (#452's review). The region is made once and never leaves
+// the box while the rest is drawn afresh, so a redraw that keeps the words says nothing again. A region the box did not hold yet takes
+// its words a moment after it is drawn, once a screen reader knows it is there.
+const regions = new WeakMap<HTMLElement, HTMLElement>();
+export function drawWithStatus(box: HTMLElement, nodes: Node[], words: string) {
+  const live = regions.get(box) ?? statusRegion();
+  regions.set(box, live);
+  const fresh = ![...box.childNodes].includes(live);
+  for (const child of [...box.childNodes]) if (child !== live) box.removeChild(child);
+  // A region the box dropped, as a closed overlay's emptied box does, comes back empty, so its words are heard again.
+  if (fresh) {
+    live.textContent = "";
+    box.appendChild(live);
+  }
+  for (const node of nodes) box.insertBefore(node, live);
+  live.dataset.words = words;
+  const say = () => {
+    if (live.textContent !== live.dataset.words) live.textContent = live.dataset.words ?? "";
+  };
+  if (fresh && words) setTimeout(say, 100);
+  else say();
 }
 
 // `node` with `full` as its native hover title: the full text of what the layout cuts (#162). No title for an empty text,
@@ -76,11 +170,12 @@ export function age(from: number, to = Date.now()): string {
   return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h`;
 }
 
-// A button: the one button component (danielrispler/Falinks#566), its type, pressed state and click.
-export function pressable<T extends HTMLElement>(button: T, pressed: boolean, click: (event: MouseEvent) => void): T {
+// A button: the one button component (danielrispler/Falinks#566), its type, pressed state and click. Only a real toggle has a pressed
+// state; any other button, a disclosure among them (which says `aria-expanded`), passes null and has no `aria-pressed` (#456).
+export function pressable<T extends HTMLElement>(button: T, pressed: boolean | null, click: (event: MouseEvent) => void): T {
   button.classList.add("btn");
   button.setAttribute("type", "button");
-  button.setAttribute("aria-pressed", String(pressed));
+  if (pressed !== null) button.setAttribute("aria-pressed", String(pressed));
   button.addEventListener("click", click);
   return button;
 }

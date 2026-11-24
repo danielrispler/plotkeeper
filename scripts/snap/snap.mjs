@@ -7,6 +7,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { inflateSync } from "node:zlib";
 import { fixtures } from "./fixtures.ts";
 import { chromeFailure, consoleLines, failed, snapPage } from "./page.mjs";
 
@@ -35,10 +36,11 @@ cpSync(dist, site, { recursive: true });
 const fixture = fixtures[name]();
 writeFileSync(join(site, "index.html"), snapPage(readFileSync(join(dist, "index.html"), "utf8"), fixture, { bodyClasses }));
 
-// A fixture with `realPointer` runs Chrome with its DevTools port open, and the page's `__snapClick`, `__snapDrag` and `__snapDoubleClick`
-// ask here for real mouse input, sent as Chrome's own (`Input.dispatchMouseEvent`): what `element.click()` skips, such as pointer capture,
-// then happens as in use. `events` are that call's params in order.
-async function realMouse(events) {
+// A fixture with `realPointer` or `realKeys` runs Chrome with its DevTools port open, and the page's `__snapClick`, `__snapDrag`,
+// `__snapDoubleClick` and `__snapKey` ask here for real input, sent as Chrome's own (`Input.dispatchMouseEvent`, `Input.dispatchKeyEvent`):
+// what `element.click()` or a synthetic KeyboardEvent skips, such as pointer capture, Tab moving focus or Esc closing a popover, then
+// happens as in use. `events` are that method's params in order; it returns Chrome's replies in that order.
+async function devtools(method, events) {
   const port = readFileSync(join(profile, "DevToolsActivePort"), "utf8").split("\n")[0];
   const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
   const socket = new WebSocket(targets.find((target) => target.type === "page").webSocketDebuggerUrl);
@@ -51,11 +53,37 @@ async function realMouse(events) {
   };
   const send = (params) => new Promise((done) => {
     waiting.set(++id, done);
-    socket.send(JSON.stringify({ id, method: "Input.dispatchMouseEvent", params }));
+    socket.send(JSON.stringify({ id, method, params }));
   });
-  for (const event of events) await send(event);
+  const replies = [];
+  for (const event of events) replies.push(await send(event));
   socket.close();
+  return replies;
 }
+const realMouse = (events) => devtools("Input.dispatchMouseEvent", events);
+// The keys a fixture may press: each a key down and up, with `text` for the keys that type (Enter, Space) so Chrome presses a focused
+// button with them as it does in use. Shift+Tab holds Shift (modifier 8) over the Tab.
+const keys = {
+  Tab: { key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 },
+  "Shift+Tab": { key: "Tab", code: "Tab", windowsVirtualKeyCode: 9, modifiers: 8 },
+  Enter: { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" },
+  Space: { key: " ", code: "Space", windowsVirtualKeyCode: 32, text: " " },
+  Escape: { key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 },
+  ArrowUp: { key: "ArrowUp", code: "ArrowUp", windowsVirtualKeyCode: 38 },
+  ArrowDown: { key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 },
+};
+const realKey = async (name) => {
+  // "Composing Enter" is Enter pressed to confirm an input method's word (#461): a composition of "か" is begun in the focused field
+  // (`Input.imeSetComposition`), so Chrome reports the key down with `isComposing`, as with a Japanese input method, and the word is
+  // committed after it (`Input.insertText`), as the Enter does in use.
+  const composing = name === "Composing Enter";
+  if (composing) await devtools("Input.imeSetComposition", [{ text: "か", selectionStart: 1, selectionEnd: 1 }]);
+  const key = keys[composing ? "Enter" : name];
+  if (!key) throw new Error(`no such key: ${name}; snap presses ${Object.keys(keys).join(", ")} and Composing Enter`);
+  const { text, ...rest } = key;
+  await devtools("Input.dispatchKeyEvent", [{ type: text ? "keyDown" : "rawKeyDown", ...key }, { type: "keyUp", ...rest }]);
+  if (composing) await devtools("Input.insertText", [{ text: "か" }]);
+};
 const press = (x, y, clickCount = 1) => [
   { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount },
   { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount },
@@ -76,14 +104,107 @@ const realDrag = (x, y, toX, toY) => realMouse([...dragStart(x, y, toX, toY), ..
 const realDragStart = (x, y, toX, toY) => realMouse(dragStart(x, y, toX, toY));
 const realDragEnd = (x, y, toX, toY) => realMouse(dragEnd(x, y, toX, toY));
 
+// A fixture with `contrast` asks for the page as drawn, Chrome's own screenshot (`Page.captureScreenshot`), whose pixels its contrast
+// pass samples (contrast.mjs). Chrome draws the shot only as the page's virtual time runs, which a waiting fetch holds, and that time runs
+// ahead of the clock's, so `/__snap/shot-start` only starts it, and the page asks `/__snap/shot` until it is there, letting some of its
+// time pass between asks, while each ask waits up to 100 ms of the clock's.
+let shot = null;
+async function realShot() {
+  const [reply] = await devtools("Page.captureScreenshot", [{ format: "png" }]);
+  if (!reply.result) throw new Error(JSON.stringify(reply.error));
+  return pixels(Buffer.from(reply.result.data, "base64"));
+}
+// A PNG of 8-bit RGB or RGBA, as Chrome writes them, made into its width and height (4 bytes each) and its RGBA pixels. The page gets the
+// pixels, not the PNG: decoding it there runs off the page's thread, and its virtual time races to the end of the budget meanwhile.
+function pixels(png) {
+  let at = 8;
+  let width, height, kind;
+  const packed = [];
+  while (at < png.length) {
+    const length = png.readUInt32BE(at);
+    const type = png.toString("latin1", at + 4, at + 8);
+    const data = png.subarray(at + 8, at + 8 + length);
+    if (type === "IHDR") [width, height, kind] = [data.readUInt32BE(0), data.readUInt32BE(4), data[9]];
+    if (type === "IDAT") packed.push(data);
+    at += 12 + length;
+  }
+  if (png[24] !== 8 || (kind !== 2 && kind !== 6)) throw new Error(`a PNG of depth ${png[24]} and colour type ${kind}`);
+  const step = kind === 6 ? 4 : 3;
+  const raw = inflateSync(Buffer.concat(packed));
+  const row = width * step;
+  const out = Buffer.alloc(8 + width * height * 4);
+  out.writeUInt32BE(width, 0);
+  out.writeUInt32BE(height, 4);
+  let previous = new Uint8Array(row);
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (row + 1)];
+    const line = Uint8Array.from(raw.subarray(y * (row + 1) + 1, (y + 1) * (row + 1)));
+    // The row's filter undone byte by byte; a filter of 0 left the row as it is.
+    if (filter !== 0) {
+      for (let x = 0; x < row; x++) {
+        const left = x >= step ? line[x - step] : 0;
+        const up = previous[x];
+        line[x] = (line[x] + predict(filter, left, up, x >= step ? previous[x - step] : 0)) & 255;
+      }
+    }
+    for (let x = 0; x < width; x++) {
+      const into = 8 + (y * width + x) * 4;
+      out[into] = line[x * step];
+      out[into + 1] = line[x * step + 1];
+      out[into + 2] = line[x * step + 2];
+      out[into + 3] = step === 4 ? line[x * step + 3] : 255;
+    }
+    previous = line;
+  }
+  return out;
+}
+
+// PNG's predictor of a byte from the bytes to its left, above, and above-left, by the row's filter.
+function predict(filter, left, up, corner) {
+  if (filter === 1) return left;
+  if (filter === 2) return up;
+  if (filter === 3) return (left + up) >> 1;
+  const guess = left + up - corner;
+  const toLeft = Math.abs(guess - left);
+  const toUp = Math.abs(guess - up);
+  const toCorner = Math.abs(guess - corner);
+  return toLeft <= toUp && toLeft <= toCorner ? left : toUp <= toCorner ? up : corner;
+}
+
 const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css" };
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");
-  const input = { "/__snap/click": realClick, "/__snap/dblclick": realDoubleClick, "/__snap/drag": realDrag, "/__snap/drag-start": realDragStart, "/__snap/drag-end": realDragEnd }[url.pathname];
-  if (input) {
+  if (url.pathname === "/__snap/shot-start" || url.pathname === "/__snap/shot") {
+    if (!fixture.contrast) {
+      res.statusCode = 500;
+      res.end("the fixture has no contrast");
+      return;
+    }
+    if (url.pathname === "/__snap/shot-start") {
+      shot = realShot();
+      shot.catch(() => {});
+      res.end("started");
+      return;
+    }
     try {
-      if (!fixture.realPointer) throw new Error("the fixture has no realPointer");
-      await input(...["x", "y", "toX", "toY"].map((key) => Number(url.searchParams.get(key))));
+      if (!shot) throw new Error("no shot was started");
+      const png = await Promise.race([shot, new Promise((done) => setTimeout(done, 100))]);
+      if (png) res.setHeader("content-type", "application/octet-stream");
+      else res.statusCode = 202;
+      res.end(png ?? "not yet");
+    } catch (why) {
+      res.statusCode = 500;
+      res.end(String(why));
+    }
+    return;
+  }
+  const input = { "/__snap/click": realClick, "/__snap/dblclick": realDoubleClick, "/__snap/drag": realDrag, "/__snap/drag-start": realDragStart, "/__snap/drag-end": realDragEnd }[url.pathname];
+  if (input || url.pathname === "/__snap/key") {
+    try {
+      if (input && !fixture.realPointer) throw new Error("the fixture has no realPointer");
+      if (!input && !fixture.realKeys) throw new Error("the fixture has no realKeys");
+      if (input) await input(...["x", "y", "toX", "toY"].map((key) => Number(url.searchParams.get(key))));
+      else await realKey(url.searchParams.get("key"));
       res.end("done");
     } catch (why) {
       res.statusCode = 500;
@@ -102,9 +223,11 @@ const server = createServer(async (req, res) => {
   }
 });
 await new Promise((done) => server.listen(0, "127.0.0.1", done));
+// The page's time: 5 s, and a second more for a fixture with `contrast`, whose pass runs after a script written against the 5 s.
+const budget = fixture.contrast ? 6000 : 5000;
 const chromeArgs = [
   "--headless=new", "--enable-logging=stderr", "--v=0", "--disable-gpu", `--force-device-scale-factor=${scale}`, `--user-data-dir=${profile}`, `--window-size=${width},${height}`,
-  "--virtual-time-budget=5000", `--screenshot=${resolve(out)}`, ...(fixture.realPointer ? ["--remote-debugging-port=0"] : []),
+  `--virtual-time-budget=${budget}`, `--screenshot=${resolve(out)}`, ...(fixture.realPointer || fixture.realKeys || fixture.contrast ? ["--remote-debugging-port=0"] : []),
   `http://127.0.0.1:${server.address().port}/index.html`,
 ];
 // A screenshot left from an earlier run must not pass for this one's.
@@ -167,6 +290,10 @@ if (run.status !== 0) {
 }
 if (failed(log, fixture.snapDone)) {
   if (!log.some((line) => line.startsWith("snap:fail"))) console.error(`snap:fail the script never printed "${fixture.snapDone}": Chrome's time budget cut it off`);
+  process.exit(1);
+}
+if (fixture.contrast && !log.some((line) => line.startsWith("contrast: "))) {
+  console.error("snap:fail the contrast pass never finished: Chrome's time budget cut it off");
   process.exit(1);
 }
 if (!existsSync(resolve(out))) {

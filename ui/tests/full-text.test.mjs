@@ -115,11 +115,12 @@ test("a check's command holds its full text in a title", () => {
 
 test("the palette's rows hold their full text in a title", () => {
   const palette = document.getElementById("palette");
-  palette.hidden = true; // as in the page
+  // A closed popover, as in the page.
+  Object.assign(palette, { matches: () => false, showPopover() {}, hidePopover() {} });
   const make = document.createElement;
   document.createElement = (tag) => Object.assign(make(tag), tag === "input" ? { value: "", focus() {} } : {});
   showPalette([{ title: "Switch to a session with a very long action name", keys: ["⌘K"], note: "A note the row cuts to fit", binding: {} }], () => {});
-  const rows = every(palette).filter((n) => n.tag === "button");
+  const rows = every(palette).filter((n) => n.getAttribute?.("role") === "option");
   assert.ok(rows.length > 0, "the palette draws its rows");
   for (const drawn of rows) {
     holds(drawn, "name", "Switch to a session with a very long action name");
@@ -169,6 +170,7 @@ const covered = {
   ".plate-caption": "map.ts: the plate's title holds the name, caption and description",
   ".agent-chip": "map-agents.ts: a chip's title holds its full label",
   ".risk-note": "blocked.ts: the note's title holds all of it",
+  ".ask::backdrop": "style.css: a dialog's backdrop holds no text; overflow hidden only makes it a scroll container that keeps its scroll",
   code: "a check's command has its own title (story.ts); any other code span wraps or sits in a text that wraps",
 };
 

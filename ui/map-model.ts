@@ -386,18 +386,21 @@ export const figureSize = { w: 292, h: 150 };
 const shape = (kind: Shape["kind"], x: number, y: number, w: number, h: number, text = "", tone: Shape["tone"] = "plain"): Shape => ({ kind, x, y, w, h, text, tone });
 const toneOf = (item: { tone: string | null; bad: boolean | null }): Shape["tone"] => (item.bad || item.tone === "lost" ? "lost" : item.tone === "live" ? "live" : "plain");
 
+// How many items each kind of figure draws; its label for assistive tech names the same ones.
+export const figureMax = { states: 6, sequence: 5, compare: 4 };
+
 // A figure drawn from the writer's labels: the layout is code's, the words the writer's. A kind code does not know draws nothing.
 export function figureShapes(fig: BriefFigure): Shape[] {
   const { w, h } = figureSize;
   if (fig.kind === "states") {
     // A frame (a part's thing, such as a terminal) holding the states it can be in, two to a row.
     const out = [shape("frame", 8, 8, w - 16, h - 16, fig.frame ?? "")];
-    fig.items.slice(0, 6).forEach((item, i) => out.push(shape("chip", 18 + (i % 2) * 136, 40 + Math.floor(i / 2) * 34, 120, 26, item.label, toneOf(item))));
+    fig.items.slice(0, figureMax.states).forEach((item, i) => out.push(shape("chip", 18 + (i % 2) * 136, 40 + Math.floor(i / 2) * 34, 120, 26, item.label, toneOf(item))));
     return out;
   }
   if (fig.kind === "sequence") {
     // The steps one after another, each a little further along, joined by a short line.
-    const items = fig.items.slice(0, 5);
+    const items = fig.items.slice(0, figureMax.sequence);
     const gap = Math.min(30, (h - 16) / Math.max(1, items.length));
     const chip = Math.min(24, gap - 4);
     const out: Shape[] = [];
@@ -411,8 +414,8 @@ export function figureShapes(fig: BriefFigure): Shape[] {
   }
   if (fig.kind === "compare") {
     const out = [shape("text", 10, 6, 118, 18, "before"), shape("text", 164, 6, 118, 18, "after"), shape("arrow", 134, 70, 24, 2)];
-    fig.before.slice(0, 4).forEach((label, i) => out.push(shape("chip", 10, 30 + i * 30, 118, 24, label)));
-    fig.after.slice(0, 4).forEach((label, i) => out.push(shape("chip", 164, 30 + i * 30, 118, 24, label, "live")));
+    fig.before.slice(0, figureMax.compare).forEach((label, i) => out.push(shape("chip", 10, 30 + i * 30, 118, 24, label)));
+    fig.after.slice(0, figureMax.compare).forEach((label, i) => out.push(shape("chip", 164, 30 + i * 30, 118, 24, label, "live")));
     return out;
   }
   return [];
@@ -663,4 +666,16 @@ export function catchUpIds(): (project: string, part: string, fog: string[]) => 
 // short commit.
 export function fogListLines(entries: FogListEntry[]): string[] {
   return entries.map((e) => (e.pr === null ? `${e.title} (${e.commit.slice(0, 7)}, no PR)` : `#${e.pr} ${e.title}`));
+}
+
+// The parts' tab order (#460): top to bottom, then left to right. A plate within half a plate's height of a row's first (highest) plate
+// reads on that row, so one dragged a little out of line keeps its place.
+export function readingOrder(positions: Record<string, Point>): string[] {
+  const rows: [string, Point][][] = [];
+  for (const entry of Object.entries(positions).sort(([, a], [, b]) => a.y - b.y || a.x - b.x)) {
+    const row = rows.at(-1);
+    if (row && entry[1].y - row[0][1].y < plateSize.h / 2) row.push(entry);
+    else rows.push([entry]);
+  }
+  return rows.flatMap((row) => row.sort(([, a], [, b]) => a.x - b.x).map(([id]) => id));
 }

@@ -1,9 +1,11 @@
 // The page `npm run snap` renders: dist's index.html with the page's transport stubbed in front of the app's module script: `fetch`
 // answers `POST /api/<command>` from the fixture's key of that name, else null, and `EventSource` takes the page's listeners, which
 // `window.__snapEmit(name, payload)` and the fixture's `appErrors` raise as the server's stream would; `window.__snapClick(node)`, `__snapDoubleClick(node)` and
-// `__snapDrag(node, dx, dy)` are real mouse input, which snap sends (`realPointer`), and the fixture's `storage` is put in localStorage first.
+// `__snapDrag(node, dx, dy)` are real mouse input, which snap sends (`realPointer`), `__snapKey(key)` a real key press (`realKeys`), and the fixture's `storage` is put in localStorage first.
 // It exists only in the page written to a temp directory, never in dist or the shipped page.
 
+import { a11yAudit, nameSource } from "./a11y.mjs";
+import { contrastAudit } from "./contrast.mjs";
 import { hoverAudit } from "./hover.mjs";
 
 export const stubSource = (fixture) => `(() => {
@@ -21,6 +23,10 @@ export const stubSource = (fixture) => `(() => {
   };
   window.__snapClick = (node) => real("click", middle(node));
   window.__snapDoubleClick = (node) => real("dblclick", middle(node));
+  // A fixture with \`realKeys\` presses keys as a person does: \`await __snapKey("Tab")\` asks snap to send Chrome a real key down and up
+  // (\`Input.dispatchKeyEvent\`), so Tab moves focus and Esc closes a native popover. The keys: Tab, Shift+Tab, Enter, Space, Escape,
+  // ArrowUp, ArrowDown and "Composing Enter", Enter while an input method composes a word (snap.mjs).
+  window.__snapKey = (key) => real("key", { key });
   // \`await __snapDrag(node, dx, dy)\` presses at the node's middle, moves by (dx, dy) with the button held and lets go there. With
   // \`midway\`, an async function, the button stays held halfway while it runs, then the rest of the move and the release follow.
   window.__snapDrag = async (node, dx, dy, midway) => {
@@ -30,6 +36,20 @@ export const stubSource = (fixture) => `(() => {
     await real("drag-start", query);
     await midway();
     return real("drag-end", query);
+  };
+  // \`await __snapShot()\` is the page as Chrome draws it now, its \`width\`, \`height\` and RGBA pixels (\`data\`), for a fixture with
+  // \`contrast\` (contrast.mjs).
+  window.__snapShot = async () => {
+    await serverFetch("/__snap/shot-start");
+    for (let ask = 0; ask < 40; ask++) {
+      await new Promise((done) => setTimeout(done, 25));
+      const reply = await serverFetch("/__snap/shot");
+      if (!reply.ok) throw new Error("no screenshot: " + (await reply.text()));
+      if (reply.status !== 200) continue;
+      const bytes = new DataView(await reply.arrayBuffer());
+      return { width: bytes.getUint32(0), height: bytes.getUint32(4), data: new Uint8ClampedArray(bytes.buffer, 8) };
+    }
+    throw new Error("no screenshot within a second of the page's time");
   };
   // A fixture's \`storage\` is what this browser had kept from an earlier visit, written before the app starts.
   for (const [key, value] of Object.entries(fixture.storage ?? {})) localStorage.setItem(key, value);
@@ -52,9 +72,11 @@ export const stubSource = (fixture) => `(() => {
     const found = reply?.__by ? (reply.values[args?.[reply.__by]] ?? null) : reply;
     // A reply of { __throw: "why" } is a command that fails with that reason.
     if (found?.__throw) throw found.__throw;
-    // A reply of { __delay: ms, value } comes after ms: a command whose answer lands after the page has drawn.
+    // A reply of { __delay: ms, value } comes after ms: a command whose answer lands after the page has drawn. A value of
+    // { __throw: "why" } fails then.
     if (found?.__delay) {
       await new Promise((done) => setTimeout(done, found.__delay));
+      if (found.value?.__throw) throw found.value.__throw;
       return found.value ?? null;
     }
     return found ?? null;
@@ -72,33 +94,34 @@ export const stubSource = (fixture) => `(() => {
   };
   // A fixture's script raises a server event with __snapEmit, as the stream would.
   window.__snapEmit = fire;
+  // \`__snapName(node)\`: a node's accessible name, as the accessibility pass reads it (a11y.mjs).
+  ${nameSource}
 })();`;
 
 // What runs in the page's head, after the stub: the body's classes (set once the body exists), then the fixture's script once
 // the UI has drawn (the page has loaded and its first replies have landed). The script is the body of an async function that
 // gets `log`; what it logs reaches snap's output, and a line that starts `snap:fail` makes snap exit non-zero. A script that
-// throws logs a `snap:fail` line. The hover rule's check runs after it in every page, also after a script that returned early or
-// threw (hover.mjs).
-export const headSource = ({ bodyClasses = [], script = null } = {}) => `
+// throws logs a `snap:fail` line. The hover rule's check, then the accessibility pass, run after it in every page, also after a script
+// that returned early or threw (hover.mjs, a11y.mjs). A fixture with `contrast` runs the contrast pass (contrast.mjs) before them.
+export const headSource = ({ bodyClasses = [], script = null, contrast = false } = {}) => {
+  const passes = [["script", script ?? ""], ...(contrast ? [["contrast pass", contrastAudit]] : []), ["hover check", hoverAudit], ["accessibility pass", a11yAudit]];
+  const run = ([what, source]) => `
+    try {
+      await (async (log) => {\n${source}\n})(log);
+    } catch (error) {
+      log("snap:fail the ${what} threw: " + error);
+    }`;
+  return `
   addEventListener("DOMContentLoaded", () => document.body.classList.add(...${JSON.stringify(bodyClasses)}));
   addEventListener("load", () => setTimeout(async () => {
-    const log = (...parts) => console.log(parts.join(" "));
-    try {
-      await (async (log) => {\n${script ?? ""}\n})(log);
-    } catch (error) {
-      log("snap:fail the script threw: " + error);
-    }
-    try {
-      await (async (log) => {\n${hoverAudit}\n})(log);
-    } catch (error) {
-      log("snap:fail the hover check threw: " + error);
-    }
+    const log = (...parts) => console.log(parts.join(" "));${passes.map(run).join("")}
   }, 2500));`;
+};
 
 export const snapPage = (index, fixture, options = {}) =>
   index.replace(
     '<script type="module"',
-    () => `<script>${stubSource(fixture)}${headSource({ script: fixture.snapScript ?? null, ...options })}</script>\n  <script type="module"`,
+    () => `<script>${stubSource(fixture)}${headSource({ script: fixture.snapScript ?? null, contrast: !!fixture.contrast, ...options })}</script>\n  <script type="module"`,
   );
 
 // The lines of Chrome's stderr that are page console output, as the page logged them.

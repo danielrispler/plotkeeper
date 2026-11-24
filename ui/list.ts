@@ -3,7 +3,7 @@
 // a strip of glyphs and labels, which opens the full list on hover, on click or on ⌘1.
 
 import { logStop } from "./stop-rules.js";
-import { age, element, failure, fullTitle, invoke, newest, patch, prose, pressable, stepText, text } from "./dom.js";
+import { age, element, failure, fullTitle, glyphOnly, invoke, newest, patch, prose, pressable, stepText, text } from "./dom.js";
 import { hideClearToast, showClearToast } from "./toast.js";
 import { counts, times, type Time } from "./times.js";
 import { shortPaths } from "./paths.js";
@@ -358,12 +358,11 @@ export function agentRow(session: Session, children: Children, agent: Subagent, 
   return button;
 }
 
-// A row control's icon: a 14px inline SVG on the current colour, in a 20x20 button (the tokens' --control and --icon).
+// A row control's icon: a 14px inline SVG on the current colour, in a 24x24 button (the tokens' --control and --icon).
 const CHEVRON = '<path d="M5 3l4 4-4 4"/>';
 const CROSS = '<path d="M3.5 3.5l7 7M10.5 3.5l-7 7"/>';
 function icon(name: string, path: string, click: () => void): HTMLElement {
-  const button = pressable(text("button", "", name), false, click);
-  button.removeAttribute("aria-pressed");
+  const button = pressable(text("button", "", name), null, click);
   button.innerHTML = `<svg viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${path}</svg>`;
   return button;
 }
@@ -379,7 +378,9 @@ export function item(key: string, depth: number, toggle: { open: boolean; hiding
       if (!folded.delete(key)) folded.add(key);
       drawSidebar();
     });
-    fold.title = toggle.open ? "Collapse subagents" : "Expand subagents";
+    // A fixed name and hover; whether it is open is said by `aria-expanded` alone (#456).
+    fold.title = "Show or hide its subagents";
+    fold.setAttribute("aria-label", "Subagents");
     fold.setAttribute("aria-expanded", String(toggle.open));
     // The count goes after the name, as the toggle's column has room only for its chevron.
     if (toggle.hiding) row.querySelector(".name")?.after(text("span", `${toggle.hiding} hidden`, "id"));
@@ -437,7 +438,10 @@ export function stripLabels(sessions: Pick<Session, "name" | "identity" | "folde
 // count for those collapsed, which opens the full list.
 export function strip(sessions: Session[]): HTMLElement[] {
   const toggle = () => document.body.classList.toggle("list-open");
-  const open = pressable(text("button", "☰", "open"), false, toggle);
+  const open = pressable(document.createElement("button"), null, toggle);
+  open.classList.add("open");
+  open.setAttribute("aria-label", "Session list");
+  open.append(glyphOnly("☰"));
   open.title = titled(studio.files.keymap, "Open the session list", "studio::ToggleList");
   const shown = sessions.filter((session) => !collapsed.includes(session.state));
   const labels = stripLabels(shown);
@@ -451,7 +455,7 @@ export function strip(sessions: Session[]): HTMLElement[] {
       button.append(glyph(session.state, session.unseen, session.landed), labels[i]);
       return button;
     }),
-    ...(rest ? [Object.assign(pressable(text("button", `${rest} idle`), false, toggle), { title: titled(studio.files.keymap, "Open the session list, idle sessions among it", "studio::ToggleList") })] : []),
+    ...(rest ? [Object.assign(pressable(text("button", `${rest} idle`), null, toggle), { title: titled(studio.files.keymap, "Open the session list, idle sessions among it", "studio::ToggleList") })] : []),
   ];
 }
 
@@ -564,20 +568,23 @@ export const sidebarSessions = <T extends Pick<Session, "state" | "id">>(session
 export const landedToClear = <T extends Pick<Session, "state" | "id" | "landed">>(sessions: T[], hidden: ReadonlySet<string>): T[] =>
   sessions.filter((session) => showsLanded(session.state, session.landed) && !hidden.has(session.id));
 
-// A project's "⋯" (#381): the one menu of the list's headers, opened under it for its project; Remove project is in it. It is drawn only for a
-// project with no live session: the server saves a project again for its sessions' next event, so removing one with live sessions would undo
-// itself (#380's review).
+// A project's "⋯" (#381): the one menu of the list's headers, opened under it for its project, flipped at the window's edges (#458), and
+// closed by a second press, as the rail's "⋯" toggles its menu (#452's review); Remove project is in it. It is drawn only for a project with no live session: the server saves a project again for its sessions' next event, so
+// removing one with live sessions would undo itself (#380's review).
 function projectMore(group: ProjectGroup<Session>): HTMLElement {
-  const more = pressable(text("button", "⋯", "project-more"), false, () => {
+  const openHere = () => element("project-actions").matches(":popover-open") && element("project-actions").dataset.project === group.key;
+  // A pointer's press outside the menu light-dismisses it before the click, so whether it was open here is read at the press.
+  let wasOpen = false;
+  const more = pressable(text("button", "⋯", "project-more"), null, () => {
     const menu = element("project-actions");
+    const close = wasOpen || openHere();
+    wasOpen = false;
+    if (close) return menu.hidePopover();
     menu.dataset.project = group.key;
-    const at = more.getBoundingClientRect();
-    menu.style.top = `${at.bottom + 4}px`;
-    menu.style.left = `${Math.max(8, at.right - menu.offsetWidth)}px`;
-    menu.showPopover();
-    menu.style.left = `${Math.max(8, at.right - menu.offsetWidth)}px`;
+    // Its button is its implicit anchor (#458), which places it by CSS as the rail's "⋯" menu.
+    menu.showPopover({ source: more });
   });
-  more.removeAttribute("aria-pressed");
+  more.addEventListener("pointerdown", () => (wasOpen = openHere()));
   more.title = "Project";
   more.setAttribute("aria-label", `More actions for ${group.name}`);
   return more;
@@ -590,8 +597,7 @@ export function projectHead(group: ProjectGroup<Session>): HTMLElement {
   head.className = ["project-head", ...(group.gone ? ["gone"] : []), ...(group.key === shownProject() ? ["current"] : [])].join(" ");
   head.dataset.key = `head ${group.key}`;
   head.dataset.project = group.key;
-  const toggle = pressable(text("button", "", "project-toggle"), false, () => pressHead(group.key));
-  toggle.removeAttribute("aria-pressed");
+  const toggle = pressable(text("button", "", "project-toggle"), null, () => pressHead(group.key));
   toggle.setAttribute("aria-expanded", String(projectOpen(group.key)));
   fullTitle(toggle, `${group.gone ? `${group.key} is gone` : group.key || group.name}\n${group.key === shownProject() ? "Fold or unfold its sessions" : "Show its map"}`);
   toggle.append(text("span", group.name, "name"));
@@ -600,6 +606,7 @@ export function projectHead(group: ProjectGroup<Session>): HTMLElement {
   if (why?.length) {
     const dot = text("span", "", "project-dot mist-swatch");
     dot.title = dotTitle(why);
+    dot.setAttribute("role", "img");
     dot.setAttribute("aria-label", dot.title);
     toggle.append(dot);
   }
@@ -649,8 +656,7 @@ export function drawSidebar() {
 // "Clear landed" at the list's end (#382), quiet, only while a landed session shows: Home's Clear (#244), with its Undo.
 function clearLanded(landed: Session[]): HTMLElement[] {
   if (!landed.length) return [];
-  const button = pressable(text("button", "Clear landed", "clear-landed quiet"), false, () => landedClear.clear(landedToClear(studio.listed, landedClear.hidden)));
-  button.removeAttribute("aria-pressed");
+  const button = pressable(text("button", "Clear landed", "clear-landed quiet"), null, () => landedClear.clear(landedToClear(studio.listed, landedClear.hidden)));
   button.title = "Clear every landed session; Undo for a few seconds";
   button.dataset.key = "clear";
   return [button];

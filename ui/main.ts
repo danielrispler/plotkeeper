@@ -36,7 +36,7 @@ import { drawFeed, showView } from "./story.js";
 import { startRailBriefs } from "./rail-brief.js";
 import { barKeyDown } from "./story-bar.js";
 import { startWriters } from "./writers.js";
-import { jumpToNeedsYou, showToast } from "./toast.js";
+import { jumpToNeedsYou, showToast, watchToasts } from "./toast.js";
 import { askOnce, notifyIfAway, type Alert } from "./alerts.js";
 import { finishedNote, showNote, watchNotes } from "./notes.js";
 import type { SavedProject, Selection, Session, SessionCards } from "./types.js";
@@ -134,11 +134,11 @@ const actions: Actions = {
     openAsk(selectedId()!, { kind: "headline", turn });
   },
   "studio::Dismiss": () => {
-    // Esc peels the map's layers (`map.ts`) and on the bare map does nothing (#386); the list or the palette open over it closes first.
-    const overlaid = ["list-open", "list-peek"].some((name) => document.body.classList.contains(name)) || !element("palette").hidden;
+    // Esc peels the map's layers (`map.ts`) and on the bare map does nothing (#386); the list open over it closes first. The palette, a
+    // popover, and a modal dialog close on Esc themselves (#458).
+    const overlaid = ["list-open", "list-peek"].some((name) => document.body.classList.contains(name));
     if (!overlaid) return mapEscape();
     document.body.classList.remove("list-open", "list-peek");
-    element("palette").hidden = true;
   },
   "studio::ToggleFocus": () => {
     studio.focus = !studio.focus;
@@ -175,6 +175,13 @@ const actions: Actions = {
     showPalette(paletteEntries(studio.files.keymap, Object.keys(actions)), (binding) => run(actions, binding));
   },
 };
+// Esc in a modal dialog (rename, delete, confirm) is the dialog's, as the palette's is (#458): it closes the dialog, and the window's Esc,
+// which peels the map's layers, does not see it (#452's outside review).
+for (const dialog of document.querySelectorAll("dialog")) {
+  dialog.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") event.stopPropagation();
+  });
+}
 window.addEventListener("keydown", (event) => {
   const target = event.target as HTMLElement;
   const typing = target.isContentEditable || target.matches?.("input, textarea, select") === true;
@@ -233,10 +240,6 @@ element("needs-you").addEventListener("click", () => {
   const first = studio.listed.find((session) => session.state === "needs_you");
   if (first) select(first.id);
 });
-// A click outside the palette closes it.
-document.addEventListener("pointerdown", (event) => {
-  if (!element("palette").contains(event.target as Node)) element("palette").hidden = true;
-}, true);
 
 // The saved project list (#381): the list's headers and the map follow it; its first arrival opens the last viewed project's map (#386).
 const showProjects = (projects: SavedProject[]) => {
@@ -262,9 +265,8 @@ const showList = (sessions: Session[]) => {
 };
 listen<Session[]>("sessions", showList);
 invoke("sessions").then(showList);
-// A press on the toast jumps to its session; the press itself keeps the keyboard focus.
-element("toast").addEventListener("pointerdown", (event) => event.preventDefault());
-element("toast").addEventListener("click", jumpToNeedsYou);
+// The toasts' presses keep the keyboard's focus, and a modal dialog holds them back (#457).
+watchToasts();
 // A turn that ended off screen in the focused window (the server's notices): the note toast names it.
 watchNotes();
 listen<string[]>("finished", (ids) => {

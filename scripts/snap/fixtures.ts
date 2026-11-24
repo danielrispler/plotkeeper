@@ -82,6 +82,31 @@ const openGone = `
     const remove = [...gone.querySelectorAll("button")].find((b) => b.textContent === "Remove project");
     if (!remove) return log("snap:fail the gone state has no Remove project");`;
 
+// #458: the project "⋯" menu, placed through the popover's implicit anchor as the rail's (#447): under its button and inside the window, and
+// right over it when the button is near the window's bottom edge, where the flipped case pads the list until the header sits there.
+const projectMenuScript = (nearBottom: boolean) => `
+    const more = named("pokedex").querySelector(".project-more");
+    // The list is padded until the button's bottom is 16 px over the window's, too near for the menu under it. In \`vh\`, as headless
+    // Chrome's window takes its full height only at its first frame; in a style sheet, as the list's redraws reset its own style.
+    ${nearBottom ? 'document.head.appendChild(document.createElement("style")).textContent = "#groups { padding-top: calc(100vh - 16px - " + more.getBoundingClientRect().bottom + "px); }"; await wait(50);' : ""}
+    const menu = document.getElementById("project-actions");
+    more.click();
+    await wait(50);
+    if (!menu.matches(":popover-open")) return log("snap:fail the menu did not open");
+    const b = more.getBoundingClientRect(), m = menu.getBoundingClientRect();
+    if (b.bottom > innerHeight) return log("snap:fail the button is outside the window: " + b.bottom);
+    if (m.left < 0 || m.top < 0 || m.right > innerWidth || m.bottom > innerHeight) log("snap:fail the menu leaves the window: " + JSON.stringify(m));
+    if (m.right < b.left || m.left > b.right) log("snap:fail the menu is not in line with its button: menu " + m.left + "–" + m.right + ", button " + b.left + "–" + b.right);
+    ${nearBottom
+      ? 'if (m.bottom > b.top + 0.5 || b.top - m.bottom > 16) log("snap:fail the menu is not right over its button: menu bottom " + m.bottom + ", button top " + b.top);'
+      : 'if (m.top < b.bottom - 0.5 || m.top - b.bottom > 16) log("snap:fail the menu is not right under its button: menu top " + m.top + ", button bottom " + b.bottom);'}
+    log("project menu at " + [m.left, m.top, m.right, m.bottom].map(Math.round) + "; button at " + [b.left, b.top, b.right, b.bottom].map(Math.round));
+    // A real second click on its "⋯" closes it, as the rail's "⋯" does (#452's review).
+    await __snapClick(more);
+    await wait(50);
+    if (menu.matches(":popover-open")) log("snap:fail a second click on its ⋯ left the menu open");
+    log("project menu ok");`;
+
 // The Map view (#309) on a map of plotkeeper's own shape, opened by its key. Positions are saved, as the prototype's Treatment C draws them.
 const mapFile = JSON.stringify({
   version: 1,
@@ -131,8 +156,48 @@ const mapTray = (): Fixture =>
     map_state: mapState({ fog: { shell: "thick" }, ready: [{ number: 334, title: "PR briefs: the brief written for each ready PR", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }, { number: 336, title: "Ready for review tray", head: "a".repeat(40), brief: null }] }),
   });
 
-// Background runs (#390) beside the map: a running run, the queue behind it, and an ended run that was denied a tool call. Cancel asks the
-// server for that run.
+// The confirm dialog (#459) a destructive button opens: modal, named by its heading, Cancel focused, the confirm button saying `verb`, and
+// naming each of `lost`. Nothing reaches the server's `api` until it is confirmed: Esc and Cancel send nothing. `press` is the script that
+// presses the button, found anew each time, since a refresh redraws it.
+const confirmFirst = (press: string, api: string, verb: string, lost: string[]) => `
+      {
+        const pause = () => new Promise((done) => setTimeout(done, 100));
+        const sent = [];
+        const real = window.fetch;
+        window.fetch = (url, init) => (sent.push(String(url)), real(url, init));
+        const asked = () => sent.filter((call) => call.includes("/api/${api}")).length;
+        const dialog = document.getElementById("confirm-dialog");
+        // A step that closes the dialog, then lets the answer land. Snap's Chrome rarely draws a frame inside its time budget, so the
+        // dialog's close event mostly never fires here, and under load it can land after the next press reopened the dialog; the answer
+        // comes from the form's submit and the dialog's cancel, which fire at once.
+        const closing = async (close) => {
+          close();
+          await pause();
+        };
+        ${press};
+        await pause();
+        if (!dialog?.matches(":modal")) log("snap:fail ${api}: no modal confirm opened");
+        else {
+          if (!document.getElementById(dialog.getAttribute("aria-labelledby") ?? "")?.textContent) log("snap:fail ${api}: the confirm has no name");
+          if (document.activeElement?.textContent !== "Cancel") log("snap:fail ${api}: Cancel is not focused but " + document.activeElement?.textContent);
+          if (document.getElementById("confirm-yes")?.textContent !== ${JSON.stringify(verb)}) log("snap:fail ${api}: the confirm button says " + document.getElementById("confirm-yes")?.textContent);
+          for (const word of ${JSON.stringify(lost)}) if (!dialog.textContent.includes(word)) log("snap:fail ${api}: the confirm does not name " + word + ": " + dialog.textContent);
+          if (asked()) log("snap:fail ${api} reached the server before the confirm");
+          await closing(() => dialog.requestClose());
+          if (dialog.open || asked()) log("snap:fail ${api}: Esc did not close the confirm, or sent it");
+          ${press};
+          await pause();
+          await closing(() => [...dialog.querySelectorAll("button")].find((b) => b.textContent === "Cancel").click());
+          if (dialog.open || asked()) log("snap:fail ${api}: Cancel did not close the confirm, or sent it");
+          ${press};
+          await pause();
+          await closing(() => document.getElementById("confirm-yes").click());
+          if (asked() !== 1) log("snap:fail ${api}: confirmed, it reached the server " + asked() + " times");
+        }
+        window.fetch = real;
+      }`;
+// Background runs (#390) beside the map: a running run, the queue behind it, and an ended run that was denied a tool call. Cancel on the
+// running run asks first (#459), naming its worktree and changes; Cancel on a queued run and Dismiss on the ended one ask the server at once.
 const runAt = Date.UTC(2026, 10, 23, 12, 4);
 const mapRuns = (): Fixture =>
   mapOpened(`
@@ -148,9 +213,15 @@ const mapRuns = (): Fixture =>
       const words = (row) => [...row.querySelectorAll("button")].map((button) => button.textContent).join(",");
       if (words(rows[0]) !== "Cancel" || words(rows[1]) !== "Cancel" || words(rows[3]) !== "Copy prompt,Dismiss") log("snap:fail the buttons: " + rows.map(words).join(" / "));
       if (document.querySelector("#map-runs .runs-paused")) log("snap:fail a pause shows with no pause");
-      rows[0].querySelector("button").click();
+      const press = (id, words) => [...document.querySelectorAll(\`#map-runs .run-row[data-run="\${id}"] button\`)].find((b) => b.textContent === words).click();
+      press("19a2f-2", "Cancel");
+      press("19a2f-0", "Dismiss");
       await new Promise((done) => setTimeout(done, 50));
-      if (!sent.some((call) => call.includes("/api/run_cancel") && call.includes("19a2f-1"))) log("snap:fail Cancel did not ask the server: " + sent.join(" | "));
+      if (document.getElementById("confirm-dialog").open) log("snap:fail a queued run's Cancel or an ended run's Dismiss asked first");
+      if (!sent.some((call) => call.includes("/api/run_cancel") && call.includes("19a2f-2"))) log("snap:fail Cancel on a queued run did not ask the server at once: " + sent.join(" | "));
+      if (!sent.some((call) => call.includes("/api/run_cancel") && call.includes("19a2f-0"))) log("snap:fail Dismiss did not ask the server at once: " + sent.join(" | "));
+      ${confirmFirst(`press("19a2f-1", "Cancel")`, "run_cancel", "Cancel run", ["worktree", "changes"])}
+      if (!sent.some((call) => call.includes("/api/run_cancel") && call.includes("19a2f-1"))) log("snap:fail confirmed, Cancel did not ask the server for the running run: " + sent.join(" | "));
       log("runs ok");`, {
     map_state: mapState({
       runs: {
@@ -190,6 +261,38 @@ const mapPreFlight = (): Fixture =>
       pre_flight: { issue: 378, title: "Studio: Spec: the modules", parts: ["core", "understanding"], predicted: true, at: runAt },
     }),
     snapDone: "pre-flight ok",
+  });
+// #456: the pre-flight's reading, predicting and failed states are announced politely (role="status").
+const mapPreFlightStatus = (): Fixture =>
+  mapOpened(`
+      const box = document.getElementById("map-pre-flight");
+      // Each status shows as a line and is said in the overlay's one status region, the same node from the first (#452's review).
+      let first = null;
+      const status = (words, why) => {
+        const node = [...box.querySelectorAll("p:not([role=status])")].find((each) => each.textContent.includes(words));
+        if (!node) return log("snap:fail " + why + ": no line with " + JSON.stringify(words) + " in " + JSON.stringify(box.textContent));
+        const live = [...box.querySelectorAll("[role=status], [aria-live]")];
+        first ??= live[0];
+        if (live.length !== 1 || live[0] !== first || !live[0].isConnected) log("snap:fail " + why + ": the overlay's status region is not the one it had");
+        if (!live[0]?.textContent.includes(words)) log("snap:fail " + why + " is not said: the region holds " + JSON.stringify(live[0]?.textContent));
+      };
+      document.getElementById("pre-flight-button").click();
+      // A region new to the overlay takes its first words a moment after it is drawn.
+      await wait(200);
+      status("Reading the open issues", "the issues' reading");
+      await wait(400);
+      const issue = box.querySelector(".pre-flight-issue");
+      if (!issue) return log("snap:fail the open issues never came");
+      issue.click();
+      await wait(50);
+      status("Asking the writer", "the prediction's wait");
+      await wait(500);
+      status("No prediction", "the failed prediction");
+      log("pre-flight status ok");`, {
+    map_state: mapState(),
+    pre_flight_issues: { __delay: 300, value: base.pre_flight_issues } as never,
+    pre_flight_predict: { __delay: 200, value: { __throw: "the writer is not set" } } as never,
+    snapDone: "pre-flight status ok",
   });
 // Back a law (#398): Hook's law on trust offers Back a law; Core's law on trust has a proven patch, and Review opens the patch review over
 // the map with the test patch, the output with the test alone and with the plant, and Discard.
@@ -233,6 +336,14 @@ const mapBackLaw = (): Fixture =>
       const outputs = [...box.querySelectorAll(".patch-output")].map((pre) => pre.textContent);
       if (outputs.length !== 2 || !outputs[0].includes("PASS") || !outputs[1].includes("FAIL")) log("snap:fail the outputs: " + outputs.join(" / "));
       if ([...box.querySelectorAll("button")].map((b) => b.textContent).join(",") !== "Open draft PR,Discard,Close") log("snap:fail the review's buttons");
+      // A real Esc in the confirm closes the confirm alone: the window's Esc, which peels the map's layers, never sees it.
+      [...box.querySelectorAll("button")].find((b) => b.textContent === "Discard").click();
+      await wait(100);
+      await __snapKey("Escape");
+      await wait(100);
+      if (document.getElementById("confirm-dialog").open) log("snap:fail a real Esc did not close the confirm");
+      if (box.hidden) log("snap:fail a real Esc in the confirm also closed the patch review under it");
+      ${confirmFirst(`[...document.querySelectorAll("#map-patch-review button")].find((b) => b.textContent === "Discard").click()`, "law_patch_discard", "Discard patch", ["patch"])}
       log("back a law ok");`, {
     map_state: mapState({
       law_patches: [
@@ -246,6 +357,7 @@ const mapBackLaw = (): Fixture =>
         },
       ],
     }),
+    realKeys: true,
     snapDone: "back a law ok",
   });
 // The queues paused by a login failure: the one indicator with Resume, over the run that failed and the one that waits.
@@ -337,6 +449,29 @@ const escBrief = `
       await wait(700);
       const after = [...document.querySelectorAll(".brief-dots i")].findIndex((d) => d.classList.contains("at"));
       if (after !== before) log("snap:fail the brief did not reopen at its step: " + before + " then " + after);`;
+// #456: a real Next and Back leave only the new step's title in the brief's one live region, the step itself is not live, and the dots
+// say "Step N of M".
+const mapBriefAnnounce = (): Fixture => ({
+  ...mapBrief(briefOf(storySteps()), 0, `
+      const box = document.getElementById("map-brief");
+      const count = ${storySteps().length};
+      const heard = (at, why) => {
+        const live = [...box.querySelectorAll("[aria-live], [role=status], [role=alert]")];
+        if (live.length !== 1 || live[0].getAttribute("aria-live") !== "polite") return log("snap:fail " + why + ": the brief has " + live.length + " live regions, not one polite");
+        const title = box.querySelector(".brief-title").textContent;
+        if (live[0].textContent !== title) log("snap:fail " + why + ": the live region holds " + JSON.stringify(live[0].textContent) + ", not the title " + JSON.stringify(title));
+        if (live[0].checkVisibility() && live[0].offsetWidth > 1) log("snap:fail " + why + ": the live region is drawn");
+        const dots = box.querySelector(".brief-dots");
+        if (dots.getAttribute("role") !== "img" || __snapName(dots) !== "Step " + at + " of " + count) log("snap:fail " + why + ": the dots read " + JSON.stringify(__snapName(dots)));
+      };
+      await __snapClick(document.getElementById("brief-next"));
+      await wait(500);
+      heard(2, "after Next");
+      await __snapClick(box.querySelector(".brief-back"));
+      await wait(500);
+      heard(1, "after Back");`, true),
+  realPointer: true,
+});
 const mapBriefStart = (): Fixture => mapBrief(briefOf(storySteps()), 0, `if (!document.querySelector("#map-brief .brief-title").textContent.includes("brings its own brief")) log("snap:fail first step");`);
 const mapBriefStory = (): Fixture => mapBrief(briefOf(storySteps(), false), 2, `${escBrief}
       if (!document.querySelector("#map-brief .brief-cites")) log("snap:fail the step shows no citations");
@@ -351,6 +486,12 @@ const fullFigure = (kind: string): BriefFigure => {
     : kind === "sequence"
       ? { kind, frame: null, items: [0, 1, 2, 3, 4].map((i) => ({ label: label(i), tone: i === 2 ? "live" : null, bad: null })), before: [], after: [] }
       : { kind, frame: null, items: [], before: [0, 1, 2, 3].map(label), after: [4, 5, 6, 7].map(label) };
+};
+// Each figure kind's accessible name, from `fullFigure`'s items (#456).
+const figureNames: Record<string, string> = {
+  states: "States of a terminal with a long name: a long label 1 here, a long label 2 here, a long label 3 here, a long label 4 here, a long label 5 here, a long label 6 here",
+  sequence: "Sequence: a long label 1 here, then a long label 2 here, then a long label 3 here, then a long label 4 here, then a long label 5 here",
+  compare: "Before: a long label 1 here, a long label 2 here, a long label 3 here, a long label 4 here. After: a long label 5 here, a long label 6 here, a long label 7 here, a long label 8 here",
 };
 // The card's geometry, read in the page: the card, its scrolling step, the step's words and figure, and Back and Next.
 const cardBox = `
@@ -367,7 +508,10 @@ const mapBriefFigure = (kind: string): Fixture =>
       if (figure.top < words.bottom - 1) log("snap:fail the figure is not under the step's words: " + figure.top + " above " + words.bottom);
       if (figure.left < inside.left - 1 || figure.right > inside.right + 1) log("snap:fail the figure overflows the card: " + figure.left + "-" + figure.right + " in " + inside.left + "-" + inside.right);
       if (cols.scrollWidth > cols.clientWidth) log("snap:fail the step scrolls sideways: " + cols.scrollWidth + " in " + cols.clientWidth);
-      if (figure.width < 200) log("snap:fail the figure is cramped: " + figure.width);`);
+      if (figure.width < 200) log("snap:fail the figure is cramped: " + figure.width);
+      // #456: the figure is named by its kind and items.
+      const named = __snapName(document.querySelector("#map-brief .brief-fig"));
+      if (named !== ${JSON.stringify(figureNames[kind])}) log("snap:fail the figure is named " + JSON.stringify(named));`);
 // Each step is as tall as its own words, the card keeps one narrow width, and Back and Next keep their place (#449).
 const mapBriefHeights = (): Fixture =>
   mapBrief(briefOf(storySteps()), 0, `${cardBox}
@@ -474,27 +618,34 @@ const flowSteps = (): BriefStep[] => [
 const flowBrief = (): BriefView =>
   briefOf(storySteps().slice(0, 2), false, { overview: flowSteps(), chapters: [{ behaviour: "story", parts: ["shell", "understanding"], title: "Turn writing", steps: storySteps().slice(0, 2), flags: [] }] });
 const tap = (ids: string[]) => ids.map((id) => `document.querySelector('.plate[data-id="${id}"]').click(); await wait(50);`).join("\n      ");
-const mapBriefOrder = (ids: string[], grade: boolean, check: string): Fixture =>
-  mapBrief(flowBrief(), 1, `
+// The same taps from the keyboard (#460): real Enter on each part's open button.
+const keyTap = (ids: string[]) =>
+  ids.map((id) => `if (!document.querySelector('.plate[data-id="${id}"] .plate-open')) return log("snap:fail ${id} has no open button");
+      document.querySelector('.plate[data-id="${id}"] .plate-open').focus(); await __snapKey("Enter"); await wait(50);`).join("\n      ");
+const mapBriefOrder = (ids: string[], grade: boolean, check: string, keys = false): Fixture => ({
+  ...mapBrief(flowBrief(), 1, `
       const next = document.getElementById("brief-next");
       if (next.textContent !== "Check" || !next.disabled) return log("snap:fail an order check starts with Check off");
       if (document.querySelectorAll(".plate.pick").length !== 4) log("snap:fail the parts the step lights cannot be tapped: " + document.querySelectorAll(".plate.pick").length);
       if (document.querySelectorAll("#map-brief .brief-slot").length !== 3) log("snap:fail the check has no three slots");
-      ${tap(ids)}
+      ${(keys ? keyTap : tap)(ids)}
       if (document.querySelector(".plate.open")) log("snap:fail a tap opened the part's sheet");
       if (document.querySelectorAll(".plate .ord").length !== ${ids.length}) log("snap:fail the taps carry no numbers on the map");
       if (document.querySelectorAll("#map-brief .brief-slot.full").length !== ${ids.length}) log("snap:fail the slots do not hold the taps");
       ${grade ? `if (next.disabled) return log("snap:fail Check is off with every slot full");
       next.click();
       await wait(250);` : `if (!next.disabled) log("snap:fail Check is on before every slot is full");`}
-      ${check}`, true);
+      ${check}`, true),
+  ...(keys && { realKeys: true }),
+});
 const orderTakeBack = `
       document.querySelector('.plate[data-id="shell"]').click();
       await wait(50);
       if (document.querySelectorAll(".plate .ord").length !== 1 || document.querySelector(".plate[data-id='core'] .ord")?.textContent !== "1") log("snap:fail a tap on a part did not take it back");
       document.querySelector('.plate[data-id="shell"]').click();
       await wait(50);`;
-const mapBriefOrderSlots = (): Fixture => mapBriefOrder(["core", "shell"], false, orderTakeBack);
+// The parts are tapped with real Enter on their open buttons (#460).
+const mapBriefOrderSlots = (): Fixture => mapBriefOrder(["core", "shell"], false, orderTakeBack, true);
 const mapBriefOrderWrong = (): Fixture =>
   mapBriefOrder(["understanding", "shell", "core"], true, `
       if (document.querySelector("#map-brief .brief-check .brief-body").textContent !== ${JSON.stringify(orderCheck.no)}) log("snap:fail the correction's words");
@@ -502,13 +653,13 @@ const mapBriefOrderWrong = (): Fixture =>
       if (slots.join() !== "Core,Shell,Understanding") log("snap:fail the slots do not show the right order: " + slots);
       if (document.querySelectorAll(".map-light .light-trail").length !== 2) log("snap:fail the right path was not replayed: " + document.querySelectorAll(".map-light .light-trail").length);
       if (next.textContent !== "Next") log("snap:fail the way on after Check: " + next.textContent);`);
-// Right, and on through the chapter: the brief plays end to end.
+// Right, and on through the chapter: the brief plays end to end, its parts tapped with real Enter (#460).
 const mapBriefOrderRight = (): Fixture =>
   mapBriefOrder(["core", "shell", "understanding"], true, `
       if (document.querySelector("#map-brief .brief-check .brief-body").textContent !== ${JSON.stringify(orderCheck.yes)}) log("snap:fail the right answer's words");
       next.click();
       await wait(300);
-      if (!document.querySelector("#map-brief .brief-title").textContent.includes("A ready PR now brings")) log("snap:fail the chapter did not follow the overview");`);
+      if (!document.querySelector("#map-brief .brief-title").textContent.includes("A ready PR now brings")) log("snap:fail the chapter did not follow the overview");`, true);
 // The brief's ratify step (#343): a changed law and a link, and the agent's two decisions, one already accepted.
 const ratifyRows: RatifyRow[] = [
   { pr: 334, kind: "law", id: "window-quiet", text: "Only needs-you has colour.", change: "changed", status: "not-yet" },
@@ -1078,6 +1229,87 @@ const mapBusy = (jump: boolean): Fixture => {
     return { ...f, sessions, selected: { session: sessions[6], agent: null }, ...(jump && { realPointer: true, snapDone: "jump ok" }) };
   };
 
+// The map from the keyboard (#460), at the busy fixture: each plate's open button, named by the part's name and caption, sits beside
+// its chips in reading order; real Tab reaches a part and then its chips, never an actor; real Enter and Space open its sheet.
+const mapPartKeys = (): Fixture => {
+  const f = mapBusy(false);
+  return {
+    ...f,
+    snapScript: f.snapScript!.replace(/log\("chips ok, not placed " \+ rest\.length\);/, `
+      const press = async (key) => { await __snapKey(key); await wait(80); };
+      const sheetPart = () => document.querySelector("#map-sheet .sheet")?.dataset.part;
+      const plates = [...document.querySelectorAll("#map .plate[data-id]")];
+      for (const plate of plates) {
+        const open = plate.querySelector(":scope > button.plate-open");
+        const words = [".plate-name", ".plate-caption"].map((at) => plate.querySelector(at)?.textContent ?? "").filter(Boolean);
+        if (!open) { log("snap:fail " + plate.dataset.id + " has no open button"); continue; }
+        if (plate.hasAttribute("role") || plate.hasAttribute("tabindex")) log("snap:fail the plate " + plate.dataset.id + " takes a role or a tabindex");
+        if (open.parentElement !== plate.querySelector(".plate-chips")?.parentElement) log("snap:fail " + plate.dataset.id + "'s open button is not a sibling of its chips");
+        if (open.contains(plate.querySelector(".agent-chip"))) log("snap:fail " + plate.dataset.id + "'s open button holds a chip");
+        if (!words.length || words.some((word) => !open.textContent.includes(word))) log("snap:fail " + plate.dataset.id + "'s open button is not named " + words.join(", "));
+      }
+      // Reading order: each next button is a row lower (half a plate or more), or on the same row and to the right.
+      const boxes = [...document.querySelectorAll("#map .plate-open")].map((b) => ({ id: b.closest(".plate").dataset.id, box: b.closest(".plate").getBoundingClientRect() }));
+      boxes.slice(1).forEach(({ id, box }, i) => {
+        const before = boxes[i].box;
+        if (!(box.top - before.top >= box.height / 2 || (Math.abs(box.top - before.top) < box.height / 2 && box.left > before.left))) log("snap:fail " + id + " comes after " + boxes[i].id + " out of reading order");
+      });
+      // Real Tab from the first part's button walks the map: every part's button, then its chips, and no actor.
+      const first = document.querySelector("#map .plate-open");
+      if (!first) return log("snap:fail the map has no open button");
+      first.focus();
+      const walked = [first];
+      while (walked.length < 40) {
+        await press("Tab");
+        if (!document.activeElement?.closest("#map .map-world")) break;
+        walked.push(document.activeElement);
+      }
+      const expected = [...document.querySelectorAll("#map .plate-open, #map .plate .agent-chip")];
+      const named = (node) => node.closest(".plate, .actor")?.dataset.id + (node.matches(".agent-chip") ? " chip" : "");
+      if (walked.map(named).join() !== expected.map(named).join()) log("snap:fail Tab walked " + walked.map(named).join() + ", not " + expected.map(named).join());
+      if (walked.some((node) => node.closest(".actor"))) log("snap:fail Tab reached an actor");
+      const core = document.querySelector("#map .plate[data-id=core] .plate-open");
+      const at = walked.indexOf(core);
+      if (at < 0 || !walked[at + 1]?.matches("#map .plate[data-id=core] .agent-chip")) log("snap:fail Tab did not reach core's button and then its chip");
+      // Real Enter, then real Space, on the focused button open the part's sheet, and the focus ring shows.
+      core.focus();
+      await press("Tab");
+      await press("Shift+Tab");
+      if (document.activeElement !== core || !core.matches(":focus-visible") || getComputedStyle(core).outlineStyle === "none") log("snap:fail the focused part shows no focus ring");
+      await press("Enter");
+      if (sheetPart() !== "core") log("snap:fail Enter did not open core's sheet: " + sheetPart());
+      await press("Escape");
+      if (sheetPart()) log("snap:fail Esc left the sheet open");
+      const hook = document.querySelector("#map .plate[data-id=hook] .plate-open");
+      hook.focus();
+      await press("Space");
+      if (sheetPart() !== "hook") log("snap:fail Space did not open hook's sheet: " + sheetPart());
+      hook.focus();
+      log("part keys ok");`),
+    realKeys: true,
+    snapDone: "part keys ok",
+  };
+};
+
+// A map redraw, here at a landed push that thins Core's fog, keeps the keyboard on the same part's button (#452's review).
+const mapPartRedraw = (): Fixture => {
+  const f = mapBusy(false);
+  return {
+    ...f,
+    map_state: { __by: "fetch", values: { true: mapState(), false: mapState({ fog: { core: "thin" } }) } } as never,
+    snapScript: f.snapScript!.replace(/log\("chips ok, not placed " \+ rest\.length\);/, `
+      const hook = document.querySelector("#map .plate[data-id=hook] > .plate-open");
+      hook.focus();
+      __snapEmit("map-landed", "/w/plotkeeper");
+      await wait(300);
+      const redrawn = document.activeElement;
+      if (hook.isConnected) log("snap:fail the landed push did not draw the map again");
+      if (!redrawn?.matches("#map .plate[data-id=hook] > .plate-open")) log("snap:fail after a map redraw focus is on " + (redrawn?.className || redrawn?.tagName) + ", not hook's button");
+      log("part redraw ok");`),
+    snapDone: "part redraw ok",
+  };
+};
+
 // A map whose default branch's CI failed in a test that backs a law of the shell (#312): the red mark beside the Needs you chip, at the
 // size of the busy fixture; `drawer` opens the proof of a law, `log` the broken-law drill-down.
 const brokenCi: Ci = {
@@ -1245,7 +1477,11 @@ const listSecondLines = (): Fixture => ({
   ...listLines(),
   snapScript: `${listChecks}
       if (!clear() || clear().textContent !== "Clear landed") log("snap:fail no Clear landed at the list's end");
-      if (clear() && getComputedStyle(clear()).color !== "rgb(111, 108, 102)") log("snap:fail Clear landed is not faint: " + getComputedStyle(clear()).color);`,
+      const probe = document.body.appendChild(document.createElement("span"));
+      probe.style.color = "var(--faint)";
+      const faint = getComputedStyle(probe).color;
+      probe.remove();
+      if (clear() && getComputedStyle(clear()).color !== faint) log("snap:fail Clear landed is not faint, " + faint + ": " + getComputedStyle(clear()).color);`,
 });
 // Clear landed pressed: the landed row is hidden, the toast offers Undo, and Undo brings it back; pressed again for the screenshot.
 // The strip and the tab's title follow at once too: the cleared session, unseen here, leaves both.
@@ -1276,6 +1512,20 @@ const claudeWriter = { kind: "claude" as const, name: "Claude", found: true, mod
 const agyWriter = { kind: "agy" as const, name: "agy", found: true, models: ["gemini-4-neon-low", "gemini-4-neon-medium", "gemini-4-neon-high", "gemini-4-argon-low", "gemini-4-hydrogen-low"], efforts: [] };
 const anthropicWriter = { kind: "anthropic" as const, name: "Anthropic API key", found: false, models: ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"], efforts: ["", "low", "medium", "high"] };
 const openaiWriter = { kind: "openai" as const, name: "OpenAI-compatible API", found: false, models: ["gpt-6-luna", "gpt-5.6-luna", "gpt-5.6-terra"], efforts: ["", "low", "medium", "high"] };
+// The writer section's one status region (#452's review): before an action, the region and a watch on the section that fails when the
+// region leaves it; after, the same region, still in the section, holding `words`.
+const writerStatusBefore = `
+      const section = document.getElementById("writers");
+      const live = [...section.children].filter((node) => node.getAttribute("role") === "status");
+      if (live.length !== 1 || live[0].textContent !== "") log("snap:fail the writer section has " + live.length + " status regions before the action, not one empty: " + live.map((node) => node.textContent));
+      let left = false;
+      new MutationObserver((changes) => (left ||= changes.some((change) => [...change.removedNodes].includes(live[0])))).observe(section, { childList: true });`;
+const writerStatusAfter = (words: string) => `
+      const now = [...section.children].filter((node) => node.getAttribute("role") === "status");
+      if (now.length !== 1 || now[0] !== live[0] || left) log("snap:fail the status region did not stay in the section across the redraw");
+      if (!now[0]?.textContent.includes(${JSON.stringify(words)})) log("snap:fail the status region says " + JSON.stringify(now[0]?.textContent));
+      if (section.querySelectorAll("[role=status], [aria-live]").length !== 1) log("snap:fail another line of the section is live");`;
+
 const writersOpen = (extra: Partial<Fixture>, check: string, press = false): Fixture => ({
   ...list(),
   map_state: mapState(),
@@ -1895,8 +2145,303 @@ const mapSheetClose = (): Fixture => ({
   realPointer: true, snapDone: "sheet close ok",
 });
 
+// Real keys (#454): \`await __snapKey(key)\` presses a key as Chrome's own input, so Tab moves focus and Esc closes a native popover, which a
+// synthetic KeyboardEvent does neither of. From the page's start, Tab reaches the page's first control and Shift+Tab leaves it; Enter
+// and Space press a focused button; the arrows reach the page as trusted keys; Esc closes an open popover.
+const snapRealKeys = (): Fixture => ({
+  ...base,
+  snapScript: `
+      const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+      const press = async (key) => { await __snapKey(key); await wait(50); };
+      const named = (node) => node?.id || node?.tagName;
+      document.activeElement?.blur();
+      // The page's first control is the skip link (#461).
+      const first = document.querySelector("a.skip-link");
+      if (!first) return log("snap:fail the page has no skip link");
+      await press("Tab");
+      if (document.activeElement !== first) log("snap:fail Tab from the page's start focused " + named(document.activeElement) + ", not the skip link");
+      await press("Shift+Tab");
+      if (document.activeElement === first) log("snap:fail Shift+Tab left focus on the skip link");
+      // A button made for the check, taken out again before the hover check runs.
+      const button = Object.assign(document.createElement("button"), { type: "button", textContent: "Pressed" });
+      const clicks = [];
+      button.addEventListener("click", (event) => clicks.push(event.isTrusted));
+      document.body.append(button);
+      button.focus();
+      await press("Enter");
+      await press("Space");
+      button.remove();
+      if (clicks.join() !== "true,true") log("snap:fail Enter and Space on a focused button clicked it " + clicks.join() + " (trusted per click)");
+      const arrows = [];
+      const heard = (event) => event.isTrusted && arrows.push(event.key);
+      document.addEventListener("keydown", heard);
+      await press("ArrowUp");
+      await press("ArrowDown");
+      document.removeEventListener("keydown", heard);
+      if (arrows.join() !== "ArrowUp,ArrowDown") log("snap:fail the arrows reached the page as " + arrows.join());
+      const menu = document.getElementById("project-actions");
+      menu.showPopover();
+      if (!menu.matches(":popover-open")) return log("snap:fail the popover did not open");
+      await press("Escape");
+      if (menu.matches(":popover-open")) log("snap:fail Esc left the popover open");
+      log("keys ok");`,
+  realKeys: true, snapDone: "keys ok",
+});
+
+// The toasts from the keyboard (#457): the needs-you, the note and the Clear toasts open at once in the Notifications region, apart.
+// A real press on Undo leaves the focus where it was. From the control before the region, a real Tab reaches each main action and
+// each ×; a real Enter on a × closes its toast and puts the focus on the next toast, and the last one hands it back. A modal dialog
+// holds the toasts back until it closes. A real Enter on the note and on the needs-you toast runs their action.
+const toastKeys = (): Fixture => {
+  const sessions = [...(list().sessions as Session[])];
+  const blocked = { ...sessions[1], id: "s5" };
+  return {
+    ...list(),
+    select: { __by: "id", values: Object.fromEntries([...sessions, blocked].map((s) => [s.id, { session: s, agent: null }])) },
+    snapScript: `
+      const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+      const press = async (key) => { await __snapKey(key); await wait(30); };
+      const byId = (id) => document.getElementById(id);
+      const open = (id) => byId(id).matches(":popover-open");
+      const name = (node) => (node?.closest(".toast")?.id ?? node?.id ?? node?.tagName) + " " + (node?.getAttribute?.("aria-label") ?? node?.textContent);
+      document.querySelector(".list .clear-landed").click();
+      await wait(50);
+      document.dispatchEvent(new KeyboardEvent("keydown", { code: "Enter", key: "Enter", metaKey: true, shiftKey: true, bubbles: true }));
+      await wait(100);
+      window.__snapEmit("finished", ["s4"]);
+      await wait(50);
+      const region = byId("toasts");
+      if (region.tagName !== "SECTION" || region.getAttribute("aria-label") !== "Notifications") log("snap:fail the toasts' region is not named Notifications");
+      for (const id of ["toast", "note-toast", "clear-toast"]) if (!open(id) || !region.contains(byId(id))) return log("snap:fail #" + id + " is not an open popover in the region");
+      const boxes = ["toast", "note-toast", "clear-toast"].map((id) => byId(id).getBoundingClientRect());
+      const apart = (a, b) => a.bottom <= b.top || b.bottom <= a.top || a.right <= b.left || b.right <= a.left;
+      if (!apart(boxes[0], boxes[1]) || !apart(boxes[0], boxes[2]) || !apart(boxes[1], boxes[2])) log("snap:fail two toasts overlap: " + boxes.map((b) => [b.left, b.top, b.right, b.bottom].map(Math.round)).join(" | "));
+      if (boxes[1].top < boxes[0].bottom) log("snap:fail the note is not under the needs-you toast");
+      const before = Object.assign(document.createElement("button"), { type: "button", textContent: "Before", title: "Where the focus was" });
+      region.before(before);
+      // A real press on Undo acts and leaves the focus where it was; Clear landed again brings the toast back.
+      before.focus();
+      await __snapClick(byId("clear-toast").querySelector("button"));
+      await wait(50);
+      if (open("clear-toast")) log("snap:fail the press on Undo did not undo");
+      if (document.activeElement !== before) log("snap:fail a press on Undo moved the focus to " + name(document.activeElement));
+      document.querySelector(".list .clear-landed").click();
+      await wait(50);
+      if (!open("clear-toast")) return log("snap:fail the Clear toast did not show again");
+      before.focus();
+      const buttons = [...region.querySelectorAll("button")];
+      const reached = [];
+      for (let i = 0; i < 6; i++) {
+        await press("Tab");
+        reached.push(document.activeElement);
+      }
+      if (reached.some((node, i) => node !== buttons[i])) log("snap:fail Tab reached " + reached.map(name).join(", ") + ", not " + buttons.map(name).join(", "));
+      // The note's × from the keyboard: the focus goes to the next toast, the Clear toast's Undo.
+      byId("note-toast").querySelector("[aria-label=Dismiss]").focus();
+      await press("Enter");
+      if (open("note-toast")) log("snap:fail Enter on the note's × left it open");
+      if (document.activeElement !== byId("clear-toast").querySelector("button")) log("snap:fail after the note's × the focus is on " + name(document.activeElement));
+      byId("clear-toast").querySelector("[aria-label=Dismiss]").focus();
+      await press("Enter");
+      if (open("clear-toast")) log("snap:fail Enter on the Clear toast's × left it open");
+      if (document.activeElement !== byId("toast").querySelector("button")) log("snap:fail after the Clear toast's × the focus is on " + name(document.activeElement));
+      await press("Tab");
+      await press("Enter");
+      if (open("toast")) log("snap:fail Enter on the needs-you toast's × left it open");
+      if (document.activeElement !== before) log("snap:fail after the last toast's × the focus is on " + name(document.activeElement) + ", not where it was");
+      // A modal dialog holds a new note back until it closes.
+      const dialog = byId("delete-dialog");
+      dialog.showModal();
+      window.__snapEmit("finished", ["s4"]);
+      await wait(50);
+      if (open("note-toast")) log("snap:fail the note showed over a modal dialog");
+      dialog.close();
+      await wait(50);
+      if (!open("note-toast")) return log("snap:fail the note did not show once the dialog closed");
+      // Enter on the note selects its session.
+      before.focus();
+      await press("Tab");
+      await press("Enter");
+      if (open("note-toast") || document.body.dataset.panel !== "story") log("snap:fail Enter on the note did not open its session: panel " + document.body.dataset.panel);
+      // A real Esc in Delete's question closes the question alone, and the story under it stays.
+      byId("delete").click();
+      await wait(50);
+      await press("Escape");
+      await wait(50);
+      if (dialog.open) log("snap:fail a real Esc did not close Delete's question");
+      if (document.body.dataset.panel !== "story") log("snap:fail a real Esc in Delete's question also closed the story: panel " + document.body.dataset.panel);
+      // Enter on the needs-you toast of a new block jumps to it and leaves focus mode.
+      window.__snapEmit("sessions", ${JSON.stringify([...sessions, blocked])});
+      await wait(50);
+      if (!open("toast")) return log("snap:fail no needs-you toast for the new block");
+      before.focus();
+      await press("Tab");
+      await press("Enter");
+      if (document.body.dataset.layout === "focus") log("snap:fail Enter on the needs-you toast did not leave focus mode");
+      log("toasts ok");`,
+    realKeys: true,
+    realPointer: true,
+    snapDone: "toasts ok",
+  };
+};
+
+// The palette (#458): a real Esc, a real click outside it and its close button each close it with focus back on the element that had it
+// before ⌘⇧P; its filter is a combobox whose real ↓ moves `aria-activedescendant` to an option, and no row is a pressed button.
+const paletteFocus = (): Fixture => ({
+  ...list(),
+  snapScript: `
+      const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+      const palette = document.getElementById("palette");
+      const before = document.getElementById("settings-button");
+      const named = (node) => node?.id || node?.className || node?.tagName;
+      const open = async () => {
+        before.focus();
+        document.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyP", key: "P", metaKey: true, shiftKey: true, bubbles: true }));
+        await wait(100);
+        if (!palette.matches(":popover-open")) log("snap:fail the palette did not open as a popover");
+      };
+      const back = (how) => {
+        if (palette.checkVisibility()) log("snap:fail " + how + " left the palette open");
+        if (document.activeElement !== before) log("snap:fail after " + how + " focus is on " + named(document.activeElement) + ", not the settings button");
+      };
+      await open();
+      const field = palette.querySelector("input");
+      if (field?.getAttribute("role") !== "combobox") log("snap:fail the filter's role is " + field?.getAttribute("role"));
+      const list = document.getElementById(field?.getAttribute("aria-controls"));
+      if (list?.getAttribute("role") !== "listbox") log("snap:fail the filter controls " + named(list) + ", not a listbox");
+      if (palette.querySelector("[aria-pressed]")) log("snap:fail a palette row carries aria-pressed");
+      await __snapKey("ArrowDown");
+      await wait(50);
+      const active = document.getElementById(field?.getAttribute("aria-activedescendant"));
+      if (active?.getAttribute("role") !== "option") log("snap:fail after ↓ the active descendant is " + named(active) + ", not an option");
+      if (active && active !== list?.children[1]) log("snap:fail ↓ did not move to the second row");
+      await __snapKey("Escape");
+      await wait(100);
+      back("a real Esc");
+      await open();
+      await __snapClick(document.querySelector(".bar-project") ?? document.querySelector("header.top"));
+      await wait(100);
+      back("an outside click");
+      // A real click on a focusable control outside closes it and leaves the focus on that control (#452's review).
+      await open();
+      const outside = Object.assign(document.createElement("input"), { name: "outside", autocomplete: "off" });
+      outside.setAttribute("aria-label", "A field outside the palette");
+      document.querySelector("header.top").append(outside);
+      await __snapClick(outside);
+      await wait(100);
+      if (palette.checkVisibility()) log("snap:fail a click on a field outside left the palette open");
+      if (document.activeElement !== outside) log("snap:fail after a click on a field outside focus is on " + named(document.activeElement) + ", not the field");
+      outside.remove();
+      await open();
+      const close = palette.querySelector('button[aria-label="Close"]');
+      if (!close?.checkVisibility()) return log("snap:fail the palette has no visible close button");
+      await __snapClick(close);
+      await wait(100);
+      back("the close button");
+      log("palette ok");`,
+  realKeys: true, realPointer: true, snapDone: "palette ok",
+});
+
+// Small gaps (#462): a real Shift+Tab from a row reaches the row before's delete, hidden only by opacity; the fold and delete boxes are
+// at least 24×24; the drawer's jumps are links to a new tab; a real Tab reaches the drawer's code block, which has a name; and the panels,
+// overlays and dialogs keep their scroll to themselves.
+const mapSmallGaps = (): Fixture => ({
+  ...mapOpened(`
+      const press = async (key) => { await __snapKey(key); await wait(50); };
+      const named = (node) => (node?.className || node?.tagName) + " " + (node?.getAttribute?.("aria-label") ?? "");
+      const items = [...document.querySelectorAll("#groups .item")];
+      const pair = items.findIndex((item, i) => item.querySelector(":scope > .delete") && !item.querySelector(":scope > .row[aria-pressed=true]")
+        && items[i + 1] === item.nextElementSibling && items[i + 1].firstElementChild?.matches(".row"));
+      if (pair < 0) return log("snap:fail no unselected row with a delete before a row with no fold");
+      const remove = items[pair].querySelector(":scope > .delete");
+      if (getComputedStyle(remove).opacity !== "0") log("snap:fail an unselected row's delete shows before hover or focus: opacity " + getComputedStyle(remove).opacity);
+      items[pair + 1].firstElementChild.focus();
+      await press("Shift+Tab");
+      if (document.activeElement !== remove) log("snap:fail Shift+Tab from the next row focused " + named(document.activeElement) + ", not the row before's delete");
+      for (const control of document.querySelectorAll("#groups .item > .fold, #groups .item > .delete")) {
+        const box = control.getBoundingClientRect();
+        if (box.width < 24 || box.height < 24) { log("snap:fail a row's " + control.className + " is " + box.width + "x" + box.height + ", under 24x24"); break; }
+      }
+      document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(300);
+      [...document.querySelectorAll("#map-sheet .sheet-ci button")].find((b) => b.textContent === "See the CI log")?.click();
+      await wait(300);
+      const jumps = [...document.querySelectorAll("#map-drawer .drawer-jump")];
+      if (!jumps.length) return log("snap:fail the CI log's drawer has no jump");
+      for (const jump of jumps)
+        if (!jump.matches("a[href]") || jump.target !== "_blank" || !jump.relList.contains("noopener")) log("snap:fail the drawer's jump " + jump.textContent + " is not a link to a new tab: " + jump.outerHTML);
+      const code = document.querySelector("#map-drawer .drawer-code");
+      document.querySelector("#map-drawer .sheet-close").focus();
+      await press("Tab");
+      if (document.activeElement !== code) log("snap:fail Tab from the drawer's × focused " + named(document.activeElement) + ", not its code block");
+      if (!code.getAttribute("aria-label")) log("snap:fail the drawer's code block has no name");
+      document.body.classList.add("list-open");
+      const contained = ["#panel-body", "#map-pre-flight", "#map-patch-review", "#palette", "nav.list", "nav.list .full", "#rename-dialog", "#delete-dialog"];
+      const loose = contained.filter((selector) => getComputedStyle(document.querySelector(selector)).overscrollBehaviorY !== "contain");
+      document.body.classList.remove("list-open");
+      if (loose.length) log("snap:fail these scroll the page behind them at their ends: " + loose.join(", "));
+      // A ::backdrop honours overscroll-behavior only as a scroll container, so it needs overflow hidden too (modern-web-guidance,
+      // prevent-page-scroll-under-modal-dialog).
+      const leaky = ["#rename-dialog", "#delete-dialog", "#confirm-dialog"].filter((selector) => {
+        const backdrop = getComputedStyle(document.querySelector(selector), "::backdrop");
+        return backdrop.overflowY !== "hidden" || backdrop.overscrollBehaviorY !== "contain";
+      });
+      if (leaky.length) log("snap:fail these dialogs' backdrops scroll the page behind them: " + leaky.join(", "));
+      log("small gaps ok");`, {
+    map_state: mapState({ ci: brokenCi }),
+    map_place: { s1: ["core", "window"], s2: ["hook"] },
+  }),
+  realKeys: true, snapDone: "small gaps ok",
+});
+
+// The page's structure (#461): from the page's start the first real Tab reaches "Skip to the map", shown, and a real Enter on it puts
+// the focus in the map, the page's one `main`.
+const skipLink = (): Fixture => ({
+  ...list(),
+  snapScript: `
+      const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+      const named = (node) => node ? node.tagName + (node.id ? "#" + node.id : "") + " " + JSON.stringify((node.textContent ?? "").trim().slice(0, 30)) : "nothing";
+      await __snapKey("Tab");
+      await wait(50);
+      const link = document.activeElement;
+      if (link?.textContent !== "Skip to the map") return log("snap:fail the first Tab focused " + named(link) + ", not the skip link");
+      const box = link.getBoundingClientRect();
+      if (box.bottom <= 0 || box.top >= innerHeight || box.width < 24) log("snap:fail the focused skip link is not on screen: " + JSON.stringify(box));
+      await __snapKey("Enter");
+      await wait(50);
+      const main = document.querySelector("main");
+      if (!main?.contains(document.activeElement)) return log("snap:fail Enter on the skip link focused " + named(document.activeElement) + ", not the map");
+      log("skip link ok");`,
+  realKeys: true, snapDone: "skip link ok",
+});
+
+// At 1000x800 (`…Narrow`) with the story panel open, the empty map's prompt sits beside the panel, not under it (#462).
+const listNarrow = (): Fixture => ({
+  ...list(),
+  snapScript: `
+      const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+      await wait(500);
+      const panel = document.getElementById("map-panel"), draft = document.querySelector("#map .map-draft");
+      if (panel.hidden || !draft) return log("snap:fail the story panel or the empty map's prompt is not shown");
+      const a = panel.getBoundingClientRect(), b = draft.getBoundingClientRect();
+      if (a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom) log("snap:fail the prompt (" + Math.round(b.left) + "–" + Math.round(b.right) + ") is under the left panel (" + Math.round(a.left) + "–" + Math.round(a.right) + ")");
+      log("narrow ok");`,
+  snapDone: "narrow ok",
+});
+
 export const fixtures = {
   ...railFixtures,
+  // The toasts from the keyboard (#457).
+  toastKeys,
+  // Real keys from a fixture (#454).
+  snapRealKeys,
+  // The palette as a popover listbox (#458).
+  paletteFocus,
+  // The small keyboard, pointer and layout gaps (#462).
+  mapSmallGaps,
+  listNarrow,
+  // The page's structure: the skip link (#461).
+  skipLink,
   // Unconfigured, with both writers found: preset to Claude, summaries off until a Test passes.
   writersList: () =>
     writersOpen({ writers: { writers: [claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: null } }, `
@@ -1919,17 +2464,22 @@ export const fixtures = {
     writersOpen({
       writers: { writers: [claudeWriter, agyWriter], summaries_on: true, briefs: true, keys: [], base_url: null },
       test_writer: { outcome: "not_logged_in", line: "`claude` is not logged in. Run `claude` in a terminal and log in with /login.", settings: null },
-    }, `
+    }, `${writerStatusBefore}
+      document.getElementById("writer-test").click();
+      await wait(300);
       const outcome = document.getElementById("writer-outcome");
-      if (!outcome?.classList.contains("failed") || !outcome.textContent.includes("/login")) log("snap:fail no failed outcome with its fix: " + outcome?.textContent);`, true),
+      if (!outcome?.classList.contains("failed") || !outcome.textContent.includes("/login")) log("snap:fail no failed outcome with its fix: " + outcome?.textContent);${writerStatusAfter("/login")}`),
   // No API key set (#366): the writer is listed but cannot be picked, and the key row offers to add one.
   writersKeyNotSet: () =>
     writersOpen({ writers: { writers: [anthropicWriter, claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: null } }, `
       const first = document.querySelector("#writer-pick option");
       if (first?.textContent !== "Anthropic API key (not set)" || !first.disabled) log("snap:fail the unset key is not listed first and unpickable: " + first?.textContent);
       if (!document.getElementById("writer-key-state")?.textContent.includes("not set")) log("snap:fail the key row does not say not set");
-      if (document.getElementById("writer-key")?.placeholder !== "Add an API key") log("snap:fail no field to add an API key");
-      if (document.getElementById("writer-key-remove")) log("snap:fail Remove shown with no key set");`),
+      if (document.getElementById("writer-key")?.placeholder !== "Add an API key…") log("snap:fail no field to add an API key");
+      if (document.getElementById("writer-key-remove")) log("snap:fail Remove shown with no key set");
+      // An empty base URL's placeholder reads as an example, not as part of the URL (#452's review).
+      const example = document.getElementById("writer-base-url")?.placeholder;
+      if (example !== "e.g. https://api.openai.com/v1…") log("snap:fail the base URL's placeholder is " + JSON.stringify(example));`),
   // An API key set: it comes first in the preset order, and a Test of the Anthropic writer passes.
   writersKeySet: () =>
     writersOpen({
@@ -1939,13 +2489,15 @@ export const fixtures = {
       if (document.getElementById("writer-pick").value !== "anthropic") log("snap:fail the preset is not the API key");
       if (document.getElementById("writer-model").value !== "claude-haiku-5-5") log("snap:fail the preset model is not the first");
       if (!document.getElementById("writer-key-state")?.textContent.includes(": set")) log("snap:fail the key row does not say set");
-      if (document.getElementById("writer-key")?.placeholder !== "Replace the API key" || !document.getElementById("writer-key-remove")) log("snap:fail no replace or remove");
+      if (document.getElementById("writer-key")?.placeholder !== "Replace the API key…" || !document.getElementById("writer-key-remove")) log("snap:fail no replace or remove");
       const outcome = document.getElementById("writer-outcome");
-      if (!outcome?.classList.contains("passed")) log("snap:fail no passed outcome: " + outcome?.textContent);`, true),
+      if (!outcome?.classList.contains("passed")) log("snap:fail no passed outcome: " + outcome?.textContent);
+      ${confirmFirst(`document.getElementById("writer-key-remove").click()`, "remove_api_key", "Remove key", ["Keychain"])}`, true),
   // A local Ollama set by its base URL alone (#367): the OpenAI-compatible API is preset before Claude, its model is typed,
   // its row shows the base URL and no key, and a Test of it passes.
-  writersOpenAI: () =>
-    writersOpen({
+  // The contrast pass (#455) runs here too: its fields' borders.
+  writersOpenAI: (): Fixture => ({
+    ...writersOpen({
       writers: { writers: [anthropicWriter, { ...openaiWriter, found: true }, claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: "http://localhost:11434/v1" },
       test_writer: { outcome: "passed", line: "Passed: `openai` answered. Summaries are written with it.", settings: null },
     }, `
@@ -1956,7 +2508,10 @@ export const fixtures = {
       if (!document.getElementById("writer-openai-state")?.textContent.includes("no key")) log("snap:fail the row does not say no key");
       if (!document.getElementById("writer-openai-remove")) log("snap:fail no Remove with a base URL set");
       const outcome = document.getElementById("writer-outcome");
-      if (!outcome?.classList.contains("passed")) log("snap:fail no passed outcome: " + outcome?.textContent);`, true),
+      if (!outcome?.classList.contains("passed")) log("snap:fail no passed outcome: " + outcome?.textContent);
+      ${confirmFirst(`document.getElementById("writer-openai-remove").click()`, "remove_api_key", "Remove", ["http://localhost:11434/v1", "Keychain"])}`, true),
+    contrast: true,
+  }),
   // No claude: agy writes the summaries, and the section says PR briefs need Claude.
   writersBriefsNeedClaude: () =>
     writersOpen({
@@ -1965,20 +2520,39 @@ export const fixtures = {
     }, `
       if (!document.getElementById("writer-briefs")?.textContent.includes("briefs need Claude")) log("snap:fail no briefs need Claude line");
       if (document.getElementById("writer-model").value !== "gemini-4-neon-high") log("snap:fail the model in effect is not shown");`),
+  // #456: a key the Keychain refuses: its error is said in the section's status region, and tied to the key's field.
+  writersKeyError: () =>
+    writersOpen({
+      writers: { writers: [anthropicWriter, claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: null },
+      set_api_key: { __throw: "the Keychain refused the key" } as never,
+    }, `${writerStatusBefore}
+      document.getElementById("writer-key").value = "sk-ant-not-a-key";
+      document.getElementById("writer-key-save").click();
+      await wait(300);
+      const error = document.getElementById("writer-key-error");
+      if (!error?.textContent.includes("Keychain refused")) return log("snap:fail no key error: " + error?.textContent);
+${writerStatusAfter("Keychain refused")}
+      const field = document.getElementById("writer-key");
+      if (field.getAttribute("aria-invalid") !== "true" || !(field.getAttribute("aria-describedby") ?? "").split(" ").includes("writer-key-error")) log("snap:fail the key error is not tied to its field");`),
   writersListNarrow: (): Fixture => fixtures.writersList(),
   writersPassedNarrow: (): Fixture => fixtures.writersPassed(),
   writersFailedNarrow: (): Fixture => fixtures.writersFailed(),
   writersBriefsNeedClaudeNarrow: (): Fixture => fixtures.writersBriefsNeedClaude(),
-  mapTray,
+  // The contrast pass (#455) runs here too.
+  mapTray: (): Fixture => ({ ...mapTray(), contrast: true }),
   mapRuns,
-  mapPreFlight,
+  // The contrast pass (#455) runs here too.
+  mapPreFlight: (): Fixture => ({ ...mapPreFlight(), contrast: true }),
+  mapPreFlightStatus,
   mapMicroWorld,
   mapRunsPaused,
   mapBackLaw,
   railBriefRow: () => railBriefReady(false),
   railBriefOpened: () => railBriefReady(true),
   mapBriefStart,
-  mapBriefStory,
+  // The contrast pass (#455) runs here too.
+  mapBriefStory: (): Fixture => ({ ...mapBriefStory(), contrast: true }),
+  mapBriefAnnounce,
   mapBriefStates: () => mapBriefFigure("states"),
   mapBriefSequence: () => mapBriefFigure("sequence"),
   mapBriefCompare: () => mapBriefFigure("compare"),
@@ -2017,8 +2591,20 @@ export const fixtures = {
   mapBriefChapterMid,
   mapBriefChapterLast,
   logRunning: () => logFixture("running"),
-  logDone: () => logFixture("completed"),
-  list,
+  // A call's result scrolls on its own, so it takes focus with a name (#462).
+  logDone: () => ({
+    ...logFixture("completed"),
+    snapScript: `
+      const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+      await wait(300);
+      const results = [...document.querySelectorAll(".log-result")];
+      if (!results.length) return log("snap:fail the log shows no call's result");
+      for (const result of results) if (result.tabIndex !== 0 || !result.getAttribute("aria-label")) log("snap:fail a call's result takes no focus or has no name: " + result.outerHTML.slice(0, 80));
+      log("log ok");`,
+    snapDone: "log ok",
+  }),
+  // The contrast pass (#455) runs here too.
+  list: (): Fixture => ({ ...list(), contrast: true }),
   listSecondLines,
   listClearLanded,
   // The palette open (#220), so the hover check reaches its rows.
@@ -2078,7 +2664,7 @@ export const fixtures = {
       await new Promise((r) => setTimeout(r, 100));
       if (document.body.textContent.includes("Not recording")) log("snap:fail a not-recording line is on the page");`,
   }),
-  // Alerts: two sessions' turns ended off screen (the note toast).
+  // Alerts: two sessions' turns ended off screen (the note toast). The contrast pass (#455) runs here too: the toast's buttons.
   alerts() {
     const context = (k: number) => ({ ...session("x", "x", "idle").transcript, context: { tokens: k * 1000 } });
     const sessions = [
@@ -2095,7 +2681,7 @@ export const fixtures = {
       // The top bar has no unseen chip (#386): the unseen rows carry their mark in the list.
       if (document.getElementById("unseen")) log("snap:fail the top bar still has an unseen chip");
       log("note: " + note.textContent);`;
-    return { ...base, sessions, selected: { session: sessions[1], agent: null }, snapScript };
+    return { ...base, sessions, selected: { session: sessions[1], agent: null }, snapScript, contrast: true };
   },
   // The saved project list (#381): a project with no sessions keeps its header, after the one with sessions; a gone one is
   // struck through; a header's "⋯" offers Remove project.
@@ -2112,6 +2698,9 @@ export const fixtures = {
       const menu = document.getElementById("project-actions");
       if (!menu.matches(":popover-open") || menu.textContent.trim() !== "Remove project") log("snap:fail the header's menu does not offer Remove project");
       log("headers " + order);`),
+  // A header's "⋯" menu (#458) opens under its button and inside the window, and flips over it near the window's bottom edge.
+  projectMenu: () => withSaved(projectMenuScript(false), { realPointer: true, snapDone: "project menu ok" }),
+  projectMenuBottom: () => withSaved(projectMenuScript(true), { realPointer: true, snapDone: "project menu ok" }),
   // A saved project whose folder is gone, in the map's place: its words, its path and Remove project, never an error (#381).
   mapProjectGone: () => withSaved(openGone + `
     log("gone: " + gone.textContent);`),
@@ -2207,6 +2796,52 @@ export const fixtures = {
       document.querySelector("#map .plate[data-id=shell]").click();
       await wait(300);
       log("thin " + thin + ", thick " + thick);`, { map_state: mapState({ fog: { shell: "thick", window: "thick", core: "thin", hook: "thin" } }), map_know: { positions: {}, tiers: {} } }),
+  // The dark page (#455): the metas, the root's colour scheme, no ::-webkit-scrollbar rule left, and the pre-flight's hand picker,
+  // whose native checkbox draws dark, sampled from Chrome's own screenshot.
+  mapPreFlightPick: (): Fixture => ({
+    ...mapOpened(`
+      const meta = (name) => document.querySelector('meta[name="' + name + '"]')?.content;
+      if (meta("color-scheme") !== "dark") log("snap:fail no color-scheme meta of dark: " + meta("color-scheme"));
+      const chrome = getComputedStyle(document.documentElement).getPropertyValue("--chrome").trim();
+      if (!chrome || meta("theme-color") !== chrome) log("snap:fail the theme-color meta " + meta("theme-color") + " is not --chrome, " + chrome);
+      if (getComputedStyle(document.documentElement).colorScheme !== "dark") log("snap:fail the root's color-scheme is " + getComputedStyle(document.documentElement).colorScheme);
+      const webkit = [...document.styleSheets].flatMap((sheet) => [...sheet.cssRules]).filter((rule) => rule.selectorText?.includes("::-webkit-scrollbar"));
+      if (webkit.length) log("snap:fail ::-webkit-scrollbar rules are left: " + webkit.map((rule) => rule.selectorText).join(", "));
+      document.getElementById("pre-flight-button").click();
+      await wait(600);
+      const byHand = [...document.querySelectorAll("#map-pre-flight button")].find((b) => b.textContent === "Pick parts by hand");
+      if (!byHand) return log("snap:fail the pre-flight offers no Pick parts by hand");
+      byHand.click();
+      await wait(300);
+      const box = document.querySelector("#map-pre-flight input[type=checkbox]");
+      if (!box) return log("snap:fail the hand picker has no checkbox");
+      const shot = await window.__snapShot();
+      const at = box.getBoundingClientRect();
+      const scale = shot.width / innerWidth;
+      const i = (Math.round((at.top + at.height / 2) * scale) * shot.width + Math.round((at.left + at.width / 2) * scale)) * 4;
+      const [red, green, blue] = shot.data.slice(i, i + 3);
+      const channel = (c) => ((c /= 255) <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+      if (0.2126 * channel(red) + 0.7152 * channel(green) + 0.0722 * channel(blue) > 0.2) log("snap:fail the checkbox draws light: rgb(" + [red, green, blue] + ")");
+      log("dark page ok");`, { map_state: mapState() }),
+    snapDone: "dark page ok",
+    contrast: true,
+  }),
+  // Thin and thick fog (#455) under the contrast pass, with nothing over the plates: the text on each reads at full contrast, and
+  // the two still differ by density, rim and drift.
+  mapFogPlates: (): Fixture => ({
+    ...mapOpened(`
+      await wait(200);
+      const [thin, thick] = ["thin", "thick"].map((kind) => document.querySelector("#map .plate.fog-" + kind));
+      if (!thin || !thick) return log("snap:fail expected a thin and a thick plate");
+      const mist = (plate) => getComputedStyle(plate.querySelector(".plate-fog"));
+      const alpha = (plate) => Number(/,\\s*([\\d.]+)\\)$/.exec(mist(plate).backgroundColor)?.[1] ?? 1);
+      if (!(alpha(thick) > alpha(thin))) log("snap:fail thick fog is not denser than thin: " + mist(thick).backgroundColor + " against " + mist(thin).backgroundColor);
+      if (getComputedStyle(thick).boxShadow === getComputedStyle(thin).boxShadow) log("snap:fail thick fog has no rim of its own");
+      if (mist(thick).animationName !== "mist-drift" || mist(thin).animationName !== "none") log("snap:fail only thick fog drifts: " + mist(thick).animationName + ", " + mist(thin).animationName);
+      log("fog plates ok");`, { map_state: mapState({ fog: { shell: "thick", window: "thick", core: "thin", hook: "thin", understanding: "thin" } }) }),
+    snapDone: "fog plates ok",
+    contrast: true,
+  }),
   // The Map view busy (#311): a session on two parts, a Needs you one, a Worker with its own chip, and the not placed list (no files yet,
   // agy, status-only Codex, ignored-only edits); a Helper and a finished session never show.
   mapBusy: () => mapBusy(false),
@@ -2234,6 +2869,9 @@ export const fixtures = {
     };
   },
   mapChipJump: () => mapBusy(true),
+  // The map from the keyboard (#460).
+  mapPartKeys,
+  mapPartRedraw,
   // Story 34: every card over the map, the left panel and the sheet and drawer alike, arrives by a 12 px slide with a fade.
   mapGlassMotion: () =>
     mapOpened(`
@@ -2269,7 +2907,8 @@ export const fixtures = {
   mapProof: () => mapBroken("proof"),
   mapBrokenLog: () => mapBroken("log"),
   // A part's history strip scrubbed to an older commit, with the sheet open (#313).
-  mapScrubbed,
+  // The contrast pass (#455) runs here too.
+  mapScrubbed: (): Fixture => ({ ...mapScrubbed(), contrast: true }),
   // The one-time review under the Map view's head, listing the modules below their thresholds (#314).
   mapReview: () =>
     mapOpened(`

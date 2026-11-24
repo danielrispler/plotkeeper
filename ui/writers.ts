@@ -9,7 +9,7 @@
 // `settings.json` as `summaries.base_url` (none: OpenAI's own), and an optional key, also kept in the Keychain, as a local
 // Ollama needs none.
 
-import { failure, invoke, text } from "./dom.js";
+import { confirmed, drawWithStatus, failure, invoke, text } from "./dom.js";
 import type { Settings, SettingsFiles } from "./settings.js";
 import type { Writers, WriterKind, WriterTest } from "./types.js";
 import { GATE } from "./writer-notice.js";
@@ -82,6 +82,7 @@ export const briefsWritten = () => list?.briefs ?? true;
 function select(id: string, title: string, options: { value: string; label: string; disabled?: boolean }[], value: string, change: (value: string) => void) {
   const node = document.createElement("select");
   node.id = id;
+  node.name = id;
   node.title = title;
   for (const option of options) {
     const item = document.createElement("option");
@@ -112,7 +113,7 @@ export type Hooks = {
 };
 
 function draw(panel: HTMLElement, hooks: Hooks) {
-  if (!list) return panel.replaceChildren(text("p", "Looking for writers…", "writer-hint"));
+  if (!list) return drawWithStatus(panel, [text("p", "Looking for writers…", "writer-hint")], "");
   const known = list;
   const writer = known.writers.find((w) => w.kind === choice.writer);
   const models = writer?.models ?? [];
@@ -160,7 +161,9 @@ function draw(panel: HTMLElement, hooks: Hooks) {
     shown.id = "writer-briefs";
     nodes.push(shown);
   }
-  panel.replaceChildren(...nodes);
+  // The Test's outcome and the keys' errors are said in the section's one status region (#456, #452's review).
+  const said = [outcome ? testLine(outcome).text : "", keyErrors.anthropic ?? "", keyErrors.openai ?? ""].filter(Boolean).join(" ");
+  drawWithStatus(panel, nodes, said);
 }
 
 // The key row: whether a key is set, a field to add one or replace it, and Remove once one is set.
@@ -170,10 +173,12 @@ function keyRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[]
   state.id = "writer-key-state";
   const input = document.createElement("input");
   input.id = "writer-key";
+  input.name = "anthropic-api-key";
   input.type = "password";
   input.autocomplete = "off";
   input.spellcheck = false;
-  input.placeholder = set ? "Replace the API key" : "Add an API key";
+  input.placeholder = set ? "Replace the API key…" : "Add an API key…";
+  input.setAttribute("aria-label", "Anthropic API key");
   input.title = "An Anthropic API key; it is kept in the macOS Keychain and never shown again";
   const save = text("button", "Save key", "btn small");
   save.id = "writer-key-save";
@@ -202,7 +207,9 @@ function keyRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[]
     remove.id = "writer-key-remove";
     remove.setAttribute("type", "button");
     remove.title = "Remove the key from the macOS Keychain; the API-key writer then cannot write";
-    remove.addEventListener("click", () => {
+    remove.addEventListener("click", async () => {
+      const lost = "The Anthropic API key is deleted from the macOS Keychain; the API-key writer cannot write until a key is pasted again.";
+      if (!(await confirmed({ heading: "Remove the API key?", lost, verb: "Remove key" }))) return;
       invoke("remove_api_key", { writer: "anthropic", expected: null })
         .then(() => {
           delete keyErrors.anthropic;
@@ -215,18 +222,29 @@ function keyRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[]
   }
   const nodes = [state, row];
   if (keyErrors.anthropic) {
-    const shown = text("p", keyErrors.anthropic, "writer-outcome failed");
-    shown.id = "writer-key-error";
-    nodes.push(shown);
+    nodes.push(keyError(keyErrors.anthropic, "writer-key-error", [input]));
   }
   return nodes;
+}
+
+// A key's error, tied to the `fields` it is about (#456); the section's status region says it.
+function keyError(words: string, id: string, fields: HTMLElement[]): HTMLElement {
+  const shown = text("p", words, "writer-outcome failed");
+  shown.id = id;
+  for (const field of fields) {
+    field.setAttribute("aria-invalid", "true");
+    field.setAttribute("aria-describedby", id);
+  }
+  return shown;
 }
 
 // The OpenAI-compatible writer's model: any id its endpoint serves, typed, with the listed ones offered.
 function modelInput(models: string[]): HTMLElement {
   const input = document.createElement("input");
   input.id = "writer-model";
+  input.name = "writer-model";
   input.title = "The model the endpoint serves, such as gpt-6-luna on OpenAI or llama3.2 on a local Ollama";
+  input.autocomplete = "off";
   input.spellcheck = false;
   input.value = choice.model;
   input.setAttribute("list", "writer-models");
@@ -254,17 +272,22 @@ function openaiRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElemen
   state.id = "writer-openai-state";
   const base = document.createElement("input");
   base.id = "writer-base-url";
+  base.name = "openai-base-url";
   base.type = "url";
+  base.autocomplete = "off";
   base.spellcheck = false;
   base.value = known.base_url ?? "";
-  base.placeholder = OPENAI_URL;
+  base.placeholder = `e.g. ${OPENAI_URL}…`;
+  base.setAttribute("aria-label", "Base URL");
   base.title = "The API's base URL, such as https://openrouter.ai/api/v1 or http://localhost:11434/v1 for Ollama; empty: OpenAI's own";
   const input = document.createElement("input");
   input.id = "writer-openai-key";
+  input.name = "openai-api-key";
   input.type = "password";
   input.autocomplete = "off";
   input.spellcheck = false;
-  input.placeholder = keySet(known, "openai") ? "Replace the key (optional)" : "Its API key (optional)";
+  input.placeholder = keySet(known, "openai") ? "Replace the key (optional)…" : "Its API key (optional)…";
+  input.setAttribute("aria-label", "API key of the OpenAI-compatible API");
   input.title = "The endpoint's API key, if it needs one; it is kept in the macOS Keychain and never shown again";
   const save = text("button", "Save", "btn small");
   save.id = "writer-openai-save";
@@ -295,7 +318,10 @@ function openaiRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElemen
     remove.id = "writer-openai-remove";
     remove.setAttribute("type", "button");
     remove.title = "Remove the base URL from settings.json and the key from the macOS Keychain";
-    remove.addEventListener("click", () => {
+    remove.addEventListener("click", async () => {
+      const url = known.base_url ? `The base URL ${known.base_url}` : "The base URL";
+      const lost = `${url} is removed from settings.json, and the endpoint's key, if one is set, from the macOS Keychain.`;
+      if (!(await confirmed({ heading: "Remove the OpenAI-compatible API?", lost, verb: "Remove" }))) return;
       invoke("remove_api_key", { writer: "openai", expected: hooks.texts().settings })
         .then((settings) => {
           delete keyErrors.openai;
@@ -309,9 +335,7 @@ function openaiRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElemen
   }
   const nodes = [state, row, keyRow];
   if (keyErrors.openai) {
-    const shown = text("p", keyErrors.openai, "writer-outcome failed");
-    shown.id = "writer-openai-error";
-    nodes.push(shown);
+    nodes.push(keyError(keyErrors.openai, "writer-openai-error", [base, input]));
   }
   return nodes;
 }
