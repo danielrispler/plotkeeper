@@ -1895,8 +1895,52 @@ const mapSheetClose = (): Fixture => ({
   realPointer: true, snapDone: "sheet close ok",
 });
 
+// Real keys (#454): \`await __snapKey(key)\` presses a key as Chrome's own input, so Tab moves focus and Esc closes a native popover, which a
+// synthetic KeyboardEvent does neither of. From the page's start, Tab reaches the top bar's first control and Shift+Tab leaves it; Enter
+// and Space press a focused button; the arrows reach the page as trusted keys; Esc closes an open popover.
+const snapRealKeys = (): Fixture => ({
+  ...base,
+  snapScript: `
+      const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+      const press = async (key) => { await __snapKey(key); await wait(50); };
+      const named = (node) => node?.id || node?.tagName;
+      document.activeElement?.blur();
+      const first = [...document.querySelectorAll("header.top button, header.top a[href], header.top input")].find((node) => !node.hidden && node.offsetParent);
+      if (!first) return log("snap:fail the top bar has no control");
+      await press("Tab");
+      if (document.activeElement !== first) log("snap:fail Tab from the page's start focused " + named(document.activeElement) + ", not " + first.id);
+      await press("Shift+Tab");
+      if (document.activeElement === first) log("snap:fail Shift+Tab left focus on " + first.id);
+      // A button made for the check, taken out again before the hover check runs.
+      const button = Object.assign(document.createElement("button"), { type: "button", textContent: "Pressed" });
+      const clicks = [];
+      button.addEventListener("click", (event) => clicks.push(event.isTrusted));
+      document.body.append(button);
+      button.focus();
+      await press("Enter");
+      await press("Space");
+      button.remove();
+      if (clicks.join() !== "true,true") log("snap:fail Enter and Space on a focused button clicked it " + clicks.join() + " (trusted per click)");
+      const arrows = [];
+      const heard = (event) => event.isTrusted && arrows.push(event.key);
+      document.addEventListener("keydown", heard);
+      await press("ArrowUp");
+      await press("ArrowDown");
+      document.removeEventListener("keydown", heard);
+      if (arrows.join() !== "ArrowUp,ArrowDown") log("snap:fail the arrows reached the page as " + arrows.join());
+      const menu = document.getElementById("project-actions");
+      menu.showPopover();
+      if (!menu.matches(":popover-open")) return log("snap:fail the popover did not open");
+      await press("Escape");
+      if (menu.matches(":popover-open")) log("snap:fail Esc left the popover open");
+      log("keys ok");`,
+  realKeys: true, snapDone: "keys ok",
+});
+
 export const fixtures = {
   ...railFixtures,
+  // Real keys from a fixture (#454).
+  snapRealKeys,
   // Unconfigured, with both writers found: preset to Claude, summaries off until a Test passes.
   writersList: () =>
     writersOpen({ writers: { writers: [claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: null } }, `
