@@ -283,3 +283,13 @@ test("a check whose last run is a worker's shows that worker, as a file row does
   assert.deepEqual(agents([byWorker("failed", "w1")]).map((s) => s.text), ["w1"]);
   assert.deepEqual(agents([check("cargo test", "passed")]), []);
 });
+
+test("a failed check's output and a file's hunk scroll on their own, so each takes focus with a name (#462)", () => {
+  tauri([], () => null);
+  const line = evidenceElement("s9", 1, { files: files([file("a.rs", 1, 0)]), checks: [check("cargo test", "failed")] }, { only: "all" });
+  const pres = line.find("pre");
+  assert.deepEqual(pres.map((pre) => pre.className).sort(), ["evidence-hunk", "evidence-output"]);
+  for (const pre of pres) assert.equal(pre.getAttribute("tabindex"), "0", pre.className);
+  assert.match(pres.find((pre) => pre.className === "evidence-hunk").getAttribute("aria-label") ?? "", /a\.rs/);
+  assert.match(pres.find((pre) => pre.className === "evidence-output").getAttribute("aria-label") ?? "", /cargo test|Core tests/);
+});

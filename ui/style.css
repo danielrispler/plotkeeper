@@ -145,8 +145,9 @@ h1 { margin: 0 0 var(--sp-4); }
 .item .fold[aria-expanded="true"] svg { transform: rotate(90deg); }
 .item .fold:dir(rtl) svg { transform: scaleX(-1); }
 .item .fold[aria-expanded="true"]:dir(rtl) svg { transform: scaleX(-1) rotate(90deg); }
-.item .delete { inset-inline-end: var(--sp-2); visibility: hidden; }
-.item:hover .delete, .item:focus-within .delete, .item:has(> .row[aria-pressed="true"]) .delete { visibility: visible; }
+/* Hidden by opacity, not visibility, so Shift+Tab still reaches it (#462). */
+.item .delete { inset-inline-end: var(--sp-2); opacity: 0; }
+.item:hover .delete, .item:focus-within .delete, .item:has(> .row[aria-pressed="true"]) .delete { opacity: 1; }
 .item .fold:hover, .item .delete:hover { color: var(--fg); background: var(--hover); }
 /* A landed task's session: a monochrome check mark, no colour (#53). */
 .glyph[data-glyph="check"]::after { content: "✓"; color: var(--muted); font-size: var(--size-xs); line-height: 1; }
@@ -170,7 +171,7 @@ h1 { margin: 0 0 var(--sp-4); }
 .pane.history { overflow-y: auto; padding: var(--sp-5) var(--sp-6); max-width: var(--dialog); margin: 0 auto; }
 .pane.history input { width: 100%; box-sizing: border-box; margin-bottom: var(--sp-3); font: inherit; padding: var(--sp-3); background: var(--raised); color: var(--fg); border: var(--hair) solid var(--edge); border-radius: var(--radius-small); }
 .pane.history .row:hover { background: var(--hover); }
-.pane.history .item .delete { visibility: visible; }
+.pane.history .item .delete { opacity: 1; }
 .list-foot { display: flex; align-items: center; justify-content: space-between; }
 .history-link { display: block; margin: var(--sp-3) var(--sp-4); color: var(--muted); }
 /* "Clear landed" (#382): under History, quieter still, only while a landed session shows. */
@@ -581,6 +582,8 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .brief-ready { display: block; margin: 0 0 var(--sp-4); padding: var(--sp-2) 0; font-size: var(--size-small); color: var(--muted); text-align: start; }
 .tray-note { display: block; font-size: var(--size-xs); color: var(--faint); }
 /* The map area is a camera (#383): it never scrolls; the world inside it pans and zooms, and the dot grid moves with it. */
+/* Panels, overlays and dialogs keep a wheel at their ends to themselves, as the map does (#462). */
+.list, .list .full, #palette, .ask, .panel-body, .map-pre-flight, .map-patch-review { overscroll-behavior: contain; }
 .map-canvas { position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; overscroll-behavior: contain;
               background-image: radial-gradient(var(--map-dot) var(--hair), transparent var(--hair));
               background-size: calc(var(--map-grid) * var(--cam-scale, 1)) calc(var(--map-grid) * var(--cam-scale, 1)); background-position: var(--cam-x, 0) var(--cam-y, 0); }
@@ -623,6 +626,8 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .map-empty { position: absolute; inset: 0; display: grid; align-content: center; justify-items: center; gap: var(--sp-4); text-align: center; }
 .map-empty-title { margin: 0; font-size: var(--size-large); font-weight: 600; }
 .map-empty .empty { max-width: var(--dialog); }
+/* With the left panel open, the empty map centres in the room the panel leaves, so a narrow window never hides its prompt (#462). */
+body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel-w)); padding-inline: var(--map-gutter); }
 /* The draft prompt, to paste into a session in the project: wrapped, in the code font, on the darkest tone. */
 .map-draft { max-width: var(--dialog); margin: 0; padding: var(--sp-5) var(--sp-5); text-align: start; white-space: pre-wrap; font: var(--size-small)/1.6 var(--mono);
              color: var(--muted); background: var(--chrome); border-radius: var(--radius-pane); }
@@ -712,6 +717,8 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .drawer-block { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); align-self: stretch; }
 .drawer-code { margin: 0; align-self: stretch; max-height: var(--drawer-code); overflow: auto; padding: var(--sp-4) var(--sp-5); border-radius: var(--radius-small);
                background: var(--raised); font: var(--size-xs)/1.5 var(--mono); white-space: pre; user-select: text; }
+/* A jump out of the drawer is a link that looks like the quiet button it was (#462). */
+.drawer-jump { text-decoration: none; }
 @media (prefers-reduced-motion: reduce) {
   .plate, .btn { transition: none; }
   .plate-fog, .plate-fog.lifting { animation: none; }

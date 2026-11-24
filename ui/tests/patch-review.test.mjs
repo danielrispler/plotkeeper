@@ -200,3 +200,12 @@ test("a run that cannot start, whose prompt the clipboard refuses, shows the pro
   assert.deepEqual(box.find("textarea").map((area) => area.value), ["Write a test for core-order…"]);
   globalThis.document = fakeDocument();
 });
+
+test("each output scrolls on its own, so it takes focus with the name of its heading (#462)", () => {
+  const nodes = reviewNodes(proven(), "Events apply in order.", acts([]));
+  const outputs = nodes.filter((node) => node.className === "patch-output");
+  assert.equal(outputs.length, 2);
+  for (const output of outputs) assert.equal(output.getAttribute("tabindex"), "0");
+  assert.deepEqual(outputs.map((output) => output.getAttribute("aria-label")), outputs.map((output) => nodes[nodes.indexOf(output) - 1].text));
+  assert.deepEqual(outputs.map((output) => output.getAttribute("aria-label")), ["With the test alone, the checks pass", "With the plant, the new test fails"]);
+});

@@ -358,7 +358,7 @@ export function agentRow(session: Session, children: Children, agent: Subagent, 
   return button;
 }
 
-// A row control's icon: a 14px inline SVG on the current colour, in a 20x20 button (the tokens' --control and --icon).
+// A row control's icon: a 14px inline SVG on the current colour, in a 24x24 button (the tokens' --control and --icon).
 const CHEVRON = '<path d="M5 3l4 4-4 4"/>';
 const CROSS = '<path d="M3.5 3.5l7 7M10.5 3.5l-7 7"/>';
 function icon(name: string, path: string, click: () => void): HTMLElement {

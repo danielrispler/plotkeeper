@@ -91,7 +91,13 @@ export function reviewNodes(patch: LawPatch, law: string, act: Pick<PatchActs, "
   const proof = patch.proof;
   const diff = text("div", "", "patch-diff");
   diff.append(...diffLines(patch.diff ?? "").map((line) => text("pre", line.text, `diff-line ${line.kind}`)));
-  const output = (heading: string, out: string) => [text("h3", heading, "patch-heading"), text("pre", out, "patch-output")];
+  // An output scrolls on its own, so it takes focus, named by its heading, for the keys to scroll it (#462).
+  const output = (heading: string, out: string) => {
+    const pre = text("pre", out, "patch-output");
+    pre.setAttribute("tabindex", "0");
+    pre.setAttribute("aria-label", heading);
+    return [text("h3", heading, "patch-heading"), pre];
+  };
   const foot = text("div", "", "patch-foot");
   foot.append(
     button("Open draft PR", "Push a branch with this test patch from the default branch and open a draft PR with the proof", () => act.open(patch.id), "primary"),
