@@ -79,7 +79,7 @@ Check the results when it ends:
   ```
 
   The status line looks the same as before, padding included. If `--settings` does not win, stop and report on danielrispler/Falinks#521: that reopens its decision 5.
-- [x] Then, with Daniel's approval, remove the danielrispler/Falinks#481 line from `~/.claude/statusline-command.sh`. It is the line copied from `workbench/statusline-usage.sh`, line 4, after `input=$(cat)`. Check the top bar's usage still updates from a studio-started session, and that it matches `/usage`.
+- [x] Then, with Daniel's approval, remove the danielrispler/Falinks#481 line from `~/.claude/statusline-command.sh`. It is the line copied from `workbench/statusline-usage.sh` (archived in #416), line 4, after `input=$(cat)`. Check the top bar's usage still updates from a studio-started session, and that it matches `/usage`.
 
   2026-11-11 (danielrispler/Falinks#598): line removed; the usage file still updates per turn. The week matched `/usage` exactly. The 5 hours read 5 % in the top bar against 7 % in `/usage`: the top bar shows the last status-line snapshot (6 % at 18:40), which lags `/usage` between turns, as danielrispler/Falinks#481 designed.
 
@@ -133,7 +133,7 @@ Open the sessions for the day's work: at least two in parallel, one in a task wo
 - [ ] **#162:** in the real app, hover a session name the list cuts with an ellipsis: its full text shows as a tooltip.
 - [ ] **#220:** in the real app, rest the pointer on any button, such as the gear, the "⋯" or a row's ×: within about half a second a tooltip says what it does, with its key when it has one. A disabled one, such as a stepper at its bound, says why it is off.
 - [ ] **#165:** open the top bar's usage popover: each agent's tile matches that agent's own usage screen (Claude's `/usage`, Codex's, agy's `/usage`), its shares used and its reset times, group by group.
-- [ ] **danielrispler/Falinks#519:** a row and the rail show `context N%` with the same number as Claude's status line. The hover reads "… tokens used · Claude's status line shows this as M% left".
+- [x] Retired in #416, with the context share: **danielrispler/Falinks#519:** a row and the rail show `context N%` with the same number as Claude's status line. The hover reads "… tokens used · Claude's status line shows this as M% left".
 - [ ] **danielrispler/Falinks#523:** the rail header shows the model and effort, such as `claude-opus-5-5 · effort medium`, on hover.
 - [ ] **danielrispler/Falinks#574:** select a session with a few turns and cards, without scrolling the rail: the newest card is at the top, then the boxed intention and the latest turn's summary.
 - [ ] **danielrispler/Falinks#574:** the rail's header is one line, the verdict and the phase; hovering shows the times and the model. Rename, Close and Delete (and Open all, Close all) are in its "⋯" menu, which closes on a choice or a click outside.
