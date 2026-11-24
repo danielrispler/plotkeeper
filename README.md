@@ -2,9 +2,9 @@
 
 A control room for coding agents that explains what your prompts changed.
 
-![Studio: the story rail on the left, a Claude Code terminal in the middle, the session list on the right](docs/studio/assets/readme/hero.png)
+![plotkeeper: the system map of a project, with the session list on the right](docs/studio/assets/readme/hero.png)
 
-plotkeeper builds Studio, a desktop app for macOS that sits beside your agent sessions and keeps your understanding of the code in step with what the agents change. It reads Claude Code sessions in full and agy sessions with fewer details, and it shows the status of other agents' sessions, such as Codex.
+plotkeeper is a local page for macOS that sits beside your agent sessions and keeps your understanding of the code in step with what the agents change. It records the sessions you start in your own terminals and editors through their hooks: Claude Code in full, Codex, agy and Cursor (its IDE and its CLI) with fewer details. Copilot, Qwen Code, OpenCode and Cline are coming in v2.
 
 ## What you get
 
@@ -22,26 +22,25 @@ plotkeeper builds Studio, a desktop app for macOS that sits beside your agent se
 
 ## Quick start
 
-You need macOS, Node, the Rust toolchain and Claude Code. `claude` must be on the `PATH` of your login shell: a login shell reads `~/.zprofile`, not `~/.zshrc`.
+You need macOS and Node. In any terminal, run:
 
-    git clone https://github.com/danielrispler/plotkeeper
-    cd plotkeeper
-    npm ci
-    npm start
+    npx plotkeeper
 
-`npm start` builds the page, the hook and the server, which takes a while the first time, installs `plotkeeper` into `~/.cargo/bin`, starts it and opens its page in your browser. Later, start it with `plotkeeper` from any terminal; Ctrl+C stops it.
+The first time, it lists the agents it found and what wiring each would change, then asks once: `Wire these? [Y/n]`. Yes wires them, starts plotkeeper and opens its page; for Codex, run `/hooks` in Codex once to trust plotkeeper's hooks.
 
-plotkeeper starts no sessions: to record the agents you start in your own terminals, run `plotkeeper install` once ([install and uninstall](docs/studio/plugin.md)).
+No starts it anyway, and the page says it is not recording. Your answer is kept: later starts ask only about an agent you installed since. With no terminal to ask in, a start never wires and prints `plotkeeper install --yes`. A start that finds an older plotkeeper running says so and opens its page. Ctrl+C stops plotkeeper.
 
-What plotkeeper does start, only on your click, is a [background run](docs/studio/behaviour/background-runs.md), which is not a session: one headless `claude -p` with a few tools and no terminal, one at a time per project, cancellable from the map. Back a law runs one to write a test for a law of your system map, and Explore this runs one to build a small interactive page of a mechanism.
+Summaries are written by `claude -p` by default, so `claude` must be on your login shell's `PATH` (`~/.zprofile`); the page's settings pick another writer.
 
-A run works on its own copy of your project, never your checkout, inside Claude Code's OS sandbox. It writes only in that copy and a private temp folder, its tools have no network beyond loopback, and it cannot commit, push, call `gh`, or read plotkeeper's data, Claude Code's login or the usual credential folders. It can still read other files in your home folder.
+- **Daily use:** `npm i -g plotkeeper`, then `plotkeeper`. Offline, `npx plotkeeper` waits about 70 seconds for the registry before it runs its cached copy, so use the global install or `npx --prefer-offline plotkeeper`.
+- **By hand:** `plotkeeper install` wires every agent found, declined ones included; `plotkeeper install --yes` is the same for scripts. `plotkeeper uninstall` undoes it and forgets your answers ([install and uninstall](docs/studio/plugin.md)).
+- **From source**, with the Rust toolchain: clone the repository, then `npm ci` and `npm start`, which builds plotkeeper, installs it into `~/.cargo/bin` and starts it.
 
-Its prompt holds only text plotkeeper wrote or you confirmed, never an issue's or a PR's. What it makes waits for you: plotkeeper proves a law's test fails when the law breaks, and it becomes a draft PR only when you press Open draft PR.
+plotkeeper starts no sessions; it records yours. On your click only, it starts a [background run](docs/studio/behaviour/background-runs.md): one sandboxed `claude -p` on a copy of your project, to back a law of your system map with a test or explain a mechanism. What it makes becomes a draft PR only when you press Open draft PR.
 
 ## Status
 
-Early: one user so far. macOS only, and no download yet, so you build from source. Issues are welcome; pull requests are not reviewed yet.
+Early: one user so far. macOS only, on Apple silicon and Intel. Issues are welcome; pull requests are not reviewed yet.
 
 ## Why
 
