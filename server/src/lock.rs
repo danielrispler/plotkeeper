@@ -1,5 +1,6 @@
 //! One plotkeeper per data folder (danielrispler/plotkeeper#325): a lock file the running one holds, and a file beside it with
-//! the port and token it serves on, so a second start can open the browser on the first.
+//! the port and token it serves on, so a second start can open the browser on the first, and its version, so a second
+//! start of another version can say so (#439).
 
 use std::{
     fs::{self, File, OpenOptions, TryLockError},
@@ -24,6 +25,19 @@ pub struct Held {
 pub struct Running {
     pub port: u16,
     pub token: String,
+    /// Its version; `None` in a running file from before #439.
+    pub version: Option<String>,
+}
+
+impl Running {
+    /// What a start of version `mine` says when it finds this one running at another version: that the older one keeps
+    /// serving until it is stopped. `None` when the versions match or the running file does not say.
+    pub fn version_notice(&self, mine: &str) -> Option<String> {
+        let theirs = self.version.as_deref().filter(|v| *v != mine)?;
+        Some(format!(
+            "plotkeeper {theirs} is still running; stop it (Ctrl+C) and run again to use {mine}"
+        ))
+    }
 }
 
 pub enum Instance {
@@ -51,7 +65,8 @@ pub fn acquire(dir: &Path) -> io::Result<Instance> {
             }))
         }
         Err(TryLockError::WouldBlock) => {
-            // The first may still be starting: its address is written once it listens.
+            // The first may still be starting: its address is written once it listens, after its wiring step, which
+            // may wait on its question (#434).
             for _ in 0..40 {
                 if let Some(running) = read_running(&dir.join(RUNNING)) {
                     return Ok(Instance::Second(running));
@@ -59,7 +74,7 @@ pub fn acquire(dir: &Path) -> io::Result<Instance> {
                 thread::sleep(Duration::from_millis(50));
             }
             Err(io::Error::other(
-                "another plotkeeper holds the data folder but does not say where it serves",
+                "another plotkeeper holds the data folder but does not say where it serves yet; it may still be starting, or waiting for an answer in its terminal",
             ))
         }
         Err(TryLockError::Error(e)) => Err(e),
@@ -71,13 +86,17 @@ fn read_running(file: &Path) -> Option<Running> {
     Some(Running {
         port: u16::try_from(value["port"].as_u64()?).ok()?,
         token: value["token"].as_str()?.to_string(),
+        version: value["version"].as_str().map(str::to_string),
     })
 }
 
 impl Held {
-    /// Says where this plotkeeper serves, for a second start. The file is for its owner only: it holds the token.
+    /// Says where this plotkeeper serves and its version, for a second start. The file is for its owner only: it holds
+    /// the token.
     pub fn publish(&self, port: u16, token: &str) -> io::Result<()> {
-        let text = serde_json::json!({ "port": port, "token": token }).to_string();
+        let version = env!("CARGO_PKG_VERSION");
+        let text =
+            serde_json::json!({ "port": port, "token": token, "version": version }).to_string();
         let temp = self.running.with_extension("tmp");
         let mut file = OpenOptions::new()
             .create(true)

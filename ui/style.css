@@ -458,6 +458,8 @@ h1 { margin: 0 0 var(--sp-4); }
 .review { display: flex; align-items: baseline; gap: var(--sp-4); font-size: var(--size-small); color: var(--muted); }
 .review[hidden], .map-review[hidden] { display: none; }
 .map-review:not([hidden]) { margin-inline-start: var(--sp-5); }
+/* Not recording (#437): the same quiet line, muted, never a colour of its own. */
+.map-wiring { margin: 0 0 0 var(--sp-5); min-width: 0; font-size: var(--size-small); color: var(--muted); }
 .map-banner:not(:empty) { margin-inline-start: auto; font-size: var(--size-small); color: var(--muted); }
 /* The map fills the stage; the left panel, the side area and the tray float over it, so opening one never moves or squashes a part (#385). */
 .map-stage { --panel-w: var(--rail); display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; position: relative; }

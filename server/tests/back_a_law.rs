@@ -103,6 +103,9 @@ fn bench(agent: &str) -> Bench {
     git(&repo, &["switch", "-q", "-c", "mine"]);
     git(&repo, &["config", "user.name", "Daniel"]);
     git(&repo, &["config", "user.email", "daniel@example.com"]);
+    // A commit starts `git maintenance run --auto --detach`, whose `.git/objects/maintenance.lock` can still be there
+    // when the test takes its snapshot of the repository and gone when it compares (CI on PR #442, twice).
+    git(&repo, &["config", "maintenance.auto", "false"]);
     fs::write(repo.join("src/add.mjs"), "// Daniel's own work.\n").unwrap();
     git(&repo, &["commit", "-q", "-am", "Mine"]);
     let project = repo.display().to_string();
