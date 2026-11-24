@@ -1,34 +1,4 @@
-// Removed from core/tests/turn_files.rs in #415 with `Studio::summary_facts`, `turn_workers` and `turn_merged`, which only these tests called. One `turn_workers` assert was dropped from `a_worktree_the_session_edits_through_bash_with_no_worker_in_it_counts_for_its_turn`.
-
-#[test]
-fn a_turns_summary_facts_are_its_files_with_counts_and_its_checks() {
-    let studio = Studio::replayed([
-        prompt(json!({ ROOT: "s1" })),
-        edit(1_000, "e1", "/w/repo/src/a.rs", None),
-        stop(json!({ ROOT: "e1" })),
-    ]);
-    let id = studio.session(SESSION).unwrap().turns[0]
-        .id
-        .clone()
-        .unwrap();
-
-    let ask = studio
-        .summary_ask(&id)
-        .expect("an ask for a turn with trees");
-    assert!(ask.ended);
-    assert_eq!(ask.trees[0].end.as_deref(), Some("e1"));
-    let diff = vec![RootDiff {
-        root: ROOT.into(),
-        moved: vec![],
-        files: vec![stat("src/a.rs", 3, 1), stat("src/b.rs", 5, 0)],
-    }];
-    let facts = studio.summary_facts(&ask, Some(diff));
-
-    assert_eq!(facts.files.len(), 2);
-    assert_eq!(facts.files[0].file.path, "src/a.rs");
-    assert_eq!(facts.files[1].file.path, "src/b.rs");
-    assert_eq!(studio.summary_ask("no-such-turn"), None);
-}
+// Removed from core/tests/turn_files.rs in #415 with `Studio::turn_workers` and `turn_merged`, which only these tests called. One `turn_workers` assert was dropped from `a_worktree_the_session_edits_through_bash_with_no_worker_in_it_counts_for_its_turn`.
 
 #[test]
 fn the_turns_workers_homes_are_the_worktrees_its_offer_leaves_out() {

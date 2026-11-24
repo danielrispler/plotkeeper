@@ -4,7 +4,7 @@
 
 use crate::common;
 use serde_json::{Value, json};
-use studio_core::{CheckStatus, Numstat, RootDiff, Studio, TurnDiff};
+use studio_core::{CheckStatus, Numstat, RootDiff, Studio, TurnDiff, compute_turn_files};
 
 const SESSION: &str = "5b1c7e30-9d2a-4f8b-8c63-1e0a7d4b9f52";
 const ROOT: &str = "/w/repo";
@@ -425,6 +425,37 @@ fn an_agy_session_reports_no_turn_files_and_its_capability_says_so() {
             .iter()
             .all(|t| t.files.is_none())
     );
+}
+
+#[test]
+fn a_turns_summary_facts_are_its_files_with_counts_and_its_checks() {
+    let studio = Studio::replayed([
+        prompt(json!({ ROOT: "s1" })),
+        edit(1_000, "e1", "/w/repo/src/a.rs", None),
+        stop(json!({ ROOT: "e1" })),
+    ]);
+    let id = studio.session(SESSION).unwrap().turns[0]
+        .id
+        .clone()
+        .unwrap();
+
+    let ask = studio
+        .summary_ask(&id)
+        .expect("an ask for a turn with trees");
+    assert!(ask.ended);
+    assert_eq!(ask.trees[0].end.as_deref(), Some("e1"));
+    let diff = vec![RootDiff {
+        root: ROOT.into(),
+        moved: vec![],
+        files: vec![stat("src/a.rs", 3, 1), stat("src/b.rs", 5, 0)],
+    }];
+    let found = compute_turn_files(&studio.turn_files_snapshot(&ask, &diff), diff);
+    let facts = studio.facts_of(&ask, Some(found));
+
+    assert_eq!(facts.files.len(), 2);
+    assert_eq!(facts.files[0].file.path, "src/a.rs");
+    assert_eq!(facts.files[1].file.path, "src/b.rs");
+    assert_eq!(studio.summary_ask("no-such-turn"), None);
 }
 
 /// `count` turns, each ended, from prompt ids `t0`, `t1`, ... one second apart.

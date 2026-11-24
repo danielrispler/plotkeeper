@@ -465,6 +465,15 @@ fn a_card_blocked_again_is_blocked_at_the_time_of_the_new_block() {
     assert_eq!((card.at, card.run_at), (8_000, None));
 }
 
+/// An ended session's card still counts as waiting; only `wants_you`, archived in #415, left it out.
+#[test]
+fn an_ended_session_keeps_its_waiting_cards() {
+    let end = line("SessionEnd", 8_000, json!({ "reason": "other" }));
+    let lines = then(allowed(), vec![stop(6_000, None), end]);
+    let s = session(&lines);
+    assert_eq!((s.state, s.blocked_waiting()), (State::Ended, 1));
+}
+
 /// A subagent `a-7aaaa`'s block of `COMMAND`, which Daniel allowed.
 fn allowed_for_subagent() -> Vec<String> {
     then(

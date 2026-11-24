@@ -133,7 +133,7 @@ Retired with the Tauri app (#332); it is in `archive/terminal-daemon/` (#415). T
 _Avoid_: Server (the program that serves the page, below), multiplexer
 
 **Server**:
-The `server/` library and its `plotkeeper` program, which has no window: it holds the core state, the card store and the writer, follows the event log, writes the summaries and the PR briefs, and serves the learning layer as a page on 127.0.0.1 (one per data folder, behind a token) that Daniel opens in a browser tab. The app's shell is another host of the same library. It does not own terminals, which stay with the **Terminal daemon**.
+The `server/` library and its `plotkeeper` program, which has no window: it holds the core state, the card store and the writer, follows the event log, writes the summaries and the PR briefs, and serves the learning layer as a page on 127.0.0.1 (one per data folder, behind a token) that Daniel opens in a browser tab. It owns no terminals: the **Terminal daemon** and the Tauri app's shell that also hosted the library are retired (#332, #415).
 _Avoid_: Backend, daemon (the terminal daemon is another process)
 
 **Pane** (retired):

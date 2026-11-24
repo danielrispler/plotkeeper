@@ -37,7 +37,7 @@ fn losses_are_empty_for_a_clean_pushed_task_and_list_new_work() {
 fn no_code_path_passes_force() {
     let studio = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let mut checked = 0;
-    for dir in ["workbench/src", "server/src", "ui"] {
+    for dir in ["workbench/src", "server/src", "server/src/bin", "ui"] {
         for entry in std::fs::read_dir(studio.join(dir)).unwrap() {
             let file = entry.unwrap().path();
             if !matches!(file.extension().and_then(|e| e.to_str()), Some("rs" | "ts")) {
