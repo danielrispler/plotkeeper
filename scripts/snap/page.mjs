@@ -4,6 +4,7 @@
 // `__snapDrag(node, dx, dy)` are real mouse input, which snap sends (`realPointer`), `__snapKey(key)` a real key press (`realKeys`), and the fixture's `storage` is put in localStorage first.
 // It exists only in the page written to a temp directory, never in dist or the shipped page.
 
+import { contrastAudit } from "./contrast.mjs";
 import { hoverAudit } from "./hover.mjs";
 
 export const stubSource = (fixture) => `(() => {
@@ -34,6 +35,20 @@ export const stubSource = (fixture) => `(() => {
     await real("drag-start", query);
     await midway();
     return real("drag-end", query);
+  };
+  // \`await __snapShot()\` is the page as Chrome draws it now, its \`width\`, \`height\` and RGBA pixels (\`data\`), for a fixture with
+  // \`contrast\` (contrast.mjs).
+  window.__snapShot = async () => {
+    await serverFetch("/__snap/shot-start");
+    for (let ask = 0; ask < 40; ask++) {
+      await new Promise((done) => setTimeout(done, 25));
+      const reply = await serverFetch("/__snap/shot");
+      if (!reply.ok) throw new Error("no screenshot: " + (await reply.text()));
+      if (reply.status !== 200) continue;
+      const bytes = new DataView(await reply.arrayBuffer());
+      return { width: bytes.getUint32(0), height: bytes.getUint32(4), data: new Uint8ClampedArray(bytes.buffer, 8) };
+    }
+    throw new Error("no screenshot within a second of the page's time");
   };
   // A fixture's \`storage\` is what this browser had kept from an earlier visit, written before the app starts.
   for (const [key, value] of Object.entries(fixture.storage ?? {})) localStorage.setItem(key, value);
@@ -82,8 +97,8 @@ export const stubSource = (fixture) => `(() => {
 // the UI has drawn (the page has loaded and its first replies have landed). The script is the body of an async function that
 // gets `log`; what it logs reaches snap's output, and a line that starts `snap:fail` makes snap exit non-zero. A script that
 // throws logs a `snap:fail` line. The hover rule's check runs after it in every page, also after a script that returned early or
-// threw (hover.mjs).
-export const headSource = ({ bodyClasses = [], script = null } = {}) => `
+// threw (hover.mjs). A fixture with `contrast` runs the contrast pass (contrast.mjs) between the two.
+export const headSource = ({ bodyClasses = [], script = null, contrast = false } = {}) => `
   addEventListener("DOMContentLoaded", () => document.body.classList.add(...${JSON.stringify(bodyClasses)}));
   addEventListener("load", () => setTimeout(async () => {
     const log = (...parts) => console.log(parts.join(" "));
@@ -91,7 +106,12 @@ export const headSource = ({ bodyClasses = [], script = null } = {}) => `
       await (async (log) => {\n${script ?? ""}\n})(log);
     } catch (error) {
       log("snap:fail the script threw: " + error);
-    }
+    }${contrast ? `
+    try {
+      await (async (log) => {\n${contrastAudit}\n})(log);
+    } catch (error) {
+      log("snap:fail the contrast pass threw: " + error);
+    }` : ""}
     try {
       await (async (log) => {\n${hoverAudit}\n})(log);
     } catch (error) {
@@ -102,7 +122,7 @@ export const headSource = ({ bodyClasses = [], script = null } = {}) => `
 export const snapPage = (index, fixture, options = {}) =>
   index.replace(
     '<script type="module"',
-    () => `<script>${stubSource(fixture)}${headSource({ script: fixture.snapScript ?? null, ...options })}</script>\n  <script type="module"`,
+    () => `<script>${stubSource(fixture)}${headSource({ script: fixture.snapScript ?? null, contrast: !!fixture.contrast, ...options })}</script>\n  <script type="module"`,
   );
 
 // The lines of Chrome's stderr that are page console output, as the page logged them.
