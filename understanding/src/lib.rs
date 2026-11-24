@@ -877,8 +877,9 @@ impl ClaudeWriter {
             build_command(WriterKind::Claude, &self.program, &self.folder, &request);
         command.args(["--output-format", "json"]);
         // Appended, so `claude`'s own system prompt stays and the facts follow it, the same text on every call of a write.
+        // NUL bytes, which no argument can hold, are dropped, as standard input's are.
         if let Some(facts) = facts {
-            command.args(["--append-system-prompt", facts]);
+            command.args(["--append-system-prompt", &facts.replace('\0', "")]);
         }
         (command, stdin)
     }

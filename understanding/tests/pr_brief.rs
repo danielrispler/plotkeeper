@@ -1137,6 +1137,25 @@ fn a_briefs_call_carries_its_facts_as_appended_system_text_and_its_own_rules_as_
     assert_eq!(stdin, "the rules");
 }
 
+// No argument can hold a NUL byte: the facts drop theirs, as standard input does, so the spawn starts (#443 review).
+#[test]
+fn a_briefs_facts_with_a_nul_byte_still_spawn() {
+    use studio_understanding::ClaudeWriter;
+    let folder = tempfile::tempdir().unwrap();
+    let writer = ClaudeWriter::new("/usr/bin/true".into(), folder.path().into());
+    let (mut command, _) =
+        writer.brief_command("opus", CallKind::Write, Some("FACTS\0 from a diff"), "p");
+    let args: Vec<String> = command
+        .get_args()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    let at = args.iter().position(|a| a == "--append-system-prompt");
+    assert_eq!(at.map(|i| args[i + 1].as_str()), Some("FACTS from a diff"));
+    let spawned = command.spawn();
+    assert!(spawned.is_ok(), "{:?}", spawned.err());
+    spawned.unwrap().wait().unwrap();
+}
+
 #[test]
 fn the_claim_checks_call_runs_at_claudes_own_effort_whatever_the_brief_effort() {
     use studio_understanding::ClaudeWriter;

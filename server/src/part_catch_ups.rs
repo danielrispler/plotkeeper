@@ -122,6 +122,8 @@ impl Claim {
             Some(next)
         });
         if queued.is_none() {
+            // The stage goes while the part is still this claim's, so it never wipes a new write's.
+            self.stages.lock().unwrap().remove(&self.key);
             busy.remove(&self.key);
             self.released = true;
         }
@@ -131,13 +133,15 @@ impl Claim {
 
 impl Drop for Claim {
     fn drop(&mut self) {
-        self.stages.lock().unwrap().remove(&self.key);
         // A write panicked: the newest list asked for is marked failed, so the sheet says so and a click tries it again.
-        if !self.released
-            && let Some((writing, queued)) = self.busy.lock().unwrap().remove(&self.key)
-        {
-            let list = queued.unwrap_or(writing);
-            self.failed.lock().unwrap().insert(self.key.clone(), list);
+        // A released claim no longer owns the part, so it touches neither its stage nor its claim.
+        if !self.released {
+            let mut busy = self.busy.lock().unwrap();
+            self.stages.lock().unwrap().remove(&self.key);
+            if let Some((writing, queued)) = busy.remove(&self.key) {
+                let list = queued.unwrap_or(writing);
+                self.failed.lock().unwrap().insert(self.key.clone(), list);
+            }
         }
         if let Some(done) = self.done.take() {
             done();
@@ -1000,6 +1004,22 @@ mod tests {
             "{seen:?}"
         );
         assert_eq!(shows.catch_ups.stage(&shows.rig.main, "a"), None);
+    }
+
+    // A claim that ended keeps its hands off the part: a new write claimed before the old guard drops keeps its stage
+    // (#443 review).
+    #[test]
+    fn an_ended_claim_dropping_late_keeps_the_new_writes_stage() {
+        let catch_ups = CatchUps::default();
+        let fog = vec!["c1".to_string()];
+        let mut old = catch_ups.claim("p", "a", &fog).unwrap();
+        assert_eq!(old.next(), None);
+        let _new = catch_ups.claim("p", "a", &fog).unwrap();
+        let key = ("p".to_string(), "a".to_string());
+        catch_ups.stages.lock().unwrap().insert(key, Stage::Writing);
+        drop(old);
+        assert_eq!(catch_ups.stage("p", "a"), Some(Stage::Writing));
+        assert!(catch_ups.writing("p", "a"));
     }
 
     #[test]

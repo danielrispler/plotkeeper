@@ -776,8 +776,11 @@ function show(view: MapView, same: boolean) {
     if (now.step === 0) summaryInto(node);
     const bar = endBar(node, now.step, list.length);
     cols.replaceChildren(node);
+    // A new step opens at its top, and the camera frames once the step's words set the card's height (#443 review).
+    if (!same) cols.scrollTop = 0;
     bar?.offer();
     watchLast(node, now.step);
+    aim(view, step);
   };
   clearTimeout(swap);
   if (same || reduced()) {
@@ -796,7 +799,6 @@ function show(view: MapView, same: boolean) {
   wireTaps(view);
   light(view, step);
   paintOrder(view, step);
-  aim(view, step);
 }
 
 // The end-of-story bar ends the played list's last step: a single story's end, or a chapter's (#393). It goes under the step's words and figure.

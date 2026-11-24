@@ -179,8 +179,10 @@ window.addEventListener("keydown", (event) => {
   const target = event.target as HTMLElement;
   const typing = target.isContentEditable || target.matches?.("input, textarea, select") === true;
   const inList = target.closest?.(".list") != null;
-  // The end-of-story bar on screen takes its digits and its skip key (#393), after a docked card's answer keys.
-  if (!answerable() && barKeyDown(event, typing)) return void event.preventDefault();
+  // The end-of-story bar on screen takes its digits and its skip key (#393), after a docked card's answer keys. A picked
+  // explain-back mark (a radio) takes no letters, so S still skips the bar from it (#443 review).
+  const choosing = target.matches?.('input[type="radio"], input[type="checkbox"]') === true;
+  if (!answerable() && barKeyDown(event, typing && !choosing)) return void event.preventDefault();
   const action = windowBinding(studio.files.keymap, event, typing, inList, !typing && answerable());
   if (!run(actions, action)) return;
   if (action !== "studio::Dismiss") event.preventDefault();

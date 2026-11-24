@@ -407,6 +407,29 @@ const mapBriefTall = (): Fixture =>
       cols.scrollTop = cols.scrollHeight;
       await wait(100);
       if (box(next).top !== place.top) log("snap:fail Next moved with the scroll");`);
+// With motion on, a step's words come in after a short fade: the camera frames once they are in, so a taller step's card never covers the
+// parts it lights (#443 review). The brief opens on a short step and Next goes to a tall one.
+const motionOn = `
+      window.matchMedia = (query) => (query.includes("prefers-reduced-motion") ? { ...media(query), matches: false } : media(query));`;
+const mapBriefTaller = (): Fixture =>
+  mapBrief(briefOf([storySteps()[1], { ...tallStep(), on: ["core", "daemon"] }]), 0, `${cardBox}${motionOn}
+      document.getElementById("brief-next").click();
+      await wait(400);
+      const top = box(card()).top;
+      const lit = [...document.querySelectorAll(".plate.lit")];
+      if (!lit.length) log("snap:fail the tall step lights no part");
+      for (const plate of lit) if (box(plate).bottom > top + 0.5) log("snap:fail the card covers " + plate.dataset.id + ": its foot at " + box(plate).bottom + ", the card's top at " + top);`, true);
+// Next from a tall step scrolled to its end opens the next tall step at its top (#443 review).
+const mapBriefTallScroll = (): Fixture =>
+  mapBrief(briefOf([tallStep(), tallStep()]), 0, `
+      const cols = document.querySelector("#map-brief .brief-cols");
+      cols.scrollTop = cols.scrollHeight;
+      await wait(50);
+      if (!(cols.scrollTop > 0)) return log("snap:fail the first tall step did not scroll: " + cols.scrollTop);
+      document.getElementById("brief-next").click();
+      await wait(200);
+      if (document.querySelectorAll(".brief-dots i")[1]?.classList.contains("at") !== true) return log("snap:fail Next did not go to the second step");
+      if (cols.scrollTop !== 0) log("snap:fail the next step opens scrolled: " + cols.scrollTop);`, true);
 const mapBriefUnconfirmed = (): Fixture =>
   mapBrief(briefOf([step("Now", "Cards are written once per turn", "A turn is written once, whatever the order of events.", ["understanding"], { flags: ["the claim is not in the facts"] })], true), 0, `
       if (!document.querySelector("#map-brief .brief-unconfirmed")?.textContent.includes("not confirmed from the facts")) log("snap:fail no unconfirmed mark");
@@ -568,7 +591,7 @@ const mapBriefBar = (): Fixture =>
 // in the bar's first row: autocomplete off, a placeholder that shows an example and ends with "…". Before submit, an "s" and a "2" typed
 // in the line do not skip, the gist is not shown yet, and an Enter while an input method is composing does not submit. After submit
 // (Enter), the line shows with the gist under it and the three marks as radios in a fieldset with a legend, each radio inside its label;
-// a click on Partly's label checks it. Each is sent to the shell; no number shows.
+// a click on Partly's label checks it. Each is sent to the shell; no number shows. With the picked mark focused, S skips the bar.
 const explainGist = "A ready PR's brief is written in the background and played on the map, and reading a chapter clears its parts' fog.";
 const mapBriefExplainBack = (submit: boolean): Fixture =>
   mapBrief(briefOf(storySteps(), false, { chapters: [{ ...brief(storySteps()).chapters[0], gist: explainGist }] }), 3, `
@@ -611,7 +634,13 @@ const mapBriefExplainBack = (submit: boolean): Fixture =>
       if (/\\d/.test(bar().querySelector(".bar-slot").textContent)) log("snap:fail explain-back shows a number");
       const bars = sent.filter((call) => call.includes("/api/story_bar")).map((call) => JSON.parse(call.slice(call.indexOf(" ") + 1)));
       const kinds = bars.map((b) => b.kind + ":" + (b.line ?? b.mark)).join();
-      if (kinds !== "explain-back-given:" + line.value + ",explain-back-marked:partly") log("snap:fail the bar sent " + kinds);` : `await wait(50);`}`, false, 100);
+      if (kinds !== "explain-back-given:" + line.value + ",explain-back-marked:partly") log("snap:fail the bar sent " + kinds);
+      // A picked mark is no field: S still skips the bar (#443 review). The screenshot is the bar before the skip.
+      radios[1].focus();
+      key(radios[1], "s");
+      await wait(50);
+      if (!bar().hidden) log("snap:fail the S key did not skip the bar with a mark picked");
+      bar().hidden = false;` : `await wait(50);`}`, false, 100);
 // Overturning in the brief's ratify step (port decision Q2): the prompt goes to the clipboard and the step says so, or, when the clipboard
 // refuses, shows the prompt in a box with a Copy button. The page's clipboard is stubbed to take or refuse the write.
 const mapBriefOverturn = (clipboard: "copies" | "refuses"): Fixture => ({
@@ -1955,6 +1984,8 @@ export const fixtures = {
   mapBriefCompare: () => mapBriefFigure("compare"),
   mapBriefHeights,
   mapBriefTall,
+  mapBriefTaller,
+  mapBriefTallScroll,
   mapBriefUnconfirmed,
   mapBriefPickRight: () => mapBriefPick(1),
   mapBriefPickWrong: () => mapBriefPick(0),
