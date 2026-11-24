@@ -9,7 +9,7 @@
 
 use crate::pr_brief::{
     Also, Brief, BriefRecord, BriefWriter, CallUsage, CheckContext, Decision, Facts, Step,
-    check_brief, facts_block, prompt, put_plan_first, timed_write,
+    check_brief, facts_block, prompt, put_plan_first, timed_write_facts,
 };
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -30,7 +30,7 @@ pub enum Stage {
 pub const UNCONFIRMED: &str = "not confirmed from the facts";
 const CLAIM_PREFIX: &str = "claim check: ";
 
-const CHECK_INSTRUCTIONS: &str = r#"You check a written PR brief against the facts it was written from. You have no tools: everything you may rely on is in FACTS above.
+const CHECK_INSTRUCTIONS: &str = r#"You check a written PR brief against the facts it was written from. You have no tools: everything you may rely on is in FACTS, in the system prompt.
 
 For every item of the brief, decide whether FACTS support each claim it makes, at the strength it states it:
 - a step: its heading and body, its law and covered_by, its list lines, every risk (part, trigger, check), and, when it holds a check, the check's question, its options and its yes and no text;
@@ -123,15 +123,15 @@ fn item_json(brief: &Brief, item: Item) -> Value {
     }
 }
 
-/// The claim check's request: the facts block the writer's prompt starts with (#450), the rules, and every item with its id.
-pub fn claim_prompt(facts: &Facts, brief: &Brief) -> String {
+/// The claim check's request: the rules and every item with its id. The facts go beside it as the write's shared facts block
+/// (#450).
+pub fn claim_prompt(brief: &Brief) -> String {
     let list: Vec<Value> = items(brief)
         .into_iter()
         .map(|(id, item)| json!({ "id": id, "item": item_json(brief, item) }))
         .collect();
     format!(
-        "{}{CHECK_INSTRUCTIONS}\nBRIEF ITEMS\n\n{}\n",
-        facts_block(facts),
+        "{CHECK_INSTRUCTIONS}\nBRIEF ITEMS\n\n{}\n",
         serde_json::to_string_pretty(&list).unwrap_or_default()
     )
 }
@@ -199,8 +199,8 @@ fn add_claim_flags(brief: &mut Brief, claims: &[ClaimFlag], skip: &BTreeSet<Stri
     }
 }
 
-/// The retry's request: the brief's whole prompt, the brief as written, and each flagged item with its flags.
-/// `None` when no item is flagged.
+/// The retry's request: the writer's rules, the brief as written, and each flagged item with its flags; the facts go beside it
+/// as the write's shared facts block (#450). `None` when no item is flagged.
 pub fn retry_prompt(facts: &Facts, brief: &Brief) -> Option<String> {
     let flagged: Vec<Value> = items(brief)
         .into_iter()
@@ -321,7 +321,8 @@ pub fn claim_check_and_retry(
 ) {
     let mut claims = Vec::new();
     stage(Stage::Checking);
-    match timed_write(writer, model, &claim_prompt(facts, brief)) {
+    let shared = facts_block(facts);
+    match timed_write_facts(writer, model, &shared, &claim_prompt(brief)) {
         Err(e) => record.claim_error = Some(e),
         Ok(reply) => {
             record.calls.push(with_role(reply.usage, "claim check"));
@@ -347,7 +348,7 @@ pub fn claim_check_and_retry(
         .count();
     stage(Stage::Fixing { claims: flagged });
     let mut rewritten = BTreeSet::new();
-    match timed_write(writer, model, &request) {
+    match timed_write_facts(writer, model, &shared, &request) {
         Err(e) => record.retry_error = Some(e),
         Ok(reply) => {
             record.calls.push(with_role(reply.usage, "retry"));

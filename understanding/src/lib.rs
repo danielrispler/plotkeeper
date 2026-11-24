@@ -836,16 +836,27 @@ impl ClaudeWriter {
 
     /// What `claude -p --output-format json` printed for a PR brief's call at `model` on `prompt`: always Claude, whatever
     /// `summaries.writer` says (danielrispler/plotkeeper#334, port decision Q4). One line for the log when the call failed.
-    pub(crate) fn brief_stdout(&self, model: &str, prompt: &str) -> Result<String, String> {
+    pub(crate) fn brief_stdout(
+        &self,
+        model: &str,
+        facts: Option<&str>,
+        prompt: &str,
+    ) -> Result<String, String> {
         let timeout = self.timeout.unwrap_or(WriterKind::Claude.timeout());
-        match self.call(timeout, self.brief_command(model, prompt), false) {
+        match self.call(timeout, self.brief_command(model, facts, prompt), false) {
             Ok(reply) => Ok(reply.text),
             Err(error) => Err(error.to_string()),
         }
     }
 
-    /// The `claude -p --output-format json` run of a PR brief's call at `model` on `prompt`, and its standard input.
-    pub fn brief_command(&self, model: &str, prompt: &str) -> (Command, String) {
+    /// The `claude -p --output-format json` run of a PR brief's call at `model` on `prompt`, with `facts` appended to the system
+    /// prompt, and its standard input.
+    pub fn brief_command(
+        &self,
+        model: &str,
+        facts: Option<&str>,
+        prompt: &str,
+    ) -> (Command, String) {
         let request = WriterRequest {
             user: prompt.into(),
             model: Some(model.into()),
@@ -856,6 +867,10 @@ impl ClaudeWriter {
         let (mut command, stdin) =
             build_command(WriterKind::Claude, &self.program, &self.folder, &request);
         command.args(["--output-format", "json"]);
+        // Appended, so `claude`'s own system prompt stays and the facts follow it, the same text on every call of a write.
+        if let Some(facts) = facts {
+            command.args(["--append-system-prompt", facts]);
+        }
         (command, stdin)
     }
 

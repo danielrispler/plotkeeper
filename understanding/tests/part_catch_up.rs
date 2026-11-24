@@ -156,12 +156,7 @@ fn the_check_follows_the_brief_rule_a_changed_tagged_test_allows_a_pick_and_a_ch
 fn the_prompt_is_the_catch_ups_and_keeps_the_briefs_step_rules() {
     let facts = build_catch_up_facts(&source()).unwrap();
     let p = studio_understanding::pr_brief::prompt(&facts);
-    let rules = &p[studio_understanding::pr_brief::facts_block(&facts).len()..];
-    assert!(
-        rules.starts_with("You write a part catch-up"),
-        "{}",
-        &rules[..80]
-    );
+    assert!(p.starts_with("You write a part catch-up"), "{}", &p[..80]);
     assert!(p.contains("\"Must stay true\""), "the brief's step kinds");
     assert!(p.contains("\"kind\": \"pick\""), "the brief's checks");
     assert!(!p.contains("You write a PR brief"));
@@ -320,25 +315,64 @@ fn the_entry_runs_the_claim_check_and_one_retry_and_stores_the_catch_up_by_part_
     assert_eq!(records[0].claim_flags_before.len(), 1);
 }
 
+/// A writer that keeps each call's shared facts and its own prompt apart, as `claude -p` gets them.
+struct Fenced {
+    replies: RefCell<Vec<String>>,
+    calls: RefCell<Vec<(String, String)>>,
+}
+
+impl BriefWriter for Fenced {
+    fn write(&self, model: &str, prompt: &str) -> Result<BriefReply, String> {
+        self.write_with_facts(model, "", prompt)
+    }
+    fn write_with_facts(
+        &self,
+        _model: &str,
+        facts: &str,
+        prompt: &str,
+    ) -> Result<BriefReply, String> {
+        self.calls.borrow_mut().push((facts.into(), prompt.into()));
+        Ok(BriefReply {
+            text: self.replies.borrow_mut().remove(0),
+            usage: CallUsage::default(),
+        })
+    }
+}
+
 #[test]
-fn the_writer_the_claim_check_and_the_retry_start_with_the_same_facts_block_byte_for_byte() {
+fn the_three_calls_share_the_facts_as_fenced_system_text_and_send_only_their_own_rules_as_the_prompt()
+ {
     let data = tempfile::tempdir().unwrap();
     let store = CatchUpStore::open(data.path()).unwrap();
     let flagged = json!({ "items": [ { "id": "step 3", "supported": false, "phrase": "keeps the order", "why": "the facts say nothing" } ] });
-    let retry = json!({ "items": [] });
-    let writer = Canned::new(vec![
-        reply().to_string(),
-        flagged.to_string(),
-        retry.to_string(),
-    ]);
+    let writer = Fenced {
+        replies: RefCell::new(vec![
+            reply().to_string(),
+            flagged.to_string(),
+            json!({ "items": [] }).to_string(),
+        ]),
+        calls: RefCell::new(vec![]),
+    };
     write_part_catch_up(&writer, "opus", &source(), &store, |_| {}, |_| {}).unwrap();
-    let block =
-        studio_understanding::pr_brief::facts_block(&build_catch_up_facts(&source()).unwrap());
-    let prompts = writer.prompts.borrow();
-    assert_eq!(prompts.len(), 3, "writer, claim check, retry");
-    for (i, p) in prompts.iter().enumerate() {
-        assert!(p.starts_with(&block), "call {i} starts: {}", &p[..80]);
+    let facts = build_catch_up_facts(&source()).unwrap();
+    let block = studio_understanding::pr_brief::facts_block(&facts);
+    let calls = writer.calls.borrow();
+    assert_eq!(calls.len(), 3, "writer, claim check, retry");
+    for (i, (shared, prompt)) in calls.iter().enumerate() {
+        assert_eq!(shared, &block, "call {i}'s shared facts");
+        assert!(
+            !prompt.contains(&facts.text),
+            "call {i}'s prompt repeats the facts"
+        );
     }
+    assert!(
+        block.contains(&facts.text) && block.contains("untrusted"),
+        "{}",
+        &block[..200]
+    );
+    assert!(calls[0].1.starts_with("You write a part catch-up"));
+    assert!(calls[1].1.starts_with("You check a written PR brief"));
+    assert!(calls[2].1.contains("RETRY"));
 }
 
 fn long_source(n: usize) -> CatchUpSource {

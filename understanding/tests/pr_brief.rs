@@ -1092,7 +1092,7 @@ fn a_failed_call_or_an_unreadable_reply_stores_and_records_nothing() {
 fn a_briefs_call_runs_at_the_brief_effort_and_at_claudes_own_without_one() {
     use studio_understanding::ClaudeWriter;
     let args = |w: &ClaudeWriter| -> Vec<String> {
-        w.brief_command("opus", "p")
+        w.brief_command("opus", None, "p")
             .0
             .get_args()
             .map(|a| a.to_string_lossy().into_owned())
@@ -1112,6 +1112,28 @@ fn a_briefs_call_runs_at_the_brief_effort_and_at_claudes_own_without_one() {
     let unset = ClaudeWriter::new("/bin/claude".into(), "/w/card-writer".into())
         .with_brief_effort(String::new);
     assert!(!args(&unset).contains(&"--effort".to_string()));
+}
+
+#[test]
+fn a_briefs_call_carries_its_facts_as_appended_system_text_and_its_own_rules_as_the_prompt() {
+    use studio_understanding::ClaudeWriter;
+    let writer = ClaudeWriter::new("/bin/claude".into(), "/w/card-writer".into());
+    let (command, stdin) = writer.brief_command("opus", Some("FACTS text"), "the rules");
+    let args: Vec<String> = command
+        .get_args()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    let at = args.iter().position(|a| a == "--append-system-prompt");
+    assert_eq!(
+        at.map(|i| args[i + 1].as_str()),
+        Some("FACTS text"),
+        "{args:?}"
+    );
+    assert!(
+        !args.contains(&"--system-prompt".to_string()),
+        "the default system prompt stays"
+    );
+    assert_eq!(stdin, "the rules");
 }
 
 #[test]
@@ -1366,7 +1388,7 @@ fn a_flagged_step_is_rewritten_unflagged_steps_are_kept_and_a_step_still_flagged
     assert!(prompts[1].1.contains("=== SHAPE (decided by code) ==="));
     assert!(prompts[2].1.contains("banned word"));
     assert!(prompts[2].1.contains("the PR never says it is kept"));
-    // The three calls start with the same facts block, byte for byte, so the later ones can read it from cache (#450).
+    // The three calls get the same facts block, byte for byte (#450); a writer with no system text of its own gets it first.
     let block = facts_block(&build_facts(&source(&["alpha/a.rs"])).unwrap());
     for (i, (_, p)) in prompts.iter().enumerate() {
         assert!(p.starts_with(&block), "call {i} starts: {}", &p[..80]);

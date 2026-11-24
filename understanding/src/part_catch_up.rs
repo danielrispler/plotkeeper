@@ -14,8 +14,8 @@
 use crate::millis;
 use crate::pr_brief::{
     BUDGET, BriefRecord, BriefWriter, BudgetRecord, CUT_NOTE_ROOM, CheckContext, Facts, PrMeta,
-    Shape, TaggedTest, check_brief, cut_to, flow_key, gather, ids, parse_reply, prompt, section,
-    split_diff, timed_write,
+    Shape, TaggedTest, check_brief, cut_to, facts_block, flow_key, gather, ids, parse_reply,
+    prompt, section, split_diff, timed_write_facts,
 };
 use crate::pr_brief::{Brief, INSTRUCTIONS};
 use crate::pr_brief_check::Stage;
@@ -60,7 +60,7 @@ pub struct CatchUpSource {
 /// catch-ups too.
 const HEAD: &str = r#"You write a part catch-up: a short, stepped, plain-language story of what changed in ONE part of a system since its owner last caught up on it, for the system's owner. He directs AI agents that write the code; he does not read code. The story exists to keep his mental model of that part accurate: what it does now, how behaviour flows through it, what must stay true, what could break. It is not a changelog and not a file tour. The story plays on a map of the system: each step lights parts and may send a light along links.
 
-You get FACTS above: the part's structure first (THE PART, with its laws, their tagged tests and the flows through it), then FOG ENTRIES, every PR or commit that landed in the part since he last caught up, oldest first, then one combined DIFF of the part's files over that whole range. SHAPE says which part; follow it exactly.
+You get FACTS, in the system prompt: the part's structure first (THE PART, with its laws, their tagged tests and the flows through it), then FOG ENTRIES, every PR or commit that landed in the part since he last caught up, oldest first, then one combined DIFF of the part's files over that whole range. SHAPE says which part; follow it exactly.
 
 SELECTION. Tell ONE story over all the entries, ordered by behaviour, never one step per entry or per commit. Find the part's central changes, the ones the owner would name. Apply the deletion test: "if this change were removed, would the part do something different for the owner?" Keep those; leave out plumbing, renames, test scaffolding, docs and anything that only moves code around. Choose, do not list.
 
@@ -537,7 +537,7 @@ pub fn write_part_catch_up(
 ) -> Result<StoredCatchUp, String> {
     let facts = build_catch_up_facts(source)?;
     stage(Stage::Writing);
-    let reply = timed_write(writer, model, &prompt(&facts))?;
+    let reply = timed_write_facts(writer, model, &facts_block(&facts), &prompt(&facts))?;
     let mut brief = parse_reply(&reply.text)?;
     // A catch-up ratifies nothing and has no overview.
     brief.decisions.clear();

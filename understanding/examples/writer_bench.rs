@@ -52,7 +52,7 @@ fn main() {
             .with_brief_effort(move || effort.clone())
     };
     let argv: Vec<String> = writer
-        .brief_command(&model, "")
+        .brief_command(&model, Some("FACTS"), "")
         .0
         .get_args()
         .map(|a| a.to_string_lossy().into_owned())
