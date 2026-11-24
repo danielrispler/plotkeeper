@@ -54,6 +54,25 @@ export function logUncaught(target: Pick<Window, "addEventListener">) {
 
 export const element = (id: string) => document.getElementById(id)!;
 
+// A question before a button destroys something (#459): the dialog's heading, what is lost, and the confirm button's words, which repeat
+// the button's verb.
+export type Confirm = { heading: string; lost: string; verb: string };
+// Opens the confirm dialog with Cancel focused, as Delete's is (`story.ts`), and resolves to true only when Daniel confirms; Cancel, Esc
+// or any other close resolve to false. The answer comes from the button that submitted the form and from the dialog's cancel, which fire
+// with the press, not from its close event, which Chrome fires at the next frame and snap's Chrome never draws.
+export function confirmed(ask: Confirm): Promise<boolean> {
+  const dialog = element("confirm-dialog") as HTMLDialogElement;
+  element("confirm-heading").textContent = ask.heading;
+  element("confirm-lost").textContent = ask.lost;
+  element("confirm-yes").textContent = ask.verb;
+  return new Promise((resolve) => {
+    dialog.querySelector("form")!.onsubmit = (event) => resolve((event.submitter as HTMLButtonElement | null)?.value === "confirm");
+    dialog.oncancel = () => resolve(false);
+    dialog.onclose = () => resolve(false);
+    dialog.showModal();
+  });
+}
+
 export function text(tag: string, content: string, className = ""): HTMLElement {
   const node = document.createElement(tag);
   node.className = className;

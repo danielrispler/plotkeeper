@@ -30,14 +30,14 @@ export function closeDrawer() {
 
 export const drawerOpen = () => open !== null && currentMap()?.project === open.project;
 
-// A jump out of the drawer: a link, opened in a new tab.
-const jumpTo = (jump: Jump) => window.open(jump.to.url, "_blank", "noopener");
-
-function jumpButton(jump: Jump) {
-  const button = text("button", jump.label, "btn quiet drawer-jump");
-  button.title = jump.title;
-  button.addEventListener("click", () => jumpTo(jump));
-  return button;
+// A jump out of the drawer: a real link, opened in a new tab, so ⌘-click and middle-click work as on any link (#462).
+function jumpLink(jump: Jump) {
+  const link = text("a", jump.label, "btn quiet drawer-jump");
+  link.setAttribute("href", jump.to.url);
+  link.setAttribute("target", "_blank");
+  link.setAttribute("rel", "noopener");
+  link.title = jump.title;
+  return link;
 }
 
 function drawDrawer(view: MapView) {
@@ -58,11 +58,15 @@ function drawDrawer(view: MapView) {
   for (const block of drawer.blocks) {
     const part = text("div", "", "drawer-block");
     if (block.label) part.append(text("p", block.label, "drawer-label"));
-    part.append(text("pre", block.code, "drawer-code"));
-    if (block.jumps.length) part.append(...block.jumps.map(jumpButton));
+    // The code scrolls on its own, so it takes focus, with a name, for the keys to scroll it (#462).
+    const code = text("pre", block.code, "drawer-code");
+    code.setAttribute("tabindex", "0");
+    code.setAttribute("aria-label", block.label ?? drawer.title);
+    part.append(code);
+    if (block.jumps.length) part.append(...block.jumps.map(jumpLink));
     card.append(part);
   }
-  if (drawer.jumps.length) card.append(...drawer.jumps.map(jumpButton));
+  if (drawer.jumps.length) card.append(...drawer.jumps.map(jumpLink));
   slot.replaceChildren(card);
   syncSide(view.slots);
 }
