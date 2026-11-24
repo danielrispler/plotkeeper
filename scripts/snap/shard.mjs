@@ -2,8 +2,10 @@
 // render each fixture once. Without the flag, every fixture. A malformed flag throws, naming the form it takes.
 export const shard = (names, flag) => {
   if (flag === undefined) return names;
+  const usage = new Error(`usage: --shard=<i>/<n>, 1 <= i <= n (got "${flag}")`);
   const match = /^(\d+)\/(\d+)$/.exec(flag);
-  const [i, n] = match ? [Number(match[1]), Number(match[2])] : [0, 0];
-  if (n < 1 || i < 1 || i > n) throw new Error(`usage: --shard=<i>/<n>, 1 <= i <= n (got "${flag}")`);
+  if (!match) throw usage;
+  const [i, n] = [Number(match[1]), Number(match[2])];
+  if (i < 1 || i > n) throw usage;
   return names.filter((_, k) => k % n === i - 1);
 };
