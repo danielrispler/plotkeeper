@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
   actorSize, autoPlace, cameraRig, draftPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, rimPoint, revealPan, scrubTickets, sheetOf,
-  narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject,
+  narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject, readingOrder,
 } from "../../dist/map-model.js";
 
 const part = (id, extra = {}) => ({ id, name: id, caption: "", description: "", tier: "core", paths: [], ...extra });
@@ -247,4 +247,19 @@ test("a PR brief takes the camera while it plays and closes back to the view it 
   assert.deepEqual(rig.giveBack(), found);
   assert.deepEqual(rig.shown(), { scale: 1.2, x: 10, y: 10 });
   assert.equal(rig.lent(), false);
+});
+
+test("the parts' tab order reads the map top to bottom, then left to right, a row being plates within half a plate's height", () => {
+  const at = {
+    right: { x: 700, y: 210 },
+    lower: { x: 100, y: 400 },
+    left: { x: 100, y: 200 },
+    // Dragged a little lower than "left", still on its row.
+    middle: { x: 400, y: 200 + plateSize.h / 2 - 1 },
+    top: { x: 900, y: 50 },
+  };
+  assert.deepEqual(readingOrder(at), ["top", "left", "middle", "right", "lower"]);
+  // A plate a full half height lower starts the next row.
+  assert.deepEqual(readingOrder({ a: { x: 500, y: 100 }, b: { x: 100, y: 100 + plateSize.h / 2 } }), ["a", "b"]);
+  assert.deepEqual(readingOrder({}), []);
 });
