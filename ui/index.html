@@ -39,8 +39,8 @@
       <div id="strip" class="strip"></div>
     </nav>
 
-    <!-- The palette (danielrispler/Falinks#575): every action, filtered by what Daniel types. -->
-    <div id="palette" class="picker" role="dialog" aria-label="Palette" hidden></div>
+    <!-- The palette (danielrispler/Falinks#575): every action, filtered by what Daniel types; a native popover with a close button (#458). -->
+    <dialog id="palette" class="picker" popover aria-label="Palette"></dialog>
 
     <aside class="rail" aria-label="Session story">
       <!-- Two lines (#444). Line 1: the agent's logo, the session's name on one line, cut by CSS with "…" (the full name stays in the page

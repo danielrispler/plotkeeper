@@ -564,18 +564,15 @@ export const sidebarSessions = <T extends Pick<Session, "state" | "id">>(session
 export const landedToClear = <T extends Pick<Session, "state" | "id" | "landed">>(sessions: T[], hidden: ReadonlySet<string>): T[] =>
   sessions.filter((session) => showsLanded(session.state, session.landed) && !hidden.has(session.id));
 
-// A project's "⋯" (#381): the one menu of the list's headers, opened under it for its project; Remove project is in it. It is drawn only for a
-// project with no live session: the server saves a project again for its sessions' next event, so removing one with live sessions would undo
-// itself (#380's review).
+// A project's "⋯" (#381): the one menu of the list's headers, opened under it for its project, flipped at the window's edges (#458); Remove
+// project is in it. It is drawn only for a project with no live session: the server saves a project again for its sessions' next event, so
+// removing one with live sessions would undo itself (#380's review).
 function projectMore(group: ProjectGroup<Session>): HTMLElement {
   const more = pressable(text("button", "⋯", "project-more"), false, () => {
     const menu = element("project-actions");
     menu.dataset.project = group.key;
-    const at = more.getBoundingClientRect();
-    menu.style.top = `${at.bottom + 4}px`;
-    menu.style.left = `${Math.max(8, at.right - menu.offsetWidth)}px`;
-    menu.showPopover();
-    menu.style.left = `${Math.max(8, at.right - menu.offsetWidth)}px`;
+    // Its button is its implicit anchor (#458), which places it by CSS as the rail's "⋯" menu.
+    menu.showPopover({ source: more });
   });
   more.removeAttribute("aria-pressed");
   more.title = "Project";
