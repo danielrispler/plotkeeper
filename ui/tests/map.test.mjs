@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
-  actorSize, autoPlace, cameraRig, draftPrompt, fitCamera, panTo, zoomAt, zoomLimits, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, rimPoint, revealPan, scrubTickets, sheetOf,
+  actorSize, autoPlace, cameraRig, draftPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, rimPoint, revealPan, scrubTickets, sheetOf,
   narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject,
 } from "../../dist/map-model.js";
 

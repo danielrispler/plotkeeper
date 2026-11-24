@@ -17,7 +17,7 @@ import { redrawHistory, showHistory } from "./panes.js";
 import { isSelected, pressSession } from "./selection.js";
 import { studio } from "./state.js";
 import { titled } from "./keys.js";
-import { blockedWaits, stateLabels, type BlockedCommand, type Context, type MarkWhy, type Session, type SessionState, type Subagent } from "./types.js";
+import { blockedWaits, stateLabels, type BlockedCommand, type Context, type MarkWhy, type ProjectMark, type Session, type SessionState, type Subagent } from "./types.js";
 import { askDelete, lastHeadline, report } from "./story.js";
 import { hoverAgents, refreshAgents } from "./map-agents.js";
 import { showTitle } from "./alerts.js";
@@ -34,7 +34,7 @@ export const staleDots = () => void (marksStale = true);
 const latestDots = newest();
 async function readDots() {
   marksStale = false;
-  let now;
+  let now: ProjectMark[] | undefined;
   try {
     now = await latestDots(invoke("map_marks", { projects: knownProjects() }));
   } catch (e) {

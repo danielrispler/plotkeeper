@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { alsoAt, awaitedWrite, chapterGate, storySteps, briefCamera, briefPlayer, latestRequest, escapeMap, figureShapes, figureSize, layerOrder, playlist, unconfirmed } from "../../dist/map-model.js";
+import { alsoAt, awaitedWrite, chapterGate, storySteps, briefCamera, briefPlayer, latestRequest, escapeMap, figureShapes, figureSize, playlist, unconfirmed } from "../../dist/map-model.js";
 import { trayRows } from "../../dist/map-tray.js";
 
 const step = (k, extra = {}) => ({ k, h: k, b: "", on: [], hops: [], law: null, covered_by: null, list: [], risks: [], fig: null, check: null, cites: [], flags: [], ...extra });

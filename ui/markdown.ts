@@ -5,22 +5,22 @@
 declare const marked: typeof import("marked");
 
 const entities: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
-const escape = (text: string) => text.replace(/[&<>"']/g, (c) => entities[c]);
+const escapeHtml = (text: string) => text.replace(/[&<>"']/g, (c) => entities[c]);
 
 // A link's hover names its target (#220): the page has no status bar to show it.
-const opens = (target: string) => escape(`Open ${target} in a new tab`);
+const opens = (target: string) => escapeHtml(`Open ${target} in a new tab`);
 
 // Built at first use, so modules that import this one load where marked is not (the UI tests).
 const create = () =>
   new marked.Marked({
     gfm: true,
     renderer: {
-      html: ({ text, block }) => (block ? `<p>${escape(text)}</p>` : escape(text)),
-      image: ({ text }) => escape(text),
+      html: ({ text, block }) => (block ? `<p>${escapeHtml(text)}</p>` : escapeHtml(text)),
+      image: ({ text }) => escapeHtml(text),
       // An `http(s)` link opens in a new tab; any other link, a file's included, is its text: the page has no editor to open it in.
       link({ href, tokens }) {
         const inner = this.parser.parseInline(tokens);
-        return /^https?:\/\//i.test(href) ? `<a href="${escape(href)}" target="_blank" rel="noopener noreferrer" title="${opens(href)}">${inner}</a>` : inner;
+        return /^https?:\/\//i.test(href) ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" title="${opens(href)}">${inner}</a>` : inner;
       },
     },
   });

@@ -7,7 +7,7 @@ import type { Command } from "./types.js";
 type Seam = Window["__TAURI__"];
 
 // The reply as JSON; a refusal's body is its reason, which is what the caller's `catch` gets, as a command's `Err` was.
-async function post(command: Command | "log" | "page_focus", args: unknown): Promise<any> {
+async function post(command: Command | "log" | "page_focus", args: unknown): Promise<unknown> {
   const response = await fetch(`/api/${command}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(args ?? {}) });
   const body = await response.json().catch(() => null);
   if (!response.ok) throw typeof body === "string" ? body : `${command}: ${response.status}`;

@@ -74,7 +74,7 @@ let choice: Choice = { writer: "claude", model: "", effort: "" };
 let outcome: WriterTest | null = null;
 let testing = false;
 // Each key row's last refusal, such as a pasted text that is no key.
-let keyErrors: Partial<Record<WriterKind, string>> = {};
+const keyErrors: Partial<Record<WriterKind, string>> = {};
 
 // Whether PR briefs can be written: until the list is known, yes.
 export const briefsWritten = () => list?.briefs ?? true;

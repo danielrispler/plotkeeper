@@ -42,7 +42,7 @@ A test that fails on code the diff didn't touch gets one rerun. When the same te
 
 A red `snap` job on a fixture the diff didn't touch gets one rerun of the failed job (`gh run rerun <id> --failed`), said in the PR; a second failure is real. `snap:all` has no automatic retry. A failing `snap` prints the tail of Chrome's own stderr.
 
-Rust is formatted by `cargo fmt`. TS, JS and Markdown have no formatter, so never run one (Prettier, Biome, …).
+Rust is formatted by `cargo fmt`. TS, JS and Markdown have no formatter, so never run one (Prettier, `biome format`, `biome check --write`, …). Biome lints TS, JS, HTML and CSS, lint only, in `npm run check` (`npm run lint`); never run it with `--write`.
 
 ## The system map
 

@@ -5,6 +5,10 @@
     "lib": ["ES2022", "DOM"],
     "types": [],
     "strict": true,
+    "noUnusedLocals": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "verbatimModuleSyntax": true,
     "rootDir": "ui",
     "outDir": "dist"
   },
