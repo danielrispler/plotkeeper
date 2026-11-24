@@ -91,19 +91,26 @@ const chromeArgs = [
 // A screenshot left from an earlier run must not pass for this one's.
 rmSync(resolve(out), { force: true });
 const run = await new Promise((done) => {
-  // Chrome leads its own process group, so ending it ends its helper processes too, and none is left holding stderr open.
+  // Chrome leads its own process group, so killing the group ends its helper processes too, and none is left holding stderr open.
+  // Being out of the terminal's group, it misses a Ctrl+C, so snap passes that on.
   const child = spawn(chrome, chromeArgs, { stdio: ["ignore", "ignore", "pipe"], detached: true });
-  const end = () => {
+  const killGroup = () => {
     try {
       process.kill(-child.pid, "SIGKILL");
-    } catch {}
+    } catch {
+      // The group has already ended.
+    }
   };
+  process.once("SIGINT", () => {
+    killGroup();
+    process.exit(130);
+  });
   let stderr = "";
   let shot = false;
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
-    end();
+    killGroup();
   }, chromeTimeout);
   child.stderr.on("data", (chunk) => {
     stderr += chunk;
@@ -112,8 +119,13 @@ const run = await new Promise((done) => {
     // DevTools port open, Chrome would not end at all.
     if (!shot && /bytes written to file/.test(stderr)) {
       shot = true;
-      end();
+      killGroup();
     }
+  });
+  // A process forked just as the group was killed can outlive the kill and hold stderr open, so the group is killed again once
+  // Chrome itself has ended.
+  child.on("exit", () => {
+    if (shot || timedOut) killGroup();
   });
   child.on("close", (status) => {
     clearTimeout(timer);

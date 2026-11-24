@@ -209,7 +209,8 @@ test("a map brief fixture that never printed its ok line fails: Chrome's time bu
   assert.equal(failed([]), false, "a fixture with no ok line is as before");
 });
 
-// snap run end to end against a stand-in Chrome (`CHROME`): one that never ends, and one that ends without writing the screenshot.
+// snap run end to end against a stand-in Chrome (`CHROME`): one that never ends, one that ends without writing the screenshot, and
+// one slow to tear down after writing it (#413).
 const runSnap = async (chromeBody, env = {}) => {
   const { mkdtempSync, writeFileSync, chmodSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
@@ -262,8 +263,10 @@ test("a Chrome slow to tear down after writing the screenshot passes, without sn
 
 test("a page that logged snap:fail still fails when Chrome is ended at its screenshot (#413)", async () => {
   const line = `echo '[1124/103501.828596:INFO:CONSOLE:61] "snap:fail the card never drew", source: http://127.0.0.1:1/index.html (61)' >&2`;
+  const started = Date.now();
   const run = await runSnap(slowTeardown(line));
   assert.notEqual(run.status, 0);
   assert.match(run.output, /^snap:fail the card never drew/m);
   assert.doesNotMatch(run.output, /^wrote /m);
+  assert.ok(Date.now() - started < 10000, `snap waited ${Date.now() - started} ms for Chrome's teardown`);
 });
