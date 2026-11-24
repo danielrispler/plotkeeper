@@ -405,7 +405,24 @@ export type MapState = {
   stale: Record<string, number>;
   // The project's pre-flight (`pre_flight.rs`, #394): the parts a piece of work will likely cross; null when none is run.
   pre_flight?: PreFlight | null;
+  // The patches of the project's back a law runs (`back_a_law.rs`, #398): being proven, rejected with why, or proven with the test patch
+  // and the proof; a past payload has none.
+  law_patches?: LawPatch[];
 };
+// A back a law run's patch: its run's id, the law, where it stands, and for a proven one the test patch and the checks' output with the
+// test alone (passing) and with the plant (failing on the new test).
+export type LawPatch = {
+  id: string;
+  project: string;
+  law: string;
+  state: "proving" | "rejected" | "proven";
+  line: string | null;
+  at: number;
+  diff: string | null;
+  proof: { test: string; file: string; passed: string; failed: string } | null;
+};
+// What a click on Back a law did: a run started, or refused with the prompt to copy instead.
+export type BackLawStarted = { kind: "run"; id: string } | { kind: "refused"; line: string; prompt: string };
 // A fogged part's offer (#391): a part catch-up, `ready` when one is stored for its current fog list, `writing` while one is written, `failed`
 // when the last write for it failed; or the chapter of the one PR's brief that lights the part.
 export type CatchUpOffer = { kind: "catch-up"; ready: boolean; writing: boolean; failed: boolean } | { kind: "chapter"; pr: number; chapter: number };
@@ -563,6 +580,8 @@ export interface Commands {
   remove_api_key: string | null;
   rename: void;
   run_cancel: void;
+  back_a_law: BackLawStarted;
+  law_patch_discard: void;
   runs_resume: void;
   select: Selection | null;
   selected: Selection | null;
@@ -582,7 +601,7 @@ export interface Commands {
 export type Command = keyof Commands;
 
 // What the shell counted of Daniel's use (`stop_rules.rs`), for the one-time review: days, merged PRs and the uses of each module.
-export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen" | "rating-offered" | "rating-given" | "rating-skipped" | "note-given" | "explain-back-given" | "explain-back-marked" | "refresher-entered" | "stale-entered" | "catch-up-offered" | "catch-up-opened" | "catch-up-done" | "pre-flight-run";
+export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen" | "rating-offered" | "rating-given" | "rating-skipped" | "note-given" | "explain-back-given" | "explain-back-marked" | "refresher-entered" | "stale-entered" | "catch-up-offered" | "catch-up-opened" | "catch-up-done" | "pre-flight-run" | "back-law-started";
 export type StopFacts = {
   active_days: number;
   merged_prs: number;

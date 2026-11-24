@@ -4,6 +4,7 @@
 // button is its part catch-up (#391), or the one PR brief chapter that lights it (`fogActions`); "I know this" is the quiet second.
 //
 // "See the proof" (`.sheet-law-actions` of a law a check backs) and the CI line with its drill-down open the drawer (`map-drawer.ts`).
+// A law on trust has Back a law there instead, or its run's patch (`patch-review.ts`, #398).
 // `.sheet-extra` at the foot holds the history strip (`map-history.ts`, #313). While a past commit is shown the sheet is read-only:
 // no tier change, no proof, no CI section, no fog section.
 
@@ -18,6 +19,7 @@ import { besideSheet } from "./panel.js";
 import { enterRefresher, refresherNode, staleLine } from "./map-stale.js";
 import { ciDrawer, effectiveTier, fogActions, type Part, proofDrawer, sheetCi, sheetOf, type Tier } from "./map-model.js";
 import { openBriefOf, openCatchUpOf } from "./map-brief.js";
+import { lawAction, lawActionNodes, patchActs } from "./patch-review.js";
 
 // The part whose sheet is open, and the project it is in; a sheet never carries over to another project's map.
 let open: { project: string; part: string } | null = null;
@@ -107,6 +109,8 @@ function drawSheet(view: MapView) {
       });
       row.querySelector(".sheet-law-actions")!.append(proof);
     }
+    // A law on trust offers Back a law, or shows where its run's patch stands (#398). Of now only.
+    if (law.backing === "trust" && !view.scrub) row.querySelector(".sheet-law-actions")!.append(...lawActionNodes(lawAction(law.id, view.state.law_patches), patchActs));
     const pr = unratified.laws.get(law.id);
     if (pr !== undefined) {
       row.classList.add("unratified");

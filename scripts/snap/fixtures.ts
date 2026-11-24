@@ -191,6 +191,63 @@ const mapPreFlight = (): Fixture =>
     }),
     snapDone: "pre-flight ok",
   });
+// Back a law (#398): Hook's law on trust offers Back a law; Core's law on trust has a proven patch, and Review opens the patch review over
+// the map with the test patch, the output with the test alone and with the plant, and Discard.
+const lawPatchDiff = [
+  "diff --git a/core/tests/order.rs b/core/tests/order.rs",
+  "new file mode 100644",
+  "--- /dev/null",
+  "+++ b/core/tests/order.rs",
+  "@@ -0,0 +1,6 @@",
+  "+// @law: core-order",
+  "+#[test]",
+  "+fn events_apply_in_order() {",
+  "+    let state = apply(&[started(), ended()]);",
+  "+    assert_eq!(state.last(), Some(Ended));",
+  "+}",
+  "diff --git a/system-map.json b/system-map.json",
+  "--- a/system-map.json",
+  "+++ b/system-map.json",
+  "@@ -4,1 +4,1 @@",
+  '-    { "id": "core-order", "on": "core", "backing": "trust", "text": "Events apply in order." },',
+  '+    { "id": "core-order", "on": "core", "backing": "check", "text": "Events apply in order." },',
+].join("\n");
+const mapBackLaw = (): Fixture =>
+  mapOpened(`
+      document.querySelector("#map .plate[data-id=hook]").click();
+      await wait(300);
+      const held = document.querySelector('#map-sheet .sheet-law[data-law="hook-held"]');
+      if (![...(held?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Back a law")) return log("snap:fail Hook's law on trust has no Back a law");
+      document.querySelector("#map .plate[data-id=core]").click();
+      await wait(300);
+      const pure = document.querySelector('#map-sheet .sheet-law[data-law="core-pure"]');
+      if ([...pure.querySelectorAll("button")].some((b) => b.textContent === "Back a law")) log("snap:fail a law a check backs offers Back a law");
+      const review = [...document.querySelectorAll('#map-sheet .sheet-law[data-law="core-order"] button')].find((b) => b.textContent === "Review the patch");
+      if (!review) return log("snap:fail the proven patch has no Review");
+      review.click();
+      await wait(300);
+      const box = document.getElementById("map-patch-review");
+      if (box.hidden) return log("snap:fail the patch review did not open");
+      if (!box.textContent.includes("Events apply in order.") || !box.textContent.includes("events_apply_in_order in core/tests/order.rs")) log("snap:fail the law or the test: " + box.textContent);
+      if (box.querySelectorAll(".patch-diff .diff-line.add").length !== 7) log("snap:fail the test patch's added lines: " + box.querySelectorAll(".patch-diff .diff-line.add").length);
+      const outputs = [...box.querySelectorAll(".patch-output")].map((pre) => pre.textContent);
+      if (outputs.length !== 2 || !outputs[0].includes("PASS") || !outputs[1].includes("FAIL")) log("snap:fail the outputs: " + outputs.join(" / "));
+      if ([...box.querySelectorAll("button")].map((b) => b.textContent).join(",") !== "Discard,Close") log("snap:fail the review's buttons");
+      log("back a law ok");`, {
+    map_state: mapState({
+      law_patches: [
+        {
+          id: "19a2f-5", project: "/w/plotkeeper", law: "core-order", state: "proven", line: null, at: runAt, diff: lawPatchDiff,
+          proof: {
+            test: "events_apply_in_order", file: "core/tests/order.rs",
+            passed: "$ cargo nextest run -p studio-core\n        PASS [   0.004s] studio-core::it order::events_apply_in_order\n     Summary [   0.912s] 214 tests run: 214 passed, 0 skipped",
+            failed: "$ cargo nextest run -p studio-core\n        FAIL [   0.004s] studio-core::it order::events_apply_in_order\n     Summary [   0.917s] 214 tests run: 213 passed, 1 failed, 0 skipped",
+          },
+        },
+      ],
+    }),
+    snapDone: "back a law ok",
+  });
 // The queues paused by a login failure: the one indicator with Resume, over the run that failed and the one that waits.
 const mapRunsPaused = (): Fixture =>
   mapOpened(`
@@ -1489,6 +1546,7 @@ export const fixtures = {
   mapRuns,
   mapPreFlight,
   mapRunsPaused,
+  mapBackLaw,
   railBriefRow: () => railBriefReady(false),
   railBriefOpened: () => railBriefReady(true),
   mapBriefStart,
