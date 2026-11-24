@@ -2762,8 +2762,8 @@ ${writerStatusAfter("Keychain refused")}
       const map = document.getElementById("map").getBoundingClientRect();
       if (map.right > list.left + 1) log("snap:fail the map overlaps the session list");
       log("plates " + plates + ", marks " + checks + "/" + trusts);`, { map_state: mapState() }),
-  // The map's camera (#383): an empty point of the map is the map itself (no layer over it), a drag there pans, a plain wheel does nothing,
-  // ⌘+wheel and a pinch zoom up to 200 %, and ⌘0 fits the whole map; no part's place changes. Shown fitted.
+  // The map's camera (#383): an empty point of the map is the map itself (no layer over it), a drag there pans, a wheel and a pinch
+  // zoom up to 200 % and never scroll the page, and ⌘0 fits the whole map; no part's place changes. Shown fitted.
   mapCamera: () =>
     mapOpened(`
       const canvas = document.querySelector("#map .map-canvas");
@@ -2791,13 +2791,14 @@ ${writerStatusAfter("Keychain refused")}
       const scrolled = document.scrollingElement.scrollTop;
       const plain = wheel({ deltaY: 100 });
       canvas.dispatchEvent(plain);
-      if (JSON.stringify(camera()) !== JSON.stringify(panned)) log("snap:fail a plain wheel moved the view: " + JSON.stringify(camera()));
+      const out = camera();
+      if (!(out.scale < panned.scale)) log("snap:fail a plain wheel did not zoom out: " + JSON.stringify(out));
       if (!plain.defaultPrevented || document.scrollingElement.scrollTop !== scrolled) log("snap:fail a plain wheel was not swallowed");
       canvas.dispatchEvent(wheel({ ctrlKey: true }));
-      if (!(camera().scale > panned.scale)) log("snap:fail a pinch did not zoom in");
-      for (let i = 0; i < 40; i++) canvas.dispatchEvent(wheel({ deltaY: -300, metaKey: true }));
+      if (!(camera().scale > out.scale)) log("snap:fail a pinch did not zoom in");
+      for (let i = 0; i < 40; i++) canvas.dispatchEvent(wheel({ deltaY: -300 }));
       if (camera().scale !== 2) log("snap:fail zoom is not held at 200 %: " + camera().scale);
-      for (let i = 0; i < 40; i++) canvas.dispatchEvent(wheel({ deltaY: 300, metaKey: true }));
+      for (let i = 0; i < 40; i++) canvas.dispatchEvent(wheel({ deltaY: 300 }));
       if (camera().scale !== 0.4) log("snap:fail zoom is not held at 40 %: " + camera().scale);
       document.dispatchEvent(new KeyboardEvent("keydown", { code: "Digit0", key: "0", metaKey: true, bubbles: true }));
       const fitted = camera();
