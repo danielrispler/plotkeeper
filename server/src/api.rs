@@ -259,6 +259,9 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
         "back_a_law" => res(app
             .laws
             .start(&arg::<String>(a, "project")?, &arg::<String>(a, "law")?)),
+        "law_patch_open" => res(app
+            .laws
+            .open_pr(&arg::<String>(a, "project")?, &arg::<String>(a, "id")?)),
         "law_patch_discard" => res(app
             .laws
             .discard(&arg::<String>(a, "project")?, &arg::<String>(a, "id")?)),

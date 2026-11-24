@@ -232,7 +232,7 @@ const mapBackLaw = (): Fixture =>
       if (box.querySelectorAll(".patch-diff .diff-line.add").length !== 7) log("snap:fail the test patch's added lines: " + box.querySelectorAll(".patch-diff .diff-line.add").length);
       const outputs = [...box.querySelectorAll(".patch-output")].map((pre) => pre.textContent);
       if (outputs.length !== 2 || !outputs[0].includes("PASS") || !outputs[1].includes("FAIL")) log("snap:fail the outputs: " + outputs.join(" / "));
-      if ([...box.querySelectorAll("button")].map((b) => b.textContent).join(",") !== "Discard,Close") log("snap:fail the review's buttons");
+      if ([...box.querySelectorAll("button")].map((b) => b.textContent).join(",") !== "Open draft PR,Discard,Close") log("snap:fail the review's buttons");
       log("back a law ok");`, {
     map_state: mapState({
       law_patches: [

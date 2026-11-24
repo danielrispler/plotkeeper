@@ -13,6 +13,9 @@
 //!   check in the clone runs in the sandbox: the agent wrote the clone, its git data included.
 //! - **The patch.** A proven run's test patch and proof are kept in the data folder's `law-patches/`, and the clone is
 //!   removed, as it is for a rejected run. [`LawRuns::discard`] deletes a patch.
+//! - **Open draft PR** (ticket #400). [`LawRuns::open_pr`] pushes the test patch on a new branch from a temporary worktree
+//!   of the default branch and opens a draft PR with the proof, then records the law change as accepted in ratify. A patch
+//!   that no longer applies is out of date.
 
 use crate::{
     ci_laws,
@@ -49,6 +52,8 @@ pub struct Config {
     pub settings: PathBuf,
     /// The host-side sandbox, `srt`; none: found as the login shell's `command -v` finds it.
     pub sandbox: Option<PathBuf>,
+    /// `gh`, for Open draft PR; none: found as the login shell finds it.
+    pub gh: Option<PathBuf>,
 }
 
 impl Config {
@@ -59,6 +64,7 @@ impl Config {
             settings: data.join("settings.json"),
             data,
             sandbox: None,
+            gh: None,
         }
     }
 }
@@ -73,6 +79,10 @@ pub enum PatchState {
     Rejected,
     /// The patch is proven and kept.
     Proven,
+    /// Its draft PR is open: `pr` says which.
+    Opened,
+    /// It no longer applies to the default branch: run again.
+    OutOfDate,
 }
 
 /// What the proof saw: the new test, and the checks' output with the test alone and with the plant.
@@ -105,6 +115,19 @@ pub struct LawPatch {
     pub diff: Option<String>,
     #[serde(default)]
     pub proof: Option<Proof>,
+    /// The draft PR Open draft PR opened, and its address.
+    #[serde(default)]
+    pub pr: Option<u64>,
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+/// What Open draft PR did: a draft PR opened, or the patch no longer applies to the default branch.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case", tag = "kind")]
+pub enum Opened {
+    Pr { number: u64, url: String },
+    OutOfDate,
 }
 
 /// What a click on Back a law did: a run started, or one refused with the prompt to copy instead.
@@ -133,6 +156,8 @@ pub struct LawRuns {
     /// The patches being proven or rejected, by run id; proven ones are on disk.
     shown: Mutex<BTreeMap<String, LawPatch>>,
     changed: OnceLock<Changed>,
+    /// Serialises Open draft PR, so a second click waits and finds the PR the first opened.
+    opening: Mutex<()>,
 }
 
 impl LawRuns {
@@ -143,6 +168,7 @@ impl LawRuns {
             config,
             shown: Mutex::default(),
             changed: OnceLock::new(),
+            opening: Mutex::default(),
         });
         let me: Weak<LawRuns> = Arc::downgrade(&laws);
         runner.on_end(move |ended| {
@@ -282,6 +308,150 @@ impl LawRuns {
         Ok(())
     }
 
+    /// Open draft PR: in a temporary worktree from the default branch, as just fetched, a branch with the test patch applied
+    /// (three-way) and committed, pushed, and a draft PR with the proof in its body; then the worktree and the local branch are
+    /// removed, so Daniel's checkout and its branch are never touched. The patch then says its PR, and the law change is
+    /// recorded as accepted in ratify. A patch that does not apply is out of date.
+    pub fn open_pr(&self, project: &str, id: &str) -> Result<Opened, String> {
+        if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            return Err("no such patch".into());
+        }
+        let _one = self.opening.lock().unwrap_or_else(|e| e.into_inner());
+        let file = self.config.data.join(PATCHES).join(format!("{id}.json"));
+        let patch = fs::read(&file)
+            .ok()
+            .and_then(|text| serde_json::from_slice::<LawPatch>(&text).ok())
+            .filter(|p| p.project == project)
+            .ok_or("no such patch")?;
+        match patch.state {
+            PatchState::Proven => {}
+            PatchState::Opened => {
+                return Ok(Opened::Pr {
+                    number: patch.pr.unwrap_or_default(),
+                    url: patch.url.unwrap_or_default(),
+                });
+            }
+            PatchState::OutOfDate => return Ok(Opened::OutOfDate),
+            _ => return Err("the patch is not proven".into()),
+        }
+        let (Some(diff), Some(proof)) = (patch.diff.clone(), patch.proof.clone()) else {
+            return Err("the patch has no test patch or proof".into());
+        };
+        let repo = Path::new(project);
+        let (reference, _) =
+            crate::map::default_ref(repo).ok_or("the project has no default branch")?;
+        let (remote, base) = match reference.split_once('/') {
+            Some((remote, base)) => (remote.to_string(), base.to_string()),
+            None => ("origin".to_string(), reference.clone()),
+        };
+        // The default branch as it is now: a patch is out of date against it, not against the last fetch.
+        if reference.contains('/') {
+            host_git(repo, &["fetch", "-q", &remote, &base])
+                .map_err(|e| format!("the fetch failed: {e}"))?;
+        }
+        let law = law_text(repo, &reference, &patch.law);
+        let branch = format!("back-a-law/{}-{id}", patch.law);
+        let tmp = tempfile::Builder::new()
+            .prefix("law-pr-")
+            .tempdir_in(&self.config.data)
+            .map_err(|e| format!("the temporary worktree: {e}"))?;
+        let work = tmp.path().join("work");
+        let work_text = work.to_str().ok_or("the path is not text")?.to_string();
+        let made = (|| -> Result<Option<String>, String> {
+            host_git(
+                repo,
+                &["worktree", "add", "-q", "--detach", &work_text, &reference],
+            )?;
+            host_git(&work, &["switch", "-q", "-C", &branch])?;
+            let patch_file = tmp.path().join("test.patch");
+            fs::write(&patch_file, &diff).map_err(|e| e.to_string())?;
+            let patch_text = patch_file.to_str().ok_or("the path is not text")?;
+            if host_git(&work, &["apply", "--3way", patch_text]).is_err() {
+                return Ok(None);
+            }
+            let title = format!("Back the law `{}` with a test", patch.law);
+            host_git(
+                &work,
+                &["commit", "-q", "--no-verify", "-m", &title, "-m", &law],
+            )?;
+            host_git(&work, &["push", "-q", "--no-verify", &remote, &branch])?;
+            let body = pr_body(&patch.law, &law, &proof);
+            gh(
+                self.gh(),
+                &work,
+                &[
+                    "pr",
+                    "create",
+                    "--draft",
+                    "--head",
+                    &branch,
+                    "--base",
+                    &base,
+                    "--title",
+                    &title,
+                    "--body-file",
+                    "-",
+                ],
+                &body,
+            )
+            .map(Some)
+        })();
+        let _ = host_git(repo, &["worktree", "remove", "--force", &work_text]);
+        let _ = host_git(repo, &["worktree", "prune"]);
+        let _ = host_git(repo, &["branch", "-q", "-D", &branch]);
+        drop(tmp);
+        let Some(url) = made? else {
+            self.keep(
+                &file,
+                LawPatch {
+                    state: PatchState::OutOfDate,
+                    at: millis(),
+                    ..patch
+                },
+            )?;
+            self.tell(project);
+            return Ok(Opened::OutOfDate);
+        };
+        let number = url
+            .rsplit_once("/pull/")
+            .and_then(|(_, n)| n.trim().parse::<u64>().ok())
+            .ok_or_else(|| format!("gh did not say the PR's number: {url}"))?;
+        self.keep(
+            &file,
+            LawPatch {
+                state: PatchState::Opened,
+                at: millis(),
+                pr: Some(number),
+                url: Some(url.clone()),
+                ..patch.clone()
+            },
+        )?;
+        let ratified = crate::ratify::decide(
+            &self.config.data.join(crate::ratify::FILE),
+            project,
+            &crate::ratify::Item::new(number, "law", &patch.law),
+            crate::ratify::Decided::Accepted,
+            &law,
+            crate::ratify::now(),
+        );
+        if let Err(e) = ratified {
+            log::warn!("back a law: the ratify record of PR #{number} was not written: {e}");
+        }
+        self.tell(project);
+        Ok(Opened::Pr { number, url })
+    }
+
+    fn keep(&self, file: &Path, patch: LawPatch) -> Result<(), String> {
+        fs::write(file, serde_json::to_vec(&patch).unwrap_or_default()).map_err(|e| e.to_string())
+    }
+
+    fn gh(&self) -> PathBuf {
+        self.config
+            .gh
+            .clone()
+            .unwrap_or_else(|| studio_workbench::gh_path().into())
+    }
+
     /// Proves the patches of the back a law run that just ended, and keeps or rejects them; the clone goes either way.
     fn prove_run(&self, ended: Ended) {
         let Some(dir) = ended.folder.parent() else {
@@ -307,6 +477,8 @@ impl LawRuns {
             at: millis(),
             diff: None,
             proof: None,
+            pr: None,
+            url: None,
         };
         self.shown()
             .insert(ended.id.clone(), patch(PatchState::Proving, None));
@@ -445,6 +617,95 @@ fn clone(repo: &Path, commit: &str, work: &Path) -> Result<(), String> {
     )?;
     git(work, &["checkout", "-q", "--detach", commit])?;
     git(work, &["remote", "remove", "origin"])
+}
+
+/// Runs git in Daniel's repository or the temporary worktree, on the host: never his hooks, which could run the new test
+/// outside a sandbox.
+fn host_git(dir: &Path, args: &[&str]) -> Result<String, String> {
+    let out = Command::new("git")
+        .args(["-c", "core.hooksPath=/dev/null"])
+        .args(args)
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
+/// Runs `gh` in `dir` with `input` on its stdin: its last line of output.
+fn gh(program: PathBuf, dir: &Path, args: &[&str], input: &str) -> Result<String, String> {
+    use std::io::Write;
+    let mut child = Command::new(program)
+        .args(args)
+        .current_dir(dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("gh did not start: {e}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(input.as_bytes());
+    }
+    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(format!(
+            "gh pr create failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    Ok(text.lines().last().unwrap_or_default().trim().to_string())
+}
+
+/// The text of `law` in `repo`'s map at `reference`, or its id.
+fn law_text(repo: &Path, reference: &str, law: &str) -> String {
+    let source = crate::map::git(
+        repo,
+        &["show", &format!("{reference}:{}", system_map::MAP_FILE)],
+    );
+    source
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|map| {
+            map["laws"]
+                .as_array()?
+                .iter()
+                .find(|each| each["id"] == law)?["text"]
+                .as_str()
+                .map(String::from)
+        })
+        .unwrap_or_else(|| law.to_string())
+}
+
+/// The most characters of each output a PR body keeps, from its end: GitHub's body holds 65,536.
+const BODY_OUTPUT: usize = 25_000;
+
+/// A draft PR's body: the law, the new test and the proof. It never spells the tag, which GitHub would read as a mention.
+fn pr_body(law: &str, text: &str, proof: &Proof) -> String {
+    let end = |out: &str| {
+        let cut = out.len().saturating_sub(BODY_OUTPUT);
+        let cut = (cut..=out.len())
+            .find(|i| out.is_char_boundary(*i))
+            .unwrap_or(cut);
+        out[cut..].replace("~~~~", "~ ~ ~ ~")
+    };
+    format!(
+        "Backs the law `{law}` with a test: {text}\n\n\
+         The new test is `{test}` in `{file}`, and the law's backing in `system-map.json` becomes `check`.\n\n\
+         plotkeeper proved it in a sandbox, with no model: the checks pass with the test, and with a plant that breaks the law \
+         they fail on the new test. The plant is not part of this PR.\n\n\
+         <details><summary>With the test alone, the checks pass</summary>\n\n~~~~text\n{passed}\n~~~~\n\n</details>\n\n\
+         <details><summary>With the plant, the new test fails</summary>\n\n~~~~text\n{failed}\n~~~~\n\n</details>\n\n\
+         Opened as a draft by plotkeeper's Back a law.\n",
+        test = proof.test,
+        file = proof.file,
+        passed = end(&proof.passed),
+        failed = end(&proof.failed),
+    )
 }
 
 /// Whether `path` may be in a test patch: a file under a `tests` folder (a crate's test binary root among them), or the map.

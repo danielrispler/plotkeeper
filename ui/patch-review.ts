@@ -2,7 +2,8 @@
 // starts a background run (`server/src/back_a_law.rs`). When the run ends, plotkeeper proves its patch itself, in a sandbox and with no model,
 // and the law's row says where the patch stands: being proven, rejected with why, or proven with Review. The review is an overlay over the
 // map, in the glass, the second layer Esc closes (`layerOrder`): the law, the new tagged test, the test patch, and the checks' output with
-// the test alone (passing) and with the plant (failing on that test), with Discard, which deletes the patch. Open draft PR is a later ticket.
+// the test alone (passing) and with the plant (failing on that test), with Open draft PR and Discard, which deletes the patch. Open draft PR
+// (#400) opens a draft PR from a temporary worktree; the row then says its PR, or "Out of date, run again" when the patch no longer applies.
 
 import { failure, invoke, text } from "./dom.js";
 import { diffLines } from "./diff.js";
@@ -10,12 +11,20 @@ import { currentMap, onDraw, registerLayer, reloadMap, shownProject } from "./ma
 import { copyOverturn, overturnReport } from "./ratify.js";
 import { showNotice } from "./notice.js";
 import { logStop } from "./stop-rules.js";
-import type { LawPatch } from "./types.js";
+import type { LawPatch, LawPatchOpened } from "./types.js";
 
-// What a law's row offers: a new run, a patch being proven, a rejected one (its first line), or a proven one to review.
-export type LawAction = { law: string } & ({ kind: "start" } | { kind: "proving" } | { kind: "rejected"; id: string; line: string } | { kind: "proven"; id: string });
-// What the buttons do: start a run for a law, open a patch's review, discard a patch, close the review.
-export type PatchActs = { start: (law: string) => void; review: (id: string) => void; discard: (id: string) => void; close: () => void };
+// What a law's row offers: a new run, a patch being proven, a rejected one (its first line), a proven one to review, one whose draft PR
+// is open, or one out of date.
+export type LawAction = { law: string } & (
+  | { kind: "start" }
+  | { kind: "proving" }
+  | { kind: "rejected"; id: string; line: string }
+  | { kind: "proven"; id: string }
+  | { kind: "opened"; id: string; pr: number; url: string }
+  | { kind: "out-of-date"; id: string }
+);
+// What the buttons do: start a run for a law, open a patch's review, open its draft PR, discard a patch, close the review.
+export type PatchActs = { start: (law: string) => void; review: (id: string) => void; open: (id: string) => void; discard: (id: string) => void; close: () => void };
 
 // The action of `law` by its newest patch; a law with none, or a payload from before back a law, offers a new run.
 export function lawAction(law: string, patches: LawPatch[] | null | undefined): LawAction {
@@ -23,7 +32,14 @@ export function lawAction(law: string, patches: LawPatch[] | null | undefined): 
   if (!newest) return { law, kind: "start" };
   if (newest.state === "proving") return { law, kind: "proving" };
   if (newest.state === "rejected") return { law, kind: "rejected", id: newest.id, line: (newest.line ?? "").split("\n")[0] };
+  if (newest.state === "opened") return { law, kind: "opened", id: newest.id, pr: newest.pr ?? 0, url: newest.url ?? "" };
+  if (newest.state === "out-of-date") return { law, kind: "out-of-date", id: newest.id };
   return { law, kind: "proven", id: newest.id };
+}
+
+// The notice line of what Open draft PR did.
+export function openedLine(opened: LawPatchOpened): string {
+  return opened.kind === "pr" ? `Draft PR #${opened.number} opened: ${opened.url}` : "Out of date, run again: the patch no longer applies to the default branch";
 }
 
 const button = (words: string, title: string, click: () => void, kind = "quiet") => {
@@ -48,19 +64,32 @@ export function lawActionNodes(action: LawAction, act: Pick<PatchActs, "start" |
         button("Dismiss", "Forget this rejected run", () => act.discard(action.id)),
         start(),
       ];
+    case "opened": {
+      const link = text("a", `Draft PR #${action.pr} opened`, "law-patch-note");
+      link.setAttribute("target", "_blank");
+      link.setAttribute("rel", "noopener");
+      if (action.url.startsWith("https://")) (link as HTMLAnchorElement).href = action.url;
+      return [link];
+    }
+    case "out-of-date":
+      return [text("span", "Out of date, run again", "law-patch-note"), button("Discard", "Delete this patch", () => act.discard(action.id)), start()];
     case "proven":
       return [button("Review the patch", "See the test this run wrote and the proof plotkeeper ran", () => act.review(action.id), "primary")];
   }
 }
 
 // The review of a proven `patch` of the law whose text is `law`.
-export function reviewNodes(patch: LawPatch, law: string, act: Pick<PatchActs, "discard" | "close">): HTMLElement[] {
+export function reviewNodes(patch: LawPatch, law: string, act: Pick<PatchActs, "open" | "discard" | "close">): HTMLElement[] {
   const proof = patch.proof;
   const diff = text("div", "", "patch-diff");
   diff.append(...diffLines(patch.diff ?? "").map((line) => text("pre", line.text, `diff-line ${line.kind}`)));
   const output = (heading: string, out: string) => [text("h3", heading, "patch-heading"), text("pre", out, "patch-output")];
   const foot = text("div", "", "patch-foot");
-  foot.append(button("Discard", "Delete this patch", () => act.discard(patch.id)), button("Close", "Close the review", act.close));
+  foot.append(
+    button("Open draft PR", "Push a branch with this test patch from the default branch and open a draft PR with the proof", () => act.open(patch.id), "primary"),
+    button("Discard", "Delete this patch", () => act.discard(patch.id)),
+    button("Close", "Close the review", act.close),
+  );
   return [
     text("h2", "Back a law", "patch-title"),
     text("p", law, "patch-law"),
@@ -111,6 +140,17 @@ const acts: PatchActs = {
   review: (id) => {
     shown = id;
     paint();
+  },
+  open: (id) => {
+    const project = shownProject();
+    if (project === null) return;
+    invoke("law_patch_open", { project, id })
+      .then((opened) => {
+        showNotice(openedLine(opened));
+        if (shown === id) shown = null;
+        return reloadMap();
+      })
+      .catch(failure("law_patch_open", "error"));
   },
   discard: (id) => {
     const project = shownProject();
