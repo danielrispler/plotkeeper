@@ -18,7 +18,7 @@ The project header's quiet dot, the rail's row and the history strip's "Brief" l
 
 ## The writer and its facts
 
-`write_pr_brief` is the one call into the writer (`understanding/src/pr_brief.rs`). The model is `prBriefs.model` in `settings.json` ([settings](../settings.md)), Opus by default, read on each write, and serves the writer, the claim check and the retry alike; the effort, `prBriefs.effort`, serves the writer and the retry only, and by default is left to `claude`; the claim check always runs at `claude`'s own effort, so a faster writer never comes with a laxer checker (#450). Briefs are always written with `claude -p`, whatever `summaries.writer` says. The writer is sandboxed with no tools: everything it reads is in the facts, which `build_facts` assembles from `gh` (`fetch_meta`) and `git` (`gather`):
+`write_pr_brief` is the one call into the writer (`understanding/src/pr_brief.rs`). The model is `prBriefs.model` in `settings.json` ([settings](../settings.md)), Opus by default, read on each write, and serves the writer, the claim check and the retry alike; the effort, `prBriefs.effort`, serves the writer and the retry only, low by default; the claim check always runs at `claude`'s own effort, so a faster writer never comes with a laxer checker (#450, [Measured](#measured-450)). Briefs are always written with `claude -p`, whatever `summaries.writer` says. The writer is sandboxed with no tools: everything it reads is in the facts, which `build_facts` assembles from `gh` (`fetch_meta`) and `git` (`gather`):
 
 - The PR's title and body, the spec or ticket it closes (the lowest-numbered of them, trimmed to the sections the writer needs), its checks' conclusions. `fetch_meta` also keeps every issue the PR closes (`closing`), which pre-flight matches through, with each one's parent ([the system map](map.md), "Pre-flight"). The closing issues are noted as the brief is written, so a pre-flight's "You expected …" line reaches only the briefs written after that pre-flight was made; a brief stored before it carries none.
 - The map at the PR's head (or as of its birth for an older PR), the map's diff, and the parts the diff touches with their tier (Daniel's tier overrides the map's), laws, the tagged tests that back each law and whether this PR changed one, and the flows through them.
@@ -46,6 +46,32 @@ Every writer call of the studio, the PR brief's, the claim check's, the turn sum
 To run `plotkeeper` with a fake writer instead of `claude -p` (it then writes no PR brief):
 
     PLOTKEEPER_CARD_WRITER=fake plotkeeper
+
+### Measured (#450)
+
+#450's changes were measured before merging with the writer bench on recorded inputs: the 7 part catch-ups written before it (their fog lists rebuilt from the stored catch-ups; the rebuilt facts match the records byte for byte) and the PR briefs of #404, #425, #421 and #430. Each variant wrote all 11 once, with the strength-of-claims rules and the shared facts as appended system text; the baseline is the recorded writes, made before both.
+
+| variant | kind | writes | total time | cost | cache-read tokens | claim flags before retry | retries | figures per catch-up |
+|---|---|---|---|---|---|---|---|---|
+| baseline (recorded) | catch-up | 7 | 367 s | $5.79 | not recorded | 12 | 7 | ?, ?, ?, 0, 0, 1, 0 |
+| baseline (recorded) | brief | 4 | 257 s | $2.97 | not recorded | 9 | 4 | |
+| rules: claude's own effort, all three calls | catch-up | 7 | 308 s | $2.70 | 277,581 | 4 | 3 | 1 each |
+| rules | brief | 4 | 239 s | $1.87 | 154,946 | 5 | 4 | |
+| low: effort low, all three calls | catch-up | 7 | 159 s | $0.91 | 565,129 | 3 | 6 | 1, 1, 1, 1, 2, 1, 2 |
+| low | brief | 4 | 122 s | $0.49 | 198,358 | 1 | 1 | |
+| **split: writer and retry low, claim check claude's own** | catch-up | 7 | 182 s | $0.94 | 565,168 | 1 | 6 | 1 each |
+| **split** | brief | 4 | 133 s | $0.57 | 232,964 | 4 | 2 | |
+
+**Split is kept.** It is about as fast and cheap as low, and its claim flags, counted by a checker at full effort, do not rise against rules (1 against 4 on part catch-ups, 4 against 5 on briefs) or the baseline (12 and 9). Low was faster still but was rejected: it lowers the checker's effort too, so its few flags may come from a laxer check, and a weak checker lets bad work through. The rules alone took flags from 12 to 4 on part catch-ups; the figure ask put a figure on every catch-up, where 1 of the 4 stored ones before had one.
+
+Caching worked as built: the claim check and the retry read 23,000 to 26,000 tokens each from the cache, the facts and `claude`'s own prompt, against 1,760 before. A different `--effort` keeps the cache: low's and split's writers, at effort low, read the facts that rules' writers, at `claude`'s own, had cached.
+
+Caveats:
+- **The bench's writers read a warm cache.** Low and split ran after rules within the cache's hour, so their writers read the facts back (28,164 tokens each on average) and cost about $0.04 a call. A real write's facts are new, so its writer starts cold: the smoke write's cold writer at low took 9.1 s and $0.25. A real part catch-up is so estimated at about 20 to 25 s and $0.35, against the recorded 52 s and $0.83 on average; this is an estimate, not a measurement.
+- **Retries still run, from the code checks.** Split's retry ran on 6 of 7 part catch-ups though the claim check flagged 1: three for a figure label over 18 characters (Hook, Server at a2e1aab, Understanding at b8c0985; the figure ask puts more labels in reach of that cap), one for a body over 45 words (Core at b8c0985), one for a gist over 30 words (Understanding at a2e1aab), and one for its claim flag (Core at a2e1aab).
+- **The PR brief inputs are not byte for byte the recorded ones.** Their facts are 36 to 132 bytes larger than recorded, since `gh` now reports the PRs as merged with their final checks; the part catch-ups' facts are identical.
+
+The raw logs and per-write results are in Daniel's local evidence (`local-evidence/2026-11-24-usage-issues/bench/`).
 
 ## The record
 
