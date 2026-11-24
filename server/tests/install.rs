@@ -1534,3 +1534,54 @@ fn install_then_a_rewire_on_start_then_uninstall_leaves_every_file_outside_the_d
     };
     assert_eq!(outside(files(&machine.home)), outside(before));
 }
+
+/// Asks the server at `url` (the address a start printed, with its token) whether any harness is wired (#437), as the
+/// page does.
+fn wired(url: &str) -> bool {
+    let rest = url.strip_prefix("http://").unwrap();
+    let (host, query) = rest.split_once("/?token=").unwrap();
+    let mut stream = std::net::TcpStream::connect(host).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    write!(
+        stream,
+        "POST /api/wired HTTP/1.1\r\nHost: {host}\r\nCookie: plotkeeper={query}\r\nConnection: close\r\nContent-Length: 2\r\n\r\n{{}}"
+    )
+    .unwrap();
+    let mut raw = String::new();
+    stream.read_to_string(&mut raw).unwrap();
+    let (head, body) = raw.split_once("\r\n\r\n").unwrap_or((&raw, ""));
+    assert!(head.starts_with("HTTP/1.1 200"), "{raw}");
+    serde_json::from_str(body).unwrap_or_else(|e| panic!("{e}: {raw}"))
+}
+
+#[test]
+fn the_server_says_nothing_is_wired_after_a_declined_start_and_wired_after_install() {
+    let machine = Machine::new(true, false).with_codex();
+    machine.start(&["n"]);
+    let mut server = machine
+        .starting(false)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    let mut lines = std::io::BufReader::new(server.stdout.take().unwrap());
+    while !line.starts_with("plotkeeper: http") {
+        line.clear();
+        assert_ne!(
+            std::io::BufRead::read_line(&mut lines, &mut line).unwrap(),
+            0,
+            "the start printed no address"
+        );
+    }
+    let url = line.trim().strip_prefix("plotkeeper: ").unwrap().to_owned();
+    let before = wired(&url);
+    machine.run("install");
+    let after = wired(&url);
+    let _ = server.kill();
+    let _ = server.wait();
+    assert!(!before, "nothing is wired after a no");
+    assert!(after, "install wired, and the running server says so");
+}
