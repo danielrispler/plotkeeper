@@ -41,7 +41,7 @@ fn replay(agent: &str, recorded: &str, edited: impl Fn(&Value) -> bool) -> (Stri
         if edited(&line) {
             fs::write(trial.join("calc.py"), FIXED).unwrap();
         }
-        let mut cmd = hook(&home);
+        let mut cmd = untimed(hook(&home));
         cmd.args(["--agent", agent]);
         assert!(feed(cmd, &payload).wait().unwrap().success());
     }
@@ -87,6 +87,14 @@ fn a_cursor_turn_that_writes_a_file_records_its_worktrees_start_and_end_trees() 
     assert_eq!(changed(&root, &start, &end), "calc.py");
 }
 
+/// `cmd` with a trees budget a loaded machine cannot run out of: these tests check what the trees
+/// hold; the budget has its own tests below. Under parallel builds two roots' trees took over the
+/// real 1.2 s.
+fn untimed(mut cmd: std::process::Command) -> std::process::Command {
+    cmd.env("PLOTKEEPER_HOOK_TREES_BUDGET_MS", "30000");
+    cmd
+}
+
 /// A fresh repository at `base`/`name` with one commit, spelled as `git` spells it.
 fn repository(base: &Path, name: &str) -> String {
     let root = base.join(name);
@@ -101,7 +109,7 @@ fn repository(base: &Path, name: &str) -> String {
 
 /// Feeds Cursor's hook entry `payload`, in Cursor's names, with `home` as `HOME`, and returns the line it logged.
 fn cursor(home: &Path, payload: Value) -> Value {
-    let mut cmd = hook(home);
+    let mut cmd = untimed(hook(home));
     cmd.args(["--agent", "cursor"]);
     assert!(feed(cmd, &payload).wait().unwrap().success());
     let log = fs::read_to_string(studio_hook::event_log(home)).unwrap();
