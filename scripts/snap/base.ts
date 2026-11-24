@@ -60,6 +60,7 @@ export const base = {
   settings_files: { settings: null, keymap: null },
   subagent_log: null,
   back_a_law: { kind: "run", id: "19a2f-9" },
+  law_patch_open: { kind: "pr", number: 412, url: "https://github.com/someone/app/pull/412" },
   turn_file_hunk: null,
   turn_reply: null,
   turn_summary: null,

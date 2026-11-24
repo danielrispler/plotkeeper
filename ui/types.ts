@@ -415,12 +415,17 @@ export type LawPatch = {
   id: string;
   project: string;
   law: string;
-  state: "proving" | "rejected" | "proven";
+  state: "proving" | "rejected" | "proven" | "opened" | "out-of-date";
   line: string | null;
   at: number;
   diff: string | null;
   proof: { test: string; file: string; passed: string; failed: string } | null;
+  // The draft PR Open draft PR opened (#400), and its address; a past payload has none.
+  pr?: number | null;
+  url?: string | null;
 };
+// What Open draft PR did: a draft PR opened, or the patch no longer applies to the default branch.
+export type LawPatchOpened = { kind: "pr"; number: number; url: string } | { kind: "out-of-date" };
 // What a click on Back a law did: a run started, or refused with the prompt to copy instead.
 export type BackLawStarted = { kind: "run"; id: string } | { kind: "refused"; line: string; prompt: string };
 // A fogged part's offer (#391): a part catch-up, `ready` when one is stored for its current fog list, `writing` while one is written, `failed`
@@ -582,6 +587,7 @@ export interface Commands {
   run_cancel: void;
   back_a_law: BackLawStarted;
   law_patch_discard: void;
+  law_patch_open: LawPatchOpened;
   runs_resume: void;
   select: Selection | null;
   selected: Selection | null;

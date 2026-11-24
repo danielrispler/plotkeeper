@@ -11,7 +11,8 @@ use std::{
     time::{Duration, Instant},
 };
 use studio_server::{
-    back_a_law::{self, LawRuns, PatchState, Started},
+    back_a_law::{self, LawRuns, Opened, PatchState, Started},
+    ratify,
     runner::{self, Harness, HarnessCommand, Plan, Runner},
 };
 use studio_test_support::git;
@@ -99,6 +100,8 @@ fn bench(agent: &str) -> Bench {
     git(&root, &["clone", "-q", "origin.git", "repo"]);
     let repo = root.join("repo");
     git(&repo, &["switch", "-q", "-c", "mine"]);
+    git(&repo, &["config", "user.name", "Daniel"]);
+    git(&repo, &["config", "user.email", "daniel@example.com"]);
     fs::write(repo.join("src/add.mjs"), "// Daniel's own work.\n").unwrap();
     git(&repo, &["commit", "-q", "-am", "Mine"]);
     let project = repo.display().to_string();
@@ -119,6 +122,18 @@ fn bench(agent: &str) -> Bench {
     )
     .unwrap();
     fs::set_permissions(&srt, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    // The recorded `gh`: it keeps its arguments, its folder, the branch there and the body it was given, and answers with a
+    // PR's address, as `gh pr create` does. No test reaches GitHub.
+    let gh = root.join("gh");
+    fs::write(
+        &gh,
+        format!(
+            "#!/bin/sh\necho \"$@\" > '{0}/gh.args'\npwd -P > '{0}/gh.cwd'\ngit branch --show-current > '{0}/gh.branch'\ncat > '{0}/gh.body'\necho https://github.com/someone/app/pull/7\n",
+            root.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&gh, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
 
     let runner = Runner::new(runner::Config {
         data: data.clone(),
@@ -133,6 +148,7 @@ fn bench(agent: &str) -> Bench {
             data,
             settings,
             sandbox: Some(srt),
+            gh: Some(gh),
         },
     );
     let (tell, changes) = mpsc::channel();
@@ -397,4 +413,157 @@ fn the_prompt_holds_the_law_and_the_parts_paths() {
     assert!(prompt.contains("add sums its two numbers."), "{prompt}");
     assert!(prompt.contains("src/"), "{prompt}");
     bench.runner.cancel(&id).unwrap();
+}
+
+/// Every file of the working tree under `dir`, with its bytes, leaving out its git data.
+fn tree(dir: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+    snapshot(dir)
+        .into_iter()
+        .filter(|(path, _)| !path.strip_prefix(dir).unwrap().starts_with(".git"))
+        .collect()
+}
+
+#[test]
+fn open_draft_pr_pushes_a_branch_from_the_default_one_and_opens_a_draft_in_a_temporary_worktree() {
+    let bench = bench(&format!("set -e\n{TEST}{PLANT}{DONE}"));
+    let id = bench.start();
+    assert_eq!(bench.settled(&id).state, PatchState::Proven);
+    let files = tree(&bench.repo);
+    let head = git(&bench.repo, &["rev-parse", "HEAD"]);
+
+    let opened = bench.laws.open_pr(&bench.project, &id).unwrap();
+    assert_eq!(
+        opened,
+        Opened::Pr {
+            number: 7,
+            url: "https://github.com/someone/app/pull/7".into()
+        }
+    );
+
+    // The branch is on origin: one commit on main, holding the test patch and nothing of Daniel's own branch.
+    let root = bench.dir.path().canonicalize().unwrap();
+    let origin = root.join("origin.git");
+    let branch = format!("back-a-law/{LAW}-{id}");
+    let pushed = git(&origin, &["rev-parse", &format!("refs/heads/{branch}")]);
+    assert_eq!(
+        git(&origin, &["rev-parse", &format!("{pushed}^")]),
+        git(&origin, &["rev-parse", "main"])
+    );
+    assert_eq!(
+        git(&origin, &["diff", "--name-only", "main", &pushed]),
+        "system-map.json\ntests/add.test.mjs"
+    );
+    assert_eq!(
+        git(&origin, &["show", &format!("{pushed}:src/add.mjs")]),
+        "export const add = (a, b) => a + b;"
+    );
+    assert!(
+        git(&origin, &["show", &format!("{pushed}:system-map.json")])
+            .contains("\"backing\": \"check\"")
+    );
+
+    // The draft PR, made from the temporary worktree on that branch, with the proof in its body.
+    let args = fs::read_to_string(root.join("gh.args")).unwrap();
+    assert!(args.starts_with("pr create --draft"), "{args}");
+    assert!(args.contains(&format!("--head {branch}")), "{args}");
+    assert!(args.contains("--base main"), "{args}");
+    assert_eq!(
+        fs::read_to_string(root.join("gh.branch")).unwrap().trim(),
+        branch
+    );
+    let body = fs::read_to_string(root.join("gh.body")).unwrap();
+    assert!(body.contains("add sums its two numbers."), "{body}");
+    assert!(body.contains("ok 1 - add sums its two numbers"), "{body}");
+    assert!(
+        body.contains("not ok 1 - add sums its two numbers"),
+        "{body}"
+    );
+    assert!(
+        !body.contains("@law"),
+        "a tag in the body would mention a GitHub user: {body}"
+    );
+
+    // The temporary worktree is gone, and Daniel's checkout is as it was.
+    let made = PathBuf::from(fs::read_to_string(root.join("gh.cwd")).unwrap().trim());
+    assert_ne!(made, bench.repo);
+    assert!(!made.exists(), "the temporary worktree is removed");
+    assert_eq!(
+        git(&bench.repo, &["worktree", "list", "--porcelain"])
+            .matches("worktree ")
+            .count(),
+        1
+    );
+    assert_eq!(git(&bench.repo, &["branch", "--show-current"]), "mine");
+    assert_eq!(git(&bench.repo, &["rev-parse", "HEAD"]), head);
+    assert_eq!(git(&bench.repo, &["status", "--porcelain"]), "");
+    assert_eq!(tree(&bench.repo), files);
+
+    // The patch says its PR, and the law change is accepted in ratify, so it is not offered again as unratified.
+    let patch = bench
+        .laws
+        .patches(&bench.project)
+        .into_iter()
+        .find(|p| p.id == id)
+        .unwrap();
+    assert_eq!(patch.state, PatchState::Opened);
+    assert_eq!(patch.pr, Some(7));
+    let ratified = ratify::read(&root.join("data").join(ratify::FILE), &bench.project);
+    assert_eq!(
+        ratified.status(&ratify::Item::new(7, "law", LAW), None),
+        ratify::Status::Accepted
+    );
+}
+
+#[test]
+fn a_patch_a_later_commit_made_stale_is_out_of_date() {
+    let bench = bench(&format!("set -e\n{TEST}{PLANT}{DONE}"));
+    let id = bench.start();
+    assert_eq!(bench.settled(&id).state, PatchState::Proven);
+    // Someone else changes the law's line on main after the run's clone.
+    let root = bench.dir.path().canonicalize().unwrap();
+    let seed = root.join("seed");
+    let map = fs::read_to_string(seed.join("system-map.json")).unwrap();
+    fs::write(
+        seed.join("system-map.json"),
+        map.replace("add sums its two numbers.", "add returns the sum."),
+    )
+    .unwrap();
+    git(&seed, &["commit", "-q", "-am", "Reword"]);
+    git(&seed, &["push", "-q", "origin", "main"]);
+    let files = tree(&bench.repo);
+
+    assert_eq!(
+        bench.laws.open_pr(&bench.project, &id).unwrap(),
+        Opened::OutOfDate
+    );
+    let patch = bench
+        .laws
+        .patches(&bench.project)
+        .into_iter()
+        .find(|p| p.id == id)
+        .unwrap();
+    assert_eq!(patch.state, PatchState::OutOfDate);
+    assert!(!root.join("gh.args").exists(), "no PR is opened");
+    let origin = root.join("origin.git");
+    assert_eq!(
+        git(&origin, &["branch", "--list", "back-a-law/*"]),
+        "",
+        "nothing is pushed"
+    );
+    assert_eq!(
+        git(&bench.repo, &["worktree", "list", "--porcelain"])
+            .matches("worktree ")
+            .count(),
+        1
+    );
+    assert_eq!(
+        git(&bench.repo, &["branch", "--list", "back-a-law/*"]),
+        "",
+        "the branch is not left behind"
+    );
+    assert_eq!(git(&bench.repo, &["branch", "--show-current"]), "mine");
+    assert_eq!(tree(&bench.repo), files);
+    // Discard still deletes it.
+    bench.laws.discard(&bench.project, &id).unwrap();
+    assert!(bench.laws.patches(&bench.project).is_empty());
 }

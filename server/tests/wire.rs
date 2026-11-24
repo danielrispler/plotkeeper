@@ -156,7 +156,8 @@ fn empty(status: Status) -> MapState {
     }
 }
 
-/// A back a law run's patch in each state: being proven, rejected, and proven with its diff and proof.
+/// A back a law run's patch in each state: being proven, rejected, proven with its diff and proof, out of date, and opened
+/// as a draft PR.
 fn law_patches() -> Vec<LawPatch> {
     let patch = |id: &str, state, line: Option<&str>| LawPatch {
         id: id.into(),
@@ -167,6 +168,8 @@ fn law_patches() -> Vec<LawPatch> {
         at: 1_761_743_990_000,
         diff: None,
         proof: None,
+        pr: None,
+        url: None,
     };
     vec![
         patch("19a2f-1", PatchState::Proving, None),
@@ -184,6 +187,12 @@ fn law_patches() -> Vec<LawPatch> {
                 failed: "FAIL [ 0.01s] studio-core::it order::events_apply_in_order".into(),
             }),
             ..patch("19a2f-3", PatchState::Proven, None)
+        },
+        patch("19a2f-5", PatchState::OutOfDate, None),
+        LawPatch {
+            pr: Some(412),
+            url: Some("https://github.com/someone/app/pull/412".into()),
+            ..patch("19a2f-6", PatchState::Opened, None)
         },
     ]
 }
