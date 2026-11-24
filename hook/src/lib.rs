@@ -913,9 +913,10 @@ pub fn agent_pid(
 }
 
 /// Whether `command` is Codex's `app-server` daemon, which runs the hooks of every Codex TUI session
-/// and outlives them (#369, Codex 0.172.0); `codex exec` runs its hooks itself.
+/// and outlives them (#369, Codex 0.172.0), under `$CODEX_HOME/packages/` (`~/.codex` by default);
+/// `codex exec` runs its hooks itself.
 fn codex_daemon(command: &str) -> bool {
-    command.contains("/.codex/packages/app-server-daemon/")
+    command.contains("/packages/app-server-daemon/") && command.ends_with("/codex")
 }
 
 /// Whether `command`, a process's executable path, lies inside a macOS app bundle, as an IDE's

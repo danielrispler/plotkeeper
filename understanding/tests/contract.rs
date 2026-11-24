@@ -215,8 +215,8 @@ fn the_codex_command_is_read_only_takes_the_schema_from_a_file_and_is_marked_int
     assert_eq!(args[at + 1], WriterKind::Codex.models()[0]);
 }
 
-// Copilot's tools are turned off by an empty `--available-tools` allow-list (its docs; that an empty list turns all of
-// them off is not verified), it never stops to ask, and it runs in an empty folder.
+// Copilot's tools are turned off by an allow-list naming no tool, with its built-in MCP servers off (an empty list left
+// them on in wave 1's trial, #369), it never stops to ask, and it runs in an empty folder.
 // @law: writer-has-no-tools
 #[test]
 fn the_copilot_command_allows_no_tools_takes_the_prompt_as_an_argument_and_is_marked_internal() {

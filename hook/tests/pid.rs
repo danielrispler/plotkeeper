@@ -123,6 +123,12 @@ fn no_pid_when_the_agent_is_codexs_shared_daemon() {
     assert_eq!(agent_pid(None, 37109, t), None);
     let t = table(&[(601, "/bin/zsh", 37109), (37109, DAEMON, 70019)]);
     assert_eq!(agent_pid(None, 601, t), None);
+    // Under a `CODEX_HOME` of its own too.
+    const ELSEWHERE: &str = "/Users/me/codex-home/packages/app-server-daemon/releases/0.172.0-aarch64-apple-darwin/bin/codex";
+    assert_eq!(
+        agent_pid(None, 37110, table(&[(37110, ELSEWHERE, 70019)])),
+        None
+    );
     let t = table(&[(9735, "/opt/homebrew/bin/codex", 100)]);
     assert_eq!(agent_pid(None, 9735, t), Some(9735));
 }
