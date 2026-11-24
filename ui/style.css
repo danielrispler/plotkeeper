@@ -224,13 +224,15 @@ h1 { margin: 0 0 var(--sp-4); }
 .phase { color: var(--muted); font-size: var(--size-small); }
 /* The permission mode (danielrispler/Falinks#541): a safety fact, so it reads at a glance, before the phase. */
 .mode { font-size: var(--size-small); font-weight: 600; }
-/* The "⋯" menu: Open, Rename, Close, Open all, Close all and Delete, under the button, over the story. */
-.menu { position: fixed; inset: auto; top: calc(var(--bar) + var(--sp-7) + var(--sp-5)); left: calc(var(--rail) - var(--menu) - var(--sp-5));
-        width: var(--menu); margin: 0; border: 0; padding: var(--sp-3); background: var(--surface); color: var(--fg);
+/* A popover menu: a group of buttons over the page. */
+.menu { position: fixed; inset: auto; width: var(--menu); margin: 0; border: 0; padding: var(--sp-3); background: var(--surface); color: var(--fg);
         border-radius: var(--radius); box-shadow: var(--shadow); }
 .menu:popover-open { display: flex; flex-direction: column; gap: var(--sp-2); }
 .menu .btn { text-align: start; }
 .menu .btn[hidden] { display: none; }
+/* The rail's "⋯" menu (#447): Rename, Mark unseen and Delete, under its button through the popover's implicit anchor, its end edge at the
+   button's end; it flips over the button, or to the button's other side, when it would leave the window. Needs Chrome 157+. */
+#rail-actions { position-area: block-end span-inline-start; margin-block: var(--sp-2); position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline; }
 .story { overflow-y: auto; padding: var(--sp-4) var(--sp-5) var(--sp-5); }
 .notice-row { display: flex; align-items: flex-start; gap: var(--sp-3); margin: 0 0 var(--sp-4); }
 .notice-row:has(#notice[hidden]) { display: none; }

@@ -266,6 +266,33 @@ const withHeader = (fixture: ReturnType<typeof build>, phase: boolean) => {
   return { ...fixture, snapScript: headerScript(phase) };
 };
 
+// #447: the "⋯" menu opens at its button, under it and inside the window, and flips over it when the button is near the window's
+// bottom edge; it lists only Rename, Mark unseen and Delete, as they apply. The rail's header does not scroll in the panel, so the
+// flipped case moves the panel down until the button is near the bottom edge, as a rail scrolled there would put it.
+const menuScript = (want: string[], nearBottom: boolean) => `
+  const frame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  ${nearBottom ? 'Object.assign(document.getElementById("map-panel").style, { top: "auto", bottom: "auto", height: "120px", transform: "translateY(" + (innerHeight - 90) + "px)" }); await frame();' : ""}
+  const more = document.getElementById("rail-more");
+  const menu = document.getElementById("rail-actions");
+  more.click();
+  await frame();
+  if (!menu.matches(":popover-open")) return log("snap:fail the menu did not open");
+  const b = more.getBoundingClientRect(), m = menu.getBoundingClientRect();
+  const labels = [...menu.querySelectorAll("button")].filter((x) => x.checkVisibility()).map((x) => x.textContent);
+  if (labels.join() !== ${JSON.stringify(want.join())}) log("snap:fail the menu lists " + labels.join(", "));
+  if (m.left < 0 || m.top < 0 || m.right > innerWidth || m.bottom > innerHeight) log("snap:fail the menu leaves the window: " + JSON.stringify(m));
+  if (m.right < b.left || m.left > b.right) log("snap:fail the menu is not in line with its button: menu " + m.left + "–" + m.right + ", button " + b.left + "–" + b.right);
+  ${nearBottom
+    ? 'if (m.bottom > b.top + 0.5 || b.top - m.bottom > 16) log("snap:fail the menu is not right over its button: menu bottom " + m.bottom + ", button top " + b.top);'
+    : 'if (m.top < b.bottom - 0.5 || m.top - b.bottom > 16) log("snap:fail the menu is not right under its button: menu top " + m.top + ", button bottom " + b.bottom);'}
+  log("menu " + labels.join(", ") + " at " + [m.left, m.top, m.right, m.bottom].map(Math.round) + "; button at " + [b.left, b.top, b.right, b.bottom].map(Math.round));`;
+
+// A session at Daniel's turn that he has already seen, so Mark unseen applies.
+const seen = (fixture: ReturnType<typeof build>) => {
+  fixture.selected.session.unseen = false;
+  return fixture;
+};
+
 // #124: the banner opens an idle session, right above the newest turn, with the Brief inside it and not below the feed.
 const bannerScript = `
   const banner = document.getElementById("banner");
@@ -513,6 +540,9 @@ export const railFixtures = {
   ...railStates,
   railHeaderNeeds: () => withHeader(build("needs_you", { ask: questionAsk }), false),
   railHeaderRunning: () => withHeader(build("running"), true),
+  railMenu: () => ({ ...seen(build("your_turn")), snapScript: menuScript(["Rename", "Mark unseen", "Delete"], false) }),
+  railMenuRunning: () => ({ ...build("running"), snapScript: menuScript(["Rename", "Delete"], false) }),
+  railMenuFlip: () => ({ ...seen(build("your_turn")), snapScript: menuScript(["Rename", "Mark unseen", "Delete"], true) }),
   railBanner: () => ({ ...build("idle", { withBrief: true }), snapScript: bannerScript }),
   railIdleScroll: () => ({ ...build("idle", { withBrief: true }), snapScript: scrollScript }),
   railIdleOpened: () => ({ ...build("idle", { withBrief: true }), snapScript: openTurnScript }),

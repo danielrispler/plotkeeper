@@ -49,14 +49,12 @@
           <p class="line-1"><span id="mark" class="mark"></span><span id="session-name" class="session-name"></span></p>
           <p class="line-2"><span id="state" class="state"></span><span id="block" class="block"></span><span id="mode" class="mode"></span><span id="phase" class="phase"></span></p>
         </div>
-        <button id="rail-more" class="btn small" type="button" popovertarget="rail-actions" aria-label="More actions" title="Rename, mark unseen, close or delete this session" hidden>⋯</button>
+        <button id="rail-more" class="btn small" type="button" popovertarget="rail-actions" aria-label="More actions" title="Rename, mark unseen or delete this session" hidden>⋯</button>
         <div id="rail-actions" class="menu" popover>
           <!-- Rename and close (danielrispler/Falinks#469). -->
           <button id="rename" class="btn small" type="button" title="Give this session a name of your own" hidden>Rename</button>
           <!-- Unseen (danielrispler/Falinks#556): the row's mark comes back until Daniel selects it again. -->
           <button id="mark-unseen" class="btn small" type="button" title="Mark this session unseen, to come back to it" hidden>Mark unseen</button>
-          <button id="open-all" class="btn small" type="button" title="Unfold every turn and section in the story">Open all</button>
-          <button id="close-all" class="btn small" type="button" title="Fold every turn and section in the story">Close all</button>
           <button id="delete" class="btn small" type="button" title="Remove this session from the list; its cards are kept" hidden>Delete</button>
         </div>
       </div>
