@@ -81,7 +81,7 @@ function resize(px: number | null) {
     // A browser that keeps nothing still resizes.
   }
 }
-// The handle on the sheet's left edge, made once and moved into each drawn sheet: a drag, the arrow keys while it has the focus, and a
+// The handle on the sheet's left edge, made once and kept in the sheet's slot while a sheet is open: a drag, the arrow keys while it has the focus, and a
 // double-click back to the first width.
 let resizeHandle: HTMLButtonElement | null = null;
 function handle() {
@@ -274,7 +274,12 @@ function drawSheet(view: MapView) {
   );
   if (overturned) card.append(overturned);
   showWidth(keptWidth());
-  slot.replaceChildren(handle(), card);
+  // The handle stays in the slot across draws: moving it out, even to put it back, drops its pointer capture and ends a drag, and the
+  // server's `map-landed` draws the sheet again at every stage of a write (#450).
+  const bar = handle();
+  if (bar.parentElement === slot) [...slot.children].forEach((child) => child !== bar && child.remove());
+  else slot.replaceChildren(bar);
+  slot.append(card);
   drawStrip(view, part.id, extra);
   syncSide(view.slots);
 }

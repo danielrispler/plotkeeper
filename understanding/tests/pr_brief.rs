@@ -1156,6 +1156,32 @@ fn the_claim_checks_call_runs_at_claudes_own_effort_whatever_the_brief_effort() 
     assert_eq!(effort(CallKind::Check), None);
 }
 
+// The brief effort covers the brief and catch-up writer and its retry only: pre-flight and the law draft call plain
+// `write`, which runs at `claude`'s own effort (#443 review).
+#[test]
+fn a_plain_write_runs_at_claudes_own_effort_whatever_the_brief_effort() {
+    use std::os::unix::fs::PermissionsExt;
+    use studio_understanding::ClaudeWriter;
+    let dir = tempfile::tempdir().unwrap();
+    let args = dir.path().join("args");
+    let claude = dir.path().join("claude");
+    std::fs::write(
+        &claude,
+        format!(
+            "#!/bin/sh\ncat > /dev/null\necho \"$@\" > '{}'\necho '{{\"result\":\"ok\"}}'\n",
+            args.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let writer = ClaudeWriter::new(claude, dir.path().into()).with_brief_effort(|| "low".into());
+
+    assert_eq!(writer.write("opus", "p").unwrap().text, "ok");
+    let got = std::fs::read_to_string(&args).unwrap();
+    assert!(got.contains("--model opus"), "{got}");
+    assert!(!got.contains("--effort"), "{got}");
+}
+
 #[test]
 fn a_calls_usage_keeps_the_tokens_read_from_the_cache_and_written_to_it() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/stored/pr-brief-v3");
@@ -1253,6 +1279,40 @@ fn a_stored_brief_with_a_guard_reads_with_it_and_an_older_one_has_none() {
     let older: StoredBrief =
         serde_json::from_str(&read("pr-brief-v4/stored-brief-full.json")).unwrap();
     assert_eq!(older.guard, None);
+}
+
+// @law: old-stored-files-load
+#[test]
+fn stored_records_read_with_their_calls_cache_tokens_and_older_ones_with_none() {
+    let sample = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/stored/pr-brief-v6/pr-brief-records.jsonl");
+    let data = tempfile::tempdir().unwrap();
+    let store = BriefStore::open(data.path()).unwrap();
+    std::fs::copy(sample, data.path().join("pr-briefs/pr-brief-records.jsonl")).unwrap();
+
+    let records = store.records();
+    let prs: Vec<u64> = records.iter().map(|r| r.pr).collect();
+    assert_eq!(prs, vec![402, 455]);
+    // Written before #450: its calls carry no cache tokens and read with none.
+    let older: Vec<(u64, u64)> = records[0]
+        .calls
+        .iter()
+        .map(|c| (c.cache_read_tokens, c.cache_write_tokens))
+        .collect();
+    assert_eq!(older, vec![(0, 0), (0, 0)]);
+    let newer: Vec<(&str, u64, u64)> = records[1]
+        .calls
+        .iter()
+        .map(|c| (c.role.as_str(), c.cache_read_tokens, c.cache_write_tokens))
+        .collect();
+    assert_eq!(
+        newer,
+        vec![
+            ("write", 0, 29986),
+            ("check", 29986, 1760),
+            ("retry", 29986, 0)
+        ]
+    );
 }
 
 // ---- gather: git only ----

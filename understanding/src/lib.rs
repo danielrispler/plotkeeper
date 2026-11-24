@@ -560,9 +560,8 @@ impl ClaudeWriter {
         }
     }
 
-    /// The writer whose PR brief and part catch-up calls run at the effort `effort` gives as each starts (#450); empty, or
-    /// without it, `claude`'s own. Every call of one write runs at the same effort, so the later ones can read its facts from
-    /// cache.
+    /// The writer whose PR brief and part catch-up writer and retry calls run at the effort `effort` gives as each starts
+    /// (#450); empty, or without it, `claude`'s own. The claim check, pre-flight and a law draft always run at `claude`'s own.
     pub fn with_brief_effort(self, effort: impl Fn() -> String + Send + Sync + 'static) -> Self {
         Self {
             brief_effort: Some(Arc::new(effort)),
@@ -855,8 +854,8 @@ impl ClaudeWriter {
     }
 
     /// The `claude -p --output-format json` run of a PR brief's call of kind `kind` at `model` on `prompt`, with `facts` appended to
-    /// the system prompt, and its standard input. A write's and a retry's call runs at the brief effort; a claim check's at
-    /// `claude`'s own (#450).
+    /// the system prompt, and its standard input. A write's and a retry's call runs at the brief effort; a claim check's and
+    /// a plain call's (pre-flight, a law draft) at `claude`'s own (#450).
     pub fn brief_command(
         &self,
         model: &str,
@@ -869,7 +868,7 @@ impl ClaudeWriter {
             model: Some(model.into()),
             effort: match kind {
                 pr_brief::CallKind::Write => self.brief_effort.as_ref().map(|effort| effort()),
-                pr_brief::CallKind::Check => None,
+                pr_brief::CallKind::Check | pr_brief::CallKind::Plain => None,
             },
             timeout: self.timeout.unwrap_or(WriterKind::Claude.timeout()),
             ..WriterRequest::default()

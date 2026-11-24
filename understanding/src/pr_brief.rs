@@ -1234,10 +1234,12 @@ pub struct BriefReply {
 
 /// Which call of a write runs (#450): the writer's and the retry's write the brief and run at the brief effort
 /// (`prBriefs.effort`); the claim check always runs at `claude`'s own, so a lower effort never weakens the checker.
+/// `Plain` is any other call through `BriefWriter::write` (pre-flight, a law draft), also at `claude`'s own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CallKind {
     Write,
     Check,
+    Plain,
 }
 
 /// What writes a brief: `ClaudeWriter` in the app, a canned reply in a test.
@@ -1333,7 +1335,7 @@ pub fn read_envelope(output: &str) -> Result<BriefReply, String> {
 
 impl BriefWriter for ClaudeWriter {
     fn write(&self, model: &str, prompt: &str) -> Result<BriefReply, String> {
-        let out = self.brief_stdout(model, CallKind::Write, None, prompt)?;
+        let out = self.brief_stdout(model, CallKind::Plain, None, prompt)?;
         read_envelope(&out)
     }
 

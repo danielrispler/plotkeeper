@@ -41,8 +41,8 @@ test("the waiting card says which call of the write runs, each label ending in a
   assert.equal(stageLabel(undefined), "Writing…", "before the server reports a stage");
   assert.equal(stageLabel({ kind: "writing" }), "Writing…");
   assert.equal(stageLabel({ kind: "checking" }), "Checking claims…");
-  assert.equal(stageLabel({ kind: "fixing", claims: 3 }), "Fixing 3 claims…");
-  assert.equal(stageLabel({ kind: "fixing", claims: 1 }), "Fixing 1 claim…");
+  assert.equal(stageLabel({ kind: "fixing", claims: 3 }), "Fixing 3 problems…");
+  assert.equal(stageLabel({ kind: "fixing", claims: 1 }), "Fixing 1 problem…");
 });
 
 test("a long catch-up's full fog list names each PR by number and each direct push by its subject and commit, oldest first", () => {

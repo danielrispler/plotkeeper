@@ -21,10 +21,15 @@ export const stubSource = (fixture) => `(() => {
   };
   window.__snapClick = (node) => real("click", middle(node));
   window.__snapDoubleClick = (node) => real("dblclick", middle(node));
-  // \`await __snapDrag(node, dx, dy)\` presses at the node's middle, moves by (dx, dy) with the button held and lets go there.
-  window.__snapDrag = (node, dx, dy) => {
+  // \`await __snapDrag(node, dx, dy)\` presses at the node's middle, moves by (dx, dy) with the button held and lets go there. With
+  // \`midway\`, an async function, the button stays held halfway while it runs, then the rest of the move and the release follow.
+  window.__snapDrag = async (node, dx, dy, midway) => {
     const { x, y } = middle(node);
-    return real("drag", { x, y, toX: x + dx, toY: y + dy });
+    const query = { x, y, toX: x + dx, toY: y + dy };
+    if (!midway) return real("drag", query);
+    await real("drag-start", query);
+    await midway();
+    return real("drag-end", query);
   };
   // A fixture's \`storage\` is what this browser had kept from an earlier visit, written before the app starts.
   for (const [key, value] of Object.entries(fixture.storage ?? {})) localStorage.setItem(key, value);

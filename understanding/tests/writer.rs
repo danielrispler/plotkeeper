@@ -193,6 +193,9 @@ fn a_written_name_is_kept_whole_and_only_a_runaway_one_is_cut_at_a_space() {
     // A word longer than the bound has no space to cut at, so it is cut at the bound.
     let word = "x".repeat(70);
     assert_eq!(named(&word), format!("{}…", "x".repeat(60)));
+    // When character 61 is a space, the first 60 end on a whole word and are kept.
+    let head = format!("{} {}", "a".repeat(29), "b".repeat(30));
+    assert_eq!(named(&format!("{head} c")), format!("{head}…"));
 }
 
 #[test]

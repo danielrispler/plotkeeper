@@ -401,13 +401,17 @@ pub fn write_name(
 }
 
 /// `name` when it has at most `NAME_CHARS` characters; otherwise its first `NAME_CHARS`, cut back to the last space
-/// when there is one, and "…".
+/// when there is one and the next character is not a space, and "…".
 fn bounded_name(name: String) -> String {
     let Some((end, _)) = name.char_indices().nth(NAME_CHARS) else {
         return name;
     };
     let head = &name[..end];
-    let head = head.rfind(' ').map_or(head, |space| &head[..space]);
+    // A space right after the head means the head ends on a whole word.
+    let head = match name[end..].starts_with(' ') {
+        true => head,
+        false => head.rfind(' ').map_or(head, |space| &head[..space]),
+    };
     format!("{}…", head.trim_end())
 }
 

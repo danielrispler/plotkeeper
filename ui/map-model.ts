@@ -640,9 +640,11 @@ export function awaitedCatchUp(offer: CatchUpOffer | undefined): "open" | "stop"
 }
 
 // What the waiting card says of a part catch-up's write (#450): the call that runs now, "Writing…" until the server says.
+// A fixing stage's count covers every flagged item, the code checks' (a long label or body) as well as the claim check's,
+// so it says "problems", not "claims".
 export function stageLabel(stage: CatchUpStage | undefined): string {
   if (stage?.kind === "checking") return "Checking claims…";
-  if (stage?.kind === "fixing") return `Fixing ${stage.claims} ${stage.claims === 1 ? "claim" : "claims"}…`;
+  if (stage?.kind === "fixing") return `Fixing ${stage.claims} ${stage.claims === 1 ? "problem" : "problems"}…`;
   return "Writing…";
 }
 

@@ -1774,6 +1774,35 @@ const mapSheetWidth = (): Fixture => ({
       log("sheet width ok");`, { map_state: mapState() }),
   realPointer: true, snapDone: "sheet width ok",
 });
+// A redraw in the middle of a drag (#443 review): the server's `map-landed`, which #450 sends at every stage of a write, draws the sheet
+// again; the drag still resizes, since the handle stays in the page and keeps the pointer.
+const mapSheetResizeRedraw = (): Fixture => ({
+  ...mapOpened(`${sheetHelpers}
+      plate("shell").click();
+      await wait(300);
+      const sheet = document.getElementById("map-sheet");
+      const width = () => Math.round(sheet.getBoundingClientRect().width);
+      const handle = sheet.querySelector(".sheet-resize");
+      if (!handle) return log("snap:fail the sheet has no resize handle");
+      // The next map_state differs, so the map is drawn again.
+      const stubbed = window.fetch;
+      window.fetch = async (url, init) => {
+        const reply = await stubbed(url, init);
+        if (!String(url).endsWith("/api/map_state")) return reply;
+        const state = await reply.json();
+        return { ...reply, json: async () => state && { ...state, __redrawn: true } };
+      };
+      const before = width(), card = sheetOf();
+      await __snapDrag(handle, -100, 0, async () => {
+        window.__snapEmit("map-landed", "/w/plotkeeper");
+        await wait(300);
+        if (sheetOf() === card) log("snap:fail the map-landed did not draw the sheet again");
+      });
+      await wait(100);
+      if (Math.abs(width() - (before + 100)) > 2) log("snap:fail a 100 px drag left with a redraw in its middle made the sheet " + width() + " px wide, not " + (before + 100));
+      log("resize redraw ok");`, { map_state: mapState() }),
+  realPointer: true, snapDone: "resize redraw ok",
+});
 // A width kept from an earlier visit opens the sheet at that width.
 const mapSheetKeptWidth = (): Fixture => ({
   ...mapOpened(`${sheetHelpers}
@@ -1945,7 +1974,7 @@ export const fixtures = {
   mapCatchUpWriting,
   mapCatchUpWritingStage: () => mapCatchUpStage({ kind: "writing" }, "Writing…"),
   mapCatchUpCheckingStage: () => mapCatchUpStage({ kind: "checking" }, "Checking claims…"),
-  mapCatchUpFixingStage: () => mapCatchUpStage({ kind: "fixing", claims: 2 }, "Fixing 2 claims…"),
+  mapCatchUpFixingStage: () => mapCatchUpStage({ kind: "fixing", claims: 2 }, "Fixing 2 problems…"),
   mapCatchUpSummarising,
   mapCatchUpBold,
   mapBriefBold,
@@ -2238,6 +2267,7 @@ export const fixtures = {
   // The part sheet in the map: one scrolling column, a resizable width, and a click on the empty map closes it (#445).
   mapSheetScrollShort,
   mapSheetWidth,
+  mapSheetResizeRedraw,
   mapSheetKeptWidth,
   mapSheetClose,
   mapEmpty: () =>

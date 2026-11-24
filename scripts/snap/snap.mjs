@@ -62,19 +62,24 @@ const press = (x, y, clickCount = 1) => [
 ];
 const realClick = (x, y) => realMouse([{ type: "mouseMoved", x, y }, ...press(x, y)]);
 const realDoubleClick = (x, y) => realMouse([{ type: "mouseMoved", x, y }, ...press(x, y, 1), ...press(x, y, 2)]);
-// A press at (x, y), a move to (toX, toY) in eight steps with the button held, and the release there.
-const realDrag = (x, y, toX, toY) =>
-  realMouse([
-    { type: "mouseMoved", x, y },
-    { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 },
-    ...Array.from({ length: 8 }, (_, i) => ({ type: "mouseMoved", x: x + ((toX - x) * (i + 1)) / 8, y: y + ((toY - y) * (i + 1)) / 8, button: "left", buttons: 1 })),
-    { type: "mouseReleased", x: toX, y: toY, button: "left", buttons: 0, clickCount: 1 },
-  ]);
+// A press at (x, y), a move to (toX, toY) in eight steps with the button held, and the release there; `realDragStart` is the press and
+// the first four steps, `realDragEnd` the last four and the release, so the page can act with the button held halfway.
+const steps = (x, y, toX, toY, from, to) =>
+  Array.from({ length: to - from }, (_, i) => ({ type: "mouseMoved", x: x + ((toX - x) * (from + i + 1)) / 8, y: y + ((toY - y) * (from + i + 1)) / 8, button: "left", buttons: 1 }));
+const dragStart = (x, y, toX, toY) => [
+  { type: "mouseMoved", x, y },
+  { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 },
+  ...steps(x, y, toX, toY, 0, 4),
+];
+const dragEnd = (x, y, toX, toY) => [...steps(x, y, toX, toY, 4, 8), { type: "mouseReleased", x: toX, y: toY, button: "left", buttons: 0, clickCount: 1 }];
+const realDrag = (x, y, toX, toY) => realMouse([...dragStart(x, y, toX, toY), ...dragEnd(x, y, toX, toY)]);
+const realDragStart = (x, y, toX, toY) => realMouse(dragStart(x, y, toX, toY));
+const realDragEnd = (x, y, toX, toY) => realMouse(dragEnd(x, y, toX, toY));
 
 const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css" };
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");
-  const input = { "/__snap/click": realClick, "/__snap/dblclick": realDoubleClick, "/__snap/drag": realDrag }[url.pathname];
+  const input = { "/__snap/click": realClick, "/__snap/dblclick": realDoubleClick, "/__snap/drag": realDrag, "/__snap/drag-start": realDragStart, "/__snap/drag-end": realDragEnd }[url.pathname];
   if (input) {
     try {
       if (!fixture.realPointer) throw new Error("the fixture has no realPointer");
