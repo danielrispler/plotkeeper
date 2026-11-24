@@ -2831,7 +2831,15 @@ ${writerStatusAfter("Keychain refused")}
       if (document.getElementById("map").hidden) log("snap:fail the first Esc left the Map view");
       document.querySelector("#map .plate[data-id=shell]").click();
       await wait(300);
-      log("thin " + thin + ", thick " + thick);`, { map_state: mapState({ fog: { shell: "thick", window: "thick", core: "thin", hook: "thin" } }), map_know: { positions: {}, tiers: {} } }),
+      // With the sheet open, the not placed list's title sits over no plate (#466).
+      const title = document.querySelector("#map-not-placed .side-title");
+      if (!title) return log("snap:fail no Not placed title");
+      const at = title.getBoundingClientRect();
+      for (const plate of document.querySelectorAll("#map .plate")) {
+        const box = plate.getBoundingClientRect();
+        if (at.left < box.right && box.left < at.right && at.top < box.bottom && box.top < at.bottom) log("snap:fail the Not placed title is over the " + plate.dataset.id + " plate");
+      }
+      log("thin " + thin + ", thick " + thick);`, { map_state: mapState({ fog: { shell: "thick", window: "thick", core: "thin", hook: "thin" } }), map_know: { positions: {}, tiers: {} }, contrast: true }),
   // The dark page (#455): the metas, the root's colour scheme, no ::-webkit-scrollbar rule left, and the pre-flight's hand picker,
   // whose native checkbox draws dark, sampled from Chrome's own screenshot.
   mapPreFlightPick: (): Fixture => ({
