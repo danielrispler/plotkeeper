@@ -1357,7 +1357,8 @@ fn cancel_of_a_run_that_ends_at_that_moment_never_fails() {
     // Cancels timed around the end of a short run: whichever wins, Cancel removes the run and says nothing went wrong.
     for round in 0..40u64 {
         let id = bench.run("sleep 0.05");
-        bench.until(|_| bench.state(&id) == Some(RunState::Running));
+        // Started by `submit`; a busy machine can see it only once it has ended, which never comes back to running.
+        bench.until(|_| matches!(bench.state(&id), Some(RunState::Running | RunState::Ended)));
         std::thread::sleep(Duration::from_millis(35 + round));
         assert_eq!(bench.runner.cancel(&id), Ok(()), "round {round}");
         assert!(!bench.folder(&id).exists());
