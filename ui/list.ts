@@ -98,28 +98,18 @@ export function sessionName(
 
 const thousands = (n: number) => `${Math.round(n / 1000).toLocaleString("en-US")}k`;
 
-// How full a session's context is (danielrispler/Falinks#517, decisions 2 and 3): "context 9%", its tokens such as "85k"
-// when the window is unknown, or "" before it is known.
+// How full a session's context is: its tokens, such as "85k", or "" before they are known.
 export function contextText(context: Context | null): string {
-  if (!context) return "";
-  return context.share === null ? thousands(context.tokens) : `context ${context.share}%`;
+  return context ? thousands(context.tokens) : "";
 }
 
-// Whether a context share is past the context warning's `threshold`, a whole percent; 0 never is.
-export const pastWarning = (context: Context | null, threshold: number) =>
-  threshold > 0 && context?.share != null && context.share > threshold;
-
-// The context share's hover: its tokens of the window, and what Claude's status line shows: its own
-// percent left.
+// The context's hover: its tokens in full words.
 export function contextTitle(context: Context | null): string {
-  if (!context) return "";
-  const used = thousands(context.tokens);
-  if (context.window === null || context.left === null) return `${used} tokens used · the window size is unknown`;
-  return `${used} of ${thousands(context.window)} tokens used · Claude's status line shows this as ${context.left}% left`;
+  return context ? `${thousands(context.tokens)} tokens used` : "";
 }
 
 // The muted mark after a row's name: "terminal" for a plain terminal's row, "status only" for another agent's row
-// (danielrispler/Falinks#560), so it never reads as a Claude session with missing data; else the context share. The
+// (danielrispler/Falinks#560), so it never reads as a Claude session with missing data; else the context's tokens. The
 // agent itself is the logo before the name (#158).
 export function rowMark(session: Pick<Session, "shell" | "status_only" | "transcript">): string {
   if (session.shell) return "terminal";
@@ -133,13 +123,11 @@ function nameTitle(session: Session): string {
   return session.name || !session.prompt_name ? "" : `${sessionName(session)} · ${session.identity.name}`;
 }
 
-// The mark's node, with the context share's hover; past the context warning, it reads at full strength, not in colour.
+// The mark's node, with the context's hover.
 function markNode(session: Session): HTMLElement {
   if (session.shell) return fullTitle(text("span", rowMark(session), "id"), "A plain terminal");
   if (session.status_only) return fullTitle(text("span", rowMark(session), "id"), "Another agent, followed by its reported status only");
-  const context = session.transcript.context;
-  const past = pastWarning(context, studio.files.settings.context_warning);
-  return fullTitle(text("span", rowMark(session), past ? "id past" : "id"), contextTitle(context));
+  return fullTitle(text("span", rowMark(session), "id"), contextTitle(session.transcript.context));
 }
 
 // A subagent's state label and its state: "Needs you" while it asks, else its status.
@@ -459,9 +447,7 @@ export function strip(sessions: Session[]): HTMLElement[] {
     ...shown.map((session, i) => {
       const button = selecting(session.id, null, `strip ${session.id}`);
       button.setAttribute("aria-pressed", String(isSelected(session.id)));
-      // A share past the context warning shows in the label's hover too.
-      const past = !session.shell && !session.status_only && pastWarning(session.transcript.context, studio.files.settings.context_warning);
-      button.title = `${sessionName(session)} · ${status(session.state, session.unseen, session.landed)[1]}${past ? ` · ${rowMark(session)}` : ""}`;
+      button.title = `${sessionName(session)} · ${status(session.state, session.unseen, session.landed)[1]}`;
       button.append(glyph(session.state, session.unseen, session.landed), labels[i]);
       return button;
     }),

@@ -6,7 +6,6 @@ import { initial, reload } from "../../dist/settings.js";
 test("missing files give the defaults", () => {
   const loaded = reload(initial, { settings: null, keymap: null });
   assert.deepEqual(loaded.settings.summaries, { model: "haiku", effort: "", on_open: false, writer: "claude" });
-  assert.equal(loaded.settings.context_warning, 30);
   assert.equal(loaded.keymap.Workspace["cmd-1"], "studio::ToggleList");
   assert.deepEqual(loaded.errors, []);
 });
@@ -14,25 +13,17 @@ test("missing files give the defaults", () => {
 test("a Zed-style file, with comments and trailing commas, sets its keys and leaves the rest default", () => {
   const settings = `// Studio settings
   {
-    "context_warning": 50, /* later */
-    "summaries": { "model": "sonnet", },
+    "summaries": { "model": "sonnet", /* later */ },
   }`;
   const loaded = reload(initial, { settings, keymap: null });
-  assert.equal(loaded.settings.context_warning, 50);
   assert.deepEqual(loaded.settings.summaries, { model: "sonnet", effort: "", on_open: false, writer: "claude" });
   assert.deepEqual(loaded.errors, []);
 });
 
-test("the context warning is a whole percent from 0 to 100, and the removed notifications key is ignored", () => {
-  const warning = (value) => reload(initial, { settings: `{ "context_warning": ${value} }`, keymap: null });
-  assert.equal(warning(20).settings.context_warning, 20);
-  assert.equal(warning(0).settings.context_warning, 0);
-  assert.equal(warning(150).settings.context_warning, 100);
-  assert.equal(warning(-5).settings.context_warning, 0);
-  assert.equal(warning(32.6).settings.context_warning, 33);
-  assert.equal(warning(`"high"`).settings.context_warning, 30);
-  const old = reload(initial, { settings: `{ "notifications": { "while_focused": true } }`, keymap: null });
+test("the removed context_warning and notifications keys are ignored (#416)", () => {
+  const old = reload(initial, { settings: `{ "context_warning": 50, "notifications": { "while_focused": true } }`, keymap: null });
   assert.deepEqual(old.errors, []);
+  assert.equal(old.settings.context_warning, undefined);
 });
 
 test("a string holding // or /* is not read as a comment", () => {
@@ -41,19 +32,19 @@ test("a string holding // or /* is not read as a comment", () => {
 });
 
 test("a key of the wrong type keeps its default", () => {
-  const settings = `{ "context_warning": "high", "summaries": { "model": 3 } }`;
+  const settings = `{ "summaries": { "model": 3, "on_open": "yes", "effort": "high" } }`;
   const loaded = reload(initial, { settings, keymap: null });
-  assert.equal(loaded.settings.context_warning, 30);
   assert.equal(loaded.settings.summaries.model, "haiku");
-  assert.deepEqual(loaded.errors, ["settings.json: summaries.model: expected a string", "settings.json: context_warning: expected a number"]);
+  assert.equal(loaded.settings.summaries.on_open, false);
+  assert.deepEqual(loaded.errors, ["settings.json: summaries.model: expected a string", "settings.json: summaries.on_open: expected a boolean"]);
   // The other keys still apply.
-  assert.equal(reload(initial, { settings: `{ "context_warning": 40, "summaries": { "on_open": "yes" } }`, keymap: null }).settings.context_warning, 40);
+  assert.equal(loaded.settings.summaries.effort, "high");
 });
 
 test("a broken file keeps the last good settings and reports the error", () => {
-  const good = reload(initial, { settings: `{ "context_warning": 50 }`, keymap: `[{ "bindings": { "cmd-l": "studio::ToggleList" } }]` });
-  const broken = reload(good, { settings: `{ "context_warning": 60, `, keymap: `[{ "bindings": ` });
-  assert.equal(broken.settings.context_warning, 50);
+  const good = reload(initial, { settings: `{ "summaries": { "model": "sonnet" } }`, keymap: `[{ "bindings": { "cmd-l": "studio::ToggleList" } }]` });
+  const broken = reload(good, { settings: `{ "summaries": { "model": "opus" }, `, keymap: `[{ "bindings": ` });
+  assert.equal(broken.settings.summaries.model, "sonnet");
   assert.equal(broken.keymap.Workspace["cmd-l"], "studio::ToggleList");
   assert.equal(broken.errors.length, 2);
   assert.match(broken.errors[0], /^settings\.json: /);
@@ -85,7 +76,7 @@ test("a key that is not a keystroke is reported and the rest of the keymap stays
 test("a file of the wrong shape is reported", () => {
   const loaded = reload(initial, { settings: `[]`, keymap: `{}` });
   assert.equal(loaded.errors.length, 2);
-  assert.equal(loaded.settings.context_warning, 30);
+  assert.equal(loaded.settings.summaries.model, "haiku");
 });
 
 test("the check lists are commands per project folder, none by default, and anything else is reported (danielrispler/plotkeeper#112)", () => {

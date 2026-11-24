@@ -103,7 +103,6 @@ h1 { margin: 0 0 var(--sp-4); }
 .list .logo, .list .logo svg { width: var(--logo); height: var(--logo); }
 .list .session-row .l2 { font-size: var(--size-xs); }
 .row .id { color: var(--muted); flex: none; font-size: var(--size-small); }
-.row .id.past { color: var(--fg); font-weight: 600; }
 .row .l1 .glyph { margin-inline-start: auto; }
 .row .clock { flex: none; margin-inline-start: auto; font-size: var(--size-xs); }
 .row .row-step { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -197,7 +196,7 @@ h1 { margin: 0 0 var(--sp-4); }
 .toast.start { top: auto; bottom: var(--sp-5); background: var(--raised); cursor: default;
                box-shadow: inset 0 0 0 var(--hair) var(--edge), var(--shadow); }
 .toast.clear { right: auto; left: var(--sp-5); grid-template-columns: minmax(0, 1fr) auto; }
-/* The note toast: a turn that ended off screen or a context warning; not in colour. */
+/* The note toast: a turn that ended off screen; not in colour. */
 .toast.note { background: var(--raised); box-shadow: inset 0 0 0 var(--hair) var(--edge), var(--shadow); }
 .toast.note .name { color: var(--fg); }
 #probe { position: absolute; visibility: hidden; white-space: pre; font: var(--term-size)/var(--term-line) var(--mono); }

@@ -65,7 +65,7 @@ export function showView(selected: Selection | null) {
   element("block").textContent = (state === "needs_you" ? blockKind(open, openDecision()) : null) ?? "";
   // A subagent runs in its session's mode.
   element("mode").textContent = reports(session, "permission_mode") ? modeText(session.permission_mode) : "";
-  // The agent's logo, titled with its model line when it has one (#158); agy's keeps its note that it has no context share.
+  // The agent's logo, titled with its model line when it has one (#158); agy's keeps its note that it has no context size.
   const key = logoKey(session);
   const title = [agent === null ? modelLine(session) : "", noContextNote(session)].filter(Boolean).join("\n");
   element("mark").replaceChildren(logo(key, title || undefined));

@@ -38,7 +38,7 @@ import { barKeyDown } from "./story-bar.js";
 import { startWriters } from "./writers.js";
 import { jumpToNeedsYou, showToast } from "./toast.js";
 import { askOnce, notifyIfAway, type Alert } from "./alerts.js";
-import { finishedNote, showNote, warnContext, watchNotes } from "./notes.js";
+import { finishedNote, showNote, watchNotes } from "./notes.js";
 import type { SavedProject, Selection, Session, SessionCards } from "./types.js";
 import { HOVERS } from "./hovers.js";
 
@@ -203,19 +203,8 @@ function applySettings(files: SettingsFiles) {
   invoke("check_lists", { lists: settings.checks }).catch(failure("check_lists"));
   window.dispatchEvent(new Event("settings"));
 }
-// The context warning waits for both the settings and the list, so it first arms the sessions at the threshold in the
-// file, not the default's (`notes.ts`).
-const ready = { settings: false, list: false };
-const warn = () => ready.settings && ready.list && warnContext(studio.listed, studio.files.settings.context_warning);
-listen<SettingsFiles>("settings-files", (files) => {
-  applySettings(files);
-  warn();
-});
-invoke("settings_files").then((files) => {
-  applySettings(files);
-  ready.settings = true;
-  warn();
-});
+listen<SettingsFiles>("settings-files", applySettings);
+invoke("settings_files").then(applySettings);
 // Every block in the story opens or closes, except a card's "explain more", whose first open asks the
 // writer, and the "ask about this" boxes.
 const blocks = () => element("story").querySelectorAll<HTMLDetailsElement>("details:not(.more):not(.ask-about)");
@@ -273,8 +262,6 @@ element("remove-project").addEventListener("click", () => {
 const showList = (sessions: Session[]) => {
   showSessions(sessions);
   showToast();
-  ready.list = true;
-  warn();
 };
 listen<Session[]>("sessions", showList);
 invoke("sessions").then(showList);

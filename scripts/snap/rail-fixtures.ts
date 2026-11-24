@@ -100,7 +100,7 @@ const session = (state: SessionState, { running = false, question = false } = {}
     steps_ago: ended || state === "needs_you" ? 0 : 7,
     responses: ended ? ["I'll run the full check first.", final] : ["I'll look at how the row lays out its controls."],
     unavailable: null,
-    context: { tokens: 85000, window: 1000000, share: 9, left: 91 },
+    context: { tokens: 85000 },
     branch: "issue-56-row-controls",
     model: "claude-opus-5-5",
     effort: "high",
@@ -144,7 +144,7 @@ const others = () => {
     ...session("your_turn"), id, resume_id: id, prompt_name: name.slice(name.indexOf("·") + 2), identity: { issue: Number(name.slice(1, 3)), branch: null, pr: null, worktree: "", name },
     cwd: `/Users/danielrispler/work/plotkeeper/.claude/worktrees/issue-${name.slice(1, 3)}`, folder_name: `issue-${name.slice(1, 3)}`, state, agents: [], questions: [], turns: [],
     asker: null, unseen: false, line: undefined, landed: false, started_at: now - 3600e3, ...extra,
-    transcript: { ...session("your_turn").transcript, context: { tokens: 120000, window: 1000000, share: 12, left: 88 } },
+    transcript: { ...session("your_turn").transcript, context: { tokens: 120000 } },
   });
   return [
     other("s2", "#57 · Name from the prompt", "needs_you", { line: "Which name should a session take from its prompt? · 2m", asker: { agent: null, since: now - 2 * MIN }, questions: [{ tool_use_id: "q", agent: null, turn: 0, answer: "open", questions: [{ question: "Which name should a session take from its prompt?", options: [] }] }] }),

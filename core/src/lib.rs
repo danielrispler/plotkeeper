@@ -4395,23 +4395,6 @@ impl Studio {
         changed
     }
 
-    /// The shell read `snapshot`, the `context_window` of session `id`'s status line snapshot, `None`
-    /// with no snapshot (danielrispler/Falinks#517, decisions 1 and 2; danielrispler/Falinks#519); returns whether it changed, and with it
-    /// maybe the context's tokens or percentages.
-    pub fn set_snapshot(&mut self, id: &str, snapshot: Option<serde_json::Value>) -> bool {
-        let context = self
-            .sessions
-            .get_mut(id)
-            .and_then(|s| s.transcript.context.as_mut());
-        match context {
-            Some(context) if context.snapshot != snapshot => {
-                *context = Context::new(context.measured, snapshot);
-                true
-            }
-            _ => false,
-        }
-    }
-
     /// The typical duration of check `command`, in milliseconds: the median of how long its earlier
     /// runs took when they did not fail, its backgrounded runs included (danielrispler/Falinks#461, decisions 13 to 15).
     /// `None` when it never ran. Runs group by their check statements (`checks::key`) under the list
