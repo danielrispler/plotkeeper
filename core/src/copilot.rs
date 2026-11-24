@@ -22,8 +22,9 @@ pub const COPILOT: &str = "copilot";
 
 /// What Copilot reports: its prompts, tool calls and turn ends. Its `permissionRequest` payload is
 /// not documented, so install does not wire it and nothing waits on Daniel; no reply text, model or
-/// permission mode reach its hooks, its transcript has no reader here, and no turn trees until the
-/// hook maps its turns (spec #320, "Turn trees and pruning per harness").
+/// permission mode reach its hooks, so a turn's reply is read from its transcript (#369), which is
+/// read for nothing else, and no turn trees until the hook maps its turns (spec #320, "Turn trees
+/// and pruning per harness").
 pub const CAPABILITIES: Capabilities = Capabilities {
     agent: COPILOT,
     asks: false,
@@ -61,6 +62,9 @@ struct Raw {
     /// An object in snake_case payloads, a JSON string in camelCase ones.
     #[serde(default, alias = "toolArgs")]
     tool_input: Value,
+    /// When Copilot sent the event, in ms in a camelCase payload.
+    #[serde(default)]
+    timestamp: Value,
     #[serde(default)]
     studio_received_ms: u64,
     studio_terminal_id: Option<String>,
@@ -136,9 +140,14 @@ fn adapt(raw: Raw) -> Event {
             prompt: raw.prompt.clone(),
             origin: None,
         }),
-        "agentStop" | "Stop" => happened.push(Happened::TurnEnd {
-            background_pending: false,
-        }),
+        "agentStop" | "Stop" => {
+            if let Some(reply) = final_response(&raw.transcript_path, &raw.timestamp) {
+                happened.push(Happened::Reply(reply));
+            }
+            happened.push(Happened::TurnEnd {
+                background_pending: false,
+            });
+        }
         "preToolUse" | "PreToolUse" => {
             let (tool, id) = call();
             happened.push(Happened::ToolStart { tool, id });
@@ -178,4 +187,34 @@ fn adapt(raw: Raw) -> Event {
         line: Bytes::default(),
         happened,
     }
+}
+
+/// The reply of the turn whose `agentStop` was sent at `timestamp`, from Copilot's transcript at
+/// `path`: the last `assistant.message` with text after the turn's `user.message` and before the
+/// `hook.start` that logged that `agentStop`'s input. A transcript read live may not yet hold that
+/// record, so with none found it is the last such message. `None` when the turn has none or the
+/// transcript cannot be read.
+fn final_response(path: &str, timestamp: &Value) -> Option<String> {
+    let mut last = None;
+    for record in crate::agy::records(path)? {
+        match record["type"].as_str() {
+            Some("user.message") => last = None,
+            Some("assistant.message") => {
+                if let Some(text) = record["data"]["content"].as_str().map(str::trim)
+                    && !text.is_empty()
+                {
+                    last = Some(text.to_owned());
+                }
+            }
+            Some("hook.start")
+                if record["data"]["hookType"] == "agentStop"
+                    && timestamp.is_u64()
+                    && record["data"]["input"]["timestamp"] == *timestamp =>
+            {
+                return last;
+            }
+            _ => {}
+        }
+    }
+    last
 }

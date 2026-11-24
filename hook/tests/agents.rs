@@ -130,6 +130,40 @@ fn a_cursor_payload_is_dropped_by_the_claude_entry_and_recorded_once_by_cursors(
     assert_eq!(stderrs[1], "");
 }
 
+/// Copilot CLI's own payload, camelCase with `sessionId` (recorded in wave 1's trial, #369), is
+/// Copilot's marker: the Claude entry drops it with one line on stderr, and Copilot's entry records
+/// it once.
+#[test]
+fn a_copilot_payload_is_dropped_by_the_claude_entry_and_recorded_once_by_copilots() {
+    let payload = json!({
+        "cwd": "/",
+        "prompt": "go",
+        "sessionId": "246c4856-1241-4f20-bb9f-ef981a1a7421",
+        "timestamp": 1795512039620u64,
+    });
+    let home = scratch("agents-copilot-twice");
+    let mut stderrs = Vec::new();
+    for args in [
+        &["--agent", "claude"][..],
+        &["--agent", "copilot", "--event", "userPromptSubmitted"],
+    ] {
+        let mut cmd = hook(&home);
+        cmd.args(args).stdout(Stdio::null()).stderr(Stdio::piped());
+        let out = feed(cmd, &payload).wait_with_output().unwrap();
+        assert!(out.status.success());
+        stderrs.push(String::from_utf8(out.stderr).unwrap());
+    }
+    let text = fs::read_to_string(studio_hook::event_log(&home)).unwrap();
+    let lines: Vec<Value> = text
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 1, "{text}");
+    assert_eq!(lines[0]["studio_agent"], "copilot");
+    assert!(stderrs[0].contains("Copilot"), "{}", stderrs[0]);
+    assert_eq!(stderrs[1], "");
+}
+
 /// Every entry of Cursor's hook file names Cursor (#362), on the seven events that wait on no answer.
 #[test]
 fn every_cursor_entry_names_cursor() {
