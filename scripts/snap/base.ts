@@ -12,7 +12,7 @@ export type ByArg<T> = { __by: string; values: Record<string, T> };
 type ReadCommand = { [C in Command]: Commands[C] extends void ? never : C }[Command];
 
 // Beside the replies, the harness's own keys: errors for the log and a script that runs once the UI has drawn (page.mjs).
-export type Fixture = { [C in Command]?: Commands[C] | ByArg<Commands[C]> } & { appErrors?: string[]; snapScript?: string; snapDone?: string; realPointer?: boolean; storage?: Record<string, string> };
+export type Fixture = { [C in Command]?: Commands[C] | ByArg<Commands[C]> } & { appErrors?: string[]; snapScript?: string; snapDone?: string; realPointer?: boolean; contrast?: boolean; storage?: Record<string, string> };
 
 const noSelection: Selection | null = null;
 

@@ -7,6 +7,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { inflateSync } from "node:zlib";
 import { fixtures } from "./fixtures.ts";
 import { chromeFailure, consoleLines, failed, snapPage } from "./page.mjs";
 
@@ -76,9 +77,94 @@ const realDrag = (x, y, toX, toY) => realMouse([...dragStart(x, y, toX, toY), ..
 const realDragStart = (x, y, toX, toY) => realMouse(dragStart(x, y, toX, toY));
 const realDragEnd = (x, y, toX, toY) => realMouse(dragEnd(x, y, toX, toY));
 
+// A fixture with `contrast` asks for the page as drawn, Chrome's own screenshot (`Page.captureScreenshot`), whose pixels its contrast
+// pass samples (contrast.mjs). Chrome draws the shot only as the page's virtual time runs, which a waiting fetch holds, and that time runs
+// ahead of the clock's, so `/__snap/shot-start` only starts it, and the page asks `/__snap/shot` until it is there, letting some of its
+// time pass between asks, while each ask waits up to 100 ms of the clock's.
+let shot = null;
+async function realShot() {
+  const port = readFileSync(join(profile, "DevToolsActivePort"), "utf8").split("\n")[0];
+  const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
+  const socket = new WebSocket(targets.find((target) => target.type === "page").webSocketDebuggerUrl);
+  await new Promise((open, fail) => ((socket.onopen = open), (socket.onerror = fail)));
+  const reply = await new Promise((done) => {
+    socket.onmessage = (message) => done(JSON.parse(message.data));
+    socket.send(JSON.stringify({ id: 1, method: "Page.captureScreenshot", params: { format: "png" } }));
+  });
+  socket.close();
+  if (!reply.result) throw new Error(JSON.stringify(reply.error));
+  return pixels(Buffer.from(reply.result.data, "base64"));
+}
+// A PNG of 8-bit RGB or RGBA, as Chrome writes them, made into its width and height (4 bytes each) and its RGBA pixels. The page gets the
+// pixels, not the PNG: decoding it there runs off the page's thread, and its virtual time races to the end of the budget meanwhile.
+function pixels(png) {
+  let at = 8;
+  let width, height, kind;
+  const packed = [];
+  while (at < png.length) {
+    const length = png.readUInt32BE(at);
+    const type = png.toString("latin1", at + 4, at + 8);
+    const data = png.subarray(at + 8, at + 8 + length);
+    if (type === "IHDR") [width, height, kind] = [data.readUInt32BE(0), data.readUInt32BE(4), data[9]];
+    if (type === "IDAT") packed.push(data);
+    at += 12 + length;
+  }
+  if (png[24] !== 8 || (kind !== 2 && kind !== 6)) throw new Error(`a PNG of depth ${png[24]} and colour type ${kind}`);
+  const step = kind === 6 ? 4 : 3;
+  const raw = inflateSync(Buffer.concat(packed));
+  const row = width * step;
+  const out = Buffer.alloc(8 + width * height * 4);
+  out.writeUInt32BE(width, 0);
+  out.writeUInt32BE(height, 4);
+  let previous = new Uint8Array(row);
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (row + 1)];
+    const line = Uint8Array.from(raw.subarray(y * (row + 1) + 1, (y + 1) * (row + 1)));
+    for (let x = 0; x < row; x++) {
+      const [left, up, corner] = [x >= step ? line[x - step] : 0, previous[x], x >= step ? previous[x - step] : 0];
+      const guess = left + up - corner;
+      const paeth = Math.abs(guess - left) <= Math.abs(guess - up) && Math.abs(guess - left) <= Math.abs(guess - corner) ? left : Math.abs(guess - up) <= Math.abs(guess - corner) ? up : corner;
+      line[x] = (line[x] + [0, left, up, (left + up) >> 1, paeth][filter]) & 255;
+    }
+    for (let x = 0; x < width; x++) {
+      const into = 8 + (y * width + x) * 4;
+      out[into] = line[x * step];
+      out[into + 1] = line[x * step + 1];
+      out[into + 2] = line[x * step + 2];
+      out[into + 3] = step === 4 ? line[x * step + 3] : 255;
+    }
+    previous = line;
+  }
+  return out;
+}
+
 const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css" };
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");
+  if (url.pathname === "/__snap/shot-start" || url.pathname === "/__snap/shot") {
+    if (!fixture.contrast) {
+      res.statusCode = 500;
+      res.end("the fixture has no contrast");
+      return;
+    }
+    if (url.pathname === "/__snap/shot-start") {
+      shot = realShot();
+      shot.catch(() => {});
+      res.end("started");
+      return;
+    }
+    try {
+      if (!shot) throw new Error("no shot was started");
+      const png = await Promise.race([shot, new Promise((done) => setTimeout(done, 100))]);
+      if (png) res.setHeader("content-type", "application/octet-stream");
+      else res.statusCode = 202;
+      res.end(png ?? "not yet");
+    } catch (why) {
+      res.statusCode = 500;
+      res.end(String(why));
+    }
+    return;
+  }
   const input = { "/__snap/click": realClick, "/__snap/dblclick": realDoubleClick, "/__snap/drag": realDrag, "/__snap/drag-start": realDragStart, "/__snap/drag-end": realDragEnd }[url.pathname];
   if (input) {
     try {
@@ -102,9 +188,11 @@ const server = createServer(async (req, res) => {
   }
 });
 await new Promise((done) => server.listen(0, "127.0.0.1", done));
+// The page's time: 5 s, and a second more for a fixture with `contrast`, whose pass runs after a script written against the 5 s.
+const budget = fixture.contrast ? 6000 : 5000;
 const chromeArgs = [
   "--headless=new", "--enable-logging=stderr", "--v=0", "--disable-gpu", `--force-device-scale-factor=${scale}`, `--user-data-dir=${profile}`, `--window-size=${width},${height}`,
-  "--virtual-time-budget=5000", `--screenshot=${resolve(out)}`, ...(fixture.realPointer ? ["--remote-debugging-port=0"] : []),
+  `--virtual-time-budget=${budget}`, `--screenshot=${resolve(out)}`, ...(fixture.realPointer || fixture.contrast ? ["--remote-debugging-port=0"] : []),
   `http://127.0.0.1:${server.address().port}/index.html`,
 ];
 // A screenshot left from an earlier run must not pass for this one's.
@@ -167,6 +255,10 @@ if (run.status !== 0) {
 }
 if (failed(log, fixture.snapDone)) {
   if (!log.some((line) => line.startsWith("snap:fail"))) console.error(`snap:fail the script never printed "${fixture.snapDone}": Chrome's time budget cut it off`);
+  process.exit(1);
+}
+if (fixture.contrast && !log.some((line) => line.startsWith("contrast: "))) {
+  console.error("snap:fail the contrast pass never finished: Chrome's time budget cut it off");
   process.exit(1);
 }
 if (!existsSync(resolve(out))) {

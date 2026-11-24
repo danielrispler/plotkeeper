@@ -1245,7 +1245,11 @@ const listSecondLines = (): Fixture => ({
   ...listLines(),
   snapScript: `${listChecks}
       if (!clear() || clear().textContent !== "Clear landed") log("snap:fail no Clear landed at the list's end");
-      if (clear() && getComputedStyle(clear()).color !== "rgb(111, 108, 102)") log("snap:fail Clear landed is not faint: " + getComputedStyle(clear()).color);`,
+      const probe = document.body.appendChild(document.createElement("span"));
+      probe.style.color = "var(--faint)";
+      const faint = getComputedStyle(probe).color;
+      probe.remove();
+      if (clear() && getComputedStyle(clear()).color !== faint) log("snap:fail Clear landed is not faint, " + faint + ": " + getComputedStyle(clear()).color);`,
 });
 // Clear landed pressed: the landed row is hidden, the toast offers Undo, and Undo brings it back; pressed again for the screenshot.
 // The strip and the tab's title follow at once too: the cleared session, unseen here, leaves both.
@@ -1944,8 +1948,9 @@ export const fixtures = {
       if (!outcome?.classList.contains("passed")) log("snap:fail no passed outcome: " + outcome?.textContent);`, true),
   // A local Ollama set by its base URL alone (#367): the OpenAI-compatible API is preset before Claude, its model is typed,
   // its row shows the base URL and no key, and a Test of it passes.
-  writersOpenAI: () =>
-    writersOpen({
+  // The contrast pass (#455) runs here too: its fields' borders.
+  writersOpenAI: (): Fixture => ({
+    ...writersOpen({
       writers: { writers: [anthropicWriter, { ...openaiWriter, found: true }, claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: "http://localhost:11434/v1" },
       test_writer: { outcome: "passed", line: "Passed: `openai` answered. Summaries are written with it.", settings: null },
     }, `
@@ -1957,6 +1962,8 @@ export const fixtures = {
       if (!document.getElementById("writer-openai-remove")) log("snap:fail no Remove with a base URL set");
       const outcome = document.getElementById("writer-outcome");
       if (!outcome?.classList.contains("passed")) log("snap:fail no passed outcome: " + outcome?.textContent);`, true),
+    contrast: true,
+  }),
   // No claude: agy writes the summaries, and the section says PR briefs need Claude.
   writersBriefsNeedClaude: () =>
     writersOpen({
@@ -1969,16 +1976,19 @@ export const fixtures = {
   writersPassedNarrow: (): Fixture => fixtures.writersPassed(),
   writersFailedNarrow: (): Fixture => fixtures.writersFailed(),
   writersBriefsNeedClaudeNarrow: (): Fixture => fixtures.writersBriefsNeedClaude(),
-  mapTray,
+  // The contrast pass (#455) runs here too.
+  mapTray: (): Fixture => ({ ...mapTray(), contrast: true }),
   mapRuns,
-  mapPreFlight,
+  // The contrast pass (#455) runs here too.
+  mapPreFlight: (): Fixture => ({ ...mapPreFlight(), contrast: true }),
   mapMicroWorld,
   mapRunsPaused,
   mapBackLaw,
   railBriefRow: () => railBriefReady(false),
   railBriefOpened: () => railBriefReady(true),
   mapBriefStart,
-  mapBriefStory,
+  // The contrast pass (#455) runs here too.
+  mapBriefStory: (): Fixture => ({ ...mapBriefStory(), contrast: true }),
   mapBriefStates: () => mapBriefFigure("states"),
   mapBriefSequence: () => mapBriefFigure("sequence"),
   mapBriefCompare: () => mapBriefFigure("compare"),
@@ -2018,7 +2028,8 @@ export const fixtures = {
   mapBriefChapterLast,
   logRunning: () => logFixture("running"),
   logDone: () => logFixture("completed"),
-  list,
+  // The contrast pass (#455) runs here too.
+  list: (): Fixture => ({ ...list(), contrast: true }),
   listSecondLines,
   listClearLanded,
   // The palette open (#220), so the hover check reaches its rows.
@@ -2207,6 +2218,52 @@ export const fixtures = {
       document.querySelector("#map .plate[data-id=shell]").click();
       await wait(300);
       log("thin " + thin + ", thick " + thick);`, { map_state: mapState({ fog: { shell: "thick", window: "thick", core: "thin", hook: "thin" } }), map_know: { positions: {}, tiers: {} } }),
+  // The dark page (#455): the metas, the root's colour scheme, no ::-webkit-scrollbar rule left, and the pre-flight's hand picker,
+  // whose native checkbox draws dark, sampled from Chrome's own screenshot.
+  mapPreFlightPick: (): Fixture => ({
+    ...mapOpened(`
+      const meta = (name) => document.querySelector('meta[name="' + name + '"]')?.content;
+      if (meta("color-scheme") !== "dark") log("snap:fail no color-scheme meta of dark: " + meta("color-scheme"));
+      const chrome = getComputedStyle(document.documentElement).getPropertyValue("--chrome").trim();
+      if (!chrome || meta("theme-color") !== chrome) log("snap:fail the theme-color meta " + meta("theme-color") + " is not --chrome, " + chrome);
+      if (getComputedStyle(document.documentElement).colorScheme !== "dark") log("snap:fail the root's color-scheme is " + getComputedStyle(document.documentElement).colorScheme);
+      const webkit = [...document.styleSheets].flatMap((sheet) => [...sheet.cssRules]).filter((rule) => rule.selectorText?.includes("::-webkit-scrollbar"));
+      if (webkit.length) log("snap:fail ::-webkit-scrollbar rules are left: " + webkit.map((rule) => rule.selectorText).join(", "));
+      document.getElementById("pre-flight-button").click();
+      await wait(600);
+      const byHand = [...document.querySelectorAll("#map-pre-flight button")].find((b) => b.textContent === "Pick parts by hand");
+      if (!byHand) return log("snap:fail the pre-flight offers no Pick parts by hand");
+      byHand.click();
+      await wait(300);
+      const box = document.querySelector("#map-pre-flight input[type=checkbox]");
+      if (!box) return log("snap:fail the hand picker has no checkbox");
+      const shot = await window.__snapShot();
+      const at = box.getBoundingClientRect();
+      const scale = shot.width / innerWidth;
+      const i = (Math.round((at.top + at.height / 2) * scale) * shot.width + Math.round((at.left + at.width / 2) * scale)) * 4;
+      const [red, green, blue] = shot.data.slice(i, i + 3);
+      const channel = (c) => ((c /= 255) <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+      if (0.2126 * channel(red) + 0.7152 * channel(green) + 0.0722 * channel(blue) > 0.2) log("snap:fail the checkbox draws light: rgb(" + [red, green, blue] + ")");
+      log("dark page ok");`, { map_state: mapState() }),
+    snapDone: "dark page ok",
+    contrast: true,
+  }),
+  // Thin and thick fog (#455) under the contrast pass, with nothing over the plates: the text on each reads at full contrast, and
+  // the two still differ by density, rim and drift.
+  mapFogPlates: (): Fixture => ({
+    ...mapOpened(`
+      await wait(200);
+      const [thin, thick] = ["thin", "thick"].map((kind) => document.querySelector("#map .plate.fog-" + kind));
+      if (!thin || !thick) return log("snap:fail expected a thin and a thick plate");
+      const mist = (plate) => getComputedStyle(plate.querySelector(".plate-fog"));
+      const alpha = (plate) => Number(/,\\s*([\\d.]+)\\)$/.exec(mist(plate).backgroundColor)?.[1] ?? 1);
+      if (!(alpha(thick) > alpha(thin))) log("snap:fail thick fog is not denser than thin: " + mist(thick).backgroundColor + " against " + mist(thin).backgroundColor);
+      if (getComputedStyle(thick).boxShadow === getComputedStyle(thin).boxShadow) log("snap:fail thick fog has no rim of its own");
+      if (mist(thick).animationName !== "mist-drift" || mist(thin).animationName !== "none") log("snap:fail only thick fog drifts: " + mist(thick).animationName + ", " + mist(thin).animationName);
+      log("fog plates ok");`, { map_state: mapState({ fog: { shell: "thick", window: "thick", core: "thin", hook: "thin", understanding: "thin" } }) }),
+    snapDone: "fog plates ok",
+    contrast: true,
+  }),
   // The Map view busy (#311): a session on two parts, a Needs you one, a Worker with its own chip, and the not placed list (no files yet,
   // agy, status-only Codex, ignored-only edits); a Helper and a finished session never show.
   mapBusy: () => mapBusy(false),
@@ -2269,7 +2326,8 @@ export const fixtures = {
   mapProof: () => mapBroken("proof"),
   mapBrokenLog: () => mapBroken("log"),
   // A part's history strip scrubbed to an older commit, with the sheet open (#313).
-  mapScrubbed,
+  // The contrast pass (#455) runs here too.
+  mapScrubbed: (): Fixture => ({ ...mapScrubbed(), contrast: true }),
   // The one-time review under the Map view's head, listing the modules below their thresholds (#314).
   mapReview: () =>
     mapOpened(`

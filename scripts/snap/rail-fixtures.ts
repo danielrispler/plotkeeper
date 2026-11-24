@@ -224,7 +224,8 @@ const barScript = `
 export const railStates = {
   railRunning: () => build("running"),
   railYourTurn: () => ({ ...build("your_turn"), snapScript: barScript }),
-  railNeeds: () => ({ ...build("needs_you", { ask: questionAsk }), snapScript: barScript }),
+  // The contrast pass (#455) runs here too.
+  railNeeds: () => ({ ...build("needs_you", { ask: questionAsk }), snapScript: barScript, contrast: true }),
   railIdle: () => build("idle", { withBrief: true }),
 };
 
