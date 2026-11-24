@@ -479,8 +479,8 @@ const mapBriefGuard = (confirm: boolean): Fixture => ({
   }),
   snapDone: "guard ok",
 });
-// The end-of-story bar (#393) under the story's last step: 4 picked by its key, an "s" typed in the note that does not skip, the note kept by
-// Enter; each is sent to the shell, and no rating is shown back once the brief is opened again. The screenshot is the bar after the note.
+// The end-of-story bar (#393, restyled by #448) under the story's last step: on a story with no gist it holds only Skip, with no rating
+// and no note (#443). The S key skips it, closing it and sending nothing to the shell. The screenshot is the story before the skip.
 const mapBriefBar = (): Fixture =>
   mapBrief(briefOf(storySteps()), 3, `
       const sent = [];
@@ -488,29 +488,26 @@ const mapBriefBar = (): Fixture =>
       window.fetch = (url, init) => (sent.push(String(url) + " " + (init?.body ?? "")), real(url, init));
       const bar = () => document.querySelector("#map-brief .story-bar");
       if (!bar() || bar().hidden) return log("snap:fail no end-of-story bar on the story's last step");
+      if (bar().querySelector(".bar-rate, .bar-note, .bar-scale")) log("snap:fail the bar still has a rating or a note");
+      if (/clear|rate|note/i.test(bar().textContent)) log("snap:fail the bar still asks for a rating or a note: " + bar().textContent);
+      if (bar().querySelector(".bar-explain")) log("snap:fail explain-back on a story with no gist");
+      const skip = bar().querySelector(".bar-skip");
+      if (skip?.textContent !== "Skip") log("snap:fail no Skip on the bar");
       const key = (target, k) => target.dispatchEvent(new KeyboardEvent("keydown", { key: k, code: /^[0-9]$/.test(k) ? "Digit" + k : "Key" + k.toUpperCase(), bubbles: true }));
       key(document, "4");
       await wait(50);
-      const pressed = [...bar().querySelectorAll(".bar-rate")].filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.textContent);
-      if (pressed.join() !== "4") log("snap:fail the 4 key did not rate: " + pressed.join());
-      const note = bar().querySelector(".bar-note");
-      note.focus();
-      key(note, "s");
+      if (bar().hidden) log("snap:fail a digit closed the bar");
+      key(document, "s");
       await wait(50);
-      if (bar().hidden) return log("snap:fail an s typed in the note skipped the bar");
-      note.value = "The second step lost me.";
-      key(note, "Enter");
-      await wait(50);
-      if (!bar().querySelector(".bar-kept")) log("snap:fail Enter did not keep the note");
-      const bars = sent.filter((call) => call.includes("/api/story_bar")).map((call) => JSON.parse(call.slice(call.indexOf(" ") + 1)));
-      const kinds = bars.map((b) => b.kind + (b.rating ? ":" + b.rating : "") + (b.note ? ":" + b.note : "")).join();
-      if (kinds !== "rating-given:4,note-given:The second step lost me.") log("snap:fail the bar sent " + kinds);
-      if (bars.some((b) => b.project !== "/w/plotkeeper" || b.about.pr !== 334 || b.about.chapter !== 0)) log("snap:fail the bar's key: " + JSON.stringify(bars[0]));
-      if (["of 5", "/5", "/ 5"].some((score) => bar().textContent.includes(score))) log("snap:fail the bar shows a score");
-      if (bar().querySelector(".bar-explain")) log("snap:fail explain-back on a story with no gist");`, false, 100);
-// Explain-back (#397): the same story, its chapter carrying a gist and lighting Core parts, ends with the one-line field in the bar's first
-// row, above the rating. Before submit, an "s" and a "2" typed in the line neither skip nor rate, and the gist is not shown yet. After
-// submit (Enter), the line shows with the gist under it and the three marks; Partly is pressed. Each is sent to the shell; no number shows.
+      if (!bar().hidden) log("snap:fail the S key did not skip the bar");
+      const bars = sent.filter((call) => call.includes("/api/story_bar"));
+      if (bars.length) log("snap:fail the bar sent " + bars.join());
+      bar().hidden = false;`, false, 100);
+// Explain-back (#397, restyled by #448): the same story, its chapter carrying a gist and lighting Core parts, ends with the one-line field
+// in the bar's first row: autocomplete off, a placeholder that shows an example and ends with "…". Before submit, an "s" and a "2" typed
+// in the line do not skip, the gist is not shown yet, and an Enter while an input method is composing does not submit. After submit
+// (Enter), the line shows with the gist under it and the three marks as radios in a fieldset with a legend, each radio inside its label;
+// a click on Partly's label checks it. Each is sent to the shell; no number shows.
 const explainGist = "A ready PR's brief is written in the background and played on the map, and reading a chapter clears its parts' fog.";
 const mapBriefExplainBack = (submit: boolean): Fixture =>
   mapBrief(briefOf(storySteps(), false, { chapters: [{ ...brief(storySteps()).chapters[0], gist: explainGist }] }), 3, `
@@ -521,25 +518,35 @@ const mapBriefExplainBack = (submit: boolean): Fixture =>
       const line = bar()?.querySelector(".bar-slot .bar-explain .bar-line");
       if (!line) return log("snap:fail no explain-back line on a Core story with a gist");
       if (bar().firstElementChild.className !== "bar-slot") log("snap:fail explain-back is not the bar's first row");
+      if (bar().querySelector(".bar-rate, .bar-note, .bar-scale")) log("snap:fail the bar still has a rating or a note");
+      if (bar().querySelector(".bar-skip")?.textContent !== "Skip") log("snap:fail no Skip on the bar");
+      if (line.getAttribute("autocomplete") !== "off") log("snap:fail the line's autocomplete is not off");
+      if (!line.placeholder.endsWith("…") || !/e\\.g\\./.test(line.placeholder)) log("snap:fail the placeholder shows no example ending in …: " + line.placeholder);
       if (bar().textContent.includes(${JSON.stringify(explainGist)})) log("snap:fail the gist shows before the line is given");
-      const key = (target, k) => target.dispatchEvent(new KeyboardEvent("keydown", { key: k, code: /^[0-9]$/.test(k) ? "Digit" + k : "Key" + k.toUpperCase(), bubbles: true }));
+      const key = (target, k, init = {}) => target.dispatchEvent(new KeyboardEvent("keydown", { key: k, code: /^[0-9]$/.test(k) ? "Digit" + k : "Key" + k.toUpperCase(), bubbles: true, cancelable: true, ...init }));
       line.focus();
       key(line, "s");
       key(line, "2");
       await wait(50);
       if (bar().hidden) return log("snap:fail an s typed in the line skipped the bar");
-      if (bar().querySelector('.bar-rate[aria-pressed="true"]')) log("snap:fail a 2 typed in the line rated");
       line.value = "Briefs get written in the background and reading one clears the fog.";
+      key(line, "Enter", { isComposing: true });
+      await wait(50);
+      if (bar().querySelector(".bar-said") || sent.some((call) => call.includes("/api/story_bar"))) log("snap:fail an Enter while composing submitted the line");
       ${submit ? `key(line, "Enter");
       await wait(50);
       const said = bar().querySelector(".bar-said");
       if (said?.textContent !== line.value) log("snap:fail the line is not shown after submit: " + said?.textContent);
       if (!bar().querySelector(".bar-gist")?.textContent.includes(${JSON.stringify(explainGist)})) log("snap:fail the gist is not shown under the line");
-      const marks = [...bar().querySelectorAll(".bar-mark")];
-      if (marks.map((m) => m.textContent).join() !== "Got it,Partly,Missed") log("snap:fail the marks: " + marks.map((m) => m.textContent).join());
-      marks[1].click();
+      const group = bar().querySelector("fieldset.bar-marks");
+      if (!group?.querySelector(":scope > legend")?.textContent.trim()) log("snap:fail the marks are not a fieldset with a legend");
+      const radios = [...bar().querySelectorAll('.bar-marks input[type="radio"]')];
+      const labels = radios.map((r) => r.closest("label"));
+      if (labels.map((l) => l?.textContent.trim()).join() !== "Got it,Partly,Missed") log("snap:fail the marks: " + labels.map((l) => l?.textContent.trim()).join());
+      if (new Set(radios.map((r) => r.name)).size !== 1 || !radios[0]?.name) log("snap:fail the radios are not one group");
+      labels[1]?.querySelector(".bar-mark-word")?.click();
       await wait(50);
-      if (marks.filter((m) => m.getAttribute("aria-pressed") === "true").map((m) => m.textContent).join() !== "Partly") log("snap:fail Partly is not pressed");
+      if (radios.filter((r) => r.checked).map((r) => r.value).join() !== "partly") log("snap:fail Partly is not checked by its label");
       if (/\\d/.test(bar().querySelector(".bar-slot").textContent)) log("snap:fail explain-back shows a number");
       const bars = sent.filter((call) => call.includes("/api/story_bar")).map((call) => JSON.parse(call.slice(call.indexOf(" ") + 1)));
       const kinds = bars.map((b) => b.kind + ":" + (b.line ?? b.mark)).join();
