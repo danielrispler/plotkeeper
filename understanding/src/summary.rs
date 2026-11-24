@@ -378,20 +378,23 @@ pub fn write_name(
     setup: &SummarySetup,
     prompt: &str,
     response: Option<&str>,
+    folder: &str,
     mut log: impl FnMut(String),
 ) -> Option<String> {
-    let name = writer.name(setup, prompt, response).and_then(|reply| {
-        let value = crate::parse_object(&reply).unwrap_or_default();
-        let name = value["name"].as_str().unwrap_or_default();
-        let words: Vec<&str> = name.split_whitespace().take(NAME_WORDS).collect();
-        match words.is_empty() {
-            true => Err(format!(
-                "the reply holds none: {:?}",
-                reply.chars().take(300).collect::<String>()
-            )),
-            false => Ok(words.join(" ")),
-        }
-    });
+    let name = writer
+        .name(setup, prompt, response, folder)
+        .and_then(|reply| {
+            let value = crate::parse_object(&reply).unwrap_or_default();
+            let name = value["name"].as_str().unwrap_or_default();
+            let words: Vec<&str> = name.split_whitespace().take(NAME_WORDS).collect();
+            match words.is_empty() {
+                true => Err(format!(
+                    "the reply holds none: {:?}",
+                    reply.chars().take(300).collect::<String>()
+                )),
+                false => Ok(words.join(" ")),
+            }
+        });
     name.map_err(|line| log(format!("no session name: {line}")))
         .ok()
 }
@@ -399,12 +402,13 @@ pub fn write_name(
 impl ClaudeWriter {
     /// The `claude -p` run for a session's name, at `setup`'s model and effort with the studio's
     /// own system prompt, on Daniel's first `prompt` and the final `response`, each cut at
-    /// `MAX_CHANGE`.
+    /// `MAX_CHANGE`, with the session's `folder`, which "here" in the prompt means (#408).
     pub fn name_request(
         &self,
         setup: &SummarySetup,
         prompt: &str,
         response: Option<&str>,
+        folder: &str,
     ) -> WriterRequest {
         let cut = |text: &str| text[..text.floor_char_boundary(MAX_CHANGE)].to_string();
         let response = response.map_or(String::new(), |r| {
@@ -413,11 +417,17 @@ impl ClaudeWriter {
                 cut(r)
             )
         });
+        // `claude -p` names its own working directory to the model even with `--system-prompt`, so "here" needs the
+        // session's folder beside it (#408).
+        let folder = match folder.is_empty() {
+            true => String::new(),
+            false => format!("The session's folder: {folder}\n\n"),
+        };
         self.request_with(
             Some(setup),
             Some(NAME),
             &format!(
-                "The developer's first prompt:\n<prompt>\n{}\n</prompt>{response}",
+                "{folder}The developer's first prompt:\n<prompt>\n{}\n</prompt>{response}",
                 cut(prompt)
             ),
         )
@@ -429,6 +439,8 @@ const NAME: &str = concat!(
     r#"You name one session of a coding agent in a few words, so that the developer who runs it can tell it from his other sessions in a list.
 
 Answer from the input: his first prompt and, when the prompt is only a slash command, the agent's final response to it. Use only this input: do not use tools or read files. Name what the session is about, not the command.
+
+You run in a folder of your own, not the session's: never name the folder you run in. "Here" or "this folder" in the prompt means the session's folder, given in the input when known.
 
 "#,
     explanation_language!(),

@@ -76,8 +76,9 @@ impl CardWriter for Recorded {
         setup: &SummarySetup,
         prompt: &str,
         response: Option<&str>,
+        folder: &str,
     ) -> Result<String, String> {
-        FakeWriter.name(setup, prompt, response)
+        FakeWriter.name(setup, prompt, response, folder)
     }
 }
 
@@ -482,6 +483,7 @@ fn every_entry_point_returns_within_a_few_seconds_against_a_core_with_no_such_tu
             session_id: "s1".into(),
             prompt: "Fix it".into(),
             response: None,
+            cwd: String::new(),
         };
         w.name(request);
     });
@@ -620,6 +622,7 @@ fn two_jobs_queued_for_an_ended_session_run_one_at_a_time_in_order() {
             session_id: "s1".into(),
             prompt: prompt.into(),
             response: None,
+            cwd: String::new(),
         });
     }
     for _ in 0..1000 {
@@ -666,6 +669,7 @@ fn a_job_that_panics_does_not_stop_the_later_jobs_of_its_session() {
             session_id: "s1".into(),
             prompt: prompt.into(),
             response: None,
+            cwd: String::new(),
         });
     };
     name("boom");
@@ -719,8 +723,9 @@ impl CardWriter for ReadingWriter {
         setup: &SummarySetup,
         prompt: &str,
         response: Option<&str>,
+        folder: &str,
     ) -> Result<String, String> {
-        self.recorded.name(setup, prompt, response)
+        self.recorded.name(setup, prompt, response, folder)
     }
 }
 

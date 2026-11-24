@@ -2050,6 +2050,10 @@ pub struct NameRequest {
     pub prompt: String,
     /// The final response of its turn, for a prompt that is a bare slash command; `None` otherwise.
     pub response: Option<String>,
+    /// The session's folder, which "here" in the prompt means: the writer runs in a folder of its own, which its
+    /// harness names to it (#408).
+    #[serde(default)]
+    pub cwd: String,
 }
 
 /// Whether `prompt` is a slash command with nothing after it, such as `/wayfinder`.
@@ -3165,6 +3169,7 @@ impl Studio {
                                 session_id: session.agent.id.clone(),
                                 prompt: prompt.clone(),
                                 response: None,
+                                cwd: session.cwd.clone(),
                             }));
                         }
                     }
@@ -3297,6 +3302,7 @@ impl Studio {
                             session_id: session.agent.id.clone(),
                             prompt,
                             response: Some(reply.into()),
+                            cwd: session.cwd.clone(),
                         }));
                     }
                     let mut lines = full.lines().map(str::trim);
