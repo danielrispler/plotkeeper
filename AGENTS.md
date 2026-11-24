@@ -28,7 +28,7 @@ plotkeeper is a Rust server (`server/`) that serves the TypeScript page (`ui/`) 
 
 ## Checks
 
-Before handing off a change, run `npm ci` once, then `npm run check` from the repository's root; it needs `cargo nextest` (`brew install cargo-nextest`). It builds the UI first, which the server embeds, then runs the checks of `.github/workflows/studio.yml`'s `macos` job. It leaves out the snap fixtures, which that workflow renders in Chrome in a job of its own (`npm run snap:all`).
+Before handing off a change, run `npm ci` once, then `npm run check` from the repository's root; it needs `cargo nextest` (`brew install cargo-nextest`). It builds the UI first, which the server embeds, then runs the checks of `.github/workflows/studio.yml`'s `macos` job. It leaves out the snap fixtures, which `.github/workflows/snap.yml` renders in Chrome in two shard jobs (`npm run snap:all -- --shard=<i>/2`), only when `ui/`, `scripts/snap/` or the build's inputs change.
 
 plotkeeper embeds `dist/` when it is built, so a merged change reaches Daniel's running plotkeeper only after a rebuild. After merging a change to it, tell him to stop plotkeeper (Ctrl+C) and run `npm run start` from the main checkout: it builds the page, the hook and the server, installs `plotkeeper` and starts it.
 
@@ -40,7 +40,7 @@ Never edit a frozen sample in `understanding/tests/fixtures/stored/`: a failing 
 
 A test that fails on code the diff didn't touch gets one rerun. When the same test fails a second time, in any run or CI, treat it as a bug: reproduce it red and find its cause before going on, and say it in the PR. In #319's run a test was rerun six times as a flake; its cause was git reading `--since=0` as about now.
 
-A red `snap` job on a fixture the diff didn't touch gets one rerun of the failed job (`gh run rerun <id> --failed`), said in the PR; a second failure is real. `snap:all` has no automatic retry. A failing `snap` prints the tail of Chrome's own stderr.
+A red `snap` shard job on a fixture the diff didn't touch gets one rerun of the failed job (`gh run rerun <id> --failed`), said in the PR; a second failure is real. `snap:all` has no automatic retry. A failing `snap` prints the tail of Chrome's own stderr.
 
 Rust is formatted by `cargo fmt`. TS, JS and Markdown have no formatter, so never run one (Prettier, `biome format`, `biome check --write`, …). Biome lints TS, JS, HTML and CSS, lint only, in `npm run check` (`npm run lint`); never run it with `--write`.
 

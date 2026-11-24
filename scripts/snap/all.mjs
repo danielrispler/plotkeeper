@@ -2,12 +2,14 @@
 // `npm run build` (#144), and fails if any fails: Chrome's exit, a `snap:fail` line or an uncaught error in the page.
 // Fixtures render one per core at a time, each with its own Chrome; once one fails, no new one starts.
 // Run `npm run build` first. `npm run check` leaves it out, so agents' checks stay fast.
+// `npm run snap:all -- --shard=<i>/<n>` renders only the i-th of n shares (shard.mjs), as CI's two snap jobs do (#432).
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { availableParallelism, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fixtures } from "./fixtures.ts";
+import { shard } from "./shard.mjs";
 
 // The sample fixture whose script fails on purpose (rail-fixtures.ts).
 const failsOnPurpose = new Set(["railIdleFail"]);
@@ -17,9 +19,17 @@ const failsOnPurpose = new Set(["railIdleFail"]);
 // writer section's, in the Settings panel over the map (#387), at 1900x1180.
 const sizeOf = (name) => (name.endsWith("Narrow") ? "1000x800" : name.startsWith("map") || name.startsWith("writers") ? "1900x1180" : undefined);
 
+const shardFlag = process.argv.slice(2).find((arg) => arg.startsWith("--shard="))?.slice("--shard=".length);
+let queue;
+try {
+  queue = shard(Object.keys(fixtures).filter((name) => !failsOnPurpose.has(name)), shardFlag);
+} catch (why) {
+  console.error(why.message);
+  process.exit(2);
+}
+
 const snap = join(dirname(fileURLToPath(import.meta.url)), "snap.mjs");
 const folder = mkdtempSync(join(tmpdir(), "snap-all-"));
-const queue = Object.keys(fixtures).filter((name) => !failsOnPurpose.has(name));
 const total = queue.length;
 let failure;
 
@@ -46,4 +56,4 @@ const worker = async () => {
 await Promise.all(Array.from({ length: availableParallelism() }, worker));
 rmSync(folder, { recursive: true, force: true });
 if (failure !== undefined) process.exit(failure);
-console.log(`snap:all: ${total} fixtures rendered`);
+console.log(`snap:all: ${total} fixtures rendered${shardFlag ? ` (shard ${shardFlag})` : ""}`);
