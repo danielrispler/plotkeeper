@@ -142,8 +142,9 @@ const confirmFirst = (press: string, api: string, verb: string, lost: string[]) 
         window.fetch = (url, init) => (sent.push(String(url)), real(url, init));
         const asked = () => sent.filter((call) => call.includes("/api/${api}")).length;
         const dialog = document.getElementById("confirm-dialog");
-        // A step that closes the dialog, then lets the answer land. Snap's Chrome draws no frame inside its time budget, so the dialog's
-        // close event never fires here; the answer comes from the form's submit and the dialog's cancel, which fire at once.
+        // A step that closes the dialog, then lets the answer land. Snap's Chrome rarely draws a frame inside its time budget, so the
+        // dialog's close event mostly never fires here, and under load it can land after the next press reopened the dialog; the answer
+        // comes from the form's submit and the dialog's cancel, which fire at once.
         const closing = async (close) => {
           close();
           await pause();
