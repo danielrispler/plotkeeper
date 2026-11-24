@@ -86,7 +86,7 @@ function resize(px: number | null) {
 let resizeHandle: HTMLButtonElement | null = null;
 function handle() {
   if (resizeHandle) return resizeHandle;
-  const bar = text("button", "", "sheet-resize") as HTMLButtonElement;
+  const bar = text("button", "", "btn quiet sheet-resize") as HTMLButtonElement;
   bar.type = "button";
   bar.setAttribute("aria-label", "Resize the sheet: the left arrow widens it, the right arrow narrows it");
   bar.title = "Drag to resize the sheet; double-click for its first width";

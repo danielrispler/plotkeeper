@@ -480,10 +480,10 @@ body[data-panel="diff"] .map-stage { --panel-w: min(var(--panel-wide), calc(100%
 #map-sheet { position: relative; }
 /* The sheet's left edge resizes it (#445): a thin focusable bar, lit on hover, while dragged and with the focus ring; the page selects no
    text while it is dragged. */
-.sheet-resize { position: absolute; top: 0; bottom: 0; left: 0; width: var(--sheet-handle); padding: 0; border: 0; border-radius: var(--glass-radius) 0 0 var(--glass-radius);
+.btn.sheet-resize { position: absolute; top: 0; bottom: 0; left: 0; width: var(--sheet-handle); padding: 0; border: 0; border-radius: var(--glass-radius) 0 0 var(--glass-radius);
                 background: transparent; cursor: col-resize; touch-action: none; -webkit-user-select: none; user-select: none; transition: background var(--motion); }
-.sheet-resize:hover, .sheet-resize.dragging { background: var(--selected); }
-.sheet-resize:focus-visible { outline-offset: calc(-1 * var(--mark)); background: var(--selected); }
+.btn.sheet-resize:hover:not(:disabled), .btn.sheet-resize.dragging { background: var(--selected); }
+.btn.sheet-resize:focus-visible { outline-offset: calc(-1 * var(--mark)); background: var(--selected); }
 body.resizing { -webkit-user-select: none; user-select: none; cursor: col-resize; }
 /* The left panel (#385): the story, History, the diff (widened to at most 780 px) or Settings, inset like the sheet and in its glass. */
 .map-panel { position: absolute; left: var(--inset); top: var(--inset); bottom: var(--inset); width: var(--panel-w); z-index: 4; display: flex; flex-direction: column;
