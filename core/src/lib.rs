@@ -3216,13 +3216,15 @@ impl Studio {
                         }) =>
                 {
                     // Cursor's reply can land just after its turn's `stop` (#369): it is that turn's,
-                    // unless the turn has one or another has started.
+                    // unless the turn has one or another has started. The `stop` asked for no wanted
+                    // summary, having no reply, so a long reply asks now, with the card it raised.
                     let ended = session
                         .turns
                         .last()
                         .filter(|t| !session.in_turn() && t.reply.is_empty() && t.id.is_some());
                     match (ended.and_then(|t| t.id.clone()), &mut session.stopped) {
-                        (Some(id), Some(stopped)) if stopped.card == id && !stopped.requested => {
+                        (Some(id), Some(stopped)) if stopped.card == id => {
+                            let card = stopped.requested.then(|| id.clone());
                             let reply = reply.trim();
                             let message = reply.lines().map(str::trim).find(|l| !l.is_empty());
                             stopped.message = message.map(Into::into);
@@ -3232,7 +3234,7 @@ impl Studio {
                             }
                             if !replay && wants_summary(reply, session.needs_you()) {
                                 outputs.push(Output::Summary(
-                                    session.summary_request(id, reply, None, true),
+                                    session.summary_request(id, reply, card, true),
                                 ));
                             }
                         }

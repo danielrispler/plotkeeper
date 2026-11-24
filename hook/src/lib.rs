@@ -888,8 +888,10 @@ fn first_tree(root: &str, began: Option<u64>) -> Option<(String, serde_json::Val
 /// `PLOTKEEPER_AGENT_PID` (agy's, which runs the hook from a backgrounded subshell), else the hook's
 /// `parent`, or its parent's parent when that is a shell the agent started the hook through.
 /// `inspect` gives a process's command and parent pid. `None` when no agent can be told, as for a hook
-/// reparented to init, or for an agent an IDE app hosts, such as Cursor's (#362; spec #320, "IDE-hosted
-/// pids"), whose process outlives its sessions; the session then takes the idle path.
+/// reparented to init, or for a process that outlives its sessions: one inside an IDE app's bundle
+/// (spec #320, "IDE-hosted pids") or Codex's shared daemon (#369); the session then takes the idle
+/// path. Cursor's per-window extension host, which renames itself so that no bundle path shows, is
+/// recorded: its session ends when its window closes (#369).
 pub fn agent_pid(
     wrapper: Option<&str>,
     parent: u32,
@@ -905,9 +907,15 @@ pub fn agent_pid(
         found => (parent, found.map(|(c, _)| c)),
     };
     match command {
-        Some(command) if in_app(&command) => None,
+        Some(command) if in_app(&command) || codex_daemon(&command) => None,
         _ => Some(agent),
     }
+}
+
+/// Whether `command` is Codex's `app-server` daemon, which runs the hooks of every Codex TUI session
+/// and outlives them (#369, Codex 0.172.0); `codex exec` runs its hooks itself.
+fn codex_daemon(command: &str) -> bool {
+    command.contains("/.codex/packages/app-server-daemon/")
 }
 
 /// Whether `command`, a process's executable path, lies inside a macOS app bundle, as an IDE's
