@@ -2056,6 +2056,96 @@ const snapRealKeys = (): Fixture => ({
   realKeys: true, snapDone: "keys ok",
 });
 
+// The toasts from the keyboard (#457): the needs-you, the note and the Clear toasts open at once in the Notifications region, apart.
+// A real press on Undo leaves the focus where it was. From the control before the region, a real Tab reaches each main action and
+// each ×; a real Enter on a × closes its toast and puts the focus on the next toast, and the last one hands it back. A modal dialog
+// holds the toasts back until it closes. A real Enter on the note and on the needs-you toast runs their action.
+const toastKeys = (): Fixture => {
+  const sessions = [...(list().sessions as Session[])];
+  const blocked = { ...sessions[1], id: "s5" };
+  return {
+    ...list(),
+    select: { __by: "id", values: Object.fromEntries([...sessions, blocked].map((s) => [s.id, { session: s, agent: null }])) },
+    snapScript: `
+      const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+      const press = async (key) => { await __snapKey(key); await wait(30); };
+      const byId = (id) => document.getElementById(id);
+      const open = (id) => byId(id).matches(":popover-open");
+      const name = (node) => (node?.closest(".toast")?.id ?? node?.id ?? node?.tagName) + " " + (node?.getAttribute?.("aria-label") ?? node?.textContent);
+      document.querySelector(".list .clear-landed").click();
+      await wait(50);
+      document.dispatchEvent(new KeyboardEvent("keydown", { code: "Enter", key: "Enter", metaKey: true, shiftKey: true, bubbles: true }));
+      await wait(100);
+      window.__snapEmit("finished", ["s4"]);
+      await wait(50);
+      const region = byId("toasts");
+      if (region.tagName !== "SECTION" || region.getAttribute("aria-label") !== "Notifications") log("snap:fail the toasts' region is not named Notifications");
+      for (const id of ["toast", "note-toast", "clear-toast"]) if (!open(id) || !region.contains(byId(id))) return log("snap:fail #" + id + " is not an open popover in the region");
+      const boxes = ["toast", "note-toast", "clear-toast"].map((id) => byId(id).getBoundingClientRect());
+      const apart = (a, b) => a.bottom <= b.top || b.bottom <= a.top || a.right <= b.left || b.right <= a.left;
+      if (!apart(boxes[0], boxes[1]) || !apart(boxes[0], boxes[2]) || !apart(boxes[1], boxes[2])) log("snap:fail two toasts overlap: " + boxes.map((b) => [b.left, b.top, b.right, b.bottom].map(Math.round)).join(" | "));
+      if (boxes[1].top < boxes[0].bottom) log("snap:fail the note is not under the needs-you toast");
+      const before = Object.assign(document.createElement("button"), { type: "button", textContent: "Before", title: "Where the focus was" });
+      region.before(before);
+      // A real press on Undo acts and leaves the focus where it was; Clear landed again brings the toast back.
+      before.focus();
+      await __snapClick(byId("clear-toast").querySelector("button"));
+      await wait(50);
+      if (open("clear-toast")) log("snap:fail the press on Undo did not undo");
+      if (document.activeElement !== before) log("snap:fail a press on Undo moved the focus to " + name(document.activeElement));
+      document.querySelector(".list .clear-landed").click();
+      await wait(50);
+      if (!open("clear-toast")) return log("snap:fail the Clear toast did not show again");
+      before.focus();
+      const buttons = [...region.querySelectorAll("button")];
+      const reached = [];
+      for (let i = 0; i < 6; i++) {
+        await press("Tab");
+        reached.push(document.activeElement);
+      }
+      if (reached.some((node, i) => node !== buttons[i])) log("snap:fail Tab reached " + reached.map(name).join(", ") + ", not " + buttons.map(name).join(", "));
+      // The note's × from the keyboard: the focus goes to the next toast, the Clear toast's Undo.
+      byId("note-toast").querySelector("[aria-label=Dismiss]").focus();
+      await press("Enter");
+      if (open("note-toast")) log("snap:fail Enter on the note's × left it open");
+      if (document.activeElement !== byId("clear-toast").querySelector("button")) log("snap:fail after the note's × the focus is on " + name(document.activeElement));
+      byId("clear-toast").querySelector("[aria-label=Dismiss]").focus();
+      await press("Enter");
+      if (open("clear-toast")) log("snap:fail Enter on the Clear toast's × left it open");
+      if (document.activeElement !== byId("toast").querySelector("button")) log("snap:fail after the Clear toast's × the focus is on " + name(document.activeElement));
+      await press("Tab");
+      await press("Enter");
+      if (open("toast")) log("snap:fail Enter on the needs-you toast's × left it open");
+      if (document.activeElement !== before) log("snap:fail after the last toast's × the focus is on " + name(document.activeElement) + ", not where it was");
+      // A modal dialog holds a new note back until it closes.
+      const dialog = byId("delete-dialog");
+      dialog.showModal();
+      window.__snapEmit("finished", ["s4"]);
+      await wait(50);
+      if (open("note-toast")) log("snap:fail the note showed over a modal dialog");
+      dialog.close();
+      await wait(50);
+      if (!open("note-toast")) return log("snap:fail the note did not show once the dialog closed");
+      // Enter on the note selects its session.
+      before.focus();
+      await press("Tab");
+      await press("Enter");
+      if (open("note-toast") || document.body.dataset.panel !== "story") log("snap:fail Enter on the note did not open its session: panel " + document.body.dataset.panel);
+      // Enter on the needs-you toast of a new block jumps to it and leaves focus mode.
+      window.__snapEmit("sessions", ${JSON.stringify([...sessions, blocked])});
+      await wait(50);
+      if (!open("toast")) return log("snap:fail no needs-you toast for the new block");
+      before.focus();
+      await press("Tab");
+      await press("Enter");
+      if (document.body.dataset.layout === "focus") log("snap:fail Enter on the needs-you toast did not leave focus mode");
+      log("toasts ok");`,
+    realKeys: true,
+    realPointer: true,
+    snapDone: "toasts ok",
+  };
+};
+
 // Small gaps (#462): a real Shift+Tab from a row reaches the row before's delete, hidden only by opacity; the fold and delete boxes are
 // at least 24×24; the drawer's jumps are links to a new tab; a real Tab reaches the drawer's code block, which has a name; and the panels,
 // overlays and dialogs keep their scroll to themselves.
@@ -2117,6 +2207,8 @@ const listNarrow = (): Fixture => ({
 
 export const fixtures = {
   ...railFixtures,
+  // The toasts from the keyboard (#457).
+  toastKeys,
   // Real keys from a fixture (#454).
   snapRealKeys,
   // The small keyboard, pointer and layout gaps (#462).
