@@ -4456,11 +4456,12 @@ impl Studio {
     /// The session list: every session Daniel has not deleted, grouped in `State` order, the newest first in each group.
     /// A session with no prompt is no row while its terminal's live session has prompts: a session
     /// loaded beside it, as by the `/resume` picker backed out of, until its first prompt (danielrispler/Falinks#562).
-    /// Nor is a Cursor session with no folder and no prompt: the one Cursor.app's empty window starts at
-    /// its launch, until its first prompt (#427).
+    /// Nor is a session with no folder and no prompt of an agent whose capabilities say it starts
+    /// sessions from an empty window: the one Cursor.app's empty window starts at its launch, until its
+    /// first prompt (#427).
     pub fn sessions(&self) -> Vec<&Session> {
         let empty_window = |s: &Session| {
-            s.capabilities.agent == cursor::CURSOR && s.cwd.is_empty() && s.prompts.is_empty()
+            s.capabilities.empty_window_starts && s.cwd.is_empty() && s.prompts.is_empty()
         };
         let beside_live = |s: &Session| {
             s.prompts.is_empty()

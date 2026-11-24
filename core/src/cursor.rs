@@ -32,6 +32,7 @@ pub const CAPABILITIES: Capabilities = Capabilities {
     transcript_model: false,
     context: false,
     turn_trees: true,
+    empty_window_starts: true,
     transcript_format: TranscriptFormat::Unread,
 };
 
@@ -77,6 +78,7 @@ pub(crate) fn parse(line: &str) -> Result<Event, serde_json::Error> {
     serde_json::from_str::<Raw>(line).map(adapt)
 }
 
+// hook/src/lib.rs's `cursor_shaped` keeps a copy of the tool names, as the hook does not depend on core.
 fn tool(raw: &Raw) -> Tool {
     let name = raw.tool_name.clone().unwrap_or_default();
     let input = &raw.tool_input;

@@ -696,6 +696,11 @@ type Line = serde_json::Map<String, serde_json::Value>;
 /// Codex line `event` in the names `claude_trees` reads: its turn's `turn_id` is the prompt id, an
 /// `Interrupt` ends its turn as the studio's `INTERRUPTED` line does, and an `apply_patch` edits the
 /// first file its patch names (as `studio_core`'s Codex adapter reads it).
+// The patch reading copies `patched_file` in core/src/codex.rs, as the hook does not depend on core.
+// shortcut: a patch that changes several files is taken as touching its first.
+// shortcut: Codex runs its hooks with `"async": true` (plugin-codex/hooks.json), so the `PreToolUse`
+// of a call that first touches a worktree other than the session's folder may record its start tree
+// after the call changed it, and the turn loses that change.
 fn codex_shaped(event: &Line) -> Line {
     use serde_json::{Value, json};
     let mut shaped = event.clone();
@@ -725,7 +730,8 @@ fn codex_shaped(event: &Line) -> Line {
 
 /// Cursor line `event` in the names `claude_trees` reads: its `conversation_id` is the session, its
 /// `generation_id` the prompt id, an event with no folder works in its first workspace root, and a
-/// `Write` or `Delete` edits its file and a `Shell` call runs its command.
+/// `Write` or `Delete` edits its file and a `Shell` call runs its command, in the folder it names.
+// The tool names copy `tool` in core/src/cursor.rs, as the hook does not depend on core.
 fn cursor_shaped(event: &Line) -> Line {
     use serde_json::Value;
     let text = |key: &str| event.get(key).and_then(Value::as_str);
@@ -746,9 +752,27 @@ fn cursor_shaped(event: &Line) -> Line {
     if let Some(generation) = text("generation_id").filter(|g| !g.is_empty()) {
         shaped.insert("prompt_id".into(), generation.into());
     }
-    let root = event.get("workspace_roots").and_then(|r| r[0].as_str());
-    if let Some(cwd) = text("cwd").filter(|c| !c.is_empty()).or(root) {
+    let roots = event.get("workspace_roots").and_then(Value::as_array);
+    let root = roots.and_then(|r| r.first()?.as_str());
+    // A `Shell` call names the folder it ran in, which may lie outside every root.
+    let ran_in = (text("tool_name") == Some("Shell"))
+        .then(|| event.get("tool_input")?.get("cwd")?.as_str())
+        .flatten();
+    let cwd = ran_in.filter(|c| !c.is_empty());
+    if let Some(cwd) = cwd.or(text("cwd").filter(|c| !c.is_empty())).or(root) {
         shaped.insert("cwd".into(), cwd.into());
+    }
+    // Cursor sends no event before a call, only `postToolUse` after it, so a worktree's first touch
+    // would record its start tree after the call changed it: the turn's start takes the trees of
+    // every workspace root.
+    // shortcut: a worktree outside every root still records its start after its first call, so a file
+    // its first call changes is lost. Cursor's events before a call (`preToolUse`,
+    // `beforeShellExecution`) are permission hooks, not wired: Cursor blocks the call when one replies
+    // with nothing (docs/studio/plugin.md).
+    if name == "UserPromptSubmit"
+        && let Some(roots) = roots
+    {
+        shaped.insert("studio_turn_roots".into(), roots.clone().into());
     }
     let tool = match text("tool_name") {
         Some("Write" | "Delete") => Some("Edit"),
@@ -828,7 +852,10 @@ fn claude_trees(event: &mut Line, data: &Path) -> Result<(), Box<dyn std::error:
     let command = text("tool_name")
         .filter(|t| *t == "Bash")
         .and_then(|_| event.get("tool_input")?.get("command")?.as_str());
-    let named = command.map(named_paths).unwrap_or_default();
+    let mut named = command.map(named_paths).unwrap_or_default();
+    // The folders a turn starts in, which Cursor's prompt names (`cursor_shaped`).
+    let starts = event.get("studio_turn_roots").and_then(Value::as_array);
+    named.extend(starts.into_iter().flatten().filter_map(Value::as_str));
     let mut known = strings(&kept["worktrees"]);
     // The worktrees the call touches, listed once: the folder's, an `Edit` or `Write` path's, and
     // those a Bash command names.

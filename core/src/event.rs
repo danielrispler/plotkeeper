@@ -236,6 +236,11 @@ pub struct Capabilities {
     pub context: bool,
     /// It records a git tree of each worktree a turn touches, at its start and end.
     pub turn_trees: bool,
+    /// It starts a session from an IDE window with no folder before any prompt (Cursor.app at its
+    /// launch, #427); a session with no folder is no row until its first prompt. The server's list
+    /// reads it, so the page is not sent it.
+    #[serde(skip_serializing)]
+    pub empty_window_starts: bool,
     /// How its transcript's lines read.
     pub transcript_format: TranscriptFormat,
 }

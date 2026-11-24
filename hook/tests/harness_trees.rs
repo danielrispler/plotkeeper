@@ -86,3 +86,115 @@ fn a_cursor_turn_that_writes_a_file_records_its_worktrees_start_and_end_trees() 
     let end = tree(&lines, "stop", "studio_turn_end", &root);
     assert_eq!(changed(&root, &start, &end), "calc.py");
 }
+
+/// A fresh repository at `base`/`name` with one commit, spelled as `git` spells it.
+fn repository(base: &Path, name: &str) -> String {
+    let root = base.join(name);
+    fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    git(&root, &["init", "-q"]);
+    fs::write(root.join("README"), "hi\n").unwrap();
+    git(&root, &["add", "."]);
+    git(&root, &["commit", "-qm", "init"]);
+    root.to_str().unwrap().to_string()
+}
+
+/// Feeds Cursor's hook entry `payload`, in Cursor's names, with `home` as `HOME`, and returns the line it logged.
+fn cursor(home: &Path, payload: Value) -> Value {
+    let mut cmd = hook(home);
+    cmd.args(["--agent", "cursor"]);
+    assert!(feed(cmd, &payload).wait().unwrap().success());
+    let log = fs::read_to_string(studio_hook::event_log(home)).unwrap();
+    serde_json::from_str(log.lines().last().unwrap()).unwrap()
+}
+
+/// Cursor sends no event before a call, only `postToolUse` after it: a turn's start trees are taken
+/// at its prompt for every workspace root, so a file written in a root other than the first is
+/// still the turn's (#426 review).
+#[test]
+fn a_cursor_turn_that_writes_in_its_second_workspace_root_lists_the_file() {
+    let base = std::env::temp_dir().join(format!("studio-cursor-roots-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let home = base.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let (a, b) = (repository(&base, "a"), repository(&base, "b"));
+    let event = |name: &str| {
+        serde_json::json!({
+            "conversation_id": "c-1", "generation_id": "g-1", "hook_event_name": name,
+            "cursor_version": "3.31.15", "workspace_roots": [a, b],
+        })
+    };
+    let prompt = cursor(&home, event("beforeSubmitPrompt"));
+    let file = format!("{b}/f.py");
+    fs::write(&file, "print(1)\n").unwrap();
+    let mut write = event("postToolUse");
+    write["tool_name"] = "Write".into();
+    write["tool_input"] = serde_json::json!({ "file_path": file });
+    let written = cursor(&home, write);
+    let stop = cursor(&home, event("stop"));
+
+    let start = prompt["studio_turn_start"][&b]
+        .as_str()
+        .or(written["studio_turn_start"][&b].as_str())
+        .unwrap();
+    let end = stop["studio_turn_end"][&b].as_str().unwrap();
+    let files = git(Path::new(&b), &["diff", "--name-only", start, end]);
+    let _ = fs::remove_dir_all(&base);
+    assert_eq!(files, "f.py");
+}
+
+/// A `Shell` call names the folder it ran in, which it touches, though it lies outside every
+/// workspace root.
+#[test]
+fn a_cursor_shell_call_touches_the_folder_it_ran_in() {
+    let base = std::env::temp_dir().join(format!("studio-cursor-shell-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let home = base.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let (a, c) = (repository(&base, "a"), repository(&base, "c"));
+    let event = |name: &str| {
+        serde_json::json!({
+            "conversation_id": "c-1", "generation_id": "g-1", "hook_event_name": name,
+            "cursor_version": "3.31.15", "workspace_roots": [a], "cwd": "",
+        })
+    };
+    cursor(&home, event("beforeSubmitPrompt"));
+    let mut shell = event("postToolUse");
+    shell["tool_name"] = "Shell".into();
+    shell["tool_input"] = serde_json::json!({ "command": "python3 calc.py", "cwd": c });
+    let ran = cursor(&home, shell);
+    let _ = fs::remove_dir_all(&base);
+
+    assert_eq!(ran["studio_touched_roots"], serde_json::json!([c]));
+}
+
+/// Codex's and Cursor's entries give the hook 5 seconds, and one `git` call may take 20: a turn's
+/// trees that take too long are left out, and the line is still logged in time.
+#[test]
+fn a_cursor_line_is_logged_in_time_when_git_hangs() {
+    let base = std::env::temp_dir().join(format!("studio-cursor-hang-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let (home, bin) = (base.join("home"), base.join("bin"));
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&bin).unwrap();
+    let a = repository(&base, "a");
+    // A `git` that hangs, as on a huge or locked repository.
+    let fake = bin.join("git");
+    fs::write(&fake, "#!/bin/sh\nexec sleep 30\n").unwrap();
+    fs::set_permissions(&fake, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+    let payload = serde_json::json!({
+        "conversation_id": "c-1", "generation_id": "g-1", "hook_event_name": "beforeSubmitPrompt",
+        "cursor_version": "3.31.15", "workspace_roots": [a], "prompt": "hi",
+    });
+    let mut cmd = hook(&home);
+    cmd.args(["--agent", "cursor"]).env("PATH", path);
+    let began = std::time::Instant::now();
+    assert!(feed(cmd, &payload).wait().unwrap().success());
+    let took = began.elapsed();
+    let log = fs::read_to_string(studio_hook::event_log(&home)).unwrap_or_default();
+    let _ = fs::remove_dir_all(&base);
+
+    assert!(took < std::time::Duration::from_secs(5), "took {took:?}");
+    assert_eq!(log.lines().count(), 1, "{log}");
+}

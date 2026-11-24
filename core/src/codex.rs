@@ -32,6 +32,7 @@ pub const CAPABILITIES: Capabilities = Capabilities {
     transcript_model: false,
     context: false,
     turn_trees: true,
+    empty_window_starts: false,
     transcript_format: TranscriptFormat::Unread,
 };
 
@@ -79,6 +80,7 @@ pub(crate) fn parse(line: &str) -> Result<Event, serde_json::Error> {
 
 /// The first file a patch names (`*** Update File: …`, `*** Add File: …`, `*** Delete File: …`).
 // shortcut: a patch that changes several files is taken as touching its first.
+// hook/src/lib.rs's `codex_shaped` keeps a copy, as the hook does not depend on core.
 fn patched_file(patch: &str) -> Option<String> {
     patch.lines().find_map(|line| {
         let line = line.trim_start().strip_prefix("*** ")?;

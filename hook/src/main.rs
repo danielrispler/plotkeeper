@@ -10,8 +10,16 @@ use std::{
     error::Error,
     fs,
     io::Read,
+    path::Path,
+    sync::mpsc,
+    thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+
+/// How long the trees of a Codex or Cursor line may take. Their hook entries give the hook 5
+/// seconds, and one `git` call may take 20, so past this the line is logged without its trees
+/// rather than killed with them; the append's lock wait takes the rest.
+const TREES_BUDGET: Duration = Duration::from_secs(3);
 
 fn main() {
     if let Err(e) = append() {
@@ -73,7 +81,7 @@ fn append() -> Result<(), Box<dyn Error>> {
     let data = path.parent().ok_or("no data directory")?;
     fs::create_dir_all(data)?;
     // The line goes in the log even when the trees cannot be recorded.
-    if let Err(e) = studio_hook::trees(&mut event, data) {
+    if let Err(e) = trees(&mut event, data) {
         eprintln!("plotkeeper-hook: record the trees: {e}");
     }
     // A lock that never comes must not hold the agent: the event is dropped, with a trace (#43,
@@ -99,4 +107,24 @@ fn append() -> Result<(), Box<dyn Error>> {
         )?;
     }
     Ok(())
+}
+
+/// `studio_hook::trees` on `event`, given `TREES_BUDGET` for a Codex or Cursor line; past it the
+/// line keeps none of the trees, and the hook's exit stops their work.
+fn trees(event: &mut Map<String, Value>, data: &Path) -> Result<(), String> {
+    let agent = event.get("studio_agent").and_then(Value::as_str);
+    if !matches!(agent, Some("codex" | "cursor")) {
+        return studio_hook::trees(event, data).map_err(|e| e.to_string());
+    }
+    let (mut copy, data) = (event.clone(), data.to_owned());
+    let (done, recorded) = mpsc::channel();
+    thread::spawn(move || {
+        let result = studio_hook::trees(&mut copy, &data).map_err(|e| e.to_string());
+        let _ = done.send((copy, result));
+    });
+    let (copy, result) = recorded
+        .recv_timeout(TREES_BUDGET)
+        .map_err(|_| format!("they took over {TREES_BUDGET:?}"))?;
+    *event = copy;
+    result
 }
