@@ -301,6 +301,10 @@ _Avoid_: Quiz, test, recall score
 The second sandboxed call that checks each claim of a **PR brief** against the same facts the writer had. An item still flagged after one rewrite carries the mark **not confirmed from the facts**.
 _Avoid_: Fact check, verification
 
+**Partial facts**:
+The mark on a **PR brief** written from less than its full facts: its diff was cut, the **Claim check** did not run, a language in it has no extractor, or the link check has no run at its head. One mark with a count, opening to one line per missing fact.
+_Avoid_: Partial checks (a **Check** is a command run in a worktree), not the full picture
+
 **Background run**:
 A headless agent run with scoped tools that plotkeeper starts on Daniel's click, inside Claude Code's OS sandbox, queued one at a time per project and cancellable from the map. It is not a session and has no terminal. [Background runs](behaviour/background-runs.md) has the rules.
 _Avoid_: Session, job, a check sent to the background (a check an agent backgrounds inside its own session)
