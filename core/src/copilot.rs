@@ -18,7 +18,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 /// The name Copilot's hook entries pass (`--agent copilot`), which its lines carry.
-pub const COPILOT: &str = "copilot";
+pub(crate) const COPILOT: &str = "copilot";
 
 /// What Copilot reports: its prompts, tool calls and turn ends. Its `permissionRequest` payload is
 /// not documented, so install does not wire it and nothing waits on Daniel; no reply text, model or

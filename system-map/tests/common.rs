@@ -7,7 +7,7 @@ use studio_test_support::{git, repo};
 
 /// A valid map: two parts, an actor, an import link (unproven, since the map names no extractor), an ignored folder and
 /// a law.
-pub fn base() -> Value {
+pub(crate) fn base() -> Value {
     json!({
         "version": 2,
         "parts": [
@@ -24,7 +24,7 @@ pub fn base() -> Value {
 }
 
 /// `base` as a version 1 map holds it: each part's text is one `description`, with no `holds`.
-pub fn base_v1() -> Value {
+pub(crate) fn base_v1() -> Value {
     json!({
         "version": 1,
         "parts": [
@@ -41,14 +41,14 @@ pub fn base_v1() -> Value {
 }
 
 /// The files `base` places: one per part and one ignored.
-pub const FILES: [&str; 3] = ["alpha/a.rs", "beta/b.rs", "docs/d.md"];
+pub(crate) const FILES: [&str; 3] = ["alpha/a.rs", "beta/b.rs", "docs/d.md"];
 
 /// A repository that tracks `files` and `system-map.json` holding `map`, and its root.
-pub fn project(map: &Value, files: &[&str]) -> (tempfile::TempDir, String) {
+pub(crate) fn project(map: &Value, files: &[&str]) -> (tempfile::TempDir, String) {
     project_text(&map.to_string(), files)
 }
 
-pub fn project_text(map: &str, files: &[&str]) -> (tempfile::TempDir, String) {
+pub(crate) fn project_text(map: &str, files: &[&str]) -> (tempfile::TempDir, String) {
     let (dir, root) = repo();
     write(dir.path(), "system-map.json", map);
     for file in files {
@@ -59,19 +59,19 @@ pub fn project_text(map: &str, files: &[&str]) -> (tempfile::TempDir, String) {
     (dir, root)
 }
 
-pub fn write(root: &Path, file: &str, text: &str) {
+pub(crate) fn write(root: &Path, file: &str, text: &str) {
     let path = root.join(file);
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, text).unwrap();
 }
 
 /// The problems `check` reports for a repository.
-pub fn problems(root: &str) -> Vec<String> {
+pub(crate) fn problems(root: &str) -> Vec<String> {
     system_map::check(Path::new(root)).problems
 }
 
 /// Whether some problem mentions every one of `needles`.
-pub fn has(problems: &[String], needles: &[&str]) -> bool {
+pub(crate) fn has(problems: &[String], needles: &[&str]) -> bool {
     problems
         .iter()
         .any(|line| needles.iter().all(|needle| line.contains(needle)))

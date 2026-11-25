@@ -29,7 +29,7 @@
       "purpose": "Plain Rust logic that reads the event log's lines in order and knows every session's turns, checks, subagents and whether it needs you.",
       "holds": [
         { "name": "The agent adapters", "text": "Turn each agent's hook line into one neutral event: Claude Code, agy, Codex, Copilot, Cursor and Qwen Code.", "paths": ["core/src/claude.rs", "core/src/agy.rs", "core/src/codex.rs", "core/src/copilot.rs", "core/src/cursor.rs", "core/src/qwen.rs", "core/src/event.rs"] },
-        { "name": "Session state", "text": "The sessions, their turns and subagents, and whether one needs you, from the events one at a time.", "paths": ["core/src/lib.rs", "core/src/saved.rs"] },
+        { "name": "Session state", "text": "The sessions, their turns and subagents, and whether one needs you, from the events one at a time.", "paths": ["core/src/studio.rs", "core/src/studio/take.rs", "core/src/session.rs", "core/src/output.rs", "core/src/saved.rs"] },
         { "name": "The step ledger", "text": "One row for every tool call of a session, its workers' included, and which of them were checks.", "paths": ["core/src/ledger.rs", "core/src/checks.rs"] },
         { "name": "The transcript reader", "text": "A tolerant reader of a session's transcript, for what the session is doing and why.", "paths": ["core/src/transcript.rs"] }
       ],
@@ -61,14 +61,14 @@
       "purpose": "What the Map view and the briefs show, and the runs started from them: the map with its fog, history and ratify, PR briefs and catch-ups, and the headless agent runs.",
       "holds": [
         { "name": "The map", "text": "Reads the map from the default branch, with its fog, history, staleness, CI laws and what you ratified.", "paths": ["server/src/map.rs", "server/src/fog.rs", "server/src/history.rs", "server/src/staleness.rs", "server/src/ci_laws.rs", "server/src/ratify.rs"] },
-        { "name": "Briefs", "text": "PR lookups, the PR briefs of ready PRs, part catch-ups, the pre-flight and the end-of-story bar.", "paths": ["server/src/prs.rs", "server/src/pr_briefs.rs", "server/src/part_catch_ups.rs", "server/src/pre_flight.rs", "server/src/story_bar.rs"] },
+        { "name": "Briefs", "text": "PR lookups, the PR briefs of ready PRs, part catch-ups, the pre-flight and the end-of-story bar.", "paths": ["server/src/prs.rs", "server/src/pr_briefs.rs", "server/src/pr_briefs/write.rs", "server/src/part_catch_ups.rs", "server/src/pre_flight.rs", "server/src/story_bar.rs"] },
         { "name": "Background runs", "text": "Headless agent runs on your click, one at a time per project, in a sandbox: back a law and micro-worlds.", "paths": ["server/src/runner.rs", "server/src/back_a_law.rs", "server/src/micro_worlds.rs", "server/src/micro_world_guard.mjs"] },
         { "name": "The quiet log", "text": "One line per thing you use, kept for the stop rules, with nothing shown.", "paths": ["server/src/stop_rules.rs"] }
       ],
       "tier": "core",
       "paths": [
         "server/src/map.rs", "server/src/fog.rs", "server/src/staleness.rs", "server/src/history.rs", "server/src/ci_laws.rs",
-        "server/src/ratify.rs", "server/src/stop_rules.rs", "server/src/pre_flight.rs", "server/src/pr_briefs.rs",
+        "server/src/ratify.rs", "server/src/stop_rules.rs", "server/src/pre_flight.rs", "server/src/pr_briefs.rs", "server/src/pr_briefs/",
         "server/src/part_catch_ups.rs", "server/src/prs.rs", "server/src/story_bar.rs", "server/src/runner.rs",
         "server/src/back_a_law.rs", "server/src/micro_worlds.rs", "server/src/micro_world_guard.mjs",
         "server/tests/back_a_law.rs", "server/tests/micro_worlds.rs", "server/tests/runner.rs",
@@ -81,7 +81,7 @@
       "holds": [
         { "name": "The writer contract", "text": "One call shape for every writer, run as a program or, for an API-key writer, over HTTP.", "paths": ["understanding/src/writer.rs", "understanding/src/http_writer.rs"] },
         { "name": "Turn writing", "text": "What a turn's end writes: its summary and its session's brief, held to the facts.", "paths": ["understanding/src/turn_writing.rs", "understanding/src/summary.rs", "understanding/src/brief.rs", "understanding/src/grounding.rs"] },
-        { "name": "PR briefs and part catch-ups", "text": "Facts code assembles, the writer's story of them and the code checks on its reply.", "paths": ["understanding/src/pr_brief.rs", "understanding/src/pr_brief_check.rs", "understanding/src/part_catch_up.rs"] },
+        { "name": "PR briefs and part catch-ups", "text": "Facts code assembles, the writer's story of them and the code checks on its reply.", "paths": ["understanding/src/pr_brief.rs", "understanding/src/pr_brief/build.rs", "understanding/src/pr_brief/checks.rs", "understanding/src/pr_brief_check.rs", "understanding/src/part_catch_up.rs"] },
         { "name": "Pre-flight", "text": "The parts of the map a piece of work will likely cross, predicted before it starts.", "paths": ["understanding/src/pre_flight.rs"] },
         { "name": "The store", "text": "The briefs, summaries and risk notes on disk; cards are retired, and those stored before stay readable.", "paths": ["understanding/src/store.rs", "understanding/src/risk.rs"] }
       ],

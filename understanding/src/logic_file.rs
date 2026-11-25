@@ -2,7 +2,7 @@
 //! table that gave a turn a card, which this module's functions came from, is retired (danielrispler/plotkeeper#348).
 
 /// Whether `path` is a logic file: not documentation, a lockfile, generated output or a fixture.
-pub fn is_logic(path: &str) -> bool {
+pub(crate) fn is_logic(path: &str) -> bool {
     let name = path.rsplit('/').next().unwrap_or(path);
     let segment = |s: &[&str]| path.split('/').any(|p| s.contains(&p));
     let ends = |e: &[&str]| e.iter().any(|e| name.ends_with(e));

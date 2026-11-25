@@ -1,14 +1,14 @@
 //! The map's path patterns: a trailing `/` owns a folder, `*` matches within one segment, `**`
 //! across segments, and anything else names one file.
 
-pub struct Pattern {
+pub(crate) struct Pattern {
     text: String,
     folder: bool,
     segments: Vec<String>,
 }
 
 impl Pattern {
-    pub fn new(text: &str) -> Pattern {
+    pub(crate) fn new(text: &str) -> Pattern {
         let folder = text.ends_with('/');
         let segments = text
             .trim_end_matches('/')
@@ -22,11 +22,11 @@ impl Pattern {
         }
     }
 
-    pub fn text(&self) -> &str {
+    pub(crate) fn text(&self) -> &str {
         &self.text
     }
 
-    pub fn matches(&self, path: &str) -> bool {
+    pub(crate) fn matches(&self, path: &str) -> bool {
         let path: Vec<&str> = path.split('/').collect();
         if self.folder {
             // Some folder above the file, never the file itself.

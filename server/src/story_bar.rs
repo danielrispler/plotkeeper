@@ -6,17 +6,14 @@
 
 use crate::stop_rules::{self, Event, Kind};
 use serde::{Deserialize, Serialize};
-use std::{
-    path::Path,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::path::Path;
 
 /// The longest explain-back line kept, in characters; a longer one is refused.
-pub const LINE_MAX: usize = 300;
+pub(crate) const LINE_MAX: usize = 300;
 
 /// What story a bar ends: a PR brief's chapter (`pr` and `chapter`), or a part catch-up (`part`).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct About {
+pub(crate) struct About {
     #[serde(default)]
     pub pr: Option<u64>,
     #[serde(default)]
@@ -27,7 +24,7 @@ pub struct About {
 
 /// What the bar was given with one kind: an explain-back line or its mark (#397); at most the one its kind carries.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct Given {
+pub(crate) struct Given {
     #[serde(default)]
     pub line: Option<String>,
     #[serde(default)]
@@ -37,7 +34,7 @@ pub struct Given {
 /// How Daniel marked his explain-back line against the gist.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum Mark {
+pub(crate) enum Mark {
     GotIt,
     Partly,
     Missed,
@@ -45,7 +42,7 @@ pub enum Mark {
 
 /// One line of the log from the bar.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Line {
+pub(crate) struct Line {
     #[serde(flatten)]
     pub event: Event,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -61,7 +58,7 @@ pub struct Line {
 
 /// Logs what the bar of `about` in `project` was given: `kind` is one of the bar's kinds; an `explain-back-given` carries Daniel's line
 /// and an `explain-back-marked` its mark, and neither carries the other's.
-pub fn story_bar(
+pub(crate) fn story_bar(
     kind: Kind,
     project: String,
     day: String,
@@ -105,9 +102,7 @@ fn bar_in(
     }
     let line = Line {
         event: Event {
-            at: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_or(0, |d| d.as_secs()),
+            at: studio_workbench::clock::now_ms() / 1000,
             day: day.into(),
             kind,
             project: Some(project.into()),

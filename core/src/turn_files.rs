@@ -3,8 +3,8 @@
 //! session's or turn's call names (`names`). The core runs no `git`: it names the trees to diff
 //! (`TurnDiff`), and the shell hands back git's numstat (`RootDiff`).
 
-use crate::Roots;
 use crate::ledger::Row;
+use crate::studio::Roots;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 

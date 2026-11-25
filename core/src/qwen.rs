@@ -15,7 +15,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 /// The name Qwen Code's hook entries pass (`--agent qwen`), which its lines carry.
-pub const QWEN: &str = "qwen";
+pub(crate) const QWEN: &str = "qwen";
 
 /// What Qwen Code reports. Its `PermissionRequest` waits on Daniel, every event names the
 /// permission mode, `SessionStart` names the model, and a call's end says how long it took. Its

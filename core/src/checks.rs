@@ -111,215 +111,247 @@ struct Raw {
     group: usize,
 }
 
-/// Splits `command` into statements at `;`, line breaks, `&&`, `||`, `|` and `&` outside quoted
-/// text. A heredoc's body is skipped, and a backslash-escaped quote does not end quoted text.
-#[allow(
-    clippy::too_many_lines,
-    reason = "#556 splits it by responsibility (spec #548, Group 4)"
-)]
-fn split(command: &str) -> Vec<Raw> {
-    struct Reader {
-        done: Vec<Raw>,
-        words: Vec<Word>,
-        word: String,
-        plain: bool,
-        in_word: bool,
-        group: usize,
-        before: Option<Joiner>,
+/// Reads a command one character at a time into statements (`split`): the statements done, the
+/// one being read, and the heredocs whose bodies start after the current line.
+struct Reader {
+    chars: Vec<char>,
+    /// The next character to read.
+    i: usize,
+    done: Vec<Raw>,
+    words: Vec<Word>,
+    word: String,
+    plain: bool,
+    in_word: bool,
+    group: usize,
+    before: Option<Joiner>,
+    /// Each heredoc's delimiter, and whether `<<-` strips tabs.
+    heredocs: Vec<(String, bool)>,
+}
+
+impl Reader {
+    fn new(command: &str) -> Self {
+        Reader {
+            chars: command.chars().collect(),
+            i: 0,
+            done: Vec::new(),
+            words: Vec::new(),
+            word: String::new(),
+            plain: true,
+            in_word: false,
+            group: 0,
+            before: None,
+            heredocs: Vec::new(),
+        }
     }
-    impl Reader {
-        fn end_word(&mut self) {
-            if self.in_word {
-                let text = std::mem::take(&mut self.word);
-                self.words.push(Word {
-                    text,
-                    plain: self.plain,
-                });
-            }
-            self.in_word = false;
-            self.plain = true;
+
+    fn end_word(&mut self) {
+        if self.in_word {
+            let text = std::mem::take(&mut self.word);
+            self.words.push(Word {
+                text,
+                plain: self.plain,
+            });
         }
-        fn push(&mut self, c: char, plain: bool) {
-            self.word.push(c);
-            self.in_word = true;
-            self.plain &= plain;
+        self.in_word = false;
+        self.plain = true;
+    }
+
+    fn push(&mut self, c: char, plain: bool) {
+        self.word.push(c);
+        self.in_word = true;
+        self.plain &= plain;
+    }
+
+    /// A joiner between statements; one with no words before it joins nothing.
+    fn join(&mut self, joiner: Joiner) {
+        self.end_word();
+        if self.words.is_empty() {
+            return;
         }
-        /// A joiner between statements; one with no words before it joins nothing.
-        fn join(&mut self, joiner: Joiner) {
-            self.end_word();
-            if self.words.is_empty() {
-                return;
+        self.done.push(Raw {
+            words: std::mem::take(&mut self.words),
+            before: self.before,
+            after: Some(joiner),
+            group: self.group,
+        });
+        self.before = Some(joiner);
+        // `;` and `&` each end a group: what follows runs in the foreground, after it.
+        if matches!(joiner, Joiner::Semi | Joiner::Background) {
+            self.group += 1;
+        }
+    }
+
+    /// The rest of quoted text opened by `quote`, up to its closing quote; a backslash in double
+    /// quotes escapes the character after it.
+    fn quoted(&mut self, quote: char) {
+        while self.i < self.chars.len() {
+            let inner = self.chars[self.i];
+            self.i += 1;
+            self.push(inner, false);
+            if inner == quote {
+                break;
             }
+            if inner == '\\' && quote == '"' && self.i < self.chars.len() {
+                self.push(self.chars[self.i], false);
+                self.i += 1;
+            }
+        }
+    }
+
+    /// The rest of a `$(…)` or `$((…))`, which belongs to the word it stands in, whatever quotes or
+    /// parentheses it holds.
+    fn substitution(&mut self) {
+        let mut depth = 0;
+        while self.i < self.chars.len() {
+            let inner = self.chars[self.i];
+            self.i += 1;
+            self.push(inner, false);
+            match inner {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                '\\' if self.i < self.chars.len() => {
+                    self.push(self.chars[self.i], false);
+                    self.i += 1;
+                }
+                '\'' | '"' => self.quoted(inner),
+                _ => {}
+            }
+        }
+    }
+
+    /// A comment, up to the end of its line.
+    fn comment(&mut self) {
+        while self.i < self.chars.len() && self.chars[self.i] != '\n' {
+            self.i += 1;
+        }
+    }
+
+    /// The bodies of the heredocs the line just ended opened, each up to its delimiter.
+    fn heredoc_bodies(&mut self) {
+        let chars = &self.chars;
+        for (delimiter, strip) in self.heredocs.drain(..) {
+            while self.i < chars.len() {
+                let end = chars[self.i..].iter().position(|&c| c == '\n');
+                let end = end.map_or(chars.len(), |n| self.i + n);
+                let line: String = chars[self.i..end].iter().collect();
+                self.i = (end + 1).min(chars.len());
+                let line = if strip {
+                    line.trim_start_matches('\t')
+                } else {
+                    &line
+                };
+                if line.trim_end_matches('\r') == delimiter {
+                    break;
+                }
+            }
+        }
+    }
+
+    /// A heredoc's `<<` or `<<-` and its delimiter, after the first `<`; its body starts after the
+    /// line.
+    fn heredoc(&mut self) {
+        self.i += 1;
+        let strip = self.chars.get(self.i) == Some(&'-');
+        if strip {
+            self.i += 1;
+        }
+        while self
+            .chars
+            .get(self.i)
+            .is_some_and(|c| *c == ' ' || *c == '\t')
+        {
+            self.i += 1;
+        }
+        let mut delimiter = String::new();
+        while let Some(&d) = self.chars.get(self.i) {
+            if d.is_whitespace() || ";&|()<>".contains(d) {
+                break;
+            }
+            if !"'\"\\".contains(d) {
+                delimiter.push(d);
+            }
+            self.i += 1;
+        }
+        self.heredocs.push((delimiter, strip));
+    }
+
+    /// The statements read, the last one included.
+    fn finish(mut self) -> Vec<Raw> {
+        self.end_word();
+        if !self.words.is_empty() {
             self.done.push(Raw {
-                words: std::mem::take(&mut self.words),
+                words: self.words,
                 before: self.before,
-                after: Some(joiner),
+                after: None,
                 group: self.group,
             });
-            self.before = Some(joiner);
-            // `;` and `&` each end a group: what follows runs in the foreground, after it.
-            if matches!(joiner, Joiner::Semi | Joiner::Background) {
-                self.group += 1;
-            }
         }
+        self.done
     }
-    let chars: Vec<char> = command.chars().collect();
-    let mut reader = Reader {
-        done: Vec::new(),
-        words: Vec::new(),
-        word: String::new(),
-        plain: true,
-        in_word: false,
-        group: 0,
-        before: None,
-    };
-    // The heredocs whose bodies start after this line: their delimiter, and whether `<<-` strips tabs.
-    let mut heredocs: Vec<(String, bool)> = Vec::new();
-    let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
-        let next = chars.get(i + 1).copied();
-        i += 1;
+}
+
+/// Splits `command` into statements at `;`, line breaks, `&&`, `||`, `|` and `&` outside quoted
+/// text. A heredoc's body is skipped, and a backslash-escaped quote does not end quoted text.
+fn split(command: &str) -> Vec<Raw> {
+    let mut reader = Reader::new(command);
+    while reader.i < reader.chars.len() {
+        let c = reader.chars[reader.i];
+        let next = reader.chars.get(reader.i + 1).copied();
+        reader.i += 1;
         match c {
             '\\' => match next {
-                Some('\n') => i += 1,
+                Some('\n') => reader.i += 1,
                 Some(next) => {
                     reader.push(c, false);
                     reader.push(next, false);
-                    i += 1;
+                    reader.i += 1;
                 }
                 None => reader.push(c, false),
             },
-            // `$(…)` and `$((…))` belong to the word they stand in, whatever quotes or parentheses
-            // they hold; what they run is no statement of the command.
+            // What a `$(…)` runs is no statement of the command.
             '$' if next == Some('(') => {
                 reader.push(c, false);
-                let mut depth = 0;
-                while i < chars.len() {
-                    let inner = chars[i];
-                    i += 1;
-                    reader.push(inner, false);
-                    match inner {
-                        '(' => depth += 1,
-                        ')' => {
-                            depth -= 1;
-                            if depth == 0 {
-                                break;
-                            }
-                        }
-                        '\\' if i < chars.len() => {
-                            reader.push(chars[i], false);
-                            i += 1;
-                        }
-                        '\'' | '"' => {
-                            while i < chars.len() {
-                                let quoted = chars[i];
-                                i += 1;
-                                reader.push(quoted, false);
-                                if quoted == inner {
-                                    break;
-                                }
-                                if quoted == '\\' && inner == '"' && i < chars.len() {
-                                    reader.push(chars[i], false);
-                                    i += 1;
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
+                reader.substitution();
             }
             '\'' | '"' => {
                 reader.push(c, false);
-                while i < chars.len() {
-                    let inner = chars[i];
-                    i += 1;
-                    reader.push(inner, false);
-                    if inner == c {
-                        break;
-                    }
-                    if inner == '\\' && c == '"' && i < chars.len() {
-                        reader.push(chars[i], false);
-                        i += 1;
-                    }
-                }
+                reader.quoted(c);
             }
-            '#' if !reader.in_word => {
-                while i < chars.len() && chars[i] != '\n' {
-                    i += 1;
-                }
-            }
+            '#' if !reader.in_word => reader.comment(),
             '\n' => {
                 reader.join(Joiner::Semi);
-                for (delimiter, strip) in heredocs.drain(..) {
-                    while i < chars.len() {
-                        let end = chars[i..].iter().position(|&c| c == '\n');
-                        let end = end.map_or(chars.len(), |n| i + n);
-                        let line: String = chars[i..end].iter().collect();
-                        i = (end + 1).min(chars.len());
-                        let line = if strip {
-                            line.trim_start_matches('\t')
-                        } else {
-                            &line
-                        };
-                        if line.trim_end_matches('\r') == delimiter {
-                            break;
-                        }
-                    }
-                }
+                reader.heredoc_bodies();
             }
             ';' => reader.join(Joiner::Semi),
             '&' if next == Some('&') => {
-                i += 1;
+                reader.i += 1;
                 reader.join(Joiner::And);
             }
             // A redirection, as in `2>&1` and `&>file`, is no joiner.
             '&' if reader.word.ends_with(['<', '>']) || next == Some('>') => reader.push(c, true),
             '&' => reader.join(Joiner::Background),
             '|' if next == Some('|') => {
-                i += 1;
+                reader.i += 1;
                 reader.join(Joiner::Or);
             }
             '|' => reader.join(Joiner::Pipe),
             // `<<<` is a here-string, no heredoc.
             '<' if next == Some('<')
-                && chars.get(i + 1) != Some(&'<')
-                && !(i >= 2 && chars[i - 2] == '<') =>
+                && reader.chars.get(reader.i + 1) != Some(&'<')
+                && !(reader.i >= 2 && reader.chars[reader.i - 2] == '<') =>
             {
-                i += 1;
-                let strip = chars.get(i) == Some(&'-');
-                if strip {
-                    i += 1;
-                }
-                while chars.get(i).is_some_and(|c| *c == ' ' || *c == '\t') {
-                    i += 1;
-                }
-                let mut delimiter = String::new();
-                while let Some(&d) = chars.get(i) {
-                    if d.is_whitespace() || ";&|()<>".contains(d) {
-                        break;
-                    }
-                    if !"'\"\\".contains(d) {
-                        delimiter.push(d);
-                    }
-                    i += 1;
-                }
-                heredocs.push((delimiter, strip));
+                reader.heredoc();
             }
             c if c == ' ' || c == '\t' || c == '\r' || c == '(' || c == ')' => reader.end_word(),
             c => reader.push(c, true),
         }
     }
-    reader.end_word();
-    if !reader.words.is_empty() {
-        reader.done.push(Raw {
-            words: reader.words,
-            before: reader.before,
-            after: None,
-            group: reader.group,
-        });
-    }
-    reader.done
+    reader.finish()
 }
 
 /// `words` without its redirections (`2>&1`, `> out`, `< in`) and the file each names.
@@ -477,7 +509,7 @@ pub(crate) fn statements<'a, S: AsRef<str>>(list: &'a [S], command: &str) -> Vec
 
 /// The entry of `list` that `command` runs, if any: the first of its statements that runs one. This
 /// is the one test of whether a command is a check.
-pub fn matched<'a, S: AsRef<str>>(list: &'a [S], command: &str) -> Option<&'a str> {
+pub(crate) fn matched<'a, S: AsRef<str>>(list: &'a [S], command: &str) -> Option<&'a str> {
     statements(list, command).iter().find_map(|s| s.suite)
 }
 
@@ -491,7 +523,7 @@ pub(crate) fn suites<'a, S: AsRef<str>>(list: &'a [S], command: &str) -> Vec<&'a
 
 /// Whether a check run's exit code counts, for each way its command can end.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Counts {
+pub(crate) struct Counts {
     /// Exit 0 says it passed.
     pub zero: bool,
     /// A non-zero exit says it failed.
@@ -718,7 +750,7 @@ fn runs<'a>(row: &Row, list: &'a [String], home: &str) -> Vec<(&'a str, String, 
 /// Turn `turn`'s checks, its workers' included: the ledger's rows of the turn that match `list`,
 /// grouped by suite and worktree in the order each first ran. `home` gives the worktree of a call that
 /// recorded none: the session's folder's for `None`, else the worker's own.
-pub fn of_turn(
+pub(crate) fn of_turn(
     ledger: &Ledger,
     turn: usize,
     list: &[String],

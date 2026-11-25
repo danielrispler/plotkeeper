@@ -926,9 +926,7 @@ fn claude_trees(event: &mut Line, data: &Path) -> Result<(), Box<dyn std::error:
         let roots = starts.iter().filter_map(|p| names.root(Path::new(p)));
         roots.collect::<Vec<String>>()
     };
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as u64);
+    let now = studio_workbench::clock::now_ms();
     // When the turn began, in Unix milliseconds; a record from before it is kept does not say.
     let mut began = kept["began"].as_u64();
     let mut touches = Vec::new();

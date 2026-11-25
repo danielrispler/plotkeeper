@@ -11,7 +11,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 
 /// The name Claude Code's hook entries pass (`--agent claude`), which its lines carry.
-pub const CLAUDE: &str = "claude";
+pub(crate) const CLAUDE: &str = "claude";
 
 /// What Claude Code reports: everything the core reads today.
 pub const CAPABILITIES: Capabilities = Capabilities {

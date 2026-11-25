@@ -269,22 +269,9 @@ pub(crate) fn state_file() -> Result<PathBuf, String> {
     Ok(studio_hook::data_dir(&home).join(STATE_FILE))
 }
 
-fn read_file(file: &Path) -> serde_json::Value {
-    let parsed = std::fs::read_to_string(file)
-        .ok()
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
-    parsed
-        .filter(serde_json::Value::is_object)
-        .unwrap_or_else(|| serde_json::json!({}))
-}
-
 /// Daniel's state for `project` from `file`; a missing or unreadable file is an empty state.
 pub fn read_user(file: &Path, project: &str) -> UserState {
-    read_file(file)
-        .get("projects")
-        .and_then(|projects| projects.get(project))
-        .and_then(|user| serde_json::from_value(user.clone()).ok())
-        .unwrap_or_default()
+    crate::json_file::read_project(file, project)
 }
 
 /// Serialises the writes, so two changes never lose one another.
@@ -297,30 +284,14 @@ pub fn update_user(
     project: &str,
     change: impl FnOnce(&mut UserState),
 ) -> Result<UserState, String> {
-    let _writing = WRITING.lock().unwrap();
-    let mut whole = read_file(file);
-    let mut user = read_user(file, project);
-    change(&mut user);
-    let entry = whole
-        .as_object_mut()
-        .unwrap()
-        .entry("projects")
-        .or_insert_with(|| serde_json::json!({}))
-        .as_object_mut()
-        .ok_or("map-state.json: projects is not an object")?
-        .entry(project)
-        .or_insert_with(|| serde_json::json!({}));
-    let saved = serde_json::to_value(&user).map_err(|e| e.to_string())?;
-    match entry.as_object_mut() {
-        Some(object) => object.extend(saved.as_object().unwrap().clone()),
-        None => *entry = saved,
-    }
-    let dir = file.parent().ok_or("no folder for map-state.json")?;
-    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    let mut temp = tempfile::NamedTempFile::new_in(dir).map_err(|e| e.to_string())?;
-    serde_json::to_writer_pretty(&mut temp, &whole).map_err(|e| e.to_string())?;
-    temp.persist(file).map_err(|e| e.to_string())?;
-    Ok(user)
+    Ok(crate::json_file::update_json_file(
+        file,
+        STATE_FILE,
+        &WRITING,
+        project,
+        change,
+        |_| {},
+    )?)
 }
 
 /// Fetches `origin` for `project` through the cooldown. A failure is logged quietly and the refs stay as they were.
@@ -361,7 +332,7 @@ pub fn map_state(project: String, fetch: bool, app: &Arc<crate::App>) -> Result<
     state.user = read_user(&file, &project);
     if let Some(source) = &state.source {
         state.fog = crate::fog::effective(&state.user, source);
-        let born = crate::staleness::births(repo, source);
+        let born = crate::staleness::births(&app.births, repo, source);
         let now = crate::ratify::now();
         state.stale = crate::staleness::bands(&state.user, source, &born, now);
         state.stale_why = crate::staleness::lines(&state.user, source, &born, now);
@@ -371,7 +342,7 @@ pub fn map_state(project: String, fetch: bool, app: &Arc<crate::App>) -> Result<
     app.briefs.annotate(&project, &mut state.ready);
     state.ratify = crate::ratify::file()
         .and_then(|file| crate::ratify::start(&file, &project, crate::ratify::now()))
-        .map(|mine| crate::ratify::pending(repo, &mine))
+        .map(|mine| crate::ratify::pending(&app.changes, repo, &mine))
         .unwrap_or_default();
     state.runs = app.runner.runs(&project);
     // A shown map starts the part catch-ups of up to eight fogged Core parts (#396, #450).

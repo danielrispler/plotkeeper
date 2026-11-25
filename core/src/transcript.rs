@@ -369,7 +369,7 @@ fn agy_log_entries(record: &Value, cwd: &str, entries: &mut Vec<LogEntry>) {
                 entries.push(LogEntry::Call {
                     id: k.to_string(),
                     tool: name.into(),
-                    detail: crate::step_detail(&tool.input, cwd),
+                    detail: crate::output::step_detail(&tool.input, cwd),
                 });
             }
         }
@@ -436,7 +436,7 @@ fn log_entries(line: &Value, cwd: &str, entries: &mut Vec<LogEntry>) {
             ("assistant", Some("tool_use")) => entries.push(LogEntry::Call {
                 id: block["id"].as_str().unwrap_or_default().into(),
                 tool: block["name"].as_str().unwrap_or_default().into(),
-                detail: crate::step_detail(&block["input"], cwd),
+                detail: crate::output::step_detail(&block["input"], cwd),
             }),
             ("user", Some("tool_result")) => {
                 let full = match &block["content"] {

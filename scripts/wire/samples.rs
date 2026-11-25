@@ -7,14 +7,14 @@ use std::fmt::Write;
 use std::path::Path;
 
 /// A sample: the name of its mirror in `ui/`, and its value as the shell sends it.
-pub type Sample = (&'static str, Value);
+pub(crate) type Sample = (&'static str, Value);
 
-pub fn json(value: impl serde::Serialize) -> Value {
+pub(crate) fn json(value: impl serde::Serialize) -> Value {
     serde_json::to_value(value).expect("a wire value serializes")
 }
 
 /// Writes `samples` into `scripts/wire/<name>.ts`, from the crate at `manifest_dir`, once each of `types` has one.
-pub fn write(manifest_dir: &str, name: &str, types: &[&str], samples: &[Sample]) {
+pub(crate) fn write(manifest_dir: &str, name: &str, types: &[&str], samples: &[Sample]) {
     for ty in types {
         assert!(samples.iter().any(|(t, _)| t == ty), "no sample of {ty}");
     }

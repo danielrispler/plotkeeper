@@ -461,11 +461,13 @@ pub fn snippet(text: &str, tag_line: usize) -> (usize, String) {
     let mut depth = 0usize;
     for (at, raw) in lines.iter().enumerate().skip(from + 1).take(SNIPPET) {
         let (trimmed, indent) = (raw.trim(), raw.len() - raw.trim_start().len());
+        if base.is_none()
+            && let Some(open) = system_map::attribute_brackets(depth, trimmed)
+        {
+            depth = open;
+            continue;
+        }
         match base {
-            None if depth > 0 || trimmed.starts_with("#[") || trimmed.starts_with("#![") => {
-                depth = (depth + trimmed.matches('[').count())
-                    .saturating_sub(trimmed.matches(']').count());
-            }
             None if trimmed.is_empty() || trimmed.starts_with("//") => {}
             None => {
                 base = Some(indent);

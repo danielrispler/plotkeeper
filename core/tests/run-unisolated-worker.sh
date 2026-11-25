@@ -46,7 +46,7 @@ git -C "$repo" commit -qm "Start"
 # session must not take the terminal of a studio shell this runs in, so it gets no
 # `PLOTKEEPER_TERMINAL_ID`. Step b waits before it writes: the hooks are async, and a helper's base is
 # taken when the shell reads its command's `PreToolUse`, so a write that lands first never makes it a
-# worker (the shortcut in `core/src/lib.rs`, danielrispler/Falinks#434, decision 23).
+# worker (the shortcut in `core/src/studio.rs`, danielrispler/Falinks#434, decision 23).
 cd "$repo"
 env -u PLOTKEEPER_TERMINAL_ID CLAUDE_CODE_PLUGIN_DIRS="$studio/plugin" claude -p --session-id "$session" \
   --allowedTools "Bash" --disallowedTools "Edit" "Write" "NotebookEdit" <<PROMPT

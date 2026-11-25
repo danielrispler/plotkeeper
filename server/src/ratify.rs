@@ -14,7 +14,7 @@ use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
-    sync::{LazyLock, Mutex},
+    sync::Mutex,
 };
 
 pub const FILE: &str = "ratify.json";
@@ -162,21 +162,9 @@ impl Project {
 // ---------------------------------------------------------------------------------------------------------------
 // The file.
 
-fn read_all(file: &Path) -> Value {
-    std::fs::read_to_string(file)
-        .ok()
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        .filter(Value::is_object)
-        .unwrap_or_else(|| serde_json::json!({}))
-}
-
 /// The project's state in `file`; a missing or unreadable file, or one of an older format, is an empty state.
 pub fn read(file: &Path, project: &str) -> Project {
-    read_all(file)
-        .get("projects")
-        .and_then(|p| p.get(project))
-        .and_then(|p| serde_json::from_value(p.clone()).ok())
-        .unwrap_or_default()
+    crate::json_file::read_project(file, project)
 }
 
 /// Serialises the writes, so two changes never lose one another.
@@ -188,31 +176,14 @@ fn update(
     project: &str,
     change: impl FnOnce(&mut Project),
 ) -> Result<Project, String> {
-    let _writing = WRITING.lock().unwrap();
-    let mut whole = read_all(file);
-    let mut mine = read(file, project);
-    change(&mut mine);
-    let entry = whole
-        .as_object_mut()
-        .unwrap()
-        .entry("projects")
-        .or_insert_with(|| serde_json::json!({}))
-        .as_object_mut()
-        .ok_or("ratify.json: projects is not an object")?
-        .entry(project)
-        .or_insert_with(|| serde_json::json!({}));
-    let saved = serde_json::to_value(&mine).map_err(|e| e.to_string())?;
-    match entry.as_object_mut() {
-        Some(object) => object.extend(saved.as_object().unwrap().clone()),
-        None => *entry = saved,
-    }
-    whole["version"] = 1.into();
-    let dir = file.parent().ok_or("no folder for ratify.json")?;
-    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    let mut temp = tempfile::NamedTempFile::new_in(dir).map_err(|e| e.to_string())?;
-    serde_json::to_writer_pretty(&mut temp, &whole).map_err(|e| e.to_string())?;
-    temp.persist(file).map_err(|e| e.to_string())?;
-    Ok(mine)
+    Ok(crate::json_file::update_json_file(
+        file,
+        "ratify.json",
+        &WRITING,
+        project,
+        change,
+        |whole| whole["version"] = 1.into(),
+    )?)
 }
 
 /// Records the first run of `project` (once), so everything that landed before it counts as ratified.
@@ -256,11 +227,9 @@ pub fn file() -> Result<PathBuf, String> {
     Ok(studio_hook::data_dir(&home).join(FILE))
 }
 
+/// Now, in Unix seconds, as ratify, staleness and the map keep time.
 pub fn now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+    studio_workbench::clock::now_ms() / 1000
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -604,40 +573,42 @@ fn map_at(repo: &Path, commit: &str) -> Option<String> {
     .ok()
 }
 
-type Cache = Mutex<HashMap<(String, String), Vec<MapItem>>>;
-static CHANGES: LazyLock<Cache> = LazyLock::new(Mutex::default);
+/// The map items each commit changed, by repository and commit (`changes_of`), kept for the server's life on `App`.
+pub(crate) type ChangesCache = Mutex<HashMap<(String, String), Vec<MapItem>>>;
 
 /// The map items `commit` changed, from its map and its parent's. A commit never changes, so the answer is kept, but
 /// only one read from both maps: a `git show` that failed may work the next time, so its answer is read again. That
 /// includes a commit whose parent has no map, which git reports the same way.
-fn changes_of(repo: &Path, commit: &str) -> Vec<MapItem> {
+fn changes_of(cache: &ChangesCache, repo: &Path, commit: &str) -> Vec<MapItem> {
     let key = (repo.display().to_string(), commit.to_string());
-    if let Some(known) = CHANGES.lock().unwrap().get(&key) {
+    if let Some(known) = cache.lock().unwrap().get(&key) {
         return known.clone();
     }
     let old = map_at(repo, &format!("{commit}^"));
     let new = map_at(repo, commit);
     let found = map_items(old.as_deref(), new.as_deref());
     if old.is_some() && new.is_some() {
-        CHANGES.lock().unwrap().insert(key, found.clone());
+        cache.lock().unwrap().insert(key, found.clone());
     }
     found
 }
 
 /// What the brief of PR `number` offers from the map: when the PR has landed, its squash commit's changes and when it landed;
 /// while it is open, the change from where its head left the default branch to its head, landing never.
-pub fn pr_changes(
+pub(crate) fn pr_changes(
+    cache: &ChangesCache,
     repo: &Path,
     number: u64,
     open_head: Option<&str>,
 ) -> (Vec<MapItem>, Option<u64>) {
-    pr_changes_in(repo, number, open_head, WALK)
+    pr_changes_in(cache, repo, number, open_head, WALK)
 }
 
 /// How many first-parent commits of the default branch are read for what landed.
 const WALK: usize = 500;
 
 fn pr_changes_in(
+    cache: &ChangesCache,
     repo: &Path,
     number: u64,
     open_head: Option<&str>,
@@ -660,7 +631,7 @@ fn pr_changes_in(
     let log = first_parents(repo, &reference, walk);
     let cut_short = log.len() >= walk;
     match log.into_iter().find(|l| l.pr == Some(number)) {
-        Some(l) => (changes_of(repo, &l.commit), Some(l.at)),
+        Some(l) => (changes_of(cache, repo, &l.commit), Some(l.at)),
         // Not in a walk that was cut short: it may have landed long ago. Not in the whole log: it has not landed (a draft, a
         // closed one, one no lookup has seen), so its items are not ratified.
         None if cut_short => (vec![], Some(0)),
@@ -670,7 +641,7 @@ fn pr_changes_in(
 
 /// The items not yet ratified, for the part sheet: those marked so by hand, and the map changes of the PRs that landed on the default
 /// branch after the project's first run and have no record.
-pub fn pending(repo: &Path, project: &Project) -> Vec<Pending> {
+pub(crate) fn pending(cache: &ChangesCache, repo: &Path, project: &Project) -> Vec<Pending> {
     let mut seen = std::collections::HashSet::new();
     let mut found = vec![];
     let mut add = |item: Item| {
@@ -695,7 +666,7 @@ pub fn pending(repo: &Path, project: &Project) -> Vec<Pending> {
                 continue;
             }
             let Some(pr) = landed.pr else { continue };
-            for change in changes_of(repo, &landed.commit) {
+            for change in changes_of(cache, repo, &landed.commit) {
                 let item = Item::new(pr, &change.kind, &change.id);
                 if project.status(&item, Some(landed.at)) == Status::NotYet {
                     add(item);
@@ -707,7 +678,8 @@ pub fn pending(repo: &Path, project: &Project) -> Vec<Pending> {
 }
 
 /// The items the brief of PR `number` offers for accept or overturn, with where each stands.
-pub fn pr_ratify(prs: &crate::prs::Prs, project: String, number: u64) -> Result<Vec<Row>, String> {
+pub fn pr_ratify(app: &crate::App, project: String, number: u64) -> Result<Vec<Row>, String> {
+    let prs = &app.prs;
     let repo = Path::new(&project);
     let mine = start(&file()?, &project, now())?;
     let open = prs
@@ -715,7 +687,7 @@ pub fn pr_ratify(prs: &crate::prs::Prs, project: String, number: u64) -> Result<
         .into_iter()
         .find(|r| r.number == number)
         .map(|r| r.head);
-    let (map, landed) = pr_changes(repo, number, open.as_deref());
+    let (map, landed) = pr_changes(&app.changes, repo, number, open.as_deref());
     let decisions: Vec<(String, String)> = crate::pr_briefs::store_of(&project)
         .and_then(|store| store.latest(number))
         .map(|stored| {
@@ -1241,12 +1213,13 @@ mod tests {
             commit(root, OLD, "Map (#1)", "1000000000");
             commit(root, &new_map(), "Change laws (#2)", "1100000000");
             let repo = Path::new(&main);
+            let changes = ChangesCache::default();
             // The first run was between the two.
             let mut project = Project {
                 since: 1_050_000_000,
                 ..Project::default()
             };
-            let got: Vec<(u64, &str, String)> = pending(repo, &project)
+            let got: Vec<(u64, &str, String)> = pending(&changes, repo, &project)
                 .iter()
                 .map(|p| (p.pr, p.kind.as_str(), p.id.clone()))
                 .map(|(pr, k, id)| {
@@ -1280,7 +1253,11 @@ mod tests {
                 text: String::new(),
                 extra: BTreeMap::new(),
             });
-            assert!(!pending(repo, &project).iter().any(|p| p.id == "l1"));
+            assert!(
+                !pending(&changes, repo, &project)
+                    .iter()
+                    .any(|p| p.id == "l1")
+            );
             // A record marked pending by hand shows although PR 1 landed before the first run.
             project.records.push(Record {
                 pr: 1,
@@ -1292,7 +1269,7 @@ mod tests {
                 extra: BTreeMap::new(),
             });
             assert!(
-                pending(repo, &project)
+                pending(&changes, repo, &project)
                     .iter()
                     .any(|p| p.pr == 1 && p.id == "l2")
             );
@@ -1308,20 +1285,24 @@ mod tests {
             let head = run(root, &["rev-parse", "HEAD"]);
             run(root, &["checkout", "-q", "main"]);
             let repo = Path::new(&main);
+            let changes = ChangesCache::default();
             // Open: not on main yet.
-            let (open, landed) = pr_changes(repo, 2, Some(&head));
+            let (open, landed) = pr_changes(&changes, repo, 2, Some(&head));
             assert_eq!(landed, None);
             assert_eq!(open.len(), 3);
             // Landed by a squash commit.
             commit(root, &new_map(), "Change laws (#2)", "1200000000");
-            let (done, landed) = pr_changes(repo, 2, None);
+            let (done, landed) = pr_changes(&changes, repo, 2, None);
             assert_eq!(landed, Some(1_200_000_000));
             assert_eq!(done.len(), 3);
             // A PR that is not ready and not in the log has not landed: a draft, a closed one, or one not looked up yet. Its items
             // are not ratified.
-            assert_eq!(pr_changes(repo, 99, None), (vec![], None));
+            assert_eq!(pr_changes(&changes, repo, 99, None), (vec![], None));
             // Only when the walk was cut short may it have landed before the cut: long ago.
-            assert_eq!(pr_changes_in(repo, 99, None, 1), (vec![], Some(0)));
+            assert_eq!(
+                pr_changes_in(&changes, repo, 99, None, 1),
+                (vec![], Some(0))
+            );
         }
 
         #[test]
@@ -1331,16 +1312,17 @@ mod tests {
             commit(root, OLD, "Map (#1)", "1000000000");
             commit(root, &new_map(), "Change laws (#2)", "1100000000");
             let repo = Path::new(&main);
+            let changes = ChangesCache::default();
             // The new map's object is out of reach for a moment: `git log` still answers, `git show` of the map fails.
             let blob = run(root, &["rev-parse", "HEAD:system-map.json"]);
             let object = root.join(".git/objects").join(&blob[..2]).join(&blob[2..]);
             let aside = root.join("aside");
             std::fs::rename(&object, &aside).unwrap();
-            let (failed, landed) = pr_changes(repo, 2, None);
+            let (failed, landed) = pr_changes(&changes, repo, 2, None);
             assert_eq!(landed, Some(1_100_000_000));
             assert_ne!(failed.len(), 3, "the map was read without its object");
             std::fs::rename(&aside, &object).unwrap();
-            let (read, _) = pr_changes(repo, 2, None);
+            let (read, _) = pr_changes(&changes, repo, 2, None);
             assert_eq!(read.len(), 3, "the failed read was kept: {read:?}");
         }
 
@@ -1361,7 +1343,7 @@ mod tests {
                 since: 1_000_000_000,
                 ..Project::default()
             };
-            let got = pending(Path::new(&main), &project);
+            let got = pending(&ChangesCache::default(), Path::new(&main), &project);
             assert!(
                 got.iter().any(|p| p.pr == 1 && p.id == "l3"),
                 "PR 1 landed after the first run: {got:?}"
