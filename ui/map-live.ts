@@ -2,7 +2,7 @@
 // the map's drawing (`map-agents.ts`) and the story read. Placement is per path: `map_place` is asked one group per distinct path, and its
 // answer (`Placement`, a path to the part that owns it) is folded back here per session, Worker and turn.
 
-import type { Session, Turn } from "./types.js";
+import type { Session, Subagent, Turn } from "./types.js";
 
 // The page's 7-day cut, mirroring core's `SINCE_MS` (`core/src/turn_files.rs`): core asks for a turn's files only within it, but keeps
 // them after, so the page applies the cut itself.
@@ -27,15 +27,14 @@ export const recentTurns = (session: Pick<Session, "turns">, now: number) =>
   session.turns.flatMap((turn, index) => (inCut(turn, now) ? [{ turn, index }] : []));
 
 // The paths `map_place` is asked about for `sessions` (the shown project's): every file of every turn within the cut, Workers' included,
-// and each Running session's in-flight edit, plus `extra` (the live chips' own paths); one group per distinct path, keyed by the path.
-export function placeGroups(sessions: Session[], now: number, extra: string[] = []): Record<string, string[]> {
+// and each Running session's in-flight edit; one group per distinct path, keyed by the path.
+export function placeGroups(sessions: Session[], now: number): Record<string, string[]> {
   const paths = new Set<string>();
   for (const session of sessions) {
     for (const { turn } of recentTurns(session, now)) for (const file of turn.files?.files ?? []) paths.add(file.path);
     const flight = inFlight(session);
     if (flight) paths.add(flight);
   }
-  for (const path of extra) paths.add(path);
   return Object.fromEntries([...paths].map((path) => [path, [path]]));
 }
 
@@ -115,4 +114,65 @@ export const OLD_TURN = "Files older than 7 days aren't shown on the map";
 // Whether a turn says `OLD_TURN`: it is past the cut, and its agent records turn files (an agent that never does blames no rule).
 export function oldTurn(turn: Pick<Turn, "started_at" | "ended_at">, trees: boolean, now: number): boolean {
   return trees && !inCut(turn, now);
+}
+
+// Session badges (ticket #562): one count badge per part that marked sessions' latest turns touch.
+
+// A badge's session: the session, and its running Workers whose files of the latest turn are on the part.
+export type BadgeRow = { session: Session; workers: Subagent[] };
+// A part's badge: its sessions, Needs you first, then in the order given; `accent` when any of them needs you.
+export type Badge = { rows: BadgeRow[]; accent: boolean };
+
+// The parts a session's latest turn touches: its own files, its Workers', and its in-flight edit while Running (the footprint's firm parts).
+export const latestParts = (session: Session, placed: Placement, now: number): string[] => footprint(session, placed, now).firm;
+
+// The badges of the parts, from the sessions in the session list's order: each marked session (`marked`) counted once on every part of its
+// latest turn, with its running Workers whose files are there; the marked sessions whose latest turn touches no part are `notPlaced`.
+export function sessionBadges(sessions: Session[], placed: Placement, now: number, inProject: (cwd: string) => boolean): { byPart: Record<string, Badge>; notPlaced: Session[] } {
+  const byPart: Record<string, Badge> = {};
+  const notPlaced: Session[] = [];
+  const first = [...sessions.filter((one) => one.state === "needs_you"), ...sessions.filter((one) => one.state !== "needs_you")];
+  for (const session of first.filter((one) => marked(one, inProject))) {
+    const parts = latestParts(session, placed, now);
+    if (!parts.length) notPlaced.push(session);
+    const files = session.turns.at(-1)?.files?.files ?? [];
+    const workers = session.agents.filter((agent) => agent.kind === "worker" && agent.status === "running");
+    for (const part of parts) {
+      const badge = (byPart[part] ??= { rows: [], accent: false });
+      const on = (worker: Subagent) => files.some((file) => (file.agent === worker.id || file.agent === worker.name) && (placed[file.path] ?? []).includes(part));
+      badge.rows.push({ session, workers: workers.filter(on) });
+      badge.accent ||= session.state === "needs_you";
+    }
+  }
+  return { byPart, notPlaced };
+}
+
+// The home part of a session, where its line sits while it is spotlit: while Running, the part that owns the in-flight edit's file; else the
+// part holding most of its latest turn's changed files (Workers' included); a tie goes to the map's reading `order`. Null with no part.
+export function homePart(session: Session, placed: Placement, now: number, order: string[]): string | null {
+  const flight = inFlight(session);
+  const owner = flight ? placed[flight]?.[0] : undefined;
+  if (owner !== undefined) return owner;
+  const latest = session.turns.at(-1);
+  const files = latest && inCut(latest, now) ? (latest.files?.files ?? []) : [];
+  const count = new Map<string, number>();
+  for (const file of files) for (const part of placed[file.path] ?? []) count.set(part, (count.get(part) ?? 0) + 1);
+  const rank = (part: string) => (order.includes(part) ? order.indexOf(part) : order.length);
+  return [...count].sort(([a, x], [b, y]) => y - x || rank(a) - rank(b))[0]?.[0] ?? null;
+}
+
+// Isolation while a session is spotlit: its chip on the parts of its latest turn (`chips`, replacing their badges), its line on `home`, and
+// the other badges `dimmed`, but a badge with the Needs-you accent.
+export type Isolation = { chips: string[]; home: string | null; dimmed: string[] };
+export function isolate(byPart: Record<string, Badge>, spot: Session | null, placed: Placement, now: number, order: string[]): Isolation {
+  if (!spot) return { chips: [], home: null, dimmed: [] };
+  const chips = latestParts(spot, placed, now);
+  const dimmed = Object.keys(byPart).filter((part) => !chips.includes(part) && !byPart[part].accent);
+  return { chips, home: chips.length ? homePart(spot, placed, now, order) : null, dimmed };
+}
+
+// The not placed list's closed line (#472): how many sessions no part holds, and how many of them need you, so a needs-you one stays loud.
+export function notPlacedLine(notPlaced: Pick<Session, "state">[]): { count: string; needsYou: string | null } {
+  const asking = notPlaced.filter((session) => session.state === "needs_you").length;
+  return { count: `${notPlaced.length} not placed`, needsYou: asking ? `${asking} ${asking === 1 ? "needs" : "need"} you` : null };
 }

@@ -107,7 +107,8 @@ export const localDay = (at: Date = new Date()) => {
 };
 
 // A kind that counts days is told once a day per project (the shell counts days, so more would only fill the log). `map-action` is an
-// entered action on the map with no event of its own: a part's sheet opened, an agent chip clicked.
+// entered action on the map with no event of its own: a part's sheet opened, a session badge or a row of its list
+// pressed (#562).
 const dayKinds = new Set<StopKind>(["session", "map-open", "map-action"]);
 // A kind about a PR's brief that is told once per PR (the shell also keeps a brief's offer to once, across restarts).
 const prKinds = new Set<StopKind>(["brief-offered", "unconfirmed-seen", "guard-offered"]);
