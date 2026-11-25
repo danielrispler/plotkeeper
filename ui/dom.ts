@@ -258,28 +258,45 @@ let pruneQueued = false;
 const hintId = (key: string) => `hint-${key.replace(/[^\w-]/g, (c) => `_${c.charCodeAt(0).toString(16)}`)}`;
 const squeezed = (words: string | null) => (words ?? "").replace(/\s+/g, " ").trim();
 
+// The hint `trigger` names now: its `interestfor` or its `data-hint`.
+const named = (trigger: Element) => trigger.getAttribute("interestfor") ?? trigger.getAttribute("data-hint");
+
+// A hint stays while a trigger on the page names it, or while its trigger, kept off the page, still does. A trigger drawn again with
+// other words, as an unkeyed one is, names a new hint, so the old one goes.
 function pruneHints() {
   pruneQueued = false;
   if (!document.querySelectorAll) return;
-  const wired = new Set([...document.querySelectorAll("[interestfor], [data-hint]")].map((trigger) => trigger.getAttribute("interestfor") ?? trigger.getAttribute("data-hint")));
+  const wired = new Set([...document.querySelectorAll("[interestfor], [data-hint]")].map(named));
   for (const [id, node] of hints) {
-    if (wired.has(id) || owners.get(id)?.deref()) continue;
+    const owner = owners.get(id)?.deref();
+    if (wired.has(id) || (owner && named(owner) === id)) continue;
     node.remove();
     owners.delete(id);
     hints.delete(id);
   }
+}
+function queuePrune() {
+  if (pruneQueued) return;
+  pruneQueued = true;
+  setTimeout(pruneHints, 300);
 }
 
 // The listener path, for what `interestfor` cannot reach (a summary, an input, a select, and the marks of ticket 4): the trigger's own
 // pointer-enter/leave and focus/blur open and close its hint, with `showPopover({ source })` so the trigger is its implicit anchor, after
 // the page's `--hint-delay` (0.5 s) and Chromium's end delay (0.15 s). The pointer may rest on the hint. Esc and light dismiss are the
 // popover's own. A trigger a neighbour's hint is open beside, one sharing its parent, shows at once, as the CSS does for the other path.
+// The trigger's listeners open the hint its `data-hint` names when they run, so a trigger `patch` kept, which took a new draw's
+// `data-hint`, opens that draw's hint; a hint's own listeners act for the trigger that opened it, so no hint holds a trigger the page dropped.
 const listened = new Set(["SUMMARY", "INPUT", "SELECT", "TEXTAREA"]);
 // What `interestfor` reaches: any other trigger (a mark, a span with words) is pointer-only, or by focus too when it has a tabindex.
 const interested = new Set(["BUTTON", "A", "AREA"]);
-const wiredTriggers = new WeakMap<Element, (node: HTMLElement) => void>();
+// Whether the pointer (on the trigger or its open hint) or the focus holds a trigger's hint, and its pending open or close.
+type Interest = { pointer: boolean; focus: boolean; timer?: ReturnType<typeof setTimeout> };
+const interests = new WeakMap<Element, Interest>();
 const HINT_END_DELAY = 150;
+// The one open hint of the listener path, and the trigger that opened it.
 let openTrigger: Element | null = null;
+let openHint: HTMLElement | null = null;
 
 // An SVG shape cannot be an anchor, nor the `source` of `showPopover`: its hint anchors to this box, an invisible HTML one laid over
 // the shape, a single one since only one hint is open at a time.
@@ -301,73 +318,77 @@ function startDelay(): number {
   return Number.isFinite(read) ? read * 1000 : 500;
 }
 
-/**
- * Wires `trigger` to open and close `node`, its hint, by pointer and, when `keyboard`, by focus. A mark that stays out of the Tab order
- * passes false: it is pointer-only. Called again with a new hint node (the old one was dropped while the trigger was off the page), it
- * moves the wiring over; the trigger's listeners are added once.
- */
-function listenForHint(trigger: Element, node: HTMLElement, keyboard: boolean) {
-  const rebind = wiredTriggers.get(trigger);
-  if (rebind) return rebind(node);
-  let hinted = node;
-  let pointer = false;
-  let focus = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const isOpen = () => hinted.matches(":popover-open");
-  const show = () => {
-    if (!(pointer || focus) || isOpen()) return;
-    hinted.showPopover({ source: isSvg(trigger) ? anchorOver(trigger) : (trigger as HTMLElement) });
-    openTrigger = trigger;
-  };
-  const hide = () => {
-    if (pointer || focus) return;
-    if (isOpen()) hinted.hidePopover();
-    if (openTrigger === trigger) openTrigger = null;
-  };
-  const interest = () => {
-    clearTimeout(timer);
-    const beside = openTrigger !== null && openTrigger !== trigger && openTrigger.isConnected !== false && openTrigger.parentElement === trigger.parentElement;
-    timer = setTimeout(show, beside ? 0 : startDelay());
-  };
-  const lose = () => {
-    clearTimeout(timer);
-    timer = setTimeout(hide, HINT_END_DELAY);
-  };
-  const bind = (next: HTMLElement) => {
-    hinted = next;
-    next.addEventListener("pointerenter", () => {
-      pointer = true;
-      clearTimeout(timer);
-    });
-    next.addEventListener("pointerleave", () => {
-      pointer = false;
-      lose();
-    });
-    next.addEventListener("toggle", (event) => {
-      if ((event as ToggleEvent).newState === "closed" && openTrigger === trigger) openTrigger = null;
-    });
-  };
-  wiredTriggers.set(trigger, (next) => {
-    if (next !== hinted) bind(next);
+const hintNamed = (trigger: Element) => hints.get(trigger.getAttribute("data-hint") ?? "") ?? null;
+
+function showFor(trigger: Element, interest: Interest) {
+  const node = hintNamed(trigger);
+  if (!node || !(interest.pointer || interest.focus) || node.matches(":popover-open")) return;
+  node.showPopover({ source: isSvg(trigger) ? anchorOver(trigger) : (trigger as HTMLElement) });
+  openTrigger = trigger;
+  openHint = node;
+}
+function hideFor(trigger: Element, interest: Interest) {
+  if (interest.pointer || interest.focus || openTrigger !== trigger) return;
+  if (openHint?.matches(":popover-open")) openHint.hidePopover();
+  openTrigger = openHint = null;
+}
+function interestIn(trigger: Element, interest: Interest) {
+  clearTimeout(interest.timer);
+  const beside = openTrigger !== null && openTrigger !== trigger && openTrigger.isConnected !== false && openTrigger.parentElement === trigger.parentElement;
+  interest.timer = setTimeout(() => showFor(trigger, interest), beside ? 0 : startDelay());
+}
+function loseInterest(trigger: Element, interest: Interest) {
+  clearTimeout(interest.timer);
+  interest.timer = setTimeout(() => hideFor(trigger, interest), HINT_END_DELAY);
+}
+
+// A hint's own listeners, added once when it is made: the pointer resting on it holds it open for the trigger that opened it.
+function listenOnHint(node: HTMLElement) {
+  const opener = () => (openHint === node && openTrigger ? openTrigger : null);
+  node.addEventListener("pointerenter", () => {
+    const trigger = opener();
+    const interest = trigger && interests.get(trigger);
+    if (!interest) return;
+    interest.pointer = true;
+    clearTimeout(interest.timer);
   });
-  bind(node);
+  node.addEventListener("pointerleave", () => {
+    const trigger = opener();
+    const interest = trigger && interests.get(trigger);
+    if (!interest) return;
+    interest.pointer = false;
+    loseInterest(trigger, interest);
+  });
+  node.addEventListener("toggle", (event) => {
+    if ((event as ToggleEvent).newState === "closed" && openHint === node) openTrigger = openHint = null;
+  });
+}
+
+/**
+ * Wires `trigger` to open and close the hint its `data-hint` names, by pointer and, when `keyboard`, by focus. A mark that stays out of
+ * the Tab order passes false: it is pointer-only. The trigger's listeners are added once.
+ */
+function listenForHint(trigger: Element, keyboard: boolean) {
+  if (interests.has(trigger)) return;
+  const interest: Interest = { pointer: false, focus: false };
+  interests.set(trigger, interest);
   trigger.addEventListener("pointerenter", () => {
-    pointer = true;
-    interest();
+    interest.pointer = true;
+    interestIn(trigger, interest);
   });
   trigger.addEventListener("pointerleave", () => {
-    pointer = false;
-    lose();
+    interest.pointer = false;
+    loseInterest(trigger, interest);
   });
   if (!keyboard) return;
   trigger.addEventListener("focus", () => {
     if (!trigger.matches(":focus-visible")) return;
-    focus = true;
-    interest();
+    interest.focus = true;
+    interestIn(trigger, interest);
   });
   trigger.addEventListener("blur", () => {
-    focus = false;
-    lose();
+    interest.focus = false;
+    loseInterest(trigger, interest);
   });
 }
 
@@ -380,8 +401,7 @@ function listenForHint(trigger: Element, node: HTMLElement, keyboard: boolean) {
  * already wired keeps its hint when drawn again.
  */
 export function hint<T extends Element>(trigger: T, words: string): T {
-  const own = trigger.getAttribute("interestfor") ?? trigger.getAttribute("data-hint");
-  const id = own ?? hintId(trigger.getAttribute("data-key") ?? trigger.getAttribute("id") ?? `n${++loose}`);
+  const id = named(trigger) ?? hintId(trigger.getAttribute("data-key") ?? trigger.getAttribute("id") ?? `n${++loose}`);
   let node = hints.get(id);
   if (!node) {
     node = document.createElement("div");
@@ -389,6 +409,7 @@ export function hint<T extends Element>(trigger: T, words: string): T {
     node.setAttribute("popover", "hint");
     node.className = "hint";
     hints.set(id, node);
+    listenOnHint(node);
     element("hints").append(node);
   }
   node.textContent = words;
@@ -400,15 +421,12 @@ export function hint<T extends Element>(trigger: T, words: string): T {
   if (interested.has(trigger.nodeName)) trigger.setAttribute("interestfor", id);
   else {
     trigger.setAttribute("data-hint", id);
-    listenForHint(trigger, node, listened.has(trigger.nodeName) || trigger.hasAttribute("tabindex"));
+    listenForHint(trigger, listened.has(trigger.nodeName) || trigger.hasAttribute("tabindex"));
   }
   const described = trigger.getAttribute("aria-describedby");
   if (adds && (described === null || described === id)) trigger.setAttribute("aria-describedby", id);
   else if (!adds && described === id) trigger.removeAttribute("aria-describedby");
-  if (!pruneQueued) {
-    pruneQueued = true;
-    setTimeout(pruneHints, 300);
-  }
+  queuePrune();
   return trigger;
 }
 
