@@ -3,7 +3,7 @@
 // a strip of glyphs and labels, which opens the full list on hover, on click or on ⌘1. Its pure parts are `list-model.ts`.
 
 import { logStop } from "./stop-rules.js";
-import { age, element, failure, fullTitle, glyphOnly, hint, hintOf, invoke, keepOnly, newest, patch, pressable, prose, stepText, text } from "./dom.js";
+import { age, element, failure, fullTitle, glyphOnly, hint, hintOf, invoke, keepOnly, keyed, newest, patch, pressable, prose, stepText, text } from "./dom.js";
 import { hideClearToast, showClearToast } from "./toast.js";
 import { counts } from "./times.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
@@ -444,7 +444,7 @@ function projectNode(group: ProjectGroup<Session>): HTMLElement {
     const id = `${group.key} ${state}`;
     folded.open = opened.has(id);
     folded.addEventListener("toggle", () => (folded.open ? opened.add(id) : opened.delete(id)));
-    folded.append(fullTitle(text("summary", `${stateLabels[state]} · ${sessions.length}`), `Show or hide the ${stateLabels[state].toLowerCase()} sessions`), ...rows);
+    folded.append(hint(keyed(text("summary", `${stateLabels[state]} · ${sessions.length}`), `fold ${group.key} ${state}`), `Show or hide the ${stateLabels[state].toLowerCase()} sessions`), ...rows);
     body.append(folded);
   }
   node.append(body);

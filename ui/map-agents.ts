@@ -4,7 +4,7 @@
 // its latest turn's parts with its line on the home part, and the other badges dimmed. The pure rules are `map-live.ts`'s; this file draws
 // them from the sessions the window already has, and `map_place` (the server, `studio-system-map`) says which part owns each path.
 
-import { element, failure, invoke, newest, pressable, text } from "./dom.js";
+import { element, failure, hint, invoke, keyed, newest, pressable, text } from "./dom.js";
 import { currentMap, onCamera, onDraw, registerLayer, revealParts, syncSide } from "./map.js";
 import { logStop } from "./stop-rules.js";
 import { logo, logoKey } from "./logos.js";
@@ -229,7 +229,7 @@ const notPlacedList = () => {
   if (kept) return kept;
   const details = document.createElement("details");
   const summary = text("summary", "", "side-title");
-  summary.title = "The sessions whose latest turn touched no part: click to show or hide them";
+  hint(keyed(summary, "not-placed"), "The sessions whose latest turn touched no part: click to show or hide them");
   const rows = text("div", "", "not-placed-rows");
   details.append(summary, rows);
   details.addEventListener("toggle", () => details.open || endHoverIn(rows));

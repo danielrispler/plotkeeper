@@ -3,7 +3,7 @@
 // whole from git (`turn_file_hunk`, `all`), added and removed lines marked by a sign and a tint. The other changes in the
 // worktree are one folded line at the end. The pane is drawn once when it opens, so folding a file moves nothing else.
 
-import { fullTitle, invoke, messageOf, pressable, text } from "./dom.js";
+import { fullTitle, hint, invoke, keyed, messageOf, pressable, text } from "./dom.js";
 import type { Capabilities, Session, Turn, TurnFile } from "./types.js";
 
 type DiffLineKind = "add" | "del" | "hunk" | "meta" | "ctx";
@@ -54,7 +54,7 @@ function fileFold(session: string, index: number, file: TurnFile): HTMLElement {
     else folded.add(key);
   });
   const body = text("div", "Reading the hunk…", "diff-body");
-  fold.append(fullTitle(text("summary", `${file.from ? `${file.from} → ` : ""}${file.path}${counts(file)}`), `Show or hide this file's change: ${file.path}`), body);
+  fold.append(hint(keyed(text("summary", `${file.from ? `${file.from} → ` : ""}${file.path}${counts(file)}`), `fold ${key}`), `Show or hide this file's change: ${file.path}`), body);
   invoke("turn_file_hunk", { session, turn: index, root: file.root, path: file.path, from: file.from, all: true })
     .then((hunk) => {
       if (!hunk || hunk.binary) return void body.replaceChildren(text("p", hunk ? "Binary file: no lines to show." : "The hunk could not be read.", "empty"));

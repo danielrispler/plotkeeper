@@ -8,7 +8,7 @@
 // by project and by PR and chapter or by part. The line is an input, so the window's single keys stay off while it is typed, and an
 // Enter that confirms an input method's composition does not submit it. Nothing is read back: a bar opened again starts empty.
 
-import { failure, invoke, onEnter, pressable, text } from "./dom.js";
+import { failure, hint, invoke, onEnter, pressable, text } from "./dom.js";
 import { localDay } from "./stop-rules.js";
 
 type BarKind = "explain-back-given" | "explain-back-marked";
@@ -128,7 +128,8 @@ function explainBack(model: Model, gist: string): HTMLElement {
   field.name = "explain-back";
   field.autocomplete = "off";
   field.placeholder = "Say it back in one line, e.g. “Reading a brief clears its parts’ fog”…";
-  field.title = "Optional: say the story back in your own words, then Enter compares it with its gist";
+  field.dataset.key = "explain-back";
+  hint(field, "Optional: say the story back in your own words, then Enter compares it with its gist");
   field.setAttribute("aria-label", "Say this story back in one line");
   onEnter(field, () => {
     if (model.explain(field.value)) box.replaceChildren(...compared(model, gist));

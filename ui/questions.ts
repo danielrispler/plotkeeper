@@ -4,7 +4,7 @@
 // permission the hook waits on gets the same card with allow and deny (danielrispler/Falinks#478).
 
 import { askFor, sendAnswer } from "./answer.js";
-import { code, pressable, prose, text } from "./dom.js";
+import { availability, code, pressable, prose, text } from "./dom.js";
 import { type Ask, askKind, type Question } from "./types.js";
 
 // Whether a question is open, answered in the terminal, or not answered: its call failed, or its turn
@@ -118,8 +118,7 @@ export function decisionElement(ask: Ask): HTMLElement {
 // "Send" is enabled once every question has a choice; disabled, its hover says so.
 function readySend(block: HTMLElement, ready: boolean) {
   const send = block.querySelector<HTMLButtonElement>(".send");
-  send?.toggleAttribute("disabled", !ready);
-  if (send) send.title = ready ? answerHovers.Send : "Choose an answer to every question first";
+  if (send) availability(send, answerHovers.Send, ready ? null : "Choose an answer to every question first");
 }
 
 // What each of the card's buttons does, on its hover: a label without one does not compile.

@@ -34,18 +34,18 @@ code:empty { display: none; }
 .btn { font: inherit; color: inherit; background: var(--raised); border: 0; border-radius: var(--radius);
        padding: var(--sp-2) var(--sp-4); cursor: pointer; text-align: start;
        transition: background-color var(--motion), color var(--motion), box-shadow var(--motion); }
-.btn:hover:not(:disabled) { background: var(--pressed); }
-.btn:active:not(:disabled) { background: var(--selected); }
+.btn:hover:not(:disabled, [aria-disabled="true"]) { background: var(--pressed); }
+.btn:active:not(:disabled, [aria-disabled="true"]) { background: var(--selected); }
 .btn[aria-pressed="true"] { background: var(--selected); }
 /* A disabled button keeps its hover, which says why it is off (#220). */
-.btn:disabled { opacity: .45; cursor: default; }
+.btn:disabled, .btn[aria-disabled="true"] { opacity: .45; cursor: default; }
 /* Quiet: no fill until hovered, for actions that should recede. */
 .btn.quiet, .btn.row, .strip .btn { background: none; }
-.btn.quiet:hover:not(:disabled), .btn.row:hover:not(:disabled), .strip .btn:hover { background: var(--hover); }
+.btn.quiet:hover:not(:disabled, [aria-disabled="true"]), .btn.row:hover:not(:disabled, [aria-disabled="true"]), .strip .btn:hover { background: var(--hover); }
 /* The selected row: a fill and an edge bar at its start (danielrispler/Falinks#570). */
 .btn.row[aria-pressed="true"], .strip .btn[aria-pressed="true"] { background: var(--selected); box-shadow: inset var(--mark) 0 0 var(--fg); }
 .btn.small { font-size: var(--size-small); padding: var(--sp-1) var(--sp-4); color: var(--muted); }
-.btn.small:hover:not(:disabled) { color: var(--fg); }
+.btn.small:hover:not(:disabled, [aria-disabled="true"]) { color: var(--fg); }
 
 /* The window (#386), Treatment C's frame: a 34 px top bar over a grid of the map and the session list, laid right to left so the list is on
    the right; each region lays itself out left to right. The list and the map are told apart by tone and the map's rounded corner, never a line. */
@@ -372,7 +372,7 @@ h1 { margin: 0 0 var(--sp-4); }
 .choices li:has(.btn) { padding: 0; }
 .choices li .btn { display: flex; flex-direction: column; align-items: flex-start; width: 100%; padding: var(--sp-3) var(--sp-5);
                    background: none; }
-.choices li .btn:hover:not(:disabled) { background: var(--hover); }
+.choices li .btn:hover:not(:disabled, [aria-disabled="true"]) { background: var(--hover); }
 .answer-buttons { display: flex; gap: var(--sp-4); }
 /* A plan the card can approve (danielrispler/Falinks#478): its text, scrolled within the dock. */
 .decision .plan { white-space: pre-wrap; max-height: 30vh; overflow-y: auto; margin: var(--sp-3) 0 0; padding: var(--sp-3) var(--sp-5);
@@ -534,7 +534,7 @@ body[data-panel="diff"] .map-stage { --panel-w: min(var(--panel-wide), calc(100%
    text while it is dragged. */
 .btn.sheet-resize { position: absolute; top: 0; bottom: 0; left: 0; width: var(--sheet-handle); padding: 0; border: 0; border-radius: var(--glass-radius) 0 0 var(--glass-radius);
                 background: transparent; cursor: col-resize; touch-action: none; -webkit-user-select: none; user-select: none; transition: background var(--motion); }
-.btn.sheet-resize:hover:not(:disabled), .btn.sheet-resize.dragging { background: var(--selected); }
+.btn.sheet-resize:hover:not(:disabled, [aria-disabled="true"]), .btn.sheet-resize.dragging { background: var(--selected); }
 .btn.sheet-resize:focus-visible { outline-offset: calc(-1 * var(--mark)); background: var(--selected); }
 body.resizing { -webkit-user-select: none; user-select: none; cursor: col-resize; }
 /* The left panel (#385): the story, History, the diff (widened to at most 780 px) or Settings, inset like the sheet and in its glass. */
@@ -663,7 +663,7 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .plate.tier-black-box .plate-caption { color: var(--faint); }
 /* The part's open button (#460): the plate's text area, drawn as plain text, so Tab reaches the part and the page's focus ring marks it. */
 .btn.plate-open { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; padding: 0; border-radius: var(--radius-small); text-align: left; cursor: inherit; }
-.btn.plate-open, .btn.plate-open:hover:not(:disabled), .btn.plate-open:active:not(:disabled) { background: none; }
+.btn.plate-open, .btn.plate-open:hover:not(:disabled, [aria-disabled="true"]), .btn.plate-open:active:not(:disabled, [aria-disabled="true"]) { background: none; }
 /* The plate's slots: the mist behind it, the law marks at its top right, and a session badge or the spotlit session's chip along its foot. */
 .plate-fog { position: absolute; inset: calc(-1 * var(--sp-7)); z-index: -1; pointer-events: none; }
 .plate-marks { position: absolute; top: var(--sp-4); right: var(--sp-5); display: flex; gap: var(--sp-3); align-items: center; }
@@ -724,7 +724,7 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .btn.explain-toggle { display: grid; place-items: center; width: calc(var(--sp-6) + var(--sp-2)); height: calc(var(--sp-6) + var(--sp-2)); padding: 0;
                       border-radius: 50%; font-size: var(--size-xs); font-weight: 600; line-height: 1; color: var(--muted); box-shadow: inset 0 0 0 var(--hair) var(--muted); }
 .btn.explain-toggle[aria-pressed="true"] { background: var(--fg); color: var(--bg); box-shadow: none; }
-.btn.explain-toggle[aria-pressed="true"]:hover:not(:disabled) { background: var(--muted); }
+.btn.explain-toggle[aria-pressed="true"]:hover:not(:disabled, [aria-disabled="true"]) { background: var(--muted); }
 /* An explanation: one short muted line under its heading, pulled up to it; the selected option's and the fog actions' sit under their
    buttons at the sheet's own gap. */
 .explain { margin: calc(-1 * var(--sp-2)) 0 0; font-size: var(--size-xs); line-height: 1.45; color: var(--muted); text-wrap: pretty; }
@@ -862,8 +862,8 @@ mark.drawer-line .drawer-n::before { content: "→ " / ""; color: var(--fg); }
 .btn.session-badge { flex: none; margin-inline-start: auto; min-width: var(--badge); height: var(--badge); padding: 0 var(--sp-3); border-radius: calc(var(--badge) / 2);
                      font-size: var(--size-xs); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; color: var(--fg); background: var(--raised);
                      box-shadow: inset 0 0 0 var(--hair) var(--plate-edge), var(--shadow); transition: opacity var(--motion), box-shadow var(--motion); }
-.btn.session-badge:hover:not(:disabled) { background: var(--raised); color: var(--fg); box-shadow: inset 0 0 0 var(--hair) var(--muted), var(--shadow); }
-.btn.session-badge.needs-you, .btn.session-badge.needs-you:hover:not(:disabled) { color: var(--needs-you); background: var(--needs-you-bg); box-shadow: inset 0 0 0 var(--hair) var(--needs-you-line), var(--shadow); }
+.btn.session-badge:hover:not(:disabled, [aria-disabled="true"]) { background: var(--raised); color: var(--fg); box-shadow: inset 0 0 0 var(--hair) var(--muted), var(--shadow); }
+.btn.session-badge.needs-you, .btn.session-badge.needs-you:hover:not(:disabled, [aria-disabled="true"]) { color: var(--needs-you); background: var(--needs-you-bg); box-shadow: inset 0 0 0 var(--hair) var(--needs-you-line), var(--shadow); }
 .btn.session-badge.dim { opacity: var(--badge-dim); }
 @media (prefers-reduced-motion: reduce) { .btn.session-badge { transition: none; } }
 .btn.session-badge[aria-expanded="true"] { box-shadow: 0 0 0 var(--mark) var(--ring-warm), var(--shadow); }
@@ -883,7 +883,7 @@ mark.drawer-line .drawer-n::before { content: "→ " / ""; color: var(--fg); }
 .btn.session-pick { display: grid; grid-template-columns: var(--logo) minmax(0, 1fr); align-items: baseline; gap: 0 var(--sp-3); padding: var(--sp-3) var(--sp-4);
                     text-align: start; white-space: normal; overflow-wrap: anywhere; }
 .btn.session-pick { background: none; }
-.btn.session-pick:hover:not(:disabled) { background: var(--hover); }
+.btn.session-pick:hover:not(:disabled, [aria-disabled="true"]) { background: var(--hover); }
 .session-pick > :not(.logo) { grid-column: 2; }
 .session-pick-name { font-size: var(--size-small); font-weight: 600; }
 .session-pick-state { font-size: var(--size-xs); color: var(--faint); }

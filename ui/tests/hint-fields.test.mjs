@@ -3,12 +3,17 @@
 import { test, mock, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { fakeDocument } from "./dom.mjs";
-import { hint, hintOf } from "../../dist/dom.js";
+import { hint, hintOf as hintFor } from "../../dist/dom.js";
+
+// The stand-in DOM's nodes, read as such.
+/** @type {(node: any) => any} */
+const hintOf = (node) => hintFor(node);
 
 const page = new Map();
 globalThis.document = fakeDocument({
   getElementById: (id) => page.get(id) ?? page.set(id, document.createElement("div")).get(id),
 });
+/** @returns {any} */
 const make = (tag, key, attrs = {}) => {
   const node = document.createElement(tag);
   node.setAttribute("data-key", key);
@@ -77,8 +82,8 @@ test("the pointer on the hint keeps it open", () => {
 });
 
 test("a neighbour's hint opens at once while one is open", () => {
-  const bar = document.createElement("div");
-  const [a, b] = [hint(make("summary", "f-a"), "A words"), hint(make("summary", "f-b"), "B words")];
+  const bar = /** @type {any} */ (document.createElement("div"));
+  const [a, b] = /** @type {any[]} */ ([hint(make("summary", "f-a"), "A words"), hint(make("summary", "f-b"), "B words")]);
   bar.append(a, b);
   a.parentElement = b.parentElement = bar;
   a.listeners.pointerenter({});
@@ -97,4 +102,22 @@ test("a hint drawn again for the same trigger keeps one hint and one set of list
   hint(node, "two");
   assert.equal(hintOf(node).textContent, "two");
   assert.equal(node.listeners.pointerenter, listener);
+});
+
+test("the story bar's explain-back line has a hint, described by it, and no title", async () => {
+  const { storyBar } = await import("../../dist/story-bar.js");
+  const bar = /** @type {any} */ (storyBar({ project: "/p", pr: 1, chapter: 0 }, "The gist"));
+  const [field] = bar.node.find("input");
+  assert.match(hintOf(field).textContent, /^Optional: say the story back/);
+  assert.equal(field.getAttribute("title"), null);
+  assert.equal(field.getAttribute("aria-describedby"), hintOf(field).getAttribute("id"));
+});
+
+test("a fold's summary drawn again keeps its one hint", async () => {
+  const { hint, keyed } = await import("../../dist/dom.js");
+  const draw = () => hint(keyed(make("summary", "x"), "fold a b"), "Show or hide the sessions");
+  const first = draw();
+  const second = draw();
+  assert.equal(hintOf(first), hintOf(second));
+  assert.equal(hintOf(second).getAttribute("id"), second.getAttribute("data-hint"));
 });

@@ -2,7 +2,7 @@
 // offset and the pane keeps that offset, reading on when the server re-sends the selection. Tool calls show as rows,
 // folded once they have a result. The header's name and state come from the core's tracking, never from the log.
 
-import { fullTitle, invoke, pressable, scrollingPre, text } from "./dom.js";
+import { fullTitle, hint, invoke, keyed, pressable, scrollingPre, text } from "./dom.js";
 import type { LogCall, LogEntry, LogResult, LogRow, Subagent, SubagentLog } from "./types.js";
 
 /**
@@ -120,7 +120,7 @@ function drawRow(row: LogRow): HTMLElement {
   fold.open = expanded.has(row.id);
   fold.addEventListener("toggle", () => (fold.open ? expanded.add(row.id) : expanded.delete(row.id)));
   fold.className = failed ? "log-call failed" : "log-call";
-  const summary = fullTitle(text("summary", callTitle(row)), `Show or hide this call's result: ${callTitle(row)}`);
+  const summary = hint(keyed(text("summary", callTitle(row)), `log ${row.id}`), `Show or hide this call's result: ${callTitle(row)}`);
   if (failed) summary.append(text("span", "error", "log-error"));
   const result = scrollingPre(out + (cut ? "\n… cut" : ""), "log-result", `Result of ${callTitle(row)}`);
   fold.append(summary, result);

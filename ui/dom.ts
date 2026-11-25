@@ -237,6 +237,12 @@ export function fullTitle<T extends HTMLElement>(node: T, full: string | null | 
   return node;
 }
 
+/** `node` with `key` as its `data-key`, the name its hint and `patch` know it by; returns `node`. */
+export function keyed<T extends HTMLElement>(node: T, key: string): T {
+  node.setAttribute("data-key", key);
+  return node;
+}
+
 // The page's hints (spec #582): each trigger's own `popover="hint"`, kept in `#hints` by id, so a trigger drawn again, as the list's rows
 // are on every update, finds its hint and does not make another. A hint whose trigger left the page is dropped a moment later.
 const hints = new Map<string, HTMLElement>();
@@ -369,6 +375,18 @@ export function hint<T extends HTMLElement>(trigger: T, words: string): T {
   }
   return trigger;
 }
+
+/**
+ * `button` available, with `words` as its hint, or, given `why`, unavailable: `aria-disabled="true"` instead of `disabled`, so it
+ * stays focusable and its hint says why (#582). Its handlers check `isUnavailable` first, as a click or Enter still reaches them.
+ */
+export function availability(button: HTMLElement, words: string, why: string | null = null) {
+  if (why === null) button.removeAttribute("aria-disabled");
+  else button.setAttribute("aria-disabled", "true");
+  hint(button, why ?? words);
+}
+
+export const isUnavailable = (button: HTMLElement) => button.getAttribute("aria-disabled") === "true";
 
 /** `trigger`'s hint, for a test to read, or null when it has none. */
 export const hintOf = (trigger: HTMLElement): HTMLElement | null => hints.get(trigger.getAttribute("interestfor") ?? trigger.getAttribute("data-hint") ?? "") ?? null;

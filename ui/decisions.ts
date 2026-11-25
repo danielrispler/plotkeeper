@@ -2,7 +2,7 @@
 // "cleared" markers (danielrispler/Falinks#474), newest first, in a collapsed section above the turns. The decisions come
 // with the cards, from the store; the markers come with the selection.
 
-import { code, element, fullTitle, prose, text } from "./dom.js";
+import { code, element, hint, prose, text } from "./dom.js";
 import { askKind, riskLevels, type Decision, type RiskView } from "./types.js";
 
 let decisions: Decision[] = [];
@@ -61,6 +61,7 @@ function draw() {
   entries.sort(([a], [b]) => b - a);
   element("decisions-list").replaceChildren(...entries.map(([, node]) => node));
   element("decisions-title").textContent = `Decisions (${decisions.length})`;
+  hint(element("decisions-title"), "Show or hide the decisions made in this session");
   element("decisions").hidden = entries.length === 0;
 }
 
@@ -89,7 +90,7 @@ function entry(decision: Decision): HTMLElement {
     const plan = document.createElement("details");
     const body = prose("div", String(input.plan ?? ""));
     body.className = "plan";
-    plan.append(fullTitle(text("summary", String(input.plan ?? "").split("\n")[0] ?? ""), "Show or hide the whole plan"), body);
+    plan.append(hint(text("summary", String(input.plan ?? "").split("\n")[0] ?? ""), "Show or hide the whole plan"), body);
     item.append(plan);
   } else {
     // What the call does: a command, a path or a link; otherwise its whole input.

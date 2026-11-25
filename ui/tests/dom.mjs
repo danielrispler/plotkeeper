@@ -111,6 +111,22 @@ class StandIn {
   offsetWidth = 0;
   offsetHeight = 0;
   focus() {}
+  // Only a `.class` or a tag, as the views under test ask for.
+  querySelectorAll(selector) {
+    const out = [];
+    const walk = (node) => {
+      for (const c of node.childNodes) {
+        if (!(c instanceof StandIn)) continue;
+        if (selector.startsWith(".") ? c.className.split(" ").includes(selector.slice(1)) : c.tag === selector) out.push(c);
+        walk(c);
+      }
+    };
+    walk(this);
+    return out;
+  }
+  querySelector(selector) {
+    return this.querySelectorAll(selector)[0] ?? null;
+  }
   find(tag, out = []) {
     if (this.tag === tag) out.push(this);
     for (const c of this.childNodes) if (c instanceof StandIn) c.find(tag, out);

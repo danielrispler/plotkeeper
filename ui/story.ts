@@ -7,7 +7,7 @@
 
 import { modelLine, reports } from "./capabilities.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
-import { age, code, element, failure, fullTitle, glyphOnly, invoke, keepOnly, pressable, prose, text, unseenWords } from "./dom.js";
+import { age, code, element, failure, fullTitle, hint, glyphOnly, invoke, keepOnly, keyed, pressable, prose, text, unseenWords } from "./dom.js";
 import { askAnchor } from "./ask.js";
 import { rendered } from "./markdown.js";
 import { drawSidebar } from "./list.js";
@@ -122,11 +122,14 @@ function showStep(session: Session, agent: Subagent | null) {
   element("step").classList.toggle("has-command", Boolean(step?.command));
   // Without a command the step has nothing to unfold, but its line keeps its hover, the full path among it (#220).
   const stepLine = element("step-line");
-  stepLine.title = step?.command ? "Show or hide the step's full command" : "The step the agent is on";
+  hint(stepLine, step?.command ? "Show or hide the step's full command" : "The step the agent is on");
   stepLine.onclick = (event) => void (step?.command || event.preventDefault());
 }
 
 export function showView(selected: Selection | null) {
+  hint(element("step-line"), "The step the agent is on");
+  hint(element("unavailable-summary"), "Why only the steps are shown");
+  hint(element("brief-summary"), "Show or hide the Brief: where the session stands");
   element("empty").hidden = selected !== null;
   element("view").hidden = selected === null;
   element("rail-more").hidden = selected === null;
@@ -457,7 +460,7 @@ function folded(key: string, title: string, hover: string, body: HTMLElement[], 
   const node = document.createElement("details");
   node.className = "fold";
   node.open = opened.has(key);
-  node.append(fullTitle(text("summary", title), hover), ...body);
+  node.append(hint(keyed(text("summary", title), `fold ${key}`), hover), ...body);
   node.addEventListener("toggle", () => {
     if (node.open) opened.add(key);
     else opened.delete(key);

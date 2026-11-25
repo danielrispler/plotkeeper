@@ -6,7 +6,7 @@
 // `frame-src 'none'` (`server/src/web.rs`): no frame of it loads a URL. The frame sits in an overlay in the glass the size of the settings
 // dialog, the first layer Esc closes.
 
-import { element, failure, invoke, pressable, promptBox, sayAction, text } from "./dom.js";
+import { availability, element, failure, invoke, pressable, promptBox, sayAction, text } from "./dom.js";
 import { onDraw, registerLayer, reloadMap, shownProject } from "./map.js";
 import { copyOverturn, overturnReport } from "./ratify.js";
 import { logStop } from "./stop-rules.js";
@@ -44,9 +44,10 @@ export function exploreOffers(worlds: MicroWorlds | null | undefined, key: strin
 
 const button = (words: string, title: string, click: (() => void) | null) => {
   const node = pressable(text("button", words, "btn quiet"), null);
-  node.title = title;
   if (click) node.addEventListener("click", click);
-  else node.disabled = true;
+  // A button with no click is waiting: it says why, and stays focusable (#582).
+  if (click) node.title = title;
+  else availability(node, title, title);
   return node;
 };
 

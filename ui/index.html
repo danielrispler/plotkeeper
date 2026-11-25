@@ -84,8 +84,8 @@
           <div id="intention" class="intention">
             <p id="intention-label" class="label" hidden>Why it asks</p>
             <p><span id="intention-text"></span> <span id="intention-age" class="age"></span></p>
-            <details id="unavailable" class="unavailable" hidden><summary title="Why only the steps are shown">Steps only</summary><span id="unavailable-why"></span></details>
-            <details id="step" class="step"><summary id="step-line" title="The step the agent is on"><span id="tool" class="tool-name"></span> <span id="detail"></span></summary><code id="command"></code></details>
+            <details id="unavailable" class="unavailable" hidden><summary id="unavailable-summary">Steps only</summary><span id="unavailable-why"></span></details>
+            <details id="step" class="step"><summary id="step-line"><span id="tool" class="tool-name"></span> <span id="detail"></span></summary><code id="command"></code></details>
             <!-- A Wait tip (#523): while the session runs, one muted line under the step teaches one feature. -->
             <p id="tip" class="tip" hidden></p>
           </div>
@@ -93,9 +93,9 @@
                subagents (danielrispler/Falinks#535), checks and folded response. -->
           <section id="banner-slot"></section>
           <ol id="feed" class="feed"></ol>
-          <details id="brief-fold" class="decisions" hidden><summary title="Show or hide the Brief: where the session stands">Brief</summary><section id="brief" class="brief"></section></details>
+          <details id="brief-fold" class="decisions" hidden><summary id="brief-summary">Brief</summary><section id="brief" class="brief"></section></details>
           <!-- Decision history (danielrispler/Falinks#479), folded under the feed. -->
-          <details id="decisions" class="decisions" hidden><summary id="decisions-title" title="Show or hide the decisions made in this session"></summary><ol id="decisions-list"></ol></details>
+          <details id="decisions" class="decisions" hidden><summary id="decisions-title"></summary><ol id="decisions-list"></ol></details>
         </section>
       </div>
     </aside>
