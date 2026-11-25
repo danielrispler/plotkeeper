@@ -4,6 +4,12 @@ name: npm package
 # Intel runner with no Rust on the PATH (scripts/npm/smoke.sh, #368), on every run. It publishes to the npm registry
 # only when Daniel runs it by hand from main with "publish" ticked, by npm trusted publishing with no token
 # (docs/studio/development.md, "Cutting a release").
+# On such a publish dispatch, the release commit guard fails the run before building unless HEAD is the Release PR's
+# commit, the one that changed npm/package.json's version (#512): a change merged after it would ship under the
+# release's notes. After npm accepts the version, the `release` job tags vX.Y.Z at the run's commit and creates its
+# GitHub Release from CHANGELOG.md's section. A failed `release` is retried with "Re-run failed jobs"
+# (`gh run rerun <id> --failed`), which reruns only it; "Re-run all jobs" publishes again, npm refuses the version,
+# and `release` is skipped.
 # It runs on each push to main, by hand, and for a ready pull request that touches what the package is built from:
 # the dependencies, the toolchain, the package, its scripts, the README/LICENSE bundled into it, and the plugins
 # `plotkeeper install` renders. A pull request's other changes, an Intel-only build break among them, show here only
@@ -49,11 +55,18 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+        with:
+          # HEAD's parent, for the release commit guard: a single-commit checkout has none to compare with.
+          fetch-depth: 2
       - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: package-lock.json
+      # The release commit guard, on the publish gate: fails with "main moved past the Release PR, run /release again"
+      # unless HEAD's commit changed npm/package.json's version.
+      - if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main'
+        run: node scripts/npm/release.mjs guard
       - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           rustflags: ""
@@ -113,3 +126,21 @@ jobs:
       # `./`: npm reads a bare `out/plotkeeper-<version>.tgz` as the GitHub repository `out/plotkeeper-<version>.tgz`
       # and fails in `git ls-remote` (#441's first workflow publish, run 45486175800).
       - run: npm publish ./out/*.tgz --provenance --access public
+
+  release:
+    needs: publish
+    if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main'
+    # Only git, gh and node: no macOS runner needed.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      # Pushes the tag and creates the GitHub Release.
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      # Tags vX.Y.Z at the commit the run packed and published, and creates its Release from CHANGELOG.md's section.
+      # Idempotent: a tag at this commit is kept, one at another commit fails, an existing Release is left alone, and a
+      # missing changelog section fails (scripts/npm/release.mjs).
+      - run: node scripts/npm/release.mjs tag "$(node -p 'require("./npm/package.json").version')" "$GITHUB_SHA"
+        env:
+          GH_TOKEN: ${{ github.token }}
