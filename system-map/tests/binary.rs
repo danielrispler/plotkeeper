@@ -20,7 +20,35 @@ fn a_passing_repository_exits_zero() {
     let (_dir, root) = project(&base(), &FILES);
     let out = run(&root, &[]);
     assert!(out.status.success());
-    assert!(out.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap(),
+        "ok: 2 parts own 2 files (2 ignored); 1 link; 1 law: 0 check, 1 trust\n"
+    );
+}
+
+#[test]
+fn the_pass_line_counts_in_the_plural_and_by_backing() {
+    let mut map = base();
+    map["links"] = serde_json::json!([
+        { "id": "alpha-beta", "from": "alpha", "to": "beta" },
+        { "id": "writer-alpha", "from": "writer", "to": "alpha" }
+    ]);
+    map["laws"] = serde_json::json!([
+        { "id": "stay-true", "on": "alpha", "backing": "trust", "text": "It stays true." },
+        { "id": "held", "on": "beta", "backing": "check", "text": "It is held." }
+    ]);
+    let (dir, root) = project(
+        &map,
+        &["alpha/a.rs", "alpha/b.rs", "beta/b.rs", "docs/d.md"],
+    );
+    crate::common::write(dir.path(), "beta/b.rs", &format!("// @{}: held\n", "law"));
+    studio_test_support::git(dir.path(), &["commit", "-qam", "Tag"]);
+    let out = run(&root, &[]);
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap(),
+        "ok: 2 parts own 3 files (2 ignored); 2 links; 2 laws: 1 check, 1 trust\n"
+    );
 }
 
 #[test]
@@ -41,6 +69,13 @@ fn json_prints_data_that_parses() {
     let value: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(value["parts"][0]["id"], "alpha");
     assert_eq!(value["problems"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        value["counts"],
+        serde_json::json!({
+            "parts": 2, "files": 2, "ignored": 2, "links": 1,
+            "laws": { "check": 0, "trust": 1 }
+        })
+    );
 }
 
 #[test]

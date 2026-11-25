@@ -27,14 +27,17 @@ A law with `backing: "check"` has a test that stands behind it; one with `"trust
 
 ## What the check does
 
-`system-map check [--json] [--root <dir>]` prints one line per problem and exits non-zero when there is one; the root is the git top level of the current folder unless given. It fails, naming the file, pattern, id or law and what to change, when:
+`system-map check [--json] [--root <dir>]` prints one line per problem and exits non-zero when there is one. A pass prints one line of what it covered, so a pass with nothing checked shows: `ok: 7 parts own 581 files (212 ignored); 13 links; 12 laws: 9 check, 3 trust`, where "ignored" counts the tracked files no part owns on purpose. The root is the git top level of the current folder unless given. It fails, naming the file, pattern, id or law and what to change, when:
 
 - the file is missing, is not JSON or does not match the shape above (an unknown field, a duplicate id, a link end, a law's `on` or a hop that names nothing, a tier outside the three);
 - a tracked file is owned by no part and matched by no `ignored` pattern;
 - a pattern of a part or of `ignored` matches no tracked file;
+- a part's pattern names only `system-map.json`.
+
+The map file itself needs no owner and no `ignored` entry: `check` and `touched` both place `system-map.json` as ignored, and an `ignored` pattern that is exactly `system-map.json` never fails for matching nothing. So a new repository's map passes before and after it is first tracked.
 - a law says `check` and no tag names it, or says `trust` and a tag names it, or a tag names a law the file does not have.
 
-It also prints, without failing, a `note:` for each computed edge between two parts that no link joins, in either direction. A computed edge is a hint: a link that no extractor can see (the window and the server talk at run time) is still a link. `--json` prints the parts with their files, the links, each law with its tags (file and line), the unlinked edges and the problems.
+It also prints, without failing, a `note:` for each computed edge between two parts that no link joins, in either direction. A computed edge is a hint: a link that no extractor can see (the window and the server talk at run time) is still a link. `--json` prints the parts with their files, the links, each law with its tags (file and line), the unlinked edges, the problems, and the pass line's counts (`counts`: `parts`, `files`, `ignored`, `links`, and `laws` as `check` and `trust`).
 
 ## The extractors
 
