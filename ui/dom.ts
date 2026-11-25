@@ -98,6 +98,30 @@ export function text<K extends keyof HTMLElementTagNameMap>(tag: K, content: str
   return node;
 }
 
+/**
+ * The page's own storage under `key`: a per-browser convenience, read and written in a try, so a browser that refuses it (blocked site
+ * data, a private window) reads none and keeps nothing.
+ */
+export const pageStore = (key: string) => ({
+  get(): string | null {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  set(value: string) {
+    try {
+      localStorage.setItem(key, value);
+    } catch {}
+  },
+  remove() {
+    try {
+      localStorage.removeItem(key);
+    } catch {}
+  },
+});
+
 /** An SVG element `tag` with its attributes. */
 export function svg(tag: string, attrs: Record<string, string> = {}): SVGElement {
   const node = document.createElementNS("http://www.w3.org/2000/svg", tag);

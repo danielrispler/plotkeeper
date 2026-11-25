@@ -1,6 +1,8 @@
 // Notices (danielrispler/plotkeeper#331): the tab title's unseen count and the browser notification. They replace the Dock badge,
 // the macOS notifications and the sounds.
 
+import { pageStore } from "./dom.js";
+
 // The tab is the one Daniel is looking at: visible and focused, the same two conditions that decide Seen (`seen.ts`).
 const looking = () => document.visibilityState === "visible" && document.hasFocus();
 
@@ -25,9 +27,8 @@ export function notifyIfAway({ title, body }: Alert): boolean {
 // page's storage keeps a dismissed prompt from coming back.
 export async function askOnce(): Promise<void> {
   if (typeof Notification === "undefined" || Notification.permission !== "default") return;
-  try {
-    if (localStorage.getItem("notifications-asked")) return;
-    localStorage.setItem("notifications-asked", "1");
-  } catch {}
+  const asked = pageStore("notifications-asked");
+  if (asked.get()) return;
+  asked.set("1");
   await Notification.requestPermission();
 }

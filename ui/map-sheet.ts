@@ -12,7 +12,7 @@
 // The sheet's left edge resizes it (#445), and a click on the empty map closes it and its drawer (`map.ts`'s `pan`).
 
 import { logStop } from "./stop-rules.js";
-import { element, failure, invoke, pressable, text } from "./dom.js";
+import { element, failure, invoke, pageStore, pressable, text } from "./dom.js";
 import { currentMap, onDraw, onPlateClick, reloadMap, registerLayer, syncSide, type MapView } from "./map.js";
 import { openDrawer } from "./map-drawer.js";
 import { drawStrip } from "./map-history.js";
@@ -60,15 +60,9 @@ async function setTier(view: MapView, part: string, tier: Tier) {
 
 // The sheet's width (#445): 360 px at first, never under 300 px or over half the map, kept in this browser; it reaches the stylesheet as
 // `--sheet-w` on the side area, whose width is the sheet's.
-const widthKey = "map-sheet-width";
 const [firstWidth, leastWidth, widthStep] = [360, 300, 16];
-const keptWidth = () => {
-  try {
-    return Number(localStorage.getItem(widthKey)) || firstWidth;
-  } catch {
-    return firstWidth;
-  }
-};
+const kept = pageStore("map-sheet-width");
+const keptWidth = () => Number(kept.get()) || firstWidth;
 const showWidth = (px: number) => element("map-side").style.setProperty("--sheet-w", `${px}px`);
 // Sets the width, bounded, and keeps it; null goes back to the first width and forgets the kept one.
 function resize(px: number | null) {
@@ -76,12 +70,9 @@ function resize(px: number | null) {
   const most = Math.max(leastWidth, (side.parentElement?.clientWidth ?? 0) / 2);
   const width = px === null ? firstWidth : Math.round(Math.min(most, Math.max(leastWidth, px)));
   showWidth(width);
-  try {
-    if (px === null) localStorage.removeItem(widthKey);
-    else localStorage.setItem(widthKey, String(width));
-  } catch {
-    // A browser that keeps nothing still resizes.
-  }
+  // A browser that keeps nothing still resizes.
+  if (px === null) kept.remove();
+  else kept.set(String(width));
 }
 // The handle on the sheet's left edge, made once and kept in the sheet's slot while a sheet is open: a drag, the arrow keys while it has the focus, and a
 // double-click back to the first width.

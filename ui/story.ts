@@ -25,7 +25,7 @@ import { checkTime, counts, estimateText, times } from "./times.js";
 import { setCards, studio } from "./state.js";
 import { showError } from "./notice.js";
 import { currentMap } from "./map.js";
-import { pageStore, stretches, tipText } from "./tips.js";
+import { stretches, tipStore, tipText } from "./tips.js";
 import {
   askKind,
   stateLabels,
@@ -266,7 +266,7 @@ export function nowOf(
 }
 
 // The Wait tip (#523): one per Running stretch of the session, at the foot of its Intention box; gone at any other state.
-const tipFor = stretches(pageStore);
+const tipFor = stretches(tipStore);
 function showTip(session: Session) {
   const map = currentMap();
   const context = { map: map !== null, brief: (map?.state.ready ?? []).length > 0, trees: reports(session, "turn_trees") };

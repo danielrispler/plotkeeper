@@ -3,6 +3,8 @@
 // showed in `localStorage`: none stored (a first install) stores the current one and shows nothing, the same one shows nothing, and an
 // older one than stored (a downgrade) stores the current one and shows nothing. A browser that keeps nothing shows nothing.
 
+import { pageStore } from "./dom.js";
+
 const KEY = "shown-version";
 
 export type WhatsNew = { toast: boolean; store: boolean };
@@ -25,20 +27,7 @@ function newer(a: string, b: string): boolean {
 }
 
 // The page's storage, read and written in a try: a browser that refuses it (blocked site data) reads none and keeps nothing.
-const kept = {
-  get: (): string | null => {
-    try {
-      return localStorage.getItem(KEY);
-    } catch {
-      return null;
-    }
-  },
-  set: (version: string) => {
-    try {
-      localStorage.setItem(KEY, version);
-    } catch {}
-  },
-};
+const kept = pageStore(KEY);
 
 export const releaseUrl = (version: string) => `https://github.com/danielrispler/plotkeeper/releases/tag/v${version}`;
 

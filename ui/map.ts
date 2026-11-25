@@ -16,7 +16,7 @@
 //   a PR brief borrows the camera with `lendCamera` and `giveCameraBack` shows Daniel's view again (`cameraRig` in `map-camera.ts`).
 
 import { logStop, reviewNode, reviewOf } from "./stop-rules.js";
-import { element, failure, invoke, listen, newest, pressable, svg, text } from "./dom.js";
+import { element, failure, invoke, listen, newest, pageStore, pressable, svg, text } from "./dom.js";
 import { cameraRig, type CameraRig, fitCamera, panTo, revealPan, zoomAt } from "./map-camera.js";
 import { autoPlace, brokenParts, brokenText, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Drag, type Law, type Layer, type LayerName, type MapDoc, startProject, switchProject, parseMap, type Part, type Point, plateSize, plateTitle, sizeOf, linkLines, markPoints, readingOrder, rimPoint, type Scrub, type Tier } from "./map-model.js";
 import { recheckSeen } from "./seen.js";
@@ -99,14 +99,7 @@ async function load(path: string, fetch: boolean) {
 }
 
 // The last viewed project, which the page opens on (#386): a per-browser convenience, so a store that throws only loses it.
-const LAST = "project";
-const lastViewed = (): string | null => {
-  try {
-    return localStorage.getItem(LAST);
-  } catch {
-    return null;
-  }
-};
+const lastViewed = pageStore("project");
 
 // Shows `path`'s map.
 export function openMap(path: string | null) {
@@ -119,11 +112,8 @@ export function openMap(path: string | null) {
   loaded = null;
   view = null;
   drawn = "";
-  try {
-    if (path !== null) localStorage.setItem(LAST, path);
-  } catch {
-    // The page opens on the first project instead.
-  }
+  // A store that throws keeps nothing: the page opens on the first project instead.
+  if (path !== null) lastViewed.set(path);
   // The top bar names the project shown; Treatment C's large title on the map is not drawn, so the name is said once.
   element("bar-project").textContent = path === null ? "plotkeeper" : name(path);
   element("bar-project").title = path ?? "";
@@ -159,7 +149,7 @@ export function projectsChanged() {
   started = true;
   // A session selected before the list arrived has already shown its project's map.
   if (project === null) {
-    const opening = startProject(lastViewed(), knownProjects());
+    const opening = startProject(lastViewed.get(), knownProjects());
     if (first || opening !== null) openMap(opening);
     return;
   }

@@ -1,6 +1,7 @@
 // Wait tips (#523, spec #520): while the selected session is Running, one muted line at the foot of its Intention box teaches one
 // feature. The list is hand-written; the chooser is pure, and its show history lives in the page's storage.
 
+import { pageStore } from "./dom.js";
 import { keysOf } from "./keys.js";
 import type { Keymap } from "./settings.js";
 
@@ -77,20 +78,7 @@ export function choose({ tips, shows, context, running, on }: { tips: Tip[]; sho
 export type Store = { get(): string | null; set(text: string): void };
 
 const KEY = "wait-tips";
-export const pageStore: Store = {
-  get: () => {
-    try {
-      return localStorage.getItem(KEY);
-    } catch {
-      return null;
-    }
-  },
-  set: (text) => {
-    try {
-      localStorage.setItem(KEY, text);
-    } catch {}
-  },
-};
+export const tipStore: Store = pageStore(KEY);
 
 function load(store: Store): Shows {
   try {
