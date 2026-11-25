@@ -1,0 +1,79 @@
+{
+ "version": 1,
+ "pr": 489,
+ "head": "cafe489",
+ "written_at": 1795300000000,
+ "stale": false,
+ "model": "opus",
+ "shape": {
+  "chapters": false,
+  "required": [
+   "alpha"
+  ],
+  "also": [
+   "beta"
+  ],
+  "overview": false,
+  "flows_changed": []
+ },
+ "brief": {
+  "title": "Alpha keeps order",
+  "overview": [],
+  "chapters": [],
+  "also": [],
+  "also_groups": [
+   {
+    "kind": "no-part",
+    "files": [
+     {
+      "path": "loose/x.rs",
+      "lines": 3
+     }
+    ],
+    "lines": 3
+   },
+   {
+    "kind": "tests",
+    "files": [
+     {
+      "path": "beta/tests/order.rs",
+      "lines": 4,
+      "part": "beta",
+      "laws": [
+       "seen-gate"
+      ]
+     },
+     {
+      "path": "scripts/run.spec.ts",
+      "lines": 2,
+      "ignored": true
+     }
+    ],
+    "lines": 6
+   },
+   {
+    "kind": "ignored",
+    "files": [
+     {
+      "path": "scripts/tool.sh",
+      "lines": 1,
+      "ignored": true
+     }
+    ],
+    "lines": 1
+   },
+   {
+    "kind": "other",
+    "files": [
+     {
+      "path": "beta/b.rs",
+      "lines": 5,
+      "part": "beta"
+     }
+    ],
+    "lines": 5
+   }
+  ],
+  "decisions": []
+ }
+}

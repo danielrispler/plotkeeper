@@ -4,12 +4,12 @@
 //! whether the facts support it. Code-check flags and claim flags then go into one retry request that rewrites
 //! only the flagged items; an item still flagged after it carries "not confirmed from the facts". Both calls use
 //! the writer's model. Items are steps (with their check's question, options and yes/no text, and their risks),
-//! the chapters' gists (#397), the "also" lines and the decisions; the flags of a chapter or of the brief as a whole are not items a retry
+//! the chapters' gists (#397) and the decisions; the flags of a chapter or of the brief as a whole are not items a retry
 //! can rewrite and are left as `check_brief` set them.
 
 use crate::pr_brief::{
-    Also, Brief, BriefRecord, BriefWriter, CallKind, CallUsage, CheckContext, Decision, Facts,
-    Step, check_brief, facts_block, prompt, put_plan_first, timed_write_facts,
+    Brief, BriefRecord, BriefWriter, CallKind, CallUsage, CheckContext, Decision, Facts, Step,
+    check_brief, facts_block, prompt, put_plan_first, timed_write_facts,
 };
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -35,7 +35,6 @@ const CHECK_INSTRUCTIONS: &str = r#"You check a written PR brief against the fac
 For every item of the brief, decide whether FACTS support each claim it makes, at the strength it states it:
 - a step: its heading and body, its law and covered_by, its list lines, every risk (part, trigger, check), and, when it holds a check, the check's question, its options and its yes and no text;
 - a chapter's gist: the one sentence that sums up its story;
-- an "also" line;
 - a decision.
 A claim is supported when FACTS (the PR text, spec, map, diff, tests or checks) say it or plainly show it. A claim that only sounds plausible, a test said to cover something the facts do not show it covering, a cause or an intent no section states, a number that is not there: not supported.
 
@@ -55,8 +54,7 @@ Reply with ONE JSON object and nothing else, with one entry per flagged item, us
 { "items": [
   { "id": "step 3", "step": a full step, as in the rules above },
   { "id": "gist 1", "gist": "the chapter's story in one sentence" },
-  { "id": "decision 1", "text": "the decision, one sentence" },
-  { "id": "also 1", "line": "one line, what changed in the part" }
+  { "id": "decision 1", "text": "the decision, one sentence" }
 ] }
 "#;
 
@@ -65,7 +63,6 @@ enum Item {
     Step(usize),
     /// A chapter's gist (#397), by chapter.
     Gist(usize),
-    Also(usize),
     Decision(usize),
 }
 
@@ -82,7 +79,6 @@ fn items(brief: &Brief) -> Vec<(String, Item)> {
             .filter(|(_, c)| !c.gist.is_empty() || !c.gist_flags.is_empty())
             .map(|(i, _)| (format!("gist {}", i + 1), Item::Gist(i))),
     );
-    out.extend((0..brief.also.len()).map(|i| (format!("also {}", i + 1), Item::Also(i))));
     out.extend(
         (0..brief.decisions.len()).map(|i| (format!("decision {}", i + 1), Item::Decision(i))),
     );
@@ -93,7 +89,6 @@ fn flags_mut(brief: &mut Brief, item: Item) -> &mut Vec<String> {
     match item {
         Item::Step(i) => &mut brief.steps_mut().nth(i).expect("a step").flags,
         Item::Gist(i) => &mut brief.chapters[i].gist_flags,
-        Item::Also(i) => &mut brief.also[i].flags,
         Item::Decision(i) => &mut brief.decisions[i].flags,
     }
 }
@@ -102,7 +97,6 @@ fn flags_of(brief: &Brief, item: Item) -> &[String] {
     match item {
         Item::Step(i) => &brief.steps().nth(i).expect("a step").flags,
         Item::Gist(i) => &brief.chapters[i].gist_flags,
-        Item::Also(i) => &brief.also[i].flags,
         Item::Decision(i) => &brief.decisions[i].flags,
     }
 }
@@ -118,7 +112,6 @@ fn item_json(brief: &Brief, item: Item) -> Value {
         Item::Gist(i) => {
             json!({ "chapter": brief.chapters[i].title, "gist": brief.chapters[i].gist })
         }
-        Item::Also(i) => json!({ "part": brief.also[i].part, "line": brief.also[i].line }),
         Item::Decision(i) => json!({ "text": brief.decisions[i].text }),
     }
 }
@@ -216,6 +209,12 @@ pub fn retry_prompt(facts: &Facts, brief: &Brief) -> Option<String> {
     for (_, item) in items(&whole) {
         flags_mut(&mut whole, item).clear();
     }
+    // Also touched is code's (#477): the writer neither writes nor sees it.
+    let mut whole = serde_json::to_value(whole).unwrap_or_default();
+    if let Some(o) = whole.as_object_mut() {
+        o.remove("also");
+        o.remove("also_groups");
+    }
     Some(format!(
         "{}\n\nTHE BRIEF AS WRITTEN\n\n{}\n\n{RETRY_INSTRUCTIONS}\nFLAGGED\n\n{}\n",
         prompt(facts),
@@ -256,15 +255,6 @@ fn apply_retry(brief: &mut Brief, text: &str) -> Result<BTreeSet<String>, String
             Item::Gist(i) => text_of("gist").is_some_and(|gist| {
                 brief.chapters[i].gist = gist;
                 brief.chapters[i].gist_flags.clear();
-                true
-            }),
-            Item::Also(i) => text_of("line").is_some_and(|line| {
-                let Also { part, .. } = brief.also[i].clone();
-                brief.also[i] = Also {
-                    part,
-                    line,
-                    flags: vec![],
-                };
                 true
             }),
             Item::Decision(i) => text_of("text").is_some_and(|text| {
