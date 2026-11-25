@@ -371,6 +371,10 @@ An `import` link between two read parts, which a computed edge runs its way. An 
 **Computed edge**:
 A dependency between two parts that an extractor read from the code. It is a hint, never drawn; the links are what the map shows.
 
+**Extractor**:
+A reader of one language's code, or of one kind of build manifest, that tells the map which tracked file depends on which. A map names the ones it uses in `extractors`, such as `rust-modules` or `typescript-imports`.
+_Avoid_: Adapter (an **Agent adapter**)
+
 **Flow**:
 A named path of behaviour across the system, as ordered hops along links, each with one plain sentence.
 

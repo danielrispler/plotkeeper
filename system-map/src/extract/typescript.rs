@@ -2,15 +2,62 @@
 //! comments, strings and the text of template literals, resolved to tracked files: a relative specifier to the file it
 //! names, a bare one to the `package.json` of the workspace package it names.
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::Path,
-};
+use std::collections::{BTreeMap, BTreeSet};
 
+use super::{Extractor, Output, Pair, Repo};
 use crate::pattern::Pattern;
 
+pub(crate) struct TypescriptImports;
+
+impl Extractor for TypescriptImports {
+    fn name(&self) -> &'static str {
+        "typescript-imports"
+    }
+
+    fn reads(&self, file: &str) -> bool {
+        let base = file.rsplit('/').next().unwrap_or(file);
+        base.rsplit_once('.')
+            .is_some_and(|(_, ext)| SCRIPTS.contains(&ext))
+    }
+
+    fn extract(&self, repo: &Repo) -> Output {
+        let (pairs, problems) = typescript_imports(repo);
+        Output {
+            problems,
+            pairs: pairs
+                .into_iter()
+                .map(|(from, to)| Pair::new(&from, &to))
+                .collect(),
+        }
+    }
+
+    #[cfg(test)]
+    fn fixture(&self) -> super::contract::Fixture {
+        use super::contract::{Case, Fixture, MissingConfig};
+        Fixture {
+            support: vec![("package.json", "{ \"name\": \"kit\" }\n".into())],
+            source: |name| format!("{name}.ts"),
+            importing: |_, to| {
+                format!(
+                    "import {{ thing }} from \"./{}\";\n",
+                    to.trim_end_matches(".ts")
+                )
+            },
+            plain: |_| "export const thing = 1;\n".into(),
+            missing_config: MissingConfig::Fallback {
+                file: "package.json",
+            },
+            malformed_config: None,
+            skip: vec![(
+                Case::MalformedConfig,
+                "a package.json that does not parse declares no workspace packages, and only bare imports miss them",
+            )],
+        }
+    }
+}
+
 /// The extensions of the script files `typescript-imports` reads.
-pub(crate) const SCRIPTS: [&str; 7] = ["ts", "tsx", "js", "mjs", "jsx", "mts", "cjs"];
+const SCRIPTS: [&str; 7] = ["ts", "tsx", "js", "mjs", "jsx", "mts", "cjs"];
 
 const TS_SUFFIXES: [&str; 7] = [".ts", ".tsx", ".js", ".mjs", ".jsx", ".mts", ".cjs"];
 
@@ -473,16 +520,11 @@ fn resolve_import(from: &str, spec: &str, tracked: &BTreeSet<&str>) -> Option<St
 /// The `package.json` of each package the workspace declares, by its name: a folder that matches a pattern of the root
 /// `package.json`'s `workspaces` or of `pnpm-workspace.yaml`'s `packages` and holds a tracked `package.json` with a
 /// `name`. A name two packages share names neither, and is a problem.
-fn workspace_packages(
-    root: &Path,
-    tracked: &BTreeSet<&str>,
-) -> (BTreeMap<String, String>, Vec<String>) {
+fn workspace_packages(repo: &Repo) -> (BTreeMap<String, String>, Vec<String>) {
+    let tracked = repo.files();
     // A UTF-8 byte order mark, which some editors write, is not JSON.
     let read = |file: &str| {
-        tracked
-            .contains(file)
-            .then(|| crate::read_tracked(root, file))
-            .flatten()
+        repo.read(file)
             .map(|text| text.trim_start_matches('\u{feff}').to_string())
     };
     let mut globs: Vec<String> = Vec::new();
@@ -643,11 +685,9 @@ fn follow<'a>(
 /// Each script file paired with the tracked files its relative imports name and the `package.json` of each workspace
 /// package it imports, and with the file behind each pure barrel it imports that exports what it takes; and the problems
 /// of the workspace's packages.
-pub(crate) fn typescript_imports(
-    root: &Path,
-    tracked: &BTreeSet<&str>,
-) -> (Vec<(String, String)>, Vec<String>) {
-    let (packages, problems) = workspace_packages(root, tracked);
+fn typescript_imports(repo: &Repo) -> (Vec<(String, String)>, Vec<String>) {
+    let tracked = repo.files();
+    let (packages, problems) = workspace_packages(repo);
     let resolve = |file: &str, spec: &str| {
         resolve_import(file, spec, tracked).or_else(|| packages.get(package_name(spec)?).cloned())
     };
@@ -657,7 +697,7 @@ pub(crate) fn typescript_imports(
         let script = file
             .rsplit_once('.')
             .is_some_and(|(_, ext)| SCRIPTS.contains(&ext));
-        let Some(text) = script.then(|| crate::read_tracked(root, file)).flatten() else {
+        let Some(text) = script.then(|| repo.read(file)).flatten() else {
             continue;
         };
         let tokens = tokens(&text);
