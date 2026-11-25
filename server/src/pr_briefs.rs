@@ -9,7 +9,7 @@ use crate::App;
 use crate::prs::Ready;
 use serde::Serialize;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     path::Path,
     sync::{Arc, Mutex},
 };
@@ -182,6 +182,138 @@ pub struct BriefView {
     /// The PR matched the project's pre-flight (#394): the parts it expected against the parts the PR touched.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expected: Option<studio_understanding::pre_flight::Expected>,
+    /// What the default branch changed since the PR's merge base that bears on the brief (#494); open PRs only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stale_base: Option<StaleBase>,
+}
+
+/// The build manifests at the repository's root whose change on the default branch bears on every brief (#494). A lockfile or a
+/// manifest below the root is not one.
+const ROOT_MANIFESTS: [&str; 4] = [
+    "Cargo.toml",
+    "package.json",
+    "rust-toolchain.toml",
+    "tsconfig.json",
+];
+
+/// What the default branch changed since a PR's merge base that the brief relies on (#494), each list sorted and each id once: the
+/// map's laws, links and flows whose say on a lit part changed, the lit parts whose `paths` changed, and the changed files of lit
+/// parts and root manifests.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct StaleBase {
+    pub laws: Vec<String>,
+    pub links: Vec<String>,
+    pub flows: Vec<String>,
+    pub paths: Vec<String>,
+    pub files: Vec<String>,
+}
+
+/// What the default branch of `repo` changed, by one net diff from the merge base of `head` to its tip, that bears on the parts in
+/// `lit`: none when nothing did, or when git cannot answer.
+pub fn stale_base(repo: &Path, head: &str, lit: &BTreeSet<String>) -> Option<StaleBase> {
+    use crate::map::git;
+    let (tip, _) = crate::map::default_ref(repo)?;
+    let base = git(repo, &["merge-base", &tip, head]).ok()?;
+    let changed = git(repo, &["diff", "--name-only", &base, &tip]).ok()?;
+    let changed: Vec<String> = changed.lines().map(String::from).collect();
+    let map_at = |commit: &str| -> serde_json::Value {
+        git(
+            repo,
+            &["show", &format!("{commit}:{}", system_map::MAP_FILE)],
+        )
+        .ok()
+        .and_then(|text| system_map::convert_value(&text).ok())
+        .unwrap_or_default()
+    };
+    let new_map = map_at(&tip);
+    let mut stale = StaleBase::default();
+    // (i) A changed file a lit part owns by the current map, and (iii) a root build manifest.
+    if let Ok(map) = system_map::parse_lenient(&new_map.to_string()) {
+        let touched = system_map::touched_for_map(&map, &changed);
+        stale.files = touched
+            .parts
+            .into_iter()
+            .filter(|p| lit.contains(&p.id))
+            .flat_map(|p| p.files)
+            .collect();
+    }
+    stale.files.extend(
+        changed
+            .iter()
+            .filter(|path| ROOT_MANIFESTS.contains(&path.as_str()))
+            .cloned(),
+    );
+    // (ii) The map's say on a lit part, read as the brief reads it: laws on it or on a link at it, links at it, flows through those.
+    if changed.iter().any(|path| path == system_map::MAP_FILE) {
+        let old_map = map_at(&base);
+        for part in lit {
+            map_moves(&old_map, &new_map, part, &mut stale);
+        }
+    }
+    for list in [
+        &mut stale.laws,
+        &mut stale.links,
+        &mut stale.flows,
+        &mut stale.paths,
+        &mut stale.files,
+    ] {
+        list.sort();
+        list.dedup();
+    }
+    (stale != StaleBase::default()).then_some(stale)
+}
+
+/// Adds to `stale` what differs between `old` and `new` in the map's say on `part`: an item counts when it is at the part in either
+/// map and its value is not the same in both.
+fn map_moves(old: &serde_json::Value, new: &serde_json::Value, part: &str, stale: &mut StaleBase) {
+    use serde_json::Value;
+    let items =
+        |map: &Value, key: &str| -> Vec<Value> { map[key].as_array().cloned().unwrap_or_default() };
+    let id = |item: &Value| item["id"].as_str().unwrap_or_default().to_string();
+    let links_at = |map: &Value| -> BTreeSet<String> {
+        items(map, "links")
+            .iter()
+            .filter(|l| l["from"] == part || l["to"] == part)
+            .map(id)
+            .collect()
+    };
+    let links: BTreeSet<String> = links_at(old).union(&links_at(new)).cloned().collect();
+    let at = |link: &Value| links.contains(link.as_str().unwrap_or_default());
+    let moved = |key: &str, here: &dyn Fn(&Value) -> bool| -> Vec<String> {
+        let of = |map: &Value| -> HashMap<String, Value> {
+            items(map, key)
+                .into_iter()
+                .filter(|i| here(i))
+                .map(|i| (id(&i), i))
+                .collect()
+        };
+        let (was, now) = (of(old), of(new));
+        was.keys()
+            .chain(now.keys())
+            .filter(|k| was.get(*k) != now.get(*k))
+            .cloned()
+            .collect()
+    };
+    stale
+        .laws
+        .extend(moved("laws", &|l| l["on"] == part || at(&l["on"])));
+    stale.links.extend(moved("links", &|l| at(&l["id"])));
+    stale.flows.extend(moved("flows", &|f| {
+        f["hops"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|h| at(&h["link"]))
+    }));
+    let paths_of = |map: &Value| {
+        items(map, "parts")
+            .into_iter()
+            .find(|p| p["id"] == part)
+            .map(|p| p["paths"].clone())
+    };
+    if paths_of(old) != paths_of(new) {
+        stale.paths.push(part.to_string());
+    }
 }
 
 /// What opening a brief answers: the brief, or that it is being written (it comes through `map-landed`).
@@ -610,17 +742,17 @@ pub fn pr_brief(app: &Arc<App>, project: String, number: u64) -> Result<Option<O
     let Some(head) = head else {
         return Ok(store
             .latest(number)
-            .map(|b| Opened::Brief(Box::new(view_of(&project, &store, b)))));
+            .map(|b| Opened::Brief(Box::new(view_of(&project, &store, b, false)))));
     };
     if let Some(stored) = store.get(number, &head).filter(|b| !b.stale) {
         return Ok(Some(Opened::Brief(Box::new(view_of(
-            &project, &store, stored,
+            &project, &store, stored, true,
         )))));
     }
     let Some(writer) = briefs.writer.clone() else {
         return Ok(store
             .latest(number)
-            .map(|b| Opened::Brief(Box::new(view_of(&project, &store, b)))));
+            .map(|b| Opened::Brief(Box::new(view_of(&project, &store, b, true)))));
     };
     let write = {
         let (app, project) = (app.clone(), project.clone());
@@ -653,8 +785,9 @@ pub fn pr_brief(app: &Arc<App>, project: String, number: u64) -> Result<Option<O
     Ok(Some(opened))
 }
 
-/// A stored brief as the window plays it, with whether the writer saw all of the diff and the line of a matched pre-flight.
-fn view_of(project: &str, store: &BriefStore, brief: StoredBrief) -> BriefView {
+/// A stored brief as the window plays it, with whether the writer saw all of the diff, the line of a matched pre-flight, and, for an
+/// `open` PR, what the default branch changed since its merge base that bears on the parts it lights (#494).
+fn view_of(project: &str, store: &BriefStore, brief: StoredBrief, open: bool) -> BriefView {
     let partial = store
         .records()
         .iter()
@@ -662,10 +795,17 @@ fn view_of(project: &str, store: &BriefStore, brief: StoredBrief) -> BriefView {
         .find(|r| r.pr == brief.pr && r.head == brief.head)
         .is_some_and(|r| r.budget.files_cut + r.budget.files_partial > 0);
     let expected = crate::pre_flight::expected(project, brief.pr, &brief);
+    let stale_base = open
+        .then(|| {
+            let lit: BTreeSet<String> = lit_parts(&brief.brief).into_iter().flatten().collect();
+            stale_base(Path::new(project), &brief.head, &lit)
+        })
+        .flatten();
     BriefView {
         brief,
         partial,
         expected,
+        stale_base,
     }
 }
 
@@ -740,6 +880,216 @@ mod tests {
             diff: "diff --git a/alpha/a.rs b/alpha/a.rs\nindex 1..2 100644\n--- a/alpha/a.rs\n+++ b/alpha/a.rs\n@@ -1,1 +1,2 @@\n+one\n".into(),
             ..PrSource::default()
         }
+    }
+
+    /// The map of the stale-base tests: `alpha` is lit; the link `ab` is at it, `bg` is not; `f1` runs through `ab`, `f2` only
+    /// through `bg`; `law-ab` sits on the link at it.
+    fn stale_map() -> serde_json::Value {
+        serde_json::json!({ "version": 2,
+          "parts": [
+            { "id": "alpha", "name": "Alpha", "caption": "c", "purpose": "p", "holds": [], "tier": "core", "paths": ["alpha/"] },
+            { "id": "beta", "name": "Beta", "caption": "c", "purpose": "p", "holds": [], "tier": "core", "paths": ["beta/"] },
+            { "id": "gamma", "name": "Gamma", "caption": "c", "purpose": "p", "holds": [], "tier": "core", "paths": ["gamma/"] }],
+          "actors": [],
+          "links": [
+            { "id": "ab", "from": "alpha", "to": "beta", "kind": "import", "reason": "Alpha calls beta." },
+            { "id": "bg", "from": "beta", "to": "gamma", "kind": "import", "reason": "Beta calls gamma." }],
+          "ignored": ["tools/"],
+          "laws": [
+            { "id": "law-a", "on": "alpha", "backing": "trust", "text": "Alpha keeps order." },
+            { "id": "law-ab", "on": "ab", "backing": "trust", "text": "The wire agrees." },
+            { "id": "law-g", "on": "gamma", "backing": "trust", "text": "Gamma keeps order." }],
+          "flows": [
+            { "id": "f1", "name": "One", "hops": [{ "link": "ab", "text": "Alpha asks beta." }] },
+            { "id": "f2", "name": "Two", "hops": [{ "link": "bg", "text": "Beta asks gamma." }] }] })
+    }
+
+    fn put(dir: &Path, path: &str, text: &str) {
+        let file = dir.join(path);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, text).unwrap();
+    }
+
+    /// A repository whose PR changed `alpha` off the merge base, and whose `main` then wrote `files` and the map `change` made: its
+    /// folder, and the PR's head.
+    fn moved_main(
+        files: &[&str],
+        change: impl FnOnce(&mut serde_json::Value),
+    ) -> (tempfile::TempDir, String) {
+        use studio_test_support::{git, repo};
+        let (dir, _) = repo();
+        let at = dir.path();
+        let mut map = stale_map();
+        put(at, "system-map.json", &map.to_string());
+        for path in [
+            "alpha/a.rs",
+            "beta/b.rs",
+            "beta/package.json",
+            "gamma/g.rs",
+            "tools/Cargo.toml",
+            "Cargo.toml",
+            "Cargo.lock",
+            "package.json",
+            "package-lock.json",
+            "rust-toolchain.toml",
+            "tsconfig.json",
+        ] {
+            put(at, path, "one\n");
+        }
+        git(at, &["add", "-A"]);
+        git(at, &["commit", "-q", "-m", "base"]);
+        git(at, &["checkout", "-q", "-b", "pr"]);
+        put(at, "alpha/a.rs", "the PR\n");
+        git(at, &["commit", "-q", "-am", "the PR"]);
+        let head = git(at, &["rev-parse", "HEAD"]);
+        git(at, &["checkout", "-q", "main"]);
+        for path in files {
+            put(at, path, "main moved\n");
+        }
+        change(&mut map);
+        put(at, "system-map.json", &map.to_string());
+        git(at, &["add", "-A"]);
+        git(at, &["commit", "-q", "--allow-empty", "-m", "main moved"]);
+        (dir, head)
+    }
+
+    fn stale_of(files: &[&str], change: impl FnOnce(&mut serde_json::Value)) -> Option<StaleBase> {
+        let (dir, head) = moved_main(files, change);
+        stale_base(dir.path(), &head, &BTreeSet::from(["alpha".to_string()]))
+    }
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn main_changing_a_file_of_a_lit_part_names_the_file() {
+        assert_eq!(
+            stale_of(&["alpha/new.rs", "beta/b.rs"], |_| {}),
+            Some(StaleBase {
+                files: names(&["alpha/new.rs"]),
+                ..StaleBase::default()
+            })
+        );
+    }
+
+    #[test]
+    fn main_changing_the_map_at_a_lit_part_names_each_law_link_flow_and_paths_that_moved() {
+        let law = stale_of(&[], |m| {
+            m["laws"][0]["text"] = "Alpha keeps a new order.".into()
+        });
+        assert_eq!(law.map(|s| s.laws), Some(names(&["law-a"])));
+        // A law on a link at the lit part is the brief's reading, not fog's.
+        let on_link = stale_of(&[], |m| {
+            m["laws"][1]["text"] = "The wire agrees again.".into()
+        });
+        assert_eq!(on_link.map(|s| s.laws), Some(names(&["law-ab"])));
+        let link = stale_of(&[], |m| {
+            m["links"][0]["reason"] = "Alpha now asks beta.".into()
+        });
+        assert_eq!(
+            link,
+            Some(StaleBase {
+                links: names(&["ab"]),
+                ..StaleBase::default()
+            })
+        );
+        let flow = stale_of(&[], |m| {
+            m["flows"][0]["hops"][0]["text"] = "Alpha tells beta.".into()
+        });
+        assert_eq!(flow.map(|s| s.flows), Some(names(&["f1"])));
+        let paths = stale_of(&[], |m| {
+            m["parts"][0]["paths"] = serde_json::json!(["alpha/", "extra/"])
+        });
+        assert_eq!(paths.map(|s| s.paths), Some(names(&["alpha"])));
+        // A law added on the lit part moved too.
+        let added = stale_of(&[], |m| {
+            m["laws"].as_array_mut().unwrap().push(
+                serde_json::json!({ "id": "law-new", "on": "alpha", "backing": "trust", "text": "New." }),
+            )
+        });
+        assert_eq!(added.map(|s| s.laws), Some(names(&["law-new"])));
+    }
+
+    #[test]
+    fn main_changing_a_root_build_manifest_names_it() {
+        assert_eq!(
+            stale_of(
+                &[
+                    "Cargo.toml",
+                    "package.json",
+                    "rust-toolchain.toml",
+                    "tsconfig.json"
+                ],
+                |_| {}
+            ),
+            Some(StaleBase {
+                files: names(&[
+                    "Cargo.toml",
+                    "package.json",
+                    "rust-toolchain.toml",
+                    "tsconfig.json"
+                ]),
+                ..StaleBase::default()
+            })
+        );
+    }
+
+    #[test]
+    fn lockfiles_and_manifests_below_the_root_are_no_stale_base() {
+        assert_eq!(
+            stale_of(
+                &[
+                    "Cargo.lock",
+                    "package-lock.json",
+                    "tools/Cargo.toml",
+                    "beta/package.json"
+                ],
+                |_| {}
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn main_moving_only_elsewhere_is_no_stale_base() {
+        let elsewhere = stale_of(&["beta/b.rs", "gamma/g.rs"], |m| {
+            m["laws"][2]["text"] = "Gamma keeps a new order.".into();
+            m["links"][1]["reason"] = "Beta now asks gamma.".into();
+            m["flows"][1]["hops"][0]["text"] = "Beta tells gamma.".into();
+            m["parts"][1]["paths"] = serde_json::json!(["beta/", "more/"]);
+        });
+        assert_eq!(elsewhere, None);
+    }
+
+    #[test]
+    fn a_merged_prs_brief_gets_no_stale_base_and_an_open_ones_does() {
+        let (dir, head) = moved_main(&["alpha/new.rs"], |_| {});
+        let data = tempfile::tempdir().unwrap();
+        let store = BriefStore::open(data.path()).unwrap();
+        let mut stored = StoredBrief {
+            pr: 7,
+            head,
+            ..StoredBrief::default()
+        };
+        stored.brief.chapters = vec![studio_understanding::pr_brief::Chapter {
+            steps: vec![studio_understanding::pr_brief::Step {
+                on: vec!["alpha".into()],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }];
+        let project = dir.path().display().to_string();
+        assert_eq!(
+            view_of(&project, &store, stored.clone(), false).stale_base,
+            None
+        );
+        assert_eq!(
+            view_of(&project, &store, stored, true)
+                .stale_base
+                .map(|s| s.files),
+            Some(names(&["alpha/new.rs"]))
+        );
     }
 
     struct Fake(Cell<usize>, RefCell<Vec<String>>);

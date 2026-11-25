@@ -526,7 +526,10 @@ export type Guard = { parts: string[] };
 export type NewLaw = { id: string; on: string; text: string };
 // `partial`: the writer did not see the whole diff.
 // `expected`: the PR matched the project's pre-flight (#394).
-export type BriefView = { brief: StoredBrief; partial: boolean; expected?: Expected };
+// What main changed since an open PR's merge base that bears on its brief (#494): laws, links and flows at a lit part, lit parts whose
+// `paths` changed, and changed files of lit parts and root build manifests.
+export type StaleBase = { laws: string[]; links: string[]; flows: string[]; paths: string[]; files: string[] };
+export type BriefView = { brief: StoredBrief; partial: boolean; expected?: Expected; stale_base?: StaleBase };
 // What `pr_brief` answers: the brief, or that its write has started (it comes through `map-landed`).
 export type BriefOpened = BriefView | { writing: true };
 export type Fog = "thin" | "thick";

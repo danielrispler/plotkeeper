@@ -24,7 +24,7 @@ import { overturnNote, ratifyActions, ratifyDetail } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
 import { actorSize, alsoAt, type AlsoRow, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureMax, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, partialFactsLines, pickRun, type PickRun, playlist, plateSize, stageLabel, storySteps, type Rect, type Shape, stepCode, unconfirmed, unconfirmedReasons } from "./map-model.js";
-import type { BriefCheck, BriefFigure, BriefStep, BriefView, CatchUpOffer, CommitFiles, PrBrief, PrDiffArgs, RatifyRow, ReadyPr, StoredCatchUp } from "./types.js";
+import type { BriefCheck, BriefFigure, BriefStep, BriefView, CatchUpOffer, CommitFiles, PrBrief, PrDiffArgs, RatifyRow, ReadyPr, StaleBase, StoredCatchUp } from "./types.js";
 
 const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
 // The brief being played, as `pr_brief` returned it.
@@ -979,7 +979,35 @@ function buildPanel(view: MapView, list: BriefStep[]) {
   // A PR that closes the pre-flighted issue, or a ticket under it (#394): what Daniel expected against what it touched.
   const line = expectedLine(playing?.expected, view.doc);
   const facts = factsChip();
-  box.replaceChildren(leave, ...(facts ? [facts] : []), ...(line ? [text("p", line, "brief-expected")] : []), cols, foot, live);
+  const stale = staleBaseLine(playing?.stale_base);
+  box.replaceChildren(leave, ...(facts ? [facts] : []), ...(stale ? [stale] : []), ...(line ? [text("p", line, "brief-expected")] : []), cols, foot, live);
+}
+
+// The stale-base line (#494): what main changed since an open PR's merge base that the brief relies on, under the panel's head. The
+// server sends it for open PRs only, and only when something moved. Each kind is named once, its names left untranslated.
+function staleBaseLine(stale: StaleBase | undefined): HTMLElement | null {
+  if (!stale) return null;
+  const groups: [string, string, string[]][] = [
+    ["law", "laws", stale.laws],
+    ["link", "links", stale.links],
+    ["flow", "flows", stale.flows],
+    ["paths of", "paths of", stale.paths],
+    ["file", "files", stale.files],
+  ];
+  const shown = groups.filter(([, , names]) => names.length);
+  if (!shown.length) return null;
+  const line = text("p", "Main moved since this PR's base: ", "brief-stale");
+  shown.forEach(([one, many, names], n) => {
+    if (n) line.append(" · ");
+    line.append(`${names.length === 1 ? one : many} `);
+    // A kind shows its first three names; the rest are counted.
+    const list = text("span", names.slice(0, 3).join(", "), "brief-stale-names");
+    list.setAttribute("translate", "no");
+    line.append(list);
+    if (names.length > 3) line.append(` +${names.length - 3} more`);
+  });
+  line.title = "The brief compares against the merge base; check these against main";
+  return line;
 }
 
 // "Partial facts · N" (#491): what the brief was written without, one line per input, opening below the panel's head. Built with the
