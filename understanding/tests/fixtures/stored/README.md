@@ -34,3 +34,7 @@ loads it.
 facts"): `partial_facts` with a cut diff's cut and partial files and its bytes sent and cut, the claim check's error and the
 extensions no extractor reads. `understanding/tests/pr_brief.rs` loads it; the older samples, with no `partial_facts`, read with
 nothing missing.
+
+`pr-brief-v8/` holds a stored PR brief as written once code sorts Also touched by kind (#489, spec #477): `also_groups` with a No part,
+a Tests, an Ignored and an Other group, a file with its part, an ignored one and a tagged test with its law, and no model `also` lines.
+`understanding/tests/pr_brief.rs` loads it; the older samples, with `also` lines or none, read with no groups.

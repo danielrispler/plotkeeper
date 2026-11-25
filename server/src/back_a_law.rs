@@ -188,8 +188,20 @@ pub fn draft(
     for step in brief.brief.steps() {
         story.push(format!("- {}: {} {}", step.k, step.h, step.b));
     }
-    for also in &brief.brief.also {
-        story.push(format!("- also {}: {}", also.part, also.line));
+    for group in &brief.brief.also_groups {
+        let files: Vec<String> = group
+            .files
+            .iter()
+            .map(|f| match f.laws.as_slice() {
+                [] => f.path.clone(),
+                laws => format!("{} (law {})", f.path, laws.join(", ")),
+            })
+            .collect();
+        story.push(format!(
+            "- also touched, {}: {}",
+            group.kind.label(),
+            files.join(", ")
+        ));
     }
     let prompt = format!(
         "A pull request fixed a bug and left no test of a law of the system map behind it. You draft one new law that would \

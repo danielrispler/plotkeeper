@@ -670,11 +670,12 @@ fn the_chapters_must_light_every_required_part_and_each_its_declared_parts() {
         step("Now", &["alpha"]),
         step("Not in the plan", &["alpha"])
     ]);
-    b["also"] = json!([{ "part": "gamma", "line": "a line" }]);
     let brief = checked(&facts, b);
     let flags = flags_of(&brief).join("\n");
     assert!(
-        flags.contains("required part `gamma` lit by no chapter (in also: it keeps its fog)"),
+        flags.contains(
+            "required part `gamma` lit by no chapter (in Also touched: it keeps its fog)"
+        ),
         "{flags}"
     );
     assert!(
@@ -682,6 +683,111 @@ fn the_chapters_must_light_every_required_part_and_each_its_declared_parts() {
         "{flags}"
     );
     assert_eq!(brief.flags.len(), 1);
+}
+
+/// The map with ignored paths, for Also touched.
+fn ignoring_map() -> String {
+    MAP.replace(
+        r#""ignored": []"#,
+        r#""ignored": ["docs/", "scripts/", ".github/", "Cargo.lock", "README.md"]"#,
+    )
+}
+
+#[test]
+fn also_touched_sorts_the_files_of_no_lit_part_by_kind_the_first_match_winning() {
+    let mut s = source(&[
+        // Alpha is lit: none of its files, its tests included, is in Also touched.
+        "alpha/a.rs",
+        "alpha/tests/a.rs",
+        // Beta is touched and lit by no chapter.
+        "beta/b.rs",
+        "beta/tests/order.rs",
+        "beta/b.test.mjs",
+        "beta/conf.toml",
+        "beta/notes.md",
+        // Owned by no part and not ignored: No part, whatever its kind.
+        "loose/x_test.go",
+        // Ignored, of a kind: tagged "ignored".
+        "scripts/run.spec.ts",
+        ".github/ci.sh",
+        "Cargo.lock",
+        "docs/guide.txt",
+        "README.md",
+        // Ignored and of no kind.
+        "scripts/tool.sh",
+    ]);
+    s.map_text = ignoring_map();
+    s.diff = s.diff.replace(
+        "+line 0 of beta/tests/order.rs",
+        "+line 0 of beta/tests/order.rs\n+// @law: seen-gate",
+    );
+    s.tagged = vec![TaggedTest {
+        law: "seen-gate".into(),
+        path: "beta/tests/order.rs".into(),
+        test: "beta_keeps_order".into(),
+        changed: false,
+    }];
+    let facts = build_facts(&s).unwrap();
+    let brief = checked(&facts, single_story());
+    // Each group as its kind, its files (path, ignored) and its lines.
+    type Group<'a> = (AlsoKind, Vec<(&'a str, bool)>, usize);
+    let groups: Vec<Group> = brief
+        .also_groups
+        .iter()
+        .map(|g| {
+            (
+                g.kind,
+                g.files
+                    .iter()
+                    .map(|f| (f.path.as_str(), f.ignored))
+                    .collect(),
+                g.lines,
+            )
+        })
+        .collect();
+    assert_eq!(
+        groups,
+        [
+            (AlsoKind::NoPart, vec![("loose/x_test.go", false)], 3),
+            (
+                AlsoKind::Tests,
+                vec![
+                    ("beta/b.test.mjs", false),
+                    ("beta/tests/order.rs", false),
+                    ("scripts/run.spec.ts", true)
+                ],
+                10
+            ),
+            (
+                AlsoKind::Config,
+                vec![
+                    (".github/ci.sh", true),
+                    ("Cargo.lock", true),
+                    ("beta/conf.toml", false)
+                ],
+                9
+            ),
+            (
+                AlsoKind::Docs,
+                vec![
+                    ("README.md", true),
+                    ("beta/notes.md", false),
+                    ("docs/guide.txt", true)
+                ],
+                9
+            ),
+            (AlsoKind::Ignored, vec![("scripts/tool.sh", true)], 3),
+            (AlsoKind::Other, vec![("beta/b.rs", false)], 3),
+        ]
+    );
+    let tests = &brief.also_groups[1];
+    assert_eq!(
+        tests.files[1].laws,
+        ["seen-gate"],
+        "a tagged test names its law"
+    );
+    assert_eq!(tests.files[1].part.as_deref(), Some("beta"));
+    assert!(tests.files[0].laws.is_empty());
 }
 
 #[test]
@@ -1457,6 +1563,78 @@ fn a_stored_brief_reads_with_its_partial_facts_and_older_ones_with_nothing_missi
 
 // @law: old-stored-files-load
 #[test]
+fn a_stored_brief_reads_with_its_also_groups_and_older_ones_with_their_also_lines_and_none() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/stored");
+    let read = |name: &str| std::fs::read_to_string(dir.join(name)).unwrap();
+    let file = |path: &str, lines: usize| TouchedFile {
+        path: path.into(),
+        lines,
+        ..TouchedFile::default()
+    };
+    let stored: StoredBrief =
+        serde_json::from_str(&read("pr-brief-v8/stored-brief-also.json")).unwrap();
+    assert!(stored.brief.also.is_empty());
+    assert_eq!(
+        stored.brief.also_groups,
+        [
+            AlsoGroup {
+                kind: AlsoKind::NoPart,
+                files: vec![file("loose/x.rs", 3)],
+                lines: 3,
+            },
+            AlsoGroup {
+                kind: AlsoKind::Tests,
+                files: vec![
+                    TouchedFile {
+                        part: Some("beta".into()),
+                        laws: vec!["seen-gate".into()],
+                        ..file("beta/tests/order.rs", 4)
+                    },
+                    TouchedFile {
+                        ignored: true,
+                        ..file("scripts/run.spec.ts", 2)
+                    },
+                ],
+                lines: 6,
+            },
+            AlsoGroup {
+                kind: AlsoKind::Ignored,
+                files: vec![TouchedFile {
+                    ignored: true,
+                    ..file("scripts/tool.sh", 1)
+                }],
+                lines: 1,
+            },
+            AlsoGroup {
+                kind: AlsoKind::Other,
+                files: vec![TouchedFile {
+                    part: Some("beta".into()),
+                    ..file("beta/b.rs", 5)
+                }],
+                lines: 5,
+            },
+        ]
+    );
+    // Written before #489: the model's also line still reads, with no groups.
+    for older in [
+        "pr-brief-v3/stored-brief-full.json",
+        "pr-brief-v4/stored-brief-full.json",
+    ] {
+        let older: StoredBrief = serde_json::from_str(&read(older)).unwrap();
+        assert_eq!(older.brief.also[0].line, "a line", "{older:?}");
+        assert!(older.brief.also_groups.is_empty());
+    }
+    for older in [
+        "pr-brief-v5/stored-brief-guard.json",
+        "pr-brief-v7/stored-brief-partial.json",
+    ] {
+        let older: StoredBrief = serde_json::from_str(&read(older)).unwrap();
+        assert!(older.brief.also_groups.is_empty(), "{older:?}");
+    }
+}
+
+// @law: old-stored-files-load
+#[test]
 fn stored_records_read_with_their_calls_cache_tokens_and_older_ones_with_none() {
     let sample = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/stored/pr-brief-v6/pr-brief-records.jsonl");
@@ -1789,24 +1967,21 @@ fn the_check_block_and_the_risks_are_part_of_what_the_claim_check_reads_and_what
 }
 
 #[test]
-fn a_decision_and_an_also_line_can_be_flagged_and_rewritten() {
+fn a_decision_can_be_flagged_and_rewritten_and_a_models_also_line_is_dropped_unchecked() {
     let mut b = single_story();
     b["decisions"] = json!([{ "text": "Alpha chose order over speed." }]);
+    // The writer is no longer asked for "also" lines (#477); one it sends anyway is dropped, and code sorts Also touched.
     b["also"] = json!([{ "part": "beta", "line": "Beta changed a little." }]);
     let src = source(&["alpha/a.rs", "beta/b.rs"]);
-    let (_, stored, record, _) = run_entry(
+    let (writer, stored, record, _) = run_entry(
         vec![
-            Ok(checker(vec![
-                unsupported(
-                    "decision 1",
-                    "chose order over speed",
-                    "the PR names no such choice",
-                ),
-                unsupported("also 1", "changed a little", "nothing shows it"),
-            ])),
+            Ok(checker(vec![unsupported(
+                "decision 1",
+                "chose order over speed",
+                "the PR names no such choice",
+            )])),
             Ok(json!({ "items": [
-                { "id": "decision 1", "text": "Alpha chose to keep order." },
-                { "id": "also 1", "line": "Beta passes its list on." }
+                { "id": "decision 1", "text": "Alpha chose to keep order." }
             ]})
             .to_string()),
         ],
@@ -1819,11 +1994,19 @@ fn a_decision_and_an_also_line_can_be_flagged_and_rewritten() {
         Some("d1"),
         "the id stays"
     );
-    assert_eq!(stored.brief.also[0].line, "Beta passes its list on.");
-    // (The whole brief keeps the flag of the part no chapter lights: not an item a retry rewrites.)
-    assert!(stored.brief.also[0].flags.is_empty() && stored.brief.decisions[0].flags.is_empty());
+    assert!(stored.brief.decisions[0].flags.is_empty());
+    assert!(stored.brief.also.is_empty());
+    assert_eq!(stored.brief.also_groups.len(), 1);
+    assert_eq!(stored.brief.also_groups[0].files[0].path, "beta/b.rs");
+    let prompts = writer.prompts.borrow();
+    assert!(
+        prompts
+            .iter()
+            .all(|(_, p)| !p.contains("also 1") && !p.contains("\"also\"")),
+        "neither the writer nor the claim check is asked about also lines"
+    );
     assert!(stored.brief.steps().all(|s| s.flags.is_empty()));
-    assert_eq!(record.claim_flags_before.len(), 2);
+    assert_eq!(record.claim_flags_before.len(), 1);
 }
 
 #[test]

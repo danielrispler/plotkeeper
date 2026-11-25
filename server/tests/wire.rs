@@ -482,6 +482,8 @@ fn story() -> studio_understanding::pr_brief::Brief {
             line: "Nothing changed in core.".into(),
             flags: Vec::new(),
         }],
+        // The page reads them with Also touched's groups (#492), which fills them here.
+        also_groups: Vec::new(),
         unseen: vec!["Cargo.lock".into()],
         decisions: vec![
             Decision {

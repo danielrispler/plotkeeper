@@ -353,7 +353,7 @@ pub fn build_catch_up_facts(source: &CatchUpSource) -> Result<Facts, String> {
         diff: diff_text,
         chapters_mode: false,
         required: required.clone(),
-        also: vec![],
+        files: vec![],
         overview: false,
         parts: all_parts,
         actors: ids(&mj, "actors"),
