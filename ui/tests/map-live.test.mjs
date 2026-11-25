@@ -220,8 +220,13 @@ test("the home part is a Running session's in-flight edit's part, else the part 
   assert.equal(homePart(session("a", "needs_you", { turns, last_step: { tool: "Edit", detail: "/w/p/hook/h.rs" } }), placed, now, order), "core");
   // A tie goes to the map's reading order; a Worker's files count.
   const tie = [turn(["core/x.rs", ["ui/w.ts", "w1"], "server/s.rs"])];
-  assert.equal(homePart(session("a", "running", { turns: tie }), placed, now, order), "window");
-  assert.equal(homePart(session("a", "running", { turns: tie }), placed, now, ["server", "core", "window"]), "server");
+  assert.equal(homePart(session("a", "running", { agents: [worker("w1")], turns: tie }), placed, now, order), "window");
+  assert.equal(homePart(session("a", "running", { agents: [worker("w1")], turns: tie }), placed, now, ["server", "core", "window"]), "server");
+  // A finished Worker's files count no more than they do for the chips, so the home is always one of the chips' parts (outside review).
+  const done = [turn(["core/x.rs", ["server/s.rs", "w2"]])];
+  const finished = session("a", "running", { agents: [worker("w2", { status: "completed" })], turns: done });
+  assert.equal(homePart(finished, placed, now, order), "core");
+  assert.deepEqual(spotlightView({}, finished, placed, now, order).home, "core");
   // No part: no home.
   assert.equal(homePart(session("a", "running", { turns: [turn(["stray.txt"])] }), placed, now, order), null);
 });

@@ -171,7 +171,11 @@ function listClosed() {
 
 function openList(part: string, badge: HTMLElement, rows: Badge["rows"], byKeyboard: boolean) {
   const list = badgeList();
-  closeBadgeList();
+  // Showing the list again at once folds the close's queued `toggle` into this opening's, so the list it replaces is closed here.
+  if (listOpen()) {
+    closeBadgeList();
+    listClosed();
+  }
   listPart = part;
   listProject = currentMap()?.project ?? null;
   list.dataset.rows = "";

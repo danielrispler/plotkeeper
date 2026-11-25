@@ -130,15 +130,19 @@ export type Badge = { rows: BadgeRow[]; accent: boolean };
 const runningWorkers = (session: Session) => session.agents.filter((agent) => agent.kind === "worker" && agent.status === "running");
 const workerFile = (worker: Subagent, file: TurnFile) => file.agent === worker.id || file.agent === worker.name;
 
-// The parts a session's latest turn touches now, while within the cut: its own files, its running Workers' (a finished Worker's no longer
-// count, though the footprint keeps them), and its in-flight edit while Running.
-export function latestParts(session: Session, placed: Placement, now: number): string[] {
+// The paths of a session's latest turn that count now, while within the cut: its own files and its running Workers' (a finished Worker's no
+// longer count, though the footprint keeps them).
+function latestPaths(session: Session, now: number): string[] {
   const latest = session.turns.at(-1);
   const workers = runningWorkers(session);
   const files = latest && inCut(latest, now) ? (latest.files?.files ?? []) : [];
-  const counted = files.filter((file) => file.agent === null || workers.some((worker) => workerFile(worker, file))).map((file) => file.path);
+  return files.filter((file) => file.agent === null || workers.some((worker) => workerFile(worker, file))).map((file) => file.path);
+}
+
+// The parts a session's latest turn touches now: the parts of `latestPaths`, and its in-flight edit's while Running.
+export function latestParts(session: Session, placed: Placement, now: number): string[] {
   const flight = inFlight(session);
-  return partsOf([...counted, ...(flight ? [flight] : [])], placed);
+  return partsOf([...latestPaths(session, now), ...(flight ? [flight] : [])], placed);
 }
 
 // The badges of the parts, from the sessions in the session list's order: each marked session (`marked`) counted once on every part of its
@@ -163,15 +167,14 @@ export function sessionBadges(sessions: Session[], placed: Placement, now: numbe
 }
 
 // The home part of a session, where its line sits while it is spotlit: while Running, the part that owns the in-flight edit's file; else the
-// part holding most of its latest turn's changed files (Workers' included); a tie goes to the map's reading `order`. Null with no part.
+// part holding most of its latest turn's counted files (`latestPaths`, so always one of the chips' parts); a tie goes to the map's reading
+// `order`. Null with no part.
 export function homePart(session: Session, placed: Placement, now: number, order: string[]): string | null {
   const flight = inFlight(session);
   const owner = flight ? placed[flight]?.[0] : undefined;
   if (owner !== undefined) return owner;
-  const latest = session.turns.at(-1);
-  const files = latest && inCut(latest, now) ? (latest.files?.files ?? []) : [];
   const count = new Map<string, number>();
-  for (const file of files) for (const part of placed[file.path] ?? []) count.set(part, (count.get(part) ?? 0) + 1);
+  for (const path of latestPaths(session, now)) for (const part of placed[path] ?? []) count.set(part, (count.get(part) ?? 0) + 1);
   const rank = (part: string) => (order.includes(part) ? order.indexOf(part) : order.length);
   return [...count].sort(([a, x], [b, y]) => y - x || rank(a) - rank(b))[0]?.[0] ?? null;
 }

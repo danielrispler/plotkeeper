@@ -1888,6 +1888,15 @@ const mapBadgeList = (): Fixture =>
       if (!listOpen()) log("snap:fail after a press let go off the badge, its next press did not open its list");
       await __snapClick(badge("core"));
       await wait(60);
+      // Opening another badge's list from the keyboard while one is open leaves the first badge collapsed (outside review).
+      await __snapClick(badge("core"));
+      await wait(60);
+      badge("shell").focus();
+      await __snapKey("Enter");
+      await wait(60);
+      if (badge("core").getAttribute("aria-expanded") !== "false" || badge("shell").getAttribute("aria-expanded") !== "true") log("snap:fail a list opened over another left expanded: core " + badge("core").getAttribute("aria-expanded") + ", shell " + badge("shell").getAttribute("aria-expanded"));
+      await __snapKey("Escape");
+      await wait(60);
       // A row's press opens its story and closes the list, never the sheet.
       await __snapClick(badge("core"));
       await wait(60);
