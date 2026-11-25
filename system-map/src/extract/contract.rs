@@ -1,7 +1,8 @@
 //! The contract cases: what every registered extractor must do, run on each through the files of its [`Fixture`]. The
 //! cases build repositories from the source files `a`, `b` and `c`, which a kit's support files may name.
 
-use super::{Extractor, Output, Repo, registry::EXTRACTORS, run};
+use super::{Extractor, Output, Repo, read_parts, registry::EXTRACTORS, run};
+use crate::PartFiles;
 
 /// What an extractor gives the contract cases to build their repositories from.
 pub(crate) struct Fixture {
@@ -17,6 +18,8 @@ pub(crate) struct Fixture {
     pub(crate) missing_config: MissingConfig,
     /// The text of a config that does not parse.
     pub(crate) malformed_config: Option<&'static str>,
+    /// The path of a test file named for `name`, beside the sources, when the extractor names test files.
+    pub(crate) test_file: Option<fn(&str) -> String>,
     /// The cases the extractor opts out of, each with the reason the test prints.
     pub(crate) skip: Vec<(Case, &'static str)>,
 }
@@ -35,11 +38,21 @@ pub(crate) enum MissingConfig {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Case {
     MalformedConfig,
+    TestFile,
 }
 
 /// Writes `files` into a new folder, runs `extractor` there through the core with every file tracked, and gives what
 /// it found.
 fn run_on(extractor: &dyn Extractor, files: &[(String, Vec<u8>)]) -> Output {
+    run_with(extractor, files, &[]).0
+}
+
+/// [`run_on`], also giving which of `parts` the extractor reads.
+fn run_with(
+    extractor: &dyn Extractor,
+    files: &[(String, Vec<u8>)],
+    parts: &[PartFiles],
+) -> (Output, Vec<String>) {
     let dir = tempfile::tempdir().unwrap();
     for (file, bytes) in files {
         let path = dir.path().join(file);
@@ -48,7 +61,13 @@ fn run_on(extractor: &dyn Extractor, files: &[(String, Vec<u8>)]) -> Output {
     }
     let tracked: Vec<String> = files.iter().map(|(f, _)| f.clone()).collect();
     let repo = Repo::new(dir.path(), &tracked, |_| false);
-    run(&[extractor], &[extractor.name().to_string()], &repo)
+    let names = [extractor.name().to_string()];
+    let mut read: Vec<String> = read_parts(&[extractor], &names, &repo, parts)
+        .into_iter()
+        .map(String::from)
+        .collect();
+    read.sort();
+    (run(&[extractor], &names, &repo), read)
 }
 
 /// The support files and `a`, importing `b`, with `b` importing nothing.
@@ -173,5 +192,44 @@ fn a_malformed_config_gives_at_least_one_problem() {
             "{}: {found:?}",
             extractor.name()
         );
+    }
+}
+
+#[test]
+fn a_test_file_importing_another_file_gives_no_pair_and_does_not_make_its_part_read() {
+    for (extractor, kit) in kits() {
+        let Some(test_file) = kit.test_file else {
+            assert!(
+                skips(&kit, Case::TestFile),
+                "{}: names no test file, so skip the case with a reason",
+                extractor.name()
+            );
+            continue;
+        };
+        let (a, b, test) = ((kit.source)("a"), (kit.source)("b"), test_file("c"));
+        let mut files = anchor_files(&kit);
+        files.push((test.clone(), (kit.importing)(&test, &b).into_bytes()));
+        let part = |id: &str, files: &[&String]| PartFiles {
+            id: id.into(),
+            files: files.iter().map(|f| f.to_string()).collect(),
+        };
+        let parts = [part("tests", &[&test]), part("code", &[&a, &b])];
+        let (found, read) = run_with(extractor, &files, &parts);
+        let ends: Vec<(&str, &str)> = found
+            .pairs
+            .iter()
+            .map(|p| (p.from.as_str(), p.to.as_str()))
+            .collect();
+        assert!(
+            ends.contains(&(a.as_str(), b.as_str())),
+            "{}: the anchor pair is missing: {ends:?}",
+            extractor.name()
+        );
+        assert!(
+            ends.iter().all(|(from, _)| *from != test),
+            "{}: {ends:?}",
+            extractor.name()
+        );
+        assert_eq!(read, ["code"], "{}", extractor.name());
     }
 }

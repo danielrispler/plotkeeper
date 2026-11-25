@@ -20,6 +20,21 @@ impl Extractor for TypescriptImports {
             .is_some_and(|(_, ext)| SCRIPTS.contains(&ext))
     }
 
+    /// A file named `*.test.*` or `*.spec.*`, or under a folder named `__tests__`, `test` or `tests` at any depth: the
+    /// defaults of Jest, Vitest, Mocha and Node's test runner, and the folders a workspace package keeps its tests in.
+    fn is_test(&self, _repo: &Repo, file: &str) -> bool {
+        let mut segments: Vec<&str> = file.split('/').collect();
+        let base = segments.pop().unwrap_or(file);
+        let names: Vec<&str> = base.split('.').collect();
+        segments
+            .iter()
+            .any(|dir| matches!(*dir, "__tests__" | "test" | "tests"))
+            || (names.len() > 2
+                && names[1..names.len() - 1]
+                    .iter()
+                    .any(|name| matches!(*name, "test" | "spec")))
+    }
+
     fn extract(&self, repo: &Repo) -> Output {
         let (pairs, problems) = typescript_imports(repo);
         Output {
@@ -48,6 +63,7 @@ impl Extractor for TypescriptImports {
                 file: "package.json",
             },
             malformed_config: None,
+            test_file: Some(|name| format!("{name}.test.ts")),
             skip: vec![(
                 Case::MalformedConfig,
                 "a package.json that does not parse declares no workspace packages, and only bare imports miss them",

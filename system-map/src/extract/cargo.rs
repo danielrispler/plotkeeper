@@ -36,7 +36,7 @@ impl Extractor for Cargo {
 
     #[cfg(test)]
     fn fixture(&self) -> super::contract::Fixture {
-        use super::contract::{Fixture, MissingConfig};
+        use super::contract::{Case, Fixture, MissingConfig};
         // Each crate's library is one shared file, so a source is its manifest alone.
         fn manifest(from: &str, deps: &str) -> String {
             let name = from
@@ -72,7 +72,11 @@ impl Extractor for Cargo {
                 says: "the repository has no Cargo.toml",
             },
             malformed_config: Some("[workspace\n"),
-            skip: Vec::new(),
+            test_file: None,
+            skip: vec![(
+                Case::TestFile,
+                "a manifest reader has no test files; it leaves dev-dependencies out instead",
+            )],
         }
     }
 }

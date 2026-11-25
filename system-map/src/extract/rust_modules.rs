@@ -40,7 +40,7 @@ impl Extractor for RustModules {
 
     #[cfg(test)]
     fn fixture(&self) -> super::contract::Fixture {
-        use super::contract::{Fixture, MissingConfig};
+        use super::contract::{Case, Fixture, MissingConfig};
         Fixture {
             support: vec![
                 (
@@ -57,7 +57,11 @@ impl Extractor for RustModules {
             plain: |_| "pub struct Thing;\n".into(),
             missing_config: MissingConfig::Fallback { file: "Cargo.toml" },
             malformed_config: Some("[package\n"),
-            skip: Vec::new(),
+            test_file: None,
+            skip: vec![(
+                Case::TestFile,
+                "Rust reads its tests: files under tests/ and #[cfg(test)] code make pairs (map.md)",
+            )],
         }
     }
 }

@@ -122,9 +122,9 @@ pub(crate) struct Output {
 }
 
 /// Runs the extractors `names` names from `registry`, in that order, and holds their output to the contract: a pair
-/// whose ends are not both tracked, or from a file to itself, is dropped, and a pair two extractors (or one, twice) find
-/// is kept once, sorted, with its lowest line, and as a declaration only if every finding of it is one. A name the
-/// registry lacks is a problem.
+/// whose ends are not both tracked, from a file to itself, or from a file the extractor names a test file is dropped,
+/// and a pair two extractors (or one, twice) find is kept once, sorted, with its lowest line, and as a declaration only
+/// if every finding of it is one. A name the registry lacks is a problem.
 pub(crate) fn run(registry: &[&dyn Extractor], names: &[String], repo: &Repo) -> Output {
     let mut problems = Vec::new();
     // Each pair's ends, with its lowest line and whether every finding of it is a declaration.
@@ -145,7 +145,11 @@ pub(crate) fn run(registry: &[&dyn Extractor], names: &[String], repo: &Repo) ->
         problems.extend(found.problems);
         for pair in found.pairs {
             let tracked = |f: &str| repo.files.contains(f);
-            if pair.from == pair.to || !tracked(&pair.from) || !tracked(&pair.to) {
+            if pair.from == pair.to
+                || !tracked(&pair.from)
+                || !tracked(&pair.to)
+                || extractor.is_test(repo, &pair.from)
+            {
                 continue;
             }
             pairs
