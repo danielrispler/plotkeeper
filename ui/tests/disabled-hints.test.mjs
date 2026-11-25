@@ -33,7 +33,7 @@ globalThis.setInterval = /** @type {any} */ (() => 0);
 
 const { studio } = await import("../../dist/state.js");
 const { startWatching } = await import("../../dist/answer.js");
-const { questionElement } = await import("../../dist/questions.js");
+const { questionElement, focusSend } = await import("../../dist/questions.js");
 const { askAnchor } = await import("../../dist/ask.js");
 const { exploreNode } = await import("../../dist/micro-world.js");
 const { hintOf } = await import("../../dist/dom.js");
@@ -59,6 +59,30 @@ test("the Send of a question card is aria-disabled with its reason as a hint unt
   assert.equal(send.getAttribute("disabled"), null);
   assert.equal(hintOf(send)?.textContent, "Choose an answer to every question first");
   assert.equal(send.getAttribute("title"), null);
+});
+
+test("a card's Send takes the answer keys' focus only once every question has a choice", () => {
+  const question = {
+    tool_use_id: "t1",
+    answer: "open",
+    questions: [
+      { question: "C?", header: "c", multiSelect: false, options: [{ label: "x", description: null }] },
+      { question: "D?", header: "d", multiSelect: false, options: [{ label: "y", description: null }] },
+    ],
+  };
+  const card = /** @type {any} */ (questionElement(/** @type {any} */ (question)));
+  const [send] = card.find("button").filter((button) => button.className.includes("send"));
+  let focused = 0;
+  send.focus = () => focused++;
+  const [first, second] = card.find("button").filter((button) => !button.className.includes("send") && button.text !== "Answer in the terminal");
+  first.listeners.click();
+  focusSend(card);
+  assert.ok(disabled(send), "one question still waits for a choice");
+  assert.equal(focused, 0, "an unavailable Send does not take focus");
+  second.listeners.click();
+  focusSend(card);
+  assert.ok(!disabled(send));
+  assert.equal(focused, 1);
 });
 
 test("Ask on an anchor is aria-disabled while it waits, ignores a second ask, and its hint says so", async () => {

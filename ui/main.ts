@@ -32,6 +32,7 @@ import { besideSheet, closePanel, panelShown, showHistory, showPanel, startPanel
 import { showPalette } from "./palette.js";
 import { projectOfCwd, selectedProject, sidebarOrder } from "./projects.js";
 import { narrowBelow, selectedView } from "./map-model.js";
+import { focusSend } from "./questions.js";
 import { reload } from "./settings.js";
 import { setFocus, setMissed, setProjects, setSettings, studio } from "./state.js";
 import { askDelete, drawFeed, forgetStories, lastHeadline, showCards, showTurn, showView, startStory, turnHeadline } from "./story.js";
@@ -118,7 +119,7 @@ function answer(n: number) {
   const open = [...dock.querySelectorAll("ul.choices")].find((list) => list.querySelector("button") && !list.querySelector('[aria-pressed="true"]'));
   const buttons = (open ?? dock.querySelector(".decision .answer-buttons"))?.querySelectorAll<HTMLButtonElement>("button");
   buttons?.[n - 1]?.click();
-  dock.querySelector<HTMLButtonElement>(".send:not([disabled])")?.focus();
+  focusSend(dock);
 }
 
 const named: Record<string, (arg?: string) => void> = {

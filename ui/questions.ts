@@ -115,6 +115,11 @@ export function decisionElement(ask: Ask): HTMLElement {
   return block;
 }
 
+/** The card's "Send", in `dock`, takes focus for Enter once it is available, every question having a choice. */
+export function focusSend(dock: HTMLElement) {
+  dock.querySelector<HTMLButtonElement>('.send:not([aria-disabled="true"])')?.focus();
+}
+
 // "Send" is enabled once every question has a choice; disabled, its hover says so.
 function readySend(block: HTMLElement, ready: boolean) {
   const send = block.querySelector<HTMLButtonElement>(".send");
