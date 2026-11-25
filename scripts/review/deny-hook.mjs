@@ -5,7 +5,8 @@
 // trial (#502): agy runs this hook inside each subagent too, so a subagent can only read as well, and
 // a subagent hands its report back only through `send_message` (agy's subagent prompt: its answer
 // "is NOT automatically relayed"), which touches no file.
-// Logs each decision (never file contents) to argv[3].
+// Logs each decision (never file contents) to argv[3], with the calling agent's conversation id,
+// so a run can tell its subagents' calls from its own.
 import { readFileSync, appendFileSync, realpathSync } from "node:fs";
 import { resolve, sep } from "node:path";
 
@@ -17,7 +18,7 @@ try {
   const event = JSON.parse(readFileSync(0, "utf8"));
   const call = event.toolCall ?? {};
   const args = call.args ?? {};
-  seen = { tool: call.name, path: args.Path, command: args.CommandLine };
+  seen = { tool: call.name, path: args.Path, command: args.CommandLine, conversation: event.conversationId };
   if (call.name === "finish" || (subagents && (call.name === "invoke_subagent" || call.name === "send_message"))) verdict = { decision: "allow" };
   else if (call.name === "read_file" && typeof args.Path === "string") {
     const base = realpathSync(root);

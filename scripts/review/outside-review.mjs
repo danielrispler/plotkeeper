@@ -362,6 +362,12 @@ const main = async (opts) => {
     const logged = safe(() => readFileSync(log, "utf8"), "").split("\n");
     const decisions = logged.flatMap((line) => safe(() => [JSON.parse(line)], []));
     const result = outcome({ ...ran, reads: decisions.filter((d) => d.decision === "allow" && d.tool === "read_file").length });
+    // Each agent calls the hook under its own conversation id: every one past the reviewer's is a
+    // subagent that ran, which `usage` may not count (#502).
+    const agents = new Set(decisions.map((d) => d.conversation).filter(Boolean)).size;
+    const subagents = opts.subagents
+      ? { subagents: { started: decisions.filter((d) => d.decision === "allow" && d.tool === "invoke_subagent").length, ran: Math.max(agents - 1, 0) } }
+      : {};
     const dirty = safe(() => git("-C", repo, "status", "--porcelain"), "");
     if (dirty) notes.push(`warning: the review changed its throwaway tree, so the deny hook let a write through:\n${dirty}`);
     if (safe(() => git("status", "--porcelain"), before) !== before) notes.push("warning: the reviewed checkout changed during the review");
@@ -371,9 +377,9 @@ const main = async (opts) => {
       const quotaAfter = quotaLeft();
       const denied = decisions.filter((d) => d.decision === "deny").map(({ tool, path, command }) => ({ tool, path, command }));
       const { findings, tokens, seconds } = result;
-      const report = { model: opts.model, base, head, why: decided.why, findings, tokens, seconds, denied, quotaBefore, quotaAfter, notes };
+      const report = { model: opts.model, base, head, why: decided.why, findings, tokens, seconds, ...subagents, denied, quotaBefore, quotaAfter, notes };
       kept = { name: `${name}.json`, text: JSON.stringify(report, null, 2) + "\n" };
-      cost = { findings: findings.length, tokens, seconds, quotaBefore, quotaAfter };
+      cost = { findings: findings.length, tokens, seconds, ...subagents, quotaBefore, quotaAfter };
       writeFileSync(join(opts.out, kept.name), kept.text);
       // A trial keeps agy's whole answer too, to show what its `usage` counts (#502).
       if (opts.variant) writeFileSync(join(opts.out, `${name}-agy.json`), ran.stdout);

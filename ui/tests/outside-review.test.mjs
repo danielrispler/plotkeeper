@@ -333,11 +333,17 @@ const dir = process.env.FAKE_AGY_DIR;
 writeFileSync(join(dir, "agy-env.json"), JSON.stringify({ cwd: process.cwd(), keys: Object.keys(process.env) }));
 const hooks = JSON.parse(readFileSync(".agents/hooks.json", "utf8"));
 const command = hooks.readonly.PreToolUse[0].hooks[0].command;
-const call = (name, args) => execSync(command, { input: JSON.stringify({ cwd: process.cwd(), toolCall: { name, args } }) });
+const call = (name, args, conversationId = "reviewer") => execSync(command, { input: JSON.stringify({ cwd: process.cwd(), conversationId, toolCall: { name, args } }) });
 const arg = (name) => process.argv[process.argv.indexOf(name) + 1];
 const run = { cwd: process.cwd(), model: arg("--model"), hook: command, prompt: arg("-p"), worktree: existsSync("repo/.git") };
 appendFileSync(join(dir, "agy-runs.jsonl"), JSON.stringify(run) + "\\n");
 call("read_file", { Path: join(process.cwd(), "review/diff.patch") });
+// With --subagents, starts two subagents, and one of them reads under its own conversation id.
+if (command.endsWith("'--subagents'")) {
+  call("invoke_subagent", {});
+  call("invoke_subagent", {});
+  call("read_file", { Path: join(process.cwd(), "review/diff.patch") }, "subagent-1");
+}
 // Answers only once two runs have started, so a trial whose runs are not parallel fails.
 for (let i = 0; process.env.FAKE_AGY === "together"; i++) {
   if (readFileSync(join(dir, "agy-runs.jsonl"), "utf8").trim().split("\\n").length >= 2) break;
@@ -511,7 +517,7 @@ test("a reviewed run and a skipped run each leave one line in the main checkout'
   assert.equal(s.git("status", "--porcelain"), "");
 });
 
-test("a trial run records its variant and trial, its quota as shared, names its findings file after its variant and keeps agy's whole answer beside it", () => {
+test("a trial run records its variant and trial, its quota as shared, names its findings file after its variant and keeps agy's whole answer beside it, and counts the subagents it started and those that ran", () => {
   const s = scratch({ ignored: true });
   const head = s.git("rev-parse", "HEAD").trim().slice(0, 9);
   const ran = spawnSync(process.execPath, s.args(["--subagents", "--variant", "subagents", "--trial", "t1"]), {
@@ -525,6 +531,8 @@ test("a trial run records its variant and trial, its quota as shared, names its 
   const answer = JSON.parse(readFileSync(join(s.dir, "out", `outside-review-${head}-subagents-agy.json`), "utf8"));
   assert.equal(answer.status, "SUCCESS");
   const [line] = runsOf(s.repo);
+  assert.deepEqual(line.subagents, { started: 2, ran: 1 });
+  assert.deepEqual(JSON.parse(readFileSync(join(s.dir, "out", `outside-review-${head}-subagents.json`), "utf8")).subagents, { started: 2, ran: 1 });
   assert.equal(line.variant, "subagents");
   assert.equal(line.trial, "t1");
   assert.equal(line.quotaShared, true);
