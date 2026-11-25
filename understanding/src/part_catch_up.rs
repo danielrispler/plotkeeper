@@ -14,7 +14,7 @@
 use crate::millis;
 use crate::pr_brief::{
     BUDGET, BriefRecord, BriefWriter, BudgetRecord, CUT_NOTE_ROOM, CheckContext, Facts, FileDiff,
-    PrMeta, Shape, TaggedTest, check_brief, cut_to, facts_block, flow_key, gather, ids,
+    PrMeta, Shape, TaggedTest, check_brief, cut_note, cut_to, facts_block, flow_key, gather, ids,
     parse_reply, prompt, section, split_diff, timed_write_facts,
 };
 use crate::pr_brief::{Brief, CallKind, INSTRUCTIONS, PartialFacts};
@@ -164,7 +164,10 @@ pub fn build_catch_up_facts(source: &CatchUpSource) -> Result<Facts, String> {
     }
     let room = BUDGET.saturating_sub(used(&sections) + CUT_NOTE_ROOM);
     let (diff_text, cut, mut budget) = fit_diff(&files, room);
-    sections.push(("DIFF NOT SENT".into(), cut_note(&cut)));
+    sections.push((
+        "DIFF NOT SENT".into(),
+        cut_note(&cut, "nothing: the whole diff of the part is below"),
+    ));
     sections.push(("DIFF".into(), diff_text.clone()));
     let text: String = sections.iter().map(|(n, t)| section(n, t)).collect();
     budget.total_bytes = text.len();
@@ -418,28 +421,6 @@ fn fit_diff(files: &[&FileDiff], mut room: usize) -> (String, Vec<String>, Budge
         }
     }
     (diff_text, cut, budget)
-}
-
-/// DIFF NOT SENT: the files not fully sent, as many as fit in its room.
-fn cut_note(cut: &[String]) -> String {
-    if cut.is_empty() {
-        "nothing: the whole diff of the part is below".to_string()
-    } else {
-        let mut t = format!(
-            "{} files not fully sent; do not guess what they hold:\n",
-            cut.len()
-        );
-        for (i, line) in cut.iter().enumerate() {
-            if t.len() + line.len() + 1 > CUT_NOTE_ROOM - 200 {
-                // Writing to a `String` cannot fail.
-                writeln!(t, "- ... and {} more", cut.len() - i).ok();
-                break;
-            }
-            t += line;
-            t += "\n";
-        }
-        t
-    }
 }
 
 /// The PR brief's code checks, plus the catch-up's own: its one story is 3 or 4 steps. Returns how many items are flagged.

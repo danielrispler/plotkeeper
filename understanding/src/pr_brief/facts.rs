@@ -1,8 +1,9 @@
 //! The facts: what the writer reads and what the checks need, and the diff and map helpers that build them.
 
-use super::{TaggedTest, TouchedFile};
+use super::{CUT_NOTE_ROOM, TaggedTest, TouchedFile};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 /// What the facts builder knows that the checks need.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CheckContext {
@@ -283,6 +284,28 @@ pub(crate) fn ids(map: &serde_json::Value, key: &str) -> BTreeSet<String> {
         .flatten()
         .filter_map(|x| x["id"].as_str().map(String::from))
         .collect()
+}
+
+/// DIFF NOT SENT: the files not fully sent, as many as fit in its room, or `whole` when every file was.
+pub(crate) fn cut_note(cut: &[String], whole: &str) -> String {
+    if cut.is_empty() {
+        whole.to_string()
+    } else {
+        let mut t = format!(
+            "{} files not fully sent; do not guess what they hold:\n",
+            cut.len()
+        );
+        for (i, line) in cut.iter().enumerate() {
+            if t.len() + line.len() + 1 > CUT_NOTE_ROOM - 200 {
+                // Writing to a `String` cannot fail.
+                writeln!(t, "- ... and {} more", cut.len() - i).ok();
+                break;
+            }
+            t += line;
+            t += "\n";
+        }
+        t
+    }
 }
 
 /// `text` cut to `max` bytes at a character boundary, with a note of what was cut.
