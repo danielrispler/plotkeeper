@@ -131,10 +131,19 @@ test("notesFor fails on a missing version, including a prefix of one present", (
   assert.throws(() => notesFor(changelog, "0.1"), /no section for 0\.1$/);
 });
 
+// A note line: one sentence ending with its PR number, or with all the numbers of the PRs that share it.
+const noteLine = /^- .+\(#\d+(, #\d+)*\)$/m;
+
+test("a note line ends with one PR number or several", () => {
+  assert.match("- A fix. (#7)", noteLine);
+  assert.match("- One change. (#468, #470)", noteLine);
+  assert.doesNotMatch("- No number.", noteLine);
+});
+
 test("CHANGELOG.md has notes for the npm package's current version", () => {
   const { version } = JSON.parse(readFileSync(resolve(root, "npm/package.json"), "utf8"));
   const notes = notesFor(readFileSync(resolve(root, "CHANGELOG.md"), "utf8"), version);
-  assert.match(notes, /^- .+\(#\d+\)$/m, `CHANGELOG.md's ${version} section has no line ending with (#N)`);
+  assert.match(notes, noteLine, `CHANGELOG.md's ${version} section has no line ending with (#N) or (#N, #M)`);
 });
 
 const manifestAt = (version) => npmManifest.replace("0.1.2", version);
@@ -151,13 +160,16 @@ const commit = "a".repeat(40);
 const other = "b".repeat(40);
 
 // A stand-in for git and gh: `tag` is the commit origin's v0.2.0 tag points at (none when absent), `release` whether
-// v0.2.0's GitHub Release exists. It answers the reads and records every command that would change something.
+// v0.2.0's GitHub Release exists, or "error" when gh cannot tell (signed out, offline). It answers the reads and records every command that would change something.
 function fakeRun({ tag, release }) {
   const changes = [];
   const run = (command, args, input) => {
     const line = [command, ...args].join(" ");
     if (line.startsWith("git ls-remote ")) return { status: 0, stdout: tag ? `${tag}\trefs/tags/v0.2.0\n` : "" };
-    if (line === "gh release view v0.2.0") return { status: release ? 0 : 1, stdout: "" };
+    if (line === "gh release view v0.2.0") {
+      if (release === "error") return { status: 1, stdout: "", stderr: "HTTP 401: Bad credentials\n" };
+      return release ? { status: 0, stdout: "" } : { status: 1, stdout: "", stderr: "release not found\n" };
+    }
     changes.push(input === undefined ? line : `${line} <<< ${input}`);
     return { status: 0, stdout: "" };
   };
@@ -184,6 +196,12 @@ test("tagAndRelease fails on a tag at another commit and changes nothing", () =>
 test("tagAndRelease leaves an existing Release as it is", () => {
   const fake = fakeRun({ tag: commit, release: true });
   release(fake);
+  assert.deepEqual(fake.changes, []);
+});
+
+test("tagAndRelease fails when gh cannot tell whether the Release exists, and creates nothing", () => {
+  const fake = fakeRun({ tag: commit, release: "error" });
+  assert.throws(() => release(fake), /gh release view v0\.2\.0 failed: HTTP 401/);
   assert.deepEqual(fake.changes, []);
 });
 

@@ -77,22 +77,24 @@ export function checkReleaseCommit(parentManifest, headManifest) {
 // The commit origin's `tag` points at, or null when origin has no such tag. An annotated tag lists its commit on a
 // second line, `refs/tags/<tag>^{}`, which wins over the tag object's own line.
 function taggedCommit(run, tag) {
-  const { status, stdout } = run("git", ["ls-remote", "--tags", "origin", `refs/tags/${tag}`, `refs/tags/${tag}^{}`]);
-  if (status !== 0) throw new Error(`git ls-remote origin failed for ${tag}`);
+  const { status, stdout, stderr } = run("git", ["ls-remote", "--tags", "origin", `refs/tags/${tag}`, `refs/tags/${tag}^{}`]);
+  if (status !== 0) throw new Error(`git ls-remote origin failed for ${tag}: ${stderr}`);
   const refs = new Map(stdout.split("\n").filter(Boolean).map((line) => line.split("\t").reverse()));
   return refs.get(`refs/tags/${tag}^{}`) ?? refs.get(`refs/tags/${tag}`) ?? null;
 }
 
 // Tags `v<version>` at `commit` on origin and creates its GitHub Release from the changelog's section. Idempotent: a
 // tag already at `commit` is kept, one at another commit fails, and an existing Release is left as it is. `run(command,
-// args, input)` runs git or gh and returns `{ status, stdout }`.
+// args, input)` runs git or gh and returns `{ status, stdout, stderr }`.
 export function tagAndRelease({ version, commit, changelog, run }) {
   const notes = notesFor(changelog, version);
   const tag = `v${version}`;
   const tagged = taggedCommit(run, tag);
   if (tagged === null) run("git", ["push", "origin", `${commit}:refs/tags/${tag}`]);
   else if (tagged !== commit) throw new Error(`${tag} already points at ${tagged}, not ${commit}`);
-  if (run("gh", ["release", "view", tag]).status === 0) return;
+  const view = run("gh", ["release", "view", tag]);
+  if (view.status === 0) return;
+  if (!/release not found/.test(view.stderr ?? "")) throw new Error(`gh release view ${tag} failed: ${view.stderr}`);
   run("gh", ["release", "create", tag, "--verify-tag", "--title", tag, "--notes-file", "-"], notes);
 }
 
@@ -104,16 +106,16 @@ function runner(dryRun) {
       console.log(`would run: ${[command, ...args].join(" ")}${input === undefined ? "" : `, with notes:\n${input}`}`);
       return { status: 0, stdout: "" };
     }
-    const result = spawnSync(command, args, { input, encoding: "utf8", stdio: ["pipe", "pipe", "inherit"] });
+    const result = spawnSync(command, args, { input, encoding: "utf8" });
     if (result.error) throw result.error;
-    if (change && result.status !== 0) throw new Error(`${command} ${args.join(" ")} failed`);
+    if (change && result.status !== 0) throw new Error(`${command} ${args.join(" ")} failed: ${result.stderr}`);
     return result;
   };
 }
 
 function git(args) {
-  const { status, stdout } = runner(false)("git", args);
-  if (status !== 0) throw new Error(`git ${args.join(" ")} failed`);
+  const { status, stdout, stderr } = runner(false)("git", args);
+  if (status !== 0) throw new Error(`git ${args.join(" ")} failed: ${stderr}`);
   return stdout;
 }
 
