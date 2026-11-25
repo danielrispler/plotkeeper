@@ -762,8 +762,17 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 /* A list row hovered lights its session's chips (#382): a warm ring, as focus has on the map; a needs-you chip keeps its colour. */
 .agent-chip.lit { color: var(--fg); box-shadow: 0 0 0 var(--mark) var(--ring-warm); }
 .agent-chip.needs-you.lit { color: var(--needs-you); box-shadow: 0 0 0 var(--mark) var(--needs-you-line); }
-#map-not-placed:not(:empty) { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
-#map-not-placed .side-title { margin: 0; font-size: var(--size-xs); font-weight: 400; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
+/* The not placed list (#472): one line, "N not placed", that a click opens. Its line has a fixed height, and while a sheet is open the
+   slot keeps that height even with no agent in it, so agents joining and leaving never move the sheet under it while the list is closed. */
+#map-not-placed { --not-placed-line: 1.5rem; }
+.map-side:has(> #map-sheet:not(:empty)) > #map-not-placed:empty { display: block; block-size: var(--not-placed-line); }
+#map-not-placed .side-title { display: flex; align-items: center; block-size: var(--not-placed-line); margin: 0; font-size: var(--size-xs); font-weight: 400;
+                              letter-spacing: .12em; text-transform: uppercase; color: var(--faint); cursor: pointer; }
+#map-not-placed .side-title:hover { color: var(--muted); }
+#map-not-placed .side-title::before { content: "\25B8" / ""; display: inline-block; width: var(--glyph); margin-inline-end: var(--sp-4); }
+#map-not-placed details[open] > .side-title::before { content: "\25BE" / ""; }
+#map-not-placed .not-placed-asking { margin-inline-start: .5ch; font-weight: 600; color: var(--needs-you); }
+#map-not-placed .not-placed-chips { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); padding-block-start: var(--sp-3); }
 
 /* The PR brief (spec #334, ticket #339): treatment C. One focus per step in a panel at the foot of the map, which the camera leaves room for; the
    parts a step lights stand out and the rest of the map dims; a light runs the step's links. Never a colour of its own: the warm light of a brief.

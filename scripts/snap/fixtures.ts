@@ -2890,6 +2890,42 @@ ${writerStatusAfter("Keychain refused")}
   // The Map view busy (#311): a session on two parts, a Needs you one, a Worker with its own chip, and the not placed list (no files yet,
   // agy, status-only Codex, ignored-only edits); a Helper and a finished session never show.
   mapBusy: () => mapBusy(false),
+  // An open sheet keeps still while agents join and leave the not placed list (#472): the list is one line, "N not placed", whose
+  // height is kept while a sheet is open, even at none; a click opens it, and it stays open across the next change.
+  mapSheetStill: (): Fixture => {
+    const idle = session("s7", "#55 · Delete default", "your_turn");
+    const running = (id: string, name: string, state: "running" | "needs_you" = "running") => session(id, name, state, { turns: [] });
+    const one = [idle, running("s3", "#312 · CI marks")];
+    const three = [...one, running("s4", "#314 · Runs"), running("s6", "#313 · Docs", "needs_you")];
+    const f = mapOpened(`
+      const top = () => document.getElementById("map-sheet").getBoundingClientRect().top;
+      const line = () => document.querySelector("#map-not-placed summary")?.textContent ?? "";
+      const show = async (sessions) => { window.__snapEmit("sessions", sessions); await wait(150); };
+      document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(300);
+      if (!document.querySelector("#map-sheet .sheet")) return log("snap:fail the sheet did not open");
+      const still = top();
+      for (const [sessions, want] of [[${JSON.stringify(one)}, "1 not placed"], [${JSON.stringify(three)}, "3 not placed · 1 needs you"], [${JSON.stringify([idle])}, ""]]) {
+        await show(sessions);
+        if (line() !== want) log("snap:fail the not placed line says " + JSON.stringify(line()) + ", not " + JSON.stringify(want));
+        if (top() !== still) log("snap:fail the sheet moved from " + still + " to " + top() + " at " + JSON.stringify(want || "none"));
+      }
+      await show(${JSON.stringify(three)});
+      const chip = document.querySelector("#map-not-placed .agent-chip");
+      if (!chip || chip.checkVisibility()) log("snap:fail the closed line shows its chips");
+      document.querySelector("#map-not-placed summary").click();
+      await wait(100);
+      await show(${JSON.stringify(one)});
+      const open = [...document.querySelectorAll("#map-not-placed .agent-chip")].filter((c) => c.checkVisibility()).map((c) => c.textContent);
+      if (open.join() !== "#312 · CI marks") log("snap:fail the opened list did not stay open with its chips: " + open.join());
+      // Emptied and filled again, it comes back closed, so it never drops the sheet by a whole list without a click.
+      await show(${JSON.stringify([idle])});
+      await show(${JSON.stringify(three)});
+      if (document.querySelector("#map-not-placed details")?.open) log("snap:fail the list came back open after it emptied");
+      if (top() !== still) log("snap:fail the sheet moved when the list came back: " + top());
+      log("sheet still ok");`, { map_state: mapState(), map_place: {} });
+    return { ...f, sessions: [idle], selected: { session: idle, agent: null }, snapDone: "sheet still ok" };
+  },
   // A list row hovered lights its session's chips on the map (#382): #311's on Core and Window, and its Worker's on the Shell.
   mapListHover: (): Fixture => {
     const f = mapBusy(false);

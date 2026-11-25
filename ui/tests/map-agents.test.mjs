@@ -1,7 +1,7 @@
 // Live agents on the Map view's parts and its "not placed" list (spec danielrispler/plotkeeper#306, ticket #311), run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { arrange, litAgents, liveAgents } from "../../dist/map-agents.js";
+import { arrange, litAgents, liveAgents, notPlacedLine } from "../../dist/map-agents.js";
 
 const file = (path, agent = null) => ({ root: "/w/p", path, from: null, added: 1, removed: 0, agent });
 const turn = (files) => ({ started_at: 1, ended_at: null, prompt: "", id: null, message: null, checks: [], listed: [], files: files === null ? null : { files, merged: 0 } });
@@ -104,4 +104,12 @@ test("the session open in the panel keeps its chips lit, with a hovered row's", 
   assert.deepEqual(litAgents(live, null, "a"), ["a", "a/w"]);
   assert.deepEqual(litAgents(live, "b", "a"), ["a", "a/w", "b"]);
   assert.deepEqual(litAgents(live, null, null), []);
+});
+
+test("the not placed line counts the agents no part holds, and says how many need you (#472)", () => {
+  const agent = (key, needsYou = false) => ({ key, session: key, agent: null, label: key, needsYou, paths: [] });
+  assert.deepEqual(notPlacedLine([]), { count: "0 not placed", needsYou: null });
+  assert.deepEqual(notPlacedLine([agent("a")]), { count: "1 not placed", needsYou: null });
+  assert.deepEqual(notPlacedLine([agent("a"), agent("b", true), agent("c", true)]), { count: "3 not placed", needsYou: "2 need you" });
+  assert.deepEqual(notPlacedLine([agent("a", true)]), { count: "1 not placed", needsYou: "1 needs you" });
 });
