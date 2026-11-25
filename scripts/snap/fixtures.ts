@@ -399,7 +399,8 @@ const mapRunsPaused = (): Fixture =>
     }),
     snapDone: "paused ok",
   });
-// #472: with a part's sheet open and the side column scrolled to its end, the background runs below it cross the Window plate, on glass.
+// #472: with a part's sheet open and the side column scrolled to its end, the background runs below it are on the sheet's glass, since the
+// map pans under them.
 const mapRunsBesideSheet = (): Fixture => ({
   ...mapRunsPaused(),
   snapScript: mapOpened(`
@@ -420,10 +421,12 @@ const mapRunsBesideSheet = (): Fixture => ({
         const box = plate.getBoundingClientRect();
         return at.left < box.right && box.left < at.right && at.top < box.bottom && box.top < at.bottom;
       });
-      if (!over.length) return log("snap:fail the runs cross no plate here, so this checks nothing");
+      // Whether they cross one here depends on the window's size (at 1900x900 they cross Window, at snap:all's 1900x1180 none), so the
+      // glass is asserted at any size and the plates crossed are only said.
       const style = getComputedStyle(runs);
       if (!style.backdropFilter.includes("blur") || style.backgroundColor !== getComputedStyle(document.getElementById("map-sheet")).backgroundColor)
-        log("snap:fail the background runs are over the " + over.map((plate) => plate.dataset.id).join(", ") + " plate with no glass");
+        log("snap:fail the background runs are not on the sheet's glass, over " + (over.map((plate) => plate.dataset.id).join(", ") || "no plate here"));
+      log("over " + (over.map((plate) => plate.dataset.id).join(", ") || "no plate"));
       log("runs beside sheet ok");`).snapScript,
   snapDone: "runs beside sheet ok",
 });
