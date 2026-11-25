@@ -418,12 +418,16 @@ impl log::Log for Logger {
         if !self.enabled(record.metadata()) {
             return;
         }
-        eprintln!(
+        // A stderr that cannot be written (a closed pipe, a gone terminal) loses the line: `eprintln!` would panic, and
+        // with `exit_on_panic` that would stop plotkeeper, or abort it when the hook's own line panicked again.
+        writeln!(
+            io::stderr().lock(),
             "[{}][{}] {}",
             record.level(),
             record.target(),
             record.args()
-        );
+        )
+        .ok();
         // The page shows its own errors when it logs them, so they are not sent back to it.
         if record.level() == log::Level::Error && record.target() != PAGE_TARGET {
             let message = record.args().to_string();
