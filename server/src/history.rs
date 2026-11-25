@@ -6,7 +6,10 @@
 //! later ticket hooks to see that Daniel looked back.
 
 use serde::Serialize;
-use std::{collections::HashSet, path::Path};
+use std::{
+    collections::{BTreeMap, HashSet},
+    path::Path,
+};
 
 use crate::map::{default_ref, git};
 
@@ -179,6 +182,52 @@ pub fn part_history(repo: &Path, part: &str, fogged: &HashSet<String>) -> Vec<En
             brief: None,
         })
         .collect()
+}
+
+/// When each part id of `wanted` first appeared in `system-map.json` on `repo`'s default branch: the committer time (unix seconds) of
+/// the first first-parent commit whose map lists it. Only `parts[].id` is read, so a map of any version counts, and a commit whose map
+/// does not parse is passed over. An id never seen is left out.
+pub fn part_births(repo: &Path, wanted: &[String]) -> BTreeMap<String, u64> {
+    let mut born = BTreeMap::new();
+    let Some((reference, _)) = default_ref(repo) else {
+        return born;
+    };
+    let Ok(log) = git(
+        repo,
+        &[
+            "log",
+            "--first-parent",
+            "--reverse",
+            "--format=%H %ct",
+            &reference,
+            "--",
+            system_map::MAP_FILE,
+        ],
+    ) else {
+        return born;
+    };
+    for (commit, at) in log.lines().filter_map(|line| line.split_once(' ')) {
+        if wanted.iter().all(|id| born.contains_key(id)) {
+            break;
+        }
+        let (Ok(at), Some(text)) = (at.parse::<u64>(), map_text(repo, commit)) else {
+            continue;
+        };
+        let Ok(map) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        for id in map["parts"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|p| p["id"].as_str())
+        {
+            if wanted.iter().any(|w| w == id) {
+                born.entry(id.to_string()).or_insert(at);
+            }
+        }
+    }
+    born
 }
 
 fn subject_of(repo: &Path, commit: &str) -> Result<(String, String), String> {
@@ -425,6 +474,89 @@ mod tests {
         let broken = rig.commit("Broken", &[("system-map.json", "not json")]);
         assert!(at(Path::new(&rig.main), &broken).is_err());
         assert!(at(Path::new(&rig.main), "deadbeef").is_err());
+    }
+
+    /// `git args` in `dir` with committer time `at`, its author time long before: the committer time is what counts, as the author
+    /// time of a rebased or squashed commit stays old.
+    fn git_at(dir: &Path, at: u64, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=Studio",
+                "-c",
+                "user.email=studio@example.com",
+            ])
+            .args(args)
+            .env("GIT_AUTHOR_DATE", "@1000000000 +0000")
+            .env("GIT_COMMITTER_DATE", format!("@{at} +0000"))
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{out:?}");
+    }
+
+    #[test]
+    fn a_parts_birth_is_the_commit_time_its_id_first_entered_the_map_of_any_version() {
+        let rig = Rig::new();
+        let commit_at = |message: &str, files: &[(&str, &str)], at: u64| {
+            for (name, text) in files {
+                std::fs::write(rig.dir.path().join(name), text).unwrap();
+            }
+            run(rig.dir.path(), &["add", "-A"]);
+            git_at(rig.dir.path(), at, &["commit", "-q", "-m", message]);
+        };
+        commit_at("Before the map", &[("x", "1")], 100);
+        commit_at("The map", &[("system-map.json", MAP)], 200);
+        commit_at("Broken", &[("system-map.json", "not json")], 300);
+        let without_b = MAP.replace(
+            r#",
+        {"id":"b","name":"B","caption":"c","description":"d","tier":"core","paths":["b/"]}"#,
+            "",
+        );
+        commit_at("Drop b", &[("system-map.json", &without_b)], 400);
+        // A version 2 map, with `purpose` and `holds` in place of `description`, adds c and brings b back.
+        let v2 = r#"{"version":2,"parts":[
+          {"id":"a","name":"A","caption":"c","purpose":"p","holds":[],"tier":"core","paths":["a/"]},
+          {"id":"b","name":"B","caption":"c","purpose":"p","holds":[],"tier":"core","paths":["b/"]},
+          {"id":"c","name":"C","caption":"c","purpose":"p","holds":[],"tier":"core","paths":["c/"]}],
+          "actors":[],"links":[],"ignored":[],"laws":[]}"#;
+        commit_at("Add c", &[("system-map.json", v2)], 500);
+        commit_at("Unrelated", &[("x", "2")], 600);
+        let wanted = ["a", "b", "c", "nobody"].map(String::from);
+        let found = part_births(Path::new(&rig.main), &wanted);
+        let expected: BTreeMap<String, u64> = [("a", 200), ("b", 200), ("c", 500)]
+            .into_iter()
+            .map(|(id, at)| (id.to_string(), at))
+            .collect();
+        assert_eq!(found, expected);
+    }
+
+    #[test]
+    fn a_parts_birth_follows_first_parents_only() {
+        let rig = Rig::new();
+        rig.commit("The map", &[("system-map.json", MAP)]);
+        run(rig.dir.path(), &["checkout", "-q", "-b", "side"]);
+        let with_c = MAP.replace(
+            r#""paths":["b/"]}"#,
+            r#""paths":["b/"]},{"id":"c","name":"C","caption":"c","description":"d","tier":"core","paths":["c/"]}"#,
+        );
+        std::fs::write(rig.dir.path().join("system-map.json"), with_c).unwrap();
+        run(rig.dir.path(), &["add", "-A"]);
+        git_at(rig.dir.path(), 300, &["commit", "-q", "-m", "Side adds c"]);
+        run(rig.dir.path(), &["checkout", "-q", "main"]);
+        assert!(part_births(Path::new(&rig.main), &["c".to_string()]).is_empty());
+        // The side branch's own commit is older; c entered the default branch with the merge.
+        git_at(
+            rig.dir.path(),
+            900,
+            &["merge", "-q", "--no-ff", "-m", "Merge side (#5)", "side"],
+        );
+        assert_eq!(
+            part_births(Path::new(&rig.main), &["c".to_string()]).get("c"),
+            Some(&900)
+        );
     }
 
     #[test]

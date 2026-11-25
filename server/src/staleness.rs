@@ -2,14 +2,20 @@
 //! the last commit: a quiet part he read last week is not stale. An entered activity on a part (a brief chapter that lights it, a part
 //! catch-up, the refresher, "I know this") resets it; bands start at 3, 6 and 12 weeks.
 //!
-//! The baseline for every part is the project's first map with this build (`start`), so nothing is stale on day one. A brief chapter is
+//! A part's baseline is the project's first map with this build (`start`), so nothing is stale on day one, or, when later, the commit
+//! time at which its id first entered the map on the default branch (`births`), so a part added to an old project starts fresh too;
+//! that time is read from git, never stored. A brief chapter is
 //! read from what fog already keeps (`fog.reads`, with when each chapter was read), so a chapter read before this shipped counts too, and
 //! is kept here as well when it is read (`fog::mark_read`), since fog drops a brief's reads when it is rewritten; the other kinds are kept
 //! here, in `map-state.json`, by `record`. Another module records its activity with `record` and a new `Activity`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::BTreeMap, path::Path};
+use std::{
+    collections::{BTreeMap, HashMap},
+    path::Path,
+    sync::{LazyLock, Mutex},
+};
 
 use crate::map::{UserState, update_user};
 
@@ -80,7 +86,12 @@ pub fn touch(u: &mut UserState, part: &str, kind: Activity, at: u64) {
 }
 
 /// The band (1, 2 or 3) of each stale part of `source` whose effective tier is Core, at `now`; a part not listed is not stale.
-pub fn bands(user: &UserState, source: &str, now: u64) -> BTreeMap<String, u8> {
+pub fn bands(
+    user: &UserState,
+    source: &str,
+    born: &BTreeMap<String, u64>,
+    now: u64,
+) -> BTreeMap<String, u8> {
     let Some(since) = user.staleness.since else {
         return BTreeMap::new();
     };
@@ -103,7 +114,7 @@ pub fn bands(user: &UserState, source: &str, now: u64) -> BTreeMap<String, u8> {
         }
         let read = chapter_read(user, id);
         let touched = user.staleness.parts.get(id).map(|t| t.at);
-        let last = [Some(since), read, touched]
+        let last = [Some(since), born.get(id).copied(), read, touched]
             .into_iter()
             .flatten()
             .max()
@@ -118,6 +129,55 @@ pub fn bands(user: &UserState, source: &str, now: u64) -> BTreeMap<String, u8> {
         stale.insert(id.to_string(), band);
     }
     stale
+}
+
+type Births = Mutex<HashMap<(String, String), Option<u64>>>;
+static BIRTHS: LazyLock<Births> = LazyLock::new(Mutex::default);
+
+/// When each part of `source` first entered the map on `repo`'s default branch (`history::part_births`), the later baseline of a part
+/// added after the project's. Git's history is read at most once per project and part while the server runs.
+pub fn births(repo: &Path, source: &str) -> BTreeMap<String, u64> {
+    let ids: Vec<String> = serde_json::from_str::<Value>(source)
+        .ok()
+        .and_then(|map| {
+            map["parts"].as_array().map(|parts| {
+                parts
+                    .iter()
+                    .filter_map(|p| p["id"].as_str().map(String::from))
+                    .collect()
+            })
+        })
+        .unwrap_or_default();
+    births_in(&BIRTHS, &repo.display().to_string(), &ids, |wanted| {
+        crate::history::part_births(repo, wanted)
+    })
+}
+
+/// `births` over `cache`, with `load` reading git for the ids not yet asked about.
+fn births_in(
+    cache: &Births,
+    project: &str,
+    ids: &[String],
+    load: impl FnOnce(&[String]) -> BTreeMap<String, u64>,
+) -> BTreeMap<String, u64> {
+    // The lock is held across the read, so two first maps of one project never both read git.
+    let mut known = cache.lock().unwrap();
+    let key = |id: &str| (project.to_string(), id.to_string());
+    let missing: Vec<String> = ids
+        .iter()
+        .filter(|id| !known.contains_key(&key(id)))
+        .cloned()
+        .collect();
+    if !missing.is_empty() {
+        let found = load(&missing);
+        for id in missing {
+            let at = found.get(&id).copied();
+            known.insert(key(&id), at);
+        }
+    }
+    ids.iter()
+        .filter_map(|id| Some((id.clone(), (*known.get(&key(id))?)?)))
+        .collect()
 }
 
 /// When Daniel last read to its end a brief chapter that lights `part`, as fog keeps it.
@@ -169,7 +229,10 @@ mod tests {
             self.state.path().join("map-state.json")
         }
         fn bands(&self, at: u64) -> BTreeMap<String, u8> {
-            bands(&read_user(&self.file(), "/p"), MAP, at)
+            self.bands_born(&BTreeMap::new(), at)
+        }
+        fn bands_born(&self, born: &BTreeMap<String, u64>, at: u64) -> BTreeMap<String, u8> {
+            bands(&read_user(&self.file(), "/p"), MAP, born, at)
         }
     }
 
@@ -207,7 +270,12 @@ mod tests {
         assert_eq!(rig.bands(DAY_ONE + 6 * WEEK), of(&[("a", 2), ("b", 2)]));
         // A project never shown with this build has no baseline yet, so nothing is stale.
         assert_eq!(
-            bands(&UserState::default(), MAP, DAY_ONE + 50 * WEEK),
+            bands(
+                &UserState::default(),
+                MAP,
+                &BTreeMap::new(),
+                DAY_ONE + 50 * WEEK
+            ),
             of(&[])
         );
     }
@@ -266,6 +334,78 @@ mod tests {
         .unwrap();
         record(&rig.file(), "/p", "a", Activity::Know, DAY_ONE + 2 * WEEK).unwrap();
         assert_eq!(rig.bands(DAY_ONE + 12 * WEEK), of(&[("b", 3)]));
+    }
+
+    fn born(pairs: &[(&str, u64)]) -> BTreeMap<String, u64> {
+        pairs.iter().map(|(id, at)| (id.to_string(), *at)).collect()
+    }
+
+    #[test]
+    fn a_part_added_to_the_map_after_the_baseline_starts_fresh_from_its_first_commit() {
+        let rig = Rig::new();
+        let added = DAY_ONE + 20 * WEEK;
+        let births = born(&[("a", added)]);
+        assert_eq!(rig.bands_born(&births, added + 2 * WEEK), of(&[("b", 3)]));
+        assert_eq!(
+            rig.bands_born(&births, added + 3 * WEEK),
+            of(&[("a", 1), ("b", 3)])
+        );
+    }
+
+    #[test]
+    fn a_part_in_the_map_since_before_the_baseline_keeps_the_baseline() {
+        let rig = Rig::new();
+        let births = born(&[("a", DAY_ONE - 40 * WEEK), ("b", DAY_ONE - WEEK)]);
+        assert_eq!(rig.bands_born(&births, DAY_ONE + 3 * WEEK - 1), of(&[]));
+        assert_eq!(
+            rig.bands_born(&births, DAY_ONE + 6 * WEEK),
+            of(&[("a", 2), ("b", 2)])
+        );
+    }
+
+    #[test]
+    fn a_new_parts_later_activity_still_wins_over_its_first_commit() {
+        let rig = Rig::new();
+        let added = DAY_ONE + 20 * WEEK;
+        let births = born(&[("a", added)]);
+        record(&rig.file(), "/p", "a", Activity::Know, added + 4 * WEEK).unwrap();
+        assert_eq!(rig.bands_born(&births, added + 6 * WEEK), of(&[("b", 3)]));
+        assert_eq!(
+            rig.bands_born(&births, added + 7 * WEEK),
+            of(&[("a", 1), ("b", 3)])
+        );
+    }
+
+    #[test]
+    fn git_is_read_once_per_project_and_part() {
+        let cache = Births::default();
+        let calls = std::cell::RefCell::new(Vec::new());
+        let ids = |list: &[&str]| list.iter().map(|id| id.to_string()).collect::<Vec<_>>();
+        let ask = |project: &str, list: &[&str]| {
+            births_in(&cache, project, &ids(list), |wanted| {
+                calls
+                    .borrow_mut()
+                    .push((project.to_string(), wanted.to_vec()));
+                born(&[("a", 5), ("c", 7)])
+                    .into_iter()
+                    .filter(|(id, _)| wanted.contains(id))
+                    .collect()
+            })
+        };
+        assert_eq!(ask("/p", &["a", "b"]), born(&[("a", 5)]));
+        // b was asked about and never found; it is not read again.
+        assert_eq!(ask("/p", &["a", "b"]), born(&[("a", 5)]));
+        assert_eq!(ask("/p", &["a", "b", "c"]), born(&[("a", 5), ("c", 7)]));
+        assert_eq!(ask("/q", &["a"]), born(&[("a", 5)]));
+        assert_eq!(ask("/p", &["c", "a"]), born(&[("a", 5), ("c", 7)]));
+        assert_eq!(
+            calls.into_inner(),
+            [
+                ("/p".to_string(), ids(&["a", "b"])),
+                ("/p".to_string(), ids(&["c"])),
+                ("/q".to_string(), ids(&["a"])),
+            ]
+        );
     }
 
     #[test]
