@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { El, fakeDocument } from "./dom.mjs";
 import { row, projectHead } from "../../dist/list.js";
+import { hintOf } from "../../dist/dom.js";
 import { showPalette } from "../../dist/palette.js";
 import { showToast } from "../../dist/toast.js";
 import { checkElement, foldedTurn } from "../../dist/story.js";
@@ -24,7 +25,8 @@ const every = (node, out = []) => {
   }
   return out;
 };
-const titled = (node, parents = []) => [node.title, ...parents.map((p) => p.title)].filter((t) => typeof t === "string");
+// The words a node or an ancestor shows on hover: its `title` or its hint (spec #582, whose triggers have no title).
+const titled = (node, parents = []) => [node, ...parents].flatMap((p) => [p.title, hintOf(p)?.textContent]).filter((t) => typeof t === "string");
 // The path from `root` down to the first element of class `name`, so its ancestors' titles can be read.
 const path = (root, name, trail = []) => {
   const here = [...trail, root];
@@ -69,7 +71,7 @@ const session = /** @type {import("../../dist/types.js").Session} */ ({
   shell: false,
 });
 
-test("a session row's name, step and token hold their full text in a title, and none is empty", () => {
+test("a session row's name, step and token hold their full text in a title or a hint, and none is empty", () => {
   const button = row(session, new Map(), token);
   holds(button, "name", long);
   holds(button, "name", "PR #9 · issue-9");
@@ -78,7 +80,7 @@ test("a session row's name, step and token hold their full text in a title, and 
   noEmptyTitle(button);
 });
 
-test("a named session's name needs no title of its own: the row's holds it", () => {
+test("a named session's name needs no title of its own: the row's hint holds it", () => {
   const button = row({ ...session, name: "Short", prompt_name: null }, new Map());
   holds(button, "name", "Short");
   noEmptyTitle(button);
@@ -131,7 +133,7 @@ test("the palette's rows hold their full text in a title", () => {
   document.createElement = make;
 });
 
-test("a project group's toggle has a title, also for the home folder", () => {
+test("a project group's toggle has a hint, also for the home folder", () => {
   const group = (key, name) => /** @type {import("../../dist/projects.js").ProjectGroup<import("../../dist/types.js").Session>} */ ({ key, name, rollup: null, states: [] });
   const head = projectHead(group("/Users/someone/elsewhere/a-repository", "a-repository"));
   holds(head, "project-toggle", "/Users/someone/elsewhere/a-repository");
@@ -142,13 +144,13 @@ test("a project group's toggle has a title, also for the home folder", () => {
 // Every CSS rule that cuts text, by selector, with where its full text is: a new one fails this test until it is covered.
 const covered = {
   ".top": "a container: its items are the session header and two chips",
-  ".strip .btn": "list.ts: the button's title holds the name and state",
+  ".strip .btn": "list.ts: the button's hint holds the name and state",
   ".row .l1": "a container: its name, token and glyph carry the titles",
   ".row .l2": "a container: its step carries the title",
-  ".row .name": "list.ts: the row button's title holds it; a prompt-named session's own title adds the identity",
+  ".row .name": "list.ts: the row button's hint holds it; a prompt-named session's own title adds the identity",
   ".row .row-step": "list.ts: the step's title",
   ".row .token": "list.ts: the token's title",
-  ".project-toggle .name": "list.ts: the toggle's title is the project's path",
+  ".project-toggle .name": "list.ts: the toggle's hint is the project's path",
   ".session-header .name": "story.ts: the header's title holds the full name",
   ".session-name": "story.ts: the rail header's name is its own title (#444)",
   ".line-2 > .block": "story.ts: the block's kind is its own title",

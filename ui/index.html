@@ -15,7 +15,7 @@
   <!-- The page's structure (#461): a heading for the page, hidden but read, and a link, shown on focus and first in the tab order, that
        jumps past the session list into the map, the page's main content. -->
   <h1 class="visually-hidden">plotkeeper</h1>
-  <a class="skip-link" href="#map" title="Jump past the session list into the map">Skip to the map</a>
+  <a id="skip-link" class="skip-link" href="#map">Skip to the map</a>
   <!-- Treatment C's frame (#386): a 34 px top bar over the map and the session list at the right. The grid runs right to left. -->
   <div class="app">
     <header class="top">
@@ -25,7 +25,7 @@
       <!-- How many sessions need Daniel (danielrispler/Falinks#572), anywhere, shown whenever any do; it selects the first. -->
       <button id="needs-you" class="btn small chip" type="button" hidden></button>
       <!-- Settings (#385): a quiet gear that opens the Settings panel over the map, which holds the writer section (#387); the palette's `studio::ShowSettings` does too. -->
-      <button id="settings-button" class="btn quiet small gear" type="button" aria-label="Settings" title="Settings" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1"/></svg></button>
+      <button id="settings-button" class="btn quiet small gear" type="button" aria-label="Settings" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1"/></svg></button>
     </header>
 
     <nav class="list" aria-label="Sessions">
@@ -182,5 +182,7 @@
       <div class="ask-buttons"><button type="submit" class="btn" id="confirm-yes" value="confirm" title="Go ahead; this cannot be undone">Go ahead</button><button type="submit" class="btn" value="cancel" autofocus title="Keep it (Esc)">Cancel</button></div>
     </form>
   </dialog>
+  <!-- The page's hints (spec #582): each trigger's own `popover="hint"`, made by `hint()` in dom.ts. -->
+  <div id="hints"></div>
 </body>
 </html>

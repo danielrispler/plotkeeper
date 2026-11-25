@@ -10,7 +10,7 @@ import { startWatching } from "./answer.js";
 import { forgetAsks, openAsk } from "./ask.js";
 import { recheckSeen } from "./seen.js";
 import { diffRequest, newestDiff } from "./diff.js";
-import { element, failure, invoke, listen, logUncaught } from "./dom.js";
+import { element, failure, hint, invoke, listen, logUncaught } from "./dom.js";
 import { type Actions, newestUnseen, nextNeedsYou, paletteEntries, run, stepLine, stepSession, windowBinding } from "./keys.js";
 import { hover, realClock, shownGate } from "./hover.js";
 import { arrange } from "./layout.js";
@@ -264,6 +264,8 @@ startMapAgents({
 // The left panel over the map (#385): History, a turn's diff and a worker's log; closing a story or a log selects none and leaves the bare map.
 startPanel({ history: historyIn, diff: diffIn, log: logIn, deselect: () => void deselect() });
 const openSettings = () => showPanel({ kind: "settings" });
+hint(element("skip-link"), "Jump past the session list into the map");
+hint(element("settings-button"), "Settings");
 element("settings-button").addEventListener("click", () => (panelShown()?.kind === "settings" ? showPanel(null) : void openSettings()));
 // The page's own elements whose hover another place shows too (#220); the needs-you toast's adds its key when it shows.
 element("toast").title = element("note-toast").title = HOVERS.goToSession;

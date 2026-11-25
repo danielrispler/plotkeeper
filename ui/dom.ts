@@ -268,7 +268,7 @@ export function hint<T extends HTMLElement>(trigger: T, words: string): T {
   let node = hints.get(id);
   if (!node) {
     node = document.createElement("div");
-    node.id = id;
+    node.setAttribute("id", id);
     node.setAttribute("popover", "hint");
     node.className = "hint";
     hints.set(id, node);
