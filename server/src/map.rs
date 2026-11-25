@@ -444,7 +444,8 @@ pub fn map_commit(project: String, commit: String) -> Result<crate::history::Com
 }
 
 /// What "See the code" of a PR's brief asks for (`PrDiffArgs` in `ui/types.ts`). `parts`: only the files owned by these parts, under the
-/// map at `head`; `paths`: only these files (an Also touched group's, #492); all the PR's files when both are absent.
+/// map at `head` (the default branch's when `head` has none); `paths`: only these files (an Also touched group's, #492); all the PR's
+/// files when both are absent.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PrDiffArgs {
     pub project: String,
@@ -473,11 +474,13 @@ pub fn pr_diff(args: PrDiffArgs) -> Result<crate::history::Commit, String> {
         base,
     } = args;
     let repo = Path::new(&project);
-    // The map at the PR's head, as its brief's chapters light parts by it.
+    // The map at the PR's head, as its brief's chapters light parts by it; the default branch's when the head has none.
     let map = parts.as_ref().and_then(|_| {
         crate::history::at(repo, &head)
+            .map(|at| at.source)
             .ok()
-            .and_then(|at| system_map::parse_lenient(&at.source).ok())
+            .or_else(|| read_map(repo).source)
+            .and_then(|text| system_map::parse_lenient(&text).ok())
     });
     let keep = |all: Vec<String>| match (parts, paths) {
         (None, None) => all,
@@ -843,6 +846,34 @@ mod tests {
         };
         assert_eq!(diff("n"), ["a/new.rs", "n/one"]);
         assert_eq!(diff("a"), ["a/old.rs"]);
+    }
+
+    #[test]
+    fn see_the_code_of_a_step_places_files_by_the_default_branchs_map_when_the_head_has_none() {
+        let o = origin();
+        let map = r#"{"version":1,"parts":[
+            {"id":"a","name":"A","caption":"","description":"","tier":"core","paths":["a/"]}],
+            "actors":[],"links":[],"ignored":[],"laws":[]}"#;
+        commit_file(&o.seed, MAP_FILE, map);
+        git(&o.seed, &["push", "-q", "origin", "HEAD"]);
+        git(&o.main, &["fetch", "-q", "origin"]);
+        // A PR branched before the map was born: its head has no map.
+        git(&o.main, &["checkout", "-q", "-b", "work", "origin/trunk~1"]);
+        std::fs::create_dir_all(o.main.join("a")).unwrap();
+        commit_file(&o.main, "a/one.rs", "x\n");
+        let head = git(&o.main, &["rev-parse", "HEAD"]);
+        let found = pr_diff(PrDiffArgs {
+            project: o.main.display().to_string(),
+            number: 7,
+            head,
+            title: "Work".into(),
+            parts: Some(vec!["a".into()]),
+            paths: None,
+            base: None,
+        })
+        .unwrap();
+        let shown: Vec<_> = found.files.into_iter().map(|f| f.path).collect();
+        assert_eq!(shown, ["a/one.rs"]);
     }
 
     #[test]
