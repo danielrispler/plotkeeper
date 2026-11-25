@@ -13,11 +13,14 @@ const { preFlightNodes } = await import("../../dist/map-pre-flight.js");
 globalThis.document = fakeDocument({ body: new El("body") });
 
 const words = (button) => hintOf(button)?.textContent;
+// The page's nodes, which here are the stand-in DOM's, whose fields the tests read.
+/** @type {(nodes: HTMLElement[]) => any[]} */
+const stand = (nodes) => nodes;
 
 test("a toast's inner buttons have hints of their own, and its container has no title", () => {
   const toast = new El("div");
   toast.id = "probe-toast";
-  const { main, close } = toastButtons(toast, () => new El("button"), () => {}, "Hide this toast; the clear goes on");
+  const { main, close } = /** @type {any} */ (toastButtons)(toast, () => new El("button"), () => {}, "Hide this toast; the clear goes on");
   assert.equal(words(close), "Hide this toast; the clear goes on");
   assert.equal(close.getAttribute("title"), null);
   assert.equal(toast.getAttribute("title"), null);
@@ -25,8 +28,9 @@ test("a toast's inner buttons have hints of their own, and its container has no 
 });
 
 test("a run's Cancel button has a hint and no title", () => {
+  /** @type {any} */
   const queued = { id: "a", kind: "back-law", state: "queued", at: 0, outcome: null, line: null, denials: [], prompt: null };
-  const row = runsNodes({ runs: [queued], paused: null }, { cancel() {}, confirm: async () => true, resume() {}, copy: async () => "copied" }).find((node) => node.find("button").length);
+  const row = stand(runsNodes({ runs: [queued], paused: null }, { cancel() {}, confirm: async () => true, resume() {}, copy: async () => "copied" })).find((node) => node.find("button").length);
   const cancel = row.find("button").find((each) => each.text === "Cancel");
   assert.equal(words(cancel), "Take this run out of the queue");
   assert.equal(cancel.getAttribute("title"), null);
@@ -36,7 +40,7 @@ test("a run's Cancel button has a hint and no title", () => {
 test("pre-flight's buttons have hints and no title", () => {
   const act = { predict() {}, byHand() {}, pick() {}, clear() {} };
   const nodes = preFlightNodes({ kind: "start", issues: [{ number: 394, title: "Studio: pre-flight" }] }, { ok: true, parts: [], actors: [], links: [], laws: [] }, /** @type {any} */ ({}), act);
-  const buttons = nodes.flatMap((node) => node.find("button"));
+  const buttons = stand(nodes).flatMap((node) => node.find("button"));
   assert.ok(buttons.length > 0);
   for (const button of buttons) {
     assert.ok(words(button), `no hint on ${button.text}`);
