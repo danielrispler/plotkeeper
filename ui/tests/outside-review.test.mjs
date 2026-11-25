@@ -225,6 +225,9 @@ test("a review that cannot run is `review unavailable`, and the script still exi
   assert.equal(line({ status: 3 }), "review unavailable: the review was cut at 15 minutes");
   assert.equal(line({ status: 1, stderr: "quota exceeded" }), "review unavailable: the Gemini quota is used up");
   assert.equal(line({ status: 1, stderr: "429: rate limit" }), "review unavailable: the Gemini quota is used up");
+  // agy exits 3 when the quota runs out mid-review too, as in the trial of 2026-11-25.
+  const exhausted = JSON.stringify({ status: "ERROR", error: "Individual quota reached. Resets in 2h5m6s." });
+  assert.equal(line({ status: 3, stdout: exhausted, stderr: "AGY_ERROR: RESOURCE_EXHAUSTED (code 429)" }), "review unavailable: the Gemini quota is used up");
 });
 
 test("a finished review stays `reviewed` when agy also warns about the quota", () => {
@@ -335,9 +338,9 @@ const arg = (name) => process.argv[process.argv.indexOf(name) + 1];
 const run = { cwd: process.cwd(), model: arg("--model"), hook: command, prompt: arg("-p"), worktree: existsSync("repo/.git") };
 appendFileSync(join(dir, "agy-runs.jsonl"), JSON.stringify(run) + "\\n");
 call("read_file", { Path: join(process.cwd(), "review/diff.patch") });
-// Answers only once three runs have started, so a trial whose runs are not parallel fails.
+// Answers only once two runs have started, so a trial whose runs are not parallel fails.
 for (let i = 0; process.env.FAKE_AGY === "together"; i++) {
-  if (readFileSync(join(dir, "agy-runs.jsonl"), "utf8").trim().split("\\n").length >= 3) break;
+  if (readFileSync(join(dir, "agy-runs.jsonl"), "utf8").trim().split("\\n").length >= 2) break;
   if (i > 200) process.exit(1);
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
 }
@@ -532,23 +535,23 @@ test("a trial run records its variant and trial, its quota as shared, names its 
 
 const trial = join(import.meta.dirname, "../../scripts/review/outside-review-trial.mjs");
 
-test("the trial runs its three variants in parallel, each in its own throwaway folder and worktree, and leaves nothing behind", () => {
+test("the trial runs its two variants, medium and subagents, in parallel, each in its own throwaway folder and worktree, and leaves nothing behind", () => {
   const s = scratch({ ignored: true });
   const head = s.git("rev-parse", "HEAD").trim().slice(0, 9);
   const ran = spawnSync(process.execPath, [trial, "--out", join(s.dir, "out")], { cwd: s.repo, env: { ...s.env, FAKE_AGY: "together" }, encoding: "utf8" });
   assert.equal(ran.status, 0, ran.stderr);
   assert.match(ran.stdout.split("\n")[0], /^Gemini quota left: /);
-  for (const variant of ["medium", "high", "subagents"]) {
+  for (const variant of ["medium", "subagents"]) {
     assert.match(ran.stdout, new RegExp(`== ${variant} ==\nreviewed: 1 finding .*\nfindings: .*outside-review-${head}-${variant}\\.json\ncost: `));
     assert.ok(existsSync(join(s.dir, "out", `outside-review-${head}-${variant}.json`)), variant);
   }
   const agy = readFileSync(join(s.dir, "agy-runs.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
-  assert.equal(new Set(agy.map((a) => a.cwd)).size, 3);
+  assert.equal(new Set(agy.map((a) => a.cwd)).size, 2);
   assert.ok(agy.every((a) => a.worktree));
-  assert.deepEqual(agy.map((a) => a.model).sort(), ["gemini-4-neon-high", "gemini-4-neon-medium", "gemini-4-neon-medium"]);
+  assert.deepEqual(agy.map((a) => a.model), ["gemini-4-neon-medium", "gemini-4-neon-medium"]);
   assert.equal(agy.filter((a) => a.hook.endsWith("'--subagents'")).length, 1);
   const runs = runsOf(s.repo);
-  assert.deepEqual(runs.map((r) => r.variant).sort(), ["high", "medium", "subagents"]);
+  assert.deepEqual(runs.map((r) => r.variant).sort(), ["medium", "subagents"]);
   assert.equal(new Set(runs.map((r) => r.trial)).size, 1);
   assert.ok(runs.every((r) => r.quotaShared === true && r.why === "--force"));
   assert.deepEqual(s.left(), nothingLeft);
