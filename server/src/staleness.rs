@@ -14,7 +14,7 @@ use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashMap},
     path::Path,
-    sync::{LazyLock, Mutex},
+    sync::{Arc, LazyLock, Mutex},
 };
 
 use crate::map::{UserState, update_user};
@@ -131,7 +131,8 @@ pub fn bands(
     stale
 }
 
-type Births = Mutex<HashMap<(String, String), Option<u64>>>;
+/// Each project's births by part id, behind a lock of its own.
+type Births = Mutex<HashMap<String, Arc<Mutex<HashMap<String, Option<u64>>>>>>;
 static BIRTHS: LazyLock<Births> = LazyLock::new(Mutex::default);
 
 /// When each part of `source` first entered the map on `repo`'s default branch (`history::part_births`), the later baseline of a part
@@ -161,13 +162,18 @@ fn births_in(
     ids: &[String],
     load: impl FnOnce(&[String]) -> Option<BTreeMap<String, u64>>,
 ) -> BTreeMap<String, u64> {
-    // The lock is held across the read, so two first maps of one project never both read git.
-    // A reader that panicked holding the lock left whole entries: the cache stays usable.
-    let mut known = cache.lock().unwrap_or_else(|e| e.into_inner());
-    let key = |id: &str| (project.to_string(), id.to_string());
+    // The project's lock is held across the read, so two first maps of one project never both read git, while another
+    // project's map goes on. A reader that panicked holding a lock left whole entries: the cache stays usable.
+    let project_cache = cache
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .entry(project.to_string())
+        .or_default()
+        .clone();
+    let mut known = project_cache.lock().unwrap_or_else(|e| e.into_inner());
     let missing: Vec<String> = ids
         .iter()
-        .filter(|id| !known.contains_key(&key(id)))
+        .filter(|id| !known.contains_key(*id))
         .cloned()
         .collect();
     if !missing.is_empty()
@@ -175,11 +181,11 @@ fn births_in(
     {
         for id in missing {
             let at = found.get(&id).copied();
-            known.insert(key(&id), at);
+            known.insert(id, at);
         }
     }
     ids.iter()
-        .filter_map(|id| Some((id.clone(), (*known.get(&key(id))?)?)))
+        .filter_map(|id| Some((id.clone(), (*known.get(id)?)?)))
         .collect()
 }
 
@@ -411,6 +417,35 @@ mod tests {
                 ("/q".to_string(), ids(&["a"])),
             ]
         );
+    }
+
+    #[test]
+    fn one_projects_read_of_git_does_not_hold_up_another_projects_known_births() {
+        let cache = Births::default();
+        let ids = vec!["a".to_string()];
+        births_in(&cache, "/q", &ids, |_| Some(born(&[("a", 5)])));
+        let (cache, ids) = (&cache, &ids);
+        let (started, wait) = std::sync::mpsc::channel();
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let (answered, answer) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            scope.spawn(move || {
+                births_in(cache, "/p", ids, |_| {
+                    started.send(()).unwrap();
+                    held.recv().ok();
+                    Some(born(&[("a", 9)]))
+                })
+            });
+            wait.recv().unwrap();
+            scope.spawn(move || {
+                answered
+                    .send(births_in(cache, "/q", ids, |_| None))
+                    .unwrap()
+            });
+            let got = answer.recv_timeout(std::time::Duration::from_secs(2));
+            release.send(()).unwrap();
+            assert_eq!(got.ok(), Some(born(&[("a", 5)])));
+        });
     }
 
     #[test]
