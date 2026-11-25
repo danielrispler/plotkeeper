@@ -1573,3 +1573,48 @@ fn a_barrel_inside_another_workspace_package_is_not_followed() {
     ]);
     assert_eq!(found, ["app>entry", "entry>one"]);
 }
+
+#[test]
+fn an_export_default_without_a_semicolon_before_another_re_export_is_a_barrel() {
+    for next in [
+        "export * from '../two/b'\n",
+        "export { B } from '../two/b'\n",
+    ] {
+        let text = format!("import A from '../one/a'\nexport default A\n{next}");
+        let found = barrel_edges(&[
+            ("app/x.ts", "import A from '../entry';\n"),
+            ("entry/index.ts", &text),
+            ("one/a.ts", "export default 1;\n"),
+            ("two/b.ts", "export const B = 2;\n"),
+        ]);
+        assert_eq!(
+            found,
+            ["app>entry", "app>one", "entry>one", "entry>two"],
+            "{next}"
+        );
+    }
+}
+
+#[test]
+fn a_barrel_starting_with_a_byte_order_mark_is_followed() {
+    let found = barrel_edges(&[
+        ("app/x.ts", "import { A } from '../entry';\n"),
+        ("entry/index.ts", "\u{feff}export * from '../one/a';\n"),
+        ("one/a.ts", "export const A = 1;\n"),
+    ]);
+    assert_eq!(found, ["app>entry", "app>one", "entry>one"]);
+}
+
+#[test]
+fn a_file_with_an_import_that_binds_nothing_is_not_followed() {
+    let found = barrel_edges(&[
+        ("app/x.ts", "import { A } from '../entry';\n"),
+        (
+            "entry/index.ts",
+            "import {} from '../two/b'\nexport * from '../one/a'\n",
+        ),
+        ("one/a.ts", "export const A = 1;\n"),
+        ("two/b.ts", ""),
+    ]);
+    assert_eq!(found, ["app>entry", "entry>one", "entry>two"]);
+}

@@ -59,6 +59,8 @@ fn regex_may_follow(tokens: &[Tok]) -> bool {
 /// The words, strings and punctuation of script source. Comments, regular expressions and the text of template literals
 /// are left out; the code in a template's `${}` is read.
 fn tokens(text: &str) -> Vec<Tok> {
+    // A UTF-8 byte order mark, which some editors write, is not code.
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let chars: Vec<char> = text.chars().collect();
     let mut tokens = Vec::new();
     // For each template literal whose `${}` is being read, the brace depth its `${` opened at.
@@ -359,13 +361,20 @@ fn barrel(tokens: &[Tok]) -> Option<Barrel<&str>> {
             Tok::Sym(';') | Tok::Str(_) => i += 1,
             Tok::Ident(word) if word == "import" => {
                 let clause = from_clause(tokens, i + 1)?;
+                // `import {} from "x"` binds nothing, so no re-export uses it: it is there for its side effects.
+                if clause.names.is_empty() {
+                    return None;
+                }
                 for (origin, name) in clause.names {
                     imported.insert(name, (clause.spec, origin));
                 }
                 i = clause.end;
             }
             Tok::Ident(word) if word == "export" => {
-                if let Some(clause) = from_clause(tokens, i + 1) {
+                // Only `export *`, `export {` and `export type` can be a re-export; `export default A` is read below.
+                let reexport = matches!(tokens.get(i + 1), Some(Tok::Sym('*' | '{')))
+                    || is_word(tokens.get(i + 1), "type");
+                if let Some(clause) = reexport.then(|| from_clause(tokens, i + 1)).flatten() {
                     for (origin, name) in clause.names {
                         if name == "*" {
                             found.stars.push(clause.spec);
