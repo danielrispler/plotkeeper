@@ -15,7 +15,6 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use studio_understanding::ClaudeWriter;
 use studio_understanding::part_catch_up::{
     CatchUpStore, build_catch_up_facts, gather_catch_up, write_part_catch_up,
@@ -172,9 +171,8 @@ fn main() {
 }
 
 fn git(repo: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
+    let out = studio_workbench::run::git(repo)
         .args(args)
-        .current_dir(repo)
         .output()
         .expect("git runs");
     assert!(

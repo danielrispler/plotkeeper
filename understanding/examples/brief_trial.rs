@@ -10,16 +10,14 @@
 //! it writes the facts and budget only and makes no call. Calls `gh` and `git`; reads no credential file.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use studio_understanding::ClaudeWriter;
 use studio_understanding::pr_brief::{
     BriefStore, DEFAULT_MODEL, PrMeta, build_facts, fetch_meta, gather, write_pr_brief,
 };
 
 fn git(repo: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
+    let out = studio_workbench::run::git(repo)
         .args(args)
-        .current_dir(repo)
         .output()
         .expect("git ran");
     assert!(

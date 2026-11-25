@@ -11,7 +11,6 @@ use std::{
     collections::{HashMap, HashSet},
     io::{self, Write},
     path::{Path, PathBuf},
-    process::Command,
     sync::{
         Arc, Mutex, OnceLock,
         atomic::{AtomicBool, Ordering},
@@ -1226,16 +1225,15 @@ pub fn append_to(log: &Path, lines: &[serde_json::Value]) -> Result<(), String> 
 
 // The pull requests and the landed tasks, looked up with `gh`.
 
+/// The longest a lookup at GitHub may take.
+const GH_LIMIT: Duration = Duration::from_secs(30);
+
 /// The `state` of the pull request or issue that `gh <args>` shows, run in `cwd`: `MERGED`, `CLOSED`
 /// and the like; `None` when `gh` fails, is missing or is offline.
 fn gh_state(gh: &str, cwd: &str, args: &[&str]) -> Option<String> {
-    let output = Command::new(gh)
-        .args(args)
-        .args(["--json", "state", "--jq", ".state"])
-        .current_dir(cwd)
-        .output()
-        .ok()
-        .filter(|o| o.status.success())?;
+    let mut gh = studio_workbench::run::gh_at(gh, Path::new(cwd));
+    gh.args(args).args(["--json", "state", "--jq", ".state"]);
+    let output = studio_workbench::run::run_until(&mut gh, GH_LIMIT).ok()?;
     Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 

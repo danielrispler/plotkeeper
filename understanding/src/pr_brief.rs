@@ -20,7 +20,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::time::Duration;
+use studio_workbench::run::{self as runner, RunError, run_until};
 
 /// The facts' budget: the writer is sandboxed with no tools, so everything it reads is here.
 pub const BUDGET: usize = 64 << 10;
@@ -2299,19 +2300,23 @@ pub fn write_pr_brief(
 // ---------------------------------------------------------------------------------------------------------------
 // Gathering: git and gh.
 
+/// The longest one `git` read or `gh` lookup of the gathering may take.
+const GATHER_LIMIT: Duration = Duration::from_secs(30);
+
+/// What `git` or `gh` (the `program`) prints for `args` in `dir`.
 fn run(program: &str, dir: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new(program)
-        .args(args)
-        .current_dir(dir)
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|e| format!("{program} did not run: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
+    let mut command = match program {
+        "git" => runner::git(dir),
+        gh => runner::gh_at(gh, dir),
+    };
+    let out = run_until(command.args(args), GATHER_LIMIT).map_err(|e| match e {
+        RunError::Start(e) => format!("{program} did not run: {e}"),
+        RunError::Failed(out) => format!(
             "{program} {args:?} failed: {}",
             String::from_utf8_lossy(&out.stderr)
-        ));
-    }
+        ),
+        e => format!("{program} {args:?} {e}"),
+    })?;
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
@@ -2395,11 +2400,12 @@ pub fn gather(repo: &Path, base: &str, head: &str, meta: PrMeta) -> Result<PrSou
         .unwrap_or_default();
     let mut tagged = Vec::new();
     // `git grep` exits 1 when nothing matches.
-    let grep = Command::new("git")
-        .args(["grep", "-n", "@law:", head])
-        .current_dir(repo)
-        .output()
-        .map_err(|e| format!("git did not run: {e}"))?;
+    let mut grep = runner::git(repo);
+    let grep = match run_until(grep.args(["grep", "-n", "@law:", head]), GATHER_LIMIT) {
+        Ok(out) | Err(RunError::Failed(out)) => out,
+        Err(RunError::Start(e)) => return Err(format!("git did not run: {e}")),
+        Err(e) => return Err(format!("git grep {e}")),
+    };
     for line in String::from_utf8_lossy(&grep.stdout).lines() {
         let mut f = line.splitn(4, ':');
         let (_, path, num, text) = (

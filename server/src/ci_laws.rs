@@ -13,9 +13,10 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::{Path, PathBuf},
-    process::Command,
     sync::{Arc, Mutex},
+    time::Duration,
 };
+use studio_workbench::run::{self, RunError, run_until};
 use system_map::LawTest;
 
 /// The CI workflow whose run holds the law tests: the Studio's `npm run check` job.
@@ -604,20 +605,15 @@ fn parts_of(repo: &Path, laws: &[String]) -> Vec<String> {
 
 /// Runs `gh` as a normal user in `repo`, never prompting, and returns what it printed.
 pub(crate) fn gh(repo: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new(studio_workbench::gh_path())
-        .args(args)
-        .current_dir(repo)
-        .env("GH_PROMPT_DISABLED", "1")
-        .output()
-        .map_err(|e| format!("gh cannot run: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "gh: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
+    let out = run_until(run::gh(repo).args(args), GH_LIMIT).map_err(|e| match e {
+        RunError::Start(e) => format!("gh cannot run: {e}"),
+        e => format!("gh: {e}"),
+    })?;
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
+
+/// The longest a lookup at GitHub may take.
+const GH_LIMIT: Duration = Duration::from_secs(30);
 
 /// The last CI read of each project: the payload and the project header's dot read it, and only a trigger replaces it. The last finished
 /// result is also kept in `file` (when there is one), so a restart does not lose the header's dot before the map is opened.

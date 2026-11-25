@@ -5,19 +5,17 @@
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    io::{Read, Write},
-    os::unix::process::CommandExt,
+    io::Write,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Command,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
-        mpsc,
     },
-    thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 use studio_core::{CardRequest, Session, SummaryRequest, Transcript};
+use studio_workbench::run::{RunError, run_until_with_input};
 
 mod brief;
 mod drift;
@@ -1007,63 +1005,7 @@ impl ClaudeWriter {
             }
         };
         let timeout = stop_after(kind, timeout);
-        // A writer that says why it failed on standard error only has that read too, apart from its reply.
-        command.stdout(Stdio::piped());
-        if kind.fails_on_stderr() {
-            command.stderr(Stdio::piped());
-        }
-        let child = command
-            .stdin(Stdio::piped())
-            .process_group(0)
-            .spawn()
-            .map_err(|e| {
-                let not_found = e.kind() == std::io::ErrorKind::NotFound;
-                let kind_of = if not_found {
-                    FailureKind::NotInstalled
-                } else {
-                    FailureKind::Other
-                };
-                let error = WriterError::new(kind_of, kind, format!("({e})"));
-                tell_failed(&error);
-                error
-            })?;
-        // The command holds the pipe's write ends until it is dropped, and the output would never end while it does.
-        drop(command);
-        let mut child = child;
-        let mut stdin = child.stdin.take();
-        let mut stdout = child.stdout.take();
-        let mut stderr = child.stderr.take();
-        // Threads, so a call that reads no input or never ends cannot hold back the timeout, and one that fills one
-        // pipe while the other is read cannot stall.
-        thread::spawn(move || stdin.as_mut().map(|i| i.write_all(prompt.as_bytes())));
-        let errors = thread::spawn(move || {
-            let mut err = Vec::new();
-            let _ = stderr.as_mut().map(|e| e.read_to_end(&mut err));
-            err
-        });
-        let (sender, read) = mpsc::channel();
-        thread::spawn(move || {
-            let mut out = Vec::new();
-            let _ = stdout.as_mut().map(|o| o.read_to_end(&mut out));
-            let _ = sender.send((out, errors.join().unwrap_or_default()));
-        });
-        let deadline = Instant::now() + timeout;
-        let out = read.recv_timeout(timeout).ok();
-        let status = loop {
-            match child.try_wait() {
-                Ok(None) if out.is_some() && Instant::now() < deadline => {
-                    thread::sleep(Duration::from_millis(10))
-                }
-                Ok(status) => break status,
-                Err(_) => break None,
-            }
-        };
-        let (Some((out, err)), Some(status)) = (out, status) else {
-            // The group's id stays taken while the unreaped call or a process holding its output
-            // lives, so this stops no one else.
-            // SAFETY: `kill` takes no pointers.
-            unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL) };
-            let _ = child.wait();
+        let timed_out = || {
             let error = WriterError::new(
                 FailureKind::Timeout,
                 kind,
@@ -1073,7 +1015,32 @@ impl ClaudeWriter {
             if timeout >= kind.timeout() {
                 tell_failed(&error);
             }
-            return Err(error);
+            error
+        };
+        let ran = run_until_with_input(&mut command, prompt.as_bytes(), timeout);
+        let output = match ran {
+            Ok(output) | Err(RunError::Failed(output)) => output,
+            Err(RunError::TimedOut(_)) => return Err(timed_out()),
+            Err(RunError::Start(e)) => {
+                let not_found = e.kind() == std::io::ErrorKind::NotFound;
+                let kind_of = if not_found {
+                    FailureKind::NotInstalled
+                } else {
+                    FailureKind::Other
+                };
+                let error = WriterError::new(kind_of, kind, format!("({e})"));
+                tell_failed(&error);
+                return Err(error);
+            }
+        };
+        let (status, out) = (output.status, output.stdout);
+        // Only a writer that says why it failed on standard error has that read as part of its reply; another's
+        // goes where it went before, to plotkeeper's own.
+        let err = if kind.fails_on_stderr() {
+            output.stderr
+        } else {
+            std::io::stderr().write_all(&output.stderr).ok();
+            Vec::new()
         };
         let reply = writer::read_reply_and_stderr(
             kind,

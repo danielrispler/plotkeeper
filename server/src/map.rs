@@ -11,10 +11,10 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     path::{Path, PathBuf},
-    process::Command,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+use studio_workbench::run::{self, run_until};
 
 /// The map file's name at the repository's root.
 const MAP_FILE: &str = system_map::MAP_FILE;
@@ -105,15 +105,12 @@ pub struct View {
     pub y: f64,
 }
 
+/// The longest a read of a project's repository may take.
+pub(crate) const GIT_READ_LIMIT: Duration = Duration::from_secs(30);
+
+/// What `git args` prints in `dir`, read within [`GIT_READ_LIMIT`]; else what went wrong, for a failed git its own message.
 pub(crate) fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
-    }
+    let out = run_until(run::git(dir).args(args), GIT_READ_LIMIT).map_err(|e| e.to_string())?;
     Ok(String::from_utf8_lossy(&out.stdout).trim_end().to_string())
 }
 

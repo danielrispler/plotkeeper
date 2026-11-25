@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::time::Duration;
 
 /// The stored catch-up's format version; a reader ignores fields it does not know.
 pub const STORED_VERSION: u32 = 1;
@@ -612,18 +612,19 @@ pub fn write_part_catch_up(
 // ---------------------------------------------------------------------------------------------------------------
 // Gathering: git only.
 
+/// The longest a read of the repository may take.
+const GIT_LIMIT: Duration = Duration::from_secs(30);
+
 fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git")
-        .args(args)
-        .current_dir(repo)
-        .output()
-        .map_err(|e| format!("git did not run: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
+    use studio_workbench::run::{RunError, git, run_until};
+    let out = run_until(git(repo).args(args), GIT_LIMIT).map_err(|e| match e {
+        RunError::Start(e) => format!("git did not run: {e}"),
+        RunError::Failed(out) => format!(
             "git {args:?} failed: {}",
             String::from_utf8_lossy(&out.stderr)
-        ));
-    }
+        ),
+        e => format!("git {args:?} {e}"),
+    })?;
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
