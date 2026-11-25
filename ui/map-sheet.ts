@@ -376,7 +376,7 @@ function fillHere(box: HTMLElement, part: string, live: boolean, explain: boolea
     headline: hereDeps!.headline(session!, index) ?? (turn.prompt.trim().split("\n")[0] || "No Headline"),
     age: hereAge(turn.ended_at ?? turn.started_at, now),
   }));
-  const drawn = JSON.stringify([session?.id ?? null, rows, found?.older, explain]);
+  const drawn = JSON.stringify([session?.id ?? null, rows, found?.older, found?.pending, explain]);
   if (box.dataset.drawn === drawn) return;
   box.dataset.drawn = drawn;
   const focused = box.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.turn : undefined;
@@ -396,7 +396,8 @@ function fillHere(box: HTMLElement, part: string, live: boolean, explain: boolea
   }
   box.replaceChildren(
     ...explained(text("h3", "This session here", "sheet-heading"), SHEET_HEADINGS["This session here"], explain),
-    ...(rows.length ? [list] : [text("p", hereEmpty, "empty")]),
+    // While `map_place` has not answered for one of the turns' files, an empty list says nothing yet.
+    ...(rows.length ? [list] : found.pending ? [] : [text("p", hereEmpty, "empty")]),
     ...(found.older ? [text("p", hereOlder, "sheet-here-older")] : []),
   );
   if (focused !== undefined) box.querySelector<HTMLElement>(`[data-turn="${focused}"]`)?.focus();

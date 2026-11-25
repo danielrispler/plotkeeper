@@ -2,7 +2,7 @@
 // the spotlit session, run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { footprint, footprintNote, homePart, isolate, marked, notPlacedLine, placeGroups, sessionBadges, sessionHere, spotlit, turnLight, oldTurn, OLD_TURN } from "../../dist/map-live.js";
+import { footprint, footprintNote, homePart, spotlightView, marked, notPlacedLine, placeGroups, sessionBadges, sessionHere, spotlit, turnLight, oldTurn, OLD_TURN } from "../../dist/map-live.js";
 
 const day = 24 * 60 * 60 * 1000;
 const now = 100 * day;
@@ -107,6 +107,12 @@ test("the sheet lists the open session's turns within the cut that changed the p
   assert.deepEqual(here("old"), { rows: [], older: true });
 });
 
+test("the sheet's rows are pending while map_place has not answered for a path of the session's turns within the cut", () => {
+  const s = session("a", "ended", { turns: [turn(["old/new.rs"], 9 * day), turn(["core/x.rs"], 2 * day), turn(["new/n.rs"])] });
+  assert.equal(sessionHere(s, "server", placed, now).pending, true, "new/n.rs is not answered yet");
+  assert.equal(sessionHere(s, "server", { ...placed, "new/n.rs": [] }, now).pending, false, "a path past the cut is never waited for");
+});
+
 test("the sheet's footer shows only when the open session has turns older than the cut", () => {
   const s = (turns) => sessionHere(session("a", "ended", { turns }), "core", placed, now).older;
   assert.equal(s([]), false);
@@ -148,6 +154,15 @@ test("a badge counts a session once with its Workers, and a Worker-only part cou
   assert.deepEqual(counts(byPart), { core: ["a"], window: ["a"] });
   assert.deepEqual(byPart.core.rows[0].workers.map((w) => w.id), ["w1"]);
   assert.deepEqual(byPart.window.rows[0].workers.map((w) => w.id), ["w2"]);
+});
+
+test("a badge counts the session's own files and its running Workers', never a finished Worker's; the footprint keeps every Worker's", () => {
+  const s = session("a", "running", { agents: [worker("w1"), worker("w2", { status: "completed" })], turns: [
+    turn(["core/x.rs", ["ui/w.ts", "w1"], ["server/s.rs", "w2"]]),
+  ] });
+  assert.deepEqual(counts(sessionBadges([s], placed, now, here).byPart), { core: ["a"], window: ["a"] });
+  assert.deepEqual(spotlightView({}, s, placed, now, []).chips.sort(), ["core", "window"], "the chip follows the badge");
+  assert.deepEqual(footprint(s, placed, now).firm.sort(), ["core", "server", "window"]);
 });
 
 test("Running, Needs you and Unseen sessions are counted; a seen Your turn or Idle, a shell, an Ended and another project's are not", () => {
@@ -219,19 +234,19 @@ test("a spotlit session's chip replaces the badge on its latest turn's parts; th
   ];
   const { byPart } = sessionBadges(others, placed, now, here);
   const order = ["window", "server", "core", "hook"];
-  const shown = isolate(byPart, spot, placed, now, order);
+  const shown = spotlightView(byPart, spot, placed, now, order);
   assert.deepEqual(shown.chips.sort(), ["core", "window"]);
   assert.equal(shown.home, "core");
   // Core's badge gives way to the chip; hook dims; server needs you and stays full.
   assert.deepEqual(shown.dimmed, ["hook"]);
-  // With no spotlit session nothing is isolated.
-  assert.deepEqual(isolate(byPart, null, placed, now, order), { chips: [], home: null, dimmed: [] });
+  // With no spotlit session nothing changes.
+  assert.deepEqual(spotlightView(byPart, null, placed, now, order), { chips: [], home: null, dimmed: [] });
 });
 
 test("a spotlit session with no part in its latest turn has no chip and no home, and still dims the badges", () => {
   const spot = session("a", "ended", { turns: [turn(["core/x.rs"], 3 * day), turn([])] });
   const { byPart } = sessionBadges([session("b", "running", { turns: [turn(["hook/h.rs"])] })], placed, now, here);
-  assert.deepEqual(isolate(byPart, spot, placed, now, []), { chips: [], home: null, dimmed: ["hook"] });
+  assert.deepEqual(spotlightView(byPart, spot, placed, now, []), { chips: [], home: null, dimmed: ["hook"] });
 });
 
 test("the not placed line counts the sessions no part holds, and says how many need you (#472)", () => {

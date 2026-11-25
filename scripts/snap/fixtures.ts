@@ -1781,6 +1781,19 @@ const mapBadgeList = (): Fixture =>
       document.querySelector("#map .map-canvas").dispatchEvent(new WheelEvent("wheel", { deltaY: 40, clientX: 400, clientY: 300, bubbles: true, cancelable: true }));
       await wait(60);
       if (listOpen()) log("snap:fail a zoom left the list open");
+      // A press on the open list's badge that is dragged off and let go elsewhere closes the list; the badge's next press, by the keyboard
+      // too, opens it again.
+      await __snapClick(badge("core"));
+      await wait(60);
+      await __snapDrag(badge("core"), 80, 0);
+      await wait(100);
+      if (listOpen()) log("snap:fail a press let go off the badge left the list open");
+      badge("core").focus();
+      await __snapKey("Enter");
+      await wait(60);
+      if (!listOpen()) log("snap:fail after a press let go off the badge, its next press did not open its list");
+      await __snapClick(badge("core"));
+      await wait(60);
       // A row's press opens its story and closes the list, never the sheet.
       await __snapClick(badge("core"));
       await wait(60);
@@ -1795,9 +1808,9 @@ const mapBadgeList = (): Fixture =>
       await wait(60);
       if (!listOpen()) log("snap:fail the list did not open again");`, "badge list ok");
 
-// Isolation (#562): hovering #311's row spotlights it. Its chip replaces the badge on Core, Window and Shell, with its line on Core alone (a tie of
+// The spotlight's view (#562): hovering #311's row spotlights it. Its chip replaces the badge on Core, Window and Shell, with its line on Core alone (a tie of
 // one file each goes to reading order); Understanding's badge dims and Hook's Needs-you one stays full. The shot keeps the hover.
-const mapIsolation = (): Fixture =>
+const mapSpotlight = (): Fixture =>
   badgeFixture(`
       const chips = () => [...document.querySelectorAll("#map .spot-chip")].map((c) => c.closest(".plate").dataset.id + ":" + c.querySelector(".spot-chip-name").textContent + (c.querySelector(".spot-chip-line") ? " · " + c.querySelector(".spot-chip-line").textContent : "")).sort().join("|");
       const row = document.querySelector('#groups .session-row[data-key="s1 "]');
@@ -1823,12 +1836,23 @@ const mapIsolation = (): Fixture =>
       await wait(150);
       if (!chips().startsWith("core:#410 · Reading review")) log("snap:fail the badge list's row did not spotlight its session: " + chips());
       if (!listOpen()) log("snap:fail spotlighting from the list closed it");
-      list.querySelector(".session-pick").dispatchEvent(new PointerEvent("pointerleave"));
+      // Esc closes the list under the pointer: the hover ends with it.
       await __snapKey("Escape");
+      await wait(100);
+      if (chips() !== "") log("snap:fail the closed list's row stayed spotlit: " + chips());
+      // A row's press from the keyboard opens its story, whose spotlit chip takes the badge's place: the keyboard lands on Core's button.
+      badge("core").focus();
+      await __snapKey("Enter");
+      await wait(60);
+      await __snapKey("Enter");
+      await wait(300);
+      if (document.getElementById("session-name").textContent !== "Ship PR 286") log("snap:fail Enter on the row opened the story of " + JSON.stringify(document.getElementById("session-name").textContent));
+      if (!document.activeElement?.matches("#map .plate[data-id=core] .plate-open")) log("snap:fail after a row's Enter the focus is on " + (document.activeElement?.className || document.activeElement?.tagName) + ", not Core's button");
+      document.getElementById("panel-close").click();
       await wait(100);
       document.activeElement?.blur();
       row.dispatchEvent(new PointerEvent("pointerenter"));
-      await wait(150);`, "isolation ok");
+      await wait(150);`, "spotlight ok");
 
 // The map from the keyboard (#460), at the busy fixture: each plate's open button, named by the part's name and caption, sits beside
 // its session badge in reading order; real Tab reaches a part and then its badge, never an actor; real Enter and Space open its sheet.
@@ -1915,6 +1939,20 @@ const mapPartRedraw = (): Fixture => {
       await wait(300);
       if (hookBadge.isConnected) log("snap:fail the window's focus did not draw the map again");
       if (!document.activeElement?.matches("#map .plate[data-id=hook] .session-badge")) log("snap:fail after a map redraw focus is on " + (document.activeElement?.className || document.activeElement?.tagName) + ", not hook's badge");
+      // A redraw at a new commit asks map_place again, so the badges come after the map: the badge gets the keyboard back when they do.
+      const fetched = window.fetch;
+      window.fetch = async (url, init) => {
+        const reply = await fetched(url, init);
+        if (String(url).endsWith("/api/map_place")) await wait(150);
+        if (!String(url).endsWith("/api/map_state")) return reply;
+        const state = await reply.json();
+        return { ...reply, json: async () => ({ ...state, commit: "f".repeat(40) }) };
+      };
+      const before = document.activeElement;
+      window.dispatchEvent(new Event("focus"));
+      await wait(500);
+      if (before.isConnected) log("snap:fail the new commit did not draw the map again");
+      if (!document.activeElement?.matches("#map .plate[data-id=hook] .session-badge")) log("snap:fail after a new commit's redraw focus is on " + (document.activeElement?.className || document.activeElement?.tagName) + ", not hook's badge");
       log("part redraw ok");`),
     snapDone: "part redraw ok",
   };
@@ -2588,6 +2626,42 @@ const mapSheetHere = (older: boolean): Fixture => {
     map_place: { ...busyPlace(), "daemon/old.rs": ["daemon"], "understanding/u.rs": ["understanding"], "core/older.rs": ["core"] },
   });
 };
+// A late placement (#549's final review): #311's story is open beside Hook's sheet when a new turn of it changes hook/late.rs, whose
+// `map_place` answer is held back. While it is pending the section says nothing rather than "No turn of this session changed this part";
+// once it lands the section lists the turn and the newest turn gets its "Show on map", with no other change. The shot is that frame.
+const mapLatePlace = (): Fixture => {
+  const sessions = busySessions();
+  const s1 = sessions[0];
+  const late = { ...s1, turns: [...s1.turns, { started_at: Date.now() - 120e3, ended_at: Date.now() - 60e3, prompt: "Read the hook late", id: null, message: null, checks: [], listed: [], files: { files: [{ root: "/w/plotkeeper", path: "hook/late.rs", from: null, added: 3, removed: 1, agent: null }], merged: 0 } }] };
+  return mapPanel(`
+      const here = () => document.querySelector("#map-sheet .sheet-here");
+      const rows = () => [...here().querySelectorAll(".sheet-here-turn")].map((b) => b.querySelector(".sheet-here-number").textContent);
+      const showOnMap = () => document.querySelector("#feed > li.turn .show-on-map");
+      await plate("hook");
+      await press(row("s1"));
+      if (!panelOpen() || !sheetOpen() || here().hidden) return log("snap:fail the story and Hook's section are not both shown");
+      if (!here().querySelector("p.empty")) log("snap:fail Hook's section does not say no turn changed it: " + here().textContent);
+      // map_place's answer for the new path is held until released.
+      let release;
+      const held = new Promise((done) => (release = done));
+      const fetched = window.fetch;
+      window.fetch = async (url, init) => {
+        if (!String(url).endsWith("/api/map_place")) return fetched(url, init);
+        await held;
+        return { ok: true, status: 200, json: async () => ({ ...${JSON.stringify(busyPlace())}, "hook/late.rs": ["hook"] }) };
+      };
+      __snapEmit("sessions", ${JSON.stringify(sessions)}.map((s) => (s.id === "s1" ? ${JSON.stringify(late)} : s)));
+      __snapEmit("selected", { session: ${JSON.stringify(late)}, agent: null });
+      await wait(300);
+      if (here().querySelector("p.empty")) log("snap:fail a pending placement reads as no turn changed Hook");
+      if (rows().length) log("snap:fail Hook's section lists rows before the placement came: " + rows());
+      if (showOnMap()) log("snap:fail the newest turn has Show on map before its placement came");
+      release();
+      await wait(300);
+      if (rows().join() !== "2") log("snap:fail the late placement did not reach Hook's section: " + JSON.stringify(rows()) + " " + here().textContent);
+      if (!showOnMap()) log("snap:fail the late placement did not give the newest turn its Show on map");
+      log("panel ok");`, { sessions });
+};
 // A story's turn on the map (#560): with #311's story open, hovering or focusing a turn lights its parts (a brief's ring, nothing dimmed,
 // no camera move); leaving, or a feed redraw, clears it. Its 9-day-old turn says its files aren't shown and lights nothing; a turn with
 // no files lights nothing; the newest has "Show on map"; under a brief nothing lights. It ends on the 2-day-old turn, hovered.
@@ -2789,8 +2863,18 @@ const mapPanelHistory = (): Fixture =>
       const tray = document.getElementById("map-tray").getBoundingClientRect();
       if (tray.left < panel.getBoundingClientRect().right) log("snap:fail the tray is under the open panel");
       checkAll("with History open");
+      // Hovering an ended session's row spotlights its footprint; Esc closes History under the pointer, and the hover ends with its row.
+      const firm = () => [...document.querySelectorAll("#map .plate.foot-firm")].map((p) => p.dataset.id).join();
+      panel.querySelector('.history .row[data-key="e1 "]').dispatchEvent(new PointerEvent("pointerenter"));
+      await wait(150);
+      if (firm() !== "hook") log("snap:fail the History row's footprint: " + firm());
+      await esc();
+      if (panelOpen()) log("snap:fail Esc did not close History");
+      if (firm() !== "") log("snap:fail the removed History row's spotlight stuck: " + firm());
+      document.querySelector("#history-link .history-link").click();
+      await wait(300);
       log("panel ok");`, {
-  sessions: [...busySessions(), session("e1", "Map view drawer, #312", "ended", { last_event_at: Date.now() - 2 * 86400e3 }), session("e2", "Wire check covers MapState, #333", "ended", { last_event_at: Date.now() - 3 * 86400e3 })],
+  sessions: [...busySessions(), session("e1", "Map view drawer, #312", "ended", { last_event_at: Date.now() - 2 * 86400e3, turns: [{ started_at: Date.now() - 600e3, ended_at: Date.now() - 300e3, prompt: "", id: null, message: null, checks: [], listed: [], files: { files: [{ root: "/w/plotkeeper", path: "hook/src/main.rs", from: null, added: 3, removed: 1, agent: null }], merged: 0 } }] }), session("e2", "Wire check covers MapState, #333", "ended", { last_event_at: Date.now() - 3 * 86400e3 })],
 });
 // Settings in the left panel from the top bar's gear, holding the writer section (#387); the gear again closes it.
 const mapPanelSettings = (): Fixture =>
@@ -3848,13 +3932,14 @@ ${writerStatusAfter("Keychain refused")}
       log("sheet still ok");`, { map_state: mapState(), map_place: {} });
     return { ...f, sessions: [idle], selected: { session: idle, agent: null }, snapDone: "sheet still ok" };
   },
-  // Session badges (#562): an accented badge and its open list, and isolation with a dimmed and a full Needs-you badge.
+  // Session badges (#562): an accented badge and its open list, and the spotlight's view with a dimmed and a full Needs-you badge.
   mapBadgeList,
-  mapIsolation,
+  mapSpotlight,
   mapFootprint,
   // "This session here" on a part's sheet beside the open story (#561), with and without its footer.
   mapSheetHere: () => mapSheetHere(false),
   mapSheetHereOlder: () => mapSheetHere(true),
+  mapLatePlace,
   mapTurnLight,
   // The map from the keyboard (#460).
   mapPartKeys,

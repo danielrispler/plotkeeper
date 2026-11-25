@@ -234,7 +234,7 @@ startMap({ selectedProject, removeProject, shown: drawSidebar });
 element("pre-flight-button").addEventListener("click", () => openPreFlight());
 startMapAgents({
   sessions: () => studio.listed, projectOf: projectOfCwd, select: (id, agent) => void pressSession(id, agent), briefOpen,
-  name: sessionName, line: (session) => secondLine(session, lastHeadline),
+  name: sessionName, line: (session) => secondLine(session, lastHeadline), placed: drawFeed,
 });
 // The left panel over the map (#385): History, a turn's diff and a worker's log; closing a story or a log selects none and leaves the bare map.
 startPanel({ history: historyIn, diff: diffIn, log: logIn, deselect: () => void deselect() });

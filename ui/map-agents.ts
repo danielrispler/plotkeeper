@@ -9,11 +9,12 @@ import { currentMap, onCamera, onDraw, registerLayer, revealParts, syncSide } fr
 import { logStop } from "./stop-rules.js";
 import { logo, logoKey } from "./logos.js";
 import { sidebarOrder } from "./projects.js";
-import { type Badge, footprint, footprintNote, isolate, latestParts, notPlacedLine, placeGroups, type Placement, sessionBadges, spotlit, turnLight } from "./map-live.js";
+import { type Badge, type BadgeRow, footprint, footprintNote, spotlightView, latestParts, notPlacedLine, placeGroups, type Placement, sessionBadges, spotlit, turnLight } from "./map-live.js";
 import { stateLabels, type Session, type Subagent, type Turn } from "./types.js";
 
 // What the drawing needs of the window, given by `main.ts`: the sessions, a folder's project, the jump to a session or a Worker's log,
-// whether a PR brief plays (no spotlight then), and a session's name and second line as the session list shows them.
+// whether a PR brief plays (no spotlight then), a session's name and second line as the session list shows them, and what follows a new
+// placement (the story, whose feed redraw also refreshes the sheet's "This session here").
 export type AgentDeps = {
   sessions: () => Session[];
   projectOf: (cwd: string) => string | null;
@@ -21,6 +22,7 @@ export type AgentDeps = {
   briefOpen: () => boolean;
   name: (session: Session) => string;
   line: (session: Session) => string | null;
+  placed: () => void;
 };
 let deps: AgentDeps;
 let hidden = false;
@@ -32,10 +34,15 @@ export const currentPlacement = (): Placement => placed;
 const latest = newest();
 
 // The session whose row the pointer is on (a session list or History row, a badge list's or the not placed list's), which is spotlit
-// (#559, #562), and that row: a hover ends when the row leaves the page (a session moving to History, a redraw, a list closing), which
-// `pointerleave` never reports.
+// (#559, #562), and that row: a hover ends when the row leaves the page (a session moving to History, a redraw, the panel closing) or its
+// list closes (`endHoverIn`), which `pointerleave` never reports.
 let hovered: string | null = null;
 let hoveredRow: Element | null = null;
+const rowGone = () => hoveredRow !== null && !hoveredRow.isConnected;
+// A list closed: a hover on one of its rows ends.
+const endHoverIn = (list: Element) => {
+  if (hoveredRow && list.contains(hoveredRow)) hoverAgents(null);
+};
 export function hoverAgents(session: string | null, row: Element | null = null) {
   hoveredRow = row;
   if (session === hovered) return;
@@ -46,7 +53,7 @@ export function hoverAgents(session: string | null, row: Element | null = null) 
 // The session open in the left panel (#385), spotlit while no row is hovered.
 let opened: string | null = null;
 export function openAgents(session: string | null) {
-  if (session === opened) return;
+  if (session === opened && !rowGone()) return;
   opened = session;
   paint();
 }
@@ -72,7 +79,7 @@ type View = NonNullable<ReturnType<typeof currentMap>>;
 
 // The spotlit session of the map shown: the hovered row's, else the open one's; none while a brief plays or a past commit shows.
 function spotOf(view: View, sessions: Session[]): Session | null {
-  if (hoveredRow && !hoveredRow.isConnected) [hovered, hoveredRow] = [null, null];
+  if (rowGone()) [hovered, hoveredRow] = [null, null];
   const id = spotlit({ hovered, open: opened, brief: deps.briefOpen(), past: view.scrub !== null, shown: sessions.map((session) => session.id) });
   return sessions.find((one) => one.id === id) ?? null;
 }
@@ -134,7 +141,7 @@ function fillRows(box: HTMLElement, key: string, build: () => HTMLElement[]) {
   box.dataset.rows = key;
   box.replaceChildren(...build());
 }
-const rowsKey = (rows: { session: Session; workers: Subagent[] }[]) =>
+const rowsKey = (rows: BadgeRow[]) =>
   JSON.stringify(rows.map(({ session, workers }) => [session.id, session.state, session.unseen, deps.name(session), deps.line(session), session.asker?.agent ?? null, workers.map((worker) => worker.id)]));
 
 // The badge's list (#562): one element, kept outside the transformed map world, a native popover in the top layer. It is placed by its
@@ -152,6 +159,7 @@ export function closeBadgeList() {
 
 // The list closed, by a press outside, Esc or any of the cases above: its badge says so, and a focus inside it goes back to the badge.
 function listClosed() {
+  endHoverIn(badgeList());
   const part = listPart;
   listPart = null;
   listProject = null;
@@ -185,7 +193,9 @@ function badgeButton(part: string, badge: Badge, dim: boolean): HTMLElement {
   const count = badge.rows.length;
   const asking = badge.rows.filter((row) => row.session.state === "needs_you").length;
   const button = pressable(text("button", String(count), `session-badge${badge.accent ? " needs-you" : ""}${dim ? " dim" : ""}`), null, (event) => {
-    const close = listWasOpen || (listOpen() && listPart === part);
+    // A pointer's press reads whether the list was open at its pointerdown, before light dismiss closed it; a keyboard press (no pointerdown,
+    // `detail` 0) reads it now, so a pointer press let go off the badge, which never clicked, leaves nothing behind.
+    const close = (event.detail !== 0 && listWasOpen) || (listOpen() && listPart === part);
     listWasOpen = false;
     logMapAction();
     if (close) return closeBadgeList();
@@ -218,6 +228,7 @@ const notPlacedList = () => {
   summary.title = "The sessions whose latest turn touched no part: click to show or hide them";
   const rows = text("div", "", "not-placed-rows");
   details.append(summary, rows);
+  details.addEventListener("toggle", () => details.open || endHoverIn(rows));
   return (kept = { details, summary, rows });
 };
 
@@ -248,7 +259,7 @@ export function lightTurn(turn: LitTurn | null, on = true) {
   if (view) paintTurn(view);
 }
 
-function paintTurn(view: NonNullable<ReturnType<typeof currentMap>>) {
+function paintTurn(view: View) {
   const parts = litTurn ? turnLit(litTurn) : [];
   for (const plate of view.slots.canvas.querySelectorAll<HTMLElement>(".plate[data-id]")) plate.classList.toggle("turn-lit", parts.includes(plate.dataset.id!));
 }
@@ -259,14 +270,9 @@ export function revealTurn(turn: LitTurn) {
   if (parts.length) revealParts(parts);
 }
 
-// Draws the badges, the spotlight and the footprint again: a brief opened or closed, or the update that painted is done.
-export function repaintFootprint() {
-  paint();
-}
-
 // Puts the badges or the spotlit session's chips on the plates, the not placed list in its slot and the footprint, from what the last refresh
-// found; keeps the open badge list while its part still has a badge, and the keyboard on a part's badge.
-function paint() {
+// found; keeps the open badge list while its part still has a badge, and the keyboard on a part's badge. Also called when a brief opens or closes.
+export function paint() {
   const view = currentMap();
   if (!view) return;
   const sessions = shownSessions(view.project);
@@ -275,15 +281,18 @@ function paint() {
   const spot = spotOf(view, sessions);
   const plates = [...view.slots.canvas.querySelectorAll<HTMLElement>(".plate[data-id]")];
   // The plates are drawn in the map's reading order.
-  const shown = isolate(byPart, spot, placed, now, plates.map((plate) => plate.dataset.id!));
-  const focused = document.activeElement?.matches(".session-badge") ? (document.activeElement as HTMLElement).dataset.part : undefined;
+  const shown = spotlightView(byPart, spot, placed, now, plates.map((plate) => plate.dataset.id!));
+  // The keyboard on a badge stays on its part's new one; a part's button that held it for a badge still to come (`map.ts`) gives it back.
+  const active = document.activeElement as HTMLElement | null;
+  const focused = active?.matches(".session-badge") ? active.dataset.part : active?.matches(".plate-open[data-wants-badge]") ? active.closest<HTMLElement>(".plate")?.dataset.id : undefined;
   for (const plate of plates) {
     const id = plate.dataset.id!;
     const slot = plate.querySelector(".plate-chips");
     if (spot && shown.chips.includes(id)) slot?.replaceChildren(spotChip(spot, id === shown.home));
     else slot?.replaceChildren(...(byPart[id] ? [badgeButton(id, byPart[id], shown.dimmed.includes(id))] : []));
   }
-  if (focused) badgeOn(focused)?.focus({ preventScroll: true });
+  // A focused badge a spotlit chip replaced (its session's story opened from its list) leaves the keyboard on its part's button, as a redraw does.
+  if (focused) (badgeOn(focused) ?? view.slots.canvas.querySelector<HTMLElement>(`.plate[data-id="${CSS.escape(focused)}"] .plate-open`))?.focus({ preventScroll: true });
   if (listPart !== null) {
     const rows = byPart[listPart]?.rows;
     if (!rows || listProject !== view.project || deps.briefOpen()) closeBadgeList();
@@ -307,7 +316,7 @@ function paint() {
   paintFootprint(view, spot);
   // The row hovered may leave the page in the same update that painted (the list and History are drawn after the sessions are read):
   // looked at again once that update is done.
-  if (hoveredRow) queueMicrotask(() => hoveredRow && !hoveredRow.isConnected && paint());
+  if (hoveredRow) queueMicrotask(() => rowGone() && paint());
 }
 
 // Reads which parts the shown project's paths touch (when they changed) and draws the badges and the footprint. Called when the sessions change and when the map draws.
@@ -318,13 +327,16 @@ async function read() {
   // One group per path (#559): every file of the shown project's turns within the cut, and each Running session's in-flight edit.
   const groups = placeGroups(shownSessions(view.project), Date.now());
   const key = JSON.stringify([view.project, view.state.commit, Object.keys(groups).sort()]);
-  if (key !== asked) {
+  const fresh = key !== asked;
+  if (fresh) {
     const found = await latest(invoke("map_place", { project: view.project, groups }));
     if (!found || currentMap() !== view) return;
     asked = key;
     placed = found;
   }
   paint();
+  // A new answer reaches what else reads the placement: the story's "Show on map" and the sheet's "This session here".
+  if (fresh) deps.placed();
 }
 
 // Wires the drawing: a map that draws gets its badges, and `list.ts` calls `refreshAgents` as the sessions change. The badge list closes

@@ -405,7 +405,7 @@ The one count on a **Part**'s plate of the marked sessions (Running, Needs you, 
 _Avoid_: Agent chip (retired), mark, pin
 
 **Spotlit session**:
-The session the **Map view** isolates to, with its **Footprint**, its chip on its latest turn's parts and its line on its home part, the other **Session badge**s dimmed: the one whose row in the **Session list**, **History**, a **Session badge**'s list or the not placed list the pointer is on, else the one open in the **Left panel**; none while a **PR brief** plays or a past commit shows. A hover ends when the pointer leaves the row, and also when the row leaves the page or its session leaves the shown project.
+The session the **Map view** turns to, with its **Footprint**, its chip on its latest turn's parts and its line on its home part, the other **Session badge**s dimmed: the one whose row in the **Session list**, **History**, a **Session badge**'s list or the not placed list the pointer is on, else the one open in the **Left panel**; none while a **PR brief** plays or a past commit shows. A hover ends when the pointer leaves the row, and also when the row leaves the page or its session leaves the shown project.
 _Avoid_: Focused session (**Focus mode** is the layout), isolated session (isolation means a Worker's worktree)
 
 **plotkeeper**:

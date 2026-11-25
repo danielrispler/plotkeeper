@@ -2,7 +2,7 @@
 // the map's drawing (`map-agents.ts`) and the story read. Placement is per path: `map_place` is asked one group per distinct path, and its
 // answer (`Placement`, a path to the part that owns it) is folded back here per session, Worker and turn.
 
-import type { Session, Subagent, Turn } from "./types.js";
+import type { Session, Subagent, Turn, TurnFile } from "./types.js";
 
 // The page's 7-day cut, mirroring core's `SINCE_MS` (`core/src/turn_files.rs`): core asks for a turn's files only within it, but keeps
 // them after, so the page applies the cut itself.
@@ -91,14 +91,17 @@ export function footprintNote(session: Session, placed: Placement, now: number):
 }
 
 // "This session here" on a part's sheet (#561): the open session's turns within the cut that changed `part`, newest first, each with its
-// index in `session.turns` and its number (the index from 1); `older` says whether the session has turns older than the cut.
+// index in `session.turns` and its number (the index from 1); `older` says whether the session has turns older than the cut, and `pending`
+// whether `map_place` has yet to answer for a file of one of those turns, so a pending answer never reads as "no turn changed this part".
 export type HereRow = { turn: Turn; index: number; number: number };
-export function sessionHere(session: Pick<Session, "turns">, part: string, placed: Placement, now: number): { rows: HereRow[]; older: boolean } {
-  const rows = recentTurns(session, now)
+export function sessionHere(session: Pick<Session, "turns">, part: string, placed: Placement, now: number): { rows: HereRow[]; older: boolean; pending: boolean } {
+  const recent = recentTurns(session, now);
+  const rows = recent
     .filter(({ turn }) => turnParts(turn, placed).includes(part))
     .map(({ turn, index }) => ({ turn, index, number: index + 1 }))
     .reverse();
-  return { rows, older: session.turns.some((turn) => !inCut(turn, now)) };
+  const pending = recent.some(({ turn }) => (turn.files?.files ?? []).some((file) => !(file.path in placed)));
+  return { rows, older: session.turns.some((turn) => !inCut(turn, now)), pending };
 }
 
 // Turn lighting (ticket #560): a story's turn, hovered or focused, lights the parts it changed; unfolding it or "Show on map" reveals them.
@@ -123,8 +126,20 @@ export type BadgeRow = { session: Session; workers: Subagent[] };
 // A part's badge: its sessions, Needs you first, then in the order given; `accent` when any of them needs you.
 export type Badge = { rows: BadgeRow[]; accent: boolean };
 
-// The parts a session's latest turn touches: its own files, its Workers', and its in-flight edit while Running (the footprint's firm parts).
-export const latestParts = (session: Session, placed: Placement, now: number): string[] => footprint(session, placed, now).firm;
+// The running Workers of a session, and whether a file is theirs.
+const runningWorkers = (session: Session) => session.agents.filter((agent) => agent.kind === "worker" && agent.status === "running");
+const workerFile = (worker: Subagent, file: TurnFile) => file.agent === worker.id || file.agent === worker.name;
+
+// The parts a session's latest turn touches now, while within the cut: its own files, its running Workers' (a finished Worker's no longer
+// count, though the footprint keeps them), and its in-flight edit while Running.
+export function latestParts(session: Session, placed: Placement, now: number): string[] {
+  const latest = session.turns.at(-1);
+  const workers = runningWorkers(session);
+  const files = latest && inCut(latest, now) ? (latest.files?.files ?? []) : [];
+  const counted = files.filter((file) => file.agent === null || workers.some((worker) => workerFile(worker, file))).map((file) => file.path);
+  const flight = inFlight(session);
+  return partsOf([...counted, ...(flight ? [flight] : [])], placed);
+}
 
 // The badges of the parts, from the sessions in the session list's order: each marked session (`marked`) counted once on every part of its
 // latest turn, with its running Workers whose files are there; the marked sessions whose latest turn touches no part are `notPlaced`.
@@ -136,10 +151,10 @@ export function sessionBadges(sessions: Session[], placed: Placement, now: numbe
     const parts = latestParts(session, placed, now);
     if (!parts.length) notPlaced.push(session);
     const files = session.turns.at(-1)?.files?.files ?? [];
-    const workers = session.agents.filter((agent) => agent.kind === "worker" && agent.status === "running");
+    const workers = runningWorkers(session);
     for (const part of parts) {
       const badge = (byPart[part] ??= { rows: [], accent: false });
-      const on = (worker: Subagent) => files.some((file) => (file.agent === worker.id || file.agent === worker.name) && (placed[file.path] ?? []).includes(part));
+      const on = (worker: Subagent) => files.some((file) => workerFile(worker, file) && (placed[file.path] ?? []).includes(part));
       badge.rows.push({ session, workers: workers.filter(on) });
       badge.accent ||= session.state === "needs_you";
     }
@@ -161,10 +176,10 @@ export function homePart(session: Session, placed: Placement, now: number, order
   return [...count].sort(([a, x], [b, y]) => y - x || rank(a) - rank(b))[0]?.[0] ?? null;
 }
 
-// Isolation while a session is spotlit: its chip on the parts of its latest turn (`chips`, replacing their badges), its line on `home`, and
+// The spotlight's view while a session is spotlit: its chip on the parts of its latest turn (`chips`, replacing their badges), its line on `home`, and
 // the other badges `dimmed`, but a badge with the Needs-you accent.
-export type Isolation = { chips: string[]; home: string | null; dimmed: string[] };
-export function isolate(byPart: Record<string, Badge>, spot: Session | null, placed: Placement, now: number, order: string[]): Isolation {
+export type SpotlightView = { chips: string[]; home: string | null; dimmed: string[] };
+export function spotlightView(byPart: Record<string, Badge>, spot: Session | null, placed: Placement, now: number, order: string[]): SpotlightView {
   if (!spot) return { chips: [], home: null, dimmed: [] };
   const chips = latestParts(spot, placed, now);
   const dimmed = Object.keys(byPart).filter((part) => !chips.includes(part) && !byPart[part].accent);

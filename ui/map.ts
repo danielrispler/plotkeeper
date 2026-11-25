@@ -455,8 +455,17 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub
   applyCamera(false);
   pan(canvas);
   drawHooks.forEach((hook) => hook(current));
-  // The badges are drawn by a hook; a part that lost its badge keeps the focus on its button.
-  if (kept && onBadge) nodes.get(kept)?.querySelector<HTMLElement>(".session-badge")?.focus({ preventScroll: true });
+  // The badges are drawn by a hook; a part that lost its badge keeps the focus on its button. Badges that come later, once a new placement
+  // is answered, take it back while it is still there (`wantsBadge`, read by `map-agents.ts`).
+  if (kept && onBadge) {
+    const badge = nodes.get(kept)?.querySelector<HTMLElement>(".session-badge");
+    const button = nodes.get(kept)?.querySelector<HTMLElement>(".plate-open");
+    if (badge) badge.focus({ preventScroll: true });
+    else if (button && document.activeElement === button) {
+      button.dataset.wantsBadge = "";
+      button.addEventListener("blur", () => delete button.dataset.wantsBadge, { once: true });
+    }
+  }
   syncSide(slots);
 }
 

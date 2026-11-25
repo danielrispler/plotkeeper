@@ -46,7 +46,6 @@ function draw() {
   document.body.classList.toggle("panel-open", content !== null);
   document.body.dataset.panel = content?.kind ?? "";
   element("settings-button").ariaPressed = String(content?.kind === "settings");
-  openAgents(panelSession(content));
   const body = element("panel-body");
   if (content?.kind === "history") {
     const box = text("div", "", "panel-view history");
@@ -70,6 +69,8 @@ function draw() {
   }
   // The open sheet's "This session here" shows only beside a session's story (#561).
   refreshHere();
+  // After the body changed, so a hovered History row it removed ends its hover.
+  openAgents(panelSession(content));
 }
 
 // The selection was sent again while a log shows: the log reads on.
