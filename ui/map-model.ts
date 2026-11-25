@@ -617,8 +617,9 @@ export function orderRun(key: string[], links: { id: string; from: string; to: s
 export function awaitedWrite(pr: ReadyPr | undefined, full = false): "open" | "stop" | "wait" {
   const brief = pr?.brief;
   if (!pr || brief?.quiet || (brief?.failed && !brief.writing)) return "stop";
-  // A "Since you read" story (#497) opens once stored, whatever head the full brief is of; asking for the full brief waits for that.
-  if (!full && brief?.since && !brief.writing) return "open";
+  // A "Since you read" story (#497) opens once stored, whatever head the full brief is of and while it is written after the story;
+  // asking for the full brief waits for that.
+  if (!full && brief?.since) return "open";
   return brief && !brief.writing && !brief.stale && brief.chapters.length > 0 ? "open" : "wait";
 }
 

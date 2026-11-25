@@ -372,13 +372,16 @@ fn write_since(
 }
 
 /// Opening PR `pr` at `head` when the push to it is the since case (#497): its stored "Since you read" story, or one written now
-/// from `source`'s PR. `None`: this head has no story, and the full brief opens (`on_open`), as it does when the story fails.
+/// from `source`'s PR. A story written now is told to `landed`, so it opens, and when `landed` says to go on the full brief at
+/// `head` is written after it, as today (`on_open`). `None`: this head has no story, and the full brief opens (`on_open`), as it
+/// does when the story fails.
 pub fn on_open_since(
     with: &Writing,
     seen: &Mutex<Seen>,
     pr: u64,
     head: &str,
     source: impl FnOnce() -> Result<PrSource, String>,
+    landed: impl FnOnce() -> bool,
     log: impl FnMut(String),
 ) -> Option<Result<StoredBrief, String>> {
     if let Some((_, story)) = with.store.since(pr, head) {
@@ -387,7 +390,17 @@ pub fn on_open_since(
     let Some(Push::Since(from)) = push_at(with, seen, pr, head) else {
         return None;
     };
-    Some(source().and_then(|full| write_since(with, &full, &from, log)))
+    let full = match source() {
+        Ok(full) => full,
+        Err(why) => return Some(Err(why)),
+    };
+    let mut log = log;
+    let story = write_since(with, &full, &from, &mut log);
+    if story.is_ok() && landed() {
+        // A failure is kept in `seen` (the tray row says so) and told to the log; the story still opens.
+        let _ = on_open(with, seen, pr, head, move || Ok(full), log);
+    }
+    Some(story)
 }
 
 /// The "Since you read" story of PR `pr` at `head` was read to its end (#497): Daniel's read carries over from the head the story runs
@@ -1140,7 +1153,9 @@ pub fn pr_brief(
                 reading: reading.as_ref().map(|r| r as &dyn Reading),
             };
             let log = |line: String| log::warn!("pr brief of #{number}: {line}");
-            // In the since case the story is written, and opens; when it fails, the full brief is written instead.
+            // In the since case the story is written, and opens; the full brief is written after it, under a claim of its own so
+            // the tray stops saying the story is written. When the story fails, the full brief is written instead.
+            let mut claim = Some(claim);
             let story = (!full)
                 .then(|| {
                     on_open_since(
@@ -1149,6 +1164,13 @@ pub fn pr_brief(
                         number,
                         &head,
                         || source_of(&project, number),
+                        || {
+                            drop(claim.take());
+                            app.events
+                                .emit("map-landed", serde_json::json!(project.clone()));
+                            claim = briefs.claim(&project, number);
+                            claim.is_some()
+                        },
                         log,
                     )
                 })
@@ -2594,18 +2616,33 @@ mod tests {
             on_lookup(&with, &seen, 7, &h2, || Ok(source(&h2)), |_| {}),
             Did::Staled
         );
-        let story = on_open_since(&with, &seen, 7, &h2, || Ok(source(&h2)), |_| {})
-            .expect("the since case has a story")
-            .unwrap();
+        let landed = Cell::new(false);
+        let story = on_open_since(
+            &with,
+            &seen,
+            7,
+            &h2,
+            || Ok(source(&h2)),
+            || {
+                // The story opens before the full brief is written.
+                assert!(store.since(7, &h2).is_some() && store.get(7, &h2).is_none());
+                landed.set(true);
+                true
+            },
+            |_| {},
+        )
+        .expect("the since case has a story")
+        .unwrap();
+        assert!(landed.get(), "the story was told before the full brief");
         assert_eq!(store.since(7, &h2).map(|(from, _)| from), Some(h1.clone()));
         assert_eq!(story.head, h2);
         assert!(
-            store.get(7, &h2).is_none(),
-            "the full brief waits, as before"
+            store.get(7, &h2).is_some_and(|b| !b.stale),
+            "the full brief at H2 is written after the story"
         );
         // Opened again, the stored story is read as it is.
         let calls = fake.0.get();
-        on_open_since(&with, &seen, 7, &h2, || Ok(source(&h2)), |_| {});
+        on_open_since(&with, &seen, 7, &h2, || Ok(source(&h2)), || true, |_| {});
         assert_eq!(fake.0.get(), calls);
         // Not read yet: the PR still waits at H2.
         assert!(!crate::fog::fully_read_at(&rig.user(), 7, &h2));
