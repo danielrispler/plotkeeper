@@ -220,13 +220,16 @@ export const mapOpened = (check: string, extra: Fixture = {}): Fixture => ({
     ${check}`,
 });
 
+// `map_place`'s answer for the busy sessions' paths, one group per path (#559): docs/notes.md is ignored, so it places no part.
+export const busyPlace = (worker = "shell") => ({ "core/lib.rs": ["core"], "ui/map.ts": ["window"], "shell/run.rs": [worker], "hook/src/main.rs": ["hook"], "docs/notes.md": [] });
 export const busySessions = () => {
-    const touched = (...paths: string[]) => [{ started_at: Date.now() - 600e3, ended_at: null, prompt: "", id: null, message: null, checks: [], listed: [], files: { files: paths.map((path) => ({ root: "/w/plotkeeper", path, from: null, added: 3, removed: 1, agent: null })), merged: 0 } }];
+    // A turn of `paths`: a path, or a path and the Worker whose file it is.
+    const touched = (...paths: (string | [string, string])[]) => [{ started_at: Date.now() - 600e3, ended_at: null, prompt: "", id: null, message: null, checks: [], listed: [], files: { files: paths.map((given) => { const [path, agent] = typeof given === "string" ? [given, null] : given; return { root: "/w/plotkeeper", path, from: null, added: 3, removed: 1, agent }; }), merged: 0 } }];
     const agy = { agent: "agy", asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, transcript_model: false, context: false, turn_trees: false };
     const w = { ...subagent("w1", "Map chips"), kind: "worker" as const };
     const h = { ...subagent("h1", "Read the log"), kind: "helper" as const };
     const sessions = [
-      session("s1", "#311 · Live agents", "running", { turns: touched("core/lib.rs", "ui/map.ts"), agents: [w, h] }),
+      session("s1", "#311 · Live agents", "running", { turns: touched("core/lib.rs", "ui/map.ts", ["shell/run.rs", "w1"]), agents: [w, h] }),
       session("s2", "Ship PR 286", "needs_you", { turns: touched("hook/src/main.rs") }),
       session("s3", "#312 · CI marks", "running"),
       session("s4", "agy · Name from the prompt", "running", { capabilities: agy }),

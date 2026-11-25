@@ -1,7 +1,7 @@
 // The map's left panel and a part's sheet beside it.
 
 import type { Fixture } from "./base.ts";
-import { briefOf, busySessions, mapFile, mapOpened, mapState, pairFile, panelChecks, session, storySteps } from "./fixtures-shared.ts";
+import { briefOf, busyPlace, busySessions, mapFile, mapOpened, mapState, pairFile, panelChecks, session, storySteps } from "./fixtures-shared.ts";
 
 /** The part sheet with one law not yet ratified (#343): it says so, with Accept and Overturn. */
 export const mapSheetUnratified = (): Fixture =>
@@ -59,13 +59,224 @@ const mapPanel = (check: string, extra: Fixture = {}): Fixture => {
       checkAll("on the bare map");
       ${check}`, {
     map_state: mapState({ fog: { understanding: "thin" }, ready: [{ number: 334, title: "PR briefs on the map", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }] }),
-    map_place: { s1: ["core", "window"], "s1/w1": ["shell"], s2: ["hook"], s6: [] },
+    map_place: busyPlace(),
     select: { __by: "id", values: selected },
     projects: [{ path: "/w/plotkeeper", gone: false }],
     turn_file_hunk: { text: "@@ -261,7 +261,9 @@ function drawMap(\n   const saved = positions;\n-  const added = autoPlace(items, links);\n+  // Placed once and saved, so a part never moves on its own.\n+  const added = autoPlace(items, links, saved);\n", binary: false, left_out: 0, first_line: 261 },
     ...extra,
   });
   return { ...f, sessions: extra.sessions ?? sessions, selected: null, snapDone: "panel ok" };
+};
+// The footprint (#559): hovering #311's row brackets every part its turns of the last 7 days changed beside Understanding's thin fog, firm
+// on its latest turn's parts (Core and Window, and the Shell its Worker changed) and faint on Understanding, from a turn 2 days ago; its
+// 9-day-old turn adds nothing to Daemon. With no hover the open session's footprint shows; a hovered row that leaves the list (its
+// session moved to History) gives it back; a session that touched no part says so in its row's hover text.
+export const mapFootprint = (): Fixture => {
+  const day = 24 * 3600e3;
+  const turn = (ago: number, paths: (string | [string, string])[]) => ({
+    started_at: Date.now() - ago - 60e3, ended_at: Date.now() - ago, prompt: "", id: null, message: null, checks: [], listed: [],
+    files: { files: paths.map((given) => { const [path, agent] = typeof given === "string" ? [given, null] : given; return { root: "/w/plotkeeper", path, from: null, added: 3, removed: 1, agent }; }), merged: 0 },
+  });
+  const sessions = busySessions().map((s) => (s.id === "s1" ? { ...s, turns: [turn(9 * day, ["daemon/old.rs"]), turn(2 * day, ["understanding/u.rs", "core/older.rs"]), ...s.turns] } : s));
+  return mapPanel(`
+      const marks = () => ["firm", "faint"].map((kind) => kind + ":" + [...document.querySelectorAll("#map .plate.foot-" + kind)].map((p) => p.dataset.id).sort().join()).join(" ");
+      const hover = async (key, on = true) => { row(key).dispatchEvent(new PointerEvent(on ? "pointerenter" : "pointerleave")); await wait(150); };
+      if (marks() !== "firm: faint:") log("snap:fail a footprint shows with no session hovered or open: " + marks());
+      // A session that touched no part says so in its row's hover text.
+      await hover("s3");
+      if (!row("s3").title.endsWith("\\nTouched no part in the last 7 days")) log("snap:fail #312's row does not say it touched no part: " + JSON.stringify(row("s3").title));
+      if (row("s1").title.includes("Touched no part")) log("snap:fail #311's row says it touched no part");
+      await hover("s3", false);
+      // The open session's footprint shows with no hover.
+      await press(row("s2"));
+      if (marks() !== "firm:hook faint:") log("snap:fail the open session's footprint: " + marks());
+      // A hover replaces it, one footprint at a time; the pointer leaving gives it back.
+      await hover("s1");
+      if (marks() !== "firm:core,shell,window faint:understanding") log("snap:fail the hovered session's footprint: " + marks());
+      await hover("s1", false);
+      if (marks() !== "firm:hook faint:") log("snap:fail the open session's footprint did not come back: " + marks());
+      // A hovered row that leaves the list never sticks: #312 ends, its row goes to History, and the open session's footprint comes back.
+      await hover("s3");
+      if (marks() !== "firm: faint:") log("snap:fail #312's empty footprint did not replace the open one: " + marks());
+      __snapEmit("sessions", ${JSON.stringify(sessions)}.map((s) => (s.id === "s3" ? { ...s, state: "ended" } : s)));
+      await wait(300);
+      if (row("s3")) log("snap:fail #312's row stayed in the list after it ended");
+      if (marks() !== "firm:hook faint:") log("snap:fail a hover whose row left the list stuck: " + marks());
+      await hover("s1");
+      const corner = getComputedStyle(document.querySelector("#map .plate[data-id=core]"), "::after");
+      if (corner.content === "none" || corner.pointerEvents !== "none") log("snap:fail the brackets are not drawn, or take the pointer");
+      log("footprint " + marks());
+      log("panel ok");`, {
+    sessions,
+    map_place: { ...busyPlace(), "daemon/old.rs": ["daemon"], "understanding/u.rs": ["understanding"], "core/older.rs": ["core"] },
+  });
+};
+// "This session here" (#561): #311's story open beside Core's sheet lists its two turns of the last 7 days that changed Core, newest first,
+// each its number, Headline and age, under the section's explanation; Hook's says no turn changed it. With `older`, #311 also has a turn 9
+// days old, so "Turns older than 7 days aren't listed" shows under the section. Pressing turn 2 unfolds it in the story, flashes its
+// outline and moves the focus to it; the screenshot is that frame. With no story open the section is not there.
+export const mapSheetHere = (older: boolean): Fixture => {
+  const day = 24 * 3600e3;
+  const turn = (ago: number, paths: string[], message: string) => ({
+    started_at: Date.now() - ago - 60e3, ended_at: Date.now() - ago, prompt: "Draw it", id: null, message, checks: [], listed: [],
+    files: { files: paths.map((path) => ({ root: "/w/plotkeeper", path, from: null, added: 3, removed: 1, agent: null })), merged: 0 },
+  });
+  const sessions = busySessions().map((s) => (s.id === "s1" ? { ...s, turns: [
+    ...(older ? [turn(9 * day, ["daemon/old.rs"], "The daemon's old socket")] : []),
+    turn(2 * day, ["core/older.rs", "understanding/u.rs"], "Per-path placement in core"),
+    turn(5 * 3600e3, ["understanding/u.rs"], "Turn files read in understanding"),
+    ...s.turns.map((t) => ({ ...t, message: "Chips on the parts a turn touches" })),
+  ] } : s));
+  const [newest, second] = older ? [4, 2] : [3, 1];
+  const selected = Object.fromEntries(sessions.map((s) => [s.id, { session: s, agent: null }]));
+  return mapPanel(`
+      const here = () => document.querySelector("#map-sheet .sheet-here");
+      const rows = () => [...here().querySelectorAll(".sheet-here-turn")].map((b) => [...b.children].map((c) => c.textContent).join(" "));
+      await plate("core");
+      if (!sheetOpen()) return log("snap:fail the plate's click did not open its sheet");
+      if (!here().hidden) return log("snap:fail This session here shows with no story open");
+      await press(row("s1"));
+      if (!panelOpen() || !sheetOpen()) return log("snap:fail the story and the sheet are not both open");
+      if (here().hidden) return log("snap:fail This session here is not shown beside the open story");
+      if (here().querySelector("h3")?.textContent !== "This session here") log("snap:fail the section's heading");
+      if (here().querySelector(".explain")?.textContent !== "The open session's turns that changed this part, newest first.") log("snap:fail the section carries no explanation line");
+      const want = ["${newest} Chips on the parts a turn touches 10m", "${second} Per-path placement in core 2d"];
+      if (JSON.stringify(rows()) !== JSON.stringify(want)) log("snap:fail the section's rows: " + JSON.stringify(rows()));
+      const footer = here().querySelector(".sheet-here-older")?.textContent;
+      if (${older} ? footer !== "Turns older than 7 days aren't listed" : footer !== undefined) log("snap:fail the footer: " + footer);
+      await plate("hook");
+      if (here().querySelector("p.empty")?.textContent !== "No turn of this session changed this part in the last 7 days" || rows().length) log("snap:fail Hook's empty section: " + here().textContent);
+      await plate("core");
+      here().querySelectorAll(".sheet-here-turn")[1].click();
+      await wait(100);
+      const feed = document.getElementById("feed");
+      const target = feed.children[${newest} - ${second}];
+      if (!target.classList.contains("flash") || feed.querySelectorAll(".turn.flash").length !== 1) log("snap:fail turn ${second} did not flash, alone");
+      if (target.querySelector(".turn-line")?.getAttribute("aria-expanded") !== "true") log("snap:fail turn ${second} did not unfold");
+      if (document.activeElement !== target.querySelector(".turn-line")) log("snap:fail the focus did not move to turn ${second}");
+      // The section in view for the screenshot, at the sheet's foot.
+      here().querySelector(".sheet-heading").scrollIntoView({ block: "start" });
+      log("panel ok");`, {
+    sessions,
+    select: { __by: "id", values: selected },
+    map_place: { ...busyPlace(), "daemon/old.rs": ["daemon"], "understanding/u.rs": ["understanding"], "core/older.rs": ["core"] },
+  });
+};
+// A late placement (#549's final review): #311's story is open beside Hook's sheet when a new turn of it changes hook/late.rs, whose
+// `map_place` answer is held back. While it is pending the section says nothing rather than "No turn of this session changed this part";
+// once it lands the section lists the turn and the newest turn gets its "Show on map", with no other change. The shot is that frame.
+export const mapLatePlace = (): Fixture => {
+  const sessions = busySessions();
+  const s1 = sessions[0];
+  const late = { ...s1, turns: [...s1.turns, { started_at: Date.now() - 120e3, ended_at: Date.now() - 60e3, prompt: "Read the hook late", id: null, message: null, checks: [], listed: [], files: { files: [{ root: "/w/plotkeeper", path: "hook/late.rs", from: null, added: 3, removed: 1, agent: null }], merged: 0 } }] };
+  return mapPanel(`
+      const here = () => document.querySelector("#map-sheet .sheet-here");
+      const rows = () => [...here().querySelectorAll(".sheet-here-turn")].map((b) => b.querySelector(".sheet-here-number").textContent);
+      const showOnMap = () => document.querySelector("#feed > li.turn .show-on-map");
+      await plate("hook");
+      await press(row("s1"));
+      if (!panelOpen() || !sheetOpen() || here().hidden) return log("snap:fail the story and Hook's section are not both shown");
+      if (!here().querySelector("p.empty")) log("snap:fail Hook's section does not say no turn changed it: " + here().textContent);
+      // map_place's answer for the new path is held until released.
+      let release;
+      const held = new Promise((done) => (release = done));
+      const fetched = window.fetch;
+      window.fetch = async (url, init) => {
+        if (!String(url).endsWith("/api/map_place")) return fetched(url, init);
+        await held;
+        return { ok: true, status: 200, json: async () => ({ ...${JSON.stringify(busyPlace())}, "hook/late.rs": ["hook"] }) };
+      };
+      __snapEmit("sessions", ${JSON.stringify(sessions)}.map((s) => (s.id === "s1" ? ${JSON.stringify(late)} : s)));
+      __snapEmit("selected", { session: ${JSON.stringify(late)}, agent: null });
+      await wait(300);
+      if (here().querySelector("p.empty")) log("snap:fail a pending placement reads as no turn changed Hook");
+      if (rows().length) log("snap:fail Hook's section lists rows before the placement came: " + rows());
+      if (showOnMap()) log("snap:fail the newest turn has Show on map before its placement came");
+      release();
+      await wait(300);
+      if (rows().join() !== "2") log("snap:fail the late placement did not reach Hook's section: " + JSON.stringify(rows()) + " " + here().textContent);
+      if (!showOnMap()) log("snap:fail the late placement did not give the newest turn its Show on map");
+      log("panel ok");`, { sessions });
+};
+// A story's turn on the map (#560): with #311's story open, hovering or focusing a turn lights its parts (a brief's ring, nothing dimmed,
+// no camera move); leaving, or a feed redraw, clears it. Its 9-day-old turn says its files aren't shown and lights nothing; a turn with
+// no files lights nothing; the newest has "Show on map"; under a brief nothing lights. It ends on the 2-day-old turn, hovered.
+export const mapTurnLight = (): Fixture => {
+  const day = 24 * 3600e3;
+  const turn = (ago: number, paths: (string | [string, string])[], prompt: string) => ({
+    started_at: Date.now() - ago - 60e3, ended_at: Date.now() - ago, prompt, id: null, message: null, checks: [], listed: [],
+    files: { files: paths.map((given) => { const [path, agent] = typeof given === "string" ? [given, null] : given; return { root: "/w/plotkeeper", path, from: null, added: 3, removed: 1, agent }; }), merged: 0 },
+  });
+  const sessions = busySessions().map((s) => (s.id === "s1" ? { ...s, turns: [turn(9 * day, ["daemon/old.rs"], "Rework the daemon"), turn(2 * day, ["understanding/u.rs", "core/older.rs"], "Read the understanding"), turn(day, [], "Explain the fog"), ...s.turns] } : s));
+  return mapPanel(`
+      const lit = () => [...document.querySelectorAll("#map .plate.turn-lit")].map((p) => p.dataset.id).sort().join();
+      const world = () => document.querySelector("#map .map-world").style.transform;
+      const turns = () => [...document.querySelectorAll("#feed > li.turn")];
+      const at = (i) => turns()[i];
+      const hover = async (node, on = true) => { node.dispatchEvent(new PointerEvent(on ? "pointerenter" : "pointerleave")); await wait(30); };
+      await press(row("s1"));
+      if (!panelOpen()) return log("snap:fail #311's story did not open");
+      // Its four turns, newest first, then the block of what started in no turn.
+      if (turns().length < 4) return log("snap:fail #311's feed has " + turns().length + " turns, not 4");
+      const camera = world();
+      // The 2-day-old turn lights the parts it changed, nothing dims and the camera stays; leaving clears it.
+      await hover(at(2));
+      if (lit() !== "core,understanding") log("snap:fail the hovered turn lights " + JSON.stringify(lit()));
+      const dimmed = [...document.querySelectorAll("#map .plate")].filter((p) => Number(getComputedStyle(p).opacity) < 1).map((p) => p.dataset.id);
+      if (dimmed.length) log("snap:fail a turn's hover dimmed " + dimmed.join());
+      if (world() !== camera) log("snap:fail a turn's hover moved the camera");
+      const ring = getComputedStyle(document.querySelector("#map .plate[data-id=core]")).boxShadow;
+      if (!ring.includes("0px 0px 0px")) log("snap:fail a lit part has no ring: " + ring);
+      await hover(at(2), false);
+      if (lit() !== "") log("snap:fail the light stayed after the pointer left: " + lit());
+      // Keyboard focus lights it too, and moving the focus out clears it.
+      at(2).querySelector(".turn-line").focus();
+      await wait(30);
+      if (lit() !== "core,understanding") log("snap:fail the focused turn lights " + JSON.stringify(lit()));
+      at(2).querySelector(".turn-line").blur();
+      await wait(30);
+      if (lit() !== "") log("snap:fail the light stayed after the focus left: " + lit());
+      // The newest turn lights its parts, its Worker's Shell included, and has "Show on map"; a turn with no files lights nothing.
+      await hover(at(0));
+      if (lit() !== "core,shell,window") log("snap:fail the newest turn lights " + JSON.stringify(lit()));
+      await hover(at(0), false);
+      if (!at(0).querySelector(".show-on-map")) log("snap:fail the newest turn has no Show on map");
+      await hover(at(1));
+      if (lit() !== "") log("snap:fail a turn with no files lights " + lit());
+      await hover(at(1), false);
+      // The 9-day-old turn, unfolded, says its files aren't shown and lights nothing.
+      at(3).querySelector(".turn-line").click();
+      await wait(100);
+      const old = at(3).querySelector(".turn-old");
+      if (old?.textContent !== "Files older than 7 days aren't shown on the map") log("snap:fail the old turn's line: " + JSON.stringify(old?.textContent));
+      if (at(2).querySelector(".turn-old") || at(0).querySelector(".turn-old")) log("snap:fail a turn within 7 days says its files aren't shown");
+      await hover(at(3));
+      if (lit() !== "") log("snap:fail the old turn lights " + lit());
+      await hover(at(3), false);
+      at(3).querySelector(".turn-line").click();
+      await wait(100);
+      // A feed redraw clears the light.
+      await hover(at(2));
+      __snapEmit("selected", { session: ${JSON.stringify(sessions[0])}, agent: null });
+      await wait(100);
+      if (lit() !== "") log("snap:fail the light stayed after the feed redrew: " + lit());
+      // Under a brief, a turn's hover lights nothing.
+      document.querySelector('#map-tray .tray-row[data-pr="334"]').click();
+      await wait(400);
+      if (document.getElementById("map-brief").hidden) return log("snap:fail the brief did not open");
+      await hover(at(2));
+      if (lit() !== "") log("snap:fail a turn lit " + lit() + " under a brief");
+      await hover(at(2), false);
+      await esc();
+      if (!document.getElementById("map-brief").hidden) return log("snap:fail Esc did not close the brief");
+      await hover(at(2));
+      log("turn lit " + lit());
+      log("panel ok");`, {
+    sessions,
+    select: { __by: "id", values: Object.fromEntries(sessions.map((s) => [s.id, { session: s, agent: null }])) },
+    pr_brief: briefOf(storySteps()),
+    map_place: { ...busyPlace(), "daemon/old.rs": ["daemon"], "understanding/u.rs": ["understanding"], "core/older.rs": ["core"] },
+  });
 };
 /**
  * The rail with no session picked (#526): the story's session is picked no more while its panel shows, as when it is deleted elsewhere. The
@@ -94,7 +305,7 @@ export const mapPanelStory = (): Fixture =>
       await press(row("s2"));
       if (!panelOpen() || !document.querySelector("#panel-body > .rail")) return log("snap:fail a row's press did not open its story in the left panel");
       if (document.getElementById("map").hidden) return log("snap:fail the row's press left the Map view");
-      if (document.querySelector("#map .plate[data-id=hook] .agent-chip.lit") === null) log("snap:fail the open session's chip is not lit");
+      if (document.querySelector("#map .plate[data-id=hook] .spot-chip") === null) log("snap:fail the open session's chip is not on its part");
       // Below 1007 px the open panel leaves no room for the legend (the prototype's scene narrow), and the tray never lies on a plate.
       const checkFoot = (when) => {
         if (narrow && panelOpen() && document.getElementById("map-legend").getClientRects().length) log("snap:fail the legend shows beside the open panel below 1007 px " + when);
@@ -116,7 +327,7 @@ export const mapPanelStory = (): Fixture =>
       }
       checkFoot("with the story and the sheet");
       checkAll("with the story and the sheet");
-      if (!narrow && document.querySelector("#map .plate[data-id=hook] .agent-chip.lit") === null) log("snap:fail the open session's chip went out");
+      if (!narrow && document.querySelector("#map .plate[data-id=hook] .spot-chip") === null) log("snap:fail the open session's chip went out");
       log("panel ok");`);
 /** Focus mode below 1007 px (#380's review): the open panel hides the legend and the Ready-for-review tray there as in the strip layout. */
 export const mapPanelFocus = (): Fixture =>
@@ -135,7 +346,7 @@ export const mapPanelPeel = (): Fixture =>
       await press(row("s2"));
       await press(row("s2"));
       if (panelOpen()) return log("snap:fail a second press on the same row did not close its story");
-      if (document.querySelector("#map .agent-chip.lit")) log("snap:fail the chips stay lit after the story closed");
+      if (document.querySelector("#map .spot-chip")) log("snap:fail the chip stays after the story closed");
       checkAll("after the second press");
       await press(row("s2"));
       await plate("understanding");
@@ -192,8 +403,18 @@ export const mapPanelHistory = (): Fixture =>
       const tray = document.getElementById("map-tray").getBoundingClientRect();
       if (tray.left < panel.getBoundingClientRect().right) log("snap:fail the tray is under the open panel");
       checkAll("with History open");
+      // Hovering an ended session's row spotlights its footprint; Esc closes History under the pointer, and the hover ends with its row.
+      const firm = () => [...document.querySelectorAll("#map .plate.foot-firm")].map((p) => p.dataset.id).join();
+      panel.querySelector('.history .row[data-key="e1 "]').dispatchEvent(new PointerEvent("pointerenter"));
+      await wait(150);
+      if (firm() !== "hook") log("snap:fail the History row's footprint: " + firm());
+      await esc();
+      if (panelOpen()) log("snap:fail Esc did not close History");
+      if (firm() !== "") log("snap:fail the removed History row's spotlight stuck: " + firm());
+      document.querySelector("#history-link .history-link").click();
+      await wait(300);
       log("panel ok");`, {
-  sessions: [...busySessions(), session("e1", "Map view drawer, #312", "ended", { last_event_at: Date.now() - 2 * 86400e3 }), session("e2", "Wire check covers MapState, #333", "ended", { last_event_at: Date.now() - 3 * 86400e3 })],
+  sessions: [...busySessions(), session("e1", "Map view drawer, #312", "ended", { last_event_at: Date.now() - 2 * 86400e3, turns: [{ started_at: Date.now() - 600e3, ended_at: Date.now() - 300e3, prompt: "", id: null, message: null, checks: [], listed: [], files: { files: [{ root: "/w/plotkeeper", path: "hook/src/main.rs", from: null, added: 3, removed: 1, agent: null }], merged: 0 } }] }), session("e2", "Wire check covers MapState, #333", "ended", { last_event_at: Date.now() - 3 * 86400e3 })],
 });
 /** Settings in the left panel from the top bar's gear, holding the writer section (#387); the gear again closes it. */
 export const mapPanelSettings = (): Fixture =>
@@ -468,7 +689,7 @@ export const mapSheetClose = (): Fixture => ({
 });
 
 /**
- * An open sheet keeps still while agents join and leave the not placed list (#472): the list is one line, "N not placed", whose
+ * An open sheet keeps still while sessions join and leave the not placed list (#472): the list is one line, "N not placed", whose
  * height is kept while a sheet is open, even at none; a click opens it, and it stays open across the next change.
  */
 export const mapSheetStill = (): Fixture => {
@@ -490,13 +711,13 @@ export const mapSheetStill = (): Fixture => {
       if (top() !== still) log("snap:fail the sheet moved from " + still + " to " + top() + " at " + JSON.stringify(want || "none"));
     }
     await show(${JSON.stringify(three)});
-    const chip = document.querySelector("#map-not-placed .agent-chip");
-    if (!chip || chip.checkVisibility()) log("snap:fail the closed line shows its chips");
+    const pick = document.querySelector("#map-not-placed .session-pick");
+    if (!pick || pick.checkVisibility()) log("snap:fail the closed line shows its rows");
     document.querySelector("#map-not-placed summary").click();
     await wait(100);
     await show(${JSON.stringify(one)});
-    const open = [...document.querySelectorAll("#map-not-placed .agent-chip")].filter((c) => c.checkVisibility()).map((c) => c.textContent);
-    if (open.join() !== "#312 · CI marks") log("snap:fail the opened list did not stay open with its chips: " + open.join());
+    const open = [...document.querySelectorAll("#map-not-placed .session-pick-name")].filter((c) => c.checkVisibility()).map((c) => c.textContent);
+    if (open.join() !== "#312 · CI marks") log("snap:fail the opened list did not stay open with its rows: " + open.join());
     // Emptied and filled again, it comes back closed, so it never drops the sheet by a whole list without a click.
     await show(${JSON.stringify([idle])});
     await show(${JSON.stringify(three)});

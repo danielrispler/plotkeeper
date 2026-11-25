@@ -25,6 +25,9 @@ import { checkTime, counts, estimateText, times } from "./times.js";
 import { setCards, studio } from "./state.js";
 import { showError } from "./notice.js";
 import { currentMap } from "./map.js";
+import { lightTurn, revealTurn, turnLit } from "./map-agents.js";
+import { OLD_TURN, oldTurn } from "./map-live.js";
+import { refreshHere } from "./map-sheet.js";
 import { stretches, tipStore, tipText } from "./tips.js";
 import {
   askKind,
@@ -573,6 +576,7 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
     const line = evidenceElement(session.id, index, turn, { only: session.state === "running" && now ? "failed" : "all" });
     if (line) node.append(line);
   }
+  if (turn) node.append(...turnMapNodes(session, turn, now !== null && index !== null));
   // A PR brief waiting for this session's PR: one quiet row in the newest turn, which opens it on the Map view.
   if (now && index !== null) {
     const row = railBriefRow(session, drawFeed);
@@ -612,6 +616,7 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
       if (opened.has(key)) opened.delete(key);
       else opened.add(key);
       draw();
+      if (opened.has(key)) revealTurn(turn);
     });
     button.classList.add("turn-line");
     // The line's prompt and Headline carry their own full text; the rest of the line says what a click does (#220).
@@ -652,12 +657,37 @@ function openCitation(id: string) {
   (node as HTMLElement | undefined)?.scrollIntoView?.({ block: "start" });
 }
 
-const turnElement = (session: Session, block: FeedTurn, now: Now | null) =>
-  now || block.index === null ? turnContent(session, block, now) : foldedTurn(session, block);
+function turnElement(session: Session, block: FeedTurn, now: Now | null): HTMLElement {
+  const node = now || block.index === null ? turnContent(session, block, now) : foldedTurn(session, block);
+  if (block.turn) lightsTurn(node, block.turn);
+  return flashing(session, block.index, node);
+}
+
+// Turn lighting (#560): hovering or focusing a turn lights the parts it changed on the map; leaving it, or a redraw of the feed, clears it.
+function lightsTurn(node: HTMLElement, turn: Turn) {
+  node.addEventListener("pointerenter", () => lightTurn(turn));
+  node.addEventListener("pointerleave", () => lightTurn(turn, false));
+  node.addEventListener("focusin", () => lightTurn(turn));
+  node.addEventListener("focusout", (event) => {
+    if (!(event.relatedTarget instanceof Node && node.contains(event.relatedTarget))) lightTurn(turn, false);
+  });
+}
+
+// What a turn's block says of the map (#560): a turn past the cut, of an agent that records turn files, says its files aren't shown;
+// the newest turn with parts has a quiet "Show on map", which pans them clear of the panel (nothing while a brief plays).
+function turnMapNodes(session: Session, turn: Turn, newest: boolean): HTMLElement[] {
+  if (oldTurn(turn, reports(session, "turn_trees"), Date.now())) return [text("p", OLD_TURN, "turn-old")];
+  if (!newest || !turnLit(turn, false).length) return [];
+  const button = pressable(text("button", "Show on map", "quiet show-on-map"), null, () => revealTurn(turn));
+  button.title = "Pan the map so this turn's parts show beside the story";
+  return [button];
+}
 
 /** Draws "now" and the feed from the selection and the brief the server last sent. */
 export function drawFeed() {
   const selected = studio.selection;
+  // The feed's nodes are new: no turn is under the pointer or the focus until one is entered again.
+  lightTurn(null);
   if (selected === null) {
     drawNow(null, null);
     element("banner-slot").replaceChildren();
@@ -678,6 +708,8 @@ export function drawFeed() {
   );
   element("brief-fold").hidden = lives || briefNodes(cards, openCitation).length === 0;
   element("feed").replaceChildren(...blocks.map((block, i) => turnElement(session, block, own && i === 0 && block.index !== null ? now : null)));
+  // The open part sheet's "This session here" follows the story (#561).
+  refreshHere();
 }
 // Rename (danielrispler/Falinks#469): the row's name, kept in the event log. An empty name gives the row its folder's again.
 function askName(session: Session) {
@@ -797,4 +829,46 @@ export function showCards(cards: SessionCards) {
   if (notes) fillDockNotes();
   // A summary was stored: the list's unseen rows show its Headline (#382).
   drawSidebar();
+}
+
+// "This session here" on a part's sheet (#561): a turn's Headline as the folded line shows it, and the press of a row, which scrolls the
+// story to the turn, unfolds it, flashes its outline once and pans its parts clear of the panel, `openCitation`'s way.
+export function turnHeadline(session: Session, index: number): string | null {
+  const turn = session.turns[index];
+  return turn ? headlineOf(turn.id ? summaryOf(turn.id) : null, turn.message).headline : null;
+}
+
+// The turn whose outline flashes, and when its flash ends: a redraw meanwhile carries the flash on from where it was.
+const flashMs = 1000;
+let flashed: { session: string; index: number; until: number } | null = null;
+function flashing(session: Session, index: number | null, node: HTMLElement): HTMLElement {
+  const left = flashed && flashed.session === session.id && flashed.index === index ? flashed.until - Date.now() : 0;
+  if (left > 0) {
+    node.classList.add("flash");
+    node.style.animationDelay = `${left - flashMs}ms`;
+  }
+  return node;
+}
+
+export function showTurn(index: number) {
+  const selected = studio.selection;
+  if (selected === null || selected.agent !== null) return;
+  const { session } = selected;
+  const turn = session.turns[index];
+  if (!turn) return;
+  if (index < session.turns.length - 1) opened.add(`${session.id} ${index} turn`);
+  const flash = { session: session.id, index, until: Date.now() + flashMs };
+  flashed = flash;
+  drawFeed();
+  const node = element("feed").children[session.turns.length - 1 - index] as HTMLElement | undefined;
+  node?.scrollIntoView?.({ block: "nearest" });
+  // The focus follows to the turn's line, so the keyboard reads on from there.
+  node?.querySelector<HTMLElement>(".turn-line")?.focus({ preventScroll: true });
+  // Under reduced motion the ring holds still until the flash ends.
+  setTimeout(() => {
+    if (flashed !== flash) return;
+    flashed = null;
+    element("feed").querySelectorAll(".turn.flash").forEach((each) => each.classList.remove("flash"));
+  }, flashMs);
+  revealTurn(turn);
 }

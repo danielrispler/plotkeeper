@@ -4,12 +4,14 @@
 //
 // Where the next tickets plug in, so they add to this file rather than reshape it:
 // - `onPlate(fn)`: runs for each plate each time it is drawn, with the plate's slots: `fog` behind the name, `marks` at its top
-//   right (law marks sit there; a broken-law mark joins them), `chips` along its foot (live agents). A ticket fills a slot.
+//   right (law marks sit there; a broken-law mark joins them), `chips` along its foot (a session badge or the spotlit session's chip, #562).
+//   A ticket fills a slot.
 // - `onPlateClick(fn)`: a click on a plate that was not a drag, such as one that opens the part's sheet. A click on the empty map closes
 //   the `drawer` and `sheet` layers (#445).
 // - `onDraw(fn)`: runs after each draw with the whole `MapView`, for what is not on a plate: the side area (`slots.notPlaced`,
 //   `slots.sheet`, `slots.drawer`, `slots.runs`, shown by `syncSide`), the tray (`slots.tray`) and the banner (`slots.banner`).
-// - `registerLayer(name, layer)`: Esc's layers, `drawer`, `popover` (#491), `brief`, `scrubbed`, `sheet` and `panel` (#385), peeled in that order; on the bare map Esc does nothing.
+// - `registerLayer(name, layer)`: Esc's layers, `badges` (#562), `drawer`, `popover` (#491), `brief`, `scrubbed`, `sheet` and `panel` (#385), peeled in that order; on the bare map Esc does nothing.
+// - `onCamera(fn)`: runs when the camera moves (a pan, a zoom, a reveal, or a brief borrowing it), so what floats over the map can close.
 // - The left panel (`panel.ts`, #385) floats over the map's left; `revealParts` pans the camera so the parts in focus clear it and the sheet.
 // - `MapState` (`types.ts`, `map.rs`) is the one payload; `currentMap()` gives the view as drawn.
 // - The camera (#383): the map area pans and zooms the world rather than scrolling it. Daniel's view is saved per project (`map_save_view`);
@@ -49,6 +51,8 @@ export const onUnread = (hook: (banner: HTMLElement, scrub: Scrub | null) => voi
 export const registerLayer = (name: LayerName, layer: Layer) => {
   layers[name] = layer;
 };
+const cameraHooks: (() => void)[] = [];
+export const onCamera = (hook: () => void) => void cameraHooks.push(hook);
 
 /** What `startMap` is given by `main.ts`, which owns what the Map view may not import. */
 export type MapDeps = {
@@ -185,6 +189,7 @@ const saving = new Map<string, ReturnType<typeof setTimeout>>();
 function moveCamera(to: Camera, glide: boolean) {
   if (!rig?.move(to)) return;
   applyCamera(glide);
+  cameraHooks.forEach((hook) => hook());
   const path = project;
   if (path === null || view?.scrub) return;
   clearTimeout(saving.get(path));
@@ -198,6 +203,7 @@ function moveCamera(to: Camera, glide: boolean) {
 export function lendCamera(camera: Camera) {
   rig?.lend(camera);
   applyCamera(true);
+  cameraHooks.forEach((hook) => hook());
 }
 /** Shows Daniel's view again, as the brief found it. */
 export function giveCameraBack() {
@@ -443,9 +449,7 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub
   }
   world.append(...elements);
   canvas.append(world);
-  // The keyboard on a part's button stays on that part's new button (#452's review).
-  const focused = document.activeElement;
-  const kept = focused?.matches(".plate-open") && body.contains(focused) ? focused.closest<HTMLElement>(".plate")?.dataset.id : undefined;
+  const { kept, onBadge } = focusedPart(body);
   body.replaceChildren(canvas);
   if (kept) nodes.get(kept)?.querySelector<HTMLElement>(".plate-open")?.focus({ preventScroll: true });
   fit();
@@ -455,7 +459,28 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub
   applyCamera(false);
   pan(canvas);
   drawHooks.forEach((hook) => hook(current));
+  if (kept && onBadge) keepBadgeFocus(nodes.get(kept));
   syncSide(slots);
+}
+
+// The keyboard on a part's button stays on that part's new button (#452's review), and on a part's session badge on its new badge (#562):
+// the part whose button or badge has the focus in `body`, and whether it is the badge.
+function focusedPart(body: HTMLElement): { kept: string | undefined; onBadge: boolean } {
+  const focused = document.activeElement;
+  const kept = focused?.matches(".plate-open, .session-badge") && body.contains(focused) ? focused.closest<HTMLElement>(".plate")?.dataset.id : undefined;
+  return { kept, onBadge: focused?.matches(".session-badge") === true };
+}
+
+// The badges are drawn by a hook; a part that lost its badge keeps the focus on its button. Badges that come later, once a new placement
+// is answered, take it back while it is still there (`wantsBadge`, read by `map-agents.ts`).
+function keepBadgeFocus(plate: HTMLElement | undefined) {
+  const badge = plate?.querySelector<HTMLElement>(".session-badge");
+  const button = plate?.querySelector<HTMLElement>(".plate-open");
+  if (badge) badge.focus({ preventScroll: true });
+  else if (button && document.activeElement === button) {
+    button.dataset.wantsBadge = "";
+    button.addEventListener("blur", () => delete button.dataset.wantsBadge, { once: true });
+  }
 }
 
 // How far, in screen pixels, a press on the empty map may move and still be a click (#445, tldraw's threshold).
@@ -508,7 +533,7 @@ function grab(node: HTMLElement, id: string, current: MapView, links: Element, f
   // The drag runs on the screen, so its threshold is in screen pixels whatever the zoom; the plate's place is that over the scale.
   let scale = 1;
   node.addEventListener("pointerdown", (event) => {
-    // A press on a control on the plate, such as an agent's chip, is the control's: capturing it here would give its click to the plate.
+    // A press on a control on the plate, such as a session badge, is the control's: capturing it here would give its click to the plate.
     // The part's own open button is the plate's, so a press on its text still drags (#460).
     if (event.button !== 0 || (event.target as Element).closest("button:not(.plate-open)")) return;
     scale = rig?.shown().scale ?? 1;

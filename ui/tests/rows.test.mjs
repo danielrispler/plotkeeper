@@ -276,3 +276,20 @@ test("a second Clear inside the window restarts it and keeps the first rows hidd
   time.tick(1);
   assert.deepEqual(deleted, ["a", "b"]);
 });
+
+// The spotlit session's chip on the map reads the row's own second line (#562): a seen Idle or Ended session has none, and never asks
+// for its Headline, so hovering History starts no summary write.
+test("a seen Idle or Ended session has no second line and never asks for its Headline; an unseen one does", () => {
+  const asked = [];
+  const headline = (session) => {
+    asked.push(session.state);
+    return "Did it";
+  };
+  const base = { line: "x", questions: [], landed: false };
+  assert.equal(secondLine({ ...base, state: "idle", unseen: false }, headline), null);
+  assert.equal(secondLine({ ...base, state: "ended", unseen: false }, headline), null);
+  assert.equal(secondLine({ ...base, state: "ended", unseen: true }, headline), null);
+  assert.deepEqual(asked, []);
+  assert.equal(secondLine({ ...base, state: "idle", unseen: true }, headline), "Did it");
+  assert.deepEqual(asked, ["idle"]);
+});

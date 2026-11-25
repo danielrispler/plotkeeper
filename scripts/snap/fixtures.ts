@@ -7,8 +7,8 @@ import type { Fixture } from "./base.ts";
 import { railFixtures } from "./rail-fixtures.ts";
 import { list, withSaved } from "./fixtures-shared.ts";
 import { alerts, listClearLanded, listNarrow, listSecondLines, logDone, logFixture, logos, noticeErrors, notRecording, paletteFocus, paletteOpen, projectMenuScript, projectsSaved, recording, skipLink, snapRealKeys, toastKeys, whatsNewToast } from "./fixtures-page.ts";
-import { mapBase, mapBriefPairLight, mapBriefSwitch, mapBroken, mapBusy, mapCalm, mapCamera, mapDotsOrder, mapDotsRetry, mapEmpty, mapFog, mapFogPlates, mapFresh, mapGlassMotion, mapGoneFocus, mapHeaderDot, mapListHover, mapMarks, mapNoMap, mapPartKeys, mapPartRedraw, mapProjectGone, mapProjectRemoved, mapRefresher, mapReview, mapScrubbed, mapSmallGaps, mapStale, mapSwitchSavesViews, mapTalksTo, readmeHero } from "./fixtures-map.ts";
-import { mapPanelBrief, mapPanelDiff, mapPanelFocus, mapPanelHistory, mapPanelNoSession, mapPanelPeel, mapPanelSettings, mapPanelStory, mapPanelToggle, mapSheetClose, mapSheetExplained, mapSheetHolds, mapSheetKeptWidth, mapSheetResizeRedraw, mapSheetScrollShort, mapSheetStill, mapSheetUnratified, mapSheetWidth } from "./fixtures-panel.ts";
+import { mapBadgeList, mapBase, mapBriefPairLight, mapBriefSwitch, mapBroken, mapBusy, mapCalm, mapCamera, mapDotsOrder, mapDotsRetry, mapEmpty, mapFog, mapFogPlates, mapFresh, mapGlassMotion, mapGoneFocus, mapHeaderDot, mapMarks, mapNoMap, mapPartKeys, mapPartRedraw, mapProjectGone, mapProjectRemoved, mapRefresher, mapReview, mapScrubbed, mapSmallGaps, mapSpotlight, mapStale, mapSwitchSavesViews, mapTalksTo, readmeHero } from "./fixtures-map.ts";
+import { mapFootprint, mapLatePlace, mapPanelBrief, mapPanelDiff, mapPanelFocus, mapPanelHistory, mapPanelNoSession, mapPanelPeel, mapPanelSettings, mapPanelStory, mapPanelToggle, mapSheetClose, mapSheetExplained, mapSheetHere, mapSheetHolds, mapSheetKeptWidth, mapSheetResizeRedraw, mapSheetScrollShort, mapSheetStill, mapSheetUnratified, mapSheetWidth, mapTurnLight } from "./fixtures-panel.ts";
 import { mapBackLaw, mapMicroWorld, mapPreFlight, mapPreFlightPick, mapPreFlightStatus, mapRuns, mapRunsAnnounced, mapRunsBesideSheet, mapRunsPaused, mapTray, mapTrayAfterPush } from "./fixtures-runs.ts";
 import { mapBriefAlsoGroups, mapBriefAnnounce, mapBriefBar, mapBriefBold, mapBriefBoldUnpaired, mapBriefChapterLast, mapBriefChapterMid, mapBriefChapters, mapBriefCopied, mapBriefCopyByHand, mapBriefExplainBack, mapBriefExplained, mapBriefFigure, mapBriefGuard, mapBriefHeights, mapBriefNoFacts, mapBriefNoStaleBase, mapBriefOrderRight, mapBriefOrderSlots, mapBriefOrderWrong, mapBriefOverturn, mapBriefPartialFacts, mapBriefPick, mapBriefRatify, mapBriefRatifyDetail, mapBriefRatifyEvidence, mapBriefSince, mapBriefStaleBase, mapBriefStart, mapBriefStepCode, mapBriefStory, mapBriefTall, mapBriefTaller, mapBriefTallScroll, mapBriefUnconfirmed, mapBriefWhy, mapBriefWhyDecision, mapBriefWriting, mapCatchUp, mapCatchUpBold, mapCatchUpStage, mapCatchUpSummarising, mapCatchUpWriting, railBriefReady } from "./fixtures-brief.ts";
 import { writersBriefsNeedClaude, writersFailed, writersKeyError, writersKeyNotSet, writersKeySet, writersList, writersOpenAI, writersPassed } from "./fixtures-writers.ts";
@@ -146,12 +146,19 @@ export const fixtures = {
   mapFog,
   mapPreFlightPick,
   mapFogPlates,
-  // The Map view busy (#311): a session on two parts, a Needs you one, a Worker with its own chip, and the not placed list (no files yet,
-  // agy, status-only Codex, ignored-only edits); a Helper and a finished session never show.
-  mapBusy: () => mapBusy(false),
+  // The Map view busy (#311, #562): a badge on each part a session's latest turn touched, a Worker's part counting its session, a Needs-you
+  // badge, and the not placed list (no files yet, agy, status-only Codex, ignored-only edits); a Helper and a finished session never show.
+  mapBusy,
   mapSheetStill,
-  mapListHover,
-  mapChipJump: () => mapBusy(true),
+  // Session badges (#562): an accented badge and its open list, and the spotlight's view with a dimmed and a full Needs-you badge.
+  mapBadgeList,
+  mapSpotlight,
+  mapFootprint,
+  // "This session here" on a part's sheet beside the open story (#561), with and without its footer.
+  mapSheetHere: () => mapSheetHere(false),
+  mapSheetHereOlder: () => mapSheetHere(true),
+  mapLatePlace,
+  mapTurnLight,
   // The map from the keyboard (#460).
   mapPartKeys,
   mapPartRedraw,

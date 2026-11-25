@@ -78,23 +78,23 @@ test("a link runs from rim to rim, not centre to centre", () => {
   assert.deepEqual(rimPoint(a, plateSize, a), a);
 });
 
-test("Esc closes the overlays (a micro-world, the pre-flight, the patch review), then the drawer, then the brief, then returns from a scrubbed commit to now, then closes the sheet, then the left panel, then does nothing (#386, #394, #398, #399)", () => {
-  const open = { scrubbed: true, drawer: true, brief: true, sheet: true, panel: true, "pre-flight": true, "patch-review": true, "micro-world": true };
+test("Esc closes the overlays (a micro-world, the pre-flight, the patch review), then a badge's list, then the drawer, then the brief, then returns from a scrubbed commit to now, then closes the sheet, then the left panel, then does nothing (#386, #394, #398, #399, #562)", () => {
+  const open = { scrubbed: true, drawer: true, brief: true, sheet: true, panel: true, "pre-flight": true, "patch-review": true, "micro-world": true, badges: true };
   const closed = [];
   const layers = Object.fromEntries(layerOrder.map((name) => [name, { open: () => open[name], close: () => { open[name] = false; closed.push(name); } }]));
   const presses = [];
-  for (let i = 0; i < 9; i++) presses.push(escapeMap(layers));
-  assert.deepEqual(closed, ["micro-world", "pre-flight", "patch-review", "drawer", "brief", "scrubbed", "sheet", "panel"]);
-  assert.deepEqual(presses, ["micro-world", "pre-flight", "patch-review", "drawer", "brief", "scrubbed", "sheet", "panel", null]);
+  for (let i = 0; i < 10; i++) presses.push(escapeMap(layers));
+  assert.deepEqual(closed, ["micro-world", "pre-flight", "patch-review", "badges", "drawer", "brief", "scrubbed", "sheet", "panel"]);
+  assert.deepEqual(presses, ["micro-world", "pre-flight", "patch-review", "badges", "drawer", "brief", "scrubbed", "sheet", "panel", null]);
 });
 
-test("a project switch closes the PR brief and its popover, the pre-flight, the patch review and a micro-world, and leaves the other layers", () => {
+test("a project switch closes the PR brief and its popover, the pre-flight, the patch review, a micro-world and a badge's list, and leaves the other layers", () => {
   const open = Object.fromEntries(layerOrder.map((name) => [name, true]));
   const layers = Object.fromEntries(layerOrder.map((name) => [name, { open: () => open[name], close: () => {
     open[name] = false;
   } }]));
   switchProject(layers);
-  assert.deepEqual(open, { "micro-world": false, "pre-flight": false, "patch-review": false, drawer: true, popover: false, brief: false, scrubbed: true, sheet: true, panel: true });
+  assert.deepEqual(open, { "micro-world": false, "pre-flight": false, "patch-review": false, badges: false, drawer: true, popover: false, brief: false, scrubbed: true, sheet: true, panel: true });
 });
 
 // The left panel and the part's sheet (#385): what opens where.
@@ -138,7 +138,7 @@ test("a row's press opens its session's story in the panel, and a second press o
   assert.deepEqual(pressRow({ kind: "diff", session: "s1", turn: 0 }, "s1"), story("s1"));
 });
 
-test("the session whose chips stay lit is the one the panel shows", () => {
+test("the session spotlit while the panel is open is the one the panel shows", () => {
   assert.equal(panelSession(story("s1")), "s1");
   assert.equal(panelSession({ kind: "diff", session: "s2", turn: 0 }), "s2");
   assert.equal(panelSession({ kind: "history" }), null);

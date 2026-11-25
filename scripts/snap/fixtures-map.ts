@@ -2,7 +2,7 @@
 
 import type { Ci, MapState } from "../../ui/types.ts";
 import { base, type Fixture } from "./base.ts";
-import { at, briefOf, busySessions, mapBrief, mapFile, mapOpened, mapState, pairFile, panelChecks, step, storySteps, withSaved } from "./fixtures-shared.ts";
+import { at, briefOf, busyPlace, busySessions, mapBrief, mapFile, mapOpened, mapState, pairFile, panelChecks, session, step, storySteps, withSaved } from "./fixtures-shared.ts";
 
 const openGone = `
     named("pokedex").querySelector(".project-toggle").click();
@@ -151,44 +151,200 @@ export const mapTalksTo = (): Fixture =>
 // the Map view fell below its threshold, and so did the history strip and "See the proof".
 // Pre-flight (#394) was run twice and three explain-back lines (#397) were written, so the review lists only the modules of project 2.
 const dueFacts = { active_days: 20, merged_prs: 25, engaged_days: 1, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, counts: { "pre-flight-run": 2, "catch-up-done": 3, "explain-back-given": 3, "micro-world-opened": 2, "back-law-started": 1 }, began: "2026-10-01", stale_since: null };
-export const mapBusy = (jump: boolean): Fixture => {
+export const mapBusy = (): Fixture => {
     const sessions = busySessions();
     const f = mapOpened(`
-      const chips = (id) => [...document.querySelectorAll("#map .plate[data-id=" + id + "] .agent-chip")].map((c) => c.textContent);
+      const badge = (id) => document.querySelector("#map .plate[data-id=" + id + "] .session-badge");
       await wait(400);
-      if (chips("core").join() !== "#311 · Live agents") log("snap:fail core chips: " + chips("core").join());
-      if (chips("window").join() !== "#311 · Live agents") log("snap:fail window chips: " + chips("window").join());
-      if (chips("hook").join() !== "Ship PR 286 needs you") log("snap:fail hook chips: " + chips("hook").join());
-      if (chips("shell").join() !== "Map chips") log("snap:fail shell chips: " + chips("shell").join());
-      if (!document.querySelector("#map .plate[data-id=hook] .agent-chip.needs-you")) log("snap:fail the needs-you chip is not loud");
-      const rest = [...document.querySelectorAll("#map-not-placed .agent-chip")].map((c) => c.textContent);
-      if (rest.join("|") !== "#312 · CI marks|agy · Name from the prompt|codex · plotkeeper|#313 · Docs needs you") log("snap:fail not placed: " + rest.join("|"));
-      if (document.querySelector("#map .agent-chip[title*=Helper], #map .agent-chip[title*='Read the log']")) log("snap:fail a Helper is on the map");
-      log("chips ok, not placed " + rest.length);
-      ${jump ? `// A real click, as a mouse gives it: the plate under the chip captures the pointer on its press (#385's review).
-      await __snapClick(document.querySelector("#map .plate[data-id=hook] .agent-chip"));
-      await wait(400);
-      if (document.getElementById("map").hidden) log("snap:fail a chip left the Map view");
-      if (document.getElementById("map-panel").hidden || !document.querySelector("#panel-body > .rail")) log("snap:fail a chip did not open its session's story in the left panel");
-      if (document.getElementById("session-name").textContent !== "Ship PR 286") log("snap:fail the chip opened the story of " + JSON.stringify(document.getElementById("session-name").textContent));
-      if (document.getElementById("map-sheet").childElementCount) log("snap:fail the chip's click opened the plate's sheet");
-      log("jump ok");` : ""}`, {
+      const counts = [...document.querySelectorAll("#map .plate .session-badge")].map((b) => b.closest(".plate").dataset.id + ":" + b.textContent).sort().join();
+      // #311 counts once on each of its parts, its Worker's Shell included; Ship PR 286 needs you on Hook.
+      if (counts !== "core:1,hook:1,shell:1,window:1") log("snap:fail the badges: " + counts);
+      if (!badge("hook")?.matches(".needs-you") || badge("core")?.matches(".needs-you")) log("snap:fail only Hook's badge carries the Needs-you accent");
+      if (document.querySelector("#map .spot-chip")) log("snap:fail a chip shows with no session spotlit");
+      const rest = [...document.querySelectorAll("#map-not-placed .session-pick:not(.worker) .session-pick-name")].map((c) => c.textContent);
+      if (rest.join("|") !== "#313 · Docs|#312 · CI marks|agy · Name from the prompt|codex · plotkeeper") log("snap:fail not placed: " + rest.join("|"));
+      if (document.querySelector("#map-not-placed .session-pick.worker")) log("snap:fail the not placed list shows a Worker row");
+      if (document.querySelector("#map [title*='Read the log'], #map-not-placed [title*='Read the log']")) log("snap:fail a Helper is on the map");
+      log("badges ok, not placed " + rest.length);`, {
       map_state: mapState(),
-      map_place: { s1: ["core", "window"], "s1/w1": ["shell"], s2: ["hook"], s6: [] },
+      map_place: busyPlace(),
       select: { __by: "id", values: Object.fromEntries(sessions.map((s) => [s.id, { session: s, agent: null }])) },
     });
-    return { ...f, sessions, selected: { session: sessions[6], agent: null }, ...(jump && { realPointer: true, snapDone: "jump ok" }) };
+    return { ...f, sessions, selected: { session: sessions[6], agent: null } };
   };
+
+// The badge fixtures' sessions (#562): the busy ones, with Ship PR 286 also on Core, #311 telling its Intention, and an unseen session on
+// Core and Understanding, so Core's badge counts three and carries the accent.
+const badgePlace = () => ({ ...busyPlace(), "understanding/u.rs": ["understanding"] });
+const badgeSessions = () => {
+  const touched = (message: string | null, ...paths: (string | [string, string])[]) => [{ started_at: Date.now() - 600e3, ended_at: Date.now() - 60e3, prompt: "", id: null, message, checks: [], listed: [], files: { files: paths.map((given) => { const [path, agent] = typeof given === "string" ? [given, null] : given; return { root: "/w/plotkeeper", path, from: null, added: 3, removed: 1, agent }; }), merged: 0 } }];
+  const sessions = busySessions().map((s) => {
+    if (s.id === "s1") return { ...s, transcript: { ...s.transcript, intention: "Drawing the session badges on the plates" } };
+    if (s.id === "s2") return { ...s, turns: touched(null, "hook/src/main.rs", "core/lib.rs") };
+    return s;
+  });
+  return [...sessions, session("s8", "#410 · Reading review", "your_turn", { unseen: true, turns: touched("Reviewed how the core reads a turn", "core/lib.rs", "understanding/u.rs") })];
+};
+const badgeFixture = (check: string, done: string): Fixture => {
+  const sessions = badgeSessions();
+  const f = mapOpened(`
+      const badge = (id) => document.querySelector("#map .plate[data-id=" + id + "] .session-badge");
+      const list = document.getElementById("map-badge-list");
+      const listOpen = () => list.matches(":popover-open");
+      const names = () => [...list.querySelectorAll(".session-pick")].map((r) => (r.matches(".worker") ? "↳ " : "") + r.querySelector(".session-pick-name").textContent);
+      const sheetOpen = () => document.getElementById("map-sheet").childElementCount > 0;
+      await wait(200);
+      ${check}
+      log(${JSON.stringify(done)});`, {
+    map_state: mapState(),
+    map_place: badgePlace(),
+    select: { __by: "id", values: Object.fromEntries(sessions.map((s) => [s.id, { session: s, agent: null }])) },
+  });
+  return { ...f, sessions, selected: { session: sessions[6], agent: null }, realPointer: true, realKeys: true, snapDone: done };
+};
+
+// A badge with the Needs-you accent and its open list (#562): real presses, as a mouse and keys give them. The badge's press opens the list
+// beside it and never the sheet; a row's press opens its story; Esc, a click outside and a zoom close it; the shot ends with Core's list open.
+export const mapBadgeList = (): Fixture =>
+  badgeFixture(`
+      const sent = [];
+      const fetched = window.fetch;
+      window.fetch = (url, init) => {
+        if (String(url).endsWith("/stop_log")) sent.push(JSON.parse(init.body).kind);
+        return fetched(url, init);
+      };
+      if (badge("core")?.textContent !== "3" || !badge("core").matches(".needs-you")) return log("snap:fail Core's badge: " + badge("core")?.outerHTML);
+      if (!badge("core").title.includes("Ship PR 286") || badge("core").getAttribute("aria-label") !== "3 sessions on this part, 1 needs you") log("snap:fail Core's badge names: " + badge("core").title + " / " + badge("core").getAttribute("aria-label"));
+      await __snapClick(badge("core"));
+      await wait(60);
+      if (!listOpen()) return log("snap:fail the badge's press did not open its list");
+      if (sheetOpen()) log("snap:fail the badge's press opened the plate's sheet");
+      if (!sent.includes("map-action")) log("snap:fail the badge's press logged no map-action: " + sent);
+      if (badge("core").getAttribute("aria-expanded") !== "true") log("snap:fail the open badge is not expanded");
+      // Needs you first, then the session list's order.
+      if (names().join("|") !== "Ship PR 286|#311 · Live agents|#410 · Reading review") log("snap:fail Core's list: " + names().join("|"));
+      const states = [...list.querySelectorAll(".session-pick-state")].map((r) => r.textContent).join("|");
+      if (states !== "Needs you|Running|Your turn, not seen") log("snap:fail the list's states: " + states);
+      const lines = [...list.querySelectorAll(".session-pick-line")].map((r) => r.textContent).join("|");
+      if (lines !== "Drawing the session badges on the plates|Reviewed how the core reads a turn") log("snap:fail the list's lines: " + lines);
+      if (list.querySelectorAll(".session-pick .logo").length !== 3) log("snap:fail a row lacks its logo");
+      const [b, l] = [badge("core").getBoundingClientRect(), list.getBoundingClientRect()];
+      if (Math.abs(l.right - b.right) > 1 || l.top < b.bottom || l.top - b.bottom > 12) log("snap:fail the list is not under its badge: " + JSON.stringify([b, l]));
+      // Esc closes the list alone, and the keyboard is back on the badge.
+      await __snapKey("Escape");
+      await wait(60);
+      if (listOpen()) log("snap:fail Esc did not close the list");
+      if (document.activeElement !== badge("core")) log("snap:fail after Esc the focus is on " + document.activeElement?.className);
+      // A badge of one opens its list too, with its session's Worker on the part under it.
+      await __snapClick(badge("shell"));
+      await wait(60);
+      if (names().join("|") !== "#311 · Live agents|↳ Map chips") log("snap:fail Shell's list: " + names().join("|"));
+      // A second press closes it.
+      await __snapClick(badge("shell"));
+      await wait(60);
+      if (listOpen()) log("snap:fail a second press on the badge left its list open");
+      // A click outside closes it, and so does a zoom.
+      await __snapClick(badge("core"));
+      await wait(60);
+      await __snapClick(document.querySelector("#map .actor"));
+      await wait(60);
+      if (listOpen()) log("snap:fail a click outside left the list open");
+      await __snapClick(badge("core"));
+      await wait(60);
+      document.querySelector("#map .map-canvas").dispatchEvent(new WheelEvent("wheel", { deltaY: 40, clientX: 400, clientY: 300, bubbles: true, cancelable: true }));
+      await wait(60);
+      if (listOpen()) log("snap:fail a zoom left the list open");
+      // A press on the open list's badge that is dragged off and let go elsewhere closes the list; the badge's next press, by the keyboard
+      // too, opens it again.
+      await __snapClick(badge("core"));
+      await wait(60);
+      await __snapDrag(badge("core"), 80, 0);
+      await wait(100);
+      if (listOpen()) log("snap:fail a press let go off the badge left the list open");
+      badge("core").focus();
+      await __snapKey("Enter");
+      await wait(60);
+      if (!listOpen()) log("snap:fail after a press let go off the badge, its next press did not open its list");
+      await __snapClick(badge("core"));
+      await wait(60);
+      // Opening another badge's list from the keyboard while one is open leaves the first badge collapsed (outside review).
+      await __snapClick(badge("core"));
+      await wait(60);
+      badge("shell").focus();
+      await __snapKey("Enter");
+      await wait(60);
+      if (badge("core").getAttribute("aria-expanded") !== "false" || badge("shell").getAttribute("aria-expanded") !== "true") log("snap:fail a list opened over another left expanded: core " + badge("core").getAttribute("aria-expanded") + ", shell " + badge("shell").getAttribute("aria-expanded"));
+      await __snapKey("Escape");
+      await wait(60);
+      // A row's press opens its story and closes the list, never the sheet.
+      await __snapClick(badge("core"));
+      await wait(60);
+      await __snapClick(list.querySelector(".session-pick"));
+      await wait(250);
+      if (listOpen()) log("snap:fail the row's press left the list open");
+      if (document.getElementById("session-name").textContent !== "Ship PR 286") log("snap:fail the row opened the story of " + JSON.stringify(document.getElementById("session-name").textContent));
+      if (sheetOpen()) log("snap:fail the row's press opened the plate's sheet");
+      document.getElementById("panel-close").click();
+      await wait(150);
+      await __snapClick(badge("core"));
+      await wait(60);
+      if (!listOpen()) log("snap:fail the list did not open again");`, "badge list ok");
+
+// The spotlight's view (#562): hovering #311's row spotlights it. Its chip replaces the badge on Core, Window and Shell, with its line on Core alone (a tie of
+// one file each goes to reading order); Understanding's badge dims and Hook's Needs-you one stays full. The shot keeps the hover.
+export const mapSpotlight = (): Fixture =>
+  badgeFixture(`
+      const chips = () => [...document.querySelectorAll("#map .spot-chip")].map((c) => c.closest(".plate").dataset.id + ":" + c.querySelector(".spot-chip-name").textContent + (c.querySelector(".spot-chip-line") ? " · " + c.querySelector(".spot-chip-line").textContent : "")).sort().join("|");
+      const row = document.querySelector('#groups .session-row[data-key="s1 "]');
+      row.dispatchEvent(new PointerEvent("pointerenter"));
+      await wait(150);
+      if (chips() !== "core:#311 · Live agents · Drawing the session badges on the plates|shell:#311 · Live agents|window:#311 · Live agents") log("snap:fail the spotlit chips: " + chips());
+      if (badge("core") || badge("window") || badge("shell")) log("snap:fail a badge shows beside the spotlit chip");
+      if (!badge("understanding")?.matches(".dim")) log("snap:fail Understanding's badge is not dimmed");
+      if (badge("hook")?.matches(".dim") || getComputedStyle(badge("hook")).opacity !== "1") log("snap:fail Hook's Needs-you badge dimmed");
+      if (!(Number(getComputedStyle(badge("understanding")).opacity) < 0.5)) log("snap:fail the dimmed badge's opacity is " + getComputedStyle(badge("understanding")).opacity);
+      // The hover ends: the badges come back undimmed.
+      row.dispatchEvent(new PointerEvent("pointerleave"));
+      await wait(150);
+      if (chips() !== "" || badge("core")?.textContent !== "3" || document.querySelector("#map .session-badge.dim")) log("snap:fail the badges did not come back: " + chips());
+      // Hovering a badge spotlights nothing.
+      badge("core").dispatchEvent(new PointerEvent("pointerenter", { bubbles: true }));
+      await wait(100);
+      if (chips() !== "") log("snap:fail hovering a badge spotlit " + chips());
+      // A badge list's row spotlights its session while hovered.
+      await __snapClick(badge("understanding"));
+      await wait(150);
+      list.querySelector(".session-pick").dispatchEvent(new PointerEvent("pointerenter"));
+      await wait(150);
+      if (!chips().startsWith("core:#410 · Reading review")) log("snap:fail the badge list's row did not spotlight its session: " + chips());
+      if (!listOpen()) log("snap:fail spotlighting from the list closed it");
+      // Esc closes the list under the pointer: the hover ends with it.
+      await __snapKey("Escape");
+      await wait(100);
+      if (chips() !== "") log("snap:fail the closed list's row stayed spotlit: " + chips());
+      // A row's press from the keyboard opens its story, whose spotlit chip takes the badge's place: the keyboard lands on Core's button.
+      badge("core").focus();
+      await __snapKey("Enter");
+      await wait(60);
+      await __snapKey("Enter");
+      await wait(300);
+      if (document.getElementById("session-name").textContent !== "Ship PR 286") log("snap:fail Enter on the row opened the story of " + JSON.stringify(document.getElementById("session-name").textContent));
+      if (!document.activeElement?.matches("#map .plate[data-id=core] .plate-open")) log("snap:fail after a row's Enter the focus is on " + (document.activeElement?.className || document.activeElement?.tagName) + ", not Core's button");
+      document.getElementById("panel-close").click();
+      await wait(100);
+      document.activeElement?.blur();
+      row.dispatchEvent(new PointerEvent("pointerenter"));
+      await wait(150);`, "spotlight ok");
 
 /**
  * The map from the keyboard (#460), at the busy fixture: each plate's open button, named by the part's name and caption, sits beside
- * its chips in reading order; real Tab reaches a part and then its chips, never an actor; real Enter and Space open its sheet.
+ * its session badge in reading order; real Tab reaches a part and then its badge, never an actor; real Enter and Space open its sheet.
  */
 export const mapPartKeys = (): Fixture => {
-  const f = mapBusy(false);
+  const f = mapBusy();
   return {
     ...f,
-    snapScript: (f.snapScript ?? "").replace(/log\("chips ok, not placed " \+ rest\.length\);/, `
+    snapScript: (f.snapScript ?? "").replace(/log\("badges ok, not placed " \+ rest\.length\);/, `
       const press = async (key) => { await __snapKey(key); await wait(80); };
       const sheetPart = () => document.querySelector("#map-sheet .sheet")?.dataset.part;
       const plates = [...document.querySelectorAll("#map .plate[data-id]")];
@@ -197,8 +353,8 @@ export const mapPartKeys = (): Fixture => {
         const words = [".plate-name", ".plate-caption"].map((at) => plate.querySelector(at)?.textContent ?? "").filter(Boolean);
         if (!open) { log("snap:fail " + plate.dataset.id + " has no open button"); continue; }
         if (plate.hasAttribute("role") || plate.hasAttribute("tabindex")) log("snap:fail the plate " + plate.dataset.id + " takes a role or a tabindex");
-        if (open.parentElement !== plate.querySelector(".plate-chips")?.parentElement) log("snap:fail " + plate.dataset.id + "'s open button is not a sibling of its chips");
-        if (open.contains(plate.querySelector(".agent-chip"))) log("snap:fail " + plate.dataset.id + "'s open button holds a chip");
+        if (open.parentElement !== plate.querySelector(".plate-chips")?.parentElement) log("snap:fail " + plate.dataset.id + "'s open button is not a sibling of its badge's slot");
+        if (open.contains(plate.querySelector(".session-badge"))) log("snap:fail " + plate.dataset.id + "'s open button holds a badge");
         if (!words.length || words.some((word) => !open.textContent.includes(word))) log("snap:fail " + plate.dataset.id + "'s open button is not named " + words.join(", "));
       }
       // Reading order: each next button is a row lower (half a plate or more), or on the same row and to the right.
@@ -207,7 +363,7 @@ export const mapPartKeys = (): Fixture => {
         const before = boxes[i].box;
         if (!(box.top - before.top >= box.height / 2 || (Math.abs(box.top - before.top) < box.height / 2 && box.left > before.left))) log("snap:fail " + id + " comes after " + boxes[i].id + " out of reading order");
       });
-      // Real Tab from the first part's button walks the map: every part's button, then its chips, and no actor.
+      // Real Tab from the first part's button walks the map: every part's button, then its session badge, and no actor.
       const first = document.querySelector("#map .plate-open");
       if (!first) return log("snap:fail the map has no open button");
       first.focus();
@@ -217,13 +373,13 @@ export const mapPartKeys = (): Fixture => {
         if (!document.activeElement?.closest("#map .map-world")) break;
         walked.push(document.activeElement);
       }
-      const expected = [...document.querySelectorAll("#map .plate-open, #map .plate .agent-chip")];
-      const named = (node) => node.closest(".plate, .actor")?.dataset.id + (node.matches(".agent-chip") ? " chip" : "");
+      const expected = [...document.querySelectorAll("#map .plate-open, #map .plate .session-badge")];
+      const named = (node) => node.closest(".plate, .actor")?.dataset.id + (node.matches(".session-badge") ? " badge" : "");
       if (walked.map(named).join() !== expected.map(named).join()) log("snap:fail Tab walked " + walked.map(named).join() + ", not " + expected.map(named).join());
       if (walked.some((node) => node.closest(".actor"))) log("snap:fail Tab reached an actor");
       const core = document.querySelector("#map .plate[data-id=core] .plate-open");
       const at = walked.indexOf(core);
-      if (at < 0 || !walked[at + 1]?.matches("#map .plate[data-id=core] .agent-chip")) log("snap:fail Tab did not reach core's button and then its chip");
+      if (at < 0 || !walked[at + 1]?.matches("#map .plate[data-id=core] .session-badge")) log("snap:fail Tab did not reach core's button and then its badge");
       // Real Enter, then real Space, on the focused button open the part's sheet, and the focus ring shows.
       core.focus();
       await press("Tab");
@@ -244,13 +400,16 @@ export const mapPartKeys = (): Fixture => {
   };
 };
 
-/** A map redraw, here at a landed push that thins Core's fog, keeps the keyboard on the same part's button (#452's review). */
+/**
+ * A map redraw, here at a landed push that thins Core's fog, keeps the keyboard on the same part's button (#452's review), and then at
+ * the window's focus on the same part's session badge (#562).
+ */
 export const mapPartRedraw = (): Fixture => {
-  const f = mapBusy(false);
+  const f = mapBusy();
   return {
     ...f,
     map_state: { __by: "fetch", values: { true: mapState(), false: mapState({ fog: { core: "thin" } }) } } as never,
-    snapScript: (f.snapScript ?? "").replace(/log\("chips ok, not placed " \+ rest\.length\);/, `
+    snapScript: (f.snapScript ?? "").replace(/log\("badges ok, not placed " \+ rest\.length\);/, `
       const hook = document.querySelector("#map .plate[data-id=hook] > .plate-open");
       hook.focus();
       __snapEmit("map-landed", "/w/plotkeeper");
@@ -258,12 +417,34 @@ export const mapPartRedraw = (): Fixture => {
       const redrawn = document.activeElement;
       if (hook.isConnected) log("snap:fail the landed push did not draw the map again");
       if (!redrawn?.matches("#map .plate[data-id=hook] > .plate-open")) log("snap:fail after a map redraw focus is on " + (redrawn?.className || redrawn?.tagName) + ", not hook's button");
+      // The keyboard on a part's session badge stays on that part's new badge (#562).
+      const hookBadge = document.querySelector("#map .plate[data-id=hook] .session-badge");
+      hookBadge.focus();
+      // The window's focus reads the map again, which has Core's fog back.
+      window.dispatchEvent(new Event("focus"));
+      await wait(300);
+      if (hookBadge.isConnected) log("snap:fail the window's focus did not draw the map again");
+      if (!document.activeElement?.matches("#map .plate[data-id=hook] .session-badge")) log("snap:fail after a map redraw focus is on " + (document.activeElement?.className || document.activeElement?.tagName) + ", not hook's badge");
+      // A redraw at a new commit asks map_place again, so the badges come after the map: the badge gets the keyboard back when they do.
+      const fetched = window.fetch;
+      window.fetch = async (url, init) => {
+        const reply = await fetched(url, init);
+        if (String(url).endsWith("/api/map_place")) await wait(150);
+        if (!String(url).endsWith("/api/map_state")) return reply;
+        const state = await reply.json();
+        return { ...reply, json: async () => ({ ...state, commit: "f".repeat(40) }) };
+      };
+      const before = document.activeElement;
+      window.dispatchEvent(new Event("focus"));
+      await wait(500);
+      if (before.isConnected) log("snap:fail the new commit did not draw the map again");
+      if (!document.activeElement?.matches("#map .plate[data-id=hook] .session-badge")) log("snap:fail after a new commit's redraw focus is on " + (document.activeElement?.className || document.activeElement?.tagName) + ", not hook's badge");
       log("part redraw ok");`),
     snapDone: "part redraw ok",
   };
 };
 
-// A map whose default branch's CI failed in a test that backs a law of the shell (#312): the red mark beside the Needs you chip, at the
+// A map whose default branch's CI failed in a test that backs a law of the shell (#312): the red mark beside a Needs-you badge, at the
 // size of the busy fixture; `drawer` opens the proof of a law, `log` the broken-law drill-down.
 const brokenCi: Ci = {
   status: "broken", run_url: "https://github.com/danielrispler/plotkeeper/actions/runs/9", commit: "35745b1693c5d061e5aea891e98a58515942a12d", earlier: false,
@@ -305,14 +486,14 @@ export const mapBroken = (open: "none" | "proof" | "log"): Fixture => {
       await wait(400);
       const marked = [...document.querySelectorAll("#map .plate .law-broken")].map((m) => m.closest(".plate").dataset.id);
       if (marked.join() !== "shell") log("snap:fail the broken-law mark is on " + marked);
-      if (!document.querySelector("#map .agent-chip.needs-you")) log("snap:fail no needs-you chip beside the mark");
+      if (!document.querySelector("#map .session-badge.needs-you")) log("snap:fail no needs-you badge beside the mark");
       const red = getComputedStyle(document.querySelector("#map .plate .law-broken")).backgroundColor;
-      const orange = getComputedStyle(document.querySelector("#map .agent-chip.needs-you")).color;
+      const orange = getComputedStyle(document.querySelector("#map .session-badge.needs-you")).color;
       if (red === orange) log("snap:fail the broken mark and Needs you are one colour");
       ${opened}
       log("broken " + marked.join());`, {
     map_state: mapState({ ci: brokenCi }),
-    map_place: { s1: ["core", "window"], "s1/w1": ["shell"], s2: ["hook"], s6: [] },
+    map_place: busyPlace(),
     map_proof: [{ file: "workbench/tests/wire.rs", line: 11, test: "wire_types_match", first: 11, snippet: "// @law: wire-types-agree\n#[test]\nfn wire_types_match() {\n    studio_test_support::assert_wire_types_agree();\n}" }],
   });
   return { ...f, sessions, selected: { session: sessions[6], agent: null } };
@@ -330,7 +511,7 @@ export const mapScrubbed = (): Fixture => {
       await wait(100);`;
   const f = mapOpened(`
       await wait(200);
-      if (!document.querySelector("#map .plate .law-broken") || !document.querySelector("#map .agent-chip")) return log("snap:fail the live map lacks its mark or chips");
+      if (!document.querySelector("#map .plate .law-broken") || !document.querySelector("#map .session-badge")) return log("snap:fail the live map lacks its mark or badges");
       document.querySelector("#map .plate[data-id=shell]").click();
       await wait(200);
       const rows = [...document.querySelectorAll("#map-sheet .hist-row")];
@@ -342,7 +523,7 @@ export const mapScrubbed = (): Fixture => {
       await wait(200);
       const banner = document.getElementById("map-banner");
       if (!banner.textContent.includes("Viewing 2222222") || !banner.textContent.includes("Back to now")) return log("snap:fail banner: " + banner.textContent);
-      if (document.querySelector("#map .agent-chip, #map-not-placed .agent-chip")) log("snap:fail a live agent shows in the past");
+      if (document.querySelector("#map .session-badge, #map .spot-chip, #map-not-placed .session-pick")) log("snap:fail a live session shows in the past");
       if (document.querySelector("#map .plate .law-broken")) log("snap:fail a broken-law mark shows in the past");
       if (document.querySelector("#map .plate.fog-thin, #map .plate.fog-thick")) log("snap:fail fog shows in the past");
       if (document.querySelector("#map .plate[data-id=workbench]")) log("snap:fail the workbench was not yet there");
@@ -364,7 +545,7 @@ export const mapScrubbed = (): Fixture => {
       if (!document.getElementById("map-banner").textContent.includes("Viewing")) return log("snap:fail could not scrub again");
       log("scrubbed ok");`, {
     map_state: mapState({ ci: brokenCi, fog: { shell: "thick", core: "thin" } }),
-    map_place: { s1: ["core", "window"], "s1/w1": ["shell"], s2: ["hook"], s6: [] },
+    map_place: busyPlace(),
     map_history: [strip(1, "#101 Map first drawn", false), strip(2, "#150 Plates and links", false), strip(3, "#210 Fog engine", true), strip(4, "#306 Live agents on the map", true, 306)],
     map_at: { commit: "2".repeat(40), short: "2222222", label: "#150 Plates and links", source: JSON.stringify(past) },
     map_commit: { commit: "2".repeat(40), short: "2222222", label: "#150 Plates and links", url: "https://github.com/danielrispler/plotkeeper/commit/" + "2".repeat(40), files: [{ path: "src-tauri/src/map.rs", diff: "@@ -1,2 +1,2 @@\n-one\n+two" }, { path: "ui/map.ts", diff: "@@ -1 +1,2 @@\n+three" }] },
@@ -405,7 +586,7 @@ const mapBaseOf = (check: string, extra: Fixture = {}): Fixture => ({
   selected: null,
   projects: baseProjects,
   map_state: mapState({ fog: { understanding: "thin" } }),
-  map_place: { s1: ["core", "window"], "s1/w1": ["shell"], s2: ["hook"], s6: [] },
+  map_place: busyPlace(),
   ...extra,
   snapScript: `
     const wait = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -483,7 +664,7 @@ export const readmeHero = (): Fixture =>
         },
       },
     }),
-    map_place: { s1: ["core", "window"], "s1/w1": ["server"], s2: ["hook"], s6: [] },
+    map_place: busyPlace("server"),
   });
 /**
  * A project with no sessions keeps its header, with the quiet dot drawn as the map's mist; its hover names what lit it. A click on the header
@@ -669,7 +850,7 @@ export const mapSmallGaps = (): Fixture => ({
       if (leaky.length) log("snap:fail these dialogs' backdrops scroll the page behind them: " + leaky.join(", "));
       log("small gaps ok");`, {
     map_state: mapState({ ci: brokenCi }),
-    map_place: { s1: ["core", "window"], s2: ["hook"] },
+    map_place: busyPlace(),
   }),
   realKeys: true, snapDone: "small gaps ok",
 });
@@ -798,29 +979,6 @@ export const mapFogPlates = (): Fixture => ({
   snapDone: "fog plates ok",
   contrast: true,
 });
-/** A list row hovered lights its session's chips on the map (#382): #311's on Core and Window, and its Worker's on the Shell. */
-export const mapListHover = (): Fixture => {
-  const f = mapBusy(false);
-  return {
-    ...f,
-    snapScript: `${f.snapScript}
-    const lit = () => [...document.querySelectorAll("#map .agent-chip.lit")].map((c) => c.closest(".plate").dataset.id + ":" + c.textContent).sort().join();
-    if (lit() !== "") log("snap:fail chips are lit before a hover: " + lit());
-    const row = document.querySelector('#groups .session-row[data-key="s1 "]');
-    row.dispatchEvent(new PointerEvent("pointerenter"));
-    await wait(100);
-    if (lit() !== "core:#311 · Live agents,shell:Map chips,window:#311 · Live agents") log("snap:fail the hovered row's chips: " + lit());
-    row.dispatchEvent(new PointerEvent("pointerleave"));
-    await wait(100);
-    if (lit() !== "") log("snap:fail chips stay lit after the pointer left: " + lit());
-    document.querySelector('#groups .session-row[data-key="s2 "]').dispatchEvent(new PointerEvent("pointerenter"));
-    await wait(100);
-    if (lit() !== "hook:Ship PR 286 needs you") log("snap:fail the needs-you row's chip: " + lit());
-    row.dispatchEvent(new PointerEvent("pointerenter"));
-    await wait(100);
-    log("lit: " + lit());`,
-  };
-};
 /** Story 34: every card over the map, the left panel and the sheet and drawer alike, arrives by a 12 px slide with a fade. */
 export const mapGlassMotion = () =>
   mapOpened(`

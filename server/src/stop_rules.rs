@@ -31,7 +31,7 @@ pub enum Kind {
     Session,
     /// The Map view opened.
     MapOpen,
-    /// An entered action on the map with no event of its own: a part's sheet opened, an agent chip clicked (once a day).
+    /// An entered action on the map with no event of its own: a part's sheet opened, a session badge or a row of its list pressed (once a day).
     MapAction,
     /// A part's history strip was scrubbed to a commit.
     Scrub,
@@ -175,7 +175,7 @@ pub fn read(file: &Path) -> Vec<Event> {
         .collect()
 }
 
-/// Whether `kind` is an entered action on the map, not something only seen or opened: a part's sheet opened or an agent chip clicked
+/// Whether `kind` is an entered action on the map, not something only seen or opened: a part's sheet opened or a session badge pressed
 /// (`MapAction`), a scrub, a proof, a brief entered and what is done inside a sheet or a brief.
 fn entered(kind: Kind) -> bool {
     matches!(
@@ -558,7 +558,7 @@ mod tests {
             // Open, with no entered action: not engaged.
             event("2026-11-01", Kind::Session, None),
             event("2026-11-01", Kind::MapOpen, Some("/p")),
-            // A sheet opened or a chip clicked.
+            // A sheet opened or a session badge pressed.
             event("2026-11-02", Kind::MapOpen, Some("/p")),
             event("2026-11-02", Kind::MapAction, Some("/p")),
             // Two entered actions on one day: one engaged day.

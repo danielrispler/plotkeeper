@@ -21,10 +21,11 @@ import { startMapTray } from "./map-tray.js";
 import { startMapRuns } from "./map-runs.js";
 import { startMicroWorld } from "./micro-world.js";
 import { openBriefOf } from "./map-brief.js";
+import { briefOpen } from "./map-brief-player.js";
 import { openPreFlight } from "./map-pre-flight.js";
 import { startMapAgents } from "./map-agents.js";
 import { drawSidebar, showSessions, staleDots, startList } from "./list.js";
-import { listSpace } from "./list-model.js";
+import { listSpace, secondLine, sessionName } from "./list-model.js";
 import { deselect, pressSession, select, show } from "./selection.js";
 import { diffIn, historyIn, logIn, startPanes } from "./panes.js";
 import { besideSheet, closePanel, panelShown, showHistory, showPanel, startPanel } from "./panel.js";
@@ -33,7 +34,7 @@ import { projectOfCwd, selectedProject, sidebarOrder } from "./projects.js";
 import { narrowBelow, selectedView } from "./map-model.js";
 import { reload } from "./settings.js";
 import { setFocus, setMissed, setProjects, setSettings, studio } from "./state.js";
-import { askDelete, drawFeed, forgetStories, lastHeadline, showCards, showView, startStory } from "./story.js";
+import { askDelete, drawFeed, forgetStories, lastHeadline, showCards, showTurn, showView, startStory, turnHeadline } from "./story.js";
 import { forgetTails } from "./blocked.js";
 import { startRailBriefs } from "./rail-brief.js";
 import { barKeyDown } from "./story-bar.js";
@@ -235,7 +236,7 @@ window.addEventListener("focus", () => actions.get("studio::RefreshLanded")?.())
 // The Map view's overlays hook into its draws and Esc's layers, in the order their imports gave them.
 startMicroWorld();
 startMapHistory({ openBriefOf });
-startMapSheet(besideSheet);
+startMapSheet({ besideSheet, panelShown, headline: turnHeadline, show: showTurn });
 startMapTray();
 startMapRuns();
 startPanes(select);
@@ -253,7 +254,15 @@ startList({
 startRailBriefs(drawFeed);
 startMap({ selectedProject, removeProject, shown: drawSidebar });
 element("pre-flight-button").addEventListener("click", () => openPreFlight());
-startMapAgents({ sessions: () => studio.listed, projectOf: projectOfCwd, select: (id, agent) => void pressSession(id, agent) });
+startMapAgents({
+  sessions: () => studio.listed,
+  projectOf: projectOfCwd,
+  select: (id, agent) => void pressSession(id, agent),
+  briefOpen,
+  name: sessionName,
+  line: (session) => secondLine(session, lastHeadline),
+  placed: drawFeed,
+});
 // The left panel over the map (#385): History, a turn's diff and a worker's log; closing a story or a log selects none and leaves the bare map.
 startPanel({ history: historyIn, diff: diffIn, log: logIn, deselect: () => void deselect() });
 const openSettings = () => showPanel({ kind: "settings" });

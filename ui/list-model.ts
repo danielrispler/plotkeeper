@@ -4,6 +4,7 @@
 import { blockedWaits, stateLabels, type BlockedCommand, type Context, type Session, type SessionState, type Subagent } from "./types.js";
 import { times, type Time } from "./times.js";
 import { shortPaths } from "./paths.js";
+import { NO_FOOTPRINT } from "./map-live.js";
 
 // What the strip calls a session: the issue number of an `issue-<n>-…` folder, else its folder's
 // first letters.
@@ -297,3 +298,9 @@ export const sidebarSessions = <T extends Pick<Session, "state" | "id">>(session
 /** The sessions "Clear landed" would clear: every landed one it has not hidden yet; none, and the list shows no Clear landed. */
 export const landedToClear = <T extends Pick<Session, "state" | "id" | "landed">>(sessions: T[], hidden: ReadonlySet<string>): T[] =>
   sessions.filter((session) => showsLanded(session.state, session.landed) && !hidden.has(session.id));
+
+/** A row's hover text with the footprint's note as its last line, or without it: a row kept across redraws may carry an older one. */
+export function withNote(title: string, note: string | null): string {
+  const base = title.split("\n").filter((line) => line !== NO_FOOTPRINT).join("\n");
+  return note ? `${base}\n${note}` : base;
+}

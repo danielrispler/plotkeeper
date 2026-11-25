@@ -12,15 +12,19 @@
 // The sheet's left edge resizes it (#445), and a click on the empty map closes it and its drawer (`map.ts`'s `pan`).
 
 import { logStop } from "./stop-rules.js";
-import { element, failure, invoke, pageStore, pressable, text } from "./dom.js";
+import { age, element, failure, fullTitle, invoke, pageStore, pressable, text } from "./dom.js";
 import { currentMap, onDraw, onPlateClick, reloadMap, registerLayer, syncSide, type MapView } from "./map.js";
 import { openDrawer } from "./map-drawer.js";
 import { drawStrip } from "./map-history.js";
 import { overturnNote, ratifyActions } from "./map-ratify.js";
 import { sheetLinkItem, sheetPending, statusWords } from "./ratify.js";
+import { currentPlacement } from "./map-agents.js";
+import { sessionHere } from "./map-live.js";
+import { studio } from "./state.js";
+import type { Session } from "./types.js";
 import { enterRefresher, refresherNode, staleWhy } from "./map-stale.js";
 import { fogActions } from "./map-catch-up.js";
-import { ciDrawer, effectiveTier, type Part, proofDrawer, type Sheet, sheetCi, sheetMarks, sheetOf, talksTo, type Tier } from "./map-model.js";
+import { ciDrawer, effectiveTier, type PanelContent, type Part, proofDrawer, type Sheet, sheetCi, sheetMarks, sheetOf, talksTo, type Tier } from "./map-model.js";
 import { openBriefOf, openCatchUpOf } from "./map-brief.js";
 import { lawAction, lawActionNodes, patchActs } from "./patch-review.js";
 import { explained, explainedChoice, explainedLinks, explainLine, explanationsOn, explainToggle, onExplanations, SHEET, SHEET_HEADINGS } from "./explanations.js";
@@ -321,13 +325,94 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
     ...(view.scrub ? [] : [...heading("Fog"), fog]),
     ...(state ? [...heading("CI on main"), ci] : []),
   );
+  const here = text("div", "", "sheet-here");
+  fillHere(here, part.id, !view.scrub, explain);
   const extra = text("div", "", "sheet-extra");
-  card.append(extra);
+  card.append(here, extra);
   const overturned = overturnNote(view.project, (item) =>
     item.kind === "law" ? sheet.laws.some((law) => law.id === item.id) : item.kind === "link" && view.doc.links.some((link) => link.id === item.id && (link.from === part.id || link.to === part.id)),
   );
   if (overturned) card.append(overturned);
   return { card, extra, toggle };
+}
+
+// "This session here" (#561): while a session's story is open in the left panel beside the sheet, its turns of the last 7 days that changed
+// the part, newest first, each its number, Headline and age; a row's press goes to the turn in the story (`showTurn`). Of now only. Below
+// 1007 px the sheet takes the panel's place, so the section never shows there, and nothing is kept for it.
+const hereEmpty = "No turn of this session changed this part in the last 7 days";
+const hereOlder = "Turns older than 7 days aren't listed";
+const day = 24 * 60 * 60 * 1000;
+const hereAge = (from: number, now: number) => (now - from >= day ? `${Math.floor((now - from) / day)}d` : age(from, now));
+
+/**
+ * What the sheet asks of the page, given by `main.ts` to `startMapSheet`: the left panel's `besideSheet` and `panelShown` (`panel.ts`, which
+ * imports this module; below 1007 px, or over the widened diff, the sheet takes the panel's place, #385), and the story's turn Headline and
+ * the press of a "This session here" row (`story.ts`, so the sheet never imports the story and its clocks).
+ */
+export type SheetDeps = {
+  besideSheet: (part: string) => void;
+  panelShown: () => PanelContent | null;
+  headline: (session: Session, index: number) => string | null;
+  show: (index: number) => void;
+};
+let deps: SheetDeps | null = null;
+
+// The session whose story is open beside the sheet, none for a subagent's view.
+function storyBeside() {
+  const shown = deps?.panelShown() ?? null;
+  const selected = studio.selection;
+  if (shown?.kind !== "story" || selected === null || selected.agent !== null || selected.session.id !== shown.session) return null;
+  return selected.session;
+}
+
+// Fills `box` for `part`, drawn again only when what it shows changed, so a focused row keeps the focus.
+function fillHere(box: HTMLElement, part: string, live: boolean, explain: boolean) {
+  const given = deps;
+  const session = live && given ? storyBeside() : null;
+  const now = Date.now();
+  const found = session ? sessionHere(session, part, currentPlacement(), now) : null;
+  const rows = (session && found ? found.rows : []).map(({ turn, index, number }) => ({
+    index,
+    number: String(number),
+    headline: (session ? given?.headline(session, index) : null) ?? (turn.prompt.trim().split("\n")[0] || "No Headline"),
+    age: hereAge(turn.ended_at ?? turn.started_at, now),
+  }));
+  const drawn = JSON.stringify([session?.id ?? null, rows, found?.older, found?.pending, explain]);
+  if (box.dataset.drawn === drawn) return;
+  box.dataset.drawn = drawn;
+  const focused = box.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.turn : undefined;
+  box.hidden = found === null;
+  if (found === null) {
+    box.replaceChildren();
+    return;
+  }
+  const list = text("ul", "", "sheet-here-turns");
+  // Safari drops a list's semantics under `list-style: none`; the role brings them back.
+  list.setAttribute("role", "list");
+  for (const row of rows) {
+    const button = pressable(text("button", "", "sheet-here-turn"), null, () => deps?.show(row.index));
+    button.dataset.turn = String(row.index);
+    button.title = "Show this turn in the story";
+    button.append(text("span", row.number, "sheet-here-number"), fullTitle(text("span", row.headline, "sheet-here-headline"), row.headline), text("span", row.age, "sheet-here-age"));
+    const item = text("li", "");
+    item.append(button);
+    list.append(item);
+  }
+  box.replaceChildren(
+    ...explained(text("h3", "This session here", "sheet-heading"), SHEET.here, explain),
+    // While `map_place` has not answered for one of the turns' files, an empty list says nothing yet.
+    ...(rows.length ? [list] : found.pending ? [] : [text("p", hereEmpty, "empty")]),
+    ...(found.older ? [text("p", hereOlder, "sheet-here-older")] : []),
+  );
+  if (focused !== undefined) box.querySelector<HTMLElement>(`[data-turn="${focused}"]`)?.focus();
+}
+
+// The story or its panel changed: the open sheet's "This session here" follows.
+export function refreshHere() {
+  const view = currentMap();
+  const box = view?.slots.sheet.querySelector<HTMLElement>(".sheet-here");
+  const part = box?.closest<HTMLElement>(".sheet")?.dataset.part;
+  if (view && box && part) fillHere(box, part, !view.scrub, explanationsOn());
 }
 
 // Why the part's plate carries its marks (#495), first on its sheet: its fog, its staleness band and a broken law, each from this case's
@@ -383,15 +468,13 @@ export function heldList(holds: Sheet["holds"]): HTMLElement {
   return list;
 }
 
-/**
- * Hooks the sheet into the map's plate clicks and draws, the explanations switch and Esc's `sheet` layer. `besideSheet` is the left
- * panel's (`panel.ts`), which imports this module: below 1007 px, or over the widened diff, the sheet takes the panel's place (#385).
- */
-export function startMapSheet(besideSheet: (part: string) => void) {
+/** Hooks the sheet into the map's plate clicks and draws, the explanations switch and Esc's `sheet` layer, with what `given` holds. */
+export function startMapSheet(given: SheetDeps) {
+  deps = given;
   onPlateClick(({ view, part }) => {
     if (open?.part !== part.id) refreshing = null;
     open = { project: view.project, part: part.id };
-    besideSheet(part.id);
+    given.besideSheet(part.id);
     logStop("map-action", view.project);
     drawSheet(view);
   });

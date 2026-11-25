@@ -15,6 +15,7 @@
 import { failure, invoke, messageOf, pressable, svg, text } from "./dom.js";
 import { currentMap, onDraw, registerLayer, type MapView } from "./map.js";
 import { closeDrawer, openDrawer } from "./map-drawer.js";
+import { paint as paintBadges } from "./map-agents.js";
 import { watchSeen } from "./seen.js";
 import { logStop } from "./stop-rules.js";
 import { expectedLine } from "./map-pre-flight.js";
@@ -365,6 +366,8 @@ function closeBrief() {
   document.body.classList.remove("brief-open");
   if (view) unlight(view);
   closeDrawer();
+  // The spotlit session's footprint comes back (#559).
+  paintBadges();
 }
 
 // ---- the panel.
@@ -632,6 +635,8 @@ function show(view: MapView, same: boolean) {
   if (!now || !step || !playing) return closeBrief();
   const pr = now.pr;
   document.body.classList.add("brief-open");
+  // No footprint while a brief plays (#559).
+  paintBadges();
   if (!box.classList.contains("open") || !box.firstElementChild) buildPanel(view, list);
   box.hidden = false;
   // A reflow first, so the panel rises from where it was hidden.

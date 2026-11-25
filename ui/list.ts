@@ -14,7 +14,7 @@ import { closePanel, panelShown, redrawPanel, showHistory } from "./panel.js";
 import { isSelected, setListed, studio } from "./state.js";
 import { titled } from "./keys.js";
 import { stateLabels, type MarkWhy, type ProjectMark, type Session, type SessionState, type Subagent } from "./types.js";
-import { hoverAgents, refreshAgents } from "./map-agents.js";
+import { hoverAgents, refreshAgents, rowNote } from "./map-agents.js";
 import { showTitle } from "./alerts.js";
 import {
   agentLine,
@@ -38,6 +38,7 @@ import {
   sidebarSessions,
   status,
   stripLabels,
+  withNote,
 } from "./list-model.js";
 
 /** What the list asks of the page above it, given by `main.ts`: a press on a row, a row's delete, and a session's last Headline. */
@@ -197,14 +198,17 @@ export function row(session: Session, children: Children, token: string | null =
     session.landed,
     !session.pid,
   );
-  // Hovering the row lights its session's chips on the map (#382).
-  button.addEventListener("pointerenter", () => hoverAgents(session.id));
+  // Hovering the row spotlights its session on the map (#382, #562) and shows its footprint (#559); a session that touched no part in the
+  // last 7 days says so in the row's hover text.
+  button.addEventListener("pointerenter", () => {
+    button.title = withNote(button.title, rowNote(session.id));
+    hoverAgents(session.id, button);
+  });
   button.addEventListener("pointerleave", () => hoverAgents(null));
   // The agent's logo leads the row, apart from its state glyph (#158).
   first.prepend(logo(logoKey(session), noContextNote(session) || undefined));
   return button;
 }
-
 
 // A row's line, such as a card summary stored in Hebrew, laid out by its own direction, its code spans
 // cleaned as a card's are (danielrispler/Falinks#434, decision 40), its paths shortened with the full line on hover (danielrispler/Falinks#571).
