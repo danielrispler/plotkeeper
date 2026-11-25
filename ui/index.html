@@ -123,11 +123,11 @@
         <!-- The patch review of back a law (#398): an overlay over the map in the glass, closed by Esc after the pre-flight; `patch-review.ts` fills it. -->
         <section id="map-patch-review" class="map-patch-review glass" role="dialog" aria-label="Patch review" hidden></section>
         <!-- Ready for review (#336), over the map's foot on the left; it moves right of the left panel while that is open (#385). -->
-        <section id="map-tray" class="map-tray"></section>
+        <section id="map-tray" class="map-tray glass"></section>
         <!-- The left panel (#385): a session's story (the rail, moved in), History, a turn's diff (widened) or Settings, floating over the map
              in the part sheet's glass; `panel.ts` fills it. It never darkens the map. -->
         <section id="map-panel" class="map-panel glass" aria-label="Panel" hidden>
-          <button id="panel-close" class="btn quiet small panel-close" type="button" title="Close the panel (Esc)">Close</button>
+          <button id="panel-close" class="btn quiet panel-close" type="button" aria-label="Close" title="Close the panel (Esc)">×</button>
           <div id="panel-body" class="panel-body"></div>
         </section>
         <!-- The right side, floating over the map: the sessions not placed, then the part's sheet and the drawer under it, each in the same glass,

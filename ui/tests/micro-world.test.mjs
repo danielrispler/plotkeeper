@@ -59,11 +59,12 @@ test("the page is shown by srcdoc in a frame with allow-scripts and never allow-
   for (const each of frames) assert.doesNotMatch(each.getAttribute("sandbox"), /allow-same-origin/);
 });
 
-test("the overlay of an out-of-date world offers Rebuild beside Close", () => {
+test("the overlay of an out-of-date world offers Rebuild beside its ×, named Close (#571)", () => {
   const calls = [];
   const nodes = /** @type {any} */ (worldNodes("A turn", "<p>x</p>", view("ready", { page: true, stale: true }), { rebuild: () => calls.push("rebuild"), close: () => calls.push("close") }));
   const buttons = nodes.flatMap((node) => node.find("button"));
-  assert.deepEqual(buttons.map((b) => b.text), ["Rebuild", "Close"]);
+  assert.deepEqual(buttons.map((b) => b.text), ["Rebuild", "×"]);
+  assert.equal(buttons[1].getAttribute("aria-label"), "Close");
   buttons.forEach((b) => b.listeners.click());
   assert.deepEqual(calls, ["rebuild", "close"]);
   assert.match(nodes.map((node) => node.text).join(" "), /may be out of date/);

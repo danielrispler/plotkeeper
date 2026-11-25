@@ -726,3 +726,42 @@ export const mapSheetStill = (): Fixture => {
     log("sheet still ok");`, { map_state: mapState(), map_place: {} });
   return { ...f, sessions: [idle], selected: { session: idle, agent: null }, snapDone: "sheet still ok" };
 };
+/**
+ * #571: the panel's close is ×, named Close, on its views' header line, within 1 px of the story's "⋯" and of the History, Settings and
+ * diff headers' centre; the Ready-for-review tray beside it is on the sheet's glass, since the map pans under it.
+ */
+export const mapPanelHead = (): Fixture =>
+  mapPanel(`
+      const close = document.getElementById("panel-close");
+      // The centre of a node's content box, so a title's padding does not count.
+      const mid = (node) => {
+        const box = node.getBoundingClientRect(), style = getComputedStyle(node);
+        const top = box.top + parseFloat(style.paddingTop), bottom = box.bottom - parseFloat(style.paddingBottom);
+        return (top + bottom) / 2;
+      };
+      const level = (node, view) => {
+        if (!node) return log("snap:fail no header to line the × up with in " + view);
+        const off = Math.round(mid(close) - mid(node));
+        log(view + " off by " + off + " px");
+        if (Math.abs(off) > 1) log("snap:fail the × is " + off + " px off the header line in " + view);
+      };
+      await press(row("s2"));
+      if (close.textContent !== "×" || close.getAttribute("aria-label") !== "Close") log("snap:fail the panel's close is " + JSON.stringify(close.textContent) + " named " + close.getAttribute("aria-label"));
+      level(document.getElementById("rail-more"), "the story");
+      const tray = document.getElementById("map-tray");
+      const style = getComputedStyle(tray);
+      if (!style.backdropFilter.includes("blur") || style.backgroundColor !== getComputedStyle(panel).backgroundColor)
+        log("snap:fail the tray is not on the glass: " + style.backgroundColor + " " + style.backdropFilter);
+      document.querySelector("#history-link .history-link").click();
+      await wait(300);
+      level(panel.querySelector(".panel-title"), "History");
+      await press(row("s1"));
+      await palette("Open full diff");
+      level(panel.querySelector(".turn-diff header > *"), "the diff");
+      document.getElementById("settings-button").click();
+      await wait(300);
+      level(panel.querySelector(".panel-title"), "Settings");
+      log("panel ok");`, {
+  // An ended session, so the list has its History link; #311's turn has its id, as in mapPanel, for its diff.
+  sessions: [...busySessions().map((s) => (s.id === "s1" ? { ...s, turns: s.turns.map((t) => ({ ...t, id: "t1", message: "Chips on the parts a turn touches" })) } : s)), session("e1", "Map view drawer, #312", "ended", { last_event_at: Date.now() - 2 * 86400e3 })],
+});

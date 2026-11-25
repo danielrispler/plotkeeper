@@ -79,12 +79,15 @@ export function frameNode(html: string): HTMLElement {
   return frame;
 }
 
-/** The overlay's nodes: the head with the world's name, "may be out of date" with Rebuild, and Close; then the frame. */
+/** The overlay's nodes: the head with the world's name, "may be out of date" with Rebuild, and its ×; then the frame. */
 export function worldNodes(name: string, html: string, world: MicroWorldView | undefined, act: WorldActs): [HTMLElement, HTMLElement] {
   const head = text("div", "", "micro-world-head");
   head.append(text("h2", name, "micro-world-title"));
   if (world?.stale) head.append(text("span", staleWords, "micro-world-stale"), button("Rebuild", "Build it again from the code as it is now", act.rebuild));
-  head.append(button("Close", "Close the micro-world (Esc)", act.close));
+  // A corner closer is ×, as the sheet's and the panel's (#571).
+  const close = button("×", "Close the micro-world (Esc)", act.close);
+  close.setAttribute("aria-label", "Close");
+  head.append(close);
   return [head, frameNode(html)];
 }
 
