@@ -47,9 +47,6 @@ class StandIn {
   hasAttribute(name) {
     return this.attrs.has(name);
   }
-  querySelectorAll() {
-    return [];
-  }
   hasChildNodes() {
     return this.childNodes.length > 0;
   }
