@@ -24,7 +24,7 @@ use studio_workbench::run::{RunError, git, run_until};
 use serde::{Deserialize, Serialize};
 
 pub use imports::{Across, Count, Hub, Imports, Inside, Share, imports};
-pub use laws::{LawReport, LawTest, Tag, law_tests, tag_id, test_name_after};
+pub use laws::{LawReport, LawTest, Tag, attribute_brackets, law_tests, tag_id, test_name_after};
 pub use parts::{convert, convert_value, part_text};
 use pattern::Pattern;
 pub use touched::{Touched, touched, touched_for_map};

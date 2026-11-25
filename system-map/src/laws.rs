@@ -136,9 +136,8 @@ pub fn test_name_after(text: &str, line: usize) -> Option<String> {
     let mut depth = 0usize; // Open brackets of an attribute that runs over several lines.
     for raw in lines.by_ref() {
         let trimmed = raw.trim();
-        if depth > 0 || trimmed.starts_with("#[") || trimmed.starts_with("#![") {
-            depth =
-                (depth + trimmed.matches('[').count()).saturating_sub(trimmed.matches(']').count());
+        if let Some(open) = attribute_brackets(depth, trimmed) {
+            depth = open;
             continue;
         }
         if trimmed.is_empty() || trimmed.starts_with("//") {
@@ -147,6 +146,13 @@ pub fn test_name_after(text: &str, line: usize) -> Option<String> {
         return rust_fn_name(trimmed).or_else(|| node_test_title(trimmed));
     }
     None
+}
+
+/// Whether the trimmed `line` is an attribute, or a line of one that runs over several, with `depth`
+/// of its brackets open before it: the brackets left open after it when it is, `None` when it is not.
+pub fn attribute_brackets(depth: usize, line: &str) -> Option<usize> {
+    (depth > 0 || line.starts_with("#[") || line.starts_with("#!["))
+        .then(|| (depth + line.matches('[').count()).saturating_sub(line.matches(']').count()))
 }
 
 fn rust_fn_name(line: &str) -> Option<String> {
