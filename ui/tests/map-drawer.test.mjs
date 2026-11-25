@@ -116,3 +116,19 @@ test("a commit whose PR has a stored brief offers it, and one whose PR has none 
   const rows = stripOf([entry("aaaaaaaa"), entry("bbbbbbbb", { brief: 12 })], null);
   assert.deepEqual(rows.map((r) => r.brief), [null, 12]);
 });
+
+// #548: a jump's address comes from the server's data (a CI run, a commit). Only an `https:` one is linked, as the patch review's
+// draft PR link is; anything else shows its label with no address to follow.
+test("a jump out of the drawer is a link only when its address is https", async () => {
+  globalThis.document = fakeDocument();
+  const { jumpLink } = await import("../../dist/map-drawer.js");
+  const jump = (url) => jumpLink({ label: "Open on GitHub", title: "Open the run", to: { url } });
+  const linked = jump("https://github.com/o/r/actions/runs/9");
+  assert.equal(linked.getAttribute("href"), "https://github.com/o/r/actions/runs/9");
+  assert.equal(linked.getAttribute("rel"), "noopener");
+  for (const url of ["javascript:alert(1)", "JavaScript:alert(1)", " javascript:alert(1)", "data:text/html,<script>1</script>", "http://github.com/o/r", "file:///etc/passwd", "//evil.example", "/local", ""]) {
+    const node = jump(url);
+    assert.equal(node.hasAttribute("href"), false, url);
+    assert.equal(node.text, "Open on GitHub", url);
+  }
+});

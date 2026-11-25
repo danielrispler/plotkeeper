@@ -45,7 +45,7 @@ export function diffIn(place: HTMLElement, id: string, turn: number) {
   const session = studio.listed.find((s) => s.id === id);
   if (session) drawDiff(place, session, turn, () => void select(id));
 }
-export function logIn(place: HTMLElement, id: string, agent: string, follow: boolean) {
+export async function logIn(place: HTMLElement, id: string, agent: string, follow: boolean): Promise<void> {
   const session = studio.listed.find((s) => s.id === id) ?? (studio.selection?.session.id === id ? studio.selection.session : undefined);
   const subagent = session?.agents.find((a) => a.id === agent);
   const toParent = () => void select(id);

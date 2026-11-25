@@ -195,8 +195,35 @@ fn save(home: &Path, state: &State) -> Result<(), String> {
     let mut value = serde_json::to_value(state).map_err(|e| e.to_string())?;
     value["answers_kept"] = Value::Bool(true);
     let text = serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?;
-    fs::write(dir.join("state.json"), text)
+    write_whole(&dir.join("state.json"), text)
         .map_err(|e| format!("could not record the install: {e}"))
+}
+
+/// Writes `text` as the whole of `file`, or leaves `file` as it was: the text goes to a temp file in the same folder,
+/// which is then renamed over it, so a crash mid-write never leaves half a `~/.zshrc`. A symlink is resolved first,
+/// so the file it points at is replaced and the link stays a link. The file keeps its permissions.
+fn write_whole(file: &Path, text: impl AsRef<[u8]>) -> std::io::Result<()> {
+    let target = match fs::canonicalize(file) {
+        Ok(target) => target,
+        // A link to a file that is not there: writing through it makes the file and keeps the link.
+        Err(_) if file.is_symlink() => return fs::write(file, text),
+        Err(_) => file.to_path_buf(),
+    };
+    let name = target.file_name().unwrap_or_default().to_string_lossy();
+    let temp = target.with_file_name(format!(".{name}.plotkeeper-{}.tmp", std::process::id()));
+    let written = (|| {
+        let mut out = fs::File::create(&temp)?;
+        out.write_all(text.as_ref())?;
+        if let Ok(old) = fs::metadata(&target) {
+            out.set_permissions(old.permissions())?;
+        }
+        out.sync_all()?;
+        fs::rename(&temp, &target)
+    })();
+    if written.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    written
 }
 
 /// The program `name` in a folder of `path` (a PATH value), as `command -v` finds it.
@@ -437,7 +464,7 @@ fn wire(
                 edits,
             });
             save(home, &state)?;
-            fs::write(&zshrc, cleaned).map_err(|e| format!("could not write ~/.zshrc: {e}"))?;
+            write_whole(&zshrc, cleaned).map_err(|e| format!("could not write ~/.zshrc: {e}"))?;
             say(
                 out,
                 "~/.zshrc: removed the old plugin path from CLAUDE_CODE_PLUGIN_DIRS (the removed lines are kept for uninstall)",
@@ -1175,7 +1202,7 @@ impl HookFile {
             save(home, state)?;
         }
         fs::create_dir_all(dir).map_err(|e| format!("could not make {}: {e}", dir.display()))?;
-        fs::write(&self.file, &text)
+        write_whole(&self.file, &text)
             .map_err(|e| format!("could not write {}: {e}", self.shown()))?;
         if let Some(record) = record(state).as_mut() {
             record.written = text;
@@ -1208,7 +1235,7 @@ impl HookFile {
             if record.existed {
                 let old = fs::read(record_dir(home).join("backups").join(self.backup))
                     .map_err(|e| format!("could not read the backup of {}: {e}", self.shown()))?;
-                fs::write(&self.file, old)
+                write_whole(&self.file, old)
                     .map_err(|e| format!("could not write {}: {e}", self.shown()))?;
             } else {
                 fs::remove_file(&self.file)
@@ -1225,7 +1252,7 @@ impl HookFile {
         }
         let text = self.without_ours(&now, bin)?;
         if text != now {
-            fs::write(&self.file, text)
+            write_whole(&self.file, text)
                 .map_err(|e| format!("could not write {}: {e}", self.shown()))?;
         }
         say(
@@ -1399,7 +1426,7 @@ pub fn uninstall(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Resu
             let put_back = fs::read(backups.join("zshrc"))
                 .map_err(|e| format!("could not read the backup of ~/.zshrc: {e}"))
                 .and_then(|old| {
-                    fs::write(&zshrc, old).map_err(|e| format!("could not write ~/.zshrc: {e}"))
+                    write_whole(&zshrc, old).map_err(|e| format!("could not write ~/.zshrc: {e}"))
                 });
             match put_back.and_then(|()| {
                 fs::remove_file(backups.join("zshrc"))
@@ -1429,7 +1456,7 @@ pub fn uninstall(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Resu
             .ok()
             .and_then(|now| with_removed_lines(&now, record));
         match put_back {
-            Some(text) => match fs::write(&zshrc, text) {
+            Some(text) => match write_whole(&zshrc, text) {
                 Ok(()) => {
                     say(out, "~/.zshrc: put back as it was");
                     state.zshrc_edits = None;

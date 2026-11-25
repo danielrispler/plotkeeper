@@ -1,6 +1,7 @@
 // The Map view's pure logic (spec danielrispler/plotkeeper#306, ticket #309): the map file as the window reads it, where parts
 // are placed, the drag threshold, the link's rim points, the layered Esc and the camera. `map.ts` draws and wires them.
 
+import { isObject } from "./settings.js";
 import type { AlsoGroup, AlsoKind, BriefFigure, PartialFacts, BriefStep, BriefView, CatchUpOffer, CatchUpStage, FogListEntry, Camera, Ci, CommitFiles, Fog, FogEntry, HistoricalMap, HistoryEntry, PrBrief, PrDiffArgs, Proof, ReadyPr } from "./types.js";
 
 export type Tier = "core" | "interface" | "black-box";
@@ -35,12 +36,13 @@ const list = <T>(value: unknown): T[] | null => (Array.isArray(value) ? (value a
 
 // The map file's text as the window draws it. The shell already read it leniently, so an unknown field is ignored here too.
 export function parseMap(text: string): MapDoc {
-  let file: Record<string, unknown>;
+  let file: unknown;
   try {
     file = JSON.parse(text);
   } catch (e) {
     return { ok: false, why: String(e) };
   }
+  if (!isObject(file)) return { ok: false, why: "the map is not a JSON object" };
   const [parts, actors, links, laws] = [list<Part>(file.parts), list<Actor>(file.actors), list<MapLink>(file.links), list<Law>(file.laws)];
   if (!parts || !actors || !links || !laws) return { ok: false, why: "the map lacks its parts, actors, links or laws" };
   return { ok: true, parts, actors, links, laws };

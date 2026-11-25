@@ -43,6 +43,8 @@ test("the refresher is drawn with no call to the shell, and a part the map lacks
   calls.length = 0;
   refresherOf(map, "window");
   assert.equal(refresherOf(map, "gone"), null);
+  // #548: a file that is JSON but no object does not read.
+  for (const text of ["null", "[]", "3", '"parts"']) assert.equal(refresherOf(text, "window"), null, text);
   assert.equal(refresherOf("not json", "server"), null);
   assert.deepEqual(calls, []);
 });

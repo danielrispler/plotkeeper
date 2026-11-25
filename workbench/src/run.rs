@@ -112,11 +112,13 @@ fn run(
         .process_group(0)
         .spawn()
         .map_err(RunError::Start)?;
-    let group = -(child.id() as i32);
+    let group = libc::pid_t::try_from(child.id()).ok();
     let kill_group = || {
-        // SAFETY: `kill` takes no pointers. The group is the one made for this child above; its id stays taken while
-        // the unreaped child or a process holding its output lives, so this signals no one else.
-        unsafe { libc::kill(group, libc::SIGKILL) };
+        if let Some(group) = group {
+            // SAFETY: `kill` takes no pointers. The group is the one made for this child above; its id stays taken
+            // while the unreaped child or a process holding its output lives, so this signals no one else.
+            unsafe { libc::kill(-group, libc::SIGKILL) };
+        }
     };
     // Threads, so a command that reads no input cannot hold back the deadline, and one that fills one pipe while the
     // other is read cannot stall.

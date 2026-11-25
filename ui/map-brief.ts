@@ -63,8 +63,9 @@ const gates = new Map<string, Gate>();
 // The chapters of each "Since you read" story read to their end while the window runs (#497).
 const storyDone = new Map<string, Set<number>>();
 let watching: (() => void) | null = null;
-// The "not confirmed from the facts" marks shown, watched until seen or the brief closes (#346).
+// The "not confirmed from the facts" marks of the step drawn, watched until seen, the step is drawn again or the brief closes (#346).
 let marks: (() => void)[] = [];
+const stopMarks = () => (marks.forEach((stop) => stop()), (marks = []));
 const stopWatching = () => (watching?.(), (watching = null));
 // The not-confirmed popover (#491): one manual popover of the panel, so Esc reaches the map's layers, which close it before the brief. It
 // shows the reasons of the mark that opened it, anchored to that mark (`showPopover`'s source); a redraw of the same step anchors it to the
@@ -403,8 +404,7 @@ export function closeBrief() {
   delete panel().dataset.waiting;
   hideWriting();
   stopWatching();
-  marks.forEach((stop) => stop());
-  marks = [];
+  stopMarks();
   closePopover();
   litFiles.clear();
   player.close();
@@ -621,7 +621,10 @@ function bodyNode(body: string) {
 }
 
 // One step's words and figure. The panel around them stays put.
-function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["also"] = []) {
+// The step drawn before stops being watched first: the brief draws its step again on every map draw, resize and explanations toggle,
+// and each draw makes new marks (#548). Exported for the tests.
+export function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["also"] = []) {
+  stopMarks();
   const part = (id: string) => partName(view, id);
   const words = text("div", "", "brief-txt");
   const kick = text("div", "", "brief-kick");

@@ -52,6 +52,6 @@ test("the rows are the ended sessions that match, newest first", () => {
 });
 
 test("Show history is a palette action with no default key", () => {
-  assert.equal(Object.values(initial.keymap.Workspace).some((b) => b === "studio::ShowHistory"), false);
+  assert.equal([...initial.keymap.get("Workspace").values()].some((b) => b === "studio::ShowHistory"), false);
   assert.equal(windowBinding(initial.keymap, { key: "y", code: "KeyY", metaKey: true, ctrlKey: false, altKey: false, shiftKey: true }, false), undefined);
 });

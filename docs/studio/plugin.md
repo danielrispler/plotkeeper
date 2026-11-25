@@ -26,6 +26,8 @@ Install, whether from a start's yes or from `plotkeeper install`, works at user 
 
 The backups and a record of what install did are in `install/` in the data folder. A second install keeps the first backups and replaces its own plugins, and in `~/.codex/hooks.json` and `~/.cursor/hooks.json` it first takes out every entry whose command names the data folder's `bin/`, so no entry of an older template stays beside the current ones (#435). After you change `plugin/`, `plugin-agy/`, `plugin-codex/`, `plugin-cursor/`, `plugin-copilot/` or `plugin-qwen/`, the next start of a build with the change rewires the wired harnesses it touched, or run install again: the agents run the copies install made.
 
+Install and uninstall write `~/.zshrc`, `~/.codex/hooks.json`, `~/.cursor/hooks.json` and the record through a temporary file beside the file, renamed into place, so a crash mid-write leaves the old file whole (#548). A file that is a symlink, as a dotfile manager makes, stays a symlink: the file it points at is the one replaced, and it keeps its permissions.
+
 To take it all back:
 
     plotkeeper uninstall

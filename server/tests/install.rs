@@ -1071,6 +1071,44 @@ fn no_line_of_zshrc_but_the_removed_ones_is_kept_in_the_data_folder() {
     assert_eq!(files(&machine.home), before);
 }
 
+/// A dotfile manager links `~/.zshrc` to its own copy. Install replaces the copy whole, by a rename, so the link stays
+/// a link, and a reader that opened the old file still reads all of it: nothing is ever cut short in place.
+#[test]
+fn a_symlinked_zshrc_stays_a_symlink_and_is_replaced_whole() {
+    let machine = Machine::new(true, true);
+    legacy(&machine, FALINKS_LINE);
+    let link = machine.home.join(".zshrc");
+    let real = machine.home.join("dotfiles/zshrc");
+    fs::create_dir_all(real.parent().unwrap()).unwrap();
+    fs::rename(&link, &real).unwrap();
+    fs::set_permissions(&real, fs::Permissions::from_mode(0o600)).unwrap();
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let old = fs::read_to_string(&real).unwrap();
+    let mut held = fs::File::open(&real).unwrap();
+
+    machine.run("install");
+
+    assert!(fs::symlink_metadata(&link).unwrap().is_symlink());
+    assert_eq!(fs::read_link(&link).unwrap(), real);
+    let new = fs::read_to_string(&real).unwrap();
+    assert!(!new.contains("checkout/plugin"), "{new}");
+    assert!(new.contains("alias g=git\n") && new.contains("export EDITOR=vim\n"));
+    let mode = fs::metadata(&real).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "the file keeps its permissions");
+    let mut still = String::new();
+    held.read_to_string(&mut still).unwrap();
+    assert_eq!(still, old, "the old file was written over in place");
+    let left: Vec<_> = fs::read_dir(real.parent().unwrap())
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(left, ["zshrc"], "a temp file was left behind");
+
+    machine.run("uninstall");
+    assert!(fs::symlink_metadata(&link).unwrap().is_symlink());
+    assert_eq!(fs::read_to_string(&real).unwrap(), old);
+}
+
 /// A record written before install kept only the removed lines held the whole old `~/.zshrc` in `backups/zshrc` and
 /// the text install wrote in `state.json`'s `zshrc`.
 #[test]

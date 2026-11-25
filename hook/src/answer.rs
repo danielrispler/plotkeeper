@@ -185,18 +185,9 @@ fn shows_life(data: &Path, session: Option<&str>) -> bool {
         && file_pid_lives(&watching)
 }
 
-/// Whether process `pid` exists and is the user's own.
-pub fn pid_lives(pid: i32) -> bool {
-    // Signal 0 only checks that the process exists and is the user's own.
-    // SAFETY: `kill` takes plain integers and touches no memory; `pid > 0` keeps it to one
-    // process, never a process group.
-    pid > 0 && unsafe { libc::kill(pid, 0) } == 0
-}
-
-/// Whether the process a file's `pid` names exists and is the user's own.
+/// Whether the process a file's `pid` names exists.
 pub fn file_pid_lives(file: &Value) -> bool {
-    let pid = file["pid"].as_i64().and_then(|p| i32::try_from(p).ok());
-    pid.is_some_and(pid_lives)
+    file["pid"].as_i64().is_some_and(crate::sys::pid_alive)
 }
 
 /// Whether the studio watches `session`: the watching file names it, its pid lives and its heartbeat

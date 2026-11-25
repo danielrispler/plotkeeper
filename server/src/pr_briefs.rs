@@ -52,7 +52,7 @@ pub enum Did {
     Staled,
     /// A brief was written.
     Wrote,
-    /// The write failed (told to `log`).
+    /// The write, or the stale mark of a new head, failed (told to `log`).
     Failed,
     /// No part the PR touches would fog at Daniel's tiers, so it gets no brief.
     Quiet,
@@ -488,8 +488,14 @@ pub fn on_lookup(
         return Did::Carried;
     }
     if !again && let Some(old) = with.store.latest(pr) {
-        let _ = with.store.mark_stale(pr, &old.head);
-        return Did::Staled;
+        return match with.store.mark_stale(pr, &old.head) {
+            Ok(_) => Did::Staled,
+            // Not kept in `seen.failed`: the next lookup of this head rewrites, as after a mark that worked.
+            Err(e) => {
+                log(format!("mark the brief stale: {e}"));
+                Did::Failed
+            }
+        };
     }
     // The first brief of a ready PR is written at once; a stale one when the same head is seen twice. The write takes minutes and
     // holds no lock. In the since case the story is written first, since the tray opens it first (#497).
@@ -498,6 +504,7 @@ pub fn on_lookup(
         && with.store.since(pr, head).is_none()
         && let Some(Push::Since(from)) = push_at(with, seen, pr, head)
     {
+        // `write_since` tells `log` its failure; the full brief is written either way.
         let _ = write_since(with, full, &from, &mut log);
     }
     match write_now(with, move || built, log) {
@@ -1773,6 +1780,42 @@ mod tests {
         assert_eq!(waiting_numbers(&store, &[ready(7)], None), vec![7]);
         // A PR that is not ready (merged, closed, a draft) is not in the list given, so nothing waits for it.
         assert!(waiting_numbers(&store, &[], None).is_empty());
+    }
+
+    #[test]
+    fn a_stale_mark_that_fails_is_told_and_not_reported_as_staled() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let store = BriefStore::open(dir.path()).unwrap();
+        let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+        lookup(&store, &seen, &fake, "aaa");
+        // The store's folder takes no writes, so the mark can't be saved.
+        let folder = dir.path().join("pr-briefs");
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let told = RefCell::new(vec![]);
+        let with = Writing {
+            writer: &fake,
+            model: "opus",
+            store: &store,
+            reading: None,
+        };
+        let did = on_lookup(
+            &with,
+            &seen,
+            7,
+            "bbb",
+            || Ok(source("bbb")),
+            |l| told.borrow_mut().push(l),
+        );
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(did, Did::Failed);
+        assert!(
+            told.borrow()[0].contains("mark the brief stale"),
+            "{told:?}"
+        );
+        assert!(!store.get(7, "aaa").unwrap().stale);
+        // The next lookup of the same head rewrites, as after a mark that worked.
+        assert_eq!(lookup(&store, &seen, &fake, "bbb"), Did::Wrote);
     }
 
     #[test]

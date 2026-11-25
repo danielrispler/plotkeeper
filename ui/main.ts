@@ -119,7 +119,7 @@ function answer(n: number) {
   dock.querySelector<HTMLButtonElement>(".send:not([disabled])")?.focus();
 }
 
-const actions: Actions = {
+const named: Record<string, (arg?: string) => void> = {
   "studio::ToggleList": () => toggle("list-open"),
   // The selected session's story, which lives in the left panel over the map (#386): shown, or closed back to the bare map with the
   // session still selected, so ⌘2 opens it again.
@@ -176,9 +176,11 @@ const actions: Actions = {
   // The page's explanations on or off (#522), as the `?` beside an explained panel's × does.
   "studio::ToggleExplanations": () => toggleExplanations(),
   "studio::Palette": () => {
-    showPalette(paletteEntries(studio.files.keymap, Object.keys(actions)), (binding) => run(actions, binding));
+    showPalette(paletteEntries(studio.files.keymap, [...actions.keys()]), (binding) => run(actions, binding));
   },
 };
+// Looked up by the name `keymap.json` gives, so a Map (`keys.ts`, `Actions`).
+const actions: Actions = new Map(Object.entries(named));
 // Esc in a modal dialog (rename, delete, confirm) is the dialog's, as the palette's is (#458): it closes the dialog, and the window's Esc,
 // which peels the map's layers, does not see it (#452's outside review).
 for (const dialog of document.querySelectorAll("dialog")) {
@@ -218,14 +220,14 @@ function applySettings(files: SettingsFiles) {
   window.dispatchEvent(new Event("settings"));
 }
 listen<SettingsFiles>("settings-files", applySettings);
-invoke("settings_files").then(applySettings);
+invoke("settings_files").then(applySettings).catch(failure("settings_files"));
 // The rail's "⋯" menu (danielrispler/Falinks#574) closes once an action in it is chosen.
 element("rail-actions").addEventListener("click", () => element("rail-actions").hidePopover());
 
 document.addEventListener("visibilitychange", recheckSeen);
 window.addEventListener("focus", recheckSeen);
 window.addEventListener("blur", recheckSeen);
-window.addEventListener("focus", () => actions["studio::RefreshLanded"]());
+window.addEventListener("focus", () => actions.get("studio::RefreshLanded")?.());
 
 startPanes();
 startRailBriefs(drawFeed);
@@ -257,7 +259,7 @@ function removeProject(path: string) {
   invoke("remove_project", { path }).then(showProjects).catch(failure("remove_project"));
 }
 listen<SavedProject[]>("projects", showProjects);
-invoke("projects").then(showProjects);
+invoke("projects").then(showProjects).catch(failure("projects"));
 element("remove-project").addEventListener("click", () => {
   const menu = element("project-actions");
   menu.hidePopover();
@@ -269,7 +271,7 @@ const showList = (sessions: Session[]) => {
   showToast();
 };
 listen<Session[]>("sessions", showList);
-invoke("sessions").then(showList);
+invoke("sessions").then(showList).catch(failure("sessions"));
 // The toasts' presses keep the keyboard's focus, and a modal dialog holds them back (#457).
 watchToasts();
 // A turn that ended off screen in the focused window (the server's notices): the note toast names it.
@@ -292,11 +294,13 @@ listen<string[]>("finished", (ids) => {
 // The press's settling fetches what it held back.
 listen<Selection | null>("selected", (selected) => (studio.pending ? (studio.missed = true) : show(selected)));
 // A session selected before the page opened opens in the left panel, its story or its worker's log, over its project's map.
-invoke("selected").then((selected) => {
-  show(selected);
-  if (selected) openMap(projectOfCwd(selected.session.cwd));
-  if (selected) showPanel(selectedView(selected.session.id, projectOfCwd(selected.session.cwd), selected.agent).panel);
-});
+invoke("selected")
+  .then((selected) => {
+    show(selected);
+    if (selected) openMap(projectOfCwd(selected.session.cwd));
+    if (selected) showPanel(selectedView(selected.session.id, projectOfCwd(selected.session.cwd), selected.agent).panel);
+  })
+  .catch(failure("selected"));
 listen<SessionCards>("cards", (cards) => (studio.pending ? (studio.missed = true) : showCards(cards)));
 // Claude Code's version changed: re-record the subagent fixture.
 listen<string>("notice", showNotice);
@@ -330,7 +334,7 @@ const checkWired = () =>
     .catch(failure("wired"));
 checkWired();
 window.addEventListener("focus", checkWired);
-invoke("cards").then(showCards);
+invoke("cards").then(showCards).catch(failure("cards"));
 // The writer section in the Settings panel (spec #320, #387): its gate notice shares the writer's line, and a passed Test's save applies as one.
 startWriters({
   summaries: () => studio.files.settings.summaries,

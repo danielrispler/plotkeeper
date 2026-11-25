@@ -21,6 +21,21 @@ test("summaries on open are written one at a time, in the order asked, newest fi
   assert.deepEqual(started, ["newest", "older", "oldest"]);
 });
 
+// #548: a run that fails is caught, and the queue goes on to the next id.
+test("a summary whose write throws leaves no unhandled rejection and the next one still runs", async () => {
+  const unhandled = [];
+  const note = (reason) => unhandled.push(String(reason));
+  process.on("unhandledRejection", note);
+  const started = [];
+  const ask = oneAtATime((id) => (started.push(id), id === "bad" ? Promise.reject(new Error("no writer")) : Promise.resolve()));
+  ask("bad");
+  ask("next");
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  process.off("unhandledRejection", note);
+  assert.deepEqual(started, ["bad", "next"]);
+  assert.deepEqual(unhandled, []);
+});
+
 const html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const rail = html.slice(html.indexOf('<aside class="rail"'), html.indexOf("</aside>"));
 const turn = (started_at, prompt) => ({ started_at, ended_at: null, prompt, id: null, message: null });

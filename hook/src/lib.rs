@@ -1,6 +1,7 @@
 //! The event log (danielrispler/Falinks#328, module 2): one append-only JSON Lines file, the only source of session state.
 
 pub mod answer;
+pub mod sys;
 
 use std::{
     env,

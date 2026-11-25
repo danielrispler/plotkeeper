@@ -7,7 +7,7 @@
 // What opens where is `map-model.ts`'s (`withPanel`, `withSheet`, `pressRow`): below 1007 px only one overlay is open, and the widened diff
 // closes the sheet. The camera pans the parts in focus clear of it (`revealParts`); no position is ever written.
 
-import { element, text } from "./dom.js";
+import { element, failure, text } from "./dom.js";
 import { mapShown, onDraw, registerLayer, revealParts } from "./map.js";
 import { openAgents } from "./map-agents.js";
 import { closeSheet, sheetPart } from "./map-sheet.js";
@@ -20,7 +20,7 @@ export type PanelDeps = {
   history: (box: HTMLElement) => void;
   diff: (box: HTMLElement, session: string, turn: number) => void;
   // A worker's or helper's log (#386); `follow` reads it on from where it was.
-  log: (box: HTMLElement, session: string, agent: string, follow: boolean) => void;
+  log: (box: HTMLElement, session: string, agent: string, follow: boolean) => Promise<void>;
   deselect: () => void;
 };
 let deps: PanelDeps;
@@ -64,7 +64,7 @@ function draw() {
   } else if (content?.kind === "log") {
     const box = text("div", "", "panel-view log");
     body.replaceChildren(box);
-    deps.log(box, content.session, content.agent, false);
+    deps.log(box, content.session, content.agent, false).catch(failure("subagent log"));
   } else if (content === null) {
     body.replaceChildren();
   }
@@ -73,7 +73,7 @@ function draw() {
 // The selection was sent again while a log shows: the log reads on.
 export function followPanelLog() {
   const place = element("panel-body").querySelector<HTMLElement>(".panel-view.log");
-  if (shown?.kind === "log" && place) deps.log(place, shown.session, shown.agent, true);
+  if (shown?.kind === "log" && place) deps.log(place, shown.session, shown.agent, true).catch(failure("subagent log"));
 }
 
 // The parts the panel's content is about, kept clear of it and of the sheet: the sheet's part, and the parts the open session's chips are on.
