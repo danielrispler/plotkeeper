@@ -3,7 +3,7 @@
 // a strip of glyphs and labels, which opens the full list on hover, on click or on ⌘1. Its pure parts are `list-model.ts`.
 
 import { logStop } from "./stop-rules.js";
-import { age, element, failure, fullTitle, glyphOnly, hint, invoke, keepOnly, newest, patch, pressable, prose, stepText, text } from "./dom.js";
+import { age, element, failure, fullTitle, glyphOnly, hint, hintOf, invoke, keepOnly, newest, patch, pressable, prose, stepText, text } from "./dom.js";
 import { hideClearToast, showClearToast } from "./toast.js";
 import { counts } from "./times.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
@@ -200,8 +200,12 @@ export function row(session: Session, children: Children, token: string | null =
     rowNote(session.id),
   );
   // Hovering the row spotlights its session on the map (#382, #562) and shows its footprint (#559); a session that touched no part in the
-  // last 7 days says so in the row's hint, built when the row is drawn.
-  button.addEventListener("pointerenter", () => hoverAgents(session.id, button));
+  // last 7 days says so in the row's hint, built when the row is drawn and again as the pointer arrives.
+  button.addEventListener("pointerenter", () => {
+    // The footprint may have been placed after the row was drawn, so the hint's note is read again as the pointer arrives.
+    hint(button, withNote(hintOf(button)?.textContent ?? "", rowNote(session.id)));
+    hoverAgents(session.id, button);
+  });
   button.addEventListener("pointerleave", () => hoverAgents(null));
   // The agent's logo leads the row, apart from its state glyph (#158).
   first.prepend(logo(logoKey(session), noContextNote(session) || undefined));
