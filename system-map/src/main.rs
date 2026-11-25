@@ -49,6 +49,10 @@ fn run() -> Result<ExitCode, String> {
         return run_imports(&root, json);
     }
     let report = system_map::check(&root);
+    // On standard error, so standard output keeps exactly the problems and the pass line, and never a failure.
+    for name in &report.suggested {
+        eprintln!("note: {name} could read this repository; add it to extractors");
+    }
     if json {
         println!(
             "{}",
