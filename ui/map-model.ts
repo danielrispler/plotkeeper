@@ -177,6 +177,28 @@ export function sheetOf(part: Part, laws: Law[], tier: Tier, fog: Fog | undefine
   };
 }
 
+// The sheet's "Talks to" (spec #473): each link at either end of `part`, in the map's order, with the other end by name, whether its
+// arrow leaves the part, its kind and its reason. The sheet has no other list of links.
+export type TalkRow = { link: string; other: string; out: boolean; kind?: LinkKind; reason?: string };
+export const talksTo = (part: string, links: MapLink[], nameOf: (id: string) => string): TalkRow[] =>
+  links
+    .filter((link) => link.from === part || link.to === part)
+    .map((link) => ({ link: link.id, other: nameOf(link.from === part ? link.to : link.from), out: link.from === part, kind: link.kind, reason: link.reason }));
+
+// The map's lines (spec #473): links joining the same two ends, in either direction, are one line, drawn the way its first link runs and
+// holding every link's id, so a brief's light and a law's mark on any of them find it.
+export type LinkLine = { ids: string[]; from: string; to: string };
+export function linkLines(links: MapLink[]): LinkLine[] {
+  const lines = new Map<string, LinkLine>();
+  for (const link of links) {
+    const key = JSON.stringify([link.from, link.to].sort());
+    const line = lines.get(key);
+    if (line) line.ids.push(link.id);
+    else lines.set(key, { ids: [link.id], from: link.from, to: link.to });
+  }
+  return [...lines.values()];
+}
+
 // A plate's hover text: its name, caption and purpose, never the held items, so a glance stays a glance.
 export const plateTitle = (part: Part): string => [part.name, part.caption, part.purpose].filter(Boolean).join("\n\n");
 
