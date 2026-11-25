@@ -520,6 +520,8 @@ fn brief() -> studio_understanding::pr_brief::StoredBrief {
         guard: Some(Guard {
             parts: vec!["server".into()],
         }),
+        // The page reads it with the Partial facts chip (#491), which fills it here.
+        partial_facts: PartialFacts::default(),
     }
 }
 
