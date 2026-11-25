@@ -332,7 +332,7 @@ pub fn map_state(project: String, fetch: bool, app: &Arc<crate::App>) -> Result<
     state.user = read_user(&file, &project);
     if let Some(source) = &state.source {
         state.fog = crate::fog::effective(&state.user, source);
-        let born = crate::staleness::births(repo, source);
+        let born = crate::staleness::births(&app.births, repo, source);
         let now = crate::ratify::now();
         state.stale = crate::staleness::bands(&state.user, source, &born, now);
         state.stale_why = crate::staleness::lines(&state.user, source, &born, now);
@@ -342,7 +342,7 @@ pub fn map_state(project: String, fetch: bool, app: &Arc<crate::App>) -> Result<
     app.briefs.annotate(&project, &mut state.ready);
     state.ratify = crate::ratify::file()
         .and_then(|file| crate::ratify::start(&file, &project, crate::ratify::now()))
-        .map(|mine| crate::ratify::pending(repo, &mine))
+        .map(|mine| crate::ratify::pending(&app.changes, repo, &mine))
         .unwrap_or_default();
     state.runs = app.runner.runs(&project);
     // A shown map starts the part catch-ups of up to eight fogged Core parts (#396, #450).

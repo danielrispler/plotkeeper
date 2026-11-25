@@ -14,7 +14,7 @@ use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashMap},
     path::Path,
-    sync::{Arc, LazyLock, Mutex},
+    sync::{Arc, Mutex},
 };
 
 use crate::map::{UserState, update_user};
@@ -193,13 +193,12 @@ pub fn lines(
         .collect()
 }
 
-/// Each project's births by part id, behind a lock of its own.
-type Births = Mutex<HashMap<String, Arc<Mutex<HashMap<String, Option<u64>>>>>>;
-static BIRTHS: LazyLock<Births> = LazyLock::new(Mutex::default);
+/// Each project's births by part id, behind a lock of its own, kept for the server's life on `App`.
+pub(crate) type Births = Mutex<HashMap<String, Arc<Mutex<HashMap<String, Option<u64>>>>>>;
 
 /// When each part of `source` first entered the map on `repo`'s default branch (`history::part_births`), the later baseline of a part
 /// added after the project's. Git's history is read at most once per project and part while the server runs.
-pub fn births(repo: &Path, source: &str) -> BTreeMap<String, u64> {
+pub(crate) fn births(cache: &Births, repo: &Path, source: &str) -> BTreeMap<String, u64> {
     let ids: Vec<String> = serde_json::from_str::<Value>(source)
         .ok()
         .and_then(|map| {
@@ -211,7 +210,7 @@ pub fn births(repo: &Path, source: &str) -> BTreeMap<String, u64> {
             })
         })
         .unwrap_or_default();
-    births_in(&BIRTHS, &repo.display().to_string(), &ids, |wanted| {
+    births_in(cache, &repo.display().to_string(), &ids, |wanted| {
         crate::history::part_births(repo, wanted)
     })
 }

@@ -163,6 +163,10 @@ pub struct App {
     pub worlds: Arc<micro_worlds::MicroWorlds>,
     /// Back a law (`back_a_law.rs`): its runs' proofs and the patches kept.
     pub laws: Arc<back_a_law::LawRuns>,
+    /// The map items each landed commit changed (`ratify::changes_of`).
+    changes: ratify::ChangesCache,
+    /// Each project's part births (`staleness::births`).
+    births: staleness::Births,
 }
 
 impl App {
@@ -355,6 +359,8 @@ impl App {
             runner,
             worlds,
             laws,
+            changes: Mutex::default(),
+            births: Mutex::default(),
         })
     }
 
