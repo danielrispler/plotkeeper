@@ -2,6 +2,19 @@
 
 All notable changes to plotkeeper's npm package. Newest first; each version's section is the notes of its GitHub Release.
 
+## 0.2.0
+
+### Added
+
+- After a new push to a PR you've read, its brief shows only what changed since your read ("Since you read"), or keeps your read when the push touched nothing on your map, with the full brief one click away. (#518)
+- A PR's brief says when its facts are partial (a cut diff, a failed claim check, a language with no import reader) and when `main` has moved since the PR's base, so you know what it couldn't see. (#518)
+- Each brief step has "See the code" for that step's parts and a copy icon on "Could break" that writes a ready prompt, and a part's fog, stale or broken mark says why and from which PR. (#518)
+
+### Changed
+
+- The brief's "Also touched" step groups files by kind (no part, tests, config and build, docs, ignored, other), so the leftovers are easier to scan. (#518)
+- A part's sheet leads with a short purpose, then what it holds with its key files, then who it talks to and why, and the map draws one line per pair of parts. (#500)
+
 ## 0.1.2
 
 ### Added
