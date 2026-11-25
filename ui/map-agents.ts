@@ -1,11 +1,13 @@
 // Live agents on the Map view (spec danielrispler/plotkeeper#306, ticket #311): a chip on every part a running or needs-you session's
 // or Worker's current turn touched, and a quiet "not placed" list beside the map for the ones no part holds. The pure rules come first;
 // the drawing below them reads the sessions the window already has, and `map_place` (the shell, `studio-system-map`) says which parts a
-// list of paths touches.
+// list of paths touches. Since #559 it asks one group per path (`placeGroups`, `map-live.ts`) and folds the answers back, and it draws the
+// spotlit session's footprint as corner brackets around its plates beside the chips.
 
 import { failure, invoke, newest, pressable, text } from "./dom.js";
 import { currentMap, onDraw, syncSide } from "./map.js";
 import { logStop } from "./stop-rules.js";
+import { footprint, footprintNote, partsOf, placeGroups, type Placement, spotlit } from "./map-live.js";
 import type { Session } from "./types.js";
 
 // One agent on the map: a session's own, or a Worker's. `key` is the session's id, and `session/worker` for a Worker.
@@ -62,6 +64,10 @@ export function arrange(live: Live[], placed: Record<string, string[]>): { byPar
   return { byPart, notPlaced };
 }
 
+// Each agent's parts from the per-path placement (#559): its key to the parts its paths touch, which `arrange` reads.
+export const agentParts = (live: Live[], placed: Placement): Record<string, string[]> =>
+  Object.fromEntries(live.map((agent) => [agent.key, partsOf(agent.paths, placed)]));
+
 // The not placed list's closed line (#472): how many agents no part holds, and how many of them need you, so a needs-you agent stays loud.
 export function notPlacedLine(notPlaced: Live[]): { count: string; needsYou: string | null } {
   const asking = notPlaced.filter((agent) => agent.needsYou).length;
@@ -74,18 +80,29 @@ export function litAgents(live: Live[], hovered: string | null, open: string | n
   return live.filter((agent) => agent.session === hovered || agent.session === open).map((agent) => agent.key);
 }
 
-// What the drawing needs of the window, given by `main.ts`: the sessions, a folder's project, and the jump to a session.
-export type AgentDeps = { sessions: () => Session[]; projectOf: (cwd: string) => string | null; select: (session: string, agent: string | null) => void };
+// What the drawing needs of the window, given by `main.ts`: the sessions, a folder's project, the jump to a session, and whether a PR
+// brief plays (no footprint then).
+export type AgentDeps = {
+  sessions: () => Session[];
+  projectOf: (cwd: string) => string | null;
+  select: (session: string, agent: string | null) => void;
+  briefOpen: () => boolean;
+};
 let deps: AgentDeps;
 let hidden = false;
-// The last answer of `map_place` for the paths asked, so a refresh that changes none asks nothing.
+// The last answer of `map_place` for the paths asked, by path, so a refresh that changes none asks nothing.
 let asked = "";
-let placed: Record<string, string[]> = {};
+let placed: Placement = {};
+// The last placement, for the story's turn rules (`turnParts`): a path asked for no part is not in it yet.
+export const currentPlacement = (): Placement => placed;
 const latest = newest();
 
-// The session whose list row the pointer is on (#382), whose chips are lit.
+// The session whose list or History row the pointer is on (#382), whose chips are lit and whose footprint shows (#559), and that row: a
+// hover ends when the row leaves the page (a session moving to History, a redraw), which `pointerleave` never reports.
 let hovered: string | null = null;
-export function hoverAgents(session: string | null) {
+let hoveredRow: Element | null = null;
+export function hoverAgents(session: string | null, row: Element | null = null) {
+  hoveredRow = row;
   if (session === hovered) return;
   hovered = session;
   paint();
@@ -129,12 +146,42 @@ const notPlacedList = () => {
   return (kept = { details, summary, chips });
 };
 
-// Puts the chips on the plates and the not placed list in its slot, from what the last refresh found.
+// The shown project's sessions, whose turns are placed: none on a past commit's map.
+const shownSessions = (project: string) => (hidden ? [] : deps.sessions().filter((session) => !session.shell && deps.projectOf(session.cwd) === project));
+
+// The added hover text of a session's row (#559): "Touched no part in the last 7 days" once the placement says so; null otherwise, and for
+// a session the map does not show.
+export function rowNote(id: string): string | null {
+  const view = currentMap();
+  const session = view ? shownSessions(view.project).find((one) => one.id === id) : undefined;
+  return session ? footprintNote(session, placed, Date.now()) : null;
+}
+
+// Corner brackets around the spotlit session's plates (#559): firm on its latest turn's parts, faint on the rest within the cut.
+function paintFootprint(view: NonNullable<ReturnType<typeof currentMap>>) {
+  if (hoveredRow && !hoveredRow.isConnected) [hovered, hoveredRow] = [null, null];
+  const sessions = shownSessions(view.project);
+  const id = spotlit({ hovered, open: opened, brief: deps.briefOpen(), past: view.scrub !== null, shown: sessions.map((session) => session.id) });
+  const session = sessions.find((one) => one.id === id);
+  const { firm, faint } = session ? footprint(session, placed, Date.now()) : { firm: [], faint: [] };
+  for (const plate of view.slots.canvas.querySelectorAll<HTMLElement>(".plate[data-id]")) {
+    plate.classList.toggle("foot-firm", firm.includes(plate.dataset.id!));
+    plate.classList.toggle("foot-faint", faint.includes(plate.dataset.id!));
+  }
+}
+
+// Draws the footprint again: a brief opened or closed, or the update that painted is done.
+export function repaintFootprint() {
+  const view = currentMap();
+  if (view) paintFootprint(view);
+}
+
+// Puts the chips on the plates and the not placed list in its slot, from what the last refresh found, and the spotlit session's footprint.
 function paint() {
   const view = currentMap();
   if (!view) return;
   const live = hidden ? [] : liveAgents(deps.sessions(), (cwd) => deps.projectOf(cwd) === view.project);
-  const { byPart, notPlaced } = arrange(live, placed);
+  const { byPart, notPlaced } = arrange(live, agentParts(live, placed));
   const lit = litAgents(live, hovered, opened);
   for (const plate of view.slots.canvas.querySelectorAll<HTMLElement>(".plate[data-id]")) {
     plate.querySelector(".plate-chips")?.replaceChildren(...(byPart[plate.dataset.id!] ?? []).map((agent) => chip(agent, deps.select, lit)));
@@ -154,16 +201,22 @@ function paint() {
     }
   } else slot.replaceChildren();
   syncSide(view.slots);
+  paintFootprint(view);
+  // The row hovered may leave the page in the same update that painted (the list and History are drawn after the sessions are read):
+  // looked at again once that update is done.
+  if (hoveredRow) queueMicrotask(repaintFootprint);
 }
 
-// Reads which parts the live agents' paths touch (when they changed) and draws them. Called when the sessions change and when the map draws.
+// Reads which parts the shown project's paths touch (when they changed) and draws the chips and the footprint. Called when the sessions change and when the map draws.
 export const refreshAgents = () => read().catch(failure("map_place"));
 async function read() {
   const view = currentMap();
   if (!view) return;
   const live = hidden ? [] : liveAgents(deps.sessions(), (cwd) => deps.projectOf(cwd) === view.project);
-  const groups = Object.fromEntries(live.filter((agent) => agent.paths.length).map((agent) => [agent.key, agent.paths]));
-  const key = JSON.stringify([view.project, view.state.commit, groups]);
+  // One group per path (#559): every file of the shown project's turns within the cut, and the chips' own paths (a Needs you session's
+  // last edit among them), so the chips land as they did when each was asked by agent.
+  const groups = placeGroups(shownSessions(view.project), Date.now(), live.flatMap((agent) => agent.paths));
+  const key = JSON.stringify([view.project, view.state.commit, Object.keys(groups).sort()]);
   if (key !== asked) {
     const found = await latest(invoke("map_place", { project: view.project, groups }));
     if (!found || currentMap() !== view) return;
