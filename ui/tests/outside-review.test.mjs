@@ -294,7 +294,7 @@ test("the deny hook allows a read inside its root and the answer's hand-over, an
   assert.ok(!logged.includes("inside"));
 });
 
-test("--subagents lets the reviewer start a subagent and nothing else new: writes, commands and other agent tools stay denied", () => {
+test("--subagents lets the reviewer start a subagent and hear its report, and nothing else new: writes, commands and other agent tools stay denied", () => {
   const root = mkdtempSync(join(tmpdir(), "deny-hook-"));
   const decision = (name, flags) => {
     const input = JSON.stringify({ cwd: root, toolCall: { name, args: {} } });
@@ -303,8 +303,10 @@ test("--subagents lets the reviewer start a subagent and nothing else new: write
   };
   assert.equal(decision("invoke_subagent", []), "deny");
   assert.equal(decision("invoke_subagent", ["--subagents"]), "allow");
+  assert.equal(decision("send_message", []), "deny");
+  assert.equal(decision("send_message", ["--subagents"]), "allow");
   for (const flags of [[], ["--subagents"]])
-    for (const tool of ["write_file", "run_command", "send_message", "swarm", "run_workflow", "define_subagent", "manage_subagents"])
+    for (const tool of ["write_file", "run_command", "swarm", "run_workflow", "define_subagent", "manage_subagents"])
       assert.equal(decision(tool, flags), "deny", `${tool} ${flags}`);
 });
 
@@ -506,7 +508,7 @@ test("a reviewed run and a skipped run each leave one line in the main checkout'
   assert.equal(s.git("status", "--porcelain"), "");
 });
 
-test("a trial run records its variant and trial, its quota as shared, and names its findings file after its variant", () => {
+test("a trial run records its variant and trial, its quota as shared, names its findings file after its variant and keeps agy's whole answer beside it", () => {
   const s = scratch({ ignored: true });
   const head = s.git("rev-parse", "HEAD").trim().slice(0, 9);
   const ran = spawnSync(process.execPath, s.args(["--subagents", "--variant", "subagents", "--trial", "t1"]), {
@@ -517,6 +519,8 @@ test("a trial run records its variant and trial, its quota as shared, and names 
   assert.match(ran.stdout, new RegExp(`findings: .*outside-review-${head}-subagents\\.json`));
   assert.ok(existsSync(join(s.dir, "out", `outside-review-${head}-subagents.json`)));
   assert.ok(existsSync(join(s.repo, `local-evidence/outside-review/outside-review-${head}-subagents.json`)));
+  const answer = JSON.parse(readFileSync(join(s.dir, "out", `outside-review-${head}-subagents-agy.json`), "utf8"));
+  assert.equal(answer.status, "SUCCESS");
   const [line] = runsOf(s.repo);
   assert.equal(line.variant, "subagents");
   assert.equal(line.trial, "t1");
