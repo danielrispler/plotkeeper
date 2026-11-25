@@ -8,7 +8,7 @@ use std::{
 
 use serde::Serialize;
 
-use crate::PartFiles;
+use crate::{PartFiles, extract::Pair};
 
 /// What `imports` counted. Weighted counts give each pair 1 / the fan-in of its target, rounded
 /// to two places; shares are percentages of the total, rounded to one place.
@@ -78,8 +78,18 @@ pub fn imports(root: &Path) -> Result<Imports, Vec<String>> {
     // Unowned files are `check`'s to report; here they only fall out of the counts.
     let (parts, _, _) = crate::ownership(&map, &files);
     let names = map.extractors.as_deref().unwrap_or_default();
-    let (pairs, problems) = crate::edges::file_pairs(root, names, &files, false);
-    Ok(count(&parts, &pairs, problems))
+    let repo = crate::repo(root, &map, &files);
+    let found = crate::extract::run(crate::extract::registry::EXTRACTORS, names, &repo);
+    Ok(count(&parts, &counted(&found.pairs), found.problems))
+}
+
+/// The pairs the report counts: a crate root's `mod` lines declare the module tree, so their pairs are left out.
+fn counted(pairs: &[Pair]) -> BTreeSet<(String, String)> {
+    pairs
+        .iter()
+        .filter(|p| !p.declaration)
+        .map(|p| (p.from.clone(), p.to.clone()))
+        .collect()
 }
 
 fn count(
@@ -194,4 +204,22 @@ fn rounded((raw, weighted): (usize, f64)) -> Count {
 
 fn round2(value: f64) -> f64 {
     (value * 100.0).round() / 100.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_declaration_pair_is_left_out_of_the_report() {
+        let declaration = Pair {
+            declaration: true,
+            ..Pair::new("lib.rs", "a.rs")
+        };
+        let counted = counted(&[declaration, Pair::new("a.rs", "b.rs")]);
+        assert_eq!(
+            counted.into_iter().collect::<Vec<_>>(),
+            [("a.rs".to_string(), "b.rs".to_string())]
+        );
+    }
 }
