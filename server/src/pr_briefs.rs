@@ -104,6 +104,9 @@ pub enum Push {
     Quiet,
     /// Fully read at H1, which still resolves, and the old and new ranges hold the same patches: the read carries over.
     Rebased,
+    /// Fully read at H1, and H2 only merged the default branch into it: the PR's own commits hold the same patches, so the read
+    /// carries over.
+    Merged,
     /// Fully read at H1 (held here), H2 descends from it, and H1..H2 fogs something: a "Since you read" story is written from the
     /// diff H1..H2 (#497), and the full brief at H2 as before.
     Since(String),
@@ -117,13 +120,14 @@ impl Push {
         match self {
             Push::Quiet => Some("New push touched nothing on your map".into()),
             Push::Rebased => Some("Rebased onto main, nothing new in the PR".into()),
+            Push::Merged => Some("Main merged into the branch, nothing new in the PR".into()),
             Push::Since(_) => None,
             Push::Rewrite(note) => note.clone(),
         }
     }
 
     fn carries(&self) -> bool {
-        matches!(self, Push::Quiet | Push::Rebased)
+        matches!(self, Push::Quiet | Push::Rebased | Push::Merged)
     }
 }
 
@@ -184,15 +188,12 @@ impl Reading for GitReading {
 fn partial_note(read: Option<&crate::fog::PrRead>, old: &str) -> Option<String> {
     let read = read?;
     let n = read.chapters.values().filter(|c| c.head == old).count();
-    (n > 0).then(|| {
-        format!(
-            "Rewritten after a new push; you had read {n} of {}",
-            read.lit.len()
-        )
-    })
+    (n > 0).then(|| format!("{PUSHED}; you had read {n} of {}", read.lit.len()))
 }
 
 const REBASED: &str = "Rewritten: the branch was rebased";
+const PUSHED: &str = "Rewritten after a new push";
+const MERGED: &str = "Rewritten: main was merged into the branch";
 
 /// What the push of PR `pr` from `old` to `new` does to `read`, by `git` in `repo`: `reference` is the default branch the
 /// patch-ids' ranges start from, `tiers` Daniel's, which decide whether H1..H2 fogs something.
@@ -213,6 +214,14 @@ pub fn push_of(
         return Push::Rewrite(Some(REBASED.into()));
     }
     if git(&["merge-base", "--is-ancestor", old, new]).is_ok() {
+        // The default branch merged into the PR: H1..H2 holds main's changes, so the PR's own commits are compared instead.
+        let base = |head: &str| git(&["merge-base", reference, head]).ok();
+        if base(old) != base(new) {
+            return match (patches(repo, reference, old), patches(repo, reference, new)) {
+                (Some(before), Some(after)) if before == after => Push::Merged,
+                _ => Push::Rewrite(Some(MERGED.into())),
+            };
+        }
         let meta = studio_understanding::pr_brief::PrMeta {
             number: pr,
             head: new.to_string(),
@@ -224,7 +233,7 @@ pub fn push_of(
         }) {
             Ok(true) => Push::Quiet,
             Ok(false) => Push::Since(old.to_string()),
-            Err(_) => Push::Rewrite(None),
+            Err(_) => Push::Rewrite(Some(PUSHED.into())),
         };
     }
     match (patches(repo, reference, old), patches(repo, reference, new)) {
@@ -2276,6 +2285,43 @@ mod tests {
         assert_eq!(
             repo.push(Some(&read), &h1, &changed),
             Push::Rewrite(Some(REBASED.into()))
+        );
+    }
+
+    #[test]
+    fn merging_main_into_the_branch_is_judged_by_the_prs_own_commits_not_mains() {
+        let repo = Repo::new();
+        let h1 = repo.head();
+        let read = read_of(1, &[&h1]);
+        // Main changes alpha, which would fog, and is merged into the branch: the PR's own commits are as they were.
+        repo.git(&["checkout", "-q", "main"]);
+        repo.commit(&[("alpha/main.rs", "main")]);
+        repo.git(&["checkout", "-q", "pr"]);
+        repo.git(&["merge", "-q", "--no-edit", "main"]);
+        let merged = repo.head();
+        let push = repo.push(Some(&read), &h1, &merged);
+        assert_eq!(push, Push::Merged);
+        assert_eq!(
+            push.note().as_deref(),
+            Some("Main merged into the branch, nothing new in the PR")
+        );
+        // A commit of the PR's own on top of the merge: the full brief is rewritten, saying why.
+        let more = repo.commit(&[("alpha/a.rs", "3")]);
+        assert_eq!(
+            repo.push(Some(&read), &h1, &more),
+            Push::Rewrite(Some(MERGED.into()))
+        );
+    }
+
+    #[test]
+    fn a_push_whose_diff_cannot_be_gathered_rewrites_a_read_brief_with_a_note() {
+        let repo = Repo::new();
+        let h1 = repo.head();
+        // The new head's map does not parse, so what the push fogs cannot be told.
+        let h2 = repo.commit(&[("system-map.json", "{ not a map")]);
+        assert_eq!(
+            repo.push(Some(&read_of(1, &[&h1])), &h1, &h2),
+            Push::Rewrite(Some("Rewritten after a new push".into()))
         );
     }
 
