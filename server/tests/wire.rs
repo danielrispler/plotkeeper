@@ -1061,6 +1061,7 @@ fn command_arguments() -> Vec<(String, Vec<String>)> {
 /// has, or names a command's arguments otherwise.
 #[test]
 fn the_command_arguments_are_written_for_tsc() {
+    use std::fmt::Write;
     let commands = command_arguments();
     assert!(
         commands
@@ -1083,7 +1084,7 @@ fn the_command_arguments_are_written_for_tsc() {
                 .collect::<Vec<_>>()
                 .join(" | ")
         };
-        ts.push_str(&format!("  {command}: {names};\n"));
+        writeln!(ts, "  {command}: {names};").expect("a String takes a write");
     }
     ts.push_str(
         "};\n\n\
@@ -1097,7 +1098,7 @@ fn the_command_arguments_are_written_for_tsc() {
     );
     for (command, _) in &commands {
         if command != "log" && command != "page_focus" {
-            ts.push_str(&format!("  {command}: true,\n"));
+            writeln!(ts, "  {command}: true,").expect("a String takes a write");
         }
     }
     ts.push_str("};\n");
