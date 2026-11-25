@@ -279,13 +279,17 @@ h1 { margin: 0 0 var(--sp-4); }
              box-shadow: inset var(--mark) 0 0 var(--fg); overflow-wrap: anywhere; }
 .intention > p { margin: 0 0 var(--sp-2); font-size: var(--size-large); font-weight: 500; }
 .intention.old > p { color: var(--muted); }
-.intention:has(#intention-text:empty) > p { display: none; }
+.intention:has(#intention-text:empty) > p:not(.tip) { display: none; }
 .age { color: var(--muted); font-size: var(--size-small); font-weight: 400; }
 .unavailable { color: var(--muted); font-size: var(--size-small); margin: 0 0 var(--sp-2); }
 .step { margin: 0; min-width: 0; font-size: var(--size-small); }
 .step summary { overflow-wrap: anywhere; }
 .step:not(.has-command) summary { list-style: none; cursor: default; }
 .step code { display: block; white-space: pre-wrap; overflow-wrap: anywhere; margin: var(--sp-2) 0 0; }
+/* A Wait tip (#523): the box's last line, under the step, set apart by a hair line; muted, small, one line ending in "…", its
+   full text the hover. */
+.intention > .tip { margin: var(--sp-4) 0 0; padding-top: var(--sp-4); border-top: var(--hair) solid var(--line); color: var(--muted);
+  font-size: var(--size-small); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tool-name { font-weight: 600; }
 /* The feed of turns, newest first: each turn one block, told apart by a line, as in the story rail
    mockup (danielrispler/Falinks#517). Its prompt is one line; its "ask about this" shows on hover or while open. */
