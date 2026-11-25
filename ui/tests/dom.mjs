@@ -91,8 +91,10 @@ class StandIn {
   }
   // A popover's state, and the geometry and focus a toast's placing reads (all zero here).
   popoverOpen = false;
-  showPopover() {
+  source = null;
+  showPopover(options) {
     this.popoverOpen = true;
+    this.source = options?.source ?? null;
   }
   hidePopover() {
     this.popoverOpen = false;

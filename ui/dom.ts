@@ -248,7 +248,7 @@ const squeezed = (words: string | null) => (words ?? "").replace(/\s+/g, " ").tr
 function pruneHints() {
   pruneQueued = false;
   if (!document.querySelectorAll) return;
-  const wired = new Set([...document.querySelectorAll("[interestfor]")].map((trigger) => trigger.getAttribute("interestfor")));
+  const wired = new Set([...document.querySelectorAll("[interestfor], [data-hint]")].map((trigger) => trigger.getAttribute("interestfor") ?? trigger.getAttribute("data-hint")));
   for (const [id, node] of hints) {
     if (wired.has(id)) continue;
     node.remove();
@@ -256,15 +256,92 @@ function pruneHints() {
   }
 }
 
+// The listener path, for what `interestfor` cannot reach (a summary, an input, a select, and the marks of ticket 4): the trigger's own
+// pointer-enter/leave and focus/blur open and close its hint, with `showPopover({ source })` so the trigger is its implicit anchor, after
+// the page's `--hint-delay` (0.5 s) and Chromium's end delay (0.15 s). The pointer may rest on the hint. Esc and light dismiss are the
+// popover's own. A trigger a neighbour's hint is open beside, one sharing its parent, shows at once, as the CSS does for the other path.
+const listened = new Set(["SUMMARY", "INPUT", "SELECT", "TEXTAREA"]);
+const wiredTriggers = new WeakSet<HTMLElement>();
+const HINT_END_DELAY = 150;
+let openTrigger: HTMLElement | null = null;
+
+function startDelay(): number {
+  const read = typeof getComputedStyle === "function" ? Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hint-delay")) : Number.NaN;
+  return Number.isFinite(read) ? read * 1000 : 500;
+}
+
 /**
- * `trigger`, an enabled `<button>` or `<a>`, with its own hint of `words`, the one hover of the page: it shows on hover and on focus,
+ * Wires `trigger` to open and close `node`, its hint, by pointer and, when `keyboard`, by focus. A mark that stays out of the Tab order
+ * passes false: it is pointer-only.
+ */
+export function listenForHint(trigger: HTMLElement, node: HTMLElement, keyboard: boolean) {
+  if (wiredTriggers.has(trigger)) return;
+  wiredTriggers.add(trigger);
+  let pointer = false;
+  let focus = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const isOpen = () => node.matches(":popover-open");
+  const show = () => {
+    if (!(pointer || focus) || isOpen()) return;
+    node.showPopover({ source: trigger });
+    openTrigger = trigger;
+  };
+  const hide = () => {
+    if (pointer || focus) return;
+    if (isOpen()) node.hidePopover();
+    if (openTrigger === trigger) openTrigger = null;
+  };
+  const interest = () => {
+    clearTimeout(timer);
+    const beside = openTrigger !== null && openTrigger !== trigger && openTrigger.isConnected !== false && openTrigger.parentElement === trigger.parentElement;
+    timer = setTimeout(show, beside ? 0 : startDelay());
+  };
+  const lose = () => {
+    clearTimeout(timer);
+    timer = setTimeout(hide, HINT_END_DELAY);
+  };
+  trigger.addEventListener("pointerenter", () => {
+    pointer = true;
+    interest();
+  });
+  trigger.addEventListener("pointerleave", () => {
+    pointer = false;
+    lose();
+  });
+  node.addEventListener("pointerenter", () => {
+    pointer = true;
+    clearTimeout(timer);
+  });
+  node.addEventListener("pointerleave", () => {
+    pointer = false;
+    lose();
+  });
+  node.addEventListener("toggle", (event) => {
+    if ((event as ToggleEvent).newState === "closed" && openTrigger === trigger) openTrigger = null;
+  });
+  if (!keyboard) return;
+  trigger.addEventListener("focus", () => {
+    if (!trigger.matches(":focus-visible")) return;
+    focus = true;
+    interest();
+  });
+  trigger.addEventListener("blur", () => {
+    focus = false;
+    lose();
+  });
+}
+
+/**
+ * `trigger`, an enabled `<button>` or `<a>`, or a `<summary>`, `<input>` or `<select>` (the listener path), with its own hint of `words`, the one hover of the page: it shows on hover and on focus,
  * closes on Esc and sits beside its trigger (`interestfor`, `popover="hint"`; `style.css`). The words are plain text, known when the
  * trigger is drawn. A hint that adds to the trigger's name (its `aria-label`, else its text) is its description: `role="tooltip"` on the
  * hint and `aria-describedby` on the trigger, unless the author set one; a hint that only repeats the name adds nothing, as it would be
- * read twice. Any `title` goes. The trigger's `data-key` or `id` pins its hint across draws; give a trigger one.
+ * read twice. Any `title` goes. The trigger's `data-key` or `id` pins its hint across draws; give a trigger one. A trigger this has
+ * already wired keeps its hint when drawn again.
  */
 export function hint<T extends HTMLElement>(trigger: T, words: string): T {
-  const id = hintId(trigger.getAttribute("data-key") ?? trigger.getAttribute("id") ?? `n${++loose}`);
+  const own = trigger.getAttribute("interestfor") ?? trigger.getAttribute("data-hint");
+  const id = own ?? hintId(trigger.getAttribute("data-key") ?? trigger.getAttribute("id") ?? `n${++loose}`);
   let node = hints.get(id);
   if (!node) {
     node = document.createElement("div");
@@ -279,7 +356,10 @@ export function hint<T extends HTMLElement>(trigger: T, words: string): T {
   if (adds) node.setAttribute("role", "tooltip");
   else node.removeAttribute("role");
   trigger.removeAttribute("title");
-  trigger.setAttribute("interestfor", id);
+  if (listened.has(trigger.nodeName)) {
+    trigger.setAttribute("data-hint", id);
+    listenForHint(trigger, node, true);
+  } else trigger.setAttribute("interestfor", id);
   const described = trigger.getAttribute("aria-describedby");
   if (adds && (described === null || described === id)) trigger.setAttribute("aria-describedby", id);
   else if (!adds && described === id) trigger.removeAttribute("aria-describedby");
@@ -291,7 +371,7 @@ export function hint<T extends HTMLElement>(trigger: T, words: string): T {
 }
 
 /** `trigger`'s hint, for a test to read, or null when it has none. */
-export const hintOf = (trigger: HTMLElement): HTMLElement | null => hints.get(trigger.getAttribute("interestfor") ?? "") ?? null;
+export const hintOf = (trigger: HTMLElement): HTMLElement | null => hints.get(trigger.getAttribute("interestfor") ?? trigger.getAttribute("data-hint") ?? "") ?? null;
 
 export const stepText = (step: Step | null) => (step ? `${step.tool} ${step.detail ?? ""}` : "No step yet");
 
