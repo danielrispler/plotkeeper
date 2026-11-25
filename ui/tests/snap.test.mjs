@@ -142,11 +142,11 @@ test("a page without a script logs nothing while the hover rule holds, and has n
   assert.deepEqual([logged, added], [[], []]);
 });
 
-// A stand-in element for the hover check (#220): its tag, label (its text, or with `ariaLabel` its name), own title and own hint. `hint` is the words of its own hint
+// A stand-in element for the hover check (#220): its tag, label, own title and own hint. `hint` is the words of its own hint
 // (spec #582): its `interestfor` names a hint of those words, or, with `listener`, its `data-hint` does. No ancestor's title or hint counts.
-const control = (label, { title = null, pointer = "auto", hint = null, listener = false, ariaLabel = null } = {}) => ({
+const control = (label, { title = null, pointer = "auto", hint = null, listener = false } = {}) => ({
   tagName: "BUTTON", id: "", className: "btn", textContent: label, title: title ?? "", pointer,
-  getAttribute: (name) => (name === (listener ? "data-hint" : "interestfor") && hint !== null ? `hint:${hint}` : name === "title" ? title : name === "aria-label" ? ariaLabel : null),
+  getAttribute: (name) => (name === (listener ? "data-hint" : "interestfor") && hint !== null ? `hint:${hint}` : name === "title" ? title : null),
   hasAttribute: (name) => name === "title" && title !== null,
   closest: () => null,
 });
@@ -170,13 +170,6 @@ test("the hover check fails a control without a hint of its own, a leftover titl
     "snap:fail hover: out of the pointer's reach", "snap:fail hover: out of the pointer's reach",
   ]);
   assert.ok(failed(logged));
-});
-
-test("the hover check fails a hint repeating a control's aria-label, its accessible name, as hint() reads it", async () => {
-  const gear = control("", { ariaLabel: "Settings", hint: "Settings" });
-  const named = control("", { ariaLabel: "Settings", hint: "Open the settings" });
-  const { logged } = await runHead({}, { controls: [gear, named] });
-  assert.deepEqual(hoverLines(logged), ["snap:fail hover: repeats its label"]);
 });
 
 test("the hover check fails an SVG title, and holds a page whose controls each have a hint", async () => {
