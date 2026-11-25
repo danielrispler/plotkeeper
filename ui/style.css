@@ -695,6 +695,17 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 @keyframes mist-drift { from { transform: translateX(calc(-1 * var(--sp-2))); } to { transform: translateX(var(--sp-2)); } }
 @keyframes mist-lift { to { opacity: 0; transform: translateY(calc(-1 * var(--sp-6))); } }
 .plate.open { box-shadow: inset 0 0 0 var(--hair) var(--ring-warm), var(--shadow); }
+/* The spotlit session's footprint (#559): four corner brackets just outside the plate, drawn as one decorative layer that takes no
+   pointer; firm on its latest turn's parts, faint on the rest. */
+.plate.foot-firm::after, .plate.foot-faint::after {
+  content: ""; position: absolute; inset: calc(-1 * var(--foot-gap)); pointer-events: none; --c: var(--foot-faint);
+  background: linear-gradient(var(--c), var(--c)) 0 0 / var(--foot-arm) var(--mark), linear-gradient(var(--c), var(--c)) 0 0 / var(--mark) var(--foot-arm),
+              linear-gradient(var(--c), var(--c)) 100% 0 / var(--foot-arm) var(--mark), linear-gradient(var(--c), var(--c)) 100% 0 / var(--mark) var(--foot-arm),
+              linear-gradient(var(--c), var(--c)) 0 100% / var(--foot-arm) var(--mark), linear-gradient(var(--c), var(--c)) 0 100% / var(--mark) var(--foot-arm),
+              linear-gradient(var(--c), var(--c)) 100% 100% / var(--foot-arm) var(--mark), linear-gradient(var(--c), var(--c)) 100% 100% / var(--mark) var(--foot-arm);
+  background-repeat: no-repeat;
+}
+.plate.foot-firm::after { --c: var(--foot-firm); }
 .mist-swatch { display: inline-block; width: var(--sp-6); height: var(--sp-4); border-radius: var(--sp-4); margin-inline: var(--sp-2); vertical-align: middle; }
 .mist-swatch.thin { background: var(--mist-thin); box-shadow: inset 0 0 0 var(--hair) var(--mist-thin); }
 .mist-swatch.thick { background: var(--mist-thick); box-shadow: inset 0 0 0 var(--hair) var(--mist); }

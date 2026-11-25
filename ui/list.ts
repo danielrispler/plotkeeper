@@ -19,7 +19,8 @@ import { studio } from "./state.js";
 import { titled } from "./keys.js";
 import { blockedWaits, stateLabels, type BlockedCommand, type Context, type MarkWhy, type ProjectMark, type Session, type SessionState, type Subagent } from "./types.js";
 import { askDelete, lastHeadline, report } from "./story.js";
-import { hoverAgents, refreshAgents } from "./map-agents.js";
+import { hoverAgents, refreshAgents, rowNote } from "./map-agents.js";
+import { NO_FOOTPRINT } from "./map-live.js";
 import { showTitle } from "./alerts.js";
 
 // The project header's quiet dot (#386): Home's mark (#344), unchanged in meaning, drawn as the map's mist. Its hover names which of the three
@@ -291,12 +292,22 @@ export function row(session: Session, children: Children, token: string | null =
     session.landed,
     !session.pid,
   );
-  // Hovering the row lights its session's chips on the map (#382).
-  button.addEventListener("pointerenter", () => hoverAgents(session.id));
+  // Hovering the row lights its session's chips on the map (#382) and shows its footprint (#559); a session that touched no part in the
+  // last 7 days says so in the row's hover text.
+  button.addEventListener("pointerenter", () => {
+    button.title = withNote(button.title, rowNote(session.id));
+    hoverAgents(session.id, button);
+  });
   button.addEventListener("pointerleave", () => hoverAgents(null));
   // The agent's logo leads the row, apart from its state glyph (#158).
   first.prepend(logo(logoKey(session), noContextNote(session) || undefined));
   return button;
+}
+
+// A row's hover text with the footprint's note as its last line, or without it: a row kept across redraws may carry an older one.
+export function withNote(title: string, note: string | null): string {
+  const base = title.split("\n").filter((line) => line !== NO_FOOTPRINT).join("\n");
+  return note ? `${base}\n${note}` : base;
 }
 
 // The row's clock: the turn time, only on the row being looked at; the rail has all three (danielrispler/Falinks#517,

@@ -62,4 +62,7 @@
   --mist-mask: linear-gradient(to right, #000 calc(var(--sp-7) - var(--sp-2)), #0000 calc(var(--sp-7) + var(--sp-4)), #0000 calc(100% - var(--sp-7) - var(--sp-4)), #000 calc(100% - var(--sp-7) + var(--sp-2))),
                linear-gradient(to bottom, #000 var(--sp-7), #0000 calc(var(--sp-7) + var(--sp-4)), #0000 calc(100% - 2 * var(--sp-7)), #000 calc(100% - var(--sp-7)));
   --strip-height: 240px; --mist-lift: 900ms ease-out; --mist-drift: 14s; --plate-move: 160ms ease-out;
+  /* The footprint (#549, #559): corner brackets just outside a plate, in the neutral text tone (no hue, no warm, so they read apart from
+     fog's cool mist and the warm ring); firm for the spotlit session's latest turn, faint for its earlier turns of the last 7 days. */
+  --foot-firm: #e7e5dfb0; --foot-faint: #e7e5df40; --foot-arm: 14px; --foot-gap: 7px;
 }

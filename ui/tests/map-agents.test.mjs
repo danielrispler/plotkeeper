@@ -1,7 +1,7 @@
 // Live agents on the Map view's parts and its "not placed" list (spec danielrispler/plotkeeper#306, ticket #311), run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { arrange, litAgents, liveAgents, notPlacedLine } from "../../dist/map-agents.js";
+import { agentParts, arrange, litAgents, liveAgents, notPlacedLine } from "../../dist/map-agents.js";
 
 const file = (path, agent = null) => ({ root: "/w/p", path, from: null, added: 1, removed: 0, agent });
 const turn = (files) => ({ started_at: 1, ended_at: null, prompt: "", id: null, message: null, checks: [], listed: [], files: files === null ? null : { files, merged: 0 } });
@@ -112,4 +112,18 @@ test("the not placed line counts the agents no part holds, and says how many nee
   assert.deepEqual(notPlacedLine([agent("a")]), { count: "1 not placed", needsYou: null });
   assert.deepEqual(notPlacedLine([agent("a"), agent("b", true), agent("c", true)]), { count: "3 not placed", needsYou: "2 need you" });
   assert.deepEqual(notPlacedLine([agent("a", true)]), { count: "1 not placed", needsYou: "1 needs you" });
+});
+
+// Placement is per path since #559: `map_place` answers each path, and an agent's chip lands on the parts of its own paths, as when it was
+// asked by agent.
+test("a chip lands on the parts of its own paths, from the per-path placement", () => {
+  const sessions = [
+    session("a", "running", { agents: [worker("w")], turns: [turn([file("core/x.rs"), file("ui/y.ts"), file("hook/w.rs", "w")])] }),
+    session("b", "needs_you", { turns: [turn([file("docs/z.md")])], last_step: { tool: "Edit", detail: "/w/p/core/e.rs" } }),
+  ];
+  const live = liveAgents(sessions, here);
+  const placed = { "core/x.rs": ["core"], "ui/y.ts": ["window"], "hook/w.rs": ["hook"], "docs/z.md": [], "core/e.rs": ["core"] };
+  const { byPart, notPlaced } = arrange(live, agentParts(live, placed));
+  assert.deepEqual(Object.fromEntries(Object.entries(byPart).map(([part, agents]) => [part, keys(agents)])), { core: ["a", "b"], window: ["a"], hook: ["a/w"] });
+  assert.deepEqual(notPlaced, []);
 });

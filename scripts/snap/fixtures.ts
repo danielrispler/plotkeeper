@@ -1659,13 +1659,16 @@ const mapOpened = (check: string, extra: Fixture = {}): Fixture => ({
     ${check}`,
 });
 
+// `map_place`'s answer for the busy sessions' paths, one group per path (#559): docs/notes.md is ignored, so it places no part.
+const busyPlace = (worker = "shell") => ({ "core/lib.rs": ["core"], "ui/map.ts": ["window"], "shell/run.rs": [worker], "hook/src/main.rs": ["hook"], "docs/notes.md": [] });
 const busySessions = () => {
-    const touched = (...paths: string[]) => [{ started_at: Date.now() - 600e3, ended_at: null, prompt: "", id: null, message: null, checks: [], listed: [], files: { files: paths.map((path) => ({ root: "/w/plotkeeper", path, from: null, added: 3, removed: 1, agent: null })), merged: 0 } }];
+    // A turn of `paths`: a path, or a path and the Worker whose file it is.
+    const touched = (...paths: (string | [string, string])[]) => [{ started_at: Date.now() - 600e3, ended_at: null, prompt: "", id: null, message: null, checks: [], listed: [], files: { files: paths.map((given) => { const [path, agent] = typeof given === "string" ? [given, null] : given; return { root: "/w/plotkeeper", path, from: null, added: 3, removed: 1, agent }; }), merged: 0 } }];
     const agy = { agent: "agy", asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, transcript_model: false, context: false, turn_trees: false };
     const w = { ...subagent("w1", "Map chips"), kind: "worker" as const };
     const h = { ...subagent("h1", "Read the log"), kind: "helper" as const };
     const sessions = [
-      session("s1", "#311 · Live agents", "running", { turns: touched("core/lib.rs", "ui/map.ts"), agents: [w, h] }),
+      session("s1", "#311 · Live agents", "running", { turns: touched("core/lib.rs", "ui/map.ts", ["shell/run.rs", "w1"]), agents: [w, h] }),
       session("s2", "Ship PR 286", "needs_you", { turns: touched("hook/src/main.rs") }),
       session("s3", "#312 · CI marks", "running"),
       session("s4", "agy · Name from the prompt", "running", { capabilities: agy }),
@@ -1698,7 +1701,7 @@ const mapBusy = (jump: boolean): Fixture => {
       if (document.getElementById("map-sheet").childElementCount) log("snap:fail the chip's click opened the plate's sheet");
       log("jump ok");` : ""}`, {
       map_state: mapState(),
-      map_place: { s1: ["core", "window"], "s1/w1": ["shell"], s2: ["hook"], s6: [] },
+      map_place: busyPlace(),
       select: { __by: "id", values: Object.fromEntries(sessions.map((s) => [s.id, { session: s, agent: null }])) },
     });
     return { ...f, sessions, selected: { session: sessions[6], agent: null }, ...(jump && { realPointer: true, snapDone: "jump ok" }) };
@@ -1834,7 +1837,7 @@ const mapBroken = (open: "none" | "proof" | "log"): Fixture => {
       ${opened}
       log("broken " + marked.join());`, {
     map_state: mapState({ ci: brokenCi }),
-    map_place: { s1: ["core", "window"], "s1/w1": ["shell"], s2: ["hook"], s6: [] },
+    map_place: busyPlace(),
     map_proof: [{ file: "workbench/tests/wire.rs", line: 11, test: "wire_types_match", first: 11, snippet: "// @law: wire-types-agree\n#[test]\nfn wire_types_match() {\n    studio_test_support::assert_wire_types_agree();\n}" }],
   });
   return { ...f, sessions, selected: { session: sessions[6], agent: null } };
@@ -1908,7 +1911,7 @@ const mapScrubbed = (): Fixture => {
       if (!document.getElementById("map-banner").textContent.includes("Viewing")) return log("snap:fail could not scrub again");
       log("scrubbed ok");`, {
     map_state: mapState({ ci: brokenCi, fog: { shell: "thick", core: "thin" } }),
-    map_place: { s1: ["core", "window"], "s1/w1": ["shell"], s2: ["hook"], s6: [] },
+    map_place: busyPlace(),
     map_history: [strip(1, "#101 Map first drawn", false), strip(2, "#150 Plates and links", false), strip(3, "#210 Fog engine", true), strip(4, "#306 Live agents on the map", true, 306)],
     map_at: { commit: "2".repeat(40), short: "2222222", label: "#150 Plates and links", source: JSON.stringify(past) },
     map_commit: { commit: "2".repeat(40), short: "2222222", label: "#150 Plates and links", url: "https://github.com/danielrispler/plotkeeper/commit/" + "2".repeat(40), files: [{ path: "src-tauri/src/map.rs", diff: "@@ -1,2 +1,2 @@\n-one\n+two" }, { path: "ui/map.ts", diff: "@@ -1 +1,2 @@\n+three" }] },
@@ -2129,7 +2132,7 @@ const mapBaseOf = (check: string, extra: Fixture = {}): Fixture => ({
   selected: null,
   projects: baseProjects,
   map_state: mapState({ fog: { understanding: "thin" } }),
-  map_place: { s1: ["core", "window"], "s1/w1": ["shell"], s2: ["hook"], s6: [] },
+  map_place: busyPlace(),
   ...extra,
   snapScript: `
     const wait = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -2207,7 +2210,7 @@ const readmeHero = (): Fixture =>
         },
       },
     }),
-    map_place: { s1: ["core", "window"], "s1/w1": ["server"], s2: ["hook"], s6: [] },
+    map_place: busyPlace("server"),
   });
 // A project with no sessions keeps its header, with the quiet dot drawn as the map's mist; its hover names what lit it. A click on the header
 // shows that project's map.
@@ -2350,13 +2353,57 @@ const mapPanel = (check: string, extra: Fixture = {}): Fixture => {
       checkAll("on the bare map");
       ${check}`, {
     map_state: mapState({ fog: { understanding: "thin" }, ready: [{ number: 334, title: "PR briefs on the map", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }] }),
-    map_place: { s1: ["core", "window"], "s1/w1": ["shell"], s2: ["hook"], s6: [] },
+    map_place: busyPlace(),
     select: { __by: "id", values: selected },
     projects: [{ path: "/w/plotkeeper", gone: false }],
     turn_file_hunk: { text: "@@ -261,7 +261,9 @@ function drawMap(\n   const saved = positions;\n-  const added = autoPlace(items, links);\n+  // Placed once and saved, so a part never moves on its own.\n+  const added = autoPlace(items, links, saved);\n", binary: false, left_out: 0, first_line: 261 },
     ...extra,
   });
   return { ...f, sessions: extra.sessions ?? sessions, selected: null, snapDone: "panel ok" };
+};
+// The footprint (#559): hovering #311's row brackets every part its turns of the last 7 days changed beside Understanding's thin fog, firm
+// on its latest turn's parts (Core and Window, and the Shell its Worker changed) and faint on Understanding, from a turn 2 days ago; its
+// 9-day-old turn adds nothing to Daemon. With no hover the open session's footprint shows; a hovered row that leaves the list (its
+// session moved to History) gives it back; a session that touched no part says so in its row's hover text.
+const mapFootprint = (): Fixture => {
+  const day = 24 * 3600e3;
+  const turn = (ago: number, paths: (string | [string, string])[]) => ({
+    started_at: Date.now() - ago - 60e3, ended_at: Date.now() - ago, prompt: "", id: null, message: null, checks: [], listed: [],
+    files: { files: paths.map((given) => { const [path, agent] = typeof given === "string" ? [given, null] : given; return { root: "/w/plotkeeper", path, from: null, added: 3, removed: 1, agent }; }), merged: 0 },
+  });
+  const sessions = busySessions().map((s) => (s.id === "s1" ? { ...s, turns: [turn(9 * day, ["daemon/old.rs"]), turn(2 * day, ["understanding/u.rs", "core/older.rs"]), ...s.turns] } : s));
+  return mapPanel(`
+      const marks = () => ["firm", "faint"].map((kind) => kind + ":" + [...document.querySelectorAll("#map .plate.foot-" + kind)].map((p) => p.dataset.id).sort().join()).join(" ");
+      const hover = async (key, on = true) => { row(key).dispatchEvent(new PointerEvent(on ? "pointerenter" : "pointerleave")); await wait(150); };
+      if (marks() !== "firm: faint:") log("snap:fail a footprint shows with no session hovered or open: " + marks());
+      // A session that touched no part says so in its row's hover text.
+      await hover("s3");
+      if (!row("s3").title.endsWith("\\nTouched no part in the last 7 days")) log("snap:fail #312's row does not say it touched no part: " + JSON.stringify(row("s3").title));
+      if (row("s1").title.includes("Touched no part")) log("snap:fail #311's row says it touched no part");
+      await hover("s3", false);
+      // The open session's footprint shows with no hover.
+      await press(row("s2"));
+      if (marks() !== "firm:hook faint:") log("snap:fail the open session's footprint: " + marks());
+      // A hover replaces it, one footprint at a time; the pointer leaving gives it back.
+      await hover("s1");
+      if (marks() !== "firm:core,shell,window faint:understanding") log("snap:fail the hovered session's footprint: " + marks());
+      await hover("s1", false);
+      if (marks() !== "firm:hook faint:") log("snap:fail the open session's footprint did not come back: " + marks());
+      // A hovered row that leaves the list never sticks: #312 ends, its row goes to History, and the open session's footprint comes back.
+      await hover("s3");
+      if (marks() !== "firm: faint:") log("snap:fail #312's empty footprint did not replace the open one: " + marks());
+      __snapEmit("sessions", ${JSON.stringify(sessions)}.map((s) => (s.id === "s3" ? { ...s, state: "ended" } : s)));
+      await wait(300);
+      if (row("s3")) log("snap:fail #312's row stayed in the list after it ended");
+      if (marks() !== "firm:hook faint:") log("snap:fail a hover whose row left the list stuck: " + marks());
+      await hover("s1");
+      const corner = getComputedStyle(document.querySelector("#map .plate[data-id=core]"), "::after");
+      if (corner.content === "none" || corner.pointerEvents !== "none") log("snap:fail the brackets are not drawn, or take the pointer");
+      log("footprint " + marks());
+      log("panel ok");`, {
+    sessions,
+    map_place: { ...busyPlace(), "daemon/old.rs": ["daemon"], "understanding/u.rs": ["understanding"], "core/older.rs": ["core"] },
+  });
 };
 // The rail with no session picked (#526): the story's session is picked no more while its panel shows, as when it is deleted elsewhere. The
 // rail's empty screen says what will show there, under "Pick a session in the list."; the panel closes with the selection (`followSelection`),
@@ -3008,7 +3055,7 @@ const mapSmallGaps = (): Fixture => ({
       if (leaky.length) log("snap:fail these dialogs' backdrops scroll the page behind them: " + leaky.join(", "));
       log("small gaps ok");`, {
     map_state: mapState({ ci: brokenCi }),
-    map_place: { s1: ["core", "window"], s2: ["hook"] },
+    map_place: busyPlace(),
   }),
   realKeys: true, snapDone: "small gaps ok",
 });
@@ -3562,6 +3609,7 @@ ${writerStatusAfter("Keychain refused")}
     };
   },
   mapChipJump: () => mapBusy(true),
+  mapFootprint,
   // The map from the keyboard (#460).
   mapPartKeys,
   mapPartRedraw,
