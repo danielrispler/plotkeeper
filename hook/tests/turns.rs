@@ -39,6 +39,7 @@ fn a_sessions_turn_file_goes_at_its_end_and_any_older_than_7_days_at_a_start() {
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
     assert_eq!(left, ["s-new.json"]);
 }

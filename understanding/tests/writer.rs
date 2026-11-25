@@ -445,11 +445,8 @@ fn the_summary_input_holds_the_sessions_last_3_summaries() {
     let input = writer.inputs().pop().unwrap();
     assert!(!input.contains("Summary one."), "{input}");
     assert!(!input.contains("Other session."), "{input}");
-    for n in 2..=4 {
-        assert!(
-            input.contains(&format!("Summary {}.", NAMES[n as usize])),
-            "{input}"
-        );
+    for name in &NAMES[2..=4] {
+        assert!(input.contains(&format!("Summary {name}.")), "{input}");
     }
     // No summary carries a question any more (danielrispler/plotkeeper#347).
     assert!(!input.contains("Why a stack?"), "{input}");
@@ -593,7 +590,7 @@ fn a_failed_subagent_summary_keeps_nothing_and_logs_one_line() {
     let mut lines = Vec::new();
 
     let summary = write_agent_summary(&store, &writer, &setup(), "c1", SPAWNED, LAST, |l| {
-        lines.push(l)
+        lines.push(l);
     });
 
     assert_eq!(summary, None);
@@ -638,7 +635,7 @@ fn a_writer_that_cannot_start_gives_one_notice_until_a_call_works() {
         assert!(writer.goal(&["a prompt"]).is_err());
     }
     {
-        let heard = heard.lock().unwrap();
+        let heard = heard.lock().unwrap().clone();
         assert_eq!(heard.len(), 1, "{heard:?}");
         let text = heard[0].as_deref().unwrap();
         assert!(text.contains("Summaries are off"), "{text}");
@@ -664,7 +661,7 @@ fn a_writer_that_starts_and_fails_tells_why_and_what_to_do_once_until_a_call_wor
         assert!(writer.goal(&["a prompt"]).is_err());
     }
     {
-        let heard = heard.lock().unwrap();
+        let heard = heard.lock().unwrap().clone();
         assert_eq!(heard.len(), 1, "{heard:?}");
         let text = heard[0].as_deref().unwrap();
         assert!(text.starts_with("Summaries are off: "), "{text}");

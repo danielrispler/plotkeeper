@@ -4,7 +4,7 @@
 // In the viewport means covering at least half of the element or at least half of the viewport (so a card taller than twice the
 // viewport can be seen), for `seenAfter` ms without a break.
 
-export const seenAfter = 500;
+const seenAfter = 500;
 
 // How much of the element, and how much of the viewport, the element covers; both 0 to 1.
 export type Overlap = { element: number; viewport: number };

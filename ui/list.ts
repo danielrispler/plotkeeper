@@ -27,7 +27,7 @@ import { showTitle } from "./alerts.js";
 const marks = new Map<string, MarkWhy[]>();
 let marksStale = true;
 const whyText: Record<MarkWhy, string> = { fog: "A Core part you track has changed", broken: "A test that backs a law failed on main", brief: "A PR brief is waiting" };
-export const dotTitle = (why: MarkWhy[]): string => why.map((reason) => whyText[reason]).join("\n");
+const dotTitle = (why: MarkWhy[]): string => why.map((reason) => whyText[reason]).join("\n");
 export const staleDots = () => void (marksStale = true);
 // One read at a time asked for: `marksStale` is cleared when it starts and set again when it fails, so the next draw of the list asks again;
 // a read's answer that came after a newer one asked is dropped.
@@ -77,11 +77,11 @@ const collapsed: SessionState[] = ["idle"];
 const opened = new Set<string>();
 // The projects whose group Daniel folded: its header stays, with its rollup.
 const shut = new Set<string>();
-export const projectOpen = (key: string) => !shut.has(key);
+const projectOpen = (key: string) => !shut.has(key);
 
 // What the strip calls a session: the issue number of an `issue-<n>-…` folder, else its folder's
 // first letters.
-export function stripLabel(folder: string): string {
+function stripLabel(folder: string): string {
   return /^issue-(\d+)/.exec(folder)?.[1] ?? folder.slice(0, 4);
 }
 
@@ -155,7 +155,7 @@ export function status(state: string, unseen = false, landed = false, unwatched 
 }
 
 // A status's glyph, named by its word, so the shape is never alone. The pill shows its word.
-export function glyph(state: string, unseen = false, landed = false, unwatched = false): HTMLElement {
+function glyph(state: string, unseen = false, landed = false, unwatched = false): HTMLElement {
   const [shape, word] = status(state, unseen, landed, unwatched);
   const node = text("span", shape === "pill" ? word : "", "glyph");
   node.dataset.glyph = shape;
@@ -265,7 +265,7 @@ function rowLines(button: HTMLElement, state: string, name: HTMLElement[], below
 
 // A row's button, keyed by what it selects (`patch` keeps it across updates). It selects on the press,
 // so the row shows selected at once (danielrispler/Falinks#570); a click without a pointer, from the keyboard, selects too.
-export function selecting(id: string, agent: string | null, key = `${id} ${agent ?? ""}`): HTMLButtonElement {
+function selecting(id: string, agent: string | null, key = `${id} ${agent ?? ""}`): HTMLButtonElement {
   const button = pressable(document.createElement("button"), isSelected(id, agent), (event: MouseEvent) => event.detail === 0 && pressSession(id, agent));
   button.dataset.key = key;
   button.addEventListener("pointerdown", (event) => event.button === 0 && pressSession(id, agent));
@@ -537,7 +537,7 @@ export function clearing(
 // The page's one Clear: the list's "Clear landed" (#244, #382), and the toast offers Undo. A commit is today's Delete: the row
 // dropped, the cards kept.
 const stillLanded = (id: string) => studio.listed.find((s) => s.id === id && showsLanded(s.state, s.landed));
-export const landedClear = clearing(
+const landedClear = clearing(
   { set: (run, ms) => setTimeout(run, ms), clear: (id) => clearTimeout(id as number) },
   {
     landed: stillLanded,

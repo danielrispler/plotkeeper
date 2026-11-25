@@ -21,6 +21,7 @@ use crate::pr_brief::{Brief, CallKind, INSTRUCTIONS, PartialFacts};
 use crate::pr_brief_check::Stage;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -110,6 +111,10 @@ fn part_files(map: &system_map::Map, part: &str, paths: &[String]) -> Vec<String
 
 /// Assembles the writer's facts: the part's structure, then the fog entries, then one combined diff of the part's paths inside
 /// the PR brief's `BUDGET`; the code is cut first, and "DIFF NOT SENT" says what was.
+#[allow(
+    clippy::too_many_lines,
+    reason = "#556 splits it by responsibility (spec #548, Group 4)"
+)]
 pub fn build_catch_up_facts(source: &CatchUpSource) -> Result<Facts, String> {
     let map = system_map::parse_lenient(&source.map_text)?;
     // The map comes from git as it was committed, so a version 1 map is read converted.
@@ -232,7 +237,8 @@ pub fn build_catch_up_facts(source: &CatchUpSource) -> Result<Facts, String> {
         }
     );
     for f in &files {
-        the_part += &format!("- {} +{}/-{}\n", f.path, f.added, f.removed);
+        // Writing to a `String` cannot fail.
+        writeln!(the_part, "- {} +{}/-{}", f.path, f.added, f.removed).ok();
     }
 
     let entries: Vec<String> = source
@@ -329,7 +335,8 @@ pub fn build_catch_up_facts(source: &CatchUpSource) -> Result<Facts, String> {
         );
         for (i, line) in cut.iter().enumerate() {
             if t.len() + line.len() + 1 > CUT_NOTE_ROOM - 200 {
-                t += &format!("- ... and {} more\n", cut.len() - i);
+                // Writing to a `String` cannot fail.
+                writeln!(t, "- ... and {} more", cut.len() - i).ok();
                 break;
             }
             t += line;

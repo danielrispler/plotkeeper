@@ -34,7 +34,9 @@ static HOOK: Mutex<()> = Mutex::new(());
 
 /// The tree of `root`'s files as the hook records it.
 fn tree(root: &str) -> String {
-    let _one = HOOK.lock().unwrap_or_else(|e| e.into_inner());
+    let _one = HOOK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     studio_hook::record_tree(Path::new(root)).unwrap().1
 }
 
@@ -135,7 +137,9 @@ fn a_turns_hunks_are_still_readable_after_git_gc() {
     ]);
     let asks = studio.turn_diffs(AT + 20_000, 10);
     // Asking anchors the ended turn's trees.
-    let _one = HOOK.lock().unwrap_or_else(|e| e.into_inner());
+    let _one = HOOK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     assert!(turn_diffs(&asks[0], &mut drop).is_some());
     drop(_one);
 
@@ -223,7 +227,9 @@ fn a_running_turns_hunk_ends_at_the_worktree_now() {
     let (_dir, root) = repo();
     let start = tree(&root);
     fs::write(format!("{root}/a.rs"), "fn a() {}\nfn live() {}\n").unwrap();
-    let _one = HOOK.lock().unwrap_or_else(|e| e.into_inner());
+    let _one = HOOK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let hunk = turn_hunk(Path::new(&root), &start, None, "a.rs", None, false).unwrap();
     assert!(hunk.text.contains("+fn live() {}"));
 }
@@ -252,7 +258,9 @@ fn hooked(data: &Path, ms: u64, mut event: serde_json::Value) -> String {
     event["session_id"] = SESSION.into();
     let event = event.as_object_mut().unwrap();
     {
-        let _one = HOOK.lock().unwrap_or_else(|e| e.into_inner());
+        let _one = HOOK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         studio_hook::trees(event, data).unwrap();
     }
     event.insert("studio_received_ms".into(), (AT + ms).into());
@@ -630,7 +638,9 @@ fn a_diff_past_the_cap_is_skipped_with_a_warning_that_names_the_count_and_no_pat
     let ask = ask_of(&root, &start, &end);
 
     let mut warnings = Vec::new();
-    let _one = HOOK.lock().unwrap_or_else(|e| e.into_inner());
+    let _one = HOOK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let diffs = turn_diffs(&ask, &mut |w| warnings.push(w));
 
     assert!(diffs.is_none());
@@ -657,7 +667,9 @@ fn a_diff_at_the_cap_keeps_its_numstat_and_rename_detection() {
     let ask = ask_of(&root, &start, &end);
 
     let mut warnings = Vec::new();
-    let _one = HOOK.lock().unwrap_or_else(|e| e.into_inner());
+    let _one = HOOK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let diffs = turn_diffs(&ask, &mut |w| warnings.push(w)).unwrap();
 
     assert!(warnings.is_empty(), "{warnings:?}");
@@ -724,8 +736,7 @@ fn a_turns_files_are_matched_with_the_core_unlocked_and_stored_after() {
         .lock()
         .unwrap()
         .store_turn_files(&ask, Some(found.clone()));
-    let guard = state.lock().unwrap();
-    let session = guard.session(SESSION).unwrap();
+    let session = state.lock().unwrap().session(SESSION).unwrap().clone();
     assert_eq!(session.turns[0].files, Some(found));
     // The final write also updates the unseen state: the turn's file now counts.
     assert!(session.unseen);
@@ -739,7 +750,8 @@ fn a_turn_is_read_for_its_facts_without_locking_the_core_while_it_is_held() {
     let core = state.clone();
     std::thread::spawn(move || {
         turn_facts(&core, "no-such-turn", &mut drop);
-        let _ = done.send(());
+        // The receiver may have gone, and then no one waits for this.
+        done.send(()).ok();
     });
     // A lock taken while the thread's own earlier one is still held never returns.
     let read = read.recv_timeout(std::time::Duration::from_secs(5));
@@ -768,7 +780,9 @@ fn an_oversized_turn_is_warned_of_and_settled_so_no_pass_asks_again() {
     let state = Mutex::new(studio);
     let mut warnings = Vec::new();
     let diffs = {
-        let _one = HOOK.lock().unwrap_or_else(|e| e.into_inner());
+        let _one = HOOK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         diff_turn(&state, &ask, &mut |w| warnings.push(w))
     };
     assert!(diffs.is_none());

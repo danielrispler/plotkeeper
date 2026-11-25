@@ -143,7 +143,7 @@ fn an_ide_session_with_no_pid_goes_idle_and_is_never_ended_by_the_process_check(
 fn a_cursor_session_ended_by_the_process_check_or_interrupted_stays_cursor() {
     // The CLI session up to its second turn's first call, then the server's lines for an interrupt and for its
     // gone process.
-    let lines: Vec<String> = fixture()[..11].iter().map(|l| l.to_string()).collect();
+    let lines: Vec<String> = fixture()[..11].iter().map(ToString::to_string).collect();
     let synthetic = [
         serde_json::json!({
             "session_id": FIRST,
@@ -214,9 +214,10 @@ fn a_reply_that_lands_after_its_stop_is_still_its_turns_and_asks_for_its_summary
         let mut studio = Studio::default();
         let mut outputs = Vec::new();
         for l in [&start, &prompt, order[0], order[1]] {
-            let changes = match changed && *l == stop {
-                true => edited(),
-                false => Default::default(),
+            let changes = if changed && *l == stop {
+                edited()
+            } else {
+                Default::default()
             };
             outputs.extend(studio.apply_with_changes(l, changes));
         }

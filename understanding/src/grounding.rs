@@ -3,6 +3,7 @@
 //! is still held to what was recorded.
 
 use std::collections::BTreeSet;
+use std::fmt::Write as _;
 use studio_core::{CheckStatus, Facts, SummaryRequest};
 
 /// A hunk's lines in the writer's input; the whole hunk still counts as material.
@@ -28,7 +29,8 @@ pub(crate) fn facts_text(facts: &Facts) -> String {
     for f in &facts.files {
         let count = |n: Option<u64>| n.map_or("?".into(), |n| n.to_string());
         let (added, removed) = (count(f.file.added), count(f.file.removed));
-        text += &format!("- {} +{added} -{removed}\n", f.file.path);
+        // Writing to a `String` cannot fail.
+        writeln!(text, "- {} +{added} -{removed}", f.file.path).ok();
     }
     if facts.files.is_empty() {
         text += "none\n";
@@ -40,7 +42,8 @@ pub(crate) fn facts_text(facts: &Facts) -> String {
             n => format!(", after {n} earlier failed runs"),
         };
         let command = c.runs.last().map_or("", |r| r.command.as_str());
-        text += &format!("- {command}: {:?}{retries}\n", c.status);
+        // Writing to a `String` cannot fail.
+        writeln!(text, "- {command}: {:?}{retries}", c.status).ok();
     }
     if facts.checks.is_empty() {
         text += "none\n";
@@ -51,9 +54,10 @@ pub(crate) fn facts_text(facts: &Facts) -> String {
         let cut = lines.len().saturating_sub(HUNK_LINES);
         let mut hunk = lines[..lines.len() - cut].join("\n");
         if cut > 0 {
-            hunk += &format!("\n... {cut} more lines");
+            // Writing to a `String` cannot fail.
+            write!(hunk, "\n... {cut} more lines").ok();
         }
-        hunks += &format!("{hunk}\n");
+        writeln!(hunks, "{hunk}").ok();
     }
     let end = hunks.floor_char_boundary(HUNKS_MAX);
     text + "Hunks:\n" + &hunks[..end]
@@ -69,16 +73,17 @@ pub(crate) fn material(request: &SummaryRequest, earlier: &str) -> String {
         request.intentions.join("\n")
     );
     let facts = &request.facts;
-    text += &format!("{}\n", facts_text(facts));
-    text += &format!("{}\n", facts.files.len());
+    // Writing to a `String` cannot fail.
+    writeln!(text, "{}", facts_text(facts)).ok();
+    writeln!(text, "{}", facts.files.len()).ok();
     for f in &facts.files {
-        text += &format!("{}\n{}\n", f.file.path, f.hunk);
-        text += &format!("{:?} {:?}\n", f.file.added, f.file.removed);
+        write!(text, "{}\n{}\n", f.file.path, f.hunk).ok();
+        writeln!(text, "{:?} {:?}", f.file.added, f.file.removed).ok();
     }
     for c in &facts.checks {
-        text += &format!("{} {} {}\n", c.suite, c.retries, c.runs.len());
+        writeln!(text, "{} {} {}", c.suite, c.retries, c.runs.len()).ok();
         for r in &c.runs {
-            text += &format!("{} {:?}\n", r.command, r.exit_code);
+            writeln!(text, "{} {:?}", r.command, r.exit_code).ok();
         }
     }
     text
@@ -151,9 +156,10 @@ fn claims(headline: &str) -> bool {
 pub(crate) fn agent_says(headline: &str, facts: &Facts) -> String {
     let passed = facts.checks.iter().any(|c| c.status == CheckStatus::Passed);
     let failed = facts.checks.iter().any(|c| c.status == CheckStatus::Failed);
-    match claims(headline) && !(passed && !failed) && !headline.starts_with("Agent says:") {
-        true => format!("Agent says: {headline}"),
-        false => headline.into(),
+    if claims(headline) && !(passed && !failed) && !headline.starts_with("Agent says:") {
+        format!("Agent says: {headline}")
+    } else {
+        headline.into()
     }
 }
 

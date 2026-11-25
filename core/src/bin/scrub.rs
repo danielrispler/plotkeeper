@@ -5,6 +5,7 @@
 //!     cargo run -p studio-core --bin scrub -- <session-id>... < events.jsonl > fixture.jsonl
 
 use serde_json::{Map, Value};
+use std::fmt::Write as _;
 use std::io::{self, BufRead, Write};
 
 fn main() -> io::Result<()> {
@@ -279,7 +280,8 @@ fn tag(s: &str) -> Option<(String, usize, &str)> {
             && id_like(key)
             && id_like(value)
         {
-            tag.push_str(&format!(" {key}=\"{value}\""));
+            // Writing to a `String` cannot fail.
+            write!(tag, " {key}=\"{value}\"").ok();
         }
     }
     if s[1..end].ends_with('/') {

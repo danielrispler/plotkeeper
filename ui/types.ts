@@ -15,7 +15,7 @@ export type Step = { tool: string; detail: string | null; command?: string | nul
 // snapshots (#416).
 // `model` and `effort`: what the session runs at, null when the transcript names none (danielrispler/Falinks#517, decision 8).
 export type Context = { tokens: number };
-export type Transcript = {
+type Transcript = {
   intention: string | null;
   steps_ago: number;
   responses: string[];
@@ -26,7 +26,7 @@ export type Transcript = {
   effort: string | null;
 };
 // What names a session (danielrispler/Falinks#480): its issue, branch, PR and worktree, and the name derived from them.
-export type Identity = { issue: number | null; branch: string | null; pr: number | null; worktree: string; name: string };
+type Identity = { issue: number | null; branch: string | null; pr: number | null; worktree: string; name: string };
 export type SessionState = "needs_you" | "running" | "your_turn" | "idle" | "ended";
 // When something started and ended, in Unix milliseconds; `end` is null while it runs.
 export type Span = { start: number; end: number | null };
@@ -40,7 +40,7 @@ export type ListedCheck = {
   typical_ms: number | null;
 };
 // Who spawned a subagent: the session's own agent, another subagent, or no known spawn.
-export type Parent = "session" | "unattached" | { agent: string };
+type Parent = "session" | "unattached" | { agent: string };
 export type Subagent = {
   id: string;
   parent: Parent;
@@ -69,18 +69,18 @@ export type Subagent = {
 };
 // Who a session that needs Daniel waits on, and since when: the subagent who asks, or null for its
 // own agent.
-export type Asker = { agent: string | null; since: number };
+type Asker = { agent: string | null; since: number };
 // Who sent a prompt: Daniel, a wake-up naming the task that returned, or a known task id in markup
 // the studio does not know, which counts as Daniel's.
-export type Sender = "daniel" | { wake_up: string } | { unrecognised: string };
+type Sender = "daniel" | { wake_up: string } | { unrecognised: string };
 // `turn` is the turn it is in, null in a log read before the core kept it.
-export type Prompt = { at: number; sender: Sender; turn?: number | null };
+type Prompt = { at: number; sender: Sender; turn?: number | null };
 // An AskUserQuestion call, as the tool input gives it, with Daniel's choice for each question by its text
 // once he answers in the terminal.
-export type Choice = { label: string; description?: string };
+type Choice = { label: string; description?: string };
 // A multi-select answer joins its labels with ", "; a single-choice answer is one whole label.
-export type Asked = { question: string; header?: string; multiSelect?: boolean; options: Choice[] };
-export type Answer = "open" | "not_answered" | { answered: Record<string, string> };
+type Asked = { question: string; header?: string; multiSelect?: boolean; options: Choice[] };
+type Answer = "open" | "not_answered" | { answered: Record<string, string> };
 export type Question = { tool_use_id: string; agent: string | null; questions: Asked[]; answer: Answer; turn: number | null };
 // A turn, a block in the rail's feed (danielrispler/Falinks#574): its prompt's first line, or "worker <name> returned";
 // `id` names its card and summary once its `Stop` came; `message` is its final reply's first line.
@@ -115,7 +115,7 @@ export type TurnFile = { root: string; path: string; from: string | null; added:
 // What a turn changed: every file that differs between its trees, but those another call names, and the files
 // a move of `HEAD` (a merge, a pull, a rebase, a checkout) brought in, which are only counted in `merged`.
 // `null` while the trees are not yet diffed, and for an agent that reports no trees.
-export type TurnFiles = { files: TurnFile[]; merged: number };
+type TurnFiles = { files: TurnFile[]; merged: number };
 // What the session's agent adapter reports, which decides what its view shows (danielrispler/plotkeeper#43, decision 4);
 // `agent` is its mark's name, empty for a status-only row.
 export type Capabilities = {
@@ -204,16 +204,16 @@ export type Session = {
 // What happened in a session since Daniel looked (danielrispler/plotkeeper#124).
 export type Since = { turns: number; files: number; passed: number; failed: number; ran: number };
 // A multiple-choice question as the store kept it on a summary written before #347; `key` is the right option, counting from 0.
-export type Quiz = { text: string; options: { text: string; why: string }[]; key: number };
+type Quiz = { text: string; options: { text: string; why: string }[]; key: number };
 // What Daniel did with a Quiz, each with its time (danielrispler/plotkeeper#120): what the retired turn Quiz, cards, Home and the
 // Retests wrote, which the store still reads (#347, #348). The window sends none.
-export type Tap =
+type Tap =
   | { kind: "pick"; option: number }
   | { kind: "confidence"; sure: boolean; surface?: "home" }
   | { kind: "why"; text: string }
   | { kind: "shown" | "hunk" }
   | { kind: "skip" | "understood" | "explain_more" | "key_wrong" | "not_now" };
-export type QuizTap = Tap & { at: number };
+type QuizTap = Tap & { at: number };
 // An answered question, plan or permission in the session's decision history (danielrispler/Falinks#479): the call's input,
 // Daniel's answers by question text or "allow"/"deny", when, and where he answered.
 export type Decision = {
@@ -262,7 +262,7 @@ export type BlockedCommand = {
 export type SummaryLine = { kind: "why" | "reported" | "open" | "ask"; text: string };
 // The shell sends the summary as the store keeps it: also the request it was written from, when it arrived and the
 // turn's hunks, which the window never reads.
-export type SummaryRequest = {
+type SummaryRequest = {
   session_id: string;
   id: string;
   prompt: string;
@@ -289,7 +289,7 @@ export type OpenItem = {
   text: string;
 };
 // A line of "Design so far" (danielrispler/plotkeeper#123): a decision with its reason, and the id of the turn or card it came from.
-export type DesignLine = { text: string; cite: string };
+type DesignLine = { text: string; cite: string };
 // The selected session's brief, decision history and the risk notes of its blocked commands.
 export type SessionCards = {
   brief: string | null;
@@ -368,7 +368,7 @@ export type Work = {
 // positions and tiers for it. A feature of the view adds its field here and in `MapState` there; `server/tests/wire.rs` holds
 // the two to agree (#333).
 // What landed since Daniel caught up and what he has read of each PR's brief (`fog.rs`); `UserMap.fog`, which the window does not read.
-export type FogState = {
+type FogState = {
   first: string | null;
   processed: string | null;
   parts: Record<string, FogEntry[]>;
@@ -381,7 +381,7 @@ export type FogEntry = { commit: string; strength: Fog; pr: number | null; why: 
 export type Camera = { scale: number; x: number; y: number };
 // `view`: the project's saved camera, none until it was first moved.
 // When Daniel last engaged with each part, and the baseline (`staleness.rs`); the window reads the bands, not this.
-export type Staleness = { since: number | null; parts: Record<string, { at: number; kind: "know" | "refresher" | "catch-up" | "chapter" | "other" }> };
+type Staleness = { since: number | null; parts: Record<string, { at: number; kind: "know" | "refresher" | "catch-up" | "chapter" | "other" }> };
 export type UserMap = { positions: Record<string, [number, number]>; tiers: Record<string, string>; fog?: FogState; view?: Camera | null; staleness?: Staleness };
 export type MapState = {
   project: string;
@@ -477,26 +477,26 @@ export type Expected = { expected: string[]; touched: string[] };
 // A background run (`server/src/runner.rs`): a headless agent run Daniel started with a click, queued one at a time per project. `at` is when
 // it was asked for, started or ended, by its state. An ended run says how it ended in `line`, lists the tool calls it was denied, and
 // carries its `prompt` to copy on every end but a clean one. `paused` is why every queue waits, null while they run.
-export type RunEnd = "done" | "denied" | "failed" | "timed-out" | "died" | "setup-failed" | "not-logged-in" | "rate-limited";
+type RunEnd = "done" | "denied" | "failed" | "timed-out" | "died" | "setup-failed" | "not-logged-in" | "rate-limited";
 export type RunView = { id: string; kind: "back-law" | "micro-world"; state: "queued" | "running" | "ended"; at: number; outcome: RunEnd | null; line: string | null; denials: string[]; prompt: string | null };
 export type Runs = { paused: string | null; runs: RunView[] };
 // Ratifying (`ratify.rs`): an item of a PR is a map change (kind part, actor, link, law or flow) or a decision the agent declared.
 export type PendingItem = { pr: number; kind: string; id: string };
 export type RatifyRow = { pr: number; kind: string; id: string; text: string; change: string; status: "ratified" | "accepted" | "overturned" | "not-yet"; detail: RatifyDetail | null };
 // Old beside new for a part or a link: a text on each side, null on the side that has no item.
-export type RatifyWords = { before: string | null; after: string | null };
-export type RatifyHeld = { name: string; text: RatifyWords; paths_added: string[]; paths_removed: string[] };
+type RatifyWords = { before: string | null; after: string | null };
+type RatifyHeld = { name: string; text: RatifyWords; paths_added: string[]; paths_removed: string[] };
 export type RatifyDetail =
   | { of: "part"; name: RatifyWords; purpose: RatifyWords; holds: RatifyHeld[]; paths_added: string[]; paths_removed: string[] }
   | { of: "link"; kind: RatifyWords; reason: RatifyWords };
 // What a ready PR's brief is doing (`pr_briefs.rs`): a newer head was pushed (stale), being written now, and the chapters' titles, or the one story's.
 // `note` (#477, part B): why the brief at this head is what it is after a push: the read carried over, or it was rewritten.
 // `since` (#497): the title of the "Since you read" story stored for this head, which the tray opens first; `since_chapters`, its chapters' titles when it has more than one, one tray row each.
-export type BriefInfo = { stale: boolean; writing: boolean; chapters: string[]; quiet: boolean; read?: boolean; failed?: boolean; note?: string; since?: string; since_chapters?: string[] };
+type BriefInfo = { stale: boolean; writing: boolean; chapters: string[]; quiet: boolean; read?: boolean; failed?: boolean; note?: string; since?: string; since_chapters?: string[] };
 export type ReadyPr = { number: number; title: string; head: string; branch?: string; brief: BriefInfo | null };
 // A PR brief as the writer made it and `pr_brief` returns it (`understanding/src/pr_brief.rs`). A step's `flags` are what the checks found wrong with it
 // that the one rewrite did not mend: it shows "not confirmed from the facts".
-export type BriefCite = { from: string; quote: string };
+type BriefCite = { from: string; quote: string };
 export type BriefFigure = { kind: string; frame: string | null; items: { label: string; tone: string | null; bad: boolean | null }[]; before: string[]; after: string[] };
 export type BriefCheck = { kind: string; q: string; opts: string[]; key: unknown; yes: string; no: string; flow: string | null; test: string | null };
 export type BriefStep = {
@@ -512,16 +512,16 @@ export type PrBrief = {
 };
 // One Also touched group (`pr_brief.rs`), in the order shown, its files sorted by path; `lines` added and removed.
 export type AlsoKind = "no-part" | "tests" | "config" | "docs" | "ignored" | "other";
-export type TouchedFile = { path: string; lines: number; part?: string; ignored?: boolean; laws?: string[] };
+type TouchedFile = { path: string; lines: number; part?: string; ignored?: boolean; laws?: string[] };
 export type AlsoGroup = { kind: AlsoKind; files: TouchedFile[]; lines: number };
 // `guard`: Guard with a law's offer (#401), the parts a bug fix touched; none when the PR offers none, or in a brief from before it.
 // `shape`: what code decided the brief's shape would be; the window never reads it.
-export type BriefShape = { chapters: boolean; required: string[]; also: string[]; overview: boolean; flows_changed: string[] };
+type BriefShape = { chapters: boolean; required: string[]; also: string[]; overview: boolean; flows_changed: string[] };
 // `partial_facts` (#477, #491): what the brief was written without, absent when nothing was missing or in a brief from before it.
-export type StoredBrief = { version: number; pr: number; head: string; written_at: number; stale: boolean; model: string; shape?: BriefShape; brief: PrBrief; guard?: Guard | null; partial_facts?: PartialFacts };
+type StoredBrief = { version: number; pr: number; head: string; written_at: number; stale: boolean; model: string; shape?: BriefShape; brief: PrBrief; guard?: Guard | null; partial_facts?: PartialFacts };
 // The cut diff's files none of whose hunks were sent and those sent in part, with its bytes sent and not sent; the claim check's error; the
 // extensions of the diff's source languages no extractor of the map reads (`understanding/src/pr_brief.rs`, `PartialFacts`).
-export type DiffCut = { files_cut: string[]; files_partial: string[]; bytes_sent: number; bytes_cut: number };
+type DiffCut = { files_cut: string[]; files_partial: string[]; bytes_sent: number; bytes_cut: number };
 export type PartialFacts = { cut?: DiffCut; claim_error?: string; no_extractor?: string[] };
 export type Guard = { parts: string[] };
 // A new law (#401): drafted by the writer from a PR's facts, confirmed or edited by Daniel, then added with its test by a run.
@@ -538,7 +538,7 @@ export type BriefOpened = BriefView | { writing: true };
 export type Fog = "thin" | "thick";
 // What a finished run of the default branch's CI says of the laws: `unknown` (nothing to read), `passed`, `broken` (a test that backs a
 // law failed), `not-run` (it failed, but not in a test that backs a law), `unreadable` (it failed and its log cannot be read).
-export type CiStatus = "unknown" | "passed" | "broken" | "not-run" | "unreadable";
+type CiStatus = "unknown" | "passed" | "broken" | "not-run" | "unreadable";
 export type Ci = {
   status: CiStatus;
   run_url: string | null;
@@ -583,9 +583,9 @@ export type ProjectMark = { project: string; why: MarkWhy[] };
 // key or its base URL is. `keys` lists the API-key writers whose key is set, which is all the page learns of a key; `base_url`
 // is the OpenAI-compatible writer's, none for OpenAI's own.
 export type WriterKind = "anthropic" | "openai" | "claude" | "agy" | "codex" | "copilot" | "cursor";
-export type FoundWriter = { kind: WriterKind; name: string; found: boolean; models: string[]; efforts: string[] };
+type FoundWriter = { kind: WriterKind; name: string; found: boolean; models: string[]; efforts: string[] };
 export type Writers = { writers: FoundWriter[]; summaries_on: boolean; briefs: boolean; keys: WriterKind[]; base_url: string | null };
-export type WriterOutcome = "passed" | "not_logged_in" | "quota" | "timeout" | "not_installed" | "empty" | "other";
+type WriterOutcome = "passed" | "not_logged_in" | "quota" | "timeout" | "not_installed" | "empty" | "other";
 export type WriterTest = { outcome: WriterOutcome; line: string; settings: string | null };
 
 // Why the session didn't touch a name (`ask_why_not`): its recorded facts, and the writer's possible reasons when it has any.

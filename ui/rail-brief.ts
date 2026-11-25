@@ -23,7 +23,7 @@ export function briefRowFor(
   return row;
 }
 
-export function openBriefOnMap(project: string, pr: number) {
+function openBriefOnMap(project: string, pr: number) {
   openMap(project);
   openBriefWhenDrawn(project, pr);
 }

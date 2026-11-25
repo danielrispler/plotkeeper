@@ -221,7 +221,8 @@ fn write_whole(file: &Path, text: impl AsRef<[u8]>) -> std::io::Result<()> {
         fs::rename(&temp, &target)
     })();
     if written.is_err() {
-        let _ = fs::remove_file(&temp);
+        // Best effort: the write's own error is the one returned.
+        fs::remove_file(&temp).ok();
     }
     written
 }
@@ -253,7 +254,8 @@ fn run(program: &Path, args: &[&OsStr]) -> Result<(), String> {
 }
 
 fn say(out: &mut dyn Write, line: impl AsRef<str>) {
-    let _ = writeln!(out, "  {}", line.as_ref());
+    // Output only: a closed terminal is no error.
+    writeln!(out, "  {}", line.as_ref()).ok();
 }
 
 /// Whether an entry of `CLAUDE_CODE_PLUGIN_DIRS` is the archived app's plugin, through a data folder's `checkout`
@@ -511,11 +513,12 @@ fn wire_one(
             render_claude(&dir, bin)?;
             if state.claude {
                 // A second install starts from none; either may already be gone.
-                let _ = run(
+                run(
                     &claude,
                     &["plugin".as_ref(), "uninstall".as_ref(), CLAUDE_ID.as_ref()],
-                );
-                let _ = run(
+                )
+                .ok();
+                run(
                     &claude,
                     &[
                         "plugin".as_ref(),
@@ -523,7 +526,8 @@ fn wire_one(
                         "remove".as_ref(),
                         NAME.as_ref(),
                     ],
-                );
+                )
+                .ok();
             }
             run(
                 &claude,
@@ -781,20 +785,23 @@ pub fn wire_on_start(
     }
     let names: Vec<_> = unasked.iter().map(|h| h.label()).collect();
     let not_asked = |out: &mut dyn Write| {
-        let _ = writeln!(
+        // Output only: a closed terminal is no error.
+        writeln!(
             out,
             "plotkeeper: {} not wired, as there is no terminal to ask in; to wire, run: plotkeeper install --yes",
             names.join(", ")
-        );
+        ).ok();
     };
     let Some(terminal) = terminal else {
         not_asked(out);
         return Ok(());
     };
-    let _ = writeln!(
+    // Output only: a closed terminal is no error.
+    writeln!(
         out,
         "plotkeeper can record these agents by wiring its hooks into them:"
-    );
+    )
+    .ok();
     for harness in &unasked {
         for line in harness.plan(home) {
             say(out, line);
@@ -817,19 +824,22 @@ pub fn wire_on_start(
         "events stay on this machine, in plotkeeper's data folder",
     );
     say(out, "to undo it: plotkeeper uninstall");
-    let _ = write!(out, "\nWire these? [Y/n] ");
-    let _ = out.flush();
+    // Output only: a closed terminal is no error.
+    write!(out, "\nWire these? [Y/n] ").ok();
+    // Output only: a closed terminal is no error.
+    out.flush().ok();
     let mut answer = String::new();
     if terminal.read_line(&mut answer).unwrap_or(0) == 0 {
         // The terminal closed before an answer.
-        let _ = writeln!(out);
+        writeln!(out).ok();
         not_asked(out);
         return Ok(());
     }
     if matches!(answer.trim().to_lowercase().as_str(), "" | "y" | "yes") {
         // The summary above already said each step, so they are not said again as they run.
         wire(home, beside, path, Some(&unasked), &mut std::io::sink())?;
-        let _ = writeln!(out, "plotkeeper: wired {}", names.join(", "));
+        // Output only: a closed terminal is no error.
+        writeln!(out, "plotkeeper: wired {}", names.join(", ")).ok();
         return Ok(());
     }
     for harness in &unasked {
@@ -842,10 +852,11 @@ pub fn wire_on_start(
         );
     }
     save(home, &state)?;
-    let _ = writeln!(
+    // Output only: a closed terminal is no error.
+    writeln!(
         out,
         "plotkeeper: not wired; plotkeeper will not ask again. To wire later, run: plotkeeper install"
-    );
+    ).ok();
     Ok(())
 }
 
@@ -893,21 +904,25 @@ fn rewire_changed(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Res
             Ok(false) => continue,
             Err(e) => {
                 // The others are still rewired, and the asking step still runs.
-                let _ = writeln!(
+                writeln!(
                     out,
                     "plotkeeper: could not rewire {}: {e}; run plotkeeper install to retry",
                     harness.label()
-                );
+                )
+                .ok();
                 continue;
             }
         }
-        let _ = writeln!(
+        // Output only: a closed terminal is no error.
+        writeln!(
             out,
             "plotkeeper: rewired {}, as plotkeeper's hooks for it changed",
             harness.label()
-        );
+        )
+        .ok();
         if harness == Harness::Codex {
-            let _ = writeln!(out, "  {CODEX_RETRUST}");
+            // Output only: a closed terminal is no error.
+            writeln!(out, "  {CODEX_RETRUST}").ok();
         }
     }
     Ok(())
@@ -979,10 +994,11 @@ fn install_copilot(
     }
     if state.copilot {
         // Already gone is fine: the install below puts it back.
-        let _ = run(
+        run(
             copilot,
             &["plugin".as_ref(), "uninstall".as_ref(), NAME.as_ref()],
-        );
+        )
+        .ok();
     }
     run(
         copilot,
@@ -1241,7 +1257,8 @@ impl HookFile {
                 fs::remove_file(&self.file)
                     .map_err(|e| format!("could not remove {}: {e}", self.shown()))?;
                 if record.made_dir {
-                    let _ = fs::remove_dir(self.file.parent().unwrap_or(home));
+                    // Best effort: a folder that is not empty stays.
+                    fs::remove_dir(self.file.parent().unwrap_or(home)).ok();
                 }
             }
             say(
@@ -1271,6 +1288,10 @@ impl HookFile {
 /// backups, and removes the data folder's `bin/`, the rendered plugins and the record. Prints each step to `out`. Every
 /// recorded step runs: one that fails, such as a harness's CLI no longer on the PATH, is said and stays recorded, with
 /// everything in the data folder kept, so running uninstall again retries only the steps that failed.
+#[allow(
+    clippy::too_many_lines,
+    reason = "#556 splits it by responsibility (spec #548, Group 4)"
+)]
 pub fn uninstall(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Result<(), String> {
     let Some(mut state) = load(home)? else {
         say(out, "plotkeeper install has not run here; nothing to undo");
@@ -1503,7 +1524,7 @@ pub fn uninstall(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Resu
     }
     // A data folder install made and left empty goes too.
     let data = studio_hook::data_dir(home);
-    let _ = fs::remove_dir(&data);
+    fs::remove_dir(&data).ok();
     // Uninstall keeps what was recorded, and cannot remove the package it runs from: it says both.
     if data.exists() {
         say(

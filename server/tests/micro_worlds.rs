@@ -111,9 +111,10 @@ fn bench(script: &str, dsh: bool) -> Bench {
     let data = dir.path().join("data");
     fs::create_dir_all(&data).unwrap();
     let scripts = fake_scripts(dir.path());
-    let settings = match dsh {
-        true => serde_json::json!({ "microWorlds": { "dshVisual": scripts } }),
-        false => serde_json::json!({}),
+    let settings = if dsh {
+        serde_json::json!({ "microWorlds": { "dshVisual": scripts } })
+    } else {
+        serde_json::json!({})
     };
     fs::write(data.join("settings.json"), settings.to_string()).unwrap();
     let repo = dir.path().join("repo");

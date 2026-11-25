@@ -125,7 +125,7 @@ fn server_line(id: &str, name: &str, at: u64, fields: Value) -> String {
 #[test]
 fn a_codex_session_ended_by_the_process_check_or_interrupted_stays_codex() {
     // The run up to its second turn's tool, before Codex's own interrupt and end.
-    let lines: Vec<String> = fixture()[..15].iter().map(|l| l.to_string()).collect();
+    let lines: Vec<String> = fixture()[..15].iter().map(ToString::to_string).collect();
     let synthetic = [
         server_line(
             FIRST,

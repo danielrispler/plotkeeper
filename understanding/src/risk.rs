@@ -49,6 +49,10 @@ impl Risk {
         // Nothing of the reply goes in the message but its head, in quotes, which the log's scrubbing cuts: a serde error
         // may name the reply's own words.
         let read = parse_object(reply).and_then(serde_json::from_value::<Reply>);
+        #[allow(
+            clippy::map_err_ignore,
+            reason = "a serde error may name the reply's own words, which the message must not hold (the comment above)"
+        )]
         let Reply { level, line } = read.map_err(|_| {
             let head: String = reply.trim().chars().take(300).collect();
             let head = head.replace('\n', " ");
@@ -301,7 +305,8 @@ pub fn judge(
     if let Err(line) = &outcome {
         log(format!("no risk note on {}: {line}", ask.session));
     }
-    if let Err(e) = notes.lock().unwrap().keep(ask, outcome, at) {
+    let kept = notes.lock().unwrap().keep(ask, outcome, at);
+    if let Err(e) = kept {
         log(format!("save the risk notes: {e}"));
     }
 }

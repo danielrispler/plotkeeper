@@ -8,7 +8,7 @@ use crate::common::{base, project, project_text};
 
 fn touched(map: &Value, paths: &[&str]) -> system_map::Touched {
     let (_dir, root) = project(map, &["alpha/a.rs"]);
-    let paths: Vec<String> = paths.iter().map(|s| s.to_string()).collect();
+    let paths: Vec<String> = paths.iter().map(ToString::to_string).collect();
     system_map::touched(Path::new(&root), &paths).unwrap()
 }
 

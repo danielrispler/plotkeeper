@@ -27,7 +27,7 @@ impl Extractor for Fake {
 
     fn extract(&self, _repo: &Repo) -> Output {
         Output {
-            problems: self.problems.iter().map(|p| p.to_string()).collect(),
+            problems: self.problems.iter().map(ToString::to_string).collect(),
             pairs: self.pairs.clone(),
         }
     }
@@ -47,7 +47,7 @@ fn fake(name: &'static str, pairs: &[(&str, &str)]) -> Fake {
 }
 
 fn names(names: &[&str]) -> Vec<String> {
-    names.iter().map(|n| n.to_string()).collect()
+    names.iter().map(ToString::to_string).collect()
 }
 
 fn ends(out: &Output) -> Vec<(&str, &str)> {
@@ -60,7 +60,7 @@ fn ends(out: &Output) -> Vec<(&str, &str)> {
 fn part(id: &str, files: &[&str]) -> PartFiles {
     PartFiles {
         id: id.into(),
-        files: files.iter().map(|f| f.to_string()).collect(),
+        files: files.iter().map(ToString::to_string).collect(),
     }
 }
 

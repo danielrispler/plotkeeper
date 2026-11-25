@@ -44,7 +44,10 @@ fn fake(status: u16, body: &str, delay: Duration) -> (String, thread::JoinHandle
             body: serde_json::from_str(&text).unwrap_or(Value::Null),
         };
         thread::sleep(delay);
-        let _ = request.respond(tiny_http::Response::from_string(body).with_status_code(status));
+        // The client may have hung up; there is no one left to answer.
+        request
+            .respond(tiny_http::Response::from_string(body).with_status_code(status))
+            .ok();
         seen
     });
     (base, seen)
@@ -224,8 +227,10 @@ fn fake_all(answers: Vec<(u16, String)>) -> (String, thread::JoinHandle<Vec<Seen
                     .collect(),
                 body: serde_json::from_str(&text).unwrap_or(Value::Null),
             });
-            let _ =
-                request.respond(tiny_http::Response::from_string(body).with_status_code(status));
+            // The client may have hung up; there is no one left to answer.
+            request
+                .respond(tiny_http::Response::from_string(body).with_status_code(status))
+                .ok();
         }
         seen
     });

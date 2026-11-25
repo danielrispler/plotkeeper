@@ -132,7 +132,8 @@ fn append() -> Result<(), Box<dyn Error>> {
     }
     // Trees given up stop their `git` and remove its scratch index in a moment.
     if let Some(stopped) = given_up {
-        let _ = stopped.recv_timeout(STOP_BUDGET);
+        // A closed channel or a timeout both mean carry on.
+        stopped.recv_timeout(STOP_BUDGET).ok();
     }
     Ok(())
 }
@@ -155,7 +156,8 @@ fn trees(
     let (done, recorded) = mpsc::channel();
     thread::spawn(move || {
         let result = studio_hook::trees(&mut copy, &data).map_err(|e| e.to_string());
-        let _ = done.send((copy, result));
+        // The receiver may have gone, and then no one waits for this.
+        done.send((copy, result)).ok();
     });
     let (copy, result) = match recorded.recv_timeout(budget) {
         Ok(recorded) => recorded,

@@ -92,8 +92,9 @@ fn main() -> ExitCode {
     };
     refresh_hook_copies(&home);
     wire_on_start(&home);
-    let _ = log::set_logger(&studio_server::LOGGER)
-        .map(|()| log::set_max_level(log::LevelFilter::Warn));
+    if log::set_logger(&studio_server::LOGGER).is_ok() {
+        log::set_max_level(log::LevelFilter::Warn);
+    }
     // Before the read loop, the web server and every thread they start: a panic on any of them stops plotkeeper.
     studio_server::exit_on_panic(|code| std::process::exit(code));
     match run(&log, held) {
@@ -225,11 +226,13 @@ fn run(log: &std::path::Path, held: lock::Held) -> std::io::Result<()> {
 
     let (stop, stopped) = mpsc::channel();
     ctrlc::set_handler(move || {
-        let _ = stop.send(());
+        // The receiver may have gone, and then no one waits for this.
+        stop.send(()).ok();
     })
     .map_err(std::io::Error::other)?;
     show(&address(page.port(), &token));
-    let _ = stopped.recv();
+    // A closed channel or a timeout both mean carry on.
+    stopped.recv().ok();
     // The stores write by temp file and rename, so a stop between writes leaves them whole.
     page.stop();
     drop(held);

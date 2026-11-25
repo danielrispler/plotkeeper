@@ -113,6 +113,10 @@ struct Raw {
 
 /// Splits `command` into statements at `;`, line breaks, `&&`, `||`, `|` and `&` outside quoted
 /// text. A heredoc's body is skipped, and a backslash-escaped quote does not end quoted text.
+#[allow(
+    clippy::too_many_lines,
+    reason = "#556 splits it by responsibility (spec #548, Group 4)"
+)]
 fn split(command: &str) -> Vec<Raw> {
     struct Reader {
         done: Vec<Raw>,

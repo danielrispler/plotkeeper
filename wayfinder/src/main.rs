@@ -741,6 +741,10 @@ fn blockers_of(number: impl std::fmt::Display) -> Result<Vec<u64>> {
     ])?)
 }
 /// Assign the ticket, then create or reuse its worktree.
+#[allow(
+    clippy::too_many_lines,
+    reason = "#556 splits this file into modules (spec #548, Group 4), which places this function anew"
+)]
 fn claim(number: u64) -> Result<()> {
     let id = number.to_string();
     let issue = gh(&[
@@ -927,6 +931,10 @@ fn done(number: u64) -> Result<()> {
 }
 /// Publish the spec's tickets in `dir` once `publish_problems` finds none, recording each write in
 /// `published.json` as it lands so a rerun does only what is missing.
+#[allow(
+    clippy::too_many_lines,
+    reason = "#556 splits this file into modules (spec #548, Group 4), which places this function anew"
+)]
 fn publish(dir: &str) -> Result<()> {
     use std::{collections::HashMap, fs, path::Path};
     let dir = Path::new(dir);
@@ -1076,6 +1084,10 @@ fn open_issue_pages() -> Result<Value> {
     ])
 }
 const OPEN_ISSUES: &str = "query($endCursor: String) { repository(owner: \"danielrispler\", name: \"plotkeeper\") { issues(states: OPEN, first: 100, after: $endCursor) { pageInfo { hasNextPage endCursor } nodes { number title url body parent { number } assignees(first: 20) { totalCount nodes { login } } blockedBy(first: 50) { totalCount nodes { number state } } } } } }";
+#[allow(
+    clippy::too_many_lines,
+    reason = "#556 splits this file into modules (spec #548, Group 4), which places this function anew"
+)]
 fn run() -> Result<()> {
     let args = env::args().skip(1).collect::<Vec<_>>();
     if args == ["--help"] {
@@ -1099,7 +1111,12 @@ fn run() -> Result<()> {
         let [_, number] = args.as_slice() else {
             return Err(USAGE.into());
         };
-        return write(number.parse().map_err(|_| USAGE)?);
+        #[allow(
+            clippy::map_err_ignore,
+            reason = "a number that does not parse is a usage error, and the usage says what to type"
+        )]
+        let number = number.parse().map_err(|_| USAGE)?;
+        return write(number);
     }
     if args == ["--all"] {
         let pages = open_issue_pages()?;
@@ -1199,6 +1216,10 @@ fn run() -> Result<()> {
             .into_iter()
             .map(|fetch| match fetch {
                 None => Ok(vec![]),
+                #[allow(
+                    clippy::map_err_ignore,
+                    reason = "a panic's payload is no error to show: the panic printed its own message"
+                )]
                 Some(thread) => thread.join().map_err(|_| "blocker fetch panicked")?,
             })
             .collect::<Result<Vec<_>>>()
@@ -1854,7 +1875,7 @@ mod publish_tests {
             file: file.into(),
             title: format!("Studio: {file}"),
             labels: vec!["studio".into()],
-            blocked_by: blocked_by.iter().map(|b| b.to_string()).collect(),
+            blocked_by: blocked_by.iter().map(ToString::to_string).collect(),
         }
     }
     fn files(order: &[&Ticket]) -> Vec<String> {

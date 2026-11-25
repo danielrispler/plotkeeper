@@ -9,15 +9,20 @@ use crate::{Backing, Map};
 /// One law with the tags that name it.
 #[derive(Debug, Serialize)]
 pub struct LawReport {
+    /// The law's id.
     pub id: String,
+    /// Whether a test stands behind it.
     pub backing: Backing,
+    /// The tags that name it.
     pub tags: Vec<Tag>,
 }
 
 /// Where a tag stands: a tracked file and a 1-based line.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Tag {
+    /// The file's path from the repository's root.
     pub file: String,
+    /// The tag's line, from 1.
     pub line: usize,
 }
 
@@ -96,7 +101,9 @@ pub fn tag_id(line: &str) -> Option<&str> {
 /// A tag with the test it sits above.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LawTest {
+    /// The law the tag names.
     pub law: String,
+    /// Where the tag stands.
     pub tag: Tag,
     /// The test's name; none when no test follows the tag.
     pub test: Option<String>,
@@ -126,11 +133,12 @@ pub fn law_tests(root: &Path, laws: &[LawReport]) -> Vec<LawTest> {
 /// `test("...")`, reached over blank lines, comments (other tags among them) and attributes.
 pub fn test_name_after(text: &str, line: usize) -> Option<String> {
     let mut lines = text.lines().skip(line);
-    let mut depth = 0i32; // Open brackets of an attribute that runs over several lines.
+    let mut depth = 0usize; // Open brackets of an attribute that runs over several lines.
     for raw in lines.by_ref() {
         let trimmed = raw.trim();
         if depth > 0 || trimmed.starts_with("#[") || trimmed.starts_with("#![") {
-            depth += trimmed.matches('[').count() as i32 - trimmed.matches(']').count() as i32;
+            depth =
+                (depth + trimmed.matches('[').count()).saturating_sub(trimmed.matches(']').count());
             continue;
         }
         if trimmed.is_empty() || trimmed.starts_with("//") {

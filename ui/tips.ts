@@ -6,7 +6,7 @@ import type { Keymap } from "./settings.js";
 
 // The facts a tip's `when` may need, all of which the page already has: the shown project has a map, a PR brief is waiting
 // in its tray, the session's agent records each turn's files. No usage is tracked.
-export type Condition = "map" | "brief" | "trees";
+type Condition = "map" | "brief" | "trees";
 export type Context = Record<Condition, boolean>;
 
 // From the grilling and prototype (2026-11-25).

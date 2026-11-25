@@ -211,8 +211,10 @@ pub fn write_design(
     let (sources, mut known): (_, BTreeSet<String>) = {
         let store = store.lock().unwrap();
         let cards = store.cards().iter().filter(|k| k.request.owner() == owner);
-        let ids = cards.map(|kept| kept.request.id.clone());
-        (design_sources(&store, owner, turns), ids.collect())
+        let ids = cards.map(|kept| kept.request.id.clone()).collect();
+        let sources = design_sources(&store, owner, turns);
+        drop(store);
+        (sources, ids)
     };
     known.extend(turns.iter().cloned());
     let written = store.lock().unwrap().brief(owner).map(|b| b.design_from);

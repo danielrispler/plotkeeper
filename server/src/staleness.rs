@@ -218,6 +218,10 @@ pub fn births(repo: &Path, source: &str) -> BTreeMap<String, u64> {
 
 /// `births` over `cache`, with `load` reading git for the ids not yet asked about. A failed read (`None`) is not kept, so the next map
 /// reads them again.
+#[allow(
+    clippy::significant_drop_tightening,
+    reason = "the project's lock is held across the read on purpose (the comment below)"
+)]
 fn births_in(
     cache: &Births,
     project: &str,
@@ -228,11 +232,13 @@ fn births_in(
     // project's map goes on. A reader that panicked holding a lock left whole entries: the cache stays usable.
     let project_cache = cache
         .lock()
-        .unwrap_or_else(|e| e.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .entry(project.to_string())
         .or_default()
         .clone();
-    let mut known = project_cache.lock().unwrap_or_else(|e| e.into_inner());
+    let mut known = project_cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let missing: Vec<String> = ids
         .iter()
         .filter(|id| !known.contains_key(*id))
@@ -451,7 +457,7 @@ mod tests {
     fn git_is_read_once_per_project_and_part() {
         let cache = Births::default();
         let calls = std::cell::RefCell::new(Vec::new());
-        let ids = |list: &[&str]| list.iter().map(|id| id.to_string()).collect::<Vec<_>>();
+        let ids = |list: &[&str]| list.iter().map(ToString::to_string).collect::<Vec<_>>();
         let ask = |project: &str, list: &[&str]| {
             births_in(&cache, project, &ids(list), |wanted| {
                 calls
@@ -502,7 +508,7 @@ mod tests {
             scope.spawn(move || {
                 answered
                     .send(births_in(cache, "/q", ids, |_| None))
-                    .unwrap()
+                    .unwrap();
             });
             let got = answer.recv_timeout(std::time::Duration::from_secs(2));
             release.send(()).unwrap();
@@ -527,10 +533,12 @@ mod tests {
     #[test]
     fn a_poisoned_cache_still_answers() {
         let cache = Births::default();
-        let _ = std::panic::catch_unwind(|| {
+        // The panic is the point: it poisons the lock.
+        std::panic::catch_unwind(|| {
             let _held = cache.lock().unwrap();
             panic!("a reader panicked holding the lock");
-        });
+        })
+        .unwrap_err();
         let ids = vec!["a".to_string()];
         assert_eq!(
             births_in(&cache, "/p", &ids, |_| Some(born(&[("a", 5)]))),

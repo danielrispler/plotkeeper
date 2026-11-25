@@ -6,7 +6,7 @@
 import { fullTitle, invoke, pressable, text } from "./dom.js";
 import type { Capabilities, Session, Turn, TurnFile } from "./types.js";
 
-export type DiffLineKind = "add" | "del" | "hunk" | "meta" | "ctx";
+type DiffLineKind = "add" | "del" | "hunk" | "meta" | "ctx";
 export type DiffLine = { kind: DiffLineKind; text: string };
 
 // A hunk's lines classified for the tint; the sign stays in the text.

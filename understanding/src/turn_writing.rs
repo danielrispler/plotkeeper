@@ -145,9 +145,10 @@ impl TurnWriting {
         let on_open = self.state.core.lock().unwrap().summaries_on_open();
         let id = request.session_id.clone();
         let state = self.state.clone();
-        let job: Job = match on_open {
-            true => Box::new(move || state.park(request)),
-            false => Box::new(move || state.write_summary(request)),
+        let job: Job = if on_open {
+            Box::new(move || state.park(request))
+        } else {
+            Box::new(move || state.write_summary(request))
         };
         self.queue(id, job);
     }
@@ -215,6 +216,7 @@ impl TurnWriting {
                     return;
                 }
                 waiting.insert(id.clone(), VecDeque::from([job]));
+                drop(waiting);
                 let queues = queues.clone();
                 thread::spawn(move || {
                     loop {
@@ -223,7 +225,9 @@ impl TurnWriting {
                             match waiting.get_mut(&id).and_then(VecDeque::pop_front) {
                                 Some(job) => job,
                                 None => {
+                                    // Removed under the lock that saw it empty, so no job queued meanwhile is lost.
                                     waiting.remove(&id);
+                                    drop(waiting);
                                     return;
                                 }
                             }

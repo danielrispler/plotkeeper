@@ -458,12 +458,13 @@ pub fn snippet(text: &str, tag_line: usize) -> (usize, String) {
     let from = tag_line.saturating_sub(1).min(lines.len());
     let mut limit = (from + SNIPPET).min(lines.len());
     let mut base: Option<usize> = None; // The indentation of the test's first line, past attributes and comments.
-    let mut depth = 0i32;
+    let mut depth = 0usize;
     for (at, raw) in lines.iter().enumerate().skip(from + 1).take(SNIPPET) {
         let (trimmed, indent) = (raw.trim(), raw.len() - raw.trim_start().len());
         match base {
             None if depth > 0 || trimmed.starts_with("#[") || trimmed.starts_with("#![") => {
-                depth += trimmed.matches('[').count() as i32 - trimmed.matches(']').count() as i32;
+                depth = (depth + trimmed.matches('[').count())
+                    .saturating_sub(trimmed.matches(']').count());
             }
             None if trimmed.is_empty() || trimmed.starts_with("//") => {}
             None => {
@@ -634,7 +635,7 @@ impl Drop for Running<'_> {
         // plotkeeper's panic hook the process stops on a panic; this path is left for the tests, which unwind.
         self.0
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(&self.1);
     }
 }
@@ -667,6 +668,10 @@ impl CiCache {
     }
 
     /// Keeps `ci`, except that an answer of none (`gh` failed) never replaces a real result. Whether the record changed.
+    #[allow(
+        clippy::significant_drop_tightening,
+        reason = "the record is saved under its lock, so two saves never interleave"
+    )]
     pub fn put(&self, project: &str, ci: Ci) -> bool {
         let mut last = self.last.lock().unwrap();
         if ci.status == Status::Unknown
@@ -1243,7 +1248,7 @@ mod tests {
             run_url: None,
             commit: None,
             earlier: false,
-            parts: parts.iter().map(|p| p.to_string()).collect(),
+            parts: parts.iter().map(ToString::to_string).collect(),
             laws: Vec::new(),
             tail: String::new(),
             note: None,

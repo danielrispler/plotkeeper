@@ -1,7 +1,7 @@
 // One small stand-in DOM for the node tests: element and text nodes that keep their identity and children, so a test can
 // assert that a node is the same object after an update. Not a browser: it holds what the tests read and the calls the code makes.
 
-export class Text {
+class Text {
   nodeType = 3;
   nodeName = "#text";
   constructor(value) {

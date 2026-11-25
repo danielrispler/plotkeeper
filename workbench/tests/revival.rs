@@ -3,7 +3,7 @@
 use studio_workbench::{resume, resumes_latest};
 
 fn argv(words: &[&str]) -> Option<Vec<String>> {
-    Some(words.iter().map(|w| w.to_string()).collect())
+    Some(words.iter().map(ToString::to_string).collect())
 }
 
 #[test]

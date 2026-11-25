@@ -124,7 +124,7 @@ export function reviewNodes(patch: LawPatch, law: string, act: Pick<PatchActs, "
 }
 
 // A run that could not start and whose prompt the clipboard refused: its line, and the prompt in the overlay to copy by hand.
-export function refusedNodes(line: string, prompt: string, close: () => void): HTMLElement[] {
+function refusedNodes(line: string, prompt: string, close: () => void): HTMLElement[] {
   const area = promptBox(prompt, 6);
   const foot = text("div", "", "patch-foot");
   foot.append(button("Close", "Close", close));

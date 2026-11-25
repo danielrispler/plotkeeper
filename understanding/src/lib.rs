@@ -3,6 +3,7 @@
 //! the card store with its briefs and its weekly rates (module 6), and the drift in Claude Code
 //! (danielrispler/Falinks#369, decisions 7, 9 and 23).
 use serde::{Deserialize, Serialize};
+use std::fmt::Write as _;
 use std::{
     collections::HashMap,
     io::Write,
@@ -235,17 +236,19 @@ pub fn write_goal(
     }
     let reply = writer.goal(&prompts).and_then(|reply| goal_in(&reply));
     match reply {
-        Ok(goal) => match store
-            .lock()
-            .unwrap()
-            .set_goal(owner, goal, prompts.len() as u32)
-        {
-            Ok(()) => true,
-            Err(e) => {
-                log(format!("save the card store: {e}"));
-                false
+        Ok(goal) => {
+            let saved = store
+                .lock()
+                .unwrap()
+                .set_goal(owner, goal, prompts.len() as u32);
+            match saved {
+                Ok(()) => true,
+                Err(e) => {
+                    log(format!("save the card store: {e}"));
+                    false
+                }
             }
-        },
+        }
         Err(line) => {
             log(format!("no goal on {}: {line}", request.id));
             false
@@ -275,7 +278,8 @@ pub fn ask_about(
 pub fn ask_item(what: &str, facts: &studio_core::AskFacts, hunk: Option<&str>) -> String {
     let mut item = format!("About {what}. What was recorded:\n{}", facts.text());
     if let Some(hunk) = hunk {
-        item.push_str(&format!("\n\nThe hunk:\n{hunk}"));
+        // Writing to a `String` cannot fail.
+        write!(item, "\n\nThe hunk:\n{hunk}").ok();
     }
     item
 }
@@ -490,6 +494,7 @@ impl Availability {
         let mut shown = self.shown.lock().unwrap();
         if shown.as_ref() != Some(&notice) {
             *shown = Some(notice.clone());
+            drop(shown);
             self.tell(Some(notice));
         }
     }
@@ -921,7 +926,7 @@ impl ClaudeWriter {
             Err(error)
                 if tell && (error.kind != FailureKind::Timeout || timeout >= kind.timeout()) =>
             {
-                self.availability.failed(error)
+                self.availability.failed(error);
             }
             _ => {}
         }
@@ -968,13 +973,14 @@ impl ClaudeWriter {
 
     /// Nothing, or why no call runs: summaries are off until a writer passes Test. Being off is no failure notice.
     fn on_or(&self, kind: WriterKind) -> Result<(), WriterError> {
-        match self.on.load(Ordering::Acquire) {
-            true => Ok(()),
-            false => Err(WriterError::new(
+        if self.on.load(Ordering::Acquire) {
+            Ok(())
+        } else {
+            Err(WriterError::new(
                 FailureKind::Other,
                 kind,
                 "(summaries are off until a writer passes Test)",
-            )),
+            ))
         }
     }
 
@@ -1001,7 +1007,7 @@ impl ClaudeWriter {
     ) -> Result<WriterReply, WriterError> {
         let tell_failed = |error: &WriterError| {
             if tell {
-                self.availability.failed(error)
+                self.availability.failed(error);
             }
         };
         let timeout = stop_after(kind, timeout);
@@ -1045,7 +1051,7 @@ impl ClaudeWriter {
         let reply = writer::read_reply_and_stderr(
             kind,
             schema,
-            &status,
+            status,
             &String::from_utf8_lossy(&out),
             &String::from_utf8_lossy(&err),
         );
@@ -1230,7 +1236,7 @@ mod reply_tests {
             Ok::<_, String>(1),
             |_| true,
             || Err("no".into()),
-            |second, first| second.or(first),
+            Result::or,
         );
         assert_eq!(keep_first_when_second_fails, Ok(1));
         let second_stands = once_more(

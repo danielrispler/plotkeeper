@@ -108,7 +108,7 @@ impl Bench {
 
     /// Waits, on the runner's own change notices, until `what` holds.
     fn until(&self, what: impl Fn(&Runner) -> bool) {
-        until(&self.runner, &self.changes, what)
+        until(&self.runner, &self.changes, what);
     }
 
     fn state(&self, id: &str) -> Option<RunState> {

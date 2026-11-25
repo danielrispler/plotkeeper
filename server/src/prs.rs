@@ -171,6 +171,7 @@ impl Prs {
             }
             of_project.retain(|key, _| keep.contains(key));
         }
+        drop(found);
         Some(numbers)
     }
 
@@ -195,6 +196,7 @@ impl Prs {
                 brief: None,
             })
             .collect();
+        drop(found);
         ready.sort_by_key(|r| r.number);
         ready
     }
@@ -236,7 +238,8 @@ pub fn ask_later(app: &Arc<App>, trigger: Trigger, also: Option<&str>) {
     let (app, also) = (app.clone(), also.map(str::to_string));
     std::thread::spawn(move || {
         let mut projects = BTreeMap::<String, Vec<(String, String)>>::new();
-        for (cwd, branch) in app.core.lock().unwrap().branches() {
+        let branches = app.core.lock().unwrap().branches();
+        for (cwd, branch) in branches {
             if let Ok(project) = studio_workbench::main_checkout(Path::new(&cwd)) {
                 projects.entry(project).or_default().push((cwd, branch));
             }

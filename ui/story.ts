@@ -139,7 +139,7 @@ export function showView(selected: Selection | null) {
 // The session's permission mode on the rail's line (danielrispler/Falinks#541), never only on hover, as it is a safety
 // fact; nothing for the default mode, or before an event names one.
 const modes: Record<string, string> = { auto: "auto mode", plan: "plan mode", acceptEdits: "accept edits", bypassPermissions: "bypass permissions" };
-export const modeText = (mode: string | null) => (!mode || mode === "default" ? "" : (modes[mode] ?? mode));
+const modeText = (mode: string | null) => (!mode || mode === "default" ? "" : (modes[mode] ?? mode));
 
 // The subagent summaries the writer gave (danielrispler/Falinks#535), by subagent id, those being written, and those
 // whose call failed while the subagent stays open, so a redraw does not ask again.

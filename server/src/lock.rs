@@ -58,7 +58,8 @@ pub fn acquire(dir: &Path) -> io::Result<Instance> {
     match lock.try_lock() {
         Ok(()) => {
             let running = dir.join(RUNNING);
-            let _ = fs::remove_file(&running);
+            // Best effort: a file already gone is fine.
+            fs::remove_file(&running).ok();
             Ok(Instance::First(Held {
                 _lock: lock,
                 running,
@@ -111,6 +112,7 @@ impl Held {
 
 impl Drop for Held {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.running);
+        // Best effort: a file already gone is fine.
+        fs::remove_file(&self.running).ok();
     }
 }

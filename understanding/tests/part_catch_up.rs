@@ -3,6 +3,7 @@
 
 use serde_json::json;
 use std::cell::RefCell;
+use std::fmt::Write as _;
 use studio_understanding::part_catch_up::*;
 use studio_understanding::pr_brief::{BriefReply, BriefWriter, CallKind, CallUsage, TaggedTest};
 
@@ -22,9 +23,10 @@ const MAP: &str = r#"{
 fn file_diff(path: &str, lines: usize) -> String {
     let mut d =
         format!("diff --git a/{path} b/{path}\nindex 1..2 100644\n--- a/{path}\n+++ b/{path}\n");
-    d += &format!("@@ -1,1 +1,{lines} @@\n");
+    // Writing to a `String` cannot fail.
+    writeln!(d, "@@ -1,1 +1,{lines} @@").ok();
     for i in 0..lines {
-        d += &format!("+line {i} of {path}\n");
+        writeln!(d, "+line {i} of {path}").ok();
     }
     d
 }

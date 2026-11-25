@@ -28,3 +28,10 @@ studio-test-support = { path = "../test-support" }
 [[bin]]
 name = "plotkeeper"
 path = "src/bin/plotkeeper.rs"
+
+[lints]
+workspace = true
+
+# Its library is named `system_map`, which cargo machete does not match to the package's name.
+[package.metadata.cargo-machete]
+ignored = ["studio-system-map"]

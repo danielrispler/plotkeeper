@@ -101,6 +101,10 @@ pub enum Surface {
 }
 
 impl Surface {
+    #[allow(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's `skip_serializing_if` passes the field by reference"
+    )]
     fn is_rail(&self) -> bool {
         *self == Surface::Rail
     }

@@ -329,7 +329,7 @@ pub fn explain(
                     ["name", "caption", "purpose", "holds"]
                         .iter()
                         .filter(|f| before[**f] != part[**f])
-                        .map(|f| f.to_string()),
+                        .map(ToString::to_string),
                 );
                 if thick {
                     Some(Strength::Thick)
@@ -1007,7 +1007,7 @@ mod tests {
     }
 
     fn words(list: &[&str]) -> Vec<String> {
-        list.iter().map(|w| w.to_string()).collect()
+        list.iter().map(ToString::to_string).collect()
     }
 
     #[test]
@@ -1088,7 +1088,7 @@ mod tests {
         fn read(&self, chapter: usize, head: &str, lit: &[&[&str]], at: u64) -> BTreeSet<String> {
             let lit = lit
                 .iter()
-                .map(|c| c.iter().map(|p| p.to_string()).collect())
+                .map(|c| c.iter().map(ToString::to_string).collect())
                 .collect();
             mark_read(&self.file(), &self.main, 7, chapter, head, lit, at).unwrap()
         }
@@ -1099,7 +1099,7 @@ mod tests {
             }
         }
         fn set(&self, parts: &[&str]) -> BTreeSet<String> {
-            parts.iter().map(|p| p.to_string()).collect()
+            parts.iter().map(ToString::to_string).collect()
         }
     }
 

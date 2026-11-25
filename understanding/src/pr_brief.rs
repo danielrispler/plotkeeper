@@ -18,6 +18,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -815,6 +816,10 @@ pub fn hop_ends(
 }
 
 /// Assembles the writer's facts: structure first, then the diff hunk by hunk inside `BUDGET`.
+#[allow(
+    clippy::too_many_lines,
+    reason = "#556 splits it by responsibility (spec #548, Group 4)"
+)]
 pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
     let map = system_map::parse_lenient(&source.map_text)?;
     let mj: serde_json::Value =
@@ -1015,12 +1020,17 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
             .map(String::as_str)
             .or(pj["tier"].as_str())
             .unwrap_or("");
-        table += &format!(
-            "## {} ({}, tier {tier})\n",
+        // Writing to a `String` cannot fail.
+        writeln!(
+            table,
+            "## {} ({}, tier {tier})",
             p.id,
             pj["name"].as_str().unwrap_or("")
-        );
-        table += &format!(
+        )
+        .ok();
+        // Writing to a `String` cannot fail.
+        write!(
+            table,
             "laws:\n  {}\nflows through it: {}\n",
             if laws.is_empty() {
                 "none".into()
@@ -1032,24 +1042,31 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
             } else {
                 flows.join(", ")
             }
-        );
+        )
+        .ok();
         for f in fs {
             let d = file(f);
-            table += &format!(
-                "- {} {} +{}/-{}\n",
+            // Writing to a `String` cannot fail.
+            writeln!(
+                table,
+                "- {} {} +{}/-{}",
                 kind(f),
                 f,
                 d.map_or(0, |d| d.added),
                 d.map_or(0, |d| d.removed)
-            );
+            )
+            .ok();
         }
         table += "\n";
     }
     if !touched.ignored.is_empty() || !touched.unowned.is_empty() {
-        table += &format!(
-            "noise (ignored or unowned paths, not the running system): {} files\n",
+        // Writing to a `String` cannot fail.
+        writeln!(
+            table,
+            "noise (ignored or unowned paths, not the running system): {} files",
             touched.ignored.len() + touched.unowned.len()
-        );
+        )
+        .ok();
     }
 
     let meta = &source.meta;
@@ -1234,7 +1251,8 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
         );
         for (i, line) in cut.iter().enumerate() {
             if t.len() + line.len() + 1 > CUT_NOTE_ROOM - 200 {
-                t += &format!("- ... and {} more\n", cut.len() - i);
+                // Writing to a `String` cannot fail.
+                writeln!(t, "- ... and {} more", cut.len() - i).ok();
                 break;
             }
             t += line;
@@ -1643,6 +1661,10 @@ fn step_prose(s: &Step) -> Vec<&str> {
     prose
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "#556 splits this file into modules (spec #548, Group 4), which places this function anew"
+)]
 fn check_step(s: &mut Step, ctx: &CheckContext, facts_norm: &str) {
     let mut f: Vec<String> = Vec::new();
     if words(&s.h) > 14 {
@@ -1703,7 +1725,7 @@ fn check_step(s: &mut Step, ctx: &CheckContext, facts_norm: &str) {
                 let flow = c.flow.clone().unwrap_or_default();
                 match ctx.flows_changed.get(&flow) {
                     None if !ctx.flows.contains(&flow) => {
-                        f.push(format!("order check keyed to `{flow}`, not a flow"))
+                        f.push(format!("order check keyed to `{flow}`, not a flow"));
                     }
                     None => f.push(format!(
                         "order check on flow `{flow}`, which this PR's map diff does not change"

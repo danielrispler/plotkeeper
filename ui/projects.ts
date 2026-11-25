@@ -5,9 +5,9 @@
 import { studio } from "./state.js";
 import type { SavedProject, Session, SessionState } from "./types.js";
 
-export const liveStates: SessionState[] = ["needs_you", "running", "your_turn", "idle"];
-export type Rollup = "needs_you" | "running" | null;
-export type StateGroup<S> = { state: SessionState; sessions: S[] };
+const liveStates: SessionState[] = ["needs_you", "running", "your_turn", "idle"];
+type Rollup = "needs_you" | "running" | null;
+type StateGroup<S> = { state: SessionState; sessions: S[] };
 export type ProjectGroup<S> = {
   // The repository's main checkout.
   key: string;
@@ -20,13 +20,13 @@ export type ProjectGroup<S> = {
   live: boolean;
 };
 
-export const lastSegment = (path: string) => path.split("/").filter(Boolean).pop() ?? "";
+const lastSegment = (path: string) => path.split("/").filter(Boolean).pop() ?? "";
 
 // The main checkout a task's worktree path names, else the folder itself.
 export const repositoryOf = (cwd: string) => /^(.*)\/\.claude\/worktrees\/[^/]+/.exec(cwd)?.[1] || cwd;
 
 // A project's name: its folder's, else "~".
-export const projectName = (path: string) => lastSegment(path) || "~";
+const projectName = (path: string) => lastSegment(path) || "~";
 
 // The name of the project a session belongs to.
 export const sessionProjectName = (session: Pick<Session, "cwd">): string => projectName(repositoryOf(session.cwd));

@@ -19,3 +19,6 @@ studio-test-support = { path = "../test-support" }
 [[test]]
 name = "it"
 path = "tests/main.rs"
+
+[lints]
+workspace = true

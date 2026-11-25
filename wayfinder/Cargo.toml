@@ -13,3 +13,6 @@ path = "src/main.rs"
 serde_json = "1"
 # The one runner of `git` and `gh`.
 studio-workbench = { path = "../workbench" }
+
+[lints]
+workspace = true

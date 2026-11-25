@@ -211,7 +211,7 @@ fn a_test_file_importing_another_file_gives_no_pair_and_does_not_make_its_part_r
         files.push((test.clone(), (kit.importing)(&test, &b).into_bytes()));
         let part = |id: &str, files: &[&String]| PartFiles {
             id: id.into(),
-            files: files.iter().map(|f| f.to_string()).collect(),
+            files: files.iter().map(ToString::to_string).collect(),
         };
         let parts = [part("tests", &[&test]), part("code", &[&a, &b])];
         let (found, read) = run_with(extractor, &files, &parts);

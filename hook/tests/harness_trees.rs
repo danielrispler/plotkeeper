@@ -18,7 +18,8 @@ const FIXED: &str = "def add(a, b):\n    return a + b\n\nprint(\"2+3 =\", add(2,
 /// reports. Returns the repository's root and the lines the hook logged.
 fn replay(agent: &str, recorded: &str, edited: impl Fn(&Value) -> bool) -> (String, Vec<Value>) {
     let base = std::env::temp_dir().join(format!("studio-harness-{agent}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&base);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&base).ok();
     let (home, trial) = (base.join("home"), base.join("trial"));
     fs::create_dir_all(&home).unwrap();
     fs::create_dir_all(&trial).unwrap();
@@ -64,7 +65,8 @@ fn tree(lines: &[Value], name: &str, key: &str, root: &str) -> String {
 /// The files that differ between trees `from` and `to` of repository `root`, which goes with the call.
 fn changed(root: &str, from: &str, to: &str) -> String {
     let changed = git(Path::new(root), &["diff", "--name-only", from, to]);
-    let _ = fs::remove_dir_all(Path::new(root).parent().unwrap());
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(Path::new(root).parent().unwrap()).ok();
     changed
 }
 
@@ -122,7 +124,8 @@ fn cursor(home: &Path, payload: Value) -> Value {
 #[test]
 fn a_cursor_turn_that_writes_in_its_second_workspace_root_lists_the_file() {
     let base = std::env::temp_dir().join(format!("studio-cursor-roots-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&base);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&base).ok();
     let home = base.join("home");
     fs::create_dir_all(&home).unwrap();
     let (a, b) = (repository(&base, "a"), repository(&base, "b"));
@@ -147,7 +150,8 @@ fn a_cursor_turn_that_writes_in_its_second_workspace_root_lists_the_file() {
         .unwrap();
     let end = stop["studio_turn_end"][&b].as_str().unwrap();
     let files = git(Path::new(&b), &["diff", "--name-only", start, end]);
-    let _ = fs::remove_dir_all(&base);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&base).ok();
     assert_eq!(files, "f.py");
 }
 
@@ -157,7 +161,8 @@ fn a_cursor_turn_that_writes_in_its_second_workspace_root_lists_the_file() {
 #[test]
 fn a_cursor_prompt_starts_every_workspace_root_but_touches_only_its_folders() {
     let base = std::env::temp_dir().join(format!("studio-cursor-touch-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&base);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&base).ok();
     let home = base.join("home");
     fs::create_dir_all(&home).unwrap();
     let (a, b) = (repository(&base, "a"), repository(&base, "b"));
@@ -168,7 +173,8 @@ fn a_cursor_prompt_starts_every_workspace_root_but_touches_only_its_folders() {
             "cursor_version": "3.31.15", "workspace_roots": [a, b],
         }),
     );
-    let _ = fs::remove_dir_all(&base);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&base).ok();
 
     assert_eq!(prompt["studio_touched_roots"], serde_json::json!([a]));
     let started = prompt["studio_turn_start"].as_object().unwrap();
@@ -183,7 +189,8 @@ fn a_cursor_prompt_starts_every_workspace_root_but_touches_only_its_folders() {
 #[test]
 fn a_cursor_shell_call_touches_the_folder_it_ran_in() {
     let base = std::env::temp_dir().join(format!("studio-cursor-shell-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&base);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&base).ok();
     let home = base.join("home");
     fs::create_dir_all(&home).unwrap();
     let (a, c) = (repository(&base, "a"), repository(&base, "c"));
@@ -198,7 +205,8 @@ fn a_cursor_shell_call_touches_the_folder_it_ran_in() {
     shell["tool_name"] = "Shell".into();
     shell["tool_input"] = serde_json::json!({ "command": "python3 calc.py", "cwd": c });
     let ran = cursor(&home, shell);
-    let _ = fs::remove_dir_all(&base);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&base).ok();
 
     assert_eq!(ran["studio_touched_roots"], serde_json::json!([c]));
 }
@@ -208,7 +216,8 @@ fn a_cursor_shell_call_touches_the_folder_it_ran_in() {
 #[test]
 fn a_cursor_line_is_logged_in_time_when_git_hangs() {
     let base = std::env::temp_dir().join(format!("studio-cursor-hang-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&base);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&base).ok();
     let (home, bin) = (base.join("home"), base.join("bin"));
     fs::create_dir_all(&home).unwrap();
     fs::create_dir_all(&bin).unwrap();
@@ -228,7 +237,8 @@ fn a_cursor_line_is_logged_in_time_when_git_hangs() {
     assert!(feed(cmd, &payload).wait().unwrap().success());
     let took = began.elapsed();
     let log = fs::read_to_string(studio_hook::event_log(&home)).unwrap_or_default();
-    let _ = fs::remove_dir_all(&base);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&base).ok();
 
     assert!(took < std::time::Duration::from_secs(5), "took {took:?}");
     assert_eq!(log.lines().count(), 1, "{log}");
@@ -240,7 +250,8 @@ fn a_cursor_line_is_logged_in_time_when_git_hangs() {
 #[test]
 fn a_cursor_prompts_late_trees_leave_the_worktrees_start_to_its_next_touch() {
     let base = std::env::temp_dir().join(format!("studio-cursor-late-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&base);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&base).ok();
     let (home, bin) = (base.join("home"), base.join("bin"));
     fs::create_dir_all(&home).unwrap();
     fs::create_dir_all(&bin).unwrap();
@@ -287,7 +298,8 @@ fn a_cursor_prompts_late_trees_leave_the_worktrees_start_to_its_next_touch() {
     write["tool_name"] = "Write".into();
     write["tool_input"] = serde_json::json!({ "file_path": file });
     let written = cursor(&home, write);
-    let _ = fs::remove_dir_all(&base);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&base).ok();
 
     assert!(written["studio_turn_start"][&a].is_string(), "{written}");
 }
