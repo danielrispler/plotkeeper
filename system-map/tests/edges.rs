@@ -1018,3 +1018,67 @@ fn check_prints_an_undeclared_edge_as_a_problem_and_json_has_no_unlinked() {
     let value: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(value.get("unlinked"), None);
 }
+
+#[test]
+fn import_like_text_in_comments_strings_and_template_text_gives_no_edge() {
+    for text in [
+        "// import { x } from '../beta/b.ts';\n",
+        "/* see require('../beta/b.ts') */\n",
+        "/*\n * export * from \"../beta/b.ts\";\n */\n",
+        "const s = \"import '../beta/b.ts'\";\n",
+        "const s = 'from \"../beta/b.ts\"';\n",
+        "const s = `import(\"../beta/b.ts\")`;\n",
+        "const s = `a ${1} from '../beta/b.ts'`;\n",
+        "const s = \"\\\" import '../beta/b.ts'\";\n",
+    ] {
+        let found = ts_edges(&[("alpha/a.ts", text), ("beta/b.ts", "")]);
+        assert_eq!(found, Vec::<String>::new(), "{text}");
+    }
+}
+
+#[test]
+fn an_import_call_inside_a_template_s_substitution_gives_an_edge() {
+    for text in [
+        "const s = `a ${await import('../beta/b.ts')} b`;\n",
+        "const s = `a ${`x ${{ k: require('../beta/b.ts') }.k}`} b`;\n",
+    ] {
+        let found = ts_edges(&[("alpha/a.ts", text), ("beta/b.ts", "")]);
+        assert_eq!(found, ["alpha>beta"], "{text}");
+    }
+}
+
+#[test]
+fn each_import_and_re_export_form_gives_its_edge() {
+    for text in [
+        "import x from '../beta/b.ts';",
+        "import x, { y as z } from '../beta/b.ts';",
+        "import * as ns from '../beta/b.ts';",
+        "import type { T } from '../beta/b.ts';",
+        "import '../beta/b.ts'",
+        "const m = import(`../beta/b.ts`);",
+        "const m = require(\"../beta/b.ts\");",
+        "import fs = require('../beta/b.ts');",
+        "export { x, y as z } from '../beta/b.ts';",
+        "export * as ns from '../beta/b.ts';",
+        "export type { T } from '../beta/b.ts';",
+        "export type * from '../beta/b.ts';",
+        "const q = /'\"`/g;\nimport x from '../beta/b.ts';",
+        "#!/usr/bin/env node\nconst a = 1\nexport { a } from '../beta/b.ts'",
+    ] {
+        let found = ts_edges(&[("alpha/a.ts", text), ("beta/b.ts", "")]);
+        assert_eq!(found, ["alpha>beta"], "{text}");
+    }
+}
+
+#[test]
+fn a_local_export_or_a_member_named_import_gives_no_edge() {
+    for text in [
+        "export const from = '../beta/b.ts';\n",
+        "export default '../beta/b.ts';\n",
+        "obj.require('../beta/b.ts');\n",
+        "const t = x.import('../beta/b.ts');\n",
+    ] {
+        let found = ts_edges(&[("alpha/a.ts", text), ("beta/b.ts", "")]);
+        assert_eq!(found, Vec::<String>::new(), "{text}");
+    }
+}

@@ -14,7 +14,7 @@ use std::{
     process::Command,
 };
 
-use crate::{Kind, Link, PartFiles};
+use crate::{Kind, Link, PartFiles, typescript::SCRIPTS};
 
 /// The extractors a map may name.
 const KNOWN: [&str; 3] = ["cargo", "rust-modules", "typescript-imports"];
@@ -183,7 +183,7 @@ pub(crate) fn file_pairs(
                 });
                 Ok(rust_modules(root, &tracked, &crates, root_mod_lines))
             }
-            "typescript-imports" => Ok(typescript_imports(root, &tracked)),
+            "typescript-imports" => Ok(crate::typescript::typescript_imports(root, &tracked)),
             other => Err(format!(
                 "unknown extractor {other:?} in extractors; use one of {}",
                 KNOWN.join(", ")
@@ -837,102 +837,6 @@ fn is_crate_root(file: &str) -> bool {
     let parent = file.rsplit('/').nth(1).unwrap_or("");
     matches!(name, "lib.rs" | "main.rs" | "build.rs")
         || matches!(parent, "bin" | "tests" | "examples" | "benches")
-}
-
-const TS_SUFFIXES: [&str; 7] = [".ts", ".tsx", ".js", ".mjs", ".jsx", ".mts", ".cjs"];
-
-/// A tracked file a relative import specifier of `from` names, if one exists.
-fn resolve_import(from: &str, spec: &str, tracked: &BTreeSet<&str>) -> Option<String> {
-    if !spec.starts_with("./") && !spec.starts_with("../") {
-        return None;
-    }
-    let mut segments: Vec<&str> = from.split('/').collect();
-    segments.pop();
-    for part in spec.split('/') {
-        match part {
-            "." | "" => {}
-            ".." => {
-                segments.pop()?;
-            }
-            name => segments.push(name),
-        }
-    }
-    let target = segments.join("/");
-    let mut candidates = vec![target.clone()];
-    for (written, real) in [
-        (".js", ".ts"),
-        (".js", ".tsx"),
-        (".mjs", ".mts"),
-        (".jsx", ".tsx"),
-        (".cjs", ".cts"),
-    ] {
-        if let Some(stem) = target.strip_suffix(written) {
-            candidates.push(format!("{stem}{real}"));
-        }
-    }
-    candidates.extend(TS_SUFFIXES.iter().map(|s| format!("{target}{s}")));
-    candidates.extend(TS_SUFFIXES.iter().map(|s| format!("{target}/index{s}")));
-    candidates
-        .into_iter()
-        .find(|c| tracked.contains(c.as_str()))
-}
-
-/// The quoted specifiers that follow `from`, `import` and `import(` in the text of a file.
-fn import_specifiers(text: &str) -> Vec<&str> {
-    let bytes = text.as_bytes();
-    let mut specs = Vec::new();
-    for keyword in ["from", "import", "require"] {
-        for (at, _) in text.match_indices(keyword) {
-            let before = text[..at].chars().next_back();
-            let word_char = |c: char| c.is_alphanumeric() || c == '_' || c == '$' || c == '.';
-            if before.is_some_and(word_char) {
-                continue;
-            }
-            let mut i = at + keyword.len();
-            if bytes
-                .get(i)
-                .is_some_and(|b| (*b as char).is_alphanumeric() || *b == b'_')
-            {
-                continue;
-            }
-            while bytes
-                .get(i)
-                .is_some_and(|b| b.is_ascii_whitespace() || *b == b'(')
-            {
-                i += 1;
-            }
-            let Some(&quote) = bytes.get(i).filter(|b| matches!(**b, b'\'' | b'"' | b'`')) else {
-                continue;
-            };
-            let body = &text[i + 1..];
-            if let Some(len) = body.find(quote as char) {
-                specs.push(&body[..len]);
-            }
-        }
-    }
-    specs
-}
-
-/// The extensions of the script files `typescript-imports` reads.
-const SCRIPTS: [&str; 7] = ["ts", "tsx", "js", "mjs", "jsx", "mts", "cjs"];
-
-/// Each script file paired with the tracked files its relative imports name.
-fn typescript_imports(root: &Path, tracked: &BTreeSet<&str>) -> Pairs {
-    let mut pairs = Pairs::new();
-    for file in tracked {
-        let script = file
-            .rsplit_once('.')
-            .is_some_and(|(_, ext)| SCRIPTS.contains(&ext));
-        let Some(text) = script.then(|| crate::read_tracked(root, file)).flatten() else {
-            continue;
-        };
-        for spec in import_specifiers(&text) {
-            if let Some(target) = resolve_import(file, spec, tracked).filter(|t| t != file) {
-                pairs.push((file.to_string(), target));
-            }
-        }
-    }
-    pairs
 }
 
 #[cfg(test)]
