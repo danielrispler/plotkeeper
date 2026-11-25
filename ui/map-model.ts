@@ -24,9 +24,9 @@ export const actorSize: Size = { w: 120, h: 28 };
 // How far the pointer moves before a press on a plate becomes a drag, so a click never nudges it.
 export const dragThreshold = 6;
 // The layers Esc peels, first to last (user story 5, spec #334 and spec #380): an overlay over the map (a micro-world, #399, then the pre-flight,
-// #394; spec #378, "Layers and keys"), the patch review (#398), a drawer, a brief's "not confirmed" popover (#491), a PR brief (closing it keeps its step), a scrubbed past commit (back to now), a part's sheet, then the left panel (#385). The
+// #394; spec #378, "Layers and keys"), the patch review (#398), a session badge's list (#562), a drawer, a brief's "not confirmed" popover (#491), a PR brief (closing it keeps its step), a scrubbed past commit (back to now), a part's sheet, then the left panel (#385). The
 // tickets that add them register a `Layer` under its name in `map.ts`; the Map view itself is left only when none is open.
-export const layerOrder = ["micro-world", "pre-flight", "patch-review", "drawer", "popover", "brief", "scrubbed", "sheet", "panel"] as const;
+export const layerOrder = ["micro-world", "pre-flight", "patch-review", "badges", "drawer", "popover", "brief", "scrubbed", "sheet", "panel"] as const;
 export type LayerName = (typeof layerOrder)[number];
 export type Layer = { open: () => boolean; close: () => void };
 
@@ -116,7 +116,7 @@ export function rimPoint(center: Point, size: Size, toward: Point): Point {
 
 // A project switch: closes the layers that belong to the project shown, whatever the next one draws, since it may have no map to draw.
 export function switchProject(layers: Partial<Record<LayerName, Layer>>) {
-  for (const name of ["micro-world", "pre-flight", "patch-review", "popover", "brief"] as const) if (layers[name]?.open()) layers[name].close();
+  for (const name of ["micro-world", "pre-flight", "patch-review", "badges", "popover", "brief"] as const) if (layers[name]?.open()) layers[name].close();
 }
 
 // Esc: closes the first layer that is open, in `layerOrder`, and says which; null when none was: on the bare map Esc does nothing, since the
@@ -703,10 +703,10 @@ export const withSheet = (now: Overlays, sheet: string | null, width: number): O
   sheet,
   panel: sheet && (width < narrowBelow || now.panel?.kind === "diff") ? null : now.panel,
 });
-// A press on a session's row or chip: its story, or none when the panel already shows that story (a second click closes it).
+// A press on a session's row (the list's or a badge list's): its story, or none when the panel already shows that story (a second click closes it).
 export const pressRow = (panel: PanelContent | null, session: string): PanelContent | null =>
   panel?.kind === "story" && panel.session === session ? null : { kind: "story", session };
-// The session the panel shows (its story, a turn's diff or a worker's log), whose chips stay lit while it is open, and whose closing selects no session.
+// The session the panel shows (its story, a turn's diff or a worker's log), which is spotlit while it is open, and whose closing selects no session.
 export const panelSession = (panel: PanelContent | null): string | null =>
   panel?.kind === "story" || panel?.kind === "diff" || panel?.kind === "log" ? panel.session : null;
 // The project the page opens on (#386): the last viewed, while the list still holds it, else the first; none on a fresh install.

@@ -256,7 +256,7 @@ export function openPreFlight(fresh = false) {
 }
 
 // The parts of the project's pre-flight are framed on the map, marked predicted or picked; a past commit's map shows none.
-// The word sits among the law marks, since the live agents' chips replace their slot's children.
+// The word sits among the law marks, since the session badges replace their slot's children.
 onPlate(({ view, part, plate, marks }) => {
   const pre = view.state.pre_flight;
   if (view.scrub || !pre?.parts.includes(part.id)) return;
