@@ -92,6 +92,27 @@ fn the_issue_goes_to_the_writer_fenced_as_text_to_read() {
     assert!(asked[0].contains("- core: Core (Turns events into state)."));
 }
 
+#[test]
+fn the_prompt_quotes_each_parts_purpose_and_held_items() {
+    let v2 = MAP
+        .replace(r#""version": 1"#, r#""version": 2"#)
+        .replace(
+            r#""caption": "Turns events into state", "description": """#,
+            r#""caption": "Turns events into state", "purpose": "Plain logic.", "holds": [{ "name": "Adapters", "text": "One per agent.", "paths": ["core/claude.rs"] }]"#,
+        )
+        .replace(r#""description": """#, r#""purpose": "", "holds": []"#);
+    let writer = Fake::new(Ok(r#"{"parts": ["core"]}"#));
+    predict(&writer, "opus", &v2, &Input::Text("Anything")).unwrap();
+    let asked = writer.asked.borrow();
+    assert!(
+        asked[0].contains(
+            "- core: Core (Turns events into state). Plain logic.\n  - Adapters: One per agent. (key files: core/claude.rs)\n"
+        ),
+        "{}",
+        asked[0]
+    );
+}
+
 // `gh pr view 406 --json closingIssuesReferences` and `gh issue view <n> --json parent` as `gh` 2.105 printed them, trimmed of ids.
 const PR_CLOSES_390: &str = r#"{"closingIssuesReferences":[{"id":"I_1","number":390,"repository":{"id":"R_1","name":"plotkeeper","owner":{"id":"U_1","login":"danielrispler"}},"url":"https://github.com/danielrispler/plotkeeper/issues/390"}]}"#;
 const PR_CLOSES_12_AND_390: &str = r#"{"closingIssuesReferences":[{"id":"I_2","number":12,"url":"https://github.com/danielrispler/plotkeeper/issues/12"},{"id":"I_1","number":390,"url":"https://github.com/danielrispler/plotkeeper/issues/390"}]}"#;

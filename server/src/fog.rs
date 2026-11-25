@@ -5,7 +5,8 @@
 //! The walk is first-parent, from the commit last processed to the ref's tip. Each commit's changed paths are placed by the
 //! union of its map and its parent's, so a file moved between parts touches both. Strength is by what changed, never by how
 //! much: thick when a law on the part, a link at it, a flow through it or its `paths` changed, or it was added; thin when
-//! files it owns changed or only its `name`, `caption` or `description` did; nothing for `zone`, `ignored` or `tier`.
+//! files it owns changed or only its `name`, `caption`, `purpose` or `holds` did (a version 1 map's `description` read as its
+//! `purpose`); nothing for `zone`, `ignored` or `tier`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -218,6 +219,11 @@ pub fn classify(
     let (Some(old), Some(new)) = (old, new) else {
         return found;
     };
+    // Both sides as version 2, so a version 1 map's `description` is compared as its `purpose`.
+    let (Ok(old), Ok(new)) = (system_map::convert(old), system_map::convert(new)) else {
+        return found;
+    };
+    let (old, new) = (old.as_str(), new.as_str());
     let (Ok(old_map), Ok(new_map)) = (
         system_map::parse_lenient(old),
         system_map::parse_lenient(new),
@@ -249,7 +255,7 @@ pub fn classify(
                 Some(Strength::Thick)
             }
             Some(before) => (touched.iter().any(|t| t == id)
-                || ["name", "caption", "description"]
+                || ["name", "caption", "purpose", "holds"]
                     .iter()
                     .any(|f| before[*f] != part[*f]))
             .then_some(Strength::Thin),
@@ -701,6 +707,55 @@ mod tests {
             );
         rig.commit(&[("system-map.json", &quiet), ("ign/x", "2")]);
         assert!(rig.fog().is_empty(), "{:?}", rig.fog());
+    }
+
+    /// `BASE` as version 2: each `description` a `purpose`, with no held items.
+    fn base_v2() -> String {
+        BASE.replace(r#""version":1,"#, r#""version":2,"#)
+            .replace(r#""description":"d""#, r#""purpose":"d","holds":[]"#)
+    }
+
+    #[test]
+    fn an_edited_description_in_a_version_1_map_is_thin() {
+        let edited = BASE.replacen(r#""description":"d""#, r#""description":"new words""#, 1);
+        assert_eq!(
+            classify(Some(BASE), Some(&edited), &[]),
+            strengths(&[("a", Strength::Thin)])
+        );
+    }
+
+    #[test]
+    fn an_edited_purpose_or_held_item_is_thin() {
+        let v2 = base_v2();
+        let purpose = v2.replacen(r#""purpose":"d""#, r#""purpose":"new words""#, 1);
+        assert_eq!(
+            classify(Some(&v2), Some(&purpose), &[]),
+            strengths(&[("a", Strength::Thin)])
+        );
+        let held = v2.replacen(
+            r#""holds":[]"#,
+            r#""holds":[{"name":"Reader","text":"Reads."}]"#,
+            1,
+        );
+        assert_eq!(
+            classify(Some(&v2), Some(&held), &[]),
+            strengths(&[("a", Strength::Thin)])
+        );
+        let paths = held.replace(r#""text":"Reads."}"#, r#""text":"Reads.","paths":["a/x"]}"#);
+        assert_eq!(
+            classify(Some(&held), Some(&paths), &[]),
+            strengths(&[("a", Strength::Thin)])
+        );
+    }
+
+    #[test]
+    fn moving_a_map_to_version_2_with_the_same_words_fogs_nothing() {
+        assert!(classify(Some(BASE), Some(&base_v2()), &[]).is_empty());
+        let reworded = base_v2().replacen(r#""purpose":"d""#, r#""purpose":"Short.""#, 1);
+        assert_eq!(
+            classify(Some(BASE), Some(&reworded), &[]),
+            strengths(&[("a", Strength::Thin)])
+        );
     }
 
     #[test]

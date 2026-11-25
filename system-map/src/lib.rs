@@ -144,6 +144,21 @@ pub fn check_files(root: &Path, files: Vec<String>) -> Report {
     check_with(root, Ok(files.into_iter().collect()))
 }
 
+/// The laws of the map in `root` with their backing and tags, and the laws' problems, read leniently, so a version 1 map
+/// answers too; the load's problem when the map does not read. `files` are the tracked files, as for `check_files`.
+pub fn law_reports(
+    root: &Path,
+    files: Vec<String>,
+) -> Result<(Vec<LawReport>, Vec<String>), String> {
+    let path = root.join(MAP_FILE);
+    let text = std::fs::read_to_string(&path)
+        .map_err(|error| format!("{MAP_FILE}: cannot read it ({error})"))?;
+    let map = parse_lenient(&text)?;
+    let files: BTreeSet<String> = files.into_iter().collect();
+    let files: Vec<String> = files.into_iter().collect();
+    Ok(laws::check(root, &map, &files))
+}
+
 fn check_with(root: &Path, files: Result<Vec<String>, String>) -> Report {
     let mut report = Report::default();
     let map = match load(root) {
