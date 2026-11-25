@@ -2175,6 +2175,8 @@ const mapFresh = (): Fixture =>
       const fresh = document.querySelector("#map .map-empty.map-fresh");
       if (!fresh) return log("snap:fail no fresh-install line: " + document.getElementById("map-body").textContent);
       if (fresh.querySelector(".map-empty-title").textContent !== "Run your agent in a repository; it appears here") log("snap:fail the fresh line says " + fresh.textContent);
+      // The teaching sentence (#526) sits under the title, whatever the Explanations switch says.
+      if (fresh.querySelector(".map-empty-title + .empty")?.textContent !== "plotkeeper follows each agent session and maps what it changes.") log("snap:fail no teaching sentence under the fresh line: " + fresh.textContent);
       const link = fresh.querySelector("a.map-install");
       if (!link || !link.href.includes("plugin.md")) log("snap:fail no link to the install docs");
       if (document.getElementById("bar-project").textContent !== "plotkeeper") log("snap:fail the top bar names a project");
@@ -2187,6 +2189,10 @@ const mapNoMap = (): Fixture =>
       const draft = document.querySelector("#map .map-empty .map-draft");
       if (!draft) return log("snap:fail no draft prompt");
       if (document.querySelector("#map .map-empty.map-fresh")) log("snap:fail the fresh line shows for a project");
+      // The teaching sentence (#526) follows the "no system-map.json" line, and the draft prompt stays.
+      const lines = [...document.querySelectorAll("#map .map-empty .empty")].map((p) => p.textContent);
+      const at = lines.findIndex((line) => line.includes("has no system-map.json"));
+      if (at < 0 || lines[at + 1] !== "A map names your parts and their rules; changes light them up.") log("snap:fail no teaching sentence after the no-map line: " + JSON.stringify(lines));
       frame("without a map");
       checkColours("without a map");
       log("base ok");`, { map_state: mapState({ status: "none", source: null }) });
@@ -2286,6 +2292,22 @@ const mapPanel = (check: string, extra: Fixture = {}): Fixture => {
   });
   return { ...f, sessions: extra.sessions ?? sessions, selected: null, snapDone: "panel ok" };
 };
+// The rail with no session picked (#526): the story's session is picked no more while its panel shows, as when it is deleted elsewhere. The
+// rail's empty screen says what will show there, under "Pick a session in the list."; the panel closes with the selection (`followSelection`),
+// so since #385 that screen is not drawn and this checks its words, not its pixels.
+const mapPanelNoSession = (): Fixture =>
+  mapPanel(`
+      await press(row("s2"));
+      if (!panelOpen() || !document.querySelector("#panel-body > .rail")) return log("snap:fail a row's press did not open its story in the left panel");
+      __snapEmit("selected", null);
+      await wait(300);
+      const empty = document.getElementById("empty");
+      if (empty.hidden || !document.getElementById("view").hidden) return log("snap:fail the rail does not show its empty screen with no session picked");
+      const lines = [...empty.querySelectorAll("p.empty")].map((p) => p.textContent);
+      if (JSON.stringify(lines) !== JSON.stringify(["Pick a session in the list.", "Its story shows here: what it is doing, and each finished turn."])) log("snap:fail the rail's empty screen says " + JSON.stringify(lines));
+      if (!document.getElementById("view").hidden) log("snap:fail the story shows with no session picked");
+      if (panelOpen()) log("snap:fail the story's panel stays open with no session picked");
+      log("panel ok");`);
 // The story of Ship PR 286 in the left panel with Understanding's sheet open (both, in a wide window; below 1007 px the sheet takes the
 // panel's place, and the row's press takes it back).
 const mapPanelStory = (): Fixture =>
@@ -3469,6 +3491,7 @@ ${writerStatusAfter("Keychain refused")}
   // The left panel over the map (#385): the story with a part's sheet, Esc's peel and a second press, the widened diff, History, Settings,
   // ⌘2's toggle, and a brief over both panels. `mapPanelNarrow` is the story at 1000x800 (snap:all's size for it), where only one overlay opens.
   mapPanelStory,
+  mapPanelNoSession,
   mapPanelPeel,
   mapPanelToggle,
   mapPanelDiff,
