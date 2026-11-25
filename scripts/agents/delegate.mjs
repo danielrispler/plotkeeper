@@ -210,7 +210,11 @@ const runWorker = (worktree, candidate, effort) =>
     };
     let silence = setTimeout(() => kill("silent"), SILENCE_MS);
     const attempt = setTimeout(() => kill("timeout"), ATTEMPT_MS);
+    // A spawn that fails emits `error` and then `close`: the files are closed once.
+    let closed = false;
     const done = () => {
+      if (closed) return;
+      closed = true;
       clearTimeout(silence);
       clearTimeout(attempt);
       closeSync(jsonl);
@@ -314,7 +318,13 @@ const runTicket = async ({ ticket, integration, effort, routing }) => {
     const started = Date.now();
     const exit = await runWorker(worktree, candidate, effort);
     const ms = Date.now() - started;
-    verdict = { ...judge(worktree, { base, integration, exit, title, worker: candidate.model }), ms };
+    try {
+      verdict = { ...judge(worktree, { base, integration, exit, title, worker: candidate.model }), ms };
+    } catch (error) {
+      // The worker ran, so the run started: a failure now is an error attempt, and escalates.
+      if (!(error instanceof CouldNotStart)) throw error;
+      verdict = { result: "error", escalate: `error: ${error.message}`, ms };
+    }
   } catch (error) {
     if (!(error instanceof CouldNotStart)) throw error;
     console.error(`could not start: ${error.message}`);

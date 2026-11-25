@@ -121,7 +121,7 @@ for (const [run, said] of [
 
 // The stand-in worker. FAKE_OPENCODE says what it does: "edit" (changes a file and exits 0), "commit" (also commits
 // it, twice), "moved" (edits, and someone else moves the integration branch), "conflict" (edits a line someone else
-// also changes on the integration branch), "empty" (exits 0 with no change), "fail" (exits 1) or "silent" (prints
+// also changes on the integration branch), "lost" (edits, and origin goes away), "empty" (exits 0 with no change), "fail" (exits 1) or "silent" (prints
 // nothing and waits). Every call is logged with the environment it got.
 const fakeOpencode = `#!/usr/bin/env node
 const { execFileSync } = require("node:child_process");
@@ -144,7 +144,7 @@ if (mode === "silent") setTimeout(() => {}, 60000);
 else {
   event("step_start", { type: "step-start" });
   event("tool_use", { type: "tool", tool: "read", state: { status: "completed", input: { filePath: join(process.cwd(), "AGENTS.md") }, output: "long" } });
-  if (["edit", "commit", "moved", "conflict"].includes(mode)) {
+  if (["edit", "commit", "moved", "conflict", "lost"].includes(mode)) {
     writeFileSync("shared.txt", "the worker's line\\n");
     event("tool_use", { type: "tool", tool: "edit", state: { status: "completed", input: { filePath: "shared.txt" }, output: "ok" } });
   }
@@ -156,6 +156,7 @@ else {
   }
   if (mode === "moved") other("other.txt", "someone else's file\\n");
   if (mode === "conflict") other("shared.txt", "someone else's line\\n");
+  if (mode === "lost") require("node:fs").renameSync(join(env.FAKE_DIR, "origin.git"), join(env.FAKE_DIR, "origin-gone.git"));
   event("text", { type: "text", text: "Done: the ticket is implemented." });
   event("step_finish", { type: "step-finish", reason: "stop" });
   if (mode === "fail") process.exit(1);
@@ -409,4 +410,14 @@ test("outcomeSegment writes one attempt's tier, effort, worker, result and minut
   const { outcomeSegment } = await import(script);
   assert.equal(outcomeSegment({ tier: "cheap", effort: "high", worker: "opencode/beam-free", result: "red", ms: 9.6 * 60_000 }), "cheap·high opencode/beam-free → red | 10m");
   assert.equal(outcomeSegment({ tier: "cheap", effort: "medium", worker: "opencode/beam-free", result: "pass", ms: 5_000 }), "cheap·medium opencode/beam-free → pass | 1m");
+});
+
+test("run: a failure after the worker ran escalates with exit 0, not as a run that could not start", () => {
+  const scratch = scratchRun();
+  const ran = scratch.run({ FAKE_OPENCODE: "lost" });
+  assert.equal(ran.status, 0, ran.stderr);
+  const lines = ran.stdout.trimEnd().split("\n");
+  assert.match(lines[0], /^escalate medium \(error: git fetch failed: .+\)$/);
+  assert.match(lines.at(-1), /^Route outcome: cheap·medium opencode\/test-free → error \| \d+m$/);
+  gone(scratch);
 });
