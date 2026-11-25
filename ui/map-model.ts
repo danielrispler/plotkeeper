@@ -6,7 +6,10 @@ import type { BriefFigure, BriefStep, CatchUpOffer, CatchUpStage, FogListEntry, 
 export type Tier = "core" | "interface" | "black-box";
 export type Point = { x: number; y: number };
 export type Size = { w: number; h: number };
-export type Part = { id: string; name: string; caption: string; description: string; tier: Tier; paths: string[]; zone?: string };
+// A part of a version 2 map (spec #473): a short purpose and the named things it holds, each with its key files. The server sends a
+// version 1 map converted, so the page reads only these.
+export type Held = { name: string; text: string; paths?: string[] };
+export type Part = { id: string; name: string; caption: string; purpose: string; holds: Held[]; tier: Tier; paths: string[]; zone?: string };
 export type Actor = { id: string; name: string };
 export type MapLink = { id: string; from: string; to: string };
 export type Law = { id: string; on: string; backing: "check" | "trust"; text: string };
@@ -128,7 +131,8 @@ export function escapeMap(layers: Partial<Record<LayerName, Layer>>): LayerName 
 
 // The first prompt of "Draft a map", for a project with no `system-map.json` on its default branch.
 export const draftPrompt =
-  "Draft system-map.json at this repository's root, in plain words: its parts, each with the files it owns, the outside actors, the links between them, " +
+  "Draft system-map.json at this repository's root, in plain words: its parts, each with the files it owns, a purpose of one or two sentences " +
+  "and the named things it holds (each with one sentence and its key files), the outside actors, the links between them, " +
   "the files that belong to no part on purpose, and the laws that must stay true. Run `system-map check` and fix what it reports until it passes.";
 
 // The part sheet (ticket #310) as data: what `map-sheet.ts` draws for one part.
@@ -136,7 +140,9 @@ export const tierLabel: Record<Tier, string> = { core: "Core", interface: "Inter
 export type Sheet = {
   name: string;
   caption: string;
-  description: string;
+  purpose: string;
+  // Each held item with its key files, its `paths` as written; an item without paths shows none.
+  holds: { name: string; text: string; files: string[] }[];
   tier: Tier;
   // The three tiers in a fixed order, the effective one pressed. Never a hint to lower one.
   tiers: { tier: Tier; label: string; pressed: boolean }[];
@@ -158,7 +164,8 @@ export function sheetOf(part: Part, laws: Law[], tier: Tier, fog: Fog | undefine
   return {
     name: part.name,
     caption: part.caption,
-    description: part.description,
+    purpose: part.purpose,
+    holds: (part.holds ?? []).map((item) => ({ name: item.name, text: item.text, files: item.paths ?? [] })),
     tier,
     tiers: tiers.map((each) => ({ tier: each, label: tierLabel[each], pressed: each === tier })),
     laws: laws.filter((law) => law.on === part.id).map((law) => ({ id: law.id, text: law.text, backing: law.backing, label: law.backing === "check" ? "Backed by a check" : "On trust" })),
@@ -166,6 +173,9 @@ export function sheetOf(part: Part, laws: Law[], tier: Tier, fog: Fog | undefine
     canClear: fog !== undefined,
   };
 }
+
+// A plate's hover text: its name, caption and purpose, never the held items, so a glance stays a glance.
+export const plateTitle = (part: Part): string => [part.name, part.caption, part.purpose].filter(Boolean).join("\n\n");
 
 // Broken laws and the drawer (ticket #312). The drawer is read-only and holds any content a ticket gives it: blocks of code or text and
 // the one-click jumps out of it. `openDrawer` (map-drawer.ts) draws a `Drawer`; the history strip's commit drill-down builds one too.

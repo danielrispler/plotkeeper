@@ -19,7 +19,7 @@ import { logStop, reviewNode, reviewOf } from "./stop-rules.js";
 import { element, failure, invoke, listen, newest, pressable, text } from "./dom.js";
 import {
   actorSize, autoPlace, brokenParts, brokenText, cameraRig, type CameraRig, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, fitCamera, panTo, type Drag,
-  type Law, type Layer, type LayerName, type MapDoc, startProject, switchProject, parseMap, type Part, type Point, plateSize, readingOrder, revealPan, rimPoint, type Scrub, type Tier, zoomAt,
+  type Law, type Layer, type LayerName, type MapDoc, startProject, switchProject, parseMap, type Part, type Point, plateSize, plateTitle, readingOrder, revealPan, rimPoint, type Scrub, type Tier, zoomAt,
 } from "./map-model.js";
 import { recheckSeen } from "./seen.js";
 import { knownProjects, projectGone } from "./projects.js";
@@ -409,7 +409,7 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub
     const open = text("button", "", "btn plate-open");
     open.append(text("span", part.name, "plate-name"), text("span", part.caption, "plate-caption"));
     plate.append(fog, open, marks, chips);
-    plate.title = [part.name, part.caption, part.description].filter(Boolean).join("\n\n");
+    plate.title = plateTitle(part);
     const context: PlateContext = { view: current, part, tier, plate, fog, marks, chips };
     plateHooks.forEach((hook) => hook(context));
     grab(plate, part.id, current, links, fit, () => clickHooks.forEach((hook) => hook(context)));
