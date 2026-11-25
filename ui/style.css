@@ -758,6 +758,21 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .sheet-link-text { min-width: 0; overflow-wrap: anywhere; }
 .sheet-link-kind { font-size: var(--size-xs); color: var(--faint); }
 .sheet-link-reason { color: var(--muted); text-wrap: pretty; overflow-wrap: anywhere; }
+/* "This session here" (#561): the open session's turns that changed the part, each its number, Headline and age, a press going to the turn. */
+.sheet-here { display: contents; }
+.sheet-here-turns { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-1); }
+.sheet-here-turn { display: flex; align-items: baseline; gap: var(--sp-4); width: 100%; min-width: 0; text-align: start; background: none; border: 0; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-small); color: var(--fg); font-size: var(--size-small); cursor: pointer; }
+.sheet-here-turn:hover { background: var(--hover); }
+.sheet-here-number { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
+.sheet-here-headline { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-here-age { flex: none; color: var(--faint); font-variant-numeric: tabular-nums; }
+.sheet-here-older { margin: 0; font-size: var(--size-xs); color: var(--faint); }
+/* Its press flashes the story's turn once, the warm ring fading; under reduced motion the ring holds still until the flash ends. */
+.turn.flash {
+  outline: var(--mark) solid var(--ring-warm); outline-offset: var(--sp-1); border-radius: var(--radius-small);
+  @media (prefers-reduced-motion: no-preference) { animation: turn-flash 1s ease-out forwards; }
+}
+@keyframes turn-flash { to { outline-color: transparent; } }
 .ratify-mark { grid-column: 2; font-size: var(--size-xs); color: var(--faint); }
 .ratify-actions { grid-column: 2; display: inline-flex; gap: var(--sp-2); }
 .brief-ratify { margin: var(--sp-4) 0 0; padding: 0; list-style: none; max-width: 60ch; display: grid; gap: var(--sp-3); }

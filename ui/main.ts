@@ -17,7 +17,7 @@ import { hover, realClock, shownGate } from "./hover.js";
 import { arrange } from "./layout.js";
 import { fitMap, mapEscape, openMap, projectsChanged, startMap } from "./map.js";
 import "./map-history.js";
-import "./map-sheet.js";
+import { startSheetHere } from "./map-sheet.js";
 import "./map-tray.js";
 import "./map-runs.js";
 import "./micro-world.js";
@@ -33,7 +33,7 @@ import { projectOfCwd, selectedProject, sidebarOrder } from "./projects.js";
 import { narrowBelow, selectedView } from "./map-model.js";
 import { reload, type SettingsFiles } from "./settings.js";
 import { studio } from "./state.js";
-import { drawFeed, showView } from "./story.js";
+import { drawFeed, showTurn, showView, turnHeadline } from "./story.js";
 import { startRailBriefs } from "./rail-brief.js";
 import { barKeyDown } from "./story-bar.js";
 import { startWriters } from "./writers.js";
@@ -235,6 +235,8 @@ element("pre-flight-button").addEventListener("click", () => openPreFlight());
 startMapAgents({ sessions: () => studio.listed, projectOf: projectOfCwd, select: (id, agent) => void pressSession(id, agent), briefOpen });
 // The left panel over the map (#385): History, a turn's diff and a worker's log; closing a story or a log selects none and leaves the bare map.
 startPanel({ history: historyIn, diff: diffIn, log: logIn, deselect: () => void deselect() });
+// "This session here" on the part sheet reads the story (#561).
+startSheetHere({ headline: turnHeadline, show: showTurn });
 const openSettings = () => showPanel({ kind: "settings" });
 element("settings-button").addEventListener("click", () => (panelShown()?.kind === "settings" ? showPanel(null) : void openSettings()));
 // The page's own elements whose hover another place shows too (#220); the needs-you toast's adds its key when it shows.

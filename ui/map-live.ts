@@ -91,6 +91,17 @@ export function footprintNote(session: Session, placed: Placement, now: number):
   return firm.length || faint.length ? null : NO_FOOTPRINT;
 }
 
+// "This session here" on a part's sheet (#561): the open session's turns within the cut that changed `part`, newest first, each with its
+// index in `session.turns` and its number (the index from 1); `older` says whether the session has turns older than the cut.
+export type HereRow = { turn: Turn; index: number; number: number };
+export function sessionHere(session: Pick<Session, "turns">, part: string, placed: Placement, now: number): { rows: HereRow[]; older: boolean } {
+  const rows = recentTurns(session, now)
+    .filter(({ turn }) => turnParts(turn, placed).includes(part))
+    .map(({ turn, index }) => ({ turn, index, number: index + 1 }))
+    .reverse();
+  return { rows, older: session.turns.some((turn) => !inCut(turn, now)) };
+}
+
 // Turn lighting (ticket #560): a story's turn, hovered or focused, lights the parts it changed; unfolding it or "Show on map" reveals them.
 
 // The parts a turn lights and reveals: the parts it changed (its Workers' files included) while it is within the cut; none for an older

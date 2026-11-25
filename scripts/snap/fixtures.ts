@@ -2405,6 +2405,57 @@ const mapFootprint = (): Fixture => {
     map_place: { ...busyPlace(), "daemon/old.rs": ["daemon"], "understanding/u.rs": ["understanding"], "core/older.rs": ["core"] },
   });
 };
+// "This session here" (#561): #311's story open beside Core's sheet lists its two turns of the last 7 days that changed Core, newest first,
+// each its number, Headline and age, under the section's explanation; Hook's says no turn changed it. With `older`, #311 also has a turn 9
+// days old, so "Turns older than 7 days aren't listed" shows under the section. Pressing turn 2 unfolds it in the story, flashes its
+// outline and moves the focus to it; the screenshot is that frame. With no story open the section is not there.
+const mapSheetHere = (older: boolean): Fixture => {
+  const day = 24 * 3600e3;
+  const turn = (ago: number, paths: string[], message: string) => ({
+    started_at: Date.now() - ago - 60e3, ended_at: Date.now() - ago, prompt: "Draw it", id: null, message, checks: [], listed: [],
+    files: { files: paths.map((path) => ({ root: "/w/plotkeeper", path, from: null, added: 3, removed: 1, agent: null })), merged: 0 },
+  });
+  const sessions = busySessions().map((s) => (s.id === "s1" ? { ...s, turns: [
+    ...(older ? [turn(9 * day, ["daemon/old.rs"], "The daemon's old socket")] : []),
+    turn(2 * day, ["core/older.rs", "understanding/u.rs"], "Per-path placement in core"),
+    turn(5 * 3600e3, ["understanding/u.rs"], "Turn files read in understanding"),
+    ...s.turns.map((t) => ({ ...t, message: "Chips on the parts a turn touches" })),
+  ] } : s));
+  const [newest, second] = older ? [4, 2] : [3, 1];
+  const selected = Object.fromEntries(sessions.map((s) => [s.id, { session: s, agent: null }]));
+  return mapPanel(`
+      const here = () => document.querySelector("#map-sheet .sheet-here");
+      const rows = () => [...here().querySelectorAll(".sheet-here-turn")].map((b) => [...b.children].map((c) => c.textContent).join(" "));
+      await plate("core");
+      if (!sheetOpen()) return log("snap:fail the plate's click did not open its sheet");
+      if (!here().hidden) return log("snap:fail This session here shows with no story open");
+      await press(row("s1"));
+      if (!panelOpen() || !sheetOpen()) return log("snap:fail the story and the sheet are not both open");
+      if (here().hidden) return log("snap:fail This session here is not shown beside the open story");
+      if (here().querySelector("h3")?.textContent !== "This session here") log("snap:fail the section's heading");
+      if (here().querySelector(".explain")?.textContent !== "The open session's turns that changed this part, newest first.") log("snap:fail the section carries no explanation line");
+      const want = ["${newest} Chips on the parts a turn touches 10m", "${second} Per-path placement in core 2d"];
+      if (JSON.stringify(rows()) !== JSON.stringify(want)) log("snap:fail the section's rows: " + JSON.stringify(rows()));
+      const footer = here().querySelector(".sheet-here-older")?.textContent;
+      if (${older} ? footer !== "Turns older than 7 days aren't listed" : footer !== undefined) log("snap:fail the footer: " + footer);
+      await plate("hook");
+      if (here().querySelector("p.empty")?.textContent !== "No turn of this session changed this part in the last 7 days" || rows().length) log("snap:fail Hook's empty section: " + here().textContent);
+      await plate("core");
+      here().querySelectorAll(".sheet-here-turn")[1].click();
+      await wait(100);
+      const feed = document.getElementById("feed");
+      const target = feed.children[${newest} - ${second}];
+      if (!target.classList.contains("flash") || feed.querySelectorAll(".turn.flash").length !== 1) log("snap:fail turn ${second} did not flash, alone");
+      if (target.querySelector(".turn-line")?.getAttribute("aria-expanded") !== "true") log("snap:fail turn ${second} did not unfold");
+      if (document.activeElement !== target.querySelector(".turn-line")) log("snap:fail the focus did not move to turn ${second}");
+      // The section in view for the screenshot, at the sheet's foot.
+      here().querySelector(".sheet-heading").scrollIntoView({ block: "start" });
+      log("panel ok");`, {
+    sessions,
+    select: { __by: "id", values: selected },
+    map_place: { ...busyPlace(), "daemon/old.rs": ["daemon"], "understanding/u.rs": ["understanding"], "core/older.rs": ["core"] },
+  });
+};
 // A story's turn on the map (#560): with #311's story open, hovering or focusing a turn lights its parts (a brief's ring, nothing dimmed,
 // no camera move); leaving, or a feed redraw, clears it. Its 9-day-old turn says its files aren't shown and lights nothing; a turn with
 // no files lights nothing; the newest has "Show on map"; under a brief nothing lights. It ends on the 2-day-old turn, hovered.
@@ -3690,6 +3741,9 @@ ${writerStatusAfter("Keychain refused")}
   },
   mapChipJump: () => mapBusy(true),
   mapFootprint,
+  // "This session here" on a part's sheet beside the open story (#561), with and without its footer.
+  mapSheetHere: () => mapSheetHere(false),
+  mapSheetHereOlder: () => mapSheetHere(true),
   mapTurnLight,
   // The map from the keyboard (#460).
   mapPartKeys,
