@@ -40,14 +40,39 @@
       "holds": [
         { "name": "Serving the page", "text": "The built page, a POST route per command and one event stream, behind a token, a cookie and a Host check.", "paths": ["server/src/web.rs", "server/src/api.rs", "server/src/lock.rs"] },
         { "name": "The read loop", "text": "Follows the event log and sends what changed (the list, the selection, the brief, notices) to the page.", "paths": ["server/src/read_loop.rs"] },
-        { "name": "Install", "text": "Wires the agents it finds to the hook copies in the data folder's `bin/`, and takes that back on uninstall.", "paths": ["server/src/install.rs", "server/src/hook_copies.rs"] },
         { "name": "Settings and projects", "text": "The writer, its API keys in plotkeeper's own Keychain entries, the settings and the saved project list.", "paths": ["server/src/settings.rs", "server/src/projects.rs"] },
+        { "name": "The programs", "text": "`plotkeeper`, which starts the server and opens the page, and `plotkeeper-run`, the launcher of one background run.", "paths": ["server/src/bin/plotkeeper.rs", "server/src/bin/plotkeeper-run.rs"] }
+      ],
+      "tier": "core", "paths": ["server/"]
+    },
+    {
+      "id": "install", "name": "Install", "caption": "Wires the agents to the hook",
+      "purpose": "`plotkeeper install` and `uninstall`: copies the hook into the data folder and wires each agent it finds to that copy, through the agent's own command where it has one.",
+      "holds": [
+        { "name": "Agent wiring", "text": "Renders each agent's plugin or hook file with the hook's path and installs it, and takes that back on uninstall.", "paths": ["server/src/install.rs"] },
+        { "name": "Hook copies", "text": "The hook binaries copied into the data folder's `bin/`, so an agent runs a copy that a rebuild does not move.", "paths": ["server/src/hook_copies.rs"] }
+      ],
+      "tier": "core",
+      "paths": ["server/src/install.rs", "server/src/hook_copies.rs", "server/tests/install.rs", "server/tests/hook_copies.rs"]
+    },
+    {
+      "id": "map-briefs-runs", "name": "Map, briefs and runs", "caption": "Map data, briefs, agent runs",
+      "purpose": "What the Map view and the briefs show, and the runs started from them: the map with its fog, history and ratify, PR briefs and catch-ups, and the headless agent runs.",
+      "holds": [
         { "name": "The map", "text": "Reads the map from the default branch, with its fog, history, staleness, CI laws and what you ratified.", "paths": ["server/src/map.rs", "server/src/fog.rs", "server/src/history.rs", "server/src/staleness.rs", "server/src/ci_laws.rs", "server/src/ratify.rs"] },
         { "name": "Briefs", "text": "PR lookups, the PR briefs of ready PRs, part catch-ups, the pre-flight and the end-of-story bar.", "paths": ["server/src/prs.rs", "server/src/pr_briefs.rs", "server/src/part_catch_ups.rs", "server/src/pre_flight.rs", "server/src/story_bar.rs"] },
         { "name": "Background runs", "text": "Headless agent runs on your click, one at a time per project, in a sandbox: back a law and micro-worlds.", "paths": ["server/src/runner.rs", "server/src/back_a_law.rs", "server/src/micro_worlds.rs", "server/src/micro_world_guard.mjs"] },
         { "name": "The quiet log", "text": "One line per thing you use, kept for the stop rules, with nothing shown.", "paths": ["server/src/stop_rules.rs"] }
       ],
-      "tier": "core", "paths": ["server/"]
+      "tier": "core",
+      "paths": [
+        "server/src/map.rs", "server/src/fog.rs", "server/src/staleness.rs", "server/src/history.rs", "server/src/ci_laws.rs",
+        "server/src/ratify.rs", "server/src/stop_rules.rs", "server/src/pre_flight.rs", "server/src/pr_briefs.rs",
+        "server/src/part_catch_ups.rs", "server/src/prs.rs", "server/src/story_bar.rs", "server/src/runner.rs",
+        "server/src/back_a_law.rs", "server/src/micro_worlds.rs", "server/src/micro_world_guard.mjs",
+        "server/tests/back_a_law.rs", "server/tests/micro_worlds.rs", "server/tests/runner.rs",
+        "server/tests/fake-dsh-visual/", "server/tests/ci-logs/"
+      ]
     },
     {
       "id": "understanding", "name": "Understanding", "caption": "Writes what you read, and keeps it",
@@ -92,7 +117,7 @@
       "reason": "Each agent reads its plugin's hook config to learn which events to send to the hook." },
     { "id": "plugins-hook", "from": "plugins", "to": "hook", "kind": "spawn",
       "reason": "Each plugin's hooks run the hook binaries on an agent event, with the event on standard input." },
-    { "id": "server-plugins", "from": "server", "to": "plugins", "kind": "file",
+    { "id": "install-plugins", "from": "install", "to": "plugins", "kind": "file",
       "reason": "Install embeds the plugins' hook files at build time and writes each agent's copy with the hook's path filled in." },
     { "id": "hook-server", "from": "hook", "to": "server", "kind": "file",
       "reason": "The hook appends each event to the event log, which the server follows." },
@@ -100,6 +125,15 @@
     { "id": "server-core", "from": "server", "to": "core", "kind": "import" },
     { "id": "server-understanding", "from": "server", "to": "understanding", "kind": "import" },
     { "id": "server-workbench", "from": "server", "to": "workbench", "kind": "import" },
+    { "id": "server-install", "from": "server", "to": "install", "kind": "import" },
+    { "id": "server-map-briefs-runs", "from": "server", "to": "map-briefs-runs", "kind": "import" },
+    { "id": "map-briefs-runs-server", "from": "map-briefs-runs", "to": "server", "kind": "import" },
+    { "id": "map-briefs-runs-core", "from": "map-briefs-runs", "to": "core", "kind": "import" },
+    { "id": "map-briefs-runs-hook", "from": "map-briefs-runs", "to": "hook", "kind": "import" },
+    { "id": "map-briefs-runs-understanding", "from": "map-briefs-runs", "to": "understanding", "kind": "import" },
+    { "id": "map-briefs-runs-workbench", "from": "map-briefs-runs", "to": "workbench", "kind": "import" },
+    { "id": "install-hook", "from": "install", "to": "hook", "kind": "import" },
+    { "id": "install-workbench", "from": "install", "to": "workbench", "kind": "import" },
     { "id": "core-workbench", "from": "core", "to": "workbench", "kind": "import" },
     { "id": "understanding-core", "from": "understanding", "to": "core", "kind": "import" },
     { "id": "understanding-hook", "from": "understanding", "to": "hook", "kind": "import" },
@@ -111,8 +145,10 @@
       "reason": "Workbench runs git to fetch from origin and `gh` to look up PRs." },
     { "id": "workbench-plugins", "from": "workbench", "to": "plugins", "kind": "file",
       "reason": "Workbench embeds agy's plugin files at build time and installs them." },
-    { "id": "server-agents", "from": "server", "to": "agents", "kind": "spawn",
-      "reason": "The server starts headless agent runs, such as back a law, and runs each agent's own install command." },
+    { "id": "map-briefs-runs-agents", "from": "map-briefs-runs", "to": "agents", "kind": "spawn",
+      "reason": "The runner starts headless agent runs, such as back a law and micro-worlds, in a sandbox." },
+    { "id": "install-agents", "from": "install", "to": "agents", "kind": "spawn",
+      "reason": "Install runs each agent's own install command, such as `claude plugin` or `qwen extensions`." },
     { "id": "workbench-agents", "from": "workbench", "to": "agents", "kind": "spawn",
       "reason": "Workbench runs the `agy` command to install and remove agy's plugin." }
   ],
@@ -124,9 +160,9 @@
     "wayfinder/", "test-support/", "system-map/"
   ],
   "laws": [
-    { "id": "install-never-opens-claude-settings", "on": "server", "backing": "check",
+    { "id": "install-never-opens-claude-settings", "on": "install", "backing": "check",
       "text": "Install and uninstall reach Claude Code only through `claude plugin` and never open its settings file." },
-    { "id": "install-never-opens-qwen-settings", "on": "server", "backing": "check",
+    { "id": "install-never-opens-qwen-settings", "on": "install", "backing": "check",
       "text": "Install and uninstall reach Qwen Code only through `qwen extensions` and never open its settings file, which can hold API keys." },
     { "id": "hook-never-makes-agent-wait", "on": "hook", "backing": "trust",
       "text": "The hook never makes the agent wait, except for your answer." },
