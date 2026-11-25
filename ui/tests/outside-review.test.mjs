@@ -435,6 +435,25 @@ test("a review that is killed ends its agy and removes its worktree", async () =
   assert.equal(alive, false, "the stand-in agy outlived the review");
 });
 
+test("a review signalled twice, as a trial's run is by Ctrl-C and then by the trial, still removes its worktree", async () => {
+  const s = scratch();
+  const child = spawn(process.execPath, s.args(), { cwd: s.repo, env: { ...s.env, FAKE_AGY: "sleep" }, stdio: "ignore" });
+  const closed = new Promise((done) => child.on("close", done));
+  const pidFile = join(s.dir, "agy.pid");
+  for (let i = 0; i < 200 && !existsSync(pidFile); i++) await new Promise((done) => setTimeout(done, 50));
+  const agy = Number(readFileSync(pidFile, "utf8"));
+  assert.ok(agy > 0, "the stand-in agy wrote no pid");
+  // Two signals sent at once merge into one: the second comes a moment later, while the first is handled.
+  child.kill("SIGINT");
+  await new Promise((done) => setTimeout(done, 1));
+  child.kill("SIGINT");
+  await closed;
+  try {
+    process.kill(agy, "SIGKILL");
+  } catch {}
+  assert.deepEqual(s.left(), nothingLeft);
+});
+
 test("--out must be a folder that can be made: it fails before agy runs", () => {
   const s = scratch();
   writeFileSync(join(s.dir, "file"), "");

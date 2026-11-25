@@ -324,8 +324,13 @@ const main = async (opts) => {
     safe(() => git("worktree", "prune"));
   };
   // Killed mid-review (Ctrl-C, a stopped background task): end agy and leave no worktree behind.
+  // The handler stays on: a trial's run gets Ctrl-C twice, from the process group and from the trial,
+  // and a second signal with no handler would end it halfway through the cleanup.
+  let ending = false;
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
-    process.once(signal, () => {
+    process.on(signal, () => {
+      if (ending) return;
+      ending = true;
       child?.kill();
       cleanup();
       process.exit(1);

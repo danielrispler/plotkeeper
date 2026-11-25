@@ -35,8 +35,8 @@ const main = async (argv) => {
   const trial = `trial-${new Date().toISOString().replace(/[:.]/g, "-")}`;
   const script = join(import.meta.dirname, "outside-review.mjs");
   const children = [];
-  // Ctrl-C reaches the runs through the process group; another signal is passed on, and each run
-  // then ends its agy and removes its own worktree.
+  // Each signal is passed on to the runs, which may also get it from the process group (Ctrl-C):
+  // a run cleans up once, whichever comes first, and ends its agy and removes its own worktree.
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
     process.once(signal, () => {
       for (const child of children) child.kill(signal);
