@@ -8,7 +8,7 @@ import { El, fakeDocument, tauri } from "./dom.mjs";
 const calls = [];
 tauri(calls, (command) => (command === "set_explanations" ? '{ "explanations": false }' : null));
 globalThis.document = fakeDocument({ body: new El("body") });
-const { SHEET, SHEET_HEADINGS, explained, explainedChoice, explainToggle, explainedLinks, explanationsApplied, onExplanations, startExplanations } = await import("../../dist/explanations.js");
+const { BRIEF, BRIEF_HEADINGS, RATIFY, RATIFY_HEADINGS, SHEET, SHEET_HEADINGS, explained, stepLine, explainedChoice, explainToggle, explainedLinks, explanationsApplied, onExplanations, startExplanations } = await import("../../dist/explanations.js");
 const { studio } = await import("../../dist/state.js");
 
 // A word has a letter: the arrows → and ← are marks, not words.
@@ -27,6 +27,36 @@ test("every heading the sheet draws has a line, and every text is at most 12 wor
   }
   // Every link kind has its line, in the same form.
   for (const kind of ["file", "spawn", "http", "import"]) assert.match(SHEET.kinds[kind], new RegExp(`^${kind}: `));
+});
+
+test("every heading the brief's reader and Ratify draw has a line: each step kind the writer may send, Ratify's titles, Also touched", () => {
+  const root = new URL("../../", import.meta.url);
+  const read = (path) => readFileSync(new URL(path, root), "utf8");
+  // The kinds the brief's writer is told it may send, and the part catch-up's, which are among them.
+  const kinds = read("understanding/src/pr_brief.rs").match(/"k": one of ([^\n]+)/)[1].match(/"([^"]+)"/g).map((k) => k.slice(1, -1));
+  assert.ok(kinds.length >= 7, `found the step kinds: ${kinds}`);
+  for (const kind of kinds) assert.ok(BRIEF_HEADINGS[kind], `the step kind "${kind}" has no line`);
+  // The Ratify step's titles, from the step `ratify.ts` makes.
+  const titles = [...read("ui/ratify.ts").matchAll(/\bh: "([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(titles.sort(), ["Accept or overturn", "Guard with a law"]);
+  for (const title of titles) assert.ok(RATIFY_HEADINGS[title], `Ratify's "${title}" has no line`);
+  // The reader's own headings.
+  const drawn = [...read("ui/map-brief.ts").matchAll(/text\("h[1-6]", "([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(drawn.includes("Also touched"), `found the reader's headings: ${drawn}`);
+  for (const heading of drawn) assert.ok(BRIEF_HEADINGS[heading], `"${heading}" has no line`);
+  for (const line of [...every(BRIEF), ...every(RATIFY)]) {
+    assert.ok(words(line) <= 12, `over 12 words: ${line}`);
+    assert.doesNotMatch(line, /Daniel/);
+  }
+  // A meaning is worded once: Ratify's "not yet ratified" is the sheet's.
+  assert.equal(RATIFY.notYet, SHEET.notYet);
+});
+
+test("a step's line is its kind's, and on the Ratify step its title's; a kind with none has no line", () => {
+  assert.equal(stepLine({ k: "Could break", h: "The rail may drop a turn" }), BRIEF.steps["Could break"]);
+  assert.equal(stepLine({ k: "Ratify", h: "Accept or overturn" }), RATIFY.accept);
+  assert.equal(stepLine({ k: "Ratify", h: "Guard with a law" }), RATIFY.guard);
+  assert.equal(stepLine({ k: "Something new", h: "A title" }), undefined);
 });
 
 // The Agent plugins part's links: two kinds, the first and third not yet ratified.

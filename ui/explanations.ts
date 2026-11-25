@@ -41,6 +41,37 @@ export const SHEET_HEADINGS: Record<string, string> = {
   History: SHEET.history,
 };
 
+// The PR brief's reader (#524): a line under each step's title, by the step's kind, and under Also touched. A part catch-up plays in
+// the same reader, so a kind's line holds for a PR and a catch-up alike.
+export const BRIEF = {
+  steps: {
+    Where: "Where this change sits on your map.",
+    Before: "How it worked before this change.",
+    Now: "How it works after this change.",
+    "Must stay true": "A law this change must keep true.",
+    "Could break": "What this change might break, and the cheapest way to see it.",
+    "Not in the plan": "What the agent did that the spec didn't ask for.",
+    "Your turn": "A question for you; answer it to check your reading.",
+  } as Record<string, string>,
+  also: "Other files this PR changed, grouped by kind.",
+} as const;
+
+// Ratify, the brief's last step (#524): a line under its title, and "not yet ratified"'s under its first undecided item, worded as
+// on the sheet.
+export const RATIFY = {
+  accept: "Changes this PR made to your map; say whether each stands.",
+  guard: "A law with a test keeps this bug from coming back.",
+  notYet: SHEET.notYet,
+} as const;
+
+// The line under each heading the brief's reader draws, by its words: a step's kind, and Also touched.
+export const BRIEF_HEADINGS: Record<string, string> = { ...BRIEF.steps, "Also touched": BRIEF.also };
+// The line under the Ratify step's title, by the title `ratifyStep` gives it.
+export const RATIFY_HEADINGS: Record<string, string> = { "Accept or overturn": RATIFY.accept, "Guard with a law": RATIFY.guard };
+
+// A step's line: the Ratify step's by its title, any other by its kind; none for a kind the reader has no line for.
+export const stepLine = (step: { k: string; h: string }): string | undefined => (step.k === "Ratify" ? RATIFY_HEADINGS[step.h] : BRIEF.steps[step.k]);
+
 // Whether the explanations show: the `explanations` setting, on for a fresh install.
 export const explanationsOn = () => studio.files.settings.explanations;
 
@@ -70,16 +101,23 @@ export const toggleExplanations = () => setExplanations(!explanationsOn());
 
 // The `?` toggle beside a panel's ×: its name stays "Explanations" while `aria-pressed` says whether they show (the name never repeats
 // the state); filled when on, a muted ring when off (`style.css`).
+// The click reads the setting then, so a `?` kept across redraws (the brief's, built once per brief) flips what shows now.
 export function explainToggle(on: boolean): HTMLElement {
-  const button = pressable(text("button", "?", "quiet explain-toggle"), on, () => setExplanations(!on));
+  const button = pressable(text("button", "?", "quiet explain-toggle"), on, toggleExplanations);
   button.setAttribute("aria-label", "Explanations");
+  return pressToggle(button, on);
+}
+
+// Sets a `?`'s pressed state and hover to `on`, in place, so a kept `?` keeps the focus a click gave it.
+export function pressToggle(button: HTMLElement, on: boolean): HTMLElement {
+  button.setAttribute("aria-pressed", String(on));
   button.title = on ? "Hide explanations" : "Show explanations";
   return button;
 }
 
 // Each line's id, new at every draw, for `aria-describedby`.
 let lines = 0;
-function line(words: string, className = ""): HTMLElement {
+export function explainLine(words: string, className = ""): HTMLElement {
   const node = text("p", words, `explain${className ? ` ${className}` : ""}`);
   node.id = `explain-${++lines}`;
   return node;
@@ -88,7 +126,7 @@ function line(words: string, className = ""): HTMLElement {
 // A section's heading with its line under it while `on`, the heading described by it; the bare heading while off.
 export function explained(heading: HTMLElement, words: string, on: boolean): HTMLElement[] {
   if (!on) return [heading];
-  const note = line(words);
+  const note = explainLine(words);
   heading.setAttribute("aria-describedby", note.id);
   return [heading, note];
 }
@@ -96,7 +134,7 @@ export function explained(heading: HTMLElement, words: string, on: boolean): HTM
 // A choice (the tier buttons) with the selected option's meaning under it while `on`, the option described by it.
 export function explainedChoice(choice: HTMLElement, selected: HTMLElement | undefined, words: string, on: boolean): HTMLElement[] {
   if (!on) return [choice];
-  const note = line(words, "explain-choice");
+  const note = explainLine(words, "explain-choice");
   selected?.setAttribute("aria-describedby", note.id);
   return [choice, note];
 }
@@ -110,11 +148,11 @@ export function explainedLinks(rows: HTMLElement[], links: { kind?: LinkKind; un
     const { kind, unratified } = links[at];
     if (kind && !told.has(kind)) {
       told.add(kind);
-      row.append(line(SHEET.kinds[kind], "explain-link"));
+      row.append(explainLine(SHEET.kinds[kind], "explain-link"));
     }
     if (unratified && !told.has("not-yet")) {
       told.add("not-yet");
-      row.append(line(SHEET.notYet, "explain-link"));
+      row.append(explainLine(SHEET.notYet, "explain-link"));
     }
   });
   return rows;

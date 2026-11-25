@@ -96,6 +96,8 @@ const actions = new Set([...readFileSync(new URL("../main.ts", import.meta.url),
 test("the list: real palette actions, one line each, written to you, unique ids", () => {
   assert.ok(TIPS.length >= 10);
   assert.ok(actions.has("studio::Palette"));
+  // The explanations' switch is taught (#524).
+  assert.ok(TIPS.some((t) => t.action === "studio::ToggleExplanations"), "no tip teaches studio::ToggleExplanations");
   for (const t of TIPS) {
     if (t.action) assert.ok(actions.has(t.action), `${t.id}: ${t.action} is not a palette action`);
     assert.equal(t.text.includes("{key}"), t.action !== undefined, `${t.id}: {key} marks its action's key`);
