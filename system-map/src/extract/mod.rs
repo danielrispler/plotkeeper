@@ -5,15 +5,19 @@
 mod cargo;
 #[cfg(test)]
 mod contract;
+mod go;
+mod names;
 pub(crate) mod registry;
 mod rust_modules;
 mod typescript;
 
 use std::{
     cell::OnceCell,
-    collections::{BTreeMap, BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet, btree_map::Entry},
     path::Path,
 };
+
+use serde::Serialize;
 
 use crate::PartFiles;
 
@@ -25,16 +29,17 @@ pub(crate) trait Extractor {
     /// Whether `file` is one of its language's files, or of its manifest kind.
     fn reads(&self, file: &str) -> bool;
 
-    /// Whether `file` is one of its language's test files, which make no pairs and never make their part read.
-    fn is_test(&self, _repo: &Repo, _file: &str) -> bool {
+    /// Whether `file` is a file its language's build leaves out: a test file, or one the build never compiles. A skipped
+    /// file makes no pairs and never makes its part read.
+    fn skips(&self, _repo: &Repo, _file: &str) -> bool {
         false
     }
 
-    /// Whether the repository holds a file it would read: a tracked, non-ignored file it reads that is no test file.
+    /// Whether the repository holds a file it would read: a tracked, non-ignored file it reads and does not skip.
     fn detect(&self, repo: &Repo) -> bool {
         repo.files()
             .iter()
-            .any(|f| !repo.is_ignored(f) && self.reads(f) && !self.is_test(repo, f))
+            .any(|f| !repo.is_ignored(f) && self.reads(f) && !self.skips(repo, f))
     }
 
     /// Its pairs, and its problems when it cannot run, or not fully.
@@ -149,6 +154,13 @@ pub(crate) struct Pair {
     pub(crate) lines: BTreeSet<u32>,
     /// A crate root's `mod` line: kept for the check, left out of the imports report.
     pub(crate) declaration: bool,
+    /// The one target an import named that covers several files (a Go package's folder, say): the imports report
+    /// counts the pairs of one import of it as one unit per part. None for a pair that is its own unit.
+    pub(crate) group: Option<String>,
+    /// The group `from` itself belongs to (its Go package's folder, say): the imports report counts a grouped pair's
+    /// importer as that group's slice, so a file nothing imports still counts as its package. None for a pair that
+    /// counts its importer as the file.
+    pub(crate) from_group: Option<String>,
 }
 
 impl Pair {
@@ -158,6 +170,8 @@ impl Pair {
             to: to.to_string(),
             lines: BTreeSet::new(),
             declaration: false,
+            group: None,
+            from_group: None,
         }
     }
 
@@ -170,22 +184,47 @@ impl Pair {
     }
 }
 
-/// What an extractor found: the problems that say it could not run, or not fully, and its pairs, together when both
-/// apply.
+/// A tracked file an extractor reads but cannot resolve with certainty: an import in it could name more than one target
+/// (spec #569, "Unsure").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Unsure {
+    /// The importing file.
+    pub file: String,
+    /// The name in doubt, such as the import path `example.com/a`.
+    pub name: String,
+    /// Why it is in doubt, such as `declared twice`.
+    pub reason: String,
+    /// The tracked files the name could mean, sorted; never empty.
+    pub candidates: Vec<String>,
+}
+
+/// What an extractor found: the problems that say it could not run, or not fully, its pairs and its Unsure files,
+/// together when they apply.
 #[derive(Debug, Default)]
 pub(crate) struct Output {
     pub(crate) problems: Vec<String>,
     pub(crate) pairs: Vec<Pair>,
+    pub(crate) unsure: Vec<Unsure>,
+    /// Each file it puts in a group (its Go package's folder, say), with that group, whether or not the file makes or
+    /// ends a pair: the imports report names a group's slice by its part when the group's files sit in more than one.
+    pub(crate) members: BTreeSet<(String, String)>,
 }
 
 /// Runs the extractors `names` names from `registry`, in that order, and holds their output to the contract: a pair
-/// whose ends are not both tracked, from a file to itself, or from a file the extractor names a test file is dropped,
-/// and a pair two extractors (or one, twice) find is kept once, sorted, with the lines of every finding, and as a
-/// declaration only if every finding of it is one. A name the registry lacks is a problem.
+/// whose ends are not both tracked, from a file to itself, or from a file the extractor reads and skips is dropped,
+/// and a pair two extractors (or one, twice) find is kept once, sorted, with the lines of every finding, as a
+/// declaration only if every finding of it is one, and with the lowest of its findings' groups and of their `from`
+/// groups, none counting as lowest.
+/// An Unsure finding with no candidates is a problem, one in an untracked, ignored or skipped file is dropped, and
+/// findings of one file, name and reason are kept once, sorted, with the union of their candidates. A name the registry
+/// lacks is a problem. A group's member that is untracked or skipped is dropped.
 pub(crate) fn run(registry: &[&dyn Extractor], names: &[String], repo: &Repo) -> Output {
     let mut problems = Vec::new();
-    // Each pair's ends, with the lines of its findings and whether every finding of it is a declaration.
-    let mut pairs: BTreeMap<(String, String), (BTreeSet<u32>, bool)> = BTreeMap::new();
+    // Each Unsure finding's file, name and reason, with the candidates of every finding of them.
+    let mut unsure: BTreeMap<(String, String, String), BTreeSet<String>> = BTreeMap::new();
+    // Each pair by its ends, merged from its findings.
+    let mut pairs: BTreeMap<(String, String), Pair> = BTreeMap::new();
+    let mut members = BTreeSet::new();
     for name in names {
         let Some(extractor) = registry.iter().find(|e| e.name() == name) else {
             problems.push(format!(
@@ -200,39 +239,76 @@ pub(crate) fn run(registry: &[&dyn Extractor], names: &[String], repo: &Repo) ->
         };
         let found = extractor.extract(repo);
         problems.extend(found.problems);
-        for pair in found.pairs {
-            let tracked = |f: &str| repo.files.contains(f);
-            if pair.from == pair.to
-                || !tracked(&pair.from)
-                || !tracked(&pair.to)
-                || extractor.is_test(repo, &pair.from)
-            {
+        // Whether each file it reads is skipped, asked once per file, since `skips` may read the file.
+        let mut skipped: HashMap<String, bool> = HashMap::new();
+        let mut skips = |file: &str| {
+            extractor.reads(file)
+                && *skipped
+                    .entry(file.to_string())
+                    .or_insert_with(|| extractor.skips(repo, file))
+        };
+        let tracked = |f: &str| repo.files.contains(f);
+        for finding in found.unsure {
+            if finding.candidates.is_empty() {
+                problems.push(format!(
+                    "extractor {name:?} found {} unsure of {:?} with no candidates; an Unsure finding names at least one \
+                     candidate file",
+                    finding.file, finding.name
+                ));
                 continue;
             }
-            pairs
-                .entry((pair.from, pair.to))
-                .and_modify(|(lines, declaration)| {
-                    lines.extend(&pair.lines);
-                    *declaration &= pair.declaration;
-                })
-                .or_insert((pair.lines, pair.declaration));
+            if !tracked(&finding.file) || repo.is_ignored(&finding.file) || skips(&finding.file) {
+                continue;
+            }
+            unsure
+                .entry((finding.file, finding.name, finding.reason))
+                .or_default()
+                .extend(finding.candidates);
+        }
+        for (file, group) in found.members {
+            if tracked(&file) && !skips(&file) {
+                members.insert((file, group));
+            }
+        }
+        for pair in found.pairs {
+            if pair.from == pair.to || !tracked(&pair.from) || !tracked(&pair.to) {
+                continue;
+            }
+            if skips(&pair.from) {
+                continue;
+            }
+            match pairs.entry((pair.from.clone(), pair.to.clone())) {
+                Entry::Vacant(entry) => {
+                    entry.insert(pair);
+                }
+                Entry::Occupied(mut entry) => {
+                    let kept = entry.get_mut();
+                    kept.lines.extend(&pair.lines);
+                    kept.declaration &= pair.declaration;
+                    // `Option`'s order puts none first, so none is the lowest group.
+                    kept.group = kept.group.take().min(pair.group);
+                    kept.from_group = kept.from_group.take().min(pair.from_group);
+                }
+            }
         }
     }
     Output {
         problems,
-        pairs: pairs
+        pairs: pairs.into_values().collect(),
+        unsure: unsure
             .into_iter()
-            .map(|((from, to), (lines, declaration))| Pair {
-                from,
-                to,
-                lines,
-                declaration,
+            .map(|((file, name, reason), candidates)| Unsure {
+                file,
+                name,
+                reason,
+                candidates: candidates.into_iter().collect(),
             })
             .collect(),
+        members,
     }
 }
 
-/// The parts one of the named extractors reads: those that own a file it reads that is no test file.
+/// The parts one of the named extractors reads: those that own a file it reads and does not skip.
 pub(crate) fn read_parts<'p>(
     registry: &[&dyn Extractor],
     names: &[String],
@@ -246,11 +322,9 @@ pub(crate) fn read_parts<'p>(
     parts
         .iter()
         .filter(|part| {
-            part.files.iter().any(|file| {
-                named
-                    .iter()
-                    .any(|e| e.reads(file) && !e.is_test(repo, file))
-            })
+            part.files
+                .iter()
+                .any(|file| named.iter().any(|e| e.reads(file) && !e.skips(repo, file)))
         })
         .map(|part| part.id.as_str())
         .collect()

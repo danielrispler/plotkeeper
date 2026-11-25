@@ -3,6 +3,7 @@
 mod binary;
 mod common;
 mod edges;
+mod go;
 mod imports;
 mod laws;
 mod map_file;

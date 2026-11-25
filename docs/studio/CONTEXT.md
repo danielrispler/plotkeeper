@@ -370,7 +370,7 @@ What joins a link's ends: `import`, a code dependency the extractors can prove, 
 A part at least one of whose files a named extractor reads. The link check compares links with computed edges only between read parts.
 
 **Proven import link**:
-An `import` link between two read parts, which a computed edge runs its way. An **unproven** one has an end that is not a read part, such as a part in a language no extractor reads, and passes the check, counted apart.
+An `import` link between two read parts, which a computed edge runs its way. An **unproven** one has an end that is not a read part, such as a part in a language no extractor reads, or runs from a part that owns an **Unsure file** to a part that owns one of its candidates, and passes the check, counted apart.
 
 **Computed edge**:
 A dependency between two parts that an extractor read from the code. It is a hint, never drawn; the links are what the map shows.
@@ -378,6 +378,9 @@ A dependency between two parts that an extractor read from the code. It is a hin
 **Extractor**:
 A reader of one language's code, or of one kind of build manifest, that tells the map which tracked file depends on which. A map names the ones it uses in `extractors`, such as `rust-modules` or `typescript-imports`.
 _Avoid_: Adapter (an **Agent adapter**)
+
+**Unsure file**:
+A file an extractor reads but cannot resolve with certainty: an import in it could name more than one target.
 
 **Flow**:
 A named path of behaviour across the system, as ordered hops along links, each with one plain sentence.

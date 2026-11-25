@@ -3,6 +3,7 @@
 //! `system-map imports [--json] [--root <dir>]` counts the imports inside and across parts.
 
 use std::{
+    io::Write,
     path::{Path, PathBuf},
     process::ExitCode,
     time::Duration,
@@ -57,28 +58,48 @@ fn run() -> Result<ExitCode, String> {
         Some(commit) => system_map::check_at(&root, commit),
         None => system_map::check(&root),
     };
-    // On standard error, so standard output keeps exactly the problems and the pass line, and never a failure.
-    for name in &report.suggested {
-        eprintln!("note: {name} could read this repository; add it to extractors");
-    }
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
-        );
-    } else {
-        for problem in &report.problems {
-            println!("{problem}");
-        }
-        if report.problems.is_empty() {
-            println!("{}", pass_line(&report.counts));
-        }
-    }
+    print_check(
+        &report,
+        json,
+        &mut std::io::stdout(),
+        &mut std::io::stderr(),
+    )
+    .map_err(|e| e.to_string())?;
     Ok(if report.problems.is_empty() {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
     })
+}
+
+/// Prints what `check` found: its notes on `err`, so `out` keeps exactly the problems and the pass line, or the JSON, and
+/// never a failure.
+fn print_check(
+    report: &system_map::Report,
+    json: bool,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> std::io::Result<()> {
+    for name in &report.suggested {
+        writeln!(
+            err,
+            "note: {name} could read this repository; add it to extractors"
+        )?;
+    }
+    for note in report.unsure_notes() {
+        writeln!(err, "note: {note}")?;
+    }
+    if json {
+        writeln!(out, "{}", serde_json::to_string_pretty(report)?)?;
+    } else {
+        for problem in &report.problems {
+            writeln!(out, "{problem}")?;
+        }
+        if report.problems.is_empty() {
+            writeln!(out, "{}", pass_line(&report.counts))?;
+        }
+    }
+    Ok(())
 }
 
 /// The one line a pass prints, such as `ok: 7 parts own 581 files (212 ignored); 18 links: 9 import (9 proven, 0 unproven),
@@ -179,8 +200,8 @@ fn run_imports(root: &Path, json: bool) -> Result<ExitCode, String> {
     }
     for hub in &found.hubs {
         println!(
-            "  {} ({}): degree {}, {} in, {} out",
-            hub.file, hub.part, hub.degree, hub.fan_in, hub.fan_out
+            "  {}: degree {}, {} in, {} out",
+            hub.label, hub.degree, hub.fan_in, hub.fan_out
         );
     }
     println!("inside:");
@@ -232,4 +253,70 @@ fn git_top_level() -> Result<PathBuf, String> {
     Ok(PathBuf::from(
         String::from_utf8_lossy(&output.stdout).trim_end(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use system_map::{PartFiles, Report, Unsure};
+
+    use super::print_check;
+
+    /// A report whose part `p` owns `a.x`, unsure of `example.com/x` with candidates in `p`, `q` and `r`.
+    fn unsure_report() -> Report {
+        let part = |id: &str, files: &[&str]| PartFiles {
+            id: id.into(),
+            files: files.iter().map(ToString::to_string).collect(),
+        };
+        Report {
+            parts: vec![
+                part("p", &["a.x", "a2.x"]),
+                part("q", &["b.x"]),
+                part("r", &["c.x"]),
+            ],
+            problems: vec!["a problem".into()],
+            unsure: vec![Unsure {
+                file: "a.x".into(),
+                name: "example.com/x".into(),
+                reason: "declared twice".into(),
+                candidates: vec!["a2.x".into(), "b.x".into(), "c.x".into()],
+            }],
+            ..Report::default()
+        }
+    }
+
+    /// What `print_check` writes to standard output and to standard error.
+    fn printed(report: &Report, json: bool) -> (String, String) {
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        print_check(report, json, &mut out, &mut err).unwrap();
+        (
+            String::from_utf8(out).unwrap(),
+            String::from_utf8(err).unwrap(),
+        )
+    }
+
+    #[test]
+    fn an_unsure_file_is_noted_on_standard_error_and_not_standard_output() {
+        let (out, err) = printed(&unsure_report(), false);
+        assert_eq!(
+            err,
+            "note: a.x is unsure of example.com/x; its links to q, r pass as unproven\n"
+        );
+        assert_eq!(out, "a problem\n");
+    }
+
+    #[test]
+    fn json_lists_the_unsure_files_with_their_candidates() {
+        let (out, err) = printed(&unsure_report(), true);
+        let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            value["unsure"],
+            serde_json::json!([{
+                "file": "a.x",
+                "name": "example.com/x",
+                "reason": "declared twice",
+                "candidates": ["a2.x", "b.x", "c.x"]
+            }])
+        );
+        assert!(err.contains("note: a.x is unsure of"), "{err}");
+    }
 }

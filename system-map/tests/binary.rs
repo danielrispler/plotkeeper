@@ -165,3 +165,14 @@ fn json_lists_the_suggested_extractors() {
         serde_json::json!(["rust-modules", "typescript-imports"])
     );
 }
+
+#[test]
+fn json_leaves_out_unsure_when_no_file_is_unsure() {
+    let mut map = base();
+    map["extractors"] = serde_json::json!(["rust-modules"]);
+    let (_dir, root) = project(&map, &FILES);
+    let out = run(&root, &["--json"]);
+    let value: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(value.get("problems").is_some(), "{value}");
+    assert_eq!(value.get("unsure"), None, "{value}");
+}

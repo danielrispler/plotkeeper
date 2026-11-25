@@ -191,6 +191,14 @@ fn json_prints_the_same_numbers() {
 }
 
 #[test]
+fn json_leaves_out_unsure_when_no_file_is_unsure() {
+    let (_dir, root) = hub_repo();
+    let found: Value = serde_json::from_slice(&run(&root, &["--json"]).stdout).unwrap();
+    assert!(found.get("problems").is_some(), "{found}");
+    assert_eq!(found.get("unsure"), None, "{found}");
+}
+
+#[test]
 fn no_imports_still_exit_zero() {
     let (_dir, root) = repo(&map(&[], &["alpha/"], &["beta/"]), &[("alpha/a.ts", "")]);
     let out = run(&root, &[]);
