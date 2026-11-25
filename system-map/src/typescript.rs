@@ -24,10 +24,16 @@ enum Tok {
     Sym(char),
 }
 
-/// Whether a `/` after `prev` starts a regular expression rather than a division.
-fn regex_may_follow(prev: Option<&Tok>) -> bool {
-    match prev {
+/// Whether a `/` after `tokens` starts a regular expression rather than a division.
+fn regex_may_follow(tokens: &[Tok]) -> bool {
+    match tokens.last() {
         None => true,
+        // `i++ / 2`, `i-- / 2`.
+        Some(Tok::Sym(c @ ('+' | '-')))
+            if tokens.len() > 1 && tokens[tokens.len() - 2] == Tok::Sym(*c) =>
+        {
+            false
+        }
         Some(Tok::Sym(c)) => !matches!(c, ')' | ']' | '}'),
         Some(Tok::Str(_)) => false,
         Some(Tok::Ident(word)) => matches!(
@@ -77,7 +83,7 @@ fn tokens(text: &str) -> Vec<Tok> {
                 i += 1;
             }
             i += 2;
-        } else if c == '/' && regex_may_follow(tokens.last()) {
+        } else if c == '/' && regex_may_follow(&tokens) {
             i = skip_regex(&chars, i + 1);
         } else if c == '"' || c == '\'' {
             let (end, body) = string(&chars, i + 1, c);
@@ -244,7 +250,9 @@ fn bindings(tokens: &[Tok], mut i: usize) -> (Vec<(Origin, String)>, usize) {
     let mut braced = false;
     loop {
         let alias = |at: usize| match (tokens.get(at), tokens.get(at + 1)) {
-            (Some(Tok::Ident(word)), Some(Tok::Ident(name))) if word == "as" => Some(name.clone()),
+            (Some(Tok::Ident(word)), Some(Tok::Ident(name) | Tok::Str(name))) if word == "as" => {
+                Some(name.clone())
+            }
             _ => None,
         };
         match tokens.get(i) {
@@ -264,6 +272,17 @@ fn bindings(tokens: &[Tok], mut i: usize) -> (Vec<(Origin, String)>, usize) {
             {
                 i += 1;
             }
+            // A name written as a string, `{ "a-b" as c }`, is braced.
+            Some(Tok::Str(word)) if braced => match alias(i + 1) {
+                Some(name) => {
+                    names.push((Origin::Name(word.clone()), name));
+                    i += 3;
+                }
+                None => {
+                    names.push((Origin::Name(word.clone()), word.clone()));
+                    i += 1;
+                }
+            },
             Some(Tok::Ident(word)) => {
                 let origin = Origin::Name(if braced {
                     word.clone()
@@ -291,12 +310,13 @@ fn bindings(tokens: &[Tok], mut i: usize) -> (Vec<(Origin, String)>, usize) {
                     i += 1;
                 }
             },
-            Some(Tok::Sym(c @ ('{' | '}' | ','))) => {
-                braced = match c {
-                    '{' => true,
-                    '}' => false,
-                    _ => braced,
-                };
+            // A clause's braces come last, so its `}` ends it: without semicolons, the next statement follows.
+            Some(Tok::Sym('}')) => {
+                i += 1;
+                break;
+            }
+            Some(Tok::Sym(c @ ('{' | ','))) => {
+                braced |= *c == '{';
                 i += 1;
             }
             _ => break,
@@ -358,8 +378,25 @@ fn barrel(tokens: &[Tok]) -> Option<Barrel<&str>> {
                             .push((clause.spec, origin));
                     }
                     i = clause.end;
+                } else if is_word(tokens.get(i + 1), "default") {
+                    // `export default A`, an imported binding exported as the default, and nothing after it.
+                    let Some(Tok::Ident(inner)) = tokens.get(i + 2) else {
+                        return None;
+                    };
+                    match tokens.get(i + 3) {
+                        None | Some(Tok::Sym(';')) => {}
+                        Some(Tok::Ident(word)) if word == "export" || word == "import" => {}
+                        _ => return None,
+                    }
+                    local.push((inner.clone(), "default".to_string()));
+                    i += 3;
                 } else {
-                    if tokens.get(i + 1) != Some(&Tok::Sym('{')) {
+                    let brace = if is_word(tokens.get(i + 1), "type") {
+                        i + 2
+                    } else {
+                        i + 1
+                    };
+                    if tokens.get(brace) != Some(&Tok::Sym('{')) {
                         return None;
                     }
                     let (names, end) = bindings(tokens, i + 1);
@@ -375,9 +412,15 @@ fn barrel(tokens: &[Tok]) -> Option<Barrel<&str>> {
             _ => return None,
         }
     }
+    let mut used = BTreeSet::new();
     for (inner, name) in local {
         let source = imported.get(&inner)?.clone();
         found.named.entry(name).or_default().push(source);
+        used.insert(inner);
+    }
+    // An import no re-export uses is there for code of its own, or for its side effects.
+    if imported.keys().any(|name| !used.contains(name)) {
+        return None;
     }
     (!found.named.is_empty() || !found.stars.is_empty()).then_some(found)
 }
@@ -425,11 +468,13 @@ fn workspace_packages(
     root: &Path,
     tracked: &BTreeSet<&str>,
 ) -> (BTreeMap<String, String>, Vec<String>) {
+    // A UTF-8 byte order mark, which some editors write, is not JSON.
     let read = |file: &str| {
         tracked
             .contains(file)
             .then(|| crate::read_tracked(root, file))
             .flatten()
+            .map(|text| text.trim_start_matches('\u{feff}').to_string())
     };
     let mut globs: Vec<String> = Vec::new();
     if let Some(json) =
@@ -489,8 +534,10 @@ fn workspace_packages(
     (packages, problems)
 }
 
-/// The patterns of `pnpm-workspace.yaml`'s `packages` list, written one per `- ` line.
+/// The patterns of `pnpm-workspace.yaml`'s `packages` list, written one per `- ` line or on one line as
+/// `packages: ['a/*', 'b']`.
 fn pnpm_packages(yaml: &str) -> Vec<String> {
+    let unquote = |item: &str| item.trim().trim_matches(['"', '\'']).to_string();
     let mut globs = Vec::new();
     let mut inside = false;
     for line in yaml.lines() {
@@ -500,8 +547,15 @@ fn pnpm_packages(yaml: &str) -> Vec<String> {
         }
         if !text.starts_with([' ', '-']) {
             inside = text.trim() == "packages:";
+            let flow = text
+                .strip_prefix("packages:")
+                .map(str::trim)
+                .and_then(|rest| rest.strip_prefix('[')?.strip_suffix(']'));
+            if let Some(list) = flow {
+                globs.extend(list.split(',').map(unquote).filter(|g| !g.is_empty()));
+            }
         } else if inside && let Some(item) = text.trim_start().strip_prefix("- ") {
-            globs.push(item.trim().trim_matches(['"', '\'']).to_string());
+            globs.push(unquote(item));
         }
     }
     globs
@@ -520,27 +574,44 @@ fn package_name(spec: &str) -> Option<&str> {
     Some(&spec[..end])
 }
 
-/// The files a binding with `origin` reaches through the file `at`: `at` itself unless it is a pure barrel, else the files
-/// the re-exports that bring in what it takes reach in turn. `seen` holds the barrels and origins already followed, so a
-/// cycle of barrels ends.
+/// The folder of the declared workspace package a file lies in, if any: the deepest one that holds it.
+fn package_of<'a>(folders: &'a [String], file: &str) -> Option<&'a str> {
+    folders
+        .iter()
+        .filter(|folder| file.starts_with(&format!("{folder}/")))
+        .max_by_key(|folder| folder.len())
+        .map(String::as_str)
+}
+
+/// The files a binding with `origin` reaches through the file `at`, which `from` imports: `at` itself unless it is a pure
+/// barrel in `from`'s own workspace package (or outside every package, as `from` is), else the files the re-exports that
+/// bring in what it takes reach in turn. `seen` holds the barrels and origins already followed, so a cycle of barrels
+/// ends.
 fn follow<'a>(
     barrels: &'a BTreeMap<String, Barrel<String>>,
+    folders: &[String],
+    from: &str,
     at: &'a str,
     origin: &Origin,
     seen: &mut BTreeSet<(&'a str, Origin)>,
     out: &mut BTreeSet<String>,
 ) {
-    if !seen.insert((at, origin.clone())) {
-        return;
-    }
-    let Some(barrel) = barrels.get(at) else {
+    let barrel = barrels
+        .get(at)
+        .filter(|_| package_of(folders, at) == package_of(folders, from));
+    let Some(barrel) = barrel else {
         out.insert(at.to_string());
         return;
     };
+    if !seen.insert((at, origin.clone())) {
+        return;
+    }
     let mut next: Vec<(&'a String, Origin)> = Vec::new();
     match origin {
         Origin::Name(name) => match barrel.named.get(name) {
             Some(sources) => next.extend(sources.iter().map(|(target, o)| (target, o.clone()))),
+            // `export *` never carries `default`.
+            None if name == "default" => {}
             // An over-count: every `export *` target, as the name's real source is not read.
             None => next.extend(barrel.stars.iter().map(|target| (target, origin.clone()))),
         },
@@ -556,7 +627,7 @@ fn follow<'a>(
         }
     }
     for (target, origin) in next {
-        follow(barrels, target, &origin, seen, out);
+        follow(barrels, folders, at, target, &origin, seen, out);
     }
 }
 
@@ -603,13 +674,19 @@ pub(crate) fn typescript_imports(
             barrels.insert(file.to_string(), resolved);
         }
     }
+    let folders: Vec<String> = packages
+        .values()
+        .filter_map(|manifest| manifest.strip_suffix("/package.json"))
+        .map(str::to_string)
+        .collect();
     let mut pairs = Vec::new();
     for (file, targets) in imports {
         let mut ends = BTreeSet::new();
         for (target, origins) in targets {
             ends.insert(target.clone());
             for origin in &origins {
-                follow(&barrels, &target, origin, &mut BTreeSet::new(), &mut ends);
+                let seen = &mut BTreeSet::new();
+                follow(&barrels, &folders, &file, &target, origin, seen, &mut ends);
             }
         }
         ends.remove(&file);

@@ -1384,7 +1384,7 @@ fn a_file_with_code_of_its_own_beside_its_re_exports_is_not_followed() {
     for code in [
         "export const version = 1;\n",
         "import '../three/side';\n",
-        "export default A;\n",
+        "export default function f() {}\n",
     ] {
         let text = format!("import {{ A }} from '../one/a';\nexport {{ A }};\n{code}");
         let found = barrel_edges(&[
@@ -1432,6 +1432,138 @@ fn an_import_of_a_workspace_package_is_not_followed_past_its_package_json() {
         (
             "entry/contract/package.json",
             "{ \"name\": \"@chery/contract\", \"main\": \"src/index.ts\" }",
+        ),
+        (
+            "entry/contract/src/index.ts",
+            "export { A } from '../../../one/a';\n",
+        ),
+        ("one/a.ts", "export const A = 1;\n"),
+    ]);
+    assert_eq!(found, ["app>entry", "entry>one"]);
+}
+
+#[test]
+fn a_braced_clause_ends_at_its_brace_without_semicolons() {
+    let found = barrel_edges(&[
+        ("app/x.ts", "import { A } from '../entry'\n"),
+        (
+            "entry/index.ts",
+            "import { A } from '../one/a'\nexport { A }\nexport * from '../two/x'\n",
+        ),
+        ("one/a.ts", "export const A = 1\n"),
+        ("two/x.ts", "export const X = 2\n"),
+    ]);
+    assert_eq!(found, ["app>entry", "app>one", "entry>one", "entry>two"]);
+
+    let found = barrel_edges(&[
+        ("app/x.ts", "import { B } from '../entry'\n"),
+        (
+            "entry/index.ts",
+            "import {A} from '../one/a'\nimport {B} from '../two/b'\nexport { A }\nexport { B }\n",
+        ),
+        ("one/a.ts", "export const A = 1\n"),
+        ("two/b.ts", "export const B = 2\n"),
+    ]);
+    assert_eq!(found, ["app>entry", "app>two", "entry>one", "entry>two"]);
+}
+
+#[test]
+fn an_imported_type_or_default_exported_again_is_a_barrel_that_is_followed() {
+    for (import, barrel) in [
+        (
+            "import type { A } from '../entry';\n",
+            "import type { A } from '../one/a';\nexport type { A };\n",
+        ),
+        (
+            "import A from '../entry';\n",
+            "import A from '../one/a';\nexport default A;\n",
+        ),
+    ] {
+        let found = barrel_edges(&[
+            ("app/x.ts", import),
+            ("entry/index.ts", barrel),
+            ("one/a.ts", "export default 1;\n"),
+        ]);
+        assert_eq!(found, ["app>entry", "app>one", "entry>one"], "{barrel}");
+    }
+}
+
+#[test]
+fn a_file_with_an_import_no_re_export_uses_is_not_followed() {
+    let found = barrel_edges(&[
+        ("app/x.ts", "import { A } from '../entry';\n"),
+        (
+            "entry/index.ts",
+            "import { B } from '../two/b';\nexport { A } from '../one/a';\n",
+        ),
+        ("one/a.ts", "export const A = 1;\n"),
+        ("two/b.ts", "export const B = 2;\n"),
+    ]);
+    assert_eq!(found, ["app>entry", "entry>one", "entry>two"]);
+}
+
+#[test]
+fn a_default_import_is_not_followed_through_export_star() {
+    let found = barrel_edges(&[
+        ("app/x.ts", "import A from '../entry';\n"),
+        ("entry/index.ts", "export * from '../one/a';\n"),
+        ("one/a.ts", "export default 1;\n"),
+    ]);
+    assert_eq!(found, ["app>entry", "entry>one"]);
+}
+
+#[test]
+fn a_slash_after_an_increment_or_decrement_is_a_division() {
+    for text in [
+        "let i = 0;\ni++ / 2; import a from '../beta/b.ts';\n",
+        "let i = 0;\ni-- / 2; import a from '../beta/b.ts';\n",
+    ] {
+        let found = ts_edges(&[("alpha/a.ts", text), ("beta/b.ts", "")]);
+        assert_eq!(found, ["alpha>beta"], "{text}");
+    }
+}
+
+#[test]
+fn a_binding_named_by_a_string_keeps_its_edge() {
+    for text in [
+        "import { \"a-b\" as c } from '../beta/b.ts';\n",
+        "export { x as \"y\" } from '../beta/b.ts';\n",
+    ] {
+        let found = ts_edges(&[("alpha/a.ts", text), ("beta/b.ts", "")]);
+        assert_eq!(found, ["alpha>beta"], "{text}");
+    }
+}
+
+#[test]
+fn a_pnpm_flow_list_and_a_package_json_with_a_bom_declare_the_workspace() {
+    for (config, text) in [
+        ("pnpm-workspace.yaml", "packages: ['beta/*']\n"),
+        (
+            "pnpm-workspace.yaml",
+            "packages: [\"other/*\", \"beta/*\"]\n",
+        ),
+        ("package.json", "\u{feff}{ \"workspaces\": [\"beta/*\"] }"),
+    ] {
+        let found = ws_report(&[
+            (config, text),
+            ("alpha/a.ts", "import { x } from '@chery/contract';\n"),
+            (CONTRACT.0, &format!("\u{feff}{}", CONTRACT.1)),
+        ]);
+        assert_eq!(found, (vec!["alpha>beta".to_string()], vec![]), "{text}");
+    }
+}
+
+#[test]
+fn a_barrel_inside_another_workspace_package_is_not_followed() {
+    let found = barrel_edges(&[
+        ("package.json", "{ \"workspaces\": [\"entry/*\"] }"),
+        (
+            "app/x.ts",
+            "import { A } from '../entry/contract/src/index';\n",
+        ),
+        (
+            "entry/contract/package.json",
+            "{ \"name\": \"@chery/contract\" }",
         ),
         (
             "entry/contract/src/index.ts",
