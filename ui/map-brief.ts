@@ -704,8 +704,8 @@ function codeInto(view: MapView, node: HTMLElement, list: BriefStep[], index: nu
   words.append(row);
 }
 
-// Also touched by kind (#492), on the last step of the last chapter: each group its name, counts and laws, its files (the "ignored" tag
-// where `alsoRows` keeps it), and a See the code of only its files.
+// Also touched by kind (#492), on the last step of the last chapter: each group its name and counts, its files, each with the laws its
+// `@law:` tags name and the "ignored" tag where `alsoRows` keeps it, and a See the code of only its files.
 function alsoInto(view: MapView, node: HTMLElement, groups: AlsoRow[]) {
   const words = node.querySelector(".brief-txt");
   if (!playing || catchUp || !groups.length || !words) return;
@@ -729,11 +729,11 @@ function alsoInto(view: MapView, node: HTMLElement, groups: AlsoRow[]) {
       head.append(copyButton("Copy for your agent: assign these files to a part, or ignore them", "Copy a prompt for your agent: assign these files to a part, or ignore them", () => agentPrompt(pr, branchOf(pr), { of: "no-part", files: group.paths })));
     }
     row.append(head);
-    if (group.laws.length) row.append(text("p", `Laws: ${group.laws.join(", ")}`, "brief-quiet brief-also-laws"));
     const files = text("ul", "", "brief-also-files");
     files.setAttribute("role", "list");
     for (const file of group.files) {
       const item = text("li", file.path);
+      if (file.laws.length) item.append(" ", text("span", `@law: ${file.laws.join(", ")}`, "brief-also-law"));
       if (file.ignored) item.append(" ", text("span", "ignored", "brief-tag"));
       files.append(item);
     }

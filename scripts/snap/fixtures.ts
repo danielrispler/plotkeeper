@@ -565,7 +565,7 @@ const mapBriefAlsoGroups = (): Fixture => ({
       const groups = [...document.querySelectorAll("#map-brief .brief-also-group")];
       const names = groups.map((group) => group.querySelector(".brief-also-name").textContent + " " + group.querySelector(".brief-also-counts").textContent);
       if (names.join("|") !== "No part 1 file · 12 lines|Tests 2 files · 46 lines|Config/build 2 files · 21 lines|Docs 1 file · 9 lines|Ignored 1 file · 2 lines|Other 1 file · 1 line") log("snap:fail the groups show " + names.join("|"));
-      if (!groups[1].textContent.includes("wire-types-agree")) log("snap:fail the Tests group does not name its law");
+      if (groups[1].querySelectorAll(".brief-also-files li")[1]?.querySelector(".brief-also-law")?.textContent !== "@law: wire-types-agree") log("snap:fail the Tests group's tagged file does not name its law");
       if (groups[1].querySelectorAll(".brief-tag").length !== 1 || groups[4].querySelector(".brief-tag")) log("snap:fail the ignored tag shows outside tests, config/build and docs, or not in them");
       groups[1].querySelector(".brief-code").click();
       await wait(250);

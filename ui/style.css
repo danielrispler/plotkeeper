@@ -872,6 +872,7 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .brief-also-head .brief-code { margin-inline-start: auto; }
 .brief-also-files { margin: var(--sp-2) 0 0; padding: 0; list-style: none; color: var(--muted); font: var(--size-xs)/1.6 var(--mono); }
 .brief-also-files li { overflow-wrap: anywhere; }
+.brief-also-law { color: var(--fg); }
 
 .brief-step-code { margin-top: var(--sp-5); display: flex; align-items: center; gap: var(--sp-2); }
 /* Copy for the agent (#493): a quiet icon, a 24px target with a 14px glyph, beside a See the code and in the not-confirmed popover. */

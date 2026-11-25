@@ -71,7 +71,7 @@ test("Also touched shows on the last step of the last chapter only: an older bri
   assert.deepEqual(alsoAt(grouped, 0, 0, 2), none);
 });
 
-test("each Also touched group shows its name, file and line counts, its laws and its files, the ignored tag only in tests, config/build and docs", () => {
+test("each Also touched group shows its name, file and line counts and its files, each with its laws, the ignored tag only in tests, config/build and docs", () => {
   // The frozen sample #489 stored (`pr-brief-v8`): no part, tests (one ignored file), ignored, other.
   const stored = JSON.parse(readFileSync("understanding/tests/fixtures/stored/pr-brief-v8/stored-brief-also.json", "utf8"));
   const rows = alsoRows([...stored.brief.also_groups, { kind: "config", files: [{ path: "a.toml", lines: 1, ignored: true }], lines: 1 }, { kind: "docs", files: [], lines: 0 }]);
@@ -82,11 +82,10 @@ test("each Also touched group shows its name, file and line counts, its laws and
     ["Other", "1 file · 5 lines"],
     ["Config/build", "1 file · 1 line"],
   ], "an empty group is not shown");
-  assert.deepEqual(rows[1].laws, ["seen-gate"]);
-  assert.deepEqual(rows[0].laws, []);
-  assert.deepEqual(rows[1].files, [{ path: "beta/tests/order.rs", ignored: false }, { path: "scripts/run.spec.ts", ignored: true }]);
-  assert.deepEqual(rows[2].files, [{ path: "scripts/tool.sh", ignored: false }], "the Ignored group is a plain list");
-  assert.deepEqual(rows[4].files, [{ path: "a.toml", ignored: true }]);
+  // A file holding a `@law:` tag names its law on its own row.
+  assert.deepEqual(rows[1].files, [{ path: "beta/tests/order.rs", ignored: false, laws: ["seen-gate"] }, { path: "scripts/run.spec.ts", ignored: true, laws: [] }]);
+  assert.deepEqual(rows[2].files, [{ path: "scripts/tool.sh", ignored: false, laws: [] }], "the Ignored group is a plain list");
+  assert.deepEqual(rows[4].files, [{ path: "a.toml", ignored: true, laws: [] }]);
   assert.deepEqual(rows[1].paths, ["beta/tests/order.rs", "scripts/run.spec.ts"], "See the code asks for the group's files");
 });
 

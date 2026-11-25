@@ -339,9 +339,9 @@ export function alsoAt(brief: PrBrief, chapter: number, step: number, length: nu
   return chapter === brief.chapters.length - 1 && step === length - 1 ? { lines: brief.also, groups: alsoRows(brief.also_groups ?? []) } : { lines: [], groups: [] };
 }
 
-// One Also touched group as the reader shows it (#492): its name, its counts, the laws its files' tags name, its files with the "ignored"
-// tag (only in the Tests, Config/build and Docs groups; the Ignored group is a plain list), and the paths its See the code asks for.
-export type AlsoRow = { kind: AlsoKind; name: string; counts: string; laws: string[]; files: { path: string; ignored: boolean }[]; paths: string[] };
+// One Also touched group as the reader shows it (#492): its name, its counts, its files, each with the laws its `@law:` tags name and the
+// "ignored" tag (only in the Tests, Config/build and Docs groups; the Ignored group is a plain list), and the paths its See the code asks for.
+export type AlsoRow = { kind: AlsoKind; name: string; counts: string; files: { path: string; ignored: boolean; laws: string[] }[]; paths: string[] };
 const alsoNames: Record<AlsoKind, string> = { "no-part": "No part", tests: "Tests", config: "Config/build", docs: "Docs", ignored: "Ignored", other: "Other" };
 const tagsIgnored: ReadonlySet<AlsoKind> = new Set<AlsoKind>(["tests", "config", "docs"]);
 const many = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -352,8 +352,7 @@ export function alsoRows(groups: AlsoGroup[]): AlsoRow[] {
       kind: group.kind,
       name: alsoNames[group.kind] ?? group.kind,
       counts: `${many(group.files.length, "file")} · ${many(group.lines, "line")}`,
-      laws: [...new Set(group.files.flatMap((file) => file.laws ?? []))].sort(),
-      files: group.files.map((file) => ({ path: file.path, ignored: tagsIgnored.has(group.kind) && file.ignored === true })),
+      files: group.files.map((file) => ({ path: file.path, ignored: tagsIgnored.has(group.kind) && file.ignored === true, laws: file.laws ?? [] })),
       paths: group.files.map((file) => file.path),
     }));
 }
