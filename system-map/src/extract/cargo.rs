@@ -172,12 +172,14 @@ fn cargo(repo: &Repo) -> Result<Vec<Pair>, String> {
 /// quoted) in a table of normal or build dependencies, or the header `[dependencies.key]`; none when no line does, as
 /// for a top-level inline table.
 fn key_line(manifest: &str, key: &str) -> Option<u32> {
-    // `dependencies`, `build-dependencies` and a target's, never `dev-dependencies`.
+    // `dependencies`, `build-dependencies` and a target's, never `dev-dependencies` or the workspace's
+    // `[workspace.dependencies]`, which a root manifest that is also a package holds beside its own.
     let is_deps = |table: &str| {
         let table = table.trim();
-        ["dependencies", "build-dependencies"]
-            .iter()
-            .any(|name| table == *name || table.ends_with(&format!(".{name}")))
+        table != "workspace.dependencies"
+            && ["dependencies", "build-dependencies"]
+                .iter()
+                .any(|name| table == *name || table.ends_with(&format!(".{name}")))
     };
     let is_key = |word: &str| word.trim().trim_matches(['"', '\'']) == key;
     let mut in_deps = false;

@@ -14,7 +14,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 use studio_understanding::pr_brief::{
-    BriefStore, BriefWriter, PrSource, StoredBrief, build_facts, fetch_meta, gather, write_pr_brief,
+    BriefStore, BriefWriter, LinkEvidence, PrSource, StoredBrief, build_facts, fetch_meta, gather,
+    write_pr_brief,
 };
 
 /// What the tray row of a ready PR says of its brief.
@@ -143,6 +144,9 @@ pub trait Reading {
     fn carry(&self, pr: u64, from: &str, to: &str) -> Result<(), String>;
     /// What the since story of the push from `from` reads (#497): `full`'s PR, with the diff, map diff and tags from `from` to its head.
     fn since_source(&self, full: &PrSource, from: &str) -> Result<PrSource, String>;
+    /// The link evidence of the PR at `head` (`ratify::link_evidence`, from its merge base with the default branch), for a brief
+    /// carried to `head`; none when the base is unknown.
+    fn link_evidence(&self, head: &str) -> Vec<LinkEvidence>;
 }
 
 /// The server's `Reading`: Daniel's state in `file`, `git` in `project`, and its default branch `reference`.
@@ -187,6 +191,18 @@ impl Reading for GitReading {
         source.earlier_decisions = full.earlier_decisions.clone();
         source.since = Some(from.to_string());
         Ok(source)
+    }
+
+    fn link_evidence(&self, head: &str) -> Vec<LinkEvidence> {
+        let repo = Path::new(&self.project);
+        let Some(base) = self
+            .reference
+            .as_deref()
+            .and_then(|r| crate::map::git(repo, &["merge-base", r, head]).ok())
+        else {
+            return Vec::new();
+        };
+        crate::ratify::link_evidence(repo, base.trim(), head)
     }
 }
 
@@ -363,11 +379,13 @@ fn carried(
         return None;
     }
     let old = with.store.latest(pr).filter(|old| old.head != head)?;
-    // The read moves first: a copy whose read did not move would be a brief to read again.
+    // The read moves first: a copy whose read did not move would be a brief to read again. Its link evidence is read again at
+    // `head`, since a rebase or a quiet push can move an import site or remove its file (#499).
     let copy = StoredBrief {
         head: head.to_string(),
         stale: false,
         written_at: studio_understanding::millis().max(old.written_at + 1),
+        link_evidence: reading.link_evidence(head),
         ..old.clone()
     };
     match reading.carry(pr, &old.head, head).and_then(|()| {
@@ -1339,7 +1357,7 @@ pub fn brief_chapter_done(
 mod tests {
     use super::*;
     use std::cell::{Cell, RefCell};
-    use studio_understanding::pr_brief::{BriefReply, CallUsage, PrMeta};
+    use studio_understanding::pr_brief::{BriefReply, CallUsage, ImportSite, PrMeta};
 
     const MAP: &str = r#"{ "version": 1,
       "parts": [{ "id": "alpha", "name": "Alpha", "caption": "c", "description": "d", "tier": "core", "paths": ["alpha/"] }],
@@ -2502,6 +2520,71 @@ mod tests {
             Some("Rebased onto main, nothing new in the PR")
         );
         assert!(info.read && !info.stale);
+    }
+
+    #[test]
+    fn a_carried_brief_holds_the_link_evidence_of_the_new_head() {
+        let rig = Rig::new();
+        let store = BriefStore::open(rig.store_dir.path()).unwrap();
+        let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+        let reading = rig.reading();
+        let with = Writing {
+            writer: &fake,
+            model: "opus",
+            store: &store,
+            reading: Some(&reading),
+        };
+        let part = |id: &str| {
+            serde_json::json!({ "id": id, "name": id, "caption": "c", "purpose": "p", "holds": [], "tier": "core",
+                                "paths": [format!("{id}/")] })
+        };
+        let map = serde_json::json!({
+            "version": 2, "extractors": ["typescript-imports"],
+            "parts": [part("alpha"), part("beta")], "actors": [],
+            "links": [{ "id": "alpha-beta", "from": "alpha", "to": "beta", "kind": "import" }],
+            "ignored": ["system-map.json", "docs/"], "laws": [], "flows": []
+        })
+        .to_string();
+        // The PR adds the link and its one import.
+        let h1 = rig.repo.commit(&[
+            ("system-map.json", &map),
+            ("alpha/a.ts", "import { b } from \"../beta/b\";\n"),
+            ("beta/b.ts", "export const b = 1;\n"),
+        ]);
+        let repo = Path::new(&rig.repo.path);
+        let at = |head: &str| {
+            let mut s = source(head);
+            s.link_evidence = crate::ratify::link_evidence(repo, "main", head);
+            s
+        };
+        assert_eq!(
+            on_lookup(&with, &seen, 7, &h1, || Ok(at(&h1)), |_| {}),
+            Did::Wrote
+        );
+        let lit = lit_parts(&store.get(7, &h1).unwrap().brief);
+        crate::fog::mark_read(&reading.file, &rig.repo.path, 7, 0, &h1, lit, 1).unwrap();
+        // Main gains a second import of beta, and the PR is rebased onto it: the read carries over.
+        rig.repo.git(&["checkout", "-q", "main"]);
+        rig.repo
+            .commit(&[("alpha/z.ts", "// z\nimport { b } from \"../beta/b\";\n")]);
+        rig.repo.git(&["checkout", "-q", "pr"]);
+        rig.repo.git(&["rebase", "-q", "main"]);
+        let h2 = rig.repo.head();
+        assert_eq!(
+            on_lookup(&with, &seen, 7, &h2, || Ok(at(&h2)), |_| {}),
+            Did::Carried
+        );
+        let site = |file: &str, line: u32| ImportSite {
+            file: file.into(),
+            line: Some(line),
+        };
+        assert_eq!(
+            store.get(7, &h2).unwrap().link_evidence,
+            [LinkEvidence {
+                link: "alpha-beta".into(),
+                sites: vec![site("alpha/a.ts", 1), site("alpha/z.ts", 2)],
+            }]
+        );
     }
 
     #[test]

@@ -98,7 +98,10 @@ fn a_pair_two_extractors_find_is_kept_once_with_the_lines_of_both() {
         ..Pair::new(from, to)
     };
     let one = Fake {
-        pairs: vec![at("b.x", "c.x", &[], false), at("a.x", "b.x", &[7], true)],
+        pairs: vec![
+            at("b.x", "c.x", &[], false),
+            at("a.x", "b.x", &[5, 7], true),
+        ],
         ..fake("one", &[])
     };
     let two = Fake {
@@ -112,7 +115,7 @@ fn a_pair_two_extractors_find_is_kept_once_with_the_lines_of_both() {
     assert_eq!(
         out.pairs,
         [
-            at("a.x", "b.x", &[3, 7], false),
+            at("a.x", "b.x", &[3, 5, 7], false),
             at("b.x", "c.x", &[], false)
         ]
     );

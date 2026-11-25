@@ -1798,6 +1798,48 @@ fn a_cargo_site_is_the_line_of_the_dependency_s_key_when_a_text_search_finds_it(
     }
 }
 
+#[test]
+fn a_cargo_site_in_a_root_manifest_is_the_package_s_dependency_never_the_workspace_s() {
+    let workspace = "[workspace]\nresolver = \"2\"\nmembers = [\"beta\"]\n\n";
+    let package = "[package]\nname = \"alpha\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n";
+    for (text, site) in [
+        (
+            format!(
+                "{workspace}[workspace.dependencies]\nbeta = {{ path = \"beta\" }}\n\n{package}\
+                 [dependencies]\nbeta = {{ workspace = true }}\n"
+            ),
+            "alpha>beta Cargo.toml:14",
+        ),
+        (
+            format!(
+                "{workspace}[workspace.dependencies.beta]\npath = \"beta\"\n\n{package}\
+                 [dependencies]\nbeta = {{ workspace = true }}\n"
+            ),
+            "alpha>beta Cargo.toml:14",
+        ),
+        // A target's table still counts.
+        (
+            format!(
+                "{workspace}[workspace.dependencies]\nbeta = {{ path = \"beta\" }}\n\n{package}\
+                 [target.'cfg(unix)'.dependencies]\nbeta = {{ workspace = true }}\n"
+            ),
+            "alpha>beta Cargo.toml:14",
+        ),
+    ] {
+        let mut map = map(&["cargo"], json!([]));
+        map["parts"][0]["paths"] = json!(["Cargo.toml", "src/"]);
+        map["ignored"] = json!(["docs/", "system-map.json"]);
+        let (dir, root) = project_text(&map.to_string(), &["docs/d.md"]);
+        write(dir.path(), "Cargo.toml", &text);
+        write(dir.path(), "src/lib.rs", "");
+        write(dir.path(), "beta/Cargo.toml", &manifest("beta", "", ""));
+        write(dir.path(), "beta/src/lib.rs", "");
+        studio_test_support::git(dir.path(), &["add", "-A"]);
+        studio_test_support::git(dir.path(), &["commit", "-q", "-m", "Workspace"]);
+        assert_eq!(sites(&root, &[]), [site], "{text}");
+    }
+}
+
 /// A repository whose map names all three extractors over a cargo workspace, Rust paths, TypeScript imports, a barrel
 /// and a law tag, with the map's links left out so that every edge prints as a problem too.
 fn every_extractor() -> (tempfile::TempDir, String) {
