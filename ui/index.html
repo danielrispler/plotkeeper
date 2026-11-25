@@ -76,12 +76,14 @@
         <section id="view" hidden>
           <!-- While running: what Daniel asked. At your turn it is in the newest turn's block (danielrispler/plotkeeper#116). -->
           <section id="now-asked"></section>
-          <!-- The intention, boxed as the anchor (mockup C), and the step line (danielrispler/Falinks#472). -->
+          <!-- The intention, boxed as the anchor (mockup C), the step line (danielrispler/Falinks#472) and a Wait tip (#523). -->
           <div id="intention" class="intention">
             <p id="intention-label" class="label" hidden>Why it asks</p>
             <p><span id="intention-text"></span> <span id="intention-age" class="age"></span></p>
             <details id="unavailable" class="unavailable" hidden><summary title="Why only the steps are shown">Steps only</summary><span id="unavailable-why"></span></details>
             <details id="step" class="step"><summary id="step-line" title="The step the agent is on"><span id="tool" class="tool-name"></span> <span id="detail"></span></summary><code id="command"></code></details>
+            <!-- A Wait tip (#523): while the session runs, one muted line under the step teaches one feature. -->
+            <p id="tip" class="tip" hidden></p>
           </div>
           <!-- The feed of turns, newest first, the first being "now" at your turn: each with its prompt, Headline, cards,
                subagents (danielrispler/Falinks#535), checks and folded response. -->

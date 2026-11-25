@@ -13,6 +13,7 @@ The page has no terminal (danielrispler/plotkeeper#326) and no project list to e
   "setup": { "/path/to/app": "npm ci" },         // per project folder, one command a background run runs in its working folder before its agent starts; default: none
   "backgroundRuns": { "harness": "claude", "model": "sonnet" }, // the agent program of a background run (only "claude") and its model; default model: the CLI's own
   "explanations": true, // the dense panels' one-line explanations under each section (spec #520); default: true. The `?` beside the part sheet's ×, or the palette's `studio::ToggleExplanations`, writes it
+  "tips": true, // a Wait tip at the foot of a running session's Intention box (#523, see the rail's doc); false turns them off; default: true
   "microWorlds": { "dshVisual": "~/work/dsh-skills/skills/dsh-visual/scripts" } // the folder holding dsh-visual's build.py and verify.mjs (with `npm install` run in it), which check a micro-world's page; unset: "Explore this" only copies a prompt
 }
 ```

@@ -111,3 +111,11 @@ test("explanations are on by default, read from the file, and a wrong type is re
   assert.equal(wrong.settings.explanations, true);
   assert.deepEqual(wrong.errors, ["settings.json: explanations: expected a boolean"]);
 });
+
+test("tips are on by default, `\"tips\": false` turns them off, and a wrong type is reported (#523)", () => {
+  assert.equal(reload(initial, { settings: null, keymap: null }).settings.tips, true);
+  assert.equal(reload(initial, { settings: `{ "tips": false }`, keymap: null }).settings.tips, false);
+  const wrong = reload(initial, { settings: `{ "tips": "no" }`, keymap: null });
+  assert.equal(wrong.settings.tips, true);
+  assert.deepEqual(wrong.errors, ["settings.json: tips: expected a boolean"]);
+});
