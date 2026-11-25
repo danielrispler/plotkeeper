@@ -5,6 +5,7 @@
 
 mod edges;
 mod laws;
+mod parts;
 mod pattern;
 mod touched;
 
@@ -17,6 +18,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 pub use laws::{LawReport, LawTest, Tag, law_tests, tag_id, test_name_after};
+pub use parts::{convert, part_text};
 use pattern::Pattern;
 pub use touched::{Touched, touched, touched_for_map};
 
@@ -73,7 +75,8 @@ struct Part {
     id: String,
     name: String,
     caption: String,
-    description: String,
+    purpose: String,
+    holds: Vec<parts::Held>,
     tier: Tier,
     paths: Vec<String>,
     zone: Option<String>,
@@ -156,6 +159,7 @@ fn check_with(root: &Path, files: Result<Vec<String>, String>) -> Report {
         Ok(files) => {
             let (parts, problems) = ownership(&map, &files);
             report.problems.extend(problems);
+            report.problems.extend(parts::check_paths(&map, &parts));
             let (laws, problems) = laws::check(root, &map, &files);
             report.laws = laws;
             report.problems.extend(problems);
@@ -194,6 +198,12 @@ fn load(root: &Path) -> Result<Map, String> {
 
 /// Parses map text strictly, as `check` does: an unknown field is an error.
 pub fn parse(text: &str) -> Result<Map, String> {
+    if serde_json::from_str::<serde_json::Value>(text).is_ok_and(|map| map["version"] == 1) {
+        return Err(format!(
+            "{MAP_FILE}: version 1 is not one this checker reads; it reads version 2, so set \"version\" to 2 and give each \
+             part a \"purpose\" and \"holds\" in place of its \"description\""
+        ));
+    }
     serde_json::from_str(text).map_err(|error| {
         let kind = if error.is_syntax() || error.is_eof() {
             "is not valid JSON"
@@ -216,13 +226,7 @@ const MAP_FIELDS: &[&str] = &[
     "flows",
 ];
 const PART_FIELDS: &[&str] = &[
-    "id",
-    "name",
-    "caption",
-    "description",
-    "tier",
-    "paths",
-    "zone",
+    "id", "name", "caption", "purpose", "holds", "tier", "paths", "zone",
 ];
 const ACTOR_FIELDS: &[&str] = &["id", "name"];
 const LINK_FIELDS: &[&str] = &["id", "from", "to"];
@@ -230,15 +234,16 @@ const LAW_FIELDS: &[&str] = &["id", "on", "backing", "text"];
 const FLOW_FIELDS: &[&str] = &["id", "name", "hops"];
 const HOP_FIELDS: &[&str] = &["link", "text"];
 
-/// Parses the text of a historical `system-map.json` read from git: fields this reader does not
-/// know are ignored, so a later schema addition never breaks a walk through old commits. Fails
-/// only when the text is not JSON or lacks a field the map must hold.
+/// Parses the text of a historical `system-map.json` read from git: a version 1 map is converted
+/// first, and fields this reader does not know are ignored, so a later schema addition never
+/// breaks a walk through old commits. Fails only when the text is not JSON or lacks a field the
+/// map must hold.
 pub fn parse_lenient(text: &str) -> Result<Map, String> {
-    let mut value: serde_json::Value = serde_json::from_str(text)
+    let mut value: serde_json::Value = serde_json::from_str(&convert(text)?)
         .map_err(|error| format!("{MAP_FILE}: is not valid JSON: {error}"))?;
     prune(&mut value, MAP_FIELDS);
     for (key, fields, nested) in [
-        ("parts", PART_FIELDS, None),
+        ("parts", PART_FIELDS, Some(("holds", parts::HELD_FIELDS))),
         ("actors", ACTOR_FIELDS, None),
         ("links", LINK_FIELDS, None),
         ("laws", LAW_FIELDS, None),
@@ -252,7 +257,7 @@ pub fn parse_lenient(text: &str) -> Result<Map, String> {
             if let Some((inner, inner_fields)) = nested
                 && let Some(inner) = item.get_mut(inner).and_then(|v| v.as_array_mut())
             {
-                inner.iter_mut().for_each(|hop| prune(hop, inner_fields));
+                inner.iter_mut().for_each(|each| prune(each, inner_fields));
             }
         }
     }
@@ -279,12 +284,13 @@ pub fn is_id(id: &str) -> bool {
 
 fn check_ids_and_references(map: &Map) -> Vec<String> {
     let mut problems = Vec::new();
-    if map.version != 1 {
+    if map.version != 2 {
         problems.push(format!(
-            "{MAP_FILE}: version {} is not one this checker reads; it reads version 1, so set \"version\" to 1",
+            "{MAP_FILE}: version {} is not one this checker reads; it reads version 2, so set \"version\" to 2",
             map.version
         ));
     }
+    problems.extend(parts::check(map));
     let flows = map.flows.as_deref().unwrap_or_default();
     let ids = map
         .parts
