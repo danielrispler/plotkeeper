@@ -40,6 +40,8 @@ pub struct Report {
     pub problems: Vec<String>,
     /// What the check covered, for the line a pass prints.
     pub counts: Counts,
+    /// The registered extractors the map does not name that could read the repository, which `check` notes.
+    pub suggested: Vec<String>,
 }
 
 /// What a check covered: parts, the tracked files they own and the ones ignored, links, and laws
@@ -255,6 +257,11 @@ fn check_with(root: &Path, files: Result<Vec<String>, String>) -> Report {
                 &map.links,
             );
             report.problems.extend(found.problems);
+            report.suggested = extract::registry::EXTRACTORS
+                .iter()
+                .filter(|e| !names.iter().any(|n| n == e.name()) && e.detect(&repo))
+                .map(|e| e.name().to_string())
+                .collect();
             let kinds = |kind: Kind| map.links.iter().filter(|l| l.kind == Some(kind)).count();
             report.counts = Counts {
                 parts: parts.len(),

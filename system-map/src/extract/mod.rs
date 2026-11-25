@@ -30,7 +30,6 @@ pub(crate) trait Extractor {
     }
 
     /// Whether the repository holds a file it would read: a tracked, non-ignored file it reads that is no test file.
-    #[allow(dead_code, reason = "`check`'s note calls it (#534)")]
     fn detect(&self, repo: &Repo) -> bool {
         repo.files()
             .iter()
@@ -78,7 +77,6 @@ impl<'a> Repo<'a> {
         &self.files
     }
 
-    #[allow(dead_code, reason = "`detect` calls it (#534)")]
     pub(crate) fn is_ignored(&self, file: &str) -> bool {
         self.ignored.contains(file)
     }

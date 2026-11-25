@@ -16,6 +16,11 @@ impl Extractor for Cargo {
         file.rsplit('/').next() == Some("Cargo.toml")
     }
 
+    /// A root `Cargo.toml` on disk, the condition `extract` needs, even when the map ignores it (spec #529, "Detection").
+    fn detect(&self, repo: &Repo) -> bool {
+        repo.root().join("Cargo.toml").is_file()
+    }
+
     fn extract(&self, repo: &Repo) -> Output {
         match cargo(repo.root()) {
             Ok(pairs) => Output {
