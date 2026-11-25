@@ -62,6 +62,12 @@ export function arrange(live: Live[], placed: Record<string, string[]>): { byPar
   return { byPart, notPlaced };
 }
 
+// The not placed list's closed line (#472): how many agents no part holds, and how many of them need you, so a needs-you agent stays loud.
+export function notPlacedLine(notPlaced: Live[]): { count: string; needsYou: string | null } {
+  const asking = notPlaced.filter((agent) => agent.needsYou).length;
+  return { count: `${notPlaced.length} not placed`, needsYou: asking ? `${asking} ${asking === 1 ? "needs" : "need"} you` : null };
+}
+
 // The chips a hovered list row lights (#382): every chip of the `hovered` session, its Workers' too; and those of the session `open` in the left
 // panel (#385), which stay lit while it is open. None without either.
 export function litAgents(live: Live[], hovered: string | null, open: string | null = null): string[] {
@@ -111,6 +117,18 @@ const chip = (agent: Live, select: AgentDeps["select"], lit: string[]) => {
   return button;
 };
 
+// The not placed list: a closed <details> whose summary is the line, made at the first paint and kept.
+let kept: { details: HTMLDetailsElement; summary: HTMLElement; chips: HTMLElement } | undefined;
+const notPlacedList = () => {
+  if (kept) return kept;
+  const details = document.createElement("details");
+  const summary = text("summary", "", "side-title");
+  summary.title = "The agents whose turn touched no part yet: click to show or hide them";
+  const chips = text("div", "", "not-placed-chips");
+  details.append(summary, chips);
+  return (kept = { details, summary, chips });
+};
+
 // Puts the chips on the plates and the not placed list in its slot, from what the last refresh found.
 function paint() {
   const view = currentMap();
@@ -121,8 +139,16 @@ function paint() {
   for (const plate of view.slots.canvas.querySelectorAll<HTMLElement>(".plate[data-id]")) {
     plate.querySelector(".plate-chips")?.replaceChildren(...(byPart[plate.dataset.id!] ?? []).map((agent) => chip(agent, deps.select, lit)));
   }
+  // One line that a click opens (#472), so an agent joining or leaving changes its count and not its height. The same element is kept
+  // from paint to paint, so the list stays open, and its line keeps the focus, while agents come and go.
   const slot = view.slots.notPlaced;
-  slot.replaceChildren(...(notPlaced.length ? [text("h3", "Not placed", "side-title"), ...notPlaced.map((agent) => chip(agent, deps.select, lit))] : []));
+  if (notPlaced.length) {
+    const list = notPlacedList();
+    const line = notPlacedLine(notPlaced);
+    list.summary.replaceChildren(text("span", line.count), ...(line.needsYou ? [text("span", ` · ${line.needsYou}`, "not-placed-asking")] : []));
+    list.chips.replaceChildren(...notPlaced.map((agent) => chip(agent, deps.select, lit)));
+    if (list.details.parentElement !== slot) slot.replaceChildren(list.details);
+  } else slot.replaceChildren();
   syncSide(view.slots);
 }
 
