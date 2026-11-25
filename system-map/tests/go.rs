@@ -335,7 +335,7 @@ fn a_path_declared_twice_makes_the_importer_unsure_and_relaxes_only_the_link_to_
 }
 
 #[test]
-fn imports_json_lists_the_unsure_files_and_the_text_prints_their_note() {
+fn imports_json_lists_the_unsure_files_and_the_pass_line_counts_the_relaxed_link_unproven() {
     let (_dir, root) = declared_twice(&[("app", "xa")]);
     let out = run(&root, "imports", &["--json"]);
     let value: Value = serde_json::from_slice(&out.stdout).unwrap();
