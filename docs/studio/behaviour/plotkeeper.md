@@ -28,6 +28,10 @@ At start it applies the writer `settings.json` names (`summaries.writer`, `claud
 
 `PLOTKEEPER_NO_BROWSER=1` leaves the browser closed; the address is printed either way (`plotkeeper: <url>`).
 
+## A panic stops plotkeeper
+
+A panic on any thread (the read loop, a request, a background run's thread, a turn's writing job) stops plotkeeper (#551, spec #548). It prints one error line to stderr, `thread '<name>' panicked at <file>:<line>:<column>: <message>; plotkeeper stops`, and exits with code 101; the operating system frees the lock on `plotkeeper.lock`. It never goes on half-working, with a poisoned lock that fails every later command or a served page whose read loop is gone. Starting it again is safe: the sessions are rebuilt from the event log, the stores write by temp file and rename, and the background runs a start before left are picked up. The hooks are processes of their own and are not stopped by it.
+
 ## What's new after an update
 
 At start the page asks the server for plotkeeper's package version (`about`, #527). The page keeps the last version it showed in `localStorage` (`shown-version`). With none stored, a first install, it stores the current one and shows nothing; with the same version it shows nothing, so a rebuild without a version change stays quiet. With an older one, a downgrade, it stores the current one and shows nothing. With a newer one (X.Y.Z compared as numbers) it shows one toast, "Updated to X.Y.Z" with a "What's new" link to that version's GitHub Release (`https://github.com/danielrispler/plotkeeper/releases/tag/vX.Y.Z`) and a ×, in the toasts' region under the copy toast, not in colour. It stays until its ×. The new version is stored only once the toast has shown while the tab was visible: a page reloaded in a hidden tab stores it at the tab's first visible moment. The changelog's text stays on GitHub; a version published without a Release links to a missing page. A browser that refuses `localStorage` shows nothing and fails nothing.

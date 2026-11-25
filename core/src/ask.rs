@@ -164,8 +164,15 @@ impl Studio {
     }
 
     /// The recorded facts of `anchor` in session `session`: from its ledger, and from the event log at `log` through the
-    /// ledger's offsets. `None` when the session or the thing is not known.
+    /// ledger's offsets. `None` when the session or the thing is not known. It reads the log, so a caller that holds a
+    /// lock on the studio takes `ask_recorded` and reads after.
     pub fn ask_facts(&self, session: &str, anchor: &Anchor, log: &Path) -> Option<AskFacts> {
+        Some(self.ask_recorded(session, anchor)?.read(log))
+    }
+
+    /// The facts of `anchor` the ledger holds, and the row whose output the event log holds, with no file read (spec
+    /// danielrispler/plotkeeper#548). `None` when the session or the thing is not known.
+    pub fn ask_recorded(&self, session: &str, anchor: &Anchor) -> Option<AskRecorded> {
         let session = self.session(session)?;
         let ledger = &session.ledger;
         let who = |agent: &Option<String>| match agent {
@@ -177,6 +184,7 @@ impl Studio {
                 .map_or(id.clone(), |a| a.name.clone()),
         };
         let mut facts = AskFacts::default();
+        let mut check = None;
         match anchor {
             Anchor::File {
                 turn, root, path, ..
@@ -219,16 +227,7 @@ impl Studio {
             Anchor::Check { agent, call } => {
                 let row = ledger.row(agent.as_deref(), call)?;
                 facts.line("Command", row.command.clone().unwrap_or_default());
-                match output(row, log) {
-                    Ok(out) => {
-                        let code = out
-                            .exit_code
-                            .map_or("The log does not say".to_string(), |c| c.to_string());
-                        facts.line("Exit code", code);
-                        facts.line("End of the output", out.tail);
-                    }
-                    Err(e) => facts.line("Output", format!("It could not be read: {e}")),
-                }
+                check = Some(row.clone());
             }
             Anchor::Subagent { agent } => {
                 let worker = session.agents.iter().find(|a| &a.agent.id == agent)?;
@@ -301,6 +300,34 @@ impl Studio {
                 );
             }
         }
-        Some(facts)
+        Some(AskRecorded { facts, check })
+    }
+}
+
+/// What the studio holds of an Ask anchor (`Studio::ask_recorded`): a plain value copied out of it, so the event log
+/// is read with no lock on the studio held.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AskRecorded {
+    facts: AskFacts,
+    /// A check's ledger row: its exit code and output are in the event log.
+    check: Option<Row>,
+}
+
+impl AskRecorded {
+    /// The facts, with a check's exit code and the end of its output read from the event log at `log`.
+    pub fn read(self, log: &Path) -> AskFacts {
+        let mut facts = self.facts;
+        let Some(row) = self.check else { return facts };
+        match output(&row, log) {
+            Ok(out) => {
+                let code = out
+                    .exit_code
+                    .map_or("The log does not say".to_string(), |c| c.to_string());
+                facts.line("Exit code", code);
+                facts.line("End of the output", out.tail);
+            }
+            Err(e) => facts.line("Output", format!("It could not be read: {e}")),
+        }
+        facts
     }
 }
