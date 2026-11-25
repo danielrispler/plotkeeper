@@ -23,6 +23,7 @@ import { enterRefresher, refresherNode, staleWhy } from "./map-stale.js";
 import { ciDrawer, effectiveTier, fogActions, type Part, proofDrawer, type Sheet, sheetCi, sheetMarks, sheetOf, talksTo, type Tier } from "./map-model.js";
 import { openBriefOf, openCatchUpOf } from "./map-brief.js";
 import { lawAction, lawActionNodes, patchActs } from "./patch-review.js";
+import { explained, explainedChoice, explainedLinks, explanationsOn, explainToggle, onExplanations, SHEET, SHEET_HEADINGS } from "./explanations.js";
 
 // The part whose sheet is open, and the project it is in; a sheet never carries over to another project's map.
 let open: { project: string; part: string } | null = null;
@@ -149,11 +150,20 @@ function drawSheet(view: MapView) {
   closer.setAttribute("aria-label", "Close");
   closer.title = "Close the sheet (Esc)";
   closer.addEventListener("click", closeSheet);
+  // Explanations (#522): a line under each heading, the selected tier's meaning under the tiers, a link kind's and "not yet ratified"'s
+  // at their first link, and the fog actions' under them. The `?` beside the × shows or hides them all.
+  const explain = explanationsOn();
+  const heading = (words: string) => explained(text("h3", words, "sheet-heading"), SHEET_HEADINGS[words], explain);
+  const header = text("div", "", "sheet-header");
+  header.append(explainToggle(explain), closer);
   const tiers = text("div", "", "sheet-tiers");
+  let selected: HTMLElement | undefined;
   for (const each of sheet.tiers) {
     const button = pressable(text("button", each.label, "btn"), each.pressed, () => setTier(view, part.id, each.tier).catch(failure("map_set_tier")));
-    button.title = `Track ${part.name} as ${each.label}`;
+    // Each tier's meaning on hover, so the ones not picked compare without a change.
+    button.title = SHEET.tiers[each.tier];
     if (view.scrub) (button as HTMLButtonElement).disabled = true;
+    if (each.pressed) selected = button;
     tiers.append(button);
   }
   // The laws and links at this part that landed without Daniel's say: marked "not yet ratified", with accept and overturn. Of now only.
@@ -187,7 +197,8 @@ function drawSheet(view: MapView) {
   const nameOf = (id: string) => view.doc.parts.find((p) => p.id === id)?.name ?? view.doc.actors.find((a) => a.id === id)?.name ?? id;
   // "Talks to" (spec #473): every link at either end, its arrow, other end, kind and reason; an unratified one carries its accept and overturn.
   const pending = new Map(unratified.links.map((link) => [link.id, sheetLinkItem(link, link.pr)]));
-  const links = talksTo(part.id, view.doc.links, nameOf).map((talk) => {
+  const talks = talksTo(part.id, view.doc.links, nameOf);
+  const rows = talks.map((talk) => {
     const row = text("li", "", "sheet-link");
     row.dataset.link = talk.link;
     const arrow = text("span", talk.out ? "→" : "←", "sheet-link-dir");
@@ -204,6 +215,7 @@ function drawSheet(view: MapView) {
     }
     return row;
   });
+  const links = explainedLinks(rows, talks.map((talk) => ({ kind: talk.kind, unratified: pending.has(talk.link) })), explain);
   const fog = text("div", "", `sheet-fog${!view.scrub && view.state.fog?.[part.id] ? ` ${view.state.fog[part.id]}` : ""}`);
   fog.append(text("p", sheet.fogLine, "sheet-fog-line"));
   const actions = fogActions(view.scrub ? undefined : view.state.fog?.[part.id], view.state.catch_ups?.[part.id]);
@@ -233,6 +245,7 @@ function drawSheet(view: MapView) {
       know(view, part.id).catch(failure("map_know"));
     });
     fog.append(clear);
+    if (explain && actions.main?.open.kind === "catch-up") fog.append(text("p", SHEET.fogActions, "explain explain-choice"));
   }
   // A part with no fog offers the refresher (#392).
   const refresher = !view.scrub && refreshing === part.id ? refresherNode(view, part.id) : null;
@@ -262,23 +275,23 @@ function drawSheet(view: MapView) {
   const card = text("div", "", "sheet");
   card.dataset.part = part.id;
   card.append(
-    closer,
+    header,
     text("h2", sheet.name, "sheet-name"),
     text("p", sheet.caption, "sheet-caption"),
     ...(view.scrub ? [] : marksList(view, part.id)),
     // A converted version 1 map may have had an empty description: no empty paragraph for it.
     ...(sheet.purpose ? [text("p", sheet.purpose, "sheet-purpose")] : []),
-    ...(sheet.holds.length ? [text("h3", "Holds", "sheet-heading"), heldList(sheet.holds)] : []),
-    text("h3", "Tier", "sheet-heading"),
-    tiers,
-    text("h3", "Laws", "sheet-heading"),
+    ...(sheet.holds.length ? [...heading("Holds"), heldList(sheet.holds)] : []),
+    ...heading("Tier"),
+    ...explainedChoice(tiers, selected, SHEET.tiers[tier], explain),
+    ...heading("Laws"),
     ...(laws.length ? [text("ul", "", "sheet-laws")] : [text("p", "No laws on this part", "empty")]),
-    text("h3", "Talks to", "sheet-heading"),
+    ...heading("Talks to"),
     ...(links.length ? [text("ul", "", "sheet-links")] : [text("p", "No link at this part", "empty")]),
     // Fog and CI are of now: a past commit shows neither.
     ...(refresher ? [refresher] : []),
-    ...(view.scrub ? [] : [text("h3", "Fog", "sheet-heading"), fog]),
-    ...(state ? [text("h3", "CI on main", "sheet-heading"), ci] : []),
+    ...(view.scrub ? [] : [...heading("Fog"), fog]),
+    ...(state ? [...heading("CI on main"), ci] : []),
   );
   const extra = text("div", "", "sheet-extra");
   card.append(extra);
@@ -354,4 +367,9 @@ onPlateClick(({ view, part }) => {
   drawSheet(view);
 });
 onDraw(drawSheet);
+// The explanations switched on or off (#522): the open sheet draws again with or without them.
+onExplanations(() => {
+  const view = currentMap();
+  if (view && open) drawSheet(view);
+});
 registerLayer("sheet", { open: () => open !== null && currentMap() !== null, close: closeSheet });

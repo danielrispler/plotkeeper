@@ -59,6 +59,7 @@ export const base = {
   sessions: [],
   remove_api_key: null,
   set_api_key: null,
+  set_explanations: "{}",
   settings_files: { settings: null, keymap: null },
   subagent_log: null,
   back_a_law: { kind: "run", id: "19a2f-9" },

@@ -103,3 +103,11 @@ test("summaries.writer chooses agy, codex, copilot, cursor, anthropic or openai,
   assert.equal(bad.settings.summaries.writer, "claude");
   assert.equal(bad.errors.length, 1);
 });
+
+test("explanations are on by default, read from the file, and a wrong type is reported and keeps them on (#522)", () => {
+  assert.equal(reload(initial, { settings: null, keymap: null }).settings.explanations, true);
+  assert.equal(reload(initial, { settings: `{ "explanations": false }`, keymap: null }).settings.explanations, false);
+  const wrong = reload(initial, { settings: `{ "explanations": "no" }`, keymap: null });
+  assert.equal(wrong.settings.explanations, true);
+  assert.deepEqual(wrong.errors, ["settings.json: explanations: expected a boolean"]);
+});
