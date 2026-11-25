@@ -4,10 +4,6 @@
 use std::collections::BTreeMap;
 
 /// The names a language declares, each with every target that declares it.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "go-imports (#578) is its first user")
-)]
 #[derive(Debug)]
 pub(crate) struct Names<T> {
     targets: BTreeMap<String, Vec<T>>,
@@ -24,10 +20,6 @@ pub(crate) enum Lookup<'a, T> {
     Ambiguous(Vec<&'a T>),
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "go-imports (#578) is its first user")
-)]
 impl<T: PartialEq> Names<T> {
     pub(crate) fn new() -> Names<T> {
         Names {

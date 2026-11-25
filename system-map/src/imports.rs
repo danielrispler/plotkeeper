@@ -116,18 +116,25 @@ pub fn imports(root: &Path) -> Result<Imports, Vec<String>> {
     })
 }
 
-/// The pairs the report counts, each with its group: a crate root's `mod` lines declare the module tree, so their
+/// The pairs the report counts, each with its groups: a crate root's `mod` lines declare the module tree, so their
 /// pairs are left out.
 fn counted(pairs: &[Pair]) -> BTreeSet<Counted> {
     pairs
         .iter()
         .filter(|p| !p.declaration)
-        .map(|p| (p.from.clone(), p.to.clone(), p.group.clone()))
+        .map(|p| {
+            (
+                p.from.clone(),
+                p.to.clone(),
+                p.group.clone(),
+                p.from_group.clone(),
+            )
+        })
         .collect()
 }
 
-/// A counted pair: its two files and its group.
-type Counted = (String, String, Option<String>);
+/// A counted pair: its two files, its group and the group of its importer.
+type Counted = (String, String, Option<String>, Option<String>);
 
 fn count(parts: &[PartFiles], pairs: &BTreeSet<Counted>, problems: Vec<String>) -> Imports {
     let owner: HashMap<&str, &str> = parts
@@ -230,50 +237,42 @@ fn count(parts: &[PartFiles], pairs: &BTreeSet<Counted>, problems: Vec<String>) 
 }
 
 /// One unit per (importing file, target node): a grouped pair's target is its group's slice in the part that owns
-/// `to`, so the pairs of one import of a group count once per part; an ungrouped pair is its own unit. Also gives the
-/// parts each group's files sit in.
+/// `to`, so the pairs of one import of a group count once per part; an ungrouped pair is its own unit. A grouped pair's
+/// importer counts as the slice of its own group when the pair names one, else as the file. Also gives the parts each
+/// group's files sit in.
 fn units<'a>(
     pairs: &'a BTreeSet<Counted>,
     owner: &HashMap<&'a str, &'a str>,
 ) -> (Vec<Unit<'a>>, GroupParts<'a>) {
-    let owned: Vec<(&str, &str, Option<&str>)> = pairs
-        .iter()
-        .map(|(from, to, group)| (from.as_str(), to.as_str(), group.as_deref()))
-        .filter(|(from, to, _)| from != to && owner.contains_key(from) && owner.contains_key(to))
-        .collect();
-    // Each file's group, the lowest a grouped pair into it names, and the parts each group's files sit in.
-    let mut group_of: HashMap<&str, &str> = HashMap::new();
     let mut group_parts = GroupParts::new();
-    for &(_, to, group) in &owned {
-        if let Some(group) = group {
-            let lowest = group_of.entry(to).or_insert(group);
-            *lowest = (*lowest).min(group);
-            group_parts.entry(group).or_default().insert(owner[to]);
+    let mut units: BTreeSet<(&str, Node, Node)> = BTreeSet::new();
+    for (from, to, group, from_group) in pairs {
+        let (from, to) = (from.as_str(), to.as_str());
+        if from == to || !owner.contains_key(from) || !owner.contains_key(to) {
+            continue;
         }
-    }
-    let targets: BTreeSet<(&str, Node)> = owned
-        .iter()
-        .map(|&(from, to, group)| {
-            let target = match group {
-                Some(group) => Node::Slice(group, owner[to]),
-                None => Node::File(to),
-            };
-            (from, target)
-        })
-        .collect();
-    // A grouped pair's importer counts as its own group's slice, when it has one; an ungrouped pair's stays a file.
-    let units = targets
-        .into_iter()
-        .map(|(from, target)| {
-            let source = match (target, group_of.get(from)) {
-                (Node::Slice(..), Some(group)) => Node::Slice(group, owner[from]),
-                _ => Node::File(from),
-            };
-            Unit {
-                source,
-                from,
-                target,
+        let (target, source) = match group.as_deref() {
+            Some(group) => {
+                group_parts.entry(group).or_default().insert(owner[to]);
+                let source = match from_group.as_deref() {
+                    Some(own) => {
+                        group_parts.entry(own).or_default().insert(owner[from]);
+                        Node::Slice(own, owner[from])
+                    }
+                    None => Node::File(from),
+                };
+                (Node::Slice(group, owner[to]), source)
             }
+            None => (Node::File(to), Node::File(from)),
+        };
+        units.insert((from, source, target));
+    }
+    let units = units
+        .into_iter()
+        .map(|(from, source, target)| Unit {
+            source,
+            from,
+            target,
         })
         .collect();
     (units, group_parts)
@@ -352,7 +351,7 @@ mod tests {
         let counted = counted(&[declaration, Pair::new("a.rs", "b.rs")]);
         assert_eq!(
             counted.into_iter().collect::<Vec<_>>(),
-            [("a.rs".to_string(), "b.rs".to_string(), None)]
+            [("a.rs".to_string(), "b.rs".to_string(), None, None)]
         );
     }
 
@@ -363,11 +362,26 @@ mod tests {
         }
     }
 
-    /// The pairs from `from` to each of `files`, of the group `group`.
+    /// The pairs from `from` to each of `files`, of the group `group`, with no group of `from`'s own.
     fn import(from: &str, group: &str, files: &[&str]) -> Vec<Counted> {
         files
             .iter()
-            .map(|to| (from.to_string(), to.to_string(), Some(group.to_string())))
+            .map(|to| {
+                (
+                    from.to_string(),
+                    to.to_string(),
+                    Some(group.to_string()),
+                    None,
+                )
+            })
+            .collect()
+    }
+
+    /// [`import`], from a file of the group `own`.
+    fn import_from(from: &str, own: &str, group: &str, files: &[&str]) -> Vec<Counted> {
+        import(from, group, files)
+            .into_iter()
+            .map(|(from, to, group, _)| (from, to, group, Some(own.to_string())))
             .collect()
     }
 
@@ -467,7 +481,7 @@ mod tests {
             .map(|a| import(a, "s/", &["s/x.go", "s/y.go"]))
             .collect();
         // A file of `s/` that imports counts as `s/`'s slice, not as itself.
-        pairs.push(import("s/x.go", "t/", &["t/w.go"]));
+        pairs.push(import_from("s/x.go", "s/", "t/", &["t/w.go"]));
         let found = report(&parts, &pairs);
         // Seven units over eight nodes: the six importers, `s/` and `t/`.
         assert_eq!(found.mean_degree, 1.75);

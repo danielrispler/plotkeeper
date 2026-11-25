@@ -5,6 +5,7 @@
 mod cargo;
 #[cfg(test)]
 mod contract;
+mod go;
 mod names;
 pub(crate) mod registry;
 mod rust_modules;
@@ -156,6 +157,10 @@ pub(crate) struct Pair {
     /// The one target an import named that covers several files (a Go package's folder, say): the imports report
     /// counts the pairs of one import of it as one unit per part. None for a pair that is its own unit.
     pub(crate) group: Option<String>,
+    /// The group `from` itself belongs to (its Go package's folder, say): the imports report counts a grouped pair's
+    /// importer as that group's slice, so a file nothing imports still counts as its package. None for a pair that
+    /// counts its importer as the file.
+    pub(crate) from_group: Option<String>,
 }
 
 impl Pair {
@@ -166,6 +171,7 @@ impl Pair {
             lines: BTreeSet::new(),
             declaration: false,
             group: None,
+            from_group: None,
         }
     }
 
@@ -204,7 +210,8 @@ pub(crate) struct Output {
 /// Runs the extractors `names` names from `registry`, in that order, and holds their output to the contract: a pair
 /// whose ends are not both tracked, from a file to itself, or from a file the extractor reads and skips is dropped,
 /// and a pair two extractors (or one, twice) find is kept once, sorted, with the lines of every finding, as a
-/// declaration only if every finding of it is one, and with the lowest of its findings' groups, none counting as lowest.
+/// declaration only if every finding of it is one, and with the lowest of its findings' groups and of their `from`
+/// groups, none counting as lowest.
 /// An Unsure finding with no candidates is a problem, one in an untracked, ignored or skipped file is dropped, and
 /// findings of one file, name and reason are kept once, sorted, with the union of their candidates. A name the registry
 /// lacks is a problem.
@@ -271,6 +278,7 @@ pub(crate) fn run(registry: &[&dyn Extractor], names: &[String], repo: &Repo) ->
                     kept.declaration &= pair.declaration;
                     // `Option`'s order puts none first, so none is the lowest group.
                     kept.group = kept.group.take().min(pair.group);
+                    kept.from_group = kept.from_group.take().min(pair.from_group);
                 }
             }
         }
