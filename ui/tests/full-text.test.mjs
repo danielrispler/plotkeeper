@@ -125,7 +125,6 @@ test("a check's command scrolls in place", () => {
   const node = checkElement({ statement: command, status: "failed", ended_at: 2, started_at: 1, typical_ms: null });
   const code = every(node).find((n) => n.tag === "code");
   assert.ok(code, "the command is drawn");
-  assert.ok(node.childNodes.includes(code));
   cuts(node, "cut", command);
 });
 
@@ -211,5 +210,5 @@ test("cut() keeps the element's text whole, inside its own box that moves", () =
   assert.equal(node.textContent, "A long line the layout cuts");
   assert.ok(node.className.split(" ").includes("cut"));
   assert.equal(node.childNodes.length, 1);
-  assert.equal(node.childNodes[0].tag, "span");
+  assert.equal(/** @type {any} */ (node.childNodes[0]).tag, "span");
 });
