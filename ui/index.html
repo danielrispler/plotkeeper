@@ -72,7 +72,11 @@
           <p id="notice" role="status" hidden></p>
           <button id="notice-dismiss" class="btn small" type="button" title="Hide this notice">Dismiss</button>
         </div>
-        <p id="empty" class="empty">Pick a session in the list.</p>
+        <!-- With no session picked, the rail says what will show there (#526). -->
+        <div id="empty" class="rail-empty">
+          <p class="empty">Pick a session in the list.</p>
+          <p class="empty">Its story shows here: what it is doing, and each finished turn.</p>
+        </div>
         <section id="view" hidden>
           <!-- While running: what Daniel asked. At your turn it is in the newest turn's block (danielrispler/plotkeeper#116). -->
           <section id="now-asked"></section>

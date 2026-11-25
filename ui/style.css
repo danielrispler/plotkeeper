@@ -259,6 +259,8 @@ h1 { margin: 0 0 var(--sp-4); }
    header's "⋯" menu (#458) is placed the same way. */
 #rail-actions, #project-actions { position-area: block-end span-inline-start; margin-block: var(--sp-2); position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline; }
 .story { overflow-y: auto; padding: var(--sp-4) var(--sp-5) var(--sp-5); }
+/* The rail with no session picked (#526): its line, then what will show there. */
+.rail-empty { display: grid; gap: var(--sp-3); }
 .notice-row { display: flex; align-items: flex-start; gap: var(--sp-3); margin: 0 0 var(--sp-4); }
 .notice-row:has(#notice[hidden]) { display: none; }
 #notice { flex: 1; min-width: 0; margin: 0; color: var(--muted); white-space: pre-line; overflow-wrap: anywhere; }
