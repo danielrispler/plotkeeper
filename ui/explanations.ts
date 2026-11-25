@@ -34,6 +34,8 @@ export const SHEET = {
   },
   ci: "The last CI run on main, for this part's laws.",
   history: "Commits on main that changed this part, newest last.",
+  // "This session here" (#561), shown while a session's story is open beside the sheet.
+  here: "The open session's turns that changed this part, newest first.",
 } as const;
 
 // The line under each heading the part sheet draws, by the heading's words.
@@ -45,6 +47,7 @@ export const SHEET_HEADINGS: Record<string, string> = {
   Fog: SHEET.fog,
   "CI on main": SHEET.ci,
   History: SHEET.history,
+  "This session here": SHEET.here,
 };
 
 // The PR brief's reader (#524): a line under each step's title, by the step's kind, and under Also touched. A part catch-up plays in

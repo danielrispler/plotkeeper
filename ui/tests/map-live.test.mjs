@@ -2,7 +2,7 @@
 // the spotlit session, run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { footprint, footprintNote, marked, placeGroups, spotlit } from "../../dist/map-live.js";
+import { footprint, footprintNote, marked, placeGroups, sessionHere, spotlit } from "../../dist/map-live.js";
 
 const day = 24 * 60 * 60 * 1000;
 const now = 100 * day;
@@ -90,4 +90,28 @@ test("a session that touched no part within the cut says so; one whose placement
   assert.equal(note([turn(["core/x.rs"], 9 * day), turn(["docs/a.md", "stray.txt"], day)]), "Touched no part in the last 7 days");
   assert.equal(note([turn(["core/x.rs"], day)]), null);
   assert.equal(note([turn(["new/file.rs"], day)]), null);
+});
+
+// "This session here" (#561): the open session's turns within the cut that changed a part, newest first, and whether it has older turns.
+test("the sheet lists the open session's turns within the cut that changed the part, newest first, each by its number", () => {
+  const s = session("a", "your_turn", { agents: [worker("w1", { status: "completed" })], turns: [
+    turn(["core/x.rs"], 9 * day),
+    turn(["core/y.rs", "server/s.rs"], 3 * day),
+    turn(["server/s.rs"], 2 * day),
+    turn(null, day),
+    turn([["core/x.rs", "w1"], "docs/a.md"]),
+  ] });
+  const here = (part) => { const found = sessionHere(s, part, placed, now); return { rows: found.rows.map((row) => row.number), older: found.older }; };
+  assert.deepEqual(here("core"), { rows: [5, 2], older: true });
+  assert.deepEqual(here("server"), { rows: [3, 2], older: true });
+  assert.deepEqual(here("old"), { rows: [], older: true });
+});
+
+test("the sheet's footer shows only when the open session has turns older than the cut", () => {
+  const s = (turns) => sessionHere(session("a", "ended", { turns }), "core", placed, now).older;
+  assert.equal(s([]), false);
+  assert.equal(s([turn(["server/s.rs"], 6 * day), turn(["core/x.rs"])]), false);
+  // An older turn counts whatever it changed, and a turn that never ended ages from its start.
+  assert.equal(s([turn(["docs/a.md"], 8 * day), turn(["core/x.rs"])]), true);
+  assert.equal(s([turn(null, 8 * day, true)]), true);
 });

@@ -171,6 +171,7 @@ const covered = {
   ".plate-name": "map.ts: the plate's title holds the name, caption and purpose",
   ".plate-caption": "map.ts: the plate's title holds the name, caption and purpose",
   ".agent-chip": "map-agents.ts: a chip's title holds its full label",
+  ".sheet-here-headline": "map-sheet.ts: a This session here row's Headline holds its full text as its title",
   ".risk-note": "blocked.ts: the note's title holds all of it",
   ".ask::backdrop": "style.css: a dialog's backdrop holds no text; overflow hidden only makes it a scroll container that keeps its scroll",
   code: "a check's command has its own title (story.ts); any other code span wraps or sits in a text that wraps",

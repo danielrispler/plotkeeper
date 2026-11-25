@@ -10,7 +10,7 @@
 import { element, text } from "./dom.js";
 import { mapShown, onDraw, registerLayer, revealParts } from "./map.js";
 import { openAgents } from "./map-agents.js";
-import { closeSheet, sheetPart } from "./map-sheet.js";
+import { closeSheet, refreshHere, sheetPart } from "./map-sheet.js";
 import { panelSession, type PanelContent, withPanel, withSheet } from "./map-model.js";
 import { writersIn } from "./writers.js";
 
@@ -68,6 +68,8 @@ function draw() {
   } else if (content === null) {
     body.replaceChildren();
   }
+  // The open sheet's "This session here" shows only beside a session's story (#561).
+  refreshHere();
 }
 
 // The selection was sent again while a log shows: the log reads on.
