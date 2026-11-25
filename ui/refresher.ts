@@ -7,7 +7,8 @@ export type Refresher = {
   flows: { id: string; name: string; hops: string[] }[];
 };
 
-type Named = { id: string };
+type WithId = { id: string };
+type Link = { id: string; from: string; to: string };
 type Flow = { id: string; name: string; hops: { link: string; text: string }[] };
 const list = <T>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : []);
 
@@ -19,10 +20,10 @@ export function refresherOf(source: string, part: string): Refresher | null {
   } catch {
     return null;
   }
-  const parts = list<Named>(file.parts);
+  const parts = list<WithId>(file.parts);
   if (!parts.some((each) => each.id === part)) return null;
-  const at = list<{ id: string; from: string; to: string }>(file.links).filter((link) => link.from === part || link.to === part);
-  const ids = new Set(at.map((link) => link.id));
+  // The ids of the links at the part: a hop on one of them crosses it.
+  const ids = new Set(list<Link>(file.links).flatMap((link) => (link.from === part || link.to === part ? [link.id] : [])));
   const flows = list<Flow>(file.flows)
     .map((flow) => ({ id: flow.id, name: flow.name, hops: list<Flow["hops"][number]>(flow.hops).filter((hop) => ids.has(hop.link)).map((hop) => hop.text) }))
     .filter((flow) => flow.hops.length > 0);
