@@ -2484,6 +2484,9 @@ const mapSheetHolds = (): Fixture =>
       const files = rows.map((row) => [...row.querySelectorAll(".sheet-held-files code")].map((code) => code.textContent));
       if (files[0].join() !== "src-tauri/src/web.rs,src-tauri/src/api.rs") log("snap:fail the first item's key files are " + files[0].join());
       if (files[2].length) log("snap:fail an item without paths shows key files");
+      const notes = rows.map((row) => row.classList.contains("sheet-held-note"));
+      if (notes.join() !== "false,false,true") log("snap:fail only the item without paths is a note: " + notes.join());
+      if (rows[2].querySelector(".sheet-held-head")?.textContent !== "The quiet log · note") log("snap:fail the note's head is " + rows[2].querySelector(".sheet-held-head")?.textContent);
       // The glass's rise ends before the picture is taken.
       await wait(400);
       log("sheet holds ok");`, { map_state: mapState({ source: heldSheet }) });
