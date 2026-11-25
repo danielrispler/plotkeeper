@@ -85,13 +85,20 @@ pub fn touch(u: &mut UserState, part: &str, kind: Activity, at: u64) {
     }
 }
 
-/// The band (1, 2 or 3) of each stale part of `source` whose effective tier is Core, at `now`; a part not listed is not stale.
-pub fn bands(
+/// A stale part: its band, when tracking it began (the baseline, or its birth when later), and its last engagement after that, if any.
+struct Stale {
+    band: u8,
+    began: u64,
+    engaged: Option<u64>,
+}
+
+/// Each stale part of `source` whose effective tier is Core, at `now`.
+fn stale(
     user: &UserState,
     source: &str,
     born: &BTreeMap<String, u64>,
     now: u64,
-) -> BTreeMap<String, u8> {
+) -> BTreeMap<String, Stale> {
     let Some(since) = user.staleness.since else {
         return BTreeMap::new();
     };
@@ -112,13 +119,16 @@ pub fn bands(
         if tier != "core" {
             continue;
         }
-        let read = chapter_read(user, id);
-        let touched = user.staleness.parts.get(id).map(|t| t.at);
-        let last = [Some(since), born.get(id).copied(), read, touched]
-            .into_iter()
-            .flatten()
-            .max()
-            .unwrap_or(since);
+        let began = born.get(id).copied().map_or(since, |at| at.max(since));
+        let engaged = [
+            chapter_read(user, id),
+            user.staleness.parts.get(id).map(|t| t.at),
+        ]
+        .into_iter()
+        .flatten()
+        .max()
+        .filter(|at| *at > began);
+        let last = engaged.unwrap_or(began);
         let weeks = now.saturating_sub(last) / WEEK;
         let band = match weeks {
             12.. => 3,
@@ -126,9 +136,61 @@ pub fn bands(
             3.. => 1,
             _ => continue,
         };
-        stale.insert(id.to_string(), band);
+        stale.insert(
+            id.to_string(),
+            Stale {
+                band,
+                began,
+                engaged,
+            },
+        );
     }
     stale
+}
+
+/// The band (1, 2 or 3) of each stale part of `source` whose effective tier is Core, at `now`; a part not listed is not stale.
+pub fn bands(
+    user: &UserState,
+    source: &str,
+    born: &BTreeMap<String, u64>,
+    now: u64,
+) -> BTreeMap<String, u8> {
+    stale(user, source, born, now)
+        .into_iter()
+        .map(|(id, found)| (id, found.band))
+        .collect()
+}
+
+/// What each stale part's sheet says (#495): its band, and the UTC date Daniel last engaged with it, or that he has not since tracking
+/// began.
+pub fn lines(
+    user: &UserState,
+    source: &str,
+    born: &BTreeMap<String, u64>,
+    now: u64,
+) -> BTreeMap<String, String> {
+    let date = |at: u64| studio_understanding::utc_date(at * 1000);
+    stale(user, source, born, now)
+        .into_iter()
+        .map(|(id, found)| {
+            let weeks = match found.band {
+                3 => 12,
+                2 => 6,
+                _ => 3,
+            };
+            let line = match found.engaged {
+                Some(at) => format!(
+                    "{weeks} weeks or more since you last engaged with this part, on {}",
+                    date(at)
+                ),
+                None => format!(
+                    "{weeks} weeks or more: not engaged since tracking began on {}",
+                    date(found.began)
+                ),
+            };
+            (id, line)
+        })
+        .collect()
 }
 
 /// Each project's births by part id, behind a lock of its own.
@@ -474,6 +536,40 @@ mod tests {
             births_in(&cache, "/p", &ids, |_| Some(born(&[("a", 5)]))),
             born(&[("a", 5)])
         );
+    }
+
+    fn lines_at(rig: &Rig, born: &BTreeMap<String, u64>, at: u64) -> BTreeMap<String, String> {
+        lines(&read_user(&rig.file(), "/p"), MAP, born, at)
+    }
+
+    #[test]
+    fn a_stale_parts_line_names_its_band_and_its_last_engagement_or_that_it_was_never_engaged() {
+        let rig = Rig::new();
+        let read = DAY_ONE + 7 * WEEK;
+        record(&rig.file(), "/p", "a", Activity::Refresher, read).unwrap();
+        let born = born(&[("b", DAY_ONE + 20 * WEEK)]);
+        let found = lines_at(&rig, &born, DAY_ONE + 33 * WEEK);
+        assert_eq!(
+            found,
+            BTreeMap::from([
+                (
+                    "a".to_string(),
+                    "12 weeks or more since you last engaged with this part, on 2027-03-05"
+                        .to_string()
+                ),
+                (
+                    "b".to_string(),
+                    "12 weeks or more: not engaged since tracking began on 2027-06-04".to_string()
+                ),
+            ])
+        );
+        let found = lines_at(&rig, &BTreeMap::new(), DAY_ONE + 3 * WEEK);
+        assert_eq!(
+            found["b"],
+            "3 weeks or more: not engaged since tracking began on 2027-01-15"
+        );
+        assert!(!found.contains_key("a"), "a was engaged after day one");
+        assert!(!found.contains_key("i"), "only Core parts are stale");
     }
 
     #[test]

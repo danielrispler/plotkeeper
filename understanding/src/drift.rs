@@ -190,7 +190,7 @@ const WEEK: u64 = 7 * DAY;
 
 /// The UTC date of `ms`, in Unix milliseconds, as `YYYY-MM-DD` (Howard Hinnant's
 /// `civil_from_days`).
-pub(crate) fn date(ms: u64) -> String {
+pub fn date(ms: u64) -> String {
     let days = ms / DAY + 719_468;
     let (era, day_of_era) = (days / 146_097, days % 146_097);
     let year_of_era =

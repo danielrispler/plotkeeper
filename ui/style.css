@@ -742,6 +742,12 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .sheet-ci { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
 .sheet-ci-line { margin: 0; font-size: var(--size-small); color: var(--muted); }
 .sheet-ci.broken .sheet-ci-line { color: var(--conflict); }
+/* Why the plate carries its marks (#495), first on the sheet: one quiet line per mark, in the tone its mark has on the plate. */
+.sheet-marks { list-style: none; margin: var(--sp-3) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); font-size: var(--size-small); color: var(--muted); }
+.sheet-mark { overflow-wrap: anywhere; }
+.sheet-mark-fog { color: var(--mist); }
+.sheet-mark-more { margin-left: var(--sp-2); color: var(--muted); white-space: nowrap; }
+.sheet-mark-broken { color: var(--conflict); }
 /* The history strip (#313): a commit per row, oldest first. A commit Daniel has not caught up on has a filled mist dot; an older one a
    hollow dot. The one being viewed is raised. The strip scrolls; its labels wrap, so none is cut. */
 .hist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); max-height: var(--strip-height); overflow-y: auto; }

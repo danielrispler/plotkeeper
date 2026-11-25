@@ -140,7 +140,7 @@ const at = (x: number, y: number): [number, number] => [x, y];
 const mapState = (extra: Partial<MapState> = {}): MapState => ({
   project: "/w/plotkeeper", status: "loaded", source: mapFile, reference: "origin/main", commit: "35745b1693c5d061e5aea891e98a58515942a12d", note: null,
   user: { tiers: {}, positions: { core: at(620, 190), understanding: at(980, 290), plugins: at(300, 430), hook: at(580, 430), shell: at(880, 440), window: at(1180, 560), daemon: at(760, 690), workbench: at(480, 650), agents: at(110, 430), writer: at(1400, 190), github: at(250, 650) } },
-  fog: {}, ci: null, ready: [], ratify: [], runs: { paused: null, runs: [] }, stale: {}, catch_ups: {},
+  fog: {}, ci: null, ready: [], ratify: [], runs: { paused: null, runs: [] }, stale: {}, stale_why: {}, catch_ups: {},
   ...extra,
 });
 // The Ready for review tray (#336) with two ready PRs, at the Map view's foot.
@@ -1111,6 +1111,40 @@ const mapStale = (): Fixture =>
       log("stale ok");`, {
     map_state: mapState({ stale: { core: 1, shell: 2, understanding: 3 } }),
   });
+// A plate's marks explain themselves (#495): the sheet opens with this case's reasons. Thick fog shows the newest thick entry with its PR
+// and why, then "+N more"; thin fog an entry filed before #495, by its strength and commit; staleness the server's line with its date; a
+// broken law the run's date, never the law.
+const fogEntry = (commit: string, strength: "thin" | "thick", pr: number | null, why: string[]) => ({ commit: commit.repeat(40), strength, pr, why });
+const mapMarks = (kind: "thick" | "thin" | "stale" | "broken"): Fixture => {
+  const part = { thick: "understanding", thin: "shell", stale: "core", broken: "shell" }[kind];
+  const user = mapState().user;
+  const fog = (entries: ReturnType<typeof fogEntry>[]) => ({ first: null, processed: null, reads: {}, parts: { [part]: entries } });
+  const states: Record<typeof kind, Partial<MapState>> = {
+    thick: {
+      fog: { understanding: "thick" },
+      user: { ...user, fog: fog([fogEntry("1", "thick", 410, ["law brief-cites-facts", "link shell-understanding"]), fogEntry("2", "thin", 412, ["3 files"]), fogEntry("3", "thick", 418, ["paths", "2 files"])]) },
+    },
+    thin: { fog: { shell: "thin" }, user: { ...user, fog: fog([{ commit: "4".repeat(40), strength: "thin" } as ReturnType<typeof fogEntry>]) } },
+    stale: { stale: { core: 2 }, stale_why: { core: "6 weeks or more: not engaged since tracking began on 2026-10-01" } },
+    broken: { ci: { ...brokenCi, at: "2026-11-24T10:00:00Z" } },
+  };
+  const want = {
+    thick: ["Thick fog from #418: paths, 2 files", "+2 more"],
+    thin: ["Thin fog from commit 4444444"],
+    stale: ["6 weeks or more: not engaged since tracking began on 2026-10-01"],
+    broken: ["A check behind a law of this part failed in main's latest CI, 2026-11-24"],
+  }[kind];
+  return mapOpened(`
+      document.querySelector("#map .plate[data-id=${part}]").click();
+      await wait(300);
+      const marks = document.querySelector("#map-sheet .sheet-marks");
+      if (!marks) return log("snap:fail the sheet has no marks list");
+      if (marks.previousElementSibling?.className !== "sheet-caption") log("snap:fail the marks are not at the sheet's top");
+      const text = marks.textContent;
+      for (const want of ${JSON.stringify(want)}) if (!text.includes(want)) log("snap:fail the marks lack " + want + ": " + text);
+      if (text.includes("wire-types-agree")) log("snap:fail a broken law is named");
+      log("marks ${kind} ok");`, { map_state: mapState(states[kind]) });
+};
 // The refresher (#392) on Shell's sheet, a stale part with no fog: drawn at once from the map file, the flows through it hop by hop (the
 // sheet already shows the rest, its links as "Talks to", spec #473), with no writer and no "Writing…".
 const mapRefresher = (): Fixture => {
@@ -1455,7 +1489,7 @@ const mapPartRedraw = (): Fixture => {
 // size of the busy fixture; `drawer` opens the proof of a law, `log` the broken-law drill-down.
 const brokenCi: Ci = {
   status: "broken", run_url: "https://github.com/danielrispler/plotkeeper/actions/runs/9", commit: "35745b1693c5d061e5aea891e98a58515942a12d", earlier: false,
-  parts: ["shell"], laws: ["wire-types-agree"], note: null,
+  parts: ["shell"], laws: ["wire-types-agree"], note: null, at: null,
   tail: "        FAIL [   0.013s] (4/4) studio-workbench::wire wire_types_match\n  stderr ───\n\n    thread 'wire_types_match' panicked at workbench/tests/wire.rs:11:25:\n    assertion `left == right` failed: wire drifted\n      left: 1\n     right: 2\n\n────────────\n     Summary [   0.014s] 4 tests run: 3 passed, 1 failed, 0 skipped",
 };
 const mapBroken = (open: "none" | "proof" | "log"): Fixture => {
@@ -2829,6 +2863,10 @@ ${writerStatusAfter("Keychain refused")}
   mapBriefBoldUnpaired,
   mapSheetUnratified,
   mapStale,
+  mapMarksThick: () => mapMarks("thick"),
+  mapMarksThin: () => mapMarks("thin"),
+  mapMarksStale: () => mapMarks("stale"),
+  mapMarksBroken: () => mapMarks("broken"),
   mapRefresher,
   mapTalksTo,
   mapBriefPairLight,

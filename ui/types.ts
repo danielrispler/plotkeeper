@@ -371,9 +371,12 @@ export type Work = {
 export type FogState = {
   first: string | null;
   processed: string | null;
-  parts: Record<string, { commit: string; strength: Fog }[]>;
+  parts: Record<string, FogEntry[]>;
   reads: Record<string, { lit: string[][]; chapters: Record<string, { head: string; at: number }> }>;
 };
+// One commit Daniel has not caught up on, on one part: the PR its subject names, and why it fogs the part (`fog::Change`: "added",
+// "paths", `law <id>`, `link <id>`, `flow <id>`, a changed word such as "caption", and `N files`); an entry filed before #495 has neither.
+export type FogEntry = { commit: string; strength: Fog; pr: number | null; why: string[] };
 // The map's camera (#383): a world point `p` shows at `p * scale + (x, y)` in the map area.
 export type Camera = { scale: number; x: number; y: number };
 // `view`: the project's saved camera, none until it was first moved.
@@ -403,6 +406,9 @@ export type MapState = {
   catch_ups: Record<string, CatchUpOffer>;
   // The staleness band (1 to 3) of each Core part not engaged with for 3, 6 or 12 weeks (`staleness.rs`); a part not listed is not stale.
   stale: Record<string, number>;
+  // What each stale part's sheet says (`staleness::lines`, #495): the band, and when Daniel last engaged with the part, or "not engaged
+  // since tracking began on <date>".
+  stale_why: Record<string, string>;
   // The project's pre-flight (`pre_flight.rs`, #394): the parts a piece of work will likely cross; null when none is run.
   pre_flight?: PreFlight | null;
   // The project's micro-worlds (`micro_worlds.rs`, #399) by subject key (`flow:<id>`, `figure:<pr>:<chapter>:<step>`), and whether a run can
@@ -528,6 +534,8 @@ export type Ci = {
   laws: string[];
   tail: string;
   note: string | null;
+  // When that run finished, as GitHub gives it (ISO 8601, UTC); null in an answer kept before #495.
+  at: string | null;
 };
 // A tagged test shown by "See the proof": its file and tag line, and the code from the tag on, starting at line `first`.
 export type Proof = { file: string; line: number; test: string | null; first: number; snippet: string };
