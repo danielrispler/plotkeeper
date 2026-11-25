@@ -275,6 +275,49 @@ pub struct MapItem {
     pub change: String,
     /// What the item says, in words.
     pub text: String,
+    /// Old beside new, for a part or a link.
+    pub detail: Option<Detail>,
+}
+
+/// One text before and after a change: none on the side that has no item.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Words {
+    pub before: Option<String>,
+    pub after: Option<String>,
+}
+
+/// What a part or a link said before and after, for the brief's ratify step.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "of", rename_all = "lowercase")]
+pub enum Detail {
+    Part(PartDetail),
+    Link(LinkDetail),
+}
+
+/// A part's name and purpose, its held items matched by name, and the patterns its own `paths` gained and lost.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PartDetail {
+    pub name: Words,
+    pub purpose: Words,
+    pub holds: Vec<HeldDetail>,
+    pub paths_added: Vec<String>,
+    pub paths_removed: Vec<String>,
+}
+
+/// A held item, by its name: its text before and after (none before when added, none after when removed) and its `paths` change.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct HeldDetail {
+    pub name: String,
+    pub text: Words,
+    pub paths_added: Vec<String>,
+    pub paths_removed: Vec<String>,
+}
+
+/// A link's kind and reason before and after.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LinkDetail {
+    pub kind: Words,
+    pub reason: Words,
 }
 
 fn field<'a>(item: &'a Value, name: &str) -> &'a str {
@@ -302,16 +345,104 @@ fn significant(kind: &str, item: &Value) -> Value {
     item
 }
 
-/// The map items a change from `old` to `new` made, read from the two maps by code. A side that is missing or does not read gives
-/// nothing: nothing can be told apart.
+/// The text of `name` on each side that has the item.
+fn words_of(before: Option<&Value>, after: Option<&Value>, name: &str) -> Words {
+    let side = |item: Option<&Value>| item.map(|item| field(item, name).to_string());
+    Words {
+        before: side(before),
+        after: side(after),
+    }
+}
+
+/// The patterns of `paths` on each side: those only `after` has, then those only `before` has.
+fn paths_change(before: Option<&Value>, after: Option<&Value>) -> (Vec<String>, Vec<String>) {
+    let list = |item: Option<&Value>| -> Vec<String> {
+        item.and_then(|item| item["paths"].as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|p| Some(p.as_str()?.to_string()))
+            .collect()
+    };
+    let (was, now) = (list(before), list(after));
+    let only =
+        |of: &[String], not: &[String]| of.iter().filter(|p| !not.contains(p)).cloned().collect();
+    (only(&now, &was), only(&was, &now))
+}
+
+/// A part's held items on each side, matched by name (a name held twice, by its n-th time): the new side's in its order, then
+/// those it removed.
+fn holds_change(before: Option<&Value>, after: Option<&Value>) -> Vec<HeldDetail> {
+    let list = |part: Option<&Value>| -> Vec<Value> {
+        part.and_then(|part| part["holds"].as_array())
+            .cloned()
+            .unwrap_or_default()
+    };
+    let (was, now) = (list(before), list(after));
+    let find = |among: &[Value], name: &str, n: usize| {
+        among
+            .iter()
+            .filter(|h| field(h, "name") == name)
+            .nth(n)
+            .cloned()
+    };
+    // Each name with how many times it came before, on the new side and then on the old.
+    let numbered = |items: &[Value]| -> Vec<(String, usize)> {
+        let mut out: Vec<(String, usize)> = Vec::new();
+        for held in items {
+            let name = field(held, "name").to_string();
+            let n = out.iter().filter(|(seen, _)| *seen == name).count();
+            out.push((name, n));
+        }
+        out
+    };
+    let mut names = numbered(&now);
+    for key in numbered(&was) {
+        if !names.contains(&key) {
+            names.push(key);
+        }
+    }
+    names
+        .into_iter()
+        .map(|(name, n)| {
+            let (old, new) = (find(&was, &name, n), find(&now, &name, n));
+            let (paths_added, paths_removed) = paths_change(old.as_ref(), new.as_ref());
+            HeldDetail {
+                text: words_of(old.as_ref(), new.as_ref(), "text"),
+                name,
+                paths_added,
+                paths_removed,
+            }
+        })
+        .collect()
+}
+
+/// Old beside new for a part or a link; none for another kind.
+fn detail(kind: &str, before: Option<&Value>, after: Option<&Value>) -> Option<Detail> {
+    let (paths_added, paths_removed) = paths_change(before, after);
+    match kind {
+        "part" => Some(Detail::Part(PartDetail {
+            name: words_of(before, after, "name"),
+            purpose: words_of(before, after, "purpose"),
+            holds: holds_change(before, after),
+            paths_added,
+            paths_removed,
+        })),
+        "link" => Some(Detail::Link(LinkDetail {
+            kind: words_of(before, after, "kind"),
+            reason: words_of(before, after, "reason"),
+        })),
+        _ => None,
+    }
+}
+
+/// The map items a change from `old` to `new` made, read from the two maps by code. A version 1 side is converted first, so its
+/// `description` is its purpose. A side that is missing or does not read gives nothing: nothing can be told apart.
 pub fn map_items(old: Option<&str>, new: Option<&str>) -> Vec<MapItem> {
     let (Some(old), Some(new)) = (old, new) else {
         return vec![];
     };
-    let (Ok(old), Ok(new)) = (
-        serde_json::from_str::<Value>(old),
-        serde_json::from_str::<Value>(new),
-    ) else {
+    let read = |text: &str| system_map::convert_value(text).ok();
+    let (Some(old), Some(new)) = (read(old), read(new)) else {
         return vec![];
     };
     let list = |map: &Value, key: &str| -> BTreeMap<String, Value> {
@@ -336,6 +467,7 @@ pub fn map_items(old: Option<&str>, new: Option<&str>) -> Vec<MapItem> {
                 id: id.clone(),
                 change: change.into(),
                 text: words(kind, item),
+                detail: detail(kind, before.get(id), Some(item)),
             });
         }
         for (id, item) in &before {
@@ -345,6 +477,7 @@ pub fn map_items(old: Option<&str>, new: Option<&str>) -> Vec<MapItem> {
                     id: id.clone(),
                     change: "removed".into(),
                     text: words(kind, item),
+                    detail: detail(kind, Some(item), None),
                 });
             }
         }
@@ -365,6 +498,8 @@ pub struct Row {
     /// `added`, `changed` or `removed` for a map item; empty for a decision.
     pub change: String,
     pub status: Status,
+    /// Old beside new, for a part or a link.
+    pub detail: Option<Detail>,
 }
 
 /// The items of PR `pr`: its map changes, then its decisions (`(id, text)` from its brief), then the decisions Daniel decided that a
@@ -376,7 +511,7 @@ pub fn rows(
     decisions: &[(String, String)],
     landed: Option<u64>,
 ) -> Vec<Row> {
-    let row = |kind: &str, id: &str, text: &str, change: &str| {
+    let row = |kind: &str, id: &str, text: &str, change: &str, detail: Option<Detail>| {
         let item = Item::new(pr, kind, id);
         Row {
             pr,
@@ -385,16 +520,17 @@ pub fn rows(
             text: text.into(),
             change: change.into(),
             status: project.status(&item, landed),
+            detail,
         }
     };
     let mut rows: Vec<Row> = map
         .iter()
-        .map(|m| row(&m.kind, &m.id, &m.text, &m.change))
+        .map(|m| row(&m.kind, &m.id, &m.text, &m.change, m.detail.clone()))
         .collect();
     rows.extend(
         decisions
             .iter()
-            .map(|(id, text)| row(DECISION, id, text, "")),
+            .map(|(id, text)| row(DECISION, id, text, "", None)),
     );
     for record in &project.records {
         let missing = record.pr == pr
@@ -402,7 +538,7 @@ pub fn rows(
             && !record.state.is_unknown()
             && !decisions.iter().any(|(id, _)| *id == record.id);
         if missing && !rows.iter().any(|r| r.kind == DECISION && r.id == record.id) {
-            rows.push(row(DECISION, &record.id, &record.text, ""));
+            rows.push(row(DECISION, &record.id, &record.text, "", None));
         }
     }
     rows
@@ -661,6 +797,207 @@ mod tests {
             "no map before: nothing to tell apart"
         );
         assert!(map_items(Some("not json"), Some(OLD)).is_empty());
+    }
+
+    /// A version 2 map of part `a` with `purpose`, own `paths` and `holds`, and a link a-b of `link` (its `kind` and `reason`).
+    fn v2(purpose: &str, paths: &str, holds: &str, link: &str) -> String {
+        format!(
+            r#"{{"version":2,
+              "parts":[{{"id":"a","name":"A","caption":"c","purpose":"{purpose}","tier":"core","paths":{paths},"holds":{holds}}},
+                       {{"id":"b","name":"B","caption":"c","purpose":"p","tier":"core","paths":["b/"],"holds":[]}}],
+              "actors":[],"links":[{{"id":"a-b","from":"a","to":"b"{link}}}],"ignored":[],"laws":[],"flows":[]}}"#
+        )
+    }
+
+    fn part_detail(items: &[MapItem], id: &str) -> PartDetail {
+        match items
+            .iter()
+            .find(|i| i.kind == "part" && i.id == id)
+            .and_then(|i| i.detail.clone())
+        {
+            Some(Detail::Part(detail)) => detail,
+            other => panic!("no part detail for {id}: {other:?}"),
+        }
+    }
+
+    fn words(before: Option<&str>, after: Option<&str>) -> Words {
+        Words {
+            before: before.map(String::from),
+            after: after.map(String::from),
+        }
+    }
+
+    #[test]
+    fn a_changed_purpose_shows_old_beside_new() {
+        let old = v2("Keeps the state.", r#"["a/"]"#, "[]", "");
+        let new = v2("Keeps and serves the state.", r#"["a/"]"#, "[]", "");
+        let detail = part_detail(&map_items(Some(&old), Some(&new)), "a");
+        assert_eq!(detail.name, words(Some("A"), Some("A")));
+        assert_eq!(
+            detail.purpose,
+            words(
+                Some("Keeps the state."),
+                Some("Keeps and serves the state.")
+            )
+        );
+        assert!(detail.holds.is_empty());
+    }
+
+    #[test]
+    fn a_name_held_twice_shows_each_item_once() {
+        let old = v2("p", r#"["a/"]"#, "[]", "");
+        let new = v2(
+            "p",
+            r#"["a/"]"#,
+            r#"[{"name":"Fog","text":"A"},{"name":"Fog","text":"B"}]"#,
+            "",
+        );
+        let detail = part_detail(&map_items(Some(&old), Some(&new)), "a");
+        let texts: Vec<&Words> = detail.holds.iter().map(|h| &h.text).collect();
+        assert_eq!(texts, [&words(None, Some("A")), &words(None, Some("B"))]);
+    }
+
+    #[test]
+    fn held_items_are_matched_by_name_and_each_ones_change_shows() {
+        let old = v2(
+            "p",
+            r#"["a/"]"#,
+            r#"[{"name":"Fog","text":"Greys a part.","paths":["a/fog.rs"]},
+                {"name":"Locks","text":"One writer."},
+                {"name":"Same","text":"Unchanged."}]"#,
+            "",
+        );
+        let new = v2(
+            "p",
+            r#"["a/"]"#,
+            r#"[{"name":"Fog","text":"Greys a part a PR changed.","paths":["a/fog.rs","a/fog/"]},
+                {"name":"Same","text":"Unchanged."},
+                {"name":"Briefs","text":"Tells a PR's story.","paths":["a/briefs.rs"]}]"#,
+            "",
+        );
+        let detail = part_detail(&map_items(Some(&old), Some(&new)), "a");
+        let held: Vec<(&str, &Words, &[String], &[String])> = detail
+            .holds
+            .iter()
+            .map(|h| {
+                (
+                    h.name.as_str(),
+                    &h.text,
+                    h.paths_added.as_slice(),
+                    h.paths_removed.as_slice(),
+                )
+            })
+            .collect();
+        let s = |list: &[&str]| list.iter().map(|p| p.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            held,
+            [
+                (
+                    "Fog",
+                    &words(Some("Greys a part."), Some("Greys a part a PR changed.")),
+                    s(&["a/fog/"]).as_slice(),
+                    s(&[]).as_slice()
+                ),
+                (
+                    "Same",
+                    &words(Some("Unchanged."), Some("Unchanged.")),
+                    s(&[]).as_slice(),
+                    s(&[]).as_slice()
+                ),
+                (
+                    "Briefs",
+                    &words(None, Some("Tells a PR's story.")),
+                    s(&["a/briefs.rs"]).as_slice(),
+                    s(&[]).as_slice()
+                ),
+                (
+                    "Locks",
+                    &words(Some("One writer."), None),
+                    s(&[]).as_slice(),
+                    s(&[]).as_slice()
+                ),
+            ],
+            "the new side's order, then what was removed"
+        );
+    }
+
+    #[test]
+    fn a_parts_own_paths_change_shows_as_the_patterns_added_and_removed() {
+        let old = v2("p", r#"["a/","old/"]"#, "[]", "");
+        let new = v2("p", r#"["a/","new/"]"#, "[]", "");
+        let detail = part_detail(&map_items(Some(&old), Some(&new)), "a");
+        assert_eq!(detail.paths_added, ["new/"]);
+        assert_eq!(detail.paths_removed, ["old/"]);
+    }
+
+    #[test]
+    fn an_added_part_shows_its_purpose_and_held_items_with_nothing_before() {
+        let old = v2("p", r#"["a/"]"#, "[]", "");
+        let new = old.replace(
+            r#"{"id":"b","#,
+            r#"{"id":"c","name":"C","caption":"c","purpose":"Installs the hook.","tier":"core","paths":["c/"],
+                "holds":[{"name":"Copies","text":"The hook's copies.","paths":["c/copies.rs"]}]},{"id":"b","#,
+        );
+        let detail = part_detail(&map_items(Some(&old), Some(&new)), "c");
+        assert_eq!(detail.name, words(None, Some("C")));
+        assert_eq!(detail.purpose, words(None, Some("Installs the hook.")));
+        assert_eq!(detail.holds.len(), 1);
+        assert_eq!(detail.holds[0].name, "Copies");
+        assert_eq!(
+            detail.holds[0].text,
+            words(None, Some("The hook's copies."))
+        );
+        assert_eq!(detail.holds[0].paths_added, ["c/copies.rs"]);
+        assert_eq!(detail.paths_added, ["c/"]);
+    }
+
+    #[test]
+    fn a_links_changed_kind_and_reason_show_old_beside_new() {
+        let old = v2("p", r#"["a/"]"#, "[]", r#","kind":"import""#);
+        let new = v2(
+            "p",
+            r#"["a/"]"#,
+            "[]",
+            r#","kind":"http","reason":"The page calls the server over HTTP.""#,
+        );
+        let items = map_items(Some(&old), Some(&new));
+        let link = items
+            .iter()
+            .find(|i| i.kind == "link")
+            .expect("the link changed");
+        assert_eq!(link.change, "changed");
+        assert_eq!(
+            link.detail,
+            Some(Detail::Link(LinkDetail {
+                kind: words(Some("import"), Some("http")),
+                reason: words(Some(""), Some("The page calls the server over HTTP.")),
+            }))
+        );
+    }
+
+    #[test]
+    fn a_version_1_side_is_converted_so_its_description_shows_as_the_old_purpose() {
+        // OLD is version 1: part a's description is "d". The same map in version 2 with a new purpose and a held item.
+        let new = OLD
+            .replace(r#""version":1"#, r#""version":2"#)
+            .replace(
+                r#""id":"a","name":"A","caption":"c","description":"d","tier":"core","paths":["a/"]"#,
+                r#""id":"a","name":"A","caption":"c","purpose":"Keeps the state.","tier":"core","paths":["a/"],"holds":[{"name":"Fog","text":"Greys a part."}]"#,
+            )
+            .replace(r#""description":"d""#, r#""purpose":"d","holds":[]"#);
+        let items = map_items(Some(OLD), Some(&new));
+        let changed: Vec<(&str, &str)> = items
+            .iter()
+            .map(|i| (i.kind.as_str(), i.id.as_str()))
+            .collect();
+        assert_eq!(
+            changed,
+            [("part", "a")],
+            "b only moved from description to purpose: no change"
+        );
+        let detail = part_detail(&items, "a");
+        assert_eq!(detail.purpose, words(Some("d"), Some("Keeps the state.")));
+        assert_eq!(detail.holds[0].text, words(None, Some("Greys a part.")));
     }
 
     #[test]

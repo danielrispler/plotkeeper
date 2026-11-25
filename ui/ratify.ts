@@ -1,7 +1,7 @@
 // Ratifying (spec danielrispler/plotkeeper#334, ticket #343), the pure part: what the part sheet and the brief's ratify step say of an item,
 // and what an overturn copies. `map-sheet.ts` and `map-brief.ts` draw it, the server (`server/src/ratify.rs`) keeps the records.
 
-import type { BriefStep, PendingItem, RatifyRow } from "./types.js";
+import type { BriefStep, PendingItem, RatifyDetail, RatifyRow } from "./types.js";
 
 // The state of an item as the brief says it: nothing to ratify when it landed before the first run.
 export const statusWords: Record<RatifyRow["status"], string> = {
@@ -22,17 +22,65 @@ export function sheetPending(pending: PendingItem[], part: string, links: { id: 
   return { laws, links: links.filter((link) => (link.from === part || link.to === part) && found.has(link.id)).map((link) => ({ ...link, pr: found.get(link.id)! })) };
 }
 
+// One line of a detail: what changed, its text before and after, null on a side that has none. `code` marks paths and a link's kind,
+// which are names in code and are never translated.
+export type DetailLine = { label: string; before: string | null; after: string | null; code?: true };
+
+const list = (patterns: string[]) => (patterns.length ? patterns.join(", ") : null);
+
+// The lines of a part's or a link's detail that changed, old beside new; an added item's every line, with nothing before. A part's own
+// paths and each held item's show the patterns removed beside those added.
+export function detailLines(detail: RatifyDetail | null | undefined): DetailLine[] {
+  if (!detail) return [];
+  const lines: DetailLine[] = [];
+  const words = (label: string, text: { before: string | null; after: string | null }, code = false) => {
+    // An empty text and none are the same: an import link added without a reason has no Reason to show.
+    if ((text.before || null) !== (text.after || null)) lines.push(code ? { label, ...text, code } : { label, ...text });
+  };
+  const paths = (label: string, added: string[], removed: string[]) => {
+    if (added.length || removed.length) lines.push({ label, before: list(removed), after: list(added), code: true });
+  };
+  if (detail.of === "link") {
+    words("Kind", detail.kind, true);
+    words("Reason", detail.reason);
+    return lines;
+  }
+  words("Name", detail.name);
+  words("Purpose", detail.purpose);
+  paths("Paths", detail.paths_added, detail.paths_removed);
+  for (const held of detail.holds) {
+    words(`Holds ${held.name}`, held.text);
+    paths(`${held.name}: paths`, held.paths_added, held.paths_removed);
+  }
+  return lines;
+}
+
+// What an overturn quotes of a part's or a link's new side: a part's purpose and the names of what it holds, a link's kind and reason.
+function newText(detail: RatifyDetail | null | undefined): string {
+  if (!detail) return "";
+  if (detail.of === "link") {
+    if (detail.kind.after === null) return "";
+    return `, kind ${detail.kind.after || "none"}${detail.reason.after ? `, reason “${detail.reason.after}”` : ""}`;
+  }
+  if (detail.purpose.after === null) return "";
+  const held = detail.holds.filter((h) => h.text.after !== null).map((h) => h.name);
+  return `${detail.purpose.after ? `, purpose: “${detail.purpose.after}”` : ""}${held.length ? `, and it holds ${held.join(", ")}` : ""}`;
+}
+
+// A full stop after `words`, unless they already end with one, inside a closing quote or not.
+const stopped = (words: string) => (/[.!?]”?$/.test(words) ? words : `${words}.`);
+
 const kindWords: Record<string, string> = { part: "part", actor: "outside actor", link: "link", law: "law", flow: "flow", decision: "decision" };
 
 // The prompt an overturn puts on the clipboard: it stands alone for any agent, naming the PR, its branch while it is open, the item's
 // id and its wording.
-export function overturnPrompt(row: Pick<RatifyRow, "pr" | "kind" | "id" | "text" | "change">, branch: string | null): string {
+export function overturnPrompt(row: Pick<RatifyRow, "pr" | "kind" | "id" | "text" | "change"> & { detail?: RatifyDetail | null }, branch: string | null): string {
   const where = branch ? `PR #${row.pr} (branch ${branch})` : `PR #${row.pr}`;
   const what =
     row.kind === "decision"
       ? `the decision ${row.id}: “${row.text}”`
-      : `the ${kindWords[row.kind] ?? row.kind} ${row.id}${row.change ? ` (${row.change})` : ""}: “${row.text}”`;
-  return `In ${where}, I overturn ${what} Undo it and tell me what you changed.`;
+      : `the ${kindWords[row.kind] ?? row.kind} ${row.id}${row.change ? ` (${row.change})` : ""}: “${row.text}”${newText(row.detail)}`;
+  return `In ${where}, I overturn ${stopped(what)} Undo it and tell me what you changed.`;
 }
 
 // Puts `prompt` on the clipboard through `writeText` (`navigator.clipboard.writeText`): "copied", or "manual" when there is no clipboard or
@@ -83,3 +131,10 @@ export const ratifyStep = (rows: RatifyRow[], on: string[] = [], guard = false):
 
 // The rows still to ratify.
 export const openRows = (rows: RatifyRow[]) => rows.filter((row) => row.status === "not-yet");
+
+// A link the part sheet marks, as an item to ratify: its ends by id as the brief's row says them, and its kind and reason as the new side
+// an overturn quotes. The sheet has no old side, so `before` is null.
+export function sheetLinkItem(link: { id: string; from: string; to: string; kind?: string; reason?: string }, pr: number) {
+  const detail: RatifyDetail = { of: "link", kind: { before: null, after: link.kind ?? "" }, reason: { before: null, after: link.reason ?? "" } };
+  return { pr, kind: "link", id: link.id, text: `${link.from} to ${link.to}`, change: "", detail };
+}

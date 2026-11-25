@@ -20,7 +20,38 @@ fn a_passing_repository_exits_zero() {
     let (_dir, root) = project(&base(), &FILES);
     let out = run(&root, &[]);
     assert!(out.status.success());
-    assert!(out.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap(),
+        "ok: 2 parts own 2 files (2 ignored); 1 link: 1 import (0 proven, 1 unproven), 0 http, 0 file, 0 spawn; 1 law: 0 check, 1 trust\n"
+    );
+}
+
+#[test]
+fn the_pass_line_counts_in_the_plural_links_by_kind_and_laws_by_backing() {
+    let mut map = base();
+    map["links"] = serde_json::json!([
+        { "id": "alpha-beta", "from": "alpha", "to": "beta", "kind": "import" },
+        { "id": "writer-alpha", "from": "writer", "to": "alpha", "kind": "http", "reason": "The writer answers over HTTP." },
+        { "id": "alpha-writer", "from": "alpha", "to": "writer", "kind": "spawn", "reason": "Alpha runs the writer." },
+        { "id": "beta-writer", "from": "beta", "to": "writer", "kind": "spawn", "reason": "Beta runs it too." },
+        { "id": "beta-alpha", "from": "beta", "to": "alpha", "kind": "file", "reason": "Beta writes a file alpha reads." }
+    ]);
+    map["laws"] = serde_json::json!([
+        { "id": "stay-true", "on": "alpha", "backing": "trust", "text": "It stays true." },
+        { "id": "held", "on": "beta", "backing": "check", "text": "It is held." }
+    ]);
+    let (dir, root) = project(
+        &map,
+        &["alpha/a.rs", "alpha/b.rs", "beta/b.rs", "docs/d.md"],
+    );
+    crate::common::write(dir.path(), "beta/b.rs", &format!("// @{}: held\n", "law"));
+    studio_test_support::git(dir.path(), &["commit", "-qam", "Tag"]);
+    let out = run(&root, &[]);
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap(),
+        "ok: 2 parts own 3 files (2 ignored); 5 links: 1 import (0 proven, 1 unproven), 1 http, 1 file, 2 spawn; 2 laws: 1 check, 1 trust\n"
+    );
 }
 
 #[test]
@@ -32,6 +63,13 @@ fn a_failing_repository_exits_non_zero_with_a_line_per_problem() {
     assert!(!out.status.success());
     let text = String::from_utf8(out.stdout).unwrap();
     assert_eq!(text.lines().count(), 2, "{text}");
+    let out = run(&root, &["--json"]);
+    let value: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(value["counts"]["files"], 2);
+    assert_eq!(
+        value["counts"]["ignored"], 2,
+        "the unowned file is not ignored"
+    );
 }
 
 #[test]
@@ -41,6 +79,14 @@ fn json_prints_data_that_parses() {
     let value: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(value["parts"][0]["id"], "alpha");
     assert_eq!(value["problems"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        value["counts"],
+        serde_json::json!({
+            "parts": 2, "files": 2, "ignored": 2,
+            "links": { "total": 1, "import": 1, "http": 0, "spawn": 0, "file": 0, "proven": 0, "unproven": 1 },
+            "laws": { "check": 0, "trust": 1 }
+        })
+    );
 }
 
 #[test]

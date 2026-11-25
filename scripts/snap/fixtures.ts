@@ -109,16 +109,16 @@ const projectMenuScript = (nearBottom: boolean) => `
 
 // The Map view (#309) on a map of plotkeeper's own shape, opened by its key. Positions are saved, as the prototype's Treatment C draws them.
 const mapFile = JSON.stringify({
-  version: 1,
+  version: 2,
   parts: [
-    { id: "plugins", name: "Agent plugins", caption: "Which hooks each agent runs", description: "", tier: "interface", paths: ["plugin/"] },
-    { id: "hook", name: "Hook", caption: "Records every agent event", description: "", tier: "core", paths: ["hook/"] },
-    { id: "core", name: "Core", caption: "Turns events into session state", description: "", tier: "core", paths: ["core/"] },
-    { id: "shell", name: "Shell", caption: "Reads the log, feeds the core, acts", description: "", tier: "core", paths: ["src-tauri/"] },
-    { id: "understanding", name: "Understanding", caption: "Writes what you read, and keeps it", description: "", tier: "core", paths: ["understanding/"] },
-    { id: "window", name: "Window", caption: "Everything you see and press", description: "", tier: "core", paths: ["ui/"] },
-    { id: "daemon", name: "Terminal daemon", caption: "Owns the terminals", description: "", tier: "core", paths: ["terminal-daemon/"] },
-    { id: "workbench", name: "Workbench", caption: "Git and worktrees", description: "", tier: "black-box", paths: ["workbench/"] },
+    { id: "plugins", name: "Agent plugins", caption: "Which hooks each agent runs", purpose: "", holds: [], tier: "interface", paths: ["plugin/"] },
+    { id: "hook", name: "Hook", caption: "Records every agent event", purpose: "", holds: [], tier: "core", paths: ["hook/"] },
+    { id: "core", name: "Core", caption: "Turns events into session state", purpose: "", holds: [], tier: "core", paths: ["core/"] },
+    { id: "shell", name: "Shell", caption: "Reads the log, feeds the core, acts", purpose: "", holds: [], tier: "core", paths: ["src-tauri/"] },
+    { id: "understanding", name: "Understanding", caption: "Writes what you read, and keeps it", purpose: "", holds: [], tier: "core", paths: ["understanding/"] },
+    { id: "window", name: "Window", caption: "Everything you see and press", purpose: "", holds: [], tier: "core", paths: ["ui/"] },
+    { id: "daemon", name: "Terminal daemon", caption: "Owns the terminals", purpose: "", holds: [], tier: "core", paths: ["terminal-daemon/"] },
+    { id: "workbench", name: "Workbench", caption: "Git and worktrees", purpose: "", holds: [], tier: "black-box", paths: ["workbench/"] },
   ],
   actors: [{ id: "agents", name: "Agents" }, { id: "writer", name: "Writer" }, { id: "github", name: "GitHub" }],
   links: [
@@ -697,10 +697,10 @@ const mapBriefOrderRight = (): Fixture =>
       if (!document.querySelector("#map-brief .brief-title").textContent.includes("A ready PR now brings")) log("snap:fail the chapter did not follow the overview");`, true);
 // The brief's ratify step (#343): a changed law and a link, and the agent's two decisions, one already accepted.
 const ratifyRows: RatifyRow[] = [
-  { pr: 334, kind: "law", id: "window-quiet", text: "Only needs-you has colour.", change: "changed", status: "not-yet" },
-  { pr: 334, kind: "link", id: "shell-understanding", text: "Shell to Understanding", change: "added", status: "not-yet" },
-  { pr: 334, kind: "decision", id: "d1", text: "A brief is stored per project, since PR numbers repeat across repositories.", change: "", status: "not-yet" },
-  { pr: 334, kind: "decision", id: "d2", text: "A merged PR's brief is read as stored, never rewritten.", change: "", status: "accepted" },
+  { pr: 334, kind: "law", id: "window-quiet", text: "Only needs-you has colour.", change: "changed", status: "not-yet", detail: null },
+  { pr: 334, kind: "link", id: "shell-understanding", text: "Shell to Understanding", change: "added", status: "not-yet", detail: null },
+  { pr: 334, kind: "decision", id: "d1", text: "A brief is stored per project, since PR numbers repeat across repositories.", change: "", status: "not-yet", detail: null },
+  { pr: 334, kind: "decision", id: "d2", text: "A merged PR's brief is read as stored, never rewritten.", change: "", status: "accepted", detail: null },
 ];
 const mapBriefRatify = (): Fixture => ({
   ...mapBrief(briefOf(storySteps()), 4, `
@@ -713,6 +713,56 @@ const mapBriefRatify = (): Fixture => ({
       if (!document.querySelector("#map-brief .ratify-row").textContent.includes("Accepted")) log("snap:fail Accept did not mark the row");
       log("ratify ok");`, false, 100),
   pr_ratify: ratifyRows,
+});
+// Old beside new in the brief's ratify step (#485): a changed part (its purpose, a path, a held item reworded, one added, one removed), an
+// added part with nothing before, and a link whose kind and reason changed.
+const ratifyDetailRows: RatifyRow[] = [
+  {
+    pr: 334, kind: "part", id: "server", text: "Server", change: "changed", status: "not-yet",
+    detail: {
+      of: "part",
+      name: { before: "Server", after: "Server" },
+      purpose: { before: "Serves the page, keeps the state, installs the hook and runs the agents.", after: "Serves the page and keeps the state it shows." },
+      holds: [
+        { name: "Fog", text: { before: "Greys a part.", after: "Greys a part a PR changed until its brief is read." }, paths_added: ["server/src/fog.rs"], paths_removed: [] },
+        { name: "Settings", text: { before: "Kept per user.", after: "Kept per user." }, paths_added: [], paths_removed: [] },
+        { name: "Locks", text: { before: null, after: "One writer per file at a time." }, paths_added: [], paths_removed: [] },
+        { name: "Install", text: { before: "Puts the hook in place.", after: null }, paths_added: [], paths_removed: [] },
+      ],
+      paths_added: [],
+      paths_removed: ["server/src/install.rs"],
+    },
+  },
+  {
+    pr: 334, kind: "part", id: "install", text: "Install", change: "added", status: "not-yet",
+    detail: {
+      of: "part",
+      name: { before: null, after: "Install" },
+      purpose: { before: null, after: "Puts plotkeeper's hook into each agent's settings, and takes it out again." },
+      holds: [{ name: "Hook copies", text: { before: null, after: "The hook file each agent runs." }, paths_added: ["server/src/hook_copies.rs"], paths_removed: [] }],
+      paths_added: ["server/src/install.rs", "server/src/hook_copies.rs"],
+      paths_removed: [],
+    },
+  },
+  {
+    pr: 334, kind: "link", id: "shell-server", text: "Shell to Server", change: "changed", status: "not-yet",
+    detail: { of: "link", kind: { before: "import", after: "http" }, reason: { before: "", after: "The page calls the server over HTTP on 127.0.0.1." } },
+  },
+];
+const mapBriefRatifyDetail = (): Fixture => ({
+  ...mapBrief(briefOf(storySteps()), 4, `
+      const rows = [...document.querySelectorAll("#map-brief .ratify-row")];
+      if (rows.length !== 3) return log("snap:fail expected 3 ratify rows, saw " + rows.length);
+      const [changed, added, link] = rows.map((row) => row.querySelector(".ratify-detail"));
+      if (!changed || !added || !link) return log("snap:fail a part or link row has no detail");
+      const terms = (detail) => [...detail.querySelectorAll("dt")].map((dt) => dt.textContent);
+      if (terms(changed).join("|") !== "Purpose|Paths|Holds Fog|Fog: paths|Holds Locks|Holds Install") log("snap:fail the changed part's lines: " + terms(changed).join("|"));
+      if (!changed.querySelector("del")?.textContent.includes("installs the hook") || !changed.querySelector("ins")?.textContent.includes("keeps the state")) log("snap:fail the purpose is not old beside new");
+      if (added.querySelector("del")) log("snap:fail an added part has something before");
+      if (terms(added)[0] !== "Name" || !added.textContent.includes("Hook copies")) log("snap:fail the added part does not show its name and held items");
+      if (terms(link).join("|") !== "Kind|Reason" || link.querySelector("del").textContent !== "import" || !link.textContent.includes("none")) log("snap:fail the link's kind and reason: " + link.textContent);
+      log("ratify detail ok");`, false, 100),
+  pr_ratify: ratifyDetailRows,
 });
 // Guard with a law (#401): a bug fix's brief, with nothing to ratify, ends with the guard's row: the on-trust laws of Core and Shell, the
 // parts it touched, with Back this law, a new law of an earlier run being proven, and Add a new law. `confirm` presses Add a new law and
@@ -1061,8 +1111,8 @@ const mapStale = (): Fixture =>
       log("stale ok");`, {
     map_state: mapState({ stale: { core: 1, shell: 2, understanding: 3 } }),
   });
-// The refresher (#392) on Shell's sheet, a stale part with no fog: drawn at once from the map file (its caption and description, the flows
-// through it, its laws with their backing and its links; the sheet already shows the first three), with no writer and no "Writing…".
+// The refresher (#392) on Shell's sheet, a stale part with no fog: drawn at once from the map file, the flows through it hop by hop (the
+// sheet already shows the rest, its links as "Talks to", spec #473), with no writer and no "Writing…".
 const mapRefresher = (): Fixture => {
   const file = JSON.parse(mapFile);
   file.flows = [{ id: "turn-writing", name: "Turn writing", hops: [
@@ -1071,7 +1121,7 @@ const mapRefresher = (): Fixture => {
     { link: "understanding-writer", text: "Understanding calls the writer." },
     { link: "shell-window", text: "The Shell tells the Window, which shows the summary." },
   ] }];
-  file.parts.find((part: { id: string }) => part.id === "shell").description = "Reads the hook's log, feeds the core, writes the summaries through Understanding and serves the Window.";
+  file.parts.find((part: { id: string }) => part.id === "shell").purpose = "Reads the hook's log, feeds the core, writes the summaries through Understanding and serves the Window.";
   return mapOpened(`
       document.querySelector("#map .plate[data-id=shell]").click();
       await wait(300);
@@ -1081,11 +1131,12 @@ const mapRefresher = (): Fixture => {
       await wait(400);
       const node = document.querySelector("#map-sheet .refresher");
       if (!node) return log("snap:fail the refresher did not show");
-      if (node.previousElementSibling?.classList.contains("sheet-laws") !== true) log("snap:fail the refresher is not under the laws");
+      if (node.previousElementSibling?.classList.contains("sheet-links") !== true) log("snap:fail the refresher is not under Talks to");
       const words = node.textContent;
-      for (const want of ["Turn writing", "The Shell asks Understanding", "Hook to Shell", "Shell to Window"]) {
+      for (const want of ["Flows through it", "Turn writing", "The Shell asks Understanding"]) {
         if (!words.includes(want)) log("snap:fail the refresher lacks " + want);
       }
+      if (words.includes("Linked with") || node.querySelector(".refresher-links")) log("snap:fail the refresher still lists the links");
       if (words.includes("Understanding calls the writer.")) log("snap:fail a hop not at the part shows");
       if (document.querySelector("#map-sheet .sheet-refresher")) log("snap:fail the button stays once the refresher shows");
       if (document.body.textContent.includes("Writing")) log("snap:fail the refresher waits on a writer");
@@ -1093,6 +1144,61 @@ const mapRefresher = (): Fixture => {
     map_state: mapState({ source: JSON.stringify(file), stale: { shell: 2 } }),
   });
 };
+// The map with a pair of ends joined twice (spec #473): Shell imports Understanding, and Understanding answers Shell over HTTP, with a
+// law on the run-time link. Each link has its kind, and the run-time ones their reasons.
+const pairFile = (() => {
+  const file = JSON.parse(mapFile);
+  for (const link of file.links) link.kind = link.to === "writer" || link.to === "github" ? "http" : "import";
+  file.links.find((link: { id: string }) => link.id === "shell-daemon").kind = "spawn";
+  file.links.find((link: { id: string }) => link.id === "shell-daemon").reason = "The Shell starts the daemon that owns the terminals.";
+  file.links.push({ id: "understanding-shell", from: "understanding", to: "shell", kind: "http", reason: "Understanding answers the Shell's summary requests." });
+  file.laws.push({ id: "understanding-answers", on: "understanding-shell", backing: "trust", text: "Every request gets one answer." });
+  return JSON.stringify(file);
+})();
+// A brief step that lights the second link of a pair (spec #473): the light runs along the pair's one line, from Understanding to Shell,
+// though the line is drawn from Shell, the end of the pair's first link.
+const mapBriefPairLight = (): Fixture => {
+  const base = mapBrief(briefOf([step("Now", "Understanding answers the Shell", "The summary comes back over the link.", ["shell", "understanding"], { hops: [["understanding-shell", false]] })]), 0, `
+      const line = document.querySelector('#map .map-links [data-link~="understanding-shell"]');
+      if (!line || line.getAttribute("data-from") !== "shell") return log("snap:fail the pair's line: " + line?.outerHTML);
+      const trails = [...document.querySelectorAll(".map-light .light-trail")];
+      if (trails.length !== 1) return log("snap:fail the step lit " + trails.length + " trails");
+      const at = (node, a, b) => node.getAttribute(a) + "," + node.getAttribute(b);
+      if (at(trails[0], "x1", "y1") !== at(line, "x2", "y2") || at(trails[0], "x2", "y2") !== at(line, "x1", "y1")) log("snap:fail the light runs the wrong way along the pair");
+      if (!document.querySelector('.plate[data-id="shell"].lit') || !document.querySelector('.plate[data-id="understanding"].lit')) log("snap:fail the pair's ends are not lit");
+      log("pair light ok");`, true);
+  return { ...base, map_state: { ...(base.map_state as MapState), source: pairFile }, snapDone: "pair light ok" };
+};
+// "Talks to" on Shell's sheet (spec #473): every link at either end, with its arrow, other end, kind and reason, and no other list of
+// links; the unratified run-time link carries Accept and Overturn on its row. On the map the Shell and Understanding pair is one line.
+const mapTalksTo = (): Fixture =>
+  mapOpened(`
+      document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(300);
+      const sheet = document.getElementById("map-sheet");
+      const headings = [...sheet.querySelectorAll(".sheet-heading")].map((h) => h.textContent);
+      if (!headings.includes("Talks to") || headings.includes("Links") || headings.includes("Linked with")) log("snap:fail headings: " + headings.join("|"));
+      if (sheet.querySelectorAll("ul.sheet-links").length !== 1) log("snap:fail not one list of links");
+      const rows = [...sheet.querySelectorAll(".sheet-links .sheet-link")];
+      if (rows.length !== 7) return log("snap:fail Talks to rows: " + rows.length);
+      const row = (id) => rows.find((r) => r.dataset.link === id);
+      const back = row("understanding-shell"), out = row("shell-understanding"), spawn = row("shell-daemon");
+      if (back.querySelector(".sheet-link-dir").getAttribute("aria-label") !== "from" || out.querySelector(".sheet-link-dir").getAttribute("aria-label") !== "to") log("snap:fail the arrows' directions");
+      if (back.querySelector(".sheet-link-text").textContent !== "Understanding" || back.querySelector(".sheet-link-kind").textContent !== "http") log("snap:fail the run-time row: " + back.textContent);
+      if (!back.querySelector(".sheet-link-reason")?.textContent.includes("summary requests")) log("snap:fail the run-time row lacks its reason");
+      if (out.querySelector(".sheet-link-kind").textContent !== "import" || out.querySelector(".sheet-link-reason")) log("snap:fail the import row: " + out.textContent);
+      if (!spawn.textContent.includes("spawn") || !spawn.textContent.includes("starts the daemon")) log("snap:fail the spawn row: " + spawn.textContent);
+      if (!back.classList.contains("unratified") || !back.querySelector(".ratify-accept") || !back.querySelector(".ratify-overturn")) log("snap:fail the unratified row has no Accept and Overturn");
+      if (sheet.querySelectorAll(".sheet-link.unratified").length !== 1) log("snap:fail a ratified link shows as unratified");
+      const lines = [...document.querySelectorAll("#map .map-links line.link")];
+      if (lines.length !== 10) log("snap:fail one line per pair: " + lines.length);
+      const pair = document.querySelector('#map .map-links [data-link~="understanding-shell"]');
+      if (!pair || pair !== document.querySelector('#map .map-links [data-link~="shell-understanding"]')) log("snap:fail the pair is not one line");
+      if (!document.querySelector("#map .map-links .link-mark.trust")) log("snap:fail the law on the pair's run-time link has no mark");
+      log("talks to ok");`, {
+    map_state: mapState({ source: pairFile, ratify: [{ pr: 334, kind: "link", id: "understanding-shell" }] }),
+    snapDone: "talks to ok",
+  });
 // A micro-world (#399) in its overlay: from the refresher on Shell's sheet, the Turn writing flow's world is ready but may be out of date, so its
 // row offers Open and Rebuild; Open shows the checked page in a frame sandboxed to scripts alone, in the glass overlay the size of the settings dialog. The page's script is
 // an inline handler: a closing script tag would end the snap page's own.
@@ -2066,12 +2172,53 @@ const mapPanelBrief = (): Fixture =>
   pr_brief: briefOf(storySteps()),
 });
 
-// The part sheet in the map (#445). A long description on the shell, whose check-backed law opens a long proof in the drawer.
+// The part sheet in the map (#445). The shell holds eight items, the most a part may, so its sheet is long; its check-backed law opens
+// a long proof in the drawer.
 const longSheet = (() => {
   const doc = JSON.parse(mapFile);
-  doc.parts.find((p: { id: string }) => p.id === "shell").description = "Reads the event log, feeds each line to the core and acts on what the core says. ".repeat(12);
+  const shell = doc.parts.find((p: { id: string }) => p.id === "shell");
+  shell.purpose = "Reads the event log, feeds each line to the core and acts on what the core says, then serves the page and answers its commands.";
+  shell.holds = Array.from({ length: 8 }, (_, i) => ({
+    name: `Held item ${i + 1}`,
+    text: "One sentence on a thing the part holds, long enough to wrap over two lines of the sheet at its first width of 360 px.",
+    paths: [`src-tauri/src/item_${i + 1}.rs`],
+  }));
   return JSON.stringify(doc);
 })();
+// The part sheet with its purpose and held items (#483): the purpose first, then each held item's name, sentence and key files; an item
+// without paths shows none. The plate's hover text is the purpose, never the held items.
+const heldSheet = (() => {
+  const doc = JSON.parse(mapFile);
+  const shell = doc.parts.find((p: { id: string }) => p.id === "shell");
+  shell.purpose = "The program that holds the state, follows the event log and serves the page on 127.0.0.1.";
+  shell.holds = [
+    { name: "Serving the page", text: "The built page, a POST route per command and one event stream, behind a token, a cookie and a Host check.", paths: ["src-tauri/src/web.rs", "src-tauri/src/api.rs"] },
+    { name: "The read loop", text: "Follows the event log and sends what changed to the page.", paths: ["src-tauri/src/read_loop.rs"] },
+    { name: "The quiet log", text: "One line per thing you use, kept for the stop rules, with nothing shown." },
+  ];
+  return JSON.stringify(doc);
+})();
+const mapSheetHolds = (): Fixture =>
+  mapOpened(`
+      const plate = document.querySelector("#map .plate[data-id=shell]");
+      if (!plate.title.endsWith("The program that holds the state, follows the event log and serves the page on 127.0.0.1.")) log("snap:fail the plate's hover text is not the purpose: " + plate.title);
+      if (plate.title.includes("Serving the page")) log("snap:fail the plate's hover text holds the held items");
+      plate.click();
+      await wait(300);
+      const sheet = document.querySelector("#map-sheet .sheet");
+      if (!sheet) return log("snap:fail the sheet did not open");
+      const purpose = sheet.querySelector(".sheet-purpose");
+      const list = sheet.querySelector(".sheet-holds");
+      if (!purpose || !list) return log("snap:fail the sheet lacks its purpose or its held items");
+      if (!(purpose.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING)) log("snap:fail the held items come before the purpose");
+      const rows = [...list.querySelectorAll(".sheet-held")];
+      if (rows.length !== 3) log("snap:fail the sheet shows " + rows.length + " held items, not 3");
+      const files = rows.map((row) => [...row.querySelectorAll(".sheet-held-files code")].map((code) => code.textContent));
+      if (files[0].join() !== "src-tauri/src/web.rs,src-tauri/src/api.rs") log("snap:fail the first item's key files are " + files[0].join());
+      if (files[2].length) log("snap:fail an item without paths shows key files");
+      // The glass's rise ends before the picture is taken.
+      await wait(400);
+      log("sheet holds ok");`, { map_state: mapState({ source: heldSheet }) });
 const longProof = [{ file: "workbench/tests/wire.rs", line: 11, test: "wire_types_match", first: 11, snippet: ["// @law: wire-types-agree", "#[test]", "fn wire_types_match() {", ...Array.from({ length: 40 }, (_, i) => `    let sample_${i} = studio_test_support::sample(${i});`), "}"].join("\n") }];
 const sheetHelpers = `
       const esc = async () => { document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", key: "Escape", bubbles: true })); await wait(100); };
@@ -2662,6 +2809,7 @@ ${writerStatusAfter("Keychain refused")}
   mapBriefOrderWrong,
   mapBriefOrderRight,
   mapBriefRatify,
+  mapBriefRatifyDetail,
   mapBriefGuard: () => mapBriefGuard(false),
   mapBriefGuardConfirm: () => mapBriefGuard(true),
   mapBriefBar,
@@ -2682,6 +2830,8 @@ ${writerStatusAfter("Keychain refused")}
   mapSheetUnratified,
   mapStale,
   mapRefresher,
+  mapTalksTo,
+  mapBriefPairLight,
   mapBriefChapters,
   mapBriefChapterMid,
   mapBriefChapterLast,
@@ -3077,6 +3227,8 @@ ${writerStatusAfter("Keychain refused")}
   mapNoMapNarrow: mapNoMap,
   // The part sheet in the map: one scrolling column, a resizable width, and a click on the empty map closes it (#445).
   mapSheetScrollShort,
+  // The sheet's purpose, then its held items with their key files (#483).
+  mapSheetHolds,
   mapSheetWidth,
   mapSheetResizeRedraw,
   mapSheetKeptWidth,

@@ -171,8 +171,10 @@ pub fn read_map(repo: &Path) -> MapState {
     let Ok(text) = git(repo, &["show", &format!("{reference}:{MAP_FILE}")]) else {
         return state;
     };
-    match system_map::parse_lenient(&text) {
-        Ok(_) => {
+    // A version 1 map is stored converted, so everything after reads version 2 only.
+    match system_map::convert(&text).and_then(|text| system_map::parse_lenient(&text).map(|_| text))
+    {
+        Ok(text) => {
             state.status = Status::Loaded;
             state.source = Some(text);
         }
@@ -357,7 +359,12 @@ pub fn map_state(project: String, fetch: bool, app: &Arc<crate::App>) -> Result<
     state.user = read_user(&file, &project);
     if let Some(source) = &state.source {
         state.fog = crate::fog::effective(&state.user, source);
-        state.stale = crate::staleness::bands(&state.user, source, crate::ratify::now());
+        state.stale = crate::staleness::bands(
+            &state.user,
+            source,
+            &crate::staleness::births(repo, source),
+            crate::ratify::now(),
+        );
     }
     state.ci = cache.get(&project);
     state.ready = app.prs.ready(&project);
@@ -604,7 +611,7 @@ mod tests {
     use super::*;
     use studio_test_support::{git, origin, repo};
 
-    const MAP: &str = r#"{"version":1,"parts":[],"actors":[],"links":[],"ignored":[],"laws":[]}"#;
+    const MAP: &str = r#"{"version":2,"parts":[],"actors":[],"links":[],"ignored":[],"laws":[]}"#;
 
     #[test]
     fn a_gone_folder_gets_no_header_mark_and_its_map_is_not_read() {
@@ -672,6 +679,19 @@ mod tests {
         // With no map on the branch, nothing is placed.
         let bare = origin();
         assert!(place(&bare.main, &groups)["both"].is_empty());
+    }
+
+    #[test]
+    fn a_version_1_map_is_stored_and_sent_as_version_2() {
+        let (dir, main) = repo();
+        let old = r#"{"version":1,"parts":[{"id":"core","name":"Core","caption":"c","description":"Plain Rust.","tier":"core","paths":["core/"]}],"actors":[],"links":[],"ignored":[],"laws":[]}"#;
+        commit_file(dir.path(), MAP_FILE, old);
+        let state = read_map(Path::new(&main));
+        assert_eq!(state.status, Status::Loaded);
+        let sent: serde_json::Value = serde_json::from_str(&state.source.unwrap()).unwrap();
+        assert_eq!(sent["version"], 2);
+        assert_eq!(sent["parts"][0]["purpose"], "Plain Rust.");
+        assert_eq!(sent["parts"][0]["holds"], serde_json::json!([]));
     }
 
     #[test]

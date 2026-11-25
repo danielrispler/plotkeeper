@@ -1,5 +1,5 @@
 // The part sheet of the Map view (spec danielrispler/plotkeeper#306, ticket #310): a click on a plate opens it over the map's right, in the
-// side area's `sheet` slot, in the glass the left panel shares (#385). It holds the part's plain description, its tier (changed in place), its laws and its fog, with a quiet
+// side area's `sheet` slot, in the glass the left panel shares (#385). It holds the part's purpose, then the named things it holds, each with its key files (spec #473), its tier (changed in place), its laws, what it talks to (its links) and its fog, with a quiet
 // "I know this" that lifts the mist. `map-model.ts`'s `sheetOf` is what it shows; Esc closes it (the `sheet` layer). A fogged part's main
 // button is its part catch-up (#391), or the one PR brief chapter that lights it (`fogActions`); "I know this" is the quiet second.
 //
@@ -16,10 +16,10 @@ import { currentMap, onDraw, onPlateClick, reloadMap, registerLayer, syncSide, t
 import { openDrawer } from "./map-drawer.js";
 import { drawStrip } from "./map-history.js";
 import { overturnNote, ratifyActions } from "./map-ratify.js";
-import { sheetPending, statusWords } from "./ratify.js";
+import { sheetLinkItem, sheetPending, statusWords } from "./ratify.js";
 import { besideSheet } from "./panel.js";
 import { enterRefresher, refresherNode, staleLine } from "./map-stale.js";
-import { ciDrawer, effectiveTier, fogActions, type Part, proofDrawer, sheetCi, sheetOf, type Tier } from "./map-model.js";
+import { ciDrawer, effectiveTier, fogActions, type Part, proofDrawer, type Sheet, sheetCi, sheetOf, talksTo, type Tier } from "./map-model.js";
 import { openBriefOf, openCatchUpOf } from "./map-brief.js";
 import { lawAction, lawActionNodes, patchActs } from "./patch-review.js";
 
@@ -184,11 +184,23 @@ function drawSheet(view: MapView) {
     return row;
   });
   const nameOf = (id: string) => view.doc.parts.find((p) => p.id === id)?.name ?? view.doc.actors.find((a) => a.id === id)?.name ?? id;
-  const links = unratified.links.map((link) => {
-    const row = text("li", "", "sheet-link unratified");
-    row.dataset.link = link.id;
-    const words = `${nameOf(link.from)} to ${nameOf(link.to)}`;
-    row.append(text("span", words, "sheet-link-text"), text("span", statusWords["not-yet"], "ratify-mark"), ratifyActions(view.project, { pr: link.pr, kind: "link", id: link.id, text: words, change: "" }, ratified));
+  // "Talks to" (spec #473): every link at either end, its arrow, other end, kind and reason; an unratified one carries its accept and overturn.
+  const pending = new Map(unratified.links.map((link) => [link.id, sheetLinkItem(link, link.pr)]));
+  const links = talksTo(part.id, view.doc.links, nameOf).map((talk) => {
+    const row = text("li", "", "sheet-link");
+    row.dataset.link = talk.link;
+    const arrow = text("span", talk.out ? "→" : "←", "sheet-link-dir");
+    arrow.setAttribute("role", "img");
+    arrow.setAttribute("aria-label", talk.out ? "to" : "from");
+    row.append(arrow, text("span", talk.other, "sheet-link-text"));
+    // The kind is a code token: never machine-translated.
+    if (talk.kind) row.append(Object.assign(text("span", talk.kind, "sheet-link-kind"), { translate: false }));
+    if (talk.reason) row.append(text("span", talk.reason, "sheet-link-reason"));
+    const item = pending.get(talk.link);
+    if (item) {
+      row.classList.add("unratified");
+      row.append(text("span", statusWords["not-yet"], "ratify-mark"), ratifyActions(view.project, item, ratified));
+    }
     return row;
   });
   const fog = text("div", "", `sheet-fog${!view.scrub && view.state.fog?.[part.id] ? ` ${view.state.fog[part.id]}` : ""}`);
@@ -227,7 +239,7 @@ function drawSheet(view: MapView) {
   const refresher = !view.scrub && refreshing === part.id ? refresherNode(view, part.id) : null;
   if (!view.scrub && !sheet.canClear && !refresher) {
     const enter = text("button", "Refresher", "btn quiet sheet-refresher") as HTMLButtonElement;
-    enter.title = "The part as the map has it now: its flows, laws and links";
+    enter.title = "The flows through this part, hop by hop";
     // It shows at once, drawn from the map; the shell records the activity behind it, and the reload drops the band.
     enter.addEventListener("click", () => {
       refreshing = part.id;
@@ -254,13 +266,16 @@ function drawSheet(view: MapView) {
     closer,
     text("h2", sheet.name, "sheet-name"),
     text("p", sheet.caption, "sheet-caption"),
-    text("p", sheet.description, "sheet-description"),
+    // A converted version 1 map may have had an empty description: no empty paragraph for it.
+    ...(sheet.purpose ? [text("p", sheet.purpose, "sheet-purpose")] : []),
+    ...(sheet.holds.length ? [text("h3", "Holds", "sheet-heading"), heldList(sheet.holds)] : []),
     text("h3", "Tier", "sheet-heading"),
     tiers,
     text("h3", "Laws", "sheet-heading"),
     ...(laws.length ? [text("ul", "", "sheet-laws")] : [text("p", "No laws on this part", "empty")]),
+    text("h3", "Talks to", "sheet-heading"),
+    ...(links.length ? [text("ul", "", "sheet-links")] : [text("p", "No link at this part", "empty")]),
     // Fog and CI are of now: a past commit shows neither.
-    ...(links.length ? [text("h3", "Links", "sheet-heading"), text("ul", "", "sheet-links")] : []),
     ...(refresher ? [refresher] : []),
     ...(view.scrub ? [] : [text("h3", "Fog", "sheet-heading"), fog]),
     ...(state ? [text("h3", "CI on main", "sheet-heading"), ci] : []),
@@ -268,7 +283,10 @@ function drawSheet(view: MapView) {
   const extra = text("div", "", "sheet-extra");
   card.append(extra);
   card.querySelector(".sheet-laws")?.append(...laws);
+  // Safari drops a list's semantics under `list-style: none`; the role brings them back.
+  card.querySelector(".sheet-laws")?.setAttribute("role", "list");
   card.querySelector(".sheet-links")?.append(...links);
+  card.querySelector(".sheet-links")?.setAttribute("role", "list");
   const overturned = overturnNote(view.project, (item) =>
     item.kind === "law" ? sheet.laws.some((law) => law.id === item.id) : item.kind === "link" && view.doc.links.some((link) => link.id === item.id && (link.from === part.id || link.to === part.id)),
   );
@@ -282,6 +300,25 @@ function drawSheet(view: MapView) {
   slot.append(card);
   drawStrip(view, part.id, extra);
   syncSide(view.slots);
+}
+
+// The things a part holds, each its name, its sentence and its key files.
+function heldList(holds: Sheet["holds"]): HTMLElement {
+  const list = text("ul", "", "sheet-holds");
+  // Safari drops a list's semantics under `list-style: none` and flex; the role brings them back.
+  list.setAttribute("role", "list");
+  for (const item of holds) {
+    const row = text("li", "", "sheet-held");
+    row.append(text("span", item.name, "sheet-held-name"), text("span", item.text, "sheet-held-text"));
+    if (item.files.length) {
+      const files = text("span", "", "sheet-held-files");
+      // A path is a code token: never machine-translated.
+      files.append(...item.files.map((file) => Object.assign(text("code", file), { translate: false })));
+      row.append(files);
+    }
+    list.append(row);
+  }
+  return list;
 }
 
 onPlateClick(({ view, part }) => {

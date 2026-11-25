@@ -92,7 +92,7 @@ fn named<'a>(map: &'a Json, id: &'a str) -> &'a str {
         .unwrap_or(id)
 }
 
-/// The topic of the parts `parts` (ids the map has), with `lead` before their descriptions.
+/// The topic of the parts `parts` (ids the map has), with `lead` before their purposes and held items.
 fn parts_text(map: &Json, parts: &[String], lead: String) -> (Vec<String>, String) {
     let mut paths: Vec<String> = Vec::new();
     let mut text = lead;
@@ -113,7 +113,7 @@ fn parts_text(map: &Json, parts: &[String], lead: String) -> (Vec<String>, Strin
             field("name"),
             own.join(", "),
             field("caption"),
-            field("description")
+            system_map::part_text(part)
         ));
     }
     let laws: Vec<String> = items(map, "laws")
@@ -135,7 +135,7 @@ fn parts_text(map: &Json, parts: &[String], lead: String) -> (Vec<String>, Strin
 
 /// The topic of flow `id` in the map file's text `source`; none when the map does not read or has no such flow.
 pub fn flow_topic(source: &str, id: &str) -> Option<Topic> {
-    let map: Json = serde_json::from_str(source).ok()?;
+    let map: Json = system_map::convert_value(source).ok()?;
     let flow = items(&map, "flows").find(|flow| flow["id"] == id)?;
     let name = flow["name"].as_str().unwrap_or(id).to_string();
     let part_ids: BTreeSet<String> = items(&map, "parts")
@@ -143,14 +143,9 @@ pub fn flow_topic(source: &str, id: &str) -> Option<Topic> {
         .collect();
     let mut parts: Vec<String> = Vec::new();
     let mut lead = format!("The flow \"{name}\", hop by hop:\n");
-    for (n, hop) in items(flow, "hops").enumerate() {
-        let link = items(&map, "links").find(|link| link["id"] == hop["link"]);
-        let ends = link.map(|link| {
-            (
-                link["from"].as_str().unwrap_or(""),
-                link["to"].as_str().unwrap_or(""),
-            )
-        });
+    let ends = studio_understanding::pr_brief::hop_ends(&map, flow);
+    for (n, (hop, ends)) in items(flow, "hops").zip(ends).enumerate() {
+        let ends = ends.as_ref().map(|(from, to)| (from.as_str(), to.as_str()));
         let between = ends.map_or(String::new(), |(from, to)| {
             format!(" ({} to {})", named(&map, from), named(&map, to))
         });
@@ -179,7 +174,7 @@ pub fn flow_topic(source: &str, id: &str) -> Option<Topic> {
 /// figure's own labels are the writer's words from a PR, so they never reach the prompt. None when the map does not read or
 /// has none of the parts.
 pub fn figure_topic(source: &str, key: String, lit: &[String]) -> Option<Topic> {
-    let map: Json = serde_json::from_str(source).ok()?;
+    let map: Json = system_map::convert_value(source).ok()?;
     let parts: Vec<String> = lit
         .iter()
         .filter(|id| items(&map, "parts").any(|part| part["id"] == id.as_str()))

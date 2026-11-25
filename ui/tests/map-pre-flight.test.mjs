@@ -9,7 +9,7 @@ const { expectedLine, paintPreFlight, preFlightNodes, preFlightRows, settle } = 
 const { windowBinding } = await import("../../dist/keys.js");
 const { initial } = await import("../../dist/settings.js");
 
-const part = (id, name) => ({ id, name, caption: "", description: "", tier: "core", paths: [] });
+const part = (id, name) => ({ id, name, caption: "", purpose: "", holds: [], tier: "core", paths: [] });
 const doc = {
   ok: true,
   parts: [part("hook", "Hook"), part("core", "Core"), part("window", "Window")],

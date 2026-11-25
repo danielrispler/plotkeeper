@@ -87,6 +87,16 @@ fn an_ignored_match_wins_over_every_part() {
 }
 
 #[test]
+fn the_map_file_is_ignored_with_no_ignored_entry_for_it() {
+    let mut map = base();
+    map["ignored"] = json!(["docs/"]);
+    map["parts"][0]["paths"] = json!(["alpha/", "*.json"]);
+    let got = touched(&map, &["system-map.json"]);
+    assert_eq!(got.ignored, vec!["system-map.json"]);
+    assert!(got.parts.is_empty() && got.unowned.is_empty(), "{got:?}");
+}
+
+#[test]
 fn paths_no_pattern_matches_are_listed_apart() {
     let got = touched(&base(), &["stray.txt", "alpha/a.rs"]);
     assert_eq!(parts(&got), vec![("alpha", vec!["alpha/a.rs"])]);
@@ -200,16 +210,16 @@ fn many_double_stars_against_a_path_that_does_not_match_finish_at_once() {
 }
 
 #[test]
-fn a_version_other_than_one_makes_touched_fail_and_names_it() {
+fn a_version_other_than_two_makes_touched_fail_and_names_it() {
     let mut map = base();
-    map["version"] = json!(2);
+    map["version"] = json!(3);
     let (_dir, root) = project(&map, &["alpha/a.rs"]);
     let problems = system_map::touched(Path::new(&root), &["alpha/a.rs".to_string()])
         .expect_err("a map of another version must not answer");
     assert!(
         problems
             .iter()
-            .any(|p| p.contains("version") && p.contains('2') && p.contains("version 1")),
+            .any(|p| p.contains("version") && p.contains('3') && p.contains("version 2")),
         "{problems:?}"
     );
 }
@@ -227,4 +237,12 @@ fn touched_for_map_places_paths_without_reading_the_working_tree() {
     assert_eq!(parts(&by_root), parts(&got));
     assert_eq!(by_root.ignored, got.ignored);
     assert_eq!(by_root.unowned, got.unowned);
+}
+
+#[test]
+fn a_map_over_a_cap_still_answers() {
+    let mut map = base();
+    map["parts"][0]["purpose"] = json!("a".repeat(241));
+    let got = touched(&map, &["alpha/a.rs"]);
+    assert_eq!(parts(&got), vec![("alpha", vec!["alpha/a.rs"])]);
 }

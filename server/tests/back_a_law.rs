@@ -46,6 +46,25 @@ const MAP: &str = r#"{
 }
 "#;
 
+/// `MAP` as version 2, its part with a purpose and a held item.
+const MAP_V2: &str = r#"{
+  "version": 2,
+  "parts": [
+    { "id": "adder", "name": "Adder", "caption": "Adds numbers", "purpose": "The sums.", "tier": "core", "paths": ["src/"],
+      "holds": [{ "name": "The adder", "text": "Adds two numbers.", "paths": ["src/add.mjs"] }] }
+  ],
+  "actors": [],
+  "links": [],
+  "ignored": ["tests/", "system-map.json"],
+  "laws": [
+    { "id": "adds", "on": "adder", "backing": "trust", "text": "add sums its two numbers." }
+  ]
+}
+"#;
+
+/// How a version 2 part's purpose and held item read in a prompt.
+const PART_TEXT: &str = "The sums.\n  - The adder: Adds two numbers. (key files: src/add.mjs)";
+
 /// The well-formed agent: a test tagged for the law, the law flipped to check, both staged; then the plant, unstaged.
 /// The tag line is its own piece, so the map check does not read it as a tag of this file.
 const TEST: &str = concat!(
@@ -78,13 +97,18 @@ struct Bench {
 /// A repository whose `origin`'s default branch `main` holds the map, `src/` and an untagged test, and whose checkout is
 /// on Daniel's own branch `mine`; a runner and back a law over it, whose agent runs `agent`.
 fn bench(agent: &str) -> Bench {
+    bench_on(MAP, agent)
+}
+
+/// `bench` with `map` as the default branch's map.
+fn bench_on(map: &str, agent: &str) -> Bench {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().canonicalize().unwrap();
     git(&root, &["init", "-q", "--bare", "-b", "main", "origin.git"]);
     git(&root, &["clone", "-q", "origin.git", "seed"]);
     let seed = root.join("seed");
     for (file, text) in [
-        ("system-map.json", MAP),
+        ("system-map.json", map),
         ("src/add.mjs", "export const add = (a, b) => a + b;\n"),
         ("src/twice.mjs", "export const twice = (a) => a * 2;\n"),
         (
@@ -300,6 +324,24 @@ fn a_well_formed_run_is_proven_and_stored_and_the_repository_is_untouched() {
 }
 
 #[test]
+fn a_well_formed_run_on_a_version_2_map_is_proven() {
+    let bench = bench_on(MAP_V2, &format!("set -e\n{TEST}{PLANT}{DONE}"));
+    let id = bench.start();
+    let patch = bench.settled(&id);
+    assert_eq!(patch.state, PatchState::Proven, "{patch:?}");
+}
+
+#[test]
+fn a_test_patch_whose_map_does_not_load_is_rejected_with_the_load_problem() {
+    let broken = "printf '{ nope' > system-map.json\ngit add system-map.json\n";
+    let bench = bench(&format!("set -e\n{TEST}{broken}{PLANT}{DONE}"));
+    let id = bench.start();
+    let line = bench.rejected(&id);
+    assert!(line.contains("not valid JSON"), "{line}");
+    assert!(!line.contains("on trust"), "{line}");
+}
+
+#[test]
 fn the_clone_is_of_the_default_branch_with_no_remote() {
     // The agent leaves what it found in the clone where the test can read it, and does nothing.
     let bench = bench(&format!(
@@ -442,6 +484,22 @@ fn the_prompt_holds_the_law_and_the_parts_paths() {
     assert!(prompt.contains("add sums its two numbers."), "{prompt}");
     assert!(prompt.contains("src/"), "{prompt}");
     bench.runner.cancel(&id).unwrap();
+}
+
+#[test]
+fn the_prompt_quotes_the_parts_purpose_and_held_items_on_either_version() {
+    for (map, text) in [(MAP_V2, PART_TEXT), (MAP, "The sums.\n")] {
+        let bench = bench_on(map, "sleep 60");
+        let id = bench.start();
+        let run = fs::read_to_string(bench.work(&id).parent().unwrap().join("run.json")).unwrap();
+        let run: serde_json::Value = serde_json::from_str(&run).unwrap();
+        let prompt = run["prompt"].as_str().unwrap();
+        assert!(
+            prompt.contains(&format!("(Adds numbers): {text}")),
+            "{prompt}"
+        );
+        bench.runner.cancel(&id).unwrap();
+    }
 }
 
 /// Every file of the working tree under `dir`, with its bytes, leaving out its git data.
@@ -846,6 +904,17 @@ fn the_writer_drafts_a_new_law_on_a_part_the_pr_touched_from_the_briefs_facts() 
     let asked = writer.asked.lock().unwrap()[0].clone();
     assert!(asked.contains(PR_TEXT), "{asked}");
     assert!(asked.contains("add sums its two numbers."), "{asked}");
+    let writer = Writer {
+        reply: r#"{"on": "adder", "id": "adds-whole", "text": "add never returns a fraction."}"#
+            .into(),
+        asked: Mutex::default(),
+    };
+    back_a_law::draft(&writer, "opus", MAP_V2, &guarded_brief()).unwrap();
+    let asked = writer.asked.lock().unwrap()[0].clone();
+    assert!(
+        asked.contains(&format!("- adder: Adder (Adds numbers). {PART_TEXT}")),
+        "{asked}"
+    );
 
     // A draft on a part the PR did not touch, of a law already on the map, or with no id is no draft.
     for reply in [

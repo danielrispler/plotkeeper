@@ -32,8 +32,7 @@ export async function enterRefresher(view: MapView, part: string) {
 }
 
 // The refresher of `part` as the sheet shows it, from the map's text; null when the map does not have the part. The sheet already shows the
-// part's caption, description and laws with their backing, so the refresher adds what the map says around it: the flows through it, hop
-// by hop, and what it is linked with.
+// part's caption, purpose, held items, laws and links ("Talks to", spec #473), so the refresher adds the flows through it, hop by hop.
 export function refresherNode(view: MapView, part: string): HTMLElement | null {
   const found = view.state.source ? refresherOf(view.state.source, part) : null;
   if (!found) return null;
@@ -49,13 +48,9 @@ export function refresherNode(view: MapView, part: string): HTMLElement | null {
     if (!view.scrub) row.append(exploreRow(view.project, view.state.micro_worlds, `flow:${flow.id}`, flow.name, { kind: "flow", id: flow.id }));
     flows.append(row);
   }
-  const links = text("ul", "", "refresher-links");
-  links.append(...found.links.map((link) => text("li", link, "refresher-link")));
   node.append(
     text("h3", "Flows through it", "sheet-heading"),
     found.flows.length ? flows : text("p", "No flow of the map crosses this part", "empty"),
-    text("h3", "Linked with", "sheet-heading"),
-    found.links.length ? links : text("p", "Nothing links to this part", "empty"),
   );
   return node;
 }

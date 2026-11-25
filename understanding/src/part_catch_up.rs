@@ -112,8 +112,8 @@ fn part_files(map: &system_map::Map, part: &str, paths: &[String]) -> Vec<String
 /// the PR brief's `BUDGET`; the code is cut first, and "DIFF NOT SENT" says what was.
 pub fn build_catch_up_facts(source: &CatchUpSource) -> Result<Facts, String> {
     let map = system_map::parse_lenient(&source.map_text)?;
-    let mj: serde_json::Value =
-        serde_json::from_str(&source.map_text).map_err(|e| e.to_string())?;
+    // The map comes from git as it was committed, so a version 1 map is read converted.
+    let mj = system_map::convert_value(&source.map_text)?;
     let part = source.part.as_str();
     let all = split_diff(&source.diff);
     let paths: Vec<String> = all.iter().map(|f| f.path.clone()).collect();
@@ -215,7 +215,7 @@ pub fn build_catch_up_facts(source: &CatchUpSource) -> Result<Facts, String> {
     let mut the_part = format!(
         "## {part} ({})\n{}\nlaws:\n  {}\nflows through it: {}\n",
         pj["name"].as_str().unwrap_or(""),
-        pj["description"].as_str().unwrap_or(""),
+        system_map::part_text(&pj),
         if laws.is_empty() {
             "none".into()
         } else {

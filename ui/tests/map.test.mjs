@@ -3,11 +3,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
-  actorSize, autoPlace, cameraRig, draftPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, rimPoint, revealPan, scrubTickets, sheetOf,
-  narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject, readingOrder,
+  actorSize, autoPlace, cameraRig, draftPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, plateTitle, rimPoint, revealPan, scrubTickets, sheetOf,
+  narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject, readingOrder, talksTo, linkLines, markPoints,
 } from "../../dist/map-model.js";
 
-const part = (id, extra = {}) => ({ id, name: id, caption: "", description: "", tier: "core", paths: [], ...extra });
+const part = (id, extra = {}) => ({ id, name: id, caption: "", purpose: "", holds: [], tier: "core", paths: [], ...extra });
 const overlaps = (a, b) => Math.abs(a.x - b.x) < plateSize.w && Math.abs(a.y - b.y) < plateSize.h;
 
 test("auto-placement puts each part beside what it links to and clear of every other plate", () => {
@@ -176,6 +176,20 @@ test("the plate's size here is the stylesheet's, so rim points land on the drawn
 test("Draft a map's prompt names the map file and the command that checks it", () => {
   assert.match(draftPrompt, /system-map\.json/);
   assert.match(draftPrompt, /system-map check/);
+  assert.match(draftPrompt, /purpose/);
+  assert.match(draftPrompt, /holds/);
+});
+
+test("a part's sheet gives its purpose, then each held item with its key files, and its plate's hover text the purpose", () => {
+  const holds = [{ name: "Adapters", text: "One per agent.", paths: ["core/src/claude.rs", "core/src/agy.rs"] }, { name: "Rules", text: "What must hold." }];
+  const core = part("core", { name: "Core", caption: "Events to state", purpose: "Plain Rust.", holds });
+  const sheet = sheetOf(core, [], "core", undefined);
+  assert.equal(sheet.purpose, "Plain Rust.");
+  assert.deepEqual(sheet.holds, [
+    { name: "Adapters", text: "One per agent.", files: ["core/src/claude.rs", "core/src/agy.rs"] },
+    { name: "Rules", text: "What must hold.", files: [] },
+  ]);
+  assert.equal(plateTitle(core), "Core\n\nEvents to state\n\nPlain Rust.");
 });
 
 test("a part's sheet names it, lists its laws by backing, and offers the three tiers with the effective one pressed", () => {
@@ -184,8 +198,8 @@ test("a part's sheet names it, lists its laws by backing, and offers the three t
     { id: "l2", on: "core", backing: "trust", text: "Applies in order." },
     { id: "l3", on: "hook", backing: "check", text: "Not this part's." },
   ];
-  const sheet = sheetOf(part("core", { name: "Core", caption: "Events to state", description: "Plain Rust." }), laws, "interface", undefined);
-  assert.deepEqual([sheet.name, sheet.caption, sheet.description], ["Core", "Events to state", "Plain Rust."]);
+  const sheet = sheetOf(part("core", { name: "Core", caption: "Events to state", purpose: "Plain Rust." }), laws, "interface", undefined);
+  assert.deepEqual([sheet.name, sheet.caption, sheet.purpose], ["Core", "Events to state", "Plain Rust."]);
   assert.deepEqual(sheet.tiers, [
     { tier: "core", label: "Core", pressed: false },
     { tier: "interface", label: "Interface-only", pressed: true },
@@ -262,4 +276,40 @@ test("the parts' tab order reads the map top to bottom, then left to right, a ro
   // A plate a full half height lower starts the next row.
   assert.deepEqual(readingOrder({ a: { x: 500, y: 100 }, b: { x: 100, y: 100 + plateSize.h / 2 } }), ["a", "b"]);
   assert.deepEqual(readingOrder({}), []);
+});
+
+// Spec #473, "The sheet's links and the drawing": one list of links on the sheet, one line per pair on the map.
+const pairLinks = [
+  { id: "hook-server", from: "hook", to: "server", kind: "import" },
+  { id: "server-hook", from: "server", to: "hook", kind: "http", reason: "The server asks the hook for its log." },
+  { id: "server-window", from: "server", to: "window", kind: "file", reason: "The page reads the built bundle." },
+  { id: "agents-hook", from: "agents", to: "hook" },
+];
+
+test("Talks to lists every link at either end of the part: the other end, the arrow's direction, the kind and the reason", () => {
+  const names = { hook: "Hook", server: "Server", window: "Window", agents: "Agents" };
+  assert.deepEqual(talksTo("server", pairLinks, (id) => names[id]), [
+    { link: "hook-server", other: "Hook", out: false, kind: "import", reason: undefined },
+    { link: "server-hook", other: "Hook", out: true, kind: "http", reason: "The server asks the hook for its log." },
+    { link: "server-window", other: "Window", out: true, kind: "file", reason: "The page reads the built bundle." },
+  ]);
+  // A version 1 link has no kind; an actor is named like a part.
+  assert.deepEqual(talksTo("hook", pairLinks, (id) => names[id]).at(-1), { link: "agents-hook", other: "Agents", out: false, kind: undefined, reason: undefined });
+  assert.deepEqual(talksTo("gone", pairLinks, (id) => id), []);
+});
+
+test("a pair with an import link and a run-time link, in either direction, draws as one line holding both ids", () => {
+  assert.deepEqual(linkLines(pairLinks), [
+    { ids: ["hook-server", "server-hook"], from: "hook", to: "server" },
+    { ids: ["server-window"], from: "server", to: "window" },
+    { ids: ["agents-hook"], from: "agents", to: "hook" },
+  ]);
+  assert.deepEqual(linkLines([]), []);
+});
+
+test("the law marks on one line sit apart along it, 10px from one another, centred on its middle", () => {
+  assert.deepEqual(markPoints({ x: 0, y: 0 }, { x: 100, y: 0 }, 1), [{ x: 50, y: 0 }]);
+  assert.deepEqual(markPoints({ x: 0, y: 0 }, { x: 100, y: 0 }, 3), [{ x: 40, y: 0 }, { x: 50, y: 0 }, { x: 60, y: 0 }]);
+  assert.deepEqual(markPoints({ x: 0, y: 100 }, { x: 0, y: 0 }, 2), [{ x: 0, y: 55 }, { x: 0, y: 45 }], "along the line's own direction");
+  assert.deepEqual(markPoints({ x: 5, y: 5 }, { x: 5, y: 5 }, 2), [{ x: 5, y: 5 }, { x: 5, y: 5 }], "a line of no length keeps them at its point");
 });

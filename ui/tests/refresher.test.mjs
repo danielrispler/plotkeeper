@@ -11,9 +11,9 @@ const { refresherOf, staleWords } = await import("../../dist/refresher.js");
 const map = JSON.stringify({
   version: 1,
   parts: [
-    { id: "hook", name: "Hook", caption: "Records every agent event", description: "Appends one line per event.", tier: "core", paths: ["hook/"] },
-    { id: "server", name: "Server", caption: "Reads the log, acts", description: "Feeds the core and serves the page.", tier: "core", paths: ["server/"] },
-    { id: "window", name: "Window", caption: "What you see", description: "The page.", tier: "core", paths: ["ui/"] },
+    { id: "hook", name: "Hook", caption: "Records every agent event", purpose: "Appends one line per event.", holds: [], tier: "core", paths: ["hook/"] },
+    { id: "server", name: "Server", caption: "Reads the log, acts", purpose: "Feeds the core and serves the page.", holds: [], tier: "core", paths: ["server/"] },
+    { id: "window", name: "Window", caption: "What you see", purpose: "The page.", holds: [], tier: "core", paths: ["ui/"] },
   ],
   actors: [{ id: "agents", name: "Agents" }],
   links: [{ id: "agents-hook", from: "agents", to: "hook" }, { id: "hook-server", from: "hook", to: "server" }, { id: "server-window", from: "server", to: "window" }],
@@ -30,13 +30,12 @@ const map = JSON.stringify({
 });
 
 // Each flow carries its id, which "Explore this" builds its micro-world from (#399).
-test("the refresher adds to the part's sheet what the map says around it: the flows through it, hop by hop, and its links", () => {
+// Its links are the sheet's "Talks to" (spec #473), so the refresher lists none of its own.
+test("the refresher adds to the part's sheet what the map says around it: the flows through it, hop by hop", () => {
   assert.deepEqual(refresherOf(map, "server"), {
     flows: [{ id: "turn", name: "Turn writing", hops: ["The hook's line reaches the server.", "The server tells the page."] }],
-    links: ["Hook to Server", "Server to Window"],
   });
-  // An outside actor is named in a link; a map with no flows has none.
-  assert.deepEqual(refresherOf(map, "hook").links, ["Agents to Hook", "Hook to Server"]);
+  // A map with no flows has none.
   assert.deepEqual(refresherOf(JSON.stringify({ ...JSON.parse(map), flows: undefined }), "hook").flows, []);
 });
 

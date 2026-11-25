@@ -20,7 +20,7 @@ import { expectedLine } from "./map-pre-flight.js";
 import { exploreRow } from "./micro-world.js";
 import { guardRow } from "./patch-review.js";
 import { scrubTo } from "./map-history.js";
-import { overturnNote, ratifyActions } from "./map-ratify.js";
+import { overturnNote, ratifyActions, ratifyDetail } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
 import { actorSize, alsoAt, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureMax, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, stageLabel, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
@@ -386,13 +386,14 @@ async function runLight(view: MapView, hops: [string, boolean][]) {
   const layer = svg("svg", { class: "map-light", "aria-hidden": "true", width: links.getAttribute("width") ?? "0", height: links.getAttribute("height") ?? "0" });
   root.append(layer);
   const legs = hops.flatMap((hop) => {
-    const line = links.querySelector(`[data-link="${CSS.escape(hop[0])}"]`);
+    // A pair's links share one line (spec #473), whose `data-link` lists them all.
+    const line = links.querySelector(`[data-link~="${CSS.escape(hop[0])}"]`);
     const pair = ends(view, hop);
     if (!line || !pair) return [];
     const read = (name: string) => Number(line.getAttribute(name));
     const [p, q] = [{ x: read("x1"), y: read("y1") }, { x: read("x2"), y: read("y2") }];
-    // The rim points belong to the link as drawn from -> to; a reversed hop runs them the other way.
-    const [from, to] = hop[1] ? [q, p] : [p, q];
+    // The rim points run from the line's `data-from`; the light runs from the hop's first end.
+    const [from, to] = line.getAttribute("data-from") === pair[0] ? [p, q] : [q, p];
     return [{ from, to, ids: pair, len: Math.hypot(to.x - from.x, to.y - from.y) }];
   });
   const lit = (leg: (typeof legs)[number]) => svg("line", { class: "light-trail", x1: String(leg.from.x), y1: String(leg.from.y), x2: String(leg.to.x), y2: String(leg.to.y) });
@@ -573,6 +574,8 @@ function summaryInto(node: HTMLElement) {
 // The items to ratify, each with where it stands; a not yet ratified one has Accept and Overturn.
 function ratifyNode(view: MapView, rows: RatifyRow[]) {
   const list = text("ul", "", "brief-ratify");
+  // Safari drops a list's semantics under `list-style: none` and grid; the role brings them back.
+  list.setAttribute("role", "list");
   for (const row of rows.filter((each) => each.status !== "ratified")) {
     const item = text("li", "", "ratify-row");
     item.dataset.kind = row.kind;
@@ -588,6 +591,8 @@ function ratifyNode(view: MapView, rows: RatifyRow[]) {
     } else {
       item.append(text("span", statusWords[row.status], "ratify-mark done"));
     }
+    const detail = ratifyDetail(row);
+    if (detail) item.append(detail);
     list.append(item);
   }
   const note = overturnNote(view.project, (item) => rows.some((row) => row.pr === item.pr && row.kind === item.kind && row.id === item.id));

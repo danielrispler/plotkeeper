@@ -4,7 +4,9 @@
 //! links and the problems out.
 
 mod edges;
+mod imports;
 mod laws;
+mod parts;
 mod pattern;
 mod touched;
 
@@ -16,7 +18,9 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+pub use imports::{Across, Count, Hub, Imports, Inside, Share, imports};
 pub use laws::{LawReport, LawTest, Tag, law_tests, tag_id, test_name_after};
+pub use parts::{convert, convert_value, part_text};
 use pattern::Pattern;
 pub use touched::{Touched, touched, touched_for_map};
 
@@ -31,10 +35,39 @@ pub struct Report {
     pub links: Vec<Link>,
     /// Each law with its backing and the tags that name it.
     pub laws: Vec<LawReport>,
-    /// Dependencies between two parts that no link joins; reported, never a problem.
-    pub unlinked: Vec<edges::Edge>,
     /// One line per problem; the check fails when there is any.
     pub problems: Vec<String>,
+    /// What the check covered, for the line a pass prints.
+    pub counts: Counts,
+}
+
+/// What a check covered: parts, the tracked files they own and the ones ignored, links, and laws
+/// by backing.
+#[derive(Debug, Default, Serialize)]
+pub struct Counts {
+    pub parts: usize,
+    pub files: usize,
+    pub ignored: usize,
+    pub links: LinkCounts,
+    pub laws: LawCounts,
+}
+
+/// The links by kind, and the import links proven by a computed edge or unproven, with an end no extractor reads.
+#[derive(Debug, Default, Serialize)]
+pub struct LinkCounts {
+    pub total: usize,
+    pub import: usize,
+    pub http: usize,
+    pub spawn: usize,
+    pub file: usize,
+    pub proven: usize,
+    pub unproven: usize,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct LawCounts {
+    pub check: usize,
+    pub trust: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -49,6 +82,35 @@ pub struct Link {
     pub id: String,
     pub from: String,
     pub to: String,
+    /// What the link carries; the check requires it, and a converted version 1 map's links have none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<Kind>,
+    /// One sentence on what crosses a run-time link; required for every kind but `import`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// A link's kind (spec #473): `import`, a code dependency the readers can prove, or one of three run-time kinds they cannot
+/// see.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Kind {
+    Import,
+    Http,
+    Spawn,
+    File,
+}
+
+impl Kind {
+    /// The kind as the map writes it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Kind::Import => "import",
+            Kind::Http => "http",
+            Kind::Spawn => "spawn",
+            Kind::File => "file",
+        }
+    }
 }
 
 /// A parsed `system-map.json`. Its fields are private: build one with `parse` or `parse_lenient`.
@@ -73,7 +135,8 @@ struct Part {
     id: String,
     name: String,
     caption: String,
-    description: String,
+    purpose: String,
+    holds: Vec<parts::Held>,
     tier: Tier,
     paths: Vec<String>,
     zone: Option<String>,
@@ -141,6 +204,21 @@ pub fn check_files(root: &Path, files: Vec<String>) -> Report {
     check_with(root, Ok(files.into_iter().collect()))
 }
 
+/// The laws of the map in `root` with their backing and tags, and the laws' problems, read leniently, so a version 1 map
+/// answers too; the load's problem when the map does not read. `files` are the tracked files, as for `check_files`.
+pub fn law_reports(
+    root: &Path,
+    files: Vec<String>,
+) -> Result<(Vec<LawReport>, Vec<String>), String> {
+    let path = root.join(MAP_FILE);
+    let text = std::fs::read_to_string(&path)
+        .map_err(|error| format!("{MAP_FILE}: cannot read it ({error})"))?;
+    let map = parse_lenient(&text)?;
+    let files: BTreeSet<String> = files.into_iter().collect();
+    let files: Vec<String> = files.into_iter().collect();
+    Ok(laws::check(root, &map, &files))
+}
+
 fn check_with(root: &Path, files: Result<Vec<String>, String>) -> Report {
     let mut report = Report::default();
     let map = match load(root) {
@@ -152,17 +230,50 @@ fn check_with(root: &Path, files: Result<Vec<String>, String>) -> Report {
     };
     report.links = map.links.clone();
     report.problems.extend(check_ids_and_references(&map));
+    // A part's purpose and held items, and their caps, are `check`'s alone: `touched` and `imports` still answer a map over a cap.
+    report.problems.extend(parts::check(&map));
+    let actors: HashSet<&str> = map.actors.iter().map(|a| a.id.as_str()).collect();
+    report
+        .problems
+        .extend(edges::check_link_fields(&map.links, &actors));
     match files {
         Ok(files) => {
-            let (parts, problems) = ownership(&map, &files);
+            let (parts, ignored, problems) = ownership(&map, &files);
             report.problems.extend(problems);
+            report.problems.extend(parts::check_paths(&map, &parts));
             let (laws, problems) = laws::check(root, &map, &files);
             report.laws = laws;
             report.problems.extend(problems);
             let names = map.extractors.as_deref().unwrap_or_default();
-            let (unlinked, problems) = edges::unlinked(root, names, &files, &parts, &map.links);
-            report.unlinked = unlinked;
-            report.problems.extend(problems);
+            let found = edges::check_links(root, names, &files, &parts, &map.links);
+            report.problems.extend(found.problems);
+            let kinds = |kind: Kind| map.links.iter().filter(|l| l.kind == Some(kind)).count();
+            report.counts = Counts {
+                parts: parts.len(),
+                files: parts.iter().map(|p| p.files.len()).sum(),
+                ignored,
+                links: LinkCounts {
+                    total: map.links.len(),
+                    import: kinds(Kind::Import),
+                    http: kinds(Kind::Http),
+                    spawn: kinds(Kind::Spawn),
+                    file: kinds(Kind::File),
+                    proven: found.proven,
+                    unproven: found.unproven,
+                },
+                laws: LawCounts {
+                    check: map
+                        .laws
+                        .iter()
+                        .filter(|l| l.backing == Backing::Check)
+                        .count(),
+                    trust: map
+                        .laws
+                        .iter()
+                        .filter(|l| l.backing == Backing::Trust)
+                        .count(),
+                },
+            };
             report.parts = parts;
         }
         Err(problem) => report.problems.push(problem),
@@ -194,6 +305,12 @@ fn load(root: &Path) -> Result<Map, String> {
 
 /// Parses map text strictly, as `check` does: an unknown field is an error.
 pub fn parse(text: &str) -> Result<Map, String> {
+    if serde_json::from_str::<serde_json::Value>(text).is_ok_and(|map| map["version"] == 1) {
+        return Err(format!(
+            "{MAP_FILE}: version 1 is not one this checker reads; it reads version 2, so set \"version\" to 2 and give each \
+             part a \"purpose\" and \"holds\" in place of its \"description\""
+        ));
+    }
     serde_json::from_str(text).map_err(|error| {
         let kind = if error.is_syntax() || error.is_eof() {
             "is not valid JSON"
@@ -216,29 +333,23 @@ const MAP_FIELDS: &[&str] = &[
     "flows",
 ];
 const PART_FIELDS: &[&str] = &[
-    "id",
-    "name",
-    "caption",
-    "description",
-    "tier",
-    "paths",
-    "zone",
+    "id", "name", "caption", "purpose", "holds", "tier", "paths", "zone",
 ];
 const ACTOR_FIELDS: &[&str] = &["id", "name"];
-const LINK_FIELDS: &[&str] = &["id", "from", "to"];
+const LINK_FIELDS: &[&str] = &["id", "from", "to", "kind", "reason"];
 const LAW_FIELDS: &[&str] = &["id", "on", "backing", "text"];
 const FLOW_FIELDS: &[&str] = &["id", "name", "hops"];
 const HOP_FIELDS: &[&str] = &["link", "text"];
 
-/// Parses the text of a historical `system-map.json` read from git: fields this reader does not
-/// know are ignored, so a later schema addition never breaks a walk through old commits. Fails
-/// only when the text is not JSON or lacks a field the map must hold.
+/// Parses the text of a historical `system-map.json` read from git: a version 1 map is converted
+/// first, and fields this reader does not know are ignored, so a later schema addition never
+/// breaks a walk through old commits. Fails only when the text is not JSON or lacks a field the
+/// map must hold.
 pub fn parse_lenient(text: &str) -> Result<Map, String> {
-    let mut value: serde_json::Value = serde_json::from_str(text)
-        .map_err(|error| format!("{MAP_FILE}: is not valid JSON: {error}"))?;
+    let mut value = convert_value(text)?;
     prune(&mut value, MAP_FIELDS);
     for (key, fields, nested) in [
-        ("parts", PART_FIELDS, None),
+        ("parts", PART_FIELDS, Some(("holds", parts::HELD_FIELDS))),
         ("actors", ACTOR_FIELDS, None),
         ("links", LINK_FIELDS, None),
         ("laws", LAW_FIELDS, None),
@@ -252,7 +363,7 @@ pub fn parse_lenient(text: &str) -> Result<Map, String> {
             if let Some((inner, inner_fields)) = nested
                 && let Some(inner) = item.get_mut(inner).and_then(|v| v.as_array_mut())
             {
-                inner.iter_mut().for_each(|hop| prune(hop, inner_fields));
+                inner.iter_mut().for_each(|each| prune(each, inner_fields));
             }
         }
     }
@@ -279,9 +390,9 @@ pub fn is_id(id: &str) -> bool {
 
 fn check_ids_and_references(map: &Map) -> Vec<String> {
     let mut problems = Vec::new();
-    if map.version != 1 {
+    if map.version != 2 {
         problems.push(format!(
-            "{MAP_FILE}: version {} is not one this checker reads; it reads version 1, so set \"version\" to 1",
+            "{MAP_FILE}: version {} is not one this checker reads; it reads version 2, so set \"version\" to 2",
             map.version
         ));
     }
@@ -400,10 +511,10 @@ impl Owners {
         }
     }
 
-    /// The ownership rule, held here for `check` and `touched` alike: a match in `ignored` wins,
-    /// then the last part with a matching pattern.
+    /// The ownership rule, held here for `check` and `touched` alike: the map file needs no owner,
+    /// then a match in `ignored` wins, then the last part with a matching pattern.
     pub(crate) fn place(&self, path: &str) -> Placement {
-        if self.ignored.iter().any(|p| p.matches(path)) {
+        if path == MAP_FILE || self.ignored.iter().any(|p| p.matches(path)) {
             return Placement::Ignored;
         }
         match self
@@ -427,9 +538,11 @@ pub(crate) fn read_tracked(root: &Path, file: &str) -> Option<String> {
     Some(String::from_utf8_lossy(&std::fs::read(path).ok()?).into_owned())
 }
 
-/// Which part owns each file, and the problems of files nobody owns and patterns that match none.
-fn ownership(map: &Map, files: &[String]) -> (Vec<PartFiles>, Vec<String>) {
+/// Which part owns each file, how many files are ignored, and the problems of files nobody owns
+/// and patterns that match none.
+fn ownership(map: &Map, files: &[String]) -> (Vec<PartFiles>, usize, Vec<String>) {
     let mut problems = Vec::new();
+    let mut ignored = 0;
     let owners = Owners::new(map);
     let mut parts: Vec<PartFiles> = map
         .parts
@@ -441,7 +554,7 @@ fn ownership(map: &Map, files: &[String]) -> (Vec<PartFiles>, Vec<String>) {
         .collect();
     for file in files {
         match owners.place(file) {
-            Placement::Ignored => {}
+            Placement::Ignored => ignored += 1,
             Placement::Part(index) => parts[index].files.push(file.clone()),
             Placement::Unowned => problems.push(format!(
                 "{file}: tracked, but no part owns it and no ignored pattern matches it; add it to a part's paths or to ignored"
@@ -458,13 +571,27 @@ fn ownership(map: &Map, files: &[String]) -> (Vec<PartFiles>, Vec<String>) {
     };
     for (part, patterns) in map.parts.iter().zip(&owners.parts) {
         let kind = format!("part {:?}", part.id);
-        problems.extend(patterns.iter().filter_map(|p| unmatched(&kind, p)));
+        for pattern in patterns {
+            let only_the_map = pattern.matches(MAP_FILE)
+                && !files
+                    .iter()
+                    .any(|file| file != MAP_FILE && pattern.matches(file));
+            if only_the_map {
+                problems.push(format!(
+                    "{kind} pattern {:?} names only {MAP_FILE}, which needs no owner; remove it",
+                    pattern.text()
+                ));
+            } else {
+                problems.extend(unmatched(&kind, pattern));
+            }
+        }
     }
     problems.extend(
         owners
             .ignored
             .iter()
+            .filter(|p| p.text() != MAP_FILE)
             .filter_map(|p| unmatched("ignored", p)),
     );
-    (parts, problems)
+    (parts, ignored, problems)
 }

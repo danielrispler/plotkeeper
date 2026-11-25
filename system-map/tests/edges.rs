@@ -1,4 +1,4 @@
-//! Computed edges: dependencies between parts that no link joins, read by the named extractors.
+//! Computed edges, read by the named extractors, and the link check that holds the map's import links to them.
 
 use std::{path::Path, process::Command};
 
@@ -57,32 +57,209 @@ fn report(root: &str) -> system_map::Report {
     system_map::check(Path::new(root))
 }
 
-/// The unlinked edges as `from>to` strings.
+/// The computed edges no import link declares, as `from>to` strings, read from their problems.
 fn edges(report: &system_map::Report) -> Vec<String> {
     report
-        .unlinked
+        .problems
         .iter()
-        .map(|e| format!("{}>{}", e.from, e.to))
+        .filter_map(|line| {
+            let (from, rest) = line
+                .strip_prefix("part \"")?
+                .split_once("\" depends on part \"")?;
+            Some(format!("{from}>{}", rest.split_once('"')?.0))
+        })
         .collect()
 }
 
-#[test]
-fn a_dependency_across_parts_without_a_link_is_reported_and_the_check_passes() {
-    let (_dir, root) = workspace(&map(&["cargo"], json!([])), &[("alpha", "beta")], &[]);
-    let report = report(&root);
-    assert_eq!(report.problems, Vec::<String>::new());
-    assert_eq!(edges(&report), ["alpha>beta"]);
+/// The problems that are not undeclared edges.
+fn other_problems(report: &system_map::Report) -> Vec<String> {
+    report
+        .problems
+        .iter()
+        .filter(|line| !(line.starts_with("part \"") && line.contains("\" depends on part \"")))
+        .cloned()
+        .collect()
+}
+
+fn import(id: &str, from: &str, to: &str) -> Value {
+    json!({ "id": id, "from": from, "to": to, "kind": "import" })
 }
 
 #[test]
-fn a_link_in_either_direction_silences_the_edge() {
-    for (from, to) in [("alpha", "beta"), ("beta", "alpha")] {
-        let links = json!([{ "id": "joined", "from": from, "to": to }]);
+fn a_dependency_across_parts_without_an_import_link_fails() {
+    let (_dir, root) = workspace(&map(&["cargo"], json!([])), &[("alpha", "beta")], &[]);
+    let report = report(&root);
+    assert_eq!(edges(&report), ["alpha>beta"]);
+    assert_eq!(other_problems(&report), Vec::<String>::new());
+}
+
+#[test]
+fn an_import_link_in_the_edge_s_direction_declares_it_and_is_proven() {
+    let links = json!([import("alpha-beta", "alpha", "beta")]);
+    let (_dir, root) = workspace(&map(&["cargo"], links), &[("alpha", "beta")], &[]);
+    let report = report(&root);
+    assert_eq!(report.problems, Vec::<String>::new());
+    assert_eq!(
+        (report.counts.links.proven, report.counts.links.unproven),
+        (1, 0)
+    );
+}
+
+#[test]
+fn a_dead_import_link_between_read_parts_fails() {
+    let links = json!([import("alpha-beta", "alpha", "beta")]);
+    let (_dir, root) = workspace(&map(&["cargo"], links), &[], &[]);
+    let problems = report(&root).problems;
+    assert!(
+        has(
+            &problems,
+            &[
+                "import link \"alpha-beta\"",
+                "no dependency of \"alpha\" on \"beta\""
+            ]
+        ),
+        "{problems:?}"
+    );
+}
+
+#[test]
+fn a_backwards_import_link_fails_and_so_does_the_edge_it_misses() {
+    let links = json!([import("beta-alpha", "beta", "alpha")]);
+    let (_dir, root) = workspace(&map(&["cargo"], links), &[("alpha", "beta")], &[]);
+    let report = report(&root);
+    assert_eq!(edges(&report), ["alpha>beta"]);
+    assert!(
+        has(
+            &report.problems,
+            &["import link \"beta-alpha\"", "turn it around"]
+        ),
+        "{:?}",
+        report.problems
+    );
+}
+
+#[test]
+fn a_run_time_link_beside_an_undeclared_edge_does_not_declare_it() {
+    for kind in ["http", "spawn", "file"] {
+        let links = json!([{ "id": "joined", "from": "alpha", "to": "beta", "kind": kind, "reason": "Data crosses." }]);
         let (_dir, root) = workspace(&map(&["cargo"], links), &[("alpha", "beta")], &[]);
         let report = report(&root);
-        assert_eq!(report.problems, Vec::<String>::new());
-        assert_eq!(edges(&report), Vec::<String>::new(), "link {from}>{to}");
+        assert_eq!(edges(&report), ["alpha>beta"], "{kind}");
+        assert_eq!(other_problems(&report), Vec::<String>::new(), "{kind}");
     }
+    // Beside the import link, a run-time link on the same pair is fine.
+    let links = json!([
+        import("alpha-beta", "alpha", "beta"),
+        { "id": "beta-alpha", "from": "beta", "to": "alpha", "kind": "file", "reason": "Beta writes a file alpha reads." }
+    ]);
+    let (_dir, root) = workspace(&map(&["cargo"], links), &[("alpha", "beta")], &[]);
+    assert_eq!(report(&root).problems, Vec::<String>::new());
+}
+
+#[test]
+fn an_import_link_with_an_unread_end_passes_as_unproven() {
+    // No extractor named: no part is read.
+    let mut map = base();
+    map["links"] = json!([import("alpha-beta", "alpha", "beta")]);
+    let (_dir, root) = project_text(&map.to_string(), &["alpha/a.rs", "beta/b.rs", "docs/d.md"]);
+    let found = report(&root);
+    assert_eq!(found.problems, Vec::<String>::new());
+    assert_eq!(
+        (found.counts.links.proven, found.counts.links.unproven),
+        (0, 1)
+    );
+    // `rust-modules` named, but beta owns no Rust file: alpha is read, beta is not.
+    let mut map = split_map(&["rust-modules"], &["alpha/"], &["beta/"]);
+    map["links"] = json!([import("alpha-beta", "alpha", "beta")]);
+    let (_dir, root) = tree(
+        &map,
+        &[("alpha/src/lib.rs", ""), ("beta/main.go", "package main\n")],
+    );
+    let found = report(&root);
+    assert_eq!(found.problems, Vec::<String>::new());
+    assert_eq!(
+        (found.counts.links.proven, found.counts.links.unproven),
+        (0, 1)
+    );
+}
+
+#[test]
+fn an_import_link_with_an_actor_at_an_end_fails() {
+    for (from, to) in [("alpha", "writer"), ("writer", "alpha")] {
+        let mut map = base();
+        map["links"] = json!([import("joined", from, to)]);
+        let (_dir, root) =
+            project_text(&map.to_string(), &["alpha/a.rs", "beta/b.rs", "docs/d.md"]);
+        let problems = report(&root).problems;
+        assert!(
+            has(
+                &problems,
+                &["import link \"joined\"", "actor \"writer\"", "owns no code"]
+            ),
+            "{problems:?}"
+        );
+    }
+}
+
+#[test]
+fn a_link_needs_a_kind_and_a_run_time_link_a_reason_of_at_most_140_characters() {
+    let check = |link: Value| {
+        let mut map = base();
+        map["links"] = json!([link]);
+        let (_dir, root) =
+            project_text(&map.to_string(), &["alpha/a.rs", "beta/b.rs", "docs/d.md"]);
+        report(&root).problems
+    };
+    let problems = check(json!({ "id": "joined", "from": "alpha", "to": "beta" }));
+    assert!(
+        has(
+            &problems,
+            &["link \"joined\"", "no kind", "import, http, spawn or file"]
+        ),
+        "{problems:?}"
+    );
+    for reason in [None, Some(""), Some("  ")] {
+        let mut link = json!({ "id": "joined", "from": "alpha", "to": "writer", "kind": "http" });
+        if let Some(reason) = reason {
+            link["reason"] = json!(reason);
+        }
+        let problems = check(link);
+        assert!(
+            has(&problems, &["link \"joined\"", "http", "no reason"]),
+            "{reason:?}: {problems:?}"
+        );
+    }
+    let long = check(
+        json!({ "id": "joined", "from": "alpha", "to": "writer", "kind": "spawn", "reason": "x".repeat(141) }),
+    );
+    assert!(
+        has(
+            &long,
+            &[
+                "link \"joined\"",
+                "reason is 141 characters, the cap is 140",
+                "the area's doc under docs/studio/behaviour/"
+            ]
+        ),
+        "{long:?}"
+    );
+    let at_cap = check(
+        json!({ "id": "joined", "from": "alpha", "to": "writer", "kind": "file", "reason": "é".repeat(140) }),
+    );
+    assert_eq!(at_cap, Vec::<String>::new());
+    let import_without = check(import("joined", "alpha", "beta"));
+    assert_eq!(
+        import_without,
+        Vec::<String>::new(),
+        "an import link needs no reason"
+    );
+    let unknown = check(
+        json!({ "id": "joined", "from": "alpha", "to": "beta", "kind": "grpc", "reason": "r" }),
+    );
+    assert!(
+        has(&unknown, &["does not match the map's shape"]),
+        "{unknown:?}"
+    );
 }
 
 #[test]
@@ -203,7 +380,7 @@ fn split_map(extractors: &[&str], alpha_paths: &[&str], beta_paths: &[&str]) -> 
 fn rust_edges(files: &[(&str, &str)], alpha: &[&str], beta: &[&str]) -> Vec<String> {
     let (_dir, root) = tree(&split_map(&["rust-modules"], alpha, beta), files);
     let report = report(&root);
-    assert_eq!(report.problems, Vec::<String>::new());
+    assert_eq!(other_problems(&report), Vec::<String>::new());
     edges(&report)
 }
 
@@ -408,15 +585,354 @@ fn a_use_between_two_parts_is_found_when_the_crate_root_is_ignored() {
         ],
     );
     let report = report(&root);
-    assert_eq!(report.problems, Vec::<String>::new());
+    assert_eq!(other_problems(&report), Vec::<String>::new());
     assert_eq!(edges(&report), ["alpha>beta"]);
+}
+
+#[test]
+fn an_inline_crate_path_outside_a_use_line_reaches_the_module_file() {
+    for text in [
+        "fn f() -> crate::a::A { crate::a::A }\n",
+        "fn f() { let _ = crate::a::inner::make(); }\n",
+        "pub fn f(x: crate::a::A) {}\n",
+        "pub struct S { x: crate::a::A }\n",
+        "fn f<T: crate::a::inner::Tr>() {}\n",
+        "fn f() { S { x: crate::a::inner::make() }; }\n",
+    ] {
+        let found = rust_edges(
+            &[
+                ("k/src/lib.rs", "mod a;\nmod b;\n"),
+                ("k/src/a.rs", "pub struct A;\npub mod inner {}\n"),
+                ("k/src/b.rs", text),
+            ],
+            &["k/src/lib.rs", "k/src/a.rs"],
+            &["k/src/b.rs"],
+        );
+        assert_eq!(found, ["alpha>beta", "beta>alpha"], "{text}");
+    }
+}
+
+#[test]
+fn a_bare_path_to_a_child_module_reaches_that_module_file() {
+    // The crate root declares `ci_laws` and names a module below it bare, from its own module and
+    // from an inline one. `ci_laws.rs` is ignored, so only the bare path can pair `lib.rs` with
+    // `ci_laws/cache.rs`.
+    for text in [
+        "pub mod ci_laws;\nfn f() -> ci_laws::cache::CiCache { todo!() }\n",
+        "pub mod ci_laws;\nmod tests { use super::*; fn f() { ci_laws::cache::CiCache::new(); } }\n",
+    ] {
+        let mut map = split_map(&["rust-modules"], &["k/src/ci_laws/"], &["k/src/lib.rs"]);
+        map["ignored"] = json!(["system-map.json", "k/src/ci_laws.rs"]);
+        let (_dir, root) = tree(
+            &map,
+            &[
+                ("k/src/lib.rs", text),
+                ("k/src/ci_laws.rs", "pub mod cache;\n"),
+                ("k/src/ci_laws/cache.rs", "pub struct CiCache;\n"),
+            ],
+        );
+        let report = report(&root);
+        assert_eq!(other_problems(&report), Vec::<String>::new(), "{text}");
+        assert_eq!(edges(&report), ["beta>alpha"], "{text}");
+    }
+}
+
+#[test]
+fn a_bare_path_through_a_module_a_use_line_brings_in_reaches_the_module_below() {
+    let mut map = split_map(&["rust-modules"], &["k/src/a/"], &["k/src/b.rs"]);
+    map["ignored"] = json!(["system-map.json", "k/src/lib.rs", "k/src/a.rs"]);
+    let (_dir, root) = tree(
+        &map,
+        &[
+            ("k/src/lib.rs", "mod a;\nmod b;\n"),
+            ("k/src/a.rs", "pub mod inner;\n"),
+            ("k/src/a/inner.rs", "pub struct X;\n"),
+            ("k/src/b.rs", "use crate::a;\nfn f() { a::inner::X; }\n"),
+        ],
+    );
+    assert_eq!(edges(&report(&root)), ["beta>alpha"]);
+}
+
+#[test]
+fn a_bare_path_whose_first_word_is_no_module_gives_no_edge() {
+    let found = rust_edges(
+        &[
+            ("k/src/lib.rs", "mod a;\nmod b;\n"),
+            ("k/src/a.rs", ""),
+            (
+                "k/src/b.rs",
+                "fn f() { std::mem::drop(1); Vec::<u8>::new(); a_thing::X; }\n",
+            ),
+        ],
+        &["k/src/lib.rs", "k/src/b.rs"],
+        &["k/src/a.rs"],
+    );
+    // Only the crate root's `mod a;`: `b.rs` declares no child `a`, so nothing in it reaches `a.rs`.
+    assert_eq!(found, ["alpha>beta"]);
+}
+
+/// A cargo workspace of the packages `(package, folder, library name or "", manifest tail)`, each
+/// with the files given, and a map giving `alpha` and `beta` their paths and ignoring `ignored`.
+fn rust_workspace(
+    packages: &[(&str, &str, &str, &str)],
+    files: &[(&str, &str)],
+    alpha: &[&str],
+    beta: &[&str],
+    ignored: &[&str],
+) -> system_map::Report {
+    let members: Vec<String> = packages.iter().map(|p| format!("{:?}", p.1)).collect();
+    let mut all: Vec<(String, String)> = vec![(
+        "Cargo.toml".into(),
+        format!(
+            "[workspace]\nresolver = \"2\"\nmembers = [{}]\n",
+            members.join(", ")
+        ),
+    )];
+    for (package, folder, lib, tail) in packages {
+        let lib = if lib.is_empty() {
+            String::new()
+        } else {
+            format!("[lib]\nname = \"{lib}\"\n\n")
+        };
+        let text = format!(
+            "[package]\nname = \"{package}\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n{lib}{tail}\n"
+        );
+        all.push((format!("{folder}/Cargo.toml"), text));
+    }
+    all.extend(files.iter().map(|(f, t)| (f.to_string(), t.to_string())));
+    let all: Vec<(&str, &str)> = all.iter().map(|(f, t)| (f.as_str(), t.as_str())).collect();
+    let mut map = split_map(&["rust-modules"], alpha, beta);
+    let mut ignore = vec!["system-map.json", "Cargo.toml", "**/Cargo.toml"];
+    ignore.extend(ignored);
+    map["ignored"] = json!(ignore);
+    let (_dir, root) = tree(&map, &all);
+    report(&root)
+}
+
+const ON_SERVER: &str = "[dependencies]\nstudio-server = { path = \"../server\" }\n";
+
+#[test]
+fn a_path_into_a_workspace_crate_reaches_the_module_file_it_names() {
+    // `lib.rs` is ignored, so an edge to it would be dropped: only a pair with `runner.rs` shows.
+    for text in [
+        "use studio_server::runner::launch;\n",
+        "fn main() { studio_server::runner::launch(); }\n",
+        "use studio_server::{runner, Other};\nfn main() { runner::launch(); }\n",
+        "use ::studio_server::runner::launch;\n",
+        "fn main() { ::studio_server::runner::launch(); }\n",
+        "fn main() { let _: ::studio_server::runner::Launch; }\n",
+    ] {
+        let report = rust_workspace(
+            &[
+                ("studio-server", "server", "", ""),
+                ("studio-app", "app", "", ON_SERVER),
+            ],
+            &[
+                ("server/src/lib.rs", "pub mod runner;\npub struct Other;\n"),
+                ("server/src/runner.rs", "pub fn launch() {}\n"),
+                ("app/src/main.rs", text),
+            ],
+            &["server/src/runner.rs"],
+            &["app/"],
+            &["server/src/lib.rs"],
+        );
+        assert_eq!(other_problems(&report), Vec::<String>::new(), "{text}");
+        assert_eq!(edges(&report), ["beta>alpha"], "{text}");
+    }
+}
+
+#[test]
+fn a_glob_of_a_workspace_crate_s_root_reaches_its_lib_rs() {
+    let report = rust_workspace(
+        &[
+            ("studio-server", "server", "", ""),
+            ("studio-app", "app", "", ON_SERVER),
+        ],
+        &[
+            ("server/src/lib.rs", "pub struct Other;\n"),
+            ("app/src/main.rs", "use studio_server::*;\n"),
+        ],
+        &["server/"],
+        &["app/"],
+        &[],
+    );
+    assert_eq!(other_problems(&report), Vec::<String>::new());
+    assert_eq!(edges(&report), ["beta>alpha"]);
+}
+
+#[test]
+fn a_path_to_a_workspace_crate_s_root_reaches_its_lib_rs_not_a_module() {
+    let report = rust_workspace(
+        &[
+            ("studio-server", "server", "", ""),
+            ("studio-app", "app", "", ON_SERVER),
+        ],
+        &[
+            ("server/src/lib.rs", "pub mod runner;\npub struct Other;\n"),
+            ("server/src/runner.rs", ""),
+            ("app/src/main.rs", "use studio_server::Other;\n"),
+        ],
+        &["server/src/runner.rs"],
+        &["app/"],
+        &["server/src/lib.rs"],
+    );
+    assert_eq!(edges(&report), Vec::<String>::new());
+}
+
+#[test]
+fn a_path_into_the_crate_s_own_library_from_its_binary_or_test_is_read() {
+    for (file, text) in [
+        (
+            "server/src/bin/run.rs",
+            "fn main() { studio_server::runner::launch(); }\n",
+        ),
+        ("server/tests/t.rs", "use studio_server::runner;\n"),
+    ] {
+        let report = rust_workspace(
+            &[("studio-server", "server", "", "")],
+            &[
+                ("server/src/lib.rs", "pub mod runner;\n"),
+                ("server/src/runner.rs", "pub fn launch() {}\n"),
+                (file, text),
+            ],
+            &["server/src/lib.rs", "server/src/runner.rs"],
+            &[file],
+            &[],
+        );
+        assert_eq!(other_problems(&report), Vec::<String>::new(), "{file}");
+        assert_eq!(edges(&report), ["beta>alpha"], "{file}");
+    }
+}
+
+#[test]
+fn a_workspace_crate_is_read_by_its_library_name_not_its_package_name() {
+    let dep = "[dependencies]\nstudio-system-map = { path = \"../map\" }\n";
+    for (text, expected) in [
+        ("use system_map::check::run;\n", &["beta>alpha"][..]),
+        ("use studio_system_map::check::run;\n", &[][..]),
+    ] {
+        let report = rust_workspace(
+            &[
+                ("studio-system-map", "map", "system_map", ""),
+                ("studio-app", "app", "", dep),
+            ],
+            &[
+                ("map/src/lib.rs", "pub mod check;\n"),
+                ("map/src/check.rs", "pub fn run() {}\n"),
+                ("app/src/main.rs", text),
+            ],
+            &["map/"],
+            &["app/"],
+            &[],
+        );
+        assert_eq!(other_problems(&report), Vec::<String>::new(), "{text}");
+        assert_eq!(edges(&report), expected, "{text}");
+    }
+}
+
+#[test]
+fn a_crate_named_path_without_a_normal_dependency_gives_no_cross_crate_edge() {
+    // `app` has a local module `studio_server` and only a dev-dependency on the real crate.
+    for (tail, app_files) in [
+        (
+            "",
+            vec![
+                (
+                    "app/src/main.rs",
+                    "mod studio_server;\nuse studio_server::runner;\n",
+                ),
+                ("app/src/studio_server.rs", "pub mod runner {}\n"),
+            ],
+        ),
+        (
+            "[dev-dependencies]\nstudio-server = { path = \"../server\" }\n",
+            vec![("app/tests/t.rs", "use studio_server::runner::launch;\n")],
+        ),
+    ] {
+        let mut files = vec![
+            ("server/src/lib.rs", "pub mod runner;\n"),
+            ("server/src/runner.rs", "pub fn launch() {}\n"),
+            ("app/src/lib.rs", ""),
+        ];
+        files.extend(app_files);
+        let report = rust_workspace(
+            &[
+                ("studio-server", "server", "", ""),
+                ("studio-app", "app", "", tail),
+            ],
+            &files,
+            &["server/"],
+            &["app/"],
+            &[],
+        );
+        assert_eq!(report.problems, Vec::<String>::new(), "{tail}");
+        assert_eq!(edges(&report), Vec::<String>::new(), "{tail}");
+    }
+}
+
+#[test]
+fn when_cargo_cannot_run_workspace_crate_paths_are_not_read_and_one_problem_says_so() {
+    let mut map = split_map(
+        &["rust-modules"],
+        &["k/src/lib.rs", "k/src/a.rs"],
+        &["k/src/b.rs"],
+    );
+    map["ignored"] = json!(["system-map.json", "Cargo.toml"]);
+    let (_dir, root) = tree(
+        &map,
+        &[
+            ("Cargo.toml", "this is not toml ["),
+            ("k/src/lib.rs", "mod a;\nmod b;\n"),
+            ("k/src/a.rs", ""),
+            ("k/src/b.rs", "use crate::a::A;\n"),
+        ],
+    );
+    let report = report(&root);
+    assert_eq!(other_problems(&report).len(), 1, "{:?}", report.problems);
+    assert!(
+        has(
+            &report.problems,
+            &["rust-modules", "workspace-crate paths were not read"]
+        ),
+        "{:?}",
+        report.problems
+    );
+    // The paths inside a crate are still read.
+    assert_eq!(edges(&report), ["alpha>beta", "beta>alpha"]);
+}
+
+#[test]
+fn when_cargo_cannot_run_an_import_link_a_workspace_crate_path_may_prove_passes_as_unproven() {
+    let mut map = split_map(&["rust-modules"], &["server/"], &["app/"]);
+    map["links"] = json!([{ "id": "app-server", "from": "beta", "to": "alpha", "kind": "import" }]);
+    map["ignored"] = json!(["system-map.json", "Cargo.toml", "**/Cargo.toml"]);
+    let (_dir, root) = tree(
+        &map,
+        &[
+            ("Cargo.toml", "this is not toml ["),
+            ("server/Cargo.toml", "[package]\nname = \"studio-server\"\n"),
+            ("server/src/lib.rs", "pub mod runner;\n"),
+            ("server/src/runner.rs", "pub fn launch() {}\n"),
+            (
+                "app/src/main.rs",
+                "fn main() { studio_server::runner::launch(); }\n",
+            ),
+        ],
+    );
+    let report = report(&root);
+    assert_eq!(report.problems.len(), 1, "{:?}", report.problems);
+    assert!(
+        has(&report.problems, &["workspace-crate paths were not read"]),
+        "{:?}",
+        report.problems
+    );
 }
 
 fn ts_edges(files: &[(&str, &str)]) -> Vec<String> {
     let map = split_map(&["typescript-imports"], &["alpha/"], &["beta/"]);
     let (_dir, root) = tree(&map, files);
     let report = report(&root);
-    assert_eq!(report.problems, Vec::<String>::new());
+    assert_eq!(other_problems(&report), Vec::<String>::new());
     edges(&report)
 }
 
@@ -487,21 +1003,18 @@ fn run_check(root: &str, args: &[&str]) -> std::process::Output {
 }
 
 #[test]
-fn check_prints_an_edge_on_a_line_no_problem_looks_like_and_json_lists_it() {
+fn check_prints_an_undeclared_edge_as_a_problem_and_json_has_no_unlinked() {
     let (_dir, root) = workspace(&map(&["cargo"], json!([])), &[("alpha", "beta")], &[]);
     let out = run_check(&root, &[]);
-    assert!(out.status.success());
+    assert!(!out.status.success());
     let text = String::from_utf8(out.stdout).unwrap();
     assert_eq!(text.lines().count(), 1, "{text}");
     assert!(
-        text.starts_with("note: ") && text.contains("alpha") && text.contains("beta"),
+        text.starts_with("part \"alpha\" depends on part \"beta\""),
         "{text}"
     );
 
     let out = run_check(&root, &["--json"]);
     let value: Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(
-        value["unlinked"],
-        json!([{ "from": "alpha", "to": "beta" }])
-    );
+    assert_eq!(value.get("unlinked"), None);
 }
