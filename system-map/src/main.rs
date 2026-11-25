@@ -58,12 +58,6 @@ fn run() -> Result<ExitCode, String> {
         for problem in &report.problems {
             println!("{problem}");
         }
-        for edge in &report.unlinked {
-            println!(
-                "note: {} depends on {} and no link says so; add a link if the map is missing one",
-                edge.from, edge.to
-            );
-        }
         if report.problems.is_empty() {
             println!("{}", pass_line(&report.counts));
         }
@@ -75,16 +69,23 @@ fn run() -> Result<ExitCode, String> {
     })
 }
 
-/// The one line a pass prints, such as `ok: 7 parts own 581 files (212 ignored); 13 links; 12 laws: 9 check, 3 trust`.
+/// The one line a pass prints, such as `ok: 7 parts own 581 files (212 ignored); 18 links: 9 import (9 proven, 0 unproven),
+/// 5 http, 3 file, 1 spawn; 12 laws: 9 check, 3 trust`.
 fn pass_line(counts: &system_map::Counts) -> String {
     let n =
         |count: usize, noun: &str| format!("{count} {noun}{}", if count == 1 { "" } else { "s" });
     format!(
-        "ok: {} own {} ({} ignored); {}; {}: {} check, {} trust",
+        "ok: {} own {} ({} ignored); {}: {} import ({} proven, {} unproven), {} http, {} file, {} spawn; {}: {} check, {} trust",
         n(counts.parts, "part"),
         n(counts.files, "file"),
         counts.ignored,
-        n(counts.links, "link"),
+        n(counts.links.total, "link"),
+        counts.links.import,
+        counts.links.proven,
+        counts.links.unproven,
+        counts.links.http,
+        counts.links.file,
+        counts.links.spawn,
         n(counts.laws.check + counts.laws.trust, "law"),
         counts.laws.check,
         counts.laws.trust

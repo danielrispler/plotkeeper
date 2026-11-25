@@ -88,19 +88,33 @@
     { "id": "github", "name": "GitHub" }
   ],
   "links": [
-    { "id": "agents-plugins", "from": "agents", "to": "plugins" },
-    { "id": "plugins-hook", "from": "plugins", "to": "hook" },
-    { "id": "server-plugins", "from": "server", "to": "plugins" },
-    { "id": "hook-server", "from": "hook", "to": "server" },
-    { "id": "core-server", "from": "core", "to": "server" },
-    { "id": "server-understanding", "from": "server", "to": "understanding" },
-    { "id": "server-workbench", "from": "server", "to": "workbench" },
-    { "id": "understanding-writer", "from": "understanding", "to": "writer" },
-    { "id": "server-window", "from": "server", "to": "window" },
-    { "id": "workbench-github", "from": "workbench", "to": "github" },
-    { "id": "workbench-plugins", "from": "workbench", "to": "plugins" },
-    { "id": "server-agents", "from": "server", "to": "agents" },
-    { "id": "workbench-agents", "from": "workbench", "to": "agents" }
+    { "id": "agents-plugins", "from": "agents", "to": "plugins", "kind": "file",
+      "reason": "Each agent reads its plugin's hook config to learn which events to send to the hook." },
+    { "id": "plugins-hook", "from": "plugins", "to": "hook", "kind": "spawn",
+      "reason": "Each plugin's hooks run the hook binaries on an agent event, with the event on standard input." },
+    { "id": "server-plugins", "from": "server", "to": "plugins", "kind": "file",
+      "reason": "Install embeds the plugins' hook files at build time and writes each agent's copy with the hook's path filled in." },
+    { "id": "hook-server", "from": "hook", "to": "server", "kind": "file",
+      "reason": "The hook appends each event to the event log, which the server follows." },
+    { "id": "server-hook", "from": "server", "to": "hook", "kind": "import" },
+    { "id": "server-core", "from": "server", "to": "core", "kind": "import" },
+    { "id": "server-understanding", "from": "server", "to": "understanding", "kind": "import" },
+    { "id": "server-workbench", "from": "server", "to": "workbench", "kind": "import" },
+    { "id": "core-workbench", "from": "core", "to": "workbench", "kind": "import" },
+    { "id": "understanding-core", "from": "understanding", "to": "core", "kind": "import" },
+    { "id": "understanding-hook", "from": "understanding", "to": "hook", "kind": "import" },
+    { "id": "understanding-writer", "from": "understanding", "to": "writer", "kind": "spawn",
+      "reason": "Understanding runs the writer's program for each summary or brief; an API-key writer is asked over HTTP instead." },
+    { "id": "server-window", "from": "server", "to": "window", "kind": "http",
+      "reason": "The server serves the page, a route per command and one event stream over HTTP on 127.0.0.1." },
+    { "id": "workbench-github", "from": "workbench", "to": "github", "kind": "spawn",
+      "reason": "Workbench runs git to fetch from origin and `gh` to look up PRs." },
+    { "id": "workbench-plugins", "from": "workbench", "to": "plugins", "kind": "file",
+      "reason": "Workbench embeds agy's plugin files at build time and installs them." },
+    { "id": "server-agents", "from": "server", "to": "agents", "kind": "spawn",
+      "reason": "The server starts headless agent runs, such as back a law, and runs each agent's own install command." },
+    { "id": "workbench-agents", "from": "workbench", "to": "agents", "kind": "spawn",
+      "reason": "Workbench runs the `agy` command to install and remove agy's plugin." }
   ],
   "ignored": [
     ".agents/", ".claude/", ".github/", ".gitignore", "AGENTS.md", "CLAUDE.md", "Cargo.lock", "Cargo.toml", "LICENSE",
@@ -137,11 +151,11 @@
   "flows": [
     { "id": "turn-writing", "name": "Turn writing",
       "hops": [
-        { "link": "core-server", "text": "Core sees the turn end and the server asks for its summary." },
+        { "link": "server-core", "text": "Core sees the turn end and the server asks for its summary; this hop runs from core to the server, against the import link." },
         { "link": "server-understanding", "text": "The server passes the request on; understanding queues it for the session." },
         { "link": "understanding-writer", "text": "Understanding asks the writer for the summary, and for the session's Goal and Design so far." },
         { "link": "understanding-writer", "text": "The writer's reply comes back and understanding stores it." },
-        { "link": "server-understanding", "text": "Understanding tells the server the brief changed." },
+        { "link": "server-understanding", "text": "Understanding tells the server the brief changed; this hop runs back against the import link." },
         { "link": "server-window", "text": "The server updates the list." }
       ] }
   ]

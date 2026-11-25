@@ -22,16 +22,19 @@ fn a_passing_repository_exits_zero() {
     assert!(out.status.success());
     assert_eq!(
         String::from_utf8(out.stdout).unwrap(),
-        "ok: 2 parts own 2 files (2 ignored); 1 link; 1 law: 0 check, 1 trust\n"
+        "ok: 2 parts own 2 files (2 ignored); 1 link: 1 import (0 proven, 1 unproven), 0 http, 0 file, 0 spawn; 1 law: 0 check, 1 trust\n"
     );
 }
 
 #[test]
-fn the_pass_line_counts_in_the_plural_and_by_backing() {
+fn the_pass_line_counts_in_the_plural_links_by_kind_and_laws_by_backing() {
     let mut map = base();
     map["links"] = serde_json::json!([
-        { "id": "alpha-beta", "from": "alpha", "to": "beta" },
-        { "id": "writer-alpha", "from": "writer", "to": "alpha" }
+        { "id": "alpha-beta", "from": "alpha", "to": "beta", "kind": "import" },
+        { "id": "writer-alpha", "from": "writer", "to": "alpha", "kind": "http", "reason": "The writer answers over HTTP." },
+        { "id": "alpha-writer", "from": "alpha", "to": "writer", "kind": "spawn", "reason": "Alpha runs the writer." },
+        { "id": "beta-writer", "from": "beta", "to": "writer", "kind": "spawn", "reason": "Beta runs it too." },
+        { "id": "beta-alpha", "from": "beta", "to": "alpha", "kind": "file", "reason": "Beta writes a file alpha reads." }
     ]);
     map["laws"] = serde_json::json!([
         { "id": "stay-true", "on": "alpha", "backing": "trust", "text": "It stays true." },
@@ -47,7 +50,7 @@ fn the_pass_line_counts_in_the_plural_and_by_backing() {
     assert!(out.status.success(), "{out:?}");
     assert_eq!(
         String::from_utf8(out.stdout).unwrap(),
-        "ok: 2 parts own 3 files (2 ignored); 2 links; 2 laws: 1 check, 1 trust\n"
+        "ok: 2 parts own 3 files (2 ignored); 5 links: 1 import (0 proven, 1 unproven), 1 http, 1 file, 2 spawn; 2 laws: 1 check, 1 trust\n"
     );
 }
 
@@ -79,7 +82,8 @@ fn json_prints_data_that_parses() {
     assert_eq!(
         value["counts"],
         serde_json::json!({
-            "parts": 2, "files": 2, "ignored": 2, "links": 1,
+            "parts": 2, "files": 2, "ignored": 2,
+            "links": { "total": 1, "import": 1, "http": 0, "spawn": 0, "file": 0, "proven": 0, "unproven": 1 },
             "laws": { "check": 0, "trust": 1 }
         })
     );

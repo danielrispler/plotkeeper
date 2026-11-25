@@ -5,7 +5,8 @@ use std::{fs, path::Path};
 use serde_json::{Value, json};
 use studio_test_support::{git, repo};
 
-/// A valid map: two parts, an actor, a link, an ignored folder and a law.
+/// A valid map: two parts, an actor, an import link (unproven, since the map names no extractor), an ignored folder and
+/// a law.
 pub fn base() -> Value {
     json!({
         "version": 2,
@@ -16,7 +17,7 @@ pub fn base() -> Value {
               "tier": "interface", "paths": ["beta/"] }
         ],
         "actors": [{ "id": "writer", "name": "Writer" }],
-        "links": [{ "id": "alpha-beta", "from": "alpha", "to": "beta" }],
+        "links": [{ "id": "alpha-beta", "from": "alpha", "to": "beta", "kind": "import" }],
         "ignored": ["docs/", "system-map.json"],
         "laws": [{ "id": "stay-true", "on": "alpha", "backing": "trust", "text": "It stays true." }]
     })

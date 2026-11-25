@@ -11,7 +11,10 @@ export type Size = { w: number; h: number };
 export type Held = { name: string; text: string; paths?: string[] };
 export type Part = { id: string; name: string; caption: string; purpose: string; holds: Held[]; tier: Tier; paths: string[]; zone?: string };
 export type Actor = { id: string; name: string };
-export type MapLink = { id: string; from: string; to: string };
+// A link's kind (spec #473): `import`, a code dependency the check proves, or a run-time kind with a one-sentence reason. A version 1
+// map's links have none.
+export type LinkKind = "import" | "http" | "spawn" | "file";
+export type MapLink = { id: string; from: string; to: string; kind?: LinkKind; reason?: string };
 export type Law = { id: string; on: string; backing: "check" | "trust"; text: string };
 export type MapDoc = { ok: true; parts: Part[]; actors: Actor[]; links: MapLink[]; laws: Law[] } | { ok: false; why: string };
 

@@ -173,6 +173,15 @@ fn named<'a>(map: &'a Value, key: &str, id: &str) -> Option<&'a Value> {
     items(map, key).into_iter().find(|item| item["id"] == id)
 }
 
+/// The words of the links at `part`: each one's id with its kind and reason, whose change is thin for the parts at its ends.
+fn link_words(map: &Value, part: &str) -> Vec<(Value, Value, Value)> {
+    items(map, "links")
+        .into_iter()
+        .filter(|l| l["from"] == part || l["to"] == part)
+        .map(|l| (l["id"].clone(), l["kind"].clone(), l["reason"].clone()))
+        .collect()
+}
+
 /// What a map says about `part` that makes a change to it structural: the laws on it, the links at it, the flows through them.
 fn structure(map: &Value, part: &str) -> (Vec<Value>, Vec<Value>, Vec<Value>) {
     let pick = |item: &Value, fields: &[&str]| {
@@ -257,7 +266,8 @@ pub fn classify(
             Some(before) => (touched.iter().any(|t| t == id)
                 || ["name", "caption", "purpose", "holds"]
                     .iter()
-                    .any(|f| before[*f] != part[*f]))
+                    .any(|f| before[*f] != part[*f])
+                || link_words(&old, id) != link_words(&new, id))
             .then_some(Strength::Thin),
         };
         if let Some(strength) = strength {
@@ -745,6 +755,30 @@ mod tests {
         assert_eq!(
             classify(Some(&held), Some(&paths), &[]),
             strengths(&[("a", Strength::Thin)])
+        );
+    }
+
+    #[test]
+    fn a_link_s_new_kind_or_reason_is_thin_on_both_its_ends() {
+        let link = r#"{"id":"a-b","from":"a","to":"b"}"#;
+        let v2 = base_v2().replace(link, r#"{"id":"a-b","from":"a","to":"b","kind":"import"}"#);
+        let kind = v2.replace(
+            r#""kind":"import""#,
+            r#""kind":"http","reason":"A asks b over HTTP.""#,
+        );
+        assert_eq!(
+            classify(Some(&v2), Some(&kind), &[]),
+            strengths(&[("a", Strength::Thin), ("b", Strength::Thin)])
+        );
+        let reason = kind.replace("A asks b over HTTP.", "A asks b for its list.");
+        assert_eq!(
+            classify(Some(&kind), Some(&reason), &[]),
+            strengths(&[("a", Strength::Thin), ("b", Strength::Thin)])
+        );
+        // A version 1 link, with no kind, given one.
+        assert_eq!(
+            classify(Some(BASE), Some(&v2), &[]),
+            strengths(&[("a", Strength::Thin), ("b", Strength::Thin)])
         );
     }
 
