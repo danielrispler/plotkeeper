@@ -229,7 +229,6 @@ const notPlacedList = () => {
   if (kept) return kept;
   const details = document.createElement("details");
   const summary = text("summary", "", "side-title");
-  hint(keyed(summary, "not-placed"), "The sessions whose latest turn touched no part: click to show or hide them");
   const rows = text("div", "", "not-placed-rows");
   details.append(summary, rows);
   details.addEventListener("toggle", () => details.open || endHoverIn(rows));
@@ -311,6 +310,8 @@ export function paint() {
     const list = notPlacedList();
     const line = notPlacedLine(notPlaced);
     list.summary.replaceChildren(text("span", line.count), ...(line.needsYou ? [text("span", ` · ${line.needsYou}`, "not-placed-asking")] : []));
+    // Drawn each time: the kept line's hint is dropped while the line is off the page.
+    hint(keyed(list.summary, "not-placed"), "The sessions whose latest turn touched no part: click to show or hide them");
     fillRows(list.rows, rowsKey(notPlaced.map((session) => ({ session, workers: [] }))), () => notPlaced.flatMap((session) => sessionRows(session, [], () => {})));
     // Back in its slot after it emptied or the map was cleared, the list comes back closed, so it never drops the sheet without a click.
     if (list.details.parentElement !== slot) {

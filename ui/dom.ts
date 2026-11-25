@@ -244,8 +244,10 @@ export function keyed<T extends HTMLElement>(node: T, key: string): T {
 }
 
 // The page's hints (spec #582): each trigger's own `popover="hint"`, kept in `#hints` by id, so a trigger drawn again, as the list's rows
-// are on every update, finds its hint and does not make another. A hint whose trigger left the page is dropped a moment later.
+// are on every update, finds its hint and does not make another. A hint whose trigger the page dropped for good goes once the trigger is collected.
 const hints = new Map<string, HTMLElement>();
+// A trigger kept off the page (a box a view keeps and puts back) keeps its hint: only a trigger the page has dropped for good loses it.
+const owners = new Map<string, WeakRef<HTMLElement>>();
 let loose = 0;
 let pruneQueued = false;
 const hintId = (key: string) => `hint-${key.replace(/[^\w-]/g, (c) => `_${c.charCodeAt(0).toString(16)}`)}`;
@@ -256,8 +258,9 @@ function pruneHints() {
   if (!document.querySelectorAll) return;
   const wired = new Set([...document.querySelectorAll("[interestfor], [data-hint]")].map((trigger) => trigger.getAttribute("interestfor") ?? trigger.getAttribute("data-hint")));
   for (const [id, node] of hints) {
-    if (wired.has(id)) continue;
+    if (wired.has(id) || owners.get(id)?.deref()) continue;
     node.remove();
+    owners.delete(id);
     hints.delete(id);
   }
 }
@@ -267,7 +270,7 @@ function pruneHints() {
 // the page's `--hint-delay` (0.5 s) and Chromium's end delay (0.15 s). The pointer may rest on the hint. Esc and light dismiss are the
 // popover's own. A trigger a neighbour's hint is open beside, one sharing its parent, shows at once, as the CSS does for the other path.
 const listened = new Set(["SUMMARY", "INPUT", "SELECT", "TEXTAREA"]);
-const wiredTriggers = new WeakSet<HTMLElement>();
+const wiredTriggers = new WeakMap<HTMLElement, (node: HTMLElement) => void>();
 const HINT_END_DELAY = 150;
 let openTrigger: HTMLElement | null = null;
 
@@ -278,23 +281,25 @@ function startDelay(): number {
 
 /**
  * Wires `trigger` to open and close `node`, its hint, by pointer and, when `keyboard`, by focus. A mark that stays out of the Tab order
- * passes false: it is pointer-only.
+ * passes false: it is pointer-only. Called again with a new hint node (the old one was dropped while the trigger was off the page), it
+ * moves the wiring over; the trigger's listeners are added once.
  */
 function listenForHint(trigger: HTMLElement, node: HTMLElement, keyboard: boolean) {
-  if (wiredTriggers.has(trigger)) return;
-  wiredTriggers.add(trigger);
+  const rebind = wiredTriggers.get(trigger);
+  if (rebind) return rebind(node);
+  let hinted = node;
   let pointer = false;
   let focus = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const isOpen = () => node.matches(":popover-open");
+  const isOpen = () => hinted.matches(":popover-open");
   const show = () => {
     if (!(pointer || focus) || isOpen()) return;
-    node.showPopover({ source: trigger });
+    hinted.showPopover({ source: trigger });
     openTrigger = trigger;
   };
   const hide = () => {
     if (pointer || focus) return;
-    if (isOpen()) node.hidePopover();
+    if (isOpen()) hinted.hidePopover();
     if (openTrigger === trigger) openTrigger = null;
   };
   const interest = () => {
@@ -306,6 +311,24 @@ function listenForHint(trigger: HTMLElement, node: HTMLElement, keyboard: boolea
     clearTimeout(timer);
     timer = setTimeout(hide, HINT_END_DELAY);
   };
+  const bind = (next: HTMLElement) => {
+    hinted = next;
+    next.addEventListener("pointerenter", () => {
+      pointer = true;
+      clearTimeout(timer);
+    });
+    next.addEventListener("pointerleave", () => {
+      pointer = false;
+      lose();
+    });
+    next.addEventListener("toggle", (event) => {
+      if ((event as ToggleEvent).newState === "closed" && openTrigger === trigger) openTrigger = null;
+    });
+  };
+  wiredTriggers.set(trigger, (next) => {
+    if (next !== hinted) bind(next);
+  });
+  bind(node);
   trigger.addEventListener("pointerenter", () => {
     pointer = true;
     interest();
@@ -313,17 +336,6 @@ function listenForHint(trigger: HTMLElement, node: HTMLElement, keyboard: boolea
   trigger.addEventListener("pointerleave", () => {
     pointer = false;
     lose();
-  });
-  node.addEventListener("pointerenter", () => {
-    pointer = true;
-    clearTimeout(timer);
-  });
-  node.addEventListener("pointerleave", () => {
-    pointer = false;
-    lose();
-  });
-  node.addEventListener("toggle", (event) => {
-    if ((event as ToggleEvent).newState === "closed" && openTrigger === trigger) openTrigger = null;
   });
   if (!keyboard) return;
   trigger.addEventListener("focus", () => {
@@ -358,6 +370,7 @@ export function hint<T extends HTMLElement>(trigger: T, words: string): T {
     element("hints").append(node);
   }
   node.textContent = words;
+  owners.set(id, new WeakRef(trigger));
   const adds = squeezed(words) !== squeezed(trigger.getAttribute("aria-label") ?? trigger.textContent);
   if (adds) node.setAttribute("role", "tooltip");
   else node.removeAttribute("role");

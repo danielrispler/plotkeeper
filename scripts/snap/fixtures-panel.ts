@@ -28,7 +28,7 @@ export const mapSheetExplained = (on: boolean): Fixture =>
       const toggle = sheet.querySelector(".sheet-header .explain-toggle");
       if (!toggle || toggle.nextElementSibling !== sheet.querySelector(".sheet-header .sheet-close")) return log("snap:fail the ? is not beside the ×");
       if (toggle.getAttribute("aria-pressed") !== "${on}" || toggle.title !== "${on ? "Hide" : "Show"} explanations") log("snap:fail the ?: " + toggle.getAttribute("aria-pressed") + " " + toggle.title);
-      const described = [...sheet.querySelectorAll("[aria-describedby]")];
+      const described = [...sheet.querySelectorAll("[aria-describedby]")].filter((node) => document.getElementById(node.getAttribute("aria-describedby"))?.classList.contains("explain"));
       const lines = [...sheet.querySelectorAll(".explain")];
       if (${!on}) {
         if (lines.length || described.length) log("snap:fail explanations drawn while off: " + lines.length + " lines, " + described.length + " described");
