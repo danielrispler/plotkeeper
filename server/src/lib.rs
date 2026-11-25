@@ -318,6 +318,47 @@ pub fn logged(metadata: &log::Metadata) -> bool {
     metadata.level() <= log::Level::Warn && !metadata.target().starts_with("ureq")
 }
 
+/// The target of the lines the page itself logs (`/api/log`).
+pub(crate) const PAGE_TARGET: &str = "studio_server::page";
+
+/// plotkeeper's logger: what is [`logged`] goes to stderr, with its level and target, and an error also to the page as a
+/// `server-error` event with its message, which the notice line shows. An error logged while no page listens is only on stderr.
+pub struct Logger(Events);
+
+/// The one [`Logger`], which `plotkeeper` installs at start.
+pub static LOGGER: Logger = Logger(Events(OnceLock::new()));
+
+impl Logger {
+    /// Sets the page the errors also go to; the first call wins.
+    pub fn send_errors_to(&self, sink: Arc<dyn Sink>) {
+        self.0.set(sink);
+    }
+}
+
+impl log::Log for Logger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        logged(metadata)
+    }
+    fn log(&self, record: &log::Record) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+        eprintln!(
+            "[{}][{}] {}",
+            record.level(),
+            record.target(),
+            record.args()
+        );
+        // The page shows its own errors when it logs them, so they are not sent back to it.
+        if record.level() == log::Level::Error && record.target() != PAGE_TARGET {
+            let message = record.args().to_string();
+            self.0
+                .emit("server-error", serde_json::Value::String(message));
+        }
+    }
+    fn flush(&self) {}
+}
+
 /// Makes a panic on any thread stop plotkeeper (spec danielrispler/plotkeeper#548): the hook logs the thread, the place
 /// and the message as an error, then calls `exit` with a non-zero code. The binary passes `std::process::exit`, so no
 /// thread goes on with a poisoned lock or without the read loop; a restart is safe, as the state is rebuilt from the

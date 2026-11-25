@@ -38,8 +38,8 @@
       "id": "server", "name": "Server", "caption": "Holds the state, answers the commands",
       "purpose": "The `plotkeeper` program: it holds the state, follows the event log and serves the page on 127.0.0.1, with one function for each of the page's commands.",
       "holds": [
-        { "name": "Serving the page", "text": "The built page, a POST route per command and one event stream, behind a token, a cookie and a Host check.", "paths": ["server/src/web.rs", "server/src/api.rs", "server/src/lock.rs"] },
-        { "name": "The read loop", "text": "Follows the event log and sends what changed (the list, the selection, the brief, notices) to the page.", "paths": ["server/src/read_loop.rs"] },
+        { "name": "Serving the page", "text": "The built page, a POST route per command and one event stream, which also carries logged errors, behind a token, a cookie and a Host check.", "paths": ["server/src/web.rs", "server/src/api.rs", "server/src/lock.rs"] },
+        { "name": "The read loop", "text": "Follows the event log and sends what changed (the list, the selection, the brief, notices, the text of the settings files) to the page.", "paths": ["server/src/read_loop.rs"] },
         { "name": "Settings and projects", "text": "The writer, its API keys in plotkeeper's own Keychain entries, the settings and the saved project list.", "paths": ["server/src/settings.rs", "server/src/projects.rs"] },
         { "name": "The programs", "text": "`plotkeeper`, which starts the server and opens the page, and `plotkeeper-run`, the launcher of one background run.", "paths": ["server/src/bin/plotkeeper.rs", "server/src/bin/plotkeeper-run.rs"] }
       ],

@@ -31,9 +31,20 @@ struct Sent {
     projects: Option<Vec<crate::projects::Project>>,
     selected: Option<serde_json::Value>,
     cards: Option<CardsKey>,
+    settings: Option<serde_json::Value>,
 }
 
 impl Sent {
+    /// Sends the text of `settings.json` and `keymap.json` when either changed, as the `settings_files` command gives
+    /// it: a hand edit or another tab's save reaches the open page, whose next save then names the text the file holds.
+    fn settings(&mut self, app: &App) {
+        let files = crate::settings::settings_files();
+        if self.settings.as_ref() != Some(&files) {
+            app.events.emit("settings-files", files.clone());
+            self.settings = Some(files);
+        }
+    }
+
     /// Sends the session list, the saved projects and the selection, each only if it changed. A session in a repository not
     /// yet saved adds it first (`projects.rs`).
     fn list(&mut self, app: &App) {
@@ -510,6 +521,7 @@ impl Follower {
         }
         // The cards also change with no line read: a card arrives, or one turns 30 minutes old.
         self.sent.cards(app);
+        self.sent.settings(app);
         self.live = true;
         // Also when the log did not open, so its replay block never ran.
         app.events.replayed();

@@ -1,9 +1,6 @@
-// The notice line's error lines (danielrispler/plotkeeper#191). An `error` line of the Studio log shows here, from the app
-// through the log plugin's `Webview` target and from the UI's own helper (`logLine` in dom.ts), once per distinct message
+// The notice line's error lines (danielrispler/plotkeeper#191). An `error` line of the Studio log shows here, from the server
+// as a `server-error` event (`main.ts`) and from the UI's own helper (`logLine` in dom.ts), once per distinct message
 // until Daniel dismisses it. Settings errors and the Claude Code version notice share the line and keep their rules.
-
-// The plugin's `LogLevel` serializes to a number; `Error` is 5.
-const ERROR = 5;
 
 // The error lines this module added, so a dismiss removes them and nothing else.
 let errors: string[] = [];
@@ -27,6 +24,7 @@ function add(text: string) {
   return message;
 }
 
+// A line a dismiss removes: an error, or a line for Daniel to act on, such as a late Allow's (`story.ts`).
 export function showError(message: string) {
   const added = add(message);
   if (added) errors.push(added);
@@ -34,11 +32,6 @@ export function showError(message: string) {
 
 // A plain notice, such as Claude Code's version changing: it joins the line and no dismiss removes it.
 export const showNotice = (message: string) => void add(message);
-
-// A record of the `Webview` target. The Rust side filters it to `Error`; the page checks the level too.
-export function onLogRecord(record: { level: number; message: string }) {
-  if (record.level === ERROR) showError(record.message);
-}
 
 export function dismissNotice() {
   const notice = line();

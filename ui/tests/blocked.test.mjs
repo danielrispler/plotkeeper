@@ -293,3 +293,54 @@ test("a docked card with no place gets one after the rule when its note is known
   assert.equal(block.childNodes.length, 3);
   assert.equal(place.text, "No risk note: the judge did not answer");
 });
+
+// "Ask again" (#550): the retry line shows only once the approval was renewed.
+import { blockedElement } from "../../dist/blocked.js";
+
+// A page with a notice line and a Studio log: `notice` is the line, `logged` the lines the page sent to the log.
+function page(invoke = async () => null) {
+  const notice = { textContent: "", hidden: true };
+  const logged = [];
+  globalThis.document = fakeDocument({ getElementById: () => notice });
+  globalThis.window = { __TAURI__: { core: { invoke }, log: { warn: async (m) => void logged.push(m), error: async (m) => void logged.push(m) } } };
+  return { notice, logged };
+}
+
+// Presses "Ask again" on a card allowed but not run, with `ask_again` answering as `renew` does; returns the cards whose retry
+// line was shown and the notice line's text.
+async function askAgain(renew) {
+  const asked = [];
+  const { notice } = page(async (command, args) => (asked.push([command, args]), renew()));
+  const retried = [];
+  const element = blockedElement("s1", card("allowed_not_run"), null, (c) => retried.push(c.call));
+  await element.find("button")[0].listeners.click();
+  assert.deepEqual(asked, [["ask_again", { session: "s1", command: card().command, cwd: "/work/repo" }]]);
+  return { retried, notice: notice.textContent };
+}
+
+test("Ask again shows the retry line once the approval is renewed", async () => {
+  assert.deepEqual(await askAgain(() => null), { retried: ["toolu_1"], notice: "" });
+});
+
+test("Ask again that could not renew the approval shows why, and no retry line", async () => {
+  const failed = await askAgain(() => Promise.reject("no session s1"));
+  assert.deepEqual(failed, { retried: [], notice: "ask_again: no session s1" });
+});
+
+// The late Allow's line (#550): what to tell the session, shown as it is and kept out of the Studio log.
+import { retryNotice } from "../../dist/story.js";
+
+test("a late Allow shows the line to tell the session, with no command's name before it, and logs nothing", () => {
+  const { notice, logged } = page();
+  retryNotice({ state: "working" }, card("allowed"), null);
+  assert.equal(notice.textContent, 'Allowed. Tell the session: Daniel approved the blocked command: `claude -p "summarise" > /tmp/out.txt`. Run it again.');
+  assert.equal(notice.hidden, false);
+  assert.deepEqual(logged, []);
+});
+
+test("a late Allow of an ended session says to start it again, and logs nothing", () => {
+  const { notice, logged } = page();
+  retryNotice({ state: "ended" }, card("allowed"), null);
+  assert.equal(notice.textContent, "The session has ended: start it again and ask it to run the approved command.");
+  assert.deepEqual(logged, []);
+});

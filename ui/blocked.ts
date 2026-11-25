@@ -201,9 +201,9 @@ export function blockedElement(session: string, card: BlockedCommand, agent: str
       button.title = blockedHovers[label];
       button.addEventListener("click", async () => {
         if (label === "Ask again") {
-          // The pass may have expired or been spent, so the approval is renewed before the line asks for the retry.
-          await invoke("ask_again", { session, command: card.command, cwd: card.cwd }).catch(failure("ask_again", "error"));
-          return retry(card);
+          // The pass may have expired or been spent, so the approval is renewed before the line asks for the retry; a renewal that
+          // failed shows why, and no line, since the retry would be blocked again.
+          return invoke("ask_again", { session, command: card.command, cwd: card.cwd }).then(() => retry(card), failure("ask_again", "error"));
         }
         if (request === null) return;
         const took = await sendBlockedAnswer(session, request, label === "Allow" ? "allow" : "deny");

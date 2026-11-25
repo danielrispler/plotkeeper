@@ -30,6 +30,7 @@ impl Effects for NoEffects {
 struct Fixture {
     app: Arc<App>,
     web: Web,
+    follower: Follower,
     _dir: tempfile::TempDir,
 }
 
@@ -54,12 +55,14 @@ fn fixture_of(events: impl FnOnce(&std::path::Path) -> String) -> Fixture {
     )
     .unwrap();
     let app = Arc::new(app);
-    Follower::start(&app, &log).pass();
+    let mut follower = Follower::start(&app, &log);
+    follower.pass();
     let web = Web::start(app.clone(), ASSETS, TOKEN.into(), 47900).unwrap();
     app.events.set(web.sink());
     Fixture {
         app,
         web,
+        follower,
         _dir: dir,
     }
 }
@@ -469,4 +472,76 @@ fn the_page_is_served_with_a_policy_that_lets_no_frame_load_a_url() {
         .find_map(|line| line.strip_prefix("Content-Security-Policy: "))
         .unwrap_or_else(|| panic!("no policy: {}", page.head));
     assert_eq!(policy, "frame-src 'none'");
+}
+
+/// The events the stream carries up to a `ping` the test sends after what it checks, as `(name, data)`.
+fn events_to_ping(f: &Fixture, stream: TcpStream) -> Vec<(String, serde_json::Value)> {
+    f.app.events.emit("ping", serde_json::json!(null));
+    let mut events = vec![];
+    let mut name = String::new();
+    for line in BufReader::new(stream).lines() {
+        let line = line.unwrap();
+        if let Some(event) = line.strip_prefix("event: ") {
+            name = event.to_string();
+        } else if let Some(data) = line.strip_prefix("data: ") {
+            if name == "ping" {
+                break;
+            }
+            events.push((name.clone(), serde_json::from_str(data).unwrap()));
+        }
+    }
+    events
+}
+
+#[test]
+fn a_hand_edit_of_settings_json_reaches_the_page_and_its_next_save_succeeds() {
+    let mut f = fixture();
+    let stream = open_stream(f.web.port());
+    let [settings, _] = studio_server::settings::paths().unwrap();
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let by_hand = "{\n  // mine\n  \"explanations\": false\n}\n";
+    std::fs::write(&settings, by_hand).unwrap();
+
+    f.follower.pass();
+
+    let sent: Vec<_> = events_to_ping(&f, stream)
+        .into_iter()
+        .filter(|(name, _)| name == "settings-files")
+        .map(|(_, data)| data)
+        .collect();
+    assert_eq!(
+        sent,
+        [serde_json::json!({ "settings": by_hand, "keymap": null })]
+    );
+    // The page saves with the text the event gave it.
+    let body = serde_json::json!({ "expected": sent[0]["settings"], "on": true }).to_string();
+    let saved = post(&f, "set_explanations", &body);
+    assert_eq!(saved.status, 200, "{}", saved.body);
+    assert_eq!(
+        std::fs::read_to_string(&settings).unwrap(),
+        "{\n  // mine\n  \"explanations\": true\n}\n"
+    );
+}
+
+#[test]
+fn only_an_error_of_the_servers_own_reaches_the_page_as_server_error() {
+    let f = fixture();
+    let _ = log::set_logger(&studio_server::LOGGER);
+    log::set_max_level(log::LevelFilter::Trace);
+    studio_server::LOGGER.send_errors_to(f.web.sink());
+    let stream = open_stream(f.web.port());
+
+    log::error!("save the cards: disk full");
+    log::warn!("prune the event log: busy");
+    log::error!(target: "ureq::unit", "x-api-key: secret");
+    // The page shows its own errors itself, so they are not sent back to it.
+    let own = r#"{"level":"error","line":"delete_session: gone"}"#;
+    assert_eq!(post(&f, "log", own).status, 200);
+
+    let sent: Vec<_> = events_to_ping(&f, stream)
+        .into_iter()
+        .filter(|(name, _)| name == "server-error")
+        .map(|(_, data)| data)
+        .collect();
+    assert_eq!(sent, [serde_json::json!("save the cards: disk full")]);
 }
