@@ -13,7 +13,6 @@ use crate::{
 };
 use std::{
     collections::{HashMap, VecDeque},
-    panic::{self, AssertUnwindSafe},
     sync::{Arc, Mutex},
     thread,
 };
@@ -217,7 +216,6 @@ impl TurnWriting {
                 }
                 waiting.insert(id.clone(), VecDeque::from([job]));
                 let queues = queues.clone();
-                let effects = self.state.effects.clone();
                 thread::spawn(move || {
                     loop {
                         let job = {
@@ -230,10 +228,8 @@ impl TurnWriting {
                                 }
                             }
                         };
-                        // A job that panics is logged and the session's later jobs still run.
-                        if panic::catch_unwind(AssertUnwindSafe(job)).is_err() {
-                            effects.log(format!("a turn writing job of session {id} panicked"));
-                        }
+                        // A job that panics is not caught: plotkeeper's panic hook stops the process (#548).
+                        job();
                     }
                 });
             }

@@ -633,6 +633,9 @@ struct Running<'a>(&'a Mutex<HashSet<String>>, String);
 
 impl Drop for Running<'_> {
     fn drop(&mut self) {
+        // A poisoned lock is used as it is. That is safe: the set only gains and loses whole names, so a panic while
+        // it is held leaves it whole, and a drop during an unwind must not panic again, which would abort. With
+        // plotkeeper's panic hook the process stops on a panic; this path is left for the tests, which unwind.
         self.0
             .lock()
             .unwrap_or_else(|e| e.into_inner())

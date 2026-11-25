@@ -1,5 +1,5 @@
 //! Settings and keymap (danielrispler/Falinks#524): `settings.json` and `keymap.json` in the studio's data directory. The
-//! shell hands the window their text, at start and each time one is saved; the window parses them
+//! page asks for their text at start, and the read loop sends it each time a file changes; the page parses them
 //! (`ui/settings.ts`), so a broken file is reported there and the last good one stays in effect.
 
 use std::{
@@ -163,7 +163,7 @@ static WRITING: Mutex<()> = Mutex::new(());
 
 /// Sets the setting at `path`, such as `["terminal", "font_size"]`, to `value` in `settings.json`, or removes it when `value`
 /// is none. `expected` is the text the page last read. Returns the new text,
-/// or why the write was refused; the written file reaches the window through `watch` like any save.
+/// or why the write was refused; the read loop's next pass sends the written file to every open page (`settings-files`).
 pub fn write_setting(
     expected: Option<String>,
     path: Vec<String>,

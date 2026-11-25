@@ -417,6 +417,9 @@ enum Fate {
 
 static FATE: Mutex<Fate> = Mutex::new(Fate::Open);
 
+/// A poisoned lock is read as it is. That is safe: `Fate` is one `Copy` value set by a single assignment, so a panic
+/// while the lock is held cannot leave it half written. The hook is a short-lived process of its own, which the
+/// server's panic hook does not cover (spec danielrispler/plotkeeper#548).
 fn fate() -> std::sync::MutexGuard<'static, Fate> {
     FATE.lock().unwrap_or_else(|e| e.into_inner())
 }

@@ -5,7 +5,7 @@ mod isolated_home;
 use std::{
     io::{BufRead, BufReader, Read, Write},
     net::TcpStream,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
     time::Duration,
 };
 use studio_server::{
@@ -30,14 +30,20 @@ impl Effects for NoEffects {
 struct Fixture {
     app: Arc<App>,
     web: Web,
+    follower: Follower,
     _dir: tempfile::TempDir,
 }
 
 fn fixture() -> Fixture {
+    fixture_of(|_| LOG.into())
+}
+
+/// A fixture over the event log `events` writes, given the fixture's folder.
+fn fixture_of(events: impl FnOnce(&std::path::Path) -> String) -> Fixture {
     isolated_home::set();
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("events.jsonl");
-    std::fs::write(&log, LOG).unwrap();
+    std::fs::write(&log, events(dir.path())).unwrap();
     let cards = Arc::new(Mutex::new(CardStore::open_beside(&log).unwrap()));
     let notes = Arc::new(Mutex::new(RiskNotes::open_beside(&log).unwrap()));
     let app = App::open_with(
@@ -49,12 +55,14 @@ fn fixture() -> Fixture {
     )
     .unwrap();
     let app = Arc::new(app);
-    Follower::start(&app, &log).pass();
+    let mut follower = Follower::start(&app, &log);
+    follower.pass();
     let web = Web::start(app.clone(), ASSETS, TOKEN.into(), 47900).unwrap();
     app.events.set(web.sink());
     Fixture {
         app,
         web,
+        follower,
         _dir: dir,
     }
 }
@@ -330,6 +338,62 @@ fn a_second_plotkeeper_for_the_same_folder_finds_the_first() {
     );
 }
 
+#[test]
+fn another_command_answers_while_a_subagents_log_is_read() {
+    // A session with a subagent, whose log is beside the session's transcript in the fixture's folder.
+    let (session, agent) = ("s1", "a7e2c4f6b8d0a1c3e");
+    let f = fixture_of(|dir| {
+        let transcript = dir.join("s1.jsonl");
+        let logs = dir.join(session).join("subagents");
+        std::fs::create_dir_all(&logs).unwrap();
+        let line = serde_json::json!({
+            "type": "user", "agentId": agent, "sessionId": session, "isSidechain": true,
+            "message": {"role": "user", "content": "Find the probe."},
+        });
+        std::fs::write(
+            logs.join(format!("agent-{agent}.jsonl")),
+            format!("{line}\n"),
+        )
+        .unwrap();
+        let own = serde_json::json!({
+            "session_id": session, "hook_event_name": "UserPromptSubmit", "cwd": "/w", "prompt": "Go.",
+            "transcript_path": transcript, "studio_received_ms": 1793261000100u64,
+        });
+        let step = serde_json::json!({
+            "session_id": session, "hook_event_name": "PreToolUse", "cwd": "/w", "agent_id": agent,
+            "tool_name": "Bash", "tool_use_id": "t0", "tool_input": {"command": "ls"},
+            "transcript_path": transcript, "studio_received_ms": 1793261000200u64,
+        });
+        format!("{own}\n{step}\n")
+    });
+
+    // The read waits, timing-free, until the other command has answered: were the studio's lock held over the read,
+    // that command would never answer.
+    let (reading, started) = mpsc::channel();
+    let (answered, released) = mpsc::channel::<()>();
+    let app = f.app.clone();
+    let reader = std::thread::spawn(move || {
+        studio_server::subagent_log_through(&app, session.into(), agent.into(), 0, |file| {
+            reading.send(()).unwrap();
+            let _ = released.recv();
+            file.read()
+        })
+    });
+    started.recv().unwrap();
+    let sessions = post(&f, "sessions", "{}");
+    assert_eq!(sessions.status, 200);
+    assert!(sessions.body.contains(session), "{}", sessions.body);
+    answered.send(()).unwrap();
+
+    let log = reader.join().unwrap().expect("a log");
+    assert_eq!(
+        log.entries,
+        [studio_core::LogEntry::Prompt {
+            text: "Find the probe.".into()
+        }]
+    );
+}
+
 /// Opens the event stream and reads up to its first comment.
 fn open_stream(port: u16) -> TcpStream {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
@@ -408,4 +472,76 @@ fn the_page_is_served_with_a_policy_that_lets_no_frame_load_a_url() {
         .find_map(|line| line.strip_prefix("Content-Security-Policy: "))
         .unwrap_or_else(|| panic!("no policy: {}", page.head));
     assert_eq!(policy, "frame-src 'none'");
+}
+
+/// The events the stream carries up to a `ping` the test sends after what it checks, as `(name, data)`.
+fn events_to_ping(f: &Fixture, stream: TcpStream) -> Vec<(String, serde_json::Value)> {
+    f.app.events.emit("ping", serde_json::json!(null));
+    let mut events = vec![];
+    let mut name = String::new();
+    for line in BufReader::new(stream).lines() {
+        let line = line.unwrap();
+        if let Some(event) = line.strip_prefix("event: ") {
+            name = event.to_string();
+        } else if let Some(data) = line.strip_prefix("data: ") {
+            if name == "ping" {
+                break;
+            }
+            events.push((name.clone(), serde_json::from_str(data).unwrap()));
+        }
+    }
+    events
+}
+
+#[test]
+fn a_hand_edit_of_settings_json_reaches_the_page_and_its_next_save_succeeds() {
+    let mut f = fixture();
+    let stream = open_stream(f.web.port());
+    let [settings, _] = studio_server::settings::paths().unwrap();
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let by_hand = "{\n  // mine\n  \"explanations\": false\n}\n";
+    std::fs::write(&settings, by_hand).unwrap();
+
+    f.follower.pass();
+
+    let sent: Vec<_> = events_to_ping(&f, stream)
+        .into_iter()
+        .filter(|(name, _)| name == "settings-files")
+        .map(|(_, data)| data)
+        .collect();
+    assert_eq!(
+        sent,
+        [serde_json::json!({ "settings": by_hand, "keymap": null })]
+    );
+    // The page saves with the text the event gave it.
+    let body = serde_json::json!({ "expected": sent[0]["settings"], "on": true }).to_string();
+    let saved = post(&f, "set_explanations", &body);
+    assert_eq!(saved.status, 200, "{}", saved.body);
+    assert_eq!(
+        std::fs::read_to_string(&settings).unwrap(),
+        "{\n  // mine\n  \"explanations\": true\n}\n"
+    );
+}
+
+#[test]
+fn only_an_error_of_the_servers_own_reaches_the_page_as_server_error() {
+    let f = fixture();
+    let _ = log::set_logger(&studio_server::LOGGER);
+    log::set_max_level(log::LevelFilter::Trace);
+    studio_server::LOGGER.send_errors_to(f.web.sink());
+    let stream = open_stream(f.web.port());
+
+    log::error!("save the cards: disk full");
+    log::warn!("prune the event log: busy");
+    log::error!(target: "ureq::unit", "x-api-key: secret");
+    // The page shows its own errors itself, so they are not sent back to it.
+    let own = r#"{"level":"error","line":"delete_session: gone"}"#;
+    assert_eq!(post(&f, "log", own).status, 200);
+
+    let sent: Vec<_> = events_to_ping(&f, stream)
+        .into_iter()
+        .filter(|(name, _)| name == "server-error")
+        .map(|(_, data)| data)
+        .collect();
+    assert_eq!(sent, [serde_json::json!("save the cards: disk full")]);
 }

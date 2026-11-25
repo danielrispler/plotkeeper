@@ -16,6 +16,9 @@
 - `GET /events` is one server-sent event stream: `event: <name>` and `data: <json>`, the events the window used to receive (`sessions`, `cards`, `selected`, `notice`, `writer-notice`, `map-landed`, and the rest), and a comment every 15 seconds.
 - The page tells the server whether its tab is visible and focused (`page_focus`); the read loop treats that as the window's focus. With no tab listening, nothing is focused.
 - `POST /api/log` puts the page's log line in plotkeeper's log (stderr).
+- `settings-files` carries the text of `settings.json` and `keymap.json`, as the `settings_files` command answers it. The read loop sends it when either file's text differs from what it last sent (#550), so a hand edit reaches every open page ([settings](../settings.md)).
+- `server-error` carries the message of an error plotkeeper logged, which is also on stderr (#550). The page shows it in the notice line until it is dismissed. Warnings stay on stderr only, the HTTP client's lines are never logged, and a page's own log lines are not sent back, since the page that logged an error already shows it. An error logged while no page is open is on stderr only.
+- A failed `writer_notice` or `wired` at the page's start is a warning in the log, not shown.
 
 ## One plotkeeper per data folder
 
@@ -24,6 +27,10 @@ The first start holds a lock on `plotkeeper.lock` in the data folder and writes 
 At start it applies the writer `settings.json` names (`summaries.writer`, `claude` by default), so summaries are written with it before any page opens. A start asks `gh` about the PRs of the sessions' repositories once and writes the PR briefs of at most 3 ready PRs whose head moved within the catch-up window (`briefBackfill.hours`, 2 by default; the older `catchUp.hours` is still read), the newest first, always with `claude -p`; any other ready PR is written when its brief is opened (see [PR briefs](pr-briefs.md)). The writer's failures reach the page as `writer-notice`; see [cards](cards.md).
 
 `PLOTKEEPER_NO_BROWSER=1` leaves the browser closed; the address is printed either way (`plotkeeper: <url>`).
+
+## A panic stops plotkeeper
+
+A panic on any thread (the read loop, a request, a background run's thread, a turn's writing job) stops plotkeeper (#551, spec #548). It prints one error line to stderr, `thread '<name>' panicked at <file>:<line>:<column>: <message>; plotkeeper stops`, and exits with code 101; the operating system frees the lock on `plotkeeper.lock`. It never goes on half-working, with a poisoned lock that fails every later command or a served page whose read loop is gone. Starting it again is safe: the sessions are rebuilt from the event log, the stores write by temp file and rename, and the background runs a start before left are picked up. The hooks are processes of their own and are not stopped by it.
 
 ## What's new after an update
 

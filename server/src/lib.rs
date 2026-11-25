@@ -318,6 +318,67 @@ pub fn logged(metadata: &log::Metadata) -> bool {
     metadata.level() <= log::Level::Warn && !metadata.target().starts_with("ureq")
 }
 
+/// The target of the lines the page itself logs (`/api/log`).
+pub(crate) const PAGE_TARGET: &str = "studio_server::page";
+
+/// plotkeeper's logger: what is [`logged`] goes to stderr, with its level and target, and an error also to the page as a
+/// `server-error` event with its message, which the notice line shows. An error logged while no page listens is only on stderr.
+pub struct Logger(Events);
+
+/// The one [`Logger`], which `plotkeeper` installs at start.
+pub static LOGGER: Logger = Logger(Events(OnceLock::new()));
+
+impl Logger {
+    /// Sets the page the errors also go to; the first call wins.
+    pub fn send_errors_to(&self, sink: Arc<dyn Sink>) {
+        self.0.set(sink);
+    }
+}
+
+impl log::Log for Logger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        logged(metadata)
+    }
+    fn log(&self, record: &log::Record) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+        eprintln!(
+            "[{}][{}] {}",
+            record.level(),
+            record.target(),
+            record.args()
+        );
+        // The page shows its own errors when it logs them, so they are not sent back to it.
+        if record.level() == log::Level::Error && record.target() != PAGE_TARGET {
+            let message = record.args().to_string();
+            self.0
+                .emit("server-error", serde_json::Value::String(message));
+        }
+    }
+    fn flush(&self) {}
+}
+
+/// Makes a panic on any thread stop plotkeeper (spec danielrispler/plotkeeper#548): the hook logs the thread, the place
+/// and the message as an error, then calls `exit` with a non-zero code. The binary passes `std::process::exit`, so no
+/// thread goes on with a poisoned lock or without the read loop; a restart is safe, as the state is rebuilt from the
+/// event log. A hook and not `panic = "abort"`, so a test that expects a panic still unwinds.
+pub fn exit_on_panic(exit: impl Fn(i32) + Send + Sync + 'static) {
+    std::panic::set_hook(Box::new(move |info| {
+        let thread = thread::current();
+        let name = thread.name().unwrap_or("unnamed");
+        let place = info.location().map_or("an unknown place".to_string(), |l| {
+            format!("{}:{}:{}", l.file(), l.line(), l.column())
+        });
+        let message = info.payload_as_str().unwrap_or("no message");
+        log::error!("thread '{name}' panicked at {place}: {message}; plotkeeper stops");
+        exit(PANIC_EXIT);
+    }));
+}
+
+/// The exit code of a plotkeeper that panicked, the one Rust's own runtime uses.
+const PANIC_EXIT: i32 = 101;
+
 /// Logs a line from the writers' code: an error when it lost data, a warning otherwise.
 pub fn report(line: String) {
     let line = scrubbed(&line);
@@ -559,7 +620,9 @@ pub fn ask_facts(
     anchor: studio_core::Anchor,
 ) -> Result<Option<studio_core::AskFacts>, String> {
     let log = studio_hook::event_log(&std::env::home_dir().ok_or("no home folder")?);
-    Ok(app.core.lock().unwrap().ask_facts(&session, &anchor, &log))
+    // The lock is held only to copy what the studio holds: the log is read after it is freed.
+    let recorded = app.core.lock().unwrap().ask_recorded(&session, &anchor);
+    Ok(recorded.map(|r| r.read(&log)))
 }
 
 /// A file's hunk of turn `turn` (danielrispler/plotkeeper#114), whole for the diff pane (#131) when `all`: `git diff` between the turn's two trees of worktree
@@ -684,10 +747,23 @@ pub fn subagent_log(
     agent_id: String,
     offset: u64,
 ) -> Option<studio_core::SubagentLog> {
-    app.core
-        .lock()
-        .unwrap()
-        .subagent_log(&session, &agent_id, offset)
+    subagent_log_through(app, session, agent_id, offset, |file| file.read())
+}
+
+/// `subagent_log` with the file read by `read`, which runs with no lock on the studio held (spec
+/// danielrispler/plotkeeper#548): the lock is held only to copy where the log is. The seam its test reads through.
+pub fn subagent_log_through(
+    app: &App,
+    session: String,
+    agent_id: String,
+    offset: u64,
+    read: impl FnOnce(&studio_core::SubagentLogFile) -> Option<studio_core::SubagentLog>,
+) -> Option<studio_core::SubagentLog> {
+    let file = {
+        let studio = app.core.lock().unwrap();
+        studio.subagent_log_file(&session, &agent_id, offset)?
+    };
+    read(&file)
 }
 
 /// The session Daniel selected and the subagent of it he opened, or `null` before his first click.
@@ -957,7 +1033,7 @@ pub fn ask_anchor(
     question: String,
 ) -> Result<String, String> {
     let log = studio_hook::event_log(&std::env::home_dir().ok_or("no home folder")?);
-    let (facts, transcript, trees) = {
+    let (recorded, transcript, trees) = {
         let studio = app.core.lock().unwrap();
         let trees = match &anchor {
             studio_core::Anchor::File { turn, root, .. } => {
@@ -966,9 +1042,10 @@ pub fn ask_anchor(
             _ => None,
         };
         let transcript = studio.session(&session).map(|s| s.transcript.clone());
-        (studio.ask_facts(&session, &anchor, &log), transcript, trees)
+        (studio.ask_recorded(&session, &anchor), transcript, trees)
     };
-    let facts = facts.ok_or("nothing is recorded about this")?;
+    // The event log is read with the studio's lock freed.
+    let facts = recorded.ok_or("nothing is recorded about this")?.read(&log);
     let hunk = match (&anchor, trees) {
         (
             studio_core::Anchor::File {
