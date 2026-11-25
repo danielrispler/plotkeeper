@@ -107,4 +107,6 @@ jobs:
           path: out
       # The tarball the smoke job tested, not a rebuild. No token: npm trusted publishing, configured on npmjs.com for
       # this repository's release.yml, authenticates it (docs/studio/development.md, "Cutting a release").
-      - run: npm publish out/*.tgz --provenance --access public
+      # `./`: npm reads a bare `out/plotkeeper-<version>.tgz` as the GitHub repository `out/plotkeeper-<version>.tgz`
+      # and fails in `git ls-remote` (#441's first workflow publish, run 45486175800).
+      - run: npm publish ./out/*.tgz --provenance --access public
