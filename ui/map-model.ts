@@ -2,6 +2,7 @@
 // are placed, the drag threshold, the link's rim points, the layered Esc, the part sheet and the left panel. `map.ts` draws and wires them. By concern
 // (spec #548, Group 4), the camera is `map-camera.ts`, the PR brief's logic `map-brief-model.ts` and the part catch-up's `map-catch-up.ts`.
 
+import { messageOf } from "./dom.js";
 import { isObject } from "./settings.js";
 import type { Ci, CommitFiles, Fog, FogEntry, HistoricalMap, HistoryEntry, Proof } from "./types.js";
 
@@ -55,7 +56,7 @@ export function parseMap(text: string): MapDoc {
   try {
     file = JSON.parse(text);
   } catch (e) {
-    return { ok: false, why: String(e) };
+    return { ok: false, why: messageOf(e) };
   }
   if (!isObject(file)) return { ok: false, why: "the map is not a JSON object" };
   const [parts, actors, links, laws] = [listOf(file.parts, isPart), listOf(file.actors, isActor), listOf(file.links, isLink), listOf(file.laws, isLaw)];
