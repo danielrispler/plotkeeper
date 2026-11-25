@@ -89,12 +89,19 @@ fn step_prose(s: &Step) -> Vec<&str> {
     prose
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "#556 splits this file into modules (spec #548, Group 4), which places this function anew"
-)]
+/// Runs the code checks on one step, replacing its flags. An order check's key is replaced by the
+/// changed flow's hops, and one whose parts disagree with them is dropped.
 fn check_step(s: &mut Step, ctx: &CheckContext, facts_norm: &str) {
     let mut f: Vec<String> = Vec::new();
+    text_flags(s, ctx, &mut f);
+    check_flags(s, ctx, &mut f);
+    map_flags(s, ctx, &mut f);
+    cite_flags(s, facts_norm, &mut f);
+    s.flags = f;
+}
+
+/// The step's text: its lengths, its prose, its risks and its figure's labels.
+fn text_flags(s: &Step, ctx: &CheckContext, f: &mut Vec<String>) {
     if words(&s.h) > 14 {
         f.push(format!("heading {} words", words(&s.h)));
     }
@@ -131,56 +138,67 @@ fn check_step(s: &mut Step, ctx: &CheckContext, facts_norm: &str) {
             }
         }
     }
-    if let Some(c) = &mut s.check {
-        match c.kind.as_str() {
-            "pick" => {
-                let test = c.test.clone().unwrap_or_default();
-                let name = test
-                    .rsplit([':', ' '])
-                    .next()
-                    .unwrap_or(&test)
-                    .trim_end_matches("()");
-                let diff = if ctx.diff.is_empty() {
-                    &ctx.facts
-                } else {
-                    &ctx.diff
-                };
-                if name.is_empty() || !diff.contains(name) {
-                    f.push(format!("pick check cites test `{test}`, not in the diff"));
-                }
+}
+
+/// The step's check: a pick check's test must be in the diff, an order check's parts must be its
+/// changed flow's hops.
+fn check_flags(s: &mut Step, ctx: &CheckContext, f: &mut Vec<String>) {
+    let Some(c) = &mut s.check else {
+        return;
+    };
+    match c.kind.as_str() {
+        "pick" => {
+            let test = c.test.clone().unwrap_or_default();
+            let name = test
+                .rsplit([':', ' '])
+                .next()
+                .unwrap_or(&test)
+                .trim_end_matches("()");
+            let diff = if ctx.diff.is_empty() {
+                &ctx.facts
+            } else {
+                &ctx.diff
+            };
+            if name.is_empty() || !diff.contains(name) {
+                f.push(format!("pick check cites test `{test}`, not in the diff"));
             }
-            "order" => {
-                let flow = c.flow.clone().unwrap_or_default();
-                match ctx.flows_changed.get(&flow) {
-                    None if !ctx.flows.contains(&flow) => {
-                        f.push(format!("order check keyed to `{flow}`, not a flow"));
-                    }
-                    None => f.push(format!(
-                        "order check on flow `{flow}`, which this PR's map diff does not change"
-                    )),
-                    Some(hops) => {
-                        let theirs: BTreeSet<&str> = c
-                            .key
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .filter_map(|k| k.as_str())
-                            .collect();
-                        let ours: BTreeSet<&str> = hops.iter().map(String::as_str).collect();
-                        if theirs == ours {
-                            c.key = serde_json::json!(hops);
-                        } else {
-                            s.check = None;
-                            f.push(format!(
-                                "order check dropped: its parts disagree with flow `{flow}`'s hops"
-                            ));
-                        }
-                    }
-                }
-            }
-            other => f.push(format!("check kind {other:?}")),
         }
+        "order" => {
+            let flow = c.flow.clone().unwrap_or_default();
+            match ctx.flows_changed.get(&flow) {
+                None if !ctx.flows.contains(&flow) => {
+                    f.push(format!("order check keyed to `{flow}`, not a flow"));
+                }
+                None => f.push(format!(
+                    "order check on flow `{flow}`, which this PR's map diff does not change"
+                )),
+                Some(hops) => {
+                    let theirs: BTreeSet<&str> = c
+                        .key
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|k| k.as_str())
+                        .collect();
+                    let ours: BTreeSet<&str> = hops.iter().map(String::as_str).collect();
+                    if theirs == ours {
+                        c.key = serde_json::json!(hops);
+                    } else {
+                        s.check = None;
+                        f.push(format!(
+                            "order check dropped: its parts disagree with flow `{flow}`'s hops"
+                        ));
+                    }
+                }
+            }
+        }
+        other => f.push(format!("check kind {other:?}")),
     }
+}
+
+/// What the step names on the map: the parts and actors it lights, its hops, its law, and the
+/// tagged test it says covers that law.
+fn map_flags(s: &Step, ctx: &CheckContext, f: &mut Vec<String>) {
     for id in &s.on {
         if !ctx.parts.contains(id) && !ctx.actors.contains(id) {
             f.push(format!("lights `{id}`, not in the map"));
@@ -215,6 +233,10 @@ fn check_step(s: &mut Step, ctx: &CheckContext, facts_norm: &str) {
             ));
         }
     }
+}
+
+/// The step's cites: it has some, and each quote is in the facts.
+fn cite_flags(s: &Step, facts_norm: &str, f: &mut Vec<String>) {
     if s.cites.is_empty() {
         f.push("no cites".into());
     }
@@ -233,7 +255,6 @@ fn check_step(s: &mut Step, ctx: &CheckContext, facts_norm: &str) {
                 .join("; ")
         ));
     }
-    s.flags = f;
 }
 
 /// Runs every code check on `brief`, replacing its flags: each failure is a flag on the item it concerns, and
