@@ -31,7 +31,7 @@ import { showPalette } from "./palette.js";
 import { projectOfCwd, selectedProject, sidebarOrder } from "./projects.js";
 import { narrowBelow, selectedView } from "./map-model.js";
 import { reload, type SettingsFiles } from "./settings.js";
-import { studio } from "./state.js";
+import { setFocus, setMissed, setProjects, setSettings, studio } from "./state.js";
 import { drawFeed, showView } from "./story.js";
 import { startRailBriefs } from "./rail-brief.js";
 import { barKeyDown } from "./story-bar.js";
@@ -145,7 +145,7 @@ const named: Record<string, (arg?: string) => void> = {
     document.body.classList.remove("list-open", "list-peek");
   },
   "studio::ToggleFocus": () => {
-    studio.focus = !studio.focus;
+    setFocus(!studio.focus);
     document.body.classList.remove("list-open", "list-peek");
     layout();
   },
@@ -210,8 +210,7 @@ function applySettings(files: SettingsFiles) {
   // A write's returned text and then the watcher's report of the same file are one change: the second does nothing.
   if (applied && files.settings === studio.texts.settings && files.keymap === studio.texts.keymap) return;
   applied = true;
-  studio.texts = files;
-  studio.files = reload(studio.files, files);
+  setSettings(files, reload(studio.files, files));
   const { settings, errors } = studio.files;
   setSettingsErrors(errors);
   layout();
@@ -252,7 +251,7 @@ element("needs-you").addEventListener("click", () => {
 
 // The saved project list (#381): the list's headers and the map follow it; its first arrival opens the last viewed project's map (#386).
 const showProjects = (projects: SavedProject[]) => {
-  studio.projects = projects;
+  setProjects(projects);
   staleDots();
   drawSidebar();
   projectsChanged();
@@ -295,7 +294,7 @@ listen<string[]>("finished", (ids) => {
 // would draw it with the last session's cards for a frame (danielrispler/Falinks#570).
 // The press's settling fetches what it held back.
 listen<Selection | null>("selected", (selected) => {
-  if (studio.pending) studio.missed = true;
+  if (studio.pending) setMissed(true);
   else show(selected);
 });
 // A session selected before the page opened opens in the left panel, its story or its worker's log, over its project's map.
@@ -307,7 +306,7 @@ invoke("selected")
   })
   .catch(failure("selected"));
 listen<SessionCards>("cards", (cards) => {
-  if (studio.pending) studio.missed = true;
+  if (studio.pending) setMissed(true);
   else showCards(cards);
 });
 // Claude Code's version changed: re-record the subagent fixture.

@@ -32,7 +32,7 @@ export const stateLabel = (status: string) => (status === "completed" ? "done" :
 
 // The log being shown: whose, and what has been read of it (null while it has no file), for reading on.
 export type ShownLog = { session: string; agent: string; log: SubagentLog | null };
-const shownLog: ShownLog = { session: "", agent: "", log: null };
+let shownLog: ShownLog = { session: "", agent: "", log: null };
 
 // The shown log with a read from its offset added: only new entries, so a call's result pairs with it when it
 // arrives. A read that found no file changes nothing.
@@ -57,18 +57,17 @@ const expanded = new Set<string>();
 
 // Draws the log view of a subagent the session does not have: the no-log state, never the previous pane.
 export function showMissing(place: HTMLElement, toParent: () => void) {
-  Object.assign(shownLog, { session: "", agent: "", log: null });
+  shownLog = { session: "", agent: "", log: null };
   drawLog(place, null, null, toParent);
 }
 
 // Reads subagent `agent`'s log from the start and draws it in `place`. `toParent` shows the parent's terminal.
 export async function showLog(place: HTMLElement, session: string, agent: Subagent, toParent: () => void) {
   expanded.clear();
-  const mine = { session, agent: agent.id, log: null as SubagentLog | null };
-  Object.assign(shownLog, mine);
+  shownLog = { session, agent: agent.id, log: null };
   const log = await invoke("subagent_log", { session, agentId: agent.id, offset: 0 });
   if (shownLog.session !== session || shownLog.agent !== agent.id || shownLog.log) return; // a newer selection took over
-  shownLog.log = log;
+  shownLog = { ...shownLog, log };
   drawLog(place, agent, shownLog.log, toParent);
   place.scrollTop = opensAtBottom(agent.status) ? place.scrollHeight : 0;
 }
@@ -83,7 +82,7 @@ export async function followLog(place: HTMLElement, session: string, agent: Suba
   if (shownLog.session !== session || shownLog.agent !== agent.id || (shownLog.log?.offset ?? 0) !== from) return;
   if (!read || read.entries.length === 0) return; // nothing new: no redraw
   const before = { scrollTop: place.scrollTop, clientHeight: place.clientHeight, scrollHeight: place.scrollHeight };
-  Object.assign(shownLog, readOn(shownLog, read));
+  shownLog = readOn(shownLog, read);
   drawLog(place, agent, shownLog.log, toParent);
   place.scrollTop = scrollAfter(before, place.scrollHeight);
 }

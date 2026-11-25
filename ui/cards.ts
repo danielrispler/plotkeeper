@@ -4,7 +4,7 @@
 
 import { element, glyphOnly, pressable, prose, text } from "./dom.js";
 import { drawSidebar } from "./list.js";
-import { studio } from "./state.js";
+import { setCards, studio } from "./state.js";
 import { showDecisions } from "./decisions.js";
 import { drawFeed, fillDockNotes, forgetMissingSummaries, openCitation } from "./story.js";
 import type { SessionCards } from "./types.js";
@@ -59,7 +59,7 @@ function showBrief(cards: SessionCards) {
 export function showCards(cards: SessionCards) {
   // A risk note that arrived fills its card's place in the dock where it stands, which only a session's own events redraw otherwise.
   const notes = JSON.stringify(cards.risk_notes) !== JSON.stringify(studio.cards.risk_notes);
-  studio.cards = cards;
+  setCards(cards);
   showBrief(cards);
   showDecisions(cards.decisions, cards.decision_notes);
   // The store changed: a summary missing before may be in it now.

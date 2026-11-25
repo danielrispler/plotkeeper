@@ -4,8 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { El } from "./dom.mjs";
 import { patch } from "../../dist/dom.js";
-import { isSelected } from "../../dist/selection.js";
-import { studio } from "../../dist/state.js";
+import { isSelected, studio } from "../../dist/state.js";
 
 // A selection as the core sends it, less the session's fields the mark never reads.
 /** @returns {import("../../dist/types.js").Selection} */

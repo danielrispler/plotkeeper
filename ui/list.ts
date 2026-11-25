@@ -14,8 +14,8 @@ import { openMap, shownProject } from "./map.js";
 import { pressHeader } from "./map-model.js";
 import { closePanel, panelShown } from "./panel.js";
 import { redrawHistory, showHistory } from "./panes.js";
-import { isSelected, pressSession } from "./selection.js";
-import { studio } from "./state.js";
+import { pressSession } from "./selection.js";
+import { isSelected, setListed, studio } from "./state.js";
 import { titled } from "./keys.js";
 import { blockedWaits, stateLabels, type BlockedCommand, type Context, type MarkWhy, type ProjectMark, type Session, type SessionState, type Subagent } from "./types.js";
 import { askDelete, lastHeadline, report } from "./story.js";
@@ -672,7 +672,7 @@ function clearLanded(landed: Session[]): HTMLElement[] {
 // fold. Ended ones are in History. The rows carry their state by shape, so the groups have no heading
 // (danielrispler/Falinks#572).
 export function showSessions(sessions: Session[]) {
-  studio.listed = sessions;
+  setListed(sessions);
   if (sessions.length) logStop("session");
   void refreshAgents();
   landedClear.sync();

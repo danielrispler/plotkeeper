@@ -11,18 +11,10 @@ import { closePanel, followSelection, panelShown, showPanel } from "./panel.js";
 import { showSessions } from "./list.js";
 import { showSession } from "./panes.js";
 import { projectOfCwd } from "./projects.js";
-import { studio } from "./state.js";
+import { setListed, setMissed, setPending, setSelection, studio } from "./state.js";
 import { showView } from "./story.js";
 import { showToast } from "./toast.js";
 import type { Selection } from "./types.js";
-
-// Whether row `session`, or its subagent `agent`'s line, shows selected: the one Daniel just pressed
-// until the shell replies, else the shell's selection, so a reply that disagrees moves the mark back
-// (danielrispler/Falinks#570). With no `agent`, any of the session's lines counts, as the strip shows.
-export function isSelected(session: string, agent?: string | null): boolean {
-  const shown = studio.pending ?? (studio.selection && { id: studio.selection.session.id, agent: studio.selection.agent });
-  return shown?.id === session && (agent === undefined || shown.agent === agent);
-}
 
 // The press shows at once in the list; then the core selects, and the window draws the selection it
 // returns. Opening a subagent's line also fades a failed helper. A later press wins over this one's
@@ -37,18 +29,18 @@ export async function select(id: string, agent: string | null = null) {
     if (agent === null) showPanel(page.panel);
   }
   const pressed = { id, agent };
-  studio.pending = pressed;
+  setPending(pressed);
   showSessions(studio.listed);
   try {
     let selected = await invoke("select", { id });
     if (agent !== null) {
       selected = await invoke("open", { agentId: agent });
-      studio.listed = await invoke("sessions");
+      setListed(await invoke("sessions"));
     }
     // The cards come first, so the rail draws the new session once, with its cards (danielrispler/Falinks#567).
     const cards = await invoke("cards");
     if (studio.pending === pressed) {
-      studio.pending = null;
+      setPending(null);
       document.body.classList.remove("list-open");
       show(selected);
       showCards(cards);
@@ -57,7 +49,7 @@ export async function select(id: string, agent: string | null = null) {
     }
   } catch (e) {
     if (studio.pending === pressed) {
-      studio.pending = null;
+      setPending(null);
       showSessions(studio.listed);
     }
     failure("select", "error")(e);
@@ -74,7 +66,7 @@ export function pressSession(id: string, agent: string | null = null) {
 
 // Selects no session, as closing the left panel's story does (#385): the core clears the selection and what is viewed, and the bare map stays.
 export async function deselect() {
-  studio.pending = null;
+  setPending(null);
   try {
     const selected = await invoke("select", { id: null });
     const cards = await invoke("cards");
@@ -94,13 +86,13 @@ async function catchUp() {
   if (studio.pending || !studio.missed) return;
   const [selected, cards] = await Promise.all([invoke("selected"), invoke("cards")]);
   if (studio.pending) return; // a newer press draws its own reply, and catches up after it
-  studio.missed = false;
+  setMissed(false);
   show(selected);
   showCards(cards);
 }
 
 export function show(selected: Selection | null) {
-  studio.selection = selected;
+  setSelection(selected);
   showSessions(studio.listed);
   showToast();
   showView(selected);

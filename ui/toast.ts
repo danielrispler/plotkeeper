@@ -13,7 +13,7 @@ import { element, fullTitle, text } from "./dom.js";
 import type { LayoutMode } from "./layout.js";
 import { sessionName } from "./list.js";
 import { select } from "./selection.js";
-import { studio } from "./state.js";
+import { setFocus, studio } from "./state.js";
 import { titled } from "./keys.js";
 import type { Session } from "./types.js";
 import { HOVERS } from "./hovers.js";
@@ -171,7 +171,7 @@ export function jumpToNeedsYou(): boolean {
   if (!shown) return false;
   // Leaving focus mode redraws the toast, which then shows none, so the session is read first.
   const { id } = shown.session;
-  studio.focus = false;
+  setFocus(false);
   window.dispatchEvent(new Event("layout"));
   void select(id);
   return true;
