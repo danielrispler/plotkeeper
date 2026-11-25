@@ -362,21 +362,54 @@ const place = (node: HTMLElement, at: Point) => {
   node.style.top = `${at.y}px`;
 };
 
-// Draws the parts as plates, the actors as labels and the links between them, placing what has no saved position once.
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: `drawMap`: spec #548 Group 4 splits it; remove this when it does
-function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub | null) {
+// The positions of the parts and actors: the saved ones, and the rest placed once. A past commit's map is read-only: what it places is
+// not saved.
+function placeAll(state: MapState, doc: LoadedMap, past: Scrub | null) {
   const saved = Object.fromEntries(Object.entries(state.user.positions).map(([id, [x, y]]) => [id, { x, y }]));
   const items = [...doc.parts, ...doc.actors];
   const added = autoPlace(items, doc.links, saved);
-  // A past commit's map is read-only: what it places is not saved, and its parts get no fog or broken-law mark.
   if (Object.keys(added).length && !past) {
     // Saved the first time they are placed, so they never move again on their own.
     const stored = Object.fromEntries(Object.entries(added).map(([id, at]) => [id, [at.x, at.y] as [number, number]]));
     state.user.positions = { ...state.user.positions, ...stored };
     invoke("map_save_positions", { project: state.project, positions: stored }).catch(failure("map_save_positions"));
   }
-  const positions = { ...saved, ...added };
+  return { ...saved, ...added };
+}
 
+// A part's plate: its tier and fog, its laws' marks and a broken law's, and its button. A past commit's parts get no fog or broken-law
+// mark.
+function plateNode(part: Part, current: MapView, links: SVGElement, fit: () => void): HTMLElement {
+  const { state, doc, scrub: past } = current;
+  const tier = effectiveTier(part, state.user.tiers);
+  // Fog under Daniel's effective tier, as the server worked it out (`fog.rs`); a part not listed is clear.
+  const mist = past ? undefined : state.fog?.[part.id];
+  const plate = text("div", "", `plate tier-${tier}${mist ? ` fog-${mist}` : ""}`);
+  plate.dataset.id = part.id;
+  const [fog, marks, chips] = [text("div", "", "plate-fog"), text("div", "", "plate-marks"), text("div", "", "plate-chips")];
+  marks.append(...doc.laws.filter((law) => law.on === part.id).map(lawMark));
+  // A test that backs a law failed on main: one coarse mark, never naming the law. Red, beside Needs you the only loud colour.
+  if (!past && brokenParts(state.ci).has(part.id)) {
+    const broken = text("span", "", "law-broken");
+    broken.title = brokenText;
+    marks.append(broken);
+    plate.classList.add("broken");
+  }
+  // The keyboard's way in (#460): a real button over the text area, named by the name and caption, beside the chips rather than around
+  // them. Its click reaches the plate's own, so Enter and Space open the sheet, or answer a brief's order question, as a tap does.
+  const open = text("button", "", "btn plate-open");
+  open.append(text("span", part.name, "plate-name"), text("span", part.caption, "plate-caption"));
+  plate.append(fog, open, marks, chips);
+  plate.title = plateTitle(part);
+  const context: PlateContext = { view: current, part, tier, plate, fog, marks, chips };
+  plateHooks.forEach((hook) => hook(context));
+  grab(plate, part.id, current, links, fit, () => clickHooks.forEach((hook) => hook(context)));
+  return plate;
+}
+
+// Draws the parts as plates, the actors as labels and the links between them, placing what has no saved position once.
+function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub | null) {
+  const positions = placeAll(state, doc, past);
   const canvas = text("div", "", "map-canvas");
   const world = text("div", "", "map-world");
   const links = svg("svg", { class: "map-links", "aria-hidden": "true" });
@@ -401,29 +434,7 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub
     return at ? [[part.id, at]] : [];
   }));
   for (const part of readingOrder(byId).flatMap((id) => parts.get(id) ?? [])) {
-    const tier = effectiveTier(part, state.user.tiers);
-    // Fog under Daniel's effective tier, as the shell worked it out (`fog.rs`); a part not listed is clear.
-    const mist = past ? undefined : state.fog?.[part.id];
-    const plate = text("div", "", `plate tier-${tier}${mist ? ` fog-${mist}` : ""}`);
-    plate.dataset.id = part.id;
-    const [fog, marks, chips] = [text("div", "", "plate-fog"), text("div", "", "plate-marks"), text("div", "", "plate-chips")];
-    marks.append(...doc.laws.filter((law) => law.on === part.id).map(lawMark));
-    // A test that backs a law failed on main: one coarse mark, never naming the law. Red, beside Needs you the only loud colour.
-    if (!past && brokenParts(state.ci).has(part.id)) {
-      const broken = text("span", "", "law-broken");
-      broken.title = brokenText;
-      marks.append(broken);
-      plate.classList.add("broken");
-    }
-    // The keyboard's way in (#460): a real button over the text area, named by the name and caption, beside the chips rather than around
-    // them. Its click reaches the plate's own, so Enter and Space open the sheet, or answer a brief's order question, as a tap does.
-    const open = text("button", "", "btn plate-open");
-    open.append(text("span", part.name, "plate-name"), text("span", part.caption, "plate-caption"));
-    plate.append(fog, open, marks, chips);
-    plate.title = plateTitle(part);
-    const context: PlateContext = { view: current, part, tier, plate, fog, marks, chips };
-    plateHooks.forEach((hook) => hook(context));
-    grab(plate, part.id, current, links, fit, () => clickHooks.forEach((hook) => hook(context)));
+    const plate = plateNode(part, current, links, fit);
     nodes.set(part.id, plate);
     elements.push(plate);
   }

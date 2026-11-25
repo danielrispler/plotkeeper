@@ -51,28 +51,22 @@ export function startStory(selectSession: (id: string, agent: string | null) => 
   select = selectSession;
 }
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: `showView`: spec #548 Group 4 splits it; remove this when it does
-export function showView(selected: Selection | null) {
-  element("empty").hidden = selected !== null;
-  element("view").hidden = selected === null;
-  element("rail-more").hidden = selected === null;
-  if (selected === null) {
-    for (const id of ["state", "block", "mode", "mark", "session-name", "phase"]) element(id).textContent = "";
-    for (const id of ["session-name", "block", "phase"]) element(id).removeAttribute("title");
-    showQuestions([], []);
-    showCleared([]);
-    shownSession = null;
-    banner = null;
-    return;
-  }
-  const session = selected.session;
-  const agent = session.agents.find((a) => a.id === selected.agent) ?? null;
+// The rail with no session selected: its header empty, its dock and its cleared decisions too.
+function clearView() {
+  for (const id of ["state", "block", "mode", "mark", "session-name", "phase"]) element(id).textContent = "";
+  for (const id of ["session-name", "block", "phase"]) element(id).removeAttribute("title");
+  showQuestions([], []);
+  showCleared([]);
+  shownSession = null;
+  banner = null;
+}
+
+// The header's two lines. Line 1: the agent's mark and the session's name, whole: CSS ends it in "…" when it is too long, and the full
+// name is its hover text (#444). Line 2: the verdict, the kind of block when the session needs Daniel, the permission mode and, only
+// while it runs, the estimate. The times and the model show on hover, counted at the hover.
+function showHeader(session: Session, agent: Subagent | null) {
   const [label, state] = agent === null ? [stateLabels[session.state], session.state] : agentState(session, agent);
-  const step = (agent ?? session).last_step;
   const stepSpan = (agent ?? session).step_span;
-  // Line 1: the agent's mark and the session's name, whole: CSS ends it in "…" when it is too long, and the full name is its
-  // hover text (#444). Line 2: the verdict, the kind of block when the session needs Daniel, the permission mode and, only
-  // while it runs, the estimate. The times and the model show on hover, counted at the hover.
   // A landed task's session at your turn, idle or ended says so in words (#53, Landed).
   element("state").textContent = agent === null && showsLanded(state, session.landed) ? "Landed" : label;
   element("state").dataset.state = state;
@@ -98,9 +92,11 @@ export function showView(selected: Selection | null) {
     const now = Date.now();
     element("headline").title = [...times(session, stepSpan).map(([, draw]) => draw(now)), runsAt].filter(Boolean).join(" · ");
   };
-  element("view").toggleAttribute("data-agent", agent !== null);
-  // Another agent's row (danielrispler/Falinks#560) has no name of its own to keep, nor turns to mark, and comes back
-  // with its status if dropped.
+}
+
+// The "⋯" menu's actions. Another agent's row (danielrispler/Falinks#560) has no name of its own to keep, nor turns to mark, and comes
+// back with its status if dropped.
+function showActions(session: Session, agent: Subagent | null) {
   const own = agent === null && !session.status_only;
   element("rename").hidden = !own;
   element("rename").onclick = () => askName(session);
@@ -108,6 +104,11 @@ export function showView(selected: Selection | null) {
   element("mark-unseen").onclick = () => void invoke("mark_unseen", { id: session.id }).catch(failure("mark_unseen", "error"));
   element("delete").hidden = !own;
   element("delete").onclick = () => askDelete(session).catch(report);
+}
+
+// The step the agent is on: its tool, its detail with long paths shortened, and its full command, folded.
+function showStep(session: Session, agent: Subagent | null) {
+  const step = (agent ?? session).last_step;
   element("tool").textContent = session.shell
     ? "A plain terminal"
     : session.status_only
@@ -123,6 +124,19 @@ export function showView(selected: Selection | null) {
   const stepLine = element("step-line");
   stepLine.title = step?.command ? "Show or hide the step's full command" : "The step the agent is on";
   stepLine.onclick = (event) => void (step?.command || event.preventDefault());
+}
+
+export function showView(selected: Selection | null) {
+  element("empty").hidden = selected !== null;
+  element("view").hidden = selected === null;
+  element("rail-more").hidden = selected === null;
+  if (selected === null) return clearView();
+  const session = selected.session;
+  const agent = session.agents.find((a) => a.id === selected.agent) ?? null;
+  showHeader(session, agent);
+  element("view").toggleAttribute("data-agent", agent !== null);
+  showActions(session, agent);
+  showStep(session, agent);
   showIntention(storyOf(session, agent));
   showTip(session);
   drawDock(selected);
@@ -448,8 +462,54 @@ export function checkElement(line: ListedCheck): HTMLElement {
   return item;
 }
 
+// A block's subagents, in the latest turn each one line: its name, result and times.
+function subagentsOf(session: Session, block: FeedTurn, now: Now | null): HTMLElement[] {
+  if (!block.agents.length) return [];
+  const list = document.createElement("ol");
+  list.className = "subagents";
+  const entries = subagentHistory({ agents: block.agents, capabilities: session.capabilities }, agentSummaries).map((e) =>
+    now ? { ...e, asked: "" } : e,
+  );
+  list.append(...entries.map((entry) => historyElement(session.id, entry)));
+  return [list];
+}
+
+// A turn's checks, as its list names them.
+function checksOf(turn: Turn | null): HTMLElement[] {
+  const checksShown = turn?.listed ?? [];
+  if (!checksShown.length) return [];
+  const list = document.createElement("ul");
+  list.className = "checks";
+  list.append(...checksShown.map(checkElement));
+  return [list];
+}
+
+// The full response, folded: the latest turn's from the transcript, an older one's fetched at its first opening. None for a turn with
+// neither.
+function responseFold(session: Session, turn: Turn, index: number | null, key: string): HTMLElement | null {
+  const latest = index !== null && index === session.turns.length - 1;
+  const responses = latest ? session.transcript.responses : [];
+  if (!(latest ? responses.length : turn.id)) return null;
+  const body = document.createElement("div");
+  const fill = (texts: string[]) => body.replaceChildren(...texts.map((t) => rendered("div", t, "response")));
+  const fetched = replies.get(key);
+  if (latest) fill(responses);
+  else if (fetched !== undefined) fill([fetched]);
+  const fetchReply = () => {
+    if (latest || index === null || replies.has(key)) return;
+    invoke("turn_reply", { id: session.id, index })
+      .then((reply) => {
+        replies.set(key, reply ?? "");
+        fill([reply ?? ""]);
+      })
+      .catch(failure("turn_reply"));
+  };
+  const fold = folded(`${key} response`, "Full response", "Show or hide the agent's whole reply", [body], fetchReply);
+  if (fold.hasAttribute("open")) fetchReply();
+  return fold;
+}
+
 // One block of the feed. The newest turn's summary is at the top, so its block leaves it out.
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: `turnContent`: spec #548 Group 4 splits it; remove this when it does
 function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLElement {
   const { turn, index } = block;
   const node = document.createElement("li");
@@ -492,46 +552,9 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
   }
   node.append(...block.questions.filter((q) => q.answer === "not_answered").map(questionElement));
   node.append(...blockedElements(session, block.blocked));
-  if (block.agents.length) {
-    const list = document.createElement("ol");
-    list.className = "subagents";
-    // In the latest turn each is one line: its name, result and times.
-    const entries = subagentHistory({ agents: block.agents, capabilities: session.capabilities }, agentSummaries).map((e) =>
-      now ? { ...e, asked: "" } : e,
-    );
-    list.append(...entries.map((entry) => historyElement(session.id, entry)));
-    node.append(list);
-  }
-  const checksShown = turn?.listed ?? [];
-  if (checksShown.length) {
-    const list = document.createElement("ul");
-    list.className = "checks";
-    list.append(...checksShown.map(checkElement));
-    node.append(list);
-  }
-  // The full response, folded: the latest turn's from the transcript, an older one's fetched at its
-  // first opening.
-  const latest = index !== null && index === session.turns.length - 1;
-  const responses = latest ? session.transcript.responses : [];
-  if (turn && (latest ? responses.length : turn.id)) {
-    const body = document.createElement("div");
-    const fill = (texts: string[]) => body.replaceChildren(...texts.map((t) => rendered("div", t, "response")));
-    const fetched = replies.get(key);
-    if (latest) fill(responses);
-    else if (fetched !== undefined) fill([fetched]);
-    const fetch = () => {
-      if (latest || index === null || replies.has(key)) return;
-      invoke("turn_reply", { id: session.id, index })
-        .then((reply) => {
-          replies.set(key, reply ?? "");
-          fill([reply ?? ""]);
-        })
-        .catch(failure("turn_reply"));
-    };
-    const fold = folded(`${key} response`, "Full response", "Show or hide the agent's whole reply", [body], fetch);
-    if (fold.hasAttribute("open")) fetch();
-    node.append(fold);
-  }
+  node.append(...subagentsOf(session, block, now), ...checksOf(turn));
+  const response = turn ? responseFold(session, turn, index, key) : null;
+  if (response) node.append(response);
   return node;
 }
 
