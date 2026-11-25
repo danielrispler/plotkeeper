@@ -153,23 +153,26 @@ pub fn births(repo: &Path, source: &str) -> BTreeMap<String, u64> {
     })
 }
 
-/// `births` over `cache`, with `load` reading git for the ids not yet asked about.
+/// `births` over `cache`, with `load` reading git for the ids not yet asked about. A failed read (`None`) is not kept, so the next map
+/// reads them again.
 fn births_in(
     cache: &Births,
     project: &str,
     ids: &[String],
-    load: impl FnOnce(&[String]) -> BTreeMap<String, u64>,
+    load: impl FnOnce(&[String]) -> Option<BTreeMap<String, u64>>,
 ) -> BTreeMap<String, u64> {
     // The lock is held across the read, so two first maps of one project never both read git.
-    let mut known = cache.lock().unwrap();
+    // A reader that panicked holding the lock left whole entries: the cache stays usable.
+    let mut known = cache.lock().unwrap_or_else(|e| e.into_inner());
     let key = |id: &str| (project.to_string(), id.to_string());
     let missing: Vec<String> = ids
         .iter()
         .filter(|id| !known.contains_key(&key(id)))
         .cloned()
         .collect();
-    if !missing.is_empty() {
-        let found = load(&missing);
+    if !missing.is_empty()
+        && let Some(found) = load(&missing)
+    {
         for id in missing {
             let at = found.get(&id).copied();
             known.insert(key(&id), at);
@@ -386,10 +389,12 @@ mod tests {
                 calls
                     .borrow_mut()
                     .push((project.to_string(), wanted.to_vec()));
-                born(&[("a", 5), ("c", 7)])
-                    .into_iter()
-                    .filter(|(id, _)| wanted.contains(id))
-                    .collect()
+                Some(
+                    born(&[("a", 5), ("c", 7)])
+                        .into_iter()
+                        .filter(|(id, _)| wanted.contains(id))
+                        .collect(),
+                )
             })
         };
         assert_eq!(ask("/p", &["a", "b"]), born(&[("a", 5)]));
@@ -405,6 +410,34 @@ mod tests {
                 ("/p".to_string(), ids(&["c"])),
                 ("/q".to_string(), ids(&["a"])),
             ]
+        );
+    }
+
+    #[test]
+    fn a_failed_read_of_git_is_not_kept_and_is_read_again() {
+        let cache = Births::default();
+        let ids = vec!["a".to_string(), "b".to_string()];
+        assert_eq!(births_in(&cache, "/p", &ids, |_| None), born(&[]));
+        let mut asked = vec![];
+        let found = births_in(&cache, "/p", &ids, |wanted| {
+            asked = wanted.to_vec();
+            Some(born(&[("a", 5)]))
+        });
+        assert_eq!(found, born(&[("a", 5)]));
+        assert_eq!(asked, ids, "both ids are read again after the failure");
+    }
+
+    #[test]
+    fn a_poisoned_cache_still_answers() {
+        let cache = Births::default();
+        let _ = std::panic::catch_unwind(|| {
+            let _held = cache.lock().unwrap();
+            panic!("a reader panicked holding the lock");
+        });
+        let ids = vec!["a".to_string()];
+        assert_eq!(
+            births_in(&cache, "/p", &ids, |_| Some(born(&[("a", 5)]))),
+            born(&[("a", 5)])
         );
     }
 

@@ -186,13 +186,11 @@ pub fn part_history(repo: &Path, part: &str, fogged: &HashSet<String>) -> Vec<En
 
 /// When each part id of `wanted` first appeared in `system-map.json` on `repo`'s default branch: the committer time (unix seconds) of
 /// the first first-parent commit whose map lists it. Only `parts[].id` is read, so a map of any version counts, and a commit whose map
-/// does not parse is passed over. An id never seen is left out.
-pub fn part_births(repo: &Path, wanted: &[String]) -> BTreeMap<String, u64> {
+/// does not parse is passed over. An id never seen is left out; none when git's history cannot be read.
+pub fn part_births(repo: &Path, wanted: &[String]) -> Option<BTreeMap<String, u64>> {
     let mut born = BTreeMap::new();
-    let Some((reference, _)) = default_ref(repo) else {
-        return born;
-    };
-    let Ok(log) = git(
+    let (reference, _) = default_ref(repo)?;
+    let log = git(
         repo,
         &[
             "log",
@@ -203,9 +201,8 @@ pub fn part_births(repo: &Path, wanted: &[String]) -> BTreeMap<String, u64> {
             "--",
             system_map::MAP_FILE,
         ],
-    ) else {
-        return born;
-    };
+    )
+    .ok()?;
     for (commit, at) in log.lines().filter_map(|line| line.split_once(' ')) {
         if wanted.iter().all(|id| born.contains_key(id)) {
             break;
@@ -227,7 +224,7 @@ pub fn part_births(repo: &Path, wanted: &[String]) -> BTreeMap<String, u64> {
             }
         }
     }
-    born
+    Some(born)
 }
 
 fn subject_of(repo: &Path, commit: &str) -> Result<(String, String), String> {
@@ -538,12 +535,18 @@ mod tests {
         commit_at("Add c", &[("system-map.json", v2)], 500);
         commit_at("Unrelated", &[("x", "2")], 600);
         let wanted = ["a", "b", "c", "nobody"].map(String::from);
-        let found = part_births(Path::new(&rig.main), &wanted);
+        let found = part_births(Path::new(&rig.main), &wanted).unwrap();
         let expected: BTreeMap<String, u64> = [("a", 200), ("b", 200), ("c", 500)]
             .into_iter()
             .map(|(id, at)| (id.to_string(), at))
             .collect();
         assert_eq!(found, expected);
+    }
+
+    #[test]
+    fn a_failed_read_of_births_is_none_not_an_empty_answer() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(part_births(dir.path(), &["a".to_string()]), None);
     }
 
     #[test]
@@ -559,7 +562,11 @@ mod tests {
         run(rig.dir.path(), &["add", "-A"]);
         git_at(rig.dir.path(), 300, &["commit", "-q", "-m", "Side adds c"]);
         run(rig.dir.path(), &["checkout", "-q", "main"]);
-        assert!(part_births(Path::new(&rig.main), &["c".to_string()]).is_empty());
+        assert!(
+            part_births(Path::new(&rig.main), &["c".to_string()])
+                .unwrap()
+                .is_empty()
+        );
         // The side branch's own commit is older; c entered the default branch with the merge.
         git_at(
             rig.dir.path(),
@@ -567,7 +574,9 @@ mod tests {
             &["merge", "-q", "--no-ff", "-m", "Merge side (#5)", "side"],
         );
         assert_eq!(
-            part_births(Path::new(&rig.main), &["c".to_string()]).get("c"),
+            part_births(Path::new(&rig.main), &["c".to_string()])
+                .unwrap()
+                .get("c"),
             Some(&900)
         );
     }
