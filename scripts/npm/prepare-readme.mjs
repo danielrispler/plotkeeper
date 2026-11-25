@@ -7,76 +7,123 @@ import { fileURLToPath } from "node:url";
 const REPO = "danielrispler/plotkeeper";
 const REF = "main";
 
-const isRelativeTarget = (target) => !/^([a-z]+:|#|\/\/)/i.test(target);
-const stripLeadingDotSlash = (target) => target.replace(/^\.\//, "");
+const IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)([^)]*)\)/g;
+const LINK_RE = /(?<!!)\[((?:!\[[^\]]*\]\([^)]*\)|[^\]])*)\]\(([^)\s]+)([^)]*)\)/g;
 
-const rewriteProse = (segment, { repo, ref }) => {
-  const rawBase = `https://raw.githubusercontent.com/${repo}/${ref}/`;
-  const blobBase = `https://github.com/${repo}/blob/${ref}/`;
-  const withImages = segment.replace(/!\[([^\]]*)\]\(([^)\s]+)([^)]*)\)/g, (match, alt, target, rest) =>
-    isRelativeTarget(target) ? `![${alt}](${rawBase}${stripLeadingDotSlash(target)}${rest})` : match,
-  );
-  return withImages.replace(
-    /(?<!!)\[((?:!\[[^\]]*\]\([^)]*\)|[^\]])*)\]\(([^)\s]+)([^)]*)\)/g,
-    (match, label, target, rest) =>
-      isRelativeTarget(target) ? `[${label}](${blobBase}${stripLeadingDotSlash(target)}${rest})` : match,
-  );
+const isRelativeTarget = (target) => !/^([a-z]+:|#|\/\/)/i.test(target);
+const normalizeRelativePath = (target) => target.replace(/^(?:\.\/|\/)+/, "");
+
+// Splits a line into alternating [prose, code, prose, ...] segments, matching CommonMark multi-backtick code spans.
+const splitInlineCode = (line) => {
+  const parts = [];
+  let cursor = 0;
+  let proseStart = 0;
+  while (cursor < line.length) {
+    if (line[cursor] !== "`") {
+      cursor += 1;
+      continue;
+    }
+    let ticks = 0;
+    while (line[cursor + ticks] === "`") ticks += 1;
+    let search = cursor + ticks;
+    let close = -1;
+    while (search < line.length) {
+      if (line[search] !== "`") {
+        search += 1;
+        continue;
+      }
+      let run = 0;
+      while (line[search + run] === "`") run += 1;
+      if (run === ticks) {
+        close = search + run;
+        break;
+      }
+      search += run;
+    }
+    if (close !== -1) {
+      parts.push(line.slice(proseStart, cursor), line.slice(cursor, close));
+      cursor = close;
+      proseStart = close;
+    } else {
+      cursor += ticks;
+    }
+  }
+  parts.push(line.slice(proseStart));
+  return parts;
 };
 
-const rewriteLine = (line, options) =>
-  line
-    .split(/(`+[^`]*`+)/g)
-    .map((part, index) => (index % 2 === 1 ? part : rewriteProse(part, options)))
-    .join("");
-
-export function rewriteReadmeForNpm(markdown, { repo = REPO, ref = REF } = {}) {
+// Transforms every non-code prose segment outside fenced code blocks with `onProse`.
+const mapProse = (markdown, onProse) => {
   let fence = null;
   return markdown
     .split("\n")
     .map((line) => {
-      const open = /^\s*(`{3,}|~{3,})/.exec(line);
-      if (open) {
-        const marker = open[1][0];
-        if (!fence) fence = { marker, length: open[1].length };
-        else if (fence.marker === marker && open[1].length >= fence.length) fence = null;
+      if (fence) {
+        const close = /^\s*(`{3,}|~{3,})\s*$/.exec(line);
+        if (close && close[1][0] === fence.marker && close[1].length >= fence.length) fence = null;
         return line;
       }
-      return fence ? line : rewriteLine(line, { repo, ref });
+      const open = /^\s*(`{3,}|~{3,})(.*)$/.exec(line);
+      if (open && (open[1][0] === "~" || !open[2].includes("`"))) {
+        fence = { marker: open[1][0], length: open[1].length };
+        return line;
+      }
+      return splitInlineCode(line)
+        .map((part, index) => (index % 2 === 1 ? part : onProse(part)))
+        .join("");
     })
     .join("\n");
-}
-
-const findRelativeTargets = (markdown) => {
-  const targets = [];
-  let fence = null;
-  for (const line of markdown.split("\n")) {
-    const open = /^\s*(`{3,}|~{3,})/.exec(line);
-    if (open) {
-      const marker = open[1][0];
-      if (!fence) fence = { marker, length: open[1].length };
-      else if (fence.marker === marker && open[1].length >= fence.length) fence = null;
-      continue;
-    }
-    if (fence) continue;
-    const parts = line.split(/(`+[^`]*`+)/g);
-    for (let i = 0; i < parts.length; i += 2) {
-      for (const match of parts[i].matchAll(/!?\[[^\]]*\]\(([^)\s]+)\)/g)) {
-        if (isRelativeTarget(match[1])) targets.push(match[1]);
-      }
-    }
-  }
-  return targets;
 };
 
+export function findRelativeTargets(markdown) {
+  const targets = [];
+  mapProse(markdown, (segment) => {
+    for (const match of segment.matchAll(IMAGE_RE)) {
+      if (isRelativeTarget(match[2])) targets.push(match[2]);
+    }
+    for (const match of segment.matchAll(LINK_RE)) {
+      if (isRelativeTarget(match[2])) targets.push(match[2]);
+    }
+    return segment;
+  });
+  return targets;
+}
+
+export function rewriteReadmeForNpm(markdown, { repo = REPO, ref = REF } = {}) {
+  const rawBase = `https://raw.githubusercontent.com/${repo}/${ref}/`;
+  const blobBase = `https://github.com/${repo}/blob/${ref}/`;
+  return mapProse(markdown, (segment) => {
+    const withImages = segment.replace(IMAGE_RE, (match, alt, target, rest) =>
+      isRelativeTarget(target) ? `![${alt}](${rawBase}${normalizeRelativePath(target)}${rest})` : match,
+    );
+    return withImages.replace(LINK_RE, (match, label, target, rest) =>
+      isRelativeTarget(target) ? `[${label}](${blobBase}${normalizeRelativePath(target)}${rest})` : match,
+    );
+  });
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-  const source = readFileSync(resolve(root, "README.md"), "utf8");
-  const rewritten = rewriteReadmeForNpm(source);
-  const leftover = findRelativeTargets(rewritten);
-  if (leftover.length > 0) {
-    console.error(`prepare-readme: relative links remain in npm/README.md: ${leftover.join(", ")}`);
-    process.exit(1);
+  if (process.argv[2] === "--check") {
+    const file = process.argv[3];
+    if (!file) {
+      console.error("usage: node scripts/npm/prepare-readme.mjs --check <file>");
+      process.exit(2);
+    }
+    const leftover = findRelativeTargets(readFileSync(file, "utf8"));
+    if (leftover.length > 0) {
+      console.error(`prepare-readme: relative links remain in ${file}: ${leftover.join(", ")}`);
+      process.exit(1);
+    }
+  } else {
+    const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+    const source = readFileSync(resolve(root, "README.md"), "utf8");
+    const rewritten = rewriteReadmeForNpm(source);
+    const leftover = findRelativeTargets(rewritten);
+    if (leftover.length > 0) {
+      console.error(`prepare-readme: relative links remain in npm/README.md: ${leftover.join(", ")}`);
+      process.exit(1);
+    }
+    writeFileSync(resolve(root, "npm/README.md"), rewritten, "utf8");
+    copyFileSync(resolve(root, "LICENSE"), resolve(root, "npm/LICENSE"));
   }
-  writeFileSync(resolve(root, "npm/README.md"), rewritten, "utf8");
-  copyFileSync(resolve(root, "LICENSE"), resolve(root, "npm/LICENSE"));
 }

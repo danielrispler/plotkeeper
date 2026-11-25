@@ -32,12 +32,12 @@ plotkeeper sits beside the agent sessions you already run in your own terminals 
 
 ## Supported agents
 
-| Agent | Hooks & live status | Turn files & diffs | Answer from page | Context size |
+| Agent | Live turns & hooks | Turn files & diffs | Answer from page | Context size |
 | --- | :---: | :---: | :---: | :---: |
-| **Claude Code** | Full | Yes | Yes | Yes |
-| **Codex** | Full | Yes | Terminal | — |
-| **Cursor** (IDE & CLI) | Full | Yes | Terminal | — |
-| **agy** | Full | — | Terminal | — |
+| **Claude Code** | Full (hooks + transcript) | Yes | Yes | Yes |
+| **Codex** | Hooks | Yes | — | — |
+| **Cursor** (IDE & CLI) | Hooks (finished calls) | Yes | — | — |
+| **agy** | Hooks + transcript | — | — | — |
 
 Copilot, Qwen Code, OpenCode and Cline are planned for v2.
 

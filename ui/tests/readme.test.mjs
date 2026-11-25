@@ -6,17 +6,13 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { rewriteReadmeForNpm } from "../../scripts/npm/prepare-readme.mjs";
+import { findRelativeTargets, rewriteReadmeForNpm } from "../../scripts/npm/prepare-readme.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const readme = readFileSync(resolve(root, "README.md"), "utf8");
 
 // The relative targets of the README's links and images, without any #fragment.
-const relativeLinks = (text) =>
-  [...text.matchAll(/!?\[[^\]]*\]\(([^)\s]+)\)/g)]
-    .map((match) => match[1])
-    .filter((target) => !/^([a-z]+:|#|\/\/)/i.test(target))
-    .map((target) => target.split("#")[0]);
+const relativeLinks = (text) => findRelativeTargets(text).map((target) => target.split("#")[0]);
 
 test("the README is at most 850 words", () => {
   const words = readme.split(/\s+/).filter(Boolean).length;
@@ -35,9 +31,12 @@ test("every relative link in the README leads to a file in the repository", () =
   assert.deepEqual(missing, []);
 });
 
-test("the link finder reads links and images and skips URLs and anchors", () => {
-  const text = "[a](docs/x.md) ![b](pic.png#z) [c](https://x.org/y) [d](#top)";
-  assert.deepEqual(relativeLinks(text), ["docs/x.md", "pic.png"]);
+test("the link finder reads links, images, and nested badges and skips URLs, anchors, and code", () => {
+  const text = [
+    "[a](docs/x.md) ![b](pic.png#z) [![badge](https://img.shields.io/b)](LICENSE)",
+    "[c](https://x.org/y) [d](#top) `` ` [e](docs/code.md) ``",
+  ].join("\n");
+  assert.deepEqual(relativeLinks(text), ["pic.png", "docs/x.md", "LICENSE"]);
 });
 
 test("the README shows the three pictures", () => {
@@ -46,13 +45,16 @@ test("the README shows the three pictures", () => {
   assert.equal(new Set(pictures).size, 3);
 });
 
-test("rewriteReadmeForNpm rewrites relative images and doc links to absolute GitHub URLs", () => {
+test("rewriteReadmeForNpm rewrites relative images, doc links, and nested badge links to absolute GitHub URLs", () => {
   const input = [
     "![Hero](docs/studio/assets/readme/hero.png)",
     "![Nested](./docs/pic.png \"Title\")",
+    "[![License](https://img.shields.io/badge/license-MIT-blue)](/LICENSE)",
     "Read [the rail](docs/studio/behaviour/rail.md#section) and [MIT](LICENSE).",
-    "Keep [web](https://example.com/a), [anchor](#quick-start), and `code [x](docs/nope.md)`.",
+    "Keep [web](https://example.com/a), [anchor](#quick-start), `code [x](docs/nope.md)`, and `` ` [y](docs/nope2.md) ``.",
+    "```inline``` and [after](docs/after.md).",
     "```md",
+    "```not-a-close",
     "![ignored](docs/in-fence.png)",
     "```",
   ].join("\n");
@@ -62,9 +64,12 @@ test("rewriteReadmeForNpm rewrites relative images and doc links to absolute Git
     [
       "![Hero](https://raw.githubusercontent.com/danielrispler/plotkeeper/main/docs/studio/assets/readme/hero.png)",
       "![Nested](https://raw.githubusercontent.com/danielrispler/plotkeeper/main/docs/pic.png \"Title\")",
+      "[![License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/danielrispler/plotkeeper/blob/main/LICENSE)",
       "Read [the rail](https://github.com/danielrispler/plotkeeper/blob/main/docs/studio/behaviour/rail.md#section) and [MIT](https://github.com/danielrispler/plotkeeper/blob/main/LICENSE).",
-      "Keep [web](https://example.com/a), [anchor](#quick-start), and `code [x](docs/nope.md)`.",
+      "Keep [web](https://example.com/a), [anchor](#quick-start), `code [x](docs/nope.md)`, and `` ` [y](docs/nope2.md) ``.",
+      "```inline``` and [after](https://github.com/danielrispler/plotkeeper/blob/main/docs/after.md).",
       "```md",
+      "```not-a-close",
       "![ignored](docs/in-fence.png)",
       "```",
     ].join("\n"),
