@@ -71,7 +71,7 @@ pub fn part_text(part: &Value) -> String {
 }
 
 /// `n` with a comma between each three digits, as the cap messages print a length.
-fn grouped(n: usize) -> String {
+pub(crate) fn grouped(n: usize) -> String {
     let digits = n.to_string();
     let mut out = String::new();
     for (i, c) in digits.chars().enumerate() {

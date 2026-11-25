@@ -1,10 +1,9 @@
-//! Computed edges: what the map's extractors read from the code, as part-to-part dependencies.
-
-use serde::Serialize;
+//! Computed edges: what the map's extractors read from the code, as part-to-part dependencies, and the link check that
+//! holds the map's import links to them.
 
 /// A dependency of the part `from` on the part `to`.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-pub struct Edge {
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct Edge {
     pub from: String,
     pub to: String,
 }
@@ -15,7 +14,7 @@ use std::{
     process::Command,
 };
 
-use crate::{Link, PartFiles};
+use crate::{Kind, Link, PartFiles};
 
 /// The extractors a map may name.
 const KNOWN: [&str; 3] = ["cargo", "rust-modules", "typescript-imports"];
@@ -23,18 +22,138 @@ const KNOWN: [&str; 3] = ["cargo", "rust-modules", "typescript-imports"];
 /// One question: which tracked file depends on which, as `(dependent, dependency)` pairs.
 type Pairs = Vec<(String, String)>;
 
-/// The edges between parts that the named extractors find and no link joins, and the problems of
+/// What the link check found: its problems, and how many import links a computed edge proves and how many have an end no
+/// extractor reads.
+pub(crate) struct LinkCheck {
+    pub(crate) problems: Vec<String>,
+    pub(crate) proven: usize,
+    pub(crate) unproven: usize,
+}
+
+/// Holds the map's import links to the edges the named extractors compute (spec #473, "The link check"). Between two read
+/// parts, an import link with no edge in its direction fails, and so does an edge with no import link in its direction,
+/// whatever run-time links join the pair. An import link with an unread end passes as unproven. Also the problems of
 /// extractors that are unknown or cannot run.
-pub(crate) fn unlinked(
+pub(crate) fn check_links(
     root: &Path,
     names: &[String],
     files: &[String],
     parts: &[PartFiles],
     links: &[Link],
-) -> (Vec<Edge>, Vec<String>) {
-    let (pairs, problems) = file_pairs(root, names, files, true);
-    (edges_between_parts(&pairs, parts, links), problems)
+) -> LinkCheck {
+    let (pairs, mut problems) = file_pairs(root, names, files, true);
+    let edges = edges_between_parts(&pairs, parts);
+    let read: HashSet<&str> = parts
+        .iter()
+        .filter(|part| part.files.iter().any(|file| is_read(names, file)))
+        .map(|part| part.id.as_str())
+        .collect();
+    let part_ids: HashSet<&str> = parts.iter().map(|p| p.id.as_str()).collect();
+    let imports: HashSet<(&str, &str)> = links
+        .iter()
+        .filter(|l| l.kind == Some(Kind::Import))
+        .map(|l| (l.from.as_str(), l.to.as_str()))
+        .collect();
+    let computed: HashSet<(&str, &str)> = edges
+        .iter()
+        .map(|e| (e.from.as_str(), e.to.as_str()))
+        .collect();
+    let (mut proven, mut unproven) = (0, 0);
+    for link in links.iter().filter(|l| l.kind == Some(Kind::Import)) {
+        let (from, to) = (link.from.as_str(), link.to.as_str());
+        // An actor at an end is its own problem; an end that names nothing is a reference problem.
+        if !part_ids.contains(from) || !part_ids.contains(to) {
+            continue;
+        }
+        if !read.contains(from) || !read.contains(to) {
+            unproven += 1;
+        } else if computed.contains(&(from, to)) {
+            proven += 1;
+        } else if computed.contains(&(to, from)) {
+            problems.push(format!(
+                "import link {:?} runs from {from:?} to {to:?}, but the code shows no dependency of {from:?} on {to:?}, only of \
+                 {to:?} on {from:?}; turn it around, so it runs from the dependent part to the one it depends on",
+                link.id
+            ));
+        } else {
+            problems.push(format!(
+                "import link {:?} runs from {from:?} to {to:?}, but the code shows no dependency of {from:?} on {to:?}; remove \
+                 it, or give it the run-time kind (http, spawn or file) and the reason that joins them",
+                link.id
+            ));
+        }
+    }
+    for edge in &edges {
+        let (from, to) = (edge.from.as_str(), edge.to.as_str());
+        if read.contains(from) && read.contains(to) && !imports.contains(&(from, to)) {
+            problems.push(format!(
+                "part {from:?} depends on part {to:?} in the code, and no import link runs from {from:?} to {to:?}; add \
+                 {{ \"from\": {from:?}, \"to\": {to:?}, \"kind\": \"import\" }}, even beside a run-time link"
+            ));
+        }
+    }
+    LinkCheck {
+        problems,
+        proven,
+        unproven,
+    }
 }
+
+/// Whether one of the named extractors reads `file`: Rust files for `rust-modules`, `Cargo.toml` files for `cargo` and
+/// script files for `typescript-imports`.
+fn is_read(names: &[String], file: &str) -> bool {
+    let base = file.rsplit('/').next().unwrap_or(file);
+    let ext = base.rsplit_once('.').map(|(_, ext)| ext);
+    names.iter().any(|name| match name.as_str() {
+        "cargo" => base == "Cargo.toml",
+        "rust-modules" => ext == Some("rs"),
+        "typescript-imports" => ext.is_some_and(|ext| SCRIPTS.contains(&ext)),
+        _ => false,
+    })
+}
+
+/// The problems of each link's own fields: a missing kind, a run-time link without a reason or with one past its cap, and
+/// an import link with an actor at an end, since an actor owns no code.
+pub(crate) fn check_link_fields(links: &[Link], actors: &HashSet<&str>) -> Vec<String> {
+    let mut problems = Vec::new();
+    for link in links {
+        let id = &link.id;
+        let Some(kind) = link.kind else {
+            problems.push(format!(
+                "link {id:?} has no kind; set \"kind\" to import, http, spawn or file"
+            ));
+            continue;
+        };
+        if kind == Kind::Import {
+            for end in [&link.from, &link.to] {
+                if actors.contains(end.as_str()) {
+                    problems.push(format!(
+                        "import link {id:?} ends at the actor {end:?}, which owns no code; give the link a run-time kind \
+                         (http, spawn or file) and a reason"
+                    ));
+                }
+            }
+        }
+        let reason = link.reason.as_deref().unwrap_or_default();
+        let length = reason.chars().count();
+        if kind != Kind::Import && reason.trim().is_empty() {
+            problems.push(format!(
+                "link {id:?} is a {} link with no reason; say in one sentence what crosses it",
+                kind.name()
+            ));
+        } else if length > REASON_CAP {
+            problems.push(format!(
+                "link {id:?}: reason is {} characters, the cap is {REASON_CAP}; keep one sentence here and move the detail \
+                 into the area's doc",
+                crate::parts::grouped(length)
+            ));
+        }
+    }
+    problems
+}
+
+/// The most characters a link's reason holds: one sentence.
+const REASON_CAP: usize = 140;
 
 /// The `(dependent, dependency)` file pairs the named extractors find, each pair once, and the
 /// problems of extractors that are unknown or cannot run. Without `root_mod_lines`, a crate root's
@@ -77,29 +196,16 @@ pub(crate) fn file_pairs(
 }
 
 /// Turns pairs of files into edges between the parts that own them, dropping pairs inside one
-/// part, pairs touching a file no part owns (ignored files too), and edges a link joins.
-fn edges_between_parts(
-    pairs: &BTreeSet<(String, String)>,
-    parts: &[PartFiles],
-    links: &[Link],
-) -> Vec<Edge> {
+/// part and pairs touching a file no part owns (ignored files too).
+fn edges_between_parts(pairs: &BTreeSet<(String, String)>, parts: &[PartFiles]) -> Vec<Edge> {
     let owner: HashMap<&str, &str> = parts
         .iter()
         .flat_map(|part| part.files.iter().map(|f| (f.as_str(), part.id.as_str())))
         .collect();
-    let joined: HashSet<(&str, &str)> = links
-        .iter()
-        .flat_map(|l| {
-            [
-                (l.from.as_str(), l.to.as_str()),
-                (l.to.as_str(), l.from.as_str()),
-            ]
-        })
-        .collect();
     let edges: BTreeSet<Edge> = pairs
         .iter()
         .filter_map(|(from, to)| Some((owner.get(from.as_str())?, owner.get(to.as_str())?)))
-        .filter(|(from, to)| from != to && !joined.contains(&(**from, **to)))
+        .filter(|(from, to)| from != to)
         .map(|(from, to)| Edge {
             from: from.to_string(),
             to: to.to_string(),
@@ -797,9 +903,11 @@ fn import_specifiers(text: &str) -> Vec<&str> {
     specs
 }
 
+/// The extensions of the script files `typescript-imports` reads.
+const SCRIPTS: [&str; 7] = ["ts", "tsx", "js", "mjs", "jsx", "mts", "cjs"];
+
 /// Each script file paired with the tracked files its relative imports name.
 fn typescript_imports(root: &Path, tracked: &BTreeSet<&str>) -> Pairs {
-    const SCRIPTS: [&str; 7] = ["ts", "tsx", "js", "mjs", "jsx", "mts", "cjs"];
     let mut pairs = Pairs::new();
     for file in tracked {
         let script = file

@@ -35,8 +35,6 @@ pub struct Report {
     pub links: Vec<Link>,
     /// Each law with its backing and the tags that name it.
     pub laws: Vec<LawReport>,
-    /// Dependencies between two parts that no link joins; reported, never a problem.
-    pub unlinked: Vec<edges::Edge>,
     /// One line per problem; the check fails when there is any.
     pub problems: Vec<String>,
     /// What the check covered, for the line a pass prints.
@@ -50,8 +48,20 @@ pub struct Counts {
     pub parts: usize,
     pub files: usize,
     pub ignored: usize,
-    pub links: usize,
+    pub links: LinkCounts,
     pub laws: LawCounts,
+}
+
+/// The links by kind, and the import links proven by a computed edge or unproven, with an end no extractor reads.
+#[derive(Debug, Default, Serialize)]
+pub struct LinkCounts {
+    pub total: usize,
+    pub import: usize,
+    pub http: usize,
+    pub spawn: usize,
+    pub file: usize,
+    pub proven: usize,
+    pub unproven: usize,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -72,6 +82,35 @@ pub struct Link {
     pub id: String,
     pub from: String,
     pub to: String,
+    /// What the link carries; the check requires it, and a converted version 1 map's links have none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<Kind>,
+    /// One sentence on what crosses a run-time link; required for every kind but `import`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// A link's kind (spec #473): `import`, a code dependency the readers can prove, or one of three run-time kinds they cannot
+/// see.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Kind {
+    Import,
+    Http,
+    Spawn,
+    File,
+}
+
+impl Kind {
+    /// The kind as the map writes it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Kind::Import => "import",
+            Kind::Http => "http",
+            Kind::Spawn => "spawn",
+            Kind::File => "file",
+        }
+    }
 }
 
 /// A parsed `system-map.json`. Its fields are private: build one with `parse` or `parse_lenient`.
@@ -191,16 +230,35 @@ fn check_with(root: &Path, files: Result<Vec<String>, String>) -> Report {
     };
     report.links = map.links.clone();
     report.problems.extend(check_ids_and_references(&map));
+    let actors: HashSet<&str> = map.actors.iter().map(|a| a.id.as_str()).collect();
+    report
+        .problems
+        .extend(edges::check_link_fields(&map.links, &actors));
     match files {
         Ok(files) => {
             let (parts, ignored, problems) = ownership(&map, &files);
             report.problems.extend(problems);
             report.problems.extend(parts::check_paths(&map, &parts));
+            let (laws, problems) = laws::check(root, &map, &files);
+            report.laws = laws;
+            report.problems.extend(problems);
+            let names = map.extractors.as_deref().unwrap_or_default();
+            let found = edges::check_links(root, names, &files, &parts, &map.links);
+            report.problems.extend(found.problems);
+            let kinds = |kind: Kind| map.links.iter().filter(|l| l.kind == Some(kind)).count();
             report.counts = Counts {
                 parts: parts.len(),
                 files: parts.iter().map(|p| p.files.len()).sum(),
                 ignored,
-                links: map.links.len(),
+                links: LinkCounts {
+                    total: map.links.len(),
+                    import: kinds(Kind::Import),
+                    http: kinds(Kind::Http),
+                    spawn: kinds(Kind::Spawn),
+                    file: kinds(Kind::File),
+                    proven: found.proven,
+                    unproven: found.unproven,
+                },
                 laws: LawCounts {
                     check: map
                         .laws
@@ -214,13 +272,6 @@ fn check_with(root: &Path, files: Result<Vec<String>, String>) -> Report {
                         .count(),
                 },
             };
-            let (laws, problems) = laws::check(root, &map, &files);
-            report.laws = laws;
-            report.problems.extend(problems);
-            let names = map.extractors.as_deref().unwrap_or_default();
-            let (unlinked, problems) = edges::unlinked(root, names, &files, &parts, &map.links);
-            report.unlinked = unlinked;
-            report.problems.extend(problems);
             report.parts = parts;
         }
         Err(problem) => report.problems.push(problem),
@@ -283,7 +334,7 @@ const PART_FIELDS: &[&str] = &[
     "id", "name", "caption", "purpose", "holds", "tier", "paths", "zone",
 ];
 const ACTOR_FIELDS: &[&str] = &["id", "name"];
-const LINK_FIELDS: &[&str] = &["id", "from", "to"];
+const LINK_FIELDS: &[&str] = &["id", "from", "to", "kind", "reason"];
 const LAW_FIELDS: &[&str] = &["id", "on", "backing", "text"];
 const FLOW_FIELDS: &[&str] = &["id", "name", "hops"];
 const HOP_FIELDS: &[&str] = &["link", "text"];

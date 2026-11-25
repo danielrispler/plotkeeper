@@ -77,9 +77,11 @@ fn a_link_end_that_is_neither_part_nor_actor_fails() {
 }
 
 #[test]
-fn a_link_to_an_actor_passes() {
+fn a_run_time_link_to_an_actor_passes() {
     let mut map = base();
     map["links"][0]["to"] = json!("writer");
+    map["links"][0]["kind"] = json!("http");
+    map["links"][0]["reason"] = json!("Alpha asks the writer over HTTP.");
     assert_eq!(failing(map), Vec::<String>::new());
 }
 

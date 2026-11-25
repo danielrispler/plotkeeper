@@ -1,4 +1,4 @@
-//! Computed edges: dependencies between parts that no link joins, read by the named extractors.
+//! Computed edges, read by the named extractors, and the link check that holds the map's import links to them.
 
 use std::{path::Path, process::Command};
 
@@ -57,32 +57,208 @@ fn report(root: &str) -> system_map::Report {
     system_map::check(Path::new(root))
 }
 
-/// The unlinked edges as `from>to` strings.
+/// The computed edges no import link declares, as `from>to` strings, read from their problems.
 fn edges(report: &system_map::Report) -> Vec<String> {
     report
-        .unlinked
+        .problems
         .iter()
-        .map(|e| format!("{}>{}", e.from, e.to))
+        .filter_map(|line| {
+            let (from, rest) = line
+                .strip_prefix("part \"")?
+                .split_once("\" depends on part \"")?;
+            Some(format!("{from}>{}", rest.split_once('"')?.0))
+        })
         .collect()
 }
 
-#[test]
-fn a_dependency_across_parts_without_a_link_is_reported_and_the_check_passes() {
-    let (_dir, root) = workspace(&map(&["cargo"], json!([])), &[("alpha", "beta")], &[]);
-    let report = report(&root);
-    assert_eq!(report.problems, Vec::<String>::new());
-    assert_eq!(edges(&report), ["alpha>beta"]);
+/// The problems that are not undeclared edges.
+fn other_problems(report: &system_map::Report) -> Vec<String> {
+    report
+        .problems
+        .iter()
+        .filter(|line| !(line.starts_with("part \"") && line.contains("\" depends on part \"")))
+        .cloned()
+        .collect()
+}
+
+fn import(id: &str, from: &str, to: &str) -> Value {
+    json!({ "id": id, "from": from, "to": to, "kind": "import" })
 }
 
 #[test]
-fn a_link_in_either_direction_silences_the_edge() {
-    for (from, to) in [("alpha", "beta"), ("beta", "alpha")] {
-        let links = json!([{ "id": "joined", "from": from, "to": to }]);
+fn a_dependency_across_parts_without_an_import_link_fails() {
+    let (_dir, root) = workspace(&map(&["cargo"], json!([])), &[("alpha", "beta")], &[]);
+    let report = report(&root);
+    assert_eq!(edges(&report), ["alpha>beta"]);
+    assert_eq!(other_problems(&report), Vec::<String>::new());
+}
+
+#[test]
+fn an_import_link_in_the_edge_s_direction_declares_it_and_is_proven() {
+    let links = json!([import("alpha-beta", "alpha", "beta")]);
+    let (_dir, root) = workspace(&map(&["cargo"], links), &[("alpha", "beta")], &[]);
+    let report = report(&root);
+    assert_eq!(report.problems, Vec::<String>::new());
+    assert_eq!(
+        (report.counts.links.proven, report.counts.links.unproven),
+        (1, 0)
+    );
+}
+
+#[test]
+fn a_dead_import_link_between_read_parts_fails() {
+    let links = json!([import("alpha-beta", "alpha", "beta")]);
+    let (_dir, root) = workspace(&map(&["cargo"], links), &[], &[]);
+    let problems = report(&root).problems;
+    assert!(
+        has(
+            &problems,
+            &[
+                "import link \"alpha-beta\"",
+                "no dependency of \"alpha\" on \"beta\""
+            ]
+        ),
+        "{problems:?}"
+    );
+}
+
+#[test]
+fn a_backwards_import_link_fails_and_so_does_the_edge_it_misses() {
+    let links = json!([import("beta-alpha", "beta", "alpha")]);
+    let (_dir, root) = workspace(&map(&["cargo"], links), &[("alpha", "beta")], &[]);
+    let report = report(&root);
+    assert_eq!(edges(&report), ["alpha>beta"]);
+    assert!(
+        has(
+            &report.problems,
+            &["import link \"beta-alpha\"", "turn it around"]
+        ),
+        "{:?}",
+        report.problems
+    );
+}
+
+#[test]
+fn a_run_time_link_beside_an_undeclared_edge_does_not_declare_it() {
+    for kind in ["http", "spawn", "file"] {
+        let links = json!([{ "id": "joined", "from": "alpha", "to": "beta", "kind": kind, "reason": "Data crosses." }]);
         let (_dir, root) = workspace(&map(&["cargo"], links), &[("alpha", "beta")], &[]);
         let report = report(&root);
-        assert_eq!(report.problems, Vec::<String>::new());
-        assert_eq!(edges(&report), Vec::<String>::new(), "link {from}>{to}");
+        assert_eq!(edges(&report), ["alpha>beta"], "{kind}");
+        assert_eq!(other_problems(&report), Vec::<String>::new(), "{kind}");
     }
+    // Beside the import link, a run-time link on the same pair is fine.
+    let links = json!([
+        import("alpha-beta", "alpha", "beta"),
+        { "id": "beta-alpha", "from": "beta", "to": "alpha", "kind": "file", "reason": "Beta writes a file alpha reads." }
+    ]);
+    let (_dir, root) = workspace(&map(&["cargo"], links), &[("alpha", "beta")], &[]);
+    assert_eq!(report(&root).problems, Vec::<String>::new());
+}
+
+#[test]
+fn an_import_link_with_an_unread_end_passes_as_unproven() {
+    // No extractor named: no part is read.
+    let mut map = base();
+    map["links"] = json!([import("alpha-beta", "alpha", "beta")]);
+    let (_dir, root) = project_text(&map.to_string(), &["alpha/a.rs", "beta/b.rs", "docs/d.md"]);
+    let found = report(&root);
+    assert_eq!(found.problems, Vec::<String>::new());
+    assert_eq!(
+        (found.counts.links.proven, found.counts.links.unproven),
+        (0, 1)
+    );
+    // `rust-modules` named, but beta owns no Rust file: alpha is read, beta is not.
+    let mut map = split_map(&["rust-modules"], &["alpha/"], &["beta/"]);
+    map["links"] = json!([import("alpha-beta", "alpha", "beta")]);
+    let (_dir, root) = tree(
+        &map,
+        &[("alpha/src/lib.rs", ""), ("beta/main.go", "package main\n")],
+    );
+    let found = report(&root);
+    assert_eq!(found.problems, Vec::<String>::new());
+    assert_eq!(
+        (found.counts.links.proven, found.counts.links.unproven),
+        (0, 1)
+    );
+}
+
+#[test]
+fn an_import_link_with_an_actor_at_an_end_fails() {
+    for (from, to) in [("alpha", "writer"), ("writer", "alpha")] {
+        let mut map = base();
+        map["links"] = json!([import("joined", from, to)]);
+        let (_dir, root) =
+            project_text(&map.to_string(), &["alpha/a.rs", "beta/b.rs", "docs/d.md"]);
+        let problems = report(&root).problems;
+        assert!(
+            has(
+                &problems,
+                &["import link \"joined\"", "actor \"writer\"", "owns no code"]
+            ),
+            "{problems:?}"
+        );
+    }
+}
+
+#[test]
+fn a_link_needs_a_kind_and_a_run_time_link_a_reason_of_at_most_140_characters() {
+    let check = |link: Value| {
+        let mut map = base();
+        map["links"] = json!([link]);
+        let (_dir, root) =
+            project_text(&map.to_string(), &["alpha/a.rs", "beta/b.rs", "docs/d.md"]);
+        report(&root).problems
+    };
+    let problems = check(json!({ "id": "joined", "from": "alpha", "to": "beta" }));
+    assert!(
+        has(
+            &problems,
+            &["link \"joined\"", "no kind", "import, http, spawn or file"]
+        ),
+        "{problems:?}"
+    );
+    for reason in [None, Some(""), Some("  ")] {
+        let mut link = json!({ "id": "joined", "from": "alpha", "to": "writer", "kind": "http" });
+        if let Some(reason) = reason {
+            link["reason"] = json!(reason);
+        }
+        let problems = check(link);
+        assert!(
+            has(&problems, &["link \"joined\"", "http", "no reason"]),
+            "{reason:?}: {problems:?}"
+        );
+    }
+    let long = check(
+        json!({ "id": "joined", "from": "alpha", "to": "writer", "kind": "spawn", "reason": "x".repeat(141) }),
+    );
+    assert!(
+        has(
+            &long,
+            &[
+                "link \"joined\"",
+                "reason is 141 characters, the cap is 140"
+            ]
+        ),
+        "{long:?}"
+    );
+    let at_cap = check(
+        json!({ "id": "joined", "from": "alpha", "to": "writer", "kind": "file", "reason": "é".repeat(140) }),
+    );
+    assert_eq!(at_cap, Vec::<String>::new());
+    let import_without = check(import("joined", "alpha", "beta"));
+    assert_eq!(
+        import_without,
+        Vec::<String>::new(),
+        "an import link needs no reason"
+    );
+    let unknown = check(
+        json!({ "id": "joined", "from": "alpha", "to": "beta", "kind": "grpc", "reason": "r" }),
+    );
+    assert!(
+        has(&unknown, &["does not match the map's shape"]),
+        "{unknown:?}"
+    );
 }
 
 #[test]
@@ -203,7 +379,7 @@ fn split_map(extractors: &[&str], alpha_paths: &[&str], beta_paths: &[&str]) -> 
 fn rust_edges(files: &[(&str, &str)], alpha: &[&str], beta: &[&str]) -> Vec<String> {
     let (_dir, root) = tree(&split_map(&["rust-modules"], alpha, beta), files);
     let report = report(&root);
-    assert_eq!(report.problems, Vec::<String>::new());
+    assert_eq!(other_problems(&report), Vec::<String>::new());
     edges(&report)
 }
 
@@ -408,7 +584,7 @@ fn a_use_between_two_parts_is_found_when_the_crate_root_is_ignored() {
         ],
     );
     let report = report(&root);
-    assert_eq!(report.problems, Vec::<String>::new());
+    assert_eq!(other_problems(&report), Vec::<String>::new());
     assert_eq!(edges(&report), ["alpha>beta"]);
 }
 
@@ -451,7 +627,7 @@ fn a_bare_path_to_a_child_module_reaches_that_module_file() {
             ],
         );
         let report = report(&root);
-        assert_eq!(report.problems, Vec::<String>::new(), "{text}");
+        assert_eq!(other_problems(&report), Vec::<String>::new(), "{text}");
         assert_eq!(edges(&report), ["beta>alpha"], "{text}");
     }
 }
@@ -552,7 +728,7 @@ fn a_path_into_a_workspace_crate_reaches_the_module_file_it_names() {
             &["app/"],
             &["server/src/lib.rs"],
         );
-        assert_eq!(report.problems, Vec::<String>::new(), "{text}");
+        assert_eq!(other_problems(&report), Vec::<String>::new(), "{text}");
         assert_eq!(edges(&report), ["beta>alpha"], "{text}");
     }
 }
@@ -596,7 +772,7 @@ fn a_path_into_the_crate_s_own_library_from_its_binary_or_test_is_read() {
             &[file],
             &[],
         );
-        assert_eq!(report.problems, Vec::<String>::new(), "{file}");
+        assert_eq!(other_problems(&report), Vec::<String>::new(), "{file}");
         assert_eq!(edges(&report), ["beta>alpha"], "{file}");
     }
 }
@@ -622,7 +798,7 @@ fn a_workspace_crate_is_read_by_its_library_name_not_its_package_name() {
             &["app/"],
             &[],
         );
-        assert_eq!(report.problems, Vec::<String>::new(), "{text}");
+        assert_eq!(other_problems(&report), Vec::<String>::new(), "{text}");
         assert_eq!(edges(&report), expected, "{text}");
     }
 }
@@ -685,7 +861,7 @@ fn when_cargo_cannot_run_workspace_crate_paths_are_not_read_and_one_problem_says
         ],
     );
     let report = report(&root);
-    assert_eq!(report.problems.len(), 1, "{:?}", report.problems);
+    assert_eq!(other_problems(&report).len(), 1, "{:?}", report.problems);
     assert!(
         has(
             &report.problems,
@@ -702,7 +878,7 @@ fn ts_edges(files: &[(&str, &str)]) -> Vec<String> {
     let map = split_map(&["typescript-imports"], &["alpha/"], &["beta/"]);
     let (_dir, root) = tree(&map, files);
     let report = report(&root);
-    assert_eq!(report.problems, Vec::<String>::new());
+    assert_eq!(other_problems(&report), Vec::<String>::new());
     edges(&report)
 }
 
@@ -773,22 +949,18 @@ fn run_check(root: &str, args: &[&str]) -> std::process::Output {
 }
 
 #[test]
-fn check_prints_an_edge_on_a_line_no_problem_looks_like_and_json_lists_it() {
+fn check_prints_an_undeclared_edge_as_a_problem_and_json_has_no_unlinked() {
     let (_dir, root) = workspace(&map(&["cargo"], json!([])), &[("alpha", "beta")], &[]);
     let out = run_check(&root, &[]);
-    assert!(out.status.success());
+    assert!(!out.status.success());
     let text = String::from_utf8(out.stdout).unwrap();
-    assert_eq!(text.lines().count(), 2, "{text}");
+    assert_eq!(text.lines().count(), 1, "{text}");
     assert!(
-        text.starts_with("note: ") && text.contains("alpha") && text.contains("beta"),
+        text.starts_with("part \"alpha\" depends on part \"beta\""),
         "{text}"
     );
-    assert!(text.lines().last().unwrap().starts_with("ok: "), "{text}");
 
     let out = run_check(&root, &["--json"]);
     let value: Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(
-        value["unlinked"],
-        json!([{ "from": "alpha", "to": "beta" }])
-    );
+    assert_eq!(value.get("unlinked"), None);
 }
