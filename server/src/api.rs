@@ -46,6 +46,11 @@ fn arg<T: DeserializeOwned>(args: &Args, key: &str) -> Result<T, Failure> {
     serde_json::from_value(value).map_err(|e| Failure::Bad(format!("{key}: {e}")))
 }
 
+/// All of a command's arguments as one value, for a command whose arguments are a wire type.
+fn whole<T: DeserializeOwned>(args: &Args) -> Result<T, Failure> {
+    serde_json::from_value(Value::Object(args.clone())).map_err(|e| Failure::Bad(e.to_string()))
+}
+
 fn out<T: Serialize>(reply: T) -> Result<Value, Failure> {
     Ok(serde_json::to_value(reply).expect("a reply serializes"))
 }
@@ -168,12 +173,7 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "project")?,
             arg(a, "commit")?,
         )),
-        "pr_diff" => res(crate::map::pr_diff(
-            arg(a, "project")?,
-            arg(a, "number")?,
-            arg(a, "head")?,
-            arg(a, "title")?,
-        )),
+        "pr_diff" => res(crate::map::pr_diff(whole(a)?)),
         "pr_brief" => res(crate::pr_briefs::pr_brief(
             arc,
             arg(a, "project")?,
