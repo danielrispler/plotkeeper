@@ -6,14 +6,16 @@
 import { messageOf } from "./dom.js";
 import type { SettingsFiles, WriterKind } from "./types.js";
 
-// An action, or an action with its argument, as Zed writes `["terminal::SendText", "\u0001"]`.
+/** An action, or an action with its argument, as Zed writes `["terminal::SendText", "\u0001"]`. */
 export type Binding = string | [string, string];
-// Keystrokes, as Zed writes them ("cmd-1", "escape"), to actions, by context: "Workspace" for the
-// page, "List" for the session list while it has focus. Maps, since the contexts and keystrokes come from the file (#548): a context named
-// `__proto__` or `constructor` is a name like any other, and never reaches what every object inherits.
+/**
+ * Keystrokes, as Zed writes them ("cmd-1", "escape"), to actions, by context: "Workspace" for the
+ * page, "List" for the session list while it has focus. Maps, since the contexts and keystrokes come from the file (#548): a context named
+ * `__proto__` or `constructor` is a name like any other, and never reaches what every object inherits.
+ */
 export type Keymap = ReadonlyMap<string, ReadonlyMap<string, Binding>>;
 
-// The settings: `settings.json`'s choices.
+/** The settings: `settings.json`'s choices. */
 export interface Settings {
   // The summary writer's model and effort ("" for the model's default), whether opening a turn
   // writes its summary, and the program that writes cards: Claude Code, the Antigravity CLI (#327), Codex (#364),
@@ -28,7 +30,7 @@ export interface Settings {
   tips: boolean;
 }
 
-// Both settings files, parsed: the settings and keymap in effect.
+/** Both settings files, parsed: the settings and keymap in effect. */
 export interface Files {
   settings: Settings;
   keymap: Keymap;
@@ -138,7 +140,7 @@ function readChecks(value: unknown, report: Report): Record<string, string[]> {
   return lists;
 }
 
-// The order modifiers take in a keystroke, here and in `keys.ts`.
+/** The order modifiers take in a keystroke, here and in `keys.ts`. */
 export const MODIFIERS = ["ctrl", "alt", "shift", "cmd"] as const;
 
 // A keystroke with its modifiers in `MODIFIERS` order; null: not a keystroke.
@@ -190,7 +192,7 @@ function readKeymap(json: unknown, report: Report): Keymap {
 }
 
 
-// The settings files from their text, each falling back to `previous` when it does not parse.
+/** The settings files from their text, each falling back to `previous` when it does not parse. */
 export function reload(previous: Files, files: SettingsFiles): Files {
   const errors: string[] = [];
   let broken = false;

@@ -35,7 +35,7 @@ import { checkNode, checkWaits, grade, paintOrder, runOf, syncNext, wireTaps } f
 
 // What stopped a row from opening, shown in its place until the next try.
 const problems = new Map<number, string>();
-// The row's problem, until its brief arrives or is being written again.
+/** The row's problem, until its brief arrives or is being written again. */
 export function briefProblem(pr: ReadyPr): string | null {
   if (pr.brief?.writing || awaitedWrite(pr) === "open") problems.delete(pr.number);
   return problems.get(pr.number) ?? null;
@@ -195,7 +195,7 @@ function play(view: MapView, story: Parameters<typeof setPlaying>, opened: () =>
   show(view, false);
 }
 
-// `full` opens the full brief past the head's "Since you read" story (#497), which opens first otherwise.
+/** `full` opens the full brief past the head's "Since you read" story (#497), which opens first otherwise. */
 export async function openBriefOf(project: string, number: number, chapter: number, full = false) {
   problems.delete(number);
   const asked = await ask(
@@ -235,8 +235,10 @@ export async function openBriefOf(project: string, number: number, chapter: numb
   play(view, [got, null, rows], () => logStop("brief-opened", project, number), { project, pr: number, chapter, since: got.since ?? "" });
 }
 
-// Opens `part`'s catch-up: the stored one for its current fog, or, while it is written, the panel says which call of the write runs, the map
-// stays usable, and it opens when it lands (`map-landed` draws the map again), unless another open or a close came since.
+/**
+ * Opens `part`'s catch-up: the stored one for its current fog, or, while it is written, the panel says which call of the write runs, the map
+ * stays usable, and it opens when it lands (`map-landed` draws the map again), unless another open or a close came since.
+ */
 export async function openCatchUpOf(project: string, part: string) {
   // The card says which call of the write runs (#450), as the map's last state has it.
   const writing = () => stageOf(currentMap()?.state.catch_ups?.[part]);
@@ -415,9 +417,11 @@ function bodyNode(body: string) {
   return node;
 }
 
-// One step's words and figure. The panel around them stays put.
-// The step drawn before stops being watched first: the brief draws its step again on every map draw, resize and explanations toggle,
-// and each draw makes new marks (#548). Exported for the tests.
+/**
+ * One step's words and figure. The panel around them stays put.
+ * The step drawn before stops being watched first: the brief draws its step again on every map draw, resize and explanations toggle,
+ * and each draw makes new marks (#548). Exported for the tests.
+ */
 export function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["also"] = []) {
   const playing = playingBrief();
   const ratifying = ratifyRows();

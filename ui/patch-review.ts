@@ -20,8 +20,10 @@ import type { MapView } from "./map.js";
 import type { Law } from "./map-model.js";
 import type { BackLawStarted, Guard, LawPatch, LawPatchOpened, NewLaw } from "./types.js";
 
-// What a law's row offers: a new run, a patch being proven, a rejected one (its first line), a proven one to review, one whose draft PR
-// is open, or one out of date.
+/**
+ * What a law's row offers: a new run, a patch being proven, a rejected one (its first line), a proven one to review, one whose draft PR
+ * is open, or one out of date.
+ */
 export type LawAction = { law: string } & (
   | { kind: "start" }
   | { kind: "proving" }
@@ -30,8 +32,10 @@ export type LawAction = { law: string } & (
   | { kind: "opened"; id: string; pr: number; url: string }
   | { kind: "out-of-date"; id: string }
 );
-// What the buttons do: start a run for a law, open a patch's review, open its draft PR, discard a patch, close the review, and ask before
-// Discard (#459), resolving true when confirmed.
+/**
+ * What the buttons do: start a run for a law, open a patch's review, open its draft PR, discard a patch, close the review, and ask before
+ * Discard (#459), resolving true when confirmed.
+ */
 export type PatchActs = {
   start: (law: string) => void;
   review: (id: string) => void;
@@ -46,7 +50,7 @@ const discardPatch: Confirm = { heading: "Discard this patch?", lost: "The test 
 const discardButton = (id: string, act: Pick<PatchActs, "discard" | "confirm">) =>
   button("Discard", "Delete this patch", () => void act.confirm(discardPatch).then((yes) => yes && act.discard(id)));
 
-// The action of `law` by its newest patch; a law with none, or a payload from before back a law, offers a new run.
+/** The action of `law` by its newest patch; a law with none, or a payload from before back a law, offers a new run. */
 export function lawAction(law: string, patches: LawPatch[] | null | undefined): LawAction {
   const newest = (patches ?? []).filter((patch) => patch.law === law).sort((a, b) => b.at - a.at)[0];
   if (!newest) return { law, kind: "start" };
@@ -57,7 +61,7 @@ export function lawAction(law: string, patches: LawPatch[] | null | undefined): 
   return { law, kind: "proven", id: newest.id };
 }
 
-// The notice line of what Open draft PR did.
+/** The notice line of what Open draft PR did. */
 export function openedLine(opened: LawPatchOpened): string {
   return opened.kind === "pr" ? `Draft PR #${opened.number} opened: ${opened.url}` : "Out of date, run again: the patch no longer applies to the default branch";
 }
@@ -69,8 +73,10 @@ const button = (words: string, title: string, click: () => void, kind = "quiet")
   return node;
 };
 
-// The nodes of a law's action, for its row in the part's sheet. `again` is the words of the button that starts a run; none for a new law,
-// which the map does not have to back.
+/**
+ * The nodes of a law's action, for its row in the part's sheet. `again` is the words of the button that starts a run; none for a new law,
+ * which the map does not have to back.
+ */
 export function lawActionNodes(action: LawAction, act: Pick<PatchActs, "start" | "review" | "discard" | "confirm">, again: string | null = "Back a law"): HTMLElement[] {
   const start = () => (again === null ? [] : [button(again, "Start a background run that writes a test for this law, then prove it here", () => act.start(action.law))]);
   switch (action.kind) {
@@ -98,7 +104,7 @@ export function lawActionNodes(action: LawAction, act: Pick<PatchActs, "start" |
   }
 }
 
-// The review of a proven `patch` of the law whose text is `law`.
+/** The review of a proven `patch` of the law whose text is `law`. */
 export function reviewNodes(patch: LawPatch, law: string, act: Pick<PatchActs, "open" | "discard" | "close" | "confirm">): HTMLElement[] {
   const proof = patch.proof;
   const diff = text("div", "", "patch-diff");
@@ -211,7 +217,7 @@ const acts: PatchActs = {
   confirm: confirmed,
 };
 
-// The sheet's law rows use these acts.
+/** The sheet's law rows use these acts. */
 export const patchActs = acts;
 
 onDraw(paint);
@@ -220,8 +226,10 @@ registerLayer("patch-review", { open: () => shown !== null || refused !== null, 
 
 // ---- Guard with a law (#401).
 
-// What a bug fix's Guard with a law offers: backing each on-trust law of a part PR `pr` touched, and the new laws its guard's runs add
-// (the newest patch of each).
+/**
+ * What a bug fix's Guard with a law offers: backing each on-trust law of a part PR `pr` touched, and the new laws its guard's runs add
+ * (the newest patch of each).
+ */
 export type GuardOffer = { back: { id: string; text: string }[]; added: LawPatch[] };
 export function guardOffer(guard: Guard, pr: number, laws: Law[], patches: LawPatch[] | null | undefined): GuardOffer {
   const added = new Map<string, LawPatch>();
@@ -236,11 +244,13 @@ export function guardOffer(guard: Guard, pr: number, laws: Law[], patches: LawPa
   };
 }
 
-// What the guard's buttons do: back an on-trust law, start a new law's confirm step, and a patch's review and discard.
+/** What the guard's buttons do: back an on-trust law, start a new law's confirm step, and a patch's review and discard. */
 export type GuardActs = Pick<PatchActs, "review" | "discard" | "confirm"> & { back: (law: string) => void; add: () => void };
 
-// The guard's row: each on-trust law with Back this law (or where its patch stands), each new law with where its patch stands, and Add a
-// new law. `patches` are the project's, for the state of each law's newest one.
+/**
+ * The guard's row: each on-trust law with Back this law (or where its patch stands), each new law with where its patch stands, and Add a
+ * new law. `patches` are the project's, for the state of each law's newest one.
+ */
 export function guardNodes(offer: GuardOffer, patches: LawPatch[] | null | undefined, act: GuardActs, adding: HTMLElement[] | null = null): HTMLElement {
   const row = text("div", "", "guard-row");
   row.append(text("p", "Guard with a law", "guard-title"), text("p", "Back a law on trust of a part it touched, or add a new one.", "brief-quiet"));
@@ -263,9 +273,11 @@ export function guardNodes(offer: GuardOffer, patches: LawPatch[] | null | undef
   return row;
 }
 
-// The confirm step of a new law: the writer's draft (null while it drafts) in fields Daniel may edit, the part among the ones the PR
-// touched, and Start the run with what the fields hold, which are kept in `draft` as he types. `line` says why the writer gave no draft, so
-// he writes the law himself.
+/**
+ * The confirm step of a new law: the writer's draft (null while it drafts) in fields Daniel may edit, the part among the ones the PR
+ * touched, and Start the run with what the fields hold, which are kept in `draft` as he types. `line` says why the writer gave no draft, so
+ * he writes the law himself.
+ */
 export function confirmNodes(draft: NewLaw | null, parts: { id: string; name: string }[], line: string | null, act: { start: (law: NewLaw) => void; cancel: () => void }): HTMLElement[] {
   const cancel = button("Cancel", "Leave the new law", act.cancel);
   if (!draft) return [text("p", "Drafting the law…", "brief-quiet guard-drafting"), cancel];
@@ -308,7 +320,7 @@ export function confirmNodes(draft: NewLaw | null, parts: { id: string; name: st
 // The new law being confirmed, by project and PR: its draft (null while the writer drafts) and why there is none.
 let confirming: { project: string; pr: number; draft: NewLaw | null; line: string | null } | null = null;
 
-// The guard's row on PR `pr`'s brief in `view`; `redraw` draws the brief again after a change of the confirm step.
+/** The guard's row on PR `pr`'s brief in `view`; `redraw` draws the brief again after a change of the confirm step. */
 export function guardRow(view: MapView, pr: number, guard: Guard, redraw: () => void): HTMLElement {
   const project = view.project;
   logStop("guard-offered", project, pr);

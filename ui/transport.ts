@@ -17,7 +17,7 @@ declare global {
   }
 }
 
-// A command the server refused: its message is the refusal's reason, the body the server sent, else the command and its status.
+/** A command the server refused: its message is the refusal's reason, the body the server sent, else the command and its status. */
 export class CommandError extends Error {
   override name = "CommandError";
   readonly command: string;
@@ -37,7 +37,7 @@ async function post(command: Command | "log" | "page_focus", args: unknown): Pro
   return body;
 }
 
-// The seam over `fetch` and `EventSource`, which are read when used, so a page or test may stub them.
+/** The seam over `fetch` and `EventSource`, which are read when used, so a page or test may stub them. */
 export function transport(): Seam {
   let source: EventSource | undefined;
   // Whether this tab is one Daniel is looking at: visible and focused. The server reads it as the window's focus.

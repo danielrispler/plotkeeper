@@ -11,18 +11,20 @@ import { staleWords } from "./refresher.js";
 import { logStop } from "./stop-rules.js";
 import type { Expected, Fog, MapState, OpenIssue, PreFlight } from "./types.js";
 
-// A predicted part as the overlay lists it: its name, the texts of its laws on trust, its fog, and its staleness band.
+/** A predicted part as the overlay lists it: its name, the texts of its laws on trust, its fog, and its staleness band. */
 export type PreFlightRow = { id: string; name: string; trust: string[]; fog: string | null; stale: string | null };
 
-// What the overlay shows: the inputs (with the open issues, null while they load), the wait for the writer, the hand picker (with why the
-// prediction failed), or the pre-flight framed on the map.
+/**
+ * What the overlay shows: the inputs (with the open issues, null while they load), the wait for the writer, the hand picker (with why the
+ * prediction failed), or the pre-flight framed on the map.
+ */
 export type Phase =
   | { kind: "start"; issues: OpenIssue[] | null }
   | { kind: "predicting" }
   | { kind: "pick"; why: string | null }
   | { kind: "result"; pre: PreFlight };
 
-// What the overlay's buttons do.
+/** What the overlay's buttons do. */
 export type PreFlightActs = {
   predict: (issue: number | null, text: string) => void;
   byHand: () => void;
@@ -32,8 +34,10 @@ export type PreFlightActs = {
 
 const fogWords: Record<Fog, string> = { thin: "fog: files changed", thick: "fog: laws, links or flows changed" };
 
-// The parts of `pre` on the map `doc`, in the pre-flight's order, each with what Daniel should know before the work starts: a law on trust
-// is a blind spot, a law backed by a check is not.
+/**
+ * The parts of `pre` on the map `doc`, in the pre-flight's order, each with what Daniel should know before the work starts: a law on trust
+ * is a blind spot, a law backed by a check is not.
+ */
 export function preFlightRows(pre: PreFlight, doc: LoadedMap, state: MapState): PreFlightRow[] {
   return pre.parts.flatMap((id) => {
     const part = doc.parts.find((each) => each.id === id);
@@ -46,7 +50,7 @@ export function preFlightRows(pre: PreFlight, doc: LoadedMap, state: MapState): 
 }
 
 
-// What a prediction left: the pre-flight framed on the map, or the hand picker with why the writer gave nothing.
+/** What a prediction left: the pre-flight framed on the map, or the hand picker with why the writer gave nothing. */
 export async function settle(asked: Promise<PreFlight>): Promise<Phase> {
   try {
     return { kind: "result", pre: await asked };
@@ -55,7 +59,7 @@ export async function settle(asked: Promise<PreFlight>): Promise<Phase> {
   }
 }
 
-// A matched brief's line: "You expected Hook, Core; it touched Window, Hook", by the parts' names on `doc`; null for a brief with none.
+/** A matched brief's line: "You expected Hook, Core; it touched Window, Hook", by the parts' names on `doc`; null for a brief with none. */
 export function expectedLine(expected: Expected | undefined | null, doc: LoadedMap | null): string | null {
   if (!expected) return null;
   const names = (ids: string[]) => (ids.length ? ids.map((id) => doc?.parts.find((part) => part.id === id)?.name ?? id).join(", ") : "nothing");
@@ -142,7 +146,7 @@ function resultNodes(pre: PreFlight, doc: LoadedMap, state: MapState, act: PreFl
   return [...nodes, ...rows, foot];
 }
 
-// The overlay's nodes for `phase` on the map `doc`.
+/** The overlay's nodes for `phase` on the map `doc`. */
 export function preFlightNodes(phase: Phase, doc: LoadedMap, state: MapState, act: PreFlightActs): HTMLElement[] {
   const head = text("h2", "Pre-flight", "pre-flight-title");
   switch (phase.kind) {
@@ -160,9 +164,11 @@ export function preFlightNodes(phase: Phase, doc: LoadedMap, state: MapState, ac
 // The phase each overlay box shows.
 const painted = new WeakMap<HTMLElement, Phase>();
 
-// Draws `phase` into the overlay `box` over the map `doc` and its `state`. A map redraw (a landed push, window focus) of the same inputs
-// or hand picker leaves them as they are, so what Daniel typed or ticked, and the focus, stay; when the open issues arrive, the typed lines
-// and the field's focus carry over. Only the predicted parts' rows, which show the map's fog and staleness, are drawn afresh.
+/**
+ * Draws `phase` into the overlay `box` over the map `doc` and its `state`. A map redraw (a landed push, window focus) of the same inputs
+ * or hand picker leaves them as they are, so what Daniel typed or ticked, and the focus, stay; when the open issues arrive, the typed lines
+ * and the field's focus carry over. Only the predicted parts' rows, which show the map's fog and staleness, are drawn afresh.
+ */
 export function paintPreFlight(box: HTMLElement, phase: Phase, doc: LoadedMap, state: MapState, act: PreFlightActs) {
   const was = painted.get(box);
   box.hidden = false;
@@ -237,7 +243,7 @@ const acts: PreFlightActs = {
   },
 };
 
-// Opens the overlay on the map shown: its pre-flight when one is framed, else the inputs; again, it closes. `fresh` starts anew.
+/** Opens the overlay on the map shown: its pre-flight when one is framed, else the inputs; again, it closes. `fresh` starts anew. */
 export function openPreFlight(fresh = false) {
   const view = currentMap();
   const project = shownProject();

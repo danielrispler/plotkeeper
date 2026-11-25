@@ -11,7 +11,7 @@ import type { RatifyRow } from "./types.js";
 
 export type Ratifiable = Pick<RatifyRow, "pr" | "kind" | "id" | "text" | "change"> & { detail?: RatifyRow["detail"] };
 
-// The branch of PR `pr` while it is open: the Map view's ready PRs name it.
+/** The branch of PR `pr` while it is open: the Map view's ready PRs name it. */
 export const branchOf = (pr: number): string | null => currentMap()?.state.ready?.find((ready) => ready.number === pr)?.branch || null;
 
 // What the last overturn did with its prompt, and for which item, kept so the sheet and the brief that hold the item, which draw again
@@ -25,9 +25,11 @@ async function overturnOut(project: string, item: Ratifiable): Promise<Overturne
   return { project, pr: item.pr, kind: item.kind, id: item.id, ...overturnReport(outcome, prompt) };
 }
 
-// The note of the last overturn, where `holds` says its item is drawn in `project`: "Prompt copied, paste it into your agent", or, when
-// the copy failed, the prompt in a small box with a Copy button. Null before any overturn, and on another item's sheet or brief. The note
-// is drawn again with its sheet or brief, so it is not live: the overturn says its line (`sayAction`, #465).
+/**
+ * The note of the last overturn, where `holds` says its item is drawn in `project`: "Prompt copied, paste it into your agent", or, when
+ * the copy failed, the prompt in a small box with a Copy button. Null before any overturn, and on another item's sheet or brief. The note
+ * is drawn again with its sheet or brief, so it is not live: the overturn says its line (`sayAction`, #465).
+ */
 export function overturnNote(project: string, holds: (item: Pick<Ratifiable, "pr" | "kind" | "id">) => boolean): HTMLElement | null {
   const shown = noteFor(last, project, holds);
   if (!shown) return null;
@@ -47,8 +49,10 @@ export function overturnNote(project: string, holds: (item: Pick<Ratifiable, "pr
   return note;
 }
 
-// A part's or a link's detail in the brief's ratify step (#485): each changed text, old beside new, in words as well as marks, so the
-// change does not rest on colour or a strike alone. Null for a row with nothing to show.
+/**
+ * A part's or a link's detail in the brief's ratify step (#485): each changed text, old beside new, in words as well as marks, so the
+ * change does not rest on colour or a strike alone. Null for a row with nothing to show.
+ */
 export function ratifyDetail(row: Ratifiable): HTMLElement | null {
   const lines = detailLines(row.detail);
   if (!lines.length) return null;
@@ -68,7 +72,7 @@ export function ratifyDetail(row: Ratifiable): HTMLElement | null {
   return list;
 }
 
-// `done` runs once the server has the decision.
+/** `done` runs once the server has the decision. */
 export function ratifyActions(project: string, item: Ratifiable, done: (state: "accepted" | "overturned") => void): HTMLElement {
   const box = text("span", "", "ratify-actions");
   const decide = (state: "accepted" | "overturned") => {

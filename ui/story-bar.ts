@@ -13,27 +13,29 @@ import { localDay } from "./stop-rules.js";
 
 type BarKind = "explain-back-given" | "explain-back-marked";
 export type BarSend = (kind: BarKind, extra?: { line?: string; mark?: Mark }) => void;
-// The longest explain-back line kept, in characters (the server refuses a longer one).
+/** The longest explain-back line kept, in characters (the server refuses a longer one). */
 export const LINE_MAX = 300;
 export type Mark = "got-it" | "partly" | "missed";
-// The three marks, in words: a mark is never shown or kept as a number.
+/** The three marks, in words: a mark is never shown or kept as a number. */
 export const MARKS: { mark: Mark; label: string }[] = [
   { mark: "got-it", label: "Got it" },
   { mark: "partly", label: "Partly" },
   { mark: "missed", label: "Missed" },
 ];
-// Whether a story's bar offers explain-back: only when the story has a gist (the writer adds one to a chapter that lights a Core part, and
-// to a part catch-up) and one of its parts is Core under Daniel's tiers now.
+/**
+ * Whether a story's bar offers explain-back: only when the story has a gist (the writer adds one to a chapter that lights a Core part, and
+ * to a part catch-up) and one of its parts is Core under Daniel's tiers now.
+ */
 export function explainsBack(gist: string | undefined, parts: string[], tierOf: (part: string) => string): boolean {
   return !!gist?.trim() && parts.some((part) => tierOf(part) === "core");
 }
 // The key that skips the whole bar.
 const SKIP_KEY = "s";
 
-// What a bar ends: a chapter of a PR's brief, or a part catch-up.
+/** What a bar ends: a chapter of a PR's brief, or a part catch-up. */
 export type StoryAbout = { project: string; pr: number; chapter: number } | { project: string; part: string };
 
-// The bar's state and what it tells the log: the explain-back line, each mark, and whether Skip closed it.
+/** The bar's state and what it tells the log: the explain-back line, each mark, and whether Skip closed it. */
 export function barModel(send: BarSend) {
   let closed = false;
   let said: string | null = null;
@@ -64,7 +66,7 @@ export function barModel(send: BarSend) {
   };
 }
 
-// What a key does to the bar: the skip key skips; nothing while typing or with a modifier held.
+/** What a key does to the bar: the skip key skips; nothing while typing or with a modifier held. */
 export function barKey(key: { key: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean }, typing: boolean): "skip" | null {
   if (typing || key.metaKey || key.ctrlKey || key.altKey) return null;
   return key.key.toLowerCase() === SKIP_KEY ? "skip" : null;
@@ -77,7 +79,7 @@ let current: Bar | null = null;
 // Each bar's marks get a radio group name of their own.
 let bars = 0;
 
-// The bar for `about`, logging through the server; with `gist`, it offers explain-back first.
+/** The bar for `about`, logging through the server; with `gist`, it offers explain-back first. */
 export function storyBar(about: StoryAbout, gist?: string): Bar {
   const { project, ...story } = about;
   const model = barModel((kind, extra = {}) => {
@@ -158,7 +160,9 @@ function compared(model: Model, gist: string): HTMLElement[] {
   return [said, against, marks];
 }
 
-// A window key for the bar on screen; true when the bar took it. The caller passes `typing` (focus in a field) so the line keeps its keys.
+/**
+ * A window key for the bar on screen; true when the bar took it. The caller passes `typing` (focus in a field) so the line keeps its keys.
+ */
 export function barKeyDown(event: KeyboardEvent, typing: boolean): boolean {
   if (!current?.node.isConnected || current.node.hidden || current.node.offsetParent === null) return false;
   return current.key(barKey(event, typing));

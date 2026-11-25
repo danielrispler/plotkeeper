@@ -10,7 +10,7 @@ import type { Keymap } from "./settings.js";
 type Condition = "map" | "brief" | "trees";
 export type Context = Record<Condition, boolean>;
 
-// From the grilling and prototype (2026-11-25).
+/** From the grilling and prototype (2026-11-25). */
 export type Tip = {
   // Keys its show history; never reused.
   id: string;
@@ -21,12 +21,12 @@ export type Tip = {
   when?: Condition;
 };
 
-// The show history: the Running-stretch counter and, per tip, its show count and the stretch of its last show.
+/** The show history: the Running-stretch counter and, per tip, its show count and the stretch of its last show. */
 export type Shows = { stretch: number; tips: Record<string, { count: number; last: number }> };
 
-// The longest line, "Tip: " and the default keys among it, that fits the rail's width at the small size.
+/** The longest line, "Tip: " and the default keys among it, that fits the rail's width at the small size. */
 export const LINE = 56;
-// A tip shows at most this many times, ever.
+/** A tip shows at most this many times, ever. */
 export const MAX_SHOWS = 5;
 // The longest cooldown, in Running stretches.
 const LONGEST = 4;
@@ -50,18 +50,20 @@ export const TIPS: Tip[] = [
   { id: "brief", text: "A PR brief waits in the map's tray; open it there.", when: "brief" },
 ];
 
-// How many Running stretches a tip waits after it shows: never back to back, and a lone eligible tip every other stretch.
+/** How many Running stretches a tip waits after it shows: never back to back, and a lone eligible tip every other stretch. */
 export const cooldown = (eligible: number): number => Math.max(1, Math.min(LONGEST, eligible - 1));
 
-// The tip's line, "Tip: …", with its action's live key in place of "{key}", or where to find an unbound one.
+/** The tip's line, "Tip: …", with its action's live key in place of "{key}", or where to find an unbound one. */
 export function tipText(tip: Tip, keymap: Keymap): string {
   const keys = tip.action ? keysOf(keymap, tip.action) : [];
   return `Tip: ${tip.text.replace("{key}", keys.length ? keys.join(", ") : "in the palette")}`;
 }
 
-// At the start of a Running stretch: the tip it shows, if any, and the history after it. Eligible tips are those whose `when`
-// holds, under the cap and out of cooldown; the one shown longest ago, or never, wins, the list's order breaking ties. Not
-// Running, or with tips off, nothing shows and the counter stays.
+/**
+ * At the start of a Running stretch: the tip it shows, if any, and the history after it. Eligible tips are those whose `when`
+ * holds, under the cap and out of cooldown; the one shown longest ago, or never, wins, the list's order breaking ties. Not
+ * Running, or with tips off, nothing shows and the counter stays.
+ */
 export function choose({ tips, shows, context, running, on }: { tips: Tip[]; shows: Shows; context: Context; running: boolean; on: boolean }): { tip: Tip | null; shows: Shows } {
   if (!running || !on) return { tip: null, shows };
   const stretch = shows.stretch + 1;
@@ -74,7 +76,7 @@ export function choose({ tips, shows, context, running, on }: { tips: Tip[]; sho
   return { tip, shows: { stretch, tips: { ...shows.tips, ...record } } };
 }
 
-// Where the history is kept: `localStorage` in the page. Losing it shows tips again from the start.
+/** Where the history is kept: `localStorage` in the page. Losing it shows tips again from the start. */
 export type Store = { get(): string | null; set(text: string): void };
 
 const KEY = "wait-tips";
@@ -90,8 +92,10 @@ function load(store: Store): Shows {
 
 type Seen = { id: string; state: string };
 
-// The tip for the selected session, one per Running stretch: picked when its stretch starts and kept while it runs. A stretch
-// ends when the session is seen not running, selected or in `listed`.
+/**
+ * The tip for the selected session, one per Running stretch: picked when its stretch starts and kept while it runs. A stretch
+ * ends when the session is seen not running, selected or in `listed`.
+ */
 export function stretches(store: Store, tips: Tip[] = TIPS) {
   const current = new Map<string, Tip | null>();
   return (selected: Seen, listed: Seen[], context: Context, on: boolean): Tip | null => {

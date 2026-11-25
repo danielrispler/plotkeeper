@@ -13,8 +13,10 @@ export type Note = { session: Session; count: string; line: string };
 
 const FADE_MS = 6000;
 
-// The note for the sessions whose turn ended off screen, in the order the server combined them: the first one's name and its
-// turn's intention, and "N finished" when there are more. Null when none is listed.
+/**
+ * The note for the sessions whose turn ended off screen, in the order the server combined them: the first one's name and its
+ * turn's intention, and "N finished" when there are more. Null when none is listed.
+ */
 export function finishedNote(ids: string[], listed: Session[]): Note | null {
   const sessions = ids.flatMap((id) => listed.filter((s) => s.id === id));
   const first = sessions[0];
@@ -25,8 +27,10 @@ export function finishedNote(ids: string[], listed: Session[]): Note | null {
 
 export type Hold = "pointer" | "focus" | "modal";
 
-// The note's fade on `clock`: `start` (a note shows) fades it in 6 s unless something holds it, the pointer resting on it, the
-// keyboard's focus in it or a modal dialog holding it back; once none does, it fades 6 s later. `stop`: the note was closed, and nothing holds it any more.
+/**
+ * The note's fade on `clock`: `start` (a note shows) fades it in 6 s unless something holds it, the pointer resting on it, the
+ * keyboard's focus in it or a modal dialog holding it back; once none does, it fades 6 s later. `stop`: the note was closed, and nothing holds it any more.
+ */
 export function noteFade(clock: Clock, hide: () => void) {
   const holds = new Set<Hold>();
   let timer: number | undefined;
@@ -75,7 +79,7 @@ const close = () => {
 // review).
 const modalHolds = () => (document.querySelector("dialog:modal") ? fade.hold("modal") : fade.release("modal"));
 
-// Shows `note` in place of the one showing.
+/** Shows `note` in place of the one showing. */
 export function showNote(note: Note) {
   noted = note;
   const toast = element("note-toast");
@@ -98,7 +102,7 @@ export function showNote(note: Note) {
   fade.start();
 }
 
-// The toast's hover, focus and a modal dialog hold its fade; once, at start.
+/** The toast's hover, focus and a modal dialog hold its fade; once, at start. */
 export function watchNotes() {
   const toast = element("note-toast");
   document.addEventListener("toggle", () => {

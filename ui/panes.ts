@@ -12,7 +12,7 @@ let ready = false;
 // What a diff's or a log's way back does: select the session (`selection.ts`, given by `main.ts`).
 let select: (id: string) => unknown = () => {};
 
-// The views are ready to draw.
+/** The views are ready to draw. */
 export function startPanes(selectSession: (id: string) => unknown) {
   select = selectSession;
   ready = true;
@@ -35,7 +35,7 @@ diffRequest.open = (id, turn) => {
   showPanel({ kind: "diff", session: id, turn });
 };
 
-// The left panel's History, diff and worker's log, drawn in the panel's box.
+/** The left panel's History, diff and worker's log, drawn in the panel's box. */
 export const historyIn = (place: HTMLElement) => drawHistory(place, studio.listed);
 export function diffIn(place: HTMLElement, id: string, turn: number) {
   const session = studio.listed.find((s) => s.id === id);

@@ -11,9 +11,11 @@ function stripLabel(folder: string): string {
   return /^issue-(\d+)/.exec(folder)?.[1] ?? folder.slice(0, 4);
 }
 
-// What a session is called: Daniel's name for it, else the name written from its first prompt with
-// the identity's issue in front ("#37 · One event internal"), else its issue, PR and worktree
-// (danielrispler/Falinks#480), else its folder.
+/**
+ * What a session is called: Daniel's name for it, else the name written from its first prompt with
+ * the identity's issue in front ("#37 · One event internal"), else its issue, PR and worktree
+ * (danielrispler/Falinks#480), else its folder.
+ */
 export function sessionName(
   session: Pick<Session, "name" | "identity" | "folder_name"> & { prompt_name?: string | null },
 ): string {
@@ -24,38 +26,42 @@ export function sessionName(
 
 const thousands = (n: number) => `${Math.round(n / 1000).toLocaleString("en-US")}k`;
 
-// How full a session's context is: its tokens, such as "85k", or "" before they are known.
+/** How full a session's context is: its tokens, such as "85k", or "" before they are known. */
 export function contextText(context: Context | null): string {
   return context ? thousands(context.tokens) : "";
 }
 
-// The context's hover: its tokens in full words.
+/** The context's hover: its tokens in full words. */
 export function contextTitle(context: Context | null): string {
   return context ? `${thousands(context.tokens)} tokens used` : "";
 }
 
-// The muted mark after a row's name: "terminal" for a plain terminal's row, "status only" for another agent's row
-// (danielrispler/Falinks#560), so it never reads as a Claude session with missing data; else the context's tokens. The
-// agent itself is the logo before the name (#158).
+/**
+ * The muted mark after a row's name: "terminal" for a plain terminal's row, "status only" for another agent's row
+ * (danielrispler/Falinks#560), so it never reads as a Claude session with missing data; else the context's tokens. The
+ * agent itself is the logo before the name (#158).
+ */
 export function rowMark(session: Pick<Session, "shell" | "status_only" | "transcript">): string {
   if (session.shell) return "terminal";
   if (session.status_only) return "status only";
   return contextText(session.transcript.context);
 }
 
-// A subagent's state label and its state: "Needs you" while it asks, else its status.
+/** A subagent's state label and its state: "Needs you" while it asks, else its status. */
 export function agentState(session: Session, agent: Subagent): [string, string] {
   return session.asker?.agent === agent.id ? [stateLabels.needs_you, "needs_you"] : [agent.status, agent.status];
 }
 
-// A status's shape and its word (danielrispler/Falinks#572): a "Needs you" pill, the only colour (danielrispler/Falinks#565, decision 1); a
-// spinner while running; a dot at your turn, filled once it finished unseen, idle too (danielrispler/Falinks#556); a ring when idle,
-// ended or, for a subagent, done.
+/**
+ * A status's shape and its word (danielrispler/Falinks#572): a "Needs you" pill, the only colour (danielrispler/Falinks#565, decision 1); a
+ * spinner while running; a dot at your turn, filled once it finished unseen, idle too (danielrispler/Falinks#556); a ring when idle,
+ * ended or, for a subagent, done.
+ */
 export type Glyph = "pill" | "spinner" | "dot" | "filled" | "ring" | "check";
-// A landed task's session at your turn, idle or ended shows a check mark and these words instead (#53, Landed).
+/** A landed task's session at your turn, idle or ended shows a check mark and these words instead (#53, Landed). */
 export const landedWord = "Landed — safe to delete";
 export const showsLanded = (state: string, landed: boolean) => landed && ["your_turn", "idle", "ended"].includes(state);
-// `unwatched`: no process of the session's agent is known, so its "Idle" is a guess (#330).
+/** `unwatched`: no process of the session's agent is known, so its "Idle" is a guess (#330). */
 export function status(state: string, unseen = false, landed = false, unwatched = false): [Glyph, string] {
   const label = (stateLabels[state as SessionState] ?? state) + (state === "idle" && unwatched ? "?" : "");
   if (showsLanded(state, landed)) return ["check", landedWord];
@@ -88,14 +94,16 @@ export function secondLine<T extends Lined>(session: T, headline: (session: T) =
   return open?.questions[0]?.question?.split("\n")[0] ?? session.line ?? "";
 }
 
-// The top bar's chip: how many sessions need Daniel, or "" when none.
+/** The top bar's chip: how many sessions need Daniel, or "" when none. */
 export function chipText(sessions: Pick<Session, "state">[]): string {
   const count = sessions.filter((session) => session.state === "needs_you").length;
   return count ? `${count} ${count === 1 ? "needs" : "need"} you` : "";
 }
 
-// A session's subagents by the id of the agent that spawned them: "session", "unattached" or a
-// subagent's id. Built once per draw, so the tree and the "done" counts do not scan every subagent.
+/**
+ * A session's subagents by the id of the agent that spawned them: "session", "unattached" or a
+ * subagent's id. Built once per draw, so the tree and the "done" counts do not scan every subagent.
+ */
 export type Children = Map<string, Subagent[]>;
 export function childrenOf(session: Pick<Session, "agents">): Children {
   const children: Children = new Map();
@@ -108,12 +116,12 @@ export function childrenOf(session: Pick<Session, "agents">): Children {
   return children;
 }
 
-// Whether a subagent's line is not drawn: it faded, and nothing below it is drawn (danielrispler/Falinks#434, decision 43).
+/** Whether a subagent's line is not drawn: it faded, and nothing below it is drawn (danielrispler/Falinks#434, decision 43). */
 export function hidden(children: Children, agent: Subagent): boolean {
   return agent.faded && (children.get(agent.id) ?? []).every((child) => hidden(children, child));
 }
 
-// The count of a parent's subagents that faded into its line, workers as helpers (danielrispler/Falinks#535).
+/** The count of a parent's subagents that faded into its line, workers as helpers (danielrispler/Falinks#535). */
 export const doneCount = (all: Children, children: Subagent[] = []) => children.filter((agent) => hidden(all, agent)).length;
 // Whether a subagent shows under a collapsed row: it needs Daniel, or it failed and he has not opened it.
 const standsOut = (session: Pick<Session, "asker">, agent: Subagent) =>
@@ -122,8 +130,10 @@ const standsOut = (session: Pick<Session, "asker">, agent: Subagent) =>
 
 export type Folded = { has(id: string): boolean };
 
-// The subagents drawn under `parent`, at any depth, each with its depth. Under a collapsed row only
-// those that stand out are drawn, at their own depth.
+/**
+ * The subagents drawn under `parent`, at any depth, each with its depth. Under a collapsed row only
+ * those that stand out are drawn, at their own depth.
+ */
 export type Drawn = { agent: Subagent; depth: number };
 export function drawn(session: Pick<Session, "asker">, children: Children, parent: string, depth: number, shut: Folded, under = false): Drawn[] {
   return (children.get(parent) ?? []).flatMap((agent) => {
@@ -133,8 +143,10 @@ export function drawn(session: Pick<Session, "asker">, children: Children, paren
   });
 }
 
-// A row's fold toggle, for the row keyed `parents[0]` whose subagents spawn from `parents`: whether it
-// is open and how many rows it hides; null when nothing is drawn under it.
+/**
+ * A row's fold toggle, for the row keyed `parents[0]` whose subagents spawn from `parents`: whether it
+ * is open and how many rows it hides; null when nothing is drawn under it.
+ */
 export function folds(session: Pick<Session, "asker">, children: Children, parents: string[], shut: Folded): { open: boolean; hiding: number } | null {
   const count = (under: boolean) => parents.flatMap((parent) => drawn(session, children, parent, 0, shut, under)).length;
   const all = count(false);
@@ -143,13 +155,15 @@ export function folds(session: Pick<Session, "asker">, children: Children, paren
   return { open, hiding: open ? 0 : all - count(true) };
 }
 
-// The row's clock: the turn time, only on the row being looked at; the rail has all three (danielrispler/Falinks#517,
-// decision 4; danielrispler/Falinks#571).
+/**
+ * The row's clock: the turn time, only on the row being looked at; the rail has all three (danielrispler/Falinks#517,
+ * decision 4; danielrispler/Falinks#571).
+ */
 export function rowTime(session: Pick<Session, "state" | "started_at" | "last_event_at" | "turn_span">, selected: boolean): Time | null {
   return (selected && session.turn_span && times(session, null)[1]) || null;
 }
 
-// A row line as plain text (danielrispler/Falinks#571): Markdown's emphasis, headings and links dropped outside code spans.
+/** A row line as plain text (danielrispler/Falinks#571): Markdown's emphasis, headings and links dropped outside code spans. */
 export function plain(line: string): string {
   return line
     .split("`")
@@ -157,20 +171,24 @@ export function plain(line: string): string {
     .join("`");
 }
 
-// A row line as shown, and its hover title: the original line whenever a link's URL or a long path's
-// start is dropped, so the full line stays reachable (danielrispler/Falinks#571); else "".
+/**
+ * A row line as shown, and its hover title: the original line whenever a link's URL or a long path's
+ * start is dropped, so the full line stays reachable (danielrispler/Falinks#571); else "".
+ */
 export function rowText(line: string): [shown: string, title: string] {
   const [shown, full] = shortPaths(plain(line));
   return [shown, full || /\]\([^)]*\)/.test(line) ? line : ""];
 }
 
-// A subagent row's second line, as a session row's (danielrispler/Falinks#572): only while it runs or needs Daniel.
+/** A subagent row's second line, as a session row's (danielrispler/Falinks#572): only while it runs or needs Daniel. */
 export function agentLine(state: string, details: (string | null)[]): string | null {
   return state === "running" || state === "needs_you" ? details.filter(Boolean).join(" · ") : null;
 }
 
-// The strip's labels, one per session, from its name: its issue number, else the name's first
-// letters; sessions whose labels would match are numbered, so none reads "Fali" five times (danielrispler/Falinks#572).
+/**
+ * The strip's labels, one per session, from its name: its issue number, else the name's first
+ * letters; sessions whose labels would match are numbered, so none reads "Fali" five times (danielrispler/Falinks#572).
+ */
 export function stripLabels(sessions: Pick<Session, "name" | "identity" | "folder_name">[]): string[] {
   const base = sessions.map((session) =>
     session.identity.issue === null ? stripLabel(sessionName(session)) : String(session.identity.issue),
@@ -183,8 +201,10 @@ export function stripLabels(sessions: Pick<Session, "name" | "identity" | "folde
   });
 }
 
-// Clear landed (#244): Clear hides every landed row and offers Undo for CLEAR_WINDOW_MS. When the window closes each hidden session
-// that is still landed goes through today's Delete (`commit`); Undo commits nothing. `changed` hears the sessions still pending.
+/**
+ * Clear landed (#244): Clear hides every landed row and offers Undo for CLEAR_WINDOW_MS. When the window closes each hidden session
+ * that is still landed goes through today's Delete (`commit`); Undo commits nothing. `changed` hears the sessions still pending.
+ */
 export type Clock = { set(run: () => void, ms: number): unknown; clear(id: unknown): void };
 export const CLEAR_WINDOW_MS = 8000;
 type ClearDeps = { landed(id: string): Session | undefined; commit(session: Session): Promise<unknown> | void; changed(pending: Session[], writing: Session[]): void };
@@ -262,16 +282,18 @@ export function clearing(time: Clock, deps: ClearDeps, hidden = new Set<string>(
   };
 }
 
-// Whether a click on `target`, inside the session list, is on its empty space: not on a row, a group or project heading or any button.
-// Such a click goes back to the bare map.
+/**
+ * Whether a click on `target`, inside the session list, is on its empty space: not on a row, a group or project heading or any button.
+ * Such a click goes back to the bare map.
+ */
 export function listSpace(target: { closest(selector: string): unknown }): boolean {
   return ![".item", "summary", ".project-head", "button"].some((selector) => target.closest(selector));
 }
 
-// The sessions the list shows: all but the ended ones, which are in History (#94), and those Clear landed hid (`hidden`, #382).
+/** The sessions the list shows: all but the ended ones, which are in History (#94), and those Clear landed hid (`hidden`, #382). */
 export const sidebarSessions = <T extends Pick<Session, "state" | "id">>(sessions: T[], hidden: ReadonlySet<string> = new Set()): T[] =>
   sessions.filter((session) => session.state !== "ended" && !hidden.has(session.id));
 
-// The sessions "Clear landed" would clear: every landed one it has not hidden yet; none, and the list shows no Clear landed.
+/** The sessions "Clear landed" would clear: every landed one it has not hidden yet; none, and the list shows no Clear landed. */
 export const landedToClear = <T extends Pick<Session, "state" | "id" | "landed">>(sessions: T[], hidden: ReadonlySet<string>): T[] =>
   sessions.filter((session) => showsLanded(session.state, session.landed) && !hidden.has(session.id));

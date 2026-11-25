@@ -40,9 +40,9 @@ export function clearPlaying() {
   ratifying = [];
 }
 
-// Each part's catch-up plays under a negative number of its own, which no PR has.
+/** Each part's catch-up plays under a negative number of its own, which no PR has. */
 export const catchUpId = catchUpIds();
-// A stop event's PR: none for a part catch-up.
+/** A stop event's PR: none for a part catch-up. */
 export const prOf = (pr: number) => (pr < 0 ? null : pr);
 
 export const panel = () => element("map-brief");
@@ -58,7 +58,7 @@ export const steps = (): BriefStep[] => {
   return ratify ? [...list, ratify] : list;
 };
 
-// The parts the playing chapter's behaviour crosses, which its frame holds even where no step names them.
+/** The parts the playing chapter's behaviour crosses, which its frame holds even where no step names them. */
 export const chapterParts = (): string[] => {
   const now = player.current();
   return playing && now ? (playing.brief.brief.chapters[now.chapter]?.parts ?? []) : [];

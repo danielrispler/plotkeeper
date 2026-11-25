@@ -16,7 +16,7 @@ import { GATE } from "./writer-notice.js";
 
 export type Choice = { writer: WriterKind; model: string; effort: string };
 
-// The writer picker's options: every writer, one that was not found shown but not pickable.
+/** The writer picker's options: every writer, one that was not found shown but not pickable. */
 export const choiceOptions = (list: Writers): { kind: WriterKind; label: string; disabled: boolean }[] =>
   list.writers.map((w) => ({ kind: w.kind, label: w.found ? w.name : `${w.name} (${apiWriter(w.kind) ? "not set" : "not found"})`, disabled: !w.found }));
 
@@ -26,7 +26,7 @@ const apiWriter = (kind: WriterKind) => kind === "anthropic" || kind === "openai
 // OpenAI's own endpoint, which the OpenAI-compatible writer calls when no base URL is set.
 const OPENAI_URL = "https://api.openai.com/v1";
 
-// Whether writer `kind`'s API key is set, as its key row says it; the key itself never reaches the page.
+/** Whether writer `kind`'s API key is set, as its key row says it; the key itself never reaches the page. */
 export const keySet = (list: Writers, kind: WriterKind = "anthropic"): boolean => list.keys.includes(kind);
 export function keyLine(list: Writers, kind: WriterKind = "anthropic"): string {
   if (kind === "anthropic") return keySet(list) ? "Anthropic API key: set, kept in the macOS Keychain." : "Anthropic API key: not set.";
@@ -47,8 +47,10 @@ function modelOf(list: Writers, kind: WriterKind, model: string): string {
   return !any && !models.includes(model) ? (models[0] ?? model) : model;
 }
 
-// The choice the section opens with: the writer that writes now when summaries are on, else the first found in the
-// spec's order (the server lists them so), at its first model and default effort.
+/**
+ * The choice the section opens with: the writer that writes now when summaries are on, else the first found in the
+ * spec's order (the server lists them so), at its first model and default effort.
+ */
 export function preset(list: Writers, now: Settings["summaries"]): Choice {
   if (list.summaries_on) {
     const efforts = list.writers.find((w) => w.kind === now.writer)?.efforts ?? [];
@@ -58,11 +60,11 @@ export function preset(list: Writers, now: Settings["summaries"]): Choice {
   return { writer: first?.kind ?? "claude", model: first?.models[0] ?? "", effort: "" };
 }
 
-// A Test's outcome as the section shows it.
+/** A Test's outcome as the section shows it. */
 export const testLine = (test: WriterTest): { passed: boolean; text: string } =>
   test.outcome === "passed" ? { passed: true, text: test.line } : { passed: false, text: `Failed: ${test.line}` };
 
-// The writer's notice line while summaries wait for a Test (`writer-notice.ts`).
+/** The writer's notice line while summaries wait for a Test (`writer-notice.ts`). */
 export const gateNotice = (list: Writers): string | null => (list.summaries_on ? null : GATE);
 
 export const briefsLine = (list: Writers): string | null =>
@@ -76,7 +78,7 @@ let testing = false;
 // Each key row's last refusal, such as a pasted text that is no key.
 const keyErrors: Partial<Record<WriterKind, string>> = {};
 
-// Whether PR briefs can be written: until the list is known, yes.
+/** Whether PR briefs can be written: until the list is known, yes. */
 export const briefsWritten = () => list?.briefs ?? true;
 
 function select(id: string, title: string, options: { value: string; label: string; disabled?: boolean }[], value: string, change: (value: string) => void) {
@@ -378,14 +380,16 @@ const sectionNode = () => {
   return section;
 };
 
-// Draws the section and asks for the list once.
+/** Draws the section and asks for the list once. */
 export function startWriters(hooks: Hooks) {
   given = hooks;
   draw(sectionNode(), hooks);
   void refresh(sectionNode(), hooks);
 }
 
-// The Settings panel opened: the section goes into `box`, its choice preset again from the settings, as each opening of its popover did (#363).
+/**
+ * The Settings panel opened: the section goes into `box`, its choice preset again from the settings, as each opening of its popover did (#363).
+ */
 export function writersIn(box: HTMLElement) {
   const panel = sectionNode();
   if (list && !testing) {

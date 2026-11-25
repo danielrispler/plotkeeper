@@ -8,7 +8,7 @@ import { failure, fullTitle, invoke, keepOnly, messageOf, onEnter, pressable, te
 import { rendered } from "./markdown.js";
 import type { Anchor, Facts, Hunk } from "./types.js";
 
-// A hunk as plain text; `more` ends it with "… N more lines" when the cap left some out, for a view with no button of its own.
+/** A hunk as plain text; `more` ends it with "… N more lines" when the cap left some out, for a view with no button of its own. */
 export const hunkText = (h: Hunk | null, more = true) =>
   h === null ? "The hunk could not be read." : h.binary ? "Binary file: no lines to show." : h.text + (more && h.left_out ? `… ${h.left_out} more lines` : "");
 
@@ -37,7 +37,7 @@ export function forgetAsks(listed: ReadonlySet<string>) {
 // `scope` keeps the boxes of one anchor drawn in two places apart, as a node has one parent.
 const keyOf = (session: string, anchor: Anchor, scope: string) => `${scope}${session}\n${JSON.stringify(anchor)}`;
 
-// The "Ask" box of `anchor` in session `session`, labelled `what` for the model ("this file").
+/** The "Ask" box of `anchor` in session `session`, labelled `what` for the model ("this file"). */
 export function askAnchor(session: string, anchor: Anchor, what: string, scope = ""): HTMLDetailsElement {
   const key = keyOf(session, anchor, scope);
   const box = asks.get(key) ?? askBox(session, anchor, what);
@@ -46,7 +46,7 @@ export function askAnchor(session: string, anchor: Anchor, what: string, scope =
   return box;
 }
 
-// Opens the box of `anchor` and puts the cursor in it, when it is drawn; false when it is not.
+/** Opens the box of `anchor` and puts the cursor in it, when it is drawn; false when it is not. */
 export function openAsk(session: string, anchor: Anchor): boolean {
   const node = asks.get(keyOf(session, anchor, ""));
   if (!node?.isConnected) return false;
@@ -134,8 +134,10 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
   return node;
 }
 
-// What was recorded about `name`, then the writer's possible reasons folded under their own label, so a guess never reads as a
-// fact. With nothing recorded there are no reasons, as there was no call.
+/**
+ * What was recorded about `name`, then the writer's possible reasons folded under their own label, so a guess never reads as a
+ * fact. With nothing recorded there are no reasons, as there was no call.
+ */
 export function whyNotElement(name: string, result: { facts: Facts; reasons: string | null }): HTMLElement {
   const node = document.createElement("div");
   node.className = "ask-why-not";

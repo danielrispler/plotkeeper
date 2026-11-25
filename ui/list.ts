@@ -176,8 +176,10 @@ function selecting(id: string, agent: string | null, key = `${id} ${agent ?? ""}
   return button;
 }
 
-// One row: the session's name, its mark and its status glyph; while it runs or needs
-// Daniel, what it is doing and, on the row being looked at, the turn's clock.
+/**
+ * One row: the session's name, its mark and its status glyph; while it runs or needs
+ * Daniel, what it is doing and, on the row being looked at, the turn's clock.
+ */
 export function row(session: Session, children: Children, token: string | null = null): HTMLElement {
   const button = selecting(session.id, null);
   button.classList.add("row", "session-row");
@@ -215,9 +217,11 @@ function rowLine(line: string): HTMLElement {
 }
 
 
-// A subagent's row, indented under the agent that spawned it. A worker shows its task, status and
-// last step; a helper its task, type, status, duration and result. A failed child stands out until
-// Daniel opens it.
+/**
+ * A subagent's row, indented under the agent that spawned it. A worker shows its task, status and
+ * last step; a helper its task, type, status, duration and result. A failed child stands out until
+ * Daniel opens it.
+ */
 export function agentRow(session: Session, children: Children, agent: Subagent, depth: number): HTMLElement {
   const button = selecting(session.id, agent.id);
   button.classList.add("row", agent.kind);
@@ -247,8 +251,10 @@ function icon(name: string, path: string, click: () => void): HTMLElement {
   return button;
 }
 
-// A row in the list: its toggle, when anything is drawn under it, then the row, then its delete. They
-// are the row's siblings, as a button holds no button, so pressing them does not select the row.
+/**
+ * A row in the list: its toggle, when anything is drawn under it, then the row, then its delete. They
+ * are the row's siblings, as a button holds no button, so pressing them does not select the row.
+ */
 export function item(key: string, depth: number, toggle: { open: boolean; hiding: number } | null, row: HTMLElement, remove: HTMLElement | null) {
   const node = document.createElement("div");
   node.className = "item";
@@ -271,7 +277,7 @@ export function item(key: string, depth: number, toggle: { open: boolean; hiding
   return node;
 }
 
-// A session row's delete (decision of the session list's fold and delete): the rail's dialog, asked from the row.
+/** A session row's delete (decision of the session list's fold and delete): the rail's dialog, asked from the row. */
 export function deleting(session: Session): HTMLElement | null {
   if (session.status_only) return null;
   // `patch` keeps the first button and its listener, so the press reads the session as it is now.
@@ -301,8 +307,10 @@ function tree(session: Session, token: string | null): HTMLElement[] {
 }
 
 
-// The strip: a button per session that is not idle or ended, by its glyph and strip label, then one
-// count for those collapsed, which opens the full list.
+/**
+ * The strip: a button per session that is not idle or ended, by its glyph and strip label, then one
+ * count for those collapsed, which opens the full list.
+ */
 export function strip(sessions: Session[]): HTMLElement[] {
   const toggle = () => document.body.classList.toggle("list-open");
   const open = pressable(document.createElement("button"), null, toggle);
@@ -370,8 +378,10 @@ function projectMore(group: ProjectGroup<Session>): HTMLElement {
   return more;
 }
 
-// A project's header (#97): its name and, even while folded, its most urgent state: needs you over running. A saved project
-// with no live session is its header only, with its "⋯"; one whose folder is gone is struck through (#381).
+/**
+ * A project's header (#97): its name and, even while folded, its most urgent state: needs you over running. A saved project
+ * with no live session is its header only, with its "⋯"; one whose folder is gone is struck through (#381).
+ */
 export function projectHead(group: ProjectGroup<Session>): HTMLElement {
   const head = document.createElement("div");
   head.className = ["project-head", ...(group.gone ? ["gone"] : []), ...(group.key === shownProject() ? ["current"] : [])].join(" ");
@@ -425,8 +435,10 @@ function projectNode(group: ProjectGroup<Session>): HTMLElement {
   return node;
 }
 
-// The project groups (#97): one per repository, in the order its sessions are listed, then the saved projects with none (#381).
-// Patched, not rebuilt, so focus and text selection survive the update (danielrispler/Falinks#570).
+/**
+ * The project groups (#97): one per repository, in the order its sessions are listed, then the saved projects with none (#381).
+ * Patched, not rebuilt, so focus and text selection survive the update (danielrispler/Falinks#570).
+ */
 export function drawSidebar() {
   if (marksStale && studio.projects.length) readDots().catch(failure("map_marks"));
   patch(element("groups"), projectGroups(studio.listed, studio.projects, landedClear.hidden).map(projectNode));
@@ -452,9 +464,11 @@ function clearLanded(landed: Session[]): HTMLElement[] {
   return [button];
 }
 
-// The sessions are grouped by project, then by state: needs you, running, your turn, idle; the idle ones
-// fold. Ended ones are in History. The rows carry their state by shape, so the groups have no heading
-// (danielrispler/Falinks#572).
+/**
+ * The sessions are grouped by project, then by state: needs you, running, your turn, idle; the idle ones
+ * fold. Ended ones are in History. The rows carry their state by shape, so the groups have no heading
+ * (danielrispler/Falinks#572).
+ */
 export function showSessions(sessions: Session[]) {
   setListed(sessions);
   // The page's caches keep only the listed sessions (spec #548, Group 4).

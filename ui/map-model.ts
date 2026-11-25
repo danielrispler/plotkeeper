@@ -14,23 +14,27 @@ export type Rect = { x0: number; y0: number; x1: number; y1: number };
 type Held = { name: string; text: string; paths?: string[] };
 export type Part = { id: string; name: string; caption: string; purpose: string; holds: Held[]; tier: Tier; paths: string[]; zone?: string };
 type Actor = { id: string; name: string };
-// A link's kind (spec #473): `import`, a code dependency the check proves, or a run-time kind with a one-sentence reason. A version 1
-// map's links have none.
+/**
+ * A link's kind (spec #473): `import`, a code dependency the check proves, or a run-time kind with a one-sentence reason. A version 1
+ * map's links have none.
+ */
 export type LinkKind = "import" | "http" | "spawn" | "file";
 export type MapLink = { id: string; from: string; to: string; kind?: LinkKind; reason?: string };
 export type Law = { id: string; on: string; backing: "check" | "trust"; text: string };
 export type MapDoc = { ok: true; parts: Part[]; actors: Actor[]; links: MapLink[]; laws: Law[] } | { ok: false; why: string };
 
-// The sizes the stylesheet draws, `--plate-w` and the rest of tokens.css; a test holds them equal.
+/** The sizes the stylesheet draws, `--plate-w` and the rest of tokens.css; a test holds them equal. */
 export const plateSize: Size = { w: 264, h: 76 };
 export const actorSize: Size = { w: 120, h: 28 };
 /** The size drawn for `id`: an actor's, else a plate's. */
 export const sizeOf = (doc: { actors: { id: string }[] }, id: string): Size => (doc.actors.some((actor) => actor.id === id) ? actorSize : plateSize);
-// How far the pointer moves before a press on a plate becomes a drag, so a click never nudges it.
+/** How far the pointer moves before a press on a plate becomes a drag, so a click never nudges it. */
 export const dragThreshold = 6;
-// The layers Esc peels, first to last (user story 5, spec #334 and spec #380): an overlay over the map (a micro-world, #399, then the pre-flight,
-// #394; spec #378, "Layers and keys"), the patch review (#398), a drawer, a brief's "not confirmed" popover (#491), a PR brief (closing it keeps its step), a scrubbed past commit (back to now), a part's sheet, then the left panel (#385). The
-// tickets that add them register a `Layer` under its name in `map.ts`; the Map view itself is left only when none is open.
+/**
+ * The layers Esc peels, first to last (user story 5, spec #334 and spec #380): an overlay over the map (a micro-world, #399, then the pre-flight,
+ * #394; spec #378, "Layers and keys"), the patch review (#398), a drawer, a brief's "not confirmed" popover (#491), a PR brief (closing it keeps its step), a scrubbed past commit (back to now), a part's sheet, then the left panel (#385). The
+ * tickets that add them register a `Layer` under its name in `map.ts`; the Map view itself is left only when none is open.
+ */
 export const layerOrder = ["micro-world", "pre-flight", "patch-review", "drawer", "popover", "brief", "scrubbed", "sheet", "panel"] as const;
 export type LayerName = (typeof layerOrder)[number];
 export type Layer = { open: () => boolean; close: () => void };
@@ -45,7 +49,7 @@ const isLink = (value: unknown): value is MapLink => named(value, ["id", "from",
 const isLaw = (value: unknown): value is Law => named(value, ["id", "on"]);
 const listOf = <T>(value: unknown, is: (entry: unknown) => entry is T): T[] | null => (Array.isArray(value) && value.every(is) ? value : null);
 
-// The map file's text as the window draws it. The server already read it leniently, so an unknown field is ignored here too.
+/** The map file's text as the window draws it. The server already read it leniently, so an unknown field is ignored here too. */
 export function parseMap(text: string): MapDoc {
   let file: unknown;
   try {
@@ -59,7 +63,7 @@ export function parseMap(text: string): MapDoc {
   return { ok: true, parts, actors, links, laws };
 }
 
-// Daniel's tier for a part beats the map's own; a choice that is no tier is ignored.
+/** Daniel's tier for a part beats the map's own; a choice that is no tier is ignored. */
 export const effectiveTier = (part: Part, chosen: Record<string, string>): Tier => {
   const own = chosen[part.id] as Tier | undefined;
   return own && tiers.includes(own) ? own : part.tier;
@@ -71,10 +75,12 @@ const corner: Point = { x: plateSize.w / 2 + gap, y: plateSize.h / 2 + gap };
 const start: Point = { x: 640, y: 360 };
 const directions: Point[] = [0, 90, 180, 270, 45, 135, 225, 315].map((degrees) => ({ x: Math.cos((degrees * Math.PI) / 180), y: Math.sin((degrees * Math.PI) / 180) }));
 
-// Where each item without a saved position goes, once: never an item already placed. An item is put near what it links to, else near
-// the others of its `zone`, else near the middle of the plates there are, on the nearest spot clear of every plate. The one with
-// the most placed neighbours goes first, so a map grows outwards from what is placed; ties go in the map's order. Pure, so the
-// same map and positions always give the same places.
+/**
+ * Where each item without a saved position goes, once: never an item already placed. An item is put near what it links to, else near
+ * the others of its `zone`, else near the middle of the plates there are, on the nearest spot clear of every plate. The one with
+ * the most placed neighbours goes first, so a map grows outwards from what is placed; ties go in the map's order. Pure, so the
+ * same map and positions always give the same places.
+ */
 export function autoPlace(items: { id: string; zone?: string }[], links: { from: string; to: string }[], placed: Record<string, Point>): Record<string, Point> {
   const all: Record<string, Point> = { ...placed };
   const added: Record<string, Point> = {};
@@ -106,20 +112,26 @@ export function autoPlace(items: { id: string; zone?: string }[], links: { from:
   return added;
 }
 
-// A press on a plate that may become a drag: the pointer where it began, the plate's centre then, and whether the pointer has
-// moved the threshold's distance yet.
+/**
+ * A press on a plate that may become a drag: the pointer where it began, the plate's centre then, and whether the pointer has
+ * moved the threshold's distance yet.
+ */
 export type Drag = { id: string; from: Point; origin: Point; moved: boolean };
 export const dragStart = (id: string, from: Point, origin: Point): Drag => ({ id, from, origin, moved: false });
 
-// The pointer at `at`: where the plate goes, null while the press is still a click. Once past the threshold the plate follows the
-// pointer exactly, even back over the start.
+/**
+ * The pointer at `at`: where the plate goes, null while the press is still a click. Once past the threshold the plate follows the
+ * pointer exactly, even back over the start.
+ */
 export function dragMove(drag: Drag, at: Point): { drag: Drag; to: Point | null } {
   const moved = drag.moved || Math.hypot(at.x - drag.from.x, at.y - drag.from.y) >= dragThreshold;
   return { drag: { ...drag, moved }, to: moved ? { x: drag.origin.x + at.x - drag.from.x, y: drag.origin.y + at.y - drag.from.y } : null };
 }
 
-// Where the line from the centre of a box of `size` towards `toward` leaves the box: a link runs rim to rim. The centre itself
-// when `toward` is on it.
+/**
+ * Where the line from the centre of a box of `size` towards `toward` leaves the box: a link runs rim to rim. The centre itself
+ * when `toward` is on it.
+ */
 export function rimPoint(center: Point, size: Size, toward: Point): Point {
   const [dx, dy] = [toward.x - center.x, toward.y - center.y];
   if (dx === 0 && dy === 0) return center;
@@ -127,13 +139,15 @@ export function rimPoint(center: Point, size: Size, toward: Point): Point {
   return { x: center.x + dx * reach, y: center.y + dy * reach };
 }
 
-// A project switch: closes the layers that belong to the project shown, whatever the next one draws, since it may have no map to draw.
+/** A project switch: closes the layers that belong to the project shown, whatever the next one draws, since it may have no map to draw. */
 export function switchProject(layers: Partial<Record<LayerName, Layer>>) {
   for (const name of ["micro-world", "pre-flight", "patch-review", "popover", "brief"] as const) if (layers[name]?.open()) layers[name].close();
 }
 
-// Esc: closes the first layer that is open, in `layerOrder`, and says which; null when none was: on the bare map Esc does nothing, since the
-// map is the page's base (#386).
+/**
+ * Esc: closes the first layer that is open, in `layerOrder`, and says which; null when none was: on the bare map Esc does nothing, since the
+ * map is the page's base (#386).
+ */
 export function escapeMap(layers: Partial<Record<LayerName, Layer>>): LayerName | null {
   for (const name of layerOrder) {
     const layer = layers[name];
@@ -145,7 +159,7 @@ export function escapeMap(layers: Partial<Record<LayerName, Layer>>): LayerName 
   return null;
 }
 
-// The first prompt of "Draft a map", for a project with no `system-map.json` on its default branch.
+/** The first prompt of "Draft a map", for a project with no `system-map.json` on its default branch. */
 export const draftPrompt =
   "Draft system-map.json at this repository's root, in plain words: its parts, each with the files it owns, a purpose of one or two sentences " +
   "and the named things it holds (each with one sentence and its key files), the outside actors, the links between them, " +
@@ -191,9 +205,11 @@ export function sheetOf(part: Part, laws: Law[], tier: Tier, fog: Fog | undefine
   };
 }
 
-// Why a part's plate carries its marks, at the top of its sheet (#495), from the facts of this case: its newest thick fog entry (else its
-// newest) with its PR and why, and how many more; its staleness band with its last engagement (the server's line); a broken law, never
-// named. Null where the part has no such mark.
+/**
+ * Why a part's plate carries its marks, at the top of its sheet (#495), from the facts of this case: its newest thick fog entry (else its
+ * newest) with its PR and why, and how many more; its staleness band with its last engagement (the server's line); a broken law, never
+ * named. Null where the part has no such mark.
+ */
 export type SheetMarks = { fog: { line: string; more: number } | null; stale: string | null; broken: string | null };
 export function sheetMarks(part: string, fog: Fog | undefined, entries: FogEntry[], stale: string | undefined, ci: Ci | null): SheetMarks {
   // Entries are filed oldest first.
@@ -210,16 +226,20 @@ export function sheetMarks(part: string, fog: Fog | undefined, entries: FogEntry
   };
 }
 
-// The sheet's "Talks to" (spec #473): each link at either end of `part`, in the map's order, with the other end by name, whether its
-// arrow leaves the part, its kind and its reason. The sheet has no other list of links.
+/**
+ * The sheet's "Talks to" (spec #473): each link at either end of `part`, in the map's order, with the other end by name, whether its
+ * arrow leaves the part, its kind and its reason. The sheet has no other list of links.
+ */
 export type TalkRow = { link: string; other: string; out: boolean; kind?: LinkKind | undefined; reason?: string | undefined };
 export const talksTo = (part: string, links: MapLink[], nameOf: (id: string) => string): TalkRow[] =>
   links
     .filter((link) => link.from === part || link.to === part)
     .map((link) => ({ link: link.id, other: nameOf(link.from === part ? link.to : link.from), out: link.from === part, kind: link.kind, reason: link.reason }));
 
-// The map's lines (spec #473): links joining the same two ends, in either direction, are one line, drawn the way its first link runs and
-// holding every link's id, so a brief's light and a law's mark on any of them find it.
+/**
+ * The map's lines (spec #473): links joining the same two ends, in either direction, are one line, drawn the way its first link runs and
+ * holding every link's id, so a brief's light and a law's mark on any of them find it.
+ */
 export type LinkLine = { ids: string[]; from: string; to: string };
 export function linkLines(links: MapLink[]): LinkLine[] {
   const lines = new Map<string, LinkLine>();
@@ -232,19 +252,21 @@ export function linkLines(links: MapLink[]): LinkLine[] {
   return [...lines.values()];
 }
 
-// A plate's hover text: its name, caption and purpose, never the held items, so a glance stays a glance.
+/** A plate's hover text: its name, caption and purpose, never the held items, so a glance stays a glance. */
 export const plateTitle = (part: Part): string => [part.name, part.caption, part.purpose].filter(Boolean).join("\n\n");
 
-// Broken laws and the drawer (ticket #312). The drawer is read-only and holds any content a ticket gives it: blocks of code or text and
-// the one-click jumps out of it. `openDrawer` (map-drawer.ts) draws a `Drawer`; the history strip's commit drill-down builds one too.
+/**
+ * Broken laws and the drawer (ticket #312). The drawer is read-only and holds any content a ticket gives it: blocks of code or text and
+ * the one-click jumps out of it. `openDrawer` (map-drawer.ts) draws a `Drawer`; the history strip's commit drill-down builds one too.
+ */
 export type Jump = { label: string; title: string; to: { url: string } };
 type Block = { label?: string; code: string; jumps: Jump[] };
 export type Drawer = { title: string; note?: string | undefined; blocks: Block[]; jumps: Jump[] };
 
-// What the mark and the drill-down say for a broken law: coarse, never naming the law.
+/** What the mark and the drill-down say for a broken law: coarse, never naming the law. */
 export const brokenText = "A test that backs laws here failed on main";
 
-// What CI on the default branch said, in words. A missing red mark means only "no known failure", so each outcome says which it is.
+/** What CI on the default branch said, in words. A missing red mark means only "no known failure", so each outcome says which it is. */
 export function ciLine(ci: Ci | null): string {
   const earlier = ci?.earlier ? " (for an earlier commit; a newer run is going)" : "";
   switch (ci?.status) {
@@ -256,18 +278,20 @@ export function ciLine(ci: Ci | null): string {
   }
 }
 
-// The parts a broken law marks: only when the run failed in a test that backs a law.
+/** The parts a broken law marks: only when the run failed in a test that backs a law. */
 export const brokenParts = (ci: Ci | null): Set<string> => new Set(ci?.status === "broken" ? ci.parts : []);
 
-// What the part sheet says of CI for `part`, or null when it holds no law a check backs and is not marked: its line, whether it is
-// the loud one, and whether a drill-down has anything to show.
+/**
+ * What the part sheet says of CI for `part`, or null when it holds no law a check backs and is not marked: its line, whether it is
+ * the loud one, and whether a drill-down has anything to show.
+ */
 export function sheetCi(ci: Ci | null, part: string, backed: boolean): { line: string; broken: boolean; drill: boolean } | null {
   const broken = brokenParts(ci).has(part);
   if (!broken && !backed) return null;
   return { line: ciLine(ci), broken, drill: ci !== null && ci.status !== "unknown" };
 }
 
-// "See the proof" for a law: each tagged test's code from the tag on. The page has no editor to jump to.
+/** "See the proof" for a law: each tagged test's code from the tag on. The page has no editor to jump to. */
 export function proofDrawer(law: string, proofs: Proof[]): Drawer {
   const blocks: Block[] = proofs.map((proof) => ({
     label: `${proof.file}:${proof.line}${proof.test ? ` · ${proof.test}` : ""}`,
@@ -281,7 +305,9 @@ export function proofDrawer(law: string, proofs: Proof[]): Drawer {
   };
 }
 
-// The broken-law drill-down: the run's status, a note when a newer run is going, the failing log's tail, and a jump to the run on GitHub.
+/**
+ * The broken-law drill-down: the run's status, a note when a newer run is going, the failing log's tail, and a jump to the run on GitHub.
+ */
 export function ciDrawer(ci: Ci): Drawer {
   return {
     title: ciLine({ ...ci, earlier: false }),
@@ -291,11 +317,11 @@ export function ciDrawer(ci: Ci): Drawer {
   };
 }
 
-// The history strip and time travel (ticket #313). A scrub is a past commit's map shown read-only.
+/** The history strip and time travel (ticket #313). A scrub is a past commit's map shown read-only. */
 export type Scrub = Pick<HistoricalMap, "commit" | "short" | "label"> & { source: string };
 export type StripRow = HistoryEntry & { current: boolean; title: string };
 
-// What a commit of the history strip offers of its PR's stored brief: a quiet "Brief" button, none when the PR has none.
+/** What a commit of the history strip offers of its PR's stored brief: a quiet "Brief" button, none when the PR has none. */
 export const briefOffer = (row: Pick<HistoryEntry, "brief" | "short">): { number: number; label: string; title: string } | null => {
   if (row.brief === null) return null;
   return { number: row.brief, label: "Brief", title: `Play the brief of #${row.brief}, which this commit merged` };
@@ -308,10 +334,10 @@ export const stripOf = (entries: HistoryEntry[], viewing: string | null): StripR
     title: `${entry.short}${entry.fogged ? " · you have not caught up on this" : ""}\nShow the map as of this commit`,
   }));
 
-// The quiet banner while a past commit is shown: what it says and the word of the way back.
+/** The quiet banner while a past commit is shown: what it says and the word of the way back. */
 export const scrubBanner = (scrub: Pick<Scrub, "short">): { text: string; back: string } => ({ text: `Viewing ${scrub.short}`, back: "Back to now" });
 
-// A commit's drill-down: each file it changed with its diff, and the commit on GitHub when the project is there.
+/** A commit's drill-down: each file it changed with its diff, and the commit on GitHub when the project is there. */
 export function commitDrawer(found: CommitFiles): Drawer {
   const count = `${found.files.length} ${found.files.length === 1 ? "file" : "files"}`;
   return {
@@ -322,8 +348,10 @@ export function commitDrawer(found: CommitFiles): Drawer {
   };
 }
 
-// Tells which of a series of scrubs is the newest. `start` takes a ticket; `cancel` (Back to now) makes every ticket out stale; a
-// scrub that reads slowly lands only while its ticket is still `live`, so it never overrides what Daniel did after it.
+/**
+ * Tells which of a series of scrubs is the newest. `start` takes a ticket; `cancel` (Back to now) makes every ticket out stale; a
+ * scrub that reads slowly lands only while its ticket is still `live`, so it never overrides what Daniel did after it.
+ */
 export function scrubTickets() {
   let latest = 0;
   return {
@@ -334,7 +362,7 @@ export function scrubTickets() {
 }
 
 // ---- The left panel (spec #380, ticket #385): one slot over the map's left side for a session's story, History, a turn's diff (widened) or
-// Settings, beside the part's sheet on the right.
+/** Settings, beside the part's sheet on the right. */
 export type PanelContent =
   | { kind: "story"; session: string }
   | { kind: "history" }
@@ -343,44 +371,50 @@ export type PanelContent =
   // A worker's or helper's log (#386): it had the centre column, which the map replaced.
   | { kind: "log"; session: string; agent: string };
 export type Overlays = { panel: PanelContent | null; sheet: string | null };
-// Below this window width only one overlay is open at a time (user story 52).
+/** Below this window width only one overlay is open at a time (user story 52). */
 export const narrowBelow = 1007;
-// Opens `panel` (null closes it). Below `narrowBelow`, or for the widened diff, the part's sheet closes (user stories 29, 52).
+/** Opens `panel` (null closes it). Below `narrowBelow`, or for the widened diff, the part's sheet closes (user stories 29, 52). */
 export const withPanel = (now: Overlays, panel: PanelContent | null, width: number): Overlays => ({
   panel,
   sheet: panel && (width < narrowBelow || panel.kind === "diff") ? null : now.sheet,
 });
-// Opens the sheet of part `sheet` (null closes it). Below `narrowBelow`, or over the widened diff, the panel closes.
+/** Opens the sheet of part `sheet` (null closes it). Below `narrowBelow`, or over the widened diff, the panel closes. */
 export const withSheet = (now: Overlays, sheet: string | null, width: number): Overlays => ({
   sheet,
   panel: sheet && (width < narrowBelow || now.panel?.kind === "diff") ? null : now.panel,
 });
-// A press on a session's row or chip: its story, or none when the panel already shows that story (a second click closes it).
+/** A press on a session's row or chip: its story, or none when the panel already shows that story (a second click closes it). */
 export const pressRow = (panel: PanelContent | null, session: string): PanelContent | null =>
   panel?.kind === "story" && panel.session === session ? null : { kind: "story", session };
-// The session the panel shows (its story, a turn's diff or a worker's log), whose chips stay lit while it is open, and whose closing selects no session.
+/**
+ * The session the panel shows (its story, a turn's diff or a worker's log), whose chips stay lit while it is open, and whose closing selects no session.
+ */
 export const panelSession = (panel: PanelContent | null): string | null =>
   panel?.kind === "story" || panel?.kind === "diff" || panel?.kind === "log" ? panel.session : null;
-// The project the page opens on (#386): the last viewed, while the list still holds it, else the first; none on a fresh install.
+/** The project the page opens on (#386): the last viewed, while the list still holds it, else the first; none on a fresh install. */
 export const startProject = (last: string | null, projects: string[]): string | null =>
   last !== null && projects.includes(last) ? last : (projects[0] ?? null);
-// What the page shows (#386): a project's map, and what the left panel holds over it.
+/** What the page shows (#386): a project's map, and what the left panel holds over it. */
 export type PageView = { project: string | null; panel: PanelContent | null };
-// Selecting a session shows its project's map, with its story, or a worker's log, in the left panel.
+/** Selecting a session shows its project's map, with its story, or a worker's log, in the left panel. */
 export const selectedView = (session: string, project: string, agent: string | null): PageView => ({
   project,
   panel: agent === null ? { kind: "story", session } : { kind: "log", session, agent },
 });
-// A press on a project header shows that project's map; a session's panel of another project closes with the switch. A press on the shown
-// project's header folds its group, as the header did before it switched projects (#97).
+/**
+ * A press on a project header shows that project's map; a session's panel of another project closes with the switch. A press on the shown
+ * project's header folds its group, as the header did before it switched projects (#97).
+ */
 export function pressHeader(page: PageView, pressed: string, projectOf: (session: string) => string | null): PageView | "fold" {
   if (pressed === page.project) return "fold";
   const session = panelSession(page.panel);
   return { project: pressed, panel: session === null || projectOf(session) === pressed ? page.panel : null };
 }
 
-// The parts' tab order (#460): top to bottom, then left to right. A plate within half a plate's height of a row's first (highest) plate
-// reads on that row, so one dragged a little out of line keeps its place.
+/**
+ * The parts' tab order (#460): top to bottom, then left to right. A plate within half a plate's height of a row's first (highest) plate
+ * reads on that row, so one dragged a little out of line keeps its place.
+ */
 export function readingOrder(positions: Record<string, Point>): string[] {
   const rows: [string, Point][][] = [];
   for (const entry of Object.entries(positions).sort(([, a], [, b]) => a.y - b.y || a.x - b.x)) {
@@ -392,7 +426,9 @@ export function readingOrder(positions: Record<string, Point>): string[] {
   return rows.flatMap((row) => row.sort(([, a], [, b]) => a.x - b.x).map(([id]) => id));
 }
 
-// Where the law marks of a line from `a` to `b` sit: `count` points along it, 10px apart, centred on its middle, so several never stack.
+/**
+ * Where the law marks of a line from `a` to `b` sit: `count` points along it, 10px apart, centred on its middle, so several never stack.
+ */
 export function markPoints(a: Point, b: Point, count: number): Point[] {
   const [dx, dy] = [b.x - a.x, b.y - a.y];
   const length = Math.hypot(dx, dy) || 1;

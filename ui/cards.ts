@@ -5,8 +5,10 @@
 import { glyphOnly, pressable, prose, text } from "./dom.js";
 import type { SessionCards } from "./types.js";
 
-// The Brief's slots in order (danielrispler/plotkeeper#122): Goal, Decisions, Open. A brief stored as prose shows as it is,
-// with no title, until the session has a Goal.
+/**
+ * The Brief's slots in order (danielrispler/plotkeeper#122): Goal, Decisions, Open. A brief stored as prose shows as it is,
+ * with no title, until the session has a Goal.
+ */
 export type BriefSlot = { title: string; lines: string[]; cites?: string[] };
 export function briefSlots(cards: SessionCards): BriefSlot[] {
   const slots: BriefSlot[] = [];
@@ -33,7 +35,7 @@ function slotTitle(title: string): HTMLElement {
   return node;
 }
 
-// The session's brief: each slot with its title and one paragraph per line. A citation opens its turn with `open`.
+/** The session's brief: each slot with its title and one paragraph per line. A citation opens its turn with `open`. */
 export const briefNodes = (cards: SessionCards, open: (id: string) => void): HTMLElement[] =>
   briefSlots(cards).flatMap(({ title, lines, cites }) => [
     ...(title ? [slotTitle(title)] : []),

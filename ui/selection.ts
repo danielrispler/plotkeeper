@@ -15,9 +15,11 @@ import { showCards, showView } from "./story.js";
 import { showToast } from "./toast.js";
 import type { Selection } from "./types.js";
 
-// The press shows at once in the list; then the core selects, and the window draws the selection it
-// returns. Opening a subagent's line also fades a failed helper. A later press wins over this one's
-// reply.
+/**
+ * The press shows at once in the list; then the core selects, and the window draws the selection it
+ * returns. Opening a subagent's line also fades a failed helper. A later press wins over this one's
+ * reply.
+ */
 export async function select(id: string, agent: string | null = null) {
   // The map is the page's base (#386): the session's project's map shows, and its story opens in the left panel (#385) at once; a worker's
   // log opens there once the server has opened it.
@@ -56,14 +58,18 @@ export async function select(id: string, agent: string | null = null) {
   await catchUp().catch(failure("catch up"));
 }
 
-// A press on a session's row in the list or its chip on the map: a second press on the session the panel shows closes the panel (#385);
-// otherwise it selects.
+/**
+ * A press on a session's row in the list or its chip on the map: a second press on the session the panel shows closes the panel (#385);
+ * otherwise it selects.
+ */
 export function pressSession(id: string, agent: string | null = null) {
   if (agent === null && pressRow(panelShown(), id) === null) return closePanel();
   return select(id, agent);
 }
 
-// Selects no session, as closing the left panel's story does (#385): the core clears the selection and what is viewed, and the bare map stays.
+/**
+ * Selects no session, as closing the left panel's story does (#385): the core clears the selection and what is viewed, and the bare map stays.
+ */
 export async function deselect() {
   setPending(null);
   try {

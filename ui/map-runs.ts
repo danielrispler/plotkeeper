@@ -9,11 +9,13 @@ import { copyOverturn, overturnReport } from "./ratify.js";
 import type { RunView, Runs } from "./types.js";
 
 export type RunRow = { id: string; state: RunView["state"]; title: string; note: string; action: "Cancel" | "Dismiss"; denials: string[]; prompt: string | null };
-// What a copy left to show under its run's row: the line, and for a clipboard that refused, the prompt to copy by hand.
+/** What a copy left to show under its run's row: the line, and for a clipboard that refused, the prompt to copy by hand. */
 export type CopyNote = { id: string; line: string; manual: string | null };
-// What the rows' buttons do: `cancel` stops a queued or running run and removes an ended one, and settles when the server has answered;
-// `confirm` asks before a running run's Cancel (#459) and resolves true when confirmed; `noted` is told what a copy left to show, to keep
-// it across a redraw.
+/**
+ * What the rows' buttons do: `cancel` stops a queued or running run and removes an ended one, and settles when the server has answered;
+ * `confirm` asks before a running run's Cancel (#459) and resolves true when confirmed; `noted` is told what a copy left to show, to keep
+ * it across a redraw.
+ */
 export type RunActs = {
   cancel: (id: string) => unknown;
   confirm: (ask: Confirm) => Promise<boolean>;
@@ -30,7 +32,7 @@ const clock = (at: number) => {
   return `${String(time.getHours()).padStart(2, "0")}:${String(time.getMinutes()).padStart(2, "0")}`;
 };
 
-// The project's runs as rows, in the order the server lists them, which is the order they were asked for.
+/** The project's runs as rows, in the order the server lists them, which is the order they were asked for. */
 export function runRows(runs: Runs | null | undefined): RunRow[] {
   const list = runs?.runs ?? [];
   const next = list.find((run) => run.state === "queued")?.id;
@@ -105,8 +107,10 @@ function rowNode(row: RunRow, act: RunActs, note: CopyNote | null): HTMLElement 
 // What the runs area's status region says, and its indicator shows: the pause, if any (#465).
 const pauseWords = (runs: Runs | null | undefined) => (runs?.paused == null ? "" : `Background runs are paused. ${runs.paused}.`);
 
-// What the runs area holds: nothing with no run and no pause; else its title, the pause's one indicator with Resume, and a row per run.
-// `note` is what the last copy left, drawn under its run's row.
+/**
+ * What the runs area holds: nothing with no run and no pause; else its title, the pause's one indicator with Resume, and a row per run.
+ * `note` is what the last copy left, drawn under its run's row.
+ */
 export function runsNodes(runs: Runs | null | undefined, act: RunActs, note: CopyNote | null = null): HTMLElement[] {
   const rows = runRows(runs);
   const paused = runs?.paused ?? null;
@@ -120,9 +124,11 @@ export function runsNodes(runs: Runs | null | undefined, act: RunActs, note: Cop
   return [...nodes, ...rows.map((row) => rowNode(row, act, note))];
 }
 
-// Draws the runs area into `box`. While it holds anything, its one status region stays in it across draws, so the pause is said when it
-// starts and not again at each draw (#465); with nothing to show the box is empty, so the side area can hide, and the region comes back
-// empty with the next runs.
+/**
+ * Draws the runs area into `box`. While it holds anything, its one status region stays in it across draws, so the pause is said when it
+ * starts and not again at each draw (#465); with nothing to show the box is empty, so the side area can hide, and the region comes back
+ * empty with the next runs.
+ */
 export function paintRuns(box: HTMLElement, runs: Runs | null | undefined, act: RunActs, note: CopyNote | null = null) {
   const nodes = runsNodes(runs, act, note);
   if (nodes.length) drawWithStatus(box, nodes, pauseWords(runs));

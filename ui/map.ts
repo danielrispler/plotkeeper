@@ -24,7 +24,7 @@ import { knownProjects, projectGone } from "./projects.js";
 import type { Camera, MapState } from "./types.js";
 
 export type LoadedMap = Extract<MapDoc, { ok: true }>;
-// What the view holds once a map loaded: its payload, the map as parsed, and every id's centre in the world.
+/** What the view holds once a map loaded: its payload, the map as parsed, and every id's centre in the world. */
 export type MapView = {
   project: string;
   state: MapState;
@@ -50,7 +50,7 @@ export const registerLayer = (name: LayerName, layer: Layer) => {
   layers[name] = layer;
 };
 
-// What `startMap` is given by `main.ts`, which owns what the Map view may not import.
+/** What `startMap` is given by `main.ts`, which owns what the Map view may not import. */
 export type MapDeps = {
   // The project of the selected session, null with none.
   selectedProject: () => string | null;
@@ -71,14 +71,14 @@ let rig: CameraRig | null = null;
 // The sheet's part the camera last revealed, so a later draw does not pan Daniel's view back to it.
 let revealed: string | null = null;
 
-// The map is the page's base (#386): the body carries `map-open` from the start and never loses it.
+/** The map is the page's base (#386): the body carries `map-open` from the start and never loses it. */
 export const mapShown = () => document.body?.classList.contains("map-open") === true;
-// The project whose map shows; null before the saved list arrives, and on a fresh install.
+/** The project whose map shows; null before the saved list arrives, and on a fresh install. */
 export const shownProject = () => project;
 export const currentMap = (): MapView | null => view;
 export const currentScrub = (): Scrub | null => scrub;
 
-// Shows the map as of `to` read-only, or now again with null (the one setter of a scrub: `scrubTo` in `map-history.ts` calls it).
+/** Shows the map as of `to` read-only, or now again with null (the one setter of a scrub: `scrubTo` in `map-history.ts` calls it). */
 export function setScrub(to: Scrub | null) {
   scrub = to;
   draw();
@@ -101,7 +101,7 @@ async function load(path: string, fetch: boolean) {
 // The last viewed project, which the page opens on (#386): a per-browser convenience, so a store that throws only loses it.
 const lastViewed = pageStore("project");
 
-// Shows `path`'s map.
+/** Shows `path`'s map. */
 export function openMap(path: string | null) {
   if (path !== project) {
     // A PR brief and the pre-flight belong to the project they opened on; the next may have no map to draw, so they close here, not by a draw.
@@ -157,7 +157,7 @@ export function projectsChanged() {
   if (projectGone(project) !== (element("map-body").querySelector(".map-gone") !== null)) openMap(project);
 }
 
-// Reads the map again, for a change the view itself made (a tier, "I know this"); the payload decides whether it draws.
+/** Reads the map again, for a change the view itself made (a tier, "I know this"); the payload decides whether it draws. */
 export const reloadMap = () => (project === null ? Promise.resolve() : load(project, false));
 
 // The gutter around the plates when the camera reveals or fits them: `--map-gutter` in tokens.css.
@@ -194,12 +194,12 @@ function moveCamera(to: Camera, glide: boolean) {
   }, 400));
 }
 
-// A PR brief's camera, shown while it plays (`map-brief.ts`); Daniel's view is kept as it was.
+/** A PR brief's camera, shown while it plays (`map-brief.ts`); Daniel's view is kept as it was. */
 export function lendCamera(camera: Camera) {
   rig?.lend(camera);
   applyCamera(true);
 }
-// Shows Daniel's view again, as the brief found it.
+/** Shows Daniel's view again, as the brief found it. */
 export function giveCameraBack() {
   rig?.giveBack();
   applyCamera(true);
@@ -214,17 +214,19 @@ const worldBox = (current: MapView) => {
   };
 };
 
-// ⌘0 and the palette's Fit map: the whole map in the area.
+/** ⌘0 and the palette's Fit map: the whole map in the area. */
 export function fitMap() {
   if (!mapShown() || !view || !Object.keys(view.positions).length) return;
   const { canvas } = view.slots;
   moveCamera(fitCamera(worldBox(view), { w: canvas.clientWidth, h: canvas.clientHeight }, mapGutter), true);
 }
 
-// Esc in the Map view: the first open layer (a drawer, a brief, a scrubbed commit, the sheet, the left panel); on the bare map, nothing.
+/**
+ * Esc in the Map view: the first open layer (a drawer, a brief, a scrubbed commit, the sheet, the left panel); on the bare map, nothing.
+ */
 export const mapEscape = () => void escapeMap(layers);
 
-// The side area shows while any of its slots holds something; the tray floats on its own (#385).
+/** The side area shows while any of its slots holds something; the tray floats on its own (#385). */
 export const syncSide = (slots: Omit<MapView["slots"], "canvas">) => {
   slots.side.hidden = ![slots.notPlaced, slots.runs, slots.sheet, slots.drawer].some((slot) => slot.childElementCount > 0);
   // When a part's sheet opens, the camera pans just enough to show that part whole beside it, once per part, so a later draw never pans
@@ -246,8 +248,10 @@ function clearBand(canvas: HTMLElement) {
   return { left, right };
 }
 
-// Pans just enough to show the parts `ids` whole in the band the left panel and the sheet leave (#383, #385). Only the camera moves: no position
-// is written, and a brief's camera is never moved.
+/**
+ * Pans just enough to show the parts `ids` whole in the band the left panel and the sheet leave (#383, #385). Only the camera moves: no position
+ * is written, and a brief's camera is never moved.
+ */
 export function revealParts(ids: string[]) {
   const shown = view;
   if (!shown || !rig || rig.lent() || !shown.slots.canvas.clientWidth) return;
@@ -564,7 +568,7 @@ function draw() {
   unreadHooks.forEach((hook) => hook(slots.banner, scrub));
 }
 
-// Wires the view: the project menu, the window's focus and a merge the server saw.
+/** Wires the view: the project menu, the window's focus and a merge the server saw. */
 export function startMap(given: MapDeps) {
   deps = given;
   element("map-legend").append(

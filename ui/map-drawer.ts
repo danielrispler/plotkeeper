@@ -13,7 +13,7 @@ import type { Drawer, Jump } from "./map-model.js";
 
 let open: { project: string; drawer: Drawer } | null = null;
 
-// Opens the drawer on the current map's project with `drawer`, replacing what it held.
+/** Opens the drawer on the current map's project with `drawer`, replacing what it held. */
 export function openDrawer(drawer: Drawer) {
   const view = currentMap();
   if (!view) return;
@@ -30,9 +30,11 @@ export function closeDrawer() {
 
 const drawerOpen = () => open !== null && currentMap()?.project === open.project;
 
-// A jump out of the drawer: a real link, opened in a new tab, so ⌘-click and middle-click work as on any link (#462). Its address is the
-// server's data, so only an `https:` one is linked, as the patch review's draft PR is (`patch-review.ts`); another shows its label alone.
-// Exported for the tests.
+/**
+ * A jump out of the drawer: a real link, opened in a new tab, so ⌘-click and middle-click work as on any link (#462). Its address is the
+ * server's data, so only an `https:` one is linked, as the patch review's draft PR is (`patch-review.ts`); another shows its label alone.
+ * Exported for the tests.
+ */
 export function jumpLink(jump: Jump) {
   const link = text("a", jump.label, "btn quiet drawer-jump");
   if (jump.to.url.startsWith("https://")) link.setAttribute("href", jump.to.url);

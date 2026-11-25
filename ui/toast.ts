@@ -21,7 +21,7 @@ export type Toast = { session: Session; count: number };
 
 export const toastShows = (mode: LayoutMode) => mode === "focus";
 
-// The first line of a session's open question, else of the step it waits on, such as a permission's.
+/** The first line of a session's open question, else of the step it waits on, such as a permission's. */
 export function questionLine(session: Pick<Session, "questions" | "last_step">): string {
   const open = session.questions.find((q) => q.answer === "open");
   return (open?.questions[0]?.question ?? session.last_step?.detail ?? "").split("\n")[0] ?? "";
@@ -30,7 +30,7 @@ export function questionLine(session: Pick<Session, "questions" | "last_step">):
 // Whether `session` is a block the toast is about: it needs Daniel and is not the `focused` one.
 const toasted = (session: Session, focused: string | null) => session.state === "needs_you" && session.id !== focused;
 
-// The toast for the sessions that need Daniel, less the `focused` one and those he dismissed.
+/** The toast for the sessions that need Daniel, less the `focused` one and those he dismissed. */
 export function toastFor(listed: Session[], focused: string | null, dismissed: Set<string>): Toast | null {
   const blocked = listed.filter((s) => toasted(s, focused) && !dismissed.has(s.id));
   return blocked[0] ? { session: blocked[0], count: blocked.length } : null;
@@ -45,7 +45,7 @@ const TOASTS = ["toast", "note-toast", "copy-toast", "whats-new-toast", "clear-t
 const said = new Map<string, string>();
 let returnTo: HTMLElement | null = null;
 
-// What a toast announces: its visible text, never its buttons' names, and that it has an action.
+/** What a toast announces: its visible text, never its buttons' names, and that it has an action. */
 export const toastSays = (parts: string[]) => `${parts.filter(Boolean).join(". ")}. Actions available.`;
 
 // A toast's buttons, made once so a redraw keeps the focus on them: its action, which `main` makes or finds in the toast, and its ×,
@@ -66,9 +66,11 @@ export function toastButtons(toast: HTMLElement, main: () => HTMLElement, close:
   return buttons;
 }
 
-// Opens each toast that has something to say (`hidden` false) as a manual popover and closes the rest; none opens while a modal
-// dialog is open. A toast newly open, or saying something new, is announced. Then the open ones are placed, and a toast that closed
-// with the focus in it passes the focus on.
+/**
+ * Opens each toast that has something to say (`hidden` false) as a manual popover and closes the rest; none opens while a modal
+ * dialog is open. A toast newly open, or saying something new, is announced. Then the open ones are placed, and a toast that closed
+ * with the focus in it passes the focus on.
+ */
 export function stackToasts() {
   const modal = document.querySelector("dialog:modal") !== null;
   const focused = document.activeElement;
@@ -134,7 +136,7 @@ export function watchToasts(selectSession: (id: string) => unknown) {
   document.addEventListener("toggle", (event) => event.target instanceof HTMLDialogElement && stackToasts(), true);
 }
 
-// Draws the toast from the list, the selection and the layout.
+/** Draws the toast from the list, the selection and the layout. */
 export function showToast() {
   const mode = (document.body.dataset.layout ?? "full") as LayoutMode;
   const focused = studio.selection?.session.id ?? null;
@@ -168,8 +170,10 @@ function dismissToast() {
   showToast();
 }
 
-// Jumps to the toast's session and leaves focus mode; the next-needs-you key does the same. False:
-// no toast shows.
+/**
+ * Jumps to the toast's session and leaves focus mode; the next-needs-you key does the same. False:
+ * no toast shows.
+ */
 export function jumpToNeedsYou(): boolean {
   if (!shown) return false;
   // Leaving focus mode redraws the toast, which then shows none, so the session is read first.
@@ -209,8 +213,10 @@ export function hideClearToast() {
   stackToasts();
 }
 
-// The what's-new toast (#527): "Updated to X.Y.Z", a "What's new" link to that version's GitHub Release, and ×. Not in colour; it
-// stays until its ×.
+/**
+ * The what's-new toast (#527): "Updated to X.Y.Z", a "What's new" link to that version's GitHub Release, and ×. Not in colour; it
+ * stays until its ×.
+ */
 export function showWhatsNewToast(version: string, url: string) {
   const toast = element("whats-new-toast");
   const message = `Updated to ${version}`;

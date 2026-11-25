@@ -27,10 +27,12 @@ const named = (c: Check) => {
 // A check is listed once it has ended: a running one is not passed, failed or ran.
 const ended = (c: Check) => c.status !== "running";
 
-// The top level: "3 files · +2 merged · 2 checks passed". A check's status is its last run's, so only one that ended failed is named;
-// one that only "ran" is counted apart.
-// `words` gives a failed check's name in plain words once it is known (`failed_check_name`); until then, and for a check it does
-// not know, the check is named by its suite.
+/**
+ * The top level: "3 files · +2 merged · 2 checks passed". A check's status is its last run's, so only one that ended failed is named;
+ * one that only "ran" is counted apart.
+ * `words` gives a failed check's name in plain words once it is known (`failed_check_name`); until then, and for a check it does
+ * not know, the check is named by its suite.
+ */
 export function evidenceLine({ files, checks: all }: Facts, words: (check: Check) => string | undefined = () => undefined): string {
   const checks = all.filter(ended);
   const count = (status: Check["status"]) => checks.filter((c) => c.status === status).length;
@@ -44,11 +46,11 @@ export function evidenceLine({ files, checks: all }: Facts, words: (check: Check
   ].join(" · ");
 }
 
-// Whether the turn has an evidence line: its agent reports trees (agy's does not), and it has files or checks.
+/** Whether the turn has an evidence line: its agent reports trees (agy's does not), and it has files or checks. */
 export const hasEvidence = (turn: Facts, capabilities: Pick<Capabilities, "turn_trees">): boolean =>
   capabilities.turn_trees && (turn.files?.files.length ?? 0) + (turn.files?.merged ?? 0) + turn.checks.filter(ended).length > 0;
 
-// The opened list: each file with its agent, and each check with its status.
+/** The opened list: each file with its agent, and each check with its status. */
 export function evidenceRows({ files, checks: all }: Facts): EvidenceRow[] {
   const checks = all.filter(ended);
   const counts = (added: number | null, removed: number | null) => (added === null || removed === null ? "" : ` +${added} −${removed}`);
@@ -217,8 +219,10 @@ function lineInto(node: HTMLElement, line: string) {
   node.replaceChildren(...line.split("✗").flatMap((part, i) => (i ? [glyphOnly("✗"), part] : [part])));
 }
 
-// The line for turn `index` of `session`. `only: "failed"` is the running turn's: just the checks whose last run failed.
-// Null when there is nothing to show.
+/**
+ * The line for turn `index` of `session`. `only: "failed"` is the running turn's: just the checks whose last run failed.
+ * Null when there is nothing to show.
+ */
 export function evidenceElement(session: string, index: number, turn: Facts & Ended, { only }: { only: "all" | "failed" }): HTMLElement | null {
   const facts: Facts = only === "failed" ? { files: null, checks: turn.checks.filter((c) => c.status === "failed") } : turn;
   const words = (c: Check) => {

@@ -6,20 +6,26 @@ import type { AlsoGroup, AlsoKind, BriefFigure, BriefStep, BriefView, Camera, Pa
 
 // ---- The PR brief view (spec danielrispler/plotkeeper#334, ticket #339): what `map-brief.ts` draws, as pure logic.
 
-// The steps a brief plays from one tray row: a chapter's own, with the overview in front when this is the chapter that carries it (`Playing.overview`).
-// A single story has one chapter.
+/**
+ * The steps a brief plays from one tray row: a chapter's own, with the overview in front when this is the chapter that carries it (`Playing.overview`).
+ * A single story has one chapter.
+ */
 export function playlist(brief: PrBrief, chapter: number, overview: boolean): BriefStep[] {
   const own = brief.chapters[chapter]?.steps ?? [];
   return overview ? [...brief.overview, ...own] : own;
 }
 
-// What the brief says, without the Ratify step that ends its last chapter: reading to the end, the check and the "also touched" lines
-// all key on the story, since ratifying never blocks anything (#343).
+/**
+ * What the brief says, without the Ratify step that ends its last chapter: reading to the end, the check and the "also touched" lines
+ * all key on the story, since ratifying never blocks anything (#343).
+ */
 export function storySteps<T extends { k: string }>(list: T[]): T[] {
   return list.filter((step) => step.k !== "Ratify");
 }
 
-// "Also touched", which shows with the last step of the last chapter: an older brief's writer lines, a newer one's groups by kind (#492).
+/**
+ * "Also touched", which shows with the last step of the last chapter: an older brief's writer lines, a newer one's groups by kind (#492).
+ */
 export function alsoAt(brief: PrBrief, chapter: number, step: number, length: number): { lines: PrBrief["also"]; groups: AlsoRow[] } {
   return chapter === brief.chapters.length - 1 && step === length - 1 ? { lines: brief.also, groups: alsoRows(brief.also_groups ?? []) } : { lines: [], groups: [] };
 }
@@ -46,8 +52,10 @@ export function alsoRows(groups: AlsoGroup[]): AlsoRow[] {
 // `story`: a "Since you read" story's head it runs from (#497), played apart from the full brief of the same PR; "" for a brief.
 type Playing = { project: string; pr: number; chapter: number; step: number; overview: boolean; story: string };
 
-// A chapter is complete when its last step was seen and its check answered, right or wrong, when it holds one (#342). Leaving
-// mid-chapter completes nothing. `fire` runs once, the moment both hold.
+/**
+ * A chapter is complete when its last step was seen and its check answered, right or wrong, when it holds one (#342). Leaving
+ * mid-chapter completes nothing. `fire` runs once, the moment both hold.
+ */
 export type Gate = { sawLast: () => void; answered: () => void; done: () => boolean };
 export function chapterGate(list: Pick<BriefStep, "check">[], fire: () => void): Gate {
   let last = false;
@@ -80,7 +88,7 @@ export type Player = {
   // Leaves the brief where it is; the next `open` of it continues from there.
   close: () => void;
 };
-// What plays and where each brief was left. Opening one while the map shows a past commit returns the map to now first.
+/** What plays and where each brief was left. Opening one while the map shows a past commit returns the map to now first. */
 export function briefPlayer(deps: { scrubbed: () => boolean; backToNow: () => void }): Player {
   const left = new Map<string, number>();
   // Per brief: the chapter that carries the overview (the first opened), and whether it has been played to its end.
@@ -122,8 +130,10 @@ export function briefPlayer(deps: { scrubbed: () => boolean; backToNow: () => vo
   };
 }
 
-// Which of the requests that began last is the one still wanted: `begin` returns a check that is true until another request
-// begins or `cancel` is called, so a slow earlier request does not land over a later one or over a brief closed since.
+/**
+ * Which of the requests that began last is the one still wanted: `begin` returns a check that is true until another request
+ * begins or `cancel` is called, so a slow earlier request does not land over a later one or over a brief closed since.
+ */
 export function latestRequest() {
   let n = 0;
   return {
@@ -136,8 +146,10 @@ export function latestRequest() {
 }
 
 export type { Camera };
-// Where the world sits so `box` fills the visible area `area` at the largest scale up to `max`, centred in the room the panel leaves above it
-// (`room.top` clear at the top, `room.bottom` taken by the panel). A point `p` of the world lands at `p * scale + (x, y)`.
+/**
+ * Where the world sits so `box` fills the visible area `area` at the largest scale up to `max`, centred in the room the panel leaves above it
+ * (`room.top` clear at the top, `room.bottom` taken by the panel). A point `p` of the world lands at `p * scale + (x, y)`.
+ */
 export function briefCamera(box: Rect, area: { w: number; h: number }, room: { top: number; bottom: number }, max: number): Camera {
   const height = Math.max(1, area.h - room.top - room.bottom);
   const scale = Math.min(area.w / Math.max(1, box.x1 - box.x0), height / Math.max(1, box.y1 - box.y0), max);
@@ -149,10 +161,10 @@ export const figureSize = { w: 292, h: 150 };
 const shape = (kind: Shape["kind"], x: number, y: number, w: number, h: number, text = "", tone: Shape["tone"] = "plain"): Shape => ({ kind, x, y, w, h, text, tone });
 const toneOf = (item: { tone: string | null; bad: boolean | null }): Shape["tone"] => (item.bad || item.tone === "lost" ? "lost" : item.tone === "live" ? "live" : "plain");
 
-// How many items each kind of figure draws; its label for assistive tech names the same ones.
+/** How many items each kind of figure draws; its label for assistive tech names the same ones. */
 export const figureMax = { states: 6, sequence: 5, compare: 4 };
 
-// A figure drawn from the writer's labels: the layout is code's, the words the writer's. A kind code does not know draws nothing.
+/** A figure drawn from the writer's labels: the layout is code's, the words the writer's. A kind code does not know draws nothing. */
 export function figureShapes(fig: BriefFigure): Shape[] {
   const { w, h } = figureSize;
   if (fig.kind === "states") {
@@ -184,15 +196,17 @@ export function figureShapes(fig: BriefFigure): Shape[] {
   return [];
 }
 
-// An item the checks left flagged shows "not confirmed from the facts".
+/** An item the checks left flagged shows "not confirmed from the facts". */
 export const unconfirmed = (step: Pick<BriefStep, "flags">): boolean => step.flags.length > 0;
 // What the check adds to an item still flagged after the retry (`UNCONFIRMED`, `understanding/src/pr_brief_check.rs`): the mark's own words.
 const UNCONFIRMED = "not confirmed from the facts";
-// Why an item is not confirmed, as its popover lists it (#491): its flags without the mark's own words.
+/** Why an item is not confirmed, as its popover lists it (#491): its flags without the mark's own words. */
 export const unconfirmedReasons = (flags: string[]): string[] => flags.filter((flag) => flag !== UNCONFIRMED);
 
-// The "Partial facts · N" chip's lines (#491): one per input the brief was written without, the cut diff's with its files. A brief stored
-// before the facts has only `partial`, whether its diff was cut, so it says that without the list. None when nothing was missing.
+/**
+ * The "Partial facts · N" chip's lines (#491): one per input the brief was written without, the cut diff's with its files. A brief stored
+ * before the facts has only `partial`, whether its diff was cut, so it says that without the list. None when nothing was missing.
+ */
 export type PartialLine = { line: string; files: string[] };
 const kib = (bytes: number) => (bytes < 1024 ? `${bytes}\u00a0B` : `${Math.round(bytes / 1024)}\u00a0KiB`);
 export function partialFactsLines(facts: PartialFacts | undefined, partial: boolean): PartialLine[] {
@@ -205,15 +219,19 @@ export function partialFactsLines(facts: PartialFacts | undefined, partial: bool
   return lines;
 }
 
-// What every `pr_diff` of the brief played in `project` asks; a caller adds the files it wants (`parts` or `paths`). A "Since you read"
-// story's diff runs from the head it was read at (#497), the full brief's from where the PR left the default branch.
+/**
+ * What every `pr_diff` of the brief played in `project` asks; a caller adds the files it wants (`parts` or `paths`). A "Since you read"
+ * story's diff runs from the head it was read at (#497), the full brief's from where the PR left the default branch.
+ */
 export function diffArgs(project: string, view: BriefView): PrDiffArgs {
   const ask: PrDiffArgs = { project, number: view.brief.pr, head: view.brief.head, title: view.brief.brief.title };
   return view.since ? { ...ask, base: view.since } : ask;
 }
 
-// Which files a step's "See the code" asks `pr_diff` for (#490), the step at `index` of the played `list`: "all" on the Ratify step, and
-// on the last step when the list has no Ratify step; else the map's parts it lights (actors left out), or "none" when it lights no part.
+/**
+ * Which files a step's "See the code" asks `pr_diff` for (#490), the step at `index` of the played `list`: "all" on the Ratify step, and
+ * on the last step when the list has no Ratify step; else the map's parts it lights (actors left out), or "none" when it lights no part.
+ */
 export function stepCode(list: Pick<BriefStep, "k" | "on">[], index: number, parts: ReadonlySet<string>): "all" | "none" | string[] {
   const last = list.some((each) => each.k === "Ratify") ? list[index]?.k === "Ratify" : index === list.length - 1;
   if (last) return "all";
@@ -221,7 +239,7 @@ export function stepCode(list: Pick<BriefStep, "k" | "on">[], index: number, par
   return lit.length ? lit : "none";
 }
 
-// What "See the code" opens in the drawer for a step: what the writer quoted, each with its source. The page has no editor to jump to.
+/** What "See the code" opens in the drawer for a step: what the writer quoted, each with its source. The page has no editor to jump to. */
 export function citeDrawer(step: Pick<BriefStep, "h" | "cites">): Drawer {
   return {
     title: step.h,
@@ -237,7 +255,7 @@ export function citeDrawer(step: Pick<BriefStep, "h" | "cites">): Drawer {
 
 // ---- the brief's prediction check.
 
-// A pick check: one answer chosen among the options, taken back by tapping it again, graded by the key when Check is pressed.
+/** A pick check: one answer chosen among the options, taken back by tapping it again, graded by the key when Check is pressed. */
 export type PickRun = { picked: () => number | null; tap: (i: number) => void; ready: () => boolean; grade: () => { right: boolean; key: number } | null; answered: () => boolean };
 export function pickRun(key: number): PickRun {
   let picked: number | null = null;
@@ -257,8 +275,10 @@ export function pickRun(key: number): PickRun {
   };
 }
 
-// An order check: the parts tapped in order into numbered slots, one tap more takes a part back, and Check grades them against the key
-// (the changed flow's hops, set by code). The replay is the key's path along the map's links.
+/**
+ * An order check: the parts tapped in order into numbered slots, one tap more takes a part back, and Check grades them against the key
+ * (the changed flow's hops, set by code). The replay is the key's path along the map's links.
+ */
 export type OrderRun = {
   picked: () => string[];
   tap: (id: string) => void;
@@ -300,9 +320,11 @@ export function orderRun(key: string[], links: { id: string; from: string; to: s
   };
 }
 
-// What an open waiting on its brief's write does when the map draws `pr` (the ready PR, gone when undefined): "open" once the brief of
-// its head is stored, "stop" when the write failed, the PR is quiet or no longer ready, and "wait" while it is written or the map still
-// shows how it stood before the write started.
+/**
+ * What an open waiting on its brief's write does when the map draws `pr` (the ready PR, gone when undefined): "open" once the brief of
+ * its head is stored, "stop" when the write failed, the PR is quiet or no longer ready, and "wait" while it is written or the map still
+ * shows how it stood before the write started.
+ */
 export function awaitedWrite(pr: ReadyPr | undefined, full = false): "open" | "stop" | "wait" {
   const brief = pr?.brief;
   if (!pr || brief?.quiet || (brief?.failed && !brief.writing)) return "stop";
@@ -314,16 +336,20 @@ export function awaitedWrite(pr: ReadyPr | undefined, full = false): "open" | "s
 
 // ---- Copy for the agent (#493): a prompt code writes, with no model, that stands alone for any agent.
 
-// What is copied: a step (a Could break step, or one not confirmed) with the changed files of the parts it lights; a not-confirmed
-// decision; the No part group's files.
+/**
+ * What is copied: a step (a Could break step, or one not confirmed) with the changed files of the parts it lights; a not-confirmed
+ * decision; the No part group's files.
+ */
 export type AgentItem =
   | { of: "step"; step: Pick<BriefStep, "k" | "h" | "b" | "risks" | "cites" | "flags">; files: string[] }
   | { of: "decision"; text: string; flags: string[] }
   | { of: "no-part"; files: string[] };
 
-// The prompt for `item` of PR `pr`, naming its branch while it is open: a line that says what to do, the item's words, its risks, why
-// it is not confirmed (the mark's own words left out), its citations as `from: "quote"`, and its files as paths. Citations carry no
-// lines, so neither does the prompt. An empty section is left out.
+/**
+ * The prompt for `item` of PR `pr`, naming its branch while it is open: a line that says what to do, the item's words, its risks, why
+ * it is not confirmed (the mark's own words left out), its citations as `from: "quote"`, and its files as paths. Citations carry no
+ * lines, so neither does the prompt. An empty section is left out.
+ */
 export function agentPrompt(pr: number, branch: string | null, item: AgentItem): string {
   const where = branch ? `In PR #${pr} (branch ${branch})` : `In PR #${pr}`;
   const list = (title: string | null, items: string[]) => (items.length ? [...(title ? [title] : []), ...items.map((each) => `- ${each}`)] : []);

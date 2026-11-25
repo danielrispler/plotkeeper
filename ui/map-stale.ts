@@ -17,14 +17,16 @@ onPlate(({ view, part, plate }) => {
   plate.title = `${plate.title}\n\n${staleWords(band)}`;
 });
 
-// The band's line at the top of the sheet (#495): the server's, with the last engagement's date, else the band alone; null when the part
-// is not stale (or a past commit is shown).
+/**
+ * The band's line at the top of the sheet (#495): the server's, with the last engagement's date, else the band alone; null when the part
+ * is not stale (or a past commit is shown).
+ */
 export function staleWhy(view: MapView, part: string): { line: string; band: number } | null {
   const band = view.scrub ? undefined : view.state.stale?.[part];
   return band ? { line: view.state.stale_why?.[part] ?? staleWords(band), band } : null;
 }
 
-// Enters `part`'s refresher: logged (with "stale-entered" when the part had a band) and kept by the server as an activity on the part.
+/** Enters `part`'s refresher: logged (with "stale-entered" when the part had a band) and kept by the server as an activity on the part. */
 export async function enterRefresher(view: MapView, part: string) {
   logStop("refresher-entered", view.project);
   if (view.state.stale?.[part]) logStop("stale-entered", view.project);
@@ -32,8 +34,10 @@ export async function enterRefresher(view: MapView, part: string) {
   await reloadMap();
 }
 
-// The refresher of `part` as the sheet shows it, from the map's text; null when the map does not have the part. The sheet already shows the
-// part's caption, purpose, held items, laws and links ("Talks to", spec #473), so the refresher adds the flows through it, hop by hop.
+/**
+ * The refresher of `part` as the sheet shows it, from the map's text; null when the map does not have the part. The sheet already shows the
+ * part's caption, purpose, held items, laws and links ("Talks to", spec #473), so the refresher adds the flows through it, hop by hop.
+ */
 export function refresherNode(view: MapView, part: string): HTMLElement | null {
   const found = view.state.source ? refresherOf(view.state.source, part) : null;
   if (!found) return null;

@@ -8,7 +8,7 @@ import { openMap } from "./map.js";
 import { openBriefWhenDrawn } from "./map-brief.js";
 import type { Session, WaitingBriefs } from "./types.js";
 
-// The row for `session`, or null: it needs a live session, a PR, and a brief waiting for that PR.
+/** The row for `session`, or null: it needs a live session, a PR, and a brief waiting for that PR. */
 export function briefRowFor(
   session: Pick<Session, "identity" | "state">,
   waiting: WaitingBriefs | null,
@@ -31,7 +31,7 @@ function openBriefOnMap(project: string, pr: number) {
 const known = new Map<string, WaitingBriefs | null>();
 const asked = new Set<string>();
 
-// The newest turn's row of `session`; asks the server once per PR number, and `redraw` runs when the answer changes what shows.
+/** The newest turn's row of `session`; asks the server once per PR number, and `redraw` runs when the answer changes what shows. */
 export function railBriefRow(session: Session, redraw: () => void): HTMLElement | null {
   const pr = session.identity.pr;
   if (pr === null) return null;
@@ -50,7 +50,7 @@ export function railBriefRow(session: Session, redraw: () => void): HTMLElement 
   return briefRowFor(session, known.get(session.cwd) ?? null, openBriefOnMap);
 }
 
-// A brief was written or changed: ask again at the next draw.
+/** A brief was written or changed: ask again at the next draw. */
 export function startRailBriefs(redraw: () => void) {
   listen<string>("map-landed", () => {
     asked.clear();

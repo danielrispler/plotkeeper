@@ -21,7 +21,7 @@ const tickets = scrubTickets();
 type HistoryDeps = { openBriefOf(project: string, number: number, chapter: number, full: boolean): Promise<void> };
 let deps: HistoryDeps = { openBriefOf: async () => {} };
 
-// Shows the map as of `commit` read-only, or now again with null.
+/** Shows the map as of `commit` read-only, or now again with null. */
 export async function scrubTo(commit: string | null) {
   if (commit === null) {
     // Back to now works whenever a scrub is set, also when its commit's map cannot be read and no view is drawn.
@@ -76,7 +76,7 @@ function rows(view: MapView, list: HTMLElement, entries: HistoryEntry[]) {
   );
 }
 
-// Fills `slot` (the sheet's foot) with the strip of `part`.
+/** Fills `slot` (the sheet's foot) with the strip of `part`. */
 export function drawStrip(view: MapView, part: string, slot: HTMLElement) {
   const key = `${view.project}|${part}|${view.state.commit}|${view.state.fog?.[part] ?? ""}`;
   const list = text("ul", "", "hist");
@@ -98,7 +98,7 @@ export function drawStrip(view: MapView, part: string, slot: HTMLElement) {
     .catch(failure("map_history"));
 }
 
-// The banner: "Viewing <commit> · Back to now" while `scrub` is set, empty with none. A commit whose map cannot be read keeps it too.
+/** The banner: "Viewing <commit> · Back to now" while `scrub` is set, empty with none. A commit whose map cannot be read keeps it too. */
 export function showBanner(banner: HTMLElement, scrub: Scrub | null) {
   if (!scrub) {
     banner.removeAttribute("title");

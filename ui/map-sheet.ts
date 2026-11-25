@@ -111,7 +111,7 @@ function handle() {
   return bar;
 }
 
-// The part whose sheet is open on the shown map, null with none.
+/** The part whose sheet is open on the shown map, null with none. */
 export const sheetPart = () => (open && currentMap()?.project === open.project ? open.part : null);
 
 export function closeSheet() {
@@ -354,8 +354,10 @@ function marksList(view: MapView, part: string): HTMLElement[] {
   return [list];
 }
 
-// The things a part holds, each its name, its sentence and its key files. An item with no key files is a note (#525): its name in italics,
-// then "· note", so it never reads as a section heading.
+/**
+ * The things a part holds, each its name, its sentence and its key files. An item with no key files is a note (#525): its name in italics,
+ * then "· note", so it never reads as a section heading.
+ */
 export function heldList(holds: Sheet["holds"]): HTMLElement {
   const list = text("ul", "", "sheet-holds");
   // Safari drops a list's semantics under `list-style: none` and flex; the role brings them back.

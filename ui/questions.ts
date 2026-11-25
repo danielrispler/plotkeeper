@@ -87,7 +87,7 @@ export function questionElement(question: Question): HTMLElement {
   return block;
 }
 
-// A plan or a permission the answer hook waits on (danielrispler/Falinks#478): what it asks, then allow or deny.
+/** A plan or a permission the answer hook waits on (danielrispler/Falinks#478): what it asks, then allow or deny. */
 export function decisionElement(ask: Ask): HTMLElement {
   const block = document.createElement("article");
   block.className = "question decision";

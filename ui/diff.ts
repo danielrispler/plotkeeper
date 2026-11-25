@@ -9,7 +9,7 @@ import type { Capabilities, Session, Turn, TurnFile } from "./types.js";
 type DiffLineKind = "add" | "del" | "hunk" | "meta" | "ctx";
 export type DiffLine = { kind: DiffLineKind; text: string };
 
-// A hunk's lines classified for the tint; the sign stays in the text.
+/** A hunk's lines classified for the tint; the sign stays in the text. */
 export function diffLines(hunk: string): DiffLine[] {
   const kind = (line: string): DiffLineKind =>
     /^(diff |index |--- |\+\+\+ |rename |similarity |new file|deleted file|old mode|new mode)/.test(line)
@@ -27,18 +27,18 @@ export function diffLines(hunk: string): DiffLine[] {
     .map((line) => ({ kind: kind(line), text: line }));
 }
 
-// The turn whose diff the palette opens: `index` of the newest turn that has files, none for an agent without trees.
+/** The turn whose diff the palette opens: `index` of the newest turn that has files, none for an agent without trees. */
 export function newestDiff(turns: Pick<Turn, "files">[], capabilities: Pick<Capabilities, "turn_trees">): number | null {
   if (!capabilities.turn_trees) return null;
   for (let at = turns.length - 1; at >= 0; at--) if ((turns[at]?.files?.files.length ?? 0) > 0) return at;
   return null;
 }
 
-// Whether the server's re-sent selection leaves the diff shown: the same session, and not Daniel's own click.
+/** Whether the server's re-sent selection leaves the diff shown: the same session, and not Daniel's own click. */
 export const keepsDiff = (shown: { session: string } | null, session: Pick<Session, "id"> | null, clicked: boolean) =>
   shown !== null && !clicked && session?.id === shown.session;
 
-// What the evidence line calls for the pane: set by the panes (which import this), so the line never imports them.
+/** What the evidence line calls for the pane: set by the panes (which import this), so the line never imports them. */
 export const diffRequest = { open: (_session: string, _turn: number) => {} };
 
 const counts = (f: TurnFile) => (f.added === null || f.removed === null ? "" : ` +${f.added} −${f.removed}`);
@@ -64,7 +64,7 @@ function fileFold(session: string, index: number, file: TurnFile): HTMLElement {
   return fold;
 }
 
-// Draws turn `index` of `session`'s diff in `place`; `back` returns to the session.
+/** Draws turn `index` of `session`'s diff in `place`; `back` returns to the session. */
 export function drawDiff(place: HTMLElement, session: Pick<Session, "id" | "turns">, index: number, back: () => void) {
   place.className = "pane turn-diff";
   const turn = session.turns[index];

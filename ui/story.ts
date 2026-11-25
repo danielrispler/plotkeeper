@@ -195,9 +195,11 @@ function summarize(id: string) {
 
 export type HistoryEntry = { agent: string; purpose: string; asked: string; result: string; details: string };
 
-// A session's subagent history (danielrispler/Falinks#535): every subagent it ran, newest first, faded ones too. Each
-// entry's purpose is its name and its prompt's first line; its result is its written summary, else
-// its last message's first line, or its status when it failed or has none yet.
+/**
+ * A session's subagent history (danielrispler/Falinks#535): every subagent it ran, newest first, faded ones too. Each
+ * entry's purpose is its name and its prompt's first line; its result is its written summary, else
+ * its last message's first line, or its status when it failed or has none yet.
+ */
 export function subagentHistory(session: Pick<Session, "agents" | "capabilities">, summaries: Map<string, string>, now = Date.now()): HistoryEntry[] {
   return [...session.agents]
     .sort((a, b) => b.started_at - a.started_at)
@@ -222,16 +224,20 @@ function historyElement(session: string, entry: HistoryEntry): HTMLElement {
   return item;
 }
 
-// The kind of block a session needs Daniel for: a question, else a plan or permission by its tool; null when
-// none is open.
+/**
+ * The kind of block a session needs Daniel for: a question, else a plan or permission by its tool; null when
+ * none is open.
+ */
 export function blockKind(questions: Pick<Question, "answer">[], decision: Pick<Ask, "tool_name"> | null): AskKind | null {
   if (decision) return askKind(decision.tool_name);
   return questions.some((question) => question.answer === "open") ? "question" : null;
 }
 
-// A turn's Headline and Body lines (danielrispler/plotkeeper#115, #116): the writer's, when the summary has them; a summary
-// stored before them is adapted, its first line the Headline and the rest `reported` lines. Until the summary arrives, for a
-// turn with none, and when the guards stripped its Headline (empty), the Headline is the first line of the final response.
+/**
+ * A turn's Headline and Body lines (danielrispler/plotkeeper#115, #116): the writer's, when the summary has them; a summary
+ * stored before them is adapted, its first line the Headline and the rest `reported` lines. Until the summary arrives, for a
+ * turn with none, and when the guards stripped its Headline (empty), the Headline is the first line of the final response.
+ */
 export type BodyLine = SummaryLine;
 export function headlineOf(summary: TurnSummary | null, message: string | null): { headline: string | null; body: BodyLine[] } {
   const stored = summary?.summary;
@@ -243,17 +249,21 @@ export function headlineOf(summary: TurnSummary | null, message: string | null):
   return { headline: message?.trim() || null, body: [] };
 }
 
-// A folded turn's line (danielrispler/plotkeeper#117): Daniel's prompt (its first line, which the style cuts to fit) and the
-// Headline, with one mark: a check that ended failed. A check's status is its last run's, so a failure the agent fixed leaves no mark.
+/**
+ * A folded turn's line (danielrispler/plotkeeper#117): Daniel's prompt (its first line, which the style cuts to fit) and the
+ * Headline, with one mark: a check that ended failed. A check's status is its last run's, so a failure the agent fixed leaves no mark.
+ */
 export type FoldedLine = { prompt: string; headline: string | null; failed: boolean };
 export function foldedLine(turn: Pick<Turn, "prompt" | "checks">, headline: string | null): FoldedLine {
   const prompt = turn.prompt.split("\n").map((line) => line.trim()).find(Boolean) ?? "No prompt";
   return { prompt, headline, failed: turn.checks.some((check) => check.status === "failed") };
 }
 
-// What "now" holds in each state: one thing per state. While running, what Daniel asked and the intention, boxed.
-// At your turn (and idle or ended), what he asked, the Headline, the Body lines and the full response, with no
-// intention box. When the session needs him, the intention small as "why it asks", and the turn's facts so far.
+/**
+ * What "now" holds in each state: one thing per state. While running, what Daniel asked and the intention, boxed.
+ * At your turn (and idle or ended), what he asked, the Headline, the Body lines and the full response, with no
+ * intention box. When the session needs him, the intention small as "why it asks", and the turn's facts so far.
+ */
 export type Now = { asked: string | null; intention: "box" | "why" | null; headline: string | null; body: BodyLine[]; soFar: boolean; fullResponse: boolean };
 export function nowOf(
   state: SessionState,
@@ -289,13 +299,17 @@ function showIntention(story: Session["transcript"] | null) {
   element("unavailable-why").textContent = story?.unavailable ? `The transcript cannot be read: ${story.unavailable}.` : "";
 }
 
-// The transcript the rail tells: none for a subagent's, which the studio does not read, nor for
-// another agent's status-only row (danielrispler/Falinks#560).
+/**
+ * The transcript the rail tells: none for a subagent's, which the studio does not read, nor for
+ * another agent's status-only row (danielrispler/Falinks#560).
+ */
 export const storyOf = (session: Session, agent: unknown) => (agent === null && !session.status_only ? session.transcript : null);
 
-// What the rail draws for `selected`: its latest turn, which "now" tells, and the feed. A status-only row
-// (danielrispler/Falinks#560) has no turns to show.
-// `fed`: the blocked commands the dock does not hold, which the feed places (danielrispler/plotkeeper#297).
+/**
+ * What the rail draws for `selected`: its latest turn, which "now" tells, and the feed. A status-only row
+ * (danielrispler/Falinks#560) has no turns to show.
+ * `fed`: the blocked commands the dock does not hold, which the feed places (danielrispler/plotkeeper#297).
+ */
 export function railOf({ session, agent }: Selection, fed: BlockedCommand[] = []) {
   if (session.status_only) return { latest: null, blocks: [] };
   const own = agent === null;
@@ -309,19 +323,23 @@ export function railOf({ session, agent }: Selection, fed: BlockedCommand[] = []
   return { latest: own ? (turns.at(-1) ?? null) : null, blocks };
 }
 
-// When the event `id` was written at: the part after its `@`, in Unix ms (the core's `card_time`). A design line's citation may name a
-// card stored before cards were retired.
+/**
+ * When the event `id` was written at: the part after its `@`, in Unix ms (the core's `card_time`). A design line's citation may name a
+ * card stored before cards were retired.
+ */
 export const cardTime = (id: string) => Number(id.slice(id.lastIndexOf("@") + 1)) || 0;
 
-// The index of the turn that runs at `at`: the latest that started at or before it, else null.
+/** The index of the turn that runs at `at`: the latest that started at or before it, else null. */
 export function turnAt(turns: Pick<Turn, "started_at">[], at: number): number | null {
   let index = turns.length - 1;
   while (index >= 0 && (turns[index]?.started_at ?? 0) > at) index--;
   return index < 0 ? null : index;
 }
 
-// A block of the feed: turn `index` and what started in it, newest first. `index` is null for the
-// block of what started in no turn, such as a subagent's view, whose session's turns are not its own.
+/**
+ * A block of the feed: turn `index` and what started in it, newest first. `index` is null for the
+ * block of what started in no turn, such as a subagent's view, whose session's turns are not its own.
+ */
 export type FeedTurn = {
   index: number | null;
   turn: Turn | null;
@@ -331,8 +349,10 @@ export type FeedTurn = {
   blocked: BlockedCommand[];
 };
 
-// The feed (danielrispler/Falinks#574): one block per turn, newest first, each holding the subagents and questions the core put in it.
-// What has no turn goes in one last block, so nothing is lost.
+/**
+ * The feed (danielrispler/Falinks#574): one block per turn, newest first, each holding the subagents and questions the core put in it.
+ * What has no turn goes in one last block, so nothing is lost.
+ */
 export function feedTurns(
   turns: Turn[],
   { agents, questions, blocked = [] }: Pick<FeedTurn, "agents" | "questions"> & { blocked?: BlockedCommand[] },
@@ -363,7 +383,7 @@ const summaries = new Map<string, TurnSummary | null>();
 const asking = new Set<string>();
 const failedTurns = new Set<string>();
 
-// A queue that runs `run` on each pushed id in order, one in flight at a time.
+/** A queue that runs `run` on each pushed id in order, one in flight at a time. */
 export function oneAtATime(run: (id: string) => Promise<void>): (id: string) => void {
   const queue: string[] = [];
   let busy = false;
@@ -410,7 +430,7 @@ function summaryOf(id: string): TurnSummary | null {
   return null;
 }
 
-// The Headline of a session's latest turn, for the list's unseen rows; null when it has no turn.
+/** The Headline of a session's latest turn, for the list's unseen rows; null when it has no turn. */
 export function lastHeadline(session: Pick<Session, "turns">): string | null {
   const turn = session.turns.at(-1);
   return turn ? headlineOf(turn.id ? summaryOf(turn.id) : null, turn.message).headline : null;
@@ -465,8 +485,10 @@ function drawNow(session: Session | null, latest: Turn | null): Now | null {
   return now;
 }
 
-// A check line: its outcome, its command, and how long it took or, while it runs, its time against
-// its typical time. No colour, as colour is only for "needs you".
+/**
+ * A check line: its outcome, its command, and how long it took or, while it runs, its time against
+ * its typical time. No colour, as colour is only for "needs you".
+ */
 export function checkElement(line: ListedCheck): HTMLElement {
   const item = document.createElement("li");
   const label = line.status === "running" ? "Running" : "Failed";
@@ -571,8 +593,10 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
   return node;
 }
 
-// A turn before the newest (danielrispler/plotkeeper#117): one line, which opens the turn's block under it and folds it
-// again. Only this node changes, so the others and the scroll position stay; the opened turns outlast a redraw.
+/**
+ * A turn before the newest (danielrispler/plotkeeper#117): one line, which opens the turn's block under it and folds it
+ * again. Only this node changes, so the others and the scroll position stay; the opened turns outlast a redraw.
+ */
 export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
   const node = document.createElement("li");
   node.className = "turn past";
@@ -606,8 +630,10 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
   return node;
 }
 
-// The index of the turn a design line's citation `id` names (danielrispler/plotkeeper#123): the turn with that id, or else
-// the turn a card of that id was written in (an older line may cite one), null when neither is in `turns`.
+/**
+ * The index of the turn a design line's citation `id` names (danielrispler/plotkeeper#123): the turn with that id, or else
+ * the turn a card of that id was written in (an older line may cite one), null when neither is in `turns`.
+ */
 export function citedTurn(turns: Pick<Turn, "id" | "started_at">[], id: string): number | null {
   const own = turns.findIndex((turn) => turn.id === id);
   return own >= 0 ? own : turnAt(turns, cardTime(id));
@@ -629,7 +655,7 @@ function openCitation(id: string) {
 const turnElement = (session: Session, block: FeedTurn, now: Now | null) =>
   now || block.index === null ? turnContent(session, block, now) : foldedTurn(session, block);
 
-// Draws "now" and the feed from the selection and the brief the server last sent.
+/** Draws "now" and the feed from the selection and the brief the server last sent. */
 export function drawFeed() {
   const selected = studio.selection;
   if (selected === null) {
@@ -680,7 +706,7 @@ function choice(dialog: HTMLDialogElement): Promise<string> {
   });
 }
 
-// Delete: asks, then drops the row; the cards are kept.
+/** Delete: asks, then drops the row; the cards are kept. */
 export async function askDelete(session: Session) {
   const dialog = element("delete-dialog", HTMLDialogElement);
   element("delete-name").textContent = sessionName(session);
@@ -688,8 +714,10 @@ export async function askDelete(session: Session) {
   await invoke("delete_session", { id: session.id });
 }
 
-// A late Allow reaches no terminal from the page: it shows the line to tell the session, so the agent retries the command. The line
-// is no failure: it shows in the notice line until dismissed, under no command's name, and the Studio log gets none of it.
+/**
+ * A late Allow reaches no terminal from the page: it shows the line to tell the session, so the agent retries the command. The line
+ * is no failure: it shows in the notice line until dismissed, under no command's name, and the Studio log gets none of it.
+ */
 export function retryNotice(session: Pick<Session, "state">, card: BlockedCommand, agent: string | null) {
   if (session.state === "ended") return showError("The session has ended: start it again and ask it to run the approved command.");
   showError(`Allowed. Tell the session: ${retryLine(card, agent)}`);
