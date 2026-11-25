@@ -444,7 +444,7 @@ pub fn map_commit(project: String, commit: String) -> Result<crate::history::Com
 }
 
 /// What "See the code" of a PR's brief asks for (`PrDiffArgs` in `ui/types.ts`). `parts`: only the files owned by these parts, under the
-/// default branch's map; all the PR's files when absent.
+/// default branch's map; `paths`: only these files (an Also touched group's, #492); all the PR's files when both are absent.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PrDiffArgs {
     pub project: String,
@@ -453,6 +453,8 @@ pub struct PrDiffArgs {
     pub title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parts: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paths: Option<Vec<String>>,
 }
 
 /// "See the code" of a PR's brief: the files its head changed since it left the default branch, with their diffs, for the drawer.
@@ -463,6 +465,7 @@ pub fn pr_diff(args: PrDiffArgs) -> Result<crate::history::Commit, String> {
         head,
         title,
         parts,
+        paths,
     } = args;
     let repo = Path::new(&project);
     let map = parts.as_ref().and_then(|_| {
@@ -470,9 +473,13 @@ pub fn pr_diff(args: PrDiffArgs) -> Result<crate::history::Commit, String> {
             .source
             .and_then(|text| system_map::parse_lenient(&text).ok())
     });
-    let keep = |all: Vec<String>| match parts {
-        None => all,
-        Some(parts) => {
+    let keep = |all: Vec<String>| match (parts, paths) {
+        (None, None) => all,
+        (None, Some(paths)) => all
+            .into_iter()
+            .filter(|path| paths.contains(path))
+            .collect(),
+        (Some(parts), paths) => {
             let owned: BTreeSet<String> = map
                 .map(|map| system_map::touched_for_map(&map, &all).parts)
                 .unwrap_or_default()
@@ -482,6 +489,7 @@ pub fn pr_diff(args: PrDiffArgs) -> Result<crate::history::Commit, String> {
                 .collect();
             all.into_iter()
                 .filter(|path| owned.contains(path))
+                .filter(|path| paths.as_ref().is_none_or(|paths| paths.contains(path)))
                 .collect()
         }
     };
@@ -751,6 +759,7 @@ mod tests {
                 head: head.clone(),
                 title: "Work".into(),
                 parts: parts.map(|p| p.iter().map(|s| s.to_string()).collect()),
+                paths: None,
             })
             .unwrap();
             found.files.into_iter().map(|f| f.path).collect::<Vec<_>>()
@@ -760,6 +769,18 @@ mod tests {
         assert_eq!(diff(Some(&["zz", "nobody"])), ["z/own/three"]);
         assert!(diff(Some(&[])).is_empty());
         assert_eq!(diff(None).len(), 80);
+        // An Also touched group's files (#492), by path, before the cap too; a path the PR did not change is not shown.
+        let found = pr_diff(PrDiffArgs {
+            project: o.main.display().to_string(),
+            number: 7,
+            head: head.clone(),
+            title: "Work".into(),
+            parts: None,
+            paths: Some(vec!["z/docs/four".into(), "z/one".into(), "nowhere".into()]),
+        })
+        .unwrap();
+        let shown: Vec<_> = found.files.into_iter().map(|f| f.path).collect();
+        assert_eq!(shown, ["z/docs/four", "z/one"]);
     }
 
     #[test]
