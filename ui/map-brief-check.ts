@@ -3,7 +3,7 @@
 
 import { text } from "./dom.js";
 import { currentMap, type MapView } from "./map.js";
-import { orderRun, type OrderRun, pickRun, type PickRun } from "./map-model.js";
+import { orderRun, type OrderRun, pickRun, type PickRun } from "./map-brief-model.js";
 import { logStop } from "./stop-rules.js";
 import { gateOf, panel, player, prOf, steps } from "./map-brief-player.js";
 import { clearOrder, plateOf, reduced, runLight, stopLight, world } from "./map-brief-light.js";

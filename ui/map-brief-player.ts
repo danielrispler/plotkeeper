@@ -8,7 +8,8 @@ import { scrubTo } from "./map-history.js";
 import { watchSeen } from "./seen.js";
 import { logStop } from "./stop-rules.js";
 import { ratifyStep } from "./ratify.js";
-import { briefPlayer, catchUpIds, chapterGate, type Gate, playlist, storySteps } from "./map-model.js";
+import { briefPlayer, chapterGate, type Gate, playlist, storySteps } from "./map-brief-model.js";
+import { catchUpIds } from "./map-catch-up.js";
 import type { BriefStep, BriefView, RatifyRow, StoredCatchUp } from "./types.js";
 
 export const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });

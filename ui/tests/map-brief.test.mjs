@@ -2,7 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { alsoAt, alsoRows, awaitedWrite, chapterGate, storySteps, briefCamera, briefPlayer, latestRequest, escapeMap, figureShapes, figureSize, playlist, partialFactsLines, unconfirmed, unconfirmedReasons, agentPrompt, diffArgs } from "../../dist/map-model.js";
+import { escapeMap } from "../../dist/map-model.js";
+import { alsoAt, alsoRows, awaitedWrite, chapterGate, storySteps, briefCamera, briefPlayer, latestRequest, figureShapes, figureSize, playlist, partialFactsLines, unconfirmed, unconfirmedReasons, agentPrompt, diffArgs } from "../../dist/map-brief-model.js";
 import { trayRows } from "../../dist/map-tray.js";
 
 const step = (k, extra = {}) => ({ k, h: k, b: "", on: [], hops: [], law: null, covered_by: null, list: [], risks: [], fig: null, check: null, cites: [], flags: [], ...extra });
@@ -225,14 +226,14 @@ test("the Partial facts lines come from the stored facts, one per input, and non
 });
 
 test("See the code opens what the step quoted, with its source and no jump, as the page has no editor", async () => {
-  const { citeDrawer } = await import("../../dist/map-model.js");
+  const { citeDrawer } = await import("../../dist/map-brief-model.js");
   const drawer = citeDrawer(step("Now", { h: "Delete keeps a live terminal", cites: [{ from: "ui/map.ts", quote: "const a = 1;" }, { from: "the PR body", quote: "Closes #5" }] }));
   assert.equal(drawer.title, "Delete keeps a live terminal");
   assert.deepEqual(drawer.blocks.map((b) => [b.label, b.code, b.jumps.length]), [["ui/map.ts", "const a = 1;", 0], ["the PR body", "Closes #5", 0]]);
 });
 
 test("a pick is chosen, taken back by tapping it again, and graded only when Check is pressed", async () => {
-  const { pickRun } = await import("../../dist/map-model.js");
+  const { pickRun } = await import("../../dist/map-brief-model.js");
   const run = pickRun(1);
   assert.equal(run.ready(), false, "nothing picked: Check is off");
   run.tap(0);
@@ -257,7 +258,7 @@ test("a pick is chosen, taken back by tapping it again, and graded only when Che
 const links = [{ id: "a-b", from: "a", to: "b" }, { id: "c-b", from: "c", to: "b" }, { id: "a-x", from: "a", to: "x" }];
 
 test("the order slots fill by tap in order, a tap on a filled part takes it back, and Check waits for every slot", async () => {
-  const { orderRun } = await import("../../dist/map-model.js");
+  const { orderRun } = await import("../../dist/map-brief-model.js");
   const run = orderRun(["a", "b", "c"], links);
   run.tap("b");
   run.tap("a");
@@ -274,7 +275,7 @@ test("the order slots fill by tap in order, a tap on a filled part takes it back
 });
 
 test("a wrong order names the parts out of place; the right one replays the key along the links, a link backwards when it runs against the key", async () => {
-  const { orderRun } = await import("../../dist/map-model.js");
+  const { orderRun } = await import("../../dist/map-brief-model.js");
   const wrong = orderRun(["a", "b", "c"], links);
   assert.equal(wrong.grade(), null, "not graded before every slot is full");
   for (const id of ["a", "c", "b"]) wrong.tap(id);

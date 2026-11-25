@@ -7,7 +7,7 @@
 // A quiet copy icon (#493) on a Could break step, in the not-confirmed popover and on the No part group copies a prompt for the agent.
 // A step's check (#340) is answered in place: a pick in the panel, an order by tapping parts on the map into numbered slots (`pickRun`, `orderRun`);
 // Check grades it, a wrong answer shows the correction, and an order check replays the right path along the links.
-// Esc (`brief` layer) closes it and keeps its step; an open not-confirmed popover (`popover` layer) closes first, and a new step closes it. `map-model.ts` holds the logic: `briefPlayer`, `briefCamera`, `figureShapes`.
+// Esc (`brief` layer) closes it and keeps its step; an open not-confirmed popover (`popover` layer) closes first, and a new step closes it. `map-brief-model.ts` holds the logic: `briefPlayer`, `briefCamera`, `figureShapes`.
 // A part catch-up (#391) plays in the same reader (`openCatchUpOf`): one story of a fogged part, under a negative number of its own (one per
 // fog list, `catchUpIds`) so the player keeps its step apart from the PR briefs and from an older story of the part; read to its end it
 // clears the part's fog (`part_catch_up_done`) and completes no brief.
@@ -24,7 +24,9 @@ import { branchOf, overturnNote, ratifyActions, ratifyDetail } from "./map-ratif
 import { copyOverturn, statusWords } from "./ratify.js";
 import type { Copied } from "./notes.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
-import { agentPrompt, alsoAt, diffArgs, type AlsoRow, effectiveTier, awaitedCatchUp, awaitedWrite, citeDrawer, commitDrawer, figureMax, figureShapes, figureSize, fogListLines, latestRequest, partialFactsLines, stageLabel, storySteps, type Shape, stepCode, unconfirmed, unconfirmedReasons } from "./map-model.js";
+import { agentPrompt, alsoAt, diffArgs, type AlsoRow, awaitedWrite, citeDrawer, figureMax, figureShapes, figureSize, latestRequest, partialFactsLines, storySteps, type Shape, stepCode, unconfirmed, unconfirmedReasons } from "./map-brief-model.js";
+import { awaitedCatchUp, fogListLines, stageLabel } from "./map-catch-up.js";
+import { effectiveTier, commitDrawer } from "./map-model.js";
 import type { BriefFigure, BriefStep, CatchUpOffer, CommitFiles, PrBrief, RatifyRow, ReadyPr, StaleBase } from "./types.js";
 import { BRIEF, explained, explainLine, explanationsOn, explainToggle, onExplanations, pressToggle, RATIFY, stepLine } from "./explanations.js";
 import { briefOpen, catchUpId, clearPlaying, panel, player, playingBrief, playingCatchUp, prOf, ratifyRows, setPlaying, steps, stopWatching, watchLast } from "./map-brief-player.js";

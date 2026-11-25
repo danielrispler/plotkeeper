@@ -19,7 +19,7 @@ globalThis.IntersectionObserver = /** @type {any} */ (
 const doc = { visibilityState: "visible", hasFocus: () => true };
 globalThis.document = doc;
 const { watchSeen, recheckSeen } = await import("../../dist/seen.js");
-const { chapterGate } = await import("../../dist/map-model.js");
+const { chapterGate } = await import("../../dist/map-brief-model.js");
 
 const covering = (observer) =>
   observer.run([{ intersectionRatio: 1, intersectionRect: { width: 100, height: 100 }, rootBounds: { width: 100, height: 100 } }]);

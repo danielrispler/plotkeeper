@@ -3,7 +3,8 @@
 
 import { svg } from "./dom.js";
 import { giveCameraBack, lendCamera, type MapView } from "./map.js";
-import { briefCamera, type Rect, sizeOf } from "./map-model.js";
+import { briefCamera } from "./map-brief-model.js";
+import { type Rect, sizeOf } from "./map-model.js";
 import { chapterParts, panel, steps } from "./map-brief-player.js";
 import type { BriefStep } from "./types.js";
 

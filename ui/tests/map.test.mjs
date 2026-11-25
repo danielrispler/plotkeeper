@@ -2,10 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import {
-  actorSize, autoPlace, cameraRig, draftPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, plateTitle, rimPoint, revealPan, scrubTickets, sheetOf, sheetMarks,
-  narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject, readingOrder, talksTo, linkLines, markPoints,
-} from "../../dist/map-model.js";
+import { actorSize, autoPlace, draftPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, plateTitle, rimPoint, scrubTickets, sheetOf, sheetMarks, narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject, talksTo, linkLines, readingOrder, markPoints } from "../../dist/map-model.js";
+import { cameraRig, revealPan } from "../../dist/map-camera.js";
 
 /** @returns {import("../../dist/map-model.js").Part} */
 const part = (id, extra = {}) => ({ id, name: id, caption: "", purpose: "", holds: [], tier: "core", paths: [], ...extra });

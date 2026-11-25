@@ -13,14 +13,12 @@
 // - The left panel (`panel.ts`, #385) floats over the map's left; `revealParts` pans the camera so the parts in focus clear it and the sheet.
 // - `MapState` (`types.ts`, `map.rs`) is the one payload; `currentMap()` gives the view as drawn.
 // - The camera (#383): the map area pans and zooms the world rather than scrolling it. Daniel's view is saved per project (`map_save_view`);
-//   a PR brief borrows the camera with `lendCamera` and `giveCameraBack` shows Daniel's view again (`cameraRig` in `map-model.ts`).
+//   a PR brief borrows the camera with `lendCamera` and `giveCameraBack` shows Daniel's view again (`cameraRig` in `map-camera.ts`).
 
 import { logStop, reviewNode, reviewOf } from "./stop-rules.js";
 import { element, failure, invoke, listen, newest, pressable, svg, text } from "./dom.js";
-import {
-  autoPlace, brokenParts, brokenText, cameraRig, type CameraRig, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, fitCamera, panTo, type Drag,
-  type Law, type Layer, type LayerName, type MapDoc, startProject, switchProject, parseMap, type Part, type Point, plateSize, plateTitle, sizeOf, linkLines, markPoints, readingOrder, revealPan, rimPoint, type Scrub, type Tier, zoomAt,
-} from "./map-model.js";
+import { cameraRig, type CameraRig, fitCamera, panTo, revealPan, zoomAt } from "./map-camera.js";
+import { autoPlace, brokenParts, brokenText, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Drag, type Law, type Layer, type LayerName, type MapDoc, startProject, switchProject, parseMap, type Part, type Point, plateSize, plateTitle, sizeOf, linkLines, markPoints, readingOrder, rimPoint, type Scrub, type Tier } from "./map-model.js";
 import { recheckSeen } from "./seen.js";
 import { knownProjects, projectGone } from "./projects.js";
 import type { Camera, MapState } from "./types.js";
