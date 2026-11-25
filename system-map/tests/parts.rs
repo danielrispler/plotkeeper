@@ -195,6 +195,18 @@ mod conversion {
     }
 
     #[test]
+    fn a_version_1_part_with_a_purpose_and_no_description_keeps_its_purpose() {
+        let mut old = base_v1();
+        old["parts"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("description");
+        old["parts"][0]["purpose"] = json!("Appends one line per event.");
+        let new = convert_value(&old.to_string()).unwrap();
+        assert_eq!(new["parts"][0]["purpose"], "Appends one line per event.");
+    }
+
+    #[test]
     fn a_link_without_a_kind_keeps_none() {
         let new: Value = serde_json::from_str(&convert(&base_v1().to_string()).unwrap()).unwrap();
         assert_eq!(

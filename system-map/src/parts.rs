@@ -32,8 +32,8 @@ pub fn convert_value(text: &str) -> Result<Value, String> {
     Ok(upgrade(text)?.0)
 }
 
-/// A version 1 map's text as version 2: each part's `description` becomes its `purpose`, untruncated, and its `holds` is
-/// empty. A map of any other version comes back as it was. Fails only when the text is not JSON.
+/// A version 1 map's text as version 2: each part's `description` becomes its `purpose`, untruncated (a part with no
+/// `description` keeps the `purpose` it has), and its `holds` is empty when it has none. A map of any other version comes back as it was. Fails only when the text is not JSON.
 pub fn convert(text: &str) -> Result<String, String> {
     let (map, was_1) = upgrade(text)?;
     Ok(if was_1 {
@@ -53,8 +53,14 @@ fn upgrade(text: &str) -> Result<(Value, bool), String> {
     map["version"] = 2.into();
     if let Some(parts) = map.get_mut("parts").and_then(Value::as_array_mut) {
         for part in parts.iter_mut().filter_map(Value::as_object_mut) {
-            let purpose = part.remove("description").unwrap_or_else(|| "".into());
-            part.insert("purpose".into(), purpose);
+            match part.remove("description") {
+                Some(description) => {
+                    part.insert("purpose".into(), description);
+                }
+                None => {
+                    part.entry("purpose").or_insert_with(|| "".into());
+                }
+            }
             part.entry("holds").or_insert_with(|| Value::Array(vec![]));
         }
     }
