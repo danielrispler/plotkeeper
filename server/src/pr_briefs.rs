@@ -413,7 +413,7 @@ pub fn on_open_since(
     let story = write_since(with, &full, &from, &mut log);
     if story.is_ok() && landed() {
         // A failure is kept in `seen` (the tray row says so) and told to the log; the story still opens.
-        let _ = on_open(with, seen, pr, head, move || Ok(full), log);
+        on_open(with, seen, pr, head, move || Ok(full), log).ok();
     }
     Some(story)
 }
@@ -478,6 +478,7 @@ pub fn on_lookup(
         let mut seen = seen.lock().unwrap();
         let before = seen.heads.insert(pr, head.to_string());
         let skip = seen.is_quiet(pr, head) || seen.has_failed(pr, head);
+        drop(seen);
         (before.as_deref() == Some(head), skip)
     };
     if skip || with.store.get(pr, head).is_some() {
@@ -505,7 +506,7 @@ pub fn on_lookup(
         && let Some(Push::Since(from)) = push_at(with, seen, pr, head)
     {
         // `write_since` tells `log` its failure; the full brief is written either way.
-        let _ = write_since(with, full, &from, &mut log);
+        write_since(with, full, &from, &mut log).ok();
     }
     match write_now(with, move || built, log) {
         Ok(Some(_)) => Did::Wrote,
@@ -736,7 +737,10 @@ impl Startup {
     /// The numbers of `ready` (of `project`) this lookup may write. `answered`: `gh pr list` has answered for the project, so
     /// `ready` is what is really open. `head_ms` is when a PR's head commit was made, if known; `fresh` whether a brief of the
     /// PR's head is stored and not stale.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "no type groups these inputs, and one made only for this call would be a new abstraction (#555)"
+    )]
     pub fn allowed(
         &mut self,
         project: &str,
@@ -1204,14 +1208,15 @@ pub fn pr_brief(
                 .flatten();
             // A failure is kept in `seen` (the tray row says so) and told to the log.
             if !matches!(story, Some(Ok(_))) {
-                let _ = on_open(
+                on_open(
                     &with,
                     &seen,
                     number,
                     &head,
                     || source_of(&project, number),
                     log,
-                );
+                )
+                .ok();
             }
             drop(claim);
             app.events.emit("map-landed", serde_json::json!(project));
@@ -1425,7 +1430,7 @@ mod tests {
     }
 
     fn names(list: &[&str]) -> Vec<String> {
-        list.iter().map(|s| s.to_string()).collect()
+        list.iter().map(ToString::to_string).collect()
     }
 
     #[test]
@@ -1442,16 +1447,16 @@ mod tests {
     #[test]
     fn main_changing_the_map_at_a_lit_part_names_each_law_link_flow_and_paths_that_moved() {
         let law = stale_of(&[], |m| {
-            m["laws"][0]["text"] = "Alpha keeps a new order.".into()
+            m["laws"][0]["text"] = "Alpha keeps a new order.".into();
         });
         assert_eq!(law.map(|s| s.laws), Some(names(&["law-a"])));
         // A law on a link at the lit part is the brief's reading, not fog's.
         let on_link = stale_of(&[], |m| {
-            m["laws"][1]["text"] = "The wire agrees again.".into()
+            m["laws"][1]["text"] = "The wire agrees again.".into();
         });
         assert_eq!(on_link.map(|s| s.laws), Some(names(&["law-ab"])));
         let link = stale_of(&[], |m| {
-            m["links"][0]["reason"] = "Alpha now asks beta.".into()
+            m["links"][0]["reason"] = "Alpha now asks beta.".into();
         });
         assert_eq!(
             link,
@@ -1461,18 +1466,18 @@ mod tests {
             })
         );
         let flow = stale_of(&[], |m| {
-            m["flows"][0]["hops"][0]["text"] = "Alpha tells beta.".into()
+            m["flows"][0]["hops"][0]["text"] = "Alpha tells beta.".into();
         });
         assert_eq!(flow.map(|s| s.flows), Some(names(&["f1"])));
         let paths = stale_of(&[], |m| {
-            m["parts"][0]["paths"] = serde_json::json!(["alpha/", "extra/"])
+            m["parts"][0]["paths"] = serde_json::json!(["alpha/", "extra/"]);
         });
         assert_eq!(paths.map(|s| s.paths), Some(names(&["alpha"])));
         // A law added on the lit part moved too.
         let added = stale_of(&[], |m| {
             m["laws"].as_array_mut().unwrap().push(
                 serde_json::json!({ "id": "law-new", "on": "alpha", "backing": "trust", "text": "New." }),
-            )
+            );
         });
         assert_eq!(added.map(|s| s.laws), Some(names(&["law-new"])));
     }
@@ -1891,7 +1896,8 @@ mod tests {
         fn write(&self, _model: &str, _prompt: &str) -> Result<BriefReply, String> {
             self.started.lock().unwrap().send(()).unwrap();
             // A closed channel (the test is done) releases every write, the claim check's too.
-            let _ = self.release.lock().unwrap().recv();
+            // A closed channel or a timeout both mean carry on.
+            self.release.lock().unwrap().recv().ok();
             Fake::new().write("opus", "")
         }
     }
@@ -1951,7 +1957,8 @@ mod tests {
         std::thread::scope(|scope| {
             scope.spawn(|| {
                 let opened = briefs.open_in_background("/p", 7, move |claim| {
-                    let _ = release_rx.recv_timeout(Duration::from_secs(10));
+                    // A closed channel or a timeout both mean carry on.
+                    release_rx.recv_timeout(Duration::from_secs(10)).ok();
                     drop(claim);
                     done_tx.send(()).unwrap();
                 });
@@ -2048,11 +2055,11 @@ mod tests {
     #[test]
     fn the_parts_a_chapter_lights_are_its_steps_not_its_declared_parts() {
         let step = |on: &[&str]| studio_understanding::pr_brief::Step {
-            on: on.iter().map(|s| s.to_string()).collect(),
+            on: on.iter().map(ToString::to_string).collect(),
             ..Default::default()
         };
         let chapter = |parts: &[&str], steps: Vec<_>| studio_understanding::pr_brief::Chapter {
-            parts: parts.iter().map(|s| s.to_string()).collect(),
+            parts: parts.iter().map(ToString::to_string).collect(),
             steps,
             ..Default::default()
         };

@@ -8,7 +8,7 @@ use std::{
 
 use serde::Serialize;
 
-use crate::PartFiles;
+use crate::{PartFiles, extract::Pair};
 
 /// What `imports` counted. Weighted counts give each pair 1 / the fan-in of its target, rounded
 /// to two places; shares are percentages of the total, rounded to one place.
@@ -16,7 +16,9 @@ use crate::PartFiles;
 pub struct Imports {
     /// Every counted pair: both files owned, a crate root's `mod` lines left out.
     pub total: Count,
+    /// The pairs whose two files are in one part.
     pub inside: Count,
+    /// The pairs whose files are in two different parts.
     pub across: Count,
     /// `across` as a share of `total`, raw and weighted.
     pub across_share: Share,
@@ -34,38 +36,57 @@ pub struct Imports {
     pub problems: Vec<String>,
 }
 
+/// A number of import pairs, raw and weighted.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize)]
 pub struct Count {
+    /// Each pair counts 1.
     pub raw: usize,
+    /// Each pair counts 1 / the fan-in of its target.
     pub weighted: f64,
 }
 
+/// A percentage of `total`, raw and weighted.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize)]
 pub struct Share {
+    /// Of the raw counts.
     pub raw: f64,
+    /// Of the weighted counts.
     pub weighted: f64,
 }
 
+/// A file with many more imports in and out than the mean.
 #[derive(Debug, Serialize)]
 pub struct Hub {
+    /// The file's path.
     pub file: String,
+    /// The part that owns it.
     pub part: String,
+    /// Its imports in plus out.
     pub degree: usize,
+    /// The counted files that import it.
     pub fan_in: usize,
+    /// The counted files it imports.
     pub fan_out: usize,
 }
 
+/// One part with the imports inside it.
 #[derive(Debug, Serialize)]
 pub struct Inside {
+    /// The part's id.
     pub part: String,
+    /// Its pairs whose two files it owns.
     #[serde(flatten)]
     pub count: Count,
 }
 
+/// The imports from one part to another.
 #[derive(Debug, Serialize)]
 pub struct Across {
+    /// The importing part's id.
     pub from: String,
+    /// The imported part's id.
     pub to: String,
+    /// The pairs from `from`'s files to `to`'s.
     #[serde(flatten)]
     pub count: Count,
 }
@@ -78,8 +99,18 @@ pub fn imports(root: &Path) -> Result<Imports, Vec<String>> {
     // Unowned files are `check`'s to report; here they only fall out of the counts.
     let (parts, _, _) = crate::ownership(&map, &files);
     let names = map.extractors.as_deref().unwrap_or_default();
-    let (pairs, problems) = crate::edges::file_pairs(root, names, &files, false);
-    Ok(count(&parts, &pairs, problems))
+    let repo = crate::repo(root, &map, &files);
+    let found = crate::extract::run(crate::extract::registry::EXTRACTORS, names, &repo);
+    Ok(count(&parts, &counted(&found.pairs), found.problems))
+}
+
+/// The pairs the report counts: a crate root's `mod` lines declare the module tree, so their pairs are left out.
+fn counted(pairs: &[Pair]) -> BTreeSet<(String, String)> {
+    pairs
+        .iter()
+        .filter(|p| !p.declaration)
+        .map(|p| (p.from.clone(), p.to.clone()))
+        .collect()
 }
 
 fn count(
@@ -194,4 +225,22 @@ fn rounded((raw, weighted): (usize, f64)) -> Count {
 
 fn round2(value: f64) -> f64 {
     (value * 100.0).round() / 100.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_declaration_pair_is_left_out_of_the_report() {
+        let declaration = Pair {
+            declaration: true,
+            ..Pair::new("lib.rs", "a.rs")
+        };
+        let counted = counted(&[declaration, Pair::new("a.rs", "b.rs")]);
+        assert_eq!(
+            counted.into_iter().collect::<Vec<_>>(),
+            [("a.rs".to_string(), "b.rs".to_string())]
+        );
+    }
 }

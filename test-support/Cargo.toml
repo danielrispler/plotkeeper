@@ -7,3 +7,6 @@ publish = false
 # Shared by the crates' tests as a dev-dependency, so it depends on none of them.
 [dependencies]
 tempfile = "3"
+
+[lints]
+workspace = true

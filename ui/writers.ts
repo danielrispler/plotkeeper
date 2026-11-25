@@ -24,7 +24,7 @@ export const choiceOptions = (list: Writers): { kind: WriterKind; label: string;
 const apiWriter = (kind: WriterKind) => kind === "anthropic" || kind === "openai";
 
 // OpenAI's own endpoint, which the OpenAI-compatible writer calls when no base URL is set.
-export const OPENAI_URL = "https://api.openai.com/v1";
+const OPENAI_URL = "https://api.openai.com/v1";
 
 // Whether writer `kind`'s API key is set, as its key row says it; the key itself never reaches the page.
 export const keySet = (list: Writers, kind: WriterKind = "anthropic"): boolean => list.keys.includes(kind);

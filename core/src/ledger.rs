@@ -141,9 +141,10 @@ impl Row {
     /// When it ended: its result's time, or for a command in the background its notification's;
     /// `None` while it runs.
     pub(crate) fn finished(&self) -> Option<u64> {
-        match self.background {
-            true => self.reported_at,
-            false => self.ended_at,
+        if self.background {
+            self.reported_at
+        } else {
+            self.ended_at
         }
     }
 

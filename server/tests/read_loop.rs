@@ -44,6 +44,7 @@ impl FakeSink {
             .into_iter()
             .partition::<Vec<_>, _>(|(n, _)| n == name);
         *events = kept;
+        drop(events);
         taken.into_iter().map(|(_, p)| p).collect()
     }
 }

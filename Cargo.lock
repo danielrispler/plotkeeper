@@ -573,7 +573,6 @@ dependencies = [
 name = "studio-understanding"
 version = "0.0.0"
 dependencies = [
- "libc",
  "serde",
  "serde_json",
  "similar",

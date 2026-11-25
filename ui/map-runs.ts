@@ -104,7 +104,7 @@ function rowNode(row: RunRow, act: RunActs, note: CopyNote | null): HTMLElement 
 }
 
 // What the runs area's status region says, and its indicator shows: the pause, if any (#465).
-export const pauseWords = (runs: Runs | null | undefined) => (runs?.paused == null ? "" : `Background runs are paused. ${runs.paused}.`);
+const pauseWords = (runs: Runs | null | undefined) => (runs?.paused == null ? "" : `Background runs are paused. ${runs.paused}.`);
 
 // What the runs area holds: nothing with no run and no pause; else its title, the pause's one indicator with Resume, and a row per run.
 // `note` is what the last copy left, drawn under its run's row.

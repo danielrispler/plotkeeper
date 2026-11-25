@@ -126,8 +126,6 @@ class FieldStandIn extends StandIn {
 // The stand-ins as the tests see them: any, at this one boundary, since they stand in for the DOM's types without being them, so a
 // test may hand one to the page's code typed with the real ones (#554).
 /** @type {any} */
-export const Text = TextNode;
-/** @type {any} */
 export const El = StandIn;
 /** @type {any} */
 export const Field = FieldStandIn;

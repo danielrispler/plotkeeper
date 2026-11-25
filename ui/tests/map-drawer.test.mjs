@@ -6,7 +6,7 @@ import { Field, fakeDocument } from "./dom.mjs";
 import { briefOffer, brokenParts, brokenText, ciDrawer, ciLine, commitDrawer, proofDrawer, scrubBanner, sheetCi, stripOf } from "../../dist/map-model.js";
 
 // CI as the server sends it; `at` is not read here.
-/** @param {import("../../dist/types.js").CiStatus} status */
+/** @param {import("../../dist/types.js").Ci["status"]} status */
 const ci = (status, extra = {}) => /** @type {import("../../dist/types.js").Ci} */ ({ status, run_url: "https://github.com/o/r/actions/runs/9", commit: "abc1234def", earlier: false, parts: [], laws: [], tail: "", note: null, ...extra });
 const broken = ci("broken", { parts: ["shell"], laws: ["wire-types-agree"], tail: "FAIL wire_types_match\nSummary 1 failed" });
 

@@ -19,7 +19,7 @@ fn transcript(folder: &Path, name: &str, version: &str) -> std::path::PathBuf {
         json!({ "type": "user", "version": version, "sessionId": "s1" }),
         json!({ "type": "assistant", "version": version, "sessionId": "s1" }),
     ];
-    let text: Vec<String> = lines.iter().map(|line| line.to_string()).collect();
+    let text: Vec<String> = lines.iter().map(ToString::to_string).collect();
     fs::write(&path, text.join("\n") + "\n").unwrap();
     path
 }

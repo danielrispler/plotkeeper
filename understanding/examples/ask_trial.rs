@@ -21,6 +21,10 @@ fn question(anchor: &Anchor) -> &'static str {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "a hand-run trial's whole script, read top to bottom"
+)]
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let wanted: usize = args
@@ -144,7 +148,7 @@ fn main() {
             Err(e) => println!("**No answer ({took:.1} s):** {e}\n"),
         }
     }
-    seconds.sort_by(|a, b| a.total_cmp(b));
+    seconds.sort_by(f64::total_cmp);
     println!("## Counts\n");
     println!("- Anchors asked: {}; answered: {answered}", picked.len());
     if let (Some(median), Some(slowest)) = (seconds.get(seconds.len() / 2), seconds.last()) {

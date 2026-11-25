@@ -189,7 +189,7 @@ fn an_agent_the_picker_started_comes_back_by_its_own_resume_command() {
     let revival = studio.revival(&lost);
     let found: Vec<(Vec<String>, Option<String>)> =
         revival.into_iter().map(|r| (r.argv, r.session)).collect();
-    let words = |w: &[&str]| w.iter().map(|w| w.to_string()).collect::<Vec<_>>();
+    let words = |w: &[&str]| w.iter().map(ToString::to_string).collect::<Vec<_>>();
     assert_eq!(
         found,
         [

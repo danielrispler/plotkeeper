@@ -24,6 +24,7 @@ use crate::{
     runner::{End, Ended, Kind, Limits, Request, Runner, private_tmp},
 };
 use serde::{Deserialize, Serialize};
+use std::fmt::Write as _;
 use std::{
     collections::BTreeMap,
     fs,
@@ -405,7 +406,8 @@ impl LawRuns {
             else {
                 continue;
             };
-            let _ = fs::remove_file(&file);
+            // Best effort: a file already gone is fine.
+            fs::remove_file(&file).ok();
             let line = "plotkeeper stopped during the proof: back the law again".to_string();
             self.shown().insert(
                 patch.id.clone(),
@@ -421,7 +423,8 @@ impl LawRuns {
 
     /// Sets what is told the project whose patches changed; the first call wins.
     pub fn on_change(&self, changed: impl Fn(&str) + Send + Sync + 'static) {
-        let _ = self.changed.set(Box::new(changed));
+        // Set once; a later set keeps the first value, which is the same.
+        self.changed.set(Box::new(changed)).ok();
     }
 
     fn tell(&self, project: &str) {
@@ -431,7 +434,9 @@ impl LawRuns {
     }
 
     fn shown(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, LawPatch>> {
-        self.shown.lock().unwrap_or_else(|e| e.into_inner())
+        self.shown
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// `srt`: the one configured, when it is there, or the login shell's.
@@ -492,7 +497,7 @@ impl LawRuns {
             repo,
             &["show", &format!("{commit}:{}", system_map::MAP_FILE)],
         )
-        .map_err(|_| "the default branch has no system-map.json")?;
+        .map_err(|e| format!("the default branch has no system-map.json: {e}"))?;
         let source = system_map::convert(&source)?;
         let (prompt, law, new) = match target {
             Target::Back(law) => (prompt(&source, &law)?, law, None),
@@ -525,7 +530,8 @@ impl LawRuns {
             .map_err(|e| e.to_string())
         });
         if let Err(e) = cloned {
-            let _ = fs::remove_dir_all(&dir);
+            // Best effort: a file already gone is fine.
+            fs::remove_dir_all(&dir).ok();
             return refuse(format!("the clone failed: {e}"));
         }
         let request = Request {
@@ -595,11 +601,18 @@ impl LawRuns {
     /// (three-way) and committed, pushed, and a draft PR with the proof in its body; then the worktree and the local branch are
     /// removed, so Daniel's checkout and its branch are never touched. The patch then says its PR, and the law change is
     /// recorded as accepted in ratify. A patch that does not apply is out of date.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "left whole when the lint came in (#555); spec #548 names no split of it"
+    )]
     pub fn open_pr(&self, project: &str, id: &str) -> Result<Opened, String> {
         if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
             return Err("no such patch".into());
         }
-        let _one = self.opening.lock().unwrap_or_else(|e| e.into_inner());
+        let _one = self
+            .opening
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let file = self.config.data.join(PATCHES).join(format!("{id}.json"));
         let patch = fs::read(&file)
             .ok()
@@ -719,14 +732,18 @@ impl LawRuns {
         // The temporary worktree is emptied of what a failed step left and removed by its path, without forcing git and
         // without pruning, which would drop the records of Daniel's own worktrees whose folders are away.
         if work.exists() {
-            let _ = host_git(&work, &["reset", "-q", "--hard"]);
-            let _ = host_git(&work, &["clean", "-fdq"]);
+            // Best effort: the `worktree remove` below logs a failure.
+            host_git(&work, &["reset", "-q", "--hard"]).ok();
+            // Best effort: the `worktree remove` below logs a failure.
+            host_git(&work, &["clean", "-fdq"]).ok();
             if let Err(e) = host_git(repo, &["worktree", "remove", &work_text]) {
                 log::warn!("back a law: the temporary worktree {work_text} was not removed: {e}");
             }
         }
         drop(tmp);
-        let _ = host_git(repo, &["branch", "-q", "-D", &branch]);
+        if let Err(e) = host_git(repo, &["branch", "-q", "-D", &branch]) {
+            log::warn!("back a law: the temporary branch {branch} was not deleted: {e}");
+        }
         let Some(url) = made? else {
             self.keep(
                 &file,
@@ -809,7 +826,8 @@ impl LawRuns {
         };
         // A run that failed left nothing to prove: its row says how it ended.
         if !matches!(ended.end, End::Done | End::Denied) {
-            let _ = fs::remove_dir_all(&ended.folder);
+            // Best effort: a file already gone is fine.
+            fs::remove_dir_all(&ended.folder).ok();
             return;
         }
         let patch = |state, line| LawPatch {
@@ -848,7 +866,8 @@ impl LawRuns {
             }
             None => Err("`srt` was not found, so the patch could not be proven".into()),
         };
-        let _ = fs::remove_dir_all(&ended.folder);
+        // Best effort: a file already gone is fine.
+        fs::remove_dir_all(&ended.folder).ok();
         let mut shown = self.shown();
         match proved {
             Ok((diff, proof)) => {
@@ -860,7 +879,8 @@ impl LawRuns {
                 let saved = fs::create_dir_all(&folder)
                     .and_then(|()| fs::write(&file, serde_json::to_vec(&kept).unwrap_or_default()));
                 if let Err(e) = saved {
-                    let _ = fs::remove_file(&file);
+                    // Best effort: a file already gone is fine.
+                    fs::remove_file(&file).ok();
                     shown.insert(
                         ended.id.clone(),
                         patch(
@@ -871,7 +891,8 @@ impl LawRuns {
                 }
             }
             Err(line) => {
-                let _ = fs::remove_file(&file);
+                // Best effort: a file already gone is fine.
+                fs::remove_file(&file).ok();
                 shown.insert(ended.id.clone(), patch(PatchState::Rejected, Some(line)));
             }
         }
@@ -1255,7 +1276,8 @@ fn run_checks(sandbox: &Sandbox, clone: &Path, checks: &[String], all: bool) -> 
     let mut ok = true;
     for check in checks {
         let ran = sandbox.run(clone, check, true);
-        out.push_str(&format!("$ {check}\n{}\n", ran.out.trim_end()));
+        // Writing to a `String` cannot fail.
+        write!(out, "$ {check}\n{}\n", ran.out.trim_end()).ok();
         ok &= ran.ok;
         if !ok && !all {
             break;
@@ -1277,16 +1299,22 @@ fn prove(
     if checks.is_empty() {
         return Err("Set this project's checks: the patch could not be proven".into());
     }
-    let _ = fs::remove_dir_all(&sandbox.tmp);
+    // A folder a past proof left; the `create` below fails if it stayed.
+    fs::remove_dir_all(&sandbox.tmp).ok();
     fs::DirBuilder::new()
         .mode(0o700)
         .create(&sandbox.tmp)
         .map_err(|e| format!("the proof's temp folder: {e}"))?;
     let proved = prove_in(sandbox, dir, clone, asked, checks);
-    let _ = fs::remove_dir_all(&sandbox.tmp);
+    // Best effort: a file already gone is fine.
+    fs::remove_dir_all(&sandbox.tmp).ok();
     proved
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "left whole when the lint came in (#555); spec #548 names no split of it"
+)]
 fn prove_in(
     sandbox: &Sandbox,
     dir: &Path,

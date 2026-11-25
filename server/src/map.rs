@@ -214,7 +214,7 @@ impl Drop for Running<'_> {
         self.0
             .0
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .entry(self.1.to_string())
             .or_default()
             .running = false;
@@ -251,6 +251,7 @@ impl Fetches {
             }
             slot.running = true;
             slot.last = Some(now);
+            drop(slots);
         }
         // The lock is not held while git runs, so a second trigger meets `running`; the guard clears it even if `fetch` panics.
         let _running = Running(self, repo);
@@ -273,7 +274,7 @@ fn read_file(file: &Path) -> serde_json::Value {
         .ok()
         .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
     parsed
-        .filter(|v| v.is_object())
+        .filter(serde_json::Value::is_object)
         .unwrap_or_else(|| serde_json::json!({}))
 }
 
@@ -540,7 +541,9 @@ pub fn map_marks(
             if !repo.is_dir() {
                 return None;
             }
-            let _ = crate::fog::refresh(repo, &file, &project, false);
+            if let Err(e) = crate::fog::refresh(repo, &file, &project, false) {
+                log::warn!("the fog of {project} was not refreshed: {e}");
+            }
             let fog = read_map(repo).source.is_some_and(|source| {
                 crate::fog::core_fogged(&read_user(&file, &project), &source)
             });
@@ -573,7 +576,7 @@ pub fn map_save_positions(
         return Err("a position must be a number".into());
     }
     update_user(&state_file()?, &project, |user| {
-        user.positions.extend(positions)
+        user.positions.extend(positions);
     })
 }
 
@@ -723,7 +726,7 @@ mod tests {
         commit_file(&o.seed, MAP_FILE, map);
         git(&o.seed, &["push", "-q", "origin", "HEAD"]);
         git(&o.main, &["fetch", "-q", "origin"]);
-        let paths = |list: &[&str]| list.iter().map(|p| p.to_string()).collect::<Vec<_>>();
+        let paths = |list: &[&str]| list.iter().map(ToString::to_string).collect::<Vec<_>>();
         let groups = BTreeMap::from([
             ("both".to_string(), paths(&["ui/a.ts", "core/b.rs"])),
             ("docs".to_string(), paths(&["docs/x.md"])),
@@ -770,7 +773,7 @@ mod tests {
                 number: 7,
                 head: head.clone(),
                 title: "Work".into(),
-                parts: parts.map(|p| p.iter().map(|s| s.to_string()).collect()),
+                parts: parts.map(|p| p.iter().map(ToString::to_string).collect()),
                 paths: None,
                 base: None,
             })

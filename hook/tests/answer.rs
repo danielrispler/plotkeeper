@@ -107,7 +107,8 @@ fn answered(name: &str, payload: &Value, answer: Value) -> String {
     answer["nonce"] = request(&home)["nonce"].clone();
     reply(&home, answer);
     let out = finish(child, since).0;
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
     out
 }
 
@@ -172,7 +173,8 @@ fn an_answer_allows_the_call_with_the_questions_and_each_chosen_label() {
     );
     // The request is gone once answered.
     assert!(!answer::ask_file(&data(&home), SESSION).exists());
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
 }
 
 #[test]
@@ -259,7 +261,8 @@ fn a_card_answer_goes_in_the_event_log_and_a_terminal_one_does_not() {
     assert_eq!(line["tool_input"], permission()["tool_input"]);
     assert_eq!(line["studio_answer"], json!({ "decision": "deny" }));
     assert!(line["studio_received_ms"].as_u64().unwrap() > 0);
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
 }
 
 #[test]
@@ -278,7 +281,8 @@ fn nobody_watching_or_a_stale_watching_file_returns_at_once_with_no_decision() {
         ("an old heartbeat", Some((SESSION, me, 6_000))),
     ];
     for (case, watching) in cases {
-        let _ = fs::remove_file(answer::watching_file(&data(&home)));
+        // Cleanup: a leftover temp file fails no test.
+        fs::remove_file(answer::watching_file(&data(&home))).ok();
         if let Some((session, pid, age)) = watching {
             watch(&home, session, pid, age);
         }
@@ -291,7 +295,8 @@ fn nobody_watching_or_a_stale_watching_file_returns_at_once_with_no_decision() {
             assert!(!ask.exists(), "{kind}, {case}");
         }
     }
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
 }
 
 #[test]
@@ -317,7 +322,8 @@ fn a_timeout_or_answer_in_the_terminal_returns_no_decision() {
         assert_eq!(out, "", "{kind}");
         assert!(took < PROMPTLY, "{kind}");
     }
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
 }
 
 #[test]
@@ -359,7 +365,8 @@ fn an_answer_with_a_wrong_nonce_or_open_to_others_is_refused() {
         reply(&home, json!({ "nonce": ask["nonce"] }));
         assert_eq!(finish(child, since).0, "", "{kind}");
     }
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
 }
 
 /// Waits until the hook has removed the answer file `path`, a link included.
@@ -391,7 +398,8 @@ fn a_request_names_the_agent_that_asks_so_the_studio_can_tell_whose_card_it_is()
         reply(&home, json!({ "nonce": ask["nonce"] }));
         assert_eq!(finish(child, since).0, "");
     }
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
 }
 
 #[test]
@@ -411,7 +419,8 @@ fn other_calls_pass_through_at_once() {
         assert_eq!(out, "", "{payload}");
         assert!(took < PROMPTLY, "{payload}");
     }
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
 }
 
 // Blocked commands (danielrispler/plotkeeper#170, #171).
@@ -448,7 +457,7 @@ fn blocked_requests(home: &Path) -> Vec<Value> {
         return vec![];
     };
     let mut found: Vec<Value> = entries
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .filter(|e| !e.file_name().to_string_lossy().contains(".answer."))
         .filter_map(|e| fs::read_to_string(e.path()).ok())
         .filter_map(|t| serde_json::from_str(&t).ok())
@@ -510,7 +519,8 @@ fn allowing_a_blocked_command_from_the_card_tells_the_agent_to_retry() {
     assert_eq!(line["studio_asked_by"], "PermissionDenied");
     assert_eq!(line["studio_answer"], json!({ "decision": "allow" }));
     assert_eq!(line["tool_input"]["command"], COMMAND);
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
 }
 
 #[test]
@@ -527,7 +537,8 @@ fn declining_a_blocked_command_gives_no_decision_and_is_logged() {
     let log = fs::read_to_string(studio_hook::event_log(&home)).unwrap();
     let line: Value = serde_json::from_str(log.lines().next().unwrap()).unwrap();
     assert_eq!(line["studio_answer"], json!({ "decision": "deny" }));
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
 }
 
 #[test]
@@ -543,7 +554,8 @@ fn a_block_nobody_watches_returns_at_once_and_leaves_its_request_for_the_card() 
         ("an old heartbeat", Some((me, 6_000))),
     ];
     for (case, watching) in cases {
-        let _ = fs::remove_file(answer::watching_file(&data(&home)));
+        // Cleanup: a leftover temp file fails no test.
+        fs::remove_file(answer::watching_file(&data(&home))).ok();
         if let Some((pid, age)) = watching {
             watch(&home, SESSION, pid, age);
         }
@@ -554,9 +566,11 @@ fn a_block_nobody_watches_returns_at_once_and_leaves_its_request_for_the_card() 
         let requests = blocked_requests(&home);
         assert_eq!(requests.len(), 1, "{case}");
         assert_eq!(requests[0]["tool_input"]["command"], COMMAND, "{case}");
-        let _ = fs::remove_dir_all(answer::blocked_dir(&data(&home), SESSION));
+        // Cleanup: a leftover temp file fails no test.
+        fs::remove_dir_all(answer::blocked_dir(&data(&home), SESSION)).ok();
     }
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
 }
 
 #[test]
@@ -570,7 +584,8 @@ fn a_block_waits_for_the_card_while_no_session_is_selected() {
     blocked_reply(&home, &blocked_request(&home)["nonce"], "allow");
     let out: Value = serde_json::from_str(&finish(child, since).0).unwrap();
     assert_eq!(out["hookSpecificOutput"]["retry"], true);
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
 }
 
 #[test]
@@ -585,7 +600,8 @@ fn a_decision_that_could_not_be_logged_keeps_the_request_so_the_card_keeps_its_b
     let out: Value = serde_json::from_str(&finish(child, since).0).unwrap();
     assert_eq!(out["hookSpecificOutput"]["retry"], true);
     assert_eq!(blocked_requests(&home).len(), 1);
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
 }
 
 #[test]
@@ -603,7 +619,8 @@ fn a_block_nobody_answers_by_the_timeout_returns_no_decision_and_keeps_its_reque
     assert_eq!(out, "");
     assert!(took < PROMPTLY);
     assert_eq!(blocked_requests(&home).len(), 1);
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
 }
 
 #[test]
@@ -617,7 +634,8 @@ fn other_denials_pass_through_at_once() {
     assert_eq!(out, "");
     assert!(took < PROMPTLY);
     assert_eq!(blocked_requests(&home), Vec::<Value>::new());
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
 }
 
 /// What the retry's two hooks print, with a pass for `COMMAND` in `CWD` granted at `granted_ms`,
@@ -647,7 +665,8 @@ fn retry(
         String::new()
     };
     let permitted = run(retried("PermissionRequest", command, cwd, session));
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
     (claimed, permitted)
 }
 
@@ -659,7 +678,7 @@ fn a_retry_of_the_exact_command_is_claimed_asked_and_allowed_once() {
     answer::write_pass(&data(&home), SESSION, COMMAND, CWD, now_ms()).unwrap();
     let pass_files = || {
         fs::read_dir(answer::pass_dir(&data(&home), SESSION))
-            .map(|d| d.count())
+            .map(Iterator::count)
             .unwrap_or(0)
     };
     assert_eq!(pass_files(), 1);
@@ -697,7 +716,8 @@ fn a_retry_of_the_exact_command_is_claimed_asked_and_allowed_once() {
     // A second run has no pass.
     assert_eq!(run(retried("PreToolUse", COMMAND, CWD, SESSION)), "");
     assert_eq!(run(retried("PermissionRequest", COMMAND, CWD, SESSION)), "");
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
 }
 
 #[test]
@@ -742,7 +762,8 @@ fn a_pass_file_of_the_wrong_mode_is_refused() {
         );
         assert_eq!(out, "", "{event}");
     }
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
 }
 
 #[test]
@@ -773,7 +794,8 @@ fn a_retry_run_after_cd_into_the_subagents_folder_matches_the_pass_for_that_fold
         allowed["hookSpecificOutput"]["decision"]["behavior"],
         "allow"
     );
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
 }
 
 #[test]
@@ -798,7 +820,8 @@ fn asking_again_leaves_one_fresh_pass_so_the_command_runs_once() {
         "",
         "a second run has no pass"
     );
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
 }
 
 #[test]
@@ -820,7 +843,8 @@ fn scanning_a_sessions_passes_deletes_the_expired_ones() {
     );
     assert_eq!(out, "");
     assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
 }
 
 #[test]
@@ -840,7 +864,8 @@ fn a_claimed_pass_whose_retry_is_blocked_again_allows_nothing_later() {
     assert_eq!(run(denied()), "");
     watch(&home, "s-other", std::process::id(), 0);
     assert_eq!(run(retried("PermissionRequest", COMMAND, CWD, SESSION)), "");
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
 }
 
 /// Another harness that runs Claude Code's plugin hooks can send its own payload to the Claude entry's answer hook
@@ -862,5 +887,6 @@ fn a_payload_with_another_harness_marker_raises_no_card_on_the_claude_entry() {
     assert_eq!(out, "");
     assert!(took < PROMPTLY, "it waited {took:?} for a card");
     assert!(!answer::ask_file(&data(&home), SESSION).exists());
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
 }

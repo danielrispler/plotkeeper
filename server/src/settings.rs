@@ -2,6 +2,7 @@
 //! page asks for their text at start, and the read loop sends it each time a file changes; the page parses them
 //! (`ui/settings.ts`), so a broken file is reported there and the last good one stays in effect.
 
+use std::fmt::Write as _;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -85,7 +86,8 @@ fn edit_text(
             // Nothing to reset under a parent that is not there.
             None => return Ok(text.to_string()),
         }
-        walked.push_str(&format!("{name}."));
+        // Writing to a `String` cannot fail.
+        write!(walked, "{name}.").ok();
     }
     match (object.get(leaf), value) {
         (Some(prop), Some(value)) => prop.set_value(value),
@@ -128,7 +130,8 @@ fn save(file: &Path, text: &str) -> Result<(), String> {
         })
         .and_then(|()| fs::rename(&temp, &target));
     if written.is_err() {
-        let _ = fs::remove_file(&temp);
+        // Best effort: the write's own error is the one returned.
+        fs::remove_file(&temp).ok();
     }
     written.map_err(|e| e.to_string())
 }
@@ -171,7 +174,9 @@ pub fn write_setting(
 ) -> Result<String, String> {
     let [settings, _] = paths().ok_or("no home folder")?;
     // One write at a time, so two never interleave their read, compare and save.
-    let _one_at_a_time = WRITING.lock().unwrap_or_else(|e| e.into_inner());
+    let _one_at_a_time = WRITING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     write_in(&settings, expected.as_deref(), &path, value.as_ref())
 }
 
@@ -184,7 +189,9 @@ pub fn save_writer(
     effort: &str,
 ) -> Result<String, String> {
     let [settings, _] = paths().ok_or("no home folder")?;
-    let _one_at_a_time = WRITING.lock().unwrap_or_else(|e| e.into_inner());
+    let _one_at_a_time = WRITING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     save_writer_in(&settings, expected.as_deref(), writer, model, effort)
 }
 
@@ -217,7 +224,9 @@ fn save_writer_in(
 /// writes. `expected` is the text the page last read. Returns the new text.
 pub fn save_explanations(expected: Option<String>, on: bool) -> Result<String, String> {
     let [settings, _] = paths().ok_or("no home folder")?;
-    let _one_at_a_time = WRITING.lock().unwrap_or_else(|e| e.into_inner());
+    let _one_at_a_time = WRITING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     save_explanations_in(&settings, expected.as_deref(), on)
 }
 
@@ -347,7 +356,12 @@ fn brief_backfill_in(text: &str) -> studio_core::CatchUp {
     let mut backfill = studio_core::CatchUp::default();
     let hours = |key: &str| json[key]["hours"].as_f64().filter(|h| *h >= 0.0);
     if let Some(hours) = hours("briefBackfill").or_else(|| hours("catchUp")) {
-        backfill.window_ms = (hours * 3_600_000.0) as u64;
+        #[allow(
+            clippy::cast_sign_loss,
+            reason = "`hours` is at least 0 (the filter above), and a cast from `f64` saturates"
+        )]
+        let window_ms = (hours * 3_600_000.0) as u64;
+        backfill.window_ms = window_ms;
     }
     backfill
 }
@@ -587,9 +601,10 @@ impl ApiKeys for Keychain {
             quoted(key)
         );
         let out = self.run(&["-i"], Some(&command))?;
-        match out.status.success() && self.get(kind).as_deref() == Some(key) {
-            true => Ok(()),
-            false => Err("The Keychain did not save the key.".into()),
+        if out.status.success() && self.get(kind).as_deref() == Some(key) {
+            Ok(())
+        } else {
+            Err("The Keychain did not save the key.".into())
         }
     }
 
@@ -758,7 +773,7 @@ mod tests {
     }
 
     fn path(keys: &[&str]) -> Vec<String> {
-        keys.iter().map(|k| k.to_string()).collect()
+        keys.iter().map(ToString::to_string).collect()
     }
 
     fn parsed(text: &str) -> serde_json::Value {

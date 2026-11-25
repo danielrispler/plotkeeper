@@ -65,6 +65,10 @@ impl Projects {
 
     /// Adds the repository of each session not yet saved; returns whether the list changed. A removed project is added
     /// again only for a session whose latest event came after its removal.
+    #[allow(
+        clippy::significant_drop_tightening,
+        reason = "the list is changed and written under one lock, so two changes never lose one"
+    )]
     pub fn see(&self, sessions: &[&Session]) -> Result<bool, String> {
         let mut held = self.saved.lock().unwrap();
         let saved = held.get_or_insert_with(|| read(&self.file));
@@ -97,16 +101,25 @@ impl Projects {
     /// The saved projects, in the order they joined, each marked gone when its folder is not there.
     pub fn list(&self) -> Vec<Project> {
         let mut held = self.saved.lock().unwrap();
-        let saved = held.get_or_insert_with(|| read(&self.file));
-        (saved.projects.iter())
+        let paths = held
+            .get_or_insert_with(|| read(&self.file))
+            .projects
+            .clone();
+        drop(held);
+        paths
+            .into_iter()
             .map(|path| Project {
-                path: path.clone(),
-                gone: !Path::new(path).is_dir(),
+                gone: !Path::new(&path).is_dir(),
+                path,
             })
             .collect()
     }
 
     /// Remove project: takes `path` off the list at `at` ms; returns the list as it is now.
+    #[allow(
+        clippy::significant_drop_tightening,
+        reason = "the list is changed and written under one lock, so two changes never lose one"
+    )]
     pub fn remove(&self, path: &str, at: u64) -> Result<Vec<Project>, String> {
         {
             let mut held = self.saved.lock().unwrap();

@@ -95,7 +95,7 @@ test("the stored v3 brief of #317 plays as three chapters of four steps, in orde
   const full = brief({ ...writer, chapters: writer.chapters.map((c) => ({ ...c, flags: [], steps: c.steps.map((s) => step(s.k, s)) })) });
   assert.deepEqual(full.chapters.map((c) => c.behaviour), ["Fog", "Broken laws", "Seen gate"]);
   assert.deepEqual([0, 1, 2].map((i) => playlist(full, i, i === 0).length), [4, 4, 4]);
-  const rows = trayRows([{ number: 317, title: "The Map view", head: "a", brief: /** @type {import("../../dist/types.js").BriefInfo} */ ({ stale: false, writing: false, chapters: full.chapters.map((c) => c.title) }) }]);
+  const rows = trayRows([{ number: 317, title: "The Map view", head: "a", brief: /** @type {NonNullable<import("../../dist/types.js").ReadyPr["brief"]>} */ ({ stale: false, writing: false, chapters: full.chapters.map((c) => c.title) }) }]);
   assert.equal(rows.length, 3);
   assert.deepEqual(rows.map((r) => r.chapter), [0, 1, 2]);
 });
@@ -451,7 +451,7 @@ test("a not-confirmed decision and the No part group copy as prompts too", () =>
 });
 
 test("See the code of a Since you read story asks for the diff from the head it was read at, the full brief's from the PR's base (#497)", () => {
-  const brief = /** @type {import("../../dist/types.js").StoredBrief} */ ({ version: 1, pr: 7, head: "bbb", written_at: 1, stale: false, model: "opus", brief: { title: "Fog", overview: [], chapters: [], also: [] } });
+  const brief = /** @type {import("../../dist/types.js").BriefView["brief"]} */ ({ version: 1, pr: 7, head: "bbb", written_at: 1, stale: false, model: "opus", brief: { title: "Fog", overview: [], chapters: [], also: [] } });
   assert.deepEqual(diffArgs("/p", { brief, partial: false }), { project: "/p", number: 7, head: "bbb", title: "Fog" });
   assert.deepEqual(diffArgs("/p", { brief, partial: false, since: "aaa" }), { project: "/p", number: 7, head: "bbb", title: "Fog", base: "aaa" });
 });

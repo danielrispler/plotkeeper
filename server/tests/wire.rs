@@ -424,6 +424,7 @@ fn the_wire_samples_of_the_writer_section_are_written_for_tsc() {
 }
 
 /// A story with every field filled: an overview step and a chapter whose step carries a figure, a check, risks and cites.
+#[allow(clippy::too_many_lines, reason = "one sample brief, written out whole")]
 fn story() -> studio_understanding::pr_brief::Brief {
     use studio_understanding::pr_brief::*;
     let step = Step {
@@ -579,6 +580,10 @@ fn brief() -> studio_understanding::pr_brief::StoredBrief {
 
 // @law: wire-types-agree
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one sample per reply, written out in one place"
+)]
 fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
     use studio_server::{
         back_a_law::{NewLaw, Opened as LawOpened, Started},

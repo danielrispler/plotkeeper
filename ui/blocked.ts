@@ -43,7 +43,7 @@ export function riskLine(note: RiskView | undefined, hasButtons: boolean, reads 
 
 // Fills the note's place `place` with `risk`, in place: a place that already stands keeps its node, so the live region changes its text
 // and a screen reader hears it, and the card's buttons keep their focus.
-export function fillRisk(place: HTMLElement, risk: RiskLine) {
+function fillRisk(place: HTMLElement, risk: RiskLine) {
   place.title = risk.text;
   if (risk.level === null) {
     place.replaceChildren(risk.text);

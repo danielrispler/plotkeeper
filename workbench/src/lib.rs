@@ -4,6 +4,9 @@
 //! only its own tests used is in `archive/workbench/` (#415), with the `claude` command and status line wrapper
 //! a studio terminal ran and the context window its snapshots held (#416).
 
+// Spec #548, Group 3: these two crates document their public API.
+#![warn(missing_docs)]
+
 pub mod run;
 
 use serde::Serialize;
@@ -17,7 +20,7 @@ pub fn main_checkout(folder: &Path) -> Result<String, String> {
         &["rev-parse", "--path-format=absolute", "--git-common-dir"],
         GIT_READ_LIMIT,
     )
-    .map_err(|_| format!("{} is not in a git repository", folder.display()))?;
+    .map_err(|e| format!("{} is not in a git repository: {e}", folder.display()))?;
     Path::new(&common)
         .parent()
         .map(|main| main.display().to_string())
@@ -77,7 +80,9 @@ pub fn gh_path() -> &'static str {
 /// lines, and its commits that no branch at `origin` holds, as `<short hash> <subject>`.
 #[derive(Debug, PartialEq, Serialize)]
 pub struct Losses {
+    /// Its uncommitted changes, as `git status --short` lines.
     pub uncommitted: Vec<String>,
+    /// Its commits that no branch at `origin` holds, as `<short hash> <subject>`.
     pub unpushed: Vec<String>,
 }
 
@@ -123,10 +128,14 @@ pub mod agy_plugin {
     const PLUGIN_JSON: &str = include_str!("../../plugin-agy/plugin.json");
     const HOOKS_JSON: &str = include_str!("../../plugin-agy/hooks.json");
 
+    /// Whether the plugin's copy in agy's config is the one for this hook.
     #[derive(Debug, PartialEq, Eq)]
     pub enum Status {
+        /// Installed, with the same files.
         Current,
+        /// Not installed.
         Missing,
+        /// Installed, with files that differ.
         Stale,
     }
 
@@ -192,7 +201,7 @@ pub mod agy_plugin {
         }
         if let Some(name) = dir.file_name().and_then(|n| n.to_str()) {
             // An uninstall of what is not there fails, and that is fine.
-            let _ = uninstall(agy, name, home);
+            uninstall(agy, name, home).ok();
         }
         let done = run(&["install"])?;
         if !done.status.success() {

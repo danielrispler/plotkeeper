@@ -32,7 +32,7 @@ export const stateLabel = (status: string) => (status === "completed" ? "done" :
 
 // The log being shown: whose, and what has been read of it (null while it has no file), for reading on.
 export type ShownLog = { session: string; agent: string; log: SubagentLog | null };
-export const shownLog: ShownLog = { session: "", agent: "", log: null };
+const shownLog: ShownLog = { session: "", agent: "", log: null };
 
 // The shown log with a read from its offset added: only new entries, so a call's result pairs with it when it
 // arrives. A read that found no file changes nothing.

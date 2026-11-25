@@ -158,8 +158,8 @@ fn brief_touching(required: &[&str], also: &[&str]) -> StoredBrief {
         pr: 406,
         head: "abc".into(),
         shape: Shape {
-            required: required.iter().map(|s| s.to_string()).collect(),
-            also: also.iter().map(|s| s.to_string()).collect(),
+            required: required.iter().map(ToString::to_string).collect(),
+            also: also.iter().map(ToString::to_string).collect(),
             ..Shape::default()
         },
         ..StoredBrief::default()
@@ -170,7 +170,7 @@ fn pre_flight(issue: Option<u64>, parts: &[&str]) -> PreFlight {
     PreFlight {
         issue,
         title: "Studio: Spec: the modules".into(),
-        parts: parts.iter().map(|s| s.to_string()).collect(),
+        parts: parts.iter().map(ToString::to_string).collect(),
         predicted: true,
         at: 1,
     }

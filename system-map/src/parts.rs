@@ -2,6 +2,7 @@
 //! version 1 map and the one text that prompts give a part.
 
 use std::collections::HashSet;
+use std::fmt::Write as _;
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -73,11 +74,14 @@ pub fn part_text(part: &Value) -> String {
     let words = |item: &Value, key: &str| item[key].as_str().unwrap_or_default().to_string();
     let mut text = words(part, "purpose");
     for item in part["holds"].as_array().into_iter().flatten() {
-        text.push_str(&format!(
+        // Writing to a `String` cannot fail.
+        write!(
+            text,
             "\n  - {}: {}",
             words(item, "name"),
             words(item, "text")
-        ));
+        )
+        .ok();
         let paths: Vec<&str> = item["paths"]
             .as_array()
             .into_iter()
@@ -85,7 +89,8 @@ pub fn part_text(part: &Value) -> String {
             .filter_map(Value::as_str)
             .collect();
         if !paths.is_empty() {
-            text.push_str(&format!(" (key files: {})", paths.join(", ")));
+            // Writing to a `String` cannot fail.
+            write!(text, " (key files: {})", paths.join(", ")).ok();
         }
     }
     text

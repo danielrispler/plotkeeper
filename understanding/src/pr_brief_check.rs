@@ -298,7 +298,10 @@ fn labelled(claims: &[ClaimFlag], skip: &BTreeSet<String>) -> Vec<String> {
 /// Runs the claim check on `brief` (already code-checked), then the one retry, and fills the record's claim
 /// fields and calls. A call that fails or a reply that does not read is recorded and logged and leaves the
 /// brief as it was. `stage` hears each call as it starts.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "no type groups these inputs, and one made only for this call would be a new abstraction (#555)"
+)]
 pub fn claim_check_and_retry(
     writer: &(impl BriefWriter + ?Sized),
     model: &str,

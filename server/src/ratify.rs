@@ -891,7 +891,7 @@ mod tests {
                 )
             })
             .collect();
-        let s = |list: &[&str]| list.iter().map(|p| p.to_string()).collect::<Vec<_>>();
+        let s = |list: &[&str]| list.iter().map(ToString::to_string).collect::<Vec<_>>();
         assert_eq!(
             held,
             [

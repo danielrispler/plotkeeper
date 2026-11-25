@@ -685,6 +685,10 @@ pub struct BlockedCommand {
 impl BlockedCommand {
     /// Whether `agent`'s call of `tool` in `cwd` is this card's retry: the same command and folder, by
     /// the agent that was blocked or by the session's own agent, which a subagent's card asks to run it.
+    #[allow(
+        clippy::ref_option,
+        reason = "#556 makes it `Option<&str>` as it splits this file"
+    )]
     fn retried_by(&self, tool: &event::Tool, cwd: &str, agent: &Option<String>) -> bool {
         Some(self.command.as_str()) == tool.command.as_deref()
             && self.cwd == cwd
@@ -1156,6 +1160,10 @@ impl Session {
 
     /// Updates the subagent tree with one event. A spawn's response names its child (`agentId`),
     /// and every child event names its agent (`agent_id`).
+    #[allow(
+        clippy::too_many_lines,
+        reason = "left whole when the lint came in (#555); spec #548 names no split of it"
+    )]
     fn track_agents(&mut self, event: &Event, worktree_changed: bool, roots: &Roots) {
         let at = event.studio_received_ms;
         for (id, status, at) in self.ends(event) {
@@ -1350,6 +1358,10 @@ impl Session {
     }
 
     /// Whether a card's Allow covers `agent`'s call of `tool` in `cwd`: its pass lets the call through.
+    #[allow(
+        clippy::ref_option,
+        reason = "#556 makes it `Option<&str>` as it splits this file"
+    )]
     fn passes(&self, tool: &event::Tool, cwd: &str, agent: &Option<String>) -> bool {
         self.blocked_commands.iter().any(|c| {
             matches!(
@@ -1560,6 +1572,10 @@ impl Session {
     }
 
     /// The turn a call of `agent` is in: the latest, or for a subagent's call the one that spawned it.
+    #[allow(
+        clippy::ref_option,
+        reason = "#556 makes it `Option<&str>` as it splits this file"
+    )]
     fn ledger_turn(&self, agent: &Option<String>) -> Option<usize> {
         let spawned = agent.as_deref().and_then(|a| self.subagent(a)?.turn);
         spawned.or_else(|| self.current_turn())
@@ -1727,9 +1743,10 @@ impl Session {
             denied: None,
         };
         let mut calls = self.running.iter().filter(|c| block.takes(c));
-        let calls: Vec<&Call> = match named {
-            true => calls.next_back().into_iter().collect(),
-            false => calls.collect(),
+        let calls: Vec<&Call> = if named {
+            calls.next_back().into_iter().collect()
+        } else {
+            calls.collect()
         };
         let calls = calls
             .into_iter()
@@ -2396,6 +2413,10 @@ impl Studio {
     /// worker's after each Bash step, for a commit; and a worker's end. On a step 20 minutes after
     /// the last card of the worktree it is in, that worktree's, for the fallback card; a session's
     /// only in a turn. A helper's look after its Bash step comes beside such a fallback's.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "left whole when the lint came in (#555); spec #548 names no split of it"
+    )]
     fn look(&self, event: &Event) -> Vec<Fingerprint> {
         let step = event.tool_ends();
         let due = |since: &Since| step && event.studio_received_ms >= since.at + FALLBACK_MS;
@@ -2432,11 +2453,12 @@ impl Studio {
             if closing.is_empty() && ends {
                 closing = vec![self.roots.of(&event.cwd)];
             }
-            let purpose = match ends {
-                true => Some(Purpose::TurnEnd),
-                false => session
+            let purpose = if ends {
+                Some(Purpose::TurnEnd)
+            } else {
+                session
                     .is_some_and(session_due)
-                    .then_some(Purpose::Fallback),
+                    .then_some(Purpose::Fallback)
             };
             let mut looks: Vec<Fingerprint> = purpose
                 .into_iter()
@@ -2446,9 +2468,10 @@ impl Studio {
             // turn that starts after the last one ended first cards what subagents changed
             // between them (danielrispler/Falinks#434, decision 17).
             if opens || s.in_turn() && !event.turn_ends() {
-                let between = match opens && !s.in_turn() {
-                    true => s.between_turns(event.studio_received_ms),
-                    false => Vec::new(),
+                let between = if opens && !s.in_turn() {
+                    s.between_turns(event.studio_received_ms)
+                } else {
+                    Vec::new()
                 };
                 let purpose = if between.is_empty() {
                     Purpose::Base
@@ -2502,9 +2525,10 @@ impl Studio {
         let owner = agent.map_or_default(|a| a.owner.as_str());
         let since = &session.record(owner).since;
         let fallback: Vec<Fingerprint> = match session.subagent(owner) {
-            Some(own) if &own.agent.id == id => match worker(own) {
-                true if due(since) => look(id, folder, Purpose::Fallback),
-                _ => look(id, folder, Purpose::Commit).filter(|_| bash),
+            Some(own) if &own.agent.id == id => if worker(own) && due(since) {
+                look(id, folder, Purpose::Fallback)
+            } else {
+                look(id, folder, Purpose::Commit).filter(|_| bash)
             }
             .into_iter()
             .collect(),
@@ -2628,6 +2652,10 @@ impl Studio {
         }
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "#556 makes it a dispatcher with one handler per event kind (spec #548, Group 4)"
+    )]
     fn take_event(
         &mut self,
         mut event: Event,
@@ -2994,9 +3022,12 @@ impl Studio {
                     let flips: Vec<bool> = session
                         .blocked_commands
                         .iter()
-                        .map(|card| match own_end {
-                            true => card.agent.is_some() && card.agent == event.agent_id,
-                            false => ended(&card.agent),
+                        .map(|card| {
+                            if own_end {
+                                card.agent.is_some() && card.agent == event.agent_id
+                            } else {
+                                ended(&card.agent)
+                            }
                         })
                         .collect();
                     for (card, flip) in session.blocked_commands.iter_mut().zip(flips) {
@@ -3108,9 +3139,10 @@ impl Studio {
                     let allowed = answer["decision"] == "allow";
                     if let Some(card) = session.blocked_commands.iter_mut().find(|c| c.call == *id)
                     {
-                        card.status = match allowed {
-                            true => BlockedStatus::Allowed,
-                            false => BlockedStatus::Declined,
+                        card.status = if allowed {
+                            BlockedStatus::Allowed
+                        } else {
+                            BlockedStatus::Declined
                         };
                         session.decisions.push(Decision {
                             call: id.clone(),
@@ -3517,9 +3549,10 @@ impl Studio {
                         let strings = answers
                             .as_object()
                             .is_some_and(|a| a.values().all(Value::is_string));
-                        question.answer = match strings {
-                            true => Answer::Answered(answers.clone()),
-                            false => Answer::NotAnswered,
+                        question.answer = if strings {
+                            Answer::Answered(answers.clone())
+                        } else {
+                            Answer::NotAnswered
                         };
                         if strings {
                             let card = session.carded.remove(event.call_id());
@@ -4066,6 +4099,10 @@ impl Studio {
     /// started (`shell-…`) gets a shell row, named "terminal · <folder>", while nothing in it reports
     /// a status or links a session. Returns the notices a status-only row raises, as a Claude
     /// session's would.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "left whole when the lint came in (#555); spec #548 names no split of it"
+    )]
     pub fn terminals(&mut self, terms: &[Terminal], now: u64) -> Vec<Output> {
         let mut outputs = Vec::new();
         let reporting = terms.iter().filter(|t| t.exited.is_none());

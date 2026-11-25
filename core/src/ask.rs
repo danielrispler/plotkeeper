@@ -172,6 +172,10 @@ impl Studio {
 
     /// The facts of `anchor` the ledger holds, and the row whose output the event log holds, with no file read (spec
     /// danielrispler/plotkeeper#548). `None` when the session or the thing is not known.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "left whole when the lint came in (#555); spec #548 names no split of it"
+    )]
     pub fn ask_recorded(&self, session: &str, anchor: &Anchor) -> Option<AskRecorded> {
         let session = self.session(session)?;
         let ledger = &session.ledger;

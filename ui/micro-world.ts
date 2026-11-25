@@ -122,7 +122,7 @@ function close() {
 }
 
 // Opens world `key` of `project` (named `name`): its checked page fetched through the API, logged for the stop rules.
-export async function openMicroWorld(project: string, key: string, name: string, worlds: MicroWorlds | undefined, explore: () => void) {
+async function openMicroWorld(project: string, key: string, name: string, worlds: MicroWorlds | undefined, explore: () => void) {
   try {
     const html = await invoke("micro_world_page", { project, key });
     if (shownProject() !== project) return;

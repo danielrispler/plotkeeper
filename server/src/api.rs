@@ -68,6 +68,10 @@ fn res<T: Serialize>(reply: Result<T, String>) -> Result<Value, Failure> {
 }
 
 /// Runs command `name` over `args`; `page` takes what the page reports about itself.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one arm per page command: the dispatch reads as one table"
+)]
 pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<Value, Failure> {
     let args: Args = match args {
         Value::Object(map) => map.into_iter().map(|(k, v)| (snake(&k), v)).collect(),

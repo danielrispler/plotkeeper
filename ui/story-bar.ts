@@ -11,7 +11,7 @@
 import { failure, invoke, onEnter, text } from "./dom.js";
 import { localDay } from "./stop-rules.js";
 
-export type BarKind = "explain-back-given" | "explain-back-marked";
+type BarKind = "explain-back-given" | "explain-back-marked";
 export type BarSend = (kind: BarKind, extra?: { line?: string; mark?: Mark }) => void;
 // The longest explain-back line kept, in characters (the shell refuses a longer one).
 export const LINE_MAX = 300;
@@ -28,7 +28,7 @@ export function explainsBack(gist: string | undefined, parts: string[], tierOf: 
   return !!gist?.trim() && parts.some((part) => tierOf(part) === "core");
 }
 // The key that skips the whole bar.
-export const SKIP_KEY = "s";
+const SKIP_KEY = "s";
 
 // What a bar ends: a chapter of a PR's brief, or a part catch-up.
 export type StoryAbout = { project: string; pr: number; chapter: number } | { project: string; part: string };

@@ -128,6 +128,10 @@ fn summaries(checks: &Studio) -> [StoredSummary; 2] {
 
 // @law: wire-types-agree
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one sample per reply, written out in one place"
+)]
 fn the_wire_samples_of_the_understanding_layer_are_written_for_tsc() {
     let data = tempfile::tempdir().unwrap();
     let store = CardStore::open(data.path().join("cards.json")).unwrap();

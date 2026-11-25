@@ -196,6 +196,7 @@ test("Draft a map's prompt names the map file and the command that checks it", (
   assert.match(draftPrompt, /system-map check/);
   assert.match(draftPrompt, /purpose/);
   assert.match(draftPrompt, /holds/);
+  assert.match(draftPrompt, /Add the extractors its `note:` lines suggest to `extractors`\./);
 });
 
 test("a part's sheet gives its purpose, then each held item with its key files, and its plate's hover text the purpose", () => {

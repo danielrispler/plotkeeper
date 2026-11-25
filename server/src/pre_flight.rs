@@ -52,7 +52,9 @@ impl Store {
     /// Reads, changes and writes the file under one lock, so a note from a brief's write never loses a pre-flight set meanwhile.
     fn change(&self, edit: impl FnOnce(&mut Saved)) -> Result<(), String> {
         static LOCK: Mutex<()> = Mutex::new(());
-        let _held = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _held = LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut saved = self.read();
         edit(&mut saved);
         self.write(&saved)

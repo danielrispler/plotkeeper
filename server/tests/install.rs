@@ -169,7 +169,8 @@ esac"#,
             }
             if up {
                 // Ctrl+C, through the terminal.
-                let _ = stdin.write_all(b"\x03");
+                // The server may have stopped already.
+                stdin.write_all(b"\x03").ok();
             }
         });
         text.replace("\r\n", "\n")
@@ -182,7 +183,8 @@ esac"#,
         let pid = child.id().to_string();
         served(&mut child, |_, up| {
             if up {
-                let _ = Command::new("kill").args(["-INT", &pid]).status();
+                // The server may have stopped already.
+                Command::new("kill").args(["-INT", &pid]).status().ok();
             }
         })
     }
@@ -697,10 +699,10 @@ fn cursor_install_then_uninstall_leaves_its_hook_file_byte_identical() {
     let setups: [(&str, Setup); 4] = [
         ("absent", |_| {}),
         ("no file", |m| {
-            fs::create_dir_all(m.home.join(".cursor/projects")).unwrap()
+            fs::create_dir_all(m.home.join(".cursor/projects")).unwrap();
         }),
         ("present", |m| {
-            m.write(".cursor/hooks.json", "{ \"version\": 1, \"hooks\": {} }\n")
+            m.write(".cursor/hooks.json", "{ \"version\": 1, \"hooks\": {} }\n");
         }),
         ("customised", |m| m.write(".cursor/hooks.json", CURSOR_OWN)),
     ];
@@ -1362,8 +1364,10 @@ fn a_second_start_never_asks() {
     }
 
     let text = machine.start(&["y"]);
-    let _ = first.kill();
-    let _ = first.wait();
+    // The child may have exited already.
+    first.kill().ok();
+    // Only reaps the child; its exit status is not used.
+    first.wait().ok();
     assert!(text.contains(line.trim()), "{text}");
     assert!(!text.contains(ASK), "{text}");
     assert!(machine.calls("claude").is_empty());
@@ -1662,8 +1666,10 @@ fn the_server_says_nothing_is_wired_after_a_declined_start_and_wired_after_insta
     let before = wired(&url);
     machine.run("install");
     let after = wired(&url);
-    let _ = server.kill();
-    let _ = server.wait();
+    // The child may have exited already.
+    server.kill().ok();
+    // Only reaps the child; its exit status is not used.
+    server.wait().ok();
     assert!(!before, "nothing is wired after a no");
     assert!(after, "install wired, and the running server says so");
 }
@@ -1749,7 +1755,8 @@ fn with_stdout_sent_to_a_file_the_question_still_reaches_the_terminal_and_stdout
         }
         let logged = fs::read_to_string(&log).unwrap_or_default();
         if !stopped && logged.contains("plotkeeper: http") {
-            let _ = stdin.write_all(b"\x03");
+            // The server may have stopped already.
+            stdin.write_all(b"\x03").ok();
             stopped = true;
         }
     });
@@ -1775,7 +1782,8 @@ fn a_start_with_no_terminal_says_what_it_did_not_wire_on_stderr_and_prints_only_
         &mut first,
     )
     .unwrap();
-    let _ = child.kill();
+    // The child may have exited already.
+    child.kill().ok();
     let mut errors = String::new();
     child
         .stderr
@@ -1783,7 +1791,8 @@ fn a_start_with_no_terminal_says_what_it_did_not_wire_on_stderr_and_prints_only_
         .unwrap()
         .read_to_string(&mut errors)
         .unwrap();
-    let _ = child.wait();
+    // Only reaps the child; its exit status is not used.
+    child.wait().ok();
     assert!(first.starts_with("plotkeeper: http"), "{first}");
     assert!(errors.contains("Claude Code not wired"), "{errors}");
 }

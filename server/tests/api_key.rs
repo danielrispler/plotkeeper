@@ -23,9 +23,10 @@ impl log::Log for Logs {
         true
     }
     fn log(&self, record: &log::Record) {
-        match studio_server::logged(record.metadata()) {
-            true => (self.0.lock().unwrap()).push(format!("{} {}", record.target(), record.args())),
-            false => *self.1.lock().unwrap() += 1,
+        if studio_server::logged(record.metadata()) {
+            (self.0.lock().unwrap()).push(format!("{} {}", record.target(), record.args()));
+        } else {
+            *self.1.lock().unwrap() += 1;
         }
     }
     fn flush(&self) {}
@@ -71,11 +72,14 @@ fn fake(answers: Vec<(u16, String)>) -> (String, Arc<Mutex<Vec<String>>>) {
             let key = header("x-api-key").or(bearer).unwrap_or_default();
             sent.lock().unwrap().push(key.clone());
             let echo = tiny_http::Header::from_bytes("x-echo-key", key.as_bytes()).unwrap();
-            let _ = request.respond(
-                tiny_http::Response::from_string(body.replace("{key}", &key))
-                    .with_status_code(status)
-                    .with_header(echo),
-            );
+            // The client may have hung up; there is no one left to answer.
+            request
+                .respond(
+                    tiny_http::Response::from_string(body.replace("{key}", &key))
+                        .with_status_code(status)
+                        .with_header(echo),
+                )
+                .ok();
         }
     });
     (base, keys)
@@ -94,6 +98,10 @@ fn ok() -> String {
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one test scenario, read top to bottom"
+)]
 fn a_planted_key_is_saved_replaced_and_removed_and_never_reaches_the_page_or_the_log() {
     log::set_logger(&LOGS).unwrap();
     log::set_max_level(log::LevelFilter::Trace);

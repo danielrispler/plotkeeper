@@ -6,7 +6,7 @@
 import type { Command, Reply, Selection } from "../../ui/types.ts";
 
 // A reply that depends on one argument: { __by: "id", values: { <id>: reply } }.
-export type ByArg<T> = { __by: string; values: Record<string, T> };
+type ByArg<T> = { __by: string; values: Record<string, T> };
 
 // The commands whose reply the window reads.
 type ReadCommand = { [C in Command]: Reply<C> extends void ? (void extends Reply<C> ? never : C) : C }[Command];

@@ -28,7 +28,7 @@ export function closeDrawer() {
   if (view) drawDrawer(view);
 }
 
-export const drawerOpen = () => open !== null && currentMap()?.project === open.project;
+const drawerOpen = () => open !== null && currentMap()?.project === open.project;
 
 // A jump out of the drawer: a real link, opened in a new tab, so ⌘-click and middle-click work as on any link (#462). Its address is the
 // server's data, so only an `https:` one is linked, as the patch review's draft PR is (`patch-review.ts`); another shows its label alone.

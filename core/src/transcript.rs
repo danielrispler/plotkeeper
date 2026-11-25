@@ -232,6 +232,10 @@ impl TranscriptFile {
         if path.extension().is_none_or(|e| e != "jsonl") {
             return Err("the transcript path is not a .jsonl file".into());
         }
+        #[allow(
+            clippy::map_err_ignore,
+            reason = "the read before compares its error with `GONE`, so a file that does not open reads as gone"
+        )]
         let mut file = File::open(path).map_err(|_| GONE.to_string())?;
         file.seek(SeekFrom::Start(self.read_to))
             .map_err(|e| e.to_string())?;

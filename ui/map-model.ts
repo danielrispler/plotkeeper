@@ -9,9 +9,9 @@ export type Point = { x: number; y: number };
 export type Size = { w: number; h: number };
 // A part of a version 2 map (spec #473): a short purpose and the named things it holds, each with its key files. The server sends a
 // version 1 map converted, so the page reads only these.
-export type Held = { name: string; text: string; paths?: string[] };
+type Held = { name: string; text: string; paths?: string[] };
 export type Part = { id: string; name: string; caption: string; purpose: string; holds: Held[]; tier: Tier; paths: string[]; zone?: string };
-export type Actor = { id: string; name: string };
+type Actor = { id: string; name: string };
 // A link's kind (spec #473): `import`, a code dependency the check proves, or a run-time kind with a one-sentence reason. A version 1
 // map's links have none.
 export type LinkKind = "import" | "http" | "spawn" | "file";
@@ -145,10 +145,11 @@ export function escapeMap(layers: Partial<Record<LayerName, Layer>>): LayerName 
 export const draftPrompt =
   "Draft system-map.json at this repository's root, in plain words: its parts, each with the files it owns, a purpose of one or two sentences " +
   "and the named things it holds (each with one sentence and its key files), the outside actors, the links between them, " +
-  "the files that belong to no part on purpose, and the laws that must stay true. Run `system-map check` and fix what it reports until it passes.";
+  "the files that belong to no part on purpose, and the laws that must stay true. Run `system-map check` and fix what it reports until it passes. " +
+  "Add the extractors its `note:` lines suggest to `extractors`.";
 
 // The part sheet (ticket #310) as data: what `map-sheet.ts` draws for one part.
-export const tierLabel: Record<Tier, string> = { core: "Core", interface: "Interface-only", "black-box": "Black box" };
+const tierLabel: Record<Tier, string> = { core: "Core", interface: "Interface-only", "black-box": "Black box" };
 export type Sheet = {
   name: string;
   caption: string;
@@ -233,7 +234,7 @@ export const plateTitle = (part: Part): string => [part.name, part.caption, part
 // Broken laws and the drawer (ticket #312). The drawer is read-only and holds any content a ticket gives it: blocks of code or text and
 // the one-click jumps out of it. `openDrawer` (map-drawer.ts) draws a `Drawer`; the history strip's commit drill-down builds one too.
 export type Jump = { label: string; title: string; to: { url: string } };
-export type Block = { label?: string; code: string; jumps: Jump[] };
+type Block = { label?: string; code: string; jumps: Jump[] };
 export type Drawer = { title: string; note?: string | undefined; blocks: Block[]; jumps: Jump[] };
 
 // What the mark and the drill-down say for a broken law: coarse, never naming the law.
@@ -368,7 +369,7 @@ export function alsoRows(groups: AlsoGroup[]): AlsoRow[] {
 
 // `overview`: this chapter plays the brief's overview first. It is the first chapter opened, and keeps it until it is finished, so it plays once.
 // `story`: a "Since you read" story's head it runs from (#497), played apart from the full brief of the same PR; "" for a brief.
-export type Playing = { project: string; pr: number; chapter: number; step: number; overview: boolean; story: string };
+type Playing = { project: string; pr: number; chapter: number; step: number; overview: boolean; story: string };
 
 // A chapter is complete when its last step was seen and its check answered, right or wrong, when it holds one (#342). Leaving
 // mid-chapter completes nothing. `fire` runs once, the moment both hold.
@@ -640,7 +641,7 @@ export function awaitedWrite(pr: ReadyPr | undefined, full = false): "open" | "s
 // ---- The map's camera (spec #380, ticket #383): pan and zoom applied to the world, in place of a scrolling box. A point `p` of the world
 // lands at `p * scale + (x, y)` in the map area, as with `briefCamera`.
 
-export const zoomLimits = { min: 0.4, max: 2 };
+const zoomLimits = { min: 0.4, max: 2 };
 // Zooms `camera` by `factor` around the area's point (px, py), which keeps the world point under it; the scale is held to `zoomLimits`.
 export function zoomAt(camera: Camera, factor: number, px: number, py: number): Camera {
   const scale = Math.min(zoomLimits.max, Math.max(zoomLimits.min, camera.scale * factor));
