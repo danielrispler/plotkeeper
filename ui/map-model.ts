@@ -138,7 +138,8 @@ export function escapeMap(layers: Partial<Record<LayerName, Layer>>): LayerName 
 export const draftPrompt =
   "Draft system-map.json at this repository's root, in plain words: its parts, each with the files it owns, a purpose of one or two sentences " +
   "and the named things it holds (each with one sentence and its key files), the outside actors, the links between them, " +
-  "the files that belong to no part on purpose, and the laws that must stay true. Run `system-map check` and fix what it reports until it passes.";
+  "the files that belong to no part on purpose, and the laws that must stay true. Run `system-map check` and fix what it reports until it passes. " +
+  "Add the extractors its `note:` lines suggest to `extractors`.";
 
 // The part sheet (ticket #310) as data: what `map-sheet.ts` draws for one part.
 export const tierLabel: Record<Tier, string> = { core: "Core", interface: "Interface-only", "black-box": "Black box" };

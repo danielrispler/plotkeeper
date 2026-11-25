@@ -4,12 +4,12 @@
 //! links and the problems out.
 
 mod edges;
+mod extract;
 mod imports;
 mod laws;
 mod parts;
 mod pattern;
 mod touched;
-mod typescript;
 
 use std::{
     collections::{BTreeSet, HashSet},
@@ -41,6 +41,8 @@ pub struct Report {
     pub problems: Vec<String>,
     /// What the check covered, for the line a pass prints.
     pub counts: Counts,
+    /// The registered extractors the map does not name that could read the repository, which `check` notes.
+    pub suggested: Vec<String>,
 }
 
 /// What a check covered: parts, the tracked files they own and the ones ignored, links, and laws
@@ -247,8 +249,20 @@ fn check_with(root: &Path, files: Result<Vec<String>, String>) -> Report {
             report.laws = laws;
             report.problems.extend(problems);
             let names = map.extractors.as_deref().unwrap_or_default();
-            let found = edges::check_links(root, names, &files, &parts, &map.links);
+            let repo = repo(root, &map, &files);
+            let found = edges::check_links(
+                extract::registry::EXTRACTORS,
+                names,
+                &repo,
+                &parts,
+                &map.links,
+            );
             report.problems.extend(found.problems);
+            report.suggested = extract::registry::EXTRACTORS
+                .iter()
+                .filter(|e| !names.iter().any(|n| n == e.name()) && e.detect(&repo))
+                .map(|e| e.name().to_string())
+                .collect();
             let kinds = |kind: Kind| map.links.iter().filter(|l| l.kind == Some(kind)).count();
             report.counts = Counts {
                 parts: parts.len(),
@@ -524,6 +538,14 @@ impl Owners {
             None => Placement::Unowned,
         }
     }
+}
+
+/// The extractors' view of the repository at `root`, whose tracked files are `files`, the map's ignored ones marked.
+fn repo<'a>(root: &'a Path, map: &Map, files: &'a [String]) -> extract::Repo<'a> {
+    let owners = Owners::new(map);
+    extract::Repo::new(root, files, |file| {
+        matches!(owners.place(file), Placement::Ignored)
+    })
 }
 
 /// The text of a tracked file, or none for one the scans do not read: a symlink (its target may lie

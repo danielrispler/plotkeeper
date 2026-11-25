@@ -107,3 +107,61 @@ fn json_lists_each_law_with_its_backing_and_its_tags_by_file_and_line() {
     assert_eq!(law["tags"][0]["file"], "alpha/a.rs");
     assert_eq!(law["tags"][0]["line"], 2);
 }
+
+#[test]
+fn an_extractor_the_map_does_not_name_is_suggested_on_standard_error_and_the_check_passes() {
+    let (_dir, root) = project(&base(), &FILES);
+    let out = run(&root, &[]);
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap(),
+        "ok: 2 parts own 2 files (2 ignored); 1 link: 1 import (0 proven, 1 unproven), 0 http, 0 file, 0 spawn; 1 law: 0 check, 1 trust\n"
+    );
+    assert_eq!(
+        String::from_utf8(out.stderr).unwrap(),
+        "note: rust-modules could read this repository; add it to extractors\n"
+    );
+}
+
+#[test]
+fn cargo_is_suggested_for_a_root_cargo_toml_the_map_ignores() {
+    let mut map = base();
+    map["ignored"] = serde_json::json!(["docs/", "system-map.json", "Cargo.toml"]);
+    let (_dir, root) = project(&map, &["alpha/a", "beta/b", "docs/d.md", "Cargo.toml"]);
+    let out = run(&root, &[]);
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(
+        String::from_utf8(out.stderr).unwrap(),
+        "note: cargo could read this repository; add it to extractors\n"
+    );
+}
+
+#[test]
+fn a_failing_check_suggests_an_extractor_too() {
+    let (_dir, root) = project(&base(), &["alpha/a.rs", "beta/b.rs", "docs/d.md", "stray"]);
+    let out = run(&root, &[]);
+    assert!(!out.status.success(), "{out:?}");
+    assert_eq!(
+        String::from_utf8(out.stderr).unwrap(),
+        "note: rust-modules could read this repository; add it to extractors\n"
+    );
+}
+
+#[test]
+fn a_file_under_an_ignored_folder_suggests_nothing() {
+    let (_dir, root) = project(&base(), &["alpha/a", "beta/b", "docs/d.rs"]);
+    let out = run(&root, &[]);
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(String::from_utf8(out.stderr).unwrap(), "");
+}
+
+#[test]
+fn json_lists_the_suggested_extractors() {
+    let (_dir, root) = project(&base(), &["alpha/a.rs", "beta/b.ts", "docs/d.md"]);
+    let out = run(&root, &["--json"]);
+    let value: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        value["suggested"],
+        serde_json::json!(["rust-modules", "typescript-imports"])
+    );
+}

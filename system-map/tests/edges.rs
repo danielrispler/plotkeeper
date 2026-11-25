@@ -1618,3 +1618,59 @@ fn a_file_with_an_import_that_binds_nothing_is_not_followed() {
     ]);
     assert_eq!(found, ["app>entry", "entry>one", "entry>two"]);
 }
+
+#[test]
+fn a_test_file_importing_another_part_gives_no_edge() {
+    for (file, import) in [
+        ("app/x.test.ts", "../one/a"),
+        ("app/x.spec.tsx", "../one/a"),
+        ("app/x.test.mjs", "../one/a.ts"),
+        ("app/__tests__/x.ts", "../../one/a"),
+        ("app/test/x.ts", "../../one/a"),
+        ("app/tests/x.mjs", "../../one/a.ts"),
+        ("app/src/__tests__/deep/x.ts", "../../../../one/a"),
+    ] {
+        let text = format!("import {{ A }} from '{import}';\n");
+        let found = barrel_edges(&[
+            ("app/x.ts", "export const X = 1;\n"),
+            (file, &text),
+            ("one/a.ts", "export const A = 1;\n"),
+        ]);
+        assert_eq!(found, Vec::<String>::new(), "{file}");
+    }
+}
+
+#[test]
+fn a_part_made_only_of_test_files_is_not_read() {
+    // Were `app` read, its link to `one` would have no edge and fail.
+    let report = barrel_report(
+        &[
+            ("app/x.test.ts", "import { A } from '../one/a';\n"),
+            ("app/tests/helpers.ts", "export const H = 1;\n"),
+            ("one/a.ts", "export const A = 1;\n"),
+        ],
+        json!([import("app-one", "app", "one")]),
+    );
+    assert_eq!(report.problems, Vec::<String>::new());
+    assert_eq!(
+        (report.counts.links.proven, report.counts.links.unproven),
+        (0, 1)
+    );
+}
+
+#[test]
+fn a_file_whose_name_only_looks_like_a_test_keeps_its_edges() {
+    for (file, import) in [
+        ("app/x.ts", "../one/a"),
+        ("app/test.ts", "../one/a"),
+        ("app/latest.ts", "../one/a"),
+        ("app/test-utils.ts", "../one/a"),
+        ("app/x.testing.ts", "../one/a"),
+        ("app/testing/x.ts", "../../one/a"),
+        ("app/contest/x.ts", "../../one/a"),
+    ] {
+        let text = format!("import {{ A }} from '{import}';\n");
+        let found = barrel_edges(&[(file, &text), ("one/a.ts", "export const A = 1;\n")]);
+        assert_eq!(found, ["app>one"], "{file}");
+    }
+}
