@@ -1,6 +1,7 @@
 //! Seam 2 (danielrispler/plotkeeper#170, Testing Decisions) for blocked commands: `PermissionDenied`
 //! lines and the answer hook's `StudioAnswer` lines replayed through the core. The lines follow the
-//! documented payloads until a recorded run replaces them.
+//! documented payloads until a recorded run replaces them. Since the card went (#572) a block waits on
+//! Daniel only until the session moves on, and Allow, Decline and the retry come only from older logs.
 
 use crate::common;
 use serde_json::{Value, json};
@@ -91,7 +92,7 @@ fn a_subagents_block_names_it_and_cards_stack_in_block_order() {
 }
 
 #[test]
-fn needs_you_ends_at_the_agents_next_event() {
+fn needs_you_ends_at_the_agents_next_call() {
     let lines = then(started(), vec![denied(3_000, "toolu_1", COMMAND, None)]);
     assert_eq!(session(&lines).state, State::NeedsYou);
     let step = line(
@@ -102,8 +103,33 @@ fn needs_you_ends_at_the_agents_next_event() {
     );
     let session = session(&then(lines, vec![step]));
     assert_eq!(session.state, State::Running);
-    // The card stays: Daniel has not chosen.
-    assert_eq!(session.blocked_commands[0].status, BlockedStatus::Blocked);
+    assert_eq!(session.blocked_commands[0].status, BlockedStatus::MovedOn);
+}
+
+/// The agent stopped for Daniel, who handles the command in his agent (#572): the session needs him until his
+/// next prompt.
+#[test]
+fn a_block_outlasts_its_turns_end_until_daniels_next_prompt() {
+    let lines = then(
+        started(),
+        vec![
+            denied(3_000, "toolu_1", COMMAND, None),
+            line("Stop", 4_000, json!({ "prompt_id": "p-1" })),
+        ],
+    );
+    let stopped = session(&lines);
+    assert_eq!(
+        (stopped.state, stopped.blocked_waiting()),
+        (State::NeedsYou, 1)
+    );
+    let prompt = line(
+        "UserPromptSubmit",
+        5_000,
+        json!({ "prompt": "I ran it.", "prompt_id": "p-2" }),
+    );
+    let moved = session(&then(lines, vec![prompt]));
+    assert_eq!((moved.state, moved.blocked_waiting()), (State::Running, 0));
+    assert_eq!(moved.blocked_commands[0].status, BlockedStatus::MovedOn);
 }
 
 #[test]
@@ -168,32 +194,6 @@ fn a_denied_call_of_another_tool_raises_no_card() {
     let session = session(&then(started(), vec![web]));
     assert!(session.blocked_commands.is_empty());
     assert_eq!(session.state, State::Running);
-}
-
-#[test]
-fn a_card_waits_while_blocked_and_not_once_it_is_allowed_or_declined() {
-    let step = line(
-        "PreToolUse",
-        5_000,
-        json!({ "tool_name": "Read", "tool_use_id": "toolu_5", "prompt_id": "p-1",
-            "tool_input": { "file_path": "/work/repo/a.rs" } }),
-    );
-    let blocked = then(started(), vec![denied(3_000, "toolu_1", "first", None)]);
-    let blocked = then(
-        blocked,
-        vec![denied(3_500, "toolu_2", "second", None), step],
-    );
-    // The agent went on, so the session shows its real state, but two cards wait.
-    let s = session(&blocked);
-    assert_eq!((s.state, s.blocked_waiting()), (State::Running, 2));
-    let allowed = then(
-        blocked.clone(),
-        vec![answer(6_000, "toolu_1", "first", "allow")],
-    );
-    // An allowed card has no button: it waits for the agent, not for Daniel.
-    assert_eq!(session(&allowed).blocked_waiting(), 1);
-    let declined = then(allowed, vec![answer(6_500, "toolu_2", "second", "deny")]);
-    assert_eq!(session(&declined).blocked_waiting(), 0);
 }
 
 #[test]
@@ -393,14 +393,13 @@ fn stop(at: u64, agent: Option<&str>) -> String {
 }
 
 #[test]
-fn an_allowed_command_whose_turn_ends_without_the_retry_is_allowed_not_run_and_still_counts_on_the_row()
- {
+fn an_allowed_command_whose_turn_ends_without_the_retry_is_allowed_not_run_and_waits_on_nobody() {
     let session = session(&then(allowed(), vec![stop(6_000, None)]));
     assert_eq!(
         session.blocked_commands[0].status,
         BlockedStatus::AllowedNotRun
     );
-    assert_eq!(session.blocked_waiting(), 1);
+    assert_eq!(session.blocked_waiting(), 0);
 }
 
 #[test]
@@ -465,13 +464,20 @@ fn a_card_blocked_again_is_blocked_at_the_time_of_the_new_block() {
     assert_eq!((card.at, card.run_at), (8_000, None));
 }
 
-/// An ended session's card still counts as waiting; only `wants_you`, archived in #415, left it out.
+/// An ended session has moved on from its blocks.
 #[test]
-fn an_ended_session_keeps_its_waiting_cards() {
+fn an_ended_session_has_no_waiting_block() {
     let end = line("SessionEnd", 8_000, json!({ "reason": "other" }));
-    let lines = then(allowed(), vec![stop(6_000, None), end]);
+    let lines = then(
+        started(),
+        vec![
+            denied(3_000, "toolu_1", COMMAND, None),
+            stop(6_000, None),
+            end,
+        ],
+    );
     let s = session(&lines);
-    assert_eq!((s.state, s.blocked_waiting()), (State::Ended, 1));
+    assert_eq!((s.state, s.blocked_waiting()), (State::Ended, 0));
 }
 
 /// A subagent `a-7aaaa`'s block of `COMMAND`, which Daniel allowed.
@@ -619,8 +625,8 @@ fn background_block_woken_by(
     (running, finished)
 }
 
-/// The recorded run (`core/tests/record-blocked-run.sh`): a foreground and a background `claude -p`, each
-/// blocked, allowed from the card, retried and run, then the background one's wake-up.
+/// The recorded run, from before the card went (#572), whose script went with it: a foreground and a background
+/// `claude -p`, each blocked, allowed from the card, retried and run, then the background one's wake-up.
 const RECORDED: &str = include_str!("fixtures/blocked-run.jsonl");
 
 /// The recorded run's lines up to and with the `n`th (from 1) event named `name`.
@@ -859,45 +865,42 @@ fn waiting(lines: &[String]) -> usize {
     session(lines).blocked_waiting()
 }
 
-/// The count through one card's life: a card waits only while it has a button (Blocked, Blocked again, Allowed not run).
-/// `agent` is the subagent that asks, or the session's own agent.
-fn count_through_a_cards_life(agent: Option<&str>) {
-    let step = line(
-        "PreToolUse",
-        3_100,
-        json!({ "tool_name": "Read", "tool_use_id": "toolu_9", "prompt_id": "p-1",
-            "tool_input": { "file_path": "/work/repo/a.rs" } }),
-    );
-    let blocked = then(
-        started(),
-        vec![denied(3_000, "toolu_1", COMMAND, agent), step],
-    );
+/// The count through one block's life (#572): it waits on Daniel until its agent moves on. `agent` is the subagent
+/// that asks, or the session's own agent.
+fn count_through_a_blocks_life(agent: Option<&str>) {
+    let blocked = then(started(), vec![denied(3_000, "toolu_1", COMMAND, agent)]);
     assert_eq!(waiting(&blocked), 1);
-    let allowed = then(blocked, vec![answer(4_000, "toolu_1", COMMAND, "allow")]);
-    assert_eq!(waiting(&allowed), 0);
-    // Its retry starts and ends: still nothing waits.
-    let running = then(allowed.clone(), vec![retry(5_000, "toolu_2", COMMAND)]);
-    assert_eq!(waiting(&running), 0);
-    let done = ended(
-        6_000,
-        "toolu_2",
-        json!({ "tool_response": { "stdout": "ok" } }),
-    );
-    assert_eq!(waiting(&then(running, vec![done])), 0);
-    // A turn that ends with no retry returns the card to Daniel with Ask again.
-    let unused = then(allowed.clone(), vec![stop(6_000, agent)]);
-    assert_eq!(waiting(&unused), 1);
-    // A second block of the command returns it too.
-    let again = then(allowed, vec![denied(7_000, "toolu_3", COMMAND, agent)]);
-    assert_eq!(waiting(&again), 1);
+    // Another agent's step moves nothing on.
+    let mut other = json!({ "tool_name": "Read", "tool_use_id": "toolu_8", "prompt_id": "p-1",
+        "tool_input": { "file_path": "/work/repo/b.rs" } });
+    if agent.is_none() {
+        other["agent_id"] = "a-9cccc".into();
+    }
+    let others = then(blocked.clone(), vec![line("PreToolUse", 3_050, other)]);
+    assert_eq!(waiting(&others), 1);
+    // Its own next call moves it on.
+    let mut step = json!({ "tool_name": "Read", "tool_use_id": "toolu_9", "prompt_id": "p-1",
+        "tool_input": { "file_path": "/work/repo/a.rs" } });
+    if let Some(agent) = agent {
+        step["agent_id"] = agent.into();
+    }
+    let moved = session(&then(
+        blocked.clone(),
+        vec![line("PreToolUse", 3_100, step)],
+    ));
+    assert_eq!(moved.blocked_waiting(), 0);
+    assert_eq!(moved.blocked_commands[0].status, BlockedStatus::MovedOn);
+    // The session's own turn's end leaves it waiting; a subagent's end moves its block on.
+    let stopped = then(blocked, vec![stop(6_000, agent)]);
+    assert_eq!(waiting(&stopped), usize::from(agent.is_none()));
 }
 
 #[test]
-fn the_session_own_card_waits_only_while_it_has_a_button() {
-    count_through_a_cards_life(None);
+fn the_session_own_block_waits_until_it_moves_on() {
+    count_through_a_blocks_life(None);
 }
 
 #[test]
-fn a_subagents_card_waits_only_while_it_has_a_button() {
-    count_through_a_cards_life(Some("a-7aaaa"));
+fn a_subagents_block_waits_until_it_moves_on() {
+    count_through_a_blocks_life(Some("a-7aaaa"));
 }

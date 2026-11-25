@@ -12,8 +12,7 @@ import { askAnchor } from "./ask.js";
 import { rendered } from "./markdown.js";
 import { drawSidebar } from "./list.js";
 import { agentState, sessionName, showsLanded } from "./list-model.js";
-import { blockedRequestFor, openDecision } from "./answer.js";
-import { blockedElement, docksInDock, fillCardRisk, retryLine, riskLine } from "./blocked.js";
+import { openDecision } from "./answer.js";
 import { briefNodes } from "./cards.js";
 import { type Banner, bannerElement, bannerFor, bannerLives } from "./banner.js";
 import { evidenceElement, hasEvidence } from "./evidence.js";
@@ -23,7 +22,6 @@ import { decisionElement, questionElement } from "./questions.js";
 import { shortPaths } from "./paths.js";
 import { checkTime, counts, estimateText, times } from "./times.js";
 import { setCards, studio } from "./state.js";
-import { showError } from "./notice.js";
 import { currentMap } from "./map.js";
 import { lightTurn, revealTurn, turnLit } from "./map-agents.js";
 import { OLD_TURN, oldTurn } from "./map-live.js";
@@ -34,7 +32,6 @@ import {
   stateLabels,
   type Ask,
   type AskKind,
-  type BlockedCommand,
   type ListedCheck,
   type Question,
   type Selection,
@@ -58,7 +55,7 @@ export function startStory(selectSession: (id: string, agent: string | null) => 
 function clearView() {
   for (const id of ["state", "block", "mode", "mark", "session-name", "phase"]) element(id).textContent = "";
   for (const id of ["session-name", "block", "phase"]) element(id).removeAttribute("title");
-  showQuestions([], []);
+  showQuestions([]);
   showCleared([]);
   shownSession = null;
   banner = null;
@@ -311,9 +308,8 @@ export const storyOf = (session: Session, agent: unknown) => (agent === null && 
 /**
  * What the rail draws for `selected`: its latest turn, which "now" tells, and the feed. A status-only row
  * (danielrispler/Falinks#560) has no turns to show.
- * `fed`: the blocked commands the dock does not hold, which the feed places (danielrispler/plotkeeper#297).
  */
-export function railOf({ session, agent }: Selection, fed: BlockedCommand[] = []) {
+export function railOf({ session, agent }: Selection) {
   if (session.status_only) return { latest: null, blocks: [] };
   const own = agent === null;
   const turns = own ? session.turns : [];
@@ -321,7 +317,6 @@ export function railOf({ session, agent }: Selection, fed: BlockedCommand[] = []
     // A subagent's view: its session's subagents are not its own.
     agents: own ? session.agents : [],
     questions: session.questions.filter((question) => question.agent === agent),
-    blocked: fed,
   });
   return { latest: own ? (turns.at(-1) ?? null) : null, blocks };
 }
@@ -348,8 +343,6 @@ export type FeedTurn = {
   turn: Turn | null;
   agents: Subagent[];
   questions: Question[];
-  // The blocked commands with no button, in the turn of their latest step (danielrispler/plotkeeper#297).
-  blocked: BlockedCommand[];
 };
 
 /**
@@ -358,23 +351,20 @@ export type FeedTurn = {
  */
 export function feedTurns(
   turns: Turn[],
-  { agents, questions, blocked = [] }: Pick<FeedTurn, "agents" | "questions"> & { blocked?: BlockedCommand[] },
+  { agents, questions }: Pick<FeedTurn, "agents" | "questions">,
 ): FeedTurn[] {
   const blocks: FeedTurn[] = [...turns.map((turn, index) => ({ index, turn })), { index: null, turn: null }].map((b) => ({
     ...b,
     agents: [],
     questions: [],
-    blocked: [],
   }));
-  const rest = blocks[turns.length] ?? { index: null, turn: null, agents: [], questions: [], blocked: [] };
+  const rest = blocks[turns.length] ?? { index: null, turn: null, agents: [], questions: [] };
   const at = (index: number | null) => (index !== null && blocks[index]) || rest;
   // Each list is oldest first; the blocks show the newest first.
   for (const agent of [...agents].sort((a, b) => b.started_at - a.started_at)) at(agent.turn).agents.push(agent);
   for (const question of [...questions].reverse()) at(question.turn).questions.push(question);
-  // A blocked command's card is in the turn running when its retry started, else when it was blocked.
-  for (const card of [...blocked].reverse()) at(turnAt(turns, card.run_at ?? card.at)).blocked.push(card);
   blocks.pop();
-  const empty = !rest.agents.length && !rest.questions.length && !rest.blocked.length;
+  const empty = !rest.agents.length && !rest.questions.length;
   return [...blocks.reverse(), ...(empty ? [] : [rest])];
 }
 
@@ -590,7 +580,6 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
     node.append(list);
   }
   node.append(...block.questions.filter((q) => q.answer === "not_answered").map(questionElement));
-  node.append(...blockedElements(session, block.blocked));
   node.append(...subagentsOf(session, block, now), ...checksOf(turn));
   const response = turn ? responseFold(session, turn, index, key) : null;
   if (response) node.append(response);
@@ -696,7 +685,7 @@ export function drawFeed() {
   }
   const session = selected.session;
   const own = selected.agent === null;
-  const { latest, blocks } = railOf(selected, fedCards(session, selected.agent));
+  const { latest, blocks } = railOf(selected);
   const now = drawNow(session, latest);
   // The banner sits above the newest turn, and holds the Brief while it shows.
   const last = session.turns.at(-1);
@@ -746,65 +735,19 @@ export async function askDelete(session: Session) {
   await invoke("delete_session", { id: session.id });
 }
 
-/**
- * A late Allow reaches no terminal from the page: it shows the line to tell the session, so the agent retries the command. The line
- * is no failure: it shows in the notice line until dismissed, under no command's name, and the Studio log gets none of it.
- */
-export function retryNotice(session: Pick<Session, "state">, card: BlockedCommand, agent: string | null) {
-  if (session.state === "ended") return showError("The session has ended: start it again and ask it to run the approved command.");
-  showError(`Allowed. Tell the session: ${retryLine(card, agent)}`);
-}
-
-// The session's blocked commands the view shows, in block order: its own view shows them all, and a subagent's view
-// only its own (danielrispler/plotkeeper#170), less the declined, which have no card.
-const viewed = (session: Session, agent: string | null) =>
-  (session.blocked_commands ?? []).filter((card) => card.status !== "declined" && (agent === null || card.agent === agent));
-
-// The cards the dock holds: those that show a button (danielrispler/plotkeeper#297).
-const docks = (card: BlockedCommand) => docksInDock(card, blockedRequestFor(card.call) !== null);
-const dockedCards = (session: Session, agent: Subagent | null) => blockedElements(session, viewed(session, agent?.id ?? null).filter(docks));
-// The cards the feed places, neutral: those with no button.
-const fedCards = (session: Session, agent: string | null) => viewed(session, agent).filter((card) => !docks(card));
-
-// `cards` drawn, each naming the subagent that asked.
-function blockedElements(session: Session, cards: BlockedCommand[]): HTMLElement[] {
-  const named = (id: string | null) => (id === null ? null : (session.agents.find((a) => a.id === id)?.name ?? id.slice(0, 5)));
-  const retry = (card: BlockedCommand) => retryNotice(session, card, named(card.agent));
-  const note = (card: BlockedCommand) => studio.cards.risk_notes.find((n) => n.call === card.call);
-  return cards.flatMap((card) => blockedElement(session.resume_id || session.id, card, named(card.agent), retry, note(card), session.state !== "ended") ?? []);
-}
-
-// The dock of the viewed agent: its open questions and the blocked commands that show a button.
+// The dock of the viewed agent: its open questions.
 function drawDock({ session, agent: id }: Selection) {
   const agent = session.agents.find((a) => a.id === id) ?? null;
-  showQuestions(
-    reports(session, "asks") ? session.questions.filter((question) => question.agent === (agent?.id ?? null)) : [],
-    dockedCards(session, agent),
-  );
-}
-
-// Shows the note of each docked blocked command, from the cards the window holds: in the place that stands, where it stands, since a note
-// arriving changes no card's buttons and rebuilding the dock would make the live region a new node and drop the focus on Allow
-// (danielrispler/plotkeeper#298); and in a new place for a card drawn before its note was known, as when a selection draws before its cards.
-function fillDockNotes() {
-  const session = studio.selection?.session;
-  if (!session) return;
-  for (const node of element("dock").querySelectorAll<HTMLElement>(".blocked-command[data-call]")) {
-    const call = node.dataset.call;
-    const card = (session.blocked_commands ?? []).find((c) => c.call === call);
-    const note = studio.cards.risk_notes.find((n) => n.call === call);
-    const risk = card ? riskLine(note, docks(card), session.state !== "ended") : null;
-    if (risk) fillCardRisk(node, risk);
-  }
+  showQuestions(reports(session, "asks") ? session.questions.filter((question) => question.agent === (agent?.id ?? null)) : []);
 }
 
 // The open question of the viewed agent, docked at the top of the rail, newest first; a plan or a
 // permission the answer hook waits on docks too, whichever agent asks (danielrispler/Falinks#478). A question never
 // answered shows in its turn; an answered one is in the decision history (danielrispler/Falinks#479).
-function showQuestions(questions: Question[], blocked: HTMLElement[]) {
+function showQuestions(questions: Question[]) {
   const open = [...questions].reverse().filter((question) => question.answer === "open");
   const decision = openDecision();
-  const docked = [...(decision ? [decisionElement(decision)] : []), ...open.map(questionElement), ...blocked];
+  const docked = [...(decision ? [decisionElement(decision)] : []), ...open.map(questionElement)];
   element("dock").replaceChildren(...docked);
   element("dock").hidden = docked.length === 0;
 }
@@ -818,15 +761,12 @@ function showBrief(cards: SessionCards) {
 
 /** The server's session payload: the selected session's brief, cards and decisions, taken in and drawn. */
 export function showCards(cards: SessionCards) {
-  // A risk note that arrived fills its card's place in the dock where it stands, which only a session's own events redraw otherwise.
-  const notes = JSON.stringify(cards.risk_notes) !== JSON.stringify(studio.cards.risk_notes);
   setCards(cards);
   showBrief(cards);
   showDecisions(cards.decisions, cards.decision_notes);
   // The store changed: a summary missing before may be in it now.
   forgetMissingSummaries();
   drawFeed();
-  if (notes) fillDockNotes();
   // A summary was stored: the list's unseen rows show its Headline (#382).
   drawSidebar();
 }

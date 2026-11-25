@@ -18,7 +18,6 @@ const noSelection: Selection | null = null;
 
 export const base = {
   agent_summary: null,
-  answer_blocked_command: "hook",
   ask: "",
   ask_anchor: "",
   ask_facts: null,

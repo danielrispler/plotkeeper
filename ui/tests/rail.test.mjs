@@ -41,7 +41,7 @@ test("a summary whose write throws leaves no unhandled rejection and the next on
 
 const html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const rail = html.slice(html.indexOf('<aside class="rail"'), html.indexOf("</aside>"));
-// A turn, a question, a summary and a blocked card as the core sends them, less the fields the feed never reads.
+// A turn, a question and a summary as the core sends them, less the fields the feed never reads.
 const turn = (started_at, prompt) => /** @type {import("../../dist/types.js").Turn} */ ({ started_at, ended_at: null, prompt, id: null, message: null });
 /** @param {Partial<import("../../dist/types.js").Question>} fields */
 const question = (fields) => /** @type {import("../../dist/types.js").Question} */ (fields);
@@ -141,31 +141,4 @@ test("a folded turn's line holds the prompt and Headline, and a mark for a faile
   assert.equal(line([{ ...run("passed"), retries: 1 }]).failed, false);
   assert.deepEqual(line([run("ran")], null), { prompt: "Fix the parser", headline: null, failed: false });
   assert.equal(foldedLine({ prompt: "", checks: [] }, null).prompt, "No prompt");
-});
-
-// A blocked command's card with no button is in the turn of its latest step: its retry's start, else its block.
-const blocked = (call, at, extra = {}) => /** @type {import("../../dist/types.js").BlockedCommand} */ ({ call, command: "ls", cwd: "/r", reason: "r", agent: null, at, status: "allowed", ...extra });
-const placedCalls = (feed) => feed.map((b) => [b.index, b.blocked.map((c) => c.call)]);
-
-test("a blocked card is in the turn it was blocked in, also once its retry ran in that turn", () => {
-  const turns = [turn(10, "a"), turn(20, "b")];
-  const cards = [blocked("c1", 12), blocked("c2", 25, { status: "finished", run_at: 27 })];
-  const feed = feedTurns(turns, { agents: [], questions: [], blocked: cards });
-  assert.deepEqual(placedCalls(feed), [[1, ["c2"]], [0, ["c1"]]]);
-});
-
-test("a late Allow whose retry starts in a later turn puts the card in the later turn", () => {
-  const turns = [turn(10, "a"), turn(20, "b")];
-  const card = blocked("c1", 12, { status: "running", run_at: 22 });
-  const feed = feedTurns(turns, { agents: [], questions: [], blocked: [card] });
-  assert.deepEqual(placedCalls(feed), [[1, ["c1"]], [0, []]]);
-});
-
-test("a blocked card with no turn goes in the last block, as a subagent's view shows its cards", () => {
-  const feed = feedTurns([], { agents: [], questions: [], blocked: [blocked("c1", 5), blocked("c2", 6)] });
-  assert.equal(feed.length, 1);
-  assert.equal(feed[0].turn, null);
-  assert.deepEqual(feed[0].blocked.map((c) => c.call), ["c2", "c1"]);
-  const early = feedTurns([turn(10, "a")], { agents: [], questions: [], blocked: [blocked("c3", 5)] });
-  assert.deepEqual(placedCalls(early), [[0, []], [null, ["c3"]]]);
 });

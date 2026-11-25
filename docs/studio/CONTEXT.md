@@ -15,7 +15,7 @@ The part of the control room that keeps Daniel's understanding in step with the 
 The time Daniel waits on an agent: from his prompt until the agent ends its turn, or until his next prompt if he interrupts it. Answering a permission, a question or a plan inside it does not start a new wait.
 
 **Card**:
-Retired as a turn's or a worker's explanation (danielrispler/plotkeeper#348): a **PR brief** is the explanation now. The cards stored before stay readable and none is shown. A blocked command's card is another thing, see **Blocked command**.
+Retired as a turn's or a worker's explanation (danielrispler/plotkeeper#348): a **PR brief** is the explanation now. The cards stored before stay readable and none is shown. A blocked command is another thing, see **Blocked command**.
 _Avoid_: Summary (read after the work, with no question first)
 
 **Turn**:
@@ -169,15 +169,15 @@ The studio's own diagnostics: its errors, warnings and panics, one line each wit
 The lines in the **Studio log**, marked `mismatch`, of the Claude sessions whose hook state and OSC 7501 state disagree for more than a few seconds: one line each, with the time, the session and both states; a new 7501 state starts a new line. A turn running by its hooks whose 7501 state stays `idle` was interrupted, and that line also ends it. They used to be a file of their own, `mismatch.log`, which is no longer written.
 
 **Decision**:
-A question, plan, permission or blocked command Daniel answered, with his answer and where he gave it: on the card or in the terminal. A session's decisions, newest first, are its decision history.
+A question, plan or permission Daniel answered, or a blocked command he answered on its old card (before #572), with his answer and where he gave it: on the card or in the terminal. A session's decisions, newest first, are its decision history.
 _Avoid_: Verdict (only a plan's or a permission's allow or deny)
 
 **Blocked command**:
-A Bash command an agent session tried in auto mode that auto mode blocked, held on a card until Daniel allows or declines it. Allowed, the agent runs it itself, once; declined, the block stands. While the agent waits on his click the session needs you; once it has moved on, its row still names the blocked command while its card has a button for him (Allow and Decline, or Ask again), and no longer once he has allowed it. The card is docked, in orange, only while it has a button; otherwise it sits in the rail's feed.
+A Bash command an agent session tried in auto mode that auto mode blocked. Daniel handles it in his IDE or agent the regular way; plotkeeper shows no card for it (#572). Until the session moves on (the blocked agent's next call, his next prompt, or a subagent's end) the session needs you and its row names the blocked command.
 _Avoid_: Denied command (a command Daniel declined)
 
 **Risk note**:
-The card writer's one line on what a blocked command would do if allowed, led by its risk level (None, Low, Medium, High, Very high or Not sure); written from the command and its folder alone, never the agent's words; advice, the choice stays Daniel's. The classifier's label keeps its wording, "the rule that blocked it".
+The card writer's one line on what a blocked command would do if allowed, led by its risk level (None, Low, Medium, High, Very high or Not sure); written from the command and its folder alone, never the agent's words; advice, the choice stays Daniel's. Since the card went (#572) none is asked for, and the decision history shows those kept. The classifier's label keeps its wording, "the rule that blocked it".
 _Avoid_: Verdict, rating (a risk note judges nothing: it describes)
 
 **Identity**:
@@ -200,7 +200,7 @@ Retired with the context share (#416); its code is in `archive/ui/`. A neutral n
 An agent session whose terminal shows in a focused window, as the selected session or in a split's second pane. A finished turn on screen raises no note or sound. It is not the same as seen: a turn is seen only when the story rail shows it.
 
 **Needs you**:
-The state of an agent session that is blocked on Daniel: waiting for his permission, his click on a blocked command, his answer to a question tool, his approval of a plan, or an MCP request for input. A reply that ends with a question in its text blocks nothing, so it is your turn.
+The state of an agent session that is blocked on Daniel: waiting for his permission, on a command auto mode blocked until the session moves on, his answer to a question tool, his approval of a plan, or an MCP request for input. A reply that ends with a question in its text blocks nothing, so it is your turn.
 _Avoid_: Stuck (a session that is not progressing, which is a different state)
 
 **Running**:

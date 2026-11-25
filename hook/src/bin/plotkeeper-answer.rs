@@ -39,6 +39,6 @@ fn run() -> Result<Option<serde_json::Value>, Box<dyn Error>> {
     let timeout = env::var("PLOTKEEPER_ANSWER_TIMEOUT_MS")
         .ok()
         .and_then(|ms| ms.parse().ok());
-    let timeout = timeout.map_or_else(|| answer::wait_for(&payload), Duration::from_millis);
+    let timeout = Duration::from_millis(timeout.unwrap_or(answer::TIMEOUT_MS));
     Ok(answer::run(&payload, &data, timeout)?)
 }

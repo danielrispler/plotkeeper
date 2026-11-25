@@ -467,18 +467,16 @@ impl Take<'_> {
         }
     }
 
-    /// The agent's next step shows its blocked-command hook has returned, and a blocked command's
-    /// retry follows the run: its start, its end, and the wake-up of a background task.
+    /// A blocked command waits on Daniel until its agent moves on (#572): its next call, a new turn, or
+    /// a subagent's end. Its turn's end does not move it on: the agent stopped for Daniel, who handles
+    /// the command in his agent. A blocked command's retry, which only a log from before #572 holds,
+    /// follows the run: its start, its end, and the wake-up of a background task.
     fn follow_retries(&mut self) {
         let event = self.event;
         let acts = event.has(|h| {
             matches!(
                 h,
-                Happened::ToolStart { .. }
-                    | Happened::ToolEnd { .. }
-                    | Happened::TurnStart { .. }
-                    | Happened::TurnEnd { .. }
-                    | Happened::SubagentEnd
+                Happened::ToolStart { .. } | Happened::TurnStart { .. } | Happened::SubagentEnd
             )
         });
         if acts {
@@ -701,7 +699,7 @@ impl Take<'_> {
         session.blocks.last_mut().expect("just pushed").denied = Some(id.to_owned());
     }
 
-    /// Daniel's Allow or Decline: the hook has what it waited for, and the decision enters the
+    /// Daniel's Allow or Decline, in a log from before the card went (#572): the decision enters the
     /// history on the card.
     fn blocked_answered(&mut self, tool: &Tool, id: &str, answer: &Value) {
         let session = &mut *self.session;
@@ -1185,6 +1183,13 @@ impl Take<'_> {
         // An open question whose block cleared with no answer was not answered: its call failed, or
         // its turn or its agent ended first.
         let blocks = &session.blocks;
+        // A blocked command whose block cleared was moved on from: Daniel handled it in his agent (#572).
+        for card in &mut session.blocked_commands {
+            let standing = blocks.iter().any(|w| w.denied.as_ref() == Some(&card.call));
+            if card.status.waits() && !standing {
+                card.status = BlockedStatus::MovedOn;
+            }
+        }
         for question in &mut session.questions {
             let mut calls = blocks.iter().flat_map(|w| &w.calls);
             let open = calls.any(|(id, _)| *id == question.tool_use_id);

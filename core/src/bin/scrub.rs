@@ -136,7 +136,7 @@ fn labels_only(value: Value, tool: &str) -> Value {
     Value::Object(fields.into_iter().map(field).collect())
 }
 
-/// The word that marks a command as the recording script's own (`core/tests/record-blocked-run.sh`),
+/// The word that marks a command as a recording script's own (the blocked-run fixture's, recorded before #572),
 /// so its text may stay in a fixture. Any other command is content.
 const FIXTURE_MARK: &str = "studio-fixture-";
 

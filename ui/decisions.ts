@@ -3,8 +3,7 @@
 // with the cards, from the store; the markers come with the selection.
 
 import { code, element, fullTitle, prose, text } from "./dom.js";
-import { riskLevels } from "./blocked.js";
-import { askKind, type Decision, type RiskView } from "./types.js";
+import { askKind, riskLevels, type Decision, type RiskView } from "./types.js";
 
 let decisions: Decision[] = [];
 let cleared: number[] = [];
