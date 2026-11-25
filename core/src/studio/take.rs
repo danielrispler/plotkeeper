@@ -508,7 +508,7 @@ impl Take<'_> {
             matches!(
                 c.status,
                 BlockedStatus::Allowed | BlockedStatus::AllowedNotRun
-            ) && c.retried_by(tool, &event.cwd, &event.agent_id)
+            ) && c.retried_by(tool, &event.cwd, event.agent_id.as_deref())
         });
         if let Some(card) = card {
             card.status = BlockedStatus::Running;
@@ -595,7 +595,10 @@ impl Take<'_> {
             // A retry's pass from the card allows it at once, so it does not wait on Daniel; its
             // `PreToolUse` may land after it, as the hooks are async.
             Happened::PermissionAsked { tool }
-                if !tool.asks() && !self.session.passes(tool, &event.cwd, &event.agent_id) =>
+                if !tool.asks()
+                    && !self
+                        .session
+                        .passes(tool, &event.cwd, event.agent_id.as_deref()) =>
             {
                 let (name, input) = (tool.name.clone(), tool.input.clone());
                 (self.session).block(Cause::Call, name, input, event.agent_id.clone(), self.at);
@@ -646,7 +649,7 @@ impl Take<'_> {
             .iter_mut()
             .find(|c| match c.status {
                 BlockedStatus::Allowed | BlockedStatus::AllowedNotRun => {
-                    c.retried_by(tool, &event.cwd, &event.agent_id)
+                    c.retried_by(tool, &event.cwd, event.agent_id.as_deref())
                 }
                 BlockedStatus::Running => c.run.as_deref() == Some(id),
                 _ => false,
@@ -968,7 +971,7 @@ impl Take<'_> {
     /// for it.
     fn tool_start(&mut self, tool: &Tool) {
         let (session, event, at) = (&mut *self.session, self.event, self.at);
-        let turn = session.ledger_turn(&event.agent_id);
+        let turn = session.ledger_turn(event.agent_id.as_deref());
         let turn = session.ledger.start(event, tool, turn, self.called.clone());
         if let Some(turn) = turn.filter(|_| tool.kind == ToolKind::Command) {
             let list = self.check_lists.of(&session.cwd);
@@ -1069,7 +1072,7 @@ impl Take<'_> {
     /// its step and its check's duration.
     fn tool_end(&mut self, tool: &Tool, failed: bool) {
         let (session, event) = (&mut *self.session, self.event);
-        let turn = session.ledger_turn(&event.agent_id);
+        let turn = session.ledger_turn(event.agent_id.as_deref());
         // The turn its call began in, which a new prompt since may have left.
         let turn = session
             .ledger

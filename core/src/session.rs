@@ -491,14 +491,10 @@ pub struct BlockedCommand {
 impl BlockedCommand {
     /// Whether `agent`'s call of `tool` in `cwd` is this card's retry: the same command and folder, by
     /// the agent that was blocked or by the session's own agent, which a subagent's card asks to run it.
-    #[allow(
-        clippy::ref_option,
-        reason = "#556 makes it `Option<&str>` as it splits this file"
-    )]
-    pub(crate) fn retried_by(&self, tool: &event::Tool, cwd: &str, agent: &Option<String>) -> bool {
+    pub(crate) fn retried_by(&self, tool: &event::Tool, cwd: &str, agent: Option<&str>) -> bool {
         Some(self.command.as_str()) == tool.command.as_deref()
             && self.cwd == cwd
-            && (agent.is_none() || self.agent == *agent)
+            && (agent.is_none() || self.agent.as_deref() == agent)
     }
 }
 
@@ -1164,11 +1160,7 @@ impl Session {
     }
 
     /// Whether a card's Allow covers `agent`'s call of `tool` in `cwd`: its pass lets the call through.
-    #[allow(
-        clippy::ref_option,
-        reason = "#556 makes it `Option<&str>` as it splits this file"
-    )]
-    pub(crate) fn passes(&self, tool: &event::Tool, cwd: &str, agent: &Option<String>) -> bool {
+    pub(crate) fn passes(&self, tool: &event::Tool, cwd: &str, agent: Option<&str>) -> bool {
         self.blocked_commands.iter().any(|c| {
             matches!(
                 c.status,
@@ -1378,12 +1370,8 @@ impl Session {
     }
 
     /// The turn a call of `agent` is in: the latest, or for a subagent's call the one that spawned it.
-    #[allow(
-        clippy::ref_option,
-        reason = "#556 makes it `Option<&str>` as it splits this file"
-    )]
-    pub(crate) fn ledger_turn(&self, agent: &Option<String>) -> Option<usize> {
-        let spawned = agent.as_deref().and_then(|a| self.subagent(a)?.turn);
+    pub(crate) fn ledger_turn(&self, agent: Option<&str>) -> Option<usize> {
+        let spawned = agent.and_then(|a| self.subagent(a)?.turn);
         spawned.or_else(|| self.current_turn())
     }
 
@@ -1445,7 +1433,7 @@ impl Session {
     /// at its first touch of a worktree, and an end at its stop, which comes after the turn's own.
     pub(crate) fn keep_worker_trees(&mut self, event: &Event) {
         let Some(turn) = self
-            .ledger_turn(&event.agent_id)
+            .ledger_turn(event.agent_id.as_deref())
             .and_then(|t| self.turns.get_mut(t))
         else {
             return;
