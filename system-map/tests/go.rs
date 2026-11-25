@@ -291,6 +291,15 @@ fn a_build_constraint_that_can_hold_with_any_other_tag_keeps_the_file() {
 }
 
 #[test]
+fn a_go_build_line_with_a_double_negation_does_not_parse_and_skips_the_file() {
+    // Go's `go/build/constraint` rejects `!!`, spaced or not, but takes a negation in parentheses.
+    assert!(tag_skips("//go:build !!linux\n\npackage lib\n"));
+    assert!(tag_skips("//go:build ! !linux\n\npackage lib\n"));
+    assert!(!tag_skips("//go:build !linux\n\npackage lib\n"));
+    assert!(!tag_skips("//go:build !(!linux)\n\npackage lib\n"));
+}
+
+#[test]
 fn a_build_constraint_after_a_leading_byte_order_mark_is_read() {
     // Go drops a leading U+FEFF before it reads the header.
     assert!(tag_skips("\u{FEFF}//go:build ignore\n\npackage lib\n"));
@@ -657,7 +666,7 @@ fn an_excluded_go_mod_is_never_indexed_but_still_bounds_a_module() {
             ("app/go.mod", "module example.com/app\n"),
             (
                 "app/main.go",
-                "package main\n\nimport (\n\t\"example.com/x/lib\"\n\t\"example.com/x/fixed\"\n)\n",
+                "package main\n\nimport (\n\t\"example.com/x/lib\"\n\t\"example.com/x/fixed\"\n\t\"example.com/x/testdata/p\"\n)\n",
             ),
             ("x/go.mod", "module example.com/x\n"),
             ("x/lib/l.go", "package lib\n"),
@@ -666,12 +675,22 @@ fn an_excluded_go_mod_is_never_indexed_but_still_bounds_a_module() {
             ("_fixture/lib/f.go", "package lib\n"),
             ("x/fixed/testdata/go.mod", "module example.com/x/fixed\n"),
             ("x/fixed/f.go", "package fixed\n"),
+            // `x/testdata/p/` would be `x`'s folder for `example.com/x/testdata/p`, but the excluded `go.mod` above it
+            // bounds `x`, so `w` alone provides that path and the import is no doubt between two modules.
+            ("x/testdata/go.mod", "module example.com/fixture\n"),
+            ("x/testdata/p/q.go", "package p\n"),
+            ("w/go.mod", "module example.com/x/testdata\n"),
+            ("w/p/p.go", "package p\n"),
         ],
     );
     let found = report(&root);
     assert_eq!(
         pairs(&found),
-        ["app/main.go>x/fixed/f.go", "app/main.go>x/lib/l.go"]
+        [
+            "app/main.go>w/p/p.go",
+            "app/main.go>x/fixed/f.go",
+            "app/main.go>x/lib/l.go"
+        ]
     );
     assert_eq!(found.unsure, []);
     assert_eq!(found.problems, Vec::<String>::new());
@@ -890,11 +909,17 @@ fn an_importing_package_nothing_imports_is_one_node_counted_as_its_slice() {
 
 #[test]
 fn commit_mode_gives_the_edges_and_doubts_of_the_working_tree() {
-    let (dir, root) = declared_twice(&[("app", "xa")]);
+    let (dir, root) = declared_twice(&[("app", "xa"), ("xa", "app")]);
     write(
         dir.path(),
         "app/lib/l.go",
         "package lib\n\nimport \"example.com/x\"\n",
+    );
+    // A pair across parts, so the edges are not empty.
+    write(
+        dir.path(),
+        "a/sub/s.go",
+        "package sub\n\nimport \"example.com/app/lib\"\n",
     );
     write(
         dir.path(),
@@ -915,6 +940,16 @@ fn commit_mode_gives_the_edges_and_doubts_of_the_working_tree() {
     );
     let value: Value = serde_json::from_slice(&commit.stdout).unwrap();
     assert_eq!(value["unsure"].as_array().map(Vec::len), Some(2), "{value}");
+    assert_eq!(
+        value["edges"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|e| format!("{}>{}", e["from"], e["to"]))
+            .collect::<Vec<_>>(),
+        ["\"xa\">\"app\""],
+        "{value}"
+    );
     // An edit not committed changes nothing at the commit.
     write(dir.path(), "app/main.go", "package main\n");
     assert_eq!(

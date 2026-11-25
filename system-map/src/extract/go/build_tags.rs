@@ -168,7 +168,7 @@ const MAX_OLD_SIZE: usize = 100;
 const MAX_SIZE: usize = 1000;
 
 /// A `//go:build` line's expression, `||` binding looser than `&&`, with `!` and parentheses; none when it does not
-/// parse or starts more than [`MAX_SIZE`] operands.
+/// parse, holds a double negation (`!!x`), or starts more than [`MAX_SIZE`] operands.
 fn parse_go_build(line: &str) -> Option<Expr> {
     let mut p = Parser {
         text: line.strip_prefix("//go:build")?,
@@ -225,8 +225,17 @@ impl Parser<'_> {
             return None;
         }
         if self.eat("!") {
-            return Some(Expr::Not(Box::new(self.not()?)));
+            // Go rejects a second `!`, spaced or not: "double negation not allowed".
+            if self.eat("!") {
+                return None;
+            }
+            return Some(Expr::Not(Box::new(self.atom()?)));
         }
+        self.atom()
+    }
+
+    /// A tag, or an expression in parentheses.
+    fn atom(&mut self) -> Option<Expr> {
         if self.eat("(") {
             let x = self.or()?;
             return self.eat(")").then_some(x);
