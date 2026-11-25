@@ -369,7 +369,8 @@ fn paths_change(before: Option<&Value>, after: Option<&Value>) -> (Vec<String>, 
     (only(&now, &was), only(&was, &now))
 }
 
-/// A part's held items on each side, matched by name: the new side's in its order, then those it removed.
+/// A part's held items on each side, matched by name (a name held twice, by its n-th time): the new side's in its order, then
+/// those it removed.
 fn holds_change(before: Option<&Value>, after: Option<&Value>) -> Vec<HeldDetail> {
     let list = |part: Option<&Value>| -> Vec<Value> {
         part.and_then(|part| part["holds"].as_array())
@@ -377,19 +378,33 @@ fn holds_change(before: Option<&Value>, after: Option<&Value>) -> Vec<HeldDetail
             .unwrap_or_default()
     };
     let (was, now) = (list(before), list(after));
-    let find =
-        |among: &[Value], name: &str| among.iter().find(|h| field(h, "name") == name).cloned();
-    let mut names: Vec<String> = now.iter().map(|h| field(h, "name").to_string()).collect();
-    for held in &was {
-        let name = field(held, "name");
-        if !names.iter().any(|n| n == name) {
-            names.push(name.to_string());
+    let find = |among: &[Value], name: &str, n: usize| {
+        among
+            .iter()
+            .filter(|h| field(h, "name") == name)
+            .nth(n)
+            .cloned()
+    };
+    // Each name with how many times it came before, on the new side and then on the old.
+    let numbered = |items: &[Value]| -> Vec<(String, usize)> {
+        let mut out: Vec<(String, usize)> = Vec::new();
+        for held in items {
+            let name = field(held, "name").to_string();
+            let n = out.iter().filter(|(seen, _)| *seen == name).count();
+            out.push((name, n));
+        }
+        out
+    };
+    let mut names = numbered(&now);
+    for key in numbered(&was) {
+        if !names.contains(&key) {
+            names.push(key);
         }
     }
     names
         .into_iter()
-        .map(|name| {
-            let (old, new) = (find(&was, &name), find(&now, &name));
+        .map(|(name, n)| {
+            let (old, new) = (find(&was, &name, n), find(&now, &name, n));
             let (paths_added, paths_removed) = paths_change(old.as_ref(), new.as_ref());
             HeldDetail {
                 text: words_of(old.as_ref(), new.as_ref(), "text"),
@@ -826,6 +841,20 @@ mod tests {
             )
         );
         assert!(detail.holds.is_empty());
+    }
+
+    #[test]
+    fn a_name_held_twice_shows_each_item_once() {
+        let old = v2("p", r#"["a/"]"#, "[]", "");
+        let new = v2(
+            "p",
+            r#"["a/"]"#,
+            r#"[{"name":"Fog","text":"A"},{"name":"Fog","text":"B"}]"#,
+            "",
+        );
+        let detail = part_detail(&map_items(Some(&old), Some(&new)), "a");
+        let texts: Vec<&Words> = detail.holds.iter().map(|h| &h.text).collect();
+        assert_eq!(texts, [&words(None, Some("A")), &words(None, Some("B"))]);
     }
 
     #[test]
