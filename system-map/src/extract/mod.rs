@@ -11,7 +11,7 @@ mod typescript;
 
 use std::{
     cell::OnceCell,
-    collections::{BTreeMap, BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     path::Path,
 };
 
@@ -25,16 +25,17 @@ pub(crate) trait Extractor {
     /// Whether `file` is one of its language's files, or of its manifest kind.
     fn reads(&self, file: &str) -> bool;
 
-    /// Whether `file` is one of its language's test files, which make no pairs and never make their part read.
-    fn is_test(&self, _repo: &Repo, _file: &str) -> bool {
+    /// Whether `file` is a file its language's build leaves out: a test file, or one the build never compiles. A skipped
+    /// file makes no pairs and never makes its part read.
+    fn skips(&self, _repo: &Repo, _file: &str) -> bool {
         false
     }
 
-    /// Whether the repository holds a file it would read: a tracked, non-ignored file it reads that is no test file.
+    /// Whether the repository holds a file it would read: a tracked, non-ignored file it reads and does not skip.
     fn detect(&self, repo: &Repo) -> bool {
         repo.files()
             .iter()
-            .any(|f| !repo.is_ignored(f) && self.reads(f) && !self.is_test(repo, f))
+            .any(|f| !repo.is_ignored(f) && self.reads(f) && !self.skips(repo, f))
     }
 
     /// Its pairs, and its problems when it cannot run, or not fully.
@@ -179,7 +180,7 @@ pub(crate) struct Output {
 }
 
 /// Runs the extractors `names` names from `registry`, in that order, and holds their output to the contract: a pair
-/// whose ends are not both tracked, from a file to itself, or from a file the extractor names a test file is dropped,
+/// whose ends are not both tracked, from a file to itself, or from a file the extractor reads and skips is dropped,
 /// and a pair two extractors (or one, twice) find is kept once, sorted, with the lines of every finding, and as a
 /// declaration only if every finding of it is one. A name the registry lacks is a problem.
 pub(crate) fn run(registry: &[&dyn Extractor], names: &[String], repo: &Repo) -> Output {
@@ -200,12 +201,17 @@ pub(crate) fn run(registry: &[&dyn Extractor], names: &[String], repo: &Repo) ->
         };
         let found = extractor.extract(repo);
         problems.extend(found.problems);
+        // Whether each `from` file it reads is skipped, asked once per file, since `skips` may read the file.
+        let mut skipped: HashMap<String, bool> = HashMap::new();
         for pair in found.pairs {
             let tracked = |f: &str| repo.files.contains(f);
-            if pair.from == pair.to
-                || !tracked(&pair.from)
-                || !tracked(&pair.to)
-                || extractor.is_test(repo, &pair.from)
+            if pair.from == pair.to || !tracked(&pair.from) || !tracked(&pair.to) {
+                continue;
+            }
+            if extractor.reads(&pair.from)
+                && *skipped
+                    .entry(pair.from.clone())
+                    .or_insert_with(|| extractor.skips(repo, &pair.from))
             {
                 continue;
             }
@@ -232,7 +238,7 @@ pub(crate) fn run(registry: &[&dyn Extractor], names: &[String], repo: &Repo) ->
     }
 }
 
-/// The parts one of the named extractors reads: those that own a file it reads that is no test file.
+/// The parts one of the named extractors reads: those that own a file it reads and does not skip.
 pub(crate) fn read_parts<'p>(
     registry: &[&dyn Extractor],
     names: &[String],
@@ -246,11 +252,9 @@ pub(crate) fn read_parts<'p>(
     parts
         .iter()
         .filter(|part| {
-            part.files.iter().any(|file| {
-                named
-                    .iter()
-                    .any(|e| e.reads(file) && !e.is_test(repo, file))
-            })
+            part.files
+                .iter()
+                .any(|file| named.iter().any(|e| e.reads(file) && !e.skips(repo, file)))
         })
         .map(|part| part.id.as_str())
         .collect()

@@ -1,15 +1,21 @@
 //! The core's rules, tested once with fake extractors passed in as the registry.
 
+use std::cell::RefCell;
+
 use super::{Extractor, Output, Pair, Repo, contract::Fixture, run};
 use crate::{PartFiles, edges::check_links};
 
-/// An extractor that reads every file and finds what it is given.
+/// An extractor that reads every file but those it is told not to, and finds what it is given.
 struct Fake {
     name: &'static str,
     pairs: Vec<Pair>,
     problems: Vec<&'static str>,
-    /// The files it names as test files.
+    /// The files it skips.
     tests: Vec<&'static str>,
+    /// The files it does not read.
+    unread: Vec<&'static str>,
+    /// The files `skips` was asked about, in order.
+    asked: RefCell<Vec<String>>,
 }
 
 impl Extractor for Fake {
@@ -17,11 +23,12 @@ impl Extractor for Fake {
         self.name
     }
 
-    fn reads(&self, _file: &str) -> bool {
-        true
+    fn reads(&self, file: &str) -> bool {
+        !self.unread.contains(&file)
     }
 
-    fn is_test(&self, _repo: &Repo, file: &str) -> bool {
+    fn skips(&self, _repo: &Repo, file: &str) -> bool {
+        self.asked.borrow_mut().push(file.to_string());
         self.tests.contains(&file)
     }
 
@@ -43,6 +50,8 @@ fn fake(name: &'static str, pairs: &[(&str, &str)]) -> Fake {
         pairs: pairs.iter().map(|(from, to)| Pair::new(from, to)).collect(),
         problems: Vec::new(),
         tests: Vec::new(),
+        unread: Vec::new(),
+        asked: RefCell::new(Vec::new()),
     }
 }
 
@@ -77,6 +86,31 @@ fn a_pair_to_an_untracked_file_is_dropped() {
     );
     let out = run(&[&one], &names(&["one"]), &repo);
     assert_eq!(ends(&out), [("a.x", "b.x")]);
+}
+
+#[test]
+fn run_asks_skips_only_of_files_it_reads_once_per_from_file() {
+    let files = names(&["a.x", "b.x", "c.x", "d.x"]);
+    let repo = Repo::new(std::path::Path::new("."), &files, |_| false);
+    let one = Fake {
+        unread: vec!["d.x"],
+        ..fake(
+            "one",
+            &[
+                ("a.x", "b.x"),
+                ("a.x", "c.x"),
+                ("b.x", "c.x"),
+                ("a.x", "d.x"),
+                ("d.x", "a.x"),
+                ("d.x", "b.x"),
+            ],
+        )
+    };
+    let out = run(&[&one], &names(&["one"]), &repo);
+    assert_eq!(ends(&out).len(), 6);
+    let mut asked = one.asked.take();
+    asked.sort();
+    assert_eq!(asked, ["a.x", "b.x"]);
 }
 
 #[test]

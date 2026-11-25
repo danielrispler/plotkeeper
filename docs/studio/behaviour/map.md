@@ -74,7 +74,7 @@ An extractor reads which tracked file depends on which; the checker turns each p
 
 - **Text only.** It reads the repository's tracked files as text and runs no toolchain, so a check gives the same answer on any machine and in CI. The one exception is `cargo metadata`, which both Rust extractors run (`docs/adr/0002-extractors-read-text-only.md`).
 - **The core's rules.** The checker, not the extractor, drops a pair whose ends are not both tracked and a pair from a file to itself, and keeps a pair several extractors find once. It runs the extractors in the map's `extractors` order, so their problems print in that order.
-- **Test files are its own.** An extractor that skips its language's test files names them, and a test file then gives no pair and never makes its part read. `typescript-imports` skips its test files (its section says which); `cargo` and `rust-modules` skip none: they leave dev-dependencies out but read files under `tests/` and `#[cfg(test)]` code.
+- **Skipped files are its own.** An extractor names the files of its language that the build leaves out, most often its test files, or ones the build never compiles. A skipped file gives no pair and never makes its part read. `typescript-imports` skips its test files (its section says which); `cargo` and `rust-modules` skip none: they leave dev-dependencies out but read files under `tests/` and `#[cfg(test)]` code.
 - **Over-counts are stated.** An edge the code may not really hold is allowed only where its section below says so, as the barrel over-counts of `typescript-imports` are.
 - **Invisible dependencies are listed.** A dependency the text shows no import for is a silent under-count, and its section lists it.
 

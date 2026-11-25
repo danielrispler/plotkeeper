@@ -22,7 +22,7 @@ impl Extractor for TypescriptImports {
 
     /// A file named `*.test.*` or `*.spec.*`, or under a folder named `__tests__`, `test` or `tests` at any depth: the
     /// defaults of Jest, Vitest, Mocha and Node's test runner, and the folders a workspace package keeps its tests in.
-    fn is_test(&self, _repo: &Repo, file: &str) -> bool {
+    fn skips(&self, _repo: &Repo, file: &str) -> bool {
         let mut segments: Vec<&str> = file.split('/').collect();
         let base = segments.pop().unwrap_or(file);
         let names: Vec<&str> = base.split('.').collect();
