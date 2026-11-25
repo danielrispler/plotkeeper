@@ -22,7 +22,7 @@ import { expectedLine } from "./map-pre-flight.js";
 import { exploreRow } from "./micro-world.js";
 import { guardRow } from "./patch-review.js";
 import { scrubTo } from "./map-history.js";
-import { branchOf, overturnNote, ratifyActions, ratifyDetail } from "./map-ratify.js";
+import { branchOf, overturnNote, ratifyActions, ratifyDetail, ratifyEvidence } from "./map-ratify.js";
 import { copyOverturn, ratifyStep, statusWords } from "./ratify.js";
 import type { Copied } from "./notes.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
@@ -787,6 +787,8 @@ function ratifyNode(view: MapView, rows: RatifyRow[]) {
       told = true;
       item.append(explainLine(RATIFY.notYet, "explain-link"));
     }
+    const evidence = ratifyEvidence(view.project, row);
+    if (evidence) item.append(evidence);
     const detail = ratifyDetail(row);
     if (detail) item.append(detail);
     const decided = row.kind === "decision" ? playing?.brief.brief.decisions.find((each) => each.id === row.id) : undefined;

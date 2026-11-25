@@ -1,0 +1,51 @@
+{
+ "version": 1,
+ "pr": 499,
+ "head": "cafe499",
+ "written_at": 1795400000000,
+ "stale": false,
+ "model": "opus",
+ "shape": {
+  "chapters": false,
+  "required": [
+   "alpha"
+  ],
+  "also": [],
+  "overview": false,
+  "flows_changed": []
+ },
+ "brief": {
+  "title": "Alpha calls Gamma",
+  "overview": [],
+  "chapters": [],
+  "also": [],
+  "decisions": []
+ },
+ "link_evidence": [
+  {
+   "link": "alpha-gamma",
+   "sites": [
+    {
+     "file": "alpha/a.rs",
+     "line": 3
+    },
+    {
+     "file": "alpha/a.rs",
+     "line": 9
+    },
+    {
+     "file": "alpha/b.rs",
+     "line": 1
+    }
+   ]
+  },
+  {
+   "link": "beta-gamma",
+   "sites": [
+    {
+     "file": "beta/Cargo.toml"
+    }
+   ]
+  }
+ ]
+}

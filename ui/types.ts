@@ -482,7 +482,13 @@ export type RunView = { id: string; kind: "back-law" | "micro-world"; state: "qu
 export type Runs = { paused: string | null; runs: RunView[] };
 // Ratifying (`ratify.rs`): an item of a PR is a map change (kind part, actor, link, law or flow) or a decision the agent declared.
 export type PendingItem = { pr: number; kind: string; id: string };
-export type RatifyRow = { pr: number; kind: string; id: string; text: string; change: string; status: "ratified" | "accepted" | "overturned" | "not-yet"; detail: RatifyDetail | null };
+// `evidence` (#499): on a link the PR adds, the import sites behind it, stored on its brief when it was written, read at `head`.
+export type RatifyRow = { pr: number; kind: string; id: string; text: string; change: string; status: "ratified" | "accepted" | "overturned" | "not-yet"; detail: RatifyDetail | null; evidence?: LinkSites };
+// Where an import stands (`pr_brief.rs`, `ImportSite`): in the importing file, at its 1-based line when one is known.
+export type ImportSite = { file: string; line?: number };
+export type LinkSites = { head: string; sites: ImportSite[] };
+// An import site's code (`ratify_site`), read from the commit: its lines numbered from `first`, and the site's line to mark when it has one.
+export type SiteSnippet = { file: string; line?: number; first: number; lines: string[] };
 // Old beside new for a part or a link: a text on each side, null on the side that has no item.
 export type RatifyWords = { before: string | null; after: string | null };
 export type RatifyHeld = { name: string; text: RatifyWords; paths_added: string[]; paths_removed: string[] };
@@ -518,7 +524,11 @@ export type AlsoGroup = { kind: AlsoKind; files: TouchedFile[]; lines: number };
 // `shape`: what code decided the brief's shape would be; the window never reads it.
 export type BriefShape = { chapters: boolean; required: string[]; also: string[]; overview: boolean; flows_changed: string[] };
 // `partial_facts` (#477, #491): what the brief was written without, absent when nothing was missing or in a brief from before it.
-export type StoredBrief = { version: number; pr: number; head: string; written_at: number; stale: boolean; model: string; shape?: BriefShape; brief: PrBrief; guard?: Guard | null; partial_facts?: PartialFacts };
+// `link_evidence` (#499): the import sites behind each link the PR adds, read from its head; Ratify reads it through `pr_ratify`.
+export type StoredBrief = {
+  version: number; pr: number; head: string; written_at: number; stale: boolean; model: string; shape?: BriefShape; brief: PrBrief; guard?: Guard | null;
+  partial_facts?: PartialFacts; link_evidence?: { link: string; sites: ImportSite[] }[];
+};
 // The cut diff's files none of whose hunks were sent and those sent in part, with its bytes sent and not sent; the claim check's error; the
 // extensions of the diff's source languages no extractor of the map reads (`understanding/src/pr_brief.rs`, `PartialFacts`).
 export type DiffCut = { files_cut: string[]; files_partial: string[]; bytes_sent: number; bytes_cut: number };
@@ -643,6 +653,7 @@ export interface Commands {
   brief_since_done: void;
   briefs_waiting: WaitingBriefs | null;
   pr_ratify: RatifyRow[];
+  ratify_site: SiteSnippet;
   projects: SavedProject[];
   remove_project: SavedProject[];
   ratify_set: void;

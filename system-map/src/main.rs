@@ -1,4 +1,4 @@
-//! `system-map check [--json] [--root <dir>]` checks the repository's system map;
+//! `system-map check [--json] [--root <dir>] [--commit <rev>]` checks the repository's system map, or one commit's;
 //! `system-map touched [--json] [--root <dir>] [path...]` names the parts some paths touch;
 //! `system-map imports [--json] [--root <dir>]` counts the imports inside and across parts.
 
@@ -22,18 +22,22 @@ fn run() -> Result<ExitCode, String> {
     let command = args.next();
     if !matches!(command.as_deref(), Some("check" | "touched" | "imports")) {
         return Err(
-            "usage: system-map check [--json] [--root <dir>] | system-map touched [--json] [--root <dir>] [path...] | system-map imports [--json] [--root <dir>]"
+            "usage: system-map check [--json] [--root <dir>] [--commit <rev>] | system-map touched [--json] [--root <dir>] [path...] | system-map imports [--json] [--root <dir>]"
                 .into(),
         );
     }
     let touched = command.as_deref() == Some("touched");
     let mut json = false;
     let mut root = None;
+    let mut commit = None;
     let mut paths = Vec::new();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--json" => json = true,
             "--root" => root = Some(PathBuf::from(args.next().ok_or("--root needs a folder")?)),
+            "--commit" if command.as_deref() == Some("check") => {
+                commit = Some(args.next().ok_or("--commit needs a commit")?)
+            }
             other if touched && !other.starts_with("--") => paths.push(other.to_string()),
             other => return Err(format!("unknown argument {other:?}")),
         }
@@ -48,7 +52,10 @@ fn run() -> Result<ExitCode, String> {
     if command.as_deref() == Some("imports") {
         return run_imports(&root, json);
     }
-    let report = system_map::check(&root);
+    let report = match &commit {
+        Some(commit) => system_map::check_at(&root, commit),
+        None => system_map::check(&root),
+    };
     // On standard error, so standard output keeps exactly the problems and the pass line, and never a failure.
     for name in &report.suggested {
         eprintln!("note: {name} could read this repository; add it to extractors");

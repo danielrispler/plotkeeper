@@ -523,7 +523,7 @@ body[data-panel="diff"] .map-stage { --panel-w: min(var(--panel-wide), calc(100%
 .glass { background: var(--glass); backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur)); border-radius: var(--glass-radius);
          box-shadow: var(--glass-shadow); }
 /* The side area, over the map's right: the agents no part holds (first, so a sheet never pushes them down over a part, #466), the part's sheet,
-   the drawer under it, then the background runs.
+   the drawer under it, then the background runs, on the sheet's glass too, since the map pans under them (#472).
    It is one scroll column at most the map's height less its insets (#445): its cards keep their own height, so the sheet and the drawer never
    scroll on their own, and a wheel at its end never reaches the map. It hugs its cards, so it takes the pointer, its scrollbar with it. Its width is the sheet's, `--sheet-w` as Daniel resized it
    (`map-sheet.ts`), between `--map-sheet-min` and half the map. */
@@ -532,7 +532,7 @@ body[data-panel="diff"] .map-stage { --panel-w: min(var(--panel-wide), calc(100%
 .map-side[hidden] { display: none; }
 .map-side > * { flex: none; }
 #map-sheet:empty, #map-drawer:empty, #map-not-placed:empty, #map-runs:empty { display: none; }
-#map-sheet, #map-drawer { padding: var(--sp-6) var(--sp-6) var(--sp-5); animation: glass-in var(--glass-in) var(--glass-ease); }
+#map-sheet, #map-drawer, #map-runs { padding: var(--sp-6) var(--sp-6) var(--sp-5); animation: glass-in var(--glass-in) var(--glass-ease); }
 #map-sheet { position: relative; }
 /* The sheet's left edge resizes it (#445): a thin focusable bar, lit on hover, while dragged and with the focus ring; the page selects no
    text while it is dragged. */
@@ -838,6 +838,18 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
                background: var(--raised); font: var(--size-xs)/1.5 var(--mono); white-space: pre; user-select: text; }
 /* A jump out of the drawer is a link that looks like the quiet button it was (#462). */
 .drawer-jump { text-decoration: none; }
+/* An import site's code (#499): numbered lines, the site's own a <mark> with an arrow in its gutter, not colour alone. */
+.drawer-lines { padding-inline: 0; }
+.drawer-lines code { display: block; padding: 0; background: none; border-radius: 0; font: inherit; white-space: pre; overflow: visible; }
+.drawer-line { display: inline-block; min-width: 100%; padding-inline: var(--sp-2) var(--sp-5); border-left: var(--mark) solid transparent; color: inherit; background: none; }
+mark.drawer-line { background: var(--selected); border-left-color: var(--fg); }
+.drawer-n { display: inline-block; min-width: 4ch; margin-right: var(--sp-4); text-align: right; color: var(--faint); user-select: none; }
+mark.drawer-line .drawer-n::before { content: "→ " / ""; color: var(--fg); }
+.drawer-picks { margin: 0; padding: 0; list-style: none; align-self: stretch; display: grid; gap: var(--sp-1); }
+.drawer-pick { font: var(--size-xs)/1.5 var(--mono); overflow-wrap: anywhere; text-align: left; }
+/* An added link's import sites (#499), its second line under the row. */
+.ratify-evidence { grid-column: 1 / -1; margin: var(--sp-1) 0 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); font-size: var(--size-small); }
+.ratify-site { min-width: 0; font: var(--size-xs)/1.5 var(--mono); overflow-wrap: anywhere; text-align: left; }
 @media (prefers-reduced-motion: reduce) {
   .plate, .btn { transition: none; }
   .plate-fog, .plate-fog.lifting { animation: none; }
@@ -1062,7 +1074,7 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .light-spark { fill: var(--brief-light); filter: drop-shadow(0 0 var(--sp-3) var(--brief-light)); }
 .brief-open .map-canvas { overflow: clip; }
 @media (prefers-reduced-motion: reduce) {
-  .map-panel, #map-sheet, #map-drawer, .map-tray { animation: none; transition: none; }
+  .map-panel, #map-sheet, #map-drawer, #map-runs, .map-tray { animation: none; transition: none; }
   .map-brief, .brief-cols, .map-world.glide, .brief-dots i { transition: none; }
   .plate.arrive, .plate.picked, .plate.wrong { animation: none; }
 }
