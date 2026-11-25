@@ -60,7 +60,7 @@ Before planning, grilling or explanations, read `docs/agents/learning.md`. Durin
 
 ### Issue tracker
 
-Track issues and specs in GitHub Issues for `danielrispler/plotkeeper`. To read, list or claim issues, read `docs/agents/issue-tracker.md`. To create, edit or resolve issues, read `docs/agents/ticket-authoring.md`. Label every issue `studio`.
+Track issues and specs in GitHub Issues for `danielrispler/plotkeeper`. To read, list or claim issues, read `docs/agents/issue-tracker.md`. To create, edit or resolve issues, read `docs/agents/ticket-authoring.md`.
 
 ### Wayfinder
 

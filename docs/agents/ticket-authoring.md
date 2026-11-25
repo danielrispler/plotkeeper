@@ -29,13 +29,13 @@ The installed skill remains unchanged. Where it and this file differ, follow thi
 - **Agreed breakdown.** When Daniel approved the ticket list and its edges in the current conversation, publish it; the skill's quiz is for a breakdown he has not seen.
 - **Shared docs.** A file that most tickets of a spec would edit, such as `README.md`, goes to one closing ticket blocked by the tickets it describes, so parallel implementers never meet in it.
 - **Behaviour docs.** A ticket that changes behaviour updates that area's doc under `docs/studio/behaviour/` (or `plugin.md`, `settings.md`) and names it in Touches, not `README.md`.
-- **Labels.** `studio` and `ready-for-agent`; `needs-triage` for a ticket that holds a choice of Daniel's.
+- **Labels.** `ready-for-agent`; `needs-triage` for a ticket that holds a choice of Daniel's.
 - **Publish.** Write each ticket's body to its own Markdown file in one scratchpad folder, with a manifest, `tickets.json`, beside them. Then run `cargo run --bin wayfinder-startup -- --publish <folder>` in place of `gh` calls by hand. The manifest names the spec and, for each ticket, its body file, title, labels and the files of the tickets that block it (`blocked_by` may be left out):
 
   ```json
   {"parent": 102, "tickets": [
-    {"file": "01-rail.md", "title": "Studio: ...", "labels": ["studio", "ready-for-agent"]},
-    {"file": "02-cards.md", "title": "Studio: ...", "labels": ["studio", "ready-for-agent"], "blocked_by": ["01-rail.md"]}
+    {"file": "01-rail.md", "title": "Studio: ...", "labels": ["ready-for-agent"]},
+    {"file": "02-cards.md", "title": "Studio: ...", "labels": ["ready-for-agent"], "blocked_by": ["01-rail.md"]}
   ]}
   ```
 
