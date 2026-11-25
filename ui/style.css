@@ -698,11 +698,16 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .sheet-law { display: grid; grid-template-columns: auto 1fr; column-gap: var(--sp-4); align-items: baseline; font-size: var(--size-small); }
 .sheet-law-backing { grid-column: 2; font-size: var(--size-xs); color: var(--faint); }
 .sheet-law-actions { grid-column: 2; }
-.sheet-law.unratified, .sheet-link.unratified { grid-template-columns: auto 1fr; }
+.sheet-law.unratified { grid-template-columns: auto 1fr; }
+/* "Talks to" (spec #473): the arrow in the first column, the other end, its kind, its reason and any ratify controls under one another in the second. */
 .sheet-links { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--sp-4); }
-.sheet-link { display: grid; grid-template-columns: 1fr; row-gap: var(--sp-1); font-size: var(--size-small); }
+.sheet-link { display: grid; grid-template-columns: auto 1fr; column-gap: var(--sp-3); row-gap: var(--sp-1); align-items: baseline; font-size: var(--size-small); line-height: 1.45; }
+.sheet-link > :not(.sheet-link-dir) { grid-column: 2; }
+.sheet-link-dir { color: var(--muted); }
+.sheet-link-text { min-width: 0; overflow-wrap: anywhere; }
+.sheet-link-kind { font-size: var(--size-xs); color: var(--faint); }
+.sheet-link-reason { color: var(--muted); text-wrap: pretty; }
 .ratify-mark { grid-column: 2; font-size: var(--size-xs); color: var(--faint); }
-.sheet-link .ratify-mark, .sheet-link .ratify-actions { grid-column: 1; }
 .ratify-actions { grid-column: 2; display: inline-flex; gap: var(--sp-2); }
 .brief-ratify { margin: var(--sp-4) 0 0; padding: 0; list-style: none; max-width: 60ch; display: grid; gap: var(--sp-3); }
 .ratify-row { display: grid; grid-template-columns: auto 1fr auto; column-gap: var(--sp-4); align-items: baseline; font-size: var(--size); line-height: 1.45; color: var(--muted); }
@@ -917,6 +922,6 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .sheet-stale { margin: 0; font-size: var(--size-small); color: var(--muted); }
 /* The refresher (#392): what the map says around the part, in its sheet under the laws. */
 .refresher { display: flex; flex-direction: column; gap: var(--sp-3); }
-.refresher-flows, .refresher-links { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); font-size: var(--size-small); }
+.refresher-flows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); font-size: var(--size-small); }
 .refresher-flow-name { font-weight: 600; }
 .refresher-hops { margin: var(--sp-1) 0 0; padding-inline-start: var(--sp-6); color: var(--muted); line-height: 1.45; }

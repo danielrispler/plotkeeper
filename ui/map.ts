@@ -19,7 +19,7 @@ import { logStop, reviewNode, reviewOf } from "./stop-rules.js";
 import { element, failure, invoke, listen, newest, pressable, text } from "./dom.js";
 import {
   actorSize, autoPlace, brokenParts, brokenText, cameraRig, type CameraRig, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, fitCamera, panTo, type Drag,
-  type Law, type Layer, type LayerName, type MapDoc, startProject, switchProject, parseMap, type Part, type Point, plateSize, plateTitle, readingOrder, revealPan, rimPoint, type Scrub, type Tier, zoomAt,
+  type Law, type Layer, type LayerName, type MapDoc, startProject, switchProject, parseMap, type Part, type Point, plateSize, plateTitle, linkLines, readingOrder, revealPan, rimPoint, type Scrub, type Tier, zoomAt,
 } from "./map-model.js";
 import { recheckSeen } from "./seen.js";
 import { knownProjects, projectGone } from "./projects.js";
@@ -331,16 +331,17 @@ const svg = (tag: string, attrs: Record<string, string>) => {
 
 const sizeOf = (id: string, view: MapView) => (view.doc.actors.some((actor) => actor.id === id) ? actorSize : plateSize);
 
-// The links as lines from rim to rim, with the laws on a link as marks at its middle.
+// The links as lines from rim to rim, one per pair of ends (spec #473), with the laws on any of its links as marks at its middle. A line's
+// `data-link` holds all its links' ids, space-separated, and `data-from` the end it is drawn from.
 function drawLinks(layer: Element, view: MapView) {
   const nodes: Element[] = [];
-  for (const link of view.doc.links) {
-    const [from, to] = [view.positions[link.from], view.positions[link.to]];
+  for (const line of linkLines(view.doc.links)) {
+    const [from, to] = [view.positions[line.from], view.positions[line.to]];
     if (!from || !to) continue;
-    const a = rimPoint(from, sizeOf(link.from, view), to);
-    const b = rimPoint(to, sizeOf(link.to, view), from);
-    nodes.push(svg("line", { class: "link", "data-link": link.id, x1: String(a.x), y1: String(a.y), x2: String(b.x), y2: String(b.y) }));
-    for (const law of view.doc.laws.filter((law) => law.on === link.id)) {
+    const a = rimPoint(from, sizeOf(line.from, view), to);
+    const b = rimPoint(to, sizeOf(line.to, view), from);
+    nodes.push(svg("line", { class: "link", "data-link": line.ids.join(" "), "data-from": line.from, x1: String(a.x), y1: String(a.y), x2: String(b.x), y2: String(b.y) }));
+    for (const law of view.doc.laws.filter((law) => line.ids.includes(law.on))) {
       const mark = svg("rect", { class: `link-mark ${law.backing}`, width: "7", height: "7", x: "-3.5", y: "-3.5", transform: `translate(${(a.x + b.x) / 2} ${(a.y + b.y) / 2}) rotate(45)` });
       mark.append(svg("title", {}));
       mark.firstChild!.textContent = `${law.backing === "check" ? "Backed by a check" : "On trust"}: ${law.text}`;

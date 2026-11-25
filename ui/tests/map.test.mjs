@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
   actorSize, autoPlace, cameraRig, draftPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, plateTitle, rimPoint, revealPan, scrubTickets, sheetOf,
-  narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject, readingOrder,
+  narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject, readingOrder, talksTo, linkLines,
 } from "../../dist/map-model.js";
 
 const part = (id, extra = {}) => ({ id, name: id, caption: "", purpose: "", holds: [], tier: "core", paths: [], ...extra });
@@ -276,4 +276,33 @@ test("the parts' tab order reads the map top to bottom, then left to right, a ro
   // A plate a full half height lower starts the next row.
   assert.deepEqual(readingOrder({ a: { x: 500, y: 100 }, b: { x: 100, y: 100 + plateSize.h / 2 } }), ["a", "b"]);
   assert.deepEqual(readingOrder({}), []);
+});
+
+// Spec #473, "The sheet's links and the drawing": one list of links on the sheet, one line per pair on the map.
+const pairLinks = [
+  { id: "hook-server", from: "hook", to: "server", kind: "import" },
+  { id: "server-hook", from: "server", to: "hook", kind: "http", reason: "The server asks the hook for its log." },
+  { id: "server-window", from: "server", to: "window", kind: "file", reason: "The page reads the built bundle." },
+  { id: "agents-hook", from: "agents", to: "hook" },
+];
+
+test("Talks to lists every link at either end of the part: the other end, the arrow's direction, the kind and the reason", () => {
+  const names = { hook: "Hook", server: "Server", window: "Window", agents: "Agents" };
+  assert.deepEqual(talksTo("server", pairLinks, (id) => names[id]), [
+    { link: "hook-server", other: "Hook", out: false, kind: "import", reason: undefined },
+    { link: "server-hook", other: "Hook", out: true, kind: "http", reason: "The server asks the hook for its log." },
+    { link: "server-window", other: "Window", out: true, kind: "file", reason: "The page reads the built bundle." },
+  ]);
+  // A version 1 link has no kind; an actor is named like a part.
+  assert.deepEqual(talksTo("hook", pairLinks, (id) => names[id]).at(-1), { link: "agents-hook", other: "Agents", out: false, kind: undefined, reason: undefined });
+  assert.deepEqual(talksTo("gone", pairLinks, (id) => id), []);
+});
+
+test("a pair with an import link and a run-time link, in either direction, draws as one line holding both ids", () => {
+  assert.deepEqual(linkLines(pairLinks), [
+    { ids: ["hook-server", "server-hook"], from: "hook", to: "server" },
+    { ids: ["server-window"], from: "server", to: "window" },
+    { ids: ["agents-hook"], from: "agents", to: "hook" },
+  ]);
+  assert.deepEqual(linkLines([]), []);
 });

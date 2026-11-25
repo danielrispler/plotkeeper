@@ -1061,8 +1061,8 @@ const mapStale = (): Fixture =>
       log("stale ok");`, {
     map_state: mapState({ stale: { core: 1, shell: 2, understanding: 3 } }),
   });
-// The refresher (#392) on Shell's sheet, a stale part with no fog: drawn at once from the map file (its caption and purpose, the flows
-// through it, its laws with their backing and its links; the sheet already shows the first three), with no writer and no "Writing…".
+// The refresher (#392) on Shell's sheet, a stale part with no fog: drawn at once from the map file, the flows through it hop by hop (the
+// sheet already shows the rest, its links as "Talks to", spec #473), with no writer and no "Writing…".
 const mapRefresher = (): Fixture => {
   const file = JSON.parse(mapFile);
   file.flows = [{ id: "turn-writing", name: "Turn writing", hops: [
@@ -1081,11 +1081,12 @@ const mapRefresher = (): Fixture => {
       await wait(400);
       const node = document.querySelector("#map-sheet .refresher");
       if (!node) return log("snap:fail the refresher did not show");
-      if (node.previousElementSibling?.classList.contains("sheet-laws") !== true) log("snap:fail the refresher is not under the laws");
+      if (node.previousElementSibling?.classList.contains("sheet-links") !== true) log("snap:fail the refresher is not under Talks to");
       const words = node.textContent;
-      for (const want of ["Turn writing", "The Shell asks Understanding", "Hook to Shell", "Shell to Window"]) {
+      for (const want of ["Flows through it", "Turn writing", "The Shell asks Understanding"]) {
         if (!words.includes(want)) log("snap:fail the refresher lacks " + want);
       }
+      if (words.includes("Linked with") || node.querySelector(".refresher-links")) log("snap:fail the refresher still lists the links");
       if (words.includes("Understanding calls the writer.")) log("snap:fail a hop not at the part shows");
       if (document.querySelector("#map-sheet .sheet-refresher")) log("snap:fail the button stays once the refresher shows");
       if (document.body.textContent.includes("Writing")) log("snap:fail the refresher waits on a writer");
@@ -1093,6 +1094,61 @@ const mapRefresher = (): Fixture => {
     map_state: mapState({ source: JSON.stringify(file), stale: { shell: 2 } }),
   });
 };
+// The map with a pair of ends joined twice (spec #473): Shell imports Understanding, and Understanding answers Shell over HTTP, with a
+// law on the run-time link. Each link has its kind, and the run-time ones their reasons.
+const pairFile = (() => {
+  const file = JSON.parse(mapFile);
+  for (const link of file.links) link.kind = link.to === "writer" || link.to === "github" ? "http" : "import";
+  file.links.find((link: { id: string }) => link.id === "shell-daemon").kind = "spawn";
+  file.links.find((link: { id: string }) => link.id === "shell-daemon").reason = "The Shell starts the daemon that owns the terminals.";
+  file.links.push({ id: "understanding-shell", from: "understanding", to: "shell", kind: "http", reason: "Understanding answers the Shell's summary requests." });
+  file.laws.push({ id: "understanding-answers", on: "understanding-shell", backing: "trust", text: "Every request gets one answer." });
+  return JSON.stringify(file);
+})();
+// A brief step that lights the second link of a pair (spec #473): the light runs along the pair's one line, from Understanding to Shell,
+// though the line is drawn from Shell, the end of the pair's first link.
+const mapBriefPairLight = (): Fixture => {
+  const base = mapBrief(briefOf([step("Now", "Understanding answers the Shell", "The summary comes back over the link.", ["shell", "understanding"], { hops: [["understanding-shell", false]] })]), 0, `
+      const line = document.querySelector('#map .map-links [data-link~="understanding-shell"]');
+      if (!line || line.getAttribute("data-from") !== "shell") return log("snap:fail the pair's line: " + line?.outerHTML);
+      const trails = [...document.querySelectorAll(".map-light .light-trail")];
+      if (trails.length !== 1) return log("snap:fail the step lit " + trails.length + " trails");
+      const at = (node, a, b) => node.getAttribute(a) + "," + node.getAttribute(b);
+      if (at(trails[0], "x1", "y1") !== at(line, "x2", "y2") || at(trails[0], "x2", "y2") !== at(line, "x1", "y1")) log("snap:fail the light runs the wrong way along the pair");
+      if (!document.querySelector('.plate[data-id="shell"].lit') || !document.querySelector('.plate[data-id="understanding"].lit')) log("snap:fail the pair's ends are not lit");
+      log("pair light ok");`, true);
+  return { ...base, map_state: { ...(base.map_state as MapState), source: pairFile }, snapDone: "pair light ok" };
+};
+// "Talks to" on Shell's sheet (spec #473): every link at either end, with its arrow, other end, kind and reason, and no other list of
+// links; the unratified run-time link carries Accept and Overturn on its row. On the map the Shell and Understanding pair is one line.
+const mapTalksTo = (): Fixture =>
+  mapOpened(`
+      document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(300);
+      const sheet = document.getElementById("map-sheet");
+      const headings = [...sheet.querySelectorAll(".sheet-heading")].map((h) => h.textContent);
+      if (!headings.includes("Talks to") || headings.includes("Links") || headings.includes("Linked with")) log("snap:fail headings: " + headings.join("|"));
+      if (sheet.querySelectorAll("ul.sheet-links").length !== 1) log("snap:fail not one list of links");
+      const rows = [...sheet.querySelectorAll(".sheet-links .sheet-link")];
+      if (rows.length !== 7) return log("snap:fail Talks to rows: " + rows.length);
+      const row = (id) => rows.find((r) => r.dataset.link === id);
+      const back = row("understanding-shell"), out = row("shell-understanding"), spawn = row("shell-daemon");
+      if (back.querySelector(".sheet-link-dir").getAttribute("aria-label") !== "from" || out.querySelector(".sheet-link-dir").getAttribute("aria-label") !== "to") log("snap:fail the arrows' directions");
+      if (back.querySelector(".sheet-link-text").textContent !== "Understanding" || back.querySelector(".sheet-link-kind").textContent !== "http") log("snap:fail the run-time row: " + back.textContent);
+      if (!back.querySelector(".sheet-link-reason")?.textContent.includes("summary requests")) log("snap:fail the run-time row lacks its reason");
+      if (out.querySelector(".sheet-link-kind").textContent !== "import" || out.querySelector(".sheet-link-reason")) log("snap:fail the import row: " + out.textContent);
+      if (!spawn.textContent.includes("spawn") || !spawn.textContent.includes("starts the daemon")) log("snap:fail the spawn row: " + spawn.textContent);
+      if (!back.classList.contains("unratified") || !back.querySelector(".ratify-accept") || !back.querySelector(".ratify-overturn")) log("snap:fail the unratified row has no Accept and Overturn");
+      if (sheet.querySelectorAll(".sheet-link.unratified").length !== 1) log("snap:fail a ratified link shows as unratified");
+      const lines = [...document.querySelectorAll("#map .map-links line.link")];
+      if (lines.length !== 10) log("snap:fail one line per pair: " + lines.length);
+      const pair = document.querySelector('#map .map-links [data-link~="understanding-shell"]');
+      if (!pair || pair !== document.querySelector('#map .map-links [data-link~="shell-understanding"]')) log("snap:fail the pair is not one line");
+      if (!document.querySelector("#map .map-links .link-mark.trust")) log("snap:fail the law on the pair's run-time link has no mark");
+      log("talks to ok");`, {
+    map_state: mapState({ source: pairFile, ratify: [{ pr: 334, kind: "link", id: "understanding-shell" }] }),
+    snapDone: "talks to ok",
+  });
 // A micro-world (#399) in its overlay: from the refresher on Shell's sheet, the Turn writing flow's world is ready but may be out of date, so its
 // row offers Open and Rebuild; Open shows the checked page in a frame sandboxed to scripts alone, in the glass overlay the size of the settings dialog. The page's script is
 // an inline handler: a closing script tag would end the snap page's own.
@@ -2664,6 +2720,8 @@ ${writerStatusAfter("Keychain refused")}
   mapSheetUnratified,
   mapStale,
   mapRefresher,
+  mapTalksTo,
+  mapBriefPairLight,
   mapBriefChapters,
   mapBriefChapterMid,
   mapBriefChapterLast,

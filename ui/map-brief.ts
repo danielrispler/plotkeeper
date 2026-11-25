@@ -386,13 +386,14 @@ async function runLight(view: MapView, hops: [string, boolean][]) {
   const layer = svg("svg", { class: "map-light", "aria-hidden": "true", width: links.getAttribute("width") ?? "0", height: links.getAttribute("height") ?? "0" });
   root.append(layer);
   const legs = hops.flatMap((hop) => {
-    const line = links.querySelector(`[data-link="${CSS.escape(hop[0])}"]`);
+    // A pair's links share one line (spec #473), whose `data-link` lists them all.
+    const line = links.querySelector(`[data-link~="${CSS.escape(hop[0])}"]`);
     const pair = ends(view, hop);
     if (!line || !pair) return [];
     const read = (name: string) => Number(line.getAttribute(name));
     const [p, q] = [{ x: read("x1"), y: read("y1") }, { x: read("x2"), y: read("y2") }];
-    // The rim points belong to the link as drawn from -> to; a reversed hop runs them the other way.
-    const [from, to] = hop[1] ? [q, p] : [p, q];
+    // The rim points run from the line's `data-from`; the light runs from the hop's first end.
+    const [from, to] = line.getAttribute("data-from") === pair[0] ? [p, q] : [q, p];
     return [{ from, to, ids: pair, len: Math.hypot(to.x - from.x, to.y - from.y) }];
   });
   const lit = (leg: (typeof legs)[number]) => svg("line", { class: "light-trail", x1: String(leg.from.x), y1: String(leg.from.y), x2: String(leg.to.x), y2: String(leg.to.y) });
