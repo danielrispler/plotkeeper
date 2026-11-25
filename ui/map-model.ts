@@ -45,7 +45,7 @@ const isLink = (value: unknown): value is MapLink => named(value, ["id", "from",
 const isLaw = (value: unknown): value is Law => named(value, ["id", "on"]);
 const listOf = <T>(value: unknown, is: (entry: unknown) => entry is T): T[] | null => (Array.isArray(value) && value.every(is) ? value : null);
 
-// The map file's text as the window draws it. The shell already read it leniently, so an unknown field is ignored here too.
+// The map file's text as the window draws it. The server already read it leniently, so an unknown field is ignored here too.
 export function parseMap(text: string): MapDoc {
   let file: unknown;
   try {

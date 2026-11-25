@@ -13,7 +13,7 @@ export type Note = { session: Session; count: string; line: string };
 
 const FADE_MS = 6000;
 
-// The note for the sessions whose turn ended off screen, in the order the shell combined them: the first one's name and its
+// The note for the sessions whose turn ended off screen, in the order the server combined them: the first one's name and its
 // turn's intention, and "N finished" when there are more. Null when none is listed.
 export function finishedNote(ids: string[], listed: Session[]): Note | null {
   const sessions = ids.flatMap((id) => listed.filter((s) => s.id === id));

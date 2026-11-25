@@ -3,7 +3,7 @@
 // read-only: no fog, no broken-law mark, no live agents, and a quiet banner "Viewing <commit> · Back to now". A commit's "Files" opens
 // its changed files and diffs in the drawer. Esc returns to now (the `scrubbed` layer), after a drawer and before the sheet.
 //
-// `scrubTo` is the one place a scrub happens (on the shell side, the `map_at` command): a ticket that records that Daniel looked back
+// `scrubTo` is the one place a scrub happens (on the server side, the `map_at` command): a ticket that records that Daniel looked back
 // hooks there.
 
 import { logStop } from "./stop-rules.js";

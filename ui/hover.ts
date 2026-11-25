@@ -88,7 +88,7 @@ export function hover(clock: Clock, change: (open: boolean) => void): Hover {
   };
 }
 
-// Tells the shell whether the rail shows its session. A rail that shows as an overlay (`delayed`) reports so only after it has
+// Tells the server whether the rail shows its session. A rail that shows as an overlay (`delayed`) reports so only after it has
 // stayed `seenAfter` ms; closing, and any other layout, report at once. Each change is reported once.
 export function shownGate(clock: Clock, report: (shown: boolean) => void) {
   let last: boolean | null = null;

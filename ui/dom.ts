@@ -1,25 +1,19 @@
-// The window's small parts: the shell's calls, and the elements every region builds.
+// The page's small parts: the server's commands, events and log, and the elements every region builds.
 
 import { showError } from "./notice.js";
 import type { Args, Command, Reply, Step } from "./types.js";
 
 type None = Record<string, never>;
 
-declare global {
-  interface Window {
-    __TAURI__: {
-      core: { invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> };
-      log: { warn(message: string): Promise<void>; error(message: string): Promise<void> };
-      event: { listen<T>(event: string, handler: (event: { payload: T }) => void): Promise<() => void> };
-    };
-  }
-}
+// The seam `transport.ts` installs, read at each call so a test may stand in for it. This is the one place outside `transport.ts` that
+// names it.
+const seam = () => window.__TAURI__;
 
 // Only a command of the map, with its arguments' and its reply's types from there (#144, #554); one with no arguments takes none.
 export const invoke = <C extends Command>(command: C, ...args: Args<C> extends None ? [] : [args: Args<C>]) =>
-  window.__TAURI__.core.invoke<Reply<C>>(command, args[0]);
+  seam().core.invoke<Reply<C>>(command, args[0]);
 export const listen = <T>(event: string, handler: (payload: T) => void) =>
-  window.__TAURI__.event.listen<T>(event, (e) => handler(e.payload));
+  seam().event.listen<T>(event, (e) => handler(e.payload));
 
 // Tells the newest of a series of requests: the promise it returns for a request resolves to `undefined` once a later request was
 // made, so a slow, older reply never lands over a newer one.
@@ -44,7 +38,7 @@ export function logLine(level: "warn" | "error", line: string) {
     showError(line);
   }
   try {
-    window.__TAURI__.log[level](kept(line)).catch(() => {});
+    seam().log[level](kept(line)).catch(() => {});
   } catch {}
 }
 export const failure = (command: string, level: "warn" | "error" = "warn") => (e: unknown) => logLine(level, `${command}: ${messageOf(e)}`);

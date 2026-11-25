@@ -285,7 +285,7 @@ export type BlockedCommand = {
 // `headline` and `lines` are the turn writer's Headline and typed Body lines (danielrispler/plotkeeper#115); a summary stored
 // before them has neither, and its `summary` text reads as a Headline and `reported` lines.
 export type SummaryLine = { kind: "why" | "reported" | "open" | "ask"; text: string };
-// The shell sends the summary as the store keeps it: also the request it was written from, when it arrived and the
+// The server sends the summary as the store keeps it: also the request it was written from, when it arrived and the
 // turn's hunks, which the window never reads.
 type SummaryRequest = {
   session_id: string;
@@ -308,7 +308,7 @@ export type TurnSummary = {
   arm?: "quiz_first" | "body_only" | null;
 };
 // The Brief's slots (danielrispler/plotkeeper#122): the Goal a model wrote, each answered question with Daniel's reply, and
-// the Open lines the shell computed. `brief` is a brief stored as prose, which shows while there is no Goal.
+// the Open lines the server computed. `brief` is a brief stored as prose, which shows while there is no Goal.
 export type OpenItem = {
   kind: "question" | "check" | "unchecked" | "open" | "ask" | "unpushed" | "pr";
   text: string;
@@ -328,8 +328,8 @@ export type SessionCards = {
   // The note of each Bash decision in the history, by the decision's call; the window compares its `at` with the answer's (danielrispler/plotkeeper#299).
   decision_notes: RiskView[];
 };
-// A blocked command's risk note as the shell joins it to its card: on its way, not coming (a timeout, an unreadable reply or
-// no card writer), or arrived. The shell also sends when it arrived, which only the decision history reads.
+// A blocked command's risk note as the server joins it to its card: on its way, not coming (a timeout, an unreadable reply or
+// no card writer), or arrived. The server also sends when it arrived, which only the decision history reads.
 export type RiskLevel = "none" | "low" | "medium" | "high" | "very_high" | "not_sure";
 export type RiskView =
   | { call: string; state: "reading" }
@@ -722,7 +722,7 @@ export type Args<C extends Command> = Commands[C]["args"];
 /** What the server replies to command `C`. */
 export type Reply<C extends Command> = Commands[C]["reply"];
 
-// What the shell counted of Daniel's use (`stop_rules.rs`), for the one-time review: days, merged PRs and the uses of each module.
+// What the server counted of Daniel's use (`stop_rules.rs`), for the one-time review: days, merged PRs and the uses of each module.
 export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen" | "explain-back-given" | "explain-back-marked" | "refresher-entered" | "stale-entered" | "catch-up-offered" | "catch-up-opened" | "catch-up-done" | "pre-flight-run" | "micro-world-opened" | "back-law-started" | "guard-offered" | "guard-started";
 export type StopFacts = {
   active_days: number;

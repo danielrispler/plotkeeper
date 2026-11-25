@@ -1,5 +1,5 @@
 // The needs-you toast (danielrispler/Falinks#565, decision 3). While the rail's dock cannot show a block, in focus mode or
-// while the rail is an overlay, the toast floats over the map's top-right corner; the shell plays
+// while the rail is an overlay, the toast floats over the map's top-right corner; the server plays
 // the needs-you sound (danielrispler/Falinks#556). It never resizes anything. Several blocks share it,
 // with a count, and it stays until Daniel acts on them or dismisses it. The session in the focused
 // terminal, the selected one, gets none: its prompt is already there.

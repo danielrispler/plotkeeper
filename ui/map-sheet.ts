@@ -274,7 +274,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
   if (!view.scrub && !sheet.canClear && !refresher) {
     const enter = pressable(text("button", "Refresher", "btn quiet sheet-refresher"), null);
     enter.title = "The flows through this part, hop by hop";
-    // It shows at once, drawn from the map; the shell records the activity behind it, and the reload drops the band.
+    // It shows at once, drawn from the map; the server records the activity behind it, and the reload drops the band.
     enter.addEventListener("click", () => {
       refreshing = part.id;
       drawSheet(view);

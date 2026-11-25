@@ -34,7 +34,7 @@ export function newestDiff(turns: Pick<Turn, "files">[], capabilities: Pick<Capa
   return null;
 }
 
-// Whether the shell's re-sent selection leaves the diff shown: the same session, and not Daniel's own click.
+// Whether the server's re-sent selection leaves the diff shown: the same session, and not Daniel's own click.
 export const keepsDiff = (shown: { session: string } | null, session: Pick<Session, "id"> | null, clicked: boolean) =>
   shown !== null && !clicked && session?.id === shown.session;
 

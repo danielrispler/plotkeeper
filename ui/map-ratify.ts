@@ -68,7 +68,7 @@ export function ratifyDetail(row: Ratifiable): HTMLElement | null {
   return list;
 }
 
-// `done` runs once the shell has the decision.
+// `done` runs once the server has the decision.
 export function ratifyActions(project: string, item: Ratifiable, done: (state: "accepted" | "overturned") => void): HTMLElement {
   const box = text("span", "", "ratify-actions");
   const decide = (state: "accepted" | "overturned") => {

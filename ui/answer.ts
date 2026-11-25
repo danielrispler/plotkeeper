@@ -1,5 +1,5 @@
 // Answering from the card (danielrispler/Falinks#461, decision 16). While a session's view shows and the window is
-// visible, the shell watches it, so the answer hook waits for the card; the shell sends the session's
+// visible, the server watches it, so the answer hook waits for the card; the server sends the session's
 // open request in its read loop (danielrispler/Falinks#569), and the answer echoes its nonce. The hook waits only while the
 // request's card shows: a question asked in a view that is not shown is handed to the terminal.
 
@@ -17,7 +17,7 @@ export type Reply = { answers: Record<string, string | string[]> } | { decision:
 
 let current: { session: string; ask: Ask } | null = null;
 let redraw = () => {};
-// The request last answered, which the shell may still return until the hook takes the answer.
+// The request last answered, which the server may still return until the hook takes the answer.
 let sent = "";
 
 // The open request for `question`, if the card can answer it.
@@ -41,7 +41,7 @@ const watch = (session: string | null) =>
     return null;
   });
 
-// The view watched last, so a redraw of the same one asks the shell nothing.
+// The view watched last, so a redraw of the same one asks the server nothing.
 let watched = "";
 
 // The session and subagent whose view shows, null while the window is hidden.
@@ -70,7 +70,7 @@ async function take(ask: Ask | null) {
   redraw();
 }
 
-// Tells the shell which session's view shows, when that changed (danielrispler/Falinks#569): the shell keeps the
+// Tells the server which session's view shows, when that changed (danielrispler/Falinks#569): the server keeps the
 // heartbeat and sends the session's open request as an `ask` event, with no poll here.
 export async function rewatch() {
   const { session, agent } = shown();
@@ -91,7 +91,7 @@ export function startWatching(draw: () => void) {
   });
   document.addEventListener("visibilitychange", rewatch);
   rewatch().catch(failure("watch"));
-  // Shows the shell the window is alive, so a frozen window lets the hook hand a question to the
+  // Shows the server the window is alive, so a frozen window lets the hook hand a question to the
   // terminal within seconds (danielrispler/Falinks#569). It asks for nothing; the open request still comes as an event.
   setInterval(() => {
     if (document.visibilityState === "visible") invoke("alive").catch(() => {});
@@ -108,10 +108,10 @@ export async function sendAnswer(ask: Ask, reply: Reply) {
   await invoke("answer", args).catch(failure("answer", "error"));
 }
 
-// Which way the shell took Daniel's answer to a blocked command: to its hook, still waiting, or late, the hook having returned.
+// Which way the server took Daniel's answer to a blocked command: to its hook, still waiting, or late, the hook having returned.
 export type BlockedAnswered = "hook" | "late";
 
-// Allow or Decline of a blocked command, and which way it went; null when the shell refused it, which puts the request back so the
+// Allow or Decline of a blocked command, and which way it went; null when the server refused it, which puts the request back so the
 // card keeps its buttons. The card stays until the core takes the answer's line.
 export async function sendBlockedAnswer(session: string, request: BlockedRequest, decision: "allow" | "deny"): Promise<BlockedAnswered | null> {
   blockedRequests = blockedRequests.filter((r) => r.nonce !== request.nonce);

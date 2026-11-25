@@ -1,5 +1,5 @@
 // Staleness bands and the refresher on the Map view (spec danielrispler/plotkeeper#378, ticket #392). A Core part Daniel has not engaged with
-// for 3, 6 or 12 weeks carries a mild band along its plate's foot (the shell works the bands out, `server/src/staleness.rs`; the map
+// for 3, 6 or 12 weeks carries a mild band along its plate's foot (the server works the bands out, `server/src/staleness.rs`; the map
 // shows only what `MapState.stale` lists). The refresher, on a part's sheet, is the part as the map has it now (`refresher.ts`), drawn at
 // once with no writer call; entering it is an activity on the part, which clears its band. A past commit's map shows no band.
 
@@ -24,7 +24,7 @@ export function staleWhy(view: MapView, part: string): { line: string; band: num
   return band ? { line: view.state.stale_why?.[part] ?? staleWords(band), band } : null;
 }
 
-// Enters `part`'s refresher: logged (with "stale-entered" when the part had a band) and kept by the shell as an activity on the part.
+// Enters `part`'s refresher: logged (with "stale-entered" when the part had a band) and kept by the server as an activity on the part.
 export async function enterRefresher(view: MapView, part: string) {
   logStop("refresher-entered", view.project);
   if (view.state.stale?.[part]) logStop("stale-entered", view.project);

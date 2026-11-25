@@ -174,7 +174,7 @@ let shownAgent: string | null = null;
 let shownSession: string | null = null;
 let banner: Banner | null = null;
 
-// Asks the shell for subagent `id`'s summary: the store's, or one writer call now. A failed call
+// Asks the server for subagent `id`'s summary: the store's, or one writer call now. A failed call
 // leaves its name and first line, and the next opening asks again.
 function summarize(id: string) {
   if (agentSummaries.has(id) || writing.has(id) || failed.has(id)) return;
@@ -616,7 +616,7 @@ function openCitation(id: string) {
 const turnElement = (session: Session, block: FeedTurn, now: Now | null) =>
   now || block.index === null ? turnContent(session, block, now) : foldedTurn(session, block);
 
-// Draws "now" and the feed from the selection and the brief the shell last sent.
+// Draws "now" and the feed from the selection and the brief the server last sent.
 export function drawFeed() {
   const selected = studio.selection;
   if (selected === null) {

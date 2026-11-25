@@ -4,7 +4,7 @@
 //
 // A reader mounts `storyBar(about, gist).node` after its last step and calls `offer()` when that step shows. Given a gist (a story of a
 // Core part, `explainsBack`), the bar's `slot` holds explain-back (#397): one line, Enter shows the gist under it and the three marks as a
-// radio group, logged to the shell's stop-rule log (`server/src/story_bar.rs`) as `explain-back-given` and `explain-back-marked`, keyed
+// radio group, logged to the server's stop-rule log (`server/src/story_bar.rs`) as `explain-back-given` and `explain-back-marked`, keyed
 // by project and by PR and chapter or by part. The line is an input, so the window's single keys stay off while it is typed, and an
 // Enter that confirms an input method's composition does not submit it. Nothing is read back: a bar opened again starts empty.
 
@@ -13,7 +13,7 @@ import { localDay } from "./stop-rules.js";
 
 type BarKind = "explain-back-given" | "explain-back-marked";
 export type BarSend = (kind: BarKind, extra?: { line?: string; mark?: Mark }) => void;
-// The longest explain-back line kept, in characters (the shell refuses a longer one).
+// The longest explain-back line kept, in characters (the server refuses a longer one).
 export const LINE_MAX = 300;
 export type Mark = "got-it" | "partly" | "missed";
 // The three marks, in words: a mark is never shown or kept as a number.
@@ -77,7 +77,7 @@ let current: Bar | null = null;
 // Each bar's marks get a radio group name of their own.
 let bars = 0;
 
-// The bar for `about`, logging through the shell; with `gist`, it offers explain-back first.
+// The bar for `about`, logging through the server; with `gist`, it offers explain-back first.
 export function storyBar(about: StoryAbout, gist?: string): Bar {
   const { project, ...story } = about;
   const model = barModel((kind, extra = {}) => {

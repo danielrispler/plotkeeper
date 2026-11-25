@@ -38,7 +38,7 @@ export function kindText(decision: Decision): string {
 
 export const sourceText = (decision: Decision) => (decision.source === "card" ? "on the card" : "in the terminal");
 
-// What the history says of a blocked command's risk note beside its answer, or `null` for a decision with no entry: the shell sends one for
+// What the history says of a blocked command's risk note beside its answer, or `null` for a decision with no entry: the server sends one for
 // each blocked command's decision, so an ordinary Bash permission has none. The note shows only when it arrived strictly before the answer;
 // with the same millisecond, or no time, Daniel is not claimed to have seen it.
 export function riskText(decision: Decision, notes: RiskView[]): string | null {

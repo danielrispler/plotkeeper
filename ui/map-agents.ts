@@ -1,6 +1,6 @@
 // Live agents on the Map view (spec danielrispler/plotkeeper#306, ticket #311): a chip on every part a running or needs-you session's
 // or Worker's current turn touched, and a quiet "not placed" list beside the map for the ones no part holds. The pure rules come first;
-// the drawing below them reads the sessions the window already has, and `map_place` (the shell, `studio-system-map`) says which parts a
+// the drawing below them reads the sessions the window already has, and `map_place` (the server, `studio-system-map`) says which parts a
 // list of paths touches.
 
 import { failure, invoke, newest, pressable, text } from "./dom.js";

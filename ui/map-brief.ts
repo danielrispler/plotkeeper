@@ -108,7 +108,7 @@ function unconfirmedMark(view: MapView, pr: number, flags: string[], key: string
 }
 // Copy for the agent (#493): a quiet copy icon puts a prompt that stands alone for any agent on the clipboard (`agentPrompt`), through
 // Overturn's path (`copyOverturn`), and the copy toast shows it, or holds it to copy by hand when the clipboard refuses: the reader says so
-// with a `copy-for-agent` event, which `main.ts` hands to the toast, so the reader loads none of the shell's modules. A prompt is a
+// with a `copy-for-agent` event, which `main.ts` hands to the toast, so the reader loads none of the page's own modules. A prompt is a
 // string, or waits for the changed files of a step's lit parts; those are asked for when the step is drawn, so a click usually has them
 // and the clipboard is written inside it.
 type Prompt = () => string | Promise<string>;

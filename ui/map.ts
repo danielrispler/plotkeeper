@@ -1,5 +1,5 @@
 // The Map view (spec danielrispler/plotkeeper#306, ticket #309): a project's system map as plates on a quiet chart (Treatment C). Since #386
-// it is the page's base: the page opens on the last viewed project's map, and the session list's headers switch it. The shell reads the map from
+// it is the page's base: the page opens on the last viewed project's map, and the session list's headers switch it. The server reads the map from
 // `origin`'s default branch and keeps Daniel's positions (`server/src/map.rs`); `map-model.ts` holds the pure logic.
 //
 // Where the next tickets plug in, so they add to this file rather than reshape it:
@@ -86,7 +86,7 @@ export function setScrub(to: Scrub | null) {
 
 const latest = newest();
 
-// Reads the project's map; `fetch` asks `origin` first, within the shell's cooldown. A reply for a project no longer shown, or older than the
+// Reads the project's map; `fetch` asks `origin` first, within the server's cooldown. A reply for a project no longer shown, or older than the
 // newest, is dropped; one that changes nothing draws nothing.
 async function load(path: string, fetch: boolean) {
   const state = await latest(invoke("map_state", { project: path, fetch }));
@@ -564,7 +564,7 @@ function draw() {
   unreadHooks.forEach((hook) => hook(slots.banner, scrub));
 }
 
-// Wires the view: the project menu, the window's focus and a merge the shell saw.
+// Wires the view: the project menu, the window's focus and a merge the server saw.
 export function startMap(given: MapDeps) {
   deps = given;
   element("map-legend").append(

@@ -4,7 +4,18 @@
 
 import type { Command } from "./types.js";
 
-type Seam = Window["__TAURI__"];
+// The seam: commands, events and log lines. Its global keeps the name the Tauri shell gave it (#332 archived the shell), since the node
+// tests stand in for it under that name; only this file and `dom.ts`'s one reader name it.
+type Seam = {
+  core: { invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> };
+  log: { warn(message: string): Promise<void>; error(message: string): Promise<void> };
+  event: { listen<T>(event: string, handler: (event: { payload: T }) => void): Promise<() => void> };
+};
+declare global {
+  interface Window {
+    __TAURI__: Seam;
+  }
+}
 
 // A command the server refused: its message is the refusal's reason, the body the server sent, else the command and its status.
 export class CommandError extends Error {

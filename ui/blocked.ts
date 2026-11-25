@@ -29,8 +29,8 @@ export type RiskLine = { state: RiskView["state"]; level: string | null; line: s
 // The levels as the card says them.
 export const riskLevels: Record<RiskLevel, string> = { none: "None", low: "Low", medium: "Medium", high: "High", very_high: "Very high", not_sure: "Not sure" };
 
-// What the note's place says for `note`, as the shell joined it to the card. A card with a button has the place from the moment it appears, so
-// the buttons never move, and reads "on its way" until the shell says more; a card with no button has it only once the shell has news of a note.
+// What the note's place says for `note`, as the server joined it to the card. A card with a button has the place from the moment it appears, so
+// the buttons never move, and reads "on its way" until the server says more; a card with no button has it only once the server has news of a note.
 // `reads`: a note may still come; an ended session's card asks for none, so with no news it has no place.
 export function riskLine(note: RiskView | undefined, hasButtons: boolean, reads = true): RiskLine | null {
   if (note?.state === "failed") return { state: "failed", level: null, line: null, text: "No risk note: the judge did not answer" };

@@ -1,6 +1,6 @@
 // The rail's quiet row "PR brief ready" (spec danielrispler/plotkeeper#334, ticket #344): in the newest turn of the live session whose PR a brief
 // waits for. Pressing it opens the Map view on that brief. A PR with no live studio session has no row (it is in the Map view's tray and
-// lights its project header's dot). The shell says which PRs have a brief waiting (`briefs_waiting`), asked when a session's PR number is first seen and
+// lights its project header's dot). The server says which PRs have a brief waiting (`briefs_waiting`), asked when a session's PR number is first seen and
 // again when the Map view is told a brief changed (`map-landed`), never on a timer.
 
 import { failure, invoke, listen, pressable, text } from "./dom.js";
@@ -27,11 +27,11 @@ function openBriefOnMap(project: string, pr: number) {
   openBriefWhenDrawn(project, pr);
 }
 
-// What the shell last said, by the session's folder, and what was asked of it (a folder with its PR number).
+// What the server last said, by the session's folder, and what was asked of it (a folder with its PR number).
 const known = new Map<string, WaitingBriefs | null>();
 const asked = new Set<string>();
 
-// The newest turn's row of `session`; asks the shell once per PR number, and `redraw` runs when the answer changes what shows.
+// The newest turn's row of `session`; asks the server once per PR number, and `redraw` runs when the answer changes what shows.
 export function railBriefRow(session: Session, redraw: () => void): HTMLElement | null {
   const pr = session.identity.pr;
   if (pr === null) return null;

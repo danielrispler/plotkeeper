@@ -1,5 +1,5 @@
 // A subagent's log in the pane's place (danielrispler/plotkeeper#54): read-only. The core reads the log file from an
-// offset and the pane keeps that offset, reading on when the shell re-sends the selection. Tool calls show as rows,
+// offset and the pane keeps that offset, reading on when the server re-sends the selection. Tool calls show as rows,
 // folded once they have a result. The header's name and state come from the core's tracking, never from the log.
 
 import { fullTitle, invoke, pressable, scrollingPre, text } from "./dom.js";
@@ -72,7 +72,7 @@ export async function showLog(place: HTMLElement, session: string, agent: Subage
   place.scrollTop = opensAtBottom(agent.status) ? place.scrollHeight : 0;
 }
 
-// Reads on from the offset when the shell re-sends the selection of the subagent shown, and draws it, following
+// Reads on from the offset when the server re-sends the selection of the subagent shown, and draws it, following
 // the bottom only if the view was there.
 export async function followLog(place: HTMLElement, session: string, agent: Subagent, toParent: () => void) {
   if (shownLog.session !== session || shownLog.agent !== agent.id) return;
