@@ -911,8 +911,6 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
             }),
         ),
         ("StopFacts", json(Facts::default())),
-        ("BlockedAnswer", json(studio_server::answer::Answered::Hook)),
-        ("BlockedAnswer", json(studio_server::answer::Answered::Late)),
         (
             "BriefOpened",
             json(BriefOpened::Brief(Box::new(view(None)))),
@@ -1024,7 +1022,6 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
             "RatifyRow",
             "SiteSnippet",
             "StopFacts",
-            "BlockedAnswer",
             "BriefOpened",
             "CatchUpOpened",
             "OpenIssue",

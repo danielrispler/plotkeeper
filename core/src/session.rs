@@ -498,7 +498,8 @@ impl BlockedCommand {
     }
 }
 
-/// Where a blocked command stands.
+/// Where a blocked command stands. Since the card went (#572) a block only waits until the session moves on; the
+/// statuses of Daniel's Allow and its retry come only from a log from before it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BlockedStatus {
@@ -518,16 +519,14 @@ pub enum BlockedStatus {
     AllowedNotRun,
     /// Daniel declined it from the card, which closes it.
     Declined,
+    /// The session moved on with no choice made here: Daniel handled it in his agent (#572).
+    MovedOn,
 }
 
 impl BlockedStatus {
-    /// Whether a card in this status waits for Daniel: it has a button (Allow and Decline, or Ask again).
-    /// An allowed card waits for the agent's retry, not for him.
+    /// Whether a blocked command in this status waits on Daniel: blocked, also again, until the session moves on.
     pub fn waits(self) -> bool {
-        matches!(
-            self,
-            Self::Blocked | Self::AllowedNotRun | Self::BlockedAgain
-        )
+        matches!(self, Self::Blocked | Self::BlockedAgain)
     }
 }
 
@@ -1383,7 +1382,13 @@ impl Session {
     /// Ends its turn at `at`, with the change since the turn's base: a card on it, else on its
     /// workers' cards since its last card, or only its brief when a wake-up opened the turn.
     pub(crate) fn end_turn(&mut self, change: Option<Change>, at: u64) -> Option<Output> {
+        // A blocked command outlasts the turn it stopped: it waits on Daniel until his next prompt (#572).
+        let denied: Vec<Block> = (self.blocks.iter())
+            .filter(|w| w.cause == Cause::Denied && w.agent.is_none())
+            .cloned()
+            .collect();
         self.unblock();
+        self.blocks.extend(denied);
         self.close_spans(at);
         if let Some(turn) = self.turns.last_mut().filter(|t| t.ended_at.is_none()) {
             turn.ended_at = Some(at);
@@ -1503,7 +1508,7 @@ impl Session {
         !self.blocks.is_empty() || self.terminal_blocked
     }
 
-    /// How many blocked commands wait for Daniel: those with a button (blocked, also again, and allowed but not run).
+    /// How many blocked commands wait on Daniel: blocked, also again, and the session has not moved on (#572).
     pub fn blocked_waiting(&self) -> usize {
         let waits = |c: &&BlockedCommand| c.status.waits();
         self.blocked_commands.iter().filter(waits).count()
@@ -1608,7 +1613,7 @@ pub(crate) enum Cause {
     Notice,
     /// An external server's request for input.
     Elicitation,
-    /// A blocked command, whose hook waits for Daniel's card until the agent's next event.
+    /// A blocked command, which waits on Daniel until its agent moves on (#572).
     Denied,
 }
 

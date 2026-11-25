@@ -4,9 +4,8 @@
 //! the page shows (`rail_shown`, `split_shown`) from the [`App`].
 
 use crate::{
-    App, CardsKey, PROCESS_CHECK, append_to, ask_notes, cards, current_cards_key, process_ends,
-    refresh_landed, report, resume, save_roots, save_state, selected, sessions, unsaved,
-    wanted_notes, warn_log,
+    App, CardsKey, PROCESS_CHECK, append_to, cards, current_cards_key, process_ends,
+    refresh_landed, report, resume, save_roots, save_state, selected, sessions, unsaved, warn_log,
 };
 use std::{
     collections::HashMap,
@@ -73,8 +72,6 @@ impl Sent {
 
     /// Sends the cards when the viewed owner, the store's revision or the minute changed.
     fn cards(&mut self, app: &App) {
-        // A card with buttons that is shown and has no note asks for one, before the key reads the notes' revision.
-        ask_notes(app, wanted_notes(app));
         let key = current_cards_key(app);
         if self.cards.as_ref() != Some(&key) {
             let cards = serde_json::to_value(cards(app)).expect("cards serialize");
@@ -421,15 +418,6 @@ impl Follower {
                 tell(app, Notice::YourTurn, &session_id, None);
             }
             Output::CommandBlocked { session_id, agent } => {
-                // The card's buttons are live now; its note is asked for beside the notification, which waits for nothing.
-                let asks = {
-                    let (studio, mut notes) = app.core_and_notes();
-                    let blocked = studio.session(&session_id);
-                    let asks = blocked.map(|session| notes.asks(session));
-                    drop((notes, studio));
-                    asks
-                };
-                ask_notes(app, asks.unwrap_or_default());
                 tell(
                     app,
                     Notice::Titled("Auto mode blocked a command"),
@@ -493,19 +481,13 @@ impl Follower {
     }
 }
 
-/// Sends the open answer request and the blocked requests when they changed. The open request goes
+/// Sends the open answer request when it changed. The open request goes
 /// in the same pass as the list that shows "needs you" (danielrispler/Falinks#569).
 fn emit_watched(app: &App) {
     if let Ok(data) = crate::answer::data()
         && let Some(ask) = app.watching().pass(&data, studio_hook::answer::now_ms())
     {
         app.events.emit("ask", serde_json::to_value(ask).unwrap());
-    }
-    if let Ok(data) = crate::answer::data()
-        && let Some(blocked) = app.watching().changed_blocked_requests(&data)
-    {
-        app.events
-            .emit("blocked", serde_json::to_value(blocked).unwrap());
     }
 }
 

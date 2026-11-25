@@ -318,16 +318,6 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "modules")?,
             arg(a, "day")?,
         )),
-        "answer_blocked_command" => res(server_answer::answer_blocked_command(
-            arg(a, "session")?,
-            arg(a, "nonce")?,
-            arg(a, "decision")?,
-        )),
-        "ask_again" => res(server_answer::ask_again(
-            arg(a, "session")?,
-            arg(a, "command")?,
-            arg(a, "cwd")?,
-        )),
         "watch" => res(server_answer::watch(arg(a, "session")?, &app.watching)),
         "alive" => done!(server_answer::alive(&app.watching)),
         "answer" => res(server_answer::answer(

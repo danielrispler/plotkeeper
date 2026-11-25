@@ -40,8 +40,9 @@ test("a row with blocked commands waiting reads how many, ahead of the step but 
   assert.equal(secondLine(row("running", cards("blocked"))), "1 blocked command waiting");
   assert.equal(secondLine(row("running", cards("blocked", "blocked_again", "allowed", "declined"))), "2 blocked commands waiting");
   assert.equal(secondLine(row("needs_you", cards("blocked"))), "1 blocked command waiting");
-  // An allowed card has no button, so it does not count; one allowed but not run does.
-  assert.equal(secondLine(row("your_turn", cards("allowed_not_run", "blocked_again", "running", "finished"))), "2 blocked commands waiting");
+  // Once the session moved on, a blocked command waits on nobody (#572); nor does one an older log's Allow took.
+  assert.equal(secondLine(row("needs_you", cards("moved_on", "blocked_again", "allowed_not_run", "finished"))), "1 blocked command waiting");
+  assert.equal(secondLine(row("running", cards("moved_on"))), "Edit src/lib.rs");
   assert.equal(secondLine(row("running", cards("allowed"))), "Edit src/lib.rs");
   assert.equal(secondLine(row("running", cards("declined"))), "Edit src/lib.rs");
   assert.equal(secondLine(row("ended", cards("blocked"))), null);

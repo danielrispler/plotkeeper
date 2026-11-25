@@ -35,7 +35,6 @@ import { narrowBelow, selectedView } from "./map-model.js";
 import { reload } from "./settings.js";
 import { setFocus, setMissed, setProjects, setSettings, studio } from "./state.js";
 import { askDelete, drawFeed, forgetStories, lastHeadline, showCards, showTurn, showView, startStory, turnHeadline } from "./story.js";
-import { forgetTails } from "./blocked.js";
 import { startRailBriefs } from "./rail-brief.js";
 import { barKeyDown } from "./story-bar.js";
 import { startWriters } from "./writers.js";
@@ -247,7 +246,6 @@ startList({
   lastHeadline,
   forget: (sessions) => {
     forgetStories(sessions);
-    forgetTails(sessions);
     forgetAsks(new Set(sessions.map((session) => session.id)));
   },
 });

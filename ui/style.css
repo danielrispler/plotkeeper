@@ -378,10 +378,6 @@ h1 { margin: 0 0 var(--sp-4); }
 .decision .plan { white-space: pre-wrap; max-height: 30vh; overflow-y: auto; margin: var(--sp-3) 0 0; padding: var(--sp-3) var(--sp-5);
                   background: var(--hover); border-radius: var(--radius); }
 .decision .description { color: var(--muted); }
-/* A blocked command's risk note (#298): plain text, no colour, in a place that keeps two lines from the card's first draw, so the buttons never move; a
-   longer note is cut at two lines and its full text is the hover. */
-.risk-note { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; line-height: 1.4; min-height: calc(2 * 1.4em);
-             margin: var(--sp-2) 0; overflow-wrap: anywhere; }
 
 /* The palette (danielrispler/Falinks#575), a native popover in the top layer (#458), under the top bar at its end. */
 .picker { position: fixed; inset: auto; top: calc(var(--bar) + var(--sp-2)); right: var(--sp-5); margin: 0; border: 0; color: var(--fg);

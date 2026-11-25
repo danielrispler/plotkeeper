@@ -5,13 +5,9 @@
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent claude", "async": true }] }],
     "PreToolUse": [
       { "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent claude", "async": true }] },
-      { "matcher": "AskUserQuestion|ExitPlanMode", "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-answer\" --agent claude", "timeout": 130, "statusMessage": "Answer in the plotkeeper card" }] },
-      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-answer\" --agent claude", "timeout": 10 }] }
+      { "matcher": "AskUserQuestion|ExitPlanMode", "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-answer\" --agent claude", "timeout": 130, "statusMessage": "Answer in the plotkeeper card" }] }
     ],
-    "PermissionDenied": [
-      { "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent claude", "async": true }] },
-      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-answer\" --agent claude", "timeout": 610, "statusMessage": "Allow or decline in the plotkeeper card" }] }
-    ],
+    "PermissionDenied": [{ "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent claude", "async": true }] }],
     "PermissionRequest": [
       { "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-hook\" --agent claude", "async": true }] },
       { "hooks": [{ "type": "command", "command": "\"__PLOTKEEPER_BIN__/plotkeeper-answer\" --agent claude", "timeout": 130, "statusMessage": "Answer in the plotkeeper card" }] }

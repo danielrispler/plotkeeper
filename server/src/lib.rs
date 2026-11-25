@@ -21,9 +21,9 @@ use std::{
 };
 use studio_core::{Notifications, Session, State::Ended, Studio, TaskFacts, TaskQuery};
 use studio_understanding::{
-    CardStore, ClaudeWriter, Core, Effects, FakeWriter, OpenItem, RiskNotes, RiskRequest, RiskView,
-    Row, SessionCards, StoredSummary, SummarySetup, TurnWriting, Writer, WriterKind, judge,
-    live_roots, millis, open_items, turn_hunk, write_agent_summary,
+    CardStore, ClaudeWriter, Core, Effects, FakeWriter, OpenItem, RiskNotes, RiskView, Row,
+    SessionCards, StoredSummary, SummarySetup, TurnWriting, Writer, WriterKind, live_roots, millis,
+    open_items, turn_hunk, write_agent_summary,
 };
 
 pub mod answer;
@@ -57,8 +57,8 @@ pub use read_loop::{Follower, Notice, ServerEffects, follow, listed, tell, uptim
 /// The card store, which the log thread adds to and the pane records guesses in.
 pub type Cards = Arc<Mutex<CardStore>>;
 
-/// The risk notes of blocked commands (danielrispler/plotkeeper#298), in a store of their own beside the card store: the log thread asks for
-/// them, a thread of each judge keeps them, and the window's card read joins them to the cards.
+/// The risk notes of blocked commands (danielrispler/plotkeeper#298), in a store of their own beside the card store, which the
+/// window's card read joins to the decision history. Since the blocked-command card went (#572) nothing asks for new ones.
 pub type Notes = Arc<Mutex<RiskNotes>>;
 
 /// The notices not shown yet, which the log thread and the card writer's threads add to.
@@ -119,7 +119,7 @@ pub struct Cleared {
 
 /// Everything the process owns that the commands read and change. Its locked state is reached through
 /// its accessors (`core`, `cards`, `notes` and the rest); a holder of several takes them in one order,
-/// core, then cards, then notes (`core_and_cards`, `core_and_notes`). The notices are the exception:
+/// core, then cards, then notes (`core_and_cards`, `core_cards_and_notes`). The notices are the exception:
 /// their due check takes the core's lock under theirs, and nothing takes the notices' under the core's.
 pub struct App {
     core: Core,
@@ -189,12 +189,6 @@ impl App {
     pub fn core_and_cards(&self) -> (MutexGuard<'_, Studio>, MutexGuard<'_, CardStore>) {
         let core = self.core();
         (core, self.cards())
-    }
-
-    /// The core, then the risk notes, locked in that order.
-    pub fn core_and_notes(&self) -> (MutexGuard<'_, Studio>, MutexGuard<'_, RiskNotes>) {
-        let core = self.core();
-        (core, self.notes())
     }
 
     /// The core, the card store and the risk notes, locked in that order.
@@ -1073,26 +1067,6 @@ pub fn cards_key(studio: &Studio, cards: &CardStore, notes: &RiskNotes) -> Cards
 pub fn current_cards_key(app: &App) -> CardsKey {
     let (studio, cards, notes) = app.core_cards_and_notes();
     cards_key(&studio, &cards, &notes)
-}
-
-/// The risk notes the selected session wants asked for (danielrispler/plotkeeper#298), none with no session.
-pub fn wanted_notes(app: &App) -> Vec<RiskRequest> {
-    let studio = app.core();
-    let shown = noted_session(&studio);
-    let asks = shown.map(|session| app.notes().asks(session));
-    drop(studio);
-    asks.unwrap_or_default()
-}
-
-/// Starts the judge on each of `asks`, the risk notes a session wants (danielrispler/plotkeeper#298; `RiskNotes::asks`): a block that arrives
-/// live, or a card with buttons that is shown and has none, once per command per run of the app. Each call runs on a thread of its
-/// own, off the read loop and outside the turn-writing queue, as a side question does; the card shows with its buttons meanwhile.
-pub fn ask_notes(app: &App, asks: Vec<RiskRequest>) {
-    for ask in asks {
-        let notes: Notes = app.notes.clone();
-        let writer: Writer = app.writer.clone();
-        thread::spawn(move || judge(&notes, &*writer, &ask, millis, report));
-    }
 }
 
 /// Daniel's side `question` on `item`, a response, card or intention of session `session` (danielrispler/Falinks#461,

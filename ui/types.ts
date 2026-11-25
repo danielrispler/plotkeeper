@@ -267,8 +267,9 @@ export type Decision = {
   source: "card" | "terminal";
 };
 /**
- * A Bash command auto mode blocked, as a card on its session's view (danielrispler/plotkeeper#170): the command in full, its
- * folder, the rule that blocked it, the subagent that asked (null for the session's own agent) and where it stands.
+ * A Bash command auto mode blocked (danielrispler/plotkeeper#170): the command in full, its folder, the rule that blocked it, the
+ * subagent that asked (null for the session's own agent) and where it stands. Since its card went (#572) it only waits on Daniel
+ * until the session moves on (`moved_on`); Allow, Decline and the retry come only from older logs.
  */
 export type BlockedStatus =
   | "blocked"
@@ -278,12 +279,10 @@ export type BlockedStatus =
   | "finished"
   | "running_in_background"
   | "blocked_again"
-  | "declined";
-/**
- * Whether a card in `status` waits for Daniel: it has a button. An allowed card waits for the agent's retry, not for him
- * (the core's `BlockedStatus::waits`; danielrispler/plotkeeper#297).
- */
-export const blockedWaits = (status: BlockedStatus) => ["blocked", "allowed_not_run", "blocked_again"].includes(status);
+  | "declined"
+  | "moved_on";
+/** Whether a blocked command in `status` waits on Daniel: blocked, also again, and not moved on (the core's `BlockedStatus::waits`). */
+export const blockedWaits = (status: BlockedStatus) => ["blocked", "blocked_again"].includes(status);
 export type BlockedCommand = {
   call: string;
   command: string;
@@ -357,6 +356,8 @@ export type SessionCards = {
  * no card writer), or arrived. The server also sends when it arrived, which only the decision history reads.
  */
 export type RiskLevel = "none" | "low" | "medium" | "high" | "very_high" | "not_sure";
+/** The levels as the decision history says them. */
+export const riskLevels: Record<RiskLevel, string> = { none: "None", low: "Low", medium: "Medium", high: "High", very_high: "Very high", not_sure: "Not sure" };
 export type RiskView =
   | { call: string; state: "reading" }
   | { call: string; state: "failed" }
@@ -681,8 +682,6 @@ export type WriterTest = { outcome: WriterOutcome; line: string; settings: strin
 
 /** Why the session didn't touch a name (`ask_why_not`): its recorded facts, and the writer's possible reasons when it has any. */
 export type WhyNot = { facts: Facts; reasons: string | null };
-/** Who took Daniel's answer to a blocked command (`answer_blocked_command`, `server/src/answer.rs`): its hook, or the studio itself. */
-export type BlockedAnswer = "hook" | "late";
 
 // Every command the window invokes (`server/src/api.rs`): its arguments, by the names the page writes them in camel case, and what the
 // server replies, `void` where the window ignores the reply, `null` where the server may answer none. An argument the server reads as
@@ -699,9 +698,7 @@ export interface Commands {
   alive: { args: None; reply: void };
   about: { args: None; reply: About };
   answer: { args: { session: string; nonce: string; answers?: Record<string, string | string[]> | null; decision?: "allow" | "deny" | null }; reply: void };
-  answer_blocked_command: { args: { session: string; nonce: string; decision: "allow" | "deny" }; reply: BlockedAnswer };
   ask: { args: { session: string; item: string; question: string }; reply: string };
-  ask_again: { args: { session: string; command: string; cwd: string }; reply: void };
   ask_anchor: { args: { session: string; anchor: Anchor; what: string; question: string }; reply: string };
   ask_facts: { args: { session: string; anchor: Anchor }; reply: Facts | null };
   ask_why_not: { args: { session: string; turn: number; name: string }; reply: WhyNot };
