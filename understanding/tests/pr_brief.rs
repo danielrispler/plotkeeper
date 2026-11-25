@@ -177,10 +177,10 @@ fn a_brief_written_from_a_cut_diff_stores_the_cut_and_partial_files_and_the_byte
     );
     let (_, stored, record, _) = run_entry(vec![Ok(none_unsupported())], &single_story(), &s);
     let cut = stored.partial_facts.cut.expect("the diff was cut");
-    assert_eq!(cut.partial, ["alpha/a.rs"]);
-    assert_eq!(cut.cut, ["gamma/c.rs"]);
-    assert_eq!(cut.partial.len(), record.budget.files_partial);
-    assert_eq!(cut.cut.len(), record.budget.files_cut);
+    assert_eq!(cut.files_partial, ["alpha/a.rs"]);
+    assert_eq!(cut.files_cut, ["gamma/c.rs"]);
+    assert_eq!(cut.files_partial.len(), record.budget.files_partial);
+    assert_eq!(cut.files_cut.len(), record.budget.files_cut);
     assert_eq!(cut.bytes_sent + cut.bytes_cut, s.diff.len());
     assert!(cut.bytes_sent > 0 && cut.bytes_sent < BUDGET, "{cut:?}");
 
@@ -1435,8 +1435,8 @@ fn a_stored_brief_reads_with_its_partial_facts_and_older_ones_with_nothing_missi
         partial.partial_facts,
         PartialFacts {
             cut: Some(DiffCut {
-                cut: vec!["gamma/c.rs".into()],
-                partial: vec!["alpha/a.rs".into()],
+                files_cut: vec!["gamma/c.rs".into()],
+                files_partial: vec!["alpha/a.rs".into()],
                 bytes_sent: 61440,
                 bytes_cut: 20480,
             }),

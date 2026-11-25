@@ -23,10 +23,10 @@
  },
  "partial_facts": {
   "cut": {
-   "cut": [
+   "files_cut": [
     "gamma/c.rs"
    ],
-   "partial": [
+   "files_partial": [
     "alpha/a.rs"
    ],
    "bytes_sent": 61440,

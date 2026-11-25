@@ -465,10 +465,10 @@ impl PartialFacts {
 pub struct DiffCut {
     /// Files none of whose hunks were sent.
     #[serde(default)]
-    pub cut: Vec<String>,
+    pub files_cut: Vec<String>,
     /// Files with some hunks sent and some not.
     #[serde(default)]
-    pub partial: Vec<String>,
+    pub files_partial: Vec<String>,
     /// Bytes of the diff sent to the writer.
     #[serde(default)]
     pub bytes_sent: usize,
@@ -1107,10 +1107,10 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
         } else {
             if sent > 0 {
                 budget.files_partial += 1;
-                diff_cut.partial.push(f.path.clone());
+                diff_cut.files_partial.push(f.path.clone());
             } else {
                 budget.files_cut += 1;
-                diff_cut.cut.push(f.path.clone());
+                diff_cut.files_cut.push(f.path.clone());
             }
             cut.push(format!(
                 "- {} ({part}): +{}/-{}, {} of {} hunks not sent",
