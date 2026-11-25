@@ -60,3 +60,14 @@ test("without claude, a PR with no stored brief says briefs need Claude and does
   const stored = trayRows([pr(8, "Fog", { stale: false, writing: false, chapters: ["Fog"] })], false)[0];
   assert.equal(stored.openable, true);
 });
+
+test("after a push the row says why the brief is what it is: the read carried over, or it was rewritten (#477, part B)", () => {
+  const carried = trayRows([pr(7, "Fog", { stale: false, writing: false, chapters: ["Fog"], quiet: false, read: true, note: "Rebased onto main, nothing new in the PR" })])[0];
+  assert.equal(carried.note, "#7 · Rebased onto main, nothing new in the PR");
+  const chaptered = trayRows([pr(7, "PR briefs", { stale: false, writing: false, chapters: ["Fog", "Ratify"], quiet: false, note: "Rewritten after a new push; you had read 1 of 2" })]);
+  assert.match(chaptered[0].note, /1 of 2 · Rewritten after a new push; you had read 1 of 2$/);
+  assert.doesNotMatch(chaptered[1].note, /Rewritten/);
+  // While the newer push is not yet rewritten, the row says that, not the note.
+  const stale = trayRows([pr(7, "Fog", { stale: true, writing: false, chapters: ["Fog"], quiet: false, note: "Rewritten: the branch was rebased" })])[0];
+  assert.match(stale.note, /newer push; rewritten when opened$/);
+});

@@ -128,6 +128,7 @@ fn ready() -> Vec<Ready> {
         read: false,
         quiet: false,
         failed: true,
+        note: Some("Rebased onto main, nothing new in the PR".into()),
     };
     vec![
         Ready {

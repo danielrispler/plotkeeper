@@ -551,6 +551,20 @@ pub fn mark_read(
     Ok(user.fog.reads[&pr].complete_parts())
 }
 
+/// The read of PR `pr`'s brief at `from` carries over to `to` (spec #477, part B: a pure rebase, or a push that fogs nothing): every
+/// chapter read at `from` is read at `to`, at the time it was read. The parts the chapters light stay as they are; `mark_read` is not
+/// used, since a brief lit differently clears every chapter.
+pub fn carry_read(file: &Path, project: &str, pr: u64, from: &str, to: &str) -> Result<(), String> {
+    update_user(file, project, |u| {
+        if let Some(read) = u.fog.reads.get_mut(&pr) {
+            for chapter in read.chapters.values_mut().filter(|c| c.head == from) {
+                chapter.head = to.to_string();
+            }
+        }
+    })
+    .map(|_| ())
+}
+
 /// Reading finished a PR's chapters that light `parts`: the fog the PR's merged commits filed on them leaves at once.
 pub fn clear_pr(
     repo: &Path,
@@ -1078,6 +1092,12 @@ mod tests {
                 .collect();
             mark_read(&self.file(), &self.main, 7, chapter, head, lit, at).unwrap()
         }
+        /// "I know this" on every part.
+        fn clear_all(&self) {
+            for part in ["a", "b", "c"] {
+                clear(&self.file(), &self.main, part).unwrap();
+            }
+        }
         fn set(&self, parts: &[&str]) -> BTreeSet<String> {
             parts.iter().map(|p| p.to_string()).collect()
         }
@@ -1203,5 +1223,44 @@ mod tests {
         rig.read(0, &"0".repeat(40), &[&["a"]], 1);
         rig.squash();
         assert_eq!(rig.fog(), strengths(&[("a", Strength::Thin)]));
+    }
+
+    #[test]
+    fn carrying_a_read_over_moves_every_chapter_to_the_new_head_and_keeps_what_they_light() {
+        let rig = Rig::new();
+        let lit: &[&[&str]] = &[&["a", "b"], &["c"]];
+        rig.read(0, "h1", lit, 1);
+        rig.read(1, "h1", lit, 2);
+        carry_read(&rig.file(), &rig.main, 7, "h1", "h2").unwrap();
+        let user = read_user(&rig.file(), &rig.main);
+        let read = &user.fog.reads[&7];
+        assert!(read.fully_read_at("h2"), "{read:?}");
+        assert_eq!(read.lit, vec![vec!["a", "b"], vec!["c"]]);
+        assert_eq!(read.chapters[&1].at, 2, "the time of the read is kept");
+        assert!(!fully_read_at(&user, 7, "h1"));
+    }
+
+    #[test]
+    fn fog_at_merge_after_a_rebase_carried_over_runs_from_the_new_head() {
+        let rig = Rig::new();
+        let lines = |first: &str, last: &str| format!("{first}\n2\n3\n4\n5\n6\n7\n8\n9\n{last}\n");
+        rig.commit(&[("a/x", &lines("1", "10"))]);
+        rig.open();
+        rig.branch();
+        rig.commit(&[("a/x", &lines("pr", "10"))]);
+        let h1 = rig.head();
+        rig.read(0, &h1, &[&["a"]], 1);
+        // Main edits the other end of the PR's file, and the branch is rebased onto it: the same patch.
+        run(rig.dir.path(), &["checkout", "-q", "main"]);
+        rig.commit(&[("a/x", &lines("1", "main"))]);
+        rig.fog();
+        rig.clear_all();
+        run(rig.dir.path(), &["checkout", "-q", "pr"]);
+        run(rig.dir.path(), &["rebase", "-q", "main"]);
+        let h2 = rig.head();
+        carry_read(&rig.file(), &rig.main, 7, &h1, &h2).unwrap();
+        rig.squash();
+        // From H1, main's own edit of a/x would fog a again; from H2 nothing changed since the read.
+        assert!(rig.fog().is_empty(), "{:?}", rig.fog());
     }
 }

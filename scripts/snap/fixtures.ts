@@ -156,6 +156,22 @@ const mapTray = (): Fixture =>
     map_state: mapState({ fog: { shell: "thick" }, ready: [{ number: 334, title: "PR briefs: the brief written for each ready PR", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }, { number: 336, title: "Ready for review tray", head: "a".repeat(40), brief: null }] }),
   });
 
+// After a push (#477, part B): one PR's read carried over a pure rebase, another rewritten after a partial read; each row says why.
+const mapTrayAfterPush = (): Fixture =>
+  mapOpened(`
+      const notes = [...document.querySelectorAll("#map-tray .tray-row .tray-note")].map((n) => n.textContent);
+      if (notes.length !== 2) return log("snap:fail expected 2 tray rows, saw " + notes.length);
+      if (notes[0] !== "#334 · Rebased onto main, nothing new in the PR") log("snap:fail the carried row: " + notes[0]);
+      if (notes[1] !== "#336 · Rewritten after a new push; you had read 1 of 2") log("snap:fail the rewritten row: " + notes[1]);
+      log("tray notes ok");`, {
+    map_state: mapState({
+      ready: [
+        { number: 334, title: "PR briefs: the brief written for each ready PR", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false, read: true, note: "Rebased onto main, nothing new in the PR" } },
+        { number: 336, title: "Ready for review tray", head: "a".repeat(40), brief: { stale: false, writing: false, chapters: ["The tray"], quiet: false, note: "Rewritten after a new push; you had read 1 of 2" } },
+      ],
+    }),
+  });
+
 // The confirm dialog (#459) a destructive button opens: modal, named by its heading, Cancel focused, the confirm button saying `verb`, and
 // naming each of `lost`. Nothing reaches the server's `api` until it is confirmed: Esc and Cancel send nothing. `press` is the script that
 // presses the button, found anew each time, since a refresh redraws it.
@@ -2955,6 +2971,7 @@ ${writerStatusAfter("Keychain refused")}
   writersBriefsNeedClaudeNarrow: (): Fixture => fixtures.writersBriefsNeedClaude(),
   // The contrast pass (#455) runs here too.
   mapTray: (): Fixture => ({ ...mapTray(), contrast: true }),
+  mapTrayAfterPush,
   mapRuns,
   // The contrast pass (#455) runs here too.
   mapPreFlight: (): Fixture => ({ ...mapPreFlight(), contrast: true }),
