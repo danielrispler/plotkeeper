@@ -374,6 +374,8 @@ const main = async (opts) => {
       kept = { name: `${name}.json`, text: JSON.stringify(report, null, 2) + "\n" };
       cost = { findings: findings.length, tokens, seconds, quotaBefore, quotaAfter };
       writeFileSync(join(opts.out, kept.name), kept.text);
+      // A trial keeps agy's whole answer too, to show what its `usage` counts (#502).
+      if (opts.variant) writeFileSync(join(opts.out, `${name}-agy.json`), ran.stdout);
       const reasons = decided.why.split("; ");
       const more = reasons.length > 2 ? `; and ${reasons.length - 2} more reasons` : "";
       const percent = (fraction) => (typeof fraction === "number" ? `${Math.round(fraction * 100)}%` : "?");
