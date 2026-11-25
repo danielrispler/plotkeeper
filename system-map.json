@@ -81,7 +81,7 @@
       "holds": [
         { "name": "The writer contract", "text": "One call shape for every writer, run as a program or, for an API-key writer, over HTTP.", "paths": ["understanding/src/writer.rs", "understanding/src/http_writer.rs"] },
         { "name": "Turn writing", "text": "What a turn's end writes: its summary and its session's brief, held to the facts.", "paths": ["understanding/src/turn_writing.rs", "understanding/src/summary.rs", "understanding/src/brief.rs", "understanding/src/grounding.rs"] },
-        { "name": "PR briefs and part catch-ups", "text": "Facts code assembles, the writer's story of them and the code checks on its reply.", "paths": ["understanding/src/pr_brief.rs", "understanding/src/pr_brief_check.rs", "understanding/src/part_catch_up.rs"] },
+        { "name": "PR briefs and part catch-ups", "text": "Facts code assembles, the writer's story of them and the code checks on its reply.", "paths": ["understanding/src/pr_brief.rs", "understanding/src/pr_brief/build.rs", "understanding/src/pr_brief/checks.rs", "understanding/src/pr_brief_check.rs", "understanding/src/part_catch_up.rs"] },
         { "name": "Pre-flight", "text": "The parts of the map a piece of work will likely cross, predicted before it starts.", "paths": ["understanding/src/pre_flight.rs"] },
         { "name": "The store", "text": "The briefs, summaries and risk notes on disk; cards are retired, and those stored before stay readable.", "paths": ["understanding/src/store.rs", "understanding/src/risk.rs"] }
       ],
