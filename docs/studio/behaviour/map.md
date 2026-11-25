@@ -58,6 +58,20 @@ The checker runs only `git` and, when the map names `cargo` or `rust-modules`, `
 
 `system-map touched [--json] [--root <dir>] [path...]` names the parts that own the paths, with the ignored paths and the unowned ones listed apart. It takes paths as arguments or one per line on standard input, so `git diff --name-only | system-map touched` works. It matches by pattern alone, so a deleted or moved path is still placed. A map that fails the shape check gets no answer: it fails with every problem `check` would report, one per line on standard error, and exit status 2.
 
+## How well the parts follow the imports
+
+`system-map imports [--json] [--root <dir>]` tests a cut of the code into parts. It reads the map and runs the extractors it names, and counts the file pairs they find (each pair once) whose two files a part owns. A crate root's `mod` and `pub mod` lines are left out of the counts, since they declare the module tree rather than use it; the same pair still counts when the root also writes a path into that module. A map that names `cargo` counts its manifest pairs too. It prints:
+
+- one line of totals: the imports between owned files, how many are inside parts and how many across, and the across share raw and weighted;
+- **hubs**: files whose degree (imports in plus out) is at least three times the mean degree, taken over the files with at least one counted pair (Bunch's rule). They are listed apart, and their pairs stay in the counts;
+- **inside**: each part's imports inside it;
+- **across**: each ordered pair of parts with the imports from the first to the second;
+- **both ways**: the pairs of parts that import each other.
+
+Every count is given raw and **weighted**: each pair weighs 1 / the fan-in of its target, the number of counted pairs into that file. So a hub that many files import adds little weight, and a utility file does not make two parts look tangled. The weighted across share is across weight over total weight.
+
+It suggests no grouping. To test a cut, edit the map's paths and run it again. It exits 0 on any counts; an extractor that cannot run prints a `note:` and its pairs are missing from the counts. A map that does not load exits 2 with its problems on standard error, as `touched` does. `--json` prints the same numbers: `total`, `inside` and `across` (`raw`, `weighted`), `across_share` (percentages), `mean_degree`, `hubs` (`file`, `part`, `degree`, `fan_in`, `fan_out`), `parts` and `between` (each with `raw` and `weighted`), `both_ways` and `problems`.
+
 ## plotkeeper's map
 
 Seven parts: the agent plugins, the hook, the core, the server (`server/`), understanding, the window (`ui/`) and workbench; three actors: the agents, the writer and GitHub; one flow, Turn writing. `ignored` holds what is not the running system: the docs, `archive/` (retired code: the spikes and the desktop app and its terminal daemon, #332, #415), `scripts/`, the tooling crates (`wayfinder/`, `test-support/`, `system-map/`), the npm package's manifest (`npm/`, #368) and the repository's own configuration at the root. A change that adds, moves or removes files, changes what a part does or how parts connect, or changes a law changes the map in the same PR (`AGENTS.md`).
