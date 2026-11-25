@@ -1,6 +1,6 @@
 // The listener path's hints across redraws (spec #582's review): a view drawn again through `patch` hands `hint()` a new trigger each
 // time. The trigger the page keeps opens the hint its current `data-hint` names, with the current words; the hint gains no listeners per
-// draw; and a hint no trigger on the page names any more, its trigger dropped, leaves `#hints`. Run: `npm test`.
+// draw; a hint no trigger on the page names any more, its trigger dropped, leaves `#hints`; and a trigger whose hint was taken away opens nothing. Run: `npm test`.
 import { test, mock, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import v8 from "node:v8";
@@ -9,6 +9,9 @@ import { El, fakeDocument } from "./dom.mjs";
 
 v8.setFlagsFromString("--expose_gc");
 const gc = vm.runInNewContext("gc");
+
+// Imported before there is a document: times.ts starts a timer when one exists at load.
+const { showView } = await import("../../dist/story.js");
 
 const page = new Map();
 const body = new El("body");
@@ -89,4 +92,29 @@ test("a dropped span's hint leaves #hints once the span is gone", async () => {
   hint(keyed(document.createElement("button"), "requeue-prune"), "Queues a prune");
   mock.timers.tick(300);
   assert.equal(inHints(id), false);
+});
+
+test("the step's detail drawn without a shortened path opens no hint left from the last step", () => {
+  const step = (/** @type {string} */ detail) => /** @type {any} */ ({ tool: "Read", detail, command: null });
+  const session = (/** @type {string} */ detail) =>
+    /** @type {any} */ ({ id: "s", name: null, prompt_name: null, folder_name: "p", state: "idle", line: "", questions: [], shell: false, status_only: false, capabilities: { agent: "claude", context: true }, identity: { issue: null, name: "p" }, transcript: { context: null }, permission_mode: null, work: {}, agents: [], turns: [], checks: [], cleared: [], prompts: [], model: null, last_step: step(detail) });
+  const draw = (/** @type {string} */ detail) => {
+    try {
+      showView({ session: session(detail), agent: null });
+    } catch {
+      // The rest of the rail needs more of a page than the stand-in has; the step is drawn before it.
+    }
+  };
+  /** @type {any} */
+  const detail = document.getElementById("detail");
+  body.append(detail);
+  draw("/Users/me/work/project/src/deep/file.ts");
+  assert.equal(hintOf(detail)?.textContent, "/Users/me/work/project/src/deep/file.ts", "a shortened path says itself whole");
+  draw("README.md");
+  assert.equal(detail.textContent, "README.md");
+  assert.equal(hintOf(detail), null);
+  assert.equal(detail.getAttribute("aria-describedby"), null);
+  detail.listeners.pointerenter?.({});
+  mock.timers.tick(501);
+  assert.deepEqual(open(), []);
 });

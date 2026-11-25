@@ -430,6 +430,17 @@ export function hint<T extends Element>(trigger: T, words: string): T {
   return trigger;
 }
 
+/** `trigger` without its hint, on either path: it names none and is described by none it had; the hint goes at the next prune. */
+export function unhint<T extends Element>(trigger: T): T {
+  const id = named(trigger);
+  if (id === null) return trigger;
+  trigger.removeAttribute("interestfor");
+  trigger.removeAttribute("data-hint");
+  if (trigger.getAttribute("aria-describedby") === id) trigger.removeAttribute("aria-describedby");
+  queuePrune();
+  return trigger;
+}
+
 /**
  * `node`, a mark or a dot that explains itself (a state's shape, a law's mark, an agent's logo): `role="img"` named by `words`, with
  * `words` as its hint on the pointer alone (#582). It stays out of the Tab order, so what it says must also reach the keyboard some

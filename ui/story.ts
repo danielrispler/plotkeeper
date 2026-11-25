@@ -7,7 +7,7 @@
 
 import { modelLine, reports } from "./capabilities.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
-import { age, code, cut, element, failure, glyphOnly, hint, invoke, keepOnly, keyed, pressable, prose, text, unseenWords } from "./dom.js";
+import { age, code, cut, element, failure, glyphOnly, hint, invoke, keepOnly, keyed, pressable, prose, text, unhint, unseenWords } from "./dom.js";
 import { askAnchor } from "./ask.js";
 import { rendered } from "./markdown.js";
 import { drawSidebar } from "./list.js";
@@ -113,10 +113,7 @@ function showStep(session: Session, agent: Subagent | null) {
   element("detail").textContent = detail;
   // A shortened path says itself whole in a hint; a detail that is not shortened has none, and drops one left from the last draw.
   if (fullDetail) hint(element("detail"), fullDetail);
-  else {
-    element("detail").removeAttribute("interestfor");
-    element("detail").removeAttribute("aria-describedby");
-  }
+  else unhint(element("detail"));
   element("command").textContent = step?.command ?? "";
   element("step").classList.toggle("has-command", Boolean(step?.command));
   // Without a command the step has nothing to unfold, but its line keeps its hover, the full path among it (#220).
