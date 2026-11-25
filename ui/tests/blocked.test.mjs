@@ -137,6 +137,7 @@ function shell(answers) {
   globalThis.window = {
     __TAURI__: {
       core: {
+        // biome-ignore lint/suspicious/useAwait: a stand-in for an async API, so a throw in it rejects as the real one's would
         invoke: async (command) => {
           if (command !== "answer_blocked_command") return null;
           const next = answers.shift();
@@ -144,7 +145,12 @@ function shell(answers) {
           return next;
         },
       },
-      event: { listen: async (name, handler) => void (handlers[name] = (payload) => handler({ payload })) },
+      event: {
+        listen: (name, handler) => {
+          handlers[name] = (payload) => handler({ payload });
+          return Promise.resolve();
+        },
+      },
     },
   };
   startWatching(() => {});
@@ -310,7 +316,11 @@ function page(invoke = async () => null) {
 // line was shown and the notice line's text.
 async function askAgain(renew) {
   const asked = [];
-  const { notice } = page(async (command, args) => (asked.push([command, args]), renew()));
+  // biome-ignore lint/suspicious/useAwait: a stand-in for an async API, so `renew`'s throw rejects as the real one's would
+  const { notice } = page(async (command, args) => {
+    asked.push([command, args]);
+    return renew();
+  });
   const retried = [];
   const element = blockedElement("s1", card("allowed_not_run"), null, (c) => retried.push(c.call));
   await element.find("button")[0].listeners.click();

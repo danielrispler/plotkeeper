@@ -42,6 +42,7 @@ import {
   type TurnSummary,
 } from "./types.js";
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: `showView`: spec #548 Group 4 splits it; remove this when it does
 export function showView(selected: Selection | null) {
   element("empty").hidden = selected !== null;
   element("view").hidden = selected === null;
@@ -188,7 +189,7 @@ export function subagentHistory(session: Pick<Session, "agents" | "capabilities"
 
 // A subagent's entry in the turn that ran it; its click opens that subagent.
 function historyElement(session: string, entry: HistoryEntry): HTMLElement {
-  const button = pressable(document.createElement("button"), null, () => select(session, entry.agent));
+  const button = pressable(document.createElement("button"), null, () => void select(session, entry.agent));
   button.classList.add("subagent");
   const lines = [text("span", entry.purpose, "asked"), ...(entry.asked ? [prose("span", entry.asked)] : [])];
   button.append(...lines, prose("span", entry.result), text("span", entry.details, "kind"));
@@ -439,6 +440,7 @@ export function checkElement(line: ListedCheck): HTMLElement {
 }
 
 // One block of the feed. The newest turn's summary is at the top, so its block leaves it out.
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: `turnContent`: spec #548 Group 4 splits it; remove this when it does
 function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLElement {
   const { turn, index } = block;
   const node = document.createElement("li");
@@ -530,8 +532,9 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
   const node = document.createElement("li");
   node.className = "turn past";
   const key = `${session.id} ${block.index} turn`;
+  const turn = block.turn;
+  if (!turn) return node;
   const draw = () => {
-    const turn = block.turn!;
     const summary = turn.id ? summaryOf(turn.id) : null;
     const { headline } = headlineOf(summary, turn.message);
     const open = opened.has(key);
@@ -551,7 +554,7 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
       // The ✕ is for the eye; assistive tech hears "failed" once (#456).
       ...(line.failed ? [glyphOnly("✕", "mark check-failed"), unseenWords("failed")] : []),
     );
-    if (line.failed) button.querySelector(".check-failed")!.setAttribute("title", "A check ended failed");
+    if (line.failed) button.querySelector(".check-failed")?.setAttribute("title", "A check ended failed");
     node.replaceChildren(button, ...(open ? [...turnContent(session, block, null).children] : []));
   };
   draw();
@@ -596,10 +599,11 @@ export function drawFeed() {
   const now = drawNow(session, latest);
   // The banner sits above the newest turn, and holds the Brief while it shows.
   const last = session.turns.at(-1);
-  const lives = own && bannerLives(banner, session) && last !== undefined;
+  const kept = own && banner && bannerLives(banner, session) ? banner : null;
+  const lives = kept !== null && last !== undefined;
   const cards = studio.cards;
   element("banner-slot").replaceChildren(
-    ...(lives ? [bannerElement({ headline: headlineOf(last.id ? summaryOf(last.id) : null, last.message).headline, endedAt: last.ended_at, since: banner!.since, open: cards.open, brief: briefNodes(cards) })] : []),
+    ...(lives ? [bannerElement({ headline: headlineOf(last.id ? summaryOf(last.id) : null, last.message).headline, endedAt: last.ended_at, since: kept.since, open: cards.open, brief: briefNodes(cards) })] : []),
   );
   element("brief-fold").hidden = lives || briefNodes(cards).length === 0;
   element("feed").replaceChildren(...blocks.map((block, i) => turnElement(session, block, own && i === 0 && block.index !== null ? now : null)));

@@ -106,7 +106,10 @@ let queued: boolean | null = null;
 
 // Turns the explanations `on` or off in `settings.json`, through the server's settings write, from the text the page last read.
 function setExplanations(on: boolean) {
-  if (asked !== null) return void (queued = on);
+  if (asked !== null) {
+    queued = on;
+    return;
+  }
   asked = on;
   invoke("set_explanations", { on, expected: studio.texts.settings })
     .then((settings) => {

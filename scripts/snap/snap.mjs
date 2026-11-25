@@ -44,7 +44,10 @@ async function devtools(method, events) {
   const port = readFileSync(join(profile, "DevToolsActivePort"), "utf8").split("\n")[0];
   const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
   const socket = new WebSocket(targets.find((target) => target.type === "page").webSocketDebuggerUrl);
-  await new Promise((open, fail) => ((socket.onopen = open), (socket.onerror = fail)));
+  await new Promise((open, fail) => {
+    socket.onopen = open;
+    socket.onerror = fail;
+  });
   let id = 0;
   const waiting = new Map();
   socket.onmessage = (message) => {

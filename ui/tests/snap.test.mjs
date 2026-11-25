@@ -35,7 +35,7 @@ test("the stub is injected before the app's module script, and the fixture is no
   assert.ok(index.indexOf("__snapEmit") === -1);
 });
 
-test("the list fixture has a nested, a selected and a landed row", async () => {
+test("the list fixture has a nested, a selected and a landed row", () => {
   const f = fixtures.list();
   assert.ok(f.sessions.some((s) => s.agents.length > 0));
   assert.ok(f.sessions.some((s) => s.landed));
@@ -114,7 +114,7 @@ test("a fixture's script runs after load and gets log; what it logs is what snap
   assert.deepEqual(logged, ["rail scrollTop 120 drawn"]);
 });
 
-test("the script does not run at load itself, only after the UI has had time to draw", async () => {
+test("the script does not run at load itself, only after the UI has had time to draw", () => {
   const handlers = {};
   const timers = [];
   vm.runInNewContext(headSource({ script: 'log("ran")' }), {

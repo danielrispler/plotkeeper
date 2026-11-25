@@ -12,9 +12,15 @@ const ended = (id, outcome, line, extra = {}) => run(id, "ended", { outcome, lin
 // `confirm` answers a confirm dialog with `yes`, and notes what it asked.
 const acts = (calls, copy = async () => "copied", yes = true) => ({
   cancel: (id) => calls.push(["cancel", id]),
-  confirm: async (ask) => (calls.push(["confirm", ask]), yes),
+  confirm: (ask) => {
+    calls.push(["confirm", ask]);
+    return Promise.resolve(yes);
+  },
   resume: () => calls.push(["resume"]),
-  copy: (prompt) => (calls.push(["copy", prompt]), copy(prompt)),
+  copy: (prompt) => {
+    calls.push(["copy", prompt]);
+    return copy(prompt);
+  },
 });
 // The buttons of a node, by their words.
 const button = (node, words) => node.find("button").find((each) => each.text === words);
@@ -147,7 +153,13 @@ test("a second click while the copy is on its way adds no second note, and the p
 test("Cancel waits for the server's answer, so a second click asks nothing twice", async () => {
   const calls = [];
   let answer;
-  const act = { ...acts(calls), cancel: (id) => (calls.push(["cancel", id]), new Promise((done) => (answer = done))) };
+  const act = { ...acts(calls), cancel: (id) => {
+      calls.push(["cancel", id]);
+      return new Promise((done) => {
+        answer = done;
+      });
+    },
+  };
   const [row] = runsNodes({ paused: null, runs: [run("a", "queued")] }, act).filter((node) => node.dataset.run);
   const cancel = button(row, "Cancel");
   const clicked = cancel.listeners.click();

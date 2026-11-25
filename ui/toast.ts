@@ -173,7 +173,7 @@ export function jumpToNeedsYou(): boolean {
   const { id } = shown.session;
   studio.focus = false;
   window.dispatchEvent(new Event("layout"));
-  select(id);
+  void select(id);
   return true;
 }
 

@@ -92,7 +92,10 @@ export function storyBar(about: StoryAbout, gist?: string): Bar {
   const skip = text("button", "Skip", "btn quiet small bar-skip");
   skip.setAttribute("type", "button");
   skip.title = `Skip this bar (key ${SKIP_KEY.toUpperCase()})`;
-  skip.addEventListener("click", () => (model.skip(), paint()));
+  skip.addEventListener("click", () => {
+    model.skip();
+    paint();
+  });
   node.append(slot, skip);
   const paint = () => {
     node.hidden = model.closed();
@@ -158,6 +161,6 @@ function compared(model: Model, gist: string): HTMLElement[] {
 
 // A window key for the bar on screen; true when the bar took it. The caller passes `typing` (focus in a field) so the line keeps its keys.
 export function barKeyDown(event: KeyboardEvent, typing: boolean): boolean {
-  if (!current || !current.node.isConnected || current.node.hidden || current.node.offsetParent === null) return false;
+  if (!current?.node.isConnected || current.node.hidden || current.node.offsetParent === null) return false;
   return current.key(barKey(event, typing));
 }

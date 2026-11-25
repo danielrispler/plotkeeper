@@ -91,7 +91,9 @@ test("Esc closes the overlays (a micro-world, the pre-flight, the patch review),
 
 test("a project switch closes the PR brief and its popover, the pre-flight, the patch review and a micro-world, and leaves the other layers", () => {
   const open = Object.fromEntries(layerOrder.map((name) => [name, true]));
-  const layers = Object.fromEntries(layerOrder.map((name) => [name, { open: () => open[name], close: () => void (open[name] = false) }]));
+  const layers = Object.fromEntries(layerOrder.map((name) => [name, { open: () => open[name], close: () => {
+    open[name] = false;
+  } }]));
   switchProject(layers);
   assert.deepEqual(open, { "micro-world": false, "pre-flight": false, "patch-review": false, drawer: true, popover: false, brief: false, scrubbed: true, sheet: true, panel: true });
 });

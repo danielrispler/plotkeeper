@@ -136,7 +136,8 @@ export function refusedNodes(line: string, prompt: string, close: () => void): H
 async function afterStart(started: BackLawStarted, told: () => void) {
   if (started.kind === "run") {
     told();
-    return void reloadMap();
+    await reloadMap();
+    return;
   }
   const copied = await copyOverturn(started.prompt, navigator.clipboard?.writeText?.bind(navigator.clipboard));
   if (copied === "copied") return showNotice(`The run did not start: ${started.line}. ${overturnReport(copied, started.prompt).line}`);
@@ -332,8 +333,9 @@ export function guardRow(view: MapView, pr: number, guard: Guard, redraw: () => 
     },
   };
   const parts = guard.parts.map((id) => ({ id, name: view.doc.parts.find((p) => p.id === id)?.name ?? id }));
-  const adding = mine()
-    ? confirmNodes(confirming!.draft, parts, confirming!.line, {
+  const asking = mine() ? confirming : null;
+  const adding = asking
+    ? confirmNodes(asking.draft, parts, asking.line, {
         start: (law) => {
           confirming = null;
           redraw();

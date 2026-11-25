@@ -125,7 +125,11 @@ test("a brief reopens at the step left, and finishing it starts it over", () => 
 test("opening a brief while the map is scrubbed returns it to now first", () => {
   let scrubbed = true;
   let backs = 0;
-  const player = briefPlayer({ scrubbed: () => scrubbed, backToNow: () => (backs++, (scrubbed = false)) });
+  const player = briefPlayer({ scrubbed: () => scrubbed, backToNow: () => {
+      backs++;
+      scrubbed = false;
+    },
+  });
   player.open("/p", 7, 0);
   assert.equal(backs, 1);
   player.close();

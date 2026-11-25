@@ -16,7 +16,10 @@ let modal = false;
 // The note's fade falls due only when a test runs the timers.
 const timers = new Map();
 let nextTimer = 1;
-globalThis.window = { setTimeout: (run) => (timers.set(nextTimer, run), nextTimer++), clearTimeout: (id) => timers.delete(id) };
+globalThis.window = { setTimeout: (run) => {
+    timers.set(nextTimer, run);
+    return nextTimer++;
+  }, clearTimeout: (id) => timers.delete(id) };
 const runTimers = () => {
   for (const [id, run] of [...timers]) {
     timers.delete(id);

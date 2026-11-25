@@ -159,11 +159,17 @@ function clearMachine(sessions) {
   const timers = new Map();
   let next = 1;
   const time = {
-    set: (run, ms) => (timers.set(next, { at: now + ms, run }), next++),
+    set: (run, ms) => {
+      timers.set(next, { at: now + ms, run });
+      return next++;
+    },
     clear: (id) => timers.delete(id),
     tick(ms) {
       now += ms;
-      for (const [id, t] of [...timers]) if (t.at <= now) (timers.delete(id), t.run());
+      for (const [id, t] of [...timers]) if (t.at <= now) {
+        timers.delete(id);
+        t.run();
+      }
     },
   };
   const live = new Map(sessions.map((s) => [s.id, s]));
@@ -173,8 +179,14 @@ function clearMachine(sessions) {
   const commits = [];
   const m = clearing(time, {
     landed: (id) => (live.get(id)?.landed ? live.get(id) : undefined),
-    commit: (s) => (deleted.push(s.id), new Promise((resolve, reject) => commits.push({ id: s.id, resolve, reject }))),
-    changed: (list, writing = []) => (pending.push(list.map((s) => s.id)), written.push(writing.map((s) => s.id))),
+    commit: (s) => {
+      deleted.push(s.id);
+      return new Promise((resolve, reject) => commits.push({ id: s.id, resolve, reject }));
+    },
+    changed: (list, writing = []) => {
+      pending.push(list.map((s) => s.id));
+      written.push(writing.map((s) => s.id));
+    },
   });
   return { m, time, live, deleted, pending, written, commits };
 }

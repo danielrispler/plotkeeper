@@ -212,7 +212,10 @@ test("an open turn's hunk is read again at each opening and once the turn ended,
   tauri([], (command) => (command === "turn_file_hunk" ? { text: `read ${++reads}`, left_out: 0, binary: false, first_line: 1 } : null));
   const row = { kind: "file", label: "k.rs", file: file("k.rs", 1, 0) };
   const settle = () => new Promise((resolve) => setTimeout(resolve));
-  const toggle = async (item) => (item.find("button")[0].listeners.click(), settle());
+  const toggle = (item) => {
+    item.find("button")[0].listeners.click();
+    return settle();
+  };
   // While the turn is open: open, close, open again reads twice.
   const open = fileRow("s3", 1, row, "", false);
   await toggle(open);

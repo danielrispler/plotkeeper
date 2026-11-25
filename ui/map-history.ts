@@ -79,7 +79,11 @@ export function drawStrip(view: MapView, part: string, slot: HTMLElement) {
   const list = text("ul", "", "hist");
   slot.replaceChildren(...explained(text("h3", "History", "sheet-heading"), SHEET.history, explanationsOn()), list);
   const found = known.get(key);
-  if (found) return void (rows(view, list, found), (list.scrollTop = list.scrollHeight));
+  if (found) {
+    rows(view, list, found);
+    list.scrollTop = list.scrollHeight;
+    return;
+  }
   list.append(text("li", "Reading the history…", "empty"));
   invoke("map_history", { project: view.project, part })
     .then((entries) => {

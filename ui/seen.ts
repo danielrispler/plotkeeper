@@ -62,7 +62,8 @@ export function watchSeen(node: Element, { active, onSeen, interaction = false }
       ? null
       : new IntersectionObserver(
           (entries) => {
-            const entry = entries.at(-1)!;
+            const entry = entries.at(-1);
+            if (!entry) return;
             const area = (r: { width: number; height: number }) => r.width * r.height;
             const root = entry.rootBounds ?? { width: window.innerWidth, height: window.innerHeight };
             overlap = { element: entry.intersectionRatio, viewport: area(root) ? area(entry.intersectionRect) / area(root) : 0 };

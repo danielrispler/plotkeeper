@@ -266,6 +266,7 @@ function modelInput(models: string[]): HTMLElement {
 
 // The OpenAI-compatible API's row: its base URL (empty: OpenAI's own) and an optional key, saved together, and Remove,
 // which clears both, once either is set.
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: ratcheted at #554; split it rather than grow it
 function openaiRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[] {
   const found = known.writers.some((w) => w.kind === "openai" && w.found);
   const state = text("p", keyLine(known, "openai"), "writer-hint");

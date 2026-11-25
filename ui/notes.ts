@@ -33,7 +33,10 @@ export function noteFade(clock: Clock, hide: () => void) {
   let shown = false;
   const later = () => {
     if (timer !== undefined) clock.clear(timer);
-    timer = shown && !holds.size ? clock.set(() => ((shown = false), hide()), FADE_MS) : undefined;
+    timer = shown && !holds.size ? clock.set(() => {
+          shown = false;
+          hide();
+        }, FADE_MS) : undefined;
   };
   return {
     start() {
@@ -79,7 +82,7 @@ export function showNote(note: Note) {
   const action = () => {
     const button = text("button", "", "btn quiet toast-main");
     button.addEventListener("click", () => {
-      if (noted) select(noted.session.id);
+      if (noted) void select(noted.session.id);
       close();
     });
     return button;
@@ -98,7 +101,10 @@ export function showNote(note: Note) {
 // The toast's hover, focus and a modal dialog hold its fade; once, at start.
 export function watchNotes() {
   const toast = element("note-toast");
-  document.addEventListener("toggle", () => (modalHolds(), copyHolds()), true);
+  document.addEventListener("toggle", () => {
+    modalHolds();
+    copyHolds();
+  }, true);
   toast.addEventListener("pointerenter", () => fade.hold("pointer"));
   toast.addEventListener("pointerleave", () => fade.release("pointer"));
   toast.addEventListener("focusin", () => fade.hold("focus"));

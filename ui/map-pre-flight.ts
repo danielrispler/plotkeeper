@@ -230,7 +230,10 @@ const acts: PreFlightActs = {
     const project = shownProject();
     if (project === null) return;
     invoke("pre_flight_clear", { project })
-      .then(() => (reloadMap(), openPreFlight(true)))
+      .then(() => {
+        reloadMap().catch(failure("map_state"));
+        openPreFlight(true);
+      })
       .catch(failure("pre_flight_clear", "error"));
   },
 };

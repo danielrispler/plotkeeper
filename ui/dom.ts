@@ -79,8 +79,10 @@ export function confirmed(ask: Confirm): Promise<boolean> {
   element("confirm-heading").textContent = ask.heading;
   element("confirm-lost").textContent = ask.lost;
   element("confirm-yes").textContent = ask.verb;
+  const form = dialog.querySelector("form");
+  if (!form) throw new Error("#confirm-dialog has no form");
   return new Promise((resolve) => {
-    dialog.querySelector("form")!.onsubmit = (event) => resolve((event.submitter as HTMLButtonElement | null)?.value === "confirm");
+    form.onsubmit = (event) => resolve((event.submitter as HTMLButtonElement | null)?.value === "confirm");
     dialog.oncancel = () => resolve(false);
     dialog.onclose = () => {
       if (!dialog.open) resolve(false);

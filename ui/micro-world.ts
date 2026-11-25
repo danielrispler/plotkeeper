@@ -106,7 +106,13 @@ function paint(worlds?: MicroWorlds) {
     return;
   }
   const now = shown;
-  paintWorld(box, now.name, now.html, worlds?.worlds[now.key], { rebuild: () => (close(), now.explore()), close });
+  paintWorld(box, now.name, now.html, worlds?.worlds[now.key], {
+    rebuild: () => {
+      close();
+      now.explore();
+    },
+    close,
+  });
   box.hidden = false;
 }
 

@@ -42,8 +42,9 @@ const keyOf = (session: string, anchor: Anchor, scope: string) => `${scope}${ses
 // The "Ask" box of `anchor` in session `session`, labelled `what` for the model ("this file").
 export function askAnchor(session: string, anchor: Anchor, what: string, scope = ""): HTMLDetailsElement {
   const key = keyOf(session, anchor, scope);
-  if (!asks.has(key)) asks.set(key, askBox(session, anchor, what));
-  return asks.get(key)!;
+  const box = asks.get(key) ?? askBox(session, anchor, what);
+  asks.set(key, box);
+  return box;
 }
 
 // Opens the box of `anchor` and puts the cursor in it, when it is drawn; false when it is not.
@@ -56,6 +57,7 @@ export function openAsk(session: string, anchor: Anchor): boolean {
   return true;
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: ratcheted at #554; split it rather than grow it
 function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsElement {
   const node = document.createElement("details");
   node.className = "ask-about";
@@ -184,7 +186,7 @@ function whyNotBox(session: string, turn: number): HTMLElement {
     go.title = goHover;
   };
   go.addEventListener("click", run);
-  onEnter(field, run);
+  onEnter(field, () => void run());
   node.append(field, go, out);
   return node;
 }

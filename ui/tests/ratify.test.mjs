@@ -156,7 +156,10 @@ test("an overturn's note shows only where its item is drawn: its project, and th
 
 test("an overturn copies its prompt within the click, before the decision's round trip, and Accept copies nothing", async () => {
   const order = [];
-  const copy = async () => (order.push("copy"), "copied");
+  const copy = () => {
+    order.push("copy");
+    return Promise.resolve("copied");
+  };
   const record = async () => {
     order.push("record");
     await new Promise((resolve) => setTimeout(resolve, 1));

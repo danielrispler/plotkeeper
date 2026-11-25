@@ -11,6 +11,7 @@ const shown = [];
 let asked = 0;
 globalThis.Notification = class {
   static permission = "default";
+  // biome-ignore lint/suspicious/useAwait: a stand-in for an async API, so a throw in it rejects as the real one's would
   static requestPermission = async () => {
     asked++;
     return "granted";

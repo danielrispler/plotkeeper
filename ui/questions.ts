@@ -19,6 +19,7 @@ const pickedFor = (nonce: string) => {
   return picks.picked;
 };
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: ratcheted at #554; split it rather than grow it
 export function questionElement(question: Question): HTMLElement {
   const { questions, answer } = question;
   const ask = answer === "open" ? askFor(question) : null;
@@ -37,7 +38,7 @@ export function questionElement(question: Question): HTMLElement {
         return [asked.question, asked.multiSelect ? chosen : (chosen[0] ?? "")];
       }),
     );
-    sendAnswer(ask, { answers });
+    void sendAnswer(ask, { answers });
   };
   // One single-choice question is sent by its click; anything more by "Send".
   const sendButton = ask !== null && (questions.length > 1 || questions.some((asked) => asked.multiSelect));
@@ -145,6 +146,6 @@ function answerButtons(ask: Ask, buttons: [AnswerButton, () => void, string?][])
   };
   row.append(...buttons.map(([label, click, className]) => button(label, answerHovers[label], click, className)));
   readySend(row, false);
-  row.append(button("Answer in the terminal", "Leave the card and answer in the session's terminal", () => sendAnswer(ask, null)));
+  row.append(button("Answer in the terminal", "Leave the card and answer in the session's terminal", () => void sendAnswer(ask, null)));
   return row;
 }

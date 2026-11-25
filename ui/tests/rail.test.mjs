@@ -27,7 +27,10 @@ test("a summary whose write throws leaves no unhandled rejection and the next on
   const note = (reason) => unhandled.push(String(reason));
   process.on("unhandledRejection", note);
   const started = [];
-  const ask = oneAtATime((id) => (started.push(id), id === "bad" ? Promise.reject(new Error("no writer")) : Promise.resolve()));
+  const ask = oneAtATime((id) => {
+    started.push(id);
+    return id === "bad" ? Promise.reject(new Error("no writer")) : Promise.resolve();
+  });
   ask("bad");
   ask("next");
   await new Promise((resolve) => setTimeout(resolve, 5));

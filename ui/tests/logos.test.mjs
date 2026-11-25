@@ -110,7 +110,7 @@ test("the logo is drawn in the muted text colour", () => {
 test("the rail header shows the logo, titled with the model line", async () => {
   const { showView } = await import("../../dist/story.js");
   const els = new Map();
-  const get = (id) => els.get(id) ?? (els.set(id, make("div")), els.get(id));
+  const get = (id) => els.get(id) ?? els.set(id, make("div")).get(id);
   globalThis.document = { ...globalThis.document, getElementById: get };
   const session = { ...claude, transcript: { ...claude.transcript, model: "claude-opus-5-5" }, permission_mode: null, work: {}, agents: [], turns: [], checks: [], cleared: [], prompts: [], model: null };
   try {
@@ -127,7 +127,7 @@ test("the rail header shows the logo, titled with the model line", async () => {
 test("the rail header's logo for agy keeps the note that it has no context size, after the model line", async () => {
   const { showView } = await import("../../dist/story.js");
   const els = new Map();
-  const get = (id) => els.get(id) ?? (els.set(id, make("div")), els.get(id));
+  const get = (id) => els.get(id) ?? els.set(id, make("div")).get(id);
   globalThis.document = { ...globalThis.document, getElementById: get };
   const session = { ...agy, transcript: agy.transcript, permission_mode: null, work: {}, agents: [], turns: [], checks: [], cleared: [], prompts: [], model: "gemini-3-flash" };
   try {
@@ -142,7 +142,7 @@ test("the rail header's logo for agy keeps the note that it has no context size,
 
 const railOf = (session, agent = null) => {
   const els = new Map();
-  const get = (id) => els.get(id) ?? (els.set(id, make("div")), els.get(id));
+  const get = (id) => els.get(id) ?? els.set(id, make("div")).get(id);
   globalThis.document = { ...globalThis.document, getElementById: get };
   const full = { permission_mode: null, work: {}, agents: [], turns: [], checks: [], cleared: [], prompts: [], model: null, ...session };
   return import("../../dist/story.js").then(({ showView }) => {

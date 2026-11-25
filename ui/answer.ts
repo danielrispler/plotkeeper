@@ -48,7 +48,10 @@ let blockedRequests: BlockedRequest[] = [];
 export const blockedRequestFor = (call: string) => blockedRequests.find((r) => r.tool_use_id === call) ?? null;
 
 const watch = (session: string | null) =>
-  invoke("watch", { session }).catch((e) => (failure("watch")(e), null));
+  invoke("watch", { session }).catch((e: unknown) => {
+    failure("watch")(e);
+    return null;
+  });
 
 // The view watched last, so a redraw of the same one asks the shell nothing.
 let watched = "";
@@ -91,13 +94,15 @@ export async function rewatch() {
 
 export function startWatching(draw: () => void) {
   redraw = draw;
-  listen<Ask | null>("ask", (ask) => take(ask));
+  listen<Ask | null>("ask", (ask) => {
+    take(ask).catch(failure("ask"));
+  });
   listen<BlockedRequest[]>("blocked", (requests) => {
     blockedRequests = requests;
     redraw();
   });
   document.addEventListener("visibilitychange", rewatch);
-  rewatch();
+  rewatch().catch(failure("watch"));
   // Shows the shell the window is alive, so a frozen window lets the hook hand a question to the
   // terminal within seconds (danielrispler/Falinks#569). It asks for nothing; the open request still comes as an event.
   setInterval(() => {

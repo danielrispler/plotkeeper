@@ -22,7 +22,10 @@ const acts = (calls, yes = true) => ({
   open: (id) => calls.push(["open", id]),
   discard: (id) => calls.push(["discard", id]),
   close: () => calls.push(["close"]),
-  confirm: async (ask) => (calls.push(["confirm", ask.verb]), yes),
+  confirm: (ask) => {
+    calls.push(["confirm", ask.verb]);
+    return Promise.resolve(yes);
+  },
 });
 // Lets the confirm's answer land.
 const settle = () => new Promise((done) => setTimeout(done));

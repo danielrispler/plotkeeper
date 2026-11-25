@@ -50,5 +50,5 @@ export async function logIn(place: HTMLElement, id: string, agent: string, follo
   const subagent = session?.agents.find((a) => a.id === agent);
   const toParent = () => void select(id);
   if (!subagent) return showMissing(place, toParent);
-  return follow ? followLog(place, id, subagent, toParent) : showLog(place, id, subagent, toParent);
+  await (follow ? followLog(place, id, subagent, toParent) : showLog(place, id, subagent, toParent));
 }

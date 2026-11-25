@@ -137,6 +137,7 @@ test("a double click on the ? ends where two flips end, with no write refused: t
   let file = '{ "explanations": true }';
   const refused = [];
   const writes = [];
+  // biome-ignore lint/suspicious/useAwait: a stand-in for an async API, so a throw in it rejects as the real one's would
   window.__TAURI__.core.invoke = async (command, args) => {
     if (command !== "set_explanations") return null;
     writes.push(args.on);
@@ -144,7 +145,8 @@ test("a double click on the ? ends where two flips end, with no write refused: t
       refused.push(args);
       throw new Error("settings.json changed since the page read it: try again");
     }
-    return (file = JSON.stringify({ explanations: args.on }));
+    file = JSON.stringify({ explanations: args.on });
+    return file;
   };
   // The page applies the returned text, as `main.ts` does.
   startExplanations((settings) => {

@@ -1710,7 +1710,7 @@ const mapPartKeys = (): Fixture => {
   const f = mapBusy(false);
   return {
     ...f,
-    snapScript: f.snapScript!.replace(/log\("chips ok, not placed " \+ rest\.length\);/, `
+    snapScript: (f.snapScript ?? "").replace(/log\("chips ok, not placed " \+ rest\.length\);/, `
       const press = async (key) => { await __snapKey(key); await wait(80); };
       const sheetPart = () => document.querySelector("#map-sheet .sheet")?.dataset.part;
       const plates = [...document.querySelectorAll("#map .plate[data-id]")];
@@ -1772,7 +1772,7 @@ const mapPartRedraw = (): Fixture => {
   return {
     ...f,
     map_state: { __by: "fetch", values: { true: mapState(), false: mapState({ fog: { core: "thin" } }) } } as never,
-    snapScript: f.snapScript!.replace(/log\("chips ok, not placed " \+ rest\.length\);/, `
+    snapScript: (f.snapScript ?? "").replace(/log\("chips ok, not placed " \+ rest\.length\);/, `
       const hook = document.querySelector("#map .plate[data-id=hook] > .plate-open");
       hook.focus();
       __snapEmit("map-landed", "/w/plotkeeper");

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 
 const requests = [];
 let reply = { ok: true, body: null };
+// biome-ignore lint/suspicious/useAwait: a stand-in for an async API, so a throw in it rejects as the real one's would
 globalThis.fetch = async (url, init) => {
   requests.push([url, init.method, JSON.parse(init.body)]);
   return { ok: reply.ok, status: reply.ok ? 200 : 500, json: async () => reply.body };
@@ -16,7 +17,7 @@ globalThis.EventSource = class {
     sources.push(this);
   }
   addEventListener(name, handler) {
-    (this.handlers[name] ??= []).push(handler);
+    this.handlers[name] = [...(this.handlers[name] ?? []), handler];
   }
   removeEventListener(name, handler) {
     this.handlers[name] = (this.handlers[name] ?? []).filter((h) => h !== handler);

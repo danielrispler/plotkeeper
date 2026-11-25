@@ -47,10 +47,10 @@ export function transport(): Seam {
   return {
     core: { invoke: <T>(command: string, args?: Record<string, unknown>) => post(command as Command, args) as Promise<T> },
     event: {
-      listen: async <T>(name: string, handler: (event: { payload: T }) => void) => {
+      listen: <T>(name: string, handler: (event: { payload: T }) => void) => {
         const on = (message: Event) => handler({ payload: JSON.parse((message as MessageEvent<string>).data) });
         stream().addEventListener(name, on);
-        return () => source?.removeEventListener(name, on);
+        return Promise.resolve(() => source?.removeEventListener(name, on));
       },
     },
     log: { warn: logger("warn"), error: logger("error") },

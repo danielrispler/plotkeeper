@@ -48,7 +48,9 @@ export const onDraw = (hook: (view: MapView) => void) => void drawHooks.push(hoo
 // Runs when a draw has no map to show (none yet, or a past commit's cannot be read), with the banner and the scrub still set.
 const unreadHooks: ((banner: HTMLElement, scrub: Scrub | null) => void)[] = [];
 export const onUnread = (hook: (banner: HTMLElement, scrub: Scrub | null) => void) => void unreadHooks.push(hook);
-export const registerLayer = (name: LayerName, layer: Layer) => void (layers[name] = layer);
+export const registerLayer = (name: LayerName, layer: Layer) => {
+  layers[name] = layer;
+};
 
 // What `startMap` is given by `main.ts`, which owns what the Map view may not import.
 export type MapDeps = {
@@ -353,8 +355,9 @@ function drawLinks(layer: Element, view: MapView) {
       const at = points[i];
       if (!at) return;
       const mark = svg("rect", { class: `link-mark ${law.backing}`, width: "7", height: "7", x: "-3.5", y: "-3.5", transform: `translate(${at.x} ${at.y}) rotate(45)` });
-      mark.append(svg("title", {}));
-      mark.firstChild!.textContent = `${law.backing === "check" ? "Backed by a check" : "On trust"}: ${law.text}`;
+      const title = svg("title", {});
+      mark.append(title);
+      title.textContent = `${law.backing === "check" ? "Backed by a check" : "On trust"}: ${law.text}`;
       nodes.push(mark);
     });
   }
@@ -367,6 +370,7 @@ const place = (node: HTMLElement, at: Point) => {
 };
 
 // Draws the parts as plates, the actors as labels and the links between them, placing what has no saved position once.
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: `drawMap`: spec #548 Group 4 splits it; remove this when it does
 function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub | null) {
   const saved = Object.fromEntries(Object.entries(state.user.positions).map(([id, [x, y]]) => [id, { x, y }]));
   const items = [...doc.parts, ...doc.actors];
@@ -481,7 +485,10 @@ function pan(canvas: HTMLElement) {
       canvas.removeEventListener("pointerup", end);
       canvas.removeEventListener("pointercancel", end);
       if (ended.type !== "pointerup" || Math.max(far, Math.hypot(ended.clientX - from.x, ended.clientY - from.y)) > clickSlop) return;
-      for (const name of ["drawer", "sheet"] as const) if (layers[name]?.open()) layers[name]!.close();
+      for (const name of ["drawer", "sheet"] as const) {
+        const layer = layers[name];
+        if (layer?.open()) layer.close();
+      }
     };
     canvas.addEventListener("pointermove", move);
     canvas.addEventListener("pointerup", end);
@@ -555,7 +562,7 @@ function draw() {
   const doc = loaded?.status === "loaded" && loaded.source !== null ? parseMap(past?.source ?? loaded.source) : null;
   if (loaded && doc?.ok) return drawMap(body, loaded, doc, past);
   view = null;
-  const unreadable = doc && !doc.ok ? { ...loaded!, status: "unreadable" as const, note: doc.why } : loaded;
+  const unreadable = loaded && doc && !doc.ok ? { ...loaded, status: "unreadable" as const, note: doc.why } : loaded;
   drawEmpty(body, unreadable);
   const slots = { side: element("map-side"), notPlaced: element("map-not-placed"), tray: element("map-tray"), runs: element("map-runs"), sheet: element("map-sheet"), drawer: element("map-drawer"), banner: element("map-banner") };
   // No map is drawn, so nothing of the last one may stay: its banner, sheet and drawer would belong to another project.

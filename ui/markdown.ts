@@ -27,7 +27,10 @@ const create = () =>
 let renderer: ReturnType<typeof create> | undefined;
 
 // `text` as safe HTML.
-export const markdown = (text: string) => (renderer ??= create()).parse(text, { async: false });
+export const markdown = (text: string) => {
+  renderer ??= create();
+  return renderer.parse(text, { async: false });
+};
 
 // An element showing `text` rendered; its links open in a new tab.
 export function rendered(tag: string, text: string, className = ""): HTMLElement {

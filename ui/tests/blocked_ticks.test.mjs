@@ -6,7 +6,10 @@ import { fakeDocument } from "./dom.mjs";
 // The page's one second timer, captured; the clock is ours. Both are set before the import: times.ts starts its timer at load.
 let timer = null;
 let clock = 100_000;
-globalThis.setInterval = (run, ms) => ((timer = { run, ms }), 0);
+globalThis.setInterval = (run, ms) => {
+  timer = { run, ms };
+  return 0;
+};
 globalThis.document = fakeDocument({ addEventListener() {}, visibilityState: "hidden" });
 globalThis.window = { __TAURI__: { core: { invoke: async () => null }, event: { listen: async () => {} } } };
 Date.now = () => clock;

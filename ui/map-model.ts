@@ -384,8 +384,14 @@ export function chapterGate(list: Pick<BriefStep, "check">[], fire: () => void):
     }
   };
   return {
-    sawLast: () => ((last = true), look()),
-    answered: () => ((answered = true), look()),
+    sawLast: () => {
+      last = true;
+      look();
+    },
+    answered: () => {
+      answered = true;
+      look();
+    },
     done: () => fired,
   };
 }
@@ -678,7 +684,9 @@ export function cameraRig(start: Camera): CameraRig {
       user = to;
       return true;
     },
-    lend: (to) => void (borrowed = to),
+    lend: (to) => {
+      borrowed = to;
+    },
     giveBack: () => {
       borrowed = null;
       return user;
@@ -756,7 +764,7 @@ export function fogActions(fog: Fog | undefined, offer: CatchUpOffer | undefined
 // What a catch-up opened while it was written waits for, read from the part's offer at each map draw: "wait" while a write runs, then
 // "open" once it is stored for the part's fog, else "stop" (its write failed, the part was cleared meanwhile, or no write runs).
 export function awaitedCatchUp(offer: CatchUpOffer | undefined): "open" | "stop" | "wait" {
-  if (!offer || offer.kind !== "catch-up") return "stop";
+  if (offer?.kind !== "catch-up") return "stop";
   if (offer.writing) return "wait";
   return offer.ready ? "open" : "stop";
 }
@@ -776,8 +784,9 @@ export function catchUpIds(): (project: string, part: string, fog: string[]) => 
   const ids = new Map<string, number>();
   return (project, part, fog) => {
     const key = `${project}|${part}|${fog.join(",")}`;
-    if (!ids.has(key)) ids.set(key, -(ids.size + 1));
-    return ids.get(key)!;
+    const id = ids.get(key) ?? -(ids.size + 1);
+    ids.set(key, id);
+    return id;
   };
 }
 

@@ -134,5 +134,15 @@ export const fakeDocument = (extra = {}, Element = El) => ({
 
 // Installs `window.__TAURI__` so that every `invoke` is recorded in `calls` as `[command, args]` and answers `reply(command, args)`.
 export const tauri = (calls, reply = () => null) => {
-  globalThis.window = { __TAURI__: { core: { invoke: async (command, args) => (calls.push([command, args]), reply(command, args)) } } };
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        // biome-ignore lint/suspicious/useAwait: a stand-in for an async API, so a throw in `reply` rejects as the real one's would
+        invoke: async (command, args) => {
+          calls.push([command, args]);
+          return reply(command, args);
+        },
+      },
+    },
+  };
 };
