@@ -1,7 +1,7 @@
 // The Map view's pure logic (spec danielrispler/plotkeeper#306, ticket #309): the map file as the window reads it, where parts
 // are placed, the drag threshold, the link's rim points, the layered Esc and the camera. `map.ts` draws and wires them.
 
-import type { BriefFigure, BriefStep, CatchUpOffer, CatchUpStage, FogListEntry, Camera, Ci, CommitFiles, Fog, HistoricalMap, HistoryEntry, PrBrief, Proof, ReadyPr } from "./types.js";
+import type { AlsoGroup, AlsoKind, BriefFigure, BriefStep, CatchUpOffer, CatchUpStage, FogListEntry, Camera, Ci, CommitFiles, Fog, HistoricalMap, HistoryEntry, PrBrief, Proof, ReadyPr } from "./types.js";
 
 export type Tier = "core" | "interface" | "black-box";
 export type Point = { x: number; y: number };
@@ -315,9 +315,28 @@ export function storySteps<T extends { k: string }>(list: T[]): T[] {
   return list.filter((step) => step.k !== "Ratify");
 }
 
-// The "also touched" lines, which show with the last step of the last chapter.
-export function alsoAt(brief: PrBrief, chapter: number, step: number, length: number): PrBrief["also"] {
-  return chapter === brief.chapters.length - 1 && step === length - 1 ? brief.also : [];
+// "Also touched", which shows with the last step of the last chapter: an older brief's writer lines, a newer one's groups by kind (#492).
+export function alsoAt(brief: PrBrief, chapter: number, step: number, length: number): { lines: PrBrief["also"]; groups: AlsoRow[] } {
+  return chapter === brief.chapters.length - 1 && step === length - 1 ? { lines: brief.also, groups: alsoRows(brief.also_groups ?? []) } : { lines: [], groups: [] };
+}
+
+// One Also touched group as the reader shows it (#492): its name, its counts, the laws its files' tags name, its files with the "ignored"
+// tag (only in the Tests, Config/build and Docs groups; the Ignored group is a plain list), and the paths its See the code asks for.
+export type AlsoRow = { kind: AlsoKind; name: string; counts: string; laws: string[]; files: { path: string; ignored: boolean }[]; paths: string[] };
+const alsoNames: Record<AlsoKind, string> = { "no-part": "No part", tests: "Tests", config: "Config/build", docs: "Docs", ignored: "Ignored", other: "Other" };
+const tagsIgnored: ReadonlySet<AlsoKind> = new Set<AlsoKind>(["tests", "config", "docs"]);
+const many = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+export function alsoRows(groups: AlsoGroup[]): AlsoRow[] {
+  return groups
+    .filter((group) => group.files.length)
+    .map((group) => ({
+      kind: group.kind,
+      name: alsoNames[group.kind] ?? group.kind,
+      counts: `${many(group.files.length, "file")} · ${many(group.lines, "line")}`,
+      laws: [...new Set(group.files.flatMap((file) => file.laws ?? []))].sort(),
+      files: group.files.map((file) => ({ path: file.path, ignored: tagsIgnored.has(group.kind) && file.ignored === true })),
+      paths: group.files.map((file) => file.path),
+    }));
 }
 
 // `overview`: this chapter plays the brief's overview first. It is the first chapter opened, and keeps it until it is finished, so it plays once.
