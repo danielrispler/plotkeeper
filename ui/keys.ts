@@ -88,11 +88,16 @@ export function keyLabel(stroke: string): string {
   return [...MODIFIERS.filter((m) => mods.includes(`${m}-`)), name].map((part) => symbols[part] ?? part.toUpperCase()).join("");
 }
 
+// The keys `keymap` binds `name` to now, as macOS menus show them, each once.
+export const keysOf = (keymap: Keymap, name: string): string[] => [
+  ...new Set(Object.values(keymap).flatMap((bindings) =>
+    Object.entries(bindings).filter(([, binding]) => (typeof binding === "string" ? binding : binding[0]) === name).map(([stroke]) => keyLabel(stroke)))),
+];
+
 // `label` with the keys `keymap` binds `name` to now, as "Settings (⌘,)"; the bare label when none.
 export function titled(keymap: Keymap, label: string, name: string): string {
-  const keys = Object.values(keymap).flatMap((bindings) =>
-    Object.entries(bindings).filter(([, binding]) => (typeof binding === "string" ? binding : binding[0]) === name).map(([stroke]) => keyLabel(stroke)));
-  return keys.length ? `${label} (${[...new Set(keys)].join(", ")})` : label;
+  const keys = keysOf(keymap, name);
+  return keys.length ? `${label} (${keys.join(", ")})` : label;
 }
 
 // What the palette calls an action: "studio::NextSession" is "Next session", with its argument after.

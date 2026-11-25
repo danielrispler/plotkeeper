@@ -192,7 +192,7 @@ h1 { margin: 0 0 var(--sp-4); }
 /* A split's divider (danielrispler/Falinks#529), in the gap between its two panes. */
 /* The terminal panel (danielrispler/Falinks#542): a band under the panes, its height set by `panel.ts`; its divider on its top edge. */
 /* The toasts (#457): manual popovers in the top layer, so no z-index; the region spans the map's box less a margin, and
-   `toast.ts` places each open toast in it: the needs-you, the note and the copy toasts down its top-right corner, the Clear toast at its
+   `toast.ts` places each open toast in it: the needs-you, the note, the copy and the what's-new toasts down its top-right corner, the Clear toast at its
    bottom-left. The needs-you toast (danielrispler/Falinks#573) takes none of the map's space. */
 .toasts { position: absolute; inset: var(--sp-5); pointer-events: none; }
 .toast { position: fixed; inset: auto; margin: 0; border: 0; padding: 0; overflow: visible; pointer-events: auto; max-width: var(--toast); display: grid;
@@ -216,6 +216,10 @@ h1 { margin: 0 0 var(--sp-4); }
 /* The note toast: a turn that ended off screen; not in colour. */
 .toast.note { background: var(--raised); box-shadow: inset 0 0 0 var(--hair) var(--edge), var(--shadow); }
 .toast.note .name { color: var(--fg); }
+/* The what's-new toast (#527): its message, the "What's new" link and ×, on one line, as the Clear toast's. */
+.toast.whats-new { grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--sp-4); padding: var(--sp-4) var(--sp-3) var(--sp-4) var(--sp-5); }
+.toast.whats-new > .btn.quiet.small { margin: 0; }
+.toast.whats-new a.btn { text-decoration: none; }
 /* The copy toast (#493): what was copied and its first lines, each cut at the toast's width, or the whole prompt to copy by hand; then
    Copy, when the clipboard refused, and ×. */
 .toast.copy { grid-template-columns: minmax(0, 1fr) auto auto; }
@@ -259,6 +263,8 @@ h1 { margin: 0 0 var(--sp-4); }
    header's "⋯" menu (#458) is placed the same way. */
 #rail-actions, #project-actions { position-area: block-end span-inline-start; margin-block: var(--sp-2); position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline; }
 .story { overflow-y: auto; padding: var(--sp-4) var(--sp-5) var(--sp-5); }
+/* The rail with no session picked (#526): its line, then what will show there. */
+.rail-empty { display: grid; gap: var(--sp-3); }
 .notice-row { display: flex; align-items: flex-start; gap: var(--sp-3); margin: 0 0 var(--sp-4); }
 .notice-row:has(#notice[hidden]) { display: none; }
 #notice { flex: 1; min-width: 0; margin: 0; color: var(--muted); white-space: pre-line; overflow-wrap: anywhere; }
@@ -279,13 +285,17 @@ h1 { margin: 0 0 var(--sp-4); }
              box-shadow: inset var(--mark) 0 0 var(--fg); overflow-wrap: anywhere; }
 .intention > p { margin: 0 0 var(--sp-2); font-size: var(--size-large); font-weight: 500; }
 .intention.old > p { color: var(--muted); }
-.intention:has(#intention-text:empty) > p { display: none; }
+.intention:has(#intention-text:empty) > p:not(.tip) { display: none; }
 .age { color: var(--muted); font-size: var(--size-small); font-weight: 400; }
 .unavailable { color: var(--muted); font-size: var(--size-small); margin: 0 0 var(--sp-2); }
 .step { margin: 0; min-width: 0; font-size: var(--size-small); }
 .step summary { overflow-wrap: anywhere; }
 .step:not(.has-command) summary { list-style: none; cursor: default; }
 .step code { display: block; white-space: pre-wrap; overflow-wrap: anywhere; margin: var(--sp-2) 0 0; }
+/* A Wait tip (#523): the box's last line, under the step, set apart by a hair line; muted, small, one line ending in "…", its
+   full text the hover. */
+.intention > .tip { margin: var(--sp-4) 0 0; padding-top: var(--sp-4); border-top: var(--hair) solid var(--line); color: var(--muted);
+  font-size: var(--size-small); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tool-name { font-weight: 600; }
 /* The feed of turns, newest first: each turn one block, told apart by a line, as in the story rail
    mockup (danielrispler/Falinks#517). Its prompt is one line; its "ask about this" shows on hover or while open. */
@@ -594,7 +604,7 @@ body.resizing { -webkit-user-select: none; user-select: none; cursor: col-resize
 .law-patch-note { font-size: var(--size-xs); color: var(--faint); }
 .plate.predicted { outline: var(--hair) dashed var(--faint); outline-offset: var(--sp-2); }
 .plate-predicted { font-size: var(--size-xs); color: var(--faint); }
-.brief-expected { flex: none; margin: 0 0 var(--sp-3); font-size: var(--size-xs); color: var(--faint); }
+.brief-expected { flex: none; margin: 0 0 var(--sp-3); padding-inline-end: 8em; font-size: var(--size-xs); color: var(--faint); }
 /* The PR brief alone dims the map, and both panels with it (#385): what they hold, not their glass, which still covers the dimmed plates under it. */
 body.brief-open .map-panel > *, body.brief-open .map-side > * > * { opacity: var(--brief-dim); transition: opacity var(--motion); }
 /* The gear (#385): quiet, in the top bar, pressed while Settings shows. */
@@ -691,12 +701,31 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 /* The part sheet: in the side area, beside the map. */
 .sheet { position: relative; display: flex; flex-direction: column; gap: var(--sp-3); }
 .sheet-close { position: absolute; top: 0; right: 0; }
-.sheet-name { margin: 0; font-size: var(--size-large); font-weight: 600; padding-right: var(--sp-7); }
+/* The sheet's header (#522): the explanations' `?` beside the ×, at the sheet's top right. */
+.sheet-header { position: absolute; top: 0; right: 0; display: flex; align-items: center; gap: var(--sp-2); }
+.sheet-header .sheet-close { position: static; }
+.sheet-name { margin: 0; font-size: var(--size-large); font-weight: 600; padding-right: calc(2 * var(--sp-7) + var(--sp-4)); }
+/* The `?` toggle: filled while the explanations show, a muted ring while they don't, so it reads as a switch. */
+.btn.explain-toggle { display: grid; place-items: center; width: calc(var(--sp-6) + var(--sp-2)); height: calc(var(--sp-6) + var(--sp-2)); padding: 0;
+                      border-radius: 50%; font-size: var(--size-xs); font-weight: 600; line-height: 1; color: var(--muted); box-shadow: inset 0 0 0 var(--hair) var(--muted); }
+.btn.explain-toggle[aria-pressed="true"] { background: var(--fg); color: var(--bg); box-shadow: none; }
+.btn.explain-toggle[aria-pressed="true"]:hover:not(:disabled) { background: var(--muted); }
+/* An explanation: one short muted line under its heading, pulled up to it; the selected option's and the fog actions' sit under their
+   buttons at the sheet's own gap. */
+.explain { margin: calc(-1 * var(--sp-2)) 0 0; font-size: var(--size-xs); line-height: 1.45; color: var(--muted); text-wrap: pretty; }
+.explain.explain-choice { margin: 0; }
+.sheet-link > .explain-link { margin: 0; }
+/* In the brief (#524): a step's line sits between its title and its body; "not yet ratified"'s spans its item's row. */
+.brief-txt > .explain { margin: calc(-1 * var(--sp-2)) 0 var(--sp-3); }
+.brief-also-title + .explain { margin: var(--sp-1) 0 0; }
+.ratify-row > .explain-link { grid-column: 1 / -1; margin: var(--sp-1) 0 0; }
 .sheet-caption { margin: 0; font-size: var(--size-small); color: var(--muted); }
 .sheet-purpose { margin: var(--sp-3) 0 0; font-size: var(--size-read); line-height: 1.5; text-wrap: pretty; }
 .sheet-holds { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-4); }
 .sheet-held { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--size-small); line-height: 1.45; }
 .sheet-held-name { font-weight: 600; }
+.sheet-held-note .sheet-held-name { font-style: italic; font-weight: 400; }
+.sheet-held-kind { color: var(--muted); }
 .sheet-held-text { overflow-wrap: anywhere; }
 .sheet-held-files { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); font-size: var(--size-xs); color: var(--muted); }
 .sheet-held-files code { min-width: 0; overflow-wrap: anywhere; }
@@ -943,15 +972,17 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .brief-facts-list { margin: var(--sp-2) 0 0; padding-inline-start: var(--sp-6); color: var(--muted); }
 .brief-facts-list li + li { margin-top: var(--sp-2); }
 .brief-facts-files { margin: var(--sp-1) 0 0; padding-inline-start: var(--sp-5); font-family: var(--mono); overflow-wrap: anywhere; }
-/* Its end leaves room for Leave, which sits over the panel's top right corner. */
-.brief-stale { flex: none; margin: 0 0 var(--sp-3); padding-inline-end: 5.5em; font-size: var(--size-xs); color: var(--muted); text-wrap: pretty; }
+/* Its end leaves room for the ? and Leave, which sits over the panel's top right corner. */
+.brief-stale { flex: none; margin: 0 0 var(--sp-3); padding-inline-end: 8em; font-size: var(--size-xs); color: var(--muted); text-wrap: pretty; }
 .brief-stale-names { font-family: var(--mono); overflow-wrap: anywhere; }
-/* "Since you read" (#497): the story's head, first under the panel's head, with the full brief one click away; it leaves room for Leave too. */
-.brief-since { flex: none; margin: 0 0 var(--sp-3); padding-inline-end: 5.5em; font-size: var(--size-xs); color: var(--muted); text-wrap: pretty; }
+/* "Since you read" (#497): the story's head, first under the panel's head, with the full brief one click away; it leaves room for the ? and Leave too. */
+.brief-since { flex: none; margin: 0 0 var(--sp-3); padding-inline-end: 8em; font-size: var(--size-xs); color: var(--muted); text-wrap: pretty; }
 .brief-since-head { font-family: var(--mono); }
 .brief-since-full { font-size: var(--size-xs); }
 /* Leave sits over the top of the step's scrollbar when a tall step scrolls (#490): its own background keeps the thumb from under its word. */
-.brief-leave { position: absolute; top: var(--sp-5); right: var(--sp-5); color: var(--faint); }
+/* The brief's header (#524): the explanations' `?` beside Leave, over the panel's top right corner. */
+.brief-header { position: absolute; top: var(--sp-5); right: var(--sp-5); z-index: 1; display: flex; align-items: center; gap: var(--sp-2); }
+.brief-leave { color: var(--faint); }
 .btn.quiet.brief-leave { background: var(--surface); }
 .btn.primary.brief-next { min-inline-size: var(--brief-next); background: var(--brief-light); color: var(--bg); }
 .map-world.glide { transition: transform var(--brief-camera); }

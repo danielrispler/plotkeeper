@@ -306,7 +306,12 @@ function drawEmpty(body: HTMLElement, state: MapState | null) {
     install.setAttribute("rel", "noreferrer");
     install.title = "How to record the agents you start in your terminals: plotkeeper install";
     box.classList.add("map-fresh");
-    box.append(text("p", "Run your agent in a repository; it appears here", "map-empty-title"), install);
+    // Each empty screen says what will appear there (#526), whatever the Explanations switch says.
+    box.append(
+      text("p", "Run your agent in a repository; it appears here", "map-empty-title"),
+      text("p", "plotkeeper follows each agent session and maps what it changes.", "empty"),
+      install,
+    );
   } else if (state === null) {
     box.append(text("p", "Reading the map…", "empty"));
   } else if (state.status === "unreadable") {
@@ -316,6 +321,7 @@ function drawEmpty(body: HTMLElement, state: MapState | null) {
     box.append(
       text("p", "No map yet", "map-empty-title"),
       text("p", `${name(state.project)} has no system-map.json on ${where}.`, "empty"),
+      text("p", "A map names your parts and their rules; changes light them up.", "empty"),
     );
     // The page starts no session: the prompt is shown to give to one in the project.
     box.append(text("p", "To draft one, give this to a session in the project:", "empty"), text("pre", draftPrompt, "map-draft"));

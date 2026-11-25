@@ -23,6 +23,7 @@ import { enterRefresher, refresherNode, staleWhy } from "./map-stale.js";
 import { ciDrawer, effectiveTier, fogActions, type Part, proofDrawer, type Sheet, sheetCi, sheetMarks, sheetOf, talksTo, type Tier } from "./map-model.js";
 import { openBriefOf, openCatchUpOf } from "./map-brief.js";
 import { lawAction, lawActionNodes, patchActs } from "./patch-review.js";
+import { explained, explainedChoice, explainedLinks, explainLine, explanationsOn, explainToggle, onExplanations, SHEET, SHEET_HEADINGS } from "./explanations.js";
 
 // The part whose sheet is open, and the project it is in; a sheet never carries over to another project's map.
 let open: { project: string; part: string } | null = null;
@@ -142,6 +143,24 @@ function drawSheet(view: MapView) {
     return syncSide(view.slots);
   }
   view.slots.canvas.querySelector(`.plate[data-id="${CSS.escape(part.id)}"]`)?.classList.add("open");
+  // The `?` keeps the focus across a draw (a click on it draws the sheet again with or without the explanations): the new one takes it.
+  const focused = document.activeElement;
+  const keepFocus = focused instanceof HTMLElement && focused.classList.contains("explain-toggle") && slot.contains(focused);
+  const { card, extra, toggle } = sheetCard(view, part);
+  showWidth(keptWidth());
+  // The handle stays in the slot across draws: moving it out, even to put it back, drops its pointer capture and ends a drag, and the
+  // server's `map-landed` draws the sheet again at every stage of a write (#450).
+  const bar = handle();
+  if (bar.parentElement === slot) [...slot.children].forEach((child) => child !== bar && child.remove());
+  else slot.replaceChildren(bar);
+  slot.append(card);
+  if (keepFocus) toggle.focus();
+  drawStrip(view, part.id, extra);
+  syncSide(view.slots);
+}
+
+// The sheet's card for `part` on `view`, its `.sheet-extra` foot (the history strip's, drawn once the card is in the page) and its `?`.
+export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra: HTMLElement; toggle: HTMLElement } {
   const tier = effectiveTier(part, view.state.user.tiers);
   const sheet = sheetOf(part, view.doc.laws, tier, view.scrub ? undefined : view.state.fog?.[part.id]);
 
@@ -149,11 +168,21 @@ function drawSheet(view: MapView) {
   closer.setAttribute("aria-label", "Close");
   closer.title = "Close the sheet (Esc)";
   closer.addEventListener("click", closeSheet);
+  // Explanations (#522): a line under each heading, the selected tier's meaning under the tiers, a link kind's and "not yet ratified"'s
+  // at their first link, and the fog actions' under them. The `?` beside the × shows or hides them all.
+  const explain = explanationsOn();
+  const heading = (words: string) => explained(text("h3", words, "sheet-heading"), SHEET_HEADINGS[words], explain);
+  const header = text("div", "", "sheet-header");
+  const toggle = explainToggle(explain);
+  header.append(toggle, closer);
   const tiers = text("div", "", "sheet-tiers");
+  let selected: HTMLElement | undefined;
   for (const each of sheet.tiers) {
     const button = pressable(text("button", each.label, "btn"), each.pressed, () => setTier(view, part.id, each.tier).catch(failure("map_set_tier")));
-    button.title = `Track ${part.name} as ${each.label}`;
+    // Each tier's meaning on hover, so the ones not picked compare without a change.
+    button.title = SHEET.tiers[each.tier];
     if (view.scrub) (button as HTMLButtonElement).disabled = true;
+    if (each.pressed) selected = button;
     tiers.append(button);
   }
   // The laws and links at this part that landed without Daniel's say: marked "not yet ratified", with accept and overturn. Of now only.
@@ -163,7 +192,8 @@ function drawSheet(view: MapView) {
     const mark = text("span", "", `law-mark ${law.backing}`);
     const row = text("li", "", "sheet-law");
     row.dataset.law = law.id;
-    row.append(mark, text("span", law.text, "sheet-law-text"), text("span", law.label, "sheet-law-backing"), text("span", "", "sheet-law-actions"));
+    const acts = text("span", "", "sheet-law-actions");
+    row.append(mark, text("span", law.text, "sheet-law-text"), text("span", law.label, "sheet-law-backing"), acts);
     row.title = `${law.label}: ${law.text}`;
     if (law.backing === "check" && !view.scrub) {
       const proof = text("button", "See the proof", "btn quiet");
@@ -173,10 +203,10 @@ function drawSheet(view: MapView) {
           .then((proofs) => openDrawer(proofDrawer(law.id, proofs)))
           .catch(failure("map_proof"));
       });
-      row.querySelector(".sheet-law-actions")!.append(proof);
+      acts.append(proof);
     }
     // A law on trust offers Back a law, or shows where its run's patch stands (#398). Of now only.
-    if (law.backing === "trust" && !view.scrub) row.querySelector(".sheet-law-actions")!.append(...lawActionNodes(lawAction(law.id, view.state.law_patches), patchActs));
+    if (law.backing === "trust" && !view.scrub) acts.append(...lawActionNodes(lawAction(law.id, view.state.law_patches), patchActs));
     const pr = unratified.laws.get(law.id);
     if (pr !== undefined) {
       row.classList.add("unratified");
@@ -187,7 +217,8 @@ function drawSheet(view: MapView) {
   const nameOf = (id: string) => view.doc.parts.find((p) => p.id === id)?.name ?? view.doc.actors.find((a) => a.id === id)?.name ?? id;
   // "Talks to" (spec #473): every link at either end, its arrow, other end, kind and reason; an unratified one carries its accept and overturn.
   const pending = new Map(unratified.links.map((link) => [link.id, sheetLinkItem(link, link.pr)]));
-  const links = talksTo(part.id, view.doc.links, nameOf).map((talk) => {
+  const talks = talksTo(part.id, view.doc.links, nameOf);
+  const rows = talks.map((talk) => {
     const row = text("li", "", "sheet-link");
     row.dataset.link = talk.link;
     const arrow = text("span", talk.out ? "→" : "←", "sheet-link-dir");
@@ -204,9 +235,11 @@ function drawSheet(view: MapView) {
     }
     return row;
   });
+  const links = explainedLinks(rows, talks.map((talk) => ({ kind: talk.kind, unratified: pending.has(talk.link) })), explain);
   const fog = text("div", "", `sheet-fog${!view.scrub && view.state.fog?.[part.id] ? ` ${view.state.fog[part.id]}` : ""}`);
   fog.append(text("p", sheet.fogLine, "sheet-fog-line"));
   const actions = fogActions(view.scrub ? undefined : view.state.fog?.[part.id], view.state.catch_ups?.[part.id]);
+  const fogButtons: HTMLElement[] = [];
   if (actions.main) {
     const { open: opens, label, title, note } = actions.main;
     const main = text("button", label, "btn primary sheet-catch-up") as HTMLButtonElement;
@@ -216,6 +249,7 @@ function drawSheet(view: MapView) {
       void openCatchUpOf(view.project, part.id);
     });
     fog.append(main);
+    fogButtons.push(main);
     if (note) fog.append(text("span", note, "sheet-catch-up-note"));
     if (opens.kind === "catch-up") {
       const key = `${view.project}|${part.id}`;
@@ -233,6 +267,14 @@ function drawSheet(view: MapView) {
       know(view, part.id).catch(failure("map_know"));
     });
     fog.append(clear);
+    fogButtons.push(clear);
+    // The fog actions' line under the buttons shown, each button described by it.
+    if (explain) {
+      const kind = actions.main ? (actions.main.open.kind === "chapter" ? "chapter" : "catchUp") : "know";
+      const note = explainLine(SHEET.fogActions[kind], "explain-choice");
+      for (const button of fogButtons) button.setAttribute("aria-describedby", note.id);
+      fog.append(note);
+    }
   }
   // A part with no fog offers the refresher (#392).
   const refresher = !view.scrub && refreshing === part.id ? refresherNode(view, part.id) : null;
@@ -259,47 +301,40 @@ function drawSheet(view: MapView) {
       ci.append(drill);
     }
   }
+  const lawList = text("ul", "", "sheet-laws");
+  const linkList = text("ul", "", "sheet-links");
+  // Safari drops a list's semantics under `list-style: none`; the role brings them back.
+  for (const list of [lawList, linkList]) list.setAttribute("role", "list");
+  lawList.append(...laws);
+  linkList.append(...links);
   const card = text("div", "", "sheet");
   card.dataset.part = part.id;
   card.append(
-    closer,
+    header,
     text("h2", sheet.name, "sheet-name"),
     text("p", sheet.caption, "sheet-caption"),
     ...(view.scrub ? [] : marksList(view, part.id)),
     // A converted version 1 map may have had an empty description: no empty paragraph for it.
     ...(sheet.purpose ? [text("p", sheet.purpose, "sheet-purpose")] : []),
-    ...(sheet.holds.length ? [text("h3", "Holds", "sheet-heading"), heldList(sheet.holds)] : []),
-    text("h3", "Tier", "sheet-heading"),
-    tiers,
-    text("h3", "Laws", "sheet-heading"),
-    ...(laws.length ? [text("ul", "", "sheet-laws")] : [text("p", "No laws on this part", "empty")]),
-    text("h3", "Talks to", "sheet-heading"),
-    ...(links.length ? [text("ul", "", "sheet-links")] : [text("p", "No link at this part", "empty")]),
+    ...(sheet.holds.length ? [...heading("Holds"), heldList(sheet.holds)] : []),
+    ...heading("Tier"),
+    ...explainedChoice(tiers, selected, SHEET.tiers[tier], explain),
+    ...heading("Laws"),
+    ...(laws.length ? [lawList] : [text("p", "No laws on this part", "empty")]),
+    ...heading("Talks to"),
+    ...(links.length ? [linkList] : [text("p", "No link at this part", "empty")]),
     // Fog and CI are of now: a past commit shows neither.
     ...(refresher ? [refresher] : []),
-    ...(view.scrub ? [] : [text("h3", "Fog", "sheet-heading"), fog]),
-    ...(state ? [text("h3", "CI on main", "sheet-heading"), ci] : []),
+    ...(view.scrub ? [] : [...heading("Fog"), fog]),
+    ...(state ? [...heading("CI on main"), ci] : []),
   );
   const extra = text("div", "", "sheet-extra");
   card.append(extra);
-  card.querySelector(".sheet-laws")?.append(...laws);
-  // Safari drops a list's semantics under `list-style: none`; the role brings them back.
-  card.querySelector(".sheet-laws")?.setAttribute("role", "list");
-  card.querySelector(".sheet-links")?.append(...links);
-  card.querySelector(".sheet-links")?.setAttribute("role", "list");
   const overturned = overturnNote(view.project, (item) =>
     item.kind === "law" ? sheet.laws.some((law) => law.id === item.id) : item.kind === "link" && view.doc.links.some((link) => link.id === item.id && (link.from === part.id || link.to === part.id)),
   );
   if (overturned) card.append(overturned);
-  showWidth(keptWidth());
-  // The handle stays in the slot across draws: moving it out, even to put it back, drops its pointer capture and ends a drag, and the
-  // server's `map-landed` draws the sheet again at every stage of a write (#450).
-  const bar = handle();
-  if (bar.parentElement === slot) [...slot.children].forEach((child) => child !== bar && child.remove());
-  else slot.replaceChildren(bar);
-  slot.append(card);
-  drawStrip(view, part.id, extra);
-  syncSide(view.slots);
+  return { card, extra, toggle };
 }
 
 // Why the part's plate carries its marks (#495), first on its sheet: its fog, its staleness band and a broken law, each from this case's
@@ -326,15 +361,23 @@ function marksList(view: MapView, part: string): HTMLElement[] {
   return [list];
 }
 
-// The things a part holds, each its name, its sentence and its key files.
-function heldList(holds: Sheet["holds"]): HTMLElement {
+// The things a part holds, each its name, its sentence and its key files. An item with no key files is a note (#525): its name in italics,
+// then "· note", so it never reads as a section heading.
+export function heldList(holds: Sheet["holds"]): HTMLElement {
   const list = text("ul", "", "sheet-holds");
   // Safari drops a list's semantics under `list-style: none` and flex; the role brings them back.
   list.setAttribute("role", "list");
   for (const item of holds) {
-    const row = text("li", "", "sheet-held");
-    row.append(text("span", item.name, "sheet-held-name"), text("span", item.text, "sheet-held-text"));
-    if (item.files.length) {
+    const note = !item.files.length;
+    const row = text("li", "", note ? "sheet-held sheet-held-note" : "sheet-held");
+    const name = text("span", item.name, "sheet-held-name");
+    if (note) {
+      const head = text("span", "", "sheet-held-head");
+      head.append(name, " ", text("span", "· note", "sheet-held-kind"));
+      row.append(head);
+    } else row.append(name);
+    row.append(text("span", item.text, "sheet-held-text"));
+    if (!note) {
       const files = text("span", "", "sheet-held-files");
       // A path is a code token: never machine-translated.
       files.append(...item.files.map((file) => Object.assign(text("code", file), { translate: false })));
@@ -354,4 +397,9 @@ onPlateClick(({ view, part }) => {
   drawSheet(view);
 });
 onDraw(drawSheet);
+// The explanations switched on or off (#522): the open sheet draws again with or without them.
+onExplanations(() => {
+  const view = currentMap();
+  if (view && open) drawSheet(view);
+});
 registerLayer("sheet", { open: () => open !== null && currentMap() !== null, close: closeSheet });

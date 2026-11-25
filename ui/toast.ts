@@ -40,9 +40,9 @@ export function toastFor(listed: Session[], focused: string | null, dismissed: S
 const dismissed = new Set<string>();
 let shown: Toast | null = null;
 
-// The toasts, in the region's order: the needs-you, the note and the copy toasts (#493) down its top-right corner, the Clear toast at its
-// bottom-left.
-const TOASTS = ["toast", "note-toast", "copy-toast", "clear-toast"];
+// The toasts, in the region's order: the needs-you, the note, the copy (#493) and the what's-new (#527) toasts down its top-right
+// corner, the Clear toast at its bottom-left.
+const TOASTS = ["toast", "note-toast", "copy-toast", "whats-new-toast", "clear-toast"];
 const said = new Map<string, string>();
 let returnTo: HTMLElement | null = null;
 
@@ -95,16 +95,16 @@ export function stackToasts() {
   target?.focus();
 }
 
-// Top-layer popovers leave the region's layout, so each open toast is placed in the region's box by hand: the first three down its
-// top-right corner, the copy toast under them, one under the other, and the Clear toast in its bottom-left corner.
+// Top-layer popovers leave the region's layout, so each open toast is placed in the region's box by hand: the first four down its
+// top-right corner, one under the other, and the Clear toast in its bottom-left corner.
 // With none open, nothing is measured, so a resize or an update with no toast forces no layout; every size is read before any is set.
 function placeToasts(toasts: HTMLElement[]) {
-  const [needs, note, copy, clear] = toasts.map((toast) => (toast.matches(":popover-open") ? { toast, w: toast.offsetWidth, h: toast.offsetHeight } : null));
-  if (!needs && !note && !copy && !clear) return;
+  const [needs, note, copy, whatsNew, clear] = toasts.map((toast) => (toast.matches(":popover-open") ? { toast, w: toast.offsetWidth, h: toast.offsetHeight } : null));
+  if (!needs && !note && !copy && !whatsNew && !clear) return;
   const box = element("toasts").getBoundingClientRect();
   let top = 0;
   let above = 0;
-  for (const open of [needs, note, copy]) {
+  for (const open of [needs, note, copy, whatsNew]) {
     if (!open) continue;
     open.toast.style.top = `calc(${box.top + top}px + ${above} * var(--sp-3))`;
     open.toast.style.left = `${box.right - open.w}px`;
@@ -202,5 +202,27 @@ export function showClearToast(count: number, undo: () => void) {
 
 export function hideClearToast() {
   element("clear-toast").hidden = true;
+  stackToasts();
+}
+
+// The what's-new toast (#527): "Updated to X.Y.Z", a "What's new" link to that version's GitHub Release, and ×. Not in colour; it
+// stays until its ×.
+export function showWhatsNewToast(version: string, url: string) {
+  const toast = element("whats-new-toast");
+  const message = `Updated to ${version}`;
+  const link = text("a", "What's new", "btn small") as HTMLAnchorElement;
+  link.href = url;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.title = "Open this version's release notes on GitHub";
+  toast.replaceChildren(text("strong", message, "name"), link);
+  toastButtons(toast, () => link, hideWhatsNewToast, "Hide this toast; it does not come back for this version");
+  toast.dataset.say = toastSays([message]);
+  toast.hidden = false;
+  stackToasts();
+}
+
+function hideWhatsNewToast() {
+  element("whats-new-toast").hidden = true;
   stackToasts();
 }
