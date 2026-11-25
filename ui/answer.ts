@@ -5,19 +5,7 @@
 
 import { failure, invoke, listen } from "./dom.js";
 import { studio } from "./state.js";
-import { askKind, type Question } from "./types.js";
-
-// The answer hook's request (`hook/src/answer.rs`): a question or a plan at its `PreToolUse`, or a
-// permission request, which names no call (danielrispler/Falinks#478). `agent_id` is the asking subagent's, null for the
-// session's own agent.
-export type Ask = {
-  nonce: string;
-  hook_event_name: string;
-  tool_name: string;
-  tool_use_id: string | null;
-  tool_input: Record<string, unknown>;
-  agent_id: string | null;
-};
+import { type Ask, askKind, type Question } from "./types.js";
 
 // Whether `ask`'s card shows in the view of `agent` (null: the session's own): a question docks only
 // in its asker's view, a plan or a permission in every view of its session (`story.ts`).

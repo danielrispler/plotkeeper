@@ -31,7 +31,7 @@ import { besideSheet, closePanel, panelShown, showHistory, showPanel, startPanel
 import { showPalette } from "./palette.js";
 import { projectOfCwd, selectedProject, sidebarOrder } from "./projects.js";
 import { narrowBelow, selectedView } from "./map-model.js";
-import { reload, type SettingsFiles } from "./settings.js";
+import { reload } from "./settings.js";
 import { setFocus, setMissed, setProjects, setSettings, studio } from "./state.js";
 import { askDelete, drawFeed, lastHeadline, showCards, showView, startStory } from "./story.js";
 import { startRailBriefs } from "./rail-brief.js";
@@ -41,7 +41,7 @@ import { jumpToNeedsYou, showToast, showWhatsNewToast, watchToasts } from "./toa
 import { askOnce, notifyIfAway, type Alert } from "./alerts.js";
 import { type Copied, finishedNote, showCopyToast, showNote, watchNotes } from "./notes.js";
 import { startWhatsNew } from "./whats-new.js";
-import type { SavedProject, Selection, Session, SessionCards } from "./types.js";
+import type { SavedProject, Selection, Session, SessionCards, SettingsFiles } from "./types.js";
 import { HOVERS } from "./hovers.js";
 import { explanationsApplied, startExplanations, toggleExplanations } from "./explanations.js";
 

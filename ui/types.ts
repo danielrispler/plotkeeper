@@ -1,11 +1,36 @@
-// What the shell sends the window: sessions, the selection and a session's cards.
-// A field the shell sends that the window never reads is optional here, so the snap fixtures may leave it out. The wire
-// check (`scripts/wire/`, #246) types real values of the shell's against these, so a field one lacks fails `npm run check`.
+// What the server sends the page: sessions, the selection and a session's cards, and the other wire shapes, so this file imports
+// nothing (spec #548, Group 4). A field the server sends that the page never reads is optional here, so the snap fixtures may leave it
+// out. The wire check (`scripts/wire/`, #246) types real values of the server's against these, so a field one lacks fails `npm run check`.
 
-import type { Ask } from "./answer.js";
-import type { Anchor, Facts, Hunk } from "./ask.js";
-import type { CheckOutput } from "./evidence.js";
-import type { SettingsFiles } from "./settings.js";
+// The answer hook's request (`hook/src/answer.rs`): a question or a plan at its `PreToolUse`, or a
+// permission request, which names no call (danielrispler/Falinks#478). `agent_id` is the asking subagent's, null for the
+// session's own agent.
+export type Ask = {
+  nonce: string;
+  hook_event_name: string;
+  tool_name: string;
+  tool_use_id: string | null;
+  tool_input: Record<string, unknown>;
+  agent_id: string | null;
+};
+
+// What Ask is opened on: the core's `Anchor`.
+export type Anchor =
+  | { kind: "file"; turn: number; root: string; path: string; from?: string | null }
+  | { kind: "check"; agent: string | null; call: string }
+  | { kind: "subagent"; agent: string }
+  | { kind: "headline"; turn: number };
+
+// The recorded facts, in sections: `at` is Unix milliseconds when known.
+export type Facts = { sections: { label: string; facts: { at: number | null; text: string }[] }[] };
+
+export type Hunk = { text: string; left_out: number; binary: boolean; first_line: number };
+
+// A check's output, as the server reads it: its exit code and the tail of what it printed.
+export type CheckOutput = { exit_code: number | null; tail: string };
+
+// The two files' text, as the server sends it; null: no file.
+export type SettingsFiles = { settings: string | null; keymap: string | null };
 
 // `detail` is a command's description, else what the step works on; `command` a command's full text.
 export type Step = { tool: string; detail: string | null; command?: string | null };

@@ -6,18 +6,8 @@
 
 import { failure, fullTitle, invoke, messageOf, onEnter, text } from "./dom.js";
 import { rendered } from "./markdown.js";
+import type { Anchor, Facts, Hunk } from "./types.js";
 
-// What Ask is opened on: the core's `Anchor`.
-export type Anchor =
-  | { kind: "file"; turn: number; root: string; path: string; from?: string | null }
-  | { kind: "check"; agent: string | null; call: string }
-  | { kind: "subagent"; agent: string }
-  | { kind: "headline"; turn: number };
-
-// The recorded facts, in sections: `at` is Unix milliseconds when known.
-export type Facts = { sections: { label: string; facts: { at: number | null; text: string }[] }[] };
-
-export type Hunk = { text: string; left_out: number; binary: boolean; first_line: number };
 // A hunk as plain text; `more` ends it with "… N more lines" when the cap left some out, for a view with no button of its own.
 export const hunkText = (h: Hunk | null, more = true) =>
   h === null ? "The hunk could not be read." : h.binary ? "Binary file: no lines to show." : h.text + (more && h.left_out ? `… ${h.left_out} more lines` : "");

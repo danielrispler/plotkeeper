@@ -10,8 +10,8 @@
 // Ollama needs none.
 
 import { confirmed, drawWithStatus, failure, invoke, messageOf, text } from "./dom.js";
-import type { Settings, SettingsFiles } from "./settings.js";
-import type { Writers, WriterKind, WriterTest } from "./types.js";
+import type { Settings } from "./settings.js";
+import type { SettingsFiles, Writers, WriterKind, WriterTest } from "./types.js";
 import { GATE } from "./writer-notice.js";
 
 export type Choice = { writer: WriterKind; model: string; effort: string };

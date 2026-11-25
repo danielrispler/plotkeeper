@@ -1,8 +1,8 @@
 // The session list and the selection, as the server last sent them, and the settings files in effect. The page reads `studio` anywhere
 // and changes it only through the setters below (spec #548, Group 4).
 
-import { initial, type SettingsFiles } from "./settings.js";
-import type { SavedProject, Selection, Session, SessionCards } from "./types.js";
+import { initial } from "./settings.js";
+import type { SavedProject, Selection, Session, SessionCards, SettingsFiles } from "./types.js";
 
 /** The press waiting for its reply: the row Daniel just pressed, shown selected until the server replies (danielrispler/Falinks#570). */
 type Pending = { id: string; agent: string | null };

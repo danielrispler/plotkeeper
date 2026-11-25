@@ -5,9 +5,9 @@
 // draws the line open again.
 
 import { code, failure, fullTitle, glyphOnly, invoke, messageOf, pressable, scrollingPre, statusRegion, text } from "./dom.js";
-import { askAnchor, type Hunk, hunkText } from "./ask.js";
+import { askAnchor, hunkText } from "./ask.js";
 import { diffRequest } from "./diff.js";
-import type { Capabilities, Check, Turn, TurnFile } from "./types.js";
+import type { Capabilities, Check, CheckOutput, Hunk, Turn, TurnFile } from "./types.js";
 import { HOVERS } from "./hovers.js";
 
 type Facts = Pick<Turn, "files" | "checks">;
@@ -81,7 +81,6 @@ const wordsKey = (session: string, c: Check) => {
   return last ? `${session} ${last.agent ?? ""} ${last.call}` : null;
 };
 
-export type CheckOutput = { exit_code: number | null; tail: string };
 const outputText = (output: CheckOutput) => `${output.exit_code === null ? "No exit code" : `exit code ${output.exit_code}`}\n${output.tail}`;
 
 // A failed check's row: its label, which opens its exit code and the output's tail under it. Only this row changes.

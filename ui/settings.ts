@@ -4,7 +4,7 @@
 // one stays in effect.
 
 import { messageOf } from "./dom.js";
-import type { WriterKind } from "./types.js";
+import type { SettingsFiles, WriterKind } from "./types.js";
 
 // An action, or an action with its argument, as Zed writes `["terminal::SendText", "\u0001"]`.
 export type Binding = string | [string, string];
@@ -189,8 +189,6 @@ function readKeymap(json: unknown, report: Report): Keymap {
   return keymap;
 }
 
-// The two files' text, as the shell sends it; null: no file.
-export type SettingsFiles = { settings: string | null; keymap: string | null };
 
 // The settings files from their text, each falling back to `previous` when it does not parse.
 export function reload(previous: Files, files: SettingsFiles): Files {

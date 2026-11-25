@@ -4,7 +4,7 @@
 // subagents, checks, a permission mode, a model, an estimate, a brief and decision history, and a
 // Git line with several tokens. Times are relative to the moment a fixture renders.
 
-import type { Ask } from "../../ui/answer.ts";
+import type { Ask } from "../../ui/types.ts";
 import type { BlockedCommand, ListedCheck, CheckStatus, Decision, OpenItem, RiskView, Session, SessionState, Subagent, Turn, TurnFile, TurnSummary } from "../../ui/types.ts";
 import { base, type Fixture } from "./base.ts";
 

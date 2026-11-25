@@ -12,7 +12,7 @@ import { askAnchor } from "./ask.js";
 import { rendered } from "./markdown.js";
 import { drawSidebar } from "./list.js";
 import { agentState, sessionName, showsLanded } from "./list-model.js";
-import { blockedRequestFor, openDecision, type Ask } from "./answer.js";
+import { blockedRequestFor, openDecision } from "./answer.js";
 import { blockedElement, docksInDock, fillCardRisk, retryLine, riskLine } from "./blocked.js";
 import { briefNodes } from "./cards.js";
 import { type Banner, bannerElement, bannerFor, bannerLives } from "./banner.js";
@@ -29,6 +29,7 @@ import { pageStore, stretches, tipText } from "./tips.js";
 import {
   askKind,
   stateLabels,
+  type Ask,
   type AskKind,
   type BlockedCommand,
   type ListedCheck,

@@ -3,9 +3,9 @@
 // the terminal" hands it back to the TUI; otherwise answering stays in the terminal. A plan or a
 // permission the hook waits on gets the same card with allow and deny (danielrispler/Falinks#478).
 
-import { askFor, sendAnswer, type Ask } from "./answer.js";
+import { askFor, sendAnswer } from "./answer.js";
 import { code, pressable, prose, text } from "./dom.js";
-import { askKind, type Question } from "./types.js";
+import { type Ask, askKind, type Question } from "./types.js";
 
 // Whether a question is open, answered in the terminal, or not answered: its call failed, or its turn
 // or its agent ended first. An open one needs Daniel, so only it takes the colour.
