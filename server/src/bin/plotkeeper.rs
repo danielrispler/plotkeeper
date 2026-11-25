@@ -113,6 +113,8 @@ fn main() -> ExitCode {
     refresh_hook_copies(&home);
     wire_on_start(&home);
     let _ = log::set_logger(&Stderr).map(|()| log::set_max_level(log::LevelFilter::Warn));
+    // Before the read loop, the web server and every thread they start: a panic on any of them stops plotkeeper.
+    studio_server::exit_on_panic(|code| std::process::exit(code));
     match run(&log, held) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {

@@ -636,55 +636,6 @@ fn two_jobs_queued_for_an_ended_session_run_one_at_a_time_in_order() {
     assert_eq!(threaded.queues(), 0);
 }
 
-/// A writer whose name panics for the prompt "boom".
-fn panicking(events: &Events) -> Scripted {
-    let events = events.clone();
-    Scripted {
-        name: Answer::run(move |prompt| {
-            if prompt == "boom" {
-                // Long enough for the next job to be queued behind this one.
-                thread::sleep(Duration::from_millis(100));
-            }
-            assert_ne!(prompt, "boom", "the writer panics");
-            events.lock().unwrap().push(format!("named {prompt}"));
-            None
-        }),
-        ..Scripted::fake()
-    }
-}
-
-#[test]
-fn a_job_that_panics_does_not_stop_the_later_jobs_of_its_session() {
-    let mut day = Day::new();
-    day.event("UserPromptSubmit", json!({ "prompt": "Fix the build" }));
-    let events = Events::default();
-    let threaded = TurnWriting::new(
-        day.core.clone(),
-        day.store.clone(),
-        Arc::new(panicking(&events)),
-        day.recorder.clone(),
-    );
-    let name = |prompt: &str| {
-        threaded.name(NameRequest {
-            session_id: "s1".into(),
-            prompt: prompt.into(),
-            response: None,
-            cwd: String::new(),
-        });
-    };
-    name("boom");
-    name("after");
-    for _ in 0..1000 {
-        if !events.lock().unwrap().is_empty() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(2));
-    }
-    assert_eq!(*events.lock().unwrap(), ["named after"]);
-    let logs = day.recorder.logs.lock().unwrap();
-    assert_eq!(logs.len(), 1, "{logs:?}");
-}
-
 // The turns of the stand-in's tests (`prompt_cards.rs`, danielrispler/plotkeeper#261).
 
 /// The fake writer, keeping what each Goal read: its prompts.

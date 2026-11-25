@@ -5,7 +5,7 @@ mod isolated_home;
 use std::{
     io::{BufRead, BufReader, Read, Write},
     net::TcpStream,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
     time::Duration,
 };
 use studio_server::{
@@ -34,10 +34,15 @@ struct Fixture {
 }
 
 fn fixture() -> Fixture {
+    fixture_of(|_| LOG.into())
+}
+
+/// A fixture over the event log `events` writes, given the fixture's folder.
+fn fixture_of(events: impl FnOnce(&std::path::Path) -> String) -> Fixture {
     isolated_home::set();
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("events.jsonl");
-    std::fs::write(&log, LOG).unwrap();
+    std::fs::write(&log, events(dir.path())).unwrap();
     let cards = Arc::new(Mutex::new(CardStore::open_beside(&log).unwrap()));
     let notes = Arc::new(Mutex::new(RiskNotes::open_beside(&log).unwrap()));
     let app = App::open_with(
@@ -327,6 +332,62 @@ fn a_second_plotkeeper_for_the_same_folder_finds_the_first() {
     assert!(
         matches!(acquire(dir.path()).unwrap(), Instance::First(_)),
         "a stopped one frees the folder"
+    );
+}
+
+#[test]
+fn another_command_answers_while_a_subagents_log_is_read() {
+    // A session with a subagent, whose log is beside the session's transcript in the fixture's folder.
+    let (session, agent) = ("s1", "a7e2c4f6b8d0a1c3e");
+    let f = fixture_of(|dir| {
+        let transcript = dir.join("s1.jsonl");
+        let logs = dir.join(session).join("subagents");
+        std::fs::create_dir_all(&logs).unwrap();
+        let line = serde_json::json!({
+            "type": "user", "agentId": agent, "sessionId": session, "isSidechain": true,
+            "message": {"role": "user", "content": "Find the probe."},
+        });
+        std::fs::write(
+            logs.join(format!("agent-{agent}.jsonl")),
+            format!("{line}\n"),
+        )
+        .unwrap();
+        let own = serde_json::json!({
+            "session_id": session, "hook_event_name": "UserPromptSubmit", "cwd": "/w", "prompt": "Go.",
+            "transcript_path": transcript, "studio_received_ms": 1793261000100u64,
+        });
+        let step = serde_json::json!({
+            "session_id": session, "hook_event_name": "PreToolUse", "cwd": "/w", "agent_id": agent,
+            "tool_name": "Bash", "tool_use_id": "t0", "tool_input": {"command": "ls"},
+            "transcript_path": transcript, "studio_received_ms": 1793261000200u64,
+        });
+        format!("{own}\n{step}\n")
+    });
+
+    // The read waits, timing-free, until the other command has answered: were the studio's lock held over the read,
+    // that command would never answer.
+    let (reading, started) = mpsc::channel();
+    let (answered, released) = mpsc::channel::<()>();
+    let app = f.app.clone();
+    let reader = std::thread::spawn(move || {
+        studio_server::subagent_log_through(&app, session.into(), agent.into(), 0, |file| {
+            reading.send(()).unwrap();
+            let _ = released.recv();
+            file.read()
+        })
+    });
+    started.recv().unwrap();
+    let sessions = post(&f, "sessions", "{}");
+    assert_eq!(sessions.status, 200);
+    assert!(sessions.body.contains(session), "{}", sessions.body);
+    answered.send(()).unwrap();
+
+    let log = reader.join().unwrap().expect("a log");
+    assert_eq!(
+        log.entries,
+        [studio_core::LogEntry::Prompt {
+            text: "Find the probe.".into()
+        }]
     );
 }
 
