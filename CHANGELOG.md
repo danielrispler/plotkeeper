@@ -2,6 +2,33 @@
 
 All notable changes to plotkeeper's npm package. Newest first; each version's section is the notes of its GitHub Release.
 
+## 0.3.0
+
+### Breaking
+
+- When auto mode blocks a command, you now answer it in your agent as usual. The Allow/Decline card is gone, and `plotkeeper install` no longer wires the hook behind it. The session shows as needing you until it moves on. (#574)
+
+### Added
+
+- The page explains itself. A ? toggle adds a line to each heading of a part's sheet and each brief step, and a tip shows while an agent runs. Empty screens say what will appear, and after an upgrade a notice links to what's new. (#543)
+- The map and a session's story link up. The parts a session touched in the last 7 days are marked, and hovering a turn lights its parts. A part's sheet lists "This session here". One badge per part, counting its sessions, replaces the per-session chips. (#564)
+- For each import link a PR adds, its brief shows where those imports are, with a click to the code at the PR's head. (#566)
+- The map can read Go imports: add `go-imports` to your map's `extractors`. (#583)
+
+### Changed
+
+- The TypeScript import reader skips comments, strings and test files, and follows workspace packages and re-export index files, so the map's links match your code more closely. (#547, #563)
+- The panel closes with a × on its header's line. (#573)
+- A crash now stops plotkeeper, and restarting it is safe. (#558)
+
+### Fixed
+
+- The map's lines and labels no longer show through the Background runs and Ready-for-review boxes. (#567, #573)
+- A hand edit of `settings.json` or `keymap.json` reaches the open page, and your next save from the page succeeds. (#558)
+- Server errors show on the page. (#558)
+- git and gh calls never wait on a prompt and stop at a deadline, so Back a law and lookups can't hang. (#558)
+- `plotkeeper install` writes `~/.zshrc` and the Codex and Cursor hook files atomically and keeps symlinks as symlinks. (#558)
+
 ## 0.2.0
 
 ### Added
