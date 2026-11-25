@@ -7,13 +7,13 @@ export const hoverAudit = `
   const words = (text) => (text ?? "").replace(/\\s+/g, " ").trim();
   const named = (node) => node.tagName.toLowerCase() + (node.id ? "#" + node.id : "") + (typeof node.className === "string" && node.className ? "." + node.className.trim().split(/\\s+/).join(".") : "") + " " + JSON.stringify(words(node.textContent).slice(0, 40));
   for (const control of controls) {
-    const own = control.getAttribute("interestfor");
+    const own = control.getAttribute("interestfor") ?? control.getAttribute("data-hint");
     const hinted = own ? document.getElementById(own) : null;
     const hover = hinted ? hinted.textContent : control.closest("[title]")?.getAttribute("title") ?? "";
     if (!words(hover)) log("snap:fail hover: no hover on " + named(control));
     else if ((hinted || control.hasAttribute("title")) && words(hover) === words(control.textContent)) log("snap:fail hover: repeats its label on " + named(control));
   }
-  for (const node of document.querySelectorAll("[title], [interestfor]")) {
+  for (const node of document.querySelectorAll("[title], [interestfor], [data-hint]")) {
     if (node.closest(".xterm")) continue;
     if (getComputedStyle(node).pointerEvents === "none") log("snap:fail hover: out of the pointer's reach on " + named(node));
   }

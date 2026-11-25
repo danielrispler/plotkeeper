@@ -85,7 +85,7 @@ function select(id: string, title: string, options: { value: string; label: stri
   const node = document.createElement("select");
   node.id = id;
   node.name = id;
-  node.title = title;
+  hint(node, title);
   for (const option of options) {
     const item = document.createElement("option");
     item.value = option.value;
@@ -180,7 +180,7 @@ function keyRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[]
   input.spellcheck = false;
   input.placeholder = set ? "Replace the API key…" : "Add an API key…";
   input.setAttribute("aria-label", "Anthropic API key");
-  input.title = "An Anthropic API key; it is kept in the macOS Keychain and never shown again";
+  hint(input, "An Anthropic API key; it is kept in the macOS Keychain and never shown again");
   const save = pressable(text("button", "Save key", "btn small"), null);
   save.id = "writer-key-save";
   hint(save, "Keep the pasted key in the macOS Keychain, in place of any key set; the page never shows it again");
@@ -242,7 +242,7 @@ function modelInput(models: string[]): HTMLElement {
   const input = document.createElement("input");
   input.id = "writer-model";
   input.name = "writer-model";
-  input.title = "The model the endpoint serves, such as gpt-6-luna on OpenAI or llama3.2 on a local Ollama";
+  hint(input, "The model the endpoint serves, such as gpt-6-luna on OpenAI or llama3.2 on a local Ollama");
   input.autocomplete = "off";
   input.spellcheck = false;
   input.value = choice.model;
@@ -279,7 +279,7 @@ function openaiRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElemen
   base.value = known.base_url ?? "";
   base.placeholder = `e.g. ${OPENAI_URL}…`;
   base.setAttribute("aria-label", "Base URL");
-  base.title = "The API's base URL, such as https://openrouter.ai/api/v1 or http://localhost:11434/v1 for Ollama; empty: OpenAI's own";
+  hint(base, "The API's base URL, such as https://openrouter.ai/api/v1 or http://localhost:11434/v1 for Ollama; empty: OpenAI's own");
   const input = document.createElement("input");
   input.id = "writer-openai-key";
   input.name = "openai-api-key";
@@ -288,7 +288,7 @@ function openaiRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElemen
   input.spellcheck = false;
   input.placeholder = keySet(known, "openai") ? "Replace the key (optional)…" : "Its API key (optional)…";
   input.setAttribute("aria-label", "API key of the OpenAI-compatible API");
-  input.title = "The endpoint's API key, if it needs one; it is kept in the macOS Keychain and never shown again";
+  hint(input, "The endpoint's API key, if it needs one; it is kept in the macOS Keychain and never shown again");
   const save = pressable(text("button", "Save", "btn small"), null);
   save.id = "writer-openai-save";
   hint(save, "Keep the base URL in settings.json and any pasted key in the macOS Keychain; the page never shows the key again");

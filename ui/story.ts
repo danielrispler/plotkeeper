@@ -122,11 +122,14 @@ function showStep(session: Session, agent: Subagent | null) {
   element("step").classList.toggle("has-command", Boolean(step?.command));
   // Without a command the step has nothing to unfold, but its line keeps its hover, the full path among it (#220).
   const stepLine = element("step-line");
-  stepLine.title = step?.command ? "Show or hide the step's full command" : "The step the agent is on";
+  hint(stepLine, step?.command ? "Show or hide the step's full command" : "The step the agent is on");
   stepLine.onclick = (event) => void (step?.command || event.preventDefault());
 }
 
 export function showView(selected: Selection | null) {
+  hint(element("step-line"), "The step the agent is on");
+  hint(element("unavailable-summary"), "Why only the steps are shown");
+  hint(element("brief-summary"), "Show or hide the Brief: where the session stands");
   element("empty").hidden = selected !== null;
   element("view").hidden = selected === null;
   element("rail-more").hidden = selected === null;

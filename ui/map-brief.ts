@@ -12,7 +12,7 @@
 // fog list, `catchUpIds`) so the player keeps its step apart from the PR briefs and from an older story of the part; read to its end it
 // clears the part's fog (`part_catch_up_done`) and completes no brief.
 
-import { failure, hint, invoke, messageOf, pressable, svg, text } from "./dom.js";
+import { failure, hint, invoke, keyed, messageOf, pressable, svg, text } from "./dom.js";
 import { currentMap, onDraw, registerLayer, type MapView } from "./map.js";
 import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { paint as paintBadges } from "./map-agents.js";
@@ -460,7 +460,7 @@ export function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBri
   if (step.cites.length) {
     const cites = text("details", "", "brief-cites");
     const summary = text("summary", `What this rests on (${step.cites.length})`);
-    summary.title = "Show what the writer quoted for this step";
+    hint(summary, "Show what the writer quoted for this step");
     cites.append(summary);
     for (const cite of step.cites) cites.append(text("p", `${cite.from}: “${cite.quote}”`, "brief-cite"));
     words.append(cites);
@@ -568,7 +568,7 @@ function summaryInto(node: HTMLElement) {
   if (!summary || !words) return;
   const list = text("details", "", "brief-cites brief-fog-list");
   const open = text("summary", `The full fog list (${summary.entries.length})`);
-  hint(open, "Show every PR and push this catch-up covers");
+  hint(keyed(open, "fog-list"), "Show every PR and push this catch-up covers");
   list.append(open);
   for (const line of fogListLines(summary.entries)) list.append(text("p", line, "brief-cite"));
   words.append(text("p", summary.line, "brief-quiet brief-summarises"), list);
@@ -802,7 +802,7 @@ function factsChip(): HTMLElement | null {
   if (!lines.length) return null;
   const chip = text("details", "", "brief-facts");
   const summary = text("summary", `Partial facts · ${lines.length}`);
-  summary.title = "What this brief was written without";
+  hint(keyed(summary, "partial-facts"), "What this brief was written without");
   const list = text("ul", "", "brief-facts-list");
   for (const { line, files } of lines) {
     const item = text("li", line);

@@ -28,8 +28,7 @@ export const mapSheetExplained = (on: boolean): Fixture =>
       const toggle = sheet.querySelector(".sheet-header .explain-toggle");
       if (!toggle || toggle.nextElementSibling !== sheet.querySelector(".sheet-header .sheet-close")) return log("snap:fail the ? is not beside the ×");
       if (toggle.getAttribute("aria-pressed") !== "${on}" || document.getElementById(toggle.getAttribute("interestfor"))?.textContent !== "${on ? "Hide" : "Show"} explanations") log("snap:fail the ?: " + toggle.getAttribute("aria-pressed") + " " + document.getElementById(toggle.getAttribute("interestfor"))?.textContent);
-      // What a node is described by besides its own hint (spec #582): the explanation lines.
-      const described = [...sheet.querySelectorAll("[aria-describedby]")].filter((node) => node.getAttribute("aria-describedby") !== node.getAttribute("interestfor"));
+      const described = [...sheet.querySelectorAll("[aria-describedby]")].filter((node) => document.getElementById(node.getAttribute("aria-describedby"))?.classList.contains("explain"));
       const lines = [...sheet.querySelectorAll(".explain")];
       if (${!on}) {
         if (lines.length || described.length) log("snap:fail explanations drawn while off: " + lines.length + " lines, " + described.length + " described");
@@ -433,6 +432,89 @@ export const mapPanelSettings = (): Fixture =>
       if (!panelOpen()) return log("snap:fail the palette did not open Settings");
       checkAll("with Settings open");
       log("panel ok");`);
+/**
+ * The hints of fields and fold-outs (spec #582, ticket 2), with real input: the pointer on Settings' writer picker (a select) opens its
+ * hint after the delay, beside the picker, and Esc closes it; Tab, then focus on the picker, opens it by keyboard; the pointer on the
+ * story's "Steps only"-style fold-out header, a summary, opens its hint too, and a click on it still folds it.
+ */
+export const mapPanelFieldHints = (): Fixture => ({
+  ...mapPanel(`
+      const open = (hint) => hint.matches(":popover-open");
+      const hintOf = (node) => document.getElementById(node.getAttribute("data-hint"));
+      const beside = (hint, trigger) => {
+        const [h, t] = [hint.getBoundingClientRect(), trigger.getBoundingClientRect()];
+        const apart = Math.max(h.top - t.bottom, t.top - h.bottom);
+        return apart >= 0 && apart <= 24 && h.right > t.left && h.left < t.right;
+      };
+      document.getElementById("settings-button").click();
+      await wait(200);
+      const pick = () => document.getElementById("writer-pick");
+      if (!pick()) return log("snap:fail Settings has no writer picker");
+      const pickHint = hintOf(pick());
+      if (!pickHint?.matches('[popover="hint"]')) return log("snap:fail the picker has no hint");
+      if (pick().hasAttribute("title")) log("snap:fail the picker kept its title");
+      await __snapMove(pick());
+      await wait(100);
+      if (open(pickHint)) log("snap:fail the picker's hint was open before its delay");
+      await wait(450);
+      if (!open(pickHint)) return log("snap:fail the picker's hint did not open on hover");
+      if (!beside(pickHint, pick())) log("snap:fail the picker's hint is not beside it " + JSON.stringify([pickHint.getBoundingClientRect(), pick().getBoundingClientRect()]));
+      await __snapKey("Escape");
+      await wait(50);
+      if (open(pickHint)) log("snap:fail Esc left the picker's hint open");
+      // Esc also peels the map's layers, so Settings may have closed with the hint: open it again.
+      if (!panelOpen()) document.getElementById("settings-button").click();
+      await __snapMove(document.body);
+      await wait(150);
+      await __snapKey("Tab");
+      pick().focus();
+      await wait(600);
+      if (!open(pickHint)) log("snap:fail focus on the picker did not open its hint");
+      if (document.activeElement !== pick()) log("snap:fail the hint moved the focus from the picker");
+      await __snapKey("Escape");
+      await wait(150);
+      if (open(pickHint)) log("snap:fail Esc left the picker's hint open after focus");
+      log("field hints ok");`),
+  realKeys: true,
+  realPointer: true,
+  snapDone: "field hints ok",
+});
+/**
+ * The hint of a fold-out header (spec #582, ticket 2), with real input: Tab, then focus on the map's "not placed"
+ * line (a summary), opens its hint beside it without moving focus and Esc closes it; the pointer on it opens it too, and a click on the line
+ * still folds it out.
+ */
+export const mapNotPlacedHint = (): Fixture => {
+  const running = (id: string, name: string) => session(id, name, "running", { turns: [] });
+  const sessions = [running("s3", "#312 · CI marks"), running("s4", "#314 · Runs")];
+  const f = mapOpened(`
+    const open = (hint) => hint.matches(":popover-open");
+    const line = () => document.querySelector("#map-not-placed summary");
+    window.__snapEmit("sessions", ${JSON.stringify(sessions)});
+    await wait(150);
+    const hintOf = (node) => document.getElementById(node.getAttribute("data-hint"));
+    if (!line()) return log("snap:fail the map has no not placed line");
+    const shown = hintOf(line());
+    if (!shown?.matches('[popover="hint"]')) return log("snap:fail the not placed line has no hint");
+    if (line().hasAttribute("title")) log("snap:fail the not placed line kept its title");
+    await __snapKey("Tab");
+    line().focus();
+    await wait(600);
+    if (!open(shown)) log("snap:fail focus on the not placed line did not open its hint");
+    if (document.activeElement !== line()) log("snap:fail the hint moved the focus from the line");
+    await __snapKey("Escape");
+    await wait(150);
+    if (open(shown)) log("snap:fail Esc left the hint open");
+    line().blur();
+    await __snapMove(line());
+    await wait(600);
+    if (!open(shown)) log("snap:fail the pointer on the not placed line did not open its hint");
+    await __snapClick(line());
+    await wait(100);
+    if (!document.querySelector("#map-not-placed details")?.open) log("snap:fail a click on the line did not fold it out");
+    log("not placed hint ok");`, { map_state: mapState(), map_place: {} });
+  return { ...f, sessions: [], realKeys: true, realPointer: true, snapDone: "not placed hint ok" };
+};
 /** A PR brief over the story and the sheet: the one thing that dims the map, and both panels with it. */
 export const mapPanelBrief = (): Fixture =>
   mapPanel(`

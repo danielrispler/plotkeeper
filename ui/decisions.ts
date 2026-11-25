@@ -61,6 +61,7 @@ function draw() {
   entries.sort(([a], [b]) => b - a);
   element("decisions-list").replaceChildren(...entries.map(([, node]) => node));
   element("decisions-title").textContent = `Decisions (${decisions.length})`;
+  hint(element("decisions-title"), "Show or hide the decisions made in this session");
   element("decisions").hidden = entries.length === 0;
 }
 

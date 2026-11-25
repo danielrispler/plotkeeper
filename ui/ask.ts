@@ -4,7 +4,7 @@
 // those facts and, for a file, its hunk; the answer stays here, labelled as interpretation under the facts as recorded and the session never sees it. A failed call or a reply with no answer shows why, with
 // a retry.
 
-import { failure, hint, invoke, keepOnly, messageOf, onEnter, pressable, text } from "./dom.js";
+import { availability, failure, hint, invoke, isUnavailable, keepOnly, messageOf, onEnter, pressable, text } from "./dom.js";
 import { rendered } from "./markdown.js";
 import type { Anchor, Facts, Hunk } from "./types.js";
 
@@ -94,14 +94,15 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
   field.setAttribute("aria-label", `Your question about ${what}`);
   const sendHover = "Ask about this, from what was recorded; the session never sees it (⌘↩)";
   const send = button("Ask", sendHover);
+  availability(send, sendHover);
   const reply = document.createElement("div");
   reply.className = "ask-reply";
   reply.setAttribute("aria-live", "polite");
   const ask = async () => {
+    if (isUnavailable(send)) return;
     const question = field.value.trim();
     if (!question) return field.focus();
-    send.disabled = true;
-    send.title = "Waiting for the answer to your question";
+    availability(send, sendHover, "Waiting for the answer to your question");
     reply.replaceChildren(text("p", "Asking…", "asking"));
     try {
       const answer = await invoke("ask_anchor", { session, anchor, what, question });
@@ -112,8 +113,7 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
       retry.addEventListener("click", ask);
       reply.replaceChildren(text("p", `No answer: ${messageOf(e)}.`, "ask-error"), retry);
     }
-    send.disabled = false;
-    send.title = sendHover;
+    availability(send, sendHover);
   };
   send.addEventListener("click", ask);
   // ⌘↩ asks, as Enter alone makes a new line.
@@ -168,13 +168,14 @@ function whyNotBox(session: string, turn: number): HTMLElement {
   field.setAttribute("aria-label", "A file or a name it did not touch");
   const goHover = "Find what was recorded about the name you typed, and why the turn did not touch it (↩)";
   const go = button("Why didn't it touch this?", goHover);
+  availability(go, goHover);
   const out = document.createElement("div");
   out.setAttribute("aria-live", "polite");
   const run = async () => {
+    if (isUnavailable(go)) return;
     const name = field.value.trim();
     if (!name) return field.focus();
-    go.disabled = true;
-    go.title = "Reading what was recorded";
+    availability(go, goHover, "Reading what was recorded");
     out.replaceChildren(text("p", "Reading what was recorded…", "asking"));
     try {
       const result = await invoke("ask_why_not", { session, turn, name });
@@ -183,8 +184,7 @@ function whyNotBox(session: string, turn: number): HTMLElement {
       failure("ask_why_not", "error")(e);
       out.replaceChildren(text("p", `No answer: ${messageOf(e)}.`, "ask-error"));
     }
-    go.disabled = false;
-    go.title = goHover;
+    availability(go, goHover);
   };
   go.addEventListener("click", run);
   onEnter(field, () => void run());
