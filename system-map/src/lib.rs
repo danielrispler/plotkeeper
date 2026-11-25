@@ -173,13 +173,12 @@ fn check_with(root: &Path, files: Result<Vec<String>, String>) -> Report {
     report.problems.extend(check_ids_and_references(&map));
     match files {
         Ok(files) => {
-            let (parts, problems) = ownership(&map, &files);
+            let (parts, ignored, problems) = ownership(&map, &files);
             report.problems.extend(problems);
-            let owned: usize = parts.iter().map(|p| p.files.len()).sum();
             report.counts = Counts {
                 parts: parts.len(),
-                files: owned,
-                ignored: files.len() - owned,
+                files: parts.iter().map(|p| p.files.len()).sum(),
+                ignored,
                 links: map.links.len(),
                 laws: LawCounts {
                     check: map
@@ -465,9 +464,11 @@ pub(crate) fn read_tracked(root: &Path, file: &str) -> Option<String> {
     Some(String::from_utf8_lossy(&std::fs::read(path).ok()?).into_owned())
 }
 
-/// Which part owns each file, and the problems of files nobody owns and patterns that match none.
-fn ownership(map: &Map, files: &[String]) -> (Vec<PartFiles>, Vec<String>) {
+/// Which part owns each file, how many files are ignored, and the problems of files nobody owns
+/// and patterns that match none.
+fn ownership(map: &Map, files: &[String]) -> (Vec<PartFiles>, usize, Vec<String>) {
     let mut problems = Vec::new();
+    let mut ignored = 0;
     let owners = Owners::new(map);
     let mut parts: Vec<PartFiles> = map
         .parts
@@ -479,7 +480,7 @@ fn ownership(map: &Map, files: &[String]) -> (Vec<PartFiles>, Vec<String>) {
         .collect();
     for file in files {
         match owners.place(file) {
-            Placement::Ignored => {}
+            Placement::Ignored => ignored += 1,
             Placement::Part(index) => parts[index].files.push(file.clone()),
             Placement::Unowned => problems.push(format!(
                 "{file}: tracked, but no part owns it and no ignored pattern matches it; add it to a part's paths or to ignored"
@@ -518,5 +519,5 @@ fn ownership(map: &Map, files: &[String]) -> (Vec<PartFiles>, Vec<String>) {
             .filter(|p| p.text() != MAP_FILE)
             .filter_map(|p| unmatched("ignored", p)),
     );
-    (parts, problems)
+    (parts, ignored, problems)
 }

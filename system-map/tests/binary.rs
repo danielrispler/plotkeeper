@@ -60,6 +60,13 @@ fn a_failing_repository_exits_non_zero_with_a_line_per_problem() {
     assert!(!out.status.success());
     let text = String::from_utf8(out.stdout).unwrap();
     assert_eq!(text.lines().count(), 2, "{text}");
+    let out = run(&root, &["--json"]);
+    let value: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(value["counts"]["files"], 2);
+    assert_eq!(
+        value["counts"]["ignored"], 2,
+        "the unowned file is not ignored"
+    );
 }
 
 #[test]
