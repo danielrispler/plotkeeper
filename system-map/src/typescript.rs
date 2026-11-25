@@ -1,7 +1,13 @@
 //! The `typescript-imports` extractor: the import specifiers of script files, read from a token stream that leaves out
-//! comments, strings and the text of template literals, resolved to tracked files.
+//! comments, strings and the text of template literals, resolved to tracked files: a relative specifier to the file it
+//! names, a bare one to the `package.json` of the workspace package it names.
 
-use std::{collections::BTreeSet, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
+
+use crate::pattern::Pattern;
 
 /// The extensions of the script files `typescript-imports` reads.
 pub(crate) const SCRIPTS: [&str; 7] = ["ts", "tsx", "js", "mjs", "jsx", "mts", "cjs"];
@@ -265,8 +271,115 @@ fn resolve_import(from: &str, spec: &str, tracked: &BTreeSet<&str>) -> Option<St
         .find(|c| tracked.contains(c.as_str()))
 }
 
-/// Each script file paired with the tracked files its relative imports name.
-pub(crate) fn typescript_imports(root: &Path, tracked: &BTreeSet<&str>) -> Vec<(String, String)> {
+/// The `package.json` of each package the workspace declares, by its name: a folder that matches a pattern of the root
+/// `package.json`'s `workspaces` or of `pnpm-workspace.yaml`'s `packages` and holds a tracked `package.json` with a
+/// `name`. A name two packages share names neither, and is a problem.
+fn workspace_packages(
+    root: &Path,
+    tracked: &BTreeSet<&str>,
+) -> (BTreeMap<String, String>, Vec<String>) {
+    let read = |file: &str| {
+        tracked
+            .contains(file)
+            .then(|| crate::read_tracked(root, file))
+            .flatten()
+    };
+    let mut globs: Vec<String> = Vec::new();
+    if let Some(json) =
+        read("package.json").and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+    {
+        // npm and yarn write a list; yarn also `{ "packages": [...] }`.
+        let list = json["workspaces"]
+            .get("packages")
+            .unwrap_or(&json["workspaces"]);
+        globs.extend(
+            list.as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|g| g.as_str().map(str::to_string)),
+        );
+    }
+    if let Some(yaml) = read("pnpm-workspace.yaml") {
+        globs.extend(pnpm_packages(&yaml));
+    }
+    let (exclude, include): (Vec<&str>, Vec<&str>) = globs
+        .iter()
+        .map(|g| g.trim_start_matches("./").trim_end_matches('/'))
+        .partition(|g| g.starts_with('!'));
+    let include: Vec<Pattern> = include.into_iter().map(Pattern::new).collect();
+    let exclude: Vec<Pattern> = exclude
+        .into_iter()
+        .map(|g| Pattern::new(g[1..].trim_start_matches("./")))
+        .collect();
+    let mut folders: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+    for file in tracked {
+        let Some(folder) = file.strip_suffix("/package.json") else {
+            continue;
+        };
+        if !include.iter().any(|p| p.matches(folder)) || exclude.iter().any(|p| p.matches(folder)) {
+            continue;
+        }
+        let name = read(file)
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+            .and_then(|json| json["name"].as_str().map(str::to_string));
+        if let Some(name) = name {
+            folders.entry(name).or_default().push(folder);
+        }
+    }
+    let mut packages = BTreeMap::new();
+    let mut problems = Vec::new();
+    for (name, found) in folders {
+        if let [folder] = found[..] {
+            packages.insert(name, format!("{folder}/package.json"));
+        } else {
+            problems.push(format!(
+                "extractor \"typescript-imports\": the workspace declares package {name:?} in {}; npm rejects a name \
+                 declared twice, so imports of it give no edge until one is renamed",
+                found.iter().map(|f| format!("{f:?}")).collect::<Vec<_>>().join(" and ")
+            ));
+        }
+    }
+    (packages, problems)
+}
+
+/// The patterns of `pnpm-workspace.yaml`'s `packages` list, written one per `- ` line.
+fn pnpm_packages(yaml: &str) -> Vec<String> {
+    let mut globs = Vec::new();
+    let mut inside = false;
+    for line in yaml.lines() {
+        let text = line.split(" #").next().unwrap_or("").trim_end();
+        if text.trim().is_empty() || text.trim_start().starts_with('#') {
+            continue;
+        }
+        if !text.starts_with([' ', '-']) {
+            inside = text.trim() == "packages:";
+        } else if inside && let Some(item) = text.trim_start().strip_prefix("- ") {
+            globs.push(item.trim().trim_matches(['"', '\'']).to_string());
+        }
+    }
+    globs
+}
+
+/// The workspace package a bare specifier names: `name` or `name/sub`, split after the scope of `@scope/name/sub`.
+fn package_name(spec: &str) -> Option<&str> {
+    if spec.starts_with('.') || spec.starts_with('/') {
+        return None;
+    }
+    let segments = if spec.starts_with('@') { 2 } else { 1 };
+    let end = spec
+        .match_indices('/')
+        .nth(segments - 1)
+        .map_or(spec.len(), |(at, _)| at);
+    Some(&spec[..end])
+}
+
+/// Each script file paired with the tracked files its relative imports name and the `package.json` of each workspace
+/// package it imports, and the problems of the workspace's packages.
+pub(crate) fn typescript_imports(
+    root: &Path,
+    tracked: &BTreeSet<&str>,
+) -> (Vec<(String, String)>, Vec<String>) {
+    let (packages, problems) = workspace_packages(root, tracked);
     let mut pairs = Vec::new();
     for file in tracked {
         let script = file
@@ -276,10 +389,12 @@ pub(crate) fn typescript_imports(root: &Path, tracked: &BTreeSet<&str>) -> Vec<(
             continue;
         };
         for spec in specifiers(&tokens(&text)) {
-            if let Some(target) = resolve_import(file, spec, tracked).filter(|t| t != file) {
+            let target = resolve_import(file, spec, tracked)
+                .or_else(|| packages.get(package_name(spec)?).cloned());
+            if let Some(target) = target.filter(|t| t != file) {
                 pairs.push((file.to_string(), target));
             }
         }
     }
-    pairs
+    (pairs, problems)
 }

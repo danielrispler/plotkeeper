@@ -1082,3 +1082,107 @@ fn a_local_export_or_a_member_named_import_gives_no_edge() {
         assert_eq!(found, Vec::<String>::new(), "{text}");
     }
 }
+
+/// The edges and other problems `typescript-imports` gives in a repository holding `files`, with `alpha/` and `beta/` as
+/// the parts, `beta/b.ts` so that `beta` is read, and the root's workspace config ignored.
+fn ws_report(files: &[(&str, &str)]) -> (Vec<String>, Vec<String>) {
+    let files = &[files, &[("beta/b.ts", "")]].concat();
+    let mut map = split_map(&["typescript-imports"], &["alpha/"], &["beta/"]);
+    let mut ignored = vec!["system-map.json"];
+    for config in ["package.json", "pnpm-workspace.yaml"] {
+        if files.iter().any(|(file, _)| *file == config) {
+            ignored.push(config);
+        }
+    }
+    map["ignored"] = json!(ignored);
+    let (_dir, root) = tree(&map, files);
+    let report = report(&root);
+    (edges(&report), other_problems(&report))
+}
+
+const CONTRACT: (&str, &str) = (
+    "beta/contract/package.json",
+    "{ \"name\": \"@chery/contract\", \"version\": \"0.0.0\" }",
+);
+
+#[test]
+fn an_import_of_a_declared_scoped_package_or_its_subpath_is_an_edge_to_its_part() {
+    for spec in ["@chery/contract", "@chery/contract/sub/x"] {
+        let text = format!("import {{ x }} from '{spec}';\n");
+        let found = ws_report(&[
+            ("package.json", "{ \"workspaces\": [\"beta/*\"] }"),
+            ("alpha/a.ts", &text),
+            CONTRACT,
+            ("beta/contract/src/index.ts", "export const x = 1;\n"),
+        ]);
+        assert_eq!(found, (vec!["alpha>beta".to_string()], vec![]), "{spec}");
+    }
+}
+
+#[test]
+fn pnpm_workspace_yaml_s_packages_declare_the_workspace() {
+    let found = ws_report(&[
+        (
+            "pnpm-workspace.yaml",
+            "# The packages.\npackages:\n  - 'other/*'\n  - \"beta/*\" # contract\ncatalog:\n  - x\n",
+        ),
+        ("alpha/a.ts", "import { x } from '@chery/contract';\n"),
+        CONTRACT,
+    ]);
+    assert_eq!(found, (vec!["alpha>beta".to_string()], vec![]));
+}
+
+#[test]
+fn a_package_json_outside_the_workspace_globs_gives_no_edge() {
+    for (workspaces, fixture) in [
+        ("[\"alpha/*\"]", "beta/test/contract/package.json"),
+        (
+            "[\"beta/*\", \"!beta/fixtures\"]",
+            "beta/fixtures/package.json",
+        ),
+    ] {
+        let config = format!("{{ \"workspaces\": {workspaces} }}");
+        let found = ws_report(&[
+            ("package.json", &config),
+            ("alpha/a.ts", "import { x } from '@chery/contract';\n"),
+            (fixture, CONTRACT.1),
+        ]);
+        assert_eq!(found, (vec![], vec![]), "{workspaces}");
+    }
+}
+
+#[test]
+fn a_name_two_declared_packages_share_gives_no_edge_and_is_a_problem() {
+    let (edges, problems) = ws_report(&[
+        (
+            "package.json",
+            "{ \"workspaces\": [\"beta/*\", \"alpha/pkg\"] }",
+        ),
+        ("alpha/a.ts", "import { x } from '@chery/contract';\n"),
+        ("alpha/pkg/package.json", CONTRACT.1),
+        CONTRACT,
+    ]);
+    assert_eq!(edges, Vec::<String>::new());
+    assert_eq!(problems.len(), 1, "{problems:?}");
+    assert!(
+        has(
+            &problems,
+            &["@chery/contract", "\"alpha/pkg\"", "\"beta/contract\""]
+        ),
+        "{problems:?}"
+    );
+}
+
+#[test]
+fn without_a_workspace_config_a_bare_specifier_gives_no_edge_and_no_problem() {
+    let found = ws_report(&[
+        ("package.json", "{ \"name\": \"root\" }"),
+        (
+            "alpha/a.ts",
+            "import { x } from '@chery/contract';\nimport y from 'contract';\n",
+        ),
+        CONTRACT,
+        ("beta/plain/package.json", "{ \"name\": \"contract\" }"),
+    ]);
+    assert_eq!(found, (vec![], vec![]));
+}

@@ -183,7 +183,11 @@ pub(crate) fn file_pairs(
                 });
                 Ok(rust_modules(root, &tracked, &crates, root_mod_lines))
             }
-            "typescript-imports" => Ok(crate::typescript::typescript_imports(root, &tracked)),
+            "typescript-imports" => {
+                let (found, found_problems) = crate::typescript::typescript_imports(root, &tracked);
+                problems.extend(found_problems);
+                Ok(found)
+            }
             other => Err(format!(
                 "unknown extractor {other:?} in extractors; use one of {}",
                 KNOWN.join(", ")
