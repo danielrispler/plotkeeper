@@ -574,6 +574,8 @@ function summaryInto(node: HTMLElement) {
 // The items to ratify, each with where it stands; a not yet ratified one has Accept and Overturn.
 function ratifyNode(view: MapView, rows: RatifyRow[]) {
   const list = text("ul", "", "brief-ratify");
+  // Safari drops a list's semantics under `list-style: none` and grid; the role brings them back.
+  list.setAttribute("role", "list");
   for (const row of rows.filter((each) => each.status !== "ratified")) {
     const item = text("li", "", "ratify-row");
     item.dataset.kind = row.kind;

@@ -189,11 +189,9 @@ function drawSheet(view: MapView) {
   const links = talksTo(part.id, view.doc.links, nameOf).map((talk) => {
     const row = text("li", "", "sheet-link");
     row.dataset.link = talk.link;
-    const words = talk.out ? `${part.name} to ${talk.other}` : `${talk.other} to ${part.name}`;
     const arrow = text("span", talk.out ? "→" : "←", "sheet-link-dir");
     arrow.setAttribute("role", "img");
     arrow.setAttribute("aria-label", talk.out ? "to" : "from");
-    row.title = words;
     row.append(arrow, text("span", talk.other, "sheet-link-text"));
     // The kind is a code token: never machine-translated.
     if (talk.kind) row.append(Object.assign(text("span", talk.kind, "sheet-link-kind"), { translate: false }));
@@ -285,8 +283,9 @@ function drawSheet(view: MapView) {
   const extra = text("div", "", "sheet-extra");
   card.append(extra);
   card.querySelector(".sheet-laws")?.append(...laws);
-  card.querySelector(".sheet-links")?.append(...links);
   // Safari drops a list's semantics under `list-style: none`; the role brings them back.
+  card.querySelector(".sheet-laws")?.setAttribute("role", "list");
+  card.querySelector(".sheet-links")?.append(...links);
   card.querySelector(".sheet-links")?.setAttribute("role", "list");
   const overturned = overturnNote(view.project, (item) =>
     item.kind === "law" ? sheet.laws.some((law) => law.id === item.id) : item.kind === "link" && view.doc.links.some((link) => link.id === item.id && (link.from === part.id || link.to === part.id)),

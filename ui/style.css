@@ -690,6 +690,7 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .sheet-holds { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-4); }
 .sheet-held { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--size-small); line-height: 1.45; }
 .sheet-held-name { font-weight: 600; }
+.sheet-held-text { overflow-wrap: anywhere; }
 .sheet-held-files { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); font-size: var(--size-xs); color: var(--muted); }
 .sheet-held-files code { min-width: 0; overflow-wrap: anywhere; }
 .sheet-heading { margin: var(--sp-5) 0 0; font-size: var(--size-xs); letter-spacing: .12em; text-transform: uppercase; color: var(--faint); font-weight: 500; }
@@ -706,7 +707,7 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .sheet-link-dir { color: var(--muted); }
 .sheet-link-text { min-width: 0; overflow-wrap: anywhere; }
 .sheet-link-kind { font-size: var(--size-xs); color: var(--faint); }
-.sheet-link-reason { color: var(--muted); text-wrap: pretty; }
+.sheet-link-reason { color: var(--muted); text-wrap: pretty; overflow-wrap: anywhere; }
 .ratify-mark { grid-column: 2; font-size: var(--size-xs); color: var(--faint); }
 .ratify-actions { grid-column: 2; display: inline-flex; gap: var(--sp-2); }
 .brief-ratify { margin: var(--sp-4) 0 0; padding: 0; list-style: none; max-width: 60ch; display: grid; gap: var(--sp-3); }
@@ -714,8 +715,8 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .ratify-kind { font-size: var(--size-xs); color: var(--faint); text-transform: uppercase; letter-spacing: .04em; }
 .ratify-row .ratify-mark, .ratify-row .ratify-actions { grid-column: auto; }
 /* A part's or a link's detail (#485): each changed text, old beside new, under the row. No colour: the words Was and Now say which side. */
-.ratify-detail { grid-column: 1 / -1; margin: var(--sp-2) 0 0; display: grid; grid-template-columns: auto 1fr; column-gap: var(--sp-4); row-gap: var(--sp-2); font-size: var(--size-small); }
-.ratify-detail dt { color: var(--faint); }
+.ratify-detail { grid-column: 1 / -1; margin: var(--sp-2) 0 0; display: grid; grid-template-columns: minmax(0, 14ch) 1fr; column-gap: var(--sp-4); row-gap: var(--sp-2); font-size: var(--size-small); }
+.ratify-detail dt { color: var(--faint); overflow-wrap: anywhere; }
 .ratify-detail dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .ratify-detail p { margin: 0; display: grid; grid-template-columns: 4ch 1fr; column-gap: var(--sp-2); align-items: baseline; }
 .ratify-side { font-size: var(--size-xs); color: var(--faint); }
