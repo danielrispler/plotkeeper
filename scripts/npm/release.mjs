@@ -1,6 +1,12 @@
-// The release script (danielrispler/plotkeeper#512). Two pure functions, each also a subcommand:
+// The release script (danielrispler/plotkeeper#512). Each exported function is also a subcommand:
 //   node scripts/npm/release.mjs bump <patch|minor>   rewrites npm/package.json, server/Cargo.toml and Cargo.lock
 //   node scripts/npm/release.mjs notes <X.Y.Z> [file] prints (or writes) that version's CHANGELOG.md section
+//   node scripts/npm/release.mjs guard                fails unless HEAD's commit changed npm/package.json's version
+//   node scripts/npm/release.mjs tag <X.Y.Z> <commit> [--dry-run]
+//                                                     tags vX.Y.Z at the commit on origin and creates its GitHub
+//                                                     Release from CHANGELOG.md; --dry-run prints the changes instead
+// `guard` and `tag` run git and gh in the current directory's repository.
+import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -58,7 +64,58 @@ export function notesFor(changelog, version) {
   return `${body}\n`;
 }
 
-function main([command, arg, out]) {
+// The release commit guard: a publish runs only on the Release PR's commit, the one that changed the npm package's
+// version. It takes npm/package.json's text at HEAD's parent and at HEAD.
+export function checkReleaseCommit(parentManifest, headManifest) {
+  if (JSON.parse(parentManifest).version === JSON.parse(headManifest).version) {
+    throw new Error("main moved past the Release PR, run /release again");
+  }
+}
+
+// The commit origin's `tag` points at, or null when origin has no such tag. An annotated tag lists its commit on a
+// second line, `refs/tags/<tag>^{}`, which wins over the tag object's own line.
+function taggedCommit(run, tag) {
+  const { status, stdout } = run("git", ["ls-remote", "--tags", "origin", `refs/tags/${tag}`, `refs/tags/${tag}^{}`]);
+  if (status !== 0) throw new Error(`git ls-remote origin failed for ${tag}`);
+  const refs = new Map(stdout.split("\n").filter(Boolean).map((line) => line.split("\t").reverse()));
+  return refs.get(`refs/tags/${tag}^{}`) ?? refs.get(`refs/tags/${tag}`) ?? null;
+}
+
+// Tags `v<version>` at `commit` on origin and creates its GitHub Release from the changelog's section. Idempotent: a
+// tag already at `commit` is kept, one at another commit fails, and an existing Release is left as it is. `run(command,
+// args, input)` runs git or gh and returns `{ status, stdout }`.
+export function tagAndRelease({ version, commit, changelog, run }) {
+  const notes = notesFor(changelog, version);
+  const tag = `v${version}`;
+  const tagged = taggedCommit(run, tag);
+  if (tagged === null) run("git", ["push", "origin", `${commit}:refs/tags/${tag}`]);
+  else if (tagged !== commit) throw new Error(`${tag} already points at ${tagged}, not ${commit}`);
+  if (run("gh", ["release", "view", tag]).status === 0) return;
+  run("gh", ["release", "create", tag, "--verify-tag", "--title", tag, "--notes-file", "-"], notes);
+}
+
+// Runs git or gh. A read returns its result; a change must succeed, and with `dryRun` it is printed instead of run.
+function runner(dryRun) {
+  return (command, args, input) => {
+    const change = !(["ls-remote", "rev-parse", "show"].includes(args[0]) || args[1] === "view");
+    if (change && dryRun) {
+      console.log(`would run: ${[command, ...args].join(" ")}${input === undefined ? "" : `, with notes:\n${input}`}`);
+      return { status: 0, stdout: "" };
+    }
+    const result = spawnSync(command, args, { input, encoding: "utf8", stdio: ["pipe", "pipe", "inherit"] });
+    if (result.error) throw result.error;
+    if (change && result.status !== 0) throw new Error(`${command} ${args.join(" ")} failed`);
+    return result;
+  };
+}
+
+function git(args) {
+  const { status, stdout } = runner(false)("git", args);
+  if (status !== 0) throw new Error(`git ${args.join(" ")} failed`);
+  return stdout;
+}
+
+function main([command, arg, out, ...flags]) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
   const read = (path) => readFileSync(resolve(root, path), "utf8");
   if (command === "bump") {
@@ -70,8 +127,16 @@ function main([command, arg, out]) {
     const notes = notesFor(read("CHANGELOG.md"), arg);
     if (out) writeFileSync(out, notes);
     else process.stdout.write(notes);
+  } else if (command === "guard") {
+    // A checkout at depth 1 has no HEAD^, so this fails there rather than pass.
+    checkReleaseCommit(git(["show", "HEAD^:npm/package.json"]), git(["show", "HEAD:npm/package.json"]));
+  } else if (command === "tag" && arg && out && flags.every((flag) => flag === "--dry-run")) {
+    const commit = git(["rev-parse", "--verify", `${out}^{commit}`]).trim();
+    tagAndRelease({ version: arg, commit, changelog: read("CHANGELOG.md"), run: runner(flags.length > 0) });
   } else {
-    throw new Error("usage: release.mjs bump <patch|minor> | notes <X.Y.Z> [file]");
+    throw new Error(
+      "usage: release.mjs bump <patch|minor> | notes <X.Y.Z> [file] | guard | tag <X.Y.Z> <commit> [--dry-run]",
+    );
   }
 }
 

@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { bump, notesFor } from "../../scripts/npm/release.mjs";
+import { bump, checkReleaseCommit, notesFor, tagAndRelease } from "../../scripts/npm/release.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -129,4 +129,68 @@ test("CHANGELOG.md has notes for the npm package's current version", () => {
   const { version } = JSON.parse(readFileSync(resolve(root, "npm/package.json"), "utf8"));
   const notes = notesFor(readFileSync(resolve(root, "CHANGELOG.md"), "utf8"), version);
   assert.match(notes, /^- .+\(#\d+\)$/m, `CHANGELOG.md's ${version} section has no line ending with (#N)`);
+});
+
+const manifestAt = (version) => npmManifest.replace("0.1.2", version);
+
+test("checkReleaseCommit passes when HEAD changed the npm package's version and fails when it didn't", () => {
+  assert.doesNotThrow(() => checkReleaseCommit(manifestAt("0.1.2"), manifestAt("0.1.3")));
+  assert.throws(
+    () => checkReleaseCommit(manifestAt("0.1.3"), manifestAt("0.1.3").replace('"x"', '"y"')),
+    /^Error: main moved past the Release PR, run \/release again$/,
+  );
+});
+
+const commit = "a".repeat(40);
+const other = "b".repeat(40);
+
+// A stand-in for git and gh: `tag` is the commit origin's v0.2.0 tag points at (none when absent), `release` whether
+// v0.2.0's GitHub Release exists. It answers the reads and records every command that would change something.
+function fakeRun({ tag, release }) {
+  const changes = [];
+  const run = (command, args, input) => {
+    const line = [command, ...args].join(" ");
+    if (line.startsWith("git ls-remote ")) return { status: 0, stdout: tag ? `${tag}\trefs/tags/v0.2.0\n` : "" };
+    if (line === "gh release view v0.2.0") return { status: release ? 0 : 1, stdout: "" };
+    changes.push(input === undefined ? line : `${line} <<< ${input}`);
+    return { status: 0, stdout: "" };
+  };
+  return { run, changes };
+}
+
+const release = (fake, version = "0.2.0") => tagAndRelease({ version, commit, changelog, run: fake.run });
+
+test("tagAndRelease tags an untagged version at the commit and creates its Release from the changelog", () => {
+  const fake = fakeRun({ tag: null, release: false });
+  release(fake);
+  assert.deepEqual(fake.changes, [
+    `git push origin ${commit}:refs/tags/v0.2.0`,
+    "gh release create v0.2.0 --verify-tag --title v0.2.0 --notes-file - <<< ### Added\n\n- A thing. (#9)\n",
+  ]);
+});
+
+test("tagAndRelease fails on a tag at another commit and changes nothing", () => {
+  const fake = fakeRun({ tag: other, release: false });
+  assert.throws(() => release(fake), new RegExp(`v0\\.2\\.0 already points at ${other}, not ${commit}`));
+  assert.deepEqual(fake.changes, []);
+});
+
+test("tagAndRelease leaves an existing Release as it is", () => {
+  const fake = fakeRun({ tag: commit, release: true });
+  release(fake);
+  assert.deepEqual(fake.changes, []);
+});
+
+test("tagAndRelease fails on a version with no changelog section before touching anything", () => {
+  const fake = fakeRun({ tag: null, release: false });
+  assert.throws(() => release(fake, "0.3.0"), /no section for 0\.3\.0/);
+  assert.deepEqual(fake.changes, []);
+});
+
+test("tagAndRelease leaves a tag already at the commit and still creates a missing Release", () => {
+  const fake = fakeRun({ tag: commit, release: false });
+  release(fake);
+  assert.deepEqual(fake.changes, [
+    "gh release create v0.2.0 --verify-tag --title v0.2.0 --notes-file - <<< ### Added\n\n- A thing. (#9)\n",
+  ]);
 });
