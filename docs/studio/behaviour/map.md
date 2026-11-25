@@ -44,10 +44,15 @@ It also prints, without failing, a `note:` for each computed edge between two pa
 An extractor reads which tracked file depends on which; the checker turns each pair into an edge between the parts that own the two files and drops pairs inside one part or touching an ignored file.
 
 - `cargo`: the workspace's crates and the workspace crates each depends on, from `cargo metadata --no-deps --offline`. Dev-dependencies are left out.
-- `rust-modules`: inside a crate, `mod` declarations and `use crate::` paths resolved to the files they name.
+- `rust-modules`: `mod` declarations and paths, each resolved through the module tree of the crate it names to the file that defines the module (the longest stretch of the path that names a module). It reads paths in `use` lines and inline, anywhere in the code:
+  - `crate::<module>::…`, from the file's own crate root;
+  - a bare path whose first word is a module the file declares (or an inline module it sits in declares), such as `ci_laws::CiCache` in a crate root holding `pub mod ci_laws;`, or a name a `use` line brought in;
+  - a path into another workspace crate, such as `studio_server::runner::launch`, which reaches `server/src/runner.rs`, not the crate's `lib.rs`. It is read only when the file's crate depends on that crate as a normal dependency (dev-dependencies are left out), or is that crate's own binary, test or other target. A crate is named by its library target's name in `cargo metadata`, not its package's (package `studio-system-map`, library `system_map`), or by the dependency's rename. When the repository has a `Cargo.toml` and `cargo metadata` fails, these paths are not read and the check prints one problem saying so; a repository without one has no workspace crates to read.
+
+  Each pair of files counts once, however many paths join them. `self::` and `super::` paths are not read.
 - `typescript-imports`: relative import specifiers resolved to tracked files. A specifier that resolves to no tracked file is skipped; a literal `import('./x')` is read, but a computed specifier or a path alias is not seen.
 
-The checker runs only `git` and, when the map names `cargo`, `cargo`; it reads no file outside the repository, so it never reads through a tracked symlink (the link still counts as a tracked file for ownership), and needs no network.
+The checker runs only `git` and, when the map names `cargo` or `rust-modules`, `cargo`; it reads no file outside the repository, so it never reads through a tracked symlink (the link still counts as a tracked file for ownership), and needs no network.
 
 ## Which parts a change touches
 
