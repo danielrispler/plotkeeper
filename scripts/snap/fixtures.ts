@@ -140,7 +140,7 @@ const at = (x: number, y: number): [number, number] => [x, y];
 const mapState = (extra: Partial<MapState> = {}): MapState => ({
   project: "/w/plotkeeper", status: "loaded", source: mapFile, reference: "origin/main", commit: "35745b1693c5d061e5aea891e98a58515942a12d", note: null,
   user: { tiers: {}, positions: { core: at(620, 190), understanding: at(980, 290), plugins: at(300, 430), hook: at(580, 430), shell: at(880, 440), window: at(1180, 560), daemon: at(760, 690), workbench: at(480, 650), agents: at(110, 430), writer: at(1400, 190), github: at(250, 650) } },
-  fog: {}, ci: null, ready: [], ratify: [], runs: { paused: null, runs: [] }, stale: {}, catch_ups: {},
+  fog: {}, ci: null, ready: [], ratify: [], runs: { paused: null, runs: [] }, stale: {}, stale_why: {}, catch_ups: {},
   ...extra,
 });
 // The Ready for review tray (#336) with two ready PRs, at the Map view's foot.
@@ -661,7 +661,76 @@ const mapBriefTallScroll = (): Fixture =>
 const mapBriefUnconfirmed = (): Fixture =>
   mapBrief(briefOf([step("Now", "Cards are written once per turn", "A turn is written once, whatever the order of events.", ["understanding"], { flags: ["the claim is not in the facts"] })], true), 0, `
       if (!document.querySelector("#map-brief .brief-unconfirmed")?.textContent.includes("not confirmed from the facts")) log("snap:fail no unconfirmed mark");
-      if (!document.querySelector("#map-brief .brief-partial")?.textContent.includes("Written from part of the diff")) log("snap:fail no partial line");`);
+      // A brief from before its partial facts were stored knows only that its diff was cut (#491).
+      const chip = document.querySelector("#map-brief .brief-facts");
+      if (chip?.querySelector("summary").textContent !== "Partial facts · 1") return log("snap:fail an older partial brief has no chip of one: " + chip?.textContent);
+      if ([...chip.querySelectorAll(".brief-facts-list > li")].map((li) => li.textContent).join("|") !== "The diff was cut") log("snap:fail the older brief's line: " + chip.textContent);`);
+// The Partial facts chip (#491): a brief written from a cut diff, without its claim check, over a language no extractor reads. Closed, it says
+// how many inputs it lacks; `open` opens it, and a step on it stays open, since it belongs to the panel, not the step.
+const partialView = (): BriefView => {
+  const view = briefOf(storySteps(), true);
+  view.brief.partial_facts = {
+    cut: { files_cut: ["ui/map-tray.ts", "ui/map-brief.ts"], files_partial: ["server/src/pr_briefs.rs"], bytes_sent: 65_536, bytes_cut: 20_480 },
+    claim_error: "the claim check timed out after 120 s",
+    no_extractor: [".py"],
+  };
+  return view;
+};
+const mapBriefPartialFacts = (open: boolean): Fixture =>
+  mapBrief(partialView(), 0, `
+      const chip = document.querySelector("#map-brief .brief-facts");
+      if (!chip) return log("snap:fail no Partial facts chip");
+      if (chip.querySelector("summary").textContent !== "Partial facts · 3") log("snap:fail the chip's count: " + chip.querySelector("summary").textContent);
+      if (document.getElementById("map-brief").textContent.includes("Written from part of the diff")) log("snap:fail the old partial line is still shown");
+      if (chip.compareDocumentPosition(document.querySelector("#map-brief .brief-cols")) !== Node.DOCUMENT_POSITION_FOLLOWING) log("snap:fail the chip is not above the step");
+      ${open ? `chip.querySelector("summary").click();
+      await wait(50);
+      const lines = [...chip.querySelectorAll(".brief-facts-list > li")];
+      if (lines.length !== 3) return log("snap:fail the chip lists " + lines.length + " inputs, not 3");
+      if (!lines[0].textContent.startsWith("The diff was cut: 64\\u00a0KiB sent, 20\\u00a0KiB not") || lines[0].querySelectorAll(".brief-facts-files li").length !== 3) log("snap:fail the cut line: " + lines[0].textContent);
+      if (!lines[0].textContent.includes("server/src/pr_briefs.rs (in part)")) log("snap:fail the file sent in part is not marked");
+      if (lines[1].textContent !== "The claim check failed: the claim check timed out after 120 s") log("snap:fail the claim line: " + lines[1].textContent);
+      if (!lines[2].textContent.startsWith("No extractor reads .py files")) log("snap:fail the language line: " + lines[2].textContent);
+      document.getElementById("brief-next").click();
+      await wait(300);
+      if (document.querySelector("#map-brief .brief-facts") !== chip || !chip.open) log("snap:fail a step on reset the chip");
+      document.querySelector("#map-brief .brief-back").click();
+      await wait(300);` : `if (chip.open) log("snap:fail the chip opens closed");`}`, true);
+const mapBriefNoFacts = (): Fixture =>
+  mapBrief(briefOf(storySteps()), 0, `if (document.querySelector("#map-brief .brief-facts")) log("snap:fail a chip shows with nothing missing");`, true);
+// The not-confirmed popover (#491): the mark on a step, or on a flagged decision in the ratify step, opens a popover under it listing its
+// reasons without the mark's own words. \`esc\` checks that Esc closes only the popover, and that a step on closes it.
+const whyFlags = ["claim check: no fact says a turn is written once", "claim check: the order of events is not in the diff", "not confirmed from the facts"];
+const whyStep = () => step("Now", "Cards are written once per turn", "A turn is written once, whatever the order of events.", ["understanding"], { flags: whyFlags });
+const openWhy = (scope: string) => `
+      const mark = document.querySelector("${scope} .brief-why-mark");
+      if (!mark) return log("snap:fail no not-confirmed mark in ${scope}");
+      mark.click();
+      await wait(100);
+      const why = document.getElementById(mark.getAttribute("aria-controls"));
+      if (!why?.matches(":popover-open") || mark.getAttribute("aria-expanded") !== "true") return log("snap:fail the mark did not open its popover");
+      const reasons = [...why.querySelectorAll(".brief-why-list li")].map((li) => li.textContent);
+      if (reasons.join("|") !== ${JSON.stringify(whyFlags.slice(0, 2).join("|"))}) log("snap:fail the popover's reasons: " + reasons.join("|"));
+      const [m, w] = [mark.getBoundingClientRect(), why.getBoundingClientRect()];
+      if (!(Math.abs(w.top - m.bottom) < 16 || Math.abs(w.bottom - m.top) < 16) || w.right < m.left || w.left > m.right) log("snap:fail the popover is not anchored to its mark: " + JSON.stringify([m, w]));`;
+const mapBriefWhy = (esc: boolean): Fixture =>
+  mapBrief(briefOf([whyStep(), storySteps()[1]]), 0, `${openWhy("#map-brief .brief-step")}
+      ${esc ? `document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", key: "Escape", bubbles: true }));
+      await wait(100);
+      if (why.matches(":popover-open")) return log("snap:fail Esc did not close the popover");
+      if (document.getElementById("map-brief").hidden) return log("snap:fail Esc closed the brief with the popover");
+      document.querySelector("#map-brief .brief-why-mark").click();
+      await wait(100);
+      if (!why.matches(":popover-open")) return log("snap:fail the mark did not open its popover again");
+      document.getElementById("brief-next").click();
+      await wait(300);
+      if (document.querySelector(".brief-why:popover-open")) log("snap:fail a step on left the popover open");` : `await wait(800);
+      if (!why.matches(":popover-open")) log("snap:fail the popover closed by itself");`}`, true);
+const mapBriefWhyDecision = (): Fixture => ({
+  ...mapBrief(briefOf(storySteps(), false, { decisions: [{ id: "d1", text: "A brief is stored per project, since PR numbers repeat across repositories.", flags: whyFlags }] }), 4, `${openWhy("#map-brief .ratify-row[data-id=d1]")}
+      if (document.querySelectorAll("#map-brief .ratify-row .brief-why-mark").length !== 1) log("snap:fail only the flagged decision carries the mark");`, false, 100),
+  pr_ratify: ratifyRows,
+});
 // The prediction check (#340). A pick on a case inside one part: pick, take back, Check, then the right option and the way on.
 const pickCheck: NonNullable<BriefStep["check"]> = {
   kind: "pick", q: "A worker's card comes from a turn that ended in Needs you. Is its Quiz stored?", opts: ["Yes: workers skip the rule", "No: the card is stored without its Quiz"], key: 1,
@@ -995,6 +1064,8 @@ const mapCatchUp = (): Fixture => ({
       if (panel.hidden || !panel.classList.contains("open")) return log("snap:fail the part catch-up did not open");
       if (!panel.querySelector(".brief-kick").textContent.includes("Part catch-up")) log("snap:fail the kick does not say part catch-up");
       if (panel.querySelector(".brief-code")) log("snap:fail a part catch-up offers a PR's code");
+      // Its diff was cut (#491): its only input of the Partial facts chip.
+      if (panel.querySelector(".brief-facts summary")?.textContent !== "Partial facts · 1") log("snap:fail a cut part catch-up has no chip of one");
       document.getElementById("brief-next").click();
       await wait(200);
       document.getElementById("brief-next").click();
@@ -1005,7 +1076,7 @@ const mapCatchUp = (): Fixture => ({
       fog: { understanding: "thick", shell: "thin" },
       catch_ups: { understanding: { kind: "catch-up", ready: true, writing: false, failed: false }, shell: { kind: "chapter", pr: 334, chapter: 0 } },
     }),
-    part_catch_up: storedCatchUp(),
+    part_catch_up: { ...storedCatchUp(), partial: true },
   }),
   snapDone: "catch-up ok",
 });
@@ -1160,6 +1231,40 @@ const mapStale = (): Fixture =>
       log("stale ok");`, {
     map_state: mapState({ stale: { core: 1, shell: 2, understanding: 3 } }),
   });
+// A plate's marks explain themselves (#495): the sheet opens with this case's reasons. Thick fog shows the newest thick entry with its PR
+// and why, then "+N more"; thin fog an entry filed before #495, by its strength and commit; staleness the server's line with its date; a
+// broken law the run's date, never the law.
+const fogEntry = (commit: string, strength: "thin" | "thick", pr: number | null, why: string[]) => ({ commit: commit.repeat(40), strength, pr, why });
+const mapMarks = (kind: "thick" | "thin" | "stale" | "broken"): Fixture => {
+  const part = { thick: "understanding", thin: "shell", stale: "core", broken: "shell" }[kind];
+  const user = mapState().user;
+  const fog = (entries: ReturnType<typeof fogEntry>[]) => ({ first: null, processed: null, reads: {}, parts: { [part]: entries } });
+  const states: Record<typeof kind, Partial<MapState>> = {
+    thick: {
+      fog: { understanding: "thick" },
+      user: { ...user, fog: fog([fogEntry("1", "thick", 410, ["law brief-cites-facts", "link shell-understanding"]), fogEntry("2", "thin", 412, ["3 files"]), fogEntry("3", "thick", 418, ["paths", "2 files"])]) },
+    },
+    thin: { fog: { shell: "thin" }, user: { ...user, fog: fog([{ commit: "4".repeat(40), strength: "thin" } as ReturnType<typeof fogEntry>]) } },
+    stale: { stale: { core: 2 }, stale_why: { core: "6 weeks or more: not engaged since tracking began on 2026-10-01" } },
+    broken: { ci: { ...brokenCi, at: "2026-11-24T10:00:00Z" } },
+  };
+  const want = {
+    thick: ["Thick fog from #418: paths, 2 files", "+2 more"],
+    thin: ["Thin fog from commit 4444444"],
+    stale: ["6 weeks or more: not engaged since tracking began on 2026-10-01"],
+    broken: ["A check behind a law of this part failed in main's latest CI, 2026-11-24"],
+  }[kind];
+  return mapOpened(`
+      document.querySelector("#map .plate[data-id=${part}]").click();
+      await wait(300);
+      const marks = document.querySelector("#map-sheet .sheet-marks");
+      if (!marks) return log("snap:fail the sheet has no marks list");
+      if (marks.previousElementSibling?.className !== "sheet-caption") log("snap:fail the marks are not at the sheet's top");
+      const text = marks.textContent;
+      for (const want of ${JSON.stringify(want)}) if (!text.includes(want)) log("snap:fail the marks lack " + want + ": " + text);
+      if (text.includes("wire-types-agree")) log("snap:fail a broken law is named");
+      log("marks ${kind} ok");`, { map_state: mapState(states[kind]) });
+};
 // The refresher (#392) on Shell's sheet, a stale part with no fog: drawn at once from the map file, the flows through it hop by hop (the
 // sheet already shows the rest, its links as "Talks to", spec #473), with no writer and no "Writing…".
 const mapRefresher = (): Fixture => {
@@ -1504,7 +1609,7 @@ const mapPartRedraw = (): Fixture => {
 // size of the busy fixture; `drawer` opens the proof of a law, `log` the broken-law drill-down.
 const brokenCi: Ci = {
   status: "broken", run_url: "https://github.com/danielrispler/plotkeeper/actions/runs/9", commit: "35745b1693c5d061e5aea891e98a58515942a12d", earlier: false,
-  parts: ["shell"], laws: ["wire-types-agree"], note: null,
+  parts: ["shell"], laws: ["wire-types-agree"], note: null, at: null,
   tail: "        FAIL [   0.013s] (4/4) studio-workbench::wire wire_types_match\n  stderr ───\n\n    thread 'wire_types_match' panicked at workbench/tests/wire.rs:11:25:\n    assertion `left == right` failed: wire drifted\n      left: 1\n     right: 2\n\n────────────\n     Summary [   0.014s] 4 tests run: 3 passed, 1 failed, 0 skipped",
 };
 const mapBroken = (open: "none" | "proof" | "log"): Fixture => {
@@ -2854,6 +2959,12 @@ ${writerStatusAfter("Keychain refused")}
   mapBriefTaller,
   mapBriefTallScroll,
   mapBriefUnconfirmed,
+  mapBriefPartialFacts: () => mapBriefPartialFacts(false),
+  mapBriefPartialFactsOpen: () => mapBriefPartialFacts(true),
+  mapBriefNoFacts,
+  mapBriefWhy: () => mapBriefWhy(false),
+  mapBriefWhyEsc: () => mapBriefWhy(true),
+  mapBriefWhyDecision,
   mapBriefPickRight: () => mapBriefPick(1),
   mapBriefPickWrong: () => mapBriefPick(0),
   mapBriefOrderSlots,
@@ -2880,6 +2991,10 @@ ${writerStatusAfter("Keychain refused")}
   mapBriefBoldUnpaired,
   mapSheetUnratified,
   mapStale,
+  mapMarksThick: () => mapMarks("thick"),
+  mapMarksThin: () => mapMarks("thin"),
+  mapMarksStale: () => mapMarks("stale"),
+  mapMarksBroken: () => mapMarks("broken"),
   mapRefresher,
   mapTalksTo,
   mapBriefPairLight,

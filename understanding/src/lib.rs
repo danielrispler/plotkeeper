@@ -39,7 +39,9 @@ pub use brief::{
     Answered, DesignLine, OpenItem, OpenKind, answered, design_lines, design_sources, open_items,
     write_design,
 };
-pub use drift::{AGY_FIXTURE_VERSION, AgyVersions, Drift, Versions, drift, dropped_events};
+pub use drift::{
+    AGY_FIXTURE_VERSION, AgyVersions, Drift, Versions, date as utc_date, drift, dropped_events,
+};
 pub use fingerprint::{Fingerprints, fingerprint_changes, live_roots, worktree_root};
 pub use risk::{RISK_TIMEOUT, Risk, RiskLevel, RiskNote, RiskNotes, RiskRequest, RiskView, judge};
 pub use store::{

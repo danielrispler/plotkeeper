@@ -67,6 +67,9 @@ pub struct MapState {
     /// The staleness band (1 to 3) of each Core part Daniel has not engaged with for 3, 6 or 12 weeks (`staleness.rs`); a part not listed
     /// is not stale.
     pub stale: BTreeMap<String, u8>,
+    /// What each stale part's sheet says of its band (`staleness::lines`): the band, and when Daniel last engaged with the part or that
+    /// he has not since tracking began (#495).
+    pub stale_why: BTreeMap<String, String>,
     /// The project's pre-flight (`pre_flight.rs`): the parts a piece of work will likely cross, framed on the map.
     pub pre_flight: Option<studio_understanding::pre_flight::PreFlight>,
     /// The project's micro-worlds and whether a run can build one (`micro_worlds.rs`).
@@ -156,6 +159,7 @@ pub fn read_map(repo: &Path) -> MapState {
         runs: crate::runner::Runs::default(),
         catch_ups: BTreeMap::new(),
         stale: BTreeMap::new(),
+        stale_why: BTreeMap::new(),
         pre_flight: None,
         micro_worlds: crate::micro_worlds::WorldsState::default(),
         law_patches: Vec::new(),
@@ -359,12 +363,10 @@ pub fn map_state(project: String, fetch: bool, app: &Arc<crate::App>) -> Result<
     state.user = read_user(&file, &project);
     if let Some(source) = &state.source {
         state.fog = crate::fog::effective(&state.user, source);
-        state.stale = crate::staleness::bands(
-            &state.user,
-            source,
-            &crate::staleness::births(repo, source),
-            crate::ratify::now(),
-        );
+        let born = crate::staleness::births(repo, source);
+        let now = crate::ratify::now();
+        state.stale = crate::staleness::bands(&state.user, source, &born, now);
+        state.stale_why = crate::staleness::lines(&state.user, source, &born, now);
     }
     state.ci = cache.get(&project);
     state.ready = app.prs.ready(&project);
