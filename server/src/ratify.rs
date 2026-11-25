@@ -288,8 +288,17 @@ pub struct Evidence {
 }
 
 /// Joins the brief's stored link evidence, read at `head`, to the rows of the links it adds; a removed or changed link, and an
-/// added one with no evidence stored, keep none.
-pub fn with_evidence(rows: &mut [Row], head: &str, evidence: &[LinkEvidence]) {
+/// added one with no evidence stored, keep none. Rows read at an open PR's head `read_at` other than `head` (a push since the
+/// brief was written) keep none either, since the new head's imports may differ; a landed PR's rows (`None`) keep the join.
+pub fn with_evidence(
+    rows: &mut [Row],
+    read_at: Option<&str>,
+    head: &str,
+    evidence: &[LinkEvidence],
+) {
+    if read_at.is_some_and(|at| at != head) {
+        return;
+    }
     for row in rows
         .iter_mut()
         .filter(|row| row.kind == "link" && row.change == "added")
@@ -733,8 +742,9 @@ pub fn pending(repo: &Path, project: &Project) -> Vec<Pending> {
 }
 
 /// The import sites behind each link that `head` adds to the map at `base` (#499, spec #477 "When it is computed"), read from
-/// `head` in commit mode (`system_map::check_at`), so an import the PR did not edit counts and the working tree is never read. A
-/// link with no computed edge its way, such as an `http` link, has none; a removed link has none in v1.
+/// `head` in commit mode (`system_map::check_at`), so an import the PR did not edit counts and the working tree is never read. Only
+/// an `import` link has evidence: a run-time link has none, even beside an import edge between the same parts, and neither has a
+/// removed link in v1.
 pub fn link_evidence(repo: &Path, base: &str, head: &str) -> Vec<LinkEvidence> {
     let (old, new) = (map_at(repo, base), map_at(repo, head));
     let added: Vec<String> = map_items(old.as_deref(), new.as_deref())
@@ -753,7 +763,9 @@ pub fn link_evidence(repo: &Path, base: &str, head: &str) -> Vec<LinkEvidence> {
     added
         .into_iter()
         .filter_map(|id| {
-            let link = links.iter().find(|link| field(link, "id") == id)?;
+            let link = links
+                .iter()
+                .find(|link| field(link, "id") == id && field(link, "kind") == "import")?;
             let edge = edges
                 .iter()
                 .find(|e| e.from == field(link, "from") && e.to == field(link, "to"))?;
@@ -786,7 +798,7 @@ pub struct SiteSnippet {
     pub lines: Vec<String>,
 }
 
-/// The snippet of `file` at `line` as commit `head` holds it, read with `git show <head>:<file>`, not from the PR's diff, so an
+/// The snippet of `file` at `line` as commit `head` holds it, read with `git cat-file blob <head>:<file>`, not from the PR's diff, so an
 /// import the PR did not edit shows too. `head` must be a commit's hex name.
 pub fn site_snippet(
     repo: &Path,
@@ -797,7 +809,8 @@ pub fn site_snippet(
     if head.len() < 7 || !head.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err("a site is read at a commit's hex name".into());
     }
-    let text = git(repo, &["show", &format!("{head}:{file}")])?;
+    // `cat-file blob`, not `show`: a directory, or an empty `file` (the root), is a tree, which `show` would list.
+    let text = git(repo, &["cat-file", "blob", &format!("{head}:{file}")])?;
     let all: Vec<&str> = text.lines().collect();
     let at = line.map_or(1, |n| n as usize);
     let first = at.saturating_sub(AROUND).max(1);
@@ -843,7 +856,12 @@ pub fn pr_ratify(prs: &crate::prs::Prs, project: String, number: u64) -> Result<
         .collect();
     let mut found = rows(&mine, number, &map, &decisions, landed);
     if let Some(stored) = &stored {
-        with_evidence(&mut found, &stored.head, &stored.link_evidence);
+        with_evidence(
+            &mut found,
+            open.as_deref(),
+            &stored.head,
+            &stored.link_evidence,
+        );
     }
     Ok(found)
 }
@@ -1355,7 +1373,7 @@ mod tests {
                 sites: sites.clone(),
             },
         ];
-        with_evidence(&mut found, "cafe", &stored);
+        with_evidence(&mut found, Some("cafe"), "cafe", &stored);
         let got: Vec<(&str, Option<Evidence>)> = found
             .iter()
             .map(|r| (r.id.as_str(), r.evidence.clone()))
@@ -1375,6 +1393,28 @@ mod tests {
                 ("a-b", None),
             ]
         );
+    }
+
+    #[test]
+    fn evidence_stored_at_another_head_than_the_rows_were_read_at_is_not_shown() {
+        let map = [MapItem {
+            kind: "link".into(),
+            id: "a-b".into(),
+            change: "added".into(),
+            text: String::new(),
+            detail: None,
+        }];
+        let stored = [LinkEvidence {
+            link: "a-b".into(),
+            sites: vec![ImportSite {
+                file: "a/x.ts".into(),
+                line: Some(4),
+            }],
+        }];
+        // A push since the brief was written: the rows are the new head's, the evidence the old one's.
+        let mut found = rows(&Project::default(), 7, &map, &[], None);
+        with_evidence(&mut found, Some("beef"), "cafe", &stored);
+        assert_eq!(found[0].evidence, None);
     }
 
     mod git_repo {
@@ -1562,6 +1602,9 @@ mod tests {
             // A name that is no commit's hex is refused before git sees it.
             assert!(site_snippet(repo, "--output=x", "alpha/a.ts", None).is_err());
             assert!(site_snippet(repo, head, "alpha/none.ts", None).is_err());
+            // A directory, or no file at all, is a tree: git would list it, and that is no site's code.
+            assert!(site_snippet(repo, head, "alpha", None).is_err());
+            assert!(site_snippet(repo, head, "", None).is_err());
         }
 
         /// A version 2 map of `alpha`, `beta` and `gamma`, read by `typescript-imports`, with `links`.
@@ -1616,6 +1659,8 @@ mod tests {
                 link("alpha-gamma", "alpha", "gamma", "import"),
                 // Added, but no edge stands behind an http link: no evidence.
                 link("gamma-beta", "gamma", "beta", "http"),
+                // A run-time link beside the import edge between the same parts: the edge is the import link's, not its.
+                link("alpha-gamma-spawn", "alpha", "gamma", "spawn"),
             ]);
             commit(root, &evidence_map(links), "Gamma (#2)", "1100000000");
             let head = run(root, &["rev-parse", "HEAD"]);
