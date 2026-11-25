@@ -257,6 +257,44 @@ fn a_pair_into_a_package_names_only_its_package_files() {
     assert_eq!(found, ["a/main.go>lib/x.go"]);
 }
 
+/// Whether `lib/f.go`, holding `text`, is skipped: whether an import of its package pairs with it.
+fn tag_skips(text: &str) -> bool {
+    let found = go_pairs(&[
+        MOD,
+        ("a/main.go", IMPORTS_LIB),
+        ("lib/x.go", "package lib\n"),
+        ("lib/f.go", text),
+    ]);
+    !found.contains(&"a/main.go>lib/f.go".to_string())
+}
+
+#[test]
+fn a_build_constraint_that_can_never_hold_with_ignore_off_skips_the_file() {
+    for text in [
+        "//go:build ignore && linux\n\npackage lib\n",
+        "// +build ignore\n// +build linux\n\npackage lib\n",
+        "//go:build linux\n//go:build darwin\n\npackage lib\n",
+    ] {
+        assert!(tag_skips(text), "{text}");
+    }
+}
+
+#[test]
+fn a_build_constraint_that_can_hold_with_any_other_tag_keeps_the_file() {
+    for text in [
+        "//go:build linux\n\npackage lib\n",
+        "//go:build !ignore\n\npackage lib\n",
+        "//go:build linux\n// +build ignore\n\npackage lib\n",
+    ] {
+        assert!(!tag_skips(text), "{text}");
+    }
+}
+
+#[test]
+fn a_build_constraint_after_the_package_clause_is_not_read() {
+    assert!(!tag_skips("package lib\n\n//go:build ignore\n"));
+}
+
 #[test]
 fn a_file_under_no_go_mod_gives_no_pair_and_no_note_but_its_part_is_read() {
     let (_dir, root) = repo(

@@ -2,6 +2,7 @@
 //! for which module provides a package (go.dev/ref/mod, "Resolving a package to a module") against every tracked
 //! `go.mod`, and paired with the package files of the folder they name (spec #569).
 
+mod build_tags;
 mod work;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -30,7 +31,7 @@ impl Extractor for GoImports {
         file.ends_with("_test.go")
             || repo
                 .read(file)
-                .is_some_and(|text| skipped(&head_only(&text)))
+                .is_some_and(|text| skipped(&text, &head_only(&text)))
     }
 
     /// A tracked `go.mod` the module index keeps: outside the excluded folders, with a readable module line, even when the
@@ -80,26 +81,10 @@ fn excluded(path: &str) -> bool {
         .any(|e| e == "testdata" || e == "vendor" || e.starts_with(['_', '.']))
 }
 
-/// Whether a file's head leaves it out of every build: a `package documentation` file, or one whose build constraint is
-/// exactly `ignore`, a `//go:build ignore` line or, with no `//go:build` line, a `// +build ignore` line.
-fn skipped(head: &Head) -> bool {
-    let go_build = constraints(head, "//go:build");
-    let ignored = if go_build.is_empty() {
-        constraints(head, "// +build").contains(&"ignore")
-    } else {
-        go_build.contains(&"ignore")
-    };
-    ignored || head.package.as_deref() == Some("documentation")
-}
-
-/// The expressions of the head's comments that start with `prefix`, such as `//go:build`.
-fn constraints<'h>(head: &'h Head, prefix: &str) -> Vec<&'h str> {
-    head.comments
-        .iter()
-        .filter_map(|c| c.strip_prefix(prefix))
-        .filter(|rest| rest.is_empty() || rest.starts_with([' ', '\t']))
-        .map(str::trim)
-        .collect()
+/// Whether a file, its text and head given, is left out of every build: a `package documentation` file, or one whose
+/// build constraint can never hold with `ignore` off, as `go mod tidy` judges it (`build_tags`).
+fn skipped(text: &str, head: &Head) -> bool {
+    head.package.as_deref() == Some("documentation") || build_tags::never_builds(text)
 }
 
 /// The folder holding `file`, as a prefix: empty for the root, else ending in `/`.
@@ -310,8 +295,6 @@ fn resolvable(path: &str) -> bool {
 /// What the reader takes from a Go file's head: the package clause's name and each import's path with its line.
 #[derive(Debug, Default)]
 struct Head {
-    /// The `//` comments before the package clause, where build constraints stand.
-    comments: Vec<String>,
     package: Option<String>,
     imports: Vec<(String, u32)>,
 }
@@ -322,8 +305,8 @@ enum Tok {
     /// A string literal's text, or none when it holds an escape.
     Str(Option<String>),
     Punct(u8),
-    /// A `//` comment's text.
-    Comment(String),
+    /// A `//` comment.
+    Comment,
 }
 
 /// Go's tokens, as far as the reader needs them: identifiers, string literals, punctuation and line comments, with
@@ -381,7 +364,7 @@ impl<'a> Lexer<'a> {
                 .position(|&b| b == b'\n')
                 .map_or(self.text.len(), |len| start + len);
             self.at = end;
-            Tok::Comment(String::from_utf8_lossy(&self.text[start..end]).into_owned())
+            Tok::Comment
         } else if byte == b'"' {
             let mut i = start + 1;
             let mut escaped = false;
@@ -422,7 +405,7 @@ impl<'a> Lexer<'a> {
     fn next_code(&mut self) -> Option<(Tok, u32)> {
         loop {
             match self.next()? {
-                (Tok::Comment(_) | Tok::Punct(b';'), _) => {}
+                (Tok::Comment | Tok::Punct(b';'), _) => {}
                 found => return Some(found),
             }
         }
@@ -439,12 +422,12 @@ fn head_only(text: &str) -> Head {
     package_clause(&mut lexer)
 }
 
-/// Reads the comments and the package clause, the lexer left after them.
+/// Reads the package clause, the comments before it skipped, the lexer left after it.
 fn package_clause(lexer: &mut Lexer) -> Head {
     let mut head = Head::default();
     loop {
         match lexer.next() {
-            Some((Tok::Comment(c), _)) => head.comments.push(c),
+            Some((Tok::Comment, _)) => {}
             Some((tok, _)) if is_ident(&tok, "package") => break,
             _ => return head,
         }
@@ -522,7 +505,7 @@ fn go_imports(repo: &Repo) -> Output {
                 continue;
             };
             let head = head(&text);
-            if !skipped(&head) {
+            if !skipped(&text, &head) {
                 heads.insert(file, head);
             }
         }
