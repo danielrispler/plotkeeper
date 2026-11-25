@@ -17,7 +17,7 @@ use crate::pr_brief::{
     Shape, TaggedTest, check_brief, cut_to, facts_block, flow_key, gather, ids, parse_reply,
     prompt, section, split_diff, timed_write_facts,
 };
-use crate::pr_brief::{Brief, CallKind, INSTRUCTIONS};
+use crate::pr_brief::{Brief, CallKind, INSTRUCTIONS, PartialFacts};
 use crate::pr_brief_check::Stage;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -385,6 +385,7 @@ pub fn build_catch_up_facts(source: &CatchUpSource) -> Result<Facts, String> {
         context,
         instructions: Some(instructions()),
         guard: None,
+        partial_facts: PartialFacts::default(),
     })
 }
 

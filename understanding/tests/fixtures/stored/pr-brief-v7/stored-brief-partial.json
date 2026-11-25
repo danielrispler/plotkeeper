@@ -1,0 +1,41 @@
+{
+ "version": 1,
+ "pr": 488,
+ "head": "cafe488",
+ "written_at": 1795200000000,
+ "stale": false,
+ "model": "opus",
+ "shape": {
+  "chapters": false,
+  "required": [
+   "alpha"
+  ],
+  "also": [],
+  "overview": false,
+  "flows_changed": []
+ },
+ "brief": {
+  "title": "A big change",
+  "overview": [],
+  "chapters": [],
+  "also": [],
+  "decisions": []
+ },
+ "partial_facts": {
+  "cut": {
+   "files_cut": [
+    "gamma/c.rs"
+   ],
+   "files_partial": [
+    "alpha/a.rs"
+   ],
+   "bytes_sent": 61440,
+   "bytes_cut": 20480
+  },
+  "claim_error": "`claude -p` failed",
+  "no_extractor": [
+   ".go",
+   ".py"
+  ]
+ }
+}

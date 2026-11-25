@@ -29,3 +29,8 @@ the PR touched. `understanding/tests/pr_brief.rs` loads it; the older samples, w
 carries the tokens read from and written to the cache (#450): the first record from before, its calls with no
 `cache_read_tokens` or `cache_write_tokens`, which read as 0; the second with both on each call. `understanding/tests/pr_brief.rs`
 loads it.
+
+`pr-brief-v7/` holds a stored PR brief as written once a brief stores what it was written without (#488, spec #477's "Partial
+facts"): `partial_facts` with a cut diff's cut and partial files and its bytes sent and cut, the claim check's error and the
+extensions no extractor reads. `understanding/tests/pr_brief.rs` loads it; the older samples, with no `partial_facts`, read with
+nothing missing.

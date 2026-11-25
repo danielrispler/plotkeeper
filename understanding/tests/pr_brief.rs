@@ -160,6 +160,130 @@ fn the_budget_is_kept_structure_first_and_the_record_says_what_was_cut() {
 }
 
 #[test]
+fn a_brief_written_from_a_cut_diff_stores_the_cut_and_partial_files_and_the_bytes() {
+    let mut s = source(&["alpha/a.rs", "beta/b.rs", "gamma/c.rs"]);
+    // A file of many small hunks, partly sent, and one hunk far over the budget, not sent at all.
+    let mut hunks = file_diff("alpha/a.rs", 100);
+    for h in 1..40 {
+        hunks += &format!("@@ -{n},1 +{n},100 @@\n", n = h * 200);
+        for i in 0..100 {
+            hunks += &format!("+hunk {h} line {i} of alpha/a.rs\n");
+        }
+    }
+    s.diff = format!(
+        "{hunks}{}{}",
+        file_diff("beta/b.rs", 5),
+        file_diff("gamma/c.rs", 9000)
+    );
+    let (_, stored, record, _) = run_entry(vec![Ok(none_unsupported())], &single_story(), &s);
+    let cut = stored.partial_facts.cut.expect("the diff was cut");
+    assert_eq!(cut.files_partial, ["alpha/a.rs"]);
+    assert_eq!(cut.files_cut, ["gamma/c.rs"]);
+    assert_eq!(cut.files_partial.len(), record.budget.files_partial);
+    assert_eq!(cut.files_cut.len(), record.budget.files_cut);
+    assert_eq!(cut.bytes_sent + cut.bytes_cut, s.diff.len());
+    assert!(cut.bytes_sent > 0 && cut.bytes_sent < BUDGET, "{cut:?}");
+
+    let (_, whole, _, _) = run_entry(
+        vec![Ok(none_unsupported())],
+        &single_story(),
+        &source(&["alpha/a.rs"]),
+    );
+    assert_eq!(whole.partial_facts.cut, None);
+}
+
+#[test]
+fn a_failed_claim_check_stores_its_error_and_the_brief_is_still_stored() {
+    for reply in [
+        Err("`claude -p` failed".to_string()),
+        Ok("I could not decide.".into()),
+    ] {
+        let (_, stored, record, _) = run_entry(
+            vec![reply.clone()],
+            &single_story(),
+            &source(&["alpha/a.rs"]),
+        );
+        assert!(record.claim_error.is_some(), "{reply:?}");
+        assert_eq!(stored.partial_facts.claim_error, record.claim_error);
+    }
+    let (_, checked, _, _) = run_entry(
+        vec![Ok(none_unsupported())],
+        &single_story(),
+        &source(&["alpha/a.rs"]),
+    );
+    assert_eq!(checked.partial_facts.claim_error, None);
+}
+
+#[test]
+fn a_language_counts_as_unread_by_the_fixed_table_and_the_maps_extractors() {
+    let map = |extractors: &str| {
+        MAP.replacen(
+            "\"version\": 1,",
+            &format!("\"version\": 1, {extractors}"),
+            1,
+        )
+        .replace("\"ignored\": []", "\"ignored\": [\"box/\"]")
+    };
+    let paths = |ps: &[&str]| ps.iter().map(|p| p.to_string()).collect::<Vec<_>>();
+    let none = map("");
+    // The table's languages count, each extension once and sorted; files outside any part count too.
+    assert_eq!(
+        no_extractor(
+            &none,
+            &paths(&["alpha/a.go", "beta/b.py", "alpha/c.go", "x/y.kt"])
+        )
+        .unwrap(),
+        [".go", ".kt", ".py"]
+    );
+    // CSS, HTML, JSON, YAML, Markdown and shell never count.
+    assert!(
+        no_extractor(
+            &none,
+            &paths(&[
+                "alpha/a.css",
+                "alpha/a.html",
+                "alpha/a.json",
+                "alpha/a.yml",
+                "alpha/a.yaml",
+                "alpha/a.md",
+                "alpha/a.sh"
+            ])
+        )
+        .unwrap()
+        .is_empty()
+    );
+    // An ignored file never counts.
+    assert!(
+        no_extractor(&none, &paths(&["box/a.go"]))
+            .unwrap()
+            .is_empty()
+    );
+    // Rust and TypeScript count only when the map lacks their extractor.
+    let code = paths(&["alpha/a.rs", "beta/b.ts", "beta/c.tsx", "gamma/d.mjs"]);
+    assert_eq!(
+        no_extractor(&none, &code).unwrap(),
+        [".mjs", ".rs", ".ts", ".tsx"]
+    );
+    let rust = map("\"extractors\": [\"cargo\", \"rust-modules\"],");
+    assert_eq!(no_extractor(&rust, &code).unwrap(), [".mjs", ".ts", ".tsx"]);
+    let both = map("\"extractors\": [\"rust-modules\", \"typescript-imports\"],");
+    assert!(no_extractor(&both, &code).unwrap().is_empty());
+    // `cargo` alone reads crates, not a crate's modules.
+    let cargo = map("\"extractors\": [\"cargo\"],");
+    assert_eq!(
+        no_extractor(&cargo, &paths(&["alpha/a.rs"])).unwrap(),
+        [".rs"]
+    );
+}
+
+#[test]
+fn a_brief_stores_the_languages_no_extractor_reads() {
+    let s = source(&["alpha/a.rs", "beta/b.go"]);
+    let (_, stored, _, _) = run_entry(vec![Ok(none_unsupported())], &single_story(), &s);
+    assert_eq!(stored.partial_facts.no_extractor, [".go", ".rs"]);
+}
+
+#[test]
 fn the_diff_is_sent_required_parts_core_first_then_other_core_then_tests_then_the_rest() {
     let mut s = source(&[
         "alpha/tests/t.rs",
@@ -1298,6 +1422,37 @@ fn a_stored_brief_with_a_guard_reads_with_it_and_an_older_one_has_none() {
     let older: StoredBrief =
         serde_json::from_str(&read("pr-brief-v4/stored-brief-full.json")).unwrap();
     assert_eq!(older.guard, None);
+}
+
+// @law: old-stored-files-load
+#[test]
+fn a_stored_brief_reads_with_its_partial_facts_and_older_ones_with_nothing_missing() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/stored");
+    let read = |name: &str| std::fs::read_to_string(dir.join(name)).unwrap();
+    let partial: StoredBrief =
+        serde_json::from_str(&read("pr-brief-v7/stored-brief-partial.json")).unwrap();
+    assert_eq!(
+        partial.partial_facts,
+        PartialFacts {
+            cut: Some(DiffCut {
+                files_cut: vec!["gamma/c.rs".into()],
+                files_partial: vec!["alpha/a.rs".into()],
+                bytes_sent: 61440,
+                bytes_cut: 20480,
+            }),
+            claim_error: Some("`claude -p` failed".into()),
+            no_extractor: vec![".go".into(), ".py".into()],
+        }
+    );
+    for older in [
+        "pr-brief-v3/stored-brief-full.json",
+        "pr-brief-v3/stored-brief-minimal.json",
+        "pr-brief-v4/stored-brief-full.json",
+        "pr-brief-v5/stored-brief-guard.json",
+    ] {
+        let older: StoredBrief = serde_json::from_str(&read(older)).unwrap();
+        assert!(older.partial_facts.is_empty(), "{older:?}");
+    }
 }
 
 // @law: old-stored-files-load
