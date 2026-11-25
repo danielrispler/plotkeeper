@@ -13,9 +13,9 @@
 
 use crate::millis;
 use crate::pr_brief::{
-    BUDGET, BriefRecord, BriefWriter, BudgetRecord, CUT_NOTE_ROOM, CheckContext, Facts, PrMeta,
-    Shape, TaggedTest, check_brief, cut_to, facts_block, flow_key, gather, ids, parse_reply,
-    prompt, section, split_diff, timed_write_facts,
+    BUDGET, BriefRecord, BriefWriter, BudgetRecord, CUT_NOTE_ROOM, CheckContext, Facts, FileDiff,
+    PrMeta, Shape, TaggedTest, check_brief, cut_to, facts_block, flow_key, gather, ids,
+    parse_reply, prompt, section, split_diff, timed_write_facts,
 };
 use crate::pr_brief::{Brief, CallKind, INSTRUCTIONS, PartialFacts};
 use crate::pr_brief_check::Stage;
@@ -111,10 +111,6 @@ fn part_files(map: &system_map::Map, part: &str, paths: &[String]) -> Vec<String
 
 /// Assembles the writer's facts: the part's structure, then the fog entries, then one combined diff of the part's paths inside
 /// the PR brief's `BUDGET`; the code is cut first, and "DIFF NOT SENT" says what was.
-#[allow(
-    clippy::too_many_lines,
-    reason = "#556 splits it by responsibility (spec #548, Group 4)"
-)]
 pub fn build_catch_up_facts(source: &CatchUpSource) -> Result<Facts, String> {
     let map = system_map::parse_lenient(&source.map_text)?;
     // The map comes from git as it was committed, so a version 1 map is read converted.
@@ -124,39 +120,9 @@ pub fn build_catch_up_facts(source: &CatchUpSource) -> Result<Facts, String> {
     let paths: Vec<String> = all.iter().map(|f| f.path.clone()).collect();
     let mine = part_files(&map, part, &paths);
     let files: Vec<_> = all.iter().filter(|f| mine.contains(&f.path)).collect();
-
-    // The tagged tests, and whether the range changed one (wherever the test lives).
-    let mut tagged = source.tagged.clone();
-    for t in &mut tagged {
-        t.changed = all.iter().any(|fd| {
-            fd.path == t.path
-                && fd.hunks.iter().any(|h| {
-                    (!t.test.is_empty() && h.contains(&t.test))
-                        || h.contains(&format!("@law: {}", t.law))
-                })
-        });
-    }
-
-    let links: Vec<String> = mj["links"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|l| l["from"] == part || l["to"] == part)
-        .filter_map(|l| l["id"].as_str().map(String::from))
-        .collect();
-    let through = |flow: &serde_json::Value| {
-        flow["hops"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .any(|h| links.iter().any(|k| h["link"] == k.as_str()))
-    };
-    let flows: Vec<&serde_json::Value> = mj["flows"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|f| through(f))
-        .collect();
+    let tagged = tagged_changes(&source.tagged, &all);
+    let links = part_links(&mj, part);
+    let flows = flows_through(&mj, &links);
     let map_diff = if source.map_diff.is_empty() {
         "none".to_string()
     } else {
@@ -173,85 +139,8 @@ pub fn build_catch_up_facts(source: &CatchUpSource) -> Result<Facts, String> {
                 .then(|| (id.to_string(), flow_key(&mj, f, &all_parts)))
         })
         .collect();
-
-    let laws: Vec<String> = mj["laws"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|l| l["on"] == part || links.iter().any(|k| l["on"] == k.as_str()))
-        .map(|l| {
-            let id = l["id"].as_str().unwrap_or("");
-            let tests: Vec<String> = tagged
-                .iter()
-                .filter(|t| t.law == id)
-                .map(|t| {
-                    format!(
-                        "{} in {} ({})",
-                        t.test,
-                        t.path,
-                        if t.changed {
-                            "changed in the fog range"
-                        } else {
-                            "not changed in the fog range"
-                        }
-                    )
-                })
-                .collect();
-            format!(
-                "{} ({}): {} [tagged tests: {}]",
-                id,
-                l["backing"].as_str().unwrap_or(""),
-                l["text"].as_str().unwrap_or(""),
-                if tests.is_empty() {
-                    "none".into()
-                } else {
-                    tests.join("; ")
-                }
-            )
-        })
-        .collect();
-    let pj = mj["parts"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|p| p["id"] == part)
-        .cloned()
-        .unwrap_or_default();
-    let mut the_part = format!(
-        "## {part} ({})\n{}\nlaws:\n  {}\nflows through it: {}\n",
-        pj["name"].as_str().unwrap_or(""),
-        system_map::part_text(&pj),
-        if laws.is_empty() {
-            "none".into()
-        } else {
-            laws.join("\n  ")
-        },
-        if flows.is_empty() {
-            "none".into()
-        } else {
-            flows
-                .iter()
-                .filter_map(|f| f["id"].as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        }
-    );
-    for f in &files {
-        // Writing to a `String` cannot fail.
-        writeln!(the_part, "- {} +{}/-{}", f.path, f.added, f.removed).ok();
-    }
-
-    let entries: Vec<String> = source
-        .entries
-        .iter()
-        .map(|e| {
-            let short = &e.commit[..e.commit.len().min(9)];
-            match e.pr {
-                Some(n) => format!("- PR #{n} {} ({short})\n{}", e.title, e.body.trim_end()),
-                None => format!("- commit {short}, pushed with no PR: {}", e.title),
-            }
-        })
-        .collect();
+    let laws = law_lines(&mj, part, &links, &tagged);
+    let the_part = part_section(&mj, part, &laws, &flows, &files);
     let shape_text = format!(
         "part catch-up: a single story (one chapter with part \"story\") of 3 or 4 steps about part {part}, over {} fog entries, ordered by behaviour",
         source.entries.len()
@@ -261,90 +150,21 @@ pub fn build_catch_up_facts(source: &CatchUpSource) -> Result<Facts, String> {
         ("SYSTEM MAP".into(), source.map_text.clone()),
         ("MAP DIFF OVER THE FOG RANGE".into(), map_diff),
         ("THE PART".into(), the_part),
-        ("FOG ENTRIES".into(), entries.join("\n\n")),
+        (
+            "FOG ENTRIES".into(),
+            entry_lines(&source.entries).join("\n\n"),
+        ),
     ];
     // Only when the structure and the entries alone leave no room for the diff's note are the entries cut.
-    let used = |sections: &[(String, String)]| {
-        sections
-            .iter()
-            .map(|(n, t)| section(n, t).len())
-            .sum::<usize>()
-    };
     let over = (used(&sections) + CUT_NOTE_ROOM).saturating_sub(BUDGET);
     if over > 0
         && let Some((_, text)) = sections.iter_mut().find(|(n, _)| n == "FOG ENTRIES")
     {
         *text = cut_to(text, text.len().saturating_sub(over));
     }
-
-    // The diff, the part's files only: smaller files first, hunk by hunk in the room that is left.
-    let mut order = files.clone();
-    order.sort_by_key(|f| f.added + f.removed);
-    let mut room = BUDGET.saturating_sub(used(&sections) + CUT_NOTE_ROOM);
-    let mut diff_text = String::new();
-    let mut cut: Vec<String> = Vec::new();
-    let mut budget = BudgetRecord {
-        diff_bytes_full: files
-            .iter()
-            .map(|f| f.header.len() + f.hunks.iter().map(String::len).sum::<usize>())
-            .sum(),
-        ..BudgetRecord::default()
-    };
-    for f in order {
-        let mut sent = 0;
-        let mut text = String::new();
-        if f.header.len() < room {
-            text += &f.header;
-            for h in &f.hunks {
-                if text.len() + h.len() <= room {
-                    text += h;
-                    sent += 1;
-                } else {
-                    break;
-                }
-            }
-        }
-        if sent > 0 || (f.hunks.is_empty() && !text.is_empty()) {
-            room -= text.len();
-            diff_text += &text;
-        }
-        if sent == f.hunks.len() && !text.is_empty() {
-            budget.files_sent += 1;
-        } else {
-            if sent > 0 {
-                budget.files_partial += 1;
-            } else {
-                budget.files_cut += 1;
-            }
-            cut.push(format!(
-                "- {}: +{}/-{}, {} of {} hunks not sent",
-                f.path,
-                f.added,
-                f.removed,
-                f.hunks.len() - sent,
-                f.hunks.len()
-            ));
-        }
-    }
-    let cut_text = if cut.is_empty() {
-        "nothing: the whole diff of the part is below".to_string()
-    } else {
-        let mut t = format!(
-            "{} files not fully sent; do not guess what they hold:\n",
-            cut.len()
-        );
-        for (i, line) in cut.iter().enumerate() {
-            if t.len() + line.len() + 1 > CUT_NOTE_ROOM - 200 {
-                // Writing to a `String` cannot fail.
-                writeln!(t, "- ... and {} more", cut.len() - i).ok();
-                break;
-            }
-            t += line;
-            t += "\n";
-        }
-        t
-    };
-    sections.push(("DIFF NOT SENT".into(), cut_text));
+    let room = BUDGET.saturating_sub(used(&sections) + CUT_NOTE_ROOM);
+    let (diff_text, cut, mut budget) = fit_diff(&files, room);
+    sections.push(("DIFF NOT SENT".into(), cut_note(&cut)));
     sections.push(("DIFF".into(), diff_text.clone()));
     let text: String = sections.iter().map(|(n, t)| section(n, t)).collect();
     budget.total_bytes = text.len();
@@ -394,6 +214,232 @@ pub fn build_catch_up_facts(source: &CatchUpSource) -> Result<Facts, String> {
         guard: None,
         partial_facts: PartialFacts::default(),
     })
+}
+
+/// The tagged tests, each marked by whether the range changed it (wherever the test lives).
+fn tagged_changes(tagged: &[TaggedTest], all: &[FileDiff]) -> Vec<TaggedTest> {
+    let mut tagged = tagged.to_vec();
+    for t in &mut tagged {
+        t.changed = all.iter().any(|fd| {
+            fd.path == t.path
+                && fd.hunks.iter().any(|h| {
+                    (!t.test.is_empty() && h.contains(&t.test))
+                        || h.contains(&format!("@law: {}", t.law))
+                })
+        });
+    }
+    tagged
+}
+
+/// The ids of the links with the part at an end.
+fn part_links(mj: &serde_json::Value, part: &str) -> Vec<String> {
+    mj["links"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|l| l["from"] == part || l["to"] == part)
+        .filter_map(|l| l["id"].as_str().map(String::from))
+        .collect()
+}
+
+/// The flows with a hop along one of `links`.
+fn flows_through<'a>(mj: &'a serde_json::Value, links: &[String]) -> Vec<&'a serde_json::Value> {
+    let through = |flow: &serde_json::Value| {
+        flow["hops"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|h| links.iter().any(|k| h["link"] == k.as_str()))
+    };
+    mj["flows"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|f| through(f))
+        .collect()
+}
+
+/// One line per law on the part or one of its links, with its tagged tests.
+fn law_lines(
+    mj: &serde_json::Value,
+    part: &str,
+    links: &[String],
+    tagged: &[TaggedTest],
+) -> Vec<String> {
+    mj["laws"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|l| l["on"] == part || links.iter().any(|k| l["on"] == k.as_str()))
+        .map(|l| {
+            let id = l["id"].as_str().unwrap_or("");
+            let tests: Vec<String> = tagged
+                .iter()
+                .filter(|t| t.law == id)
+                .map(|t| {
+                    format!(
+                        "{} in {} ({})",
+                        t.test,
+                        t.path,
+                        if t.changed {
+                            "changed in the fog range"
+                        } else {
+                            "not changed in the fog range"
+                        }
+                    )
+                })
+                .collect();
+            format!(
+                "{} ({}): {} [tagged tests: {}]",
+                id,
+                l["backing"].as_str().unwrap_or(""),
+                l["text"].as_str().unwrap_or(""),
+                if tests.is_empty() {
+                    "none".into()
+                } else {
+                    tests.join("; ")
+                }
+            )
+        })
+        .collect()
+}
+
+/// THE PART: its name and text, its laws, the flows through it, and its files the range changed.
+fn part_section(
+    mj: &serde_json::Value,
+    part: &str,
+    laws: &[String],
+    flows: &[&serde_json::Value],
+    files: &[&FileDiff],
+) -> String {
+    let pj = mj["parts"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|p| p["id"] == part)
+        .cloned()
+        .unwrap_or_default();
+    let mut the_part = format!(
+        "## {part} ({})\n{}\nlaws:\n  {}\nflows through it: {}\n",
+        pj["name"].as_str().unwrap_or(""),
+        system_map::part_text(&pj),
+        if laws.is_empty() {
+            "none".into()
+        } else {
+            laws.join("\n  ")
+        },
+        if flows.is_empty() {
+            "none".into()
+        } else {
+            flows
+                .iter()
+                .filter_map(|f| f["id"].as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+    );
+    for f in files {
+        // Writing to a `String` cannot fail.
+        writeln!(the_part, "- {} +{}/-{}", f.path, f.added, f.removed).ok();
+    }
+    the_part
+}
+
+/// One entry per fog entry: its PR, or its commit pushed with none.
+fn entry_lines(entries: &[FogEntry]) -> Vec<String> {
+    entries
+        .iter()
+        .map(|e| {
+            let short = &e.commit[..e.commit.len().min(9)];
+            match e.pr {
+                Some(n) => format!("- PR #{n} {} ({short})\n{}", e.title, e.body.trim_end()),
+                None => format!("- commit {short}, pushed with no PR: {}", e.title),
+            }
+        })
+        .collect()
+}
+
+/// The bytes the sections take in the facts.
+fn used(sections: &[(String, String)]) -> usize {
+    sections
+        .iter()
+        .map(|(n, t)| section(n, t).len())
+        .sum::<usize>()
+}
+
+/// The diff, the part's files only, in `room` bytes: smaller files first, hunk by hunk. Returns
+/// the diff sent, a line for each file not fully sent, and the budget's file counts.
+fn fit_diff(files: &[&FileDiff], mut room: usize) -> (String, Vec<String>, BudgetRecord) {
+    let mut order = files.to_vec();
+    order.sort_by_key(|f| f.added + f.removed);
+    let mut diff_text = String::new();
+    let mut cut: Vec<String> = Vec::new();
+    let mut budget = BudgetRecord {
+        diff_bytes_full: files
+            .iter()
+            .map(|f| f.header.len() + f.hunks.iter().map(String::len).sum::<usize>())
+            .sum(),
+        ..BudgetRecord::default()
+    };
+    for f in order {
+        let mut sent = 0;
+        let mut text = String::new();
+        if f.header.len() < room {
+            text += &f.header;
+            for h in &f.hunks {
+                if text.len() + h.len() <= room {
+                    text += h;
+                    sent += 1;
+                } else {
+                    break;
+                }
+            }
+        }
+        if sent > 0 || (f.hunks.is_empty() && !text.is_empty()) {
+            room -= text.len();
+            diff_text += &text;
+        }
+        if sent == f.hunks.len() && !text.is_empty() {
+            budget.files_sent += 1;
+        } else {
+            if sent > 0 {
+                budget.files_partial += 1;
+            } else {
+                budget.files_cut += 1;
+            }
+            cut.push(format!(
+                "- {}: +{}/-{}, {} of {} hunks not sent",
+                f.path,
+                f.added,
+                f.removed,
+                f.hunks.len() - sent,
+                f.hunks.len()
+            ));
+        }
+    }
+    (diff_text, cut, budget)
+}
+
+/// DIFF NOT SENT: the files not fully sent, as many as fit in its room.
+fn cut_note(cut: &[String]) -> String {
+    if cut.is_empty() {
+        "nothing: the whole diff of the part is below".to_string()
+    } else {
+        let mut t = format!(
+            "{} files not fully sent; do not guess what they hold:\n",
+            cut.len()
+        );
+        for (i, line) in cut.iter().enumerate() {
+            if t.len() + line.len() + 1 > CUT_NOTE_ROOM - 200 {
+                // Writing to a `String` cannot fail.
+                writeln!(t, "- ... and {} more", cut.len() - i).ok();
+                break;
+            }
+            t += line;
+            t += "\n";
+        }
+        t
+    }
 }
 
 /// The PR brief's code checks, plus the catch-up's own: its one story is 3 or 4 steps. Returns how many items are flagged.
