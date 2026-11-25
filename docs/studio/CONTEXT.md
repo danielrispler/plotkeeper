@@ -133,7 +133,7 @@ Retired with the Tauri app (#332); it is in `archive/terminal-daemon/` (#415). T
 _Avoid_: Server (the program that serves the page, below), multiplexer
 
 **Server**:
-The `server/` library and its `plotkeeper` program, which has no window: it holds the core state, the card store and the writer, follows the event log, writes the summaries and the PR briefs, and serves the learning layer as a page on 127.0.0.1 (one per data folder, behind a token) that Daniel opens in a browser tab. It owns no terminals: the **Terminal daemon** and the Tauri app's shell that also hosted the library are retired (#332, #415).
+The `server/` library and its `plotkeeper` program, which has no window: it holds the core state, the card store and the writer, follows the event log, writes the summaries and the PR briefs, and serves the learning layer as a page on 127.0.0.1 (one per data folder, behind a token) that Daniel opens in a browser tab. It owns no terminals: the **Terminal daemon** and the Tauri app's shell that also hosted the library are retired (#332, #415). On plotkeeper's own system map `server/` is three parts (spec #473): **Server**, **Install** (`plotkeeper install` and the hook binaries' copies) and **Map, briefs and runs** (the Map view's modules, the PR briefs and the background runs).
 _Avoid_: Backend, daemon (the terminal daemon is another process)
 
 **Wiring**:
@@ -336,9 +336,25 @@ _Avoid_: Module, component, crate (a part may hold several, or sit inside one)
 **Outside actor**:
 A named thing the system talks to that owns no files in its repository, such as the agents, the writer or GitHub.
 
+**Purpose**:
+A part's job on the system map, in one or two sentences of at most 240 characters; the detail goes into its held items or the area's doc.
+_Avoid_: Description (version 1's field, which a conversion makes the purpose)
+
+**Held item**:
+A named thing a part holds, in one sentence of at most 140 characters, with its key files when it has any; a part holds at most eight.
+
 **Link**:
-A declared connection on the system map between two parts, or between a part and an outside actor.
+A declared connection on the system map between two parts, or between a part and an outside actor. Each has a **link kind**, and every kind but `import` a reason.
 _Avoid_: Edge (a computed edge)
+
+**Link kind**:
+What joins a link's ends: `import`, a code dependency the extractors can prove, or one of the run-time kinds no extractor sees, `http`, `spawn` and `file`.
+
+**Read part**:
+A part at least one of whose files a named extractor reads. The link check compares links with computed edges only between read parts.
+
+**Proven import link**:
+An `import` link between two read parts, which a computed edge runs its way. An **unproven** one has an end that is not a read part, such as a part in a language no extractor reads, and passes the check, counted apart.
 
 **Computed edge**:
 A dependency between two parts that an extractor read from the code. It is a hint, never drawn; the links are what the map shows.
