@@ -491,8 +491,8 @@ export type RatifyDetail =
   | { of: "link"; kind: RatifyWords; reason: RatifyWords };
 // What a ready PR's brief is doing (`pr_briefs.rs`): a newer head was pushed (stale), being written now, and the chapters' titles, or the one story's.
 // `note` (#477, part B): why the brief at this head is what it is after a push: the read carried over, or it was rewritten.
-// `since` (#497): the title of the "Since you read" story stored for this head, which the tray opens first.
-export type BriefInfo = { stale: boolean; writing: boolean; chapters: string[]; quiet: boolean; read?: boolean; failed?: boolean; note?: string; since?: string };
+// `since` (#497): the title of the "Since you read" story stored for this head, which the tray opens first; `since_chapters`, its chapters' titles when it has more than one, one tray row each.
+export type BriefInfo = { stale: boolean; writing: boolean; chapters: string[]; quiet: boolean; read?: boolean; failed?: boolean; note?: string; since?: string; since_chapters?: string[] };
 export type ReadyPr = { number: number; title: string; head: string; branch?: string; brief: BriefInfo | null };
 // A PR brief as the writer made it and `pr_brief` returns it (`understanding/src/pr_brief.rs`). A step's `flags` are what the checks found wrong with it
 // that the one rewrite did not mend: it shows "not confirmed from the facts".

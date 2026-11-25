@@ -130,6 +130,7 @@ fn ready() -> Vec<Ready> {
         failed: true,
         note: Some("Rebased onto main, nothing new in the PR".into()),
         since: Some("What changed since you read".into()),
+        since_chapters: vec!["The read".into(), "The fog".into()],
     };
     vec![
         Ready {

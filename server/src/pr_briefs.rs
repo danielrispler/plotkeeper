@@ -38,6 +38,9 @@ pub struct BriefInfo {
     /// The title of the "Since you read" story stored for this head (#497), which the tray opens first.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub since: Option<String>,
+    /// The story's chapters' titles when it has more than one: one tray row each, so each chapter can be read to its end.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub since_chapters: Vec<String>,
 }
 
 /// What a lookup of a ready PR did.
@@ -827,6 +830,7 @@ impl PrBriefs {
                         failed: false,
                         note: None,
                         since: None,
+                        since_chapters: vec![],
                     });
                 }
                 continue;
@@ -835,6 +839,7 @@ impl PrBriefs {
                 .as_ref()
                 .map(|b| chapter_titles(&b.brief))
                 .unwrap_or_default();
+            let story = store.since(pr.number, &pr.head).map(|(_, story)| story);
             pr.brief = Some(BriefInfo {
                 stale: latest
                     .as_ref()
@@ -845,9 +850,12 @@ impl PrBriefs {
                 quiet: false,
                 failed,
                 note: seen.lock().unwrap().note(pr.number, &pr.head),
-                since: store
-                    .since(pr.number, &pr.head)
-                    .map(|(_, story)| story.brief.title),
+                since: story.as_ref().map(|story| story.brief.title.clone()),
+                since_chapters: story
+                    .as_ref()
+                    .filter(|story| story.brief.chapters.len() > 1)
+                    .map(|story| chapter_titles(&story.brief))
+                    .unwrap_or_default(),
             });
         }
     }
@@ -2576,9 +2584,27 @@ mod tests {
         *briefs.seen_of("/p").lock().unwrap() = std::mem::take(&mut *seen.lock().unwrap());
         let mut tray = [ready_pr(7, &h2)];
         briefs.annotate_with("/p", &store, Some(&rig.user()), &mut tray);
+        let info = tray[0].brief.clone().unwrap();
+        assert_eq!(info.since.as_deref(), Some("Alpha"));
+        assert!(info.since_chapters.is_empty(), "a single story has one row");
+        // A story of two chapters has a tray row for each.
+        let mut two = story.clone();
+        let chapter = two.brief.chapters[0].clone();
+        two.brief.chapters = vec![
+            studio_understanding::pr_brief::Chapter {
+                title: "The read".into(),
+                ..chapter.clone()
+            },
+            studio_understanding::pr_brief::Chapter {
+                title: "The fog".into(),
+                ..chapter
+            },
+        ];
+        store.put_since(&from, &two).unwrap();
+        briefs.annotate_with("/p", &store, Some(&rig.user()), &mut tray);
         assert_eq!(
-            tray[0].brief.clone().unwrap().since.as_deref(),
-            Some("Alpha")
+            tray[0].brief.clone().unwrap().since_chapters,
+            ["The read", "The fog"]
         );
     }
 

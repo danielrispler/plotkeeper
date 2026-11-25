@@ -83,6 +83,13 @@ test("a head with a Since you read story opens it first, and the full brief's ro
   const stale = trayRows([pr(7, "Fog", { stale: true, writing: false, chapters: ["Fog"], quiet: false, since: "Since" })]);
   assert.deepEqual(stale.map((r) => [r.full, r.openable]), [[false, true], [true, true]]);
   assert.match(stale[1].note, /full brief · a newer push; rewritten when opened$/);
+  // A story of chapters has one row each, so every chapter of it can be read to its end.
+  const chaptered = trayRows([pr(7, "PR briefs", { stale: false, writing: false, chapters: ["Fog"], quiet: false, since: "The fix since you read", since_chapters: ["The read", "The fog"] })]);
+  assert.deepEqual(
+    chaptered.map((r) => [r.title, r.chapter, r.full]),
+    [["The read", 0, false], ["The fog", 1, false], ["Fog", 0, true]],
+  );
+  assert.deepEqual(chaptered.slice(0, 2).map((r) => r.note), ["#7 The fix since you read · since you read · 1 of 2", "#7 The fix since you read · since you read · 2 of 2"]);
   // With no story, a row opens as before: the server writes the story first when the push calls for one.
   assert.deepEqual(trayRows([pr(7, "Fog", { stale: true, writing: false, chapters: ["Fog"], quiet: false })]).map((r) => r.full ?? false), [false]);
 });

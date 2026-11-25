@@ -156,18 +156,21 @@ const mapTray = (): Fixture =>
     map_state: mapState({ fog: { shell: "thick" }, ready: [{ number: 334, title: "PR briefs: the brief written for each ready PR", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }, { number: 336, title: "Ready for review tray", head: "a".repeat(40), brief: null }] }),
   });
 
-// After a push (#477, part B): one PR's read carried over a pure rebase, another rewritten after a partial read; each row says why.
+// After a push (#477, part B): one PR's read carried over a pure rebase, another rewritten after a partial read; each row says why. A
+// third has a "Since you read" story of two chapters (#497): a row for each, then the full brief's.
 const mapTrayAfterPush = (): Fixture =>
   mapOpened(`
       const notes = [...document.querySelectorAll("#map-tray .tray-row .tray-note")].map((n) => n.textContent);
-      if (notes.length !== 2) return log("snap:fail expected 2 tray rows, saw " + notes.length);
+      if (notes.length !== 5) return log("snap:fail expected 5 tray rows, saw " + notes.length);
       if (notes[0] !== "#334 · Rebased onto main, nothing new in the PR") log("snap:fail the carried row: " + notes[0]);
       if (notes[1] !== "#336 · Rewritten after a new push; you had read 1 of 2") log("snap:fail the rewritten row: " + notes[1]);
+      if (notes[3] !== "#337 The push since you read · since you read · 2 of 2") log("snap:fail the story's second row: " + notes[3]);
       log("tray notes ok");`, {
     map_state: mapState({
       ready: [
         { number: 334, title: "PR briefs: the brief written for each ready PR", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false, read: true, note: "Rebased onto main, nothing new in the PR" } },
         { number: 336, title: "Ready for review tray", head: "a".repeat(40), brief: { stale: false, writing: false, chapters: ["The tray"], quiet: false, note: "Rewritten after a new push; you had read 1 of 2" } },
+        { number: 337, title: "Since you read", head: "c".repeat(40), brief: { stale: false, writing: false, chapters: ["The story"], quiet: false, since: "The push since you read", since_chapters: ["The read carries", "The fog clears"] } },
       ],
     }),
   });

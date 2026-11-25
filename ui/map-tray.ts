@@ -29,9 +29,15 @@ export const trayRows = (ready: ReadyPr[], briefs = true): TrayRow[] =>
       return [{ number: pr.number, chapter: 0, title, note: `#${pr.number} · the brief is written when you open it`, openable: true }];
     }
     const state = brief.writing ? "writing it again…" : brief.failed ? "it could not be rewritten; open it to try again" : brief.stale ? "a newer push; rewritten when opened" : (brief.note ?? "brief ready");
-    // A head with a "Since you read" story (#497): its row comes first, and the full brief's rows open past it.
+    // A head with a "Since you read" story (#497): its rows come first, one per chapter of a chaptered story as for the full brief, so
+    // each can be read to its end, and the full brief's rows open past them.
     const since = brief.since;
-    const story: TrayRow[] = since ? [{ number: pr.number, chapter: 0, title: since, note: `#${pr.number} · since you read`, openable: true, full: false }] : [];
+    const parts = brief.since_chapters ?? [];
+    const story: TrayRow[] = !since
+      ? []
+      : parts.length > 1
+        ? parts.map((chapter, i) => ({ number: pr.number, chapter: i, title: chapter, note: `#${pr.number} ${since} · since you read · ${i + 1} of ${parts.length}`, openable: true, full: false }))
+        : [{ number: pr.number, chapter: 0, title: since, note: `#${pr.number} · since you read`, openable: true, full: false }];
     const full = since ? { full: true } : {};
     const of = since ? "full brief · " : "";
     if (brief.chapters.length === 1) return [...story, { number: pr.number, chapter: 0, title: brief.chapters[0] || title, note: `#${pr.number} · ${of}${state}`, openable: true, ...full }];
