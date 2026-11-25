@@ -127,3 +127,10 @@ export const ratifyStep = (rows: RatifyRow[], on: string[] = [], guard = false):
 
 // The rows still to ratify.
 export const openRows = (rows: RatifyRow[]) => rows.filter((row) => row.status === "not-yet");
+
+// A link the part sheet marks, as an item to ratify: its ends by id as the brief's row says them, and its kind and reason as the new side
+// an overturn quotes. The sheet has no old side, so `before` is null.
+export function sheetLinkItem(link: { id: string; from: string; to: string; kind?: string; reason?: string }, pr: number) {
+  const detail: RatifyDetail = { of: "link", kind: { before: null, after: link.kind ?? "" }, reason: { before: null, after: link.reason ?? "" } };
+  return { pr, kind: "link", id: link.id, text: `${link.from} to ${link.to}`, change: "", detail };
+}

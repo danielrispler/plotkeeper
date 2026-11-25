@@ -16,7 +16,7 @@ import { currentMap, onDraw, onPlateClick, reloadMap, registerLayer, syncSide, t
 import { openDrawer } from "./map-drawer.js";
 import { drawStrip } from "./map-history.js";
 import { overturnNote, ratifyActions } from "./map-ratify.js";
-import { sheetPending, statusWords } from "./ratify.js";
+import { sheetLinkItem, sheetPending, statusWords } from "./ratify.js";
 import { besideSheet } from "./panel.js";
 import { enterRefresher, refresherNode, staleLine } from "./map-stale.js";
 import { ciDrawer, effectiveTier, fogActions, type Part, proofDrawer, type Sheet, sheetCi, sheetOf, talksTo, type Tier } from "./map-model.js";
@@ -185,7 +185,7 @@ function drawSheet(view: MapView) {
   });
   const nameOf = (id: string) => view.doc.parts.find((p) => p.id === id)?.name ?? view.doc.actors.find((a) => a.id === id)?.name ?? id;
   // "Talks to" (spec #473): every link at either end, its arrow, other end, kind and reason; an unratified one carries its accept and overturn.
-  const pending = new Map(unratified.links.map((link) => [link.id, link.pr]));
+  const pending = new Map(unratified.links.map((link) => [link.id, sheetLinkItem(link, link.pr)]));
   const links = talksTo(part.id, view.doc.links, nameOf).map((talk) => {
     const row = text("li", "", "sheet-link");
     row.dataset.link = talk.link;
@@ -198,10 +198,10 @@ function drawSheet(view: MapView) {
     // The kind is a code token: never machine-translated.
     if (talk.kind) row.append(Object.assign(text("span", talk.kind, "sheet-link-kind"), { translate: false }));
     if (talk.reason) row.append(text("span", talk.reason, "sheet-link-reason"));
-    const pr = pending.get(talk.link);
-    if (pr !== undefined) {
+    const item = pending.get(talk.link);
+    if (item) {
       row.classList.add("unratified");
-      row.append(text("span", statusWords["not-yet"], "ratify-mark"), ratifyActions(view.project, { pr, kind: "link", id: talk.link, text: words, change: "" }, ratified));
+      row.append(text("span", statusWords["not-yet"], "ratify-mark"), ratifyActions(view.project, item, ratified));
     }
     return row;
   });

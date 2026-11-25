@@ -1,7 +1,7 @@
 // Ratifying's pure part (ticket #343), run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { copyOverturn, decideWith, detailLines, noteFor, openRows, overturnPrompt, overturnReport, ratifyStep, sheetPending, statusWords } from "../../dist/ratify.js";
+import { copyOverturn, decideWith, detailLines, noteFor, openRows, overturnPrompt, overturnReport, ratifyStep, sheetLinkItem, sheetPending, statusWords } from "../../dist/ratify.js";
 
 const row = (kind, id, status = "not-yet", extra = {}) => ({ pr: 7, kind, id, text: `${id} text`, change: "", status, ...extra });
 
@@ -55,6 +55,16 @@ test("an overturn of a part quotes its new purpose and its held items' names, an
   assert.match(link, /kind http, reason “The page calls the server over HTTP\.”/);
   const removed = overturnPrompt(row("part", "old", "not-yet", { text: "Old", change: "removed", detail: { ...partDetail, purpose: words("Gone.", null), holds: [] } }), null);
   assert.doesNotMatch(removed, /purpose/, "a removed part has no new text to quote");
+});
+
+test("an overturn from the sheet quotes a link's ends as the brief does, its kind and its reason", () => {
+  const item = sheetLinkItem({ id: "ui-server", from: "ui", to: "server", kind: "http", reason: "The page calls the server over HTTP." }, 8);
+  const prompt = overturnPrompt(item, null);
+  assert.match(prompt, /PR #8/);
+  assert.match(prompt, /link ui-server: “ui to server”/, "the brief's text: the ends by id");
+  assert.match(prompt, /kind http, reason “The page calls the server over HTTP\.”/);
+  assert.equal(item.text, "ui to server");
+  assert.match(overturnPrompt(sheetLinkItem({ id: "a-b", from: "a", to: "b" }, 8), null), /link a-b: “a to b”, kind none\. Undo it/);
 });
 
 test("a detail shows only what changed, old beside new, and an added part shows everything with nothing before", () => {
