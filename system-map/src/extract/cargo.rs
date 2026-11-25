@@ -16,13 +16,14 @@ impl Extractor for Cargo {
         file.rsplit('/').next() == Some("Cargo.toml")
     }
 
-    /// A root `Cargo.toml` on disk, the condition `extract` needs, even when the map ignores it (spec #529, "Detection").
+    /// A root `Cargo.toml` on disk (in commit mode, in the commit), the condition `extract` needs, even when the map
+    /// ignores it (spec #529, "Detection").
     fn detect(&self, repo: &Repo) -> bool {
-        repo.root().join("Cargo.toml").is_file()
+        repo.has("Cargo.toml")
     }
 
     fn extract(&self, repo: &Repo) -> Output {
-        match cargo(repo.root()) {
+        match cargo(repo) {
             Ok(pairs) => Output {
                 pairs,
                 ..Output::default()
@@ -115,15 +116,18 @@ pub(super) fn relative_to(root: &Path, path: &str) -> Option<String> {
 }
 
 /// Each workspace crate's manifest paired with the manifests of the workspace crates it depends
-/// on, dev-dependencies left out.
-fn cargo(root: &Path) -> Result<Vec<Pair>, String> {
-    if !root.join("Cargo.toml").is_file() {
+/// on, dev-dependencies left out, each pair at the line of the dependency's key when a text search finds it.
+fn cargo(repo: &Repo) -> Result<Vec<Pair>, String> {
+    if !repo.has("Cargo.toml") {
         return Err(
             "extractor \"cargo\" is named but the repository has no Cargo.toml; remove \"cargo\" from extractors"
                 .into(),
         );
     }
-    let (metadata, root) = metadata(root).map_err(|e| format!("extractor \"cargo\": {e}"))?;
+    let (metadata, root) = repo
+        .cargo_dir()
+        .and_then(metadata)
+        .map_err(|e| format!("extractor \"cargo\": {e}"))?;
     let packages = metadata["packages"].as_array().map_or(&[][..], |p| p);
     let manifest =
         |package: &serde_json::Value| relative_to(&root, package["manifest_path"].as_str()?);
@@ -151,9 +155,51 @@ fn cargo(root: &Path) -> Result<Vec<Pair>, String> {
                 .and_then(|p| relative_to(&root, p))
                 .and_then(|dir| manifests.get(&dir))
             {
-                pairs.push(Pair::new(&from, to));
+                // `cargo metadata` gives no line, so the site's line is the dependency's key, found by a text search.
+                let key = dep["rename"].as_str().or(dep["name"].as_str());
+                let line = key.and_then(|key| key_line(&repo.read(&from)?, key));
+                pairs.push(match line {
+                    Some(line) => Pair::at(&from, to, line),
+                    None => Pair::new(&from, to),
+                });
             }
         }
     }
     Ok(pairs)
+}
+
+/// The 1-based line of a manifest that names the dependency `key`: a line `key = …` or `key.… = …` (the key bare or
+/// quoted) in a table of normal or build dependencies, or the header `[dependencies.key]`; none when no line does, as
+/// for a top-level inline table.
+fn key_line(manifest: &str, key: &str) -> Option<u32> {
+    // `dependencies`, `build-dependencies` and a target's, never `dev-dependencies` or the workspace's
+    // `[workspace.dependencies]`, which a root manifest that is also a package holds beside its own.
+    let is_deps = |table: &str| {
+        let table = table.trim();
+        table != "workspace.dependencies"
+            && ["dependencies", "build-dependencies"]
+                .iter()
+                .any(|name| table == *name || table.ends_with(&format!(".{name}")))
+    };
+    let is_key = |word: &str| word.trim().trim_matches(['"', '\'']) == key;
+    let mut in_deps = false;
+    for (index, line) in manifest.lines().enumerate() {
+        let text = line.trim();
+        let found = if let Some(header) = text.strip_prefix('[') {
+            let header = header.split(']').next().unwrap_or_default();
+            in_deps = is_deps(header);
+            header
+                .rsplit_once('.')
+                .is_some_and(|(table, name)| is_deps(table) && is_key(name))
+        } else {
+            in_deps
+                && text
+                    .split_once(['=', '.'])
+                    .is_some_and(|(word, _)| is_key(word))
+        };
+        if found {
+            return Some(index as u32 + 1);
+        }
+    }
+    None
 }

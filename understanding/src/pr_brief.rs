@@ -124,6 +124,8 @@ pub struct PrSource {
     /// A "Since you read" story (#497, spec #477 part B): the head Daniel fully read, which the diff runs from. Its brief is
     /// stored apart from the full briefs (`BriefStore::since`).
     pub since: Option<String>,
+    /// The import sites behind each link the PR adds (#499), read from its head by the server; stored on the brief as they are.
+    pub link_evidence: Vec<LinkEvidence>,
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -522,6 +524,25 @@ impl PartialFacts {
     pub fn is_empty(&self) -> bool {
         self == &PartialFacts::default()
     }
+}
+
+/// The import sites behind a link the PR adds (#499, spec #477 "When it is computed"), read from the PR's head in commit
+/// mode when the brief is written, so Ratify shows them without extracting anything live.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct LinkEvidence {
+    /// The added link's id in the map.
+    pub link: String,
+    /// Each import site of the link's computed edge, once per file and line, in the edge's order.
+    #[serde(default)]
+    pub sites: Vec<ImportSite>,
+}
+
+/// Where an import stands: in the importing file, at its 1-based line when one is known.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportSite {
+    pub file: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
 }
 
 /// The files of a cut diff, and its size sent and not sent.
@@ -2054,6 +2075,9 @@ pub struct StoredBrief {
     /// What it was written without (#477), when anything was missing.
     #[serde(default, skip_serializing_if = "PartialFacts::is_empty")]
     pub partial_facts: PartialFacts,
+    /// The import sites behind each link the PR adds (#499), from its head; none in a brief stored before it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub link_evidence: Vec<LinkEvidence>,
 }
 
 /// One line per brief written, for tuning prompts, caps and models from real data.
@@ -2274,6 +2298,7 @@ pub fn write_pr_brief(
             claim_error: record.claim_error.clone(),
             ..facts.partial_facts.clone()
         },
+        link_evidence: source.link_evidence.clone(),
     };
     match &source.since {
         Some(from) => store.put_since(from, &stored),

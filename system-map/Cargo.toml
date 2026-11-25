@@ -16,10 +16,11 @@ path = "src/main.rs"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Commit mode writes a commit's manifests to a temporary folder for `cargo metadata`.
+tempfile = "3"
 
 [dev-dependencies]
 studio-test-support = { path = "../test-support" }
-tempfile = "3"
 
 [[test]]
 name = "it"

@@ -2,10 +2,7 @@
 //! workspace's libraries, read from a token stream that leaves out comments, strings and lifetimes. The workspace's
 //! crates come from `cargo metadata` (`docs/adr/0002-extractors-read-text-only.md`).
 
-use std::{
-    collections::{HashMap, HashSet},
-    path::Path,
-};
+use std::collections::{HashMap, HashSet};
 
 use super::{
     Extractor, Output, Pair, Repo,
@@ -26,7 +23,7 @@ impl Extractor for RustModules {
 
     fn extract(&self, repo: &Repo) -> Output {
         let mut problems = Vec::new();
-        let crates = workspace_crates(repo.root()).unwrap_or_else(|problem| {
+        let crates = workspace_crates(repo).unwrap_or_else(|problem| {
             problems.push(format!(
                 "extractor \"rust-modules\": workspace-crate paths were not read: {problem}"
             ));
@@ -78,11 +75,11 @@ struct Crate {
 }
 
 /// The workspace's packages from `cargo metadata`; none when the repository has no Cargo.toml.
-fn workspace_crates(root: &Path) -> Result<Vec<Crate>, String> {
-    if !root.join("Cargo.toml").is_file() {
+fn workspace_crates(repo: &Repo) -> Result<Vec<Crate>, String> {
+    if !repo.has("Cargo.toml") {
         return Ok(Vec::new());
     }
-    let (metadata, root) = metadata(root)?;
+    let (metadata, root) = metadata(repo.cargo_dir()?)?;
     let packages = metadata["packages"].as_array().map_or(&[][..], |p| p);
     let crates = packages
         .iter()
@@ -165,10 +162,19 @@ enum Tok {
     Sym(char),
 }
 
-/// The identifiers and the punctuation of Rust source, comments, strings and lifetimes left out.
-fn rust_tokens(text: &str) -> Vec<Tok> {
+/// The identifiers and the punctuation of Rust source, comments, strings and lifetimes left out, and the 1-based line
+/// each starts on.
+fn rust_tokens(text: &str) -> (Vec<Tok>, Vec<u32>) {
     let chars: Vec<char> = text.chars().collect();
     let mut tokens = Vec::new();
+    let mut lines = Vec::new();
+    // The line of the character at `i`, counted forward as the scan moves on.
+    let (mut line, mut counted) = (1u32, 0usize);
+    let mut line_at = |i: usize| {
+        line += chars[counted..i].iter().filter(|c| **c == '\n').count() as u32;
+        counted = i;
+        line
+    };
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
@@ -224,15 +230,17 @@ fn rust_tokens(text: &str) -> Vec<Tok> {
                 }
             } else {
                 tokens.push(Tok::Ident(word));
+                lines.push(line_at(start));
             }
         } else {
             if !c.is_whitespace() {
                 tokens.push(Tok::Sym(c));
+                lines.push(line_at(i));
             }
             i += 1;
         }
     }
-    tokens
+    (tokens, lines)
 }
 
 /// The index after the closing quote of a string whose body starts at `i`.
@@ -268,18 +276,19 @@ fn skip_char_escape(chars: &[char], mut i: usize) -> usize {
 /// What one Rust file declares: the files its `mod name;` lines name, the module paths its inline
 /// modules and `mod` lines open, the paths it writes and the names its `use` lines bring in.
 struct RustFile {
-    /// `(module path from this file's module, whether the module is declared in a file of its own)`
-    mods: Vec<(Vec<String>, bool)>,
+    /// `(module path from this file's module, whether the module is declared in a file of its own, the line of its
+    /// `mod`)`
+    mods: Vec<(Vec<String>, bool, u32)>,
     /// Each path in a `use` line, and each inline path of two words or more: `(the inline modules
-    /// it sits in, its words)`.
-    paths: Vec<(Vec<String>, Vec<String>)>,
+    /// it sits in, its words, the line of its `use` or of its first word)`.
+    paths: Vec<(Vec<String>, Vec<String>, u32)>,
     /// Each name a `use` line brings in: `(the inline modules the line sits in, the name, the path
     /// it names)`.
     aliases: Vec<(Vec<String>, String, Vec<String>)>,
 }
 
 fn scan_rust(text: &str) -> RustFile {
-    let tokens = rust_tokens(text);
+    let (tokens, lines) = rust_tokens(text);
     let ident = |i: usize| match tokens.get(i) {
         Some(Tok::Ident(word)) => Some(word.as_str()),
         _ => None,
@@ -320,10 +329,10 @@ fn scan_rust(text: &str) -> RustFile {
             let name = ident(i + 1).unwrap_or_default().to_string();
             if sym(i + 2, ';') {
                 path.push(name);
-                file.mods.push((path, true));
+                file.mods.push((path, true, lines[i]));
             } else if sym(i + 2, '{') {
                 path.push(name.clone());
-                file.mods.push((path, false));
+                file.mods.push((path, false, lines[i]));
                 depth += 1;
                 inline.push((name, depth));
                 i += 2;
@@ -339,7 +348,7 @@ fn scan_rust(text: &str) -> RustFile {
                     file.aliases.push((scope(), alias, path.clone()));
                 }
                 if !path.is_empty() {
-                    file.paths.push((scope(), path));
+                    file.paths.push((scope(), path, lines[i]));
                 }
             }
             i = end;
@@ -356,7 +365,7 @@ fn scan_rust(text: &str) -> RustFile {
                 end += 3;
             }
             if words.len() > 1 {
-                file.paths.push((scope(), words));
+                file.paths.push((scope(), words, lines[i]));
             }
             i = end;
             continue;
@@ -483,7 +492,7 @@ fn rust_modules(repo: &Repo, crates: &[Crate]) -> Vec<Pair> {
     for _ in 0..=parse.len() {
         let mut next: HashSet<&str> = HashSet::new();
         for (file, scanned) in &parse {
-            for (path, in_own_file) in &scanned.mods {
+            for (path, in_own_file, _) in &scanned.mods {
                 if let (true, Some(target)) = (*in_own_file, resolve(&declared, file, path)) {
                     next.insert(target);
                 }
@@ -496,11 +505,11 @@ fn rust_modules(repo: &Repo, crates: &[Crate]) -> Vec<Pair> {
     }
     for (file, scanned) in &parse {
         let declaration = is_crate_root(file) && !declared.contains(file);
-        for (path, in_own_file) in &scanned.mods {
+        for (path, in_own_file, line) in &scanned.mods {
             if let (true, Some(target)) = (*in_own_file, resolve(&declared, file, path)) {
                 pairs.push(Pair {
                     declaration,
-                    ..Pair::new(file, target)
+                    ..Pair::at(file, target, *line)
                 });
             }
         }
@@ -527,7 +536,7 @@ fn rust_modules(repo: &Repo, crates: &[Crate]) -> Vec<Pair> {
             }
             tree.modules.entry(prefix.clone()).or_insert(file);
             tree.files.push((file, prefix.clone()));
-            for (path, in_own_file) in parse.get(file).map_or(&[][..], |f| &f.mods[..]) {
+            for (path, in_own_file, _) in parse.get(file).map_or(&[][..], |f| &f.mods[..]) {
                 let mut full = prefix.clone();
                 full.extend(path.iter().cloned());
                 if !*in_own_file {
@@ -585,9 +594,9 @@ fn rust_modules(repo: &Repo, crates: &[Crate]) -> Vec<Pair> {
                     direct(scope, &full)
                 })
             };
-            for (scope, words) in &scanned.paths {
+            for (scope, words, line) in &scanned.paths {
                 if let Some(target) = reach(scope, words).filter(|t| t != file) {
-                    pairs.push(Pair::new(file, &target));
+                    pairs.push(Pair::at(file, &target, *line));
                 }
             }
         }

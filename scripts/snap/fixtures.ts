@@ -1059,6 +1059,69 @@ const mapBriefRatifyDetail = (): Fixture => ({
       log("ratify detail ok");`, false, 100),
   pr_ratify: ratifyDetailRows,
 });
+// Link evidence in the brief's ratify step (#499): an added link's second line, one import site then "(+N imports across M files)"; a
+// removed link with none. `line` shows the second line, `list` presses the count (every site in the drawer), `site` presses a site of the
+// list (its code from the PR's head, numbered, its line marked).
+const evidenceRows: RatifyRow[] = [
+  {
+    pr: 334, kind: "link", id: "shell-understanding", text: "Shell to Understanding", change: "added", status: "not-yet",
+    detail: { of: "link", kind: { before: null, after: "import" }, reason: { before: null, after: "" } },
+    evidence: {
+      head: "b".repeat(40),
+      sites: [
+        { file: "ui/map-brief.ts", line: 17 },
+        { file: "ui/map-brief.ts", line: 24 },
+        { file: "ui/map-ratify.ts", line: 9 },
+        { file: "ui/map-tray.ts", line: 12 },
+      ],
+    },
+  },
+  { pr: 334, kind: "link", id: "hook-shell", text: "Hook to Shell", change: "removed", status: "not-yet", detail: null },
+];
+const evidenceSnippet = {
+  file: "ui/map-ratify.ts",
+  line: 9,
+  first: 5,
+  lines: [
+    "// too, then copies a prompt that quotes the item to the clipboard for him to paste into his agent (port decision Q2); when the clipboard",
+    "// refuses, the prompt shows in a small box with a Copy button.",
+    "",
+    "import { failure, invoke, promptBox, sayAction, text } from \"./dom.js\";",
+    "import { currentMap } from \"./map.js\";",
+    "import { openDrawer } from \"./map-drawer.js\";",
+    "import { copyOverturn, decideWith, detailLines, evidenceLine, noteFor } from \"./ratify.js\";",
+    "import { logStop } from \"./stop-rules.js\";",
+    "import type { ImportSite, RatifyRow } from \"./types.js\";",
+  ],
+};
+const mapBriefRatifyEvidence = (at: "line" | "list" | "site"): Fixture => ({
+  ...mapBrief(briefOf(storySteps()), 4, `
+      const rows = [...document.querySelectorAll("#map-brief .ratify-row")];
+      if (rows.length !== 2) return log("snap:fail expected 2 ratify rows, saw " + rows.length);
+      const line = rows[0].querySelector(".ratify-evidence");
+      if (!line) return log("snap:fail the added link has no second line");
+      const site = line.querySelector(".ratify-site"), more = line.querySelector(".ratify-more");
+      if (site?.textContent !== "ui/map-brief.ts:17" || more?.textContent !== "(+3 imports across 3 files)") log("snap:fail the second line says " + line.textContent);
+      if (rows[1].querySelector(".ratify-evidence")) log("snap:fail a removed link shows evidence");
+      if (${at !== "line"}) {
+        more.click();
+        await wait(300);
+        const picks = [...document.querySelectorAll("#map-drawer .drawer-pick")].map((pick) => pick.textContent);
+        if (picks.join("|") !== "ui/map-brief.ts:17|ui/map-brief.ts:24|ui/map-ratify.ts:9|ui/map-tray.ts:12") log("snap:fail the drawer lists " + picks.join("|"));
+        if (document.querySelector("#map-drawer .drawer-title")?.textContent !== "Imports behind Shell to Understanding") log("snap:fail the list's title");
+      }
+      if (${at === "site"}) {
+        document.querySelectorAll("#map-drawer .drawer-pick")[2].click();
+        await wait(300);
+        const marked = document.querySelector("#map-drawer mark.drawer-line");
+        if (marked?.querySelector(".drawer-n")?.textContent !== "9") log("snap:fail the site's line is not marked: " + marked?.textContent);
+        if (document.querySelector("#map-drawer .drawer-line .drawer-n")?.textContent !== "5") log("snap:fail the snippet is not numbered from its first line");
+        if (document.querySelector("#map-drawer .drawer-title")?.textContent !== "ui/map-ratify.ts:9") log("snap:fail the snippet's title");
+      }
+      log("ratify evidence ok");`, false, 100),
+  pr_ratify: evidenceRows,
+  ratify_site: evidenceSnippet,
+});
 // Guard with a law (#401): a bug fix's brief, with nothing to ratify, ends with the guard's row: the on-trust laws of Core and Shell, the
 // parts it touched, with Back this law, a new law of an earlier run being proven, and Add a new law. `confirm` presses Add a new law and
 // shows the confirm step with the writer's draft.
@@ -3239,6 +3302,9 @@ ${writerStatusAfter("Keychain refused")}
   mapBriefRatifyExplained: () => mapBriefExplained("ratify"),
   mapBriefExplainedOff: () => mapBriefExplained("off"),
   mapBriefRatifyDetail,
+  mapBriefRatifyEvidence: () => mapBriefRatifyEvidence("line"),
+  mapBriefRatifyEvidenceList: () => mapBriefRatifyEvidence("list"),
+  mapBriefRatifyEvidenceSite: () => mapBriefRatifyEvidence("site"),
   mapBriefGuard: () => mapBriefGuard(false),
   mapBriefGuardConfirm: () => mapBriefGuard(true),
   mapBriefBar,

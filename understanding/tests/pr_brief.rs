@@ -1219,6 +1219,31 @@ fn the_entry_writes_checks_stores_and_records_one_brief() {
 }
 
 #[test]
+fn the_entry_stores_the_link_evidence_it_was_given_beside_the_brief() {
+    let data = tempfile::tempdir().unwrap();
+    let store = BriefStore::open(data.path()).unwrap();
+    let evidence = vec![LinkEvidence {
+        link: "alpha-gamma".into(),
+        sites: vec![ImportSite {
+            file: "alpha/a.rs".into(),
+            line: Some(3),
+        }],
+    }];
+    let given = PrSource {
+        link_evidence: evidence.clone(),
+        ..source(&["alpha/a.rs"])
+    };
+    let writer = Canned::new(vec![
+        Ok(single_story().to_string()),
+        Ok(none_unsupported()),
+        Ok(no_rewrites()),
+    ]);
+    let stored = write_pr_brief(&writer, "opus", &given, &store, |_| {}).unwrap();
+    assert_eq!(stored.link_evidence, evidence);
+    assert_eq!(store.get(7, "abc123").unwrap().link_evidence, evidence);
+}
+
+#[test]
 fn the_record_logs_the_wall_time_of_the_writer_the_claim_check_and_the_retry() {
     let data = tempfile::tempdir().unwrap();
     let store = BriefStore::open(data.path()).unwrap();
@@ -1630,6 +1655,47 @@ fn a_stored_brief_reads_with_its_also_groups_and_older_ones_with_their_also_line
     ] {
         let older: StoredBrief = serde_json::from_str(&read(older)).unwrap();
         assert!(older.brief.also_groups.is_empty(), "{older:?}");
+    }
+}
+
+// @law: old-stored-files-load
+#[test]
+fn a_stored_brief_reads_with_its_link_evidence_and_older_ones_with_none() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/stored");
+    let read = |name: &str| std::fs::read_to_string(dir.join(name)).unwrap();
+    let site = |file: &str, line: Option<u32>| ImportSite {
+        file: file.into(),
+        line,
+    };
+    let stored: StoredBrief =
+        serde_json::from_str(&read("pr-brief-v9/stored-brief-evidence.json")).unwrap();
+    assert_eq!(
+        stored.link_evidence,
+        [
+            LinkEvidence {
+                link: "alpha-gamma".into(),
+                sites: vec![
+                    site("alpha/a.rs", Some(3)),
+                    site("alpha/a.rs", Some(9)),
+                    site("alpha/b.rs", Some(1)),
+                ],
+            },
+            LinkEvidence {
+                link: "beta-gamma".into(),
+                sites: vec![site("beta/Cargo.toml", None)],
+            },
+        ]
+    );
+    for older in [
+        "pr-brief-v3/stored-brief-full.json",
+        "pr-brief-v3/stored-brief-minimal.json",
+        "pr-brief-v4/stored-brief-full.json",
+        "pr-brief-v5/stored-brief-guard.json",
+        "pr-brief-v7/stored-brief-partial.json",
+        "pr-brief-v8/stored-brief-also.json",
+    ] {
+        let older: StoredBrief = serde_json::from_str(&read(older)).unwrap();
+        assert!(older.link_evidence.is_empty(), "{older:?}");
     }
 }
 

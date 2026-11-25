@@ -1674,3 +1674,250 @@ fn a_file_whose_name_only_looks_like_a_test_keeps_its_edges() {
         assert_eq!(found, ["app>one"], "{file}");
     }
 }
+
+/// Each computed edge's import sites from `check --json` with `args`, as `from>to file:line` strings (`from>to file` for
+/// a site with no line).
+fn sites(root: &str, args: &[&str]) -> Vec<String> {
+    let mut args = args.to_vec();
+    args.push("--json");
+    let out = run_check(root, &args);
+    let value: Value = serde_json::from_slice(&out.stdout)
+        .unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&out.stderr)));
+    let mut found = Vec::new();
+    for edge in value["edges"].as_array().into_iter().flatten() {
+        let parts = format!(
+            "{}>{}",
+            edge["from"].as_str().unwrap(),
+            edge["to"].as_str().unwrap()
+        );
+        for pair in edge["pairs"].as_array().unwrap() {
+            for site in pair["sites"].as_array().unwrap() {
+                let file = site["file"].as_str().unwrap();
+                found.push(match site.get("line") {
+                    Some(line) => format!("{parts} {file}:{line}"),
+                    None => format!("{parts} {file}"),
+                });
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn a_grouped_use_is_one_site_and_an_inline_path_counts_once_per_line() {
+    let (_dir, root) = tree(
+        &split_map(
+            &["rust-modules"],
+            &["k/src/lib.rs", "k/src/a.rs"],
+            &["k/src/b.rs"],
+        ),
+        &[
+            ("k/src/lib.rs", "mod a;\nmod b;\n"),
+            ("k/src/a.rs", "pub struct A;\npub struct B;\n"),
+            (
+                "k/src/b.rs",
+                "use crate::a::{\n    A,\n    B,\n};\nfn f() { crate::a::A; crate::a::B; }\nfn g() {\n    crate::a::A;\n}\n",
+            ),
+        ],
+    );
+    assert_eq!(
+        sites(&root, &[]),
+        [
+            "alpha>beta k/src/lib.rs:2",
+            "beta>alpha k/src/b.rs:1",
+            "beta>alpha k/src/b.rs:5",
+            "beta>alpha k/src/b.rs:7",
+        ]
+    );
+}
+
+#[test]
+fn an_import_followed_through_a_barrel_has_its_site_in_the_importing_file() {
+    let mut map = split_map(&["typescript-imports"], &["alpha/"], &["beta/"]);
+    map["ignored"] = json!(["system-map.json", "lib/"]);
+    let (_dir, root) = tree(
+        &map,
+        &[
+            (
+                "alpha/a.ts",
+                "// Two imports.\nimport { B } from '../lib';\nimport {\n  C,\n} from '../beta/c';\n",
+            ),
+            ("lib/index.ts", "export { B } from '../beta/b';\n"),
+            ("beta/b.ts", "export const B = 1;\n"),
+            ("beta/c.ts", "export const C = 1;\n"),
+        ],
+    );
+    assert_eq!(
+        sites(&root, &[]),
+        ["alpha>beta alpha/a.ts:2", "alpha>beta alpha/a.ts:3"]
+    );
+}
+
+#[test]
+fn a_cargo_site_is_the_line_of_the_dependency_s_key_when_a_text_search_finds_it() {
+    let package = "[package]\nname = \"alpha\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n";
+    for (text, site) in [
+        (
+            format!("{package}[dependencies]\nbeta = {{ path = \"../beta\" }}\n"),
+            "alpha>beta alpha/Cargo.toml:7",
+        ),
+        (
+            format!("{package}[dependencies]\nb = {{ package = \"beta\", path = \"../beta\" }}\n"),
+            "alpha>beta alpha/Cargo.toml:7",
+        ),
+        (
+            format!("{package}[dependencies.beta]\npath = \"../beta\"\n"),
+            "alpha>beta alpha/Cargo.toml:6",
+        ),
+        (
+            format!(
+                "{package}[dev-dependencies]\nbeta = {{ path = \"../beta\" }}\n\n[build-dependencies]\n\
+                 beta = {{ path = \"../beta\" }}\n"
+            ),
+            "alpha>beta alpha/Cargo.toml:10",
+        ),
+        // A top-level inline table: valid, but no line starts with the key.
+        (
+            format!("dependencies = {{ beta = {{ path = \"../beta\" }} }}\n\n{package}"),
+            "alpha>beta alpha/Cargo.toml",
+        ),
+    ] {
+        let (dir, root) = project_text(&map(&["cargo"], json!([])).to_string(), &["docs/d.md"]);
+        write(
+            dir.path(),
+            "Cargo.toml",
+            "[workspace]\nresolver = \"2\"\nmembers = [\"alpha\", \"beta\"]\n",
+        );
+        write(dir.path(), "alpha/Cargo.toml", &text);
+        write(dir.path(), "beta/Cargo.toml", &manifest("beta", "", ""));
+        write(dir.path(), "alpha/src/lib.rs", "");
+        write(dir.path(), "beta/src/lib.rs", "");
+        studio_test_support::git(dir.path(), &["add", "-A"]);
+        studio_test_support::git(dir.path(), &["commit", "-q", "-m", "Workspace"]);
+        assert_eq!(sites(&root, &[]), [site], "{text}");
+    }
+}
+
+#[test]
+fn a_cargo_site_in_a_root_manifest_is_the_package_s_dependency_never_the_workspace_s() {
+    let workspace = "[workspace]\nresolver = \"2\"\nmembers = [\"beta\"]\n\n";
+    let package = "[package]\nname = \"alpha\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n";
+    for (text, site) in [
+        (
+            format!(
+                "{workspace}[workspace.dependencies]\nbeta = {{ path = \"beta\" }}\n\n{package}\
+                 [dependencies]\nbeta = {{ workspace = true }}\n"
+            ),
+            "alpha>beta Cargo.toml:14",
+        ),
+        (
+            format!(
+                "{workspace}[workspace.dependencies.beta]\npath = \"beta\"\n\n{package}\
+                 [dependencies]\nbeta = {{ workspace = true }}\n"
+            ),
+            "alpha>beta Cargo.toml:14",
+        ),
+        // A target's table still counts.
+        (
+            format!(
+                "{workspace}[workspace.dependencies]\nbeta = {{ path = \"beta\" }}\n\n{package}\
+                 [target.'cfg(unix)'.dependencies]\nbeta = {{ workspace = true }}\n"
+            ),
+            "alpha>beta Cargo.toml:14",
+        ),
+    ] {
+        let mut map = map(&["cargo"], json!([]));
+        map["parts"][0]["paths"] = json!(["Cargo.toml", "src/"]);
+        map["ignored"] = json!(["docs/", "system-map.json"]);
+        let (dir, root) = project_text(&map.to_string(), &["docs/d.md"]);
+        write(dir.path(), "Cargo.toml", &text);
+        write(dir.path(), "src/lib.rs", "");
+        write(dir.path(), "beta/Cargo.toml", &manifest("beta", "", ""));
+        write(dir.path(), "beta/src/lib.rs", "");
+        studio_test_support::git(dir.path(), &["add", "-A"]);
+        studio_test_support::git(dir.path(), &["commit", "-q", "-m", "Workspace"]);
+        assert_eq!(sites(&root, &[]), [site], "{text}");
+    }
+}
+
+/// A repository whose map names all three extractors over a cargo workspace, Rust paths, TypeScript imports, a barrel
+/// and a law tag, with the map's links left out so that every edge prints as a problem too.
+fn every_extractor() -> (tempfile::TempDir, String) {
+    let mut map = split_map(
+        &["cargo", "rust-modules", "typescript-imports"],
+        &["alpha/"],
+        &["beta/"],
+    );
+    map["ignored"] = json!(["system-map.json", "Cargo.toml", "lib/"]);
+    map["laws"][0]["backing"] = json!("check");
+    tree(
+        &map,
+        &[
+            (
+                "Cargo.toml",
+                "[workspace]\nresolver = \"2\"\nmembers = [\"alpha\", \"beta\"]\n",
+            ),
+            (
+                "alpha/Cargo.toml",
+                &manifest("alpha", "beta = { path = \"../beta\" }\n", ""),
+            ),
+            (
+                "alpha/src/lib.rs",
+                "use beta::thing;\nfn f() { beta::thing::Thing; }\n",
+            ),
+            ("beta/Cargo.toml", &manifest("beta", "", "")),
+            ("beta/src/lib.rs", "pub mod thing;\n"),
+            (
+                "beta/src/thing.rs",
+                "pub struct Thing;\n// @law: stay-true\n",
+            ),
+            ("alpha/a.ts", "import { B } from '../lib';\n"),
+            ("lib/index.ts", "export { B } from '../beta/b';\n"),
+            ("beta/b.ts", "export const B = 1;\n"),
+        ],
+    )
+}
+
+#[test]
+fn commit_mode_gives_what_the_working_tree_gives_on_the_same_tree() {
+    let (_dir, root) = every_extractor();
+    let tree = run_check(&root, &["--json"]);
+    let commit = run_check(&root, &["--json", "--commit", "HEAD"]);
+    assert_eq!(
+        String::from_utf8_lossy(&commit.stderr),
+        String::from_utf8_lossy(&tree.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&commit.stdout),
+        String::from_utf8_lossy(&tree.stdout)
+    );
+    assert_eq!(commit.status.code(), tree.status.code());
+    assert_eq!(
+        sites(&root, &["--commit", "HEAD"]),
+        [
+            "alpha>beta alpha/Cargo.toml:7",
+            "alpha>beta alpha/a.ts:1",
+            "alpha>beta alpha/src/lib.rs:1",
+            "alpha>beta alpha/src/lib.rs:2",
+        ]
+    );
+}
+
+#[test]
+fn commit_mode_reads_the_commit_not_the_working_tree() {
+    let (dir, root) = every_extractor();
+    let before = sites(&root, &["--commit", "HEAD"]);
+    // An edit not committed, and a file not tracked.
+    write(dir.path(), "alpha/src/lib.rs", "");
+    write(dir.path(), "alpha/c.ts", "import { B } from '../beta/b';\n");
+    assert_eq!(sites(&root, &["--commit", "HEAD"]), before);
+    assert_ne!(sites(&root, &[]), before);
+    studio_test_support::git(dir.path(), &["add", "-A"]);
+    studio_test_support::git(dir.path(), &["commit", "-q", "-m", "Edit"]);
+    assert_eq!(sites(&root, &["--commit", "HEAD~1"]), before);
+
+    let out = run_check(&root, &["--commit", "no-such-commit"]);
+    assert!(!out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("no-such-commit"), "{text}");
+}

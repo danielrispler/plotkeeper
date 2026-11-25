@@ -1,8 +1,9 @@
 //! Checks a repository's `system-map.json` against the files git tracks.
 //!
 //! `check` is the entry point: a repository's root in, the parts with the files each owns, the
-//! links and the problems out.
+//! links and the problems out. `check_at` reads one commit instead of the working tree.
 
+mod commit;
 mod edges;
 mod extract;
 mod imports;
@@ -12,13 +13,14 @@ mod pattern;
 mod touched;
 
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     path::Path,
     process::Command,
 };
 
 use serde::{Deserialize, Serialize};
 
+pub use edges::{Edge, FilePair, Site};
 pub use imports::{Across, Count, Hub, Imports, Inside, Share, imports};
 pub use laws::{LawReport, LawTest, Tag, law_tests, tag_id, test_name_after};
 pub use parts::{convert, convert_value, part_text};
@@ -34,6 +36,8 @@ pub struct Report {
     /// The parts, in the file's order, each with the tracked files it owns.
     pub parts: Vec<PartFiles>,
     pub links: Vec<Link>,
+    /// The edges the named extractors compute between parts, sorted, each with its file pairs and their import sites.
+    pub edges: Vec<Edge>,
     /// Each law with its backing and the tags that name it.
     pub laws: Vec<LawReport>,
     /// One line per problem; the check fails when there is any.
@@ -197,14 +201,27 @@ struct Hop {
 
 /// Reads the map in `root` and checks it against the files git tracks there.
 pub fn check(root: &Path) -> Report {
-    check_with(root, tracked_files(root))
+    check_with(root, tracked_files(root), None)
 }
 
 /// `check` against `files`, the tracked files as a caller listed them: plotkeeper lists a clone's inside its sandbox, since
 /// git outside it would read the clone's own config (back a law, #398).
 pub fn check_files(root: &Path, files: Vec<String>) -> Report {
     let files: BTreeSet<String> = files.into_iter().collect();
-    check_with(root, Ok(files.into_iter().collect()))
+    check_with(root, Ok(files.into_iter().collect()), None)
+}
+
+/// `check` of the commit `commit` of the repository at `root`, read from git with nothing checked out (spec #477, "Reading
+/// a commit without checking it out"): its map, its tracked files and their texts are the commit's, and the working tree
+/// is never read. A name that is no commit is the one problem.
+pub fn check_at(root: &Path, commit: &str) -> Report {
+    match commit::read(root, commit) {
+        Ok(snapshot) => check_with(root, Ok(snapshot.files.clone()), Some(&snapshot.texts)),
+        Err(problem) => Report {
+            problems: vec![problem],
+            ..Report::default()
+        },
+    }
 }
 
 /// The laws of the map in `root` with their backing and tags, and the laws' problems, read leniently, so a version 1 map
@@ -219,12 +236,24 @@ pub fn law_reports(
     let map = parse_lenient(&text)?;
     let files: BTreeSet<String> = files.into_iter().collect();
     let files: Vec<String> = files.into_iter().collect();
-    Ok(laws::check(root, &map, &files))
+    Ok(laws::check(&|file| read_tracked(root, file), &map, &files))
 }
 
-fn check_with(root: &Path, files: Result<Vec<String>, String>) -> Report {
+/// `check` of the tracked `files`, their texts read from the working tree at `root`, or from `texts` in commit mode.
+fn check_with(
+    root: &Path,
+    files: Result<Vec<String>, String>,
+    texts: Option<&BTreeMap<String, String>>,
+) -> Report {
     let mut report = Report::default();
-    let map = match load(root) {
+    let loaded = match texts {
+        Some(texts) => texts
+            .get(MAP_FILE)
+            .ok_or_else(missing_map)
+            .and_then(|text| parse(text)),
+        None => load(root),
+    };
+    let map = match loaded {
         Ok(map) => map,
         Err(problem) => {
             report.problems.push(problem);
@@ -244,11 +273,19 @@ fn check_with(root: &Path, files: Result<Vec<String>, String>) -> Report {
             let (parts, ignored, problems) = ownership(&map, &files);
             report.problems.extend(problems);
             report.problems.extend(parts::check_paths(&map, &parts));
-            let (laws, problems) = laws::check(root, &map, &files);
+            let read = |file: &str| match texts {
+                Some(texts) => texts.get(file).cloned(),
+                None => read_tracked(root, file),
+            };
+            let (laws, problems) = laws::check(&read, &map, &files);
             report.laws = laws;
             report.problems.extend(problems);
             let names = map.extractors.as_deref().unwrap_or_default();
             let repo = repo(root, &map, &files);
+            let repo = match texts {
+                Some(texts) => repo.at_commit(texts),
+                None => repo,
+            };
             let found = edges::check_links(
                 extract::registry::EXTRACTORS,
                 names,
@@ -257,6 +294,7 @@ fn check_with(root: &Path, files: Result<Vec<String>, String>) -> Report {
                 &map.links,
             );
             report.problems.extend(found.problems);
+            report.edges = found.edges;
             report.suggested = extract::registry::EXTRACTORS
                 .iter()
                 .filter(|e| !names.iter().any(|n| n == e.name()) && e.detect(&repo))
@@ -310,12 +348,14 @@ fn load_checked(root: &Path) -> Result<Map, Vec<String>> {
 fn load(root: &Path) -> Result<Map, String> {
     let path = root.join(MAP_FILE);
     let text = std::fs::read_to_string(&path).map_err(|error| match error.kind() {
-        std::io::ErrorKind::NotFound => {
-            format!("{MAP_FILE}: missing; add a {MAP_FILE} at the repository's root")
-        }
+        std::io::ErrorKind::NotFound => missing_map(),
         _ => format!("{MAP_FILE}: cannot read it ({error})"),
     })?;
     parse(&text)
+}
+
+fn missing_map() -> String {
+    format!("{MAP_FILE}: missing; add a {MAP_FILE} at the repository's root")
 }
 
 /// Parses map text strictly, as `check` does: an unknown field is an error.

@@ -40,6 +40,22 @@ function jumpLink(jump: Jump) {
   return link;
 }
 
+// Code numbered from line `first`, its line `mark` drawn as a `<mark>` with a gutter arrow, so the mark rests on more than colour (#499).
+function numberedPre(code: string, first: number, mark: number | undefined, name: string) {
+  const pre = scrollingPre("", "drawer-code drawer-lines", name);
+  pre.setAttribute("role", "region");
+  const body = document.createElement("code");
+  body.translate = false;
+  code.split("\n").forEach((words, i) => {
+    const n = first + i;
+    const line = text(n === mark ? "mark" : "span", "", "drawer-line");
+    line.append(text("span", String(n), "drawer-n"), words);
+    body.append(line, "\n");
+  });
+  pre.append(body);
+  return pre;
+}
+
 function drawDrawer(view: MapView) {
   const slot = view.slots.drawer;
   if (!open || open.project !== view.project) {
@@ -58,10 +74,26 @@ function drawDrawer(view: MapView) {
   for (const block of drawer.blocks) {
     const part = text("div", "", "drawer-block");
     if (block.label) part.append(text("p", block.label, "drawer-label"));
-    const code = scrollingPre(block.code, "drawer-code", block.label ?? drawer.title);
-    part.append(code);
+    const name = block.label ?? drawer.title;
+    part.append(block.first ? numberedPre(block.code, block.first, block.mark, name) : scrollingPre(block.code, "drawer-code", name));
     if (block.jumps.length) part.append(...block.jumps.map(jumpLink));
     card.append(part);
+  }
+  if (drawer.picks?.length) {
+    const list = text("ul", "", "drawer-picks");
+    // Safari drops a list's semantics under `list-style: none`; the role brings them back.
+    list.setAttribute("role", "list");
+    for (const pick of drawer.picks) {
+      const button = text("button", pick.label, "btn quiet drawer-pick");
+      button.setAttribute("type", "button");
+      button.translate = false;
+      button.title = pick.title;
+      button.addEventListener("click", pick.open);
+      const item = text("li", "");
+      item.append(button);
+      list.append(item);
+    }
+    card.append(list);
   }
   if (drawer.jumps.length) card.append(...drawer.jumps.map(jumpLink));
   slot.replaceChildren(card);
