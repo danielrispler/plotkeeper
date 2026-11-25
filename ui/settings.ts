@@ -3,6 +3,7 @@
 // text at start and each time one is saved; a file that does not parse is reported and the last good
 // one stays in effect.
 
+import { messageOf } from "./dom.js";
 import type { WriterKind } from "./types.js";
 
 // An action, or an action with its argument, as Zed writes `["terminal::SendText", "\u0001"]`.
@@ -141,7 +142,7 @@ export const MODIFIERS = ["ctrl", "alt", "shift", "cmd"] as const;
 function normal(stroke: string): string | null {
   const parsed = new RegExp(`^((?:(?:${MODIFIERS.join("|")})-)*)(.+)$`).exec(stroke.toLowerCase());
   if (!parsed) return null;
-  const [, mods, key] = parsed;
+  const [, mods = "", key = ""] = parsed;
   return [...MODIFIERS.filter((m) => mods.includes(`${m}-`)), key].join("-");
 }
 
@@ -197,7 +198,7 @@ export function reload(previous: Files, files: SettingsFiles): Files {
     try {
       return parse(parseJsonc(text), (problem) => errors.push(`${name}: ${problem}`));
     } catch (e) {
-      errors.push(`${name}: ${e instanceof Error ? e.message : e}`);
+      errors.push(`${name}: ${messageOf(e)}`);
       if (name === "settings.json") broken = true;
       return last;
     }

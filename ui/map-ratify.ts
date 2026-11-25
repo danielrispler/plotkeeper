@@ -73,7 +73,7 @@ export function ratifyDetail(row: Ratifiable): HTMLElement | null {
 export function ratifyActions(project: string, item: Ratifiable, done: (state: "accepted" | "overturned") => void): HTMLElement {
   const box = text("span", "", "ratify-actions");
   const decide = (state: "accepted" | "overturned") => {
-    box.querySelectorAll("button").forEach((button) => ((button as HTMLButtonElement).disabled = true));
+    box.querySelectorAll("button").forEach((button) => (button.disabled = true));
     decideWith(
       state === "overturned",
       () => overturnOut(project, item),
@@ -88,7 +88,7 @@ export function ratifyActions(project: string, item: Ratifiable, done: (state: "
         done(state);
       })
       .catch((e) => {
-        box.querySelectorAll("button").forEach((button) => ((button as HTMLButtonElement).disabled = false));
+        box.querySelectorAll("button").forEach((button) => (button.disabled = false));
         failure("ratify_set")(e);
       });
   };

@@ -8,6 +8,10 @@
     "noUnusedLocals": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noUnusedParameters": true,
     "verbatimModuleSyntax": true,
     "rootDir": "ui",
     "outDir": "dist"

@@ -351,6 +351,7 @@ function drawLinks(layer: Element, view: MapView) {
     const points = markPoints(a, b, laws.length);
     laws.forEach((law, i) => {
       const at = points[i];
+      if (!at) return;
       const mark = svg("rect", { class: `link-mark ${law.backing}`, width: "7", height: "7", x: "-3.5", y: "-3.5", transform: `translate(${at.x} ${at.y}) rotate(45)` });
       mark.append(svg("title", {}));
       mark.firstChild!.textContent = `${law.backing === "check" ? "Backed by a check" : "On trust"}: ${law.text}`;
@@ -398,8 +399,11 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub
 
   // In reading order, so Tab walks the parts top to bottom, then left to right.
   const parts = new Map(doc.parts.map((part) => [part.id, part]));
-  const byId = Object.fromEntries(doc.parts.map((part) => [part.id, positions[part.id]]));
-  for (const part of readingOrder(byId).map((id) => parts.get(id)!)) {
+  const byId = Object.fromEntries(doc.parts.flatMap((part) => {
+    const at = positions[part.id];
+    return at ? [[part.id, at]] : [];
+  }));
+  for (const part of readingOrder(byId).flatMap((id) => parts.get(id) ?? [])) {
     const tier = effectiveTier(part, state.user.tiers);
     // Fog under Daniel's effective tier, as the shell worked it out (`fog.rs`); a part not listed is clear.
     const mist = past ? undefined : state.fog?.[part.id];
@@ -433,7 +437,10 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub
     nodes.set(actor.id, label);
     elements.push(label);
   }
-  for (const [id, node] of nodes) place(node, positions[id]);
+  for (const [id, node] of nodes) {
+    const at = positions[id];
+    if (at) place(node, at);
+  }
   world.append(...elements);
   canvas.append(world);
   // The keyboard on a part's button stays on that part's new button (#452's review).
@@ -503,6 +510,7 @@ function grab(node: HTMLElement, id: string, current: MapView, links: Element, f
     if (event.button !== 0 || (event.target as Element).closest("button:not(.plate-open)")) return;
     scale = rig?.shown().scale ?? 1;
     const at = current.positions[id];
+    if (!at) return;
     drag = dragStart(id, { x: event.clientX, y: event.clientY }, { x: at.x * scale, y: at.y * scale });
     node.setPointerCapture(event.pointerId);
   });
@@ -527,6 +535,7 @@ function grab(node: HTMLElement, id: string, current: MapView, links: Element, f
     swallow = true;
     if (current.scrub) return;
     const at = current.positions[id];
+    if (!at) return;
     current.state.user.positions = { ...current.state.user.positions, [id]: [at.x, at.y] };
     invoke("map_save_positions", { project: current.project, positions: { [id]: [at.x, at.y] } }).catch(failure("map_save_positions"));
   };

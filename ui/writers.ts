@@ -9,7 +9,7 @@
 // `settings.json` as `summaries.base_url` (none: OpenAI's own), and an optional key, also kept in the Keychain, as a local
 // Ollama needs none.
 
-import { confirmed, drawWithStatus, failure, invoke, text } from "./dom.js";
+import { confirmed, drawWithStatus, failure, invoke, messageOf, text } from "./dom.js";
 import type { Settings, SettingsFiles } from "./settings.js";
 import type { Writers, WriterKind, WriterTest } from "./types.js";
 import { GATE } from "./writer-notice.js";
@@ -143,7 +143,7 @@ function draw(panel: HTMLElement, hooks: Hooks) {
   test.id = "writer-test";
   test.setAttribute("type", "button");
   test.title = "Make one tiny call with this writer, model and effort; a pass saves them and summaries are written with them";
-  (test as HTMLButtonElement).disabled = testing;
+  test.disabled = testing;
   test.addEventListener("click", () => run(panel, hooks));
   nodes.push(test);
   if (outcome) {
@@ -196,7 +196,7 @@ function keyRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[]
         outcome = null;
       })
       .catch((e: unknown) => {
-        keyErrors.anthropic = e instanceof Error ? e.message : String(e);
+        keyErrors.anthropic = messageOf(e);
       })
       .finally(() => void refresh(panel, hooks));
   });
@@ -220,7 +220,7 @@ function keyRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[]
     });
     row.append(remove);
   }
-  const nodes = [state, row];
+  const nodes: HTMLElement[] = [state, row];
   if (keyErrors.anthropic) {
     nodes.push(keyError(keyErrors.anthropic, "writer-key-error", [input]));
   }
@@ -305,7 +305,7 @@ function openaiRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElemen
         outcome = null;
       })
       .catch((e: unknown) => {
-        keyErrors.openai = e instanceof Error ? e.message : String(e);
+        keyErrors.openai = messageOf(e);
       })
       .finally(() => void refresh(panel, hooks));
   });
@@ -333,7 +333,7 @@ function openaiRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElemen
     });
     keyRow.append(remove);
   }
-  const nodes = [state, row, keyRow];
+  const nodes: HTMLElement[] = [state, row, keyRow];
   if (keyErrors.openai) {
     nodes.push(keyError(keyErrors.openai, "writer-openai-error", [base, input]));
   }

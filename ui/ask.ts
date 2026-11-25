@@ -4,7 +4,7 @@
 // those facts and, for a file, its hunk; the answer stays here, labelled as interpretation under the facts as recorded and the session never sees it. A failed call or a reply with no answer shows why, with
 // a retry.
 
-import { failure, fullTitle, invoke, onEnter, text } from "./dom.js";
+import { failure, fullTitle, invoke, messageOf, onEnter, text } from "./dom.js";
 import { rendered } from "./markdown.js";
 
 // What Ask is opened on: the core's `Anchor`.
@@ -74,7 +74,7 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
         recorded.replaceChildren(...(sections.length ? sections.flat() : [text("p", "Nothing was recorded about this.", "asking")]));
         if (anchor.kind === "file") showHunk(anchor);
       })
-      .catch((e) => recorded.replaceChildren(text("p", `The facts could not be read: ${e}`, "ask-error")));
+      .catch((e) => recorded.replaceChildren(text("p", `The facts could not be read: ${messageOf(e)}`, "ask-error")));
   };
   const hunk = text("pre", "", "evidence-hunk");
   const showHunk = (a: Extract<Anchor, { kind: "file" }>) => {
@@ -109,7 +109,7 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
     } catch (e) {
       const retry = button("Retry", "Ask the same question again");
       retry.addEventListener("click", ask);
-      reply.replaceChildren(text("p", `No answer: ${e}.`, "ask-error"), retry);
+      reply.replaceChildren(text("p", `No answer: ${messageOf(e)}.`, "ask-error"), retry);
     }
     send.disabled = false;
     send.title = sendHover;
@@ -178,7 +178,7 @@ function whyNotBox(session: string, turn: number): HTMLElement {
       out.replaceChildren(whyNotElement(name, result));
     } catch (e) {
       failure("ask_why_not", "error")(e);
-      out.replaceChildren(text("p", `No answer: ${e}.`, "ask-error"));
+      out.replaceChildren(text("p", `No answer: ${messageOf(e)}.`, "ask-error"));
     }
     go.disabled = false;
     go.title = goHover;
@@ -190,7 +190,7 @@ function whyNotBox(session: string, turn: number): HTMLElement {
 }
 
 function button(label: string, hover: string): HTMLButtonElement {
-  const node = text("button", label, "btn") as HTMLButtonElement;
+  const node = text("button", label, "btn");
   node.type = "button";
   node.title = hover;
   return node;

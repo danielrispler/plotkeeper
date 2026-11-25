@@ -5,7 +5,7 @@
 // layer Esc closes (`layerOrder`), and its field is a text field, so single-key shortcuts do not fire while Daniel types (`windowBinding`).
 // A brief of a PR that closes the pre-flighted issue, or a ticket under it, carries `expectedLine` (`map-brief.ts`).
 
-import { drawWithStatus, element, failure, invoke, text } from "./dom.js";
+import { drawWithStatus, element, failure, invoke, messageOf, text } from "./dom.js";
 import { currentMap, onDraw, onPlate, registerLayer, reloadMap, shownProject, type LoadedMap } from "./map.js";
 import { staleWords } from "./refresher.js";
 import { logStop } from "./stop-rules.js";
@@ -45,14 +45,13 @@ export function preFlightRows(pre: PreFlight, doc: LoadedMap, state: MapState): 
   });
 }
 
-const reason = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 // What a prediction left: the pre-flight framed on the map, or the hand picker with why the writer gave nothing.
 export async function settle(asked: Promise<PreFlight>): Promise<Phase> {
   try {
     return { kind: "result", pre: await asked };
   } catch (e) {
-    return { kind: "pick", why: reason(e) };
+    return { kind: "pick", why: messageOf(e) };
   }
 }
 

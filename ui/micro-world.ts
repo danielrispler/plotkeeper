@@ -45,7 +45,7 @@ const button = (words: string, title: string, click: (() => void) | null) => {
   node.setAttribute("type", "button");
   node.title = title;
   if (click) node.addEventListener("click", click);
-  else (node as HTMLButtonElement).disabled = true;
+  else node.disabled = true;
   return node;
 };
 
@@ -77,7 +77,7 @@ export function frameNode(html: string): HTMLElement {
 }
 
 // The overlay's nodes: the head with the world's name, "may be out of date" with Rebuild, and Close; then the frame.
-export function worldNodes(name: string, html: string, world: MicroWorldView | undefined, act: WorldActs): HTMLElement[] {
+export function worldNodes(name: string, html: string, world: MicroWorldView | undefined, act: WorldActs): [HTMLElement, HTMLElement] {
   const head = text("div", "", "micro-world-head");
   head.append(text("h2", name, "micro-world-title"));
   if (world?.stale) head.append(text("span", staleWords, "micro-world-stale"), button("Rebuild", "Build it again from the code as it is now", act.rebuild));

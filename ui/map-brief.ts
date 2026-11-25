@@ -12,7 +12,7 @@
 // fog list, `catchUpIds`) so the player keeps its step apart from the PR briefs and from an older story of the part; read to its end it
 // clears the part's fog (`part_catch_up_done`) and completes no brief.
 
-import { failure, invoke, text } from "./dom.js";
+import { failure, invoke, messageOf, text } from "./dom.js";
 import { currentMap, currentScrub, giveCameraBack, lendCamera, onDraw, registerLayer, type MapView } from "./map.js";
 import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { watchSeen } from "./seen.js";
@@ -238,7 +238,7 @@ export async function openBriefOf(project: string, number: number, chapter: numb
     got = await invoke("pr_brief", { project, number, full });
   } catch (e) {
     // A superseded open's failure is not this PR's problem: only a wanted answer may set it.
-    if (wanted()) problems.set(number, String(e));
+    if (wanted()) problems.set(number, messageOf(e));
     got = null;
   }
   clearTimeout(slow);
@@ -461,7 +461,10 @@ const chapterParts = (): string[] => {
 // What a brief frames: the parts its steps light and the ones their hops reach, with room around them.
 function frameOf(view: MapView, list: BriefStep[]): Rect | null {
   const ids = new Set([...list.flatMap((step) => [...step.on, ...step.hops.flatMap((hop) => ends(view, hop) ?? [])]), ...chapterParts()]);
-  const boxes = [...ids].filter((id) => centre(view, id)).map((id) => ({ at: centre(view, id), size: sizeOf(view, id) }));
+  const boxes = [...ids].flatMap((id) => {
+    const at = centre(view, id);
+    return at ? [{ at, size: sizeOf(view, id) }] : [];
+  });
   if (!boxes.length) return null;
   return {
     x0: Math.min(...boxes.map((b) => b.at.x - b.size.w / 2)) - 70,
@@ -521,7 +524,8 @@ async function runLight(view: MapView, hops: [string, boolean][]) {
     return [{ from, to, ids: pair, len: Math.hypot(to.x - from.x, to.y - from.y) }];
   });
   const lit = (leg: (typeof legs)[number]) => svg("line", { class: "light-trail", x1: String(leg.from.x), y1: String(leg.from.y), x2: String(leg.to.x), y2: String(leg.to.y) });
-  if (!legs.length) return;
+  const first = legs[0];
+  if (!first) return;
   if (reduced()) {
     for (const leg of legs) {
       layer.append(lit(leg));
@@ -531,7 +535,7 @@ async function runLight(view: MapView, hops: [string, boolean][]) {
   }
   const spark = svg("circle", { class: "light-spark", r: "5" });
   layer.append(spark);
-  arrive(view, legs[0].ids[0]);
+  arrive(view, first.ids[0]);
   for (const leg of legs) {
     const trail = lit(leg);
     layer.insertBefore(trail, spark);
@@ -772,7 +776,7 @@ function ratifyNode(view: MapView, rows: RatifyRow[]) {
     const item = text("li", "", "ratify-row");
     item.dataset.kind = row.kind;
     item.dataset.id = row.id;
-    const kind = row.kind === "decision" ? "Decided" : `${row.change ? `${row.change[0].toUpperCase()}${row.change.slice(1)} ` : ""}${row.kind}`;
+    const kind = row.kind === "decision" ? "Decided" : `${row.change ? `${row.change.charAt(0).toUpperCase()}${row.change.slice(1)} ` : ""}${row.kind}`;
     item.append(text("span", kind, "ratify-kind"), text("span", row.text || row.id, "ratify-text"));
     if (row.status === "not-yet") {
       item.append(ratifyActions(view.project, row, (state) => {

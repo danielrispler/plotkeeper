@@ -4,7 +4,7 @@
 // and the tail of its output. Opening changes only the nodes it opens: the open state is kept by key, so a redraw of the rail
 // draws the line open again.
 
-import { code, failure, fullTitle, glyphOnly, invoke, pressable, scrollingPre, statusRegion, text } from "./dom.js";
+import { code, failure, fullTitle, glyphOnly, invoke, messageOf, pressable, scrollingPre, statusRegion, text } from "./dom.js";
 import { askAnchor, type Hunk, hunkText } from "./ask.js";
 import { diffRequest } from "./diff.js";
 import type { Capabilities, Check, Turn, TurnFile } from "./types.js";
@@ -107,7 +107,7 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
         pre.textContent = outputs.get(key)!;
       })
       .catch((e) => {
-        pre.textContent = live.textContent = `The output could not be read: ${e}`;
+        pre.textContent = live.textContent = `The output could not be read: ${messageOf(e)}`;
       });
   };
   const button = pressable(document.createElement("button"), null, () => {
@@ -175,7 +175,7 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
         left(h);
       })
       .catch((e) => {
-        pre.textContent = live.textContent = `The hunk could not be read: ${e}`;
+        pre.textContent = live.textContent = `The hunk could not be read: ${messageOf(e)}`;
       });
   };
   const button = pressable(document.createElement("button"), null, () => {

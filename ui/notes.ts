@@ -17,9 +17,10 @@ const FADE_MS = 6000;
 // turn's intention, and "N finished" when there are more. Null when none is listed.
 export function finishedNote(ids: string[], listed: Session[]): Note | null {
   const sessions = ids.flatMap((id) => listed.filter((s) => s.id === id));
-  if (!sessions.length) return null;
+  const first = sessions[0];
+  if (!first) return null;
   const count = sessions.length > 1 ? `${sessions.length} finished` : "";
-  return { session: sessions[0], count, line: sessions[0].transcript.intention ?? "" };
+  return { session: first, count, line: first.transcript.intention ?? "" };
 }
 
 export type Hold = "pointer" | "focus" | "modal";
@@ -131,7 +132,7 @@ export function showCopyToast(outcome: Copied["outcome"], prompt: string) {
   copied = prompt;
   if (!copyBody || !copyButton) {
     const body = text("div", "", "copy-body");
-    const button = text("button", "Copy", "btn small") as HTMLButtonElement;
+    const button = text("button", "Copy", "btn small");
     button.setAttribute("type", "button");
     button.title = "Copy the prompt to paste into your agent";
     // The clipboard refused already, so this is the browser's older route, which a click may use.

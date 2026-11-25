@@ -75,7 +75,7 @@ export function autoPlace(items: { id: string; zone?: string }[], links: { from:
     waiting = waiting.filter((other) => other !== item);
     const near = neighbours(item.id);
     const zoned = items.filter((other) => other.zone !== undefined && other.zone === item.zone && other.id in all && other.id !== item.id).map((other) => other.id);
-    const anchors = [...near, ...zoned].map((id) => all[id]);
+    const anchors = [...near, ...zoned].flatMap((id) => all[id] ?? []);
     const where = anchors.length ? mean(anchors) : Object.keys(all).length ? mean(Object.values(all)) : start;
     const free = (at: Point) =>
       at.x >= corner.x - gap && at.y >= corner.y - gap && Object.values(all).every((other) => Math.abs(other.x - at.x) >= plateSize.w + gap || Math.abs(other.y - at.y) >= plateSize.h + gap);
@@ -200,7 +200,7 @@ export function sheetMarks(part: string, fog: Fog | undefined, entries: FogEntry
 
 // The sheet's "Talks to" (spec #473): each link at either end of `part`, in the map's order, with the other end by name, whether its
 // arrow leaves the part, its kind and its reason. The sheet has no other list of links.
-export type TalkRow = { link: string; other: string; out: boolean; kind?: LinkKind; reason?: string };
+export type TalkRow = { link: string; other: string; out: boolean; kind?: LinkKind | undefined; reason?: string | undefined };
 export const talksTo = (part: string, links: MapLink[], nameOf: (id: string) => string): TalkRow[] =>
   links
     .filter((link) => link.from === part || link.to === part)
@@ -227,7 +227,7 @@ export const plateTitle = (part: Part): string => [part.name, part.caption, part
 // the one-click jumps out of it. `openDrawer` (map-drawer.ts) draws a `Drawer`; the history strip's commit drill-down builds one too.
 export type Jump = { label: string; title: string; to: { url: string } };
 export type Block = { label?: string; code: string; jumps: Jump[] };
-export type Drawer = { title: string; note?: string; blocks: Block[]; jumps: Jump[] };
+export type Drawer = { title: string; note?: string | undefined; blocks: Block[]; jumps: Jump[] };
 
 // What the mark and the drill-down say for a broken law: coarse, never naming the law.
 export const brokenText = "A test that backs laws here failed on main";
@@ -786,7 +786,8 @@ export function readingOrder(positions: Record<string, Point>): string[] {
   const rows: [string, Point][][] = [];
   for (const entry of Object.entries(positions).sort(([, a], [, b]) => a.y - b.y || a.x - b.x)) {
     const row = rows.at(-1);
-    if (row && entry[1].y - row[0][1].y < plateSize.h / 2) row.push(entry);
+    const first = row?.[0];
+    if (row && first && entry[1].y - first[1].y < plateSize.h / 2) row.push(entry);
     else rows.push([entry]);
   }
   return rows.flatMap((row) => row.sort(([, a], [, b]) => a.x - b.x).map(([id]) => id));

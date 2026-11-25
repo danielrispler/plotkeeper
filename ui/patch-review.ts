@@ -10,7 +10,7 @@
 // the PR touched, or a new law: the no-tools writer drafts its sentence from the PR's facts, Daniel confirms or edits it, and only what he
 // confirmed reaches the run, which adds the law to the map with its tagged test in one patch, proven and reviewed like back a law.
 
-import { confirmed, failure, invoke, promptBox, scrollingPre, text, type Confirm } from "./dom.js";
+import { confirmed, failure, invoke, messageOf, promptBox, scrollingPre, text, type Confirm } from "./dom.js";
 import { diffLines } from "./diff.js";
 import { currentMap, onDraw, registerLayer, reloadMap, shownProject } from "./map.js";
 import { copyOverturn, overturnReport } from "./ratify.js";
@@ -51,7 +51,7 @@ export function lawAction(law: string, patches: LawPatch[] | null | undefined): 
   const newest = (patches ?? []).filter((patch) => patch.law === law).sort((a, b) => b.at - a.at)[0];
   if (!newest) return { law, kind: "start" };
   if (newest.state === "proving") return { law, kind: "proving" };
-  if (newest.state === "rejected") return { law, kind: "rejected", id: newest.id, line: (newest.line ?? "").split("\n")[0] };
+  if (newest.state === "rejected") return { law, kind: "rejected", id: newest.id, line: (newest.line ?? "").split("\n")[0] ?? "" };
   if (newest.state === "opened") return { law, kind: "opened", id: newest.id, pr: newest.pr ?? 0, url: newest.url ?? "" };
   if (newest.state === "out-of-date") return { law, kind: "out-of-date", id: newest.id };
   return { law, kind: "proven", id: newest.id };
@@ -89,7 +89,7 @@ export function lawActionNodes(action: LawAction, act: Pick<PatchActs, "start" |
       const link = text("a", `Draft PR #${action.pr} opened`, "law-patch-note");
       link.setAttribute("target", "_blank");
       link.setAttribute("rel", "noopener");
-      if (action.url.startsWith("https://")) (link as HTMLAnchorElement).href = action.url;
+      if (action.url.startsWith("https://")) link.href = action.url;
       return [link];
     }
     case "out-of-date":
@@ -271,22 +271,22 @@ export function confirmNodes(draft: NewLaw | null, parts: { id: string; name: st
   if (!draft) return [text("p", "Drafting the law…", "brief-quiet guard-drafting"), cancel];
   const box = text("div", "", "guard-confirm");
   if (line) box.append(text("p", `The writer could not draft one: ${line}. Write the law yourself.`, "brief-quiet"));
-  const part = text("select", "", "guard-part") as HTMLSelectElement;
+  const part = text("select", "", "guard-part");
   for (const each of parts) {
-    const option = text("option", each.name, "") as HTMLOptionElement;
+    const option = text("option", each.name, "");
     option.value = each.id;
     part.append(option);
   }
   part.value = draft.on;
   part.name = "law-part";
   part.setAttribute("aria-label", "The part the law is on");
-  const id = text("input", "", "guard-id") as HTMLInputElement;
+  const id = text("input", "", "guard-id");
   id.value = draft.id;
   id.name = "law-id";
   id.autocomplete = "off";
   id.spellcheck = false;
   id.setAttribute("aria-label", "The law's id");
-  const sentence = text("textarea", "", "guard-sentence") as HTMLTextAreaElement;
+  const sentence = text("textarea", "", "guard-sentence");
   sentence.value = draft.text;
   sentence.name = "law-sentence";
   sentence.autocomplete = "off";
@@ -327,7 +327,7 @@ export function guardRow(view: MapView, pr: number, guard: Guard, redraw: () => 
       redraw();
       invoke("guard_draft", { project, number: pr })
         .then((draft) => (asked.draft = draft))
-        .catch((e) => Object.assign(asked, { draft: { id: "", on: guard.parts[0] ?? "", text: "" }, line: String(e) }))
+        .catch((e) => Object.assign(asked, { draft: { id: "", on: guard.parts[0] ?? "", text: "" }, line: messageOf(e) }))
         .finally(() => confirming === asked && redraw());
     },
   };

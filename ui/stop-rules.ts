@@ -66,7 +66,7 @@ export const table: Row[] = [
 
 // `day` plus `n` days, both local days (`2026-11-03`).
 const addDays = (day: string, n: number) => {
-  const [y, m, d] = day.split("-").map(Number);
+  const [y = 0, m = 1, d = 1] = day.split("-").map(Number);
   return localDay(new Date(y, m - 1, d + n));
 };
 

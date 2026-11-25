@@ -215,7 +215,7 @@ export function headlineOf(summary: TurnSummary | null, message: string | null):
     return { headline: stored.headline.trim() || message?.trim() || null, body: stored.lines ?? [] };
   }
   const lines = (summary?.summary.summary ?? "").split("\n").map((line) => line.trim()).filter(Boolean);
-  if (lines.length) return { headline: lines[0], body: lines.slice(1).map((text) => ({ kind: "reported", text })) };
+  if (lines[0]) return { headline: lines[0], body: lines.slice(1).map((text) => ({ kind: "reported", text })) };
   return { headline: message?.trim() || null, body: [] };
 }
 
@@ -292,7 +292,7 @@ export const cardTime = (id: string) => Number(id.slice(id.lastIndexOf("@") + 1)
 // The index of the turn that runs at `at`: the latest that started at or before it, else null.
 export function turnAt(turns: Pick<Turn, "started_at">[], at: number): number | null {
   let index = turns.length - 1;
-  while (index >= 0 && turns[index].started_at > at) index--;
+  while (index >= 0 && (turns[index]?.started_at ?? 0) > at) index--;
   return index < 0 ? null : index;
 }
 
@@ -319,13 +319,14 @@ export function feedTurns(
     questions: [],
     blocked: [],
   }));
-  const at = (index: number | null) => blocks[index !== null && index < turns.length ? index : turns.length];
+  const rest = blocks[turns.length] ?? { index: null, turn: null, agents: [], questions: [], blocked: [] };
+  const at = (index: number | null) => (index !== null && blocks[index]) || rest;
   // Each list is oldest first; the blocks show the newest first.
   for (const agent of [...agents].sort((a, b) => b.started_at - a.started_at)) at(agent.turn).agents.push(agent);
   for (const question of [...questions].reverse()) at(question.turn).questions.push(question);
   // A blocked command's card is in the turn running when its retry started, else when it was blocked.
   for (const card of [...blocked].reverse()) at(turnAt(turns, card.run_at ?? card.at)).blocked.push(card);
-  const rest = blocks.pop()!;
+  blocks.pop();
   const empty = !rest.agents.length && !rest.questions.length && !rest.blocked.length;
   return [...blocks.reverse(), ...(empty ? [] : [rest])];
 }
@@ -605,8 +606,8 @@ export function drawFeed() {
 }
 // Rename (danielrispler/Falinks#469): the row's name, kept in the event log. An empty name gives the row its folder's again.
 function askName(session: Session) {
-  const dialog = element("rename-dialog") as HTMLDialogElement;
-  const field = element("rename-field") as HTMLInputElement;
+  const dialog = element("rename-dialog", HTMLDialogElement);
+  const field = element("rename-field", HTMLInputElement);
   field.value = session.name ?? "";
   dialog.onclose = async () => {
     if (dialog.returnValue !== "rename") return;
@@ -632,7 +633,7 @@ function choice(dialog: HTMLDialogElement): Promise<string> {
 
 // Delete: asks, then drops the row; the cards are kept.
 export async function askDelete(session: Session) {
-  const dialog = element("delete-dialog") as HTMLDialogElement;
+  const dialog = element("delete-dialog", HTMLDialogElement);
   element("delete-name").textContent = sessionName(session);
   if ((await choice(dialog)) !== "delete") return;
   await invoke("delete_session", { id: session.id });

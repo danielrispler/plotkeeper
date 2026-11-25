@@ -36,9 +36,14 @@ test("a command is a POST to /api/<command> with its arguments as JSON, and its 
   assert.deepEqual(requests.at(-1), ["/api/sessions", "POST", {}]);
 });
 
-test("a refused command rejects with the server's reason", async () => {
+// A refusal is an `Error` (#554): its message is the server's reason, and it names the command and the HTTP status.
+test("a refused command rejects with a CommandError carrying the server's reason", async () => {
+  const { CommandError } = await import("../../dist/transport.js");
   reply = { ok: false, body: "not a session id" };
-  await assert.rejects(seam().core.invoke("rename", { id: "x", name: "y" }), (e) => e === "not a session id");
+  await assert.rejects(seam().core.invoke("rename", { id: "x", name: "y" }), (e) =>
+    e instanceof CommandError && e instanceof Error && e.message === "not a session id" && e.command === "rename" && e.status === 500);
+  reply = { ok: false, body: null };
+  await assert.rejects(seam().core.invoke("rename", { id: "x", name: "y" }), { message: "rename: 500" });
 });
 
 test("one event stream carries every event to the listeners of its name, until one is removed", async () => {

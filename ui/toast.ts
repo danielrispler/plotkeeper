@@ -25,7 +25,7 @@ export const toastShows = (mode: LayoutMode) => mode === "focus";
 // The first line of a session's open question, else of the step it waits on, such as a permission's.
 export function questionLine(session: Pick<Session, "questions" | "last_step">): string {
   const open = session.questions.find((q) => q.answer === "open");
-  return (open?.questions[0]?.question ?? session.last_step?.detail ?? "").split("\n")[0];
+  return (open?.questions[0]?.question ?? session.last_step?.detail ?? "").split("\n")[0] ?? "";
 }
 
 // Whether `session` is a block the toast is about: it needs Daniel and is not the `focused` one.
@@ -34,7 +34,7 @@ const toasted = (session: Session, focused: string | null) => session.state === 
 // The toast for the sessions that need Daniel, less the `focused` one and those he dismissed.
 export function toastFor(listed: Session[], focused: string | null, dismissed: Set<string>): Toast | null {
   const blocked = listed.filter((s) => toasted(s, focused) && !dismissed.has(s.id));
-  return blocked.length ? { session: blocked[0], count: blocked.length } : null;
+  return blocked[0] ? { session: blocked[0], count: blocked.length } : null;
 }
 
 const dismissed = new Set<string>();
@@ -42,7 +42,7 @@ let shown: Toast | null = null;
 
 // The toasts, in the region's order: the needs-you, the note, the copy (#493) and the what's-new (#527) toasts down its top-right
 // corner, the Clear toast at its bottom-left.
-const TOASTS = ["toast", "note-toast", "copy-toast", "whats-new-toast", "clear-toast"];
+const TOASTS = ["toast", "note-toast", "copy-toast", "whats-new-toast", "clear-toast"] as const;
 const said = new Map<string, string>();
 let returnTo: HTMLElement | null = null;
 
@@ -73,9 +73,10 @@ export function toastButtons(toast: HTMLElement, main: () => HTMLElement, close:
 export function stackToasts() {
   const modal = document.querySelector("dialog:modal") !== null;
   const focused = document.activeElement;
-  const toasts = TOASTS.map(element);
+  const toasts = TOASTS.map((id) => element(id));
   let lost = -1;
   toasts.forEach((toast, i) => {
+    const id = TOASTS[i] ?? toast.id;
     const show = !toast.hidden && !modal;
     const open = toast.matches(":popover-open");
     if (show && !open) toast.showPopover();
@@ -84,8 +85,8 @@ export function stackToasts() {
       toast.hidePopover();
     }
     const say = show ? (toast.dataset.say ?? "") : "";
-    if (say && said.get(TOASTS[i]) !== say) (document as Document & { ariaNotify?: (text: string) => void }).ariaNotify?.(say);
-    said.set(TOASTS[i], say);
+    if (say && said.get(id) !== say) (document as Document & { ariaNotify?: (text: string) => void }).ariaNotify?.(say);
+    said.set(id, say);
   });
   placeToasts(toasts);
   if (lost < 0) return;
@@ -210,7 +211,7 @@ export function hideClearToast() {
 export function showWhatsNewToast(version: string, url: string) {
   const toast = element("whats-new-toast");
   const message = `Updated to ${version}`;
-  const link = text("a", "What's new", "btn small") as HTMLAnchorElement;
+  const link = text("a", "What's new", "btn small");
   link.href = url;
   link.target = "_blank";
   link.rel = "noopener noreferrer";

@@ -88,7 +88,7 @@ function resize(px: number | null) {
 let resizeHandle: HTMLButtonElement | null = null;
 function handle() {
   if (resizeHandle) return resizeHandle;
-  const bar = text("button", "", "btn quiet sheet-resize") as HTMLButtonElement;
+  const bar = text("button", "", "btn quiet sheet-resize");
   bar.type = "button";
   bar.setAttribute("aria-label", "Resize the sheet: the left arrow widens it, the right arrow narrows it");
   bar.title = "Drag to resize the sheet; double-click for its first width";
@@ -171,7 +171,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
   // Explanations (#522): a line under each heading, the selected tier's meaning under the tiers, a link kind's and "not yet ratified"'s
   // at their first link, and the fog actions' under them. The `?` beside the × shows or hides them all.
   const explain = explanationsOn();
-  const heading = (words: string) => explained(text("h3", words, "sheet-heading"), SHEET_HEADINGS[words], explain);
+  const heading = (words: string) => explained(text("h3", words, "sheet-heading"), SHEET_HEADINGS[words] ?? "", explain);
   const header = text("div", "", "sheet-header");
   const toggle = explainToggle(explain);
   header.append(toggle, closer);
@@ -181,7 +181,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
     const button = pressable(text("button", each.label, "btn"), each.pressed, () => setTier(view, part.id, each.tier).catch(failure("map_set_tier")));
     // Each tier's meaning on hover, so the ones not picked compare without a change.
     button.title = SHEET.tiers[each.tier];
-    if (view.scrub) (button as HTMLButtonElement).disabled = true;
+    if (view.scrub) button.disabled = true;
     if (each.pressed) selected = button;
     tiers.append(button);
   }
@@ -242,7 +242,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
   const fogButtons: HTMLElement[] = [];
   if (actions.main) {
     const { open: opens, label, title, note } = actions.main;
-    const main = text("button", label, "btn primary sheet-catch-up") as HTMLButtonElement;
+    const main = text("button", label, "btn primary sheet-catch-up");
     main.title = title;
     main.addEventListener("click", () => {
       if (opens.kind === "chapter") return void openBriefOf(view.project, opens.pr, opens.chapter, true);
@@ -260,7 +260,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
     }
   }
   if (sheet.canClear && actions.second) {
-    const clear = text("button", actions.second, "btn quiet sheet-know") as HTMLButtonElement;
+    const clear = text("button", actions.second, "btn quiet sheet-know");
     clear.title = "Clear this part's fog: you have caught up with what changed";
     clear.addEventListener("click", () => {
       clear.disabled = true;
@@ -279,7 +279,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
   // A part with no fog offers the refresher (#392).
   const refresher = !view.scrub && refreshing === part.id ? refresherNode(view, part.id) : null;
   if (!view.scrub && !sheet.canClear && !refresher) {
-    const enter = text("button", "Refresher", "btn quiet sheet-refresher") as HTMLButtonElement;
+    const enter = text("button", "Refresher", "btn quiet sheet-refresher");
     enter.title = "The flows through this part, hop by hop";
     // It shows at once, drawn from the map; the shell records the activity behind it, and the reload drops the band.
     enter.addEventListener("click", () => {

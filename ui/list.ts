@@ -238,7 +238,7 @@ export function folds(session: Pick<Session, "asker">, children: Children, paren
   const count = (under: boolean) => parents.flatMap((parent) => drawn(session, children, parent, 0, shut, under)).length;
   const all = count(false);
   if (!all) return null;
-  const open = !shut.has(parents[0]);
+  const open = !parents[0] || !shut.has(parents[0]);
   return { open, hiding: open ? 0 : all - count(true) };
 }
 
@@ -253,7 +253,7 @@ function rowLines(button: HTMLElement, state: string, name: HTMLElement[], below
   const first = text("span", "", "l1");
   first.append(...name, glyph(state, unseen, landed, unwatched));
   button.append(first);
-  button.title = `${name[0].textContent} · ${status(state, unseen, landed, unwatched)[1]}`;
+  button.title = `${name[0]?.textContent ?? ""} · ${status(state, unseen, landed, unwatched)[1]}`;
   button.classList.toggle("unseen", unseen);
   if (below) {
     const second = text("span", "", "l2");
@@ -452,7 +452,7 @@ export function strip(sessions: Session[]): HTMLElement[] {
       const button = selecting(session.id, null, `strip ${session.id}`);
       button.setAttribute("aria-pressed", String(isSelected(session.id)));
       button.title = `${sessionName(session)} · ${status(session.state, session.unseen, session.landed)[1]}`;
-      button.append(glyph(session.state, session.unseen, session.landed), labels[i]);
+      button.append(glyph(session.state, session.unseen, session.landed), labels[i] ?? "");
       return button;
     }),
     ...(rest ? [Object.assign(pressable(text("button", `${rest} idle`), null, toggle), { title: titled(studio.files.keymap, "Open the session list, idle sessions among it", "studio::ToggleList") })] : []),

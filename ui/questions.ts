@@ -32,7 +32,10 @@ export function questionElement(question: Question): HTMLElement {
   const send = () => {
     if (ask === null || picked.size < questions.length) return;
     const answers = Object.fromEntries(
-      questions.map((asked) => [asked.question, asked.multiSelect ? picked.get(asked.question)! : picked.get(asked.question)![0]]),
+      questions.map((asked) => {
+        const chosen = picked.get(asked.question) ?? [];
+        return [asked.question, asked.multiSelect ? chosen : (chosen[0] ?? "")];
+      }),
     );
     sendAnswer(ask, { answers });
   };
@@ -134,7 +137,7 @@ function answerButtons(ask: Ask, buttons: [AnswerButton, () => void, string?][])
   const row = document.createElement("p");
   row.className = "answer-buttons";
   const button = (label: string, hover: string, click: () => void, className = "") => {
-    const node = text("button", label, `btn ${className}`.trim()) as HTMLButtonElement;
+    const node = text("button", label, `btn ${className}`.trim());
     node.type = "button";
     node.title = hover;
     node.addEventListener("click", click);

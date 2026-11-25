@@ -3,7 +3,7 @@
 // whole from git (`turn_file_hunk`, `all`), added and removed lines marked by a sign and a tint. The other changes in the
 // worktree are one folded line at the end. The pane is drawn once when it opens, so folding a file moves nothing else.
 
-import { fullTitle, invoke, pressable, text } from "./dom.js";
+import { fullTitle, invoke, messageOf, pressable, text } from "./dom.js";
 import type { Capabilities, Session, Turn, TurnFile } from "./types.js";
 
 export type DiffLineKind = "add" | "del" | "hunk" | "meta" | "ctx";
@@ -30,7 +30,7 @@ export function diffLines(hunk: string): DiffLine[] {
 // The turn whose diff the palette opens: `index` of the newest turn that has files, none for an agent without trees.
 export function newestDiff(turns: Pick<Turn, "files">[], capabilities: Pick<Capabilities, "turn_trees">): number | null {
   if (!capabilities.turn_trees) return null;
-  for (let at = turns.length - 1; at >= 0; at--) if ((turns[at].files?.files.length ?? 0) > 0) return at;
+  for (let at = turns.length - 1; at >= 0; at--) if ((turns[at]?.files?.files.length ?? 0) > 0) return at;
   return null;
 }
 
@@ -60,7 +60,7 @@ function fileFold(session: string, index: number, file: TurnFile): HTMLElement {
       if (!hunk || hunk.binary) return void body.replaceChildren(text("p", hunk ? "Binary file: no lines to show." : "The hunk could not be read.", "empty"));
       body.replaceChildren(...diffLines(hunk.text).map((line) => text("pre", line.text || " ", `diff-line ${line.kind}`)));
     })
-    .catch((e) => body.replaceChildren(text("p", `The hunk could not be read: ${e}`, "empty")));
+    .catch((e) => body.replaceChildren(text("p", `The hunk could not be read: ${messageOf(e)}`, "empty")));
   return fold;
 }
 
