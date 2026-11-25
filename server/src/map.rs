@@ -455,6 +455,10 @@ pub struct PrDiffArgs {
     pub parts: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paths: Option<Vec<String>>,
+    /// A "Since you read" story's (#497): the head it runs from, so the diff runs from there, not from where the PR left the default
+    /// branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
 }
 
 /// "See the code" of a PR's brief: the files its head changed since it left the default branch, with their diffs, for the drawer.
@@ -466,6 +470,7 @@ pub fn pr_diff(args: PrDiffArgs) -> Result<crate::history::Commit, String> {
         title,
         parts,
         paths,
+        base,
     } = args;
     let repo = Path::new(&project);
     // The map at the PR's head, as its brief's chapters light parts by it.
@@ -494,7 +499,13 @@ pub fn pr_diff(args: PrDiffArgs) -> Result<crate::history::Commit, String> {
                 .collect()
         }
     };
-    crate::history::pr_files(repo, &head, &format!("#{number} {title}"), keep)
+    crate::history::pr_files(
+        repo,
+        &head,
+        base.as_deref(),
+        &format!("#{number} {title}"),
+        keep,
+    )
 }
 
 /// Why a project header's quiet dot lights (#344, #386): fog on a Core part, a broken law, a PR brief waiting, in that order.
@@ -761,6 +772,7 @@ mod tests {
                 title: "Work".into(),
                 parts: parts.map(|p| p.iter().map(|s| s.to_string()).collect()),
                 paths: None,
+                base: None,
             })
             .unwrap();
             found.files.into_iter().map(|f| f.path).collect::<Vec<_>>()
@@ -778,6 +790,7 @@ mod tests {
             title: "Work".into(),
             parts: None,
             paths: Some(vec!["z/docs/four".into(), "z/one".into(), "nowhere".into()]),
+            base: None,
         })
         .unwrap();
         let shown: Vec<_> = found.files.into_iter().map(|f| f.path).collect();
@@ -820,6 +833,7 @@ mod tests {
                 title: "Work".into(),
                 parts: Some(vec![part.into()]),
                 paths: None,
+                base: None,
             })
             .unwrap()
             .files
@@ -829,6 +843,41 @@ mod tests {
         };
         assert_eq!(diff("n"), ["a/new.rs", "n/one"]);
         assert_eq!(diff("a"), ["a/old.rs"]);
+    }
+
+    #[test]
+    fn see_the_code_of_a_since_story_runs_from_the_head_it_was_read_at() {
+        let o = origin();
+        let map = r#"{"version":1,"parts":[
+            {"id":"a","name":"A","caption":"","description":"","tier":"core","paths":["a/"]}],
+            "actors":[],"links":[],"ignored":[],"laws":[]}"#;
+        commit_file(&o.seed, MAP_FILE, map);
+        git(&o.seed, &["push", "-q", "origin", "HEAD"]);
+        git(&o.main, &["fetch", "-q", "origin"]);
+        git(&o.main, &["checkout", "-q", "-b", "work", "origin/trunk"]);
+        std::fs::create_dir_all(o.main.join("a")).unwrap();
+        commit_file(&o.main, "a/read.rs", "x\n");
+        let read_at = git(&o.main, &["rev-parse", "HEAD"]);
+        commit_file(&o.main, "a/new.rs", "x\n");
+        let head = git(&o.main, &["rev-parse", "HEAD"]);
+        let diff = |base: Option<&str>| {
+            pr_diff(PrDiffArgs {
+                project: o.main.display().to_string(),
+                number: 7,
+                head: head.clone(),
+                title: "Work".into(),
+                parts: Some(vec!["a".into()]),
+                paths: None,
+                base: base.map(String::from),
+            })
+            .unwrap()
+            .files
+            .into_iter()
+            .map(|f| f.path)
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(diff(None), ["a/new.rs", "a/read.rs"]);
+        assert_eq!(diff(Some(&read_at)), ["a/new.rs"]);
     }
 
     #[test]

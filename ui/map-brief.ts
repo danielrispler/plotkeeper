@@ -25,8 +25,8 @@ import { branchOf, overturnNote, ratifyActions, ratifyDetail } from "./map-ratif
 import { copyOverturn, ratifyStep, statusWords } from "./ratify.js";
 import type { Copied } from "./notes.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
-import { actorSize, agentPrompt, alsoAt, type AlsoRow, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureMax, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, partialFactsLines, pickRun, type PickRun, playlist, plateSize, stageLabel, storySteps, type Rect, type Shape, stepCode, unconfirmed, unconfirmedReasons } from "./map-model.js";
-import type { BriefCheck, BriefFigure, BriefStep, BriefView, CatchUpOffer, CommitFiles, PrBrief, PrDiffArgs, RatifyRow, ReadyPr, StaleBase, StoredCatchUp } from "./types.js";
+import { actorSize, agentPrompt, alsoAt, diffArgs, type AlsoRow, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureMax, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, partialFactsLines, pickRun, type PickRun, playlist, plateSize, stageLabel, storySteps, type Rect, type Shape, stepCode, unconfirmed, unconfirmedReasons } from "./map-model.js";
+import type { BriefCheck, BriefFigure, BriefStep, BriefView, CatchUpOffer, CommitFiles, PrBrief, RatifyRow, ReadyPr, StaleBase, StoredCatchUp } from "./types.js";
 
 const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
 // The brief being played, as `pr_brief` returned it.
@@ -151,12 +151,12 @@ const litFiles = new Map<string, Files>();
 function filesOf(view: MapView, step: BriefStep): Files {
   const parts = step.on.filter((id) => view.doc.parts.some((part) => part.id === id));
   if (!playing || !parts.length) return { done: [], wait: Promise.resolve([]) };
-  const { pr, head, brief } = playing.brief;
-  const key = `${view.project}|${pr}|${head}|${parts.join(",")}`;
+  const { pr, head } = playing.brief;
+  // A since story shares its full brief's head, but not its diff.
+  const key = `${view.project}|${pr}|${playing.since ?? ""}|${head}|${parts.join(",")}`;
   let found = litFiles.get(key);
   if (!found) {
-    const ask: PrDiffArgs = { project: view.project, number: pr, head, title: brief.title, parts };
-    const files: Files = { done: null, wait: invoke("pr_diff", ask).then((got) => got.files.map((file) => file.path), () => []) };
+    const files: Files = { done: null, wait: invoke("pr_diff", { ...diffArgs(view.project, playing), parts }).then((got) => got.files.map((file) => file.path), () => []) };
     void files.wait.then((paths) => (files.done = paths));
     litFiles.set(key, (found = files));
   }
@@ -684,8 +684,8 @@ function codeInto(view: MapView, node: HTMLElement, list: BriefStep[], index: nu
   const words = node.querySelector(".brief-txt");
   if (!playing || catchUp || !step || !words) return;
   const want = stepCode(list, index, new Set(view.doc.parts.map((part) => part.id)));
-  const ask: Omit<PrDiffArgs, "parts"> = { project: view.project, number: playing.brief.pr, head: playing.brief.head, title: playing.brief.brief.title };
-  const diff = (parts?: string[]) => invoke("pr_diff", (parts ? { ...ask, parts } : ask) satisfies PrDiffArgs);
+  const ask = diffArgs(view.project, playing);
+  const diff = (parts?: string[]) => invoke("pr_diff", parts ? { ...ask, parts } : ask);
   const unlit = (found: CommitFiles) => {
     const drawer = commitDrawer(found);
     return { ...drawer, note: `This step lights no changed files · ${drawer.note}` };
@@ -709,7 +709,7 @@ function codeInto(view: MapView, node: HTMLElement, list: BriefStep[], index: nu
 function alsoInto(view: MapView, node: HTMLElement, groups: AlsoRow[]) {
   const words = node.querySelector(".brief-txt");
   if (!playing || catchUp || !groups.length || !words) return;
-  const ask: PrDiffArgs = { project: view.project, number: playing.brief.pr, head: playing.brief.head, title: playing.brief.brief.title };
+  const ask = diffArgs(view.project, playing);
   const box = text("section", "", "brief-also");
   box.setAttribute("aria-label", "Also touched");
   box.append(text("h4", "Also touched", "brief-quiet brief-also-title"));
@@ -721,7 +721,7 @@ function alsoInto(view: MapView, node: HTMLElement, groups: AlsoRow[]) {
     button.title = `Open the ${group.name} files, above the brief`;
     button.setAttribute("aria-label", `See the code: ${group.name}`);
     button.addEventListener("click", () => {
-      invoke("pr_diff", { ...ask, paths: group.paths } satisfies PrDiffArgs).then((found) => openDrawer(commitDrawer(found))).catch(failure("pr_diff"));
+      invoke("pr_diff", { ...ask, paths: group.paths }).then((found) => openDrawer(commitDrawer(found))).catch(failure("pr_diff"));
     });
     head.append(button);
     if (group.kind === "no-part") {

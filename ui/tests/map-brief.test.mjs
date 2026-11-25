@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { alsoAt, alsoRows, awaitedWrite, chapterGate, storySteps, briefCamera, briefPlayer, latestRequest, escapeMap, figureShapes, figureSize, playlist, partialFactsLines, unconfirmed, unconfirmedReasons, agentPrompt } from "../../dist/map-model.js";
+import { alsoAt, alsoRows, awaitedWrite, chapterGate, storySteps, briefCamera, briefPlayer, latestRequest, escapeMap, figureShapes, figureSize, playlist, partialFactsLines, unconfirmed, unconfirmedReasons, agentPrompt, diffArgs } from "../../dist/map-model.js";
 import { trayRows } from "../../dist/map-tray.js";
 
 const step = (k, extra = {}) => ({ k, h: k, b: "", on: [], hops: [], law: null, covered_by: null, list: [], risks: [], fig: null, check: null, cites: [], flags: [], ...extra });
@@ -443,4 +443,10 @@ test("a not-confirmed decision and the No part group copy as prompts too", () =>
     ].join("\n"),
   );
   assert.doesNotMatch(prompt, fileLine, "no file:line");
+});
+
+test("See the code of a Since you read story asks for the diff from the head it was read at, the full brief's from the PR's base (#497)", () => {
+  const brief = { version: 1, pr: 7, head: "bbb", written_at: 1, stale: false, model: "opus", brief: { title: "Fog", overview: [], chapters: [], also: [] } };
+  assert.deepEqual(diffArgs("/p", { brief, partial: false }), { project: "/p", number: 7, head: "bbb", title: "Fog" });
+  assert.deepEqual(diffArgs("/p", { brief, partial: false, since: "aaa" }), { project: "/p", number: 7, head: "bbb", title: "Fog", base: "aaa" });
 });

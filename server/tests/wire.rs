@@ -736,6 +736,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
                 title: "PR briefs".into(),
                 parts: Some(vec!["server".into()]),
                 paths: None,
+                base: None,
             }),
         ),
         (
@@ -747,6 +748,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
                 title: "PR briefs".into(),
                 parts: None,
                 paths: None,
+                base: None,
             }),
         ),
         (
@@ -758,6 +760,19 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
                 title: "PR briefs".into(),
                 parts: None,
                 paths: Some(vec!["docs/a.md".into()]),
+                base: None,
+            }),
+        ),
+        (
+            "PrDiffArgs",
+            json(studio_server::map::PrDiffArgs {
+                project: "/repo".into(),
+                number: 334,
+                head: COMMIT.into(),
+                title: "PR briefs".into(),
+                parts: Some(vec!["server".into()]),
+                paths: None,
+                base: Some(COMMIT.into()),
             }),
         ),
         ("Proof", json(proof(Some("the_wire_samples")))),

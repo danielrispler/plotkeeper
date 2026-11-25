@@ -1,7 +1,7 @@
 // The Map view's pure logic (spec danielrispler/plotkeeper#306, ticket #309): the map file as the window reads it, where parts
 // are placed, the drag threshold, the link's rim points, the layered Esc and the camera. `map.ts` draws and wires them.
 
-import type { AlsoGroup, AlsoKind, BriefFigure, PartialFacts, BriefStep, CatchUpOffer, CatchUpStage, FogListEntry, Camera, Ci, CommitFiles, Fog, FogEntry, HistoricalMap, HistoryEntry, PrBrief, Proof, ReadyPr } from "./types.js";
+import type { AlsoGroup, AlsoKind, BriefFigure, PartialFacts, BriefStep, BriefView, CatchUpOffer, CatchUpStage, FogListEntry, Camera, Ci, CommitFiles, Fog, FogEntry, HistoricalMap, HistoryEntry, PrBrief, PrDiffArgs, Proof, ReadyPr } from "./types.js";
 
 export type Tier = "core" | "interface" | "black-box";
 export type Point = { x: number; y: number };
@@ -514,6 +514,13 @@ export function partialFactsLines(facts: PartialFacts | undefined, partial: bool
   if (facts?.claim_error) lines.push({ line: `The claim check failed: ${facts.claim_error}`, files: [] });
   if (facts?.no_extractor?.length) lines.push({ line: `No extractor reads ${facts.no_extractor.join(", ")} files, so their imports are not on the map`, files: [] });
   return lines;
+}
+
+// What every `pr_diff` of the brief played in `project` asks; a caller adds the files it wants (`parts` or `paths`). A "Since you read"
+// story's diff runs from the head it was read at (#497), the full brief's from where the PR left the default branch.
+export function diffArgs(project: string, view: BriefView): PrDiffArgs {
+  const ask: PrDiffArgs = { project, number: view.brief.pr, head: view.brief.head, title: view.brief.brief.title };
+  return view.since ? { ...ask, base: view.since } : ask;
 }
 
 // Which files a step's "See the code" asks `pr_diff` for (#490), the step at `index` of the played `list`: "all" on the Ratify step, and

@@ -308,20 +308,30 @@ pub fn commit_files(repo: &Path, commit: &str) -> Result<Commit, String> {
 }
 
 /// What a PR changed: its files against where its head left the default branch, each with its diff, as the brief's writer read them
-/// (`git diff base head` from the merge base). `label` names the PR in the drawer; `keep` picks the files to show, before the cap.
+/// (`git diff base head` from the merge base), or against `since` when given (a "Since you read" story's head, #497). `label` names
+/// the PR in the drawer; `keep` picks the files to show, before the cap.
 pub fn pr_files(
     repo: &Path,
     head: &str,
+    since: Option<&str>,
     label: &str,
     keep: impl FnOnce(Vec<String>) -> Vec<String>,
 ) -> Result<Commit, String> {
-    let (reference, _) =
-        crate::map::default_ref(repo).ok_or("the repository has no default branch")?;
     let full = git(
         repo,
         &["rev-parse", "--verify", &format!("{head}^{{commit}}")],
     )?;
-    let base = git(repo, &["merge-base", &reference, &full])?;
+    let base = match since {
+        Some(since) => git(
+            repo,
+            &["rev-parse", "--verify", &format!("{since}^{{commit}}")],
+        )?,
+        None => {
+            let (reference, _) =
+                crate::map::default_ref(repo).ok_or("the repository has no default branch")?;
+            git(repo, &["merge-base", &reference, &full])?
+        }
+    };
     Ok(Commit {
         short: full.chars().take(7).collect(),
         files: files_between(repo, &base, &full, keep)?,
@@ -629,7 +639,7 @@ mod tests {
         run(rig.dir.path(), &["checkout", "-q", "main"]);
         // The default branch moved on meanwhile; the PR's diff is its own, not that.
         rig.commit("Elsewhere", &[("c/y", "y\n")]);
-        let found = pr_files(Path::new(&rig.main), &head, "#7 Edit a", |all| all).unwrap();
+        let found = pr_files(Path::new(&rig.main), &head, None, "#7 Edit a", |all| all).unwrap();
         assert_eq!(
             (found.label.as_str(), found.commit.as_str()),
             ("#7 Edit a", head.as_str())
@@ -637,6 +647,6 @@ mod tests {
         let paths: Vec<_> = found.files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(paths, ["a/x", "b/new"]);
         assert!(found.files[0].diff.contains("-one") && found.files[0].diff.contains("+two"));
-        assert!(pr_files(Path::new(&rig.main), "deadbeef", "x", |all| all).is_err());
+        assert!(pr_files(Path::new(&rig.main), "deadbeef", None, "x", |all| all).is_err());
     }
 }
