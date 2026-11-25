@@ -209,7 +209,9 @@ mod touches_tests {
         json!([{"data":{"repository":{"issues":{"nodes":issues}}}}])
     }
     fn touches(files: &str) -> String {
-        format!("## Touches\n\n- **Files:** {files}\n- **Session:** auto mode\n")
+        format!(
+            "## Touches\n\n- **Files:** {files}\n- **Session:** auto mode\n- **Route:** strong · effort high — a reason\n"
+        )
     }
     fn found(pages: &Value) -> Vec<(u64, u64, Vec<String>)> {
         overlaps(pages)
