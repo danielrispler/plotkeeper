@@ -1,6 +1,6 @@
 {
   "name": "plotkeeper",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Local macOS control room for coding agents (Claude Code, Codex, Cursor, agy) that explains what your prompts changed",
   "license": "MIT",
   "author": "Daniel Rispler",
