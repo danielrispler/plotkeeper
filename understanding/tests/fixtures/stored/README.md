@@ -38,3 +38,7 @@ nothing missing.
 `pr-brief-v8/` holds a stored PR brief as written once code sorts Also touched by kind (#489, spec #477): `also_groups` with a No part,
 a Tests, an Ignored and an Other group, a file with its part, an ignored one and a tagged test with its law, and no model `also` lines.
 `understanding/tests/pr_brief.rs` loads it; the older samples, with `also` lines or none, read with no groups.
+
+`pr-brief-v9/` holds a stored PR brief as written once a brief stores the import sites behind each link its PR adds (#499, spec #477
+"Link evidence"): `link_evidence` with an import link whose sites sit on three lines of two files, and a cargo link whose one site has no
+line. `understanding/tests/pr_brief.rs` loads it; the older samples, with no `link_evidence`, read with none.

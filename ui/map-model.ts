@@ -225,8 +225,11 @@ export const plateTitle = (part: Part): string => [part.name, part.caption, part
 // Broken laws and the drawer (ticket #312). The drawer is read-only and holds any content a ticket gives it: blocks of code or text and
 // the one-click jumps out of it. `openDrawer` (map-drawer.ts) draws a `Drawer`; the history strip's commit drill-down builds one too.
 export type Jump = { label: string; title: string; to: { url: string } };
-export type Block = { label?: string; code: string; jumps: Jump[] };
-export type Drawer = { title: string; note?: string; blocks: Block[]; jumps: Jump[] };
+// A block's `first` numbers its lines from that line, and `mark` is a line to mark (#499's import site); `picks`, rows that each open
+// something else in the drawer.
+export type Block = { label?: string; code: string; jumps: Jump[]; first?: number; mark?: number };
+export type DrawerPick = { label: string; title: string; open: () => void };
+export type Drawer = { title: string; note?: string; blocks: Block[]; jumps: Jump[]; picks?: DrawerPick[] };
 
 // What the mark and the drill-down say for a broken law: coarse, never naming the law.
 export const brokenText = "A test that backs laws here failed on main";

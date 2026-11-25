@@ -16,6 +16,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{LazyLock, Mutex},
 };
+use studio_understanding::pr_brief::{ImportSite, LinkEvidence};
 
 pub const FILE: &str = "ratify.json";
 pub const DECISION: &str = "decision";
@@ -279,6 +280,30 @@ pub struct MapItem {
     pub detail: Option<Detail>,
 }
 
+/// The import sites behind an added link, and the head they were read at, where each site's snippet is read.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Evidence {
+    pub head: String,
+    pub sites: Vec<ImportSite>,
+}
+
+/// Joins the brief's stored link evidence, read at `head`, to the rows of the links it adds; a removed or changed link, and an
+/// added one with no evidence stored, keep none.
+pub fn with_evidence(rows: &mut [Row], head: &str, evidence: &[LinkEvidence]) {
+    for row in rows
+        .iter_mut()
+        .filter(|row| row.kind == "link" && row.change == "added")
+    {
+        row.evidence = evidence
+            .iter()
+            .find(|e| e.link == row.id && !e.sites.is_empty())
+            .map(|e| Evidence {
+                head: head.to_string(),
+                sites: e.sites.clone(),
+            });
+    }
+}
+
 /// One text before and after a change: none on the side that has no item.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Words {
@@ -500,6 +525,9 @@ pub struct Row {
     pub status: Status,
     /// Old beside new, for a part or a link.
     pub detail: Option<Detail>,
+    /// For a link the PR adds, the import sites behind it, stored on its brief when it was written (#499).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<Evidence>,
 }
 
 /// The items of PR `pr`: its map changes, then its decisions (`(id, text)` from its brief), then the decisions Daniel decided that a
@@ -521,6 +549,7 @@ pub fn rows(
             change: change.into(),
             status: project.status(&item, landed),
             detail,
+            evidence: None,
         }
     };
     let mut rows: Vec<Row> = map
@@ -703,6 +732,99 @@ pub fn pending(repo: &Path, project: &Project) -> Vec<Pending> {
     found
 }
 
+/// The import sites behind each link that `head` adds to the map at `base` (#499, spec #477 "When it is computed"), read from
+/// `head` in commit mode (`system_map::check_at`), so an import the PR did not edit counts and the working tree is never read. A
+/// link with no computed edge its way, such as an `http` link, has none; a removed link has none in v1.
+pub fn link_evidence(repo: &Path, base: &str, head: &str) -> Vec<LinkEvidence> {
+    let (old, new) = (map_at(repo, base), map_at(repo, head));
+    let added: Vec<String> = map_items(old.as_deref(), new.as_deref())
+        .into_iter()
+        .filter(|item| item.kind == "link" && item.change == "added")
+        .map(|item| item.id)
+        .collect();
+    let Some(map) = new.and_then(|text| system_map::convert_value(&text).ok()) else {
+        return Vec::new();
+    };
+    if added.is_empty() {
+        return Vec::new();
+    }
+    let edges = system_map::check_at(repo, head).edges;
+    let links = map["links"].as_array().cloned().unwrap_or_default();
+    added
+        .into_iter()
+        .filter_map(|id| {
+            let link = links.iter().find(|link| field(link, "id") == id)?;
+            let edge = edges
+                .iter()
+                .find(|e| e.from == field(link, "from") && e.to == field(link, "to"))?;
+            let mut sites: Vec<ImportSite> = Vec::new();
+            for site in edge.pairs.iter().flat_map(|pair| &pair.sites) {
+                let site = ImportSite {
+                    file: site.file.clone(),
+                    line: site.line,
+                };
+                if !sites.contains(&site) {
+                    sites.push(site);
+                }
+            }
+            Some(LinkEvidence { link: id, sites })
+        })
+        .collect()
+}
+
+/// The lines of an import site's snippet on each side of its line.
+const AROUND: usize = 4;
+
+/// An import site's code, read from the commit its evidence was read at (#499): the lines around it, numbered from `first`, and
+/// the site's own line to mark, none when the site has no line, which shows the file's first lines.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SiteSnippet {
+    pub file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    pub first: u32,
+    pub lines: Vec<String>,
+}
+
+/// The snippet of `file` at `line` as commit `head` holds it, read with `git show <head>:<file>`, not from the PR's diff, so an
+/// import the PR did not edit shows too. `head` must be a commit's hex name.
+pub fn site_snippet(
+    repo: &Path,
+    head: &str,
+    file: &str,
+    line: Option<u32>,
+) -> Result<SiteSnippet, String> {
+    if head.len() < 7 || !head.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("a site is read at a commit's hex name".into());
+    }
+    let text = git(repo, &["show", &format!("{head}:{file}")])?;
+    let all: Vec<&str> = text.lines().collect();
+    let at = line.map_or(1, |n| n as usize);
+    let first = at.saturating_sub(AROUND).max(1);
+    let end = (at + AROUND).max(first + 2 * AROUND).min(all.len());
+    Ok(SiteSnippet {
+        file: file.to_string(),
+        line,
+        first: first as u32,
+        lines: all
+            .get(first - 1..end)
+            .unwrap_or_default()
+            .iter()
+            .map(|l| l.to_string())
+            .collect(),
+    })
+}
+
+/// `site_snippet` of PR head `head` in `project`, for the brief's ratify step.
+pub fn ratify_site(
+    project: String,
+    head: String,
+    file: String,
+    line: Option<u32>,
+) -> Result<SiteSnippet, String> {
+    site_snippet(Path::new(&project), &head, &file, line)
+}
+
 /// The items the brief of PR `number` offers for accept or overturn, with where each stands.
 pub fn pr_ratify(prs: &crate::prs::Prs, project: String, number: u64) -> Result<Vec<Row>, String> {
     let repo = Path::new(&project);
@@ -713,18 +835,17 @@ pub fn pr_ratify(prs: &crate::prs::Prs, project: String, number: u64) -> Result<
         .find(|r| r.number == number)
         .map(|r| r.head);
     let (map, landed) = pr_changes(repo, number, open.as_deref());
-    let decisions: Vec<(String, String)> = crate::pr_briefs::store_of(&project)
-        .and_then(|store| store.latest(number))
-        .map(|stored| {
-            stored
-                .brief
-                .decisions
-                .into_iter()
-                .filter_map(|d| Some((d.id?, d.text)))
-                .collect()
-        })
-        .unwrap_or_default();
-    Ok(rows(&mine, number, &map, &decisions, landed))
+    let stored = crate::pr_briefs::store_of(&project).and_then(|store| store.latest(number));
+    let decisions: Vec<(String, String)> = stored
+        .iter()
+        .flat_map(|stored| &stored.brief.decisions)
+        .filter_map(|d| Some((d.id.clone()?, d.text.clone())))
+        .collect();
+    let mut found = rows(&mine, number, &map, &decisions, landed);
+    if let Some(stored) = &stored {
+        with_evidence(&mut found, &stored.head, &stored.link_evidence);
+    }
+    Ok(found)
 }
 
 /// Daniel's decision on one item: `accepted` or `overturned`, with what the item said.
@@ -1204,6 +1325,58 @@ mod tests {
         assert!(open.iter().all(|r| r.status == Status::NotYet));
     }
 
+    #[test]
+    fn an_added_link_carries_the_evidence_its_brief_stored_and_no_other_row_does() {
+        let item = |kind: &str, id: &str, change: &str| MapItem {
+            kind: kind.into(),
+            id: id.into(),
+            change: change.into(),
+            text: String::new(),
+            detail: None,
+        };
+        let map = [
+            item("link", "a-b", "added"),
+            item("link", "b-c", "removed"),
+            item("link", "c-d", "added"),
+            item("part", "a-b", "added"),
+        ];
+        let mut found = rows(&Project::default(), 7, &map, &[], None);
+        let sites = vec![ImportSite {
+            file: "a/x.ts".into(),
+            line: Some(4),
+        }];
+        let stored = [
+            LinkEvidence {
+                link: "a-b".into(),
+                sites: sites.clone(),
+            },
+            LinkEvidence {
+                link: "b-c".into(),
+                sites: sites.clone(),
+            },
+        ];
+        with_evidence(&mut found, "cafe", &stored);
+        let got: Vec<(&str, Option<Evidence>)> = found
+            .iter()
+            .map(|r| (r.id.as_str(), r.evidence.clone()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (
+                    "a-b",
+                    Some(Evidence {
+                        head: "cafe".into(),
+                        sites
+                    })
+                ),
+                ("b-c", None),
+                ("c-d", None),
+                ("a-b", None),
+            ]
+        );
+    }
+
     mod git_repo {
         use super::*;
         use studio_test_support::{git as run, repo};
@@ -1342,6 +1515,127 @@ mod tests {
             assert!(
                 got.iter().any(|p| p.pr == 1 && p.id == "l3"),
                 "PR 1 landed after the first run: {got:?}"
+            );
+        }
+
+        #[test]
+        fn a_sites_snippet_is_read_from_the_commit_around_its_line() {
+            let (dir, main) = repo();
+            let root = dir.path();
+            let text: String = (1..=20).map(|n| format!("line {n}\n")).collect();
+            std::fs::create_dir_all(root.join("alpha")).unwrap();
+            std::fs::write(root.join("alpha/a.ts"), &text).unwrap();
+            commit(root, OLD, "Map (#1)", "1000000000");
+            let head = run(root, &["rev-parse", "HEAD"]);
+            let head = head.trim();
+            // The working tree moved on; the commit's text is the one read.
+            std::fs::write(root.join("alpha/a.ts"), "changed\n").unwrap();
+            let repo = Path::new(&main);
+            let lines = |from: u32, to: u32| -> Vec<String> {
+                (from..=to).map(|n| format!("line {n}")).collect()
+            };
+            let at = site_snippet(repo, head, "alpha/a.ts", Some(10)).unwrap();
+            assert_eq!(
+                at,
+                SiteSnippet {
+                    file: "alpha/a.ts".into(),
+                    line: Some(10),
+                    first: 6,
+                    lines: lines(6, 14),
+                }
+            );
+            // Near the top, and with no line: the file's first lines.
+            assert_eq!(
+                site_snippet(repo, head, "alpha/a.ts", Some(2))
+                    .unwrap()
+                    .first,
+                1
+            );
+            let top = site_snippet(repo, head, "alpha/a.ts", None).unwrap();
+            assert_eq!((top.first, top.lines), (1, lines(1, 9)));
+            assert_eq!(
+                site_snippet(repo, head, "alpha/a.ts", Some(20))
+                    .unwrap()
+                    .lines,
+                lines(16, 20)
+            );
+            // A name that is no commit's hex is refused before git sees it.
+            assert!(site_snippet(repo, "--output=x", "alpha/a.ts", None).is_err());
+            assert!(site_snippet(repo, head, "alpha/none.ts", None).is_err());
+        }
+
+        /// A version 2 map of `alpha`, `beta` and `gamma`, read by `typescript-imports`, with `links`.
+        fn evidence_map(links: serde_json::Value) -> String {
+            let part = |id: &str| {
+                serde_json::json!({ "id": id, "name": id, "caption": "c", "purpose": "p", "holds": [], "tier": "core",
+                                    "paths": [format!("{id}/")] })
+            };
+            serde_json::json!({
+                "version": 2, "extractors": ["typescript-imports"],
+                "parts": [part("alpha"), part("beta"), part("gamma")], "actors": [],
+                "links": links, "ignored": ["system-map.json"], "laws": [], "flows": []
+            })
+            .to_string()
+        }
+
+        #[test]
+        fn the_evidence_of_each_added_import_link_is_its_import_sites_read_from_the_head() {
+            let (dir, main) = repo();
+            let root = dir.path();
+            let put = |path: &str, text: &str| {
+                std::fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
+                std::fs::write(root.join(path), text).unwrap();
+            };
+            let link = |id: &str, from: &str, to: &str, kind: &str| serde_json::json!({ "id": id, "from": from, "to": to, "kind": kind });
+            put("beta/b.ts", "export const b = 1;\n");
+            put("gamma/g.ts", "export const g = 1;\n");
+            // An import the PR does not edit: it is in the head, not in the diff.
+            put(
+                "alpha/old.ts",
+                "// old\nimport { g } from \"../gamma/g\";\n",
+            );
+            put("alpha/a.ts", "import { b } from \"../beta/b\";\n");
+            let ab = link("alpha-beta", "alpha", "beta", "import");
+            commit(
+                root,
+                &evidence_map(serde_json::json!([ab])),
+                "Map (#1)",
+                "1000000000",
+            );
+            let base = run(root, &["rev-parse", "HEAD"]);
+            put(
+                "alpha/a.ts",
+                "import { b } from \"../beta/b\";\n\nimport { g } from \"../gamma/g\";\n",
+            );
+            put(
+                "alpha/c.ts",
+                "import { g } from \"../gamma/g\";\nexport { g } from \"../gamma/g\";\n",
+            );
+            let links = serde_json::json!([
+                ab,
+                link("alpha-gamma", "alpha", "gamma", "import"),
+                // Added, but no edge stands behind an http link: no evidence.
+                link("gamma-beta", "gamma", "beta", "http"),
+            ]);
+            commit(root, &evidence_map(links), "Gamma (#2)", "1100000000");
+            let head = run(root, &["rev-parse", "HEAD"]);
+            // The working tree is not read: only the head's files count.
+            put("alpha/c.ts", "");
+            let site = |file: &str, line: u32| ImportSite {
+                file: file.into(),
+                line: Some(line),
+            };
+            assert_eq!(
+                link_evidence(Path::new(&main), base.trim(), head.trim()),
+                [LinkEvidence {
+                    link: "alpha-gamma".into(),
+                    sites: vec![
+                        site("alpha/a.ts", 3),
+                        site("alpha/c.ts", 1),
+                        site("alpha/c.ts", 2),
+                        site("alpha/old.ts", 2),
+                    ],
+                }]
             );
         }
     }
