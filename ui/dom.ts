@@ -281,6 +281,21 @@ const wiredTriggers = new WeakMap<Element, (node: HTMLElement) => void>();
 const HINT_END_DELAY = 150;
 let openTrigger: Element | null = null;
 
+// An SVG shape cannot be an anchor, nor the `source` of `showPopover`: its hint anchors to this box, an invisible HTML one laid over
+// the shape, a single one since only one hint is open at a time.
+let anchorBox: HTMLElement | null = null;
+function anchorOver(shape: Element): HTMLElement {
+  if (!anchorBox) {
+    anchorBox = document.createElement("div");
+    anchorBox.className = "hint-anchor";
+    element("hints").append(anchorBox);
+  }
+  const at = shape.getBoundingClientRect();
+  Object.assign(anchorBox.style, { left: `${at.left}px`, top: `${at.top}px`, width: `${at.width}px`, height: `${at.height}px` });
+  return anchorBox;
+}
+const isSvg = (node: Element) => "namespaceURI" in node && node.namespaceURI === "http://www.w3.org/2000/svg";
+
 function startDelay(): number {
   const read = typeof getComputedStyle === "function" ? Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hint-delay")) : Number.NaN;
   return Number.isFinite(read) ? read * 1000 : 500;
@@ -301,7 +316,7 @@ function listenForHint(trigger: Element, node: HTMLElement, keyboard: boolean) {
   const isOpen = () => hinted.matches(":popover-open");
   const show = () => {
     if (!(pointer || focus) || isOpen()) return;
-    hinted.showPopover({ source: trigger as HTMLElement });
+    hinted.showPopover({ source: isSvg(trigger) ? anchorOver(trigger) : (trigger as HTMLElement) });
     openTrigger = trigger;
   };
   const hide = () => {

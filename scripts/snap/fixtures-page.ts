@@ -215,7 +215,12 @@ export const toastKeys = (): Fixture => {
       const apart = (a, b) => a.bottom <= b.top || b.bottom <= a.top || a.right <= b.left || b.right <= a.left;
       if (!apart(boxes[0], boxes[1]) || !apart(boxes[0], boxes[2]) || !apart(boxes[1], boxes[2])) log("snap:fail two toasts overlap: " + boxes.map((b) => [b.left, b.top, b.right, b.bottom].map(Math.round)).join(" | "));
       if (boxes[1].top < boxes[0].bottom) log("snap:fail the note is not under the needs-you toast");
-      const before = Object.assign(document.createElement("button"), { type: "button", textContent: "Before", title: "Where the focus was" });
+      const before = Object.assign(document.createElement("button"), { type: "button", textContent: "Before" });
+      // The probe's own hint, as the hover rule asks of every control (spec #582).
+      const beforeHint = Object.assign(document.createElement("div"), { id: "before-hint", textContent: "Where the focus was" });
+      beforeHint.setAttribute("popover", "hint");
+      document.body.append(beforeHint);
+      before.setAttribute("interestfor", "before-hint");
       region.before(before);
       // A real press on Undo acts and leaves the focus where it was; Clear landed again brings the toast back.
       before.focus();

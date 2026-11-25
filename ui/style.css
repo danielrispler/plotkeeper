@@ -650,6 +650,7 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .runs-paused { display: flex; align-items: baseline; gap: var(--sp-3); margin: 0; padding: 0 var(--sp-3); color: var(--muted); }
 .map-links { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
 .map-links .link { stroke: var(--link); stroke-width: var(--link-width); }
+.link-mark { pointer-events: auto; }
 .link-mark.check { fill: var(--law-check); }
 .link-mark.trust { fill: var(--map-bg); stroke: var(--law-trust); stroke-width: var(--hair); }
 .plate { position: absolute; transform: translate(-50%, -50%); width: var(--plate-w); height: var(--plate-h); padding: var(--sp-5);
@@ -1104,6 +1105,8 @@ mark.drawer-line .drawer-n::before { content: "→ " / ""; color: var(--fg); }
   /* biome-ignore lint/correctness/noUnknownProperty: Chrome 149's interest invokers */
   interest-delay-start: 0s;
 }
+/* The invisible box an SVG trigger's hint anchors to (dom.ts, `anchorOver`). */
+.hint-anchor { position: fixed; pointer-events: none; }
 .hint { position-area: block-start; position-try-fallbacks: flip-block; inset: auto; margin-block: var(--hint-gap); margin-inline: 0; width: max-content; max-width: var(--hint);
         padding: var(--sp-2) var(--sp-4); border: var(--hair) solid var(--line); border-radius: var(--radius-small); background: var(--raised); color: var(--fg);
         box-shadow: var(--shadow); font-size: var(--size-small); line-height: 1.4; white-space: pre-line; overflow-wrap: anywhere; }

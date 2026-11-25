@@ -1012,3 +1012,41 @@ export const mapEmpty = () =>
     if (!draft.textContent.includes("system-map.json") || !draft.textContent.includes("system-map check")) log("snap:fail the drafting prompt lacks the file or the check: " + draft.textContent);
     if (document.querySelector("#map .map-empty .btn")) log("snap:fail a button starts a session from the page");
     log("drafting prompt: " + draft.textContent.slice(0, 40));`, { map_state: mapState({ status: "none", source: null }) });
+
+/**
+ * The map's marks show their hint to the real pointer (spec #582, ticket 4): a plate's law mark, a broken-law mark and a link's mark on
+ * its line (an SVG shape) each open a hint beside them after the delay, and none is in the Tab order, or has a title.
+ */
+export const mapMarkHints = (): Fixture => {
+  // A law on a link, which draws the mark on its line.
+  const file = JSON.parse(mapFile);
+  file.laws.push({ id: "shell-core-fed", on: "shell-core", backing: "check", text: "The shell tells the core only what the log says." });
+  return {
+  ...mapOpened(
+    `
+      const hintOf = (node) => document.getElementById(node.getAttribute("data-hint"));
+      const beside = (hint, trigger) => {
+        const [h, t] = [hint.getBoundingClientRect(), trigger.getBoundingClientRect()];
+        const apart = Math.max(h.top - t.bottom, t.top - h.bottom);
+        return apart >= -1 && apart <= 24 && h.right > t.left && h.left < t.right;
+      };
+      for (const [name, selector] of [["a law mark", "#map .plate .law-mark"], ["the broken-law mark", "#map .plate .law-broken"], ["a link's mark", "#map .map-links .link-mark"]]) {
+        const mark = document.querySelector(selector);
+        if (!mark) return log("snap:fail the map has no " + name);
+        if (mark.getAttribute("role") !== "img" || !mark.getAttribute("aria-label")) log("snap:fail " + name + " is no role img with an aria-label");
+        if (mark.hasAttribute("tabindex") || mark.hasAttribute("title")) log("snap:fail " + name + " takes the Tab order or has a title");
+        const hint = hintOf(mark);
+        if (!hint) return log("snap:fail " + name + " has no hint");
+        await __snapMove(mark);
+        await wait(570);
+        if (!hint.matches(":popover-open")) return log("snap:fail " + name + "'s hint did not open on the pointer");
+        if (hint.textContent !== mark.getAttribute("aria-label")) log("snap:fail " + name + "'s hint says " + JSON.stringify(hint.textContent));
+        if (!beside(hint, mark)) log("snap:fail " + name + "'s hint is not beside it " + JSON.stringify([hint.getBoundingClientRect(), mark.getBoundingClientRect()]));
+      }
+      log("mark hints ok");`,
+    { map_state: mapState({ source: JSON.stringify(file), ci: { ...brokenCi, at: "2026-11-24T10:00:00Z" } }) },
+  ),
+  realPointer: true,
+  snapDone: "mark hints ok",
+  };
+};
