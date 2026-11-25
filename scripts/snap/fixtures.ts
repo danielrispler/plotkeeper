@@ -399,6 +399,34 @@ const mapRunsPaused = (): Fixture =>
     }),
     snapDone: "paused ok",
   });
+// #472: with a part's sheet open and the side column scrolled to its end, the background runs below it cross the Window plate, on glass.
+const mapRunsBesideSheet = (): Fixture => ({
+  ...mapRunsPaused(),
+  snapScript: mapOpened(`
+      document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(300);
+      if (!document.querySelector("#map-sheet .sheet")) return log("snap:fail the sheet did not open");
+      const runs = document.getElementById("map-runs");
+      if (!runs.children.length) return log("snap:fail no background runs drawn");
+      // The side column scrolls as one (#445), so the runs show at its end: scroll there, and measure the part of them it shows.
+      runs.parentElement.scrollTop = runs.parentElement.scrollHeight;
+      await wait(100);
+      const side = runs.parentElement.getBoundingClientRect();
+      const own = runs.getBoundingClientRect();
+      const at = { left: own.left, right: own.right, top: Math.max(own.top, side.top), bottom: Math.min(own.bottom, side.bottom) };
+      if (at.bottom - at.top < own.height) return log("snap:fail the side column's end shows " + Math.round(at.bottom - at.top) + " of the runs' " + Math.round(own.height) + " px");
+      // The map pans under the side column, so the runs can cross a plate, as the sheet can; where they do, they are on the sheet's glass.
+      const over = [...document.querySelectorAll("#map .plate")].filter((plate) => {
+        const box = plate.getBoundingClientRect();
+        return at.left < box.right && box.left < at.right && at.top < box.bottom && box.top < at.bottom;
+      });
+      if (!over.length) return log("snap:fail the runs cross no plate here, so this checks nothing");
+      const style = getComputedStyle(runs);
+      if (!style.backdropFilter.includes("blur") || style.backgroundColor !== getComputedStyle(document.getElementById("map-sheet")).backgroundColor)
+        log("snap:fail the background runs are over the " + over.map((plate) => plate.dataset.id).join(", ") + " plate with no glass");
+      log("runs beside sheet ok");`).snapScript,
+  snapDone: "runs beside sheet ok",
+});
 // #465: the pause is said in the runs area's one status region, which a redraw (Resume reads the map back) keeps in place; a copied
 // prompt is said once in the page's action region, drawn empty before its words, and the row's note itself is not live.
 const mapRunsAnnounced = (): Fixture => ({
@@ -3169,6 +3197,7 @@ ${writerStatusAfter("Keychain refused")}
   mapMicroWorld,
   mapRunsPaused,
   mapRunsAnnounced,
+  mapRunsBesideSheet,
   mapBackLaw,
   railBriefRow: () => railBriefReady(false),
   railBriefOpened: () => railBriefReady(true),
