@@ -61,7 +61,7 @@ pub(crate) struct Overlap {
 }
 
 impl Overlap {
-    pub fn warning(&self) -> String {
+    pub(crate) fn warning(&self) -> String {
         format!(
             "warning: #{} and #{} both touch {}",
             self.first,
@@ -114,7 +114,7 @@ pub(crate) struct Stale {
 }
 
 impl Stale {
-    pub fn warning(&self) -> String {
+    pub(crate) fn warning(&self) -> String {
         format!(
             "warning: #{} touches paths that are not in this checkout: {}",
             self.ticket,

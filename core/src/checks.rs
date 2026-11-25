@@ -509,7 +509,7 @@ pub(crate) fn statements<'a, S: AsRef<str>>(list: &'a [S], command: &str) -> Vec
 
 /// The entry of `list` that `command` runs, if any: the first of its statements that runs one. This
 /// is the one test of whether a command is a check.
-pub fn matched<'a, S: AsRef<str>>(list: &'a [S], command: &str) -> Option<&'a str> {
+pub(crate) fn matched<'a, S: AsRef<str>>(list: &'a [S], command: &str) -> Option<&'a str> {
     statements(list, command).iter().find_map(|s| s.suite)
 }
 
@@ -523,7 +523,7 @@ pub(crate) fn suites<'a, S: AsRef<str>>(list: &'a [S], command: &str) -> Vec<&'a
 
 /// Whether a check run's exit code counts, for each way its command can end.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Counts {
+pub(crate) struct Counts {
     /// Exit 0 says it passed.
     pub zero: bool,
     /// A non-zero exit says it failed.
@@ -750,7 +750,7 @@ fn runs<'a>(row: &Row, list: &'a [String], home: &str) -> Vec<(&'a str, String, 
 /// Turn `turn`'s checks, its workers' included: the ledger's rows of the turn that match `list`,
 /// grouped by suite and worktree in the order each first ran. `home` gives the worktree of a call that
 /// recorded none: the session's folder's for `None`, else the worker's own.
-pub fn of_turn(
+pub(crate) fn of_turn(
     ledger: &Ledger,
     turn: usize,
     list: &[String],

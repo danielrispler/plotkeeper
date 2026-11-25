@@ -30,7 +30,7 @@ fn main() {
     println!("cargo:rerun-if-changed=../dist");
     let mut files = vec![];
     walk(&dist, &dist, &mut files);
-    let mut source = String::from("pub static ASSETS: &[(&str, &[u8])] = &[\n");
+    let mut source = String::from("pub(crate) static ASSETS: &[(&str, &[u8])] = &[\n");
     for (name, path) in files {
         // Writing to a `String` cannot fail.
         writeln!(source, "    ({name:?}, include_bytes!({path:?})),").ok();

@@ -9,7 +9,10 @@ resolver = "3"
 # Every crate sets `lints.workspace = true` (spec #548, Group 3, "Clippy and rustc"). `npm run check` runs clippy
 # with `-D warnings`, so each lint here is binding. An allow names its lint and gives a `reason`; one that points at
 # a #556 split goes when the split lands. `missing_docs` is set in `system-map` and `workbench` only, in their
-# `lib.rs`. `unreachable_pub` comes with #556's visibility change.
+# `lib.rs`.
+[workspace.lints.rust]
+unreachable_pub = "warn"
+
 [workspace.lints.clippy]
 let_underscore_must_use = "warn"
 significant_drop_tightening = "warn"

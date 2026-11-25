@@ -15,7 +15,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 
 /// The name Cursor's hook entries pass (`--agent cursor`), which its lines carry.
-pub const CURSOR: &str = "cursor";
+pub(crate) const CURSOR: &str = "cursor";
 
 /// What Cursor reports. No permission or question reaches plotkeeper, as its permission hooks are not
 /// wired; every event names the model. Its transcript has no reader here, so no version, model or

@@ -7,7 +7,7 @@ use std::{
 };
 
 /// An empty scratch `HOME`, named by `label` and this process.
-pub fn scratch(label: &str) -> PathBuf {
+pub(crate) fn scratch(label: &str) -> PathBuf {
     let home = std::env::temp_dir().join(format!("studio-{label}-{}", std::process::id()));
     // Cleanup: a leftover temp file fails no test.
     fs::remove_dir_all(&home).ok();
@@ -16,14 +16,14 @@ pub fn scratch(label: &str) -> PathBuf {
 }
 
 /// `plotkeeper-hook` with `home` as its `HOME` and outside a studio terminal, not yet started.
-pub fn hook(home: &Path) -> Command {
+pub(crate) fn hook(home: &Path) -> Command {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_plotkeeper-hook"));
     cmd.env("HOME", home).env_remove("PLOTKEEPER_TERMINAL_ID");
     cmd
 }
 
 /// Starts `cmd` with `payload` as its stdin, which it closes, and returns the child.
-pub fn feed(mut cmd: Command, payload: &serde_json::Value) -> Child {
+pub(crate) fn feed(mut cmd: Command, payload: &serde_json::Value) -> Child {
     let mut child = cmd.stdin(Stdio::piped()).spawn().unwrap();
     child
         .stdin

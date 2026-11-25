@@ -132,7 +132,7 @@ pub(crate) struct Adapter {
 
 impl Adapter {
     /// The events of hook line `line`, or `None` when it is no JSON.
-    pub fn events(&mut self, line: &str) -> Option<Vec<Event>> {
+    pub(crate) fn events(&mut self, line: &str) -> Option<Vec<Event>> {
         let raw: Value = serde_json::from_str(line).ok()?;
         let at = raw["studio_received_ms"].as_u64().unwrap_or_default();
         let named = (raw["conversationId"].as_str()).zip(raw["hookEventName"].as_str());
@@ -220,7 +220,7 @@ impl Adapter {
     /// The main event of `line` with the adapter's state left as it is: only the conversation of
     /// the line, its parent's and its terminal's session are copied, so it costs the same however
     /// many sessions there are.
-    pub fn peek(&self, line: &str) -> Option<Event> {
+    pub(crate) fn peek(&self, line: &str) -> Option<Event> {
         let raw: Value = serde_json::from_str(line).ok()?;
         let id = raw["conversationId"].as_str()?;
         let terminal = raw["studio_terminal_id"].as_str();

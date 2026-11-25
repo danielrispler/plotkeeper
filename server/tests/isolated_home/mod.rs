@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 
 static HOME: OnceLock<tempfile::TempDir> = OnceLock::new();
 
-pub fn set() {
+pub(crate) fn set() {
     HOME.get_or_init(|| {
         let home = tempfile::tempdir().unwrap();
         // SAFETY: `get_or_init` runs this once, before any test thread reads the home, since each test calls `set` first.

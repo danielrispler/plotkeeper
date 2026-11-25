@@ -192,7 +192,7 @@ pub(crate) enum ToolKind {
 
 impl Tool {
     /// Whether it asks Daniel, before any permission request.
-    pub fn asks(&self) -> bool {
+    pub(crate) fn asks(&self) -> bool {
         matches!(self.kind, ToolKind::Question | ToolKind::Plan)
     }
 }
@@ -278,7 +278,7 @@ pub enum TranscriptFormat {
 }
 
 impl Event {
-    pub fn has(&self, f: impl Fn(&Happened) -> bool) -> bool {
+    pub(crate) fn has(&self, f: impl Fn(&Happened) -> bool) -> bool {
         self.happened.iter().any(f)
     }
 
@@ -287,39 +287,39 @@ impl Event {
     }
 
     /// Whether the server wrote the line, so it says nothing of the session's agent.
-    pub fn written_by_studio(&self) -> bool {
+    pub(crate) fn written_by_studio(&self) -> bool {
         self.has(|h| matches!(h, Happened::WrittenByStudio))
     }
 
-    pub fn session_starts(&self) -> bool {
+    pub(crate) fn session_starts(&self) -> bool {
         self.has(|h| matches!(h, Happened::SessionStart))
     }
 
-    pub fn turn_ends(&self) -> bool {
+    pub(crate) fn turn_ends(&self) -> bool {
         self.has(|h| matches!(h, Happened::TurnEnd { .. }))
     }
 
     /// The prompt of the turn it starts.
-    pub fn prompt(&self) -> Option<&str> {
+    pub(crate) fn prompt(&self) -> Option<&str> {
         self.find(|h| match h {
             Happened::TurnStart { prompt, .. } => Some(prompt.as_str()),
             _ => None,
         })
     }
 
-    pub fn started_from(&self) -> Option<Start> {
+    pub(crate) fn started_from(&self) -> Option<Start> {
         self.find(|h| match h {
             Happened::StartedFrom(start) => Some(*start),
             _ => None,
         })
     }
 
-    pub fn is_start_from(&self, start: Start) -> bool {
+    pub(crate) fn is_start_from(&self, start: Start) -> bool {
         self.session_starts() && self.started_from() == Some(start)
     }
 
     /// The tool of its call, whatever the call's event.
-    pub fn tool(&self) -> Option<&Tool> {
+    pub(crate) fn tool(&self) -> Option<&Tool> {
         self.find(|h| match h {
             Happened::ToolStart { tool, .. }
             | Happened::ToolEnd { tool, .. }
@@ -330,7 +330,7 @@ impl Event {
     }
 
     /// The id of its call, empty when it names none.
-    pub fn call_id(&self) -> &str {
+    pub(crate) fn call_id(&self) -> &str {
         self.find(|h| match h {
             Happened::ToolStart { id, .. }
             | Happened::ToolEnd { id, .. }
@@ -341,37 +341,37 @@ impl Event {
     }
 
     /// Whether it starts a tool call.
-    pub fn tool_starts(&self) -> bool {
+    pub(crate) fn tool_starts(&self) -> bool {
         self.has(|h| matches!(h, Happened::ToolStart { .. }))
     }
 
     /// Whether it ends a tool call, in success or failure.
-    pub fn tool_ends(&self) -> bool {
+    pub(crate) fn tool_ends(&self) -> bool {
         self.has(|h| matches!(h, Happened::ToolEnd { .. }))
     }
 
     /// Whether it ends a call that succeeded.
-    pub fn tool_succeeds(&self) -> bool {
+    pub(crate) fn tool_succeeds(&self) -> bool {
         self.has(|h| matches!(h, Happened::ToolEnd { failed: false, .. }))
     }
 
     /// Whether it ends a call that failed.
-    pub fn tool_fails(&self) -> bool {
+    pub(crate) fn tool_fails(&self) -> bool {
         self.has(|h| matches!(h, Happened::ToolEnd { failed: true, .. }))
     }
 
     /// Whether the command it ends ran: it succeeded, or failed with an exit code.
-    pub fn ran(&self) -> bool {
+    pub(crate) fn ran(&self) -> bool {
         !self.tool_fails() || self.has(|h| matches!(h, Happened::ExitedNonZero))
     }
 
-    pub fn rejected(&self) -> bool {
+    pub(crate) fn rejected(&self) -> bool {
         self.has(|h| matches!(h, Happened::Rejected))
     }
 
     /// A start, an end or a notice: one that never starts a turn or touches a worktree, since in
     /// the day log they carry ids no turn ran under.
-    pub fn outside_turns(&self) -> bool {
+    pub(crate) fn outside_turns(&self) -> bool {
         self.has(|h| {
             matches!(
                 h,
@@ -385,7 +385,7 @@ impl Event {
         })
     }
 
-    pub fn reply(&self) -> &str {
+    pub(crate) fn reply(&self) -> &str {
         self.find(|h| match h {
             Happened::Reply(reply) => Some(reply.as_str()),
             _ => None,
@@ -393,14 +393,14 @@ impl Event {
         .unwrap_or_default()
     }
 
-    pub fn background_tasks(&self) -> Option<&[String]> {
+    pub(crate) fn background_tasks(&self) -> Option<&[String]> {
         self.find(|h| match h {
             Happened::BackgroundTasks(tasks) => Some(tasks.as_slice()),
             _ => None,
         })
     }
 
-    pub fn background_task(&self) -> Option<&str> {
+    pub(crate) fn background_task(&self) -> Option<&str> {
         self.find(|h| match h {
             Happened::BackgroundTask(task) => Some(task.as_str()),
             _ => None,
@@ -408,7 +408,7 @@ impl Event {
     }
 
     /// The tasks a wake-up reports on, each with how it ended.
-    pub fn reported(&self) -> &[(String, String)] {
+    pub(crate) fn reported(&self) -> &[(String, String)] {
         self.find(|h| match h {
             Happened::TasksReported(tasks) => Some(tasks.as_slice()),
             _ => None,
@@ -416,42 +416,42 @@ impl Event {
         .unwrap_or_default()
     }
 
-    pub fn answers(&self) -> Option<&Value> {
+    pub(crate) fn answers(&self) -> Option<&Value> {
         self.find(|h| match h {
             Happened::Answers(answers) => Some(answers),
             _ => None,
         })
     }
 
-    pub fn exit_code(&self) -> Option<i32> {
+    pub(crate) fn exit_code(&self) -> Option<i32> {
         self.find(|h| match h {
             Happened::ExitCode(code) => Some(*code),
             _ => None,
         })
     }
 
-    pub fn took(&self) -> Option<u64> {
+    pub(crate) fn took(&self) -> Option<u64> {
         self.find(|h| match h {
             Happened::Took(ms) => Some(*ms),
             _ => None,
         })
     }
 
-    pub fn permission_mode(&self) -> Option<&str> {
+    pub(crate) fn permission_mode(&self) -> Option<&str> {
         self.find(|h| match h {
             Happened::PermissionMode(mode) => Some(mode.as_str()),
             _ => None,
         })
     }
 
-    pub fn model(&self) -> Option<&str> {
+    pub(crate) fn model(&self) -> Option<&str> {
         self.find(|h| match h {
             Happened::Model(model) => Some(model.as_str()),
             _ => None,
         })
     }
 
-    pub fn branch(&self) -> Option<&str> {
+    pub(crate) fn branch(&self) -> Option<&str> {
         self.find(|h| match h {
             Happened::Branch(branch) => Some(branch.as_str()),
             _ => None,
