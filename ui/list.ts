@@ -3,7 +3,7 @@
 // a strip of glyphs and labels, which opens the full list on hover, on click or on ⌘1. Its pure parts are `list-model.ts`.
 
 import { logStop } from "./stop-rules.js";
-import { age, cut, element, failure, glyphOnly, hint, invoke, keepOnly, newest, patch, pressable, prose, stepText, text } from "./dom.js";
+import { age, cut, element, failure, glyphOnly, hint, invoke, keepOnly, keyed, mark, newest, patch, pressable, prose, stepText, text } from "./dom.js";
 import { hideClearToast, showClearToast } from "./toast.js";
 import { counts } from "./times.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
@@ -134,13 +134,16 @@ function markNode(session: Session): HTMLElement {
 
 
 // A status's glyph, named by its word, so the shape is never alone. The pill shows its word.
-function glyph(state: string, unseen = false, landed = false, unwatched = false): HTMLElement {
+function glyph(where: string, state: string, unseen = false, landed = false, unwatched = false): HTMLElement {
   const [shape, word] = status(state, unseen, landed, unwatched);
   const node = text("span", shape === "pill" ? word : "", "glyph");
   node.dataset.glyph = shape;
   node.setAttribute("role", "img");
   node.setAttribute("aria-label", word);
-  if (shape === "check") node.title = word;
+  if (shape === "check") {
+    node.setAttribute("data-key", `glyph ${where}`);
+    return mark(node, word);
+  }
   return node;
 }
 
@@ -158,7 +161,7 @@ function done(all: Children, children: Subagent[] = []): HTMLElement[] {
 // the name with the status's word, and a note on its footprint when it has one.
 function rowLines(button: HTMLElement, state: string, name: HTMLElement[], below: HTMLElement[] | null, unseen = false, landed = false, unwatched = false, note: string | null = null, called = name[0]?.textContent ?? "") {
   const first = text("span", "", "l1");
-  first.append(...name, glyph(state, unseen, landed, unwatched));
+  first.append(...name, glyph(button.getAttribute("data-key") ?? "", state, unseen, landed, unwatched));
   button.append(first);
   button.classList.toggle("unseen", unseen);
   if (below) {
@@ -197,7 +200,7 @@ export function row(session: Session, children: Children, token: string | null =
     [cut(text("span", sessionName(session), "name")), markNode(session), ...(token ? [cut(text("span", token, "id token"))] : [])],
     line === null
       ? null
-      : [...done(children, children.get("session")), rowLine(line, session.id), ...(turn ? [Object.assign(counts(clock, turn[1]), { title: turn[0] })] : [])],
+      : [...done(children, children.get("session")), rowLine(line, session.id), ...(turn ? [hint(counts(clock, turn[1]), turn[0])] : [])],
     session.unseen,
     session.landed,
     !session.pid,
@@ -209,7 +212,7 @@ export function row(session: Session, children: Children, token: string | null =
   button.addEventListener("pointerenter", () => hoverAgents(session.id, button));
   button.addEventListener("pointerleave", () => hoverAgents(null));
   // The agent's logo leads the row, apart from its state glyph (#158).
-  first.prepend(logo(logoKey(session), noContextNote(session) || undefined));
+  first.prepend(logo(logoKey(session), noContextNote(session) || undefined, `row-${session.id}`));
   return button;
 }
 
@@ -346,7 +349,7 @@ export function strip(sessions: Session[]): HTMLElement[] {
     ...shown.map((session, i) => {
       const button = selecting(session.id, null, `strip ${session.id}`);
       button.setAttribute("aria-pressed", String(isSelected(session.id)));
-      button.append(glyph(session.state, session.unseen, session.landed), labels[i] ?? "");
+      button.append(glyph(`strip ${session.id}`, session.state, session.unseen, session.landed), labels[i] ?? "");
       return hint(button, `${sessionName(session)} · ${status(session.state, session.unseen, session.landed)[1]}`);
     }),
     ...(rest ? [idle(rest, toggle)] : []),
@@ -410,14 +413,10 @@ export function projectHead(group: ProjectGroup<Session>): HTMLElement {
   toggle.setAttribute("aria-expanded", String(projectOpen(group.key)));
   toggle.dataset.key = `toggle ${group.key}`;
   toggle.append(text("span", group.name, "name"));
-  if (group.rollup) toggle.append(glyph(group.rollup));
+  if (group.rollup) toggle.append(glyph(`head ${group.key}`, group.rollup));
   const why = marks.get(group.key);
   if (why?.length) {
-    const dot = text("span", "", "project-dot mist-swatch");
-    dot.title = dotTitle(why);
-    dot.setAttribute("role", "img");
-    dot.setAttribute("aria-label", dot.title);
-    toggle.append(dot);
+    toggle.append(mark(keyed(text("span", "", "project-dot mist-swatch"), `dot ${group.key}`), dotTitle(why)));
   }
   hint(toggle, `${group.gone ? `${group.key} is gone` : group.key || group.name}\n${group.key === shownProject() ? "Fold or unfold its sessions" : "Show its map"}`);
   head.append(toggle, ...(group.live ? [] : [projectMore(group)]));

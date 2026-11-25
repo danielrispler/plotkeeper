@@ -93,7 +93,7 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
   field.placeholder = "Your question; the session never sees it…";
   field.setAttribute("aria-label", `Your question about ${what}`);
   const sendHover = "Ask about this, from what was recorded; the session never sees it (⌘↩)";
-  const send = button("Ask", sendHover);
+  const send = button("Ask");
   availability(send, sendHover);
   const reply = document.createElement("div");
   reply.className = "ask-reply";
@@ -109,7 +109,7 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
       // The recorded facts are above; the answer is the model's reading of them.
       reply.replaceChildren(text("p", "Interpretation", "label"), rendered("div", answer, ""));
     } catch (e) {
-      const retry = hint(button("Retry", null), "Ask the same question again");
+      const retry = hint(button("Retry"), "Ask the same question again");
       retry.addEventListener("click", ask);
       reply.replaceChildren(text("p", `No answer: ${messageOf(e)}.`, "ask-error"), retry);
     }
@@ -122,7 +122,7 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
   const picks = document.createElement("div");
   picks.className = "ask-suggestions";
   for (const question of suggestions(anchor)) {
-    const pick = hint(button(question, null), "Ask this question about it");
+    const pick = hint(button(question), "Ask this question about it");
     pick.addEventListener("click", () => {
       field.value = question;
       void ask();
@@ -167,7 +167,7 @@ function whyNotBox(session: string, turn: number): HTMLElement {
   field.placeholder = "A file or a name, e.g. main.ts…";
   field.setAttribute("aria-label", "A file or a name it did not touch");
   const goHover = "Find what was recorded about the name you typed, and why the turn did not touch it (↩)";
-  const go = button("Why didn't it touch this?", goHover);
+  const go = button("Why didn't it touch this?");
   availability(go, goHover);
   const out = document.createElement("div");
   out.setAttribute("aria-live", "polite");
@@ -192,9 +192,6 @@ function whyNotBox(session: string, turn: number): HTMLElement {
   return node;
 }
 
-// `hover` is the title of a button that goes disabled and says why (#586); null: the caller gives it a hint.
-function button(label: string, hover: string | null): HTMLButtonElement {
-  const made = pressable(text("button", label, "btn"), null);
-  if (hover !== null) made.title = hover;
-  return made;
+function button(label: string): HTMLButtonElement {
+  return pressable(text("button", label, "btn"), null);
 }

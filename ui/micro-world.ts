@@ -75,7 +75,7 @@ export function frameNode(html: string): HTMLElement {
   frame.className = "micro-world-frame";
   frame.setAttribute("sandbox", "allow-scripts");
   frame.setAttribute("referrerpolicy", "no-referrer");
-  frame.setAttribute("title", "Micro-world");
+  frame.setAttribute("aria-label", "Micro-world");
   frame.setAttribute("srcdoc", html);
   return frame;
 }

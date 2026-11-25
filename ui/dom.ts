@@ -252,7 +252,7 @@ export function keyed<T extends HTMLElement>(node: T, key: string): T {
 // are on every update, finds its hint and does not make another. A hint whose trigger the page dropped for good goes once the trigger is collected.
 const hints = new Map<string, HTMLElement>();
 // A trigger kept off the page (a box a view keeps and puts back) keeps its hint: only a trigger the page has dropped for good loses it.
-const owners = new Map<string, WeakRef<HTMLElement>>();
+const owners = new Map<string, WeakRef<Element>>();
 let loose = 0;
 let pruneQueued = false;
 const hintId = (key: string) => `hint-${key.replace(/[^\w-]/g, (c) => `_${c.charCodeAt(0).toString(16)}`)}`;
@@ -275,9 +275,11 @@ function pruneHints() {
 // the page's `--hint-delay` (0.5 s) and Chromium's end delay (0.15 s). The pointer may rest on the hint. Esc and light dismiss are the
 // popover's own. A trigger a neighbour's hint is open beside, one sharing its parent, shows at once, as the CSS does for the other path.
 const listened = new Set(["SUMMARY", "INPUT", "SELECT", "TEXTAREA"]);
-const wiredTriggers = new WeakMap<HTMLElement, (node: HTMLElement) => void>();
+// What `interestfor` reaches: any other trigger (a mark, a span with words) is pointer-only, or by focus too when it has a tabindex.
+const interested = new Set(["BUTTON", "A", "AREA"]);
+const wiredTriggers = new WeakMap<Element, (node: HTMLElement) => void>();
 const HINT_END_DELAY = 150;
-let openTrigger: HTMLElement | null = null;
+let openTrigger: Element | null = null;
 
 function startDelay(): number {
   const read = typeof getComputedStyle === "function" ? Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hint-delay")) : Number.NaN;
@@ -289,7 +291,7 @@ function startDelay(): number {
  * passes false: it is pointer-only. Called again with a new hint node (the old one was dropped while the trigger was off the page), it
  * moves the wiring over; the trigger's listeners are added once.
  */
-function listenForHint(trigger: HTMLElement, node: HTMLElement, keyboard: boolean) {
+function listenForHint(trigger: Element, node: HTMLElement, keyboard: boolean) {
   const rebind = wiredTriggers.get(trigger);
   if (rebind) return rebind(node);
   let hinted = node;
@@ -299,7 +301,7 @@ function listenForHint(trigger: HTMLElement, node: HTMLElement, keyboard: boolea
   const isOpen = () => hinted.matches(":popover-open");
   const show = () => {
     if (!(pointer || focus) || isOpen()) return;
-    hinted.showPopover({ source: trigger });
+    hinted.showPopover({ source: trigger as HTMLElement });
     openTrigger = trigger;
   };
   const hide = () => {
@@ -362,7 +364,7 @@ function listenForHint(trigger: HTMLElement, node: HTMLElement, keyboard: boolea
  * read twice. Any `title` goes. The trigger's `data-key` or `id` pins its hint across draws; give a trigger one. A trigger this has
  * already wired keeps its hint when drawn again.
  */
-export function hint<T extends HTMLElement>(trigger: T, words: string): T {
+export function hint<T extends Element>(trigger: T, words: string): T {
   const own = trigger.getAttribute("interestfor") ?? trigger.getAttribute("data-hint");
   const id = own ?? hintId(trigger.getAttribute("data-key") ?? trigger.getAttribute("id") ?? `n${++loose}`);
   let node = hints.get(id);
@@ -380,10 +382,11 @@ export function hint<T extends HTMLElement>(trigger: T, words: string): T {
   if (adds) node.setAttribute("role", "tooltip");
   else node.removeAttribute("role");
   trigger.removeAttribute("title");
-  if (listened.has(trigger.nodeName)) {
+  if (interested.has(trigger.nodeName)) trigger.setAttribute("interestfor", id);
+  else {
     trigger.setAttribute("data-hint", id);
-    listenForHint(trigger, node, true);
-  } else trigger.setAttribute("interestfor", id);
+    listenForHint(trigger, node, listened.has(trigger.nodeName) || trigger.hasAttribute("tabindex"));
+  }
   const described = trigger.getAttribute("aria-describedby");
   if (adds && (described === null || described === id)) trigger.setAttribute("aria-describedby", id);
   else if (!adds && described === id) trigger.removeAttribute("aria-describedby");
@@ -392,6 +395,17 @@ export function hint<T extends HTMLElement>(trigger: T, words: string): T {
     setTimeout(pruneHints, 300);
   }
   return trigger;
+}
+
+/**
+ * `node`, a mark or a dot that explains itself (a state's shape, a law's mark, an agent's logo): `role="img"` named by `words`, with
+ * `words` as its hint on the pointer alone (#582). It stays out of the Tab order, so what it says must also reach the keyboard some
+ * other way, in the part sheet's law list or the row's own words. Give it a `data-key` or an `id`, so its hint is the same on every draw.
+ */
+export function mark<T extends Element>(node: T, words: string): T {
+  node.setAttribute("role", "img");
+  node.setAttribute("aria-label", words);
+  return hint(node, words);
 }
 
 /**

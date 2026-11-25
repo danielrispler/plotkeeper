@@ -37,7 +37,7 @@ test("an agent the page does not know by name wears the generic logo, drawn with
   assert.equal(logoKey("newagent"), "generic");
   const drawn = logoOf(row(newagent, new Map()));
   assert.equal(drawn.getAttribute("data-logo"), "generic");
-  assert.ok(drawn.title.length > 0);
+  assert.ok(drawn.getAttribute("aria-label").length > 0);
   assert.match(drawn.innerHTML, /<path d="[^"]+"/);
 });
 
@@ -53,8 +53,8 @@ test("a recorded Codex session wears Codex's logo, titled by its name (#359)", (
   const drawn = logoOf(row(codex, new Map()));
   assert.equal(drawn.getAttribute("data-logo"), "codex");
   // Its row's title is the note on what it reports; the mark's own title names Codex, no longer as status only.
-  assert.match(drawn.title, /no context size/);
-  assert.equal(logo("codex").title, "Codex");
+  assert.match(drawn.getAttribute("aria-label"), /no context size/);
+  assert.equal(logo("codex").getAttribute("aria-label"), "Codex");
 });
 
 test("a recorded Qwen Code session wears Qwen's logo, titled by its name (#360)", () => {
@@ -62,8 +62,8 @@ test("a recorded Qwen Code session wears Qwen's logo, titled by its name (#360)"
   assert.equal(logoKey(qwen), "qwen");
   const drawn = logoOf(row(qwen, new Map()));
   assert.equal(drawn.getAttribute("data-logo"), "qwen");
-  assert.match(drawn.title, /no context size/);
-  assert.equal(logo("qwen").title, "Qwen Code");
+  assert.match(drawn.getAttribute("aria-label"), /no context size/);
+  assert.equal(logo("qwen").getAttribute("aria-label"), "Qwen Code");
 });
 
 test("a recorded Copilot session wears Copilot's logo, and the page names it Copilot (#361)", async () => {
@@ -71,7 +71,7 @@ test("a recorded Copilot session wears Copilot's logo, and the page names it Cop
   const copilot = /** @type {import("../../dist/types.js").Session} */ ({ ...base, capabilities: caps("copilot"), identity: { issue: null, name: "p" }, transcript: { context: null } });
   assert.equal(logoKey(copilot), "copilot");
   assert.equal(logoOf(row(copilot, new Map())).getAttribute("data-logo"), "copilot");
-  assert.equal(logo("copilot").title, "GitHub Copilot");
+  assert.equal(logo("copilot").getAttribute("aria-label"), "GitHub Copilot");
   assert.equal(agentNames.copilot, "Copilot");
 });
 
@@ -82,7 +82,7 @@ test("a session row in the list and History shows the logo before its name; an a
   assert.equal(logoOf(drawn).getAttribute("data-logo"), "claude");
   const agyRow = /** @type {any} */ (row(agy, new Map()));
   assert.equal(logoOf(agyRow).getAttribute("data-logo"), "agy");
-  assert.match(logoOf(agyRow).title, /no context size/);
+  assert.match(logoOf(agyRow).getAttribute("aria-label"), /no context size/);
   assert.equal(agyRow.text.includes("agy"), false);
   assert.equal(rowMark(agy), "");
   assert.equal(rowMark(claude), "9k");
@@ -127,7 +127,7 @@ test("the rail header shows the logo, titled with the model line", async () => {
   const mark = get("mark");
   assert.equal(mark.childNodes.length, 1, "the header draws its logo");
   assert.equal(mark.childNodes[0].getAttribute("data-logo"), "claude");
-  assert.equal(mark.childNodes[0].title, "Claude · Opus 5.5");
+  assert.equal(mark.childNodes[0].getAttribute("aria-label"), "Claude · Opus 5.5");
 });
 
 test("the rail header's logo for agy keeps the note that it has no context size, after the model line", async () => {
@@ -141,7 +141,7 @@ test("the rail header's logo for agy keeps the note that it has no context size,
   } catch {
     // The rest of the rail needs more of a page than the stand-in has; the header is drawn first.
   }
-  const title = get("mark").childNodes[0].title;
+  const title = get("mark").childNodes[0].getAttribute("aria-label");
   assert.match(title, /no context size/);
   assert.ok(title.length > "no context size".length);
 });
@@ -160,20 +160,20 @@ const railOf = (session, agent = null) => {
 test("the no-context note follows the session's capabilities, not the agent's name", async () => {
   const other = { ...agy, capabilities: /** @type {import("../../dist/types.js").Capabilities} */ ({ agent: "newagent", context: false }), model: null };
   const get = await railOf(other);
-  assert.match(get("mark").childNodes[0].title, /no context size/);
-  assert.match(logoOf(row(other, new Map())).title, /no context size/);
+  assert.match(get("mark").childNodes[0].getAttribute("aria-label"), /no context size/);
+  assert.match(logoOf(row(other, new Map())).getAttribute("aria-label"), /no context size/);
   const noNote = await railOf({ ...agy, capabilities: /** @type {import("../../dist/types.js").Capabilities} */ ({ agent: "agy", context: true }) });
-  assert.doesNotMatch(noNote("mark").childNodes[0].title, /no context size/);
-  assert.doesNotMatch(logoOf(row({ ...agy, capabilities: /** @type {import("../../dist/types.js").Capabilities} */ ({ agent: "agy", context: true }) }, new Map())).title, /no context size/);
+  assert.doesNotMatch(noNote("mark").childNodes[0].getAttribute("aria-label"), /no context size/);
+  assert.doesNotMatch(logoOf(row({ ...agy, capabilities: /** @type {import("../../dist/types.js").Capabilities} */ ({ agent: "agy", context: true }) }, new Map())).getAttribute("aria-label"), /no context size/);
   // A status-only row has no agent of its own to note.
-  assert.doesNotMatch(logoOf(row(statusOnly("codex"), new Map())).title, /no context size/);
+  assert.doesNotMatch(logoOf(row(statusOnly("codex"), new Map())).getAttribute("aria-label"), /no context size/);
 });
 
 test("a selected subagent's rail logo carries no model line", async () => {
   const worker = /** @type {import("../../dist/types.js").Subagent} */ ({ id: "a1", parent: "session", kind: "worker", name: "Review", asked: null, agent_type: null, status: "running", started_at: 1, ended_at: null, last_step: null, step_span: null });
   const session = /** @type {import("../../dist/types.js").Session} */ ({ ...claude, transcript: { ...claude.transcript, model: "claude-opus-5-5" }, agents: [worker] });
   const get = await railOf(session, "a1");
-  assert.doesNotMatch(get("mark").childNodes[0].title, /Opus/);
+  assert.doesNotMatch(get("mark").childNodes[0].getAttribute("aria-label"), /Opus/);
 });
 
 test("the rail's #detail has no title when the step has no detail", async () => {
@@ -186,5 +186,5 @@ test("a recorded Cursor session wears Cursor's logo, titled by its name (#362)",
   assert.equal(logoKey(cursor), "cursor");
   const drawn = logoOf(row(cursor, new Map()));
   assert.equal(drawn.getAttribute("data-logo"), "cursor");
-  assert.equal(logo("cursor").title, "Cursor");
+  assert.equal(logo("cursor").getAttribute("aria-label"), "Cursor");
 });

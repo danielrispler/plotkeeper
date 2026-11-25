@@ -101,14 +101,13 @@ export function drawStrip(view: MapView, part: string, slot: HTMLElement) {
 /** The banner: "Viewing <commit> · Back to now" while `scrub` is set, empty with none. A commit whose map cannot be read keeps it too. */
 export function showBanner(banner: HTMLElement, scrub: Scrub | null) {
   if (!scrub) {
-    banner.removeAttribute("title");
     return banner.replaceChildren();
   }
   const words = scrubBanner(scrub);
   const back = pressable(text("button", words.back, "btn quiet banner-back"), null);
   hint(back, "Show the map as it is now");
   back.addEventListener("click", () => scrubTo(null).catch(failure("map_at")));
-  banner.title = scrub.label;
+  hint(banner, scrub.label);
   banner.replaceChildren(text("span", words.text, "banner-text"), " · ", back);
 }
 

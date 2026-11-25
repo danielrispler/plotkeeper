@@ -7,7 +7,7 @@
 
 import { modelLine, reports } from "./capabilities.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
-import { age, code, cut, element, failure, glyphOnly, hint, invoke, keepOnly, pressable, prose, text, unseenWords } from "./dom.js";
+import { age, code, cut, element, failure, glyphOnly, hint, invoke, keepOnly, keyed, pressable, prose, text, unseenWords } from "./dom.js";
 import { askAnchor } from "./ask.js";
 import { rendered } from "./markdown.js";
 import { drawSidebar } from "./list.js";
@@ -54,7 +54,6 @@ export function startStory(selectSession: (id: string, agent: string | null) => 
 // The rail with no session selected: its header empty, its dock and its cleared decisions too.
 function clearView() {
   for (const id of ["state", "block", "mode", "mark", "session-name", "phase"]) element(id).textContent = "";
-  for (const id of ["session-name", "block", "phase"]) element(id).removeAttribute("title");
   showQuestions([]);
   showCleared([]);
   shownSession = null;
@@ -77,7 +76,7 @@ function showHeader(session: Session, agent: Subagent | null) {
   // The agent's logo, titled with its model line when it has one (#158); agy's keeps its note that it has no context size.
   const key = logoKey(session);
   const title = [agent === null ? modelLine(session) : "", noContextNote(session)].filter(Boolean).join("\n");
-  element("mark").replaceChildren(logo(key, title || undefined));
+  element("mark").replaceChildren(logo(key, title || undefined, "story"));
   const name = sessionName(session);
   // The name, the block's kind and the estimate may be cut at a narrow rail: each scrolls in place on hover.
   cut(element("session-name"), name);
@@ -286,7 +285,7 @@ function showTip(session: Session) {
   const context = { map: map !== null, brief: (map?.state.ready ?? []).length > 0, trees: reports(session, "turn_trees") };
   const tip = tipFor(session, studio.listed, context, studio.files.settings.tips);
   const line = tip ? tipText(tip, studio.files.keymap) : "";
-  Object.assign(element("tip"), { textContent: line, title: line, hidden: tip === null });
+  Object.assign(cut(element("tip"), line), { hidden: tip === null });
 }
 
 // After this many steps the intention dims, as it may no longer say what the agent does (danielrispler/Falinks#472).
@@ -627,9 +626,8 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
       hint(first, turn.prompt.trim() || line.prompt),
       cut(text("span", line.headline ?? "", "headline-text")),
       // The ✕ is for the eye; assistive tech hears "failed" once (#456).
-      ...(line.failed ? [glyphOnly("✕", "mark check-failed"), unseenWords("failed")] : []),
+      ...(line.failed ? [hint(keyed(glyphOnly("✕", "mark check-failed"), `failed-${key}`), "A check ended failed"), unseenWords("failed")] : []),
     );
-    if (line.failed) button.querySelector(".check-failed")?.setAttribute("title", "A check ended failed");
     node.replaceChildren(button, ...(open ? [...turnContent(session, block, null).children] : []));
   };
   draw();

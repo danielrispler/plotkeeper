@@ -191,7 +191,6 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
     row.dataset.law = law.id;
     const acts = text("span", "", "sheet-law-actions");
     row.append(mark, text("span", law.text, "sheet-law-text"), text("span", law.label, "sheet-law-backing"), acts);
-    row.title = `${law.label}: ${law.text}`;
     if (law.backing === "check" && !view.scrub) {
       const proof = pressable(text("button", "See the proof", "btn quiet"), null);
       hint(proof, "Show the test that stands behind this law, read from the default branch");

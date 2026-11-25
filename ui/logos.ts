@@ -1,6 +1,7 @@
 // An agent's logo (danielrispler/plotkeeper#158): a 14 px inline SVG on the current colour, so the muted text colour makes it
 // one colour. One pure function maps a session, or just an agent's name, to the logo's key; `logo` draws it. Adding an agent's
 // logo is one entry in `marks`; an agent with none wears the generic ring.
+import { mark } from "./dom.js";
 import type { Session } from "./types.js";
 
 export type LogoKey = string;
@@ -47,15 +48,13 @@ export const noContextNote = (session: Pick<Session, "capabilities">): string =>
   session.capabilities.agent && !session.capabilities.context ? "This agent reports no context size" : "";
 
 // The logo's element, named by its title so the shape is never alone.
-export function logo(key: LogoKey, title = (marks[key] ?? generic).title): HTMLElement {
+export function logo(key: LogoKey, title = (marks[key] ?? generic).title, where = key): HTMLElement {
   const node = document.createElement("span");
   node.className = "logo";
   node.setAttribute("data-logo", key);
-  node.title = title;
-  node.setAttribute("role", "img");
-  node.setAttribute("aria-label", title);
+  node.setAttribute("data-key", `logo-${where}`);
   const { box, path, stroke } = marks[key] ?? generic;
   const paint = stroke ? 'fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"' : 'fill="currentColor"';
   node.innerHTML = `<svg viewBox="${box}" aria-hidden="true" ${paint}><path d="${path}"/></svg>`;
-  return node;
+  return mark(node, title);
 }

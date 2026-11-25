@@ -790,8 +790,8 @@ function staleBaseLine(stale: StaleBase | undefined): HTMLElement | null {
     line.append(list);
     if (names.length > 3) line.append(` +${names.length - 3} more`);
   });
-  line.title = "The brief compares against the merge base; check these against main";
-  return line;
+  line.setAttribute("data-key", "brief-stale");
+  return hint(line, "The brief compares against the merge base; check these against main");
 }
 
 // "Partial facts · N" (#491): what the brief was written without, one line per input, opening below the panel's head. Built with the

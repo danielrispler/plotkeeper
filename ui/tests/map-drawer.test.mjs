@@ -3,6 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { showBanner } from "../../dist/map-history.js";
 import { Field, fakeDocument } from "./dom.mjs";
+import { hintOf } from "../../dist/dom.js";
 import { briefOffer, brokenParts, brokenText, ciDrawer, ciLine, commitDrawer, proofDrawer, scrubBanner, sheetCi, stripOf } from "../../dist/map-model.js";
 
 // CI as the server sends it; `at` is not read here.
@@ -105,7 +106,8 @@ test("the banner offers the way back to now while a commit is scrubbed, also whe
   const banner = new Field("div");
   showBanner(banner, { commit: "abcdef0123", short: "abcdef0", label: "#4 Thing", source: "" });
   assert.match(banner.textContent, /Viewing abcdef0.*Back to now/);
-  assert.equal(banner.title, "#4 Thing");
+  assert.equal(hintOf(banner)?.textContent, "#4 Thing");
+  assert.equal(banner.getAttribute("title"), null);
   showBanner(banner, null);
   assert.equal(banner.textContent, "");
 });

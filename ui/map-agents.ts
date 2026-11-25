@@ -117,7 +117,7 @@ function sessionRows(session: Session, workers: Subagent[], close: () => void): 
     deps.select(session.id, null);
   });
   const state = text("span", stateWord(session), `session-pick-state${session.state === "needs_you" ? " needs-you" : ""}`);
-  row.append(logo(logoKey(session)), text("span", deps.name(session), "session-pick-name"), state, ...(line ? [text("span", line, "session-pick-line")] : []));
+  row.append(logo(logoKey(session), undefined, `pick-${session.id}`), text("span", deps.name(session), "session-pick-name"), state, ...(line ? [text("span", line, "session-pick-line")] : []));
   hint(row, [deps.name(session), stateWord(session), ...(line ? [line] : []), "Open its story"].join("\n"));
   row.dataset.session = session.id;
   row.addEventListener("pointerenter", () => hoverAgents(session.id, row));
@@ -215,12 +215,12 @@ function badgeButton(part: string, badge: Badge, dim: boolean): HTMLElement {
 }
 
 // The spotlit session's chip on a part of its latest turn: its logo, full name and Needs-you pill, and on its home part its line.
-function spotChip(session: Session, home: boolean): HTMLElement {
+function spotChip(session: Session, home: boolean, part: string): HTMLElement {
   const line = home ? deps.line(session) : null;
   const chip = text("span", "", `spot-chip${session.state === "needs_you" ? " needs-you" : ""}`);
-  chip.append(logo(logoKey(session)), text("span", deps.name(session), "spot-chip-name"), ...(session.state === "needs_you" ? [needsYouPill()] : []), ...(line ? [text("span", line, "spot-chip-line")] : []));
-  chip.title = [deps.name(session), stateWord(session), ...(line ? [line] : [])].join("\n");
-  return chip;
+  chip.append(logo(logoKey(session), undefined, `chip-${session.id}-${part}`), text("span", deps.name(session), "spot-chip-name"), ...(session.state === "needs_you" ? [needsYouPill()] : []), ...(line ? [text("span", line, "spot-chip-line")] : []));
+  chip.setAttribute("data-key", `chip-${session.id}-${part}`);
+  return hint(chip, [deps.name(session), stateWord(session), ...(line ? [line] : [])].join("\n"));
 }
 
 // The not placed list: a closed <details> whose summary is the line, made at the first paint and kept.
@@ -293,7 +293,7 @@ export function paint() {
   for (const plate of plates) {
     const id = plate.dataset.id ?? "";
     const slot = plate.querySelector(".plate-chips");
-    if (spot && shown.chips.includes(id)) slot?.replaceChildren(spotChip(spot, id === shown.home));
+    if (spot && shown.chips.includes(id)) slot?.replaceChildren(spotChip(spot, id === shown.home, id));
     else slot?.replaceChildren(...(byPart[id] ? [badgeButton(id, byPart[id], shown.dimmed.includes(id))] : []));
   }
   // A focused badge a spotlit chip replaced (its session's story opened from its list) leaves the keyboard on its part's button, as a redraw does.

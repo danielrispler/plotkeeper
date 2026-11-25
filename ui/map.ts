@@ -18,7 +18,7 @@
 //   a PR brief borrows the camera with `lendCamera` and `giveCameraBack` shows Daniel's view again (`cameraRig` in `map-camera.ts`).
 
 import { logStop, reviewNode, reviewOf } from "./stop-rules.js";
-import { element, failure, hint, invoke, listen, newest, pageStore, pressable, svg, text } from "./dom.js";
+import { element, failure, hint, invoke, keyed, listen, mark, newest, pageStore, pressable, svg, text } from "./dom.js";
 import { cameraRig, type CameraRig, fitCamera, panTo, revealPan, zoomAt } from "./map-camera.js";
 import { autoPlace, brokenParts, brokenText, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Drag, type Law, type Layer, type LayerName, type MapDoc, startProject, switchProject, parseMap, type Part, type Point, plateSize, plateTitle, sizeOf, linkLines, markPoints, readingOrder, rimPoint, type Scrub, type Tier } from "./map-model.js";
 import { recheckSeen } from "./seen.js";
@@ -120,7 +120,7 @@ export function openMap(path: string | null) {
   if (path !== null) lastViewed.set(path);
   // The top bar names the project shown; Treatment C's large title on the map is not drawn, so the name is said once.
   element("bar-project").textContent = path === null ? "plotkeeper" : name(path);
-  element("bar-project").title = path ?? "";
+  hint(element("bar-project"), path ?? "plotkeeper");
   deps.shown();
   recheckSeen();
   draw();
@@ -276,14 +276,23 @@ const name = (path: string) => path.split("/").filter(Boolean).pop() ?? path;
 function drawHead(state: MapState | null) {
   const ref = element("map-ref");
   ref.textContent = state?.reference ? `${state.reference}${state.commit ? ` · ${state.commit.slice(0, 7)}` : ""}` : "";
-  ref.title = state?.note ?? "The branch this map was read from, as last fetched";
+  hint(ref, state?.note ?? "The branch this map was read from, as last fetched");
 }
 
-const lawMark = (law: Law) => {
-  const mark = text("span", "", `law-mark ${law.backing}`);
-  mark.title = `${law.backing === "check" ? "Backed by a check" : "On trust"}: ${law.text}`;
-  return mark;
-};
+const lawWords = (law: Law) => `${law.backing === "check" ? "Backed by a check" : "On trust"}: ${law.text}`;
+
+/** A law's mark: a swatch by its backing, named and hinted by what it says; `key` tells this one from the same law's mark elsewhere. */
+export const lawMark = (law: Law, key: string) => mark(keyed(text("span", "", `law-mark ${law.backing}`), key), lawWords(law));
+
+/** The one coarse mark of a part whose backing test failed on main; it names no law. */
+export const brokenMark = (part: string) => mark(keyed(text("span", "", "law-broken"), `broken-${part}`), brokenText);
+
+/** A link's law mark, a diamond at `at` on the line of `ids`, named and hinted as a law's mark is. */
+export function linkMark(ids: string[], law: Law, at: Point): SVGElement {
+  const diamond = svg("rect", { class: `link-mark ${law.backing}`, width: "7", height: "7", x: "-3.5", y: "-3.5", transform: `translate(${at.x} ${at.y}) rotate(45)` });
+  diamond.setAttribute("data-key", `link-mark-${ids.join(" ")}-${law.id}`);
+  return mark(diamond, lawWords(law));
+}
 
 // Where `plotkeeper install` is explained.
 const installDocs = "https://github.com/danielrispler/plotkeeper/blob/main/docs/studio/plugin.md";
@@ -345,11 +354,7 @@ function drawLinks(layer: Element, view: MapView) {
     laws.forEach((law, i) => {
       const at = points[i];
       if (!at) return;
-      const mark = svg("rect", { class: `link-mark ${law.backing}`, width: "7", height: "7", x: "-3.5", y: "-3.5", transform: `translate(${at.x} ${at.y}) rotate(45)` });
-      const title = svg("title", {});
-      mark.append(title);
-      title.textContent = `${law.backing === "check" ? "Backed by a check" : "On trust"}: ${law.text}`;
-      nodes.push(mark);
+      nodes.push(linkMark(line.ids, law, at));
     });
   }
   layer.replaceChildren(...nodes);
@@ -385,12 +390,10 @@ function plateNode(part: Part, current: MapView, links: SVGElement, fit: () => v
   const plate = text("div", "", `plate tier-${tier}${mist ? ` fog-${mist}` : ""}`);
   plate.dataset.id = part.id;
   const [fog, marks, chips] = [text("div", "", "plate-fog"), text("div", "", "plate-marks"), text("div", "", "plate-chips")];
-  marks.append(...doc.laws.filter((law) => law.on === part.id).map(lawMark));
+  marks.append(...doc.laws.filter((law) => law.on === part.id).map((law) => lawMark(law, `plate-${part.id}-${law.id}`)));
   // A test that backs a law failed on main: one coarse mark, never naming the law. Red, beside Needs you the only loud colour.
   if (!past && brokenParts(state.ci).has(part.id)) {
-    const broken = text("span", "", "law-broken");
-    broken.title = brokenText;
-    marks.append(broken);
+    marks.append(brokenMark(part.id));
     plate.classList.add("broken");
   }
   // The keyboard's way in (#460): a real button over the text area, named by the name and caption, beside the chips rather than around
@@ -598,8 +601,8 @@ function draw() {
 export function startMap(given: MapDeps) {
   deps = given;
   element("map-legend").append(
-    lawMark({ id: "", on: "", backing: "check", text: "a test stands behind it" }), " law, backed by a check ",
-    lawMark({ id: "", on: "", backing: "trust", text: "nothing checks it" }), " law, on trust",
+    lawMark({ id: "", on: "", backing: "check", text: "a test stands behind it" }, "legend-check"), " law, backed by a check ",
+    lawMark({ id: "", on: "", backing: "trust", text: "nothing checks it" }, "legend-trust"), " law, on trust",
   );
   element("map-legend").append(
     " ", text("span", "", "law-broken"), " a test that backs a law failed on main ",
