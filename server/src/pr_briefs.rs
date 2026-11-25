@@ -65,9 +65,10 @@ pub struct Seen {
     quiet: HashSet<(u64, String)>,
     /// The head whose write failed, per PR: it is not retried at every lookup, only when the head changes or Daniel opens the brief.
     failed: HashMap<u64, String>,
-    /// What the push to the head each PR is at did to Daniel's read, worked out once (spec #477, part B). Kept in memory, as the
-    /// rest of `Seen`: after a restart the tray's note is gone, while a carried read and its copied brief are on disk.
-    pushes: HashMap<u64, (String, Push)>,
+    /// What the push to the head each PR is at did to Daniel's read (spec #477, part B), and whether that is settled: a settled
+    /// verdict is worked out once, an unsettled one again at each ask. Kept in memory, as the rest of `Seen`: after a restart the
+    /// tray's note is gone, while a carried read and its copied brief are on disk.
+    pushes: HashMap<u64, (String, Push, bool)>,
 }
 
 impl Seen {
@@ -83,8 +84,8 @@ impl Seen {
     fn note(&self, pr: u64, head: &str) -> Option<String> {
         self.pushes
             .get(&pr)
-            .filter(|(h, _)| h == head)
-            .and_then(|(_, push)| push.note())
+            .filter(|(h, _, _)| h == head)
+            .and_then(|(_, push, _)| push.note())
     }
 }
 
@@ -133,8 +134,8 @@ impl Push {
 
 /// Daniel's read of the briefs, as a new head meets it.
 pub trait Reading {
-    /// What the push from `old`'s head to `head` does to the read of `old`.
-    fn push(&self, old: &StoredBrief, head: &str) -> Push;
+    /// What the push from `old`'s head to `head` does to the read of `old`, and whether that is settled (`push_of`).
+    fn push(&self, old: &StoredBrief, head: &str) -> (Push, bool);
     /// Moves the read of PR `pr` from head `from` to `to` (`fog::carry_read`).
     fn carry(&self, pr: u64, from: &str, to: &str) -> Result<(), String>;
     /// What the since story of the push from `from` reads (#497): `full`'s PR, with the diff, map diff and tags from `from` to its head.
@@ -149,11 +150,13 @@ pub struct GitReading {
 }
 
 impl Reading for GitReading {
-    fn push(&self, old: &StoredBrief, head: &str) -> Push {
+    fn push(&self, old: &StoredBrief, head: &str) -> (Push, bool) {
         let user = crate::map::read_user(&self.file, &self.project);
         let read = user.fog.reads.get(&old.pr);
         let Some(reference) = &self.reference else {
-            return Push::Rewrite(partial_note(read, &old.head).or(Some(REBASED.into())));
+            let settled = read.is_some_and(|r| r.fully_read_at(&old.head));
+            let note = partial_note(read, &old.head).or(Some(REBASED.into()));
+            return (Push::Rewrite(note), settled);
         };
         push_of(
             Path::new(&self.project),
@@ -196,7 +199,8 @@ const PUSHED: &str = "Rewritten after a new push";
 const MERGED: &str = "Rewritten: main was merged into the branch";
 
 /// What the push of PR `pr` from `old` to `new` does to `read`, by `git` in `repo`: `reference` is the default branch the
-/// patch-ids' ranges start from, `tiers` Daniel's, which decide whether H1..H2 fogs something.
+/// patch-ids' ranges start from, `tiers` Daniel's, which decide whether H1..H2 fogs something. With it, whether the verdict is
+/// settled: one from a brief not fully read, or from git failing, can change while the PR stays at `new`, so it is worked out again.
 pub fn push_of(
     repo: &Path,
     reference: &str,
@@ -205,22 +209,28 @@ pub fn push_of(
     pr: u64,
     old: &str,
     new: &str,
-) -> Push {
+) -> (Push, bool) {
     if !read.is_some_and(|r| r.fully_read_at(old)) {
-        return Push::Rewrite(partial_note(read, old));
+        return (Push::Rewrite(partial_note(read, old)), false);
     }
     let git = |args: &[&str]| crate::map::git(repo, args);
     if git(&["cat-file", "-e", &format!("{old}^{{commit}}")]).is_err() {
-        return Push::Rewrite(Some(REBASED.into()));
+        return (Push::Rewrite(Some(REBASED.into())), true);
     }
+    // The PR's own commits at `old` and `new`: the same patches carry the read as `same`; unsettled when git cannot tell.
+    let compare = |same: Push, note: &str| match (
+        patches(repo, reference, old),
+        patches(repo, reference, new),
+    ) {
+        (Some(before), Some(after)) if before == after => (same, true),
+        (Some(_), Some(_)) => (Push::Rewrite(Some(note.into())), true),
+        _ => (Push::Rewrite(Some(note.into())), false),
+    };
     if git(&["merge-base", "--is-ancestor", old, new]).is_ok() {
         // The default branch merged into the PR: H1..H2 holds main's changes, so the PR's own commits are compared instead.
         let base = |head: &str| git(&["merge-base", reference, head]).ok();
         if base(old) != base(new) {
-            return match (patches(repo, reference, old), patches(repo, reference, new)) {
-                (Some(before), Some(after)) if before == after => Push::Merged,
-                _ => Push::Rewrite(Some(MERGED.into())),
-            };
+            return compare(Push::Merged, MERGED);
         }
         let meta = studio_understanding::pr_brief::PrMeta {
             number: pr,
@@ -231,15 +241,12 @@ pub fn push_of(
             source.tier_overrides = tiers.clone();
             fogs_nothing(&source)
         }) {
-            Ok(true) => Push::Quiet,
-            Ok(false) => Push::Since(old.to_string()),
-            Err(_) => Push::Rewrite(Some(PUSHED.into())),
+            Ok(true) => (Push::Quiet, true),
+            Ok(false) => (Push::Since(old.to_string()), true),
+            Err(_) => (Push::Rewrite(Some(PUSHED.into())), false),
         };
     }
-    match (patches(repo, reference, old), patches(repo, reference, new)) {
-        (Some(before), Some(after)) if before == after => Push::Rebased,
-        _ => Push::Rewrite(Some(REBASED.into())),
-    }
+    compare(Push::Rebased, REBASED)
 }
 
 /// The PR's commits from the merge base with `reference` to `head`, merges left out: their count, and the multiset of their
@@ -287,26 +294,27 @@ fn patches(repo: &Path, reference: &str, head: &str) -> Option<(usize, Vec<Strin
     Some((count, ids))
 }
 
-/// When the PR moved from the newest stored brief's head to `head`, what that push does to Daniel's read, worked out once per
-/// head and kept in `seen` (for the tray's note, and for the since story once the full brief at `head` is stored too).
+/// When the PR moved from the newest stored brief's head to `head`, what that push does to Daniel's read, kept in
+/// `seen` (for the tray's note, and for the since story once the full brief at `head` is stored too): worked out once per head when
+/// settled, else again (`push_of`).
 fn push_at(with: &Writing, seen: &Mutex<Seen>, pr: u64, head: &str) -> Option<Push> {
     let known = seen
         .lock()
         .unwrap()
         .pushes
         .get(&pr)
-        .filter(|(h, _)| h == head)
-        .map(|(_, p)| p.clone());
+        .filter(|(h, _, settled)| h == head && *settled)
+        .map(|(_, p, _)| p.clone());
     if known.is_some() {
         return known;
     }
     let reading = with.reading?;
     let old = with.store.latest(pr).filter(|old| old.head != head)?;
-    let push = reading.push(&old, head);
+    let (push, settled) = reading.push(&old, head);
     seen.lock()
         .unwrap()
         .pushes
-        .insert(pr, (head.to_string(), push.clone()));
+        .insert(pr, (head.to_string(), push.clone(), settled));
     Some(push)
 }
 
@@ -2203,6 +2211,7 @@ mod tests {
                 old,
                 new,
             )
+            .0
         }
     }
 
@@ -2461,6 +2470,48 @@ mod tests {
         assert_eq!(
             tray[0].brief.clone().unwrap().note.as_deref(),
             Some(REBASED)
+        );
+    }
+
+    #[test]
+    fn a_read_finished_at_the_old_head_after_a_push_was_judged_still_carries_over() {
+        let rig = Rig::new();
+        let store = BriefStore::open(rig.store_dir.path()).unwrap();
+        let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+        let reading = rig.reading();
+        let with = Writing {
+            writer: &fake,
+            model: "opus",
+            store: &store,
+            reading: Some(&reading),
+        };
+        let h1 = rig.repo.head();
+        on_lookup(&with, &seen, 7, &h1, || Ok(source(&h1)), |_| {});
+        let lit = vec![vec!["alpha".to_string()], vec!["alpha".to_string()]];
+        let read = |chapter| {
+            crate::fog::mark_read(
+                &reading.file,
+                &rig.repo.path,
+                7,
+                chapter,
+                &h1,
+                lit.clone(),
+                1,
+            )
+            .unwrap()
+        };
+        read(0);
+        // A push that fogs nothing, seen while one chapter of two is read: the brief would be rewritten.
+        let h2 = rig.repo.commit(&[("docs/d.md", "2")]);
+        assert_eq!(
+            on_lookup(&with, &seen, 7, &h2, || Ok(source(&h2)), |_| {}),
+            Did::Staled
+        );
+        // Daniel finishes the brief at H1 before it is rewritten: the read carries over.
+        read(1);
+        assert_eq!(
+            on_lookup(&with, &seen, 7, &h2, || Ok(source(&h2)), |_| {}),
+            Did::Carried
         );
     }
 
