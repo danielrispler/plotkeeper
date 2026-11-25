@@ -280,7 +280,7 @@ function startDelay(): number {
  * Wires `trigger` to open and close `node`, its hint, by pointer and, when `keyboard`, by focus. A mark that stays out of the Tab order
  * passes false: it is pointer-only.
  */
-export function listenForHint(trigger: HTMLElement, node: HTMLElement, keyboard: boolean) {
+function listenForHint(trigger: HTMLElement, node: HTMLElement, keyboard: boolean) {
   if (wiredTriggers.has(trigger)) return;
   wiredTriggers.add(trigger);
   let pointer = false;

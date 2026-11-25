@@ -16,7 +16,6 @@ globalThis.document = fakeDocument({
 const invoked = [];
 let release = () => {};
 const asked = { nonce: "n1", hook_event_name: "PreToolUse", tool_name: "AskUserQuestion", tool_use_id: "t1", tool_input: {}, agent_id: null };
-const handlers = {};
 globalThis.window = /** @type {any} */ ({
   __TAURI__: {
     core: {
@@ -27,7 +26,7 @@ globalThis.window = /** @type {any} */ ({
         return Promise.resolve(null);
       },
     },
-    event: { listen: (name, handler) => Promise.resolve((handlers[name] = handler)) },
+    event: { listen: () => Promise.resolve(() => {}) },
   },
 });
 globalThis.setInterval = /** @type {any} */ (() => 0);

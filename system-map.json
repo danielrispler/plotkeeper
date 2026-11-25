@@ -98,7 +98,7 @@
         { "name": "Patch review", "text": "A back a law run's proven test patch, to open as a draft PR or discard.", "paths": ["ui/patch-review.ts"] },
         { "name": "Wait tips", "text": "While a session runs, one line in its Intention box teaches one feature, chosen with a cooldown; settings can turn them off.", "paths": ["ui/tips.ts"] },
         { "name": "What's new", "text": "After an update to a new version, one toast with a link to that version's GitHub Release.", "paths": ["ui/whats-new.ts"] },
-        { "name": "Hints", "text": "`hint()` gives a button, link, fold-out header, input or select its own styled hover, shown on hover and focus and closed by Esc; a control that explains why it is off is `aria-disabled`.", "paths": ["ui/dom.ts"] }
+        { "name": "Hints", "text": "`hint()` gives a button, link, fold-out header, input or select its own styled hover, shown on hover and focus, closed by Esc.", "paths": ["ui/dom.ts"] }
       ],
       "tier": "core", "paths": ["ui/"]
     },
