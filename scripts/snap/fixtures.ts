@@ -1710,7 +1710,7 @@ const mapBase = (): Fixture =>
       await esc();
       if (!document.querySelector("#map .map-canvas") || panelOpen()) log("snap:fail Esc on the bare map changed the page");
       log("base ok");`);
-// The README hero screenshot: plotkeeper's current system map (no retired parts) framed cleanly inside 1400x800.
+// The README hero screenshot: plotkeeper's current parts and actors (with a compact subset of links and laws for legibility at 1400x800).
 const readmeHeroMapFile = JSON.stringify({
   version: 1,
   parts: [

@@ -102,6 +102,14 @@ export function rewriteReadmeForNpm(markdown, { repo = REPO, ref = REF } = {}) {
   });
 }
 
+const assertNoRelativeTargets = (markdown, label) => {
+  const leftover = findRelativeTargets(markdown);
+  if (leftover.length > 0) {
+    console.error(`prepare-readme: relative links remain in ${label}: ${leftover.join(", ")}`);
+    process.exit(1);
+  }
+};
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (process.argv[2] === "--check") {
     const file = process.argv[3];
@@ -109,20 +117,12 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       console.error("usage: node scripts/npm/prepare-readme.mjs --check <file>");
       process.exit(2);
     }
-    const leftover = findRelativeTargets(readFileSync(file, "utf8"));
-    if (leftover.length > 0) {
-      console.error(`prepare-readme: relative links remain in ${file}: ${leftover.join(", ")}`);
-      process.exit(1);
-    }
+    assertNoRelativeTargets(readFileSync(file, "utf8"), file);
   } else {
     const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
     const source = readFileSync(resolve(root, "README.md"), "utf8");
     const rewritten = rewriteReadmeForNpm(source);
-    const leftover = findRelativeTargets(rewritten);
-    if (leftover.length > 0) {
-      console.error(`prepare-readme: relative links remain in npm/README.md: ${leftover.join(", ")}`);
-      process.exit(1);
-    }
+    assertNoRelativeTargets(rewritten, "npm/README.md");
     writeFileSync(resolve(root, "npm/README.md"), rewritten, "utf8");
     copyFileSync(resolve(root, "LICENSE"), resolve(root, "npm/LICENSE"));
   }
