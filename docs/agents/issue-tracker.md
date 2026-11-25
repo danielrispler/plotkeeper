@@ -60,7 +60,7 @@ Run it only when Daniel explicitly asks to merge a PR (`/ship <n>`); never on yo
 1. Wait for this PR's own CI: `gh pr checks <n> --watch` as a background task. A red `snap` job follows the rerun rule in `AGENTS.md`, "Checks".
 2. `gh pr merge <n> --squash`, which keeps the remote branch.
 3. For each open PR based on the branch (`gh pr list --base <branch> --json number,headRefName`): `gh pr edit <m> --base main`. Then rebase it only if no active worktree holds its branch (`git worktree list` shows the branch beside each path); otherwise tell Daniel it needs a rebase. `main` has the merged PR only as one squash commit, so a plain rebase replays that PR's commits and conflicts: use `git rebase --onto main <old tip> <its branch>`, where `<old tip>` is the merged PR's last head commit (`gh pr view <n> --json headRefOid`).
-4. `cargo run --bin wayfinder-startup -- --done <issue>` from the main checkout, where `<issue>` is the issue number in the branch name `issue-<issue>-<slug>`, not the PR number. It refuses while a PR still sits on the branch (`--help` lists the other refusals).
+4. `cargo run --bin wayfinder-startup -- --done <issue>` from the main checkout, where `<issue>` is the issue number in the branch name `issue-<issue>-<slug>`, not the PR number. It refuses while a PR still sits on the branch (`--help` lists the other refusals). A Release PR's branch, `release-vX.Y.Z`, has no issue: from the main checkout, run `git worktree remove .claude/worktrees/release-vX.Y.Z` and `git branch -D release-vX.Y.Z` instead.
 5. Delete the remote branch: `git push origin --delete <branch>`.
 6. `git pull --ff-only` in the main checkout. When plotkeeper changed, tell Daniel to stop plotkeeper (Ctrl+C) and run `npm run start`.
 
