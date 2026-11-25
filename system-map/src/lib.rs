@@ -9,6 +9,7 @@ mod laws;
 mod parts;
 mod pattern;
 mod touched;
+mod typescript;
 
 use std::{
     collections::{BTreeSet, HashSet},
