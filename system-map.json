@@ -97,7 +97,8 @@
         { "name": "The writer's settings", "text": "Pick the program that writes the summaries, or set up an API-key writer, and test it with one tiny call.", "paths": ["ui/settings.ts", "ui/writers.ts"] },
         { "name": "Patch review", "text": "A back a law run's proven test patch, to open as a draft PR or discard.", "paths": ["ui/patch-review.ts"] },
         { "name": "Wait tips", "text": "While a session runs, one line in its Intention box teaches one feature, chosen with a cooldown; settings can turn them off.", "paths": ["ui/tips.ts"] },
-        { "name": "What's new", "text": "After an update to a new version, one toast with a link to that version's GitHub Release.", "paths": ["ui/whats-new.ts"] }
+        { "name": "What's new", "text": "After an update to a new version, one toast with a link to that version's GitHub Release.", "paths": ["ui/whats-new.ts"] },
+        { "name": "Hints", "text": "`hint()` gives a button or link its own styled hover, shown on hover and focus and closed by Esc.", "paths": ["ui/dom.ts"] }
       ],
       "tier": "core", "paths": ["ui/"]
     },

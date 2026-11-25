@@ -70,7 +70,7 @@ const mapPanel = (check: string, extra: Fixture = {}): Fixture => {
 // The footprint (#559): hovering #311's row brackets every part its turns of the last 7 days changed beside Understanding's thin fog, firm
 // on its latest turn's parts (Core and Window, and the Shell its Worker changed) and faint on Understanding, from a turn 2 days ago; its
 // 9-day-old turn adds nothing to Daemon. With no hover the open session's footprint shows; a hovered row that leaves the list (its
-// session moved to History) gives it back; a session that touched no part says so in its row's hover text.
+// session moved to History) gives it back; a session that touched no part says so in its row's hint.
 export const mapFootprint = (): Fixture => {
   const day = 24 * 3600e3;
   const turn = (ago: number, paths: (string | [string, string])[]) => ({
@@ -82,10 +82,11 @@ export const mapFootprint = (): Fixture => {
       const marks = () => ["firm", "faint"].map((kind) => kind + ":" + [...document.querySelectorAll("#map .plate.foot-" + kind)].map((p) => p.dataset.id).sort().join()).join(" ");
       const hover = async (key, on = true) => { row(key).dispatchEvent(new PointerEvent(on ? "pointerenter" : "pointerleave")); await wait(150); };
       if (marks() !== "firm: faint:") log("snap:fail a footprint shows with no session hovered or open: " + marks());
-      // A session that touched no part says so in its row's hover text.
+      // A session that touched no part says so in its row's hint.
+      const hintOf = (key) => document.getElementById(row(key).getAttribute("interestfor"))?.textContent ?? "";
       await hover("s3");
-      if (!row("s3").title.endsWith("\\nTouched no part in the last 7 days")) log("snap:fail #312's row does not say it touched no part: " + JSON.stringify(row("s3").title));
-      if (row("s1").title.includes("Touched no part")) log("snap:fail #311's row says it touched no part");
+      if (!hintOf("s3").endsWith("\\nTouched no part in the last 7 days")) log("snap:fail #312's row does not say it touched no part: " + JSON.stringify(hintOf("s3")));
+      if (hintOf("s1").includes("Touched no part")) log("snap:fail #311's row says it touched no part");
       await hover("s3", false);
       // The open session's footprint shows with no hover.
       await press(row("s2"));

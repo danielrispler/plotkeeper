@@ -100,8 +100,8 @@ const runHead = (options, nodes = { controls: [], titled: [] }) => {
   const added = [];
   const handlers = {};
   const timers = [];
-  const querySelectorAll = (selector) => (selector === "[title]" ? nodes.titled : selector === "main" || selector === "h1" ? [{}] : nodes.controls);
-  const document = { body: { classList: { add: (...names) => added.push(...names) } }, marker: "drawn", querySelectorAll };
+  const querySelectorAll = (selector) => (selector === "[title], [interestfor]" ? nodes.titled : selector === "main" || selector === "h1" ? [{}] : nodes.controls);
+  const document = { body: { classList: { add: (...names) => added.push(...names) } }, marker: "drawn", querySelectorAll, getElementById: (id) => (id.startsWith("hint:") ? { textContent: id.slice(5) } : null) };
   vm.runInNewContext(headSource(options), {
     document, console: { log: (line) => logged.push(line) }, getComputedStyle: (node) => ({ pointerEvents: node.pointer ?? "auto" }),
     addEventListener: (name, run) => (handlers[name] = run),
@@ -141,8 +141,10 @@ test("a page without a script logs nothing while the hover rule holds, and has n
 });
 
 // A stand-in element for the hover check (#220): its tag, label, own title and the nearest title up from it.
-const control = (label, { title = null, hover = title, pointer = "auto" } = {}) => ({
+// `hint` is the words of its own hint (spec #582): its `interestfor` names a hint of those words.
+const control = (label, { title = null, hover = title, pointer = "auto", hint = null } = {}) => ({
   tagName: "BUTTON", id: "", className: "btn", textContent: label, title: title ?? "", pointer,
+  getAttribute: (name) => (name === "interestfor" && hint !== null ? `hint:${hint}` : null),
   hasAttribute: (name) => name === "title" && title !== null,
   closest: (selector) => (selector === ".xterm" ? null : hover === null ? null : { getAttribute: () => hover }),
 });
@@ -153,9 +155,12 @@ test("the hover check fails a control with no hover, one whose hover repeats its
   const unreachable = control("Pull ↓2", { title: "Uncommitted changes would be overwritten", pointer: "none" });
   const fine = control("+", { title: "Start a new session (⌘N)" });
   const inherited = control("Open", { hover: "Resume this session" });
-  const { logged } = await runHead({}, { controls: [silent, repeats, fine, inherited, unreachable], titled: [repeats, fine, unreachable] });
+  const hintRepeats = control("Dismiss", { hint: "Dismiss" });
+  const hintUnreachable = control("Pull ↓2", { hint: "Uncommitted changes would be overwritten", pointer: "none" });
+  const hinted = control("+", { hint: "Start a new session (⌘N)" });
+  const { logged } = await runHead({}, { controls: [silent, repeats, fine, inherited, unreachable, hinted, hintRepeats, hintUnreachable], titled: [repeats, fine, unreachable, hinted, hintRepeats, hintUnreachable] });
   // The accessibility pass runs after it on the same page (a11y.mjs); only the hover rule's lines are this test's.
-  assert.deepEqual(logged.filter((line) => line.startsWith("snap:fail hover")).map((line) => line.replace(/ on .*/, "")), ["snap:fail hover: no hover", "snap:fail hover: repeats its label", "snap:fail hover: out of the pointer's reach"]);
+  assert.deepEqual(logged.filter((line) => line.startsWith("snap:fail hover")).map((line) => line.replace(/ on .*/, "")), ["snap:fail hover: no hover", "snap:fail hover: repeats its label", "snap:fail hover: repeats its label", "snap:fail hover: out of the pointer's reach", "snap:fail hover: out of the pointer's reach"]);
   assert.ok(failed(logged));
 });
 

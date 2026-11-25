@@ -1092,3 +1092,18 @@ mark.drawer-line .drawer-n::before { content: "→ " / ""; color: var(--fg); }
 .refresher-flows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); font-size: var(--size-small); }
 .refresher-flow-name { font-weight: 600; }
 .refresher-hops { margin: var(--sp-1) 0 0; padding-inline-start: var(--sp-6); color: var(--muted); line-height: 1.45; }
+
+/* The hint (spec #582): the one hover of the page, a trigger's own `popover="hint"` beside it through the trigger's implicit anchor
+   (`interestfor`), above it, flipped below when the window's top is in the way, so it never covers the control the focus is on. It
+   shows after --hint-delay, and at once while a hint is open among a toolbar's or a list's neighbouring triggers; the pointer may rest on
+   it, and Esc closes it. Needs Chrome 157+ (`docs/studio/behaviour/sessions.md`). */
+/* biome-ignore lint/correctness/noUnknownProperty: Chrome 149's interest invokers, which biome does not know yet */
+[interestfor] { interest-delay-start: var(--hint-delay); }
+/* biome-ignore lint/correctness/noUnknownPseudoClass: Chrome 149's interest invokers */
+.top:has(:interest-source) [interestfor], .list:has(:interest-source) [interestfor] {
+  /* biome-ignore lint/correctness/noUnknownProperty: Chrome 149's interest invokers */
+  interest-delay-start: 0s;
+}
+.hint { position-area: block-start; position-try-fallbacks: flip-block; inset: auto; margin-block: var(--hint-gap); margin-inline: 0; width: max-content; max-width: var(--hint);
+        padding: var(--sp-2) var(--sp-4); border: var(--hair) solid var(--line); border-radius: var(--radius-small); background: var(--raised); color: var(--fg);
+        box-shadow: var(--shadow); font-size: var(--size-small); line-height: 1.4; white-space: pre-line; overflow-wrap: anywhere; }

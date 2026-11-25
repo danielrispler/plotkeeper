@@ -486,3 +486,57 @@ export const projectsSaved = () =>
     const menu = document.getElementById("project-actions");
     if (!menu.matches(":popover-open") || menu.textContent.trim() !== "Remove project") log("snap:fail the header's menu does not offer Remove project");
     log("headers " + order);`);
+
+/**
+ * The hints (spec #582, ticket 1), with real input: the pointer on the top bar's gear opens its hint after the delay, beside the gear, and
+ * on the hint it stays open; Esc closes it; Tab to the gear opens it too; and sliding from one session row to the next opens the next
+ * row's hint at once, closing the first.
+ */
+export const hints = (): Fixture => ({
+  ...list(),
+  snapScript: `
+      const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+      const open = (hint) => hint.matches(":popover-open");
+      const hintOf = (node) => document.getElementById(node.getAttribute("interestfor"));
+      // The hint sits beside its trigger: clear of it, within a few lines of it, on the side the window leaves room for.
+      const beside = (hint, trigger) => {
+        const [h, t] = [hint.getBoundingClientRect(), trigger.getBoundingClientRect()];
+        const apart = Math.max(h.top - t.bottom, t.top - h.bottom);
+        return apart >= 0 && apart <= 24 && h.right > t.left && h.left < t.right;
+      };
+      const gear = document.getElementById("settings-button");
+      const gearHint = hintOf(gear);
+      if (!gearHint?.matches('[popover="hint"]')) return log("snap:fail the gear has no hint");
+      await __snapMove(gear);
+      await wait(100);
+      if (open(gearHint)) log("snap:fail the gear's hint was open before its delay");
+      await wait(450);
+      if (!open(gearHint)) return log("snap:fail the gear's hint did not open after hovering");
+      if (!beside(gearHint, gear)) log("snap:fail the gear's hint is not beside the gear " + JSON.stringify([gearHint.getBoundingClientRect(), gear.getBoundingClientRect()]));
+      await __snapMove(gearHint);
+      await wait(300);
+      if (!open(gearHint)) log("snap:fail the gear's hint closed with the pointer on it");
+      await __snapKey("Escape");
+      await wait(50);
+      if (open(gearHint)) log("snap:fail Esc left the gear's hint open");
+      // Tab: the skip link first, then the gear (the Needs you chip is a button too, so the Tab may take two more).
+      const rows = [...document.querySelectorAll(".list .row")].slice(0, 2);
+      await __snapMove(document.body);
+      for (let tab = 0; tab < 4 && document.activeElement !== gear; tab++) await __snapKey("Tab");
+      if (document.activeElement !== gear) return log("snap:fail Tab did not reach the gear");
+      await wait(600);
+      if (!open(gearHint)) log("snap:fail Tab to the gear did not open its hint");
+      await __snapKey("Escape");
+      document.activeElement.blur();
+      // Sliding from one row to the next: the second shows at once, the first closes.
+      const [first, second] = rows;
+      await __snapMove(first);
+      await wait(600);
+      if (!open(hintOf(first))) return log("snap:fail the first row's hint did not open");
+      await __snapMove(second);
+      await wait(120);
+      if (!open(hintOf(second))) log("snap:fail the neighbouring row's hint did not open at once");
+      if (open(hintOf(first))) log("snap:fail the first row's hint stayed open beside the second's");
+      log("hints ok");`,
+  realKeys: true, realPointer: true, snapDone: "hints ok",
+});
