@@ -3,10 +3,13 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    io::Write,
     path::Path,
-    process::{Command, Stdio},
+    time::Duration,
 };
+use studio_workbench::run::{RunError, git as git_in, run_until, run_until_with_input};
+
+/// The longest one read of a commit may take.
+const GIT_LIMIT: Duration = Duration::from_secs(30);
 
 /// What a commit holds: the files it tracks, sorted, and the text of each regular file among them, its bytes that are not
 /// UTF-8 read lossily. A symlink or a submodule is tracked but has no text, as on disk the scans read neither.
@@ -27,7 +30,12 @@ pub(crate) fn read(root: &Path, commit: &str) -> Result<Snapshot, String> {
             &format!("{commit}^{{commit}}"),
         ],
     )
-    .map_err(|_| format!("{commit:?} is not a commit in {}; name one", root.display()))?;
+    .map_err(|error| {
+        format!(
+            "{commit:?} is not a commit in {}; name one ({error})",
+            root.display()
+        )
+    })?;
     let id = String::from_utf8_lossy(&id).trim().to_string();
     let listing = git(root, &["ls-tree", "-r", "-z", "--full-tree", &id])?;
     let mut files = BTreeSet::new();
@@ -54,29 +62,13 @@ pub(crate) fn read(root: &Path, commit: &str) -> Result<Snapshot, String> {
 
 /// The text of each blob in `blobs`, by its path, read through one `git cat-file --batch`.
 fn cat_file(root: &Path, blobs: &[(String, String)]) -> Result<BTreeMap<String, String>, String> {
-    let mut child = Command::new("git")
-        .args(["cat-file", "--batch"])
-        .current_dir(root)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("cannot run git in {}: {error}", root.display()))?;
-    let mut stdin = child.stdin.take().expect("stdin is piped");
     let ids: String = blobs.iter().map(|(oid, _)| format!("{oid}\n")).collect();
-    // Written beside the read, so a large answer never blocks the request.
-    let writer = std::thread::spawn(move || stdin.write_all(ids.as_bytes()));
-    let output = child
-        .wait_with_output()
-        .map_err(|error| format!("git cat-file failed in {}: {error}", root.display()))?;
-    let written = writer.join().expect("the writer does not panic");
-    if !output.status.success() || written.is_err() {
-        return Err(format!(
-            "git cat-file failed in {}: {}",
-            root.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
+    let output = run_until_with_input(
+        git_in(root).args(["cat-file", "--batch"]),
+        ids.as_bytes(),
+        GIT_LIMIT,
+    )
+    .map_err(|error| failed(root, "cat-file", &error))?;
     let mut texts = BTreeMap::new();
     let mut rest = &output.stdout[..];
     for (_, path) in blobs {
@@ -103,18 +95,15 @@ fn cat_file(root: &Path, blobs: &[(String, String)]) -> Result<BTreeMap<String, 
 
 /// The standard output of `git args` in `root`, or why it failed.
 fn git(root: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(root)
-        .output()
-        .map_err(|error| format!("cannot run git in {}: {error}", root.display()))?;
-    if !output.status.success() {
-        return Err(format!(
-            "git {} failed in {}: {}",
-            args[0],
-            root.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
+    let output = run_until(git_in(root).args(args), GIT_LIMIT)
+        .map_err(|error| failed(root, args.first().copied().unwrap_or_default(), &error))?;
     Ok(output.stdout)
+}
+
+/// Why `git command` in `root` gave nothing to use.
+fn failed(root: &Path, command: &str, error: &RunError) -> String {
+    match error {
+        RunError::Start(error) => format!("cannot run git in {}: {error}", root.display()),
+        error => format!("git {command} failed in {}: {error}", root.display()),
+    }
 }

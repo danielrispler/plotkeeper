@@ -14,7 +14,9 @@ use crate::{
 /// "One pair per file pair").
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Edge {
+    /// The part that depends.
     pub from: String,
+    /// The part it depends on.
     pub to: String,
     /// Sorted by their files.
     pub pairs: Vec<FilePair>,
@@ -23,7 +25,9 @@ pub struct Edge {
 /// A dependency of the tracked file `from` on the tracked file `to`, with the import sites behind it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FilePair {
+    /// The importing file.
     pub from: String,
+    /// The file it imports.
     pub to: String,
     /// One per line, in line order; one site with no line when the extractor finds none.
     pub sites: Vec<Site>,
@@ -33,7 +37,9 @@ pub struct FilePair {
 /// import site is").
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Site {
+    /// The importing file.
     pub file: String,
+    /// The import's 1-based line, when the extractor knows it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line: Option<u32>,
 }

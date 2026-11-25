@@ -4,27 +4,29 @@ import assert from "node:assert/strict";
 
 const requests = [];
 let reply = { ok: true, body: null };
-globalThis.fetch = async (url, init) => {
+// biome-ignore lint/suspicious/useAwait: a stand-in for an async API, so a throw in it rejects as the real one's would
+globalThis.fetch = /** @type {any} */ (async (url, init) => {
   requests.push([url, init.method, JSON.parse(init.body)]);
   return { ok: reply.ok, status: reply.ok ? 200 : 500, json: async () => reply.body };
-};
+});
 const sources = [];
-globalThis.EventSource = class {
+globalThis.EventSource = /** @type {any} */ (class {
   handlers = {};
   constructor(url) {
     this.url = url;
     sources.push(this);
   }
   addEventListener(name, handler) {
-    (this.handlers[name] ??= []).push(handler);
+    this.handlers[name] = [...(this.handlers[name] ?? []), handler];
   }
   removeEventListener(name, handler) {
     this.handlers[name] = (this.handlers[name] ?? []).filter((h) => h !== handler);
   }
-};
-globalThis.document = { visibilityState: "visible", hasFocus: () => true, addEventListener() {} };
+});
+// The page's globals, stood in for with only what transport.ts reads.
+globalThis.document = /** @type {any} */ ({ visibilityState: "visible", hasFocus: () => true, addEventListener() {} });
 globalThis.addEventListener = () => {};
-globalThis.window = {};
+globalThis.window = /** @type {any} */ ({});
 await import("../../dist/transport.js");
 const seam = () => window.__TAURI__;
 
@@ -36,9 +38,14 @@ test("a command is a POST to /api/<command> with its arguments as JSON, and its 
   assert.deepEqual(requests.at(-1), ["/api/sessions", "POST", {}]);
 });
 
-test("a refused command rejects with the server's reason", async () => {
+// A refusal is an `Error` (#554): its message is the server's reason, and it names the command and the HTTP status.
+test("a refused command rejects with a CommandError carrying the server's reason", async () => {
+  const { CommandError } = await import("../../dist/transport.js");
   reply = { ok: false, body: "not a session id" };
-  await assert.rejects(seam().core.invoke("rename", { id: "x", name: "y" }), (e) => e === "not a session id");
+  await assert.rejects(seam().core.invoke("rename", { id: "x", name: "y" }), (e) =>
+    e instanceof CommandError && e instanceof Error && e.message === "not a session id" && e.command === "rename" && e.status === 500);
+  reply = { ok: false, body: null };
+  await assert.rejects(seam().core.invoke("rename", { id: "x", name: "y" }), { message: "rename: 500" });
 });
 
 test("one event stream carries every event to the listeners of its name, until one is removed", async () => {

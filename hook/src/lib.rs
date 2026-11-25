@@ -1,6 +1,7 @@
 //! The event log (danielrispler/Falinks#328, module 2): one append-only JSON Lines file, the only source of session state.
 
 pub mod answer;
+pub mod sys;
 
 use std::{
     env,
@@ -416,8 +417,12 @@ enum Fate {
 
 static FATE: Mutex<Fate> = Mutex::new(Fate::Open);
 
+/// A poisoned lock is read as it is. That is safe: `Fate` is one `Copy` value set by a single assignment, so a panic
+/// while the lock is held cannot leave it half written. The hook is a short-lived process of its own, which the
+/// server's panic hook does not cover (spec danielrispler/plotkeeper#548).
 fn fate() -> std::sync::MutexGuard<'static, Fate> {
-    FATE.lock().unwrap_or_else(|e| e.into_inner())
+    FATE.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Gives up the trees this process is still recording: its `git` calls are killed, and `trees`
@@ -481,12 +486,15 @@ pub fn record_tree_within(folder: &Path, files: usize, bytes: u64) -> Option<(St
     let call = CALLS.fetch_add(1, Ordering::Relaxed);
     let scratch = env::temp_dir().join(format!("plotkeeper-hook-{}-{call}.index", process::id()));
     // A copy of the real index keeps git's stat cache, so only changed files are hashed again.
-    let _ = fs::copy(Path::new(&root).join(index), &scratch);
+    // Without the copy, `add` builds the index from scratch, only slower.
+    fs::copy(Path::new(&root).join(index), &scratch).ok();
     let added = git(Path::new(&root), &["add", "-A"], Some(&scratch));
     let tree = added.and_then(|_| git(Path::new(&root), &["write-tree"], Some(&scratch)));
-    let _ = fs::remove_file(&scratch);
+    // Best effort: a file already gone is fine.
+    fs::remove_file(&scratch).ok();
     // A killed `add` leaves its lock behind.
-    let _ = fs::remove_file(scratch.with_extension("index.lock"));
+    // Best effort: a file already gone is fine.
+    fs::remove_file(scratch.with_extension("index.lock")).ok();
     Some((root, tree?))
 }
 
@@ -534,8 +542,10 @@ fn untracked_within(root: &Path, files: usize, bytes: u64) -> Result<(), String>
         }
     };
     if let Some(why) = passed {
-        let _ = child.kill();
-        let _ = child.wait();
+        // The child may have exited already.
+        child.kill().ok();
+        // Only reaps the child; its exit status is not used.
+        child.wait().ok();
         return Err(why);
     }
     let status = child.wait().map_err(|e| format!("git ls-files: {e}"))?;
@@ -549,17 +559,10 @@ fn untracked_within(root: &Path, files: usize, bytes: u64) -> Result<(), String>
 /// so it never holds up the agent's own `git` commands, and never starts auto maintenance, whose
 /// repacks stacked up by the dozen in #141.
 fn command(folder: &Path, args: &[&str], index: Option<&Path>) -> Command {
-    let mut command = Command::new("git");
+    let mut command = studio_workbench::run::git(folder);
     command
-        .args([
-            "--no-optional-locks",
-            "-c",
-            "maintenance.auto=false",
-            "-c",
-            "gc.auto=0",
-        ])
-        .args(args)
-        .current_dir(folder);
+        .args(["-c", "maintenance.auto=false", "-c", "gc.auto=0"])
+        .args(args);
     if let Some(index) = index {
         command.env("GIT_INDEX_FILE", index);
     }
@@ -572,41 +575,17 @@ fn git(folder: &Path, args: &[&str], index: Option<&Path>) -> Option<String> {
     if abandoned() {
         return None;
     }
-    let mut child = command(folder, args, index)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    let mut stdout = child.stdout.take()?;
-    // Read as it runs, so a full pipe never stalls it.
-    let reader = thread::spawn(move || {
-        let mut out = String::new();
-        stdout.read_to_string(&mut out).map(|_| out)
-    });
-    let deadline = Instant::now() + GIT_TIMEOUT;
-    let status = loop {
-        if let Some(status) = child.try_wait().ok()? {
-            break status;
-        }
-        if abandoned() {
-            let _ = child.kill();
-            let _ = child.wait();
-            return None;
-        }
-        if Instant::now() > deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            let args = args.join(" ");
-            eprintln!(
-                "plotkeeper-hook: git {args} in {} ran over {GIT_TIMEOUT:?}",
-                folder.display()
-            );
-            return None;
-        }
-        thread::sleep(Duration::from_millis(5));
-    };
-    let out = reader.join().ok()?.ok()?;
-    status.success().then(|| out.trim_end().to_owned())
+    use studio_workbench::run::{RunError, run_until_unless};
+    let ran = run_until_unless(&mut command(folder, args, index), GIT_TIMEOUT, &abandoned);
+    if matches!(ran, Err(RunError::TimedOut(_))) && !abandoned() {
+        let args = args.join(" ");
+        eprintln!(
+            "plotkeeper-hook: git {args} in {} ran over {GIT_TIMEOUT:?}",
+            folder.display()
+        );
+    }
+    let out = String::from_utf8(ran.ok()?.stdout).ok()?;
+    Some(out.trim_end().to_owned())
 }
 
 /// The roots of the worktrees `git worktree list` gives for the repository that holds `folder`, as
@@ -846,6 +825,10 @@ fn cursor_shaped(event: &Line) -> Line {
     shaped
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "left whole when the lint came in (#555); spec #548 names no split of it"
+)]
 fn claude_trees(event: &mut Line, data: &Path) -> Result<(), Box<dyn std::error::Error>> {
     use serde_json::{Map, Value, json};
     use std::io::{Seek, Write};
@@ -861,7 +844,8 @@ fn claude_trees(event: &mut Line, data: &Path) -> Result<(), Box<dyn std::error:
     let state = turns.join(format!("{session}.json"));
     // A session's record goes with it; a start, which is rare, prunes those whose end never came.
     if name == "SessionEnd" && plain {
-        let _ = fs::remove_file(&state);
+        // Best effort: a file already gone is fine.
+        fs::remove_file(&state).ok();
     }
     if name == "SessionStart" {
         prune_turns(&turns);
@@ -942,9 +926,7 @@ fn claude_trees(event: &mut Line, data: &Path) -> Result<(), Box<dyn std::error:
         let roots = starts.iter().filter_map(|p| names.root(Path::new(p)));
         roots.collect::<Vec<String>>()
     };
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as u64);
+    let now = studio_workbench::clock::now_ms();
     // When the turn began, in Unix milliseconds; a record from before it is kept does not say.
     let mut began = kept["began"].as_u64();
     let mut touches = Vec::new();
@@ -1042,7 +1024,8 @@ fn prune_turns(turns: &Path) {
         let modified = entry.metadata().and_then(|m| m.modified());
         let age = modified.ok().and_then(|t| t.elapsed().ok());
         if age.is_some_and(|age| age > week) {
-            let _ = fs::remove_file(entry.path());
+            // Best effort: a file already gone is fine.
+            fs::remove_file(entry.path()).ok();
         }
     }
 }

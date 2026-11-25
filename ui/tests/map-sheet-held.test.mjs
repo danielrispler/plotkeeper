@@ -6,7 +6,8 @@ import { El, fakeDocument, tauri } from "./dom.mjs";
 
 tauri([]);
 globalThis.document = fakeDocument({ body: new El("body") });
-globalThis.matchMedia = () => ({ matches: false, addEventListener() {} });
+// The stand-in media query: never reduced motion.
+globalThis.matchMedia = () => /** @type {any} */ ({ matches: false, addEventListener() {} });
 const { heldList } = await import("../../dist/map-sheet.js");
 
 const all = (node) => [node, ...node.childNodes.filter((child) => child instanceof El).flatMap(all)];
@@ -14,10 +15,10 @@ const words = (node) => node.childNodes.map((child) => (child instanceof El ? wo
 const classed = (node, name) => all(node).filter((each) => each.className.split(" ").includes(name));
 
 test("a held item with no paths is drawn as a note: its name in italics, then \"· note\", then its text; one with paths is unchanged", () => {
-  const list = heldList([
+  const list = /** @type {any} */ (heldList([
     { name: "Plugins", text: "One per agent.", files: ["agents/claude/plugin.json"] },
     { name: "Rendering", text: "How a plugin's output is drawn.", files: [] },
-  ]);
+  ]));
   const [withPaths, without] = list.childNodes.filter((child) => child instanceof El);
   assert.deepEqual(classed(list, "sheet-held-note"), [without], "only the item without paths is a note");
   assert.equal(classed(withPaths, "sheet-held-kind").length, 0, "an item with paths has no \"· note\"");

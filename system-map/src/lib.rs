@@ -3,6 +3,9 @@
 //! `check` is the entry point: a repository's root in, the parts with the files each owns, the
 //! links and the problems out. `check_at` reads one commit instead of the working tree.
 
+// Spec #548, Group 3: these two crates document their public API.
+#![warn(missing_docs)]
+
 mod commit;
 mod edges;
 mod extract;
@@ -15,14 +18,15 @@ mod touched;
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     path::Path,
-    process::Command,
+    time::Duration,
 };
+use studio_workbench::run::{RunError, git, run_until};
 
 use serde::{Deserialize, Serialize};
 
 pub use edges::{Edge, FilePair, Site};
 pub use imports::{Across, Count, Hub, Imports, Inside, Share, imports};
-pub use laws::{LawReport, LawTest, Tag, law_tests, tag_id, test_name_after};
+pub use laws::{LawReport, LawTest, Tag, attribute_brackets, law_tests, tag_id, test_name_after};
 pub use parts::{convert, convert_value, part_text};
 use pattern::Pattern;
 pub use touched::{Touched, touched, touched_for_map};
@@ -35,6 +39,7 @@ pub const MAP_FILE: &str = "system-map.json";
 pub struct Report {
     /// The parts, in the file's order, each with the tracked files it owns.
     pub parts: Vec<PartFiles>,
+    /// The links, in the file's order.
     pub links: Vec<Link>,
     /// The edges the named extractors compute between parts, sorted, each with its file pairs and their import sites.
     pub edges: Vec<Edge>,
@@ -52,42 +57,64 @@ pub struct Report {
 /// by backing.
 #[derive(Debug, Default, Serialize)]
 pub struct Counts {
+    /// The parts.
     pub parts: usize,
+    /// The tracked files the parts own.
     pub files: usize,
+    /// The tracked files no part owns on purpose.
     pub ignored: usize,
+    /// The links, by kind.
     pub links: LinkCounts,
+    /// The laws, by backing.
     pub laws: LawCounts,
 }
 
 /// The links by kind, and the import links proven by a computed edge or unproven, with an end no extractor reads.
 #[derive(Debug, Default, Serialize)]
 pub struct LinkCounts {
+    /// Every link.
     pub total: usize,
+    /// The `import` links.
     pub import: usize,
+    /// The `http` links.
     pub http: usize,
+    /// The `spawn` links.
     pub spawn: usize,
+    /// The `file` links.
     pub file: usize,
+    /// The import links a computed edge runs the way of.
     pub proven: usize,
+    /// The import links with an end that no extractor reads.
     pub unproven: usize,
 }
 
+/// The laws by backing.
 #[derive(Debug, Default, Serialize)]
 pub struct LawCounts {
+    /// Those with a test behind them.
     pub check: usize,
+    /// Those with none.
     pub trust: usize,
 }
 
+/// A part with the files it owns or touches.
 #[derive(Debug, Serialize)]
 pub struct PartFiles {
+    /// The part's id.
     pub id: String,
+    /// The files' paths from the repository's root.
     pub files: Vec<String>,
 }
 
+/// A link of the map, from one end to another.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Link {
+    /// The link's id.
     pub id: String,
+    /// The id of the link's first end.
     pub from: String,
+    /// The id of the link's second end.
     pub to: String,
     /// What the link carries; the check requires it, and a converted version 1 map's links have none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -102,9 +129,13 @@ pub struct Link {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Kind {
+    /// A code dependency, which the readers can prove.
     Import,
+    /// An HTTP call at run time.
     Http,
+    /// A process started at run time.
     Spawn,
+    /// A file the two ends share at run time.
     File,
 }
 
@@ -123,7 +154,10 @@ impl Kind {
 /// A parsed `system-map.json`. Its fields are private: build one with `parse` or `parse_lenient`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[allow(dead_code)] // Fields the map must hold; later checks and screens read them.
+#[allow(
+    dead_code,
+    reason = "fields the map must hold, which `deny_unknown_fields` checks; later checks and screens read them"
+)]
 pub struct Map {
     version: u32,
     extractors: Option<Vec<String>>,
@@ -137,7 +171,10 @@ pub struct Map {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "fields the map must hold, which `deny_unknown_fields` checks"
+)]
 struct Part {
     id: String,
     name: String,
@@ -159,7 +196,10 @@ enum Tier {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "fields the map must hold, which `deny_unknown_fields` checks"
+)]
 struct Actor {
     id: String,
     name: String,
@@ -167,7 +207,10 @@ struct Actor {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "fields the map must hold, which `deny_unknown_fields` checks"
+)]
 struct Law {
     id: String,
     on: String,
@@ -175,16 +218,22 @@ struct Law {
     text: String,
 }
 
+/// What stands behind a law.
 #[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "kebab-case")]
 pub enum Backing {
+    /// A test tagged `@law: <id>` holds it.
     Check,
+    /// No test does: it is taken on trust.
     Trust,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "fields the map must hold, which `deny_unknown_fields` checks"
+)]
 struct Flow {
     id: String,
     name: String,
@@ -193,7 +242,10 @@ struct Flow {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "fields the map must hold, which `deny_unknown_fields` checks"
+)]
 struct Hop {
     link: String,
     text: String,
@@ -518,20 +570,16 @@ fn check_ids_and_references(map: &Map) -> Vec<String> {
     problems
 }
 
+/// The longest listing a repository's files may take.
+const GIT_LIMIT: Duration = Duration::from_secs(30);
+
 /// The files git tracks in `root`, sorted.
 fn tracked_files(root: &Path) -> Result<Vec<String>, String> {
-    let output = Command::new("git")
-        .args(["ls-files", "-z"])
-        .current_dir(root)
-        .output()
-        .map_err(|error| format!("cannot run git in {}: {error}", root.display()))?;
-    if !output.status.success() {
-        return Err(format!(
-            "git ls-files failed in {}: {}",
-            root.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
+    let listed = run_until(git(root).args(["ls-files", "-z"]), GIT_LIMIT);
+    let output = listed.map_err(|error| match error {
+        RunError::Start(error) => format!("cannot run git in {}: {error}", root.display()),
+        error => format!("git ls-files failed in {}: {error}", root.display()),
+    })?;
     let files: BTreeSet<String> = output
         .stdout
         .split(|&b| b == 0)

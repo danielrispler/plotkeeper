@@ -11,10 +11,10 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     path::{Path, PathBuf},
-    process::Command,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+use studio_workbench::run::{self, run_until};
 
 /// The map file's name at the repository's root.
 const MAP_FILE: &str = system_map::MAP_FILE;
@@ -105,15 +105,12 @@ pub struct View {
     pub y: f64,
 }
 
+/// The longest a read of a project's repository may take.
+pub(crate) const GIT_READ_LIMIT: Duration = Duration::from_secs(30);
+
+/// What `git args` prints in `dir`, read within [`GIT_READ_LIMIT`]; else what went wrong, for a failed git its own message.
 pub(crate) fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
-    }
+    let out = run_until(run::git(dir).args(args), GIT_READ_LIMIT).map_err(|e| e.to_string())?;
     Ok(String::from_utf8_lossy(&out.stdout).trim_end().to_string())
 }
 
@@ -217,7 +214,7 @@ impl Drop for Running<'_> {
         self.0
             .0
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .entry(self.1.to_string())
             .or_default()
             .running = false;
@@ -254,6 +251,7 @@ impl Fetches {
             }
             slot.running = true;
             slot.last = Some(now);
+            drop(slots);
         }
         // The lock is not held while git runs, so a second trigger meets `running`; the guard clears it even if `fetch` panics.
         let _running = Running(self, repo);
@@ -271,22 +269,9 @@ pub(crate) fn state_file() -> Result<PathBuf, String> {
     Ok(studio_hook::data_dir(&home).join(STATE_FILE))
 }
 
-fn read_file(file: &Path) -> serde_json::Value {
-    let parsed = std::fs::read_to_string(file)
-        .ok()
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
-    parsed
-        .filter(|v| v.is_object())
-        .unwrap_or_else(|| serde_json::json!({}))
-}
-
 /// Daniel's state for `project` from `file`; a missing or unreadable file is an empty state.
 pub fn read_user(file: &Path, project: &str) -> UserState {
-    read_file(file)
-        .get("projects")
-        .and_then(|projects| projects.get(project))
-        .and_then(|user| serde_json::from_value(user.clone()).ok())
-        .unwrap_or_default()
+    crate::json_file::read_project(file, project)
 }
 
 /// Serialises the writes, so two changes never lose one another.
@@ -299,30 +284,14 @@ pub fn update_user(
     project: &str,
     change: impl FnOnce(&mut UserState),
 ) -> Result<UserState, String> {
-    let _writing = WRITING.lock().unwrap();
-    let mut whole = read_file(file);
-    let mut user = read_user(file, project);
-    change(&mut user);
-    let entry = whole
-        .as_object_mut()
-        .unwrap()
-        .entry("projects")
-        .or_insert_with(|| serde_json::json!({}))
-        .as_object_mut()
-        .ok_or("map-state.json: projects is not an object")?
-        .entry(project)
-        .or_insert_with(|| serde_json::json!({}));
-    let saved = serde_json::to_value(&user).map_err(|e| e.to_string())?;
-    match entry.as_object_mut() {
-        Some(object) => object.extend(saved.as_object().unwrap().clone()),
-        None => *entry = saved,
-    }
-    let dir = file.parent().ok_or("no folder for map-state.json")?;
-    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    let mut temp = tempfile::NamedTempFile::new_in(dir).map_err(|e| e.to_string())?;
-    serde_json::to_writer_pretty(&mut temp, &whole).map_err(|e| e.to_string())?;
-    temp.persist(file).map_err(|e| e.to_string())?;
-    Ok(user)
+    Ok(crate::json_file::update_json_file(
+        file,
+        STATE_FILE,
+        &WRITING,
+        project,
+        change,
+        |_| {},
+    )?)
 }
 
 /// Fetches `origin` for `project` through the cooldown. A failure is logged quietly and the refs stay as they were.
@@ -363,7 +332,7 @@ pub fn map_state(project: String, fetch: bool, app: &Arc<crate::App>) -> Result<
     state.user = read_user(&file, &project);
     if let Some(source) = &state.source {
         state.fog = crate::fog::effective(&state.user, source);
-        let born = crate::staleness::births(repo, source);
+        let born = crate::staleness::births(&app.births, repo, source);
         let now = crate::ratify::now();
         state.stale = crate::staleness::bands(&state.user, source, &born, now);
         state.stale_why = crate::staleness::lines(&state.user, source, &born, now);
@@ -373,7 +342,7 @@ pub fn map_state(project: String, fetch: bool, app: &Arc<crate::App>) -> Result<
     app.briefs.annotate(&project, &mut state.ready);
     state.ratify = crate::ratify::file()
         .and_then(|file| crate::ratify::start(&file, &project, crate::ratify::now()))
-        .map(|mine| crate::ratify::pending(repo, &mine))
+        .map(|mine| crate::ratify::pending(&app.changes, repo, &mine))
         .unwrap_or_default();
     state.runs = app.runner.runs(&project);
     // A shown map starts the part catch-ups of up to eight fogged Core parts (#396, #450).
@@ -543,7 +512,9 @@ pub fn map_marks(
             if !repo.is_dir() {
                 return None;
             }
-            let _ = crate::fog::refresh(repo, &file, &project, false);
+            if let Err(e) = crate::fog::refresh(repo, &file, &project, false) {
+                log::warn!("the fog of {project} was not refreshed: {e}");
+            }
             let fog = read_map(repo).source.is_some_and(|source| {
                 crate::fog::core_fogged(&read_user(&file, &project), &source)
             });
@@ -576,7 +547,7 @@ pub fn map_save_positions(
         return Err("a position must be a number".into());
     }
     update_user(&state_file()?, &project, |user| {
-        user.positions.extend(positions)
+        user.positions.extend(positions);
     })
 }
 
@@ -726,7 +697,7 @@ mod tests {
         commit_file(&o.seed, MAP_FILE, map);
         git(&o.seed, &["push", "-q", "origin", "HEAD"]);
         git(&o.main, &["fetch", "-q", "origin"]);
-        let paths = |list: &[&str]| list.iter().map(|p| p.to_string()).collect::<Vec<_>>();
+        let paths = |list: &[&str]| list.iter().map(ToString::to_string).collect::<Vec<_>>();
         let groups = BTreeMap::from([
             ("both".to_string(), paths(&["ui/a.ts", "core/b.rs"])),
             ("docs".to_string(), paths(&["docs/x.md"])),
@@ -773,7 +744,7 @@ mod tests {
                 number: 7,
                 head: head.clone(),
                 title: "Work".into(),
-                parts: parts.map(|p| p.iter().map(|s| s.to_string()).collect()),
+                parts: parts.map(|p| p.iter().map(ToString::to_string).collect()),
                 paths: None,
                 base: None,
             })

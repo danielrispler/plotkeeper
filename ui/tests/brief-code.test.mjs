@@ -1,7 +1,7 @@
 // "See the code" of a brief's step (spec #477, ticket #490): which files each step's button asks for, run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { stepCode } from "../../dist/map-model.js";
+import { stepCode } from "../../dist/map-brief-model.js";
 
 const step = (k, on = []) => ({ k, on });
 const parts = new Set(["server", "window"]);

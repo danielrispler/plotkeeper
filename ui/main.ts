@@ -4,11 +4,10 @@
 // server's events to the regions and lays the list out by the width rule in `layout.ts`.
 
 import "./transport.js";
-import { dismissNotice, NOT_RECORDING, onLogRecord, setSettingsErrors, showNotice } from "./notice.js";
+import { dismissNotice, NOT_RECORDING, setSettingsErrors, showError, showNotice } from "./notice.js";
 import { withGateNotice, withWriterNotice } from "./writer-notice.js";
 import { startWatching } from "./answer.js";
-import { openAsk } from "./ask.js";
-import { showCards } from "./cards.js";
+import { forgetAsks, openAsk } from "./ask.js";
 import { recheckSeen } from "./seen.js";
 import { diffRequest, newestDiff } from "./diff.js";
 import { element, failure, invoke, listen, logUncaught } from "./dom.js";
@@ -16,24 +15,27 @@ import { type Actions, newestUnseen, nextNeedsYou, paletteEntries, run, stepLine
 import { hover, realClock, shownGate } from "./hover.js";
 import { arrange } from "./layout.js";
 import { fitMap, mapEscape, openMap, projectsChanged, startMap } from "./map.js";
-import "./map-history.js";
-import { startSheetHere } from "./map-sheet.js";
-import "./map-tray.js";
-import "./map-runs.js";
-import "./micro-world.js";
+import { startMapHistory } from "./map-history.js";
+import { startMapSheet } from "./map-sheet.js";
+import { startMapTray } from "./map-tray.js";
+import { startMapRuns } from "./map-runs.js";
+import { startMicroWorld } from "./micro-world.js";
+import { openBriefOf } from "./map-brief.js";
+import { briefOpen } from "./map-brief-player.js";
 import { openPreFlight } from "./map-pre-flight.js";
 import { startMapAgents } from "./map-agents.js";
-import { briefOpen } from "./map-brief.js";
-import { drawSidebar, listSpace, secondLine, sessionName, showSessions, staleDots } from "./list.js";
+import { drawSidebar, showSessions, staleDots, startList } from "./list.js";
+import { listSpace, secondLine, sessionName } from "./list-model.js";
 import { deselect, pressSession, select, show } from "./selection.js";
-import { diffIn, historyIn, logIn, showHistory, startPanes } from "./panes.js";
-import { closePanel, panelShown, showPanel, startPanel } from "./panel.js";
+import { diffIn, historyIn, logIn, startPanes } from "./panes.js";
+import { besideSheet, closePanel, panelShown, showHistory, showPanel, startPanel } from "./panel.js";
 import { showPalette } from "./palette.js";
 import { projectOfCwd, selectedProject, sidebarOrder } from "./projects.js";
 import { narrowBelow, selectedView } from "./map-model.js";
-import { reload, type SettingsFiles } from "./settings.js";
-import { studio } from "./state.js";
-import { drawFeed, lastHeadline, showTurn, showView, turnHeadline } from "./story.js";
+import { reload } from "./settings.js";
+import { setFocus, setMissed, setProjects, setSettings, studio } from "./state.js";
+import { askDelete, drawFeed, forgetStories, lastHeadline, showCards, showTurn, showView, startStory, turnHeadline } from "./story.js";
+import { forgetTails } from "./blocked.js";
 import { startRailBriefs } from "./rail-brief.js";
 import { barKeyDown } from "./story-bar.js";
 import { startWriters } from "./writers.js";
@@ -41,7 +43,7 @@ import { jumpToNeedsYou, showToast, showWhatsNewToast, watchToasts } from "./toa
 import { askOnce, notifyIfAway, type Alert } from "./alerts.js";
 import { type Copied, finishedNote, showCopyToast, showNote, watchNotes } from "./notes.js";
 import { startWhatsNew } from "./whats-new.js";
-import type { SavedProject, Selection, Session, SessionCards } from "./types.js";
+import type { SavedProject, Selection, Session, SessionCards, SettingsFiles } from "./types.js";
 import { HOVERS } from "./hovers.js";
 import { explanationsApplied, startExplanations, toggleExplanations } from "./explanations.js";
 
@@ -72,7 +74,8 @@ new MutationObserver(syncHover).observe(document.body, { attributes: true, attri
 const held = (event: PointerEvent) => event.buttons !== 0;
 window.addEventListener("pointerdown", () => listHover.pressed(true), true);
 for (const type of ["pointerup", "pointercancel"]) window.addEventListener(type, () => listHover.pressed(false), true);
-const list = document.querySelector(".list")!;
+const list = document.querySelector<HTMLElement>(".list");
+if (!list) throw new Error(".list is not on the page");
 list.addEventListener("pointerenter", (event) => {
   listHover.pressed(held(event as PointerEvent));
   listHover.enter("list");
@@ -120,7 +123,7 @@ function answer(n: number) {
   dock.querySelector<HTMLButtonElement>(".send:not([disabled])")?.focus();
 }
 
-const actions: Actions = {
+const named: Record<string, (arg?: string) => void> = {
   "studio::ToggleList": () => toggle("list-open"),
   // The selected session's story, which lives in the left panel over the map (#386): shown, or closed back to the bare map with the
   // session still selected, so ⌘2 opens it again.
@@ -132,9 +135,10 @@ const actions: Actions = {
   // Ask (danielrispler/plotkeeper#125) on the selected session's newest turn: its Headline's box, in the rail, opened.
   "studio::AskAbout": () => {
     const turn = (studio.selection?.session.turns.length ?? 0) - 1;
-    if (turn < 0) return;
-    showPanel({ kind: "story", session: selectedId()! });
-    openAsk(selectedId()!, { kind: "headline", turn });
+    const session = selectedId();
+    if (turn < 0 || session === null) return;
+    showPanel({ kind: "story", session });
+    openAsk(session, { kind: "headline", turn });
   },
   "studio::Dismiss": () => {
     // Esc peels the map's layers (`map.ts`) and on the bare map does nothing (#386); the list open over it closes first. The palette, a
@@ -144,7 +148,7 @@ const actions: Actions = {
     document.body.classList.remove("list-open", "list-peek");
   },
   "studio::ToggleFocus": () => {
-    studio.focus = !studio.focus;
+    setFocus(!studio.focus);
     document.body.classList.remove("list-open", "list-peek");
     layout();
   },
@@ -177,9 +181,11 @@ const actions: Actions = {
   // The page's explanations on or off (#522), as the `?` beside an explained panel's × does.
   "studio::ToggleExplanations": () => toggleExplanations(),
   "studio::Palette": () => {
-    showPalette(paletteEntries(studio.files.keymap, Object.keys(actions)), (binding) => run(actions, binding));
+    showPalette(paletteEntries(studio.files.keymap, [...actions.keys()]), (binding) => run(actions, binding));
   },
 };
+// Looked up by the name `keymap.json` gives, so a Map (`keys.ts`, `Actions`).
+const actions: Actions = new Map(Object.entries(named));
 // Esc in a modal dialog (rename, delete, confirm) is the dialog's, as the palette's is (#458): it closes the dialog, and the window's Esc,
 // which peels the map's layers, does not see it (#452's outside review).
 for (const dialog of document.querySelectorAll("dialog")) {
@@ -207,8 +213,7 @@ function applySettings(files: SettingsFiles) {
   // A write's returned text and then the watcher's report of the same file are one change: the second does nothing.
   if (applied && files.settings === studio.texts.settings && files.keymap === studio.texts.keymap) return;
   applied = true;
-  studio.texts = files;
-  studio.files = reload(studio.files, files);
+  setSettings(files, reload(studio.files, files));
   const { settings, errors } = studio.files;
   setSettingsErrors(errors);
   layout();
@@ -219,27 +224,47 @@ function applySettings(files: SettingsFiles) {
   window.dispatchEvent(new Event("settings"));
 }
 listen<SettingsFiles>("settings-files", applySettings);
-invoke("settings_files").then(applySettings);
+invoke("settings_files").then(applySettings).catch(failure("settings_files"));
 // The rail's "⋯" menu (danielrispler/Falinks#574) closes once an action in it is chosen.
 element("rail-actions").addEventListener("click", () => element("rail-actions").hidePopover());
 
 document.addEventListener("visibilitychange", recheckSeen);
 window.addEventListener("focus", recheckSeen);
 window.addEventListener("blur", recheckSeen);
-window.addEventListener("focus", () => actions["studio::RefreshLanded"]());
+window.addEventListener("focus", () => actions.get("studio::RefreshLanded")?.());
 
-startPanes();
+// The Map view's overlays hook into its draws and Esc's layers, in the order their imports gave them.
+startMicroWorld();
+startMapHistory({ openBriefOf });
+startMapSheet({ besideSheet, panelShown, headline: turnHeadline, show: showTurn });
+startMapTray();
+startMapRuns();
+startPanes(select);
+startStory((id, agent) => void select(id, agent));
+startList({
+  pressSession,
+  askDelete,
+  lastHeadline,
+  forget: (sessions) => {
+    forgetStories(sessions);
+    forgetTails(sessions);
+    forgetAsks(new Set(sessions.map((session) => session.id)));
+  },
+});
 startRailBriefs(drawFeed);
 startMap({ selectedProject, removeProject, shown: drawSidebar });
 element("pre-flight-button").addEventListener("click", () => openPreFlight());
 startMapAgents({
-  sessions: () => studio.listed, projectOf: projectOfCwd, select: (id, agent) => void pressSession(id, agent), briefOpen,
-  name: sessionName, line: (session) => secondLine(session, lastHeadline), placed: drawFeed,
+  sessions: () => studio.listed,
+  projectOf: projectOfCwd,
+  select: (id, agent) => void pressSession(id, agent),
+  briefOpen,
+  name: sessionName,
+  line: (session) => secondLine(session, lastHeadline),
+  placed: drawFeed,
 });
 // The left panel over the map (#385): History, a turn's diff and a worker's log; closing a story or a log selects none and leaves the bare map.
 startPanel({ history: historyIn, diff: diffIn, log: logIn, deselect: () => void deselect() });
-// "This session here" on the part sheet reads the story (#561).
-startSheetHere({ headline: turnHeadline, show: showTurn });
 const openSettings = () => showPanel({ kind: "settings" });
 element("settings-button").addEventListener("click", () => (panelShown()?.kind === "settings" ? showPanel(null) : void openSettings()));
 // The page's own elements whose hover another place shows too (#220); the needs-you toast's adds its key when it shows.
@@ -249,12 +274,12 @@ list.addEventListener("click", (event) => listSpace(event.target as HTMLElement)
 // The needs-you chip (danielrispler/Falinks#572) selects the first session that needs Daniel.
 element("needs-you").addEventListener("click", () => {
   const first = studio.listed.find((session) => session.state === "needs_you");
-  if (first) select(first.id);
+  if (first) void select(first.id);
 });
 
 // The saved project list (#381): the list's headers and the map follow it; its first arrival opens the last viewed project's map (#386).
 const showProjects = (projects: SavedProject[]) => {
-  studio.projects = projects;
+  setProjects(projects);
   staleDots();
   drawSidebar();
   projectsChanged();
@@ -263,7 +288,7 @@ function removeProject(path: string) {
   invoke("remove_project", { path }).then(showProjects).catch(failure("remove_project"));
 }
 listen<SavedProject[]>("projects", showProjects);
-invoke("projects").then(showProjects);
+invoke("projects").then(showProjects).catch(failure("projects"));
 element("remove-project").addEventListener("click", () => {
   const menu = element("project-actions");
   menu.hidePopover();
@@ -275,9 +300,9 @@ const showList = (sessions: Session[]) => {
   showToast();
 };
 listen<Session[]>("sessions", showList);
-invoke("sessions").then(showList);
+invoke("sessions").then(showList).catch(failure("sessions"));
 // The toasts' presses keep the keyboard's focus, and a modal dialog holds them back (#457).
-watchToasts();
+watchToasts(select);
 // A turn that ended off screen in the focused window (the server's notices): the note toast names it.
 watchNotes();
 // Copy for the agent (#493): the brief's copy icons say what they copied, and the copy toast shows it.
@@ -296,22 +321,30 @@ listen<string[]>("finished", (ids) => {
 // While a press waits for its reply, the reply draws the rail once, with its cards; an event between
 // would draw it with the last session's cards for a frame (danielrispler/Falinks#570).
 // The press's settling fetches what it held back.
-listen<Selection | null>("selected", (selected) => (studio.pending ? (studio.missed = true) : show(selected)));
-// A session selected before the page opened opens in the left panel, its story or its worker's log, over its project's map.
-invoke("selected").then((selected) => {
-  show(selected);
-  if (selected) openMap(projectOfCwd(selected.session.cwd));
-  if (selected) showPanel(selectedView(selected.session.id, projectOfCwd(selected.session.cwd), selected.agent).panel);
+listen<Selection | null>("selected", (selected) => {
+  if (studio.pending) setMissed(true);
+  else show(selected);
 });
-listen<SessionCards>("cards", (cards) => (studio.pending ? (studio.missed = true) : showCards(cards)));
+// A session selected before the page opened opens in the left panel, its story or its worker's log, over its project's map.
+invoke("selected")
+  .then((selected) => {
+    show(selected);
+    if (selected) openMap(projectOfCwd(selected.session.cwd));
+    if (selected) showPanel(selectedView(selected.session.id, projectOfCwd(selected.session.cwd), selected.agent).panel);
+  })
+  .catch(failure("selected"));
+listen<SessionCards>("cards", (cards) => {
+  if (studio.pending) setMissed(true);
+  else showCards(cards);
+});
 // Claude Code's version changed: re-record the subagent fixture.
 listen<string>("notice", showNotice);
 // A notice the server found due while no tab was focused (#331): the browser notification. The permission is asked once, on the first press.
 listen<Alert>("notification", notifyIfAway);
 window.addEventListener("pointerdown", () => void askOnce(), { once: true });
 window.addEventListener("keydown", () => void askOnce(), { once: true });
-// The server's errors, as a `log://log` record (`notice.ts`).
-listen<{ level: number; message: string }>("log://log", onLogRecord);
+// An error the server logged, by its message (`notice.ts`).
+listen<string>("server-error", showError);
 element("notice-dismiss").addEventListener("click", dismissNotice);
 // No card writer can run, or one can again (danielrispler/plotkeeper#51).
 const editNotice = (edit: (text: string) => string) => {
@@ -322,10 +355,9 @@ const editNotice = (edit: (text: string) => string) => {
 const showWriterNotice = (notice: string | null) => editNotice((text) => withWriterNotice(text, notice));
 listen<string | null>("writer-notice", showWriterNotice);
 // A page opened after the writer failed has missed the event (danielrispler/plotkeeper#328).
-// The desktop shell has no such command, so a rejection is no error there.
 invoke("writer_notice")
   .then((notice) => notice && showWriterNotice(notice))
-  .catch(() => {});
+  .catch(failure("writer_notice"));
 // No harness wired (#437): "not recording" in the map's head until one is. `plotkeeper install` runs in a terminal, so the page asks again at its focus.
 const checkWired = () =>
   invoke("wired")
@@ -334,10 +366,10 @@ const checkWired = () =>
       line.textContent = wired ? "" : NOT_RECORDING;
       line.hidden = wired;
     })
-    .catch(() => {});
+    .catch(failure("wired"));
 checkWired();
 window.addEventListener("focus", checkWired);
-invoke("cards").then(showCards);
+invoke("cards").then(showCards).catch(failure("cards"));
 // The writer section in the Settings panel (spec #320, #387): its gate notice shares the writer's line, and a passed Test's save applies as one.
 startWriters({
   summaries: () => studio.files.settings.summaries,

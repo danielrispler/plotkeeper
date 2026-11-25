@@ -12,8 +12,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     fs,
     path::{Path, PathBuf},
-    process::Command,
-    time::SystemTime,
+    time::{Duration, SystemTime},
 };
 use studio_core::{Base, Change, Fingerprint, Purpose};
 
@@ -231,8 +230,7 @@ impl Fingerprints {
 
 /// The Unix second now.
 fn now() -> u64 {
-    let since = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH);
-    since.map_or(0, |since| since.as_secs())
+    studio_workbench::clock::now_ms() / 1000
 }
 
 /// The first line of a worktree's reflog: the commit it was created at, when, and how many bytes
@@ -400,14 +398,13 @@ fn os_file(path: &str) -> bool {
 /// `git`'s output in `folder`, or `None` when it fails. It takes no optional locks, so it never
 /// holds up the agent's own `git` commands in the same worktree.
 pub(crate) fn git(folder: &Path, args: &[&str]) -> Option<Vec<u8>> {
-    let output = Command::new("git")
-        .arg("--no-optional-locks")
-        .args(args)
-        .current_dir(folder)
-        .output()
-        .ok()?;
-    output.status.success().then_some(output.stdout)
+    use studio_workbench::run::{git, run_until};
+    let output = run_until(git(folder).args(args), GIT_LIMIT).ok()?;
+    Some(output.stdout)
 }
+
+/// The longest a read of a worktree may take.
+const GIT_LIMIT: Duration = Duration::from_secs(30);
 
 /// One file's change as a unified diff, as `git diff` shows it.
 fn unified(path: &str, before: Option<Content>, after: Option<Content>) -> String {

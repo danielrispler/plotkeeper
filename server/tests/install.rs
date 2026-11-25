@@ -169,7 +169,8 @@ esac"#,
             }
             if up {
                 // Ctrl+C, through the terminal.
-                let _ = stdin.write_all(b"\x03");
+                // The server may have stopped already.
+                stdin.write_all(b"\x03").ok();
             }
         });
         text.replace("\r\n", "\n")
@@ -182,7 +183,8 @@ esac"#,
         let pid = child.id().to_string();
         served(&mut child, |_, up| {
             if up {
-                let _ = Command::new("kill").args(["-INT", &pid]).status();
+                // The server may have stopped already.
+                Command::new("kill").args(["-INT", &pid]).status().ok();
             }
         })
     }
@@ -697,10 +699,10 @@ fn cursor_install_then_uninstall_leaves_its_hook_file_byte_identical() {
     let setups: [(&str, Setup); 4] = [
         ("absent", |_| {}),
         ("no file", |m| {
-            fs::create_dir_all(m.home.join(".cursor/projects")).unwrap()
+            fs::create_dir_all(m.home.join(".cursor/projects")).unwrap();
         }),
         ("present", |m| {
-            m.write(".cursor/hooks.json", "{ \"version\": 1, \"hooks\": {} }\n")
+            m.write(".cursor/hooks.json", "{ \"version\": 1, \"hooks\": {} }\n");
         }),
         ("customised", |m| m.write(".cursor/hooks.json", CURSOR_OWN)),
     ];
@@ -1071,6 +1073,44 @@ fn no_line_of_zshrc_but_the_removed_ones_is_kept_in_the_data_folder() {
     assert_eq!(files(&machine.home), before);
 }
 
+/// A dotfile manager links `~/.zshrc` to its own copy. Install replaces the copy whole, by a rename, so the link stays
+/// a link, and a reader that opened the old file still reads all of it: nothing is ever cut short in place.
+#[test]
+fn a_symlinked_zshrc_stays_a_symlink_and_is_replaced_whole() {
+    let machine = Machine::new(true, true);
+    legacy(&machine, FALINKS_LINE);
+    let link = machine.home.join(".zshrc");
+    let real = machine.home.join("dotfiles/zshrc");
+    fs::create_dir_all(real.parent().unwrap()).unwrap();
+    fs::rename(&link, &real).unwrap();
+    fs::set_permissions(&real, fs::Permissions::from_mode(0o600)).unwrap();
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let old = fs::read_to_string(&real).unwrap();
+    let mut held = fs::File::open(&real).unwrap();
+
+    machine.run("install");
+
+    assert!(fs::symlink_metadata(&link).unwrap().is_symlink());
+    assert_eq!(fs::read_link(&link).unwrap(), real);
+    let new = fs::read_to_string(&real).unwrap();
+    assert!(!new.contains("checkout/plugin"), "{new}");
+    assert!(new.contains("alias g=git\n") && new.contains("export EDITOR=vim\n"));
+    let mode = fs::metadata(&real).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "the file keeps its permissions");
+    let mut still = String::new();
+    held.read_to_string(&mut still).unwrap();
+    assert_eq!(still, old, "the old file was written over in place");
+    let left: Vec<_> = fs::read_dir(real.parent().unwrap())
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(left, ["zshrc"], "a temp file was left behind");
+
+    machine.run("uninstall");
+    assert!(fs::symlink_metadata(&link).unwrap().is_symlink());
+    assert_eq!(fs::read_to_string(&real).unwrap(), old);
+}
+
 /// A record written before install kept only the removed lines held the whole old `~/.zshrc` in `backups/zshrc` and
 /// the text install wrote in `state.json`'s `zshrc`.
 #[test]
@@ -1324,8 +1364,10 @@ fn a_second_start_never_asks() {
     }
 
     let text = machine.start(&["y"]);
-    let _ = first.kill();
-    let _ = first.wait();
+    // The child may have exited already.
+    first.kill().ok();
+    // Only reaps the child; its exit status is not used.
+    first.wait().ok();
     assert!(text.contains(line.trim()), "{text}");
     assert!(!text.contains(ASK), "{text}");
     assert!(machine.calls("claude").is_empty());
@@ -1624,8 +1666,10 @@ fn the_server_says_nothing_is_wired_after_a_declined_start_and_wired_after_insta
     let before = wired(&url);
     machine.run("install");
     let after = wired(&url);
-    let _ = server.kill();
-    let _ = server.wait();
+    // The child may have exited already.
+    server.kill().ok();
+    // Only reaps the child; its exit status is not used.
+    server.wait().ok();
     assert!(!before, "nothing is wired after a no");
     assert!(after, "install wired, and the running server says so");
 }
@@ -1711,7 +1755,8 @@ fn with_stdout_sent_to_a_file_the_question_still_reaches_the_terminal_and_stdout
         }
         let logged = fs::read_to_string(&log).unwrap_or_default();
         if !stopped && logged.contains("plotkeeper: http") {
-            let _ = stdin.write_all(b"\x03");
+            // The server may have stopped already.
+            stdin.write_all(b"\x03").ok();
             stopped = true;
         }
     });
@@ -1737,7 +1782,8 @@ fn a_start_with_no_terminal_says_what_it_did_not_wire_on_stderr_and_prints_only_
         &mut first,
     )
     .unwrap();
-    let _ = child.kill();
+    // The child may have exited already.
+    child.kill().ok();
     let mut errors = String::new();
     child
         .stderr
@@ -1745,7 +1791,8 @@ fn a_start_with_no_terminal_says_what_it_did_not_wire_on_stderr_and_prints_only_
         .unwrap()
         .read_to_string(&mut errors)
         .unwrap();
-    let _ = child.wait();
+    // Only reaps the child; its exit status is not used.
+    child.wait().ok();
     assert!(first.starts_with("plotkeeper: http"), "{first}");
     assert!(errors.contains("Claude Code not wired"), "{errors}");
 }

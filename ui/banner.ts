@@ -5,7 +5,7 @@ import { age, fullTitle, prose, text } from "./dom.js";
 import type { OpenItem, Session, Since } from "./types.js";
 
 // A session whose last turn ended this long ago, with unseen turns, shows the banner.
-export const bannerAfter = 15 * 60_000;
+const bannerAfter = 15 * 60_000;
 
 // Whether the banner shows when Daniel selects the session: an idle or ended one with a turn, or one with unseen turns
 // whose last turn ended `bannerAfter` ago or more.

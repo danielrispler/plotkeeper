@@ -293,7 +293,7 @@ fn an_agy_session_gets_rows_from_its_tool_events() {
     let brain = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/agy/brain");
     let run = run.replace("@BRAIN@", &brain.display().to_string());
     let lines: Vec<&str> = run.lines().collect();
-    let file = log(&lines.iter().map(|l| l.to_string()).collect::<Vec<_>>());
+    let file = log(&lines.iter().map(ToString::to_string).collect::<Vec<_>>());
     let studio = Studio::replayed(lines);
 
     let session = studio

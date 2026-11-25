@@ -28,7 +28,7 @@ plotkeeper is a Rust server (`server/`) that serves the TypeScript page (`ui/`) 
 
 ## Checks
 
-Before handing off a change, run `npm ci` once, then `npm run check` from the repository's root; it needs `cargo nextest` (`brew install cargo-nextest`). It builds the UI first, which the server embeds, then runs the checks of `.github/workflows/studio.yml`'s `macos` job. It leaves out the snap fixtures, which `.github/workflows/snap.yml` renders in Chrome in two shard jobs (`npm run snap:all -- --shard=<i>/2`), only when `ui/`, `scripts/snap/` or the build's inputs change.
+Before handing off a change, run `npm ci` once, then `npm run check` from the repository's root; it needs `cargo nextest` (`brew install cargo-nextest`) and `cargo machete` (`cargo install --locked cargo-machete`). It builds the UI first, which the server embeds, then runs the checks of `.github/workflows/studio.yml`'s `macos` job. It leaves out the snap fixtures, which `.github/workflows/snap.yml` renders in Chrome in two shard jobs (`npm run snap:all -- --shard=<i>/2`), only when `ui/`, `scripts/snap/` or the build's inputs change.
 
 plotkeeper embeds `dist/` when it is built, so a merged change reaches Daniel's running plotkeeper only after a rebuild. After merging a change to it, tell him to stop plotkeeper (Ctrl+C) and run `npm run start` from the main checkout: it builds the page, the hook and the server, installs `plotkeeper` and starts it.
 

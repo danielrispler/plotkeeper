@@ -13,7 +13,6 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     sync::Mutex,
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 /// The log's file, in the data folder.
@@ -343,10 +342,9 @@ fn merge_number(subject: &str) -> Option<u64> {
     })
 }
 
+/// Now, in Unix seconds, as the stop rules' log keeps time.
 fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs())
+    studio_workbench::clock::now_ms() / 1000
 }
 
 /// Logs that Daniel used something. A `session` event names no project.

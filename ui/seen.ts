@@ -4,7 +4,7 @@
 // In the viewport means covering at least half of the element or at least half of the viewport (so a card taller than twice the
 // viewport can be seen), for `seenAfter` ms without a break.
 
-export const seenAfter = 500;
+const seenAfter = 500;
 
 // How much of the element, and how much of the viewport, the element covers; both 0 to 1.
 export type Overlap = { element: number; viewport: number };
@@ -62,7 +62,8 @@ export function watchSeen(node: Element, { active, onSeen, interaction = false }
       ? null
       : new IntersectionObserver(
           (entries) => {
-            const entry = entries.at(-1)!;
+            const entry = entries.at(-1);
+            if (!entry) return;
             const area = (r: { width: number; height: number }) => r.width * r.height;
             const root = entry.rootBounds ?? { width: window.innerWidth, height: window.innerHeight };
             overlap = { element: entry.intersectionRatio, viewport: area(root) ? area(entry.intersectionRect) / area(root) : 0 };

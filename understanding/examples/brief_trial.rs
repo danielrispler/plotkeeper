@@ -9,17 +9,16 @@
 //! its items) and `<n>-checks.md`, `<n>-claims.md` and `<n>-record.json` (the claim check's flags and the record line); the store and its records are under `<dir>/pr-briefs/`. With `BRIEF_DRY` set
 //! it writes the facts and budget only and makes no call. Calls `gh` and `git`; reads no credential file.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use studio_understanding::ClaudeWriter;
 use studio_understanding::pr_brief::{
     BriefStore, DEFAULT_MODEL, PrMeta, build_facts, fetch_meta, gather, write_pr_brief,
 };
 
 fn git(repo: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
+    let out = studio_workbench::run::git(repo)
         .args(args)
-        .current_dir(repo)
         .output()
         .expect("git ran");
     assert!(
@@ -30,6 +29,10 @@ fn git(repo: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "a hand-run trial's whole script, read top to bottom"
+)]
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let after = |flag: &str| {
@@ -73,15 +76,18 @@ fn main() {
             studio_understanding::pr_brief::BUDGET
         );
         for (name, bytes) in &facts.budget.sections {
-            budget += &format!("| {name} | {bytes} |\n");
+            // Writing to a `String` cannot fail.
+            writeln!(budget, "| {name} | {bytes} |").ok();
         }
-        budget += &format!(
+        write!(
+            budget,
             "\nDiff {} bytes in all. Files sent {}, partial {}, cut {}.\n",
             facts.budget.diff_bytes_full,
             facts.budget.files_sent,
             facts.budget.files_partial,
             facts.budget.files_cut
-        );
+        )
+        .ok();
         std::fs::write(out.join(format!("{number}-budget.md")), budget).unwrap();
         println!(
             "## #{number} {}\n\n- shape: {}; facts {} bytes",

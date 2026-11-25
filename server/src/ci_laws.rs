@@ -13,9 +13,10 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::{Path, PathBuf},
-    process::Command,
     sync::{Arc, Mutex},
+    time::Duration,
 };
+use studio_workbench::run::{self, RunError, run_until};
 use system_map::LawTest;
 
 /// The CI workflow whose run holds the law tests: the Studio's `npm run check` job.
@@ -457,13 +458,16 @@ pub fn snippet(text: &str, tag_line: usize) -> (usize, String) {
     let from = tag_line.saturating_sub(1).min(lines.len());
     let mut limit = (from + SNIPPET).min(lines.len());
     let mut base: Option<usize> = None; // The indentation of the test's first line, past attributes and comments.
-    let mut depth = 0i32;
+    let mut depth = 0usize;
     for (at, raw) in lines.iter().enumerate().skip(from + 1).take(SNIPPET) {
         let (trimmed, indent) = (raw.trim(), raw.len() - raw.trim_start().len());
+        if base.is_none()
+            && let Some(open) = system_map::attribute_brackets(depth, trimmed)
+        {
+            depth = open;
+            continue;
+        }
         match base {
-            None if depth > 0 || trimmed.starts_with("#[") || trimmed.starts_with("#![") => {
-                depth += trimmed.matches('[').count() as i32 - trimmed.matches(']').count() as i32;
-            }
             None if trimmed.is_empty() || trimmed.starts_with("//") => {}
             None => {
                 base = Some(indent);
@@ -604,20 +608,15 @@ fn parts_of(repo: &Path, laws: &[String]) -> Vec<String> {
 
 /// Runs `gh` as a normal user in `repo`, never prompting, and returns what it printed.
 pub(crate) fn gh(repo: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new(studio_workbench::gh_path())
-        .args(args)
-        .current_dir(repo)
-        .env("GH_PROMPT_DISABLED", "1")
-        .output()
-        .map_err(|e| format!("gh cannot run: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "gh: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
+    let out = run_until(run::gh(repo).args(args), GH_LIMIT).map_err(|e| match e {
+        RunError::Start(e) => format!("gh cannot run: {e}"),
+        e => format!("gh: {e}"),
+    })?;
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
+
+/// The longest a lookup at GitHub may take.
+const GH_LIMIT: Duration = Duration::from_secs(30);
 
 /// The last CI read of each project: the payload and the project header's dot read it, and only a trigger replaces it. The last finished
 /// result is also kept in `file` (when there is one), so a restart does not lose the header's dot before the map is opened.
@@ -633,9 +632,12 @@ struct Running<'a>(&'a Mutex<HashSet<String>>, String);
 
 impl Drop for Running<'_> {
     fn drop(&mut self) {
+        // A poisoned lock is used as it is. That is safe: the set only gains and loses whole names, so a panic while
+        // it is held leaves it whole, and a drop during an unwind must not panic again, which would abort. With
+        // plotkeeper's panic hook the process stops on a panic; this path is left for the tests, which unwind.
         self.0
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(&self.1);
     }
 }
@@ -668,6 +670,10 @@ impl CiCache {
     }
 
     /// Keeps `ci`, except that an answer of none (`gh` failed) never replaces a real result. Whether the record changed.
+    #[allow(
+        clippy::significant_drop_tightening,
+        reason = "the record is saved under its lock, so two saves never interleave"
+    )]
     pub fn put(&self, project: &str, ci: Ci) -> bool {
         let mut last = self.last.lock().unwrap();
         if ci.status == Status::Unknown
@@ -1244,7 +1250,7 @@ mod tests {
             run_url: None,
             commit: None,
             earlier: false,
-            parts: parts.iter().map(|p| p.to_string()).collect(),
+            parts: parts.iter().map(ToString::to_string).collect(),
             laws: Vec::new(),
             tail: String::new(),
             note: None,

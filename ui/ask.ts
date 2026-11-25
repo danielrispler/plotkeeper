@@ -4,21 +4,11 @@
 // those facts and, for a file, its hunk; the answer stays here, labelled as interpretation under the facts as recorded and the session never sees it. A failed call or a reply with no answer shows why, with
 // a retry.
 
-import { failure, fullTitle, invoke, onEnter, text } from "./dom.js";
+import { failure, fullTitle, invoke, keepOnly, messageOf, onEnter, pressable, text } from "./dom.js";
 import { rendered } from "./markdown.js";
+import type { Anchor, Facts, Hunk } from "./types.js";
 
-// What Ask is opened on: the core's `Anchor`.
-export type Anchor =
-  | { kind: "file"; turn: number; root: string; path: string; from?: string | null }
-  | { kind: "check"; agent: string | null; call: string }
-  | { kind: "subagent"; agent: string }
-  | { kind: "headline"; turn: number };
-
-// The recorded facts, in sections: `at` is Unix milliseconds when known.
-export type Facts = { sections: { label: string; facts: { at: number | null; text: string }[] }[] };
-
-export type Hunk = { text: string; left_out: number; binary: boolean; first_line: number };
-// A hunk as plain text; `more` ends it with "… N more lines" when the cap left some out, for a view with no button of its own.
+/** A hunk as plain text; `more` ends it with "… N more lines" when the cap left some out, for a view with no button of its own. */
 export const hunkText = (h: Hunk | null, more = true) =>
   h === null ? "The hunk could not be read." : h.binary ? "Binary file: no lines to show." : h.text + (more && h.left_out ? `… ${h.left_out} more lines` : "");
 
@@ -34,19 +24,29 @@ export const suggestions = (anchor: Anchor): string[] => questions[anchor.kind];
 const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour12: false });
 
 // Each anchor's box, kept across the view's redraws (every second), so a question being typed, an open box and an answer all
-// stay. shortcut: never pruned; prune by the listed sessions if it grows.
+// stay; a session that leaves the list takes its boxes with it (`forgetAsks`).
 const asks = new Map<string, HTMLDetailsElement>();
+// The session of each box's key.
+const askedIn = new Map<string, string>();
+
+/** Drops the boxes of sessions no longer listed. */
+export function forgetAsks(listed: ReadonlySet<string>) {
+  keepOnly(asks, (key) => listed.has(askedIn.get(key) ?? ""));
+  keepOnly(askedIn, (key) => asks.has(key));
+}
 // `scope` keeps the boxes of one anchor drawn in two places apart, as a node has one parent.
 const keyOf = (session: string, anchor: Anchor, scope: string) => `${scope}${session}\n${JSON.stringify(anchor)}`;
 
-// The "Ask" box of `anchor` in session `session`, labelled `what` for the model ("this file").
+/** The "Ask" box of `anchor` in session `session`, labelled `what` for the model ("this file"). */
 export function askAnchor(session: string, anchor: Anchor, what: string, scope = ""): HTMLDetailsElement {
   const key = keyOf(session, anchor, scope);
-  if (!asks.has(key)) asks.set(key, askBox(session, anchor, what));
-  return asks.get(key)!;
+  const box = asks.get(key) ?? askBox(session, anchor, what);
+  asks.set(key, box);
+  askedIn.set(key, session);
+  return box;
 }
 
-// Opens the box of `anchor` and puts the cursor in it, when it is drawn; false when it is not.
+/** Opens the box of `anchor` and puts the cursor in it, when it is drawn; false when it is not. */
 export function openAsk(session: string, anchor: Anchor): boolean {
   const node = asks.get(keyOf(session, anchor, ""));
   if (!node?.isConnected) return false;
@@ -56,6 +56,7 @@ export function openAsk(session: string, anchor: Anchor): boolean {
   return true;
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: ratcheted at #554; split it rather than grow it
 function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsElement {
   const node = document.createElement("details");
   node.className = "ask-about";
@@ -74,7 +75,7 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
         recorded.replaceChildren(...(sections.length ? sections.flat() : [text("p", "Nothing was recorded about this.", "asking")]));
         if (anchor.kind === "file") showHunk(anchor);
       })
-      .catch((e) => recorded.replaceChildren(text("p", `The facts could not be read: ${e}`, "ask-error")));
+      .catch((e) => recorded.replaceChildren(text("p", `The facts could not be read: ${messageOf(e)}`, "ask-error")));
   };
   const hunk = text("pre", "", "evidence-hunk");
   const showHunk = (a: Extract<Anchor, { kind: "file" }>) => {
@@ -109,7 +110,7 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
     } catch (e) {
       const retry = button("Retry", "Ask the same question again");
       retry.addEventListener("click", ask);
-      reply.replaceChildren(text("p", `No answer: ${e}.`, "ask-error"), retry);
+      reply.replaceChildren(text("p", `No answer: ${messageOf(e)}.`, "ask-error"), retry);
     }
     send.disabled = false;
     send.title = sendHover;
@@ -133,8 +134,10 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
   return node;
 }
 
-// What was recorded about `name`, then the writer's possible reasons folded under their own label, so a guess never reads as a
-// fact. With nothing recorded there are no reasons, as there was no call.
+/**
+ * What was recorded about `name`, then the writer's possible reasons folded under their own label, so a guess never reads as a
+ * fact. With nothing recorded there are no reasons, as there was no call.
+ */
 export function whyNotElement(name: string, result: { facts: Facts; reasons: string | null }): HTMLElement {
   const node = document.createElement("div");
   node.className = "ask-why-not";
@@ -178,20 +181,19 @@ function whyNotBox(session: string, turn: number): HTMLElement {
       out.replaceChildren(whyNotElement(name, result));
     } catch (e) {
       failure("ask_why_not", "error")(e);
-      out.replaceChildren(text("p", `No answer: ${e}.`, "ask-error"));
+      out.replaceChildren(text("p", `No answer: ${messageOf(e)}.`, "ask-error"));
     }
     go.disabled = false;
     go.title = goHover;
   };
   go.addEventListener("click", run);
-  onEnter(field, run);
+  onEnter(field, () => void run());
   node.append(field, go, out);
   return node;
 }
 
 function button(label: string, hover: string): HTMLButtonElement {
-  const node = text("button", label, "btn") as HTMLButtonElement;
-  node.type = "button";
-  node.title = hover;
-  return node;
+  const made = pressable(text("button", label, "btn"), null);
+  made.title = hover;
+  return made;
 }

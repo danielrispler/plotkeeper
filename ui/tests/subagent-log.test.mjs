@@ -3,8 +3,17 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { callTitle, logNote, logRows, stateLabel } from "../../dist/log.js";
 
+/**
+ * @param {string} id
+ * @param {string | null} [detail]
+ * @returns {import("../../dist/types.js").LogEntry}
+ */
 const call = (id, tool = "Read", detail = null) => ({ kind: "call", id, tool, detail });
+/** @returns {import("../../dist/types.js").LogEntry} */
 const result = (id, text = "ok", failed = false, cut = false) => ({ kind: "result", id, text, failed, cut });
+// The row a call became, whose `result` the test reads.
+/** @param {import("../../dist/types.js").LogRow | undefined} row */
+const callRow = (row) => /** @type {any} */ (row);
 
 test("each result pairs with its call by id; a call without one is running; a result without a call is dropped", () => {
   const rows = logRows([
@@ -51,13 +60,14 @@ test("the view follows the bottom only while it was at the bottom before the new
 });
 
 test("reading on adds only the new entries; a running call takes its result when it arrives", () => {
+  /** @type {import("../../dist/log.js").ShownLog} */
   const first = { session: "s", agent: "a", log: { entries: [{ kind: "prompt", text: "Go." }, call("c1")], offset: 10 } };
-  assert.deepEqual(logRows(first.log.entries)[1].result, null);
+  assert.deepEqual(callRow(logRows(first.log.entries)[1]).result, null);
   const next = readOn(first, { entries: [result("c1", "done"), { kind: "reply", text: "Ok." }], offset: 30 });
   assert.equal(next.log.offset, 30);
   assert.equal(next.log.entries.length, 4);
   assert.deepEqual(logRows(next.log.entries).map((r) => r.kind), ["prompt", "call", "reply"]);
-  assert.equal(logRows(next.log.entries)[1].result.text, "done");
+  assert.equal(callRow(logRows(next.log.entries)[1]).result.text, "done");
 });
 
 test("reading on finds a log that did not exist at first, and keeps what was shown when the log vanishes", () => {

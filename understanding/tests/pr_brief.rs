@@ -3,6 +3,7 @@
 
 use serde_json::json;
 use std::cell::RefCell;
+use std::fmt::Write as _;
 use std::path::Path;
 use studio_understanding::pr_brief::*;
 
@@ -37,9 +38,10 @@ const MAP: &str = r#"{
 fn file_diff(path: &str, lines: usize) -> String {
     let mut d =
         format!("diff --git a/{path} b/{path}\nindex 1..2 100644\n--- a/{path}\n+++ b/{path}\n");
-    d += &format!("@@ -1,1 +1,{lines} @@\n");
+    // Writing to a `String` cannot fail.
+    writeln!(d, "@@ -1,1 +1,{lines} @@").ok();
     for i in 0..lines {
-        d += &format!("+line {i} of {path}\n");
+        writeln!(d, "+line {i} of {path}").ok();
     }
     d
 }
@@ -165,9 +167,10 @@ fn a_brief_written_from_a_cut_diff_stores_the_cut_and_partial_files_and_the_byte
     // A file of many small hunks, partly sent, and one hunk far over the budget, not sent at all.
     let mut hunks = file_diff("alpha/a.rs", 100);
     for h in 1..40 {
-        hunks += &format!("@@ -{n},1 +{n},100 @@\n", n = h * 200);
+        // Writing to a `String` cannot fail.
+        writeln!(hunks, "@@ -{n},1 +{n},100 @@", n = h * 200).ok();
         for i in 0..100 {
-            hunks += &format!("+hunk {h} line {i} of alpha/a.rs\n");
+            writeln!(hunks, "+hunk {h} line {i} of alpha/a.rs").ok();
         }
     }
     s.diff = format!(
@@ -224,7 +227,7 @@ fn a_language_counts_as_unread_by_the_fixed_table_and_the_maps_extractors() {
         )
         .replace("\"ignored\": []", "\"ignored\": [\"box/\"]")
     };
-    let paths = |ps: &[&str]| ps.iter().map(|p| p.to_string()).collect::<Vec<_>>();
+    let paths = |ps: &[&str]| ps.iter().map(ToString::to_string).collect::<Vec<_>>();
     let none = map("");
     // The table's languages count, each extension once and sorted; files outside any part count too.
     assert_eq!(
@@ -391,10 +394,12 @@ fn guard_with_a_law_is_offered_for_a_bug_fix_that_adds_or_changes_no_tagged_test
 
     // The fix added a tagged test: no offer. The tag is built in two pieces so the map check does not read it as one.
     let mut added = bug_fix();
-    added.diff += &format!(
+    // Writing to a `String` cannot fail.
+    write!(
+        added.diff,
         "diff --git a/alpha/tests/t.rs b/alpha/tests/t.rs\n--- /dev/null\n+++ b/alpha/tests/t.rs\n@@ -0,0 +1,2 @@\n+// {}: alpha-keeps-order\n+fn order_is_kept() {{}}\n",
         concat!("@", "law")
-    );
+    ).ok();
     assert_eq!(build_facts(&added).unwrap().guard, None);
 
     // The fix touched no part of the map: there is no law to back and no part to add one on, so no offer.
@@ -1166,7 +1171,7 @@ fn the_entry_writes_checks_stores_and_records_one_brief() {
     ]);
     let mut log = Vec::new();
     let stored = write_pr_brief(&writer, "opus", &source(&["alpha/a.rs"]), &store, |l| {
-        log.push(l)
+        log.push(l);
     })
     .unwrap();
 

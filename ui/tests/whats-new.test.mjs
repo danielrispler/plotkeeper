@@ -6,9 +6,10 @@ import assert from "node:assert/strict";
 
 const listeners = new Set();
 const doc = { visibilityState: "visible", addEventListener: (_, f) => listeners.add(f), removeEventListener: (_, f) => listeners.delete(f) };
-globalThis.document = doc;
+// The stand-ins: a document of visibility alone, and a storage of two calls.
+globalThis.document = /** @type {any} */ (doc);
 const store = new Map();
-globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)) };
+globalThis.localStorage = /** @type {any} */ ({ getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)) });
 const { whatsNew, releaseUrl, startWhatsNew } = await import("../../dist/whats-new.js");
 
 test("a changed version shows the toast, and stores it when the tab is visible", () => {
@@ -56,14 +57,14 @@ test("a downgrade, an older version than the stored one, shows nothing and store
 
 test("a browser whose storage throws still starts, showing nothing and failing nothing", () => {
   const kept = globalThis.localStorage;
-  globalThis.localStorage = {
+  globalThis.localStorage = /** @type {any} */ ({
     getItem: () => {
       throw new Error("blocked");
     },
     setItem: () => {
       throw new Error("blocked");
     },
-  };
+  });
   const shown = [];
   try {
     assert.doesNotThrow(() => startWhatsNew("0.2.0", (version) => shown.push(version)));

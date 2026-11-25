@@ -27,7 +27,7 @@ use std::{
     os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
     thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 /// A heartbeat older than this counts as nobody watching (decision 22).
@@ -132,7 +132,8 @@ pub fn renew_pass(
             let same = read_private(&path)
                 .is_some_and(|pass| pass["command"] == command && pass["cwd"] == cwd);
             if same {
-                let _ = fs::remove_file(path);
+                // Best effort: a file already gone is fine.
+                fs::remove_file(path).ok();
             }
         }
     }
@@ -145,12 +146,7 @@ pub fn is_file_safe(session: &str) -> bool {
     !session.is_empty() && session.chars().all(plain)
 }
 
-pub fn now_ms() -> u64 {
-    let since = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    since.as_millis() as u64
-}
+pub use studio_workbench::clock::now_ms;
 
 /// Writes `value` to `path` whole, readable by its user only, so a reader never sees half a file.
 pub fn write_private(path: &Path, value: &Value) -> io::Result<()> {
@@ -162,7 +158,7 @@ pub fn write_private(path: &Path, value: &Value) -> io::Result<()> {
     let name = path.file_name().ok_or(io::ErrorKind::InvalidInput)?;
     let temp = folder.join(format!(".{}.{}.tmp", name.display(), std::process::id()));
     // A new file, so the mode holds even if a crashed writer left its temp file.
-    let _ = fs::remove_file(&temp);
+    fs::remove_file(&temp).ok();
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -185,18 +181,9 @@ fn shows_life(data: &Path, session: Option<&str>) -> bool {
         && file_pid_lives(&watching)
 }
 
-/// Whether process `pid` exists and is the user's own.
-pub fn pid_lives(pid: i32) -> bool {
-    // Signal 0 only checks that the process exists and is the user's own.
-    // SAFETY: `kill` takes plain integers and touches no memory; `pid > 0` keeps it to one
-    // process, never a process group.
-    pid > 0 && unsafe { libc::kill(pid, 0) } == 0
-}
-
-/// Whether the process a file's `pid` names exists and is the user's own.
+/// Whether the process a file's `pid` names exists.
 pub fn file_pid_lives(file: &Value) -> bool {
-    let pid = file["pid"].as_i64().and_then(|p| i32::try_from(p).ok());
-    pid.is_some_and(pid_lives)
+    file["pid"].as_i64().is_some_and(crate::sys::pid_alive)
 }
 
 /// Whether the studio watches `session`: the watching file names it, its pid lives and its heartbeat
@@ -334,7 +321,8 @@ pub fn run(payload: &Value, data: &Path, timeout: Duration) -> io::Result<Option
     }
     let nonce = nonce()?;
     let (ask, answer_path) = (ask_file(data, session), answer_file(data, session));
-    let _ = fs::remove_file(&answer_path);
+    // Best effort: a file already gone is fine.
+    fs::remove_file(&answer_path).ok();
     // `agent_id` (absent for the session's own agent) tells the studio whose card shows it.
     let request = json!({
         "nonce": nonce,
@@ -351,8 +339,10 @@ pub fn run(payload: &Value, data: &Path, timeout: Duration) -> io::Result<Option
     // one only times out. Key the files by tool_use_id if parallel subagent questions show up.
     let request_still_ours = fs::read_to_string(&ask).is_ok_and(|text| text.contains(&nonce));
     if request_still_ours {
-        let _ = fs::remove_file(&ask);
-        let _ = fs::remove_file(&answer_path);
+        // Best effort: a file already gone is fine.
+        fs::remove_file(&ask).ok();
+        // Best effort: a file already gone is fine.
+        fs::remove_file(&answer_path).ok();
     }
     let Some(answer) = answer else {
         return Ok(None);
@@ -390,7 +380,8 @@ fn run_blocked(payload: &Value, data: &Path, timeout: Duration) -> io::Result<Op
     let session = payload["session_id"].as_str().unwrap_or_default();
     // A claimed pass of this command was its retry's, now denied: it must allow nothing later.
     for claimed in matching_passes(payload, data, ".claimed") {
-        let _ = fs::remove_file(claimed);
+        // Best effort: a file already gone is fine.
+        fs::remove_file(claimed).ok();
     }
     let nonce = nonce()?;
     let dir = blocked_dir(data, session);
@@ -429,12 +420,14 @@ fn run_blocked(payload: &Value, data: &Path, timeout: Duration) -> io::Result<Op
     };
     let verdict = Verdict::deserialize(answer.get("decision").unwrap_or(&Value::Null)).ok();
     let Some(verdict) = verdict else {
-        let _ = fs::remove_file(&request);
+        // Best effort: a file already gone is fine.
+        fs::remove_file(&request).ok();
         return Ok(None);
     };
     // Only a logged decision closes the request: else the card keeps its buttons.
     if log_answer(data, &answered_line(payload, &answer)) {
-        let _ = fs::remove_file(&request);
+        // Best effort: a file already gone is fine.
+        fs::remove_file(&request).ok();
     }
     Ok((verdict == Verdict::Allow).then(|| {
         json!({ "hookSpecificOutput": {
@@ -460,7 +453,8 @@ fn matching_passes(payload: &Value, data: &Path, suffix: &str) -> Vec<PathBuf> {
             // An expired pass can never match again.
             let fresh = pass["expires_ms"].as_u64().is_some_and(|at| now_ms() < at);
             if !fresh {
-                let _ = fs::remove_file(path);
+                // Best effort: a file already gone is fine.
+                fs::remove_file(path).ok();
             }
             fresh
                 && pass["session_id"] == session
@@ -509,7 +503,8 @@ fn take_private_answer(path: &Path, remove: bool) -> Option<Value> {
         return None;
     }
     if remove {
-        let _ = fs::remove_file(path);
+        // Best effort: a file already gone is fine.
+        fs::remove_file(path).ok();
     }
     let refuse =
         || eprintln!("plotkeeper-answer: an answer file not private to its user was refused");

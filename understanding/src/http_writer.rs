@@ -164,9 +164,12 @@ fn post(
         call = call.set(name, value);
     }
     match call.send_string(&body.to_string()) {
-        Ok(response) => response.into_string().map_err(|e| match timed_out(&e) {
-            true => late(),
-            false => fail(FailureKind::Other, "(the reply could not be read)"),
+        Ok(response) => response.into_string().map_err(|e| {
+            if timed_out(&e) {
+                late()
+            } else {
+                fail(FailureKind::Other, "(the reply could not be read)")
+            }
         }),
         // The error body is never read: it may quote the key.
         Err(ureq::Error::Status(status, _)) => Err(Failed::Status(status)),
@@ -174,9 +177,10 @@ fn post(
             let io_timeout = std::error::Error::source(&transport)
                 .and_then(|e| e.downcast_ref::<io::Error>())
                 .is_some_and(timed_out);
-            Err(match io_timeout {
-                true => late(),
-                false => fail(FailureKind::Other, "(the API could not be reached)"),
+            Err(if io_timeout {
+                late()
+            } else {
+                fail(FailureKind::Other, "(the API could not be reached)")
             })
         }
     }

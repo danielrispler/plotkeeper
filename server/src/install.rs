@@ -195,8 +195,36 @@ fn save(home: &Path, state: &State) -> Result<(), String> {
     let mut value = serde_json::to_value(state).map_err(|e| e.to_string())?;
     value["answers_kept"] = Value::Bool(true);
     let text = serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?;
-    fs::write(dir.join("state.json"), text)
+    write_whole(&dir.join("state.json"), text)
         .map_err(|e| format!("could not record the install: {e}"))
+}
+
+/// Writes `text` as the whole of `file`, or leaves `file` as it was: the text goes to a temp file in the same folder,
+/// which is then renamed over it, so a crash mid-write never leaves half a `~/.zshrc`. A symlink is resolved first,
+/// so the file it points at is replaced and the link stays a link. The file keeps its permissions.
+fn write_whole(file: &Path, text: impl AsRef<[u8]>) -> std::io::Result<()> {
+    let target = match fs::canonicalize(file) {
+        Ok(target) => target,
+        // A link to a file that is not there: writing through it makes the file and keeps the link.
+        Err(_) if file.is_symlink() => return fs::write(file, text),
+        Err(_) => file.to_path_buf(),
+    };
+    let name = target.file_name().unwrap_or_default().to_string_lossy();
+    let temp = target.with_file_name(format!(".{name}.plotkeeper-{}.tmp", std::process::id()));
+    let written = (|| {
+        let mut out = fs::File::create(&temp)?;
+        out.write_all(text.as_ref())?;
+        if let Ok(old) = fs::metadata(&target) {
+            out.set_permissions(old.permissions())?;
+        }
+        out.sync_all()?;
+        fs::rename(&temp, &target)
+    })();
+    if written.is_err() {
+        // Best effort: the write's own error is the one returned.
+        fs::remove_file(&temp).ok();
+    }
+    written
 }
 
 /// The program `name` in a folder of `path` (a PATH value), as `command -v` finds it.
@@ -226,7 +254,8 @@ fn run(program: &Path, args: &[&OsStr]) -> Result<(), String> {
 }
 
 fn say(out: &mut dyn Write, line: impl AsRef<str>) {
-    let _ = writeln!(out, "  {}", line.as_ref());
+    // Output only: a closed terminal is no error.
+    writeln!(out, "  {}", line.as_ref()).ok();
 }
 
 /// Whether an entry of `CLAUDE_CODE_PLUGIN_DIRS` is the archived app's plugin, through a data folder's `checkout`
@@ -437,7 +466,7 @@ fn wire(
                 edits,
             });
             save(home, &state)?;
-            fs::write(&zshrc, cleaned).map_err(|e| format!("could not write ~/.zshrc: {e}"))?;
+            write_whole(&zshrc, cleaned).map_err(|e| format!("could not write ~/.zshrc: {e}"))?;
             say(
                 out,
                 "~/.zshrc: removed the old plugin path from CLAUDE_CODE_PLUGIN_DIRS (the removed lines are kept for uninstall)",
@@ -484,11 +513,12 @@ fn wire_one(
             render_claude(&dir, bin)?;
             if state.claude {
                 // A second install starts from none; either may already be gone.
-                let _ = run(
+                run(
                     &claude,
                     &["plugin".as_ref(), "uninstall".as_ref(), CLAUDE_ID.as_ref()],
-                );
-                let _ = run(
+                )
+                .ok();
+                run(
                     &claude,
                     &[
                         "plugin".as_ref(),
@@ -496,7 +526,8 @@ fn wire_one(
                         "remove".as_ref(),
                         NAME.as_ref(),
                     ],
-                );
+                )
+                .ok();
             }
             run(
                 &claude,
@@ -754,20 +785,23 @@ pub fn wire_on_start(
     }
     let names: Vec<_> = unasked.iter().map(|h| h.label()).collect();
     let not_asked = |out: &mut dyn Write| {
-        let _ = writeln!(
+        // Output only: a closed terminal is no error.
+        writeln!(
             out,
             "plotkeeper: {} not wired, as there is no terminal to ask in; to wire, run: plotkeeper install --yes",
             names.join(", ")
-        );
+        ).ok();
     };
     let Some(terminal) = terminal else {
         not_asked(out);
         return Ok(());
     };
-    let _ = writeln!(
+    // Output only: a closed terminal is no error.
+    writeln!(
         out,
         "plotkeeper can record these agents by wiring its hooks into them:"
-    );
+    )
+    .ok();
     for harness in &unasked {
         for line in harness.plan(home) {
             say(out, line);
@@ -790,19 +824,22 @@ pub fn wire_on_start(
         "events stay on this machine, in plotkeeper's data folder",
     );
     say(out, "to undo it: plotkeeper uninstall");
-    let _ = write!(out, "\nWire these? [Y/n] ");
-    let _ = out.flush();
+    // Output only: a closed terminal is no error.
+    write!(out, "\nWire these? [Y/n] ").ok();
+    // Output only: a closed terminal is no error.
+    out.flush().ok();
     let mut answer = String::new();
     if terminal.read_line(&mut answer).unwrap_or(0) == 0 {
         // The terminal closed before an answer.
-        let _ = writeln!(out);
+        writeln!(out).ok();
         not_asked(out);
         return Ok(());
     }
     if matches!(answer.trim().to_lowercase().as_str(), "" | "y" | "yes") {
         // The summary above already said each step, so they are not said again as they run.
         wire(home, beside, path, Some(&unasked), &mut std::io::sink())?;
-        let _ = writeln!(out, "plotkeeper: wired {}", names.join(", "));
+        // Output only: a closed terminal is no error.
+        writeln!(out, "plotkeeper: wired {}", names.join(", ")).ok();
         return Ok(());
     }
     for harness in &unasked {
@@ -815,10 +852,11 @@ pub fn wire_on_start(
         );
     }
     save(home, &state)?;
-    let _ = writeln!(
+    // Output only: a closed terminal is no error.
+    writeln!(
         out,
         "plotkeeper: not wired; plotkeeper will not ask again. To wire later, run: plotkeeper install"
-    );
+    ).ok();
     Ok(())
 }
 
@@ -866,21 +904,25 @@ fn rewire_changed(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Res
             Ok(false) => continue,
             Err(e) => {
                 // The others are still rewired, and the asking step still runs.
-                let _ = writeln!(
+                writeln!(
                     out,
                     "plotkeeper: could not rewire {}: {e}; run plotkeeper install to retry",
                     harness.label()
-                );
+                )
+                .ok();
                 continue;
             }
         }
-        let _ = writeln!(
+        // Output only: a closed terminal is no error.
+        writeln!(
             out,
             "plotkeeper: rewired {}, as plotkeeper's hooks for it changed",
             harness.label()
-        );
+        )
+        .ok();
         if harness == Harness::Codex {
-            let _ = writeln!(out, "  {CODEX_RETRUST}");
+            // Output only: a closed terminal is no error.
+            writeln!(out, "  {CODEX_RETRUST}").ok();
         }
     }
     Ok(())
@@ -952,10 +994,11 @@ fn install_copilot(
     }
     if state.copilot {
         // Already gone is fine: the install below puts it back.
-        let _ = run(
+        run(
             copilot,
             &["plugin".as_ref(), "uninstall".as_ref(), NAME.as_ref()],
-        );
+        )
+        .ok();
     }
     run(
         copilot,
@@ -1175,7 +1218,7 @@ impl HookFile {
             save(home, state)?;
         }
         fs::create_dir_all(dir).map_err(|e| format!("could not make {}: {e}", dir.display()))?;
-        fs::write(&self.file, &text)
+        write_whole(&self.file, &text)
             .map_err(|e| format!("could not write {}: {e}", self.shown()))?;
         if let Some(record) = record(state).as_mut() {
             record.written = text;
@@ -1208,13 +1251,14 @@ impl HookFile {
             if record.existed {
                 let old = fs::read(record_dir(home).join("backups").join(self.backup))
                     .map_err(|e| format!("could not read the backup of {}: {e}", self.shown()))?;
-                fs::write(&self.file, old)
+                write_whole(&self.file, old)
                     .map_err(|e| format!("could not write {}: {e}", self.shown()))?;
             } else {
                 fs::remove_file(&self.file)
                     .map_err(|e| format!("could not remove {}: {e}", self.shown()))?;
                 if record.made_dir {
-                    let _ = fs::remove_dir(self.file.parent().unwrap_or(home));
+                    // Best effort: a folder that is not empty stays.
+                    fs::remove_dir(self.file.parent().unwrap_or(home)).ok();
                 }
             }
             say(
@@ -1225,7 +1269,7 @@ impl HookFile {
         }
         let text = self.without_ours(&now, bin)?;
         if text != now {
-            fs::write(&self.file, text)
+            write_whole(&self.file, text)
                 .map_err(|e| format!("could not write {}: {e}", self.shown()))?;
         }
         say(
@@ -1251,209 +1295,29 @@ pub fn uninstall(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Resu
     };
     // Every answer is forgotten, so the next start asks again as on a first run.
     state.harnesses.clear();
-    let backups = record_dir(home).join("backups");
-    let bin = studio_hook::bin_dir(home);
-    let mut failed = 0;
-    let mut fail = |out: &mut dyn Write, e: String| {
-        say(out, format!("failed: {e}"));
-        failed += 1;
+    let mut undo = Undo {
+        home,
+        path,
+        out,
+        backups: record_dir(home).join("backups"),
+        bin: studio_hook::bin_dir(home),
+        state,
+        failed: 0,
     };
-
-    if let Some(codex) = &state.codex {
-        match codex_file(home).uninstall(home, codex, &bin, out) {
-            Ok(()) => state.codex = None,
-            Err(e) => fail(out, e),
-        }
-    }
-    if let Some(cursor) = &state.cursor {
-        match cursor_file(home).uninstall(home, cursor, &bin, out) {
-            Ok(()) => state.cursor = None,
-            Err(e) => fail(out, e),
-        }
-    }
-
-    if state.copilot {
-        let done = on_path("copilot", path)
-            .ok_or_else(|| {
-                "Copilot: `copilot` not found, so its plugin cannot be uninstalled".to_owned()
-            })
-            .and_then(|copilot| {
-                run(
-                    &copilot,
-                    &["plugin".as_ref(), "uninstall".as_ref(), NAME.as_ref()],
-                )
-            });
-        match done {
-            Ok(()) => {
-                say(out, format!("Copilot: copilot plugin uninstall {NAME}"));
-                state.copilot = false;
-            }
-            Err(e) => fail(out, e),
-        }
-    }
-
-    if state.qwen {
-        let done = on_path("qwen", path)
-            .ok_or_else(|| {
-                "Qwen Code: `qwen` not found, so its extension cannot be uninstalled".to_owned()
-            })
-            .and_then(|qwen| {
-                run(
-                    &qwen,
-                    &["extensions".as_ref(), "uninstall".as_ref(), NAME.as_ref()],
-                )
-            });
-        match done {
-            Ok(()) => {
-                say(out, format!("Qwen Code: qwen extensions uninstall {NAME}"));
-                state.qwen = false;
-            }
-            Err(e) => fail(out, e),
-        }
-    }
-
-    if state.agy || !state.agy_backups.is_empty() {
-        match on_path("agy", path) {
-            None => fail(
-                out,
-                "agy: `agy` not found, so its plugin cannot be uninstalled".into(),
-            ),
-            Some(agy) => {
-                if state.agy {
-                    match agy_plugin::uninstall(&agy, agy_plugin::NAME, home) {
-                        Ok(()) => {
-                            say(
-                                out,
-                                format!("agy: agy plugin uninstall {}", agy_plugin::NAME),
-                            );
-                            state.agy = false;
-                        }
-                        Err(e) => fail(out, e),
-                    }
-                }
-                let mut left = Vec::new();
-                for name in std::mem::take(&mut state.agy_backups) {
-                    match agy_plugin::install(&agy, &backups.join("agy").join(&name), home) {
-                        Ok(()) => say(out, format!("agy: put back the plugin `{name}`")),
-                        Err(e) => {
-                            fail(out, e);
-                            left.push(name);
-                        }
-                    }
-                }
-                state.agy_backups = left;
-            }
-        }
-    }
-
-    if state.claude {
-        match on_path("claude", path) {
-            None => fail(
-                out,
-                "Claude Code: `claude` not found, so its plugin cannot be uninstalled".into(),
-            ),
-            Some(claude) => {
-                if !state.claude_plugin_gone {
-                    match run(
-                        &claude,
-                        &["plugin".as_ref(), "uninstall".as_ref(), CLAUDE_ID.as_ref()],
-                    ) {
-                        Ok(()) => {
-                            say(
-                                out,
-                                format!("Claude Code: claude plugin uninstall {CLAUDE_ID}"),
-                            );
-                            state.claude_plugin_gone = true;
-                        }
-                        Err(e) => fail(out, e),
-                    }
-                }
-                if state.claude_plugin_gone {
-                    match run(
-                        &claude,
-                        &[
-                            "plugin".as_ref(),
-                            "marketplace".as_ref(),
-                            "remove".as_ref(),
-                            NAME.as_ref(),
-                        ],
-                    ) {
-                        Ok(()) => {
-                            say(
-                                out,
-                                format!("Claude Code: claude plugin marketplace remove {NAME}"),
-                            );
-                            state.claude = false;
-                            state.claude_plugin_gone = false;
-                        }
-                        Err(e) => fail(out, e),
-                    }
-                }
-            }
-        }
-    }
-
-    if let Some(written) = &state.zshrc {
-        let zshrc = home.join(".zshrc");
-        if fs::read_to_string(&zshrc).is_ok_and(|now| &now == written) {
-            let put_back = fs::read(backups.join("zshrc"))
-                .map_err(|e| format!("could not read the backup of ~/.zshrc: {e}"))
-                .and_then(|old| {
-                    fs::write(&zshrc, old).map_err(|e| format!("could not write ~/.zshrc: {e}"))
-                });
-            match put_back.and_then(|()| {
-                fs::remove_file(backups.join("zshrc"))
-                    .map_err(|e| format!("could not delete the backup of ~/.zshrc: {e}"))
-            }) {
-                Ok(()) => {
-                    say(out, "~/.zshrc: put back as it was");
-                    state.zshrc = None;
-                }
-                Err(e) => fail(out, e),
-            }
-        } else {
-            // Not a failure: only the backup of `~/.zshrc` is left to give back, so the record stays for it.
-            say(
-                out,
-                format!(
-                    "~/.zshrc changed since install, so it is left as it is; its old copy is {}",
-                    backups.join("zshrc").display()
-                ),
-            );
-        }
-    }
-
-    if let Some(record) = &state.zshrc_edits {
-        let zshrc = home.join(".zshrc");
-        let put_back = fs::read_to_string(&zshrc)
-            .ok()
-            .and_then(|now| with_removed_lines(&now, record));
-        match put_back {
-            Some(text) => match fs::write(&zshrc, text) {
-                Ok(()) => {
-                    say(out, "~/.zshrc: put back as it was");
-                    state.zshrc_edits = None;
-                }
-                Err(e) => fail(out, format!("could not write ~/.zshrc: {e}")),
-            },
-            None => {
-                // Not a failure: only these lines are left to give back, so the record stays for them.
-                let lines: String = record
-                    .edits
-                    .iter()
-                    .flat_map(|e| e.removed.iter().map(String::as_str))
-                    .collect();
-                say(
-                    out,
-                    format!(
-                        "~/.zshrc changed since install, so it is left as it is; the lines install removed were:\n{}",
-                        lines.trim_end()
-                    ),
-                );
-            }
-        }
-    }
-
+    undo.hook_files();
+    undo.copilot();
+    undo.qwen();
+    undo.agy();
+    undo.claude();
+    undo.zshrc();
+    undo.zshrc_edits();
+    let Undo {
+        out,
+        bin,
+        state,
+        failed,
+        ..
+    } = undo;
     if failed > 0 {
         // The hooks of a harness not undone still run the binaries, and a rerun needs the backups.
         save(home, &state)?;
@@ -1476,7 +1340,7 @@ pub fn uninstall(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Resu
     }
     // A data folder install made and left empty goes too.
     let data = studio_hook::data_dir(home);
-    let _ = fs::remove_dir(&data);
+    fs::remove_dir(&data).ok();
     // Uninstall keeps what was recorded, and cannot remove the package it runs from: it says both.
     if data.exists() {
         say(
@@ -1492,6 +1356,247 @@ pub fn uninstall(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Resu
         "if you installed plotkeeper with npm i -g, remove it with: npm uninstall -g plotkeeper",
     );
     Ok(())
+}
+
+/// One uninstall's steps: each undoes one thing the record holds and clears it from `state` once
+/// done, or says why it failed and counts it, leaving it recorded for a rerun.
+struct Undo<'a> {
+    home: &'a Path,
+    path: Option<&'a OsStr>,
+    out: &'a mut dyn Write,
+    /// Where install kept the files it replaced.
+    backups: PathBuf,
+    bin: PathBuf,
+    state: State,
+    failed: usize,
+}
+
+impl Undo<'_> {
+    fn fail(&mut self, e: String) {
+        say(self.out, format!("failed: {e}"));
+        self.failed += 1;
+    }
+
+    /// Codex's and Cursor's hooks files.
+    fn hook_files(&mut self) {
+        if let Some(codex) = &self.state.codex {
+            match codex_file(self.home).uninstall(self.home, codex, &self.bin, self.out) {
+                Ok(()) => self.state.codex = None,
+                Err(e) => self.fail(e),
+            }
+        }
+        if let Some(cursor) = &self.state.cursor {
+            match cursor_file(self.home).uninstall(self.home, cursor, &self.bin, self.out) {
+                Ok(()) => self.state.cursor = None,
+                Err(e) => self.fail(e),
+            }
+        }
+    }
+
+    fn copilot(&mut self) {
+        if !self.state.copilot {
+            return;
+        }
+        let done = on_path("copilot", self.path)
+            .ok_or_else(|| {
+                "Copilot: `copilot` not found, so its plugin cannot be uninstalled".to_owned()
+            })
+            .and_then(|copilot| {
+                run(
+                    &copilot,
+                    &["plugin".as_ref(), "uninstall".as_ref(), NAME.as_ref()],
+                )
+            });
+        match done {
+            Ok(()) => {
+                say(
+                    self.out,
+                    format!("Copilot: copilot plugin uninstall {NAME}"),
+                );
+                self.state.copilot = false;
+            }
+            Err(e) => self.fail(e),
+        }
+    }
+
+    fn qwen(&mut self) {
+        if !self.state.qwen {
+            return;
+        }
+        let done = on_path("qwen", self.path)
+            .ok_or_else(|| {
+                "Qwen Code: `qwen` not found, so its extension cannot be uninstalled".to_owned()
+            })
+            .and_then(|qwen| {
+                run(
+                    &qwen,
+                    &["extensions".as_ref(), "uninstall".as_ref(), NAME.as_ref()],
+                )
+            });
+        match done {
+            Ok(()) => {
+                say(
+                    self.out,
+                    format!("Qwen Code: qwen extensions uninstall {NAME}"),
+                );
+                self.state.qwen = false;
+            }
+            Err(e) => self.fail(e),
+        }
+    }
+
+    /// agy's plugin, and the plugins of the same name install moved aside.
+    fn agy(&mut self) {
+        if !self.state.agy && self.state.agy_backups.is_empty() {
+            return;
+        }
+        let Some(agy) = on_path("agy", self.path) else {
+            self.fail("agy: `agy` not found, so its plugin cannot be uninstalled".into());
+            return;
+        };
+        if self.state.agy {
+            match agy_plugin::uninstall(&agy, agy_plugin::NAME, self.home) {
+                Ok(()) => {
+                    say(
+                        self.out,
+                        format!("agy: agy plugin uninstall {}", agy_plugin::NAME),
+                    );
+                    self.state.agy = false;
+                }
+                Err(e) => self.fail(e),
+            }
+        }
+        let mut left = Vec::new();
+        for name in std::mem::take(&mut self.state.agy_backups) {
+            match agy_plugin::install(&agy, &self.backups.join("agy").join(&name), self.home) {
+                Ok(()) => say(self.out, format!("agy: put back the plugin `{name}`")),
+                Err(e) => {
+                    self.fail(e);
+                    left.push(name);
+                }
+            }
+        }
+        self.state.agy_backups = left;
+    }
+
+    /// Claude Code's plugin, then its marketplace.
+    fn claude(&mut self) {
+        if !self.state.claude {
+            return;
+        }
+        let Some(claude) = on_path("claude", self.path) else {
+            self.fail(
+                "Claude Code: `claude` not found, so its plugin cannot be uninstalled".into(),
+            );
+            return;
+        };
+        if !self.state.claude_plugin_gone {
+            match run(
+                &claude,
+                &["plugin".as_ref(), "uninstall".as_ref(), CLAUDE_ID.as_ref()],
+            ) {
+                Ok(()) => {
+                    say(
+                        self.out,
+                        format!("Claude Code: claude plugin uninstall {CLAUDE_ID}"),
+                    );
+                    self.state.claude_plugin_gone = true;
+                }
+                Err(e) => self.fail(e),
+            }
+        }
+        if self.state.claude_plugin_gone {
+            match run(
+                &claude,
+                &[
+                    "plugin".as_ref(),
+                    "marketplace".as_ref(),
+                    "remove".as_ref(),
+                    NAME.as_ref(),
+                ],
+            ) {
+                Ok(()) => {
+                    say(
+                        self.out,
+                        format!("Claude Code: claude plugin marketplace remove {NAME}"),
+                    );
+                    self.state.claude = false;
+                    self.state.claude_plugin_gone = false;
+                }
+                Err(e) => self.fail(e),
+            }
+        }
+    }
+
+    /// The `~/.zshrc` install wrote whole, put back from its backup while it is as install left it.
+    fn zshrc(&mut self) {
+        let Some(written) = &self.state.zshrc else {
+            return;
+        };
+        let zshrc = self.home.join(".zshrc");
+        let backup = self.backups.join("zshrc");
+        if fs::read_to_string(&zshrc).is_ok_and(|now| &now == written) {
+            let put_back = fs::read(&backup)
+                .map_err(|e| format!("could not read the backup of ~/.zshrc: {e}"))
+                .and_then(|old| {
+                    write_whole(&zshrc, old).map_err(|e| format!("could not write ~/.zshrc: {e}"))
+                });
+            match put_back.and_then(|()| {
+                fs::remove_file(&backup)
+                    .map_err(|e| format!("could not delete the backup of ~/.zshrc: {e}"))
+            }) {
+                Ok(()) => {
+                    say(self.out, "~/.zshrc: put back as it was");
+                    self.state.zshrc = None;
+                }
+                Err(e) => self.fail(e),
+            }
+        } else {
+            // Not a failure: only the backup of `~/.zshrc` is left to give back, so the record stays for it.
+            say(
+                self.out,
+                format!(
+                    "~/.zshrc changed since install, so it is left as it is; its old copy is {}",
+                    backup.display()
+                ),
+            );
+        }
+    }
+
+    /// The lines install removed from `~/.zshrc`, put back where they were.
+    fn zshrc_edits(&mut self) {
+        let Some(record) = &self.state.zshrc_edits else {
+            return;
+        };
+        let zshrc = self.home.join(".zshrc");
+        let put_back = fs::read_to_string(&zshrc)
+            .ok()
+            .and_then(|now| with_removed_lines(&now, record));
+        match put_back {
+            Some(text) => match write_whole(&zshrc, text) {
+                Ok(()) => {
+                    say(self.out, "~/.zshrc: put back as it was");
+                    self.state.zshrc_edits = None;
+                }
+                Err(e) => self.fail(format!("could not write ~/.zshrc: {e}")),
+            },
+            None => {
+                // Not a failure: only these lines are left to give back, so the record stays for them.
+                let lines: String = record
+                    .edits
+                    .iter()
+                    .flat_map(|e| e.removed.iter().map(String::as_str))
+                    .collect();
+                say(
+                    self.out,
+                    format!(
+                        "~/.zshrc changed since install, so it is left as it is; the lines install removed were:\n{}",
+                        lines.trim_end()
+                    ),
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]

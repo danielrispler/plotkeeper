@@ -24,18 +24,18 @@ use crate::{
     runner::{End, Ended, Kind, Limits, Request, Runner, private_tmp},
 };
 use serde::{Deserialize, Serialize};
+use std::fmt::Write as _;
 use std::{
     collections::BTreeMap,
     fs,
-    io::Read,
-    os::unix::process::CommandExt,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
-    sync::{Arc, Mutex, OnceLock, Weak, mpsc},
+    process::Command,
+    sync::{Arc, Mutex, OnceLock, Weak},
     thread,
     time::{Duration, Instant},
 };
 use studio_understanding::millis;
+use studio_workbench::run::{self, RunError, run_until, run_until_with_input};
 
 /// What the run's folder keeps beside `work/`: which law it backs, from which commit.
 const ASKED: &str = "back-a-law.json";
@@ -56,6 +56,8 @@ pub struct Config {
     pub sandbox: Option<PathBuf>,
     /// `gh`, for Open draft PR; none: found as the login shell finds it.
     pub gh: Option<PathBuf>,
+    /// Daniel's home folder, whose credential folders a proof may not read; none: no proof runs.
+    pub home: Option<PathBuf>,
 }
 
 impl Config {
@@ -67,7 +69,65 @@ impl Config {
             data,
             sandbox: None,
             gh: None,
+            home: std::env::home_dir().filter(|home| !home.as_os_str().is_empty()),
         }
+    }
+}
+
+/// The longest a `git` on the host may take: a fetch, a push or a clone of Daniel's repository.
+const HOST_GIT_LIMIT: Duration = Duration::from_secs(120);
+/// The longest a `gh` call may take: a lookup, or opening the draft.
+const GH_LIMIT: Duration = Duration::from_secs(30);
+
+/// Why a step back a law takes on the host failed. The page gets its text.
+#[derive(Debug)]
+pub enum LawError {
+    /// No home folder is known, so the sandbox cannot be told which of its folders a proof may not read.
+    NoHome,
+    /// The sandbox's settings `file`, which holds what a proof may not read, was not written.
+    Settings {
+        file: PathBuf,
+        error: std::io::Error,
+    },
+    /// A `git` on the host.
+    Git(RunError),
+    /// The `gh` `step`, such as `pr create`.
+    Gh { step: String, error: RunError },
+}
+
+impl std::fmt::Display for LawError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LawError::NoHome => f.write_str(
+                "plotkeeper found no home folder, so the patch could not be proven in a sandbox",
+            ),
+            LawError::Settings { file, error } => write!(
+                f,
+                "The sandbox's settings {} could not be written, so the patch was not proven: {error}",
+                file.display()
+            ),
+            LawError::Git(RunError::Failed(output)) => {
+                f.write_str(String::from_utf8_lossy(&output.stderr).trim())
+            }
+            LawError::Git(error) => write!(f, "git {error}"),
+            LawError::Gh {
+                step,
+                error: RunError::Failed(output),
+            } => write!(
+                f,
+                "gh {step} failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+            LawError::Gh { step, error } => write!(f, "gh {step} {error}"),
+        }
+    }
+}
+
+impl std::error::Error for LawError {}
+
+impl From<LawError> for String {
+    fn from(error: LawError) -> String {
+        error.to_string()
     }
 }
 
@@ -346,7 +406,8 @@ impl LawRuns {
             else {
                 continue;
             };
-            let _ = fs::remove_file(&file);
+            // Best effort: a file already gone is fine.
+            fs::remove_file(&file).ok();
             let line = "plotkeeper stopped during the proof: back the law again".to_string();
             self.shown().insert(
                 patch.id.clone(),
@@ -362,7 +423,8 @@ impl LawRuns {
 
     /// Sets what is told the project whose patches changed; the first call wins.
     pub fn on_change(&self, changed: impl Fn(&str) + Send + Sync + 'static) {
-        let _ = self.changed.set(Box::new(changed));
+        // Set once; a later set keeps the first value, which is the same.
+        self.changed.set(Box::new(changed)).ok();
     }
 
     fn tell(&self, project: &str) {
@@ -372,7 +434,9 @@ impl LawRuns {
     }
 
     fn shown(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, LawPatch>> {
-        self.shown.lock().unwrap_or_else(|e| e.into_inner())
+        self.shown
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// `srt`: the one configured, when it is there, or the login shell's.
@@ -433,7 +497,7 @@ impl LawRuns {
             repo,
             &["show", &format!("{commit}:{}", system_map::MAP_FILE)],
         )
-        .map_err(|_| "the default branch has no system-map.json")?;
+        .map_err(|e| format!("the default branch has no system-map.json: {e}"))?;
         let source = system_map::convert(&source)?;
         let (prompt, law, new) = match target {
             Target::Back(law) => (prompt(&source, &law)?, law, None),
@@ -466,7 +530,8 @@ impl LawRuns {
             .map_err(|e| e.to_string())
         });
         if let Err(e) = cloned {
-            let _ = fs::remove_dir_all(&dir);
+            // Best effort: a file already gone is fine.
+            fs::remove_dir_all(&dir).ok();
             return refuse(format!("the clone failed: {e}"));
         }
         let request = Request {
@@ -536,11 +601,18 @@ impl LawRuns {
     /// (three-way) and committed, pushed, and a draft PR with the proof in its body; then the worktree and the local branch are
     /// removed, so Daniel's checkout and its branch are never touched. The patch then says its PR, and the law change is
     /// recorded as accepted in ratify. A patch that does not apply is out of date.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "left whole when the lint came in (#555); spec #548 names no split of it"
+    )]
     pub fn open_pr(&self, project: &str, id: &str) -> Result<Opened, String> {
         if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
             return Err("no such patch".into());
         }
-        let _one = self.opening.lock().unwrap_or_else(|e| e.into_inner());
+        let _one = self
+            .opening
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let file = self.config.data.join(PATCHES).join(format!("{id}.json"));
         let patch = fs::read(&file)
             .ok()
@@ -619,8 +691,11 @@ impl LawRuns {
             let patch_file = tmp.path().join("test.patch");
             fs::write(&patch_file, &diff).map_err(|e| e.to_string())?;
             let patch_text = patch_file.to_str().ok_or("the path is not text")?;
-            if host_git(&work, &["apply", "--3way", patch_text]).is_err() {
-                return Ok(None);
+            match host_git(&work, &["apply", "--3way", patch_text]) {
+                Ok(_) => {}
+                // git refused the patch: it is out of date. A git that did not run or ran out of time says so instead.
+                Err(LawError::Git(RunError::Failed(_))) => return Ok(None),
+                Err(e) => return Err(e.into()),
             }
             let title = if patch.text.is_some() {
                 format!("Add the law `{}` with a test", patch.law)
@@ -652,18 +727,23 @@ impl LawRuns {
                 &body,
             )
             .map(Some)
+            .map_err(String::from)
         })();
         // The temporary worktree is emptied of what a failed step left and removed by its path, without forcing git and
         // without pruning, which would drop the records of Daniel's own worktrees whose folders are away.
         if work.exists() {
-            let _ = host_git(&work, &["reset", "-q", "--hard"]);
-            let _ = host_git(&work, &["clean", "-fdq"]);
+            // Best effort: the `worktree remove` below logs a failure.
+            host_git(&work, &["reset", "-q", "--hard"]).ok();
+            // Best effort: the `worktree remove` below logs a failure.
+            host_git(&work, &["clean", "-fdq"]).ok();
             if let Err(e) = host_git(repo, &["worktree", "remove", &work_text]) {
                 log::warn!("back a law: the temporary worktree {work_text} was not removed: {e}");
             }
         }
         drop(tmp);
-        let _ = host_git(repo, &["branch", "-q", "-D", &branch]);
+        if let Err(e) = host_git(repo, &["branch", "-q", "-D", &branch]) {
+            log::warn!("back a law: the temporary branch {branch} was not deleted: {e}");
+        }
         let Some(url) = made? else {
             self.keep(
                 &file,
@@ -746,7 +826,8 @@ impl LawRuns {
         };
         // A run that failed left nothing to prove: its row says how it ended.
         if !matches!(ended.end, End::Done | End::Denied) {
-            let _ = fs::remove_dir_all(&ended.folder);
+            // Best effort: a file already gone is fine.
+            fs::remove_dir_all(&ended.folder).ok();
             return;
         }
         let patch = |state, line| LawPatch {
@@ -778,17 +859,15 @@ impl LawRuns {
             Some(program) => {
                 let text = fs::read_to_string(&self.config.settings).unwrap_or_default();
                 let checks = crate::settings::run_settings_in(&text, &asked.project).checks;
-                prove(
-                    &Sandbox::new(program, dir, &ended.folder, &self.config.data),
-                    dir,
-                    &ended.folder,
-                    &asked,
-                    &checks,
-                )
+                let home = self.config.home.as_deref();
+                Sandbox::new(program, home, dir, &ended.folder, &self.config.data)
+                    .map_err(String::from)
+                    .and_then(|sandbox| prove(&sandbox, dir, &ended.folder, &asked, &checks))
             }
             None => Err("`srt` was not found, so the patch could not be proven".into()),
         };
-        let _ = fs::remove_dir_all(&ended.folder);
+        // Best effort: a file already gone is fine.
+        fs::remove_dir_all(&ended.folder).ok();
         let mut shown = self.shown();
         match proved {
             Ok((diff, proof)) => {
@@ -800,7 +879,8 @@ impl LawRuns {
                 let saved = fs::create_dir_all(&folder)
                     .and_then(|()| fs::write(&file, serde_json::to_vec(&kept).unwrap_or_default()));
                 if let Err(e) = saved {
-                    let _ = fs::remove_file(&file);
+                    // Best effort: a file already gone is fine.
+                    fs::remove_file(&file).ok();
                     shown.insert(
                         ended.id.clone(),
                         patch(
@@ -811,7 +891,8 @@ impl LawRuns {
                 }
             }
             Err(line) => {
-                let _ = fs::remove_file(&file);
+                // Best effort: a file already gone is fine.
+                fs::remove_file(&file).ok();
                 shown.insert(ended.id.clone(), patch(PatchState::Rejected, Some(line)));
             }
         }
@@ -921,16 +1002,9 @@ fn run_prompt(map: &serde_json::Value, on: &str, head: &str, first: [String; 2])
 /// Clones `repo` at `commit` into the empty folder `work`, with no remote: Daniel's repository is only read.
 fn clone(repo: &Path, commit: &str, work: &Path) -> Result<(), String> {
     let git = |dir: &Path, args: &[&str]| -> Result<(), String> {
-        let out = Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .output()
-            .map_err(|e| e.to_string())?;
-        if out.status.success() {
-            Ok(())
-        } else {
-            Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
-        }
+        run_until(run::git(dir).args(args), HOST_GIT_LIMIT)
+            .map(drop)
+            .map_err(|e| e.to_string())
     };
     let (Some(from), Some(into)) = (repo.to_str(), work.to_str()) else {
         return Err("the path is not text".into());
@@ -953,43 +1027,25 @@ fn clone(repo: &Path, commit: &str, work: &Path) -> Result<(), String> {
 
 /// Runs git in Daniel's repository or the temporary worktree, on the host: never his hooks, which could run the new test
 /// outside a sandbox.
-fn host_git(dir: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git")
-        .args(["-c", "core.hooksPath=/dev/null"])
-        .args(args)
-        .current_dir(dir)
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|e| e.to_string())?;
-    if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
-    } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
-    }
+/// It never prompts and ends by [`HOST_GIT_LIMIT`], so a click cannot hang on a credential prompt or a stuck network.
+fn host_git(dir: &Path, args: &[&str]) -> Result<String, LawError> {
+    let mut git = run::git(dir);
+    git.args(["-c", "core.hooksPath=/dev/null"]).args(args);
+    let out = run_until(&mut git, HOST_GIT_LIMIT).map_err(LawError::Git)?;
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-/// Runs `gh` in `dir` with `input` on its stdin: its last line of output.
-fn gh(program: PathBuf, dir: &Path, args: &[&str], input: &str) -> Result<String, String> {
-    use std::io::Write;
-    let mut child = Command::new(program)
-        .args(args)
-        .current_dir(dir)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("gh did not start: {e}"))?;
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(input.as_bytes());
-    }
-    let out = child.wait_with_output().map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        return Err(format!(
-            "gh {} failed: {}",
-            args.iter().take(2).copied().collect::<Vec<_>>().join(" "),
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
+/// Runs `gh` in `dir` with `input` on its stdin, within [`GH_LIMIT`]: its last line of output.
+fn gh(program: PathBuf, dir: &Path, args: &[&str], input: &str) -> Result<String, LawError> {
+    let out = run_until_with_input(
+        run::gh_at(program, dir).args(args),
+        input.as_bytes(),
+        GH_LIMIT,
+    )
+    .map_err(|error| LawError::Gh {
+        step: args.iter().take(2).copied().collect::<Vec<_>>().join(" "),
+        error,
+    })?;
     let text = String::from_utf8_lossy(&out.stdout);
     Ok(text.lines().last().unwrap_or_default().trim().to_string())
 }
@@ -1104,9 +1160,17 @@ struct Ran {
 }
 
 impl Sandbox {
-    fn new(program: PathBuf, dir: &Path, clone: &Path, data: &Path) -> Sandbox {
+    /// The sandbox of the proof in `dir`, its settings written there. It fails closed: with no `home` to deny the
+    /// folders of, or with the settings not written, there is no sandbox and so no proof.
+    fn new(
+        program: PathBuf,
+        home: Option<&Path>,
+        dir: &Path,
+        clone: &Path,
+        data: &Path,
+    ) -> Result<Sandbox, LawError> {
         let tmp = private_tmp(clone);
-        let home = std::env::home_dir().unwrap_or_default();
+        let home = home.ok_or(LawError::NoHome)?;
         let mut deny = vec![data.to_path_buf()];
         deny.extend(
             [
@@ -1128,13 +1192,15 @@ impl Sandbox {
             "filesystem": { "denyRead": deny, "allowWrite": [clone, &tmp], "denyWrite": [] },
         });
         let file = dir.join("srt.json");
-        let _ = fs::write(&file, settings.to_string());
-        Sandbox {
+        if let Err(error) = fs::write(&file, settings.to_string()) {
+            return Err(LawError::Settings { file, error });
+        }
+        Ok(Sandbox {
             program,
             settings: file,
             tmp,
             deadline: Instant::now() + PROOF_LIMIT,
-        }
+        })
     }
 
     /// Runs `command` in `clone`, in the sandbox, in a process group of its own that is killed at the proof's limit.
@@ -1146,8 +1212,8 @@ impl Sandbox {
             command.to_string()
         };
         let cores = crate::runner::cores().to_string();
-        let child = Command::new(&self.program)
-            .arg("-s")
+        let mut srt = Command::new(&self.program);
+        srt.arg("-s")
             .arg(&self.settings)
             .arg("-c")
             .arg(&command)
@@ -1156,60 +1222,26 @@ impl Sandbox {
             .env("CARGO_BUILD_JOBS", &cores)
             .env("NEXTEST_TEST_THREADS", &cores)
             .env_remove("ANTHROPIC_API_KEY")
-            .env_remove("ANTHROPIC_AUTH_TOKEN")
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .process_group(0)
-            .spawn();
-        let mut child = match child {
-            Ok(child) => child,
-            Err(e) => {
+            .env_remove("ANTHROPIC_AUTH_TOKEN");
+        let left = self.deadline.saturating_duration_since(Instant::now());
+        let (ok, output) = match run_until(&mut srt, left) {
+            Ok(output) => (true, output),
+            Err(RunError::Failed(output)) => (false, output),
+            Err(RunError::Start(e)) => {
                 return Ran {
                     ok: false,
                     out: format!("the sandbox did not start: {e}"),
                 };
             }
-        };
-        let reader = |pipe: Option<Box<dyn Read + Send>>| {
-            thread::spawn(move || {
-                let mut text = Vec::new();
-                if let Some(mut pipe) = pipe {
-                    let _ = pipe.read_to_end(&mut text);
-                }
-                String::from_utf8_lossy(&text).into_owned()
-            })
-        };
-        let out = reader(
-            child
-                .stdout
-                .take()
-                .map(|p| Box::new(p) as Box<dyn Read + Send>),
-        );
-        let err = reader(
-            child
-                .stderr
-                .take()
-                .map(|p| Box::new(p) as Box<dyn Read + Send>),
-        );
-        let pid = child.id();
-        let (done, waited) = mpsc::channel();
-        thread::spawn(move || drop(done.send(child.wait())));
-        let ok = match waited.recv_timeout(self.deadline.saturating_duration_since(Instant::now()))
-        {
-            Ok(status) => status.is_ok_and(|status| status.success()),
-            Err(_) => {
-                // SAFETY: a signal to the process group this proof's child leads, which it made for itself.
-                unsafe { libc::killpg(pid as i32, libc::SIGKILL) };
-                let _ = waited.recv();
+            Err(RunError::TimedOut(_)) => {
                 return Ran {
                     ok: false,
                     out: "The proof stopped at its limit of 30 minutes".into(),
                 };
             }
         };
-        let mut out = out.join().unwrap_or_default();
-        let err = err.join().unwrap_or_default();
+        let mut out = String::from_utf8_lossy(&output.stdout).into_owned();
+        let err = String::from_utf8_lossy(&output.stderr);
         if (merged || !ok) && !err.trim().is_empty() {
             out.push_str(&err);
         }
@@ -1244,7 +1276,8 @@ fn run_checks(sandbox: &Sandbox, clone: &Path, checks: &[String], all: bool) -> 
     let mut ok = true;
     for check in checks {
         let ran = sandbox.run(clone, check, true);
-        out.push_str(&format!("$ {check}\n{}\n", ran.out.trim_end()));
+        // Writing to a `String` cannot fail.
+        write!(out, "$ {check}\n{}\n", ran.out.trim_end()).ok();
         ok &= ran.ok;
         if !ok && !all {
             break;
@@ -1266,16 +1299,22 @@ fn prove(
     if checks.is_empty() {
         return Err("Set this project's checks: the patch could not be proven".into());
     }
-    let _ = fs::remove_dir_all(&sandbox.tmp);
+    // A folder a past proof left; the `create` below fails if it stayed.
+    fs::remove_dir_all(&sandbox.tmp).ok();
     fs::DirBuilder::new()
         .mode(0o700)
         .create(&sandbox.tmp)
         .map_err(|e| format!("the proof's temp folder: {e}"))?;
     let proved = prove_in(sandbox, dir, clone, asked, checks);
-    let _ = fs::remove_dir_all(&sandbox.tmp);
+    // Best effort: a file already gone is fine.
+    fs::remove_dir_all(&sandbox.tmp).ok();
     proved
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "left whole when the lint came in (#555); spec #548 names no split of it"
+)]
 fn prove_in(
     sandbox: &Sandbox,
     dir: &Path,

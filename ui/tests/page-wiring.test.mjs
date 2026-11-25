@@ -31,3 +31,8 @@ test("every element the page looks up is in the page", () => {
   }
   assert.deepEqual(missing, []);
 });
+
+test("a server error is shown in the notice line", () => {
+  const main = sources.find(([name]) => name === "main.ts")[1];
+  assert.match(main, /listen<string>\("server-error", showError\)/);
+});

@@ -451,7 +451,8 @@ fn a_worktree_made_after_the_first_fingerprint_starts_from_its_creation_commit()
     let first = prints.look(&made, Purpose::Card).map(|c| c.diff);
     assert_eq!(first.as_deref(), Some(change));
     assert_eq!(diff(&mut prints, &made), None);
-    let _ = fs::remove_dir_all(&made);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&made).ok();
 }
 
 #[test]
@@ -480,7 +481,8 @@ fn a_worktree_that_existed_before_the_first_fingerprint_starts_from_its_files_th
     assert_eq!(diff(&mut prints, dir.path()), None);
 
     assert_eq!(diff(&mut prints, &older), None);
-    let _ = fs::remove_dir_all(&older);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&older).ok();
 }
 
 /// A repository with a worktree `w1` removed and a worktree `w2` listed, both in its `worktrees`
@@ -567,7 +569,8 @@ fn a_worktree_made_before_the_turn_or_worker_began_starts_from_its_files_then() 
         + 2_000;
     let found = prints.look_since(&made, Purpose::Base, Some(began));
     assert_eq!(found.map(|c| c.diff), None);
-    let _ = fs::remove_dir_all(&made);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&made).ok();
 }
 
 #[test]
@@ -589,7 +592,8 @@ fn a_file_edited_before_a_new_worktrees_base_look_is_still_the_change_at_its_car
 
     let change = "--- a/new.rs\n+++ b/new.rs\n@@ -0,0 +1 @@\n+fn n() {}\n";
     assert_eq!(card.as_deref(), Some(change));
-    let _ = fs::remove_dir_all(&made);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&made).ok();
 }
 
 // Roots in git's spelling (danielrispler/plotkeeper#202): a temp dir's `/var` is `/private/var`.

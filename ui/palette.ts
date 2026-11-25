@@ -9,6 +9,7 @@ import type { Binding } from "./settings.js";
 // `aria-activedescendant`. Enter or a click runs one, from where the focus was. Opening it again, Esc, a click outside it and its ×
 // close it, and a close returns the focus to where it was before it opened, as no button opened it for the browser to go back to; a click
 // outside on something that takes the focus, such as a text field, keeps the focus there.
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: ratcheted at #554; split it rather than grow it
 export function showPalette(entries: Entry[], run: (binding: Binding) => void) {
   const picker = element("palette");
   if (picker.matches(":popover-open")) {

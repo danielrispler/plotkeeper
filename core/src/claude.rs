@@ -11,7 +11,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 
 /// The name Claude Code's hook entries pass (`--agent claude`), which its lines carry.
-pub const CLAUDE: &str = "claude";
+pub(crate) const CLAUDE: &str = "claude";
 
 /// What Claude Code reports: everything the core reads today.
 pub const CAPABILITIES: Capabilities = Capabilities {
@@ -166,6 +166,10 @@ fn tool(raw: &Raw) -> Tool {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "left whole when the lint came in (#555); spec #548 names no split of it"
+)]
 fn adapt(raw: Raw) -> Event {
     let id = raw.tool_use_id.clone();
     let mut happened = Vec::new();
@@ -284,14 +288,14 @@ fn adapt(raw: Raw) -> Event {
                 tool: tool(&raw),
                 id: id.clone(),
                 reason: raw.reason.clone(),
-            })
+            });
         }
         STUDIO_ANSWER if raw.studio_asked_by == "PermissionDenied" => {
             happened.push(Happened::BlockedAnswered {
                 tool: tool(&raw),
                 id: id.clone(),
                 answer: raw.studio_answer.clone(),
-            })
+            });
         }
         STUDIO_ANSWER => happened.push(Happened::Answered {
             tool: tool(&raw),

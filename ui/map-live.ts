@@ -6,16 +6,16 @@ import type { Session, Subagent, Turn, TurnFile } from "./types.js";
 
 // The page's 7-day cut, mirroring core's `SINCE_MS` (`core/src/turn_files.rs`): core asks for a turn's files only within it, but keeps
 // them after, so the page applies the cut itself.
-export const CUT_MS = 7 * 24 * 60 * 60 * 1000;
+const CUT_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Whether a turn counts: its end, or its start if it never ended, is within the cut of `now`, whatever files it still holds.
-export const inCut = (turn: Pick<Turn, "started_at" | "ended_at">, now: number) => (turn.ended_at ?? turn.started_at) + CUT_MS >= now;
+const inCut = (turn: Pick<Turn, "started_at" | "ended_at">, now: number) => (turn.ended_at ?? turn.started_at) + CUT_MS >= now;
 
 const editing = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
 
 // The file of a Running session's edit in flight (Edit, Write, MultiEdit, NotebookEdit), from its folder; null otherwise, so the last
 // edit of a session that stopped never counts.
-export function inFlight(session: Pick<Session, "state" | "last_step" | "cwd">): string | null {
+function inFlight(session: Pick<Session, "state" | "last_step" | "cwd">): string | null {
   const step = session.last_step;
   const path = session.state === "running" && step && editing.includes(step.tool) ? step.detail : null;
   if (!path) return null;
@@ -23,7 +23,7 @@ export function inFlight(session: Pick<Session, "state" | "last_step" | "cwd">):
 }
 
 // A session's turns within the cut, with their index in `session.turns`.
-export const recentTurns = (session: Pick<Session, "turns">, now: number) =>
+const recentTurns = (session: Pick<Session, "turns">, now: number) =>
   session.turns.flatMap((turn, index) => (inCut(turn, now) ? [{ turn, index }] : []));
 
 // The paths `map_place` is asked about for `sessions` (the shown project's): every file of every turn within the cut, Workers' included,
@@ -56,10 +56,10 @@ export function footprint(session: Session, placed: Placement, now: number): Foo
 }
 
 // The parts `paths` touch, each once, in the order first met.
-export const partsOf = (paths: string[], placed: Placement): string[] => [...new Set(paths.flatMap((path) => placed[path] ?? []))];
+const partsOf = (paths: string[], placed: Placement): string[] => [...new Set(paths.flatMap((path) => placed[path] ?? []))];
 
 // The parts a turn changed, Workers' files included; none while its files are not diffed.
-export const turnParts = (turn: Pick<Turn, "files">, placed: Placement): string[] => partsOf((turn.files?.files ?? []).map((file) => file.path), placed);
+const turnParts = (turn: Pick<Turn, "files">, placed: Placement): string[] => partsOf((turn.files?.files ?? []).map((file) => file.path), placed);
 
 // Whether a session is marked, wants Daniel's attention on the map: Running or Needs you, or Your turn or Idle while unseen. Never a plain
 // shell or an Ended session; `inProject` keeps another project's out. (A Helper is an agent of a session, never a session.)
@@ -157,7 +157,8 @@ export function sessionBadges(sessions: Session[], placed: Placement, now: numbe
     const files = session.turns.at(-1)?.files?.files ?? [];
     const workers = runningWorkers(session);
     for (const part of parts) {
-      const badge = (byPart[part] ??= { rows: [], accent: false });
+      const badge = byPart[part] ?? { rows: [], accent: false };
+      byPart[part] = badge;
       const on = (worker: Subagent) => files.some((file) => workerFile(worker, file) && (placed[file.path] ?? []).includes(part));
       badge.rows.push({ session, workers: workers.filter(on) });
       badge.accent ||= session.state === "needs_you";
@@ -185,7 +186,7 @@ export type SpotlightView = { chips: string[]; home: string | null; dimmed: stri
 export function spotlightView(byPart: Record<string, Badge>, spot: Session | null, placed: Placement, now: number, order: string[]): SpotlightView {
   if (!spot) return { chips: [], home: null, dimmed: [] };
   const chips = latestParts(spot, placed, now);
-  const dimmed = Object.keys(byPart).filter((part) => !chips.includes(part) && !byPart[part].accent);
+  const dimmed = Object.entries(byPart).flatMap(([part, badge]) => (chips.includes(part) || badge.accent ? [] : [part]));
   return { chips, home: chips.length ? homePart(spot, placed, now, order) : null, dimmed };
 }
 

@@ -114,14 +114,18 @@ fn loopback() -> Result<(u16, Hits), String> {
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             let mut line = String::new();
-            let _ = BufReader::new(&stream).read_line(&mut line);
+            // A request line that does not read is logged as an empty path.
+            BufReader::new(&stream).read_line(&mut line).ok();
             let path = line
                 .split_whitespace()
                 .nth(1)
                 .unwrap_or_default()
                 .to_string();
             seen.lock().unwrap().push(path);
-            let _ = (&stream).write_all(format!("HTTP/1.0 200 OK\r\n\r\n{MARKER}").as_bytes());
+            // The probe may have hung up; the request is already seen.
+            (&stream)
+                .write_all(format!("HTTP/1.0 200 OK\r\n\r\n{MARKER}").as_bytes())
+                .ok();
         }
     });
     Ok((port, hits))
@@ -150,6 +154,10 @@ fn sh(script: &str) -> Option<String> {
 const RUN_IT: &str = "Run exactly this command once with the Bash tool: `sh ./probe.sh`. Then reply with its whole \
      output verbatim and nothing else. Do not run any other command.";
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "a hand-run trial's whole script, read top to bottom"
+)]
 fn probes(g: &Ground) -> Vec<Probe> {
     let probe = vec!["sh ./probe.sh".to_string()];
     let home = g.home.display();
@@ -179,10 +187,11 @@ fn probes(g: &Ground) -> Vec<Probe> {
     for (name, command) in deny {
         // `exists` is a stat, so a missing folder is told apart from a refused one.
         let path = command.split('\'').nth(1).unwrap_or_default();
-        let _ = writeln!(
+        // Writing to a `String` cannot fail.
+        writeln!(
             reads,
             "if [ -e '{path}' ]; then e=yes; else e=no; fi; ( {command} ) >/dev/null 2>&1; echo \"{name} exists=$e exit=$?\""
-        );
+        ).ok();
     }
     vec![
         Probe {
@@ -373,10 +382,12 @@ fn build_probe(name: &'static str, variant: Variant) -> Probe {
     .iter()
     .enumerate()
     {
-        let _ = writeln!(
+        // Writing to a `String` cannot fail.
+        writeln!(
             script,
             "{command} > logs/{i}.log 2>&1; echo \"{command}: exit $?\""
-        );
+        )
+        .ok();
     }
     Probe {
         name,
@@ -394,7 +405,7 @@ fn build_probe(name: &'static str, variant: Variant) -> Probe {
 
 fn clone_repo(g: &Ground, work: &Path) -> Result<(), String> {
     // The working folder exists and is empty: clone into it.
-    let status = Command::new("git")
+    let status = studio_workbench::run::git(Path::new("."))
         .args(["clone", "-q", "--local", "--no-hardlinks"])
         .arg(&g.repo)
         .arg(work)
@@ -419,11 +430,13 @@ fn verdict(g: &Ground, name: &str, work: &Path, stdout: &str) -> String {
             if leaked { "exists" } else { "absent" }
         ));
         if leaked {
-            let _ = if p.is_dir() {
+            // Cleanup: a leak that stays is already in the verdict.
+            if p.is_dir() {
                 fs::remove_dir_all(&p)
             } else {
                 fs::remove_file(&p)
-            };
+            }
+            .ok();
         }
     };
     match name {
@@ -502,6 +515,10 @@ fn verdict(g: &Ground, name: &str, work: &Path, stdout: &str) -> String {
     lines.join("\n")
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "a hand-run trial's whole script, read top to bottom"
+)]
 fn main() -> Result<(), String> {
     let mut args = std::env::args().skip(1);
     let out = PathBuf::from(
@@ -580,7 +597,8 @@ fn main() -> Result<(), String> {
         });
         let tx = tx.clone();
         runner.on_change(move |_| {
-            let _ = tx.send(());
+            // The receiver may have gone, and then no one waits for this.
+            tx.send(()).ok();
         });
         for p in ours {
             let work = runner.new_folder()?;
@@ -609,7 +627,8 @@ fn main() -> Result<(), String> {
         .iter()
         .any(|(_, runner, id, _)| runner.outcome(id).is_none())
     {
-        let _ = rx.recv_timeout(Duration::from_secs(30));
+        // A closed channel or a timeout both mean carry on.
+        rx.recv_timeout(Duration::from_secs(30)).ok();
     }
 
     let mut summary = format!(
@@ -631,21 +650,25 @@ fn main() -> Result<(), String> {
         let into = out.join(p.name);
         fs::create_dir_all(&into).map_err(|e| e.to_string())?;
         for file in ["run.json", "stdout", "stderr", "status.json", "setup.log"] {
-            let _ = fs::copy(dir.join(file), into.join(file));
+            // Evidence only: a file that is not copied is missing from the run's folder.
+            fs::copy(dir.join(file), into.join(file)).ok();
         }
         if let Some(script) = &p.script {
-            let _ = fs::write(into.join("probe.sh"), script);
+            // Evidence only: a file that is not copied is missing from the run's folder.
+            fs::write(into.join("probe.sh"), script).ok();
         }
         if let Ok(logs) = fs::read_dir(work.join("logs")) {
             for log in logs.flatten() {
-                let _ = fs::copy(log.path(), into.join(log.file_name()));
+                // Evidence only: a file that is not copied is missing from the run's folder.
+                fs::copy(log.path(), into.join(log.file_name())).ok();
             }
         }
         let stdout = fs::read_to_string(dir.join("stdout")).unwrap_or_default();
         let verdict = verdict(&g, p.name, work, &stdout);
         let text = format!("{}\n\n{outcome:#?}\n\n{verdict}\n", p.criterion);
         fs::write(into.join("verdict.txt"), &text).map_err(|e| e.to_string())?;
-        let _ = write!(
+        // Writing to a `String` cannot fail.
+        write!(
             summary,
             "## {}\n\n{}\n\nEnd: {:?}, exit {:?}, cost {:?}\n\nDenials: {:?}\n\n{verdict}\n\nResult:\n\n```\n{}\n```\n\n",
             p.name,
@@ -655,12 +678,14 @@ fn main() -> Result<(), String> {
             outcome.cost,
             outcome.denials,
             outcome.result.trim()
-        );
+        ).ok();
     }
     if only.is_empty() || only.iter().any(|o| o == "srt") {
-        let _ = write!(summary, "{}", srt_probe(&g, &out)?);
+        // Writing to a `String` cannot fail.
+        write!(summary, "{}", srt_probe(&g, &out)?).ok();
     }
-    let _ = fs::remove_dir_all(g.temp.join(STANDIN));
+    // Cleanup: a leftover temp folder only takes space.
+    fs::remove_dir_all(g.temp.join(STANDIN)).ok();
     fs::write(out.join("summary.md"), &summary).map_err(|e| e.to_string())?;
     println!("{summary}");
     Ok(())
@@ -715,12 +740,16 @@ fn srt_probe(g: &Ground, out: &Path) -> Result<String, String> {
         .map_err(|e| format!("srt: {e}"))?;
     let into = out.join("srt");
     fs::create_dir_all(&into).map_err(|e| e.to_string())?;
-    let _ = fs::write(into.join("probe.sh"), &script);
-    let _ = fs::copy(&config_path, into.join("srt-settings.json"));
+    // Evidence only: a file that is not copied is missing from the run's folder.
+    fs::write(into.join("probe.sh"), &script).ok();
+    // Evidence only: a file that is not copied is missing from the run's folder.
+    fs::copy(&config_path, into.join("srt-settings.json")).ok();
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-    let _ = fs::write(into.join("stdout"), &stdout);
-    let _ = fs::write(into.join("stderr"), &stderr);
+    // Evidence only: a file that is not copied is missing from the run's folder.
+    fs::write(into.join("stdout"), &stdout).ok();
+    // Evidence only: a file that is not copied is missing from the run's folder.
+    fs::write(into.join("stderr"), &stderr).ok();
     let mut lines = Vec::new();
     for (label, p) in [
         ("home", g.home.join(".pk-gate-srt-home")),
@@ -735,7 +764,8 @@ fn srt_probe(g: &Ground, out: &Path) -> Result<String, String> {
             if leaked { "exists" } else { "absent" }
         ));
         if leaked {
-            let _ = fs::remove_file(&p);
+            // Cleanup: a leftover temp folder only takes space.
+            fs::remove_file(&p).ok();
         }
     }
     lines.push(format!(
@@ -746,9 +776,11 @@ fn srt_probe(g: &Ground, out: &Path) -> Result<String, String> {
         "info $TMPDIR file written in the private folder: {}",
         tmp.join("pk-gate-srt").exists()
     ));
-    let _ = fs::remove_dir_all(&tmp);
+    // Cleanup: a leftover temp folder only takes space.
+    fs::remove_dir_all(&tmp).ok();
     let verdict = lines.join("\n");
-    let _ = fs::write(into.join("verdict.txt"), &verdict);
+    // Evidence only: a file that is not copied is missing from the run's folder.
+    fs::write(into.join("verdict.txt"), &verdict).ok();
     Ok(format!(
         "## srt\n\n`srt` runs a check command with no network and writes only to the clone.\n\nExit {:?}\n\n{verdict}\n\nOutput:\n\n```\n{stdout}{stderr}```\n",
         output.status.code()

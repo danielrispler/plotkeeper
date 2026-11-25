@@ -7,13 +7,13 @@
 // A quiet copy icon (#493) on a Could break step, in the not-confirmed popover and on the No part group copies a prompt for the agent.
 // A step's check (#340) is answered in place: a pick in the panel, an order by tapping parts on the map into numbered slots (`pickRun`, `orderRun`);
 // Check grades it, a wrong answer shows the correction, and an order check replays the right path along the links.
-// Esc (`brief` layer) closes it and keeps its step; an open not-confirmed popover (`popover` layer) closes first, and a new step closes it. `map-model.ts` holds the logic: `briefPlayer`, `briefCamera`, `figureShapes`.
+// Esc (`brief` layer) closes it and keeps its step; an open not-confirmed popover (`popover` layer) closes first, and a new step closes it. `map-brief-model.ts` holds the logic: `briefPlayer`, `briefCamera`, `figureShapes`.
 // A part catch-up (#391) plays in the same reader (`openCatchUpOf`): one story of a fogged part, under a negative number of its own (one per
 // fog list, `catchUpIds`) so the player keeps its step apart from the PR briefs and from an older story of the part; read to its end it
 // clears the part's fog (`part_catch_up_done`) and completes no brief.
 
-import { failure, invoke, text } from "./dom.js";
-import { currentMap, currentScrub, giveCameraBack, lendCamera, onDraw, registerLayer, type MapView } from "./map.js";
+import { failure, invoke, messageOf, pressable, svg, text } from "./dom.js";
+import { currentMap, onDraw, registerLayer, type MapView } from "./map.js";
 import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { paint as paintBadges } from "./map-agents.js";
 import { watchSeen } from "./seen.js";
@@ -21,52 +21,36 @@ import { logStop } from "./stop-rules.js";
 import { expectedLine } from "./map-pre-flight.js";
 import { exploreRow } from "./micro-world.js";
 import { guardRow } from "./patch-review.js";
-import { scrubTo } from "./map-history.js";
 import { branchOf, overturnNote, ratifyActions, ratifyDetail, ratifyEvidence } from "./map-ratify.js";
-import { copyOverturn, ratifyStep, statusWords } from "./ratify.js";
+import { copyOverturn, statusWords } from "./ratify.js";
 import type { Copied } from "./notes.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
-import { actorSize, agentPrompt, alsoAt, diffArgs, type AlsoRow, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureMax, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, partialFactsLines, pickRun, type PickRun, playlist, plateSize, stageLabel, storySteps, type Rect, type Shape, stepCode, unconfirmed, unconfirmedReasons } from "./map-model.js";
-import type { BriefCheck, BriefFigure, BriefStep, BriefView, CatchUpOffer, CommitFiles, PrBrief, RatifyRow, ReadyPr, StaleBase, StoredCatchUp } from "./types.js";
+import { agentPrompt, alsoAt, diffArgs, type AlsoRow, awaitedWrite, citeDrawer, figureMax, figureShapes, figureSize, latestRequest, partialFactsLines, storySteps, type Shape, stepCode, unconfirmed, unconfirmedReasons } from "./map-brief-model.js";
+import { awaitedCatchUp, fogListLines, stageLabel } from "./map-catch-up.js";
+import { effectiveTier, commitDrawer } from "./map-model.js";
+import type { BriefFigure, BriefStep, CatchUpOffer, CommitFiles, PrBrief, RatifyRow, ReadyPr, StaleBase } from "./types.js";
 import { BRIEF, explained, explainLine, explanationsOn, explainToggle, onExplanations, pressToggle, RATIFY, stepLine } from "./explanations.js";
+import { briefOpen, catchUpId, clearPlaying, panel, player, playingBrief, playingCatchUp, prOf, ratifyRows, setPlaying, steps, stopWatching, watchLast } from "./map-brief-player.js";
+import { aim, light, reduced, stopLight, unlight } from "./map-brief-light.js";
+import { checkNode, checkWaits, grade, paintOrder, runOf, syncNext, wireTaps } from "./map-brief-check.js";
 
-const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
-// The brief being played, as `pr_brief` returned it.
-let playing: BriefView | null = null;
-// The part catch-up being played: its part and the fog list it covers; null while a PR brief plays.
-let catchUp: { part: string; fog: string[]; summary?: StoredCatchUp["summary"] } | null = null;
-// Each part's catch-up plays under a negative number of its own, which no PR has.
-const catchUpId = catchUpIds();
-// A stop event's PR: none for a part catch-up.
-const prOf = (pr: number) => (pr < 0 ? null : pr);
-// What the brief offers for accept or overturn (`ratify.rs`), read when it opens; a decision updates its row at once.
-let ratifying: RatifyRow[] = [];
 // What stopped a row from opening, shown in its place until the next try.
 const problems = new Map<number, string>();
-// The row's problem, until its brief arrives or is being written again.
+/** The row's problem, until its brief arrives or is being written again. */
 export function briefProblem(pr: ReadyPr): string | null {
   if (pr.brief?.writing || awaitedWrite(pr) === "open") problems.delete(pr.number);
   return problems.get(pr.number) ?? null;
 }
 
-const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
-// The light's speed along a link, in world pixels a second.
-const SPEED = 420;
-const svgNS = "http://www.w3.org/2000/svg";
-const svg = (tag: string, attrs: Record<string, string> = {}) => {
-  const node = document.createElementNS(svgNS, tag);
-  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
-  return node;
-};
-
-// Reading a chapter to its end (#342): one gate per chapter of a brief, kept while the window runs; it tells the shell once.
-const gates = new Map<string, Gate>();
-// The chapters of each "Since you read" story read to their end while the window runs (#497).
-const storyDone = new Map<string, Set<number>>();
-let watching: (() => void) | null = null;
-// The "not confirmed from the facts" marks shown, watched until seen or the brief closes (#346).
+// The end-of-story bar of each chapter played since the brief opened (#393), kept so a redraw keeps what is typed; a reopened brief starts
+// them empty.
+const bars = new Map<string, Bar>();
+// The "not confirmed from the facts" marks of the step drawn, watched until seen, the step is drawn again or the brief closes (#346).
 let marks: (() => void)[] = [];
-const stopWatching = () => (watching?.(), (watching = null));
+const stopMarks = () => {
+  for (const stop of marks) stop();
+  marks = [];
+};
 // The not-confirmed popover (#491): one manual popover of the panel, so Esc reaches the map's layers, which close it before the brief. It
 // shows the reasons of the mark that opened it, anchored to that mark (`showPopover`'s source); a redraw of the same step anchors it to the
 // mark's new copy, and a new step closes it.
@@ -76,7 +60,7 @@ let whyOf: string | null = null;
 const popoverOpen = () => !!why?.isConnected && why.matches(":popover-open");
 const markOf = (key: string) => panel().querySelector<HTMLElement>(`.brief-why-mark[data-why="${CSS.escape(key)}"]`);
 function closePopover() {
-  if (popoverOpen()) why!.hidePopover();
+  if (popoverOpen()) why?.hidePopover();
   if (whyOf) markOf(whyOf)?.setAttribute("aria-expanded", "false");
   whyOf = null;
 }
@@ -105,16 +89,15 @@ function reanchorPopover() {
   if (!whyOf || !popoverOpen()) return;
   const mark = markOf(whyOf);
   if (!mark) return closePopover();
-  why!.hidePopover();
-  why!.showPopover({ source: mark });
+  why?.hidePopover();
+  why?.showPopover({ source: mark });
   mark.setAttribute("aria-expanded", "true");
 }
 // The "not confirmed from the facts" mark of a step or a flagged decision: a button whose popover lists the item's reasons, the mark's
 // own words left out. Seeing the mark counts for the stop rules (#346).
 function unconfirmedMark(view: MapView, pr: number, flags: string[], key: string, copy: Prompt | null): HTMLElement {
   const wrap = text("p", "", "brief-quiet brief-unconfirmed");
-  const mark = text("button", "not confirmed from the facts", "btn quiet brief-why-mark");
-  mark.setAttribute("type", "button");
+  const mark = pressable(text("button", "not confirmed from the facts", "btn quiet brief-why-mark"), null);
   mark.title = "Show why the checks could not confirm this";
   mark.dataset.why = key;
   mark.setAttribute("aria-controls", "brief-why");
@@ -126,14 +109,13 @@ function unconfirmedMark(view: MapView, pr: number, flags: string[], key: string
 }
 // Copy for the agent (#493): a quiet copy icon puts a prompt that stands alone for any agent on the clipboard (`agentPrompt`), through
 // Overturn's path (`copyOverturn`), and the copy toast shows it, or holds it to copy by hand when the clipboard refuses: the reader says so
-// with a `copy-for-agent` event, which `main.ts` hands to the toast, so the reader loads none of the shell's modules. A prompt is a
+// with a `copy-for-agent` event, which `main.ts` hands to the toast, so the reader loads none of the page's own modules. A prompt is a
 // string, or waits for the changed files of a step's lit parts; those are asked for when the step is drawn, so a click usually has them
 // and the clipboard is written inside it.
 type Prompt = () => string | Promise<string>;
 const COPY_ICON = '<svg viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="4.5" width="7" height="7" rx="1.5"/><path d="M9.5 2.5h-6a1 1 0 0 0-1 1v6"/></svg>';
 function copyButton(label: string, hover: string, prompt: Prompt): HTMLElement {
-  const button = text("button", "", "btn quiet brief-copy");
-  button.setAttribute("type", "button");
+  const button = pressable(text("button", "", "btn quiet brief-copy"), null);
   button.setAttribute("aria-label", label);
   button.title = hover;
   button.innerHTML = COPY_ICON;
@@ -151,6 +133,7 @@ function copyButton(label: string, hover: string, prompt: Prompt): HTMLElement {
 type Files = { done: string[] | null; wait: Promise<string[]> };
 const litFiles = new Map<string, Files>();
 function filesOf(view: MapView, step: BriefStep): Files {
+  const playing = playingBrief();
   const parts = step.on.filter((id) => view.doc.parts.some((part) => part.id === id));
   if (!playing || !parts.length) return { done: [], wait: Promise.resolve([]) };
   const { pr, head } = playing.brief;
@@ -160,7 +143,8 @@ function filesOf(view: MapView, step: BriefStep): Files {
   if (!found) {
     const files: Files = { done: null, wait: invoke("pr_diff", { ...diffArgs(view.project, playing), parts }).then((got) => got.files.map((file) => file.path), () => []) };
     void files.wait.then((paths) => (files.done = paths));
-    litFiles.set(key, (found = files));
+    found = files;
+    litFiles.set(key, found);
   }
   return found;
 }
@@ -171,79 +155,63 @@ function stepPrompt(view: MapView, step: BriefStep, pr: number): Prompt {
   return () => (files.done ? make(files.done) : files.wait.then(make));
 }
 
-// The end-of-story bar of each chapter played since the brief opened (#393), kept so a redraw keeps what is typed; a reopened brief starts
-// them empty.
-const bars = new Map<string, Bar>();
-function gateOf(): Gate | null {
-  const now = player.current();
-  if (!now || !playing) return null;
-  const story = `${now.project}|${now.pr}|${playing.brief.head}|${now.story}`;
-  const key = `${story}|${now.chapter}`;
-  let gate = gates.get(key);
-  if (!gate) {
-    const { project, pr, chapter } = now;
-    const head = playing.brief.head;
-    const caught = catchUp;
-    const chapters = playing.since ? playing.brief.brief.chapters.length : 0;
-    gate = chapterGate(storySteps(steps()), () => {
-      if (chapters) {
-        // A "Since you read" story (#497) read to its end, every chapter of it: the read carries over to its head. Its chapters are not
-        // the full brief's, so none is marked read on its own.
-        const done = storyDone.get(story) ?? new Set<number>();
-        storyDone.set(story, done.add(chapter));
-        if (done.size < chapters) return;
-        logStop("chapter-done", project, pr);
-        void invoke("brief_since_done", { project, number: pr, head }).catch(failure("brief_since_done"));
-        return;
-      }
-      if (caught) {
-        logStop("catch-up-done", project);
-        void invoke("part_catch_up_done", { project, part: caught.part, fog: caught.fog }).catch(failure("part_catch_up_done"));
-        return;
-      }
-      logStop("chapter-done", project, pr);
-      void invoke("brief_chapter_done", { project, number: pr, chapter, head }).catch(failure("brief_chapter_done"));
-    });
-    gates.set(key, gate);
-  }
-  return gate;
-}
-// Watches the last step's words: once they have been seen, the chapter's reading counts.
-function watchLast(node: Element, index: number) {
-  stopWatching();
-  const gate = gateOf();
-  if (!gate || gate.done() || index !== storySteps(steps()).length - 1) return;
-  watching = watchSeen(node, { active: () => player.current()?.step === index && panel().classList.contains("open"), onSeen: () => gate.sawLast() });
-}
-
-const panel = () => document.getElementById("map-brief")!;
-export const briefOpen = () => player.current() !== null;
 
 // Opens `chapter` of PR `number`'s brief: reads it, returns the map to now and plays it. A stale or unwritten brief is written in the
 // background (port decision Q5): the panel and the PR's tray row say "Writing the brief…", the map stays usable, and the brief opens
 // when it lands (`map-landed` draws the map again), unless another open or a close came since.
 const latest = latestRequest();
 let awaiting: { project: string; number: number; chapter: number; full: boolean; wanted: () => boolean } | null = null;
-// `full` opens the full brief past the head's "Since you read" story (#497), which opens first otherwise.
-export async function openBriefOf(project: string, number: number, chapter: number, full = false) {
-  problems.delete(number);
+let awaitingCatchUp: { project: string; part: string; wanted: () => boolean } | null = null;
+
+// The open sequence a brief and a part catch-up share: this open supersedes any waiting one, an answer that takes a moment shows the
+// waiting card (`slowly`), and a failure is reported only while this open is still wanted. Null: a later open, or a close, came since.
+async function ask<T>(request: () => Promise<T>, slowly: () => void, failed: (e: unknown) => void): Promise<{ got: T | null; wanted: () => boolean } | null> {
   awaiting = null;
   awaitingCatchUp = null;
   const wanted = latest.begin();
-  let got: BriefView | { writing: true } | null;
-  // An answer that takes a moment shows "Writing the brief…" too.
-  const slow = window.setTimeout(() => wanted() && showWriting(number), WRITING_AFTER_MS);
+  const slow = window.setTimeout(() => wanted() && slowly(), WRITING_AFTER_MS);
+  let got: T | null;
   try {
-    panel().dataset.waiting = String(number);
-    got = await invoke("pr_brief", { project, number, full });
+    got = await request();
   } catch (e) {
-    // A superseded open's failure is not this PR's problem: only a wanted answer may set it.
-    if (wanted()) problems.set(number, String(e));
+    if (wanted()) failed(e);
     got = null;
   }
   clearTimeout(slow);
+  return wanted() ? { got, wanted } : null;
+}
+
+// Plays `brief` from its step `at`, its panel built afresh: another brief or chapter open is left first (it keeps its step), and the map
+// returns to now. `opened` tells the stop rules.
+function play(view: MapView, story: Parameters<typeof setPlaying>, opened: () => void, at: { project: string; pr: number; chapter: number; since?: string }) {
+  if (briefOpen()) closeBrief();
+  setPlaying(...story);
+  opened();
+  if (!resizing) {
+    resizing = true;
+    addEventListener("resize", onResize);
+  }
+  closeDrawer();
+  player.open(at.project, at.pr, at.chapter, at.since);
+  show(view, false);
+}
+
+/** `full` opens the full brief past the head's "Since you read" story (#497), which opens first otherwise. */
+export async function openBriefOf(project: string, number: number, chapter: number, full = false) {
+  problems.delete(number);
+  const asked = await ask(
+    () => {
+      panel().dataset.waiting = String(number);
+      return invoke("pr_brief", { project, number, full });
+    },
+    // An answer that takes a moment shows "Writing the brief…" too.
+    () => showWriting(number),
+    // A superseded open's failure is not this PR's problem: only a wanted answer may set it.
+    (e) => problems.set(number, messageOf(e)),
+  );
   // A later open, or a close, since: this one's answer is not wanted, and the panel's waiting mark is that one's.
-  if (!wanted()) return;
+  if (!asked) return;
+  const { got, wanted } = asked;
   delete panel().dataset.waiting;
   if (got && "writing" in got) {
     awaiting = { project, number, chapter, full, wanted };
@@ -255,46 +223,34 @@ export async function openBriefOf(project: string, number: number, chapter: numb
   if (!got || !view || view.project !== project) {
     if (!got && !problems.has(number)) problems.set(number, "the brief is not written yet");
     // The tray says why, in the row's place of its note, until the map is drawn again.
-    const note = number === null ? null : document.querySelector(`#map-tray .tray-row[data-pr="${number}"] .tray-note`);
-    if (note && problems.has(number)) note.textContent = problems.get(number)!;
+    const note = document.querySelector(`#map-tray .tray-row[data-pr="${number}"] .tray-note`);
+    const problem = problems.get(number);
+    if (note && problem) note.textContent = problem;
     return;
   }
-  const rows = await invoke("pr_ratify", { project, number }).catch((e) => (failure("pr_ratify")(e), [] as RatifyRow[]));
+  const rows = await invoke("pr_ratify", { project, number }).catch((e: unknown): RatifyRow[] => {
+    failure("pr_ratify")(e);
+    return [];
+  });
   if (!wanted()) return;
-  // Another brief or chapter open: leave it (it keeps its step) so the panel is built afresh for this one.
-  if (briefOpen()) closeBrief();
-  playing = got;
-  ratifying = rows;
-  logStop("brief-opened", project, number);
-  if (!resizing) {
-    resizing = true;
-    addEventListener("resize", onResize);
-  }
-  closeDrawer();
-  player.open(project, number, chapter, got.since ?? "");
-  show(view, false);
+  play(view, [got, null, rows], () => logStop("brief-opened", project, number), { project, pr: number, chapter, since: got.since ?? "" });
 }
 
-// Opens `part`'s catch-up: the stored one for its current fog, or, while it is written, the panel says which call of the write runs, the map
-// stays usable, and it opens when it lands (`map-landed` draws the map again), unless another open or a close came since.
-let awaitingCatchUp: { project: string; part: string; wanted: () => boolean } | null = null;
+/**
+ * Opens `part`'s catch-up: the stored one for its current fog, or, while it is written, the panel says which call of the write runs, the map
+ * stays usable, and it opens when it lands (`map-landed` draws the map again), unless another open or a close came since.
+ */
 export async function openCatchUpOf(project: string, part: string) {
-  awaiting = null;
-  awaitingCatchUp = null;
-  const wanted = latest.begin();
   // The card says which call of the write runs (#450), as the map's last state has it.
   const writing = () => stageOf(currentMap()?.state.catch_ups?.[part]);
-  // A catch-up has no tray row for the wait to mark.
-  const slow = window.setTimeout(() => wanted() && showWriting(null, writing(), CATCH_UP_WAIT), WRITING_AFTER_MS);
-  let got: StoredCatchUp | { writing: true } | null;
-  try {
-    got = await invoke("part_catch_up", { project, part });
-  } catch (e) {
-    if (wanted()) failure("part_catch_up")(e);
-    got = null;
-  }
-  clearTimeout(slow);
-  if (!wanted()) return;
+  const asked = await ask(
+    () => invoke("part_catch_up", { project, part }),
+    // A catch-up has no tray row for the wait to mark.
+    () => showWriting(null, writing(), CATCH_UP_WAIT),
+    failure("part_catch_up"),
+  );
+  if (!asked) return;
+  const { got, wanted } = asked;
   if (got && "writing" in got) {
     awaitingCatchUp = { project, part, wanted };
     showWriting(null, writing(), CATCH_UP_WAIT);
@@ -303,22 +259,15 @@ export async function openCatchUpOf(project: string, part: string) {
   if (!briefOpen()) hideWriting();
   const view = currentMap();
   if (!got || !view || view.project !== project) return;
-  if (briefOpen()) closeBrief();
   // A catch-up rewritten for a new fog list is another story, with a number of its own, so it starts at its first step.
   const id = catchUpId(project, part, got.fog);
   // The reader plays it as a single story; there is nothing to ratify.
-  playing = { brief: { version: got.version, pr: id, head: got.fog.join(","), written_at: got.written_at, stale: false, model: got.model, brief: got.brief }, partial: got.partial };
-  catchUp = { part, fog: got.fog, summary: got.summary };
-  ratifying = [];
-  logStop("catch-up-opened", project);
-  if (view.state.stale?.[part]) logStop("stale-entered", project);
-  if (!resizing) {
-    resizing = true;
-    addEventListener("resize", onResize);
-  }
-  closeDrawer();
-  player.open(project, id, 0);
-  show(view, false);
+  const brief = { brief: { version: got.version, pr: id, head: got.fog.join(","), written_at: got.written_at, stale: false, model: got.model, brief: got.brief }, partial: got.partial };
+  const opened = () => {
+    logStop("catch-up-opened", project);
+    if (view.state.stale?.[part]) logStop("stale-entered", project);
+  };
+  play(view, [brief, { part, fog: got.fog, summary: got.summary }, []], opened, { project, pr: id, chapter: 0 });
 }
 onDraw((view) => {
   if (!awaitingCatchUp || view.scrub) return;
@@ -399,19 +348,16 @@ onDraw((view) => {
   void openBriefOf(project, number, 0);
 });
 
-export function closeBrief() {
+function closeBrief() {
   latest.cancel();
   delete panel().dataset.waiting;
   hideWriting();
   stopWatching();
-  marks.forEach((stop) => stop());
-  marks = [];
+  stopMarks();
   closePopover();
   litFiles.clear();
   player.close();
-  playing = null;
-  catchUp = null;
-  ratifying = [];
+  clearPlaying();
   bars.clear();
   stopLight();
   const view = currentMap();
@@ -422,156 +368,6 @@ export function closeBrief() {
   closeDrawer();
   // The spotlit session's footprint comes back (#559).
   paintBadges();
-}
-
-const steps = (): BriefStep[] => {
-  const now = player.current();
-  if (!playing || !now) return [];
-  const list = playlist(playing.brief.brief, now.chapter, now.overview);
-  // The ratify step ends the last chapter (the only one of a single story), and holds Guard with a law's row when the brief offers it (#401).
-  const ratify = now.chapter >= Math.max(0, playing.brief.brief.chapters.length - 1) ? ratifyStep(ratifying.filter((row) => row.status !== "ratified"), [...new Set(list.flatMap((step) => step.on))], !!playing.brief.guard) : null;
-  return ratify ? [...list, ratify] : list;
-};
-
-// ---- the map: lit parts, the camera and the light.
-
-const world = (view: MapView) => view.slots.canvas.firstElementChild as HTMLElement | null;
-const plateOf = (view: MapView, id: string) => view.slots.canvas.querySelector<HTMLElement>(`[data-id="${CSS.escape(id)}"]`);
-
-function unlight(view: MapView) {
-  const root = world(view);
-  if (!root) return;
-  root.classList.remove("briefing");
-  giveCameraBack();
-  view.slots.canvas.querySelectorAll(".lit, .arrive").forEach((node) => node.classList.remove("lit", "arrive"));
-  clearOrder(view);
-  root.querySelector(".map-light")?.remove();
-}
-
-const centre = (view: MapView, id: string) => view.positions[id];
-const sizeOf = (view: MapView, id: string) => (view.doc.actors.some((actor) => actor.id === id) ? actorSize : plateSize);
-const ends = (view: MapView, [link, backwards]: [string, boolean]): [string, string] | null => {
-  const found = view.doc.links.find((l) => l.id === link);
-  return found ? (backwards ? [found.to, found.from] : [found.from, found.to]) : null;
-};
-
-// The parts the playing chapter's behaviour crosses, which its frame holds even where no step names them.
-const chapterParts = (): string[] => {
-  const now = player.current();
-  return playing && now ? (playing.brief.brief.chapters[now.chapter]?.parts ?? []) : [];
-};
-
-// What a brief frames: the parts its steps light and the ones their hops reach, with room around them.
-function frameOf(view: MapView, list: BriefStep[]): Rect | null {
-  const ids = new Set([...list.flatMap((step) => [...step.on, ...step.hops.flatMap((hop) => ends(view, hop) ?? [])]), ...chapterParts()]);
-  const boxes = [...ids].filter((id) => centre(view, id)).map((id) => ({ at: centre(view, id), size: sizeOf(view, id) }));
-  if (!boxes.length) return null;
-  return {
-    x0: Math.min(...boxes.map((b) => b.at.x - b.size.w / 2)) - 70,
-    y0: Math.min(...boxes.map((b) => b.at.y - b.size.h / 2)) - 56,
-    x1: Math.max(...boxes.map((b) => b.at.x + b.size.w / 2)) + 70,
-    y1: Math.max(...boxes.map((b) => b.at.y + b.size.h / 2)) + 70,
-  };
-}
-
-function aim(view: MapView, step: BriefStep) {
-  const root = world(view);
-  if (!root) return;
-  const canvas = view.slots.canvas;
-  const area = { w: canvas.clientWidth, h: canvas.clientHeight };
-  const room = { top: 26, bottom: panel().offsetHeight + 40 };
-  const all = frameOf(view, steps());
-  // One framing for every step; a window too low for that frames each step's own parts.
-  let box = all;
-  let camera = box && briefCamera(box, area, room, 1.35);
-  if (!camera || camera.scale < 0.7) {
-    box = frameOf(view, [step]) ?? box;
-    camera = box && briefCamera(box, area, room, 1.35);
-  }
-  if (camera) lendCamera(camera);
-}
-
-let run = 0;
-const stopLight = () => void run++;
-
-function arrive(view: MapView, id: string) {
-  const node = plateOf(view, id);
-  if (!node) return;
-  node.classList.add("lit");
-  node.classList.remove("arrive");
-  void node.offsetWidth;
-  node.classList.add("arrive");
-}
-
-// The light travels the step's links at one speed, leaving each lit behind it; a part lights as the light reaches it.
-async function runLight(view: MapView, hops: [string, boolean][]) {
-  const mine = ++run;
-  const root = world(view);
-  const links = root?.querySelector(".map-links");
-  if (!root || !links) return;
-  root.querySelector(".map-light")?.remove();
-  const layer = svg("svg", { class: "map-light", "aria-hidden": "true", width: links.getAttribute("width") ?? "0", height: links.getAttribute("height") ?? "0" });
-  root.append(layer);
-  const legs = hops.flatMap((hop) => {
-    // A pair's links share one line (spec #473), whose `data-link` lists them all.
-    const line = links.querySelector(`[data-link~="${CSS.escape(hop[0])}"]`);
-    const pair = ends(view, hop);
-    if (!line || !pair) return [];
-    const read = (name: string) => Number(line.getAttribute(name));
-    const [p, q] = [{ x: read("x1"), y: read("y1") }, { x: read("x2"), y: read("y2") }];
-    // The rim points run from the line's `data-from`; the light runs from the hop's first end.
-    const [from, to] = line.getAttribute("data-from") === pair[0] ? [p, q] : [q, p];
-    return [{ from, to, ids: pair, len: Math.hypot(to.x - from.x, to.y - from.y) }];
-  });
-  const lit = (leg: (typeof legs)[number]) => svg("line", { class: "light-trail", x1: String(leg.from.x), y1: String(leg.from.y), x2: String(leg.to.x), y2: String(leg.to.y) });
-  if (!legs.length) return;
-  if (reduced()) {
-    for (const leg of legs) {
-      layer.append(lit(leg));
-      leg.ids.forEach((id) => plateOf(view, id)?.classList.add("lit"));
-    }
-    return;
-  }
-  const spark = svg("circle", { class: "light-spark", r: "5" });
-  layer.append(spark);
-  arrive(view, legs[0].ids[0]);
-  for (const leg of legs) {
-    const trail = lit(leg);
-    layer.insertBefore(trail, spark);
-    const started = performance.now();
-    const time = Math.max(160, (leg.len / SPEED) * 1000);
-    await new Promise<void>((done) => {
-      const tick = (now: number) => {
-        if (mine !== run) return done();
-        const k = Math.min(1, (now - started) / time);
-        spark.setAttribute("cx", String(leg.from.x + (leg.to.x - leg.from.x) * k));
-        spark.setAttribute("cy", String(leg.from.y + (leg.to.y - leg.from.y) * k));
-        trail.setAttribute("x2", String(leg.from.x + (leg.to.x - leg.from.x) * k));
-        trail.setAttribute("y2", String(leg.from.y + (leg.to.y - leg.from.y) * k));
-        if (k < 1) requestAnimationFrame(tick);
-        else done();
-      };
-      requestAnimationFrame(tick);
-    });
-    if (mine !== run) return;
-    arrive(view, leg.ids[1]);
-  }
-  spark.remove();
-}
-
-function light(view: MapView, step: BriefStep) {
-  const root = world(view);
-  if (!root) return;
-  root.classList.add("briefing");
-  stopLight();
-  root.querySelector(".map-light")?.remove();
-  // A part a hop reaches waits for the light; the rest of the step's parts light at once.
-  const waiting = new Set(reduced() ? [] : step.hops.flatMap((hop) => ends(view, hop) ?? []));
-  root.querySelectorAll<HTMLElement>(".plate, .actor").forEach((node) => {
-    node.classList.remove("arrive");
-    node.classList.toggle("lit", step.on.includes(node.dataset.id ?? "") && !waiting.has(node.dataset.id ?? ""));
-  });
-  if (step.hops.length) void runLight(view, step.hops);
 }
 
 // ---- the panel.
@@ -615,16 +411,24 @@ function bodyNode(body: string) {
   const node = text("p", "", "brief-body");
   const runs = body.split(/(<\/?b>)/);
   for (let i = 0; i < runs.length; i++) {
-    if (runs[i] === "<b>" && runs[i + 2] === "</b>") {
-      node.append(text("b", runs[i + 1]!));
+    const run = runs[i];
+    if (run === "<b>" && runs[i + 2] === "</b>") {
+      node.append(text("b", runs[i + 1] ?? ""));
       i += 2;
-    } else if (runs[i]) node.append(runs[i]!);
+    } else if (run) node.append(run);
   }
   return node;
 }
 
-// One step's words and figure. The panel around them stays put.
-function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["also"] = []) {
+/**
+ * One step's words and figure. The panel around them stays put.
+ * The step drawn before stops being watched first: the brief draws its step again on every map draw, resize and explanations toggle,
+ * and each draw makes new marks (#548). Exported for the tests.
+ */
+export function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["also"] = []) {
+  const playing = playingBrief();
+  const ratifying = ratifyRows();
+  stopMarks();
   const part = (id: string) => partName(view, id);
   const words = text("div", "", "brief-txt");
   const kick = text("div", "", "brief-kick");
@@ -637,7 +441,7 @@ function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["als
   if (step.list.length) words.append(listNode(step.list));
   if (step.risks.length) words.append(listNode(step.risks.map((r) => `${part(r.part)}: ${r.trigger} To see it: ${r.check}`)));
   if (step.covered_by) words.append(text("p", `Covered by the test ${step.covered_by}.`, "brief-quiet"));
-  if (step.check) words.append(checkNode(view, step));
+  if (step.check) words.append(checkNode(view, step, step.check));
   if (step.k === "Ratify") {
     words.append(ratifyNode(view, ratifying));
     const guard = playing?.brief.guard;
@@ -675,6 +479,7 @@ function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["als
 // "Explore this" under a PR brief's figure (#399): a micro-world of the parts its step lights, kept by the step's place in its chapter. A part
 // catch-up's figure (no PR) and a step that is not its chapter's own offer none.
 function figureExplore(view: MapView, node: HTMLElement, step: BriefStep, pr: number, chapter: number) {
+  const playing = playingBrief();
   const figure = node.querySelector(".brief-figure");
   const at = playing?.brief.brief.chapters[chapter]?.steps.indexOf(step) ?? -1;
   if (!figure || pr <= 0 || at < 0 || view.scrub) return;
@@ -686,6 +491,8 @@ function figureExplore(view: MapView, node: HTMLElement, step: BriefStep, pr: nu
 // A step's own "See the code" (#490), under its words: the files of the parts it lights; every file on the Ratify step, or on the last
 // step when there is none; every file with a note on a step that lights no changed file. A part catch-up has no one PR's code to show.
 function codeInto(view: MapView, node: HTMLElement, list: BriefStep[], index: number) {
+  const playing = playingBrief();
+  const catchUp = playingCatchUp();
   const step = list[index];
   const words = node.querySelector(".brief-txt");
   if (!playing || catchUp || !step || !words) return;
@@ -696,12 +503,15 @@ function codeInto(view: MapView, node: HTMLElement, list: BriefStep[], index: nu
     const drawer = commitDrawer(found);
     return { ...drawer, note: `This step lights no changed files · ${drawer.note}` };
   };
-  const button = text("button", "See the code", "btn quiet brief-code");
+  const button = pressable(text("button", "See the code", "btn quiet brief-code"), null);
   button.title = want === "all" ? "Open every file the PR changed, above the brief" : "Open the changed files of the parts this step lights, above the brief";
   button.addEventListener("click", () => {
     // The PR's diff (the files the writer read); when git cannot give it, what the step quoted.
     const drawer = want === "all" ? diff().then(commitDrawer) : want === "none" ? diff().then(unlit) : diff(want).then((found) => (found.files.length ? commitDrawer(found) : diff().then(unlit)));
-    drawer.then(openDrawer).catch((e) => (failure("pr_diff")(e), openDrawer(citeDrawer(step))));
+    drawer.then(openDrawer).catch((e: unknown) => {
+      failure("pr_diff")(e);
+      openDrawer(citeDrawer(step));
+    });
   });
   const row = text("div", "", "brief-step-code");
   row.append(button);
@@ -713,6 +523,8 @@ function codeInto(view: MapView, node: HTMLElement, list: BriefStep[], index: nu
 // Also touched by kind (#492), on the last step of the last chapter: each group its name and counts, its files, each with the laws its
 // `@law:` tags name and the "ignored" tag where `alsoRows` keeps it, and a See the code of only its files.
 function alsoInto(view: MapView, node: HTMLElement, groups: AlsoRow[]) {
+  const playing = playingBrief();
+  const catchUp = playingCatchUp();
   const words = node.querySelector(".brief-txt");
   if (!playing || catchUp || !groups.length || !words) return;
   const ask = diffArgs(view.project, playing);
@@ -723,7 +535,7 @@ function alsoInto(view: MapView, node: HTMLElement, groups: AlsoRow[]) {
     const row = text("div", "", "brief-also-group");
     const head = text("div", "", "brief-also-head");
     head.append(text("h5", group.name, "brief-also-name"), text("span", group.counts, "brief-quiet brief-also-counts"));
-    const button = text("button", "See the code", "btn quiet brief-code");
+    const button = pressable(text("button", "See the code", "btn quiet brief-code"), null);
     button.title = `Open the ${group.name} files, above the brief`;
     button.setAttribute("aria-label", `See the code: ${group.name}`);
     button.addEventListener("click", () => {
@@ -750,6 +562,7 @@ function alsoInto(view: MapView, node: HTMLElement, groups: AlsoRow[]) {
 }
 
 function summaryInto(node: HTMLElement) {
+  const catchUp = playingCatchUp();
   const summary = catchUp?.summary;
   const words = node.querySelector(".brief-txt");
   if (!summary || !words) return;
@@ -763,6 +576,7 @@ function summaryInto(node: HTMLElement) {
 
 // The items to ratify, each with where it stands; a not yet ratified one has Accept and Overturn.
 function ratifyNode(view: MapView, rows: RatifyRow[]) {
+  const playing = playingBrief();
   const list = text("ul", "", "brief-ratify");
   // Safari drops a list's semantics under `list-style: none` and grid; the role brings them back.
   list.setAttribute("role", "list");
@@ -772,7 +586,7 @@ function ratifyNode(view: MapView, rows: RatifyRow[]) {
     const item = text("li", "", "ratify-row");
     item.dataset.kind = row.kind;
     item.dataset.id = row.id;
-    const kind = row.kind === "decision" ? "Decided" : `${row.change ? `${row.change[0].toUpperCase()}${row.change.slice(1)} ` : ""}${row.kind}`;
+    const kind = row.kind === "decision" ? "Decided" : `${row.change ? `${row.change.charAt(0).toUpperCase()}${row.change.slice(1)} ` : ""}${row.kind}`;
     item.append(text("span", kind, "ratify-kind"), text("span", row.text || row.id, "ratify-text"));
     if (row.status === "not-yet") {
       item.append(ratifyActions(view.project, row, (state) => {
@@ -809,169 +623,11 @@ function listNode(items: string[]) {
   return list;
 }
 
-// ---- the check: one prediction, answered in the panel (a pick) or on the map (an order).
-
-type Run = { kind: "pick"; run: PickRun } | { kind: "order"; run: OrderRun };
-// A check keeps its answer while the brief is open, so a redraw of the map or a step back shows it as it was.
-const runs = new WeakMap<BriefCheck, Run>();
-function runOf(view: MapView, check: BriefCheck): Run | null {
-  let found = runs.get(check);
-  if (!found && check.kind === "pick") found = { kind: "pick", run: pickRun(Number(check.key)) };
-  if (!found && check.kind === "order") found = { kind: "order", run: orderRun(Array.isArray(check.key) ? (check.key as string[]) : [], view.doc.links) };
-  if (found) runs.set(check, found);
-  return found ?? null;
-}
-const nameOf = (view: MapView, id: string) => view.doc.parts.find((p) => p.id === id)?.name ?? id;
-const keyOf = (check: BriefCheck) => (Array.isArray(check.key) ? (check.key as string[]) : []);
-
-// What an order check lets Daniel tap: the parts the step lights, and the ones of the key.
-const tappable = (view: MapView, step: BriefStep) => new Set([...step.on, ...keyOf(step.check!)].filter((id) => view.doc.parts.some((p) => p.id === id)));
-
-// The panel's part of a check, drawn from its run: the question (the answer's words once graded), the options or the numbered slots.
-function checkNode(view: MapView, step: BriefStep) {
-  const check = step.check!;
-  const box = text("div", "", "brief-check");
-  const found = runOf(view, check);
-  if (!found) return box.appendChild(text("p", check.q, "brief-body")), box;
-  const done = found.run.answered();
-  const right = found.kind === "pick" ? found.run.picked() === Number(check.key) : keyOf(check).every((id, i) => id === found.run.picked()[i]);
-  // The question is the step's own heading when the writer put it there; then only the answer's words add to it.
-  if (done || check.q !== step.h) box.append(text("p", done ? (right ? check.yes : check.no) : check.q, "brief-body"));
-  if (found.kind === "pick") {
-    const { run } = found;
-    const row = text("div", "", "brief-opts");
-    check.opts.forEach((opt, i) => {
-      const button = text("button", opt, "btn brief-opt");
-      button.title = "Pick this answer; press it again to take it back";
-      button.setAttribute("type", "button");
-      button.setAttribute("aria-pressed", String(run.picked() === i));
-      if (done) button.classList.add(i === Number(check.key) ? "right" : "miss");
-      button.addEventListener("click", () => {
-        run.tap(i);
-        redrawCheck(view, step);
-      });
-      row.append(button);
-    });
-    box.append(row);
-  } else {
-    // The slots show the parts as tapped; once graded they show the key, which the map replays.
-    const shown = done ? keyOf(check) : found.run.picked();
-    const row = text("div", "", "brief-slots");
-    keyOf(check).forEach((_, i) => {
-      const slot = text("span", "", `brief-slot${shown[i] ? " full" : ""}`);
-      slot.append(text("b", String(i + 1)), text("span", shown[i] ? nameOf(view, shown[i]) : "tap a part"));
-      row.append(slot);
-    });
-    box.append(row);
-  }
-  return box;
-}
-
-// Redraws the check where it is, the Check button and the map's badges with it.
-function redrawCheck(view: MapView, step: BriefStep) {
-  if (step.check && runs.get(step.check)?.run.answered()) gateOf()?.answered();
-  const old = panel().querySelector(".brief-check");
-  if (old) old.replaceWith(checkNode(view, step));
-  paintOrder(view, step);
-  syncNext(step);
-}
-
-// The map's side of an order check: the parts that can be tapped, and a number on each part tapped.
-function clearOrder(view: MapView) {
-  view.slots.canvas.querySelectorAll(".pick, .picked, .wrong").forEach((node) => node.classList.remove("pick", "picked", "wrong"));
-  view.slots.canvas.querySelectorAll(".ord").forEach((node) => node.remove());
-}
-function paintOrder(view: MapView, step: BriefStep) {
-  clearOrder(view);
-  const found = step.check?.kind === "order" ? runOf(view, step.check) : null;
-  if (!found || found.kind !== "order") return;
-  const open = tappable(view, step);
-  const answered = found.run.answered();
-  const shown = answered ? keyOf(step.check!) : found.run.picked();
-  open.forEach((id) => plateOf(view, id)?.classList.toggle("pick", !answered));
-  shown.forEach((id, i) => {
-    const plate = plateOf(view, id);
-    plate?.classList.add("picked");
-    plate?.append(text("span", String(i + 1), "ord"));
-  });
-}
-
-// A tap on a part while an order check is open picks it, instead of opening its sheet.
-function wireTaps(view: MapView) {
-  const canvas = view.slots.canvas;
-  if (canvas.dataset.briefTaps) return;
-  canvas.dataset.briefTaps = "yes";
-  canvas.addEventListener(
-    "click",
-    (event) => {
-      const now = player.current();
-      const step = now ? steps()[now.step] : undefined;
-      const current = currentMap();
-      if (!step?.check || step.check.kind !== "order" || !current) return;
-      const plate = (event.target as HTMLElement).closest<HTMLElement>(".plate");
-      if (!plate) return;
-      event.stopPropagation();
-      const found = runOf(current, step.check);
-      if (!found || found.kind !== "order" || found.run.answered() || !tappable(current, step).has(plate.dataset.id ?? "")) return;
-      found.run.tap(plate.dataset.id!);
-      redrawCheck(current, step);
-    },
-    true,
-  );
-}
-
-// A check was graded, right or wrong.
-const answeredCheck = () => {
-  const now = player.current();
-  if (now) logStop("check-answered", now.project, prOf(now.pr));
-};
-
-// Check on a check: graded, its right answer shown, and an order check's right path replayed along the links.
-function grade(view: MapView, step: BriefStep) {
-  const found = runOf(view, step.check!);
-  if (!found || !found.run.ready()) return;
-  if (found.kind === "pick") {
-    found.run.grade();
-    answeredCheck();
-    return redrawCheck(view, step);
-  }
-  const result = found.run.grade()!;
-  answeredCheck();
-  const wrong = result.wrong;
-  redrawCheck(view, step);
-  // The parts out of place nudge once; then the right path runs.
-  if (wrong.length && !reduced()) {
-    wrong.forEach((id) => plateOf(view, id)?.classList.add("wrong"));
-    setTimeout(() => replay(view, found.run), 420);
-  } else {
-    replay(view, found.run);
-  }
-}
-function replay(view: MapView, run: OrderRun) {
-  if (!player.current()) return;
-  view.slots.canvas.querySelectorAll(".wrong").forEach((node) => node.classList.remove("wrong"));
-  stopLight();
-  world(view)?.querySelector(".map-light")?.remove();
-  void runLight(view, run.replay());
-}
-
-// The Next button is Check while the step's check waits for its answer.
-function syncNext(step: BriefStep) {
-  const next = document.getElementById("brief-next") as HTMLButtonElement | null;
-  const list = steps();
-  if (!next) return;
-  const found = step.check ? runs.get(step.check) : undefined;
-  const waiting = !!step.check && (!found || !found.run.answered());
-  const last = player.current()?.step === list.length - 1;
-  next.textContent = waiting ? "Check" : last ? "Done" : "Next";
-  next.dataset.check = waiting ? step.check!.kind : "";
-  next.disabled = waiting && !(found && found.run.ready());
-}
-
 let swap = 0;
 
 // Shows the current step: the map lit and framed, the panel's words crossfaded in.
 function show(view: MapView, same: boolean) {
+  const playing = playingBrief();
   const now = player.current();
   const list = steps();
   const step = list[now?.step ?? 0];
@@ -986,7 +642,8 @@ function show(view: MapView, same: boolean) {
   // A reflow first, so the panel rises from where it was hidden.
   void box.offsetWidth;
   box.classList.add("open");
-  const cols = box.querySelector<HTMLElement>(".brief-cols")!;
+  const cols = box.querySelector<HTMLElement>(".brief-cols");
+  if (!cols) return;
   const also = alsoAt(playing.brief.brief, now.chapter, now.step, storySteps(list).length);
   // A new step closes the popover of the one before.
   if (!same) closePopover();
@@ -1010,10 +667,13 @@ function show(view: MapView, same: boolean) {
     fill();
   } else {
     cols.classList.add("swap");
-    swap = window.setTimeout(() => (fill(), cols.classList.remove("swap")), 130);
+    swap = window.setTimeout(() => {
+      fill();
+      cols.classList.remove("swap");
+    }, 130);
   }
   box.querySelectorAll(".brief-dots i").forEach((dot, i) => dot.classList.toggle("at", i === now.step));
-  box.querySelector(".brief-dots")!.setAttribute("aria-label", `Step ${now.step + 1} of ${list.length}`);
+  box.querySelector(".brief-dots")?.setAttribute("aria-label", `Step ${now.step + 1} of ${list.length}`);
   (box.querySelector(".brief-back") as HTMLButtonElement).disabled = now.step === 0;
   if (step.check) runOf(view, step.check);
   syncNext(step);
@@ -1024,13 +684,17 @@ function show(view: MapView, same: boolean) {
 
 // The end-of-story bar ends the played list's last step: a single story's end, or a chapter's (#393). It goes under the step's words and figure.
 function endBar(node: HTMLElement, index: number, count: number): Bar | null {
+  const catchUp = playingCatchUp();
   const now = player.current();
   if (!now || index !== count - 1) return null;
   const key = `${now.project}|${now.pr}|${now.story}|${now.chapter}`;
   let bar = bars.get(key);
   // A part catch-up's bar is keyed by its part (#391).
   const about = catchUp ? { project: now.project, part: catchUp.part } : { project: now.project, pr: now.pr, chapter: now.chapter };
-  if (!bar) bars.set(key, (bar = storyBar(about, gistOf(now.chapter))));
+  if (!bar) {
+    bar = storyBar(about, gistOf(now.chapter));
+    bars.set(key, bar);
+  }
   node.append(bar.node);
   return bar;
 }
@@ -1038,6 +702,8 @@ function endBar(node: HTMLElement, index: number, count: number): Bar | null {
 // The gist the bar's explain-back compares with (#397): the chapter's, or the part catch-up's one story's, when one of its parts is Core
 // under Daniel's tiers now; none otherwise, so only a Core part's story offers explain-back.
 function gistOf(chapter: number): string | undefined {
+  const playing = playingBrief();
+  const catchUp = playingCatchUp();
   const view = currentMap();
   const story = playing?.brief.brief.chapters[chapter];
   if (!view || !story) return undefined;
@@ -1051,8 +717,9 @@ function gistOf(chapter: number): string | undefined {
 
 // The panel's frame, built once per brief. Its height follows the step it shows, and Back and Next end it (#449).
 function buildPanel(view: MapView, list: BriefStep[]) {
+  const playing = playingBrief();
   const box = panel();
-  const leave = text("button", "Leave", "btn quiet brief-leave");
+  const leave = pressable(text("button", "Leave", "btn quiet brief-leave"), null);
   leave.title = "Close the brief; it opens again at this step";
   leave.addEventListener("click", closeBrief);
   // The explanations' `?` beside Leave (#524), as beside the sheet's ×; kept for the brief, its state set again when they switch.
@@ -1065,10 +732,10 @@ function buildPanel(view: MapView, list: BriefStep[]) {
   // The brief's one live region (#456): Back and Next put the new step's title in it, and nothing else; the step itself is not live.
   const live = text("p", "", "visually-hidden brief-live");
   live.setAttribute("aria-live", "polite");
-  const back = text("button", "Back", "btn brief-back");
+  const back = pressable(text("button", "Back", "btn brief-back"), null);
   back.title = "The step before";
   back.addEventListener("click", () => move(-1));
-  const next = text("button", "Next", "btn primary brief-next");
+  const next = pressable(text("button", "Next", "btn primary brief-next"), null);
   next.id = "brief-next";
   next.title = "The next step";
   next.addEventListener("click", () => advance());
@@ -1084,14 +751,14 @@ function buildPanel(view: MapView, list: BriefStep[]) {
 
 // A "Since you read" story's head (#497): what it tells, from which head, and the full brief one click away, at the chapter played.
 function sinceLine(): HTMLElement | null {
+  const playing = playingBrief();
   const now = player.current();
   if (!playing?.since || !now) return null;
   const line = text("p", "Since you read ", "brief-since");
   const from = text("code", playing.since.slice(0, 7), "brief-since-head");
   from.setAttribute("translate", "no");
   line.append(from, ": only what this push changed. ");
-  const full = text("button", "Full brief", "btn quiet brief-since-full");
-  full.setAttribute("type", "button");
+  const full = pressable(text("button", "Full brief", "btn quiet brief-since-full"), null);
   full.setAttribute("aria-label", `Full brief of PR #${now.pr}`);
   full.title = "Open the whole PR's brief at this head";
   const { project, pr } = now;
@@ -1130,6 +797,7 @@ function staleBaseLine(stale: StaleBase | undefined): HTMLElement | null {
 // "Partial facts · N" (#491): what the brief was written without, one line per input, opening below the panel's head. Built with the
 // panel, so it stays open across steps. None when nothing was missing.
 function factsChip(): HTMLElement | null {
+  const playing = playingBrief();
   const lines = partialFactsLines(playing?.brief.partial_facts, playing?.partial ?? false);
   if (!lines.length) return null;
   const chip = text("details", "", "brief-facts");
@@ -1163,8 +831,7 @@ function move(by: number) {
 function advance() {
   const view = currentMap();
   const step = steps()[player.current()?.step ?? 0];
-  const found = view && step?.check ? runs.get(step.check) : undefined;
-  if (view && step?.check && found && !found.run.answered()) return grade(view, step);
+  if (view && step && checkWaits(step)) return grade(view, step);
   move(1);
 }
 

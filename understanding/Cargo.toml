@@ -7,13 +7,14 @@ publish = false
 autotests = false
 
 [dependencies]
-libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The API-key writers' HTTP path: a blocking client, so the server pulls in no async runtime.
 ureq = { version = "2.12", default-features = false, features = ["tls"] }
 similar = "3"
 studio-core = { path = "../core" }
+# The one runner of `git` and `gh`.
+studio-workbench = { path = "../workbench" }
 # The weekly command finds the event log.
 studio-hook = { path = "../hook" }
 # The brief's facts place a PR's files by the map.
@@ -28,3 +29,10 @@ tiny_http = "0.12"
 [[test]]
 name = "it"
 path = "tests/main.rs"
+
+[lints]
+workspace = true
+
+# Its library is named `system_map`, which cargo machete does not match to the package's name.
+[package.metadata.cargo-machete]
+ignored = ["studio-system-map"]

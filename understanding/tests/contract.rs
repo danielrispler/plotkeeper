@@ -958,6 +958,7 @@ fn a_writer_beside_the_log_knows_whether_the_login_shell_found_claude() {
     // SAFETY: nextest runs each test in its own process, so no other thread reads the environment.
     unsafe { std::env::set_var("SHELL", &without) };
     assert!(!ClaudeWriter::beside(&log).unwrap().claude_found());
+    // SAFETY: as above.
     unsafe { std::env::set_var("SHELL", &with) };
     assert!(ClaudeWriter::beside(&log).unwrap().claude_found());
 }

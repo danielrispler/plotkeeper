@@ -104,7 +104,7 @@ fn a_qwen_session_records_no_turn_trees() {
 
 #[test]
 fn an_event_the_adapter_does_not_map_is_no_drift() {
-    let mut lines: Vec<String> = fixture().iter().map(|l| l.to_string()).collect();
+    let mut lines: Vec<String> = fixture().iter().map(ToString::to_string).collect();
     lines.insert(
         2,
         json!({
@@ -131,7 +131,7 @@ fn server_line(id: &str, name: &str, at: u64, fields: Value) -> String {
 #[test]
 fn a_qwen_session_ended_by_the_process_check_or_interrupted_stays_qwen() {
     // The run up to its second turn's tool start.
-    let lines: Vec<String> = fixture()[..15].iter().map(|l| l.to_string()).collect();
+    let lines: Vec<String> = fixture()[..15].iter().map(ToString::to_string).collect();
     let synthetic = [
         server_line(
             FIRST,

@@ -227,7 +227,7 @@ pub fn turn_diffs(ask: &TurnDiff, warn: &mut dyn FnMut(String)) -> Option<Vec<Ro
 /// The paths that moves of `HEAD` in the worktree at `root` changed within `window`, in
 /// milliseconds: a merge, a pull, a rebase, a checkout or a reset brought them in, and the agent's
 /// own commits did not. The reflog dates each move (danielrispler/plotkeeper#208).
-pub fn moved(root: &Path, window: (u64, u64)) -> Vec<String> {
+pub(crate) fn moved(root: &Path, window: (u64, u64)) -> Vec<String> {
     let log = reflog(root).and_then(|log| fs::read(log).ok());
     let log = String::from_utf8_lossy(log.as_deref().unwrap_or_default()).into_owned();
     let (since, until) = (window.0 / 1000, window.1 / 1000);

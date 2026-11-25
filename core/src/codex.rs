@@ -15,7 +15,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 
 /// The name Codex's hook entries pass (`--agent codex`), which its lines carry.
-pub const CODEX: &str = "codex";
+pub(crate) const CODEX: &str = "codex";
 
 /// What Codex reports. Its `PermissionRequest` waits on Daniel, and every turn's event names the
 /// permission mode and the model. Its transcript (a rollout file) has no reader here, so no version,

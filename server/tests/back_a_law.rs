@@ -102,6 +102,11 @@ fn bench(agent: &str) -> Bench {
 
 /// `bench` with `map` as the default branch's map.
 fn bench_on(map: &str, agent: &str) -> Bench {
+    bench_with(map, agent, true)
+}
+
+/// `bench_on`; `home`: whether plotkeeper knows a home folder.
+fn bench_with(map: &str, agent: &str, home: bool) -> Bench {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().canonicalize().unwrap();
     git(&root, &["init", "-q", "--bare", "-b", "main", "origin.git"]);
@@ -142,11 +147,11 @@ fn bench_on(map: &str, agent: &str) -> Bench {
         "node --test --test-reporter=tap tests/*.test.mjs",
     ] } });
     fs::write(&settings, checks.to_string()).unwrap();
-    // The fake `srt`: it insists on its settings file and runs the command as it is.
+    // The fake `srt`: it insists on its settings file and runs the command as it is. `srt.started` says it ever ran.
     let srt = root.join("srt");
     fs::write(
         &srt,
-        "#!/bin/sh\n[ \"$1\" = -s ] && [ -f \"$2\" ] && [ \"$3\" = -c ] || { echo \"fake srt: $*\" >&2; exit 64; }\nexec /bin/sh -c \"$4\"\n",
+        format!("#!/bin/sh\ntouch '{}/srt.started'\n", root.display()) + "[ \"$1\" = -s ] && [ -f \"$2\" ] && [ \"$3\" = -c ] || { echo \"fake srt: $*\" >&2; exit 64; }\nexec /bin/sh -c \"$4\"\n",
     )
     .unwrap();
     fs::set_permissions(&srt, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
@@ -163,7 +168,7 @@ fn bench_on(map: &str, agent: &str) -> Bench {
     )
     .unwrap();
     fs::set_permissions(&gh, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-    let (runner, laws, changes) = start_plotkeeper(&root, agent);
+    let (runner, laws, changes) = start_plotkeeper_in(&root, agent, home);
     Bench {
         dir,
         repo,
@@ -176,6 +181,15 @@ fn bench_on(map: &str, agent: &str) -> Bench {
 
 /// A runner and back a law over the bench in `root`, picked up as plotkeeper's start does; their agent runs `agent`.
 fn start_plotkeeper(root: &Path, agent: &str) -> (Arc<Runner>, Arc<LawRuns>, mpsc::Receiver<()>) {
+    start_plotkeeper_in(root, agent, true)
+}
+
+/// `start_plotkeeper`; `home`: whether it knows a home folder.
+fn start_plotkeeper_in(
+    root: &Path,
+    agent: &str,
+    home: bool,
+) -> (Arc<Runner>, Arc<LawRuns>, mpsc::Receiver<()>) {
     let data = root.join("data");
     let settings = data.join("settings.json");
     let runner = Runner::new(runner::Config {
@@ -192,11 +206,13 @@ fn start_plotkeeper(root: &Path, agent: &str) -> (Arc<Runner>, Arc<LawRuns>, mps
             settings,
             sandbox: Some(root.join("srt")),
             gh: Some(root.join("gh")),
+            home: home.then(|| root.join("home")),
         },
     );
     let (tell, changes) = mpsc::channel();
     laws.on_change(move |_| {
-        let _ = tell.send(());
+        // The receiver may have gone, and then no one waits for this.
+        tell.send(()).ok();
     });
     runner.pick_up();
     (runner, laws, changes)
@@ -228,9 +244,10 @@ impl Bench {
                 "run {id} was never proven or rejected: {:?}",
                 self.runner.runs(&self.project)
             );
-            let _ = self
-                .changes
-                .recv_timeout(left.min(Duration::from_millis(500)));
+            // A timeout only means look again.
+            self.changes
+                .recv_timeout(left.min(Duration::from_millis(500)))
+                .ok();
         }
     }
 
@@ -356,6 +373,35 @@ fn the_clone_is_of_the_default_branch_with_no_remote() {
     );
     assert_eq!(fs::read_to_string(run.join("remotes")).unwrap(), "");
     assert_eq!(fs::read_to_string(run.join("head")).unwrap().trim(), "HEAD");
+}
+
+impl Bench {
+    /// Whether the sandbox was ever started.
+    fn srt_started(&self) -> bool {
+        self.dir.path().join("srt.started").exists()
+    }
+}
+
+/// The sandbox fails closed (#548): its deny list names folders of the home folder, so with none known no proof runs.
+#[test]
+fn a_proof_with_no_home_folder_is_rejected_and_srt_never_starts() {
+    let bench = bench_with(MAP, &format!("{TEST}{PLANT}{DONE}"), false);
+    let id = bench.start();
+    let line = bench.rejected(&id);
+    assert!(line.contains("no home folder"), "{line}");
+    assert!(!bench.srt_started());
+}
+
+/// A proof never runs without its settings, which hold the deny list (#548).
+#[test]
+fn a_proof_whose_sandbox_settings_cannot_be_written_is_rejected_and_srt_never_starts() {
+    // A folder where the settings file goes: the write fails.
+    let bench = bench(&format!("mkdir ../srt.json\n{TEST}{PLANT}{DONE}"));
+    let id = bench.start();
+    let line = bench.rejected(&id);
+    assert!(line.contains("srt.json"), "{line}");
+    assert!(line.contains("could not be written"), "{line}");
+    assert!(!bench.srt_started());
 }
 
 #[test]

@@ -15,7 +15,6 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use studio_understanding::ClaudeWriter;
 use studio_understanding::part_catch_up::{
     CatchUpStore, build_catch_up_facts, gather_catch_up, write_part_catch_up,
@@ -24,6 +23,10 @@ use studio_understanding::pr_brief::{
     Brief, BriefRecord, BriefStore, CallKind, build_facts, fetch_meta, gather, write_pr_brief,
 };
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "a hand-run trial's whole script, read top to bottom"
+)]
 fn main() {
     let mut args = std::env::args().skip(1);
     let kind = args.next().unwrap_or_default();
@@ -172,9 +175,8 @@ fn main() {
 }
 
 fn git(repo: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
+    let out = studio_workbench::run::git(repo)
         .args(args)
-        .current_dir(repo)
         .output()
         .expect("git runs");
     assert!(

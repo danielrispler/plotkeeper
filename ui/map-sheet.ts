@@ -12,19 +12,19 @@
 // The sheet's left edge resizes it (#445), and a click on the empty map closes it and its drawer (`map.ts`'s `pan`).
 
 import { logStop } from "./stop-rules.js";
-import { age, element, failure, fullTitle, invoke, pressable, text } from "./dom.js";
+import { age, element, failure, fullTitle, invoke, pageStore, pressable, text } from "./dom.js";
 import { currentMap, onDraw, onPlateClick, reloadMap, registerLayer, syncSide, type MapView } from "./map.js";
 import { openDrawer } from "./map-drawer.js";
 import { drawStrip } from "./map-history.js";
 import { overturnNote, ratifyActions } from "./map-ratify.js";
 import { sheetLinkItem, sheetPending, statusWords } from "./ratify.js";
-import { besideSheet, panelShown } from "./panel.js";
 import { currentPlacement } from "./map-agents.js";
 import { sessionHere } from "./map-live.js";
 import { studio } from "./state.js";
 import type { Session } from "./types.js";
 import { enterRefresher, refresherNode, staleWhy } from "./map-stale.js";
-import { ciDrawer, effectiveTier, fogActions, type Part, proofDrawer, type Sheet, sheetCi, sheetMarks, sheetOf, talksTo, type Tier } from "./map-model.js";
+import { fogActions } from "./map-catch-up.js";
+import { ciDrawer, effectiveTier, type PanelContent, type Part, proofDrawer, type Sheet, sheetCi, sheetMarks, sheetOf, talksTo, type Tier } from "./map-model.js";
 import { openBriefOf, openCatchUpOf } from "./map-brief.js";
 import { lawAction, lawActionNodes, patchActs } from "./patch-review.js";
 import { explained, explainedChoice, explainedLinks, explainLine, explanationsOn, explainToggle, onExplanations, SHEET, SHEET_HEADINGS } from "./explanations.js";
@@ -64,15 +64,9 @@ async function setTier(view: MapView, part: string, tier: Tier) {
 
 // The sheet's width (#445): 360 px at first, never under 300 px or over half the map, kept in this browser; it reaches the stylesheet as
 // `--sheet-w` on the side area, whose width is the sheet's.
-const widthKey = "map-sheet-width";
 const [firstWidth, leastWidth, widthStep] = [360, 300, 16];
-const keptWidth = () => {
-  try {
-    return Number(localStorage.getItem(widthKey)) || firstWidth;
-  } catch {
-    return firstWidth;
-  }
-};
+const kept = pageStore("map-sheet-width");
+const keptWidth = () => Number(kept.get()) || firstWidth;
 const showWidth = (px: number) => element("map-side").style.setProperty("--sheet-w", `${px}px`);
 // Sets the width, bounded, and keeps it; null goes back to the first width and forgets the kept one.
 function resize(px: number | null) {
@@ -80,20 +74,16 @@ function resize(px: number | null) {
   const most = Math.max(leastWidth, (side.parentElement?.clientWidth ?? 0) / 2);
   const width = px === null ? firstWidth : Math.round(Math.min(most, Math.max(leastWidth, px)));
   showWidth(width);
-  try {
-    if (px === null) localStorage.removeItem(widthKey);
-    else localStorage.setItem(widthKey, String(width));
-  } catch {
-    // A browser that keeps nothing still resizes.
-  }
+  // A browser that keeps nothing still resizes.
+  if (px === null) kept.remove();
+  else kept.set(String(width));
 }
 // The handle on the sheet's left edge, made once and kept in the sheet's slot while a sheet is open: a drag, the arrow keys while it has the focus, and a
 // double-click back to the first width.
 let resizeHandle: HTMLButtonElement | null = null;
 function handle() {
   if (resizeHandle) return resizeHandle;
-  const bar = text("button", "", "btn quiet sheet-resize") as HTMLButtonElement;
-  bar.type = "button";
+  const bar = pressable(text("button", "", "btn quiet sheet-resize"), null);
   bar.setAttribute("aria-label", "Resize the sheet: the left arrow widens it, the right arrow narrows it");
   bar.title = "Drag to resize the sheet; double-click for its first width";
   const width = () => element("map-side").getBoundingClientRect().width;
@@ -121,10 +111,11 @@ function handle() {
     event.stopPropagation();
     resize(width() + step);
   });
-  return (resizeHandle = bar);
+  resizeHandle = bar;
+  return bar;
 }
 
-// The part whose sheet is open on the shown map, null with none.
+/** The part whose sheet is open on the shown map, null with none. */
 export const sheetPart = () => (open && currentMap()?.project === open.project ? open.part : null);
 
 export function closeSheet() {
@@ -138,7 +129,8 @@ export function closeSheet() {
 function drawSheet(view: MapView) {
   const slot = view.slots.sheet;
   view.slots.canvas.querySelectorAll(".plate.open").forEach((plate) => plate.classList.remove("open"));
-  const there = open && open.project === view.project ? view.doc.parts.find((each) => each.id === open!.part) : undefined;
+  const asked = open && open.project === view.project ? open.part : null;
+  const there = asked === null ? undefined : view.doc.parts.find((each) => each.id === asked);
   if (there && !view.scrub) remembered = there;
   const part = there ?? (view.scrub && open?.project === view.project && remembered?.id === open.part ? remembered : undefined);
   if (!part) {
@@ -164,18 +156,19 @@ function drawSheet(view: MapView) {
 }
 
 // The sheet's card for `part` on `view`, its `.sheet-extra` foot (the history strip's, drawn once the card is in the page) and its `?`.
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: ratcheted at #554; split it rather than grow it
 export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra: HTMLElement; toggle: HTMLElement } {
   const tier = effectiveTier(part, view.state.user.tiers);
   const sheet = sheetOf(part, view.doc.laws, tier, view.scrub ? undefined : view.state.fog?.[part.id]);
 
-  const closer = text("button", "×", "btn quiet sheet-close");
+  const closer = pressable(text("button", "×", "btn quiet sheet-close"), null);
   closer.setAttribute("aria-label", "Close");
   closer.title = "Close the sheet (Esc)";
   closer.addEventListener("click", closeSheet);
   // Explanations (#522): a line under each heading, the selected tier's meaning under the tiers, a link kind's and "not yet ratified"'s
   // at their first link, and the fog actions' under them. The `?` beside the × shows or hides them all.
   const explain = explanationsOn();
-  const heading = (words: string) => explained(text("h3", words, "sheet-heading"), SHEET_HEADINGS[words], explain);
+  const heading = (words: string) => explained(text("h3", words, "sheet-heading"), SHEET_HEADINGS[words] ?? "", explain);
   const header = text("div", "", "sheet-header");
   const toggle = explainToggle(explain);
   header.append(toggle, closer);
@@ -185,13 +178,13 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
     const button = pressable(text("button", each.label, "btn"), each.pressed, () => setTier(view, part.id, each.tier).catch(failure("map_set_tier")));
     // Each tier's meaning on hover, so the ones not picked compare without a change.
     button.title = SHEET.tiers[each.tier];
-    if (view.scrub) (button as HTMLButtonElement).disabled = true;
+    if (view.scrub) button.disabled = true;
     if (each.pressed) selected = button;
     tiers.append(button);
   }
   // The laws and links at this part that landed without Daniel's say: marked "not yet ratified", with accept and overturn. Of now only.
   const unratified = view.scrub ? sheetPending([], part.id, []) : sheetPending(view.state.ratify ?? [], part.id, view.doc.links);
-  const ratified = () => void reloadMap();
+  const ratified = () => void reloadMap().catch(failure("map_state"));
   const laws = sheet.laws.map((law) => {
     const mark = text("span", "", `law-mark ${law.backing}`);
     const row = text("li", "", "sheet-law");
@@ -200,7 +193,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
     row.append(mark, text("span", law.text, "sheet-law-text"), text("span", law.label, "sheet-law-backing"), acts);
     row.title = `${law.label}: ${law.text}`;
     if (law.backing === "check" && !view.scrub) {
-      const proof = text("button", "See the proof", "btn quiet");
+      const proof = pressable(text("button", "See the proof", "btn quiet"), null);
       proof.title = "Show the test that stands behind this law, read from the default branch";
       proof.addEventListener("click", () => {
         invoke("map_proof", { project: view.project, law: law.id })
@@ -246,7 +239,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
   const fogButtons: HTMLElement[] = [];
   if (actions.main) {
     const { open: opens, label, title, note } = actions.main;
-    const main = text("button", label, "btn primary sheet-catch-up") as HTMLButtonElement;
+    const main = pressable(text("button", label, "btn primary sheet-catch-up"), null);
     main.title = title;
     main.addEventListener("click", () => {
       if (opens.kind === "chapter") return void openBriefOf(view.project, opens.pr, opens.chapter, true);
@@ -264,7 +257,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
     }
   }
   if (sheet.canClear && actions.second) {
-    const clear = text("button", actions.second, "btn quiet sheet-know") as HTMLButtonElement;
+    const clear = pressable(text("button", actions.second, "btn quiet sheet-know"), null);
     clear.title = "Clear this part's fog: you have caught up with what changed";
     clear.addEventListener("click", () => {
       clear.disabled = true;
@@ -283,9 +276,9 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
   // A part with no fog offers the refresher (#392).
   const refresher = !view.scrub && refreshing === part.id ? refresherNode(view, part.id) : null;
   if (!view.scrub && !sheet.canClear && !refresher) {
-    const enter = text("button", "Refresher", "btn quiet sheet-refresher") as HTMLButtonElement;
+    const enter = pressable(text("button", "Refresher", "btn quiet sheet-refresher"), null);
     enter.title = "The flows through this part, hop by hop";
-    // It shows at once, drawn from the map; the shell records the activity behind it, and the reload drops the band.
+    // It shows at once, drawn from the map; the server records the activity behind it, and the reload drops the band.
     enter.addEventListener("click", () => {
       refreshing = part.id;
       drawSheet(view);
@@ -299,7 +292,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
     ci.append(text("p", state.line, "sheet-ci-line"));
     if (state.drill && view.state.ci) {
       const found = view.state.ci;
-      const drill = text("button", "See the CI log", "btn quiet");
+      const drill = pressable(text("button", "See the CI log", "btn quiet"), null);
       drill.title = "Show the run's status and the end of its failed log, with a link to the run on GitHub";
       drill.addEventListener("click", () => openDrawer(ciDrawer(found)));
       ci.append(drill);
@@ -351,15 +344,22 @@ const hereOlder = "Turns older than 7 days aren't listed";
 const day = 24 * 60 * 60 * 1000;
 const hereAge = (from: number, now: number) => (now - from >= day ? `${Math.floor((now - from) / day)}d` : age(from, now));
 
-// What the story gives the section (`main.ts` passes `story.ts`'s, so the sheet never imports the story and its clocks): a turn's Headline,
-// and the press of a row.
-export type HereDeps = { headline: (session: Session, index: number) => string | null; show: (index: number) => void };
-let hereDeps: HereDeps | null = null;
-export const startSheetHere = (given: HereDeps) => void (hereDeps = given);
+/**
+ * What the sheet asks of the page, given by `main.ts` to `startMapSheet`: the left panel's `besideSheet` and `panelShown` (`panel.ts`, which
+ * imports this module; below 1007 px, or over the widened diff, the sheet takes the panel's place, #385), and the story's turn Headline and
+ * the press of a "This session here" row (`story.ts`, so the sheet never imports the story and its clocks).
+ */
+export type SheetDeps = {
+  besideSheet: (part: string) => void;
+  panelShown: () => PanelContent | null;
+  headline: (session: Session, index: number) => string | null;
+  show: (index: number) => void;
+};
+let deps: SheetDeps | null = null;
 
 // The session whose story is open beside the sheet, none for a subagent's view.
 function storyBeside() {
-  const shown = panelShown();
+  const shown = deps?.panelShown() ?? null;
   const selected = studio.selection;
   if (shown?.kind !== "story" || selected === null || selected.agent !== null || selected.session.id !== shown.session) return null;
   return selected.session;
@@ -367,13 +367,14 @@ function storyBeside() {
 
 // Fills `box` for `part`, drawn again only when what it shows changed, so a focused row keeps the focus.
 function fillHere(box: HTMLElement, part: string, live: boolean, explain: boolean) {
-  const session = live && hereDeps ? storyBeside() : null;
+  const given = deps;
+  const session = live && given ? storyBeside() : null;
   const now = Date.now();
   const found = session ? sessionHere(session, part, currentPlacement(), now) : null;
-  const rows = (found?.rows ?? []).map(({ turn, index, number }) => ({
+  const rows = (session && found ? found.rows : []).map(({ turn, index, number }) => ({
     index,
     number: String(number),
-    headline: hereDeps!.headline(session!, index) ?? (turn.prompt.trim().split("\n")[0] || "No Headline"),
+    headline: (session ? given?.headline(session, index) : null) ?? (turn.prompt.trim().split("\n")[0] || "No Headline"),
     age: hereAge(turn.ended_at ?? turn.started_at, now),
   }));
   const drawn = JSON.stringify([session?.id ?? null, rows, found?.older, found?.pending, explain]);
@@ -381,12 +382,15 @@ function fillHere(box: HTMLElement, part: string, live: boolean, explain: boolea
   box.dataset.drawn = drawn;
   const focused = box.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.turn : undefined;
   box.hidden = found === null;
-  if (found === null) return void box.replaceChildren();
+  if (found === null) {
+    box.replaceChildren();
+    return;
+  }
   const list = text("ul", "", "sheet-here-turns");
   // Safari drops a list's semantics under `list-style: none`; the role brings them back.
   list.setAttribute("role", "list");
   for (const row of rows) {
-    const button = pressable(text("button", "", "sheet-here-turn"), null, () => hereDeps?.show(row.index));
+    const button = pressable(text("button", "", "sheet-here-turn"), null, () => deps?.show(row.index));
     button.dataset.turn = String(row.index);
     button.title = "Show this turn in the story";
     button.append(text("span", row.number, "sheet-here-number"), fullTitle(text("span", row.headline, "sheet-here-headline"), row.headline), text("span", row.age, "sheet-here-age"));
@@ -395,7 +399,7 @@ function fillHere(box: HTMLElement, part: string, live: boolean, explain: boolea
     list.append(item);
   }
   box.replaceChildren(
-    ...explained(text("h3", "This session here", "sheet-heading"), SHEET_HEADINGS["This session here"], explain),
+    ...explained(text("h3", "This session here", "sheet-heading"), SHEET.here, explain),
     // While `map_place` has not answered for one of the turns' files, an empty list says nothing yet.
     ...(rows.length ? [list] : found.pending ? [] : [text("p", hereEmpty, "empty")]),
     ...(found.older ? [text("p", hereOlder, "sheet-here-older")] : []),
@@ -435,8 +439,10 @@ function marksList(view: MapView, part: string): HTMLElement[] {
   return [list];
 }
 
-// The things a part holds, each its name, its sentence and its key files. An item with no key files is a note (#525): its name in italics,
-// then "· note", so it never reads as a section heading.
+/**
+ * The things a part holds, each its name, its sentence and its key files. An item with no key files is a note (#525): its name in italics,
+ * then "· note", so it never reads as a section heading.
+ */
 export function heldList(holds: Sheet["holds"]): HTMLElement {
   const list = text("ul", "", "sheet-holds");
   // Safari drops a list's semantics under `list-style: none` and flex; the role brings them back.
@@ -462,18 +468,21 @@ export function heldList(holds: Sheet["holds"]): HTMLElement {
   return list;
 }
 
-onPlateClick(({ view, part }) => {
-  if (open?.part !== part.id) refreshing = null;
-  open = { project: view.project, part: part.id };
-  // Below 1007 px, or over the widened diff, the sheet takes the left panel's place (#385).
-  besideSheet(part.id);
-  logStop("map-action", view.project);
-  drawSheet(view);
-});
-onDraw(drawSheet);
-// The explanations switched on or off (#522): the open sheet draws again with or without them.
-onExplanations(() => {
-  const view = currentMap();
-  if (view && open) drawSheet(view);
-});
-registerLayer("sheet", { open: () => open !== null && currentMap() !== null, close: closeSheet });
+/** Hooks the sheet into the map's plate clicks and draws, the explanations switch and Esc's `sheet` layer, with what `given` holds. */
+export function startMapSheet(given: SheetDeps) {
+  deps = given;
+  onPlateClick(({ view, part }) => {
+    if (open?.part !== part.id) refreshing = null;
+    open = { project: view.project, part: part.id };
+    given.besideSheet(part.id);
+    logStop("map-action", view.project);
+    drawSheet(view);
+  });
+  onDraw(drawSheet);
+  // The explanations switched on or off (#522): the open sheet draws again with or without them.
+  onExplanations(() => {
+    const view = currentMap();
+    if (view && open) drawSheet(view);
+  });
+  registerLayer("sheet", { open: () => open !== null && currentMap() !== null, close: closeSheet });
+}

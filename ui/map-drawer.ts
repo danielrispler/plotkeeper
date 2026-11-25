@@ -7,13 +7,13 @@
 // different project's map closes it.
 
 import { logStop } from "./stop-rules.js";
-import { scrollingPre, text } from "./dom.js";
+import { pressable, scrollingPre, text } from "./dom.js";
 import { currentMap, onDraw, registerLayer, syncSide, type MapView } from "./map.js";
 import type { Drawer, Jump } from "./map-model.js";
 
 let open: { project: string; drawer: Drawer } | null = null;
 
-// Opens the drawer on the current map's project with `drawer`, replacing what it held.
+/** Opens the drawer on the current map's project with `drawer`, replacing what it held. */
 export function openDrawer(drawer: Drawer) {
   const view = currentMap();
   if (!view) return;
@@ -28,12 +28,16 @@ export function closeDrawer() {
   if (view) drawDrawer(view);
 }
 
-export const drawerOpen = () => open !== null && currentMap()?.project === open.project;
+const drawerOpen = () => open !== null && currentMap()?.project === open.project;
 
-// A jump out of the drawer: a real link, opened in a new tab, so ⌘-click and middle-click work as on any link (#462).
-function jumpLink(jump: Jump) {
+/**
+ * A jump out of the drawer: a real link, opened in a new tab, so ⌘-click and middle-click work as on any link (#462). Its address is the
+ * server's data, so only an `https:` one is linked, as the patch review's draft PR is (`patch-review.ts`); another shows its label alone.
+ * Exported for the tests.
+ */
+export function jumpLink(jump: Jump) {
   const link = text("a", jump.label, "btn quiet drawer-jump");
-  link.setAttribute("href", jump.to.url);
+  if (jump.to.url.startsWith("https://")) link.setAttribute("href", jump.to.url);
   link.setAttribute("target", "_blank");
   link.setAttribute("rel", "noopener");
   link.title = jump.title;
@@ -64,7 +68,7 @@ function drawDrawer(view: MapView) {
     return syncSide(view.slots);
   }
   const { drawer } = open;
-  const closer = text("button", "×", "btn quiet sheet-close");
+  const closer = pressable(text("button", "×", "btn quiet sheet-close"), null);
   closer.title = "Close the drawer";
   closer.setAttribute("aria-label", "Close");
   closer.addEventListener("click", closeDrawer);

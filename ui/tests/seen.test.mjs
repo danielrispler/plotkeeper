@@ -4,18 +4,21 @@ import { afterEach, beforeEach, test, mock } from "node:test";
 import assert from "node:assert/strict";
 
 const observers = [];
-globalThis.IntersectionObserver = class {
-  constructor(run) {
-    this.run = run;
-    observers.push(this);
+// The stand-ins for the browser's observer, document and elements, typed as any at this boundary.
+globalThis.IntersectionObserver = /** @type {any} */ (
+  class {
+    constructor(run) {
+      this.run = run;
+      observers.push(this);
+    }
+    observe() {}
+    disconnect() {
+      this.gone = true;
+    }
   }
-  observe() {}
-  disconnect() {
-    this.gone = true;
-  }
-};
+);
 const doc = { visibilityState: "visible", hasFocus: () => true };
-globalThis.document = doc;
+globalThis.document = /** @type {any} */ (doc);
 const { watchSeen, recheckSeen, covers } = await import("../../dist/seen.js");
 
 // Reports the element as covering `element` of itself and `viewport` of the viewport (a 100 x 100 viewport).
@@ -23,7 +26,7 @@ const report = (observer, element, viewport) =>
   observer.run([{ intersectionRatio: element, intersectionRect: { width: 100, height: viewport * 100 }, rootBounds: { width: 100, height: 100 } }]);
 let open = true;
 let seen = 0;
-const watch = () => watchSeen({}, { active: () => open, onSeen: () => seen++ });
+const watch = () => watchSeen(/** @type {any} */ ({}), { active: () => open, onSeen: () => seen++ });
 beforeEach(() => {
   observers.length = 0;
   doc.visibilityState = "visible";
@@ -114,10 +117,11 @@ afterEach(() => mock.timers.reset());
 
 // An interaction with the element (#331): a card counts as seen only after Daniel pointed at, pressed, scrolled or focused it.
 const heard = [];
-const touchable = () => ({
-  addEventListener: (type, run) => heard.push([type, run]),
-  removeEventListener: (type) => heard.splice(0, heard.length, ...heard.filter(([t]) => t !== type)),
-});
+const touchable = () =>
+  /** @type {any} */ ({
+    addEventListener: (type, run) => heard.push([type, run]),
+    removeEventListener: (type) => heard.splice(0, heard.length, ...heard.filter(([t]) => t !== type)),
+  });
 const interact = (type) => heard.filter(([t]) => t === type).forEach(([, run]) => run());
 
 test("with interaction asked, a visible focused card in view is not seen until Daniel touches it", () => {

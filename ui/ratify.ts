@@ -20,7 +20,10 @@ export function sheetPending(pending: PendingItem[], part: string, links: { id: 
     if (item.kind === "law" && !laws.has(item.id)) laws.set(item.id, item.pr);
     if (item.kind === "link" && !found.has(item.id)) found.set(item.id, item.pr);
   }
-  return { laws, links: links.filter((link) => (link.from === part || link.to === part) && found.has(link.id)).map((link) => ({ ...link, pr: found.get(link.id)! })) };
+  return { laws, links: links.flatMap((link) => {
+    const pr = found.get(link.id);
+    return (link.from === part || link.to === part) && pr !== undefined ? [{ ...link, pr }] : [];
+  }) };
 }
 
 // One line of a detail: what changed, its text before and after, null on a side that has none. `code` marks paths and a link's kind,
@@ -69,7 +72,7 @@ function newText(detail: RatifyDetail | null | undefined): string {
 }
 
 // Link evidence (#499): an import site as a reader names it, `file:line`, or the file alone when its line is not known.
-export const siteLabel = (site: ImportSite) => (site.line ? `${site.file}:${site.line}` : site.file);
+const siteLabel = (site: ImportSite) => (site.line ? `${site.file}:${site.line}` : site.file);
 
 // An added link's second line in the ratify step: its first site, then "(+N imports across M files)" for the others; null with no evidence.
 export function evidenceLine(evidence: LinkSites | undefined): { site: string; more: string | null } | null {
@@ -152,7 +155,7 @@ export function overturnReport(outcome: "copied" | "manual", prompt: string): { 
 export async function decideWith<T>(overturn: boolean, copy: () => Promise<T>, record: () => Promise<void>): Promise<T | null> {
   const copied = overturn ? copy() : null;
   await record();
-  return copied ? await copied : null;
+  return copied === null ? null : await copied;
 }
 
 // An overturn's note, kept for the item it was made for: the line, and for a failed copy the prompt to copy by hand.

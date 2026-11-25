@@ -3,14 +3,17 @@
 import { beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 
+// The page's globals, stood in for with only what alerts.ts reads.
+/** @type {any} */
 const doc = { visibilityState: "visible", hasFocus: () => true };
 globalThis.document = doc;
 const store = new Map();
-globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)) };
+globalThis.localStorage = /** @type {any} */ ({ getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)) });
 const shown = [];
 let asked = 0;
-globalThis.Notification = class {
+class StandInNotification {
   static permission = "default";
+  // biome-ignore lint/suspicious/useAwait: a stand-in for an async API, so a throw in it rejects as the real one's would
   static requestPermission = async () => {
     asked++;
     return "granted";
@@ -18,7 +21,9 @@ globalThis.Notification = class {
   constructor(title, options) {
     shown.push([title, options]);
   }
-};
+}
+globalThis.Notification = /** @type {any} */ (StandInNotification);
+const Notification = StandInNotification;
 const { titleFor, notifyIfAway, askOnce } = await import("../../dist/alerts.js");
 
 beforeEach(() => {

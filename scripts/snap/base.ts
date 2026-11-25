@@ -1,18 +1,18 @@
 // What a snap fixture is, and the replies every fixture starts from (#144). A fixture maps a command of the window's
-// `Commands` (ui/types.ts) to its reply, typed by that map, so `tsc -p scripts/snap` fails on a reply that lacks a field.
+// `Commands` (ui/types.ts) to its `reply`, typed by that map, so `tsc -p scripts/snap` fails on a reply that lacks a field.
 // The stub answers a command a fixture leaves out with `null`, which only a `void` command takes: `base` answers every
 // other command, and adding one to the map without a reply here fails `tsc` too.
 
-import type { Command, Commands, Selection } from "../../ui/types.ts";
+import type { Command, Reply, Selection } from "../../ui/types.ts";
 
 // A reply that depends on one argument: { __by: "id", values: { <id>: reply } }.
-export type ByArg<T> = { __by: string; values: Record<string, T> };
+type ByArg<T> = { __by: string; values: Record<string, T> };
 
 // The commands whose reply the window reads.
-type ReadCommand = { [C in Command]: Commands[C] extends void ? never : C }[Command];
+type ReadCommand = { [C in Command]: Reply<C> extends void ? (void extends Reply<C> ? never : C) : C }[Command];
 
 // Beside the replies, the harness's own keys: errors for the log and a script that runs once the UI has drawn (page.mjs).
-export type Fixture = { [C in Command]?: Commands[C] | ByArg<Commands[C]> } & { appErrors?: string[]; snapScript?: string; snapDone?: string; realPointer?: boolean; realKeys?: boolean; contrast?: boolean; storage?: Record<string, string> };
+export type Fixture = { [C in Command]?: Reply<C> | ByArg<Reply<C>> } & { appErrors?: string[]; snapScript?: string; snapDone?: string; realPointer?: boolean; realKeys?: boolean; contrast?: boolean; storage?: Record<string, string> };
 
 const noSelection: Selection | null = null;
 
@@ -76,4 +76,4 @@ export const base = {
   writer_notice: null,
   writers: { writers: [{ kind: "claude", name: "Claude", found: true, models: ["haiku", "sonnet", "opus", "fable"], efforts: ["", "low", "medium", "high"] }, { kind: "agy", name: "agy", found: false, models: ["gemini-4-neon-low"], efforts: [] }], summaries_on: true, briefs: true, keys: [], base_url: null },
   test_writer: { outcome: "passed", line: "Passed: `claude` answered. Summaries are written with it.", settings: null },
-} satisfies { [C in ReadCommand]: Commands[C] };
+} satisfies { [C in ReadCommand]: Reply<C> };

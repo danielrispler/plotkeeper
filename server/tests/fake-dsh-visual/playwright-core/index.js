@@ -4,8 +4,9 @@ class Context {
   constructor() {
     this.routes = [];
   }
-  async route(_pattern, handler) {
+  route(_pattern, handler) {
     this.routes.push(handler);
+    return Promise.resolve();
   }
   async request(url) {
     let answer = "continued";
@@ -13,8 +14,15 @@ class Context {
       let done = false;
       await handler({
         request: () => ({ url: () => url }),
-        continue: async () => { done = true; },
-        abort: async () => { answer = "aborted"; done = true; },
+        continue: () => {
+          done = true;
+          return Promise.resolve();
+        },
+        abort: () => {
+          answer = "aborted";
+          done = true;
+          return Promise.resolve();
+        },
       });
       if (done) break;
     }
@@ -26,16 +34,16 @@ class Browser {
   constructor(options) {
     this.args = options?.args ?? [];
   }
-  async newContext() {
-    return new Context();
+  newContext() {
+    return Promise.resolve(new Context());
   }
   async close() {}
 }
 
 module.exports = {
   chromium: {
-    async launch(options) {
-      return new Browser(options);
+    launch(options) {
+      return Promise.resolve(new Browser(options));
     },
   },
 };

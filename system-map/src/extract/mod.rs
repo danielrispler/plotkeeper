@@ -112,7 +112,9 @@ impl<'a> Repo<'a> {
             }
             Ok(dir)
         });
-        dir.as_ref().map(|d| d.path()).map_err(Clone::clone)
+        dir.as_ref()
+            .map(tempfile::TempDir::path)
+            .map_err(Clone::clone)
     }
 
     /// Every tracked file, sorted.

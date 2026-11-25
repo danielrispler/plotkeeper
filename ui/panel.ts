@@ -7,7 +7,7 @@
 // What opens where is `map-model.ts`'s (`withPanel`, `withSheet`, `pressRow`): below 1007 px only one overlay is open, and the widened diff
 // closes the sheet. The camera pans the parts in focus clear of it (`revealParts`); no position is ever written.
 
-import { element, text } from "./dom.js";
+import { element, failure, text } from "./dom.js";
 import { mapShown, onDraw, registerLayer, revealParts } from "./map.js";
 import { openAgents, spotlitParts } from "./map-agents.js";
 import { closeSheet, refreshHere, sheetPart } from "./map-sheet.js";
@@ -15,12 +15,12 @@ import { panelSession, type PanelContent, withPanel, withSheet } from "./map-mod
 import { writersIn } from "./writers.js";
 
 export type { PanelContent };
-// What `startPanel` is given by `main.ts`: the content of each kind, and what closing a session's panel does (it selects no session).
+/** What `startPanel` is given by `main.ts`: the content of each kind, and what closing a session's panel does (it selects no session). */
 export type PanelDeps = {
   history: (box: HTMLElement) => void;
   diff: (box: HTMLElement, session: string, turn: number) => void;
   // A worker's or helper's log (#386); `follow` reads it on from where it was.
-  log: (box: HTMLElement, session: string, agent: string, follow: boolean) => void;
+  log: (box: HTMLElement, session: string, agent: string, follow: boolean) => Promise<void>;
   deselect: () => void;
 };
 let deps: PanelDeps;
@@ -28,7 +28,11 @@ let shown: PanelContent | null = null;
 
 export const panelShown = () => (mapShown() ? shown : null);
 
-const rail = () => document.querySelector<HTMLElement>(".rail")!;
+const rail = () => {
+  const node = document.querySelector<HTMLElement>(".rail");
+  if (!node) throw new Error(".rail is not on the page");
+  return node;
+};
 // The story is the rail itself: it moves into the panel while the panel shows it, and back to its column otherwise.
 function placeRail(inPanel: boolean) {
   const node = rail();
@@ -63,7 +67,7 @@ function draw() {
   } else if (content?.kind === "log") {
     const box = text("div", "", "panel-view log");
     body.replaceChildren(box);
-    deps.log(box, content.session, content.agent, false);
+    deps.log(box, content.session, content.agent, false).catch(failure("subagent log"));
   } else if (content === null) {
     body.replaceChildren();
   }
@@ -73,10 +77,10 @@ function draw() {
   openAgents(panelSession(content));
 }
 
-// The selection was sent again while a log shows: the log reads on.
+/** The selection was sent again while a log shows: the log reads on. */
 export function followPanelLog() {
   const place = element("panel-body").querySelector<HTMLElement>(".panel-view.log");
-  if (shown?.kind === "log" && place) deps.log(place, shown.session, shown.agent, true);
+  if (shown?.kind === "log" && place) deps.log(place, shown.session, shown.agent, true).catch(failure("subagent log"));
 }
 
 // The parts the panel's content is about, kept clear of it and of the sheet: the sheet's part, and the spotlit session's latest turn's parts
@@ -86,9 +90,11 @@ function reveal() {
   revealParts([...(sheet === null ? [] : [sheet]), ...spotlitParts()]);
 }
 
-// Opens `content` in the panel, or closes it with null; the sheet closes too when the window is narrow or the content is the widened diff.
-// Closing a panel that shows a session (`panelSession`: its story, a turn's diff or a worker's log) leaves the bare map with no session
-// selected, unless `keepSelection` (⌘2, which opens the story again).
+/**
+ * Opens `content` in the panel, or closes it with null; the sheet closes too when the window is narrow or the content is the widened diff.
+ * Closing a panel that shows a session (`panelSession`: its story, a turn's diff or a worker's log) leaves the bare map with no session
+ * selected, unless `keepSelection` (⌘2, which opens the story again).
+ */
 export function showPanel(content: PanelContent | null, keepSelection = false) {
   const before = shown;
   const next = withPanel({ panel: shown, sheet: sheetPart() }, content, window.innerWidth);
@@ -101,12 +107,15 @@ export function showPanel(content: PanelContent | null, keepSelection = false) {
 
 export const closePanel = () => showPanel(null);
 
-// A sheet is opening on part `part`: below 1007 px, or over the widened diff, it takes the panel's place.
+/** History (`history.ts`), in the left panel: the ended sessions, searchable. Clicking a row selects the session. */
+export const showHistory = () => showPanel({ kind: "history" });
+
+/** A sheet is opening on part `part`: below 1007 px, or over the widened diff, it takes the panel's place. */
 export function besideSheet(part: string) {
   if (shown && withSheet({ panel: shown, sheet: sheetPart() }, part, window.innerWidth).panel === null) closePanel();
 }
 
-// The selection changed: a panel that shows a session follows it to the new session's story, and closes when none is selected.
+/** The selection changed: a panel that shows a session follows it to the new session's story, and closes when none is selected. */
 export function followSelection(session: string | null) {
   const own = panelSession(shown);
   if (own === null || own === session) return;
@@ -114,9 +123,11 @@ export function followSelection(session: string | null) {
   draw();
 }
 
-// The list changed under History or the diff: drawn again in place.
+/** The list changed under History or the diff: drawn again in place. */
 export function redrawPanel() {
-  if (mapShown() && shown?.kind === "history") deps.history(element("panel-body").querySelector<HTMLElement>(".panel-view")!);
+  if (!mapShown() || shown?.kind !== "history") return;
+  const place = element("panel-body").querySelector<HTMLElement>(".panel-view");
+  if (place) deps.history(place);
 }
 
 export function startPanel(given: PanelDeps) {

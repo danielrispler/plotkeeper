@@ -13,7 +13,7 @@ use serde_json::Value;
 use std::{
     fs::File,
     io::{BufRead, BufReader, Seek, SeekFrom},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 /// What the transcript says of the session's latest turn, which the session view shows.
@@ -232,6 +232,10 @@ impl TranscriptFile {
         if path.extension().is_none_or(|e| e != "jsonl") {
             return Err("the transcript path is not a .jsonl file".into());
         }
+        #[allow(
+            clippy::map_err_ignore,
+            reason = "the read before compares its error with `GONE`, so a file that does not open reads as gone"
+        )]
         let mut file = File::open(path).map_err(|_| GONE.to_string())?;
         file.seek(SeekFrom::Start(self.read_to))
             .map_err(|e| e.to_string())?;
@@ -293,40 +297,48 @@ pub struct SubagentLog {
     pub offset: u64,
 }
 
-/// Reads the complete lines of the log at `path` from byte `from` that belong to subagent `agent`
-/// (a Claude line by its `agentId`, never `sessionId`; every line of an agy subagent's own
-/// transcript), or `None` when the file is missing or is no `.jsonl`. A line that does not parse is
-/// skipped. `cwd` shortens the paths of the calls' details.
-pub(crate) fn read_subagent_log(
-    path: &Path,
-    agent: &str,
-    format: TranscriptFormat,
-    from: u64,
-    cwd: &str,
-) -> Option<SubagentLog> {
-    if path.extension().is_none_or(|e| e != "jsonl") {
-        return None;
-    }
-    let mut file = File::open(path).ok()?;
-    file.seek(SeekFrom::Start(from)).ok()?;
-    let mut reader = BufReader::new(file);
-    let (mut entries, mut offset, mut line) = (Vec::new(), from, Vec::new());
-    while reader.read_until(b'\n', &mut line).ok()? > 0 && line.ends_with(b"\n") {
-        offset += line.len() as u64;
-        if let Ok(value) = serde_json::from_slice::<Value>(&line) {
-            match format {
-                TranscriptFormat::Claude => {
-                    if value["agentId"] == agent {
-                        log_entries(&value, cwd, &mut entries);
-                    }
-                }
-                TranscriptFormat::Agy => agy_log_entries(&value, cwd, &mut entries),
-                TranscriptFormat::Unread => {}
-            }
+/// Where a subagent's log is and how to read it (`Studio::subagent_log_file`): a plain value copied out of
+/// the studio, so the file is read with no lock on it held.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SubagentLogFile {
+    pub(crate) path: PathBuf,
+    pub(crate) agent: String,
+    pub(crate) format: TranscriptFormat,
+    pub(crate) from: u64,
+    pub(crate) cwd: String,
+}
+
+impl SubagentLogFile {
+    /// Reads the complete lines of the log from its byte offset that belong to its subagent (a Claude
+    /// line by its `agentId`, never `sessionId`; every line of an agy subagent's own transcript), or
+    /// `None` when the file is missing or is no `.jsonl`. A line that does not parse is skipped. Its
+    /// `cwd` shortens the paths of the calls' details.
+    pub fn read(&self) -> Option<SubagentLog> {
+        let (path, from, cwd) = (&self.path, self.from, &self.cwd);
+        if path.extension().is_none_or(|e| e != "jsonl") {
+            return None;
         }
-        line.clear();
+        let mut file = File::open(path).ok()?;
+        file.seek(SeekFrom::Start(from)).ok()?;
+        let mut reader = BufReader::new(file);
+        let (mut entries, mut offset, mut line) = (Vec::new(), from, Vec::new());
+        while reader.read_until(b'\n', &mut line).ok()? > 0 && line.ends_with(b"\n") {
+            offset += line.len() as u64;
+            if let Ok(value) = serde_json::from_slice::<Value>(&line) {
+                match self.format {
+                    TranscriptFormat::Claude => {
+                        if value["agentId"] == self.agent {
+                            log_entries(&value, cwd, &mut entries);
+                        }
+                    }
+                    TranscriptFormat::Agy => agy_log_entries(&value, cwd, &mut entries),
+                    TranscriptFormat::Unread => {}
+                }
+            }
+            line.clear();
+        }
+        Some(SubagentLog { entries, offset })
     }
-    Some(SubagentLog { entries, offset })
 }
 
 /// The entries of agy transcript record `record`. A message the subagent was sent is a prompt, the
@@ -357,7 +369,7 @@ fn agy_log_entries(record: &Value, cwd: &str, entries: &mut Vec<LogEntry>) {
                 entries.push(LogEntry::Call {
                     id: k.to_string(),
                     tool: name.into(),
-                    detail: crate::step_detail(&tool.input, cwd),
+                    detail: crate::output::step_detail(&tool.input, cwd),
                 });
             }
         }
@@ -424,7 +436,7 @@ fn log_entries(line: &Value, cwd: &str, entries: &mut Vec<LogEntry>) {
             ("assistant", Some("tool_use")) => entries.push(LogEntry::Call {
                 id: block["id"].as_str().unwrap_or_default().into(),
                 tool: block["name"].as_str().unwrap_or_default().into(),
-                detail: crate::step_detail(&block["input"], cwd),
+                detail: crate::output::step_detail(&block["input"], cwd),
             }),
             ("user", Some("tool_result")) => {
                 let full = match &block["content"] {

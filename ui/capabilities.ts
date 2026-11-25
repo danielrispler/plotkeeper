@@ -18,10 +18,10 @@ function shortModel(model: string): string {
     const rest = parts.slice(1).filter((p) => !/^\d{8}$/.test(p));
     const family = rest.find((p) => !/^\d+$/.test(p));
     const version = rest.filter((p) => /^\d+$/.test(p)).join(".");
-    return [family && family[0].toUpperCase() + family.slice(1), version].filter(Boolean).join(" ");
+    return [family && family.charAt(0).toUpperCase() + family.slice(1), version].filter(Boolean).join(" ");
   }
   const name = parts.filter((p) => !/^\d+(\.\d+)*$/.test(p) && p !== "gemini").join(" ");
-  return name ? name[0].toUpperCase() + name.slice(1) : model;
+  return name ? name.charAt(0).toUpperCase() + name.slice(1) : model;
 }
 
 // The header's model line: the agent's mark and the latest model's short name, "Claude · Opus 5.5" or "agy · Flash high".

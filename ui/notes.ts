@@ -2,9 +2,9 @@
 // over the map's top-right corner; it fades after a few seconds, and a hover or the keyboard's focus in it holds it (#457). A newer
 // note replaces it. Its main button selects its session, and its × hides it.
 
-import { element, fullTitle, promptBox, text } from "./dom.js";
+import { element, fullTitle, pressable, promptBox, text } from "./dom.js";
 import { type Clock, realClock } from "./hover.js";
-import { sessionName } from "./list.js";
+import { sessionName } from "./list-model.js";
 import { select } from "./selection.js";
 import { stackToasts, toastButtons, toastSays } from "./toast.js";
 import type { Session } from "./types.js";
@@ -13,26 +13,34 @@ export type Note = { session: Session; count: string; line: string };
 
 const FADE_MS = 6000;
 
-// The note for the sessions whose turn ended off screen, in the order the shell combined them: the first one's name and its
-// turn's intention, and "N finished" when there are more. Null when none is listed.
+/**
+ * The note for the sessions whose turn ended off screen, in the order the server combined them: the first one's name and its
+ * turn's intention, and "N finished" when there are more. Null when none is listed.
+ */
 export function finishedNote(ids: string[], listed: Session[]): Note | null {
   const sessions = ids.flatMap((id) => listed.filter((s) => s.id === id));
-  if (!sessions.length) return null;
+  const first = sessions[0];
+  if (!first) return null;
   const count = sessions.length > 1 ? `${sessions.length} finished` : "";
-  return { session: sessions[0], count, line: sessions[0].transcript.intention ?? "" };
+  return { session: first, count, line: first.transcript.intention ?? "" };
 }
 
 export type Hold = "pointer" | "focus" | "modal";
 
-// The note's fade on `clock`: `start` (a note shows) fades it in 6 s unless something holds it, the pointer resting on it, the
-// keyboard's focus in it or a modal dialog holding it back; once none does, it fades 6 s later. `stop`: the note was closed, and nothing holds it any more.
+/**
+ * The note's fade on `clock`: `start` (a note shows) fades it in 6 s unless something holds it, the pointer resting on it, the
+ * keyboard's focus in it or a modal dialog holding it back; once none does, it fades 6 s later. `stop`: the note was closed, and nothing holds it any more.
+ */
 export function noteFade(clock: Clock, hide: () => void) {
   const holds = new Set<Hold>();
   let timer: number | undefined;
   let shown = false;
   const later = () => {
     if (timer !== undefined) clock.clear(timer);
-    timer = shown && !holds.size ? clock.set(() => ((shown = false), hide()), FADE_MS) : undefined;
+    timer = shown && !holds.size ? clock.set(() => {
+          shown = false;
+          hide();
+        }, FADE_MS) : undefined;
   };
   return {
     start() {
@@ -71,14 +79,14 @@ const close = () => {
 // review).
 const modalHolds = () => (document.querySelector("dialog:modal") ? fade.hold("modal") : fade.release("modal"));
 
-// Shows `note` in place of the one showing.
+/** Shows `note` in place of the one showing. */
 export function showNote(note: Note) {
   noted = note;
   const toast = element("note-toast");
   const action = () => {
-    const button = text("button", "", "btn quiet toast-main");
+    const button = pressable(text("button", "", "btn quiet toast-main"), null);
     button.addEventListener("click", () => {
-      if (noted) select(noted.session.id);
+      if (noted) void select(noted.session.id);
       close();
     });
     return button;
@@ -94,10 +102,13 @@ export function showNote(note: Note) {
   fade.start();
 }
 
-// The toast's hover, focus and a modal dialog hold its fade; once, at start.
+/** The toast's hover, focus and a modal dialog hold its fade; once, at start. */
 export function watchNotes() {
   const toast = element("note-toast");
-  document.addEventListener("toggle", () => (modalHolds(), copyHolds()), true);
+  document.addEventListener("toggle", () => {
+    modalHolds();
+    copyHolds();
+  }, true);
   toast.addEventListener("pointerenter", () => fade.hold("pointer"));
   toast.addEventListener("pointerleave", () => fade.release("pointer"));
   toast.addEventListener("focusin", () => fade.hold("focus"));
@@ -131,8 +142,7 @@ export function showCopyToast(outcome: Copied["outcome"], prompt: string) {
   copied = prompt;
   if (!copyBody || !copyButton) {
     const body = text("div", "", "copy-body");
-    const button = text("button", "Copy", "btn small") as HTMLButtonElement;
-    button.setAttribute("type", "button");
+    const button = pressable(text("button", "Copy", "btn small"), null);
     button.title = "Copy the prompt to paste into your agent";
     // The clipboard refused already, so this is the browser's older route, which a click may use.
     button.addEventListener("click", () => {

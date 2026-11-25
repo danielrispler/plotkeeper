@@ -22,13 +22,13 @@ const names: Record<string, string> = {
 
 // The key as Zed's keymap writes it, such as "cmd-shift-k", by the physical key.
 export function keystroke({ code, metaKey, ctrlKey, altKey, shiftKey }: Key): string {
-  const name = /^(?:Key|Digit)(.)$/.exec(code)?.[1].toLowerCase() ?? names[code] ?? code.toLowerCase();
+  const name = /^(?:Key|Digit)(.)$/.exec(code)?.[1]?.toLowerCase() ?? names[code] ?? code.toLowerCase();
   const held = { ctrl: ctrlKey, alt: altKey, shift: shiftKey, cmd: metaKey };
   return [...MODIFIERS.filter((m) => held[m]), name].join("-");
 }
 
 // The action `key` triggers in `context` of `keymap`.
-export const bound = (keymap: Keymap, context: string, key: Key): Binding | undefined => keymap[context]?.[keystroke(key)];
+export const bound = (keymap: Keymap, context: string, key: Key): Binding | undefined => keymap.get(context)?.get(keystroke(key));
 
 // The window's action for `key`; `inList`: the session list has focus, so its own keys come first.
 // While typing in a field, a binding without Cmd leaves the key to it; only Dismiss runs, since it does not take the key.
@@ -41,21 +41,23 @@ export function windowBinding(keymap: Keymap, key: Key, typing: boolean, inList 
 }
 
 // The window's actions by name (danielrispler/Falinks#575); an action with an argument, such as `["studio::Answer", "1"]`,
-// gets it. A new view or menu adds its action here and appears in the palette, bound or not.
-export type Actions = Record<string, (arg?: string) => void>;
+// gets it. A new view or menu adds its action here and appears in the palette, bound or not. A Map, since the name looked up comes from
+// `keymap.json` (#548): `toString` or `constructor` there is an unknown action, not a function every object has.
+export type Actions = ReadonlyMap<string, (arg?: string) => void>;
 
 // Runs `binding`'s action; false when the window has no such action.
 export function run(actions: Actions, binding: Binding | undefined): boolean {
   const [name, arg] = typeof binding === "string" ? [binding] : (binding ?? [""]);
-  actions[name]?.(arg);
-  return name in actions;
+  const action = actions.get(name);
+  action?.(arg);
+  return action !== undefined;
 }
 
 // The line the arrow keys step to, `by` from the current one, or from the edge when none is current: only session rows and
 // subagent lines count, Null at the end.
 export function stepLine(lines: { classes: string[]; current: boolean }[], by: 1 | -1): number | null {
   const steps = lines.flatMap((line, at) => (["session-row", "worker", "helper"].some((c) => line.classes.includes(c)) ? [at] : []));
-  const here = steps.findIndex((at) => lines[at].current);
+  const here = steps.findIndex((at) => lines[at]?.current);
   return steps[here === -1 ? (by === 1 ? 0 : steps.length - 1) : here + by] ?? null;
 }
 
@@ -65,7 +67,7 @@ export function stepSession(sessions: { id: string }[], selected: string | null,
   if (!sessions.length) return null;
   const at = sessions.findIndex((session) => session.id === selected);
   const from = at === -1 ? (by === 1 ? -1 : 0) : at;
-  return sessions[(from + by + sessions.length) % sessions.length].id;
+  return sessions[(from + by + sessions.length) % sessions.length]?.id ?? null;
 }
 
 // The first session that needs Daniel after `selected`, wrapping; with none, the first unseen (danielrispler/Falinks#556).
@@ -84,14 +86,14 @@ const symbols: Record<string, string> = { ctrl: "⌃", alt: "⌥", shift: "⇧",
 
 // A keystroke as macOS menus show it: "cmd-shift-p" is "⇧⌘P".
 export function keyLabel(stroke: string): string {
-  const [, mods, name] = new RegExp(`^((?:(?:${MODIFIERS.join("|")})-)*)(.+)$`).exec(stroke)!;
+  const [, mods = "", name = stroke] = new RegExp(`^((?:(?:${MODIFIERS.join("|")})-)*)(.+)$`).exec(stroke) ?? [];
   return [...MODIFIERS.filter((m) => mods.includes(`${m}-`)), name].map((part) => symbols[part] ?? part.toUpperCase()).join("");
 }
 
 // The keys `keymap` binds `name` to now, as macOS menus show them, each once.
 export const keysOf = (keymap: Keymap, name: string): string[] => [
-  ...new Set(Object.values(keymap).flatMap((bindings) =>
-    Object.entries(bindings).filter(([, binding]) => (typeof binding === "string" ? binding : binding[0]) === name).map(([stroke]) => keyLabel(stroke)))),
+  ...new Set([...keymap.values()].flatMap((bindings) =>
+    [...bindings].filter(([, binding]) => (typeof binding === "string" ? binding : binding[0]) === name).map(([stroke]) => keyLabel(stroke)))),
 ];
 
 // `label` with the keys `keymap` binds `name` to now, as "Settings (⌘,)"; the bare label when none.
@@ -104,7 +106,7 @@ export function titled(keymap: Keymap, label: string, name: string): string {
 const title = (binding: Binding) => {
   const [name, arg] = typeof binding === "string" ? [binding] : binding;
   const words = name.replace(/^.*::/, "").replace(/(?<=[a-z])(?=[A-Z])/g, " ").toLowerCase();
-  return [words[0].toUpperCase() + words.slice(1), arg].filter(Boolean).join(" ");
+  return [words.charAt(0).toUpperCase() + words.slice(1), arg].filter(Boolean).join(" ");
 };
 
 // `note`: a second line, such as a Doctor entry's cost.
@@ -120,8 +122,8 @@ export function paletteEntries(keymap: Keymap, actions: string[]): Entry[] {
     if (actions.includes(name) && !entries.has(id)) entries.set(id, { binding, title: title(binding), keys: [] });
     return entries.get(id);
   };
-  for (const map of [initial.keymap, keymap]) for (const bindings of Object.values(map)) Object.values(bindings).forEach(add);
-  for (const bindings of Object.values(keymap)) for (const [stroke, binding] of Object.entries(bindings)) add(binding)?.keys.push(keyLabel(stroke));
+  for (const map of [initial.keymap, keymap]) for (const bindings of map.values()) for (const binding of bindings.values()) add(binding);
+  for (const bindings of keymap.values()) for (const [stroke, binding] of bindings) add(binding)?.keys.push(keyLabel(stroke));
   const named = new Set([...entries.values()].map((entry) => (typeof entry.binding === "string" ? entry.binding : entry.binding[0])));
   for (const name of actions) if (!named.has(name)) add(name);
   return [...entries.values()];

@@ -13,7 +13,8 @@ const turn = (paths, ago = 0, open = false) => ({
   files: paths === null ? null : { files: paths.map((p) => (Array.isArray(p) ? file(...p) : file(p))), merged: 0 },
 });
 const worker = (id, extra = {}) => ({ id, parent: "session", kind: "worker", name: `worker ${id}`, status: "running", ...extra });
-const session = (id, state, extra = {}) => ({
+// A session with the fields the live link reads.
+const session = (id, state, extra = {}) => /** @type {import("../../dist/types.js").Session} */ ({
   id, state, name: `session ${id}`, cwd: "/w/p", shell: false, status_only: false, asker: null, agents: [], turns: [], last_step: null,
   capabilities: { turn_trees: true }, identity: { name: `identity ${id}` }, unseen: false, ...extra,
 });
@@ -62,6 +63,7 @@ test("a Running session's in-flight edit is on its latest turn before the turn's
 
 test("Running and Needs you sessions are marked, and Your turn or Idle ones while unseen; shells, Ended and other projects' never", () => {
   const here = (cwd) => cwd === "/w/p";
+  /** @type {[import("../../dist/types.js").Session, boolean][]} */
   const cases = [
     [session("r", "running"), true], [session("n", "needs_you"), true],
     [session("y", "your_turn"), false], [session("yu", "your_turn", { unseen: true }), true],

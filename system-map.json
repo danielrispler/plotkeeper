@@ -19,7 +19,8 @@
         { "name": "The event log", "text": "One append-only JSON Lines file, the only source of session state.", "paths": ["hook/src/lib.rs"] },
         { "name": "The recorder", "text": "Appends each event with the agent its entry names, and drops another harness's event, which that harness records.", "paths": ["hook/src/main.rs"] },
         { "name": "IDE sessions", "text": "Records no process for an agent inside an IDE app such as VS Code, so its session goes idle instead of ending." },
-        { "name": "The answer hook", "text": "Waits for your answer to a question or a blocked command, given on the page.", "paths": ["hook/src/answer.rs", "hook/src/bin/plotkeeper-answer.rs"] }
+        { "name": "The answer hook", "text": "Waits for your answer to a question or a blocked command, given on the page.", "paths": ["hook/src/answer.rs", "hook/src/bin/plotkeeper-answer.rs"] },
+        { "name": "The process check", "text": "The one test of whether a pid is alive, which the answer hook and the server both use.", "paths": ["hook/src/sys.rs"] }
       ],
       "tier": "core", "paths": ["hook/"]
     },
@@ -28,7 +29,7 @@
       "purpose": "Plain Rust logic that reads the event log's lines in order and knows every session's turns, checks, subagents and whether it needs you.",
       "holds": [
         { "name": "The agent adapters", "text": "Turn each agent's hook line into one neutral event: Claude Code, agy, Codex, Copilot, Cursor and Qwen Code.", "paths": ["core/src/claude.rs", "core/src/agy.rs", "core/src/codex.rs", "core/src/copilot.rs", "core/src/cursor.rs", "core/src/qwen.rs", "core/src/event.rs"] },
-        { "name": "Session state", "text": "The sessions, their turns and subagents, and whether one needs you, from the events one at a time.", "paths": ["core/src/lib.rs", "core/src/saved.rs"] },
+        { "name": "Session state", "text": "The sessions, their turns and subagents, and whether one needs you, from the events one at a time.", "paths": ["core/src/studio.rs", "core/src/studio/take.rs", "core/src/session.rs", "core/src/output.rs", "core/src/saved.rs"] },
         { "name": "The step ledger", "text": "One row for every tool call of a session, its workers' included, and which of them were checks.", "paths": ["core/src/ledger.rs", "core/src/checks.rs"] },
         { "name": "The transcript reader", "text": "A tolerant reader of a session's transcript, for what the session is doing and why.", "paths": ["core/src/transcript.rs"] }
       ],
@@ -38,8 +39,8 @@
       "id": "server", "name": "Server", "caption": "Holds the state, answers the commands",
       "purpose": "The `plotkeeper` program: it holds the state, follows the event log and serves the page on 127.0.0.1, with one function for each of the page's commands.",
       "holds": [
-        { "name": "Serving the page", "text": "The built page, a POST route per command and one event stream, behind a token, a cookie and a Host check.", "paths": ["server/src/web.rs", "server/src/api.rs", "server/src/lock.rs"] },
-        { "name": "The read loop", "text": "Follows the event log and sends what changed (the list, the selection, the brief, notices) to the page.", "paths": ["server/src/read_loop.rs"] },
+        { "name": "Serving the page", "text": "The built page, a POST route per command and one event stream, which also carries logged errors, behind a token, a cookie and a Host check.", "paths": ["server/src/web.rs", "server/src/api.rs", "server/src/lock.rs"] },
+        { "name": "The read loop", "text": "Follows the event log and sends what changed (the list, the selection, the brief, notices, the text of the settings files) to the page.", "paths": ["server/src/read_loop.rs"] },
         { "name": "Settings and projects", "text": "The writer, its API keys in plotkeeper's own Keychain entries, the settings and the saved project list.", "paths": ["server/src/settings.rs", "server/src/projects.rs"] },
         { "name": "The programs", "text": "`plotkeeper`, which starts the server and opens the page, and `plotkeeper-run`, the launcher of one background run.", "paths": ["server/src/bin/plotkeeper.rs", "server/src/bin/plotkeeper-run.rs"] }
       ],
@@ -60,14 +61,14 @@
       "purpose": "What the Map view and the briefs show, and the runs started from them: the map with its fog, history and ratify, PR briefs and catch-ups, and the headless agent runs.",
       "holds": [
         { "name": "The map", "text": "Reads the map from the default branch, with its fog, history, staleness, CI laws and what you ratified.", "paths": ["server/src/map.rs", "server/src/fog.rs", "server/src/history.rs", "server/src/staleness.rs", "server/src/ci_laws.rs", "server/src/ratify.rs"] },
-        { "name": "Briefs", "text": "PR lookups, the PR briefs of ready PRs, part catch-ups, the pre-flight and the end-of-story bar.", "paths": ["server/src/prs.rs", "server/src/pr_briefs.rs", "server/src/part_catch_ups.rs", "server/src/pre_flight.rs", "server/src/story_bar.rs"] },
+        { "name": "Briefs", "text": "PR lookups, the PR briefs of ready PRs, part catch-ups, the pre-flight and the end-of-story bar.", "paths": ["server/src/prs.rs", "server/src/pr_briefs.rs", "server/src/pr_briefs/write.rs", "server/src/part_catch_ups.rs", "server/src/pre_flight.rs", "server/src/story_bar.rs"] },
         { "name": "Background runs", "text": "Headless agent runs on your click, one at a time per project, in a sandbox: back a law and micro-worlds.", "paths": ["server/src/runner.rs", "server/src/back_a_law.rs", "server/src/micro_worlds.rs", "server/src/micro_world_guard.mjs"] },
         { "name": "The quiet log", "text": "One line per thing you use, kept for the stop rules, with nothing shown.", "paths": ["server/src/stop_rules.rs"] }
       ],
       "tier": "core",
       "paths": [
         "server/src/map.rs", "server/src/fog.rs", "server/src/staleness.rs", "server/src/history.rs", "server/src/ci_laws.rs",
-        "server/src/ratify.rs", "server/src/stop_rules.rs", "server/src/pre_flight.rs", "server/src/pr_briefs.rs",
+        "server/src/ratify.rs", "server/src/stop_rules.rs", "server/src/pre_flight.rs", "server/src/pr_briefs.rs", "server/src/pr_briefs/",
         "server/src/part_catch_ups.rs", "server/src/prs.rs", "server/src/story_bar.rs", "server/src/runner.rs",
         "server/src/back_a_law.rs", "server/src/micro_worlds.rs", "server/src/micro_world_guard.mjs",
         "server/tests/back_a_law.rs", "server/tests/micro_worlds.rs", "server/tests/runner.rs",
@@ -80,7 +81,7 @@
       "holds": [
         { "name": "The writer contract", "text": "One call shape for every writer, run as a program or, for an API-key writer, over HTTP.", "paths": ["understanding/src/writer.rs", "understanding/src/http_writer.rs"] },
         { "name": "Turn writing", "text": "What a turn's end writes: its summary and its session's brief, held to the facts.", "paths": ["understanding/src/turn_writing.rs", "understanding/src/summary.rs", "understanding/src/brief.rs", "understanding/src/grounding.rs"] },
-        { "name": "PR briefs and part catch-ups", "text": "Facts code assembles, the writer's story of them and the code checks on its reply.", "paths": ["understanding/src/pr_brief.rs", "understanding/src/pr_brief_check.rs", "understanding/src/part_catch_up.rs"] },
+        { "name": "PR briefs and part catch-ups", "text": "Facts code assembles, the writer's story of them and the code checks on its reply.", "paths": ["understanding/src/pr_brief.rs", "understanding/src/pr_brief/build.rs", "understanding/src/pr_brief/checks.rs", "understanding/src/pr_brief_check.rs", "understanding/src/part_catch_up.rs"] },
         { "name": "Pre-flight", "text": "The parts of the map a piece of work will likely cross, predicted before it starts.", "paths": ["understanding/src/pre_flight.rs"] },
         { "name": "The store", "text": "The briefs, summaries and risk notes on disk; cards are retired, and those stored before stay readable.", "paths": ["understanding/src/store.rs", "understanding/src/risk.rs"] }
       ],
@@ -90,8 +91,8 @@
       "id": "window", "name": "Window", "caption": "Everything you see and press",
       "purpose": "The page: the Map view as its base, beside the session list. It shows state and sends your actions to the server.",
       "holds": [
-        { "name": "The Map view", "text": "The parts, links and fog, a part's sheet with its history and ratify, panels' explanations, with the pre-flight and micro-world overlays.", "paths": ["ui/map.ts", "ui/map-model.ts", "ui/map-live.ts", "ui/map-sheet.ts", "ui/explanations.ts"] },
-        { "name": "The session list", "text": "A header for every saved project, even one with no sessions, whose headers switch the map.", "paths": ["ui/list.ts", "ui/projects.ts"] },
+        { "name": "The Map view", "text": "The parts, links and fog, a part's sheet with history and ratify, the PR brief, panels' explanations, pre-flight and micro-world overlays.", "paths": ["ui/map.ts", "ui/map-model.ts", "ui/map-camera.ts", "ui/map-live.ts", "ui/map-sheet.ts", "ui/map-brief.ts", "ui/map-brief-player.ts", "ui/map-brief-model.ts", "ui/map-catch-up.ts", "ui/explanations.ts"] },
+        { "name": "The session list", "text": "A header for every saved project, even one with no sessions, whose headers switch the map.", "paths": ["ui/list.ts", "ui/list-model.ts", "ui/projects.ts"] },
         { "name": "The left panel", "text": "A session's story, History, a turn's diff, a worker's log or Settings, open over the map.", "paths": ["ui/panel.ts", "ui/story.ts", "ui/diff.ts"] },
         { "name": "The writer's settings", "text": "Pick the program that writes the summaries, or set up an API-key writer, and test it with one tiny call.", "paths": ["ui/settings.ts", "ui/writers.ts"] },
         { "name": "Patch review", "text": "A back a law run's proven test patch, to open as a draft PR or discard.", "paths": ["ui/patch-review.ts"] },
@@ -102,8 +103,9 @@
     },
     {
       "id": "workbench", "name": "Workbench", "caption": "Worktrees and PRs",
-      "purpose": "Git worktrees and fetches, the `gh` that PR lookups run, other agents' resume commands, and agy's plugin. A black box: it never fogs.",
+      "purpose": "The one runner of `git` and `gh`, git worktrees and fetches, other agents' resume commands, and agy's plugin. A black box: it never fogs.",
       "holds": [
+        { "name": "The runner", "text": "Builds every `git` and `gh` with prompts off and no input, and runs a command to a deadline that kills its process group.", "paths": ["workbench/src/run.rs"] },
         { "name": "Git", "text": "A folder's main checkout, `origin`'s fetch and what removing a worktree would lose, never with force.", "paths": ["workbench/src/lib.rs"] }
       ],
       "tier": "black-box", "paths": ["workbench/"]
@@ -139,6 +141,8 @@
     { "id": "core-workbench", "from": "core", "to": "workbench", "kind": "import" },
     { "id": "understanding-core", "from": "understanding", "to": "core", "kind": "import" },
     { "id": "understanding-hook", "from": "understanding", "to": "hook", "kind": "import" },
+    { "id": "understanding-workbench", "from": "understanding", "to": "workbench", "kind": "import" },
+    { "id": "hook-workbench", "from": "hook", "to": "workbench", "kind": "import" },
     { "id": "understanding-writer", "from": "understanding", "to": "writer", "kind": "spawn",
       "reason": "Understanding runs the writer's program for each summary or brief; an API-key writer is asked over HTTP instead." },
     { "id": "server-window", "from": "server", "to": "window", "kind": "http",
@@ -156,12 +160,14 @@
   ],
   "ignored": [
     ".agents/", ".claude/", ".github/", ".gitignore", "AGENTS.md", "CHANGELOG.md", "CLAUDE.md", "Cargo.lock", "Cargo.toml", "LICENSE",
-    "README.md", "package-lock.json", "package.json", "npm/", "rust-toolchain.toml", "tsconfig.json", "biome.json",
+    "README.md", "package-lock.json", "package.json", "npm/", "rust-toolchain.toml", "tsconfig.json", "biome.json", "knip.jsonc",
     "skills-lock.json",
     "docs/", "scripts/", "archive/",
     "wayfinder/", "test-support/", "system-map/"
   ],
   "laws": [
+    { "id": "git-and-gh-go-through-the-runner", "on": "workbench", "backing": "check",
+      "text": "Every `git` and `gh` the workspace starts is built by the runner, so none can wait on a prompt." },
     { "id": "install-never-opens-claude-settings", "on": "install", "backing": "check",
       "text": "Install and uninstall reach Claude Code only through `claude plugin` and never open its settings file." },
     { "id": "install-never-opens-qwen-settings", "on": "install", "backing": "check",
@@ -175,7 +181,7 @@
     { "id": "check-result-is-last-run", "on": "core", "backing": "trust",
       "text": "A check's result is its last run's." },
     { "id": "wire-types-agree", "on": "server-window", "backing": "check",
-      "text": "The window's types and the Rust types of the server's replies agree; a reply built as bare JSON has none." },
+      "text": "The window's types and the Rust types of the server's replies agree, and each command's argument names are its handler's; a reply built as bare JSON has none." },
     { "id": "session-pieces-in-order", "on": "understanding", "backing": "check",
       "text": "A session's pieces are written one at a time, in order." },
     { "id": "old-stored-files-load", "on": "understanding", "backing": "check",

@@ -23,3 +23,36 @@ test("a project header's click shows its map; on the shown project's header it f
   // A fresh page has no project shown yet: the header shows its map.
   assert.deepEqual(pressHeader({ project: null, panel: null }, "/w/falinks", projectOf), { project: "/w/falinks", panel: null });
 });
+
+// #548: an event that came while a press waited is drawn by a read after the press settles. When that read fails, the event is still
+// missed, so the next press reads again; and the failure is logged, not left as an unhandled rejection of the press.
+test("a catch-up whose read fails keeps the missed event for the next press", async (t) => {
+  const { fakeDocument, tauri } = await import("./dom.mjs");
+  // The page's modules tick the shown times on an interval, which would keep this test's process alive.
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  globalThis.document = fakeDocument();
+  const calls = [];
+  let down = true;
+  let studio;
+  tauri(calls, (command) => {
+    // An event arrives while the press waits for the server.
+    if (command === "select") studio.missed = true;
+    if (command === "selected" && down) throw new Error("the server is gone");
+    if (command === "cards") return { brief: null, goal: null, answers: [], open: [], design: [], decisions: [], risk_notes: [], decision_notes: [] };
+    return null;
+  });
+  const logged = [];
+  // Only `warn` is stood in for: an `error` line would fail to log, as no line here should be one.
+  window.__TAURI__.log = /** @type {any} */ ({ warn: async (line) => void logged.push(line) });
+  ({ studio } = await import("../../dist/state.js"));
+  const { select } = await import("../../dist/selection.js");
+  await select("s1");
+  assert.equal(studio.missed, true, "the failed read left the event missed");
+  assert.deepEqual(logged, ["catch up: the server is gone"]);
+  // The server is back: the next press's catch-up reads, and nothing is missed any more.
+  down = false;
+  calls.length = 0;
+  await select("s1");
+  assert.equal(studio.missed, false);
+  assert.deepEqual(calls.map(([command]) => command), ["select", "cards", "selected", "cards"]);
+});

@@ -17,6 +17,7 @@
 
 use crate::runner::{Kind, Limits, MICRO_WORLD_OUT, Request, Runner};
 use serde::{Deserialize, Serialize};
+use std::fmt::Write as _;
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     fs::{self, File},
@@ -108,13 +109,16 @@ fn parts_text(map: &Json, parts: &[String], lead: String) -> (Vec<String>, Strin
             }
         }
         let field = |key: &str| part[key].as_str().unwrap_or("").to_string();
-        text.push_str(&format!(
-            "- {} ({}): {}. {}\n",
+        // Writing to a `String` cannot fail.
+        writeln!(
+            text,
+            "- {} ({}): {}. {}",
             field("name"),
             own.join(", "),
             field("caption"),
             system_map::part_text(part)
-        ));
+        )
+        .ok();
     }
     let laws: Vec<String> = items(map, "laws")
         .filter(|law| parts.iter().any(|id| law["on"] == id.as_str()))
@@ -149,11 +153,14 @@ pub fn flow_topic(source: &str, id: &str) -> Option<Topic> {
         let between = ends.map_or(String::new(), |(from, to)| {
             format!(" ({} to {})", named(&map, from), named(&map, to))
         });
-        lead.push_str(&format!(
-            "{}. {}{between}\n",
+        // Writing to a `String` cannot fail.
+        writeln!(
+            lead,
+            "{}. {}{between}",
             n + 1,
             hop["text"].as_str().unwrap_or("")
-        ));
+        )
+        .ok();
         for end in ends.into_iter().flat_map(|(from, to)| [from, to]) {
             if part_ids.contains(end) && !parts.iter().any(|p| p == end) {
                 parts.push(end.to_string());
@@ -237,10 +244,12 @@ code. Your current folder holds the project's files; read the code of the parts 
         topic.text
     );
     if let Some(failure) = failure {
-        prompt.push_str(&format!(
+        // Writing to a `String` cannot fail.
+        write!(
+            prompt,
             "\nYour first page is in `.micro-world/template.html` and failed plotkeeper's checks:\n{failure}\nFix every failure \
 and write the page again to the same file.\n"
-        ));
+        ).ok();
     }
     prompt
 }
@@ -371,7 +380,8 @@ impl MicroWorlds {
 
     /// Sets what is told the project whose micro-worlds changed; the first call wins.
     pub fn on_change(&self, changed: impl Fn(&str) + Send + Sync + 'static) {
-        let _ = self.changed.set(Box::new(changed));
+        // Set once; a later set keeps the first value, which is the same.
+        self.changed.set(Box::new(changed)).ok();
     }
 
     fn tell(&self, project: &str) {
@@ -451,7 +461,10 @@ impl MicroWorlds {
         if self.scripts().is_none() {
             return copy("Set microWorlds.dshVisual for a run to build it".into());
         }
-        let guard = self.writing.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = self
+            .writing
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let old = self.read(project, &topic.key);
         if old.as_ref().is_some_and(|old| old.phase == Phase::Building) {
             return Explored {
@@ -620,7 +633,10 @@ impl MicroWorlds {
             )),
             _ => None,
         };
-        let _guard = self.writing.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = self
+            .writing
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // Rebuild may have started another run meanwhile.
         let Some(mut record) = self
             .read(project, key)
@@ -649,7 +665,9 @@ impl MicroWorlds {
                     .map(|folder| folder.join(MICRO_WORLD_OUT).join("template.html"))
                     .filter(|previous| previous.is_file());
                 record.attempt += 1;
-                let _ = self.start(project, record, previous.as_deref(), Some(&why));
+                // A failed start writes the record down as failed.
+                self.start(project, record, previous.as_deref(), Some(&why))
+                    .ok();
             }
             Some(Err(why)) => {
                 record.phase = Phase::Failed;
@@ -698,8 +716,10 @@ impl MicroWorlds {
     /// The checked page of world `key`, with its policy first; an error when none is stored. Only a page that passed the host
     /// checks is ever stored.
     pub fn page(&self, project: &str, key: &str) -> Result<String, String> {
-        fs::read_to_string(self.page_file(project, key))
-            .map_err(|_| "No checked micro-world is stored for this".to_string())
+        fs::read_to_string(self.page_file(project, key)).map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => "No checked micro-world is stored for this".to_string(),
+            _ => format!("The micro-world's page did not read: {e}"),
+        })
     }
 
     /// At a start: each project's building worlds whose run ended meanwhile are checked, and one whose run is gone failed.
@@ -769,9 +789,9 @@ pub fn micro_world_page(app: &crate::App, project: String, key: String) -> Resul
 /// Fills a run's working `folder` with `repo`'s files at `commit` (`git archive`, so no git data and nothing untracked) and makes
 /// the output folder in it.
 fn fill(repo: &Path, commit: &str, folder: &Path) -> Result<(), String> {
-    let mut archive = Command::new("git")
+    // Streamed into `tar`, so it is waited on by hand; it reads this machine's repository only.
+    let mut archive = studio_workbench::run::git(repo)
         .args(["archive", "--format=tar", commit])
-        .current_dir(repo)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -798,14 +818,10 @@ fn changed(repo: &Path, built: &str, current: &str, paths: &[String]) -> bool {
     if built == current || paths.is_empty() {
         return false;
     }
-    let status = Command::new("git")
-        .args(["diff", "--quiet", built, current, "--"])
-        .args(paths)
-        .current_dir(repo)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-    !status.is_ok_and(|status| status.success())
+    let mut diff = studio_workbench::run::git(repo);
+    diff.args(["diff", "--quiet", built, current, "--"])
+        .args(paths);
+    studio_workbench::run::run_until(&mut diff, crate::map::GIT_READ_LIMIT).is_err()
 }
 
 /// Runs `command` with its output in `log`, killed past `limit`: whether it exited 0, and what it printed.
@@ -824,8 +840,10 @@ fn run_logged(mut command: Command, log: &Path, limit: Duration) -> Result<(bool
             break Some(status);
         }
         if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
+            // The child may have exited already.
+            child.kill().ok();
+            // Only reaps the child; its exit status is not used.
+            child.wait().ok();
             break None;
         }
         thread::sleep(Duration::from_millis(50));
@@ -904,9 +922,10 @@ pub fn host_check(
                 .lines()
                 .filter(|line| line.starts_with("FAIL "))
                 .collect();
-            let said = match fails.is_empty() {
-                true => last_lines(&printed, 10),
-                false => last_lines(&fails.join("\n"), 20),
+            let said = if fails.is_empty() {
+                last_lines(&printed, 10)
+            } else {
+                last_lines(&fails.join("\n"), 20)
             };
             Err(format!("verify.mjs failed:\n{said}"))
         }

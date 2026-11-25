@@ -9,15 +9,20 @@ use crate::{Backing, Map};
 /// One law with the tags that name it.
 #[derive(Debug, Serialize)]
 pub struct LawReport {
+    /// The law's id.
     pub id: String,
+    /// Whether a test stands behind it.
     pub backing: Backing,
+    /// The tags that name it.
     pub tags: Vec<Tag>,
 }
 
 /// Where a tag stands: a tracked file and a 1-based line.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Tag {
+    /// The file's path from the repository's root.
     pub file: String,
+    /// The tag's line, from 1.
     pub line: usize,
 }
 
@@ -100,7 +105,9 @@ pub fn tag_id(line: &str) -> Option<&str> {
 /// A tag with the test it sits above.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LawTest {
+    /// The law the tag names.
     pub law: String,
+    /// Where the tag stands.
     pub tag: Tag,
     /// The test's name; none when no test follows the tag.
     pub test: Option<String>,
@@ -130,11 +137,11 @@ pub fn law_tests(root: &Path, laws: &[LawReport]) -> Vec<LawTest> {
 /// `test("...")`, reached over blank lines, comments (other tags among them) and attributes.
 pub fn test_name_after(text: &str, line: usize) -> Option<String> {
     let mut lines = text.lines().skip(line);
-    let mut depth = 0i32; // Open brackets of an attribute that runs over several lines.
+    let mut depth = 0usize; // Open brackets of an attribute that runs over several lines.
     for raw in lines.by_ref() {
         let trimmed = raw.trim();
-        if depth > 0 || trimmed.starts_with("#[") || trimmed.starts_with("#![") {
-            depth += trimmed.matches('[').count() as i32 - trimmed.matches(']').count() as i32;
+        if let Some(open) = attribute_brackets(depth, trimmed) {
+            depth = open;
             continue;
         }
         if trimmed.is_empty() || trimmed.starts_with("//") {
@@ -143,6 +150,13 @@ pub fn test_name_after(text: &str, line: usize) -> Option<String> {
         return rust_fn_name(trimmed).or_else(|| node_test_title(trimmed));
     }
     None
+}
+
+/// Whether the trimmed `line` is an attribute, or a line of one that runs over several, with `depth`
+/// of its brackets open before it: the brackets left open after it when it is, `None` when it is not.
+pub fn attribute_brackets(depth: usize, line: &str) -> Option<usize> {
+    (depth > 0 || line.starts_with("#[") || line.starts_with("#!["))
+        .then(|| (depth + line.matches('[').count()).saturating_sub(line.matches(']').count()))
 }
 
 fn rust_fn_name(line: &str) -> Option<String> {

@@ -40,6 +40,6 @@ Cmd+Shift+H, once `studio::GoHome`, is now `studio::ShowMap` (#386), "back to th
 
 "Delete" asks, then drops the session's row: the server appends a `StudioDelete` line to the event log, so the row stays gone after a restart until a `SessionStart` of the session brings it back; its cards stay in the store, and no worktree or branch is removed. Clear landed, at the list's end, deletes the landed rows the same way once its Undo window has passed.
 
-A late Allow of a blocked command reaches no terminal from the page: it shows the line to give the session to retry the command.
+A late Allow of a blocked command reaches no terminal from the page: it shows the line to give the session to retry the command, in the notice line until it is dismissed, as it is (no command's name before it), and it is not written to the log.
 
 An agy session is recorded from any terminal, not only a studio one: this reverses #43's decision 9, which dropped an agy event that had no `PLOTKEEPER_TERMINAL_ID` because agy's plugin is global. Its place is `PLOTKEEPER_INTERNAL=1`: plotkeeper's own model runs (the outside review's agy, the card writer's `claude -p`) set it, and the hook drops every event from a process that carries it (#323). A session without a studio terminal has no terminal to link, so it shows as a plain session.

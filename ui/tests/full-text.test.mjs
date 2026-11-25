@@ -48,7 +48,7 @@ const noEmptyTitle = (root) => {
 const long = "Session UI redesign: long name that the row cuts to fit the list";
 const step = "Edit src/some/very/long/path/to/a/file/that/the/second/line/cuts.rs";
 const token = "issue-162-a-long-branch-name";
-const session = {
+const session = /** @type {import("../../dist/types.js").Session} */ ({
   id: "s",
   name: null,
   prompt_name: long,
@@ -67,7 +67,7 @@ const session = {
   turn_span: null,
   status_only: false,
   shell: false,
-};
+});
 
 test("a session row's name, step and token hold their full text in a title, and none is empty", () => {
   const button = row(session, new Map(), token);
@@ -88,7 +88,8 @@ test("a folded turn line's prompt and Headline hold their full text", () => {
   const headline = "A Headline the line cuts to fit the rail";
   const turn = { id: null, prompt: "First line of a long prompt\nsecond line", message: headline, checks: [] };
   studio.selection = null;
-  const node = foldedTurn({ id: "s" }, { index: 0, turn, cards: [] });
+  // The folded line reads only the session's id, and the block's turn.
+  const node = foldedTurn(/** @type {import("../../dist/types.js").Session} */ ({ id: "s" }), /** @type {import("../../dist/story.js").FeedTurn} */ (/** @type {unknown} */ ({ index: 0, turn, cards: [] })));
   holds(node, "prompt", "First line of a long prompt\nsecond line");
   holds(node, "headline-text", headline);
   noEmptyTitle(node);
@@ -96,7 +97,7 @@ test("a folded turn line's prompt and Headline hold their full text", () => {
 
 test("a toast's name and line hold their full text, and a start toast's message", () => {
   studio.selection = null;
-  studio.listed = [{ ...session, state: "needs_you", questions: [{ answer: "open", questions: [{ question: "A long question the toast cuts?" }] }] }];
+  studio.listed = [{ ...session, state: "needs_you", questions: [/** @type {import("../../dist/types.js").Question} */ ({ answer: "open", questions: [{ question: "A long question the toast cuts?" }] })] }];
   showToast();
   const toast = document.getElementById("toast");
   assert.equal(toast.hidden, false);
@@ -119,7 +120,7 @@ test("the palette's rows hold their full text in a title", () => {
   Object.assign(palette, { matches: () => false, showPopover() {}, hidePopover() {} });
   const make = document.createElement;
   document.createElement = (tag) => Object.assign(make(tag), tag === "input" ? { value: "", focus() {} } : {});
-  showPalette([{ title: "Switch to a session with a very long action name", keys: ["⌘K"], note: "A note the row cuts to fit", binding: {} }], () => {});
+  showPalette([{ title: "Switch to a session with a very long action name", keys: ["⌘K"], note: "A note the row cuts to fit", binding: /** @type {any} */ ({}) }], () => {});
   const rows = every(palette).filter((n) => n.getAttribute?.("role") === "option");
   assert.ok(rows.length > 0, "the palette draws its rows");
   for (const drawn of rows) {
@@ -131,7 +132,7 @@ test("the palette's rows hold their full text in a title", () => {
 });
 
 test("a project group's toggle has a title, also for the home folder", () => {
-  const group = (key, name) => ({ key, name, rollup: null, states: [] });
+  const group = (key, name) => /** @type {import("../../dist/projects.js").ProjectGroup<import("../../dist/types.js").Session>} */ ({ key, name, rollup: null, states: [] });
   const head = projectHead(group("/Users/someone/elsewhere/a-repository", "a-repository"));
   holds(head, "project-toggle", "/Users/someone/elsewhere/a-repository");
   noEmptyTitle(projectHead(group("", "~")));

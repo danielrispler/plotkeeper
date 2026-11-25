@@ -4,7 +4,8 @@
 
 use std::{
     path::{Path, PathBuf},
-    process::{Command, ExitCode},
+    process::ExitCode,
+    time::Duration,
 };
 
 fn main() -> ExitCode {
@@ -36,7 +37,7 @@ fn run() -> Result<ExitCode, String> {
             "--json" => json = true,
             "--root" => root = Some(PathBuf::from(args.next().ok_or("--root needs a folder")?)),
             "--commit" if command.as_deref() == Some("check") => {
-                commit = Some(args.next().ok_or("--commit needs a commit")?)
+                commit = Some(args.next().ok_or("--commit needs a commit")?);
             }
             other if touched && !other.starts_with("--") => paths.push(other.to_string()),
             other => return Err(format!("unknown argument {other:?}")),
@@ -217,14 +218,17 @@ fn run_imports(root: &Path, json: bool) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
+/// The longest finding the repository's root may take.
+const GIT_LIMIT: Duration = Duration::from_secs(30);
+
 fn git_top_level() -> Result<PathBuf, String> {
-    let output = Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .output()
-        .map_err(|e| format!("cannot run git: {e}"))?;
-    if !output.status.success() {
-        return Err("not inside a git repository; pass --root <dir>".into());
-    }
+    use studio_workbench::run::{RunError, git, run_until};
+    let mut git = git(Path::new("."));
+    let found = run_until(git.args(["rev-parse", "--show-toplevel"]), GIT_LIMIT);
+    let output = found.map_err(|e| match e {
+        RunError::Failed(_) => "not inside a git repository; pass --root <dir>".to_string(),
+        e => format!("cannot run git: {e}"),
+    })?;
     Ok(PathBuf::from(
         String::from_utf8_lossy(&output.stdout).trim_end(),
     ))

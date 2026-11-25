@@ -66,7 +66,9 @@ test("none when not Running and none with tips off; neither moves the counter", 
 // A store in memory, as `localStorage` would hold it.
 const memory = () => {
   let text = null;
-  return { get: () => text, set: (value) => void (text = value) };
+  return { get: () => text, set: (value) => {
+      text = value;
+    } };
 };
 
 test("one tip per Running stretch: it stays while the session runs, and the next stretch picks again", () => {
@@ -111,9 +113,9 @@ test("the list: real palette actions, one line each, written to you, unique ids"
 test("a tip's key is the live binding; an unbound action says where to find it", () => {
   const t = { id: "fit", text: "Fit map ({key}) puts the whole map in view.", action: "studio::FitMap" };
   assert.equal(tipText(t, initial.keymap), "Tip: Fit map (⌘0) puts the whole map in view.");
-  const rebound = { ...initial.keymap, Workspace: { "cmd-9": "studio::FitMap" } };
+  const rebound = new Map([...initial.keymap, ["Workspace", new Map([["cmd-9", "studio::FitMap"]])]]);
   assert.equal(tipText(t, rebound), "Tip: Fit map (⌘9) puts the whole map in view.");
-  assert.equal(tipText(t, { Workspace: {} }), "Tip: Fit map (in the palette) puts the whole map in view.");
+  assert.equal(tipText(t, new Map([["Workspace", new Map()]])), "Tip: Fit map (in the palette) puts the whole map in view.");
 });
 
 test("the tip is the Intention box's last line, under the step", () => {

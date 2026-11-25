@@ -4,22 +4,32 @@ import assert from "node:assert/strict";
 import { answerText, kindText, riskText, sourceText } from "../../dist/decisions.js";
 
 const at = 1793262013905;
+/** @typedef {import("../../dist/types.js").Decision} Decision */
+/** @typedef {import("../../dist/types.js").RiskView} RiskView */
 
 test("a question's answer is its choices; a plan's and a permission's is their verdict", () => {
-  const question = { tool: "AskUserQuestion", input: {}, answer: { "Which?": "Install", "Also?": "A, B" }, at, source: "terminal" };
+  /** @type {Decision} */
+  const question = { call: "toolu_1", agent: null, tool: "AskUserQuestion", input: {}, answer: { "Which?": "Install", "Also?": "A, B" }, at, source: "terminal" };
   assert.equal(answerText(question), "Install · A, B");
   assert.equal(kindText(question), "Question");
   assert.equal(sourceText(question), "in the terminal");
-  const plan = { tool: "ExitPlanMode", input: {}, answer: "deny", at, source: "card" };
+  /** @type {Decision} */
+  const plan = { call: "toolu_1", agent: null, tool: "ExitPlanMode", input: {}, answer: "deny", at, source: "card" };
   assert.equal(answerText(plan), "Rejected");
   assert.equal(sourceText(plan), "on the card");
-  const permission = { tool: "Bash", input: {}, answer: "allow", at, source: "card" };
+  /** @type {Decision} */
+  const permission = { call: "toolu_1", agent: null, tool: "Bash", input: {}, answer: "allow", at, source: "card" };
   assert.equal(answerText(permission), "Allowed");
   assert.equal(kindText(permission), "Permission · Bash");
 });
 
 // The risk note beside a blocked command's answer (danielrispler/plotkeeper#299).
+/** @returns {Decision} */
 const bash = (answer) => ({ call: "toolu_1", agent: null, tool: "Bash", input: { command: "git push" }, answer, at, source: "card" });
+/**
+ * @param {number} [arrived]
+ * @returns {RiskView}
+ */
 const note = (arrived) => ({ call: "toolu_1", state: "arrived", level: "very_high", line: "Pushes to GitHub", ...(arrived === undefined ? {} : { at: arrived }) });
 
 for (const answer of ["allow", "deny"]) {

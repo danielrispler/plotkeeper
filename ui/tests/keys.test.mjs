@@ -49,7 +49,7 @@ const press = (code, mods = {}) => windowBinding(initial.keymap, key(code, mods)
 
 test("each default key of the spine runs its action", () => {
   const ran = [];
-  const actions = Object.fromEntries(
+  const actions = new Map(
     ["studio::NextSession", "studio::PreviousSession", "studio::NextNeedsYou", "studio::SelectNext", "studio::SelectPrevious",
       "studio::Answer", "studio::Palette"].map((name) => [name, (arg) => ran.push(arg ? `${name} ${arg}` : name)]),
   );
@@ -159,13 +159,13 @@ test("the palette lists every action the window runs, each with its current key,
     keymap: `[{ "bindings": { "cmd-l": "studio::ToggleList", "cmd-2": null } }]`,
   });
   const ran = [];
-  const actions = {
+  const actions = new Map(Object.entries({
     "studio::ToggleList": () => ran.push("list"),
     "studio::ToggleRail": () => {},
     "studio::Answer": (n) => ran.push(`answer ${n}`),
     "studio::Doctor": () => {},
-  };
-  const entries = paletteEntries(keymap, Object.keys(actions));
+  }));
+  const entries = paletteEntries(keymap, [...actions.keys()]);
   const find = (title) => entries.find((entry) => entry.title === title);
   assert.deepEqual(find("Toggle list").keys, ["⌘L"]);
   // Unbound, it is still listed, with no key.
@@ -182,7 +182,7 @@ test("the palette lists every action the window runs, each with its current key,
 });
 
 test("every default window action has a title and a key in the palette", () => {
-  const names = [...Object.values(initial.keymap.Workspace), ...Object.values(initial.keymap.List)].map((b) => (typeof b === "string" ? b : b[0]));
+  const names = [...initial.keymap.get("Workspace").values(), ...initial.keymap.get("List").values()].map((b) => (typeof b === "string" ? b : b[0]));
   const entries = paletteEntries(initial.keymap, names);
   for (const entry of entries) assert.ok(entry.keys.length > 0, entry.title);
   assert.deepEqual(entries.find((entry) => entry.title === "Palette").keys, ["⇧⌘P"]);
@@ -223,7 +223,7 @@ test("a button's title names the key the keymap binds its action to now (#159)",
   assert.equal(titled(initial.keymap, "Map", "studio::ShowMap"), "Map (⇧⌘H, ⇧⌘M)");
   const rebound = reload(initial, { settings: "{}", keymap: JSON.stringify([{ context: "Window", bindings: { "cmd-.": "studio::ShowMap" } }]) });
   assert.ok(titled(rebound.keymap, "Map", "studio::ShowMap").includes("⌘."), "the rebound key shows");
-  assert.equal(titled({}, "Map", "studio::ShowMap"), "Map");
+  assert.equal(titled(new Map(), "Map", "studio::ShowMap"), "Map");
 });
 
 // The settings page (#195): ⌘, opens it, Esc closes it even from a control in it, and the raw file's action is in the palette, unbound.
@@ -249,4 +249,20 @@ test("a keymap.json that still names studio::GoHome runs studio::ShowMap, back t
   // By default both old keys are the one action.
   assert.equal(windowBinding(initial.keymap, key("KeyH", { metaKey: true, shiftKey: true }, "h"), false), "studio::ShowMap");
   assert.equal(windowBinding(initial.keymap, key("KeyM", { metaKey: true, shiftKey: true }, "m"), false), "studio::ShowMap");
+});
+
+// #548: an action's name comes from keymap.json, so a name every object has (`toString`) must not find a function to run.
+test("a binding named __proto__, constructor or toString runs nothing: it is an unknown action", () => {
+  const ran = [];
+  const actions = new Map([["studio::ToggleList", () => ran.push("list")]]);
+  for (const name of ["__proto__", "constructor", "toString", "hasOwnProperty", "get"]) {
+    assert.equal(run(actions, name), false, name);
+    assert.equal(run(actions, [name, "1"]), false, name);
+  }
+  assert.equal(run(actions, "studio::ToggleList"), true);
+  assert.deepEqual(ran, ["list"]);
+  // In the palette it is an action the page does not have, as any unknown name is.
+  const { keymap } = reload(initial, { settings: null, keymap: `[{ "bindings": { "cmd-8": "constructor", "cmd-7": "toString" } }]` });
+  const titles = paletteEntries(keymap, [...actions.keys()]).map((entry) => entry.title);
+  assert.deepEqual(titles, ["Toggle list"]);
 });

@@ -2,9 +2,9 @@
 // sessions' latest turns touch (`sessionBadges`, `map-live.ts`), whose press opens one kept list of those sessions; a quiet "not placed" list
 // beside the map for the marked sessions no part holds; and, while a session is spotlit, its footprint as corner brackets (#559), its chip on
 // its latest turn's parts with its line on the home part, and the other badges dimmed. The pure rules are `map-live.ts`'s; this file draws
-// them from the sessions the window already has, and `map_place` (the shell, `studio-system-map`) says which part owns each path.
+// them from the sessions the window already has, and `map_place` (the server, `studio-system-map`) says which part owns each path.
 
-import { failure, invoke, newest, pressable, text } from "./dom.js";
+import { element, failure, invoke, newest, pressable, text } from "./dom.js";
 import { currentMap, onCamera, onDraw, registerLayer, revealParts, syncSide } from "./map.js";
 import { logStop } from "./stop-rules.js";
 import { logo, logoKey } from "./logos.js";
@@ -149,11 +149,11 @@ const rowsKey = (rows: BadgeRow[]) =>
 let listPart: string | null = null;
 let listProject: string | null = null;
 let listWasOpen = false;
-const badgeList = () => document.getElementById("map-badge-list")!;
+const badgeList = () => element("map-badge-list");
 const listOpen = () => listPart !== null && badgeList().matches(":popover-open");
 const badgeOn = (part: string) => currentMap()?.slots.canvas.querySelector<HTMLElement>(`.plate[data-id="${CSS.escape(part)}"] .session-badge`) ?? null;
 
-export function closeBadgeList() {
+function closeBadgeList() {
   if (badgeList().matches(":popover-open")) badgeList().hidePopover();
 }
 
@@ -233,15 +233,17 @@ const notPlacedList = () => {
   const rows = text("div", "", "not-placed-rows");
   details.append(summary, rows);
   details.addEventListener("toggle", () => details.open || endHoverIn(rows));
-  return (kept = { details, summary, rows });
+  kept = { details, summary, rows };
+  return kept;
 };
 
 // Corner brackets around the spotlit session's plates (#559): firm on its latest turn's parts, faint on the rest within the cut.
 function paintFootprint(view: View, spot: Session | null) {
   const { firm, faint } = spot ? footprint(spot, placed, Date.now()) : { firm: [], faint: [] };
   for (const plate of view.slots.canvas.querySelectorAll<HTMLElement>(".plate[data-id]")) {
-    plate.classList.toggle("foot-firm", firm.includes(plate.dataset.id!));
-    plate.classList.toggle("foot-faint", faint.includes(plate.dataset.id!));
+    const id = plate.dataset.id ?? "";
+    plate.classList.toggle("foot-firm", firm.includes(id));
+    plate.classList.toggle("foot-faint", faint.includes(id));
   }
   paintTurn(view);
 }
@@ -265,7 +267,7 @@ export function lightTurn(turn: LitTurn | null, on = true) {
 
 function paintTurn(view: View) {
   const parts = litTurn ? turnLit(litTurn) : [];
-  for (const plate of view.slots.canvas.querySelectorAll<HTMLElement>(".plate[data-id]")) plate.classList.toggle("turn-lit", parts.includes(plate.dataset.id!));
+  for (const plate of view.slots.canvas.querySelectorAll<HTMLElement>(".plate[data-id]")) plate.classList.toggle("turn-lit", parts.includes(plate.dataset.id ?? ""));
 }
 
 // Pans `turn`'s parts clear of the panel and the sheet, by `revealParts`'s limits; nothing while a brief plays.
@@ -285,12 +287,12 @@ export function paint() {
   const spot = spotOf(view, sessions);
   const plates = [...view.slots.canvas.querySelectorAll<HTMLElement>(".plate[data-id]")];
   // The plates are drawn in the map's reading order.
-  const shown = spotlightView(byPart, spot, placed, now, plates.map((plate) => plate.dataset.id!));
+  const shown = spotlightView(byPart, spot, placed, now, plates.flatMap((plate) => plate.dataset.id ?? []));
   // The keyboard on a badge stays on its part's new one; a part's button that held it for a badge still to come (`map.ts`) gives it back.
   const active = document.activeElement as HTMLElement | null;
   const focused = active?.matches(".session-badge") ? active.dataset.part : active?.matches(".plate-open[data-wants-badge]") ? active.closest<HTMLElement>(".plate")?.dataset.id : undefined;
   for (const plate of plates) {
-    const id = plate.dataset.id!;
+    const id = plate.dataset.id ?? "";
     const slot = plate.querySelector(".plate-chips");
     if (spot && shown.chips.includes(id)) slot?.replaceChildren(spotChip(spot, id === shown.home));
     else slot?.replaceChildren(...(byPart[id] ? [badgeButton(id, byPart[id], shown.dimmed.includes(id))] : []));

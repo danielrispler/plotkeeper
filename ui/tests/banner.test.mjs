@@ -26,6 +26,7 @@ test("a running session with nothing unseen shows none", () => {
 
 test("the banner carries the core's since, whatever seen says by then", () => {
   const since = { turns: 2, files: 1, passed: 1, failed: 0, ran: 0 };
+  // @ts-expect-error `seen` is no field of a session's: whatever an older payload says there, the banner reads only `since_looked`.
   assert.deepEqual(bannerFor({ ...session("idle", [ended(200)]), seen: 1, since_looked: since }, NOW).since, since);
 });
 
@@ -41,6 +42,7 @@ test("the banner stays while Daniel reads, and goes with another session or a ne
   assert.ok(banner);
   assert.equal(bannerLives(banner, idle), true);
   // Looking at the rail marks the turns seen: the banner is kept.
+  // @ts-expect-error `bannerLives` does not read `unseen`: the test shows that marking the turns seen changes nothing.
   assert.equal(bannerLives(banner, { ...idle, unseen: false }), true);
   assert.equal(bannerLives(banner, { ...idle, id: "other" }), false);
   assert.equal(bannerLives(banner, { ...idle, state: "running", turns: [...idle.turns, ended(0)] }), false);

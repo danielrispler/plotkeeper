@@ -22,7 +22,8 @@ struct Scene {
 impl Scene {
     fn new(name: &str) -> Scene {
         let base = std::env::temp_dir().join(format!("studio-named-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&base);
+        // Cleanup: a leftover temp file fails no test.
+        fs::remove_dir_all(&base).ok();
         let home = base.join("home");
         let main = base.join("main");
         fs::create_dir_all(&home).unwrap();
@@ -97,7 +98,8 @@ impl Scene {
 
 impl Drop for Scene {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(self.home.parent().unwrap());
+        // Cleanup: a leftover temp file fails no test.
+        fs::remove_dir_all(self.home.parent().unwrap()).ok();
     }
 }
 

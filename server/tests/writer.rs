@@ -96,7 +96,7 @@ fn replaying_a_log_twice_over_a_store_changes_no_summary_and_writes_no_card() {
     let (app, _) = app_with(&log, Arc::new(FakeWriter));
     Follower::start(&app, &log).pass();
     {
-        let mut store = app.cards.lock().unwrap();
+        let mut store = app.cards();
         let request = studio_core::SummaryRequest {
             session_id: "s1".into(),
             id: id.clone(),
@@ -114,7 +114,7 @@ fn replaying_a_log_twice_over_a_store_changes_no_summary_and_writes_no_card() {
         let (app, _) = app_with(&log, Arc::new(FakeWriter));
         Follower::start(&app, &log).pass();
         std::thread::sleep(Duration::from_secs(1));
-        assert_eq!(app.cards.lock().unwrap().summaries().len(), 1);
+        assert_eq!(app.cards().summaries().len(), 1);
         drop(app);
     }
 

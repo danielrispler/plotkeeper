@@ -68,6 +68,10 @@ fn res<T: Serialize>(reply: Result<T, String>) -> Result<Value, Failure> {
 }
 
 /// Runs command `name` over `args`; `page` takes what the page reports about itself.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one arm per page command: the dispatch reads as one table"
+)]
 pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<Value, Failure> {
     let args: Args = match args {
         Value::Object(map) => map.into_iter().map(|(k, v)| (snake(&k), v)).collect(),
@@ -89,7 +93,7 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "offset")?,
         )),
         "cards" => out(crate::cards(app)),
-        "writer_notice" => out(app.writer_notice.lock().unwrap().clone()),
+        "writer_notice" => out(app.writer_notice().clone()),
         "wired" => out(crate::wired()),
         "about" => out(crate::about()),
         "ask" => res(crate::ask(
@@ -220,7 +224,7 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
         "pre_flight_clear" => res(crate::pre_flight::pre_flight_clear(app, arg(a, "project")?)),
         "briefs_waiting" => out(crate::pr_briefs::briefs_waiting(app, arg(a, "cwd")?)),
         "pr_ratify" => res(crate::ratify::pr_ratify(
-            &app.prs,
+            app,
             arg(a, "project")?,
             arg(a, "number")?,
         )),
@@ -349,8 +353,8 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
         "log" => {
             let line: String = arg(a, "line")?;
             match arg::<String>(a, "level")?.as_str() {
-                "error" => log::error!("page: {line}"),
-                _ => log::warn!("page: {line}"),
+                "error" => log::error!(target: crate::PAGE_TARGET, "page: {line}"),
+                _ => log::warn!(target: crate::PAGE_TARGET, "page: {line}"),
             }
             out(())
         }

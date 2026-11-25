@@ -5,13 +5,13 @@ use std::sync::Mutex;
 use studio_core::SummaryRequest;
 use studio_understanding::{CardWriter, ClaudeWriter, FakeWriter, Risk, SummarySetup, TurnSummary};
 
-pub type Reply = Result<String, String>;
+pub(crate) type Reply = Result<String, String>;
 
 /// What `Answer::Run` runs.
-pub type Run = dyn Fn(&str) -> Option<Reply> + Send + Sync;
+pub(crate) type Run = dyn Fn(&str) -> Option<Reply> + Send + Sync;
 
 /// What a `Scripted` method answers.
-pub enum Answer {
+pub(crate) enum Answer {
     /// What `FakeWriter` answers.
     Fake,
     /// This, every time.
@@ -25,33 +25,33 @@ pub enum Answer {
 }
 
 impl Answer {
-    pub fn ok(reply: impl Into<String>) -> Self {
+    pub(crate) fn ok(reply: impl Into<String>) -> Self {
         Answer::Fixed(Ok(reply.into()))
     }
 
-    pub fn err(reply: &str) -> Self {
+    pub(crate) fn err(reply: &str) -> Self {
         Answer::Fixed(Err(reply.into()))
     }
 
     /// These replies in turn, the last again after that.
-    pub fn replies(replies: impl IntoIterator<Item = String>) -> Self {
+    pub(crate) fn replies(replies: impl IntoIterator<Item = String>) -> Self {
         let replies: Vec<_> = replies.into_iter().map(|r| Some(Ok(r))).collect();
         assert!(!replies.is_empty(), "a sequence needs at least one reply");
         Answer::Sequence(replies)
     }
 
     /// `FakeWriter`'s answer, after the calls that `run` takes on.
-    pub fn run(run: impl Fn(&str) -> Option<Reply> + Send + Sync + 'static) -> Self {
+    pub(crate) fn run(run: impl Fn(&str) -> Option<Reply> + Send + Sync + 'static) -> Self {
         Answer::Run(Box::new(run))
     }
 }
 
 /// What a writer was asked on a side question: the item, the turn's intentions and the question.
-pub type Asking = (String, Vec<String>, String);
+pub(crate) type Asking = (String, Vec<String>, String);
 
 /// What a `Scripted` writer keeps of its calls.
 #[derive(Default)]
-pub struct Kept {
+pub(crate) struct Kept {
     /// The name of each method called, in order.
     calls: Mutex<Vec<&'static str>>,
     asked: Mutex<Vec<Asking>>,
@@ -62,7 +62,7 @@ pub struct Kept {
 
 /// A writer that answers each method as its slot says. `fake()` has `FakeWriter`'s answer in every
 /// slot, `bare()` the answer of a writer that writes nothing; a test sets the slots it cares about.
-pub struct Scripted {
+pub(crate) struct Scripted {
     pub goal: Answer,
     pub design: Answer,
     pub ask: Answer,
@@ -89,16 +89,16 @@ impl Scripted {
         }
     }
 
-    pub fn fake() -> Self {
+    pub(crate) fn fake() -> Self {
         Self::with(|_| Answer::Fake)
     }
 
-    pub fn bare() -> Self {
+    pub(crate) fn bare() -> Self {
         Self::with(|method| Answer::err(&format!("this writer writes no {method}")))
     }
 
     /// How many times `method` was called.
-    pub fn calls(&self, method: &str) -> usize {
+    pub(crate) fn calls(&self, method: &str) -> usize {
         self.kept
             .calls
             .lock()
@@ -109,17 +109,17 @@ impl Scripted {
     }
 
     /// The side questions it was asked.
-    pub fn asked(&self) -> Vec<Asking> {
+    pub(crate) fn asked(&self) -> Vec<Asking> {
         self.kept.asked.lock().unwrap().clone()
     }
 
     /// The command and folder of each risk note it was asked for.
-    pub fn judged(&self) -> Vec<(String, String)> {
+    pub(crate) fn judged(&self) -> Vec<(String, String)> {
         self.kept.judged.lock().unwrap().clone()
     }
 
     /// What the real `claude -p` would have been given for each summary it wrote, as text.
-    pub fn inputs(&self) -> Vec<String> {
+    pub(crate) fn inputs(&self) -> Vec<String> {
         self.kept.inputs.lock().unwrap().clone()
     }
 

@@ -149,7 +149,7 @@ fn the_live_only_facts_survive_a_restart_and_an_older_store_opens_with_none() {
 
 /// The previous build's `Facts`, which requires `external`.
 #[derive(serde::Deserialize)]
-#[allow(dead_code)]
+#[allow(dead_code, reason = "the fields only have to deserialize")]
 struct MainFacts {
     files: Vec<serde_json::Value>,
     checks: Vec<serde_json::Value>,

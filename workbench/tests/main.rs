@@ -3,4 +3,5 @@
 mod agy_plugin;
 mod fetch;
 mod revival;
+mod run;
 mod tasks;

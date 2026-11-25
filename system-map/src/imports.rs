@@ -16,7 +16,9 @@ use crate::{PartFiles, extract::Pair};
 pub struct Imports {
     /// Every counted pair: both files owned, a crate root's `mod` lines left out.
     pub total: Count,
+    /// The pairs whose two files are in one part.
     pub inside: Count,
+    /// The pairs whose files are in two different parts.
     pub across: Count,
     /// `across` as a share of `total`, raw and weighted.
     pub across_share: Share,
@@ -34,38 +36,57 @@ pub struct Imports {
     pub problems: Vec<String>,
 }
 
+/// A number of import pairs, raw and weighted.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize)]
 pub struct Count {
+    /// Each pair counts 1.
     pub raw: usize,
+    /// Each pair counts 1 / the fan-in of its target.
     pub weighted: f64,
 }
 
+/// A percentage of `total`, raw and weighted.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize)]
 pub struct Share {
+    /// Of the raw counts.
     pub raw: f64,
+    /// Of the weighted counts.
     pub weighted: f64,
 }
 
+/// A file with many more imports in and out than the mean.
 #[derive(Debug, Serialize)]
 pub struct Hub {
+    /// The file's path.
     pub file: String,
+    /// The part that owns it.
     pub part: String,
+    /// Its imports in plus out.
     pub degree: usize,
+    /// The counted files that import it.
     pub fan_in: usize,
+    /// The counted files it imports.
     pub fan_out: usize,
 }
 
+/// One part with the imports inside it.
 #[derive(Debug, Serialize)]
 pub struct Inside {
+    /// The part's id.
     pub part: String,
+    /// Its pairs whose two files it owns.
     #[serde(flatten)]
     pub count: Count,
 }
 
+/// The imports from one part to another.
 #[derive(Debug, Serialize)]
 pub struct Across {
+    /// The importing part's id.
     pub from: String,
+    /// The imported part's id.
     pub to: String,
+    /// The pairs from `from`'s files to `to`'s.
     #[serde(flatten)]
     pub count: Count,
 }

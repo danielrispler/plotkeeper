@@ -12,6 +12,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+use studio_workbench::run::{self, RunError, run_until};
 
 /// What `gh pr view` is asked for.
 pub const FIELDS: &str =
@@ -170,6 +171,7 @@ impl Prs {
             }
             of_project.retain(|key, _| keep.contains(key));
         }
+        drop(found);
         Some(numbers)
     }
 
@@ -194,6 +196,7 @@ impl Prs {
                 brief: None,
             })
             .collect();
+        drop(found);
         ready.sort_by_key(|r| r.number);
         ready
     }
@@ -201,32 +204,31 @@ impl Prs {
 
 /// Runs `gh pr view <branch>` in `cwd`, as Daniel with its own login; no credential file is read.
 fn gh_view(cwd: &str, branch: &str) -> Looked {
-    let Ok(output) = std::process::Command::new(studio_workbench::gh_path())
-        .args(["pr", "view", branch, "--json", FIELDS])
-        .current_dir(cwd)
-        .output()
-    else {
-        return Looked::Failed;
-    };
-    if output.status.success() {
-        Looked::Found(String::from_utf8_lossy(&output.stdout).into_owned())
-    } else if String::from_utf8_lossy(&output.stderr).contains("no pull requests found") {
-        Looked::NoPr
-    } else {
-        Looked::Failed
+    let mut gh = run::gh(Path::new(cwd));
+    match run_until(gh.args(["pr", "view", branch, "--json", FIELDS]), GH_LIMIT) {
+        Ok(output) => Looked::Found(String::from_utf8_lossy(&output.stdout).into_owned()),
+        Err(RunError::Failed(output))
+            if String::from_utf8_lossy(&output.stderr).contains("no pull requests found") =>
+        {
+            Looked::NoPr
+        }
+        Err(_) => Looked::Failed,
     }
 }
 
+/// The longest a lookup at GitHub may take.
+const GH_LIMIT: Duration = Duration::from_secs(30);
+
 /// Runs `gh pr list` for the open PRs of the repository in `project`, hand-made ones included.
 fn gh_list(project: &str) -> Option<String> {
-    let output = std::process::Command::new(studio_workbench::gh_path())
-        .args([
+    let mut gh = run::gh(Path::new(project));
+    let output = run_until(
+        gh.args([
             "pr", "list", "--state", "open", "--limit", "100", "--json", FIELDS,
-        ])
-        .current_dir(project)
-        .output()
-        .ok()
-        .filter(|o| o.status.success())?;
+        ]),
+        GH_LIMIT,
+    )
+    .ok()?;
     Some(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
@@ -236,7 +238,8 @@ pub fn ask_later(app: &Arc<App>, trigger: Trigger, also: Option<&str>) {
     let (app, also) = (app.clone(), also.map(str::to_string));
     std::thread::spawn(move || {
         let mut projects = BTreeMap::<String, Vec<(String, String)>>::new();
-        for (cwd, branch) in app.core.lock().unwrap().branches() {
+        let branches = app.core().branches();
+        for (cwd, branch) in branches {
             if let Ok(project) = studio_workbench::main_checkout(Path::new(&cwd)) {
                 projects.entry(project).or_default().push((cwd, branch));
             }
@@ -268,7 +271,7 @@ pub fn ask_later(app: &Arc<App>, trigger: Trigger, also: Option<&str>) {
             );
             let Some(asked) = asked else { continue };
             for (branch, number) in asked {
-                if app.core.lock().unwrap().set_pr(&branch, number) {
+                if app.core().set_pr(&branch, number) {
                     app.list_changed();
                 }
             }

@@ -2,7 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { alsoAt, alsoRows, awaitedWrite, chapterGate, storySteps, briefCamera, briefPlayer, latestRequest, escapeMap, figureShapes, figureSize, playlist, partialFactsLines, unconfirmed, unconfirmedReasons, agentPrompt, diffArgs } from "../../dist/map-model.js";
+import { escapeMap } from "../../dist/map-model.js";
+import { alsoAt, alsoRows, awaitedWrite, chapterGate, storySteps, briefCamera, briefPlayer, latestRequest, figureShapes, figureSize, playlist, partialFactsLines, unconfirmed, unconfirmedReasons, agentPrompt, diffArgs } from "../../dist/map-brief-model.js";
 import { trayRows } from "../../dist/map-tray.js";
 
 const step = (k, extra = {}) => ({ k, h: k, b: "", on: [], hops: [], law: null, covered_by: null, list: [], risks: [], fig: null, check: null, cites: [], flags: [], ...extra });
@@ -95,7 +96,7 @@ test("the stored v3 brief of #317 plays as three chapters of four steps, in orde
   const full = brief({ ...writer, chapters: writer.chapters.map((c) => ({ ...c, flags: [], steps: c.steps.map((s) => step(s.k, s)) })) });
   assert.deepEqual(full.chapters.map((c) => c.behaviour), ["Fog", "Broken laws", "Seen gate"]);
   assert.deepEqual([0, 1, 2].map((i) => playlist(full, i, i === 0).length), [4, 4, 4]);
-  const rows = trayRows([{ number: 317, title: "The Map view", head: "a", brief: { stale: false, writing: false, chapters: full.chapters.map((c) => c.title) } }]);
+  const rows = trayRows([{ number: 317, title: "The Map view", head: "a", brief: /** @type {NonNullable<import("../../dist/types.js").ReadyPr["brief"]>} */ ({ stale: false, writing: false, chapters: full.chapters.map((c) => c.title) }) }]);
   assert.equal(rows.length, 3);
   assert.deepEqual(rows.map((r) => r.chapter), [0, 1, 2]);
 });
@@ -125,7 +126,11 @@ test("a brief reopens at the step left, and finishing it starts it over", () => 
 test("opening a brief while the map is scrubbed returns it to now first", () => {
   let scrubbed = true;
   let backs = 0;
-  const player = briefPlayer({ scrubbed: () => scrubbed, backToNow: () => (backs++, (scrubbed = false)) });
+  const player = briefPlayer({ scrubbed: () => scrubbed, backToNow: () => {
+      backs++;
+      scrubbed = false;
+    },
+  });
   player.open("/p", 7, 0);
   assert.equal(backs, 1);
   player.close();
@@ -221,14 +226,14 @@ test("the Partial facts lines come from the stored facts, one per input, and non
 });
 
 test("See the code opens what the step quoted, with its source and no jump, as the page has no editor", async () => {
-  const { citeDrawer } = await import("../../dist/map-model.js");
+  const { citeDrawer } = await import("../../dist/map-brief-model.js");
   const drawer = citeDrawer(step("Now", { h: "Delete keeps a live terminal", cites: [{ from: "ui/map.ts", quote: "const a = 1;" }, { from: "the PR body", quote: "Closes #5" }] }));
   assert.equal(drawer.title, "Delete keeps a live terminal");
   assert.deepEqual(drawer.blocks.map((b) => [b.label, b.code, b.jumps.length]), [["ui/map.ts", "const a = 1;", 0], ["the PR body", "Closes #5", 0]]);
 });
 
 test("a pick is chosen, taken back by tapping it again, and graded only when Check is pressed", async () => {
-  const { pickRun } = await import("../../dist/map-model.js");
+  const { pickRun } = await import("../../dist/map-brief-model.js");
   const run = pickRun(1);
   assert.equal(run.ready(), false, "nothing picked: Check is off");
   run.tap(0);
@@ -253,7 +258,7 @@ test("a pick is chosen, taken back by tapping it again, and graded only when Che
 const links = [{ id: "a-b", from: "a", to: "b" }, { id: "c-b", from: "c", to: "b" }, { id: "a-x", from: "a", to: "x" }];
 
 test("the order slots fill by tap in order, a tap on a filled part takes it back, and Check waits for every slot", async () => {
-  const { orderRun } = await import("../../dist/map-model.js");
+  const { orderRun } = await import("../../dist/map-brief-model.js");
   const run = orderRun(["a", "b", "c"], links);
   run.tap("b");
   run.tap("a");
@@ -270,7 +275,7 @@ test("the order slots fill by tap in order, a tap on a filled part takes it back
 });
 
 test("a wrong order names the parts out of place; the right one replays the key along the links, a link backwards when it runs against the key", async () => {
-  const { orderRun } = await import("../../dist/map-model.js");
+  const { orderRun } = await import("../../dist/map-brief-model.js");
   const wrong = orderRun(["a", "b", "c"], links);
   assert.equal(wrong.grade(), null, "not graded before every slot is full");
   for (const id of ["a", "c", "b"]) wrong.tap(id);
@@ -447,7 +452,39 @@ test("a not-confirmed decision and the No part group copy as prompts too", () =>
 });
 
 test("See the code of a Since you read story asks for the diff from the head it was read at, the full brief's from the PR's base (#497)", () => {
-  const brief = { version: 1, pr: 7, head: "bbb", written_at: 1, stale: false, model: "opus", brief: { title: "Fog", overview: [], chapters: [], also: [] } };
+  const brief = /** @type {import("../../dist/types.js").BriefView["brief"]} */ ({ version: 1, pr: 7, head: "bbb", written_at: 1, stale: false, model: "opus", brief: { title: "Fog", overview: [], chapters: [], also: [] } });
   assert.deepEqual(diffArgs("/p", { brief, partial: false }), { project: "/p", number: 7, head: "bbb", title: "Fog" });
   assert.deepEqual(diffArgs("/p", { brief, partial: false, since: "aaa" }), { project: "/p", number: 7, head: "bbb", title: "Fog", base: "aaa" });
+});
+
+// #548: the brief draws its step again on every map draw, resize and explanations toggle. Each draw stops watching the marks of the
+// draw before, so a drag of the window's edge leaves one seen-watcher per mark, not one per draw.
+test("drawing a step again, as a resize does, keeps one seen-watcher per not-confirmed mark", async () => {
+  const { fakeDocument } = await import("./dom.mjs");
+  const observers = [];
+  // A stand-in for the browser's observer, typed as any at this boundary.
+  globalThis.IntersectionObserver = /** @type {any} */ (
+    class {
+      constructor() {
+        observers.push(this);
+      }
+      observe() {}
+      disconnect() {
+        this.gone = true;
+      }
+    }
+  );
+  globalThis.document = fakeDocument();
+  const { stepNode } = await import("../../dist/map-brief.js");
+  // A view with only what a step's words read: no map is drawn.
+  const view = /** @type {import("../../dist/map.js").MapView} */ (/** @type {unknown} */ ({ project: "/p", doc: { parts: [], laws: [] }, scrub: null }));
+  const flagged = step("Now", { flags: ["claim check: the quote is not in the diff", "not confirmed from the facts"] });
+  const live = () => observers.filter((o) => !o.gone).length;
+  stepNode(view, flagged, 7);
+  assert.equal(live(), 1);
+  for (let i = 0; i < 20; i++) stepNode(view, flagged, 7);
+  assert.equal(live(), 1, "the watchers of the draws before are stopped");
+  // The next step has no mark: the one before is not watched on.
+  stepNode(view, step("Before"), 7);
+  assert.equal(live(), 0);
 });

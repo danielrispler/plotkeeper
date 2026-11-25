@@ -4,10 +4,10 @@
 // and the tail of its output. Opening changes only the nodes it opens: the open state is kept by key, so a redraw of the rail
 // draws the line open again.
 
-import { code, failure, fullTitle, glyphOnly, invoke, pressable, scrollingPre, statusRegion, text } from "./dom.js";
-import { askAnchor, type Hunk, hunkText } from "./ask.js";
+import { code, failure, fullTitle, glyphOnly, invoke, messageOf, pressable, scrollingPre, statusRegion, text } from "./dom.js";
+import { askAnchor, hunkText } from "./ask.js";
 import { diffRequest } from "./diff.js";
-import type { Capabilities, Check, Turn, TurnFile } from "./types.js";
+import type { Capabilities, Check, CheckOutput, Hunk, Turn, TurnFile } from "./types.js";
 import { HOVERS } from "./hovers.js";
 
 type Facts = Pick<Turn, "files" | "checks">;
@@ -27,10 +27,12 @@ const named = (c: Check) => {
 // A check is listed once it has ended: a running one is not passed, failed or ran.
 const ended = (c: Check) => c.status !== "running";
 
-// The top level: "3 files · +2 merged · 2 checks passed". A check's status is its last run's, so only one that ended failed is named;
-// one that only "ran" is counted apart.
-// `words` gives a failed check's name in plain words once it is known (`failed_check_name`); until then, and for a check it does
-// not know, the check is named by its suite.
+/**
+ * The top level: "3 files · +2 merged · 2 checks passed". A check's status is its last run's, so only one that ended failed is named;
+ * one that only "ran" is counted apart.
+ * `words` gives a failed check's name in plain words once it is known (`failed_check_name`); until then, and for a check it does
+ * not know, the check is named by its suite.
+ */
 export function evidenceLine({ files, checks: all }: Facts, words: (check: Check) => string | undefined = () => undefined): string {
   const checks = all.filter(ended);
   const count = (status: Check["status"]) => checks.filter((c) => c.status === status).length;
@@ -44,11 +46,11 @@ export function evidenceLine({ files, checks: all }: Facts, words: (check: Check
   ].join(" · ");
 }
 
-// Whether the turn has an evidence line: its agent reports trees (agy's does not), and it has files or checks.
+/** Whether the turn has an evidence line: its agent reports trees (agy's does not), and it has files or checks. */
 export const hasEvidence = (turn: Facts, capabilities: Pick<Capabilities, "turn_trees">): boolean =>
   capabilities.turn_trees && (turn.files?.files.length ?? 0) + (turn.files?.merged ?? 0) + turn.checks.filter(ended).length > 0;
 
-// The opened list: each file with its agent, and each check with its status.
+/** The opened list: each file with its agent, and each check with its status. */
 export function evidenceRows({ files, checks: all }: Facts): EvidenceRow[] {
   const checks = all.filter(ended);
   const counts = (added: number | null, removed: number | null) => (added === null || removed === null ? "" : ` +${added} −${removed}`);
@@ -81,7 +83,6 @@ const wordsKey = (session: string, c: Check) => {
   return last ? `${session} ${last.agent ?? ""} ${last.call}` : null;
 };
 
-export type CheckOutput = { exit_code: number | null; tail: string };
 const outputText = (output: CheckOutput) => `${output.exit_code === null ? "No exit code" : `exit code ${output.exit_code}`}\n${output.tail}`;
 
 // A failed check's row: its label, which opens its exit code and the output's tail under it. Only this row changes.
@@ -92,7 +93,8 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
     item.append(text("span", row.label), ...(row.agent ? [text("span", row.agent, "evidence-agent")] : []));
     return item;
   }
-  const key = `${session} ${row.agent ?? ""} ${row.call}`;
+  const call = row.call;
+  const key = `${session} ${row.agent ?? ""} ${call}`;
   const pre = scrollingPre(outputs.get(key) ?? "", "evidence-output", `Output of ${row.label}`);
   // Why the output could not be read is said aloud, in a region the row holds before the read (#456); the output itself is not.
   const live = statusRegion();
@@ -101,13 +103,14 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
     if (outputs.has(key)) return;
     pre.textContent = "Reading the output…";
     live.textContent = "";
-    invoke("check_output", { session, agent: row.agent, call: row.call })
+    invoke("check_output", { session, agent: row.agent ?? null, call })
       .then((output) => {
-        outputs.set(key, output ? outputText(output) : "No output was recorded.");
-        pre.textContent = outputs.get(key)!;
+        const words = output ? outputText(output) : "No output was recorded.";
+        outputs.set(key, words);
+        pre.textContent = words;
       })
       .catch((e) => {
-        pre.textContent = live.textContent = `The output could not be read: ${e}`;
+        pre.textContent = live.textContent = `The output could not be read: ${messageOf(e)}`;
       });
   };
   const button = pressable(document.createElement("button"), null, () => {
@@ -135,8 +138,9 @@ const hunks = new Map<string, { hunk: Hunk | null; ended: boolean; added: number
 
 // A file's row: its label, which opens the real hunk between the turn's two trees under it, with "Open in editor" at its
 // first changed line. Only this row changes.
-export function fileRow(session: string, index: number, row: EvidenceRow, scope = "", ended = false): HTMLElement {
-  const file = row.file!;
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: ratcheted at #554; split it rather than grow it
+export function fileRow(session: string, index: number, row: EvidenceRow & { file: TurnFile }, scope = "", ended = false): HTMLElement {
+  const { file } = row;
   const key = `${session} ${index} ${file.root} ${file.path}`;
   // Whether it is open is its own to each place that draws it; the hunk read is shared.
   const openKey = `${scope}${key}`;
@@ -148,7 +152,8 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
     const same = entry && entry.added === file.added && entry.removed === file.removed;
     return entry && (entry.ended || (!ended && same)) ? entry : undefined;
   };
-  const pre = scrollingPre(kept() ? hunkText(kept()!.hunk, false) : "", "evidence-hunk", `Changes to ${file.path}`);
+  const was = kept();
+  const pre = scrollingPre(was ? hunkText(was.hunk, false) : "", "evidence-hunk", `Changes to ${file.path}`);
   // As a check's output: only why the hunk could not be read is said aloud.
   const live = statusRegion();
   const left = (h: Hunk | null) => {
@@ -175,7 +180,7 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
         left(h);
       })
       .catch((e) => {
-        pre.textContent = live.textContent = `The hunk could not be read: ${e}`;
+        pre.textContent = live.textContent = `The hunk could not be read: ${messageOf(e)}`;
       });
   };
   const button = pressable(document.createElement("button"), null, () => {
@@ -214,8 +219,10 @@ function lineInto(node: HTMLElement, line: string) {
   node.replaceChildren(...line.split("✗").flatMap((part, i) => (i ? [glyphOnly("✗"), part] : [part])));
 }
 
-// The line for turn `index` of `session`. `only: "failed"` is the running turn's: just the checks whose last run failed.
-// Null when there is nothing to show.
+/**
+ * The line for turn `index` of `session`. `only: "failed"` is the running turn's: just the checks whose last run failed.
+ * Null when there is nothing to show.
+ */
 export function evidenceElement(session: string, index: number, turn: Facts & Ended, { only }: { only: "all" | "failed" }): HTMLElement | null {
   const facts: Facts = only === "failed" ? { files: null, checks: turn.checks.filter((c) => c.status === "failed") } : turn;
   const words = (c: Check) => {
@@ -231,7 +238,7 @@ export function evidenceElement(session: string, index: number, turn: Facts & En
   list.className = "evidence-rows";
   list.append(
     ...evidenceRows(facts).map((row) =>
-      row.kind === "check" ? checkRow(session, row) : row.kind === "merged" ? mergedRow(row) : fileRow(session, index, row, "", turn.ended_at != null),
+      row.kind === "check" ? checkRow(session, row) : row.kind === "merged" || !row.file ? mergedRow(row) : fileRow(session, index, { ...row, file: row.file }, "", turn.ended_at != null),
     ),
     ...(facts.files?.files.length ? [fullDiffRow(session, index)] : []),
   );

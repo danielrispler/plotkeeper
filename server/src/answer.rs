@@ -65,7 +65,8 @@ impl Watching {
         let watching = answer::watching_file(data);
         let silent = now.saturating_sub(self.alive_ms) > answer::STALE_MS;
         if silent {
-            let _ = fs::remove_file(&watching);
+            // Best effort: a file already gone is fine.
+            fs::remove_file(&watching).ok();
         } else {
             // With no session selected the heartbeat names none: a blocked command's hook still waits.
             let heartbeat = json!({ "session_id": self.session, "pid": std::process::id(), "heartbeat_ms": now });
@@ -93,7 +94,7 @@ pub fn blocked_requests(data: &Path, session: &str) -> Value {
         return json!([]);
     };
     let requests = entries
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .filter(|e| !e.file_name().to_string_lossy().contains(".answer."))
         .filter_map(|e| fs::read_to_string(e.path()).ok())
         .filter_map(|text| serde_json::from_str::<Value>(&text).ok())
@@ -358,7 +359,7 @@ mod tests {
         let data = tempfile::tempdir().unwrap();
         request(data.path(), "n1", std::process::id());
         request(data.path(), "n2", std::process::id());
-        let passes = || std::fs::read_dir(answer::pass_dir(data.path(), "s1")).map(|d| d.count());
+        let passes = || std::fs::read_dir(answer::pass_dir(data.path(), "s1")).map(Iterator::count);
 
         let took = answer_blocked(data.path(), "s1", "n2", answer::Verdict::Deny).unwrap();
         assert_eq!(took, Answered::Hook);
@@ -425,7 +426,7 @@ mod tests {
         let blocked = answer::blocked_dir(data.path(), "s1");
         assert!(blocked.join("n1.json").exists());
         let passes = std::fs::read_dir(answer::pass_dir(data.path(), "s1"));
-        assert_eq!(passes.map(|d| d.count()).unwrap_or(0), 0);
+        assert_eq!(passes.map(Iterator::count).unwrap_or(0), 0);
     }
 
     #[test]

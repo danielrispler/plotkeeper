@@ -11,7 +11,8 @@ use studio_test_support::git;
 #[test]
 fn concurrent_recordings_of_one_worktree_all_give_its_tree() {
     let dir = std::env::temp_dir().join(format!("studio-record-tree-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&dir).ok();
     fs::create_dir_all(&dir).unwrap();
     git(&dir, &["init", "-q"]);
     for i in 0..300 {
@@ -26,7 +27,8 @@ fn concurrent_recordings_of_one_worktree_all_give_its_tree() {
         .into_iter()
         .flat_map(|t| t.join().unwrap())
         .collect();
-    let _ = fs::remove_dir_all(&dir);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&dir).ok();
     let first = trees[0].clone().expect("a tree");
     assert!(
         trees.iter().all(|t| t.as_ref() == Some(&first)),
@@ -38,7 +40,8 @@ fn concurrent_recordings_of_one_worktree_all_give_its_tree() {
 fn repo(name: &str) -> PathBuf {
     let dir =
         std::env::temp_dir().join(format!("studio-record-tree-{name}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&dir).ok();
     fs::create_dir_all(&dir).unwrap();
     git(&dir, &["init", "-q"]);
     dir
@@ -65,7 +68,8 @@ fn a_workers_target_dir_is_never_in_a_tree() {
     let (_, tree) = record_tree(&dir).expect("a tree");
 
     let paths = paths(&dir, &tree);
-    let _ = fs::remove_dir_all(&dir);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&dir).ok();
     assert!(paths.contains(&"kept.txt".to_owned()), "{paths:?}");
     assert!(paths.iter().all(|p| !p.starts_with("target-")), "{paths:?}");
 }
@@ -80,7 +84,8 @@ fn a_tree_with_more_untracked_files_than_its_cap_is_not_recorded() {
     let capped = record_tree_within(&dir, 10, u64::MAX);
     let within = record_tree_within(&dir, 20, u64::MAX);
 
-    let _ = fs::remove_dir_all(&dir);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&dir).ok();
     assert_eq!(capped, None);
     assert!(within.is_some());
 }
@@ -93,7 +98,8 @@ fn a_tree_with_more_untracked_bytes_than_its_cap_is_not_recorded() {
     let capped = record_tree_within(&dir, usize::MAX, 4095);
     let within = record_tree_within(&dir, usize::MAX, 4096);
 
-    let _ = fs::remove_dir_all(&dir);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&dir).ok();
     assert_eq!(capped, None);
     assert!(within.is_some());
 }

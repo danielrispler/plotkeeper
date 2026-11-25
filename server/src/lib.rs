@@ -11,9 +11,8 @@ use std::{
     collections::{HashMap, HashSet},
     io::{self, Write},
     path::{Path, PathBuf},
-    process::Command,
     sync::{
-        Arc, Mutex, OnceLock,
+        Arc, Mutex, MutexGuard, OnceLock,
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
@@ -35,6 +34,7 @@ pub mod fog;
 pub mod history;
 pub mod hook_copies;
 pub mod install;
+mod json_file;
 pub mod lock;
 pub mod map;
 pub mod micro_worlds;
@@ -49,7 +49,7 @@ pub mod runner;
 pub mod settings;
 pub mod staleness;
 pub mod stop_rules;
-pub mod story_bar;
+pub(crate) mod story_bar;
 pub mod web;
 
 pub use read_loop::{Follower, Notice, ServerEffects, follow, listed, tell, uptime};
@@ -83,7 +83,8 @@ pub struct Events(OnceLock<Arc<dyn Sink>>);
 impl Events {
     /// Sets where events go; the first call wins.
     pub fn set(&self, sink: Arc<dyn Sink>) {
-        let _ = self.0.set(sink);
+        // Set once; a later set keeps the first value, which is the same.
+        self.0.set(sink).ok();
     }
 
     /// Sends event `name` with `payload`, or drops it while nothing is set.
@@ -116,15 +117,18 @@ pub struct Cleared {
     pub terminal: Option<String>,
 }
 
-/// Everything the process owns that the commands read and change.
+/// Everything the process owns that the commands read and change. Its locked state is reached through
+/// its accessors (`core`, `cards`, `notes` and the rest); a holder of several takes them in one order,
+/// core, then cards, then notes (`core_and_cards`, `core_and_notes`). The notices are the exception:
+/// their due check takes the core's lock under theirs, and nothing takes the notices' under the core's.
 pub struct App {
-    pub core: Core,
-    pub cards: Cards,
-    pub notes: Notes,
+    core: Core,
+    cards: Cards,
+    notes: Notes,
     /// The card writer: `claude -p` or `agy`, as `summaries.writer` says, or the fake when `PLOTKEEPER_CARD_WRITER=fake`, for checks that must not run `claude -p`.
     pub writer: Writer,
     pub writing: TurnWriting,
-    pub notices: Notices,
+    notices: Notices,
     pub clearing: Clearing,
     pub fetches: Arc<map::Fetches>,
     pub ci: Arc<ci_laws::CiCache>,
@@ -135,10 +139,10 @@ pub struct App {
     pub catch_ups: part_catch_ups::CatchUps,
     /// The saved project list (`projects.rs`), beside the log.
     pub projects: projects::Projects,
-    pub watching: Mutex<answer::Watching>,
+    watching: Mutex<answer::Watching>,
     pub events: Arc<Events>,
     /// The notice the card writer last raised and not yet cleared, for a page opened after it (danielrispler/plotkeeper#328).
-    pub writer_notice: Mutex<Option<String>>,
+    writer_notice: Mutex<Option<String>>,
     /// Whether summaries are written: off until a writer passes Test for a user who arrived with none (spec #320).
     pub summaries_on: AtomicBool,
     /// The list changed outside the read loop since it last sent it: a PR was found, or Daniel marked a session unseen.
@@ -148,20 +152,88 @@ pub struct App {
     pub rail_shown: AtomicBool,
     /// The terminal the split's second pane shows, as the UI last said, `None` with no split: its session is on screen, so its
     /// turn's end raises no toast.
-    pub split_shown: Mutex<Option<String>>,
+    split_shown: Mutex<Option<String>>,
     /// Where the API-key writers' keys are kept: the Keychain at start (`with_keys`), memory before; and the writers whose
     /// key is set, all the page learns of them.
     pub keys: Arc<dyn settings::ApiKeys>,
-    pub key_set: Mutex<Vec<WriterKind>>,
+    key_set: Mutex<Vec<WriterKind>>,
     /// The background runs (`runner.rs`): their queues, their processes and their outcomes.
     pub runner: Arc<runner::Runner>,
     /// The micro-worlds (`micro_worlds.rs`): built by background runs, checked on the host and kept per project.
     pub worlds: Arc<micro_worlds::MicroWorlds>,
     /// Back a law (`back_a_law.rs`): its runs' proofs and the patches kept.
     pub laws: Arc<back_a_law::LawRuns>,
+    /// The map items each landed commit changed (`ratify::changes_of`).
+    changes: ratify::ChangesCache,
+    /// Each project's part births (`staleness::births`).
+    births: staleness::Births,
 }
 
 impl App {
+    /// The core, locked.
+    pub fn core(&self) -> MutexGuard<'_, Studio> {
+        self.core.lock().unwrap()
+    }
+
+    /// The card store, locked.
+    pub fn cards(&self) -> MutexGuard<'_, CardStore> {
+        self.cards.lock().unwrap()
+    }
+
+    /// The risk notes, locked.
+    pub fn notes(&self) -> MutexGuard<'_, RiskNotes> {
+        self.notes.lock().unwrap()
+    }
+
+    /// The core, then the card store, locked in that order.
+    pub fn core_and_cards(&self) -> (MutexGuard<'_, Studio>, MutexGuard<'_, CardStore>) {
+        let core = self.core();
+        (core, self.cards())
+    }
+
+    /// The core, then the risk notes, locked in that order.
+    pub fn core_and_notes(&self) -> (MutexGuard<'_, Studio>, MutexGuard<'_, RiskNotes>) {
+        let core = self.core();
+        (core, self.notes())
+    }
+
+    /// The core, the card store and the risk notes, locked in that order.
+    pub fn core_cards_and_notes(
+        &self,
+    ) -> (
+        MutexGuard<'_, Studio>,
+        MutexGuard<'_, CardStore>,
+        MutexGuard<'_, RiskNotes>,
+    ) {
+        let (core, cards) = self.core_and_cards();
+        (core, cards, self.notes())
+    }
+
+    /// The notices not shown yet, locked.
+    pub fn notices(&self) -> MutexGuard<'_, Notifications> {
+        self.notices.lock().unwrap()
+    }
+
+    /// What the page watches of the answer files, locked.
+    pub fn watching(&self) -> MutexGuard<'_, answer::Watching> {
+        self.watching.lock().unwrap()
+    }
+
+    /// The card writer's last notice not yet cleared, locked.
+    pub fn writer_notice(&self) -> MutexGuard<'_, Option<String>> {
+        self.writer_notice.lock().unwrap()
+    }
+
+    /// The terminal the split's second pane shows, locked.
+    pub fn split_shown(&self) -> MutexGuard<'_, Option<String>> {
+        self.split_shown.lock().unwrap()
+    }
+
+    /// The writers whose API key is set, locked.
+    pub fn key_set(&self) -> MutexGuard<'_, Vec<WriterKind>> {
+        self.key_set.lock().unwrap()
+    }
+
     /// The state over the event log `log`: the card store and the risk notes beside it, the worktree roots a launch before
     /// saved and the card writer, whose availability notices go to `writer_notices`. `effects` is what turn writing asks of the
     /// shell.
@@ -174,21 +246,22 @@ impl App {
         let cards: Cards = Arc::new(Mutex::new(CardStore::open_beside(log)?));
         let notes: Notes = Arc::new(Mutex::new(RiskNotes::open_beside(log)?));
         let fake = std::env::var("PLOTKEEPER_CARD_WRITER").as_deref() == Ok("fake");
-        let writer: Writer = match fake {
-            true => Arc::new(FakeWriter),
-            false => {
-                let writer = ClaudeWriter::beside(log)?;
-                let writer_notices = Mutex::new(writer_notices);
-                Arc::new(writer.on_availability(move |notice| {
-                    let _ = writer_notices.lock().unwrap().send(notice);
-                }))
-            }
+        let writer: Writer = if fake {
+            Arc::new(FakeWriter)
+        } else {
+            let writer = ClaudeWriter::beside(log)?;
+            let writer_notices = Mutex::new(writer_notices);
+            Arc::new(writer.on_availability(move |notice| {
+                // The receiver may have gone, and then no one waits for this.
+                writer_notices.lock().unwrap().send(notice).ok();
+            }))
         };
         let app = Self::open_with(log, cards, notes, writer, effects)?;
         // The checks' fake writer keeps its key in memory, so no check reads the Keychain.
-        Ok(match fake {
-            true => app,
-            false => app.with_keys(Arc::new(settings::Keychain::default())),
+        Ok(if fake {
+            app
+        } else {
+            app.with_keys(Arc::new(settings::Keychain::default()))
         })
     }
 
@@ -258,7 +331,7 @@ impl App {
         // A part catch-up's write that moves on to its next call draws its stage on the waiting card (#450).
         let told = events.clone();
         let catch_ups = part_catch_ups::CatchUps::telling(move |project| {
-            told.emit("map-landed", project.into())
+            told.emit("map-landed", project.into());
         });
         Ok(App {
             core,
@@ -286,6 +359,8 @@ impl App {
             runner,
             worlds,
             laws,
+            changes: Mutex::default(),
+            births: Mutex::default(),
         })
     }
 
@@ -317,6 +392,71 @@ pub fn lost_data(line: &str) -> bool {
 pub fn logged(metadata: &log::Metadata) -> bool {
     metadata.level() <= log::Level::Warn && !metadata.target().starts_with("ureq")
 }
+
+/// The target of the lines the page itself logs (`/api/log`).
+pub(crate) const PAGE_TARGET: &str = "studio_server::page";
+
+/// plotkeeper's logger: what is [`logged`] goes to stderr, with its level and target, and an error also to the page as a
+/// `server-error` event with its message, which the notice line shows. An error logged while no page listens is only on stderr.
+pub struct Logger(Events);
+
+/// The one [`Logger`], which `plotkeeper` installs at start.
+pub static LOGGER: Logger = Logger(Events(OnceLock::new()));
+
+impl Logger {
+    /// Sets the page the errors also go to; the first call wins.
+    pub fn send_errors_to(&self, sink: Arc<dyn Sink>) {
+        self.0.set(sink);
+    }
+}
+
+impl log::Log for Logger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        logged(metadata)
+    }
+    fn log(&self, record: &log::Record) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+        // A stderr that cannot be written (a closed pipe, a gone terminal) loses the line: `eprintln!` would panic, and
+        // with `exit_on_panic` that would stop plotkeeper, or abort it when the hook's own line panicked again.
+        writeln!(
+            io::stderr().lock(),
+            "[{}][{}] {}",
+            record.level(),
+            record.target(),
+            record.args()
+        )
+        .ok();
+        // The page shows its own errors when it logs them, so they are not sent back to it.
+        if record.level() == log::Level::Error && record.target() != PAGE_TARGET {
+            let message = record.args().to_string();
+            self.0
+                .emit("server-error", serde_json::Value::String(message));
+        }
+    }
+    fn flush(&self) {}
+}
+
+/// Makes a panic on any thread stop plotkeeper (spec danielrispler/plotkeeper#548): the hook logs the thread, the place
+/// and the message as an error, then calls `exit` with a non-zero code. The binary passes `std::process::exit`, so no
+/// thread goes on with a poisoned lock or without the read loop; a restart is safe, as the state is rebuilt from the
+/// event log. A hook and not `panic = "abort"`, so a test that expects a panic still unwinds.
+pub fn exit_on_panic(exit: impl Fn(i32) + Send + Sync + 'static) {
+    std::panic::set_hook(Box::new(move |info| {
+        let thread = thread::current();
+        let name = thread.name().unwrap_or("unnamed");
+        let place = info.location().map_or("an unknown place".to_string(), |l| {
+            format!("{}:{}:{}", l.file(), l.line(), l.column())
+        });
+        let message = info.payload_as_str().unwrap_or("no message");
+        log::error!("thread '{name}' panicked at {place}: {message}; plotkeeper stops");
+        exit(PANIC_EXIT);
+    }));
+}
+
+/// The exit code of a plotkeeper that panicked, the one Rust's own runtime uses.
+const PANIC_EXIT: i32 = 101;
 
 /// Logs a line from the writers' code: an error when it lost data, a warning otherwise.
 pub fn report(line: String) {
@@ -386,7 +526,7 @@ pub struct Writers {
 pub fn writers(app: &App) -> Writers {
     let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
     let mut writers = studio_understanding::found_writers(shell.as_ref());
-    let keys = app.key_set.lock().unwrap().clone();
+    let keys = app.key_set().clone();
     let base_url = settings::openai_base_url();
     // An API-key writer is found when its key is set, the OpenAI-compatible one also when its base URL is; the key itself
     // never reaches the page.
@@ -494,7 +634,7 @@ pub fn set_api_key(
     if let Some(key) = &key {
         app.keys.set(writer, key)?;
         app.writer.use_key(writer, Some(key.clone()));
-        let mut set = app.key_set.lock().unwrap();
+        let mut set = app.key_set();
         if !set.contains(&writer) {
             set.push(writer);
         }
@@ -514,7 +654,7 @@ pub fn remove_api_key(
 ) -> Result<Option<String>, String> {
     app.keys.remove(writer)?;
     app.writer.use_key(writer, None);
-    app.key_set.lock().unwrap().retain(|&kind| kind != writer);
+    app.key_set().retain(|&kind| kind != writer);
     if writer != WriterKind::OpenAI {
         return Ok(None);
     }
@@ -525,7 +665,7 @@ pub fn remove_api_key(
 
 /// The settings' `checks` (danielrispler/plotkeeper#112): each project folder's list of commands that are checks.
 pub fn check_lists(app: &App, lists: HashMap<String, Vec<String>>) {
-    app.core.lock().unwrap().set_check_lists(lists);
+    app.core().set_check_lists(lists);
     app.list_changed();
 }
 
@@ -540,9 +680,11 @@ pub fn check_output(
     call: String,
 ) -> Result<Option<studio_core::CheckOutput>, String> {
     let row = {
-        let studio = app.core.lock().unwrap();
+        let studio = app.core();
         let ledger = &studio.session(&session).map(|s| &s.ledger);
-        ledger.and_then(|l| l.row(agent.as_deref(), &call)).cloned()
+        let row = ledger.and_then(|l| l.row(agent.as_deref(), &call)).cloned();
+        drop(studio);
+        row
     };
     let Some(row) = row else { return Ok(None) };
     let log = studio_hook::event_log(&std::env::home_dir().ok_or("no home folder")?);
@@ -559,7 +701,9 @@ pub fn ask_facts(
     anchor: studio_core::Anchor,
 ) -> Result<Option<studio_core::AskFacts>, String> {
     let log = studio_hook::event_log(&std::env::home_dir().ok_or("no home folder")?);
-    Ok(app.core.lock().unwrap().ask_facts(&session, &anchor, &log))
+    // The lock is held only to copy what the studio holds: the log is read after it is freed.
+    let recorded = app.core().ask_recorded(&session, &anchor);
+    Ok(recorded.map(|r| r.read(&log)))
 }
 
 /// A file's hunk of turn `turn` (danielrispler/plotkeeper#114), whole for the diff pane (#131) when `all`: `git diff` between the turn's two trees of worktree
@@ -573,7 +717,7 @@ pub fn turn_file_hunk(
     from: Option<String>,
     all: Option<bool>,
 ) -> Option<studio_understanding::Hunk> {
-    let (start, end) = app.core.lock().unwrap().turn_trees(&session, turn, &root)?;
+    let (start, end) = app.core().turn_trees(&session, turn, &root)?;
     turn_hunk(
         Path::new(&root),
         &start,
@@ -594,7 +738,7 @@ pub fn turn_summary(app: &App, id: String) -> Result<Option<StoredSummary>, Stri
 /// The whole final reply of turn `index` of session `id` (danielrispler/Falinks#574), which the rail fetches when Daniel
 /// opens that turn's folded response; the session list never carries it.
 pub fn turn_reply(app: &App, id: String, index: usize) -> Option<String> {
-    app.core.lock().unwrap().turn_reply(&id, index)
+    app.core().turn_reply(&id, index)
 }
 
 /// Daniel opened subagent `agent_id` (danielrispler/Falinks#535): the summary of its purpose and result, written now
@@ -602,10 +746,12 @@ pub fn turn_reply(app: &App, id: String, index: usize) -> Option<String> {
 /// `None` while it runs or when the call failed, and the rail keeps its first line.
 pub fn agent_summary(app: &App, agent_id: String) -> Option<String> {
     let (prompt, message) = {
-        let studio = app.core.lock().unwrap();
+        let studio = app.core();
         let mut agents = studio.sessions().into_iter().flat_map(|s| &s.agents);
-        let agent = agents.find(|a| a.agent.id == agent_id && a.ended_at.is_some())?;
-        (agent.prompt.clone(), agent.message.clone())
+        let agent = agents.find(|a| a.agent.id == agent_id && a.ended_at.is_some());
+        let found = agent.map(|agent| (agent.prompt.clone(), agent.message.clone()));
+        drop(studio);
+        found?
     };
     // A subagent that ended without a last message (killed, or its session ended) has no result to sum up.
     if message.is_empty() {
@@ -627,7 +773,7 @@ pub fn agent_summary(app: &App, agent_id: String) -> Option<String> {
 
 /// The session list, in its order.
 pub fn sessions(app: &App) -> Vec<Row> {
-    let studio = app.core.lock().unwrap();
+    let studio = app.core();
     let now = studio.now();
     let list: Vec<Session> = studio.sessions().into_iter().cloned().collect();
     let landed: HashSet<String> = (list.iter())
@@ -635,7 +781,7 @@ pub fn sessions(app: &App) -> Vec<Row> {
         .map(|s| s.agent.id.clone())
         .collect();
     drop(studio);
-    let cards = app.cards.lock().unwrap();
+    let cards = app.cards();
     let row = |mut session: Session| Row {
         line: cards.line(&session, now),
         session: {
@@ -649,30 +795,36 @@ pub fn sessions(app: &App) -> Vec<Row> {
 /// Daniel clicked session `id`'s row, or, with no `id`, went back to the bare map; returns the selection,
 /// which no longer names a subagent, and is `null` with none selected.
 pub fn select(app: &App, id: Option<String>) -> serde_json::Value {
-    let mut studio = app.core.lock().unwrap();
+    let mut studio = app.core();
     match id {
         Some(id) => studio.select(&id),
         None => studio.select_none(),
     }
-    selection(&studio)
+    let shown = selection(&studio);
+    drop(studio);
+    shown
 }
 
 /// Daniel started a session in studio terminal `terminal`; returns the selection, `null` until the
 /// session's first event names that terminal and selects it (danielrispler/Falinks#567).
 pub fn select_terminal(app: &App, terminal: String) -> serde_json::Value {
-    let mut studio = app.core.lock().unwrap();
+    let mut studio = app.core();
     studio.select_terminal(&terminal);
-    selection(&studio)
+    let shown = selection(&studio);
+    drop(studio);
+    shown
 }
 
 /// Daniel opened subagent `agent_id`'s line; returns the selection, which names it. The card store
 /// keeps the opening of a failed line, so it stays faded after a restart.
 pub fn open(app: &App, agent_id: String) -> serde_json::Value {
-    let mut studio = app.core.lock().unwrap();
+    let mut studio = app.core();
     if studio.open(&agent_id) {
-        unsaved(app.cards.lock().unwrap().opened(&agent_id));
+        unsaved(app.cards().opened(&agent_id));
     }
-    selection(&studio)
+    let shown = selection(&studio);
+    drop(studio);
+    shown
 }
 
 /// The log of subagent `agent_id` of session `session` from byte `offset`: its entries after it and
@@ -684,15 +836,34 @@ pub fn subagent_log(
     agent_id: String,
     offset: u64,
 ) -> Option<studio_core::SubagentLog> {
-    app.core
-        .lock()
-        .unwrap()
-        .subagent_log(&session, &agent_id, offset)
+    subagent_log_through(
+        app,
+        session,
+        agent_id,
+        offset,
+        studio_core::SubagentLogFile::read,
+    )
+}
+
+/// `subagent_log` with the file read by `read`, which runs with no lock on the studio held (spec
+/// danielrispler/plotkeeper#548): the lock is held only to copy where the log is. The seam its test reads through.
+pub fn subagent_log_through(
+    app: &App,
+    session: String,
+    agent_id: String,
+    offset: u64,
+    read: impl FnOnce(&studio_core::SubagentLogFile) -> Option<studio_core::SubagentLog>,
+) -> Option<studio_core::SubagentLog> {
+    let file = {
+        let studio = app.core();
+        studio.subagent_log_file(&session, &agent_id, offset)?
+    };
+    read(&file)
 }
 
 /// The session Daniel selected and the subagent of it he opened, or `null` before his first click.
 pub fn selected(app: &App) -> serde_json::Value {
-    selection(&app.core.lock().unwrap())
+    selection(&app.core())
 }
 
 fn selection(studio: &Studio) -> serde_json::Value {
@@ -818,22 +989,11 @@ pub fn process_ends(studio: &Mutex<Studio>, alive: impl Fn(u32) -> bool) -> Vec<
         .collect()
 }
 
-/// Whether process `pid` exists: signal 0 only checks, it sends nothing.
-pub fn pid_alive(pid: u32) -> bool {
-    let Ok(pid) = i32::try_from(pid) else {
-        return false;
-    };
-    // SAFETY: signal 0 is an existence check; it delivers no signal.
-    unsafe {
-        libc::kill(pid, 0) == 0
-            || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-    }
-}
-
 /// Daniel marked session `id` unseen (danielrispler/Falinks#556), from the rail's menu.
 pub fn mark_unseen(app: &App, id: String) {
-    if let Some((id, turns)) = app.core.lock().unwrap().mark_unseen(&id) {
-        unsaved(app.cards.lock().unwrap().seen(&id, turns));
+    let marked = app.core().mark_unseen(&id);
+    if let Some((id, turns)) = marked {
+        unsaved(app.cards().seen(&id, turns));
         app.list_changed();
     }
 }
@@ -845,26 +1005,27 @@ pub fn rail_shown(app: &App, shown: bool) {
 
 /// The UI's split opened, closed or pinned another terminal.
 pub fn split_shown(app: &App, terminal: Option<String>) {
-    *app.split_shown.lock().unwrap() = terminal;
+    *app.split_shown() = terminal;
 }
 
 // The session's brief and its risk notes.
 
 /// The brief, decision history and risk notes of the selected session, or of the worker of it Daniel opened.
 pub fn cards(app: &App) -> SessionCards {
-    let studio = app.core.lock().unwrap();
+    let (studio, cards) = app.core_and_cards();
     let Some(owner) = studio.viewed() else {
         return SessionCards::default();
     };
-    let cards = app.cards.lock().unwrap();
     let session = studio.session(owner);
     let mut shown = cards.session_cards(owner);
     // The Open slot is the session's: a worker's view has none.
     if let Some(session) = session {
         shown.open = open_items(session, studio.task_facts(owner), &cards);
     }
+    drop(cards);
     // Each blocked command's note is joined here, so the core's type holds none.
-    join_notes(&studio, &app.notes.lock().unwrap(), &mut shown);
+    join_notes(&studio, &app.notes(), &mut shown);
+    drop(studio);
     shown
 }
 
@@ -910,19 +1071,17 @@ pub fn cards_key(studio: &Studio, cards: &CardStore, notes: &RiskNotes) -> Cards
 
 /// The key of the cards the window would be sent now, from the state's own locks.
 pub fn current_cards_key(app: &App) -> CardsKey {
-    let studio = app.core.lock().unwrap();
-    let cards = app.cards.lock().unwrap();
-    let notes = app.notes.lock().unwrap();
+    let (studio, cards, notes) = app.core_cards_and_notes();
     cards_key(&studio, &cards, &notes)
 }
 
 /// The risk notes the selected session wants asked for (danielrispler/plotkeeper#298), none with no session.
 pub fn wanted_notes(app: &App) -> Vec<RiskRequest> {
-    let studio = app.core.lock().unwrap();
+    let studio = app.core();
     let shown = noted_session(&studio);
-    shown
-        .map(|session| app.notes.lock().unwrap().asks(session))
-        .unwrap_or_default()
+    let asks = shown.map(|session| app.notes().asks(session));
+    drop(studio);
+    asks.unwrap_or_default()
 }
 
 /// Starts the judge on each of `asks`, the risk notes a session wants (danielrispler/plotkeeper#298; `RiskNotes::asks`): a block that arrives
@@ -941,12 +1100,7 @@ pub fn ask_notes(app: &App, asks: Vec<RiskRequest>) {
 /// the window shows with a retry. It takes seconds; nothing reaches the session.
 pub fn ask(app: &App, session: String, item: String, question: String) -> Result<String, String> {
     // The lock ends with the statement, before the writer runs.
-    let transcript = app
-        .core
-        .lock()
-        .unwrap()
-        .session(&session)
-        .map(|s| s.transcript.clone());
+    let transcript = app.core().session(&session).map(|s| s.transcript.clone());
     let answer = studio_understanding::ask_about(
         &*app.writer,
         &transcript.unwrap_or_default(),
@@ -969,8 +1123,8 @@ pub fn ask_anchor(
     question: String,
 ) -> Result<String, String> {
     let log = studio_hook::event_log(&std::env::home_dir().ok_or("no home folder")?);
-    let (facts, transcript, trees) = {
-        let studio = app.core.lock().unwrap();
+    let (recorded, transcript, trees) = {
+        let studio = app.core();
         let trees = match &anchor {
             studio_core::Anchor::File { turn, root, .. } => {
                 studio.turn_trees(&session, *turn, root)
@@ -978,9 +1132,10 @@ pub fn ask_anchor(
             _ => None,
         };
         let transcript = studio.session(&session).map(|s| s.transcript.clone());
-        (studio.ask_facts(&session, &anchor, &log), transcript, trees)
+        (studio.ask_recorded(&session, &anchor), transcript, trees)
     };
-    let facts = facts.ok_or("nothing is recorded about this")?;
+    // The event log is read with the studio's lock freed.
+    let facts = recorded.ok_or("nothing is recorded about this")?.read(&log);
     let hunk = match (&anchor, trees) {
         (
             studio_core::Anchor::File {
@@ -1031,7 +1186,7 @@ pub fn ask_why_not(
     name: String,
 ) -> Result<studio_understanding::WhyNot, String> {
     let (facts, transcript) = {
-        let studio = app.core.lock().unwrap();
+        let studio = app.core();
         (
             studio.ask_named(&session, turn, &name),
             studio.session(&session).map(|s| s.transcript.clone()),
@@ -1051,7 +1206,7 @@ pub fn forward_writer_notices(app: &Arc<App>, notices: mpsc::Receiver<Option<Str
                 "card writer notice {}",
                 if notice.is_some() { "shown" } else { "cleared" }
             );
-            *app.writer_notice.lock().unwrap() = notice.clone();
+            *app.writer_notice() = notice.clone();
             app.events.emit("writer-notice", serde_json::json!(notice));
         }
     });
@@ -1149,16 +1304,15 @@ pub fn append_to(log: &Path, lines: &[serde_json::Value]) -> Result<(), String> 
 
 // The pull requests and the landed tasks, looked up with `gh`.
 
+/// The longest a lookup at GitHub may take.
+const GH_LIMIT: Duration = Duration::from_secs(30);
+
 /// The `state` of the pull request or issue that `gh <args>` shows, run in `cwd`: `MERGED`, `CLOSED`
 /// and the like; `None` when `gh` fails, is missing or is offline.
 fn gh_state(gh: &str, cwd: &str, args: &[&str]) -> Option<String> {
-    let output = Command::new(gh)
-        .args(args)
-        .args(["--json", "state", "--jq", ".state"])
-        .current_dir(cwd)
-        .output()
-        .ok()
-        .filter(|o| o.status.success())?;
+    let mut gh = studio_workbench::run::gh_at(gh, Path::new(cwd));
+    gh.args(args).args(["--json", "state", "--jq", ".state"]);
+    let output = studio_workbench::run::run_until(&mut gh, GH_LIMIT).ok()?;
     Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
@@ -1186,13 +1340,14 @@ pub fn refresh_landed(app: &Arc<App>, session: Option<String>) {
     let app = app.clone();
     thread::spawn(move || {
         let tasks = {
-            let mut studio = app.core.lock().unwrap();
+            let mut studio = app.core();
             studio.forget_gone_tasks();
             let mut tasks = studio.task_queries();
             if let Some(session) = session {
                 let path = studio.task_of(&session);
                 tasks.retain(|t| Some(&t.path) == path.as_ref());
             }
+            drop(studio);
             tasks
         };
         let gh = studio_workbench::gh_path();
@@ -1202,7 +1357,7 @@ pub fn refresh_landed(app: &Arc<App>, session: Option<String>) {
                 .exists()
                 .then(|| lookup_task(gh, &task));
             let (before, changed) = {
-                let mut studio = app.core.lock().unwrap();
+                let mut studio = app.core();
                 let before = studio.task_facts_at(&task.path);
                 (before, studio.set_task_facts(&task.path, facts))
             };
@@ -1236,7 +1391,7 @@ pub fn map_marks(app: &App, projects: Vec<String>) -> Result<Vec<map::Mark>, Str
 
 /// Opens the sessions' notices: `sounds` is the setting from `settings.json`, which the window parses.
 pub fn sounds(app: &App, on: bool) {
-    app.notices.lock().unwrap().sounds = on;
+    app.notices().sounds = on;
 }
 
 #[cfg(test)]
@@ -1362,16 +1517,6 @@ mod tests {
             studio_core::State::Ended
         );
         assert!(super::process_ends(&studio, alive).is_empty());
-    }
-
-    #[test]
-    fn this_process_is_alive_and_a_vanished_pid_is_not() {
-        assert!(super::pid_alive(std::process::id()));
-        // A child that has exited and been waited for.
-        let mut child = std::process::Command::new("true").spawn().unwrap();
-        let pid = child.id();
-        child.wait().unwrap();
-        assert!(!super::pid_alive(pid));
     }
 
     #[test]

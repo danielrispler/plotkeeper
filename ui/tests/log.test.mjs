@@ -4,10 +4,12 @@ import assert from "node:assert/strict";
 
 const lines = [];
 const listeners = {};
-globalThis.window = {
+globalThis.window = /** @type {any} */ ({
   __TAURI__: { log: { warn: async (m) => void lines.push(["warn", m]), error: async (m) => void lines.push(["error", m]) } },
-  addEventListener: (type, handler) => void (listeners[type] = handler),
-};
+  addEventListener: (type, handler) => {
+    listeners[type] = handler;
+  },
+});
 const { failure, logUncaught } = await import("../../dist/dom.js");
 const last = () => lines[lines.length - 1];
 
@@ -43,6 +45,7 @@ test("a message of several lines is logged as one line", () => {
 });
 
 test("a log call that itself fails does not throw", async () => {
+  // biome-ignore lint/suspicious/useAwait: a stand-in for an async API, so a throw in it rejects as the real one's would
   window.__TAURI__.log.warn = async () => {
     throw new Error("log gone");
   };

@@ -26,26 +26,6 @@ mod embedded {
     include!(concat!(env!("OUT_DIR"), "/assets.rs"));
 }
 
-/// Warnings and errors to stderr, with the time; never the HTTP client's (`studio_server::logged`).
-struct Stderr;
-
-impl log::Log for Stderr {
-    fn enabled(&self, metadata: &log::Metadata) -> bool {
-        studio_server::logged(metadata)
-    }
-    fn log(&self, record: &log::Record) {
-        if self.enabled(record.metadata()) {
-            eprintln!(
-                "[{}][{}] {}",
-                record.level(),
-                record.target(),
-                record.args()
-            );
-        }
-    }
-    fn flush(&self) {}
-}
-
 fn address(port: u16, token: &str) -> String {
     format!("http://127.0.0.1:{port}/?token={token}")
 }
@@ -112,7 +92,11 @@ fn main() -> ExitCode {
     };
     refresh_hook_copies(&home);
     wire_on_start(&home);
-    let _ = log::set_logger(&Stderr).map(|()| log::set_max_level(log::LevelFilter::Warn));
+    if log::set_logger(&studio_server::LOGGER).is_ok() {
+        log::set_max_level(log::LevelFilter::Warn);
+    }
+    // Before the read loop, the web server and every thread they start: a panic on any of them stops plotkeeper.
+    studio_server::exit_on_panic(|code| std::process::exit(code));
     match run(&log, held) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
@@ -232,6 +216,7 @@ fn run(log: &std::path::Path, held: lock::Held) -> std::io::Result<()> {
         web::DEFAULT_PORT,
     )?;
     app.events.set(page.sink());
+    studio_server::LOGGER.send_errors_to(page.sink());
     held.publish(page.port(), &token)?;
 
     studio_server::forward_writer_notices(&app, writer_notice_reader);
@@ -241,11 +226,13 @@ fn run(log: &std::path::Path, held: lock::Held) -> std::io::Result<()> {
 
     let (stop, stopped) = mpsc::channel();
     ctrlc::set_handler(move || {
-        let _ = stop.send(());
+        // The receiver may have gone, and then no one waits for this.
+        stop.send(()).ok();
     })
     .map_err(std::io::Error::other)?;
     show(&address(page.port(), &token));
-    let _ = stopped.recv();
+    // A closed channel or a timeout both mean carry on.
+    stopped.recv().ok();
     // The stores write by temp file and rename, so a stop between writes leaves them whole.
     page.stop();
     drop(held);

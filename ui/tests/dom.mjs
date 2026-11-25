@@ -1,7 +1,7 @@
 // One small stand-in DOM for the node tests: element and text nodes that keep their identity and children, so a test can
 // assert that a node is the same object after an update. Not a browser: it holds what the tests read and the calls the code makes.
 
-export class Text {
+class TextNode {
   nodeType = 3;
   nodeName = "#text";
   constructor(value) {
@@ -12,9 +12,9 @@ export class Text {
   }
 }
 
-const node = (item) => (typeof item === "string" ? new Text(item) : item);
+const node = (item) => (typeof item === "string" ? new TextNode(item) : item);
 
-export class El {
+class StandIn {
   nodeType = 1;
   attrs = new Map();
   listeners = {};
@@ -84,7 +84,7 @@ export class El {
     return this.text;
   }
   set textContent(value) {
-    this.childNodes = [new Text(value)];
+    this.childNodes = [new TextNode(value)];
   }
   get text() {
     return this.childNodes.map((c) => c.text).join("");
@@ -101,7 +101,7 @@ export class El {
     return selector === ":popover-open" && this.popoverOpen;
   }
   contains(other) {
-    return other === this || this.childNodes.some((c) => c instanceof El && c.contains(other));
+    return other === this || this.childNodes.some((c) => c instanceof StandIn && c.contains(other));
   }
   getBoundingClientRect() {
     return { top: 0, right: 0, bottom: 0, left: 0, width: 0, height: 0 };
@@ -111,19 +111,27 @@ export class El {
   focus() {}
   find(tag, out = []) {
     if (this.tag === tag) out.push(this);
-    for (const c of this.childNodes) if (c instanceof El) c.find(tag, out);
+    for (const c of this.childNodes) if (c instanceof StandIn) c.find(tag, out);
     return out;
   }
 }
 
 // An element with the form-control fields a view reads and writes.
-export class Field extends El {
+class FieldStandIn extends StandIn {
   title = "";
   disabled = false;
   dir = "";
 }
 
+// The stand-ins as the tests see them: any, at this one boundary, since they stand in for the DOM's types without being them, so a
+// test may hand one to the page's code typed with the real ones (#554).
+/** @type {any} */
+export const El = StandIn;
+/** @type {any} */
+export const Field = FieldStandIn;
+
 // A document whose elements are `Element`s, for `globalThis.document`; `extra` adds or replaces members.
+/** @returns {any} */
 export const fakeDocument = (extra = {}, Element = El) => ({
   createElement: (tag) => new Element(tag),
   getElementById: () => new Element("div"),
@@ -133,6 +141,20 @@ export const fakeDocument = (extra = {}, Element = El) => ({
 });
 
 // Installs `window.__TAURI__` so that every `invoke` is recorded in `calls` as `[command, args]` and answers `reply(command, args)`.
+/**
+ * @param {unknown[][]} calls
+ * @param {(command: string, args?: any) => unknown} [reply]
+ */
 export const tauri = (calls, reply = () => null) => {
-  globalThis.window = { __TAURI__: { core: { invoke: async (command, args) => (calls.push([command, args]), reply(command, args)) } } };
+  globalThis.window = /** @type {any} */ ({
+    __TAURI__: {
+      core: {
+        // biome-ignore lint/suspicious/useAwait: a stand-in for an async API, so a throw in `reply` rejects as the real one's would
+        invoke: async (command, args) => {
+          calls.push([command, args]);
+          return reply(command, args);
+        },
+      },
+    },
+  });
 };

@@ -183,14 +183,14 @@ pub fn write_summary(
         Err(_) => true,
         Ok((_, problem)) => problem.is_some(),
     };
-    match crate::once_more(first, retry, summary, |second, first| second.or(first)) {
+    match crate::once_more(first, retry, summary, Result::or) {
         Ok((summary, problem)) => {
             if let Some(problem) = problem {
                 log(format!("headline of {}: {problem}", request.id));
             }
             let id = request.id.clone();
-            let mut store = store.lock().unwrap();
-            if let Err(e) = store.add_summary(request, summary.clone()) {
+            let added = store.lock().unwrap().add_summary(request, summary.clone());
+            if let Err(e) = added {
                 log(format!("save the summaries of {id}: {e}"));
             }
             Some(summary)
@@ -284,7 +284,8 @@ pub fn write_agent_summary(
         });
     match summary {
         Ok(summary) => {
-            if let Err(e) = store.lock().unwrap().add_agent_summary(id, &summary) {
+            let added = store.lock().unwrap().add_agent_summary(id, &summary);
+            if let Err(e) = added {
                 log(format!("save the summary of subagent {id}: {e}"));
             }
             Some(summary)
@@ -388,12 +389,13 @@ pub fn write_name(
             let value = crate::parse_object(&reply).unwrap_or_default();
             let name = value["name"].as_str().unwrap_or_default();
             let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
-            match name.is_empty() {
-                true => Err(format!(
+            if name.is_empty() {
+                Err(format!(
                     "the reply holds none: {:?}",
                     reply.chars().take(300).collect::<String>()
-                )),
-                false => Ok(bounded_name(name)),
+                ))
+            } else {
+                Ok(bounded_name(name))
             }
         });
     name.map_err(|line| log(format!("no session name: {line}")))
@@ -408,9 +410,10 @@ fn bounded_name(name: String) -> String {
     };
     let head = &name[..end];
     // A space right after the head means the head ends on a whole word.
-    let head = match name[end..].starts_with(' ') {
-        true => head,
-        false => head.rfind(' ').map_or(head, |space| &head[..space]),
+    let head = if name[end..].starts_with(' ') {
+        head
+    } else {
+        head.rfind(' ').map_or(head, |space| &head[..space])
     };
     format!("{}…", head.trim_end())
 }
@@ -435,9 +438,10 @@ impl ClaudeWriter {
         });
         // `claude -p` names its own working directory to the model even with `--system-prompt`, so "here" needs the
         // session's folder beside it (#408).
-        let folder = match folder.is_empty() {
-            true => String::new(),
-            false => format!("The session's folder: {folder}\n\n"),
+        let folder = if folder.is_empty() {
+            String::new()
+        } else {
+            format!("The session's folder: {folder}\n\n")
         };
         self.request_with(
             Some(setup),

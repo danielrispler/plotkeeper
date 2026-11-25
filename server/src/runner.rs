@@ -232,7 +232,7 @@ pub fn allowed_tools(kind: Kind, folder: &Path, checks: &[String]) -> Vec<String
 
 /// How many cores a run's builds and tests get: a third, so a run leaves room for the sessions.
 pub(crate) fn cores() -> usize {
-    (thread::available_parallelism().map_or(1, |n| n.get()) / 3).max(1)
+    (thread::available_parallelism().map_or(1, std::num::NonZero::get) / 3).max(1)
 }
 
 /// The `claude` command for `plan`, built and never run here: no user settings, hooks, plugins, skills or MCP servers
@@ -587,7 +587,8 @@ pub fn launch(dir: &Path) -> Result<(), String> {
         Err(status) => status,
     };
     if let Some(tmp) = made {
-        let _ = fs::remove_dir_all(tmp);
+        // Best effort: a file already gone is fine.
+        fs::remove_dir_all(tmp).ok();
     }
     let status = Status {
         started_ms,
@@ -654,7 +655,8 @@ fn run_check(stored: &Launched, deadline: Instant) -> Result<(), Status> {
     };
     let mut said = String::new();
     if let Some(mut stderr) = stderr {
-        let _ = stderr.read_to_string(&mut said);
+        // A stderr that does not read leaves what was read before the error.
+        stderr.read_to_string(&mut said).ok();
     }
     Err(down(match said.trim() {
         "" => code.map_or("the check was stopped by a signal".into(), |code| {
@@ -994,13 +996,15 @@ impl Runner {
 
     /// Sets what is told the project whose runs changed; the first call wins.
     pub fn on_change(&self, changed: impl Fn(&str) + Send + Sync + 'static) {
-        let _ = self.changed.set(Box::new(changed));
+        // Set once; a later set keeps the first value, which is the same.
+        self.changed.set(Box::new(changed)).ok();
     }
 
     /// Sets what is told when a run ends on its own, as it ends or when [`Runner::pick_up`] finds it ended; never for a
     /// cancelled run. Set it before `pick_up`; the first call wins.
     pub fn on_end(&self, ended: impl Fn(Ended) + Send + Sync + 'static) {
-        let _ = self.ended.set(Box::new(ended));
+        // Set once; a later set keeps the first value, which is the same.
+        self.ended.set(Box::new(ended)).ok();
     }
 
     fn tell(&self, project: &str) {
@@ -1010,7 +1014,9 @@ impl Runner {
     }
 
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(|e| e.into_inner())
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn dir(&self, id: &str) -> PathBuf {
@@ -1052,7 +1058,8 @@ impl Runner {
         let refuse = |line: String| {
             // Only a new run's own folder is ever removed: never a submitted run's, never a folder outside the runs folder.
             if let Some(dir) = &new {
-                let _ = fs::remove_dir_all(dir);
+                // Best effort: a file already gone is fine.
+                fs::remove_dir_all(dir).ok();
             }
             Refusal {
                 line,
@@ -1167,8 +1174,10 @@ impl Runner {
                 .truncate(false)
                 .write(true)
                 .open(dir.join(LOCK))?;
-            lock.try_lock()
-                .map_err(|_| io::Error::other("the run's lock is held"))?;
+            lock.try_lock().map_err(|e| match e {
+                TryLockError::WouldBlock => io::Error::other("the run's lock is held"),
+                TryLockError::Error(e) => e,
+            })?;
             Command::new(&self.config.launcher)
                 .arg(&dir)
                 .stdin(lock)
@@ -1201,7 +1210,12 @@ impl Runner {
                     format!("the launcher `{launcher}` did not start: {e}"),
                 );
                 self.record(stored, serde_json::json!(outcome.end), Some(&outcome), 0);
-                let _ = fs::write(dir.join(RECORDED), "");
+                if let Err(e) = fs::write(dir.join(RECORDED), "") {
+                    log::warn!(
+                        "run {}: its `recorded` mark was not written: {e}",
+                        stored.id
+                    );
+                }
                 Phase::Ended {
                     outcome,
                     at_ms: millis(),
@@ -1217,7 +1231,8 @@ impl Runner {
         thread::spawn(move || {
             wait_free(&dir);
             if let Some(mut child) = child {
-                let _ = child.wait();
+                // Only reaps the child; its exit status is not used.
+                child.wait().ok();
             }
             if let Some(runner) = me.upgrade() {
                 runner.ended(&id);
@@ -1291,7 +1306,12 @@ impl Runner {
             Some(&outcome),
             duration,
         );
-        let _ = fs::write(dir.join(RECORDED), "");
+        if let Err(e) = fs::write(dir.join(RECORDED), "") {
+            log::warn!(
+                "run {}: its `recorded` mark was not written: {e}",
+                run.stored.id
+            );
+        }
         let end = outcome.end;
         run.phase = Phase::Ended { outcome, at_ms: to };
         end
@@ -1362,6 +1382,7 @@ impl Runner {
             return None;
         }
         *state.held.entry(id.to_string()).or_default() += 1;
+        drop(state);
         Some(Hold {
             runner: self.me.clone(),
             id: id.to_string(),
@@ -1407,7 +1428,8 @@ impl Runner {
         if matches!(run.phase, Phase::Running { .. })
             && let Some(tmp) = &run.stored.command.private_tmp
         {
-            let _ = fs::remove_dir_all(tmp);
+            // Best effort: a file already gone is fine.
+            fs::remove_dir_all(tmp).ok();
         }
         if let Err(e) = fs::remove_dir_all(&dir) {
             log::warn!("background run {id}: its folder was not removed: {e}");
@@ -1435,8 +1457,8 @@ impl Runner {
         };
         let refused = match process_start(pid) {
             Some(now) if now == start => {
-                let group =
-                    i32::try_from(pid).map_err(|_| "the run's process id is out of range")?;
+                let group = i32::try_from(pid)
+                    .map_err(|e| format!("the run's process id is out of range: {e}"))?;
                 // SAFETY: a signal to the process group the launcher leads, which the lock and the start time just named.
                 if unsafe { libc::killpg(group, libc::SIGKILL) } == 0 {
                     wait_free(dir);
@@ -1500,7 +1522,8 @@ impl Runner {
             let Some(stored) = stored.filter(|_| !orphan) else {
                 // A folder this build cannot read is removed only once nothing runs in it: a newer build's run goes on.
                 if lock_free(&dir) {
-                    let _ = fs::remove_dir_all(&dir);
+                    // Best effort: a file already gone is fine.
+                    fs::remove_dir_all(&dir).ok();
                 } else {
                     log::warn!(
                         "background runs: {} holds a running run this build cannot read",
@@ -1578,9 +1601,11 @@ impl Runner {
     pub fn outcome(&self, id: &str) -> Option<Outcome> {
         let state = self.state();
         let run = state.runs.iter().find(|run| run.stored.id == id)?;
-        match &run.phase {
+        let outcome = match &run.phase {
             Phase::Ended { outcome, .. } => Some(outcome.clone()),
             _ => None,
-        }
+        };
+        drop(state);
+        outcome
     }
 }
