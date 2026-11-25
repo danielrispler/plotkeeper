@@ -38,6 +38,7 @@ impl Extractor for Fake {
             problems: self.problems.iter().map(ToString::to_string).collect(),
             pairs: self.pairs.clone(),
             unsure: self.unsure.clone(),
+            ..Output::default()
         }
     }
 

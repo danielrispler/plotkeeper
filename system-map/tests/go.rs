@@ -291,6 +291,43 @@ fn a_build_constraint_that_can_hold_with_any_other_tag_keeps_the_file() {
 }
 
 #[test]
+fn a_build_constraint_after_a_leading_byte_order_mark_is_read() {
+    // Go drops a leading U+FEFF before it reads the header.
+    assert!(tag_skips("\u{FEFF}//go:build ignore\n\npackage lib\n"));
+    assert!(tag_skips("\u{FEFF}// +build ignore\n\npackage lib\n"));
+}
+
+/// A `//go:build` line of `linux` in `depth` parentheses.
+fn nested(depth: usize) -> String {
+    format!(
+        "//go:build {}linux{}\n\npackage lib\n",
+        "(".repeat(depth),
+        ")".repeat(depth)
+    )
+}
+
+#[test]
+fn a_go_build_line_over_a_thousand_terms_deep_does_not_parse_and_skips_the_file() {
+    // Go's parser counts each operand it starts and rejects the thousand and first (`go/build/constraint`'s `maxSize`).
+    assert!(!tag_skips(&nested(999)));
+    assert!(tag_skips(&nested(1000)));
+}
+
+#[test]
+fn a_plus_build_line_of_over_a_hundred_operators_is_not_read() {
+    // Go rejects a `// +build` line of more than a hundred `,` and ` ` operators, and `ShouldBuild` then passes over
+    // the line, so the file stays in.
+    let line = |terms: usize| {
+        format!(
+            "// +build {}\n\npackage lib\n",
+            vec!["ignore"; terms].join(",")
+        )
+    };
+    assert!(tag_skips(&line(101)));
+    assert!(!tag_skips(&line(102)));
+}
+
+#[test]
 fn a_build_constraint_after_the_package_clause_is_not_read() {
     assert!(!tag_skips("package lib\n\n//go:build ignore\n"));
 }
@@ -802,6 +839,25 @@ fn a_split_package_counts_once_per_part_and_its_hubs_name_their_part_in_the_text
 }
 
 #[test]
+fn a_split_package_hub_names_its_part_even_when_its_other_part_has_no_import() {
+    // `s/` sits in `p` and `q`; only `p`'s file imports, and nothing imports `s/`.
+    let libs: Vec<String> = (1..=5).map(|i| format!("l{i}/x.go")).collect();
+    let imports: String = (1..=5)
+        .map(|i| format!("\t\"example.com/m/l{i}\"\n"))
+        .collect();
+    let main = format!("package main\n\nimport (\n{imports})\n");
+    let mut files = vec![
+        MOD,
+        ("s/main.go", main.as_str()),
+        ("s/q.go", "package main\n"),
+    ];
+    files.extend(libs.iter().map(|f| (f.as_str(), "package l\n")));
+    let (_dir, root) = repo(&map(&[("p", &["**"]), ("q", &["s/q.go"])], &[]), &files);
+    let text = String::from_utf8(run(&root, "imports", &[]).stdout).unwrap();
+    assert!(text.contains("  s/ (p): degree 5, 0 in, 5 out\n"), "{text}");
+}
+
+#[test]
 fn an_importing_package_nothing_imports_is_one_node_counted_as_its_slice() {
     // A `main` package of six files, each importing its own one-file package.
     let libs: Vec<(String, String)> = (1..=6)
@@ -864,5 +920,39 @@ fn commit_mode_gives_the_edges_and_doubts_of_the_working_tree() {
     assert_eq!(
         String::from_utf8_lossy(&run(&root, "check", &["--json", "--commit", "HEAD"]).stdout),
         String::from_utf8_lossy(&tree.stdout)
+    );
+}
+
+#[test]
+fn a_mixed_go_and_typescript_repository_reads_each_languages_parts_side_by_side() {
+    let mut mixed = map(
+        &[
+            ("golib", &["go.mod", "lib/"]),
+            ("goapp", &["a/"]),
+            ("tslib", &["web/lib/"]),
+            ("tsapp", &["web/app/"]),
+        ],
+        &[("goapp", "golib"), ("tsapp", "tslib")],
+    );
+    mixed["extractors"] = json!(["go-imports", "typescript-imports"]);
+    let (_dir, root) = repo(
+        &mixed,
+        &[
+            MOD,
+            ("a/main.go", IMPORTS_LIB),
+            ("lib/x.go", "package lib\n"),
+            ("web/app/main.ts", "import { x } from \"../lib/x\";\n"),
+            ("web/lib/x.ts", "export const x = 1;\n"),
+        ],
+    );
+    let found = report(&root);
+    assert_eq!(found.problems, Vec::<String>::new());
+    assert_eq!(
+        pairs(&found),
+        ["a/main.go>lib/x.go", "web/app/main.ts>web/lib/x.ts"]
+    );
+    assert_eq!(
+        (found.counts.links.proven, found.counts.links.unproven),
+        (2, 0)
     );
 }

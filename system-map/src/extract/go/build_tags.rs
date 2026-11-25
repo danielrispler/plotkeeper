@@ -6,8 +6,9 @@
 /// Whether a file's build constraint leaves it out of every build `go mod tidy` considers. As `ShouldBuild` has it, a
 /// `//go:build` line in the leading comments controls; with none, every `// +build` line of the header (the leading
 /// comments up to their last blank line) must hold. Two `//go:build` lines, or one that does not parse, leave the file
-/// out, as Go rejects it.
+/// out, as Go rejects it. A leading byte order mark is dropped first, as Go's reader drops it.
 pub(super) fn never_builds(text: &str) -> bool {
+    let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
     let Some((header, go_build)) = file_header(text) else {
         return true;
     };
@@ -106,7 +107,8 @@ fn is_tag(s: &str) -> bool {
 }
 
 /// A `// +build` line's expression: its fields ORed, each field's comma-separated terms ANDed, a bad term read as
-/// `ignore`, and an empty line as `ignore`. None when the line is not a `+build` line.
+/// `ignore`, and an empty line as `ignore`. None when the line is not a `+build` line, or when it joins more than
+/// [`MAX_OLD_SIZE`] terms, which Go rejects as too complex and `ShouldBuild` passes over.
 fn plus_build(line: &str) -> Option<Expr> {
     let rest = line.strip_prefix("//")?.trim();
     let rest = rest.strip_prefix("+build")?;
@@ -114,6 +116,7 @@ fn plus_build(line: &str) -> Option<Expr> {
         return None;
     }
     let ignore = || Expr::Tag("ignore".into());
+    let mut size = 0;
     let mut or: Option<Expr> = None;
     for clause in rest.split_whitespace() {
         let mut and: Option<Expr> = None;
@@ -132,25 +135,45 @@ fn plus_build(line: &str) -> Option<Expr> {
                 if neg { Expr::Not(Box::new(z)) } else { z }
             };
             and = Some(match and {
-                Some(y) => Expr::And(Box::new(y), Box::new(z)),
+                Some(y) => {
+                    size += 1;
+                    if size > MAX_OLD_SIZE {
+                        return None;
+                    }
+                    Expr::And(Box::new(y), Box::new(z))
+                }
                 None => z,
             });
         }
         let y = and.unwrap_or_else(ignore);
         or = Some(match or {
-            Some(x) => Expr::Or(Box::new(x), Box::new(y)),
+            Some(x) => {
+                size += 1;
+                if size > MAX_OLD_SIZE {
+                    return None;
+                }
+                Expr::Or(Box::new(x), Box::new(y))
+            }
             None => y,
         });
     }
     Some(or.unwrap_or_else(ignore))
 }
 
+/// The most `,` and ` ` joins Go takes in a `// +build` line (`go/build/constraint`'s `maxOldSize`).
+const MAX_OLD_SIZE: usize = 100;
+
+/// The most operands Go's parser starts in a `//go:build` line (`go/build/constraint`'s `maxSize`), which bounds how
+/// deep the parse, the evaluation and the drop of the expression recurse.
+const MAX_SIZE: usize = 1000;
+
 /// A `//go:build` line's expression, `||` binding looser than `&&`, with `!` and parentheses; none when it does not
-/// parse.
+/// parse or starts more than [`MAX_SIZE`] operands.
 fn parse_go_build(line: &str) -> Option<Expr> {
     let mut p = Parser {
         text: line.strip_prefix("//go:build")?,
         at: 0,
+        size: 0,
     };
     let x = p.or()?;
     p.skip_space();
@@ -160,6 +183,8 @@ fn parse_go_build(line: &str) -> Option<Expr> {
 struct Parser<'a> {
     text: &'a str,
     at: usize,
+    /// The operands started so far, each call of `not` one.
+    size: usize,
 }
 
 impl Parser<'_> {
@@ -195,6 +220,10 @@ impl Parser<'_> {
     }
 
     fn not(&mut self) -> Option<Expr> {
+        self.size += 1;
+        if self.size > MAX_SIZE {
+            return None;
+        }
         if self.eat("!") {
             return Some(Expr::Not(Box::new(self.not()?)));
         }

@@ -112,7 +112,12 @@ pub fn imports(root: &Path) -> Result<Imports, Vec<String>> {
     let found = crate::extract::run(crate::extract::registry::EXTRACTORS, names, &repo);
     Ok(Imports {
         unsure: crate::edges::owned_unsure(found.unsure, &parts),
-        ..count(&parts, &counted(&found.pairs), found.problems)
+        ..count(
+            &parts,
+            &counted(&found.pairs),
+            &found.members,
+            found.problems,
+        )
     })
 }
 
@@ -136,12 +141,18 @@ fn counted(pairs: &[Pair]) -> BTreeSet<Counted> {
 /// A counted pair: its two files, its group and the group of its importer.
 type Counted = (String, String, Option<String>, Option<String>);
 
-fn count(parts: &[PartFiles], pairs: &BTreeSet<Counted>, problems: Vec<String>) -> Imports {
+/// Counts `pairs` over `parts`; `members` are the files of each group, whose parts decide how a slice is named.
+fn count(
+    parts: &[PartFiles],
+    pairs: &BTreeSet<Counted>,
+    members: &BTreeSet<(String, String)>,
+    problems: Vec<String>,
+) -> Imports {
     let owner: HashMap<&str, &str> = parts
         .iter()
         .flat_map(|part| part.files.iter().map(|f| (f.as_str(), part.id.as_str())))
         .collect();
-    let (units, group_parts) = units(pairs, &owner);
+    let (units, group_parts) = units(pairs, members, &owner);
     let mut fan_in: HashMap<Node, usize> = HashMap::new();
     let mut fan_out: HashMap<Node, usize> = HashMap::new();
     for unit in &units {
@@ -239,12 +250,18 @@ fn count(parts: &[PartFiles], pairs: &BTreeSet<Counted>, problems: Vec<String>) 
 /// One unit per (importing file, target node): a grouped pair's target is its group's slice in the part that owns
 /// `to`, so the pairs of one import of a group count once per part; an ungrouped pair is its own unit. A grouped pair's
 /// importer counts as the slice of its own group when the pair names one, else as the file. Also gives the parts each
-/// group's files sit in.
+/// group's files sit in, its `members` and the files of its pairs alike.
 fn units<'a>(
     pairs: &'a BTreeSet<Counted>,
+    members: &'a BTreeSet<(String, String)>,
     owner: &HashMap<&'a str, &'a str>,
 ) -> (Vec<Unit<'a>>, GroupParts<'a>) {
     let mut group_parts = GroupParts::new();
+    for (file, group) in members {
+        if let Some(part) = owner.get(file.as_str()) {
+            group_parts.entry(group.as_str()).or_default().insert(*part);
+        }
+    }
     let mut units: BTreeSet<(&str, Node, Node)> = BTreeSet::new();
     for (from, to, group, from_group) in pairs {
         let (from, to) = (from.as_str(), to.as_str());
@@ -386,7 +403,12 @@ mod tests {
     }
 
     fn report(parts: &[PartFiles], pairs: &[Vec<Counted>]) -> Imports {
-        count(parts, &pairs.concat().into_iter().collect(), Vec::new())
+        count(
+            parts,
+            &pairs.concat().into_iter().collect(),
+            &BTreeSet::new(),
+            Vec::new(),
+        )
     }
 
     fn raw(count: Count) -> usize {

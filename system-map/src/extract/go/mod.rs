@@ -521,6 +521,10 @@ fn go_imports(repo: &Repo) -> Output {
     };
     let mut found = Output {
         problems,
+        members: heads
+            .keys()
+            .map(|file| (file.to_string(), group(folder_of(file))))
+            .collect(),
         ..Output::default()
     };
     for (&file, head) in &heads {

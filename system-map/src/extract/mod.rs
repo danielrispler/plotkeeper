@@ -205,6 +205,9 @@ pub(crate) struct Output {
     pub(crate) problems: Vec<String>,
     pub(crate) pairs: Vec<Pair>,
     pub(crate) unsure: Vec<Unsure>,
+    /// Each file it puts in a group (its Go package's folder, say), with that group, whether or not the file makes or
+    /// ends a pair: the imports report names a group's slice by its part when the group's files sit in more than one.
+    pub(crate) members: BTreeSet<(String, String)>,
 }
 
 /// Runs the extractors `names` names from `registry`, in that order, and holds their output to the contract: a pair
@@ -214,13 +217,14 @@ pub(crate) struct Output {
 /// groups, none counting as lowest.
 /// An Unsure finding with no candidates is a problem, one in an untracked, ignored or skipped file is dropped, and
 /// findings of one file, name and reason are kept once, sorted, with the union of their candidates. A name the registry
-/// lacks is a problem.
+/// lacks is a problem. A group's member that is untracked or skipped is dropped.
 pub(crate) fn run(registry: &[&dyn Extractor], names: &[String], repo: &Repo) -> Output {
     let mut problems = Vec::new();
     // Each Unsure finding's file, name and reason, with the candidates of every finding of them.
     let mut unsure: BTreeMap<(String, String, String), BTreeSet<String>> = BTreeMap::new();
     // Each pair by its ends, merged from its findings.
     let mut pairs: BTreeMap<(String, String), Pair> = BTreeMap::new();
+    let mut members = BTreeSet::new();
     for name in names {
         let Some(extractor) = registry.iter().find(|e| e.name() == name) else {
             problems.push(format!(
@@ -261,6 +265,11 @@ pub(crate) fn run(registry: &[&dyn Extractor], names: &[String], repo: &Repo) ->
                 .or_default()
                 .extend(finding.candidates);
         }
+        for (file, group) in found.members {
+            if tracked(&file) && !skips(&file) {
+                members.insert((file, group));
+            }
+        }
         for pair in found.pairs {
             if pair.from == pair.to || !tracked(&pair.from) || !tracked(&pair.to) {
                 continue;
@@ -295,6 +304,7 @@ pub(crate) fn run(registry: &[&dyn Extractor], names: &[String], repo: &Repo) ->
                 candidates: candidates.into_iter().collect(),
             })
             .collect(),
+        members,
     }
 }
 
