@@ -145,6 +145,18 @@ fn a_run_given_up_ends_at_once_as_timed_out() {
 }
 
 #[test]
+fn a_run_given_up_while_a_helper_holds_its_output_ends_before_its_deadline() {
+    let started = Instant::now();
+    // The command exits at once; its helper holds the pipes until it is killed.
+    let given_up = || started.elapsed() > Duration::from_millis(300);
+
+    let ended = run_until_unless(&mut sh("sleep 20 & exit 0"), AMPLE, &given_up);
+
+    assert!(matches!(ended, Err(RunError::TimedOut(_))), "{ended:?}");
+    assert!(started.elapsed() < Duration::from_secs(10));
+}
+
+#[test]
 fn a_program_that_is_not_there_failed_to_start() {
     let ended = run_until(&mut Command::new("/no/such/program"), AMPLE);
 

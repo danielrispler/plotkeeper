@@ -165,19 +165,23 @@ fn run(
         nap = (nap * 2).min(Duration::from_millis(5));
     };
     let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
-    for _ in 0..2 {
-        // A helper the command left behind may hold the pipes open: it gets what is left of the deadline, and at
-        // least a moment for the output of a command that exited right at it.
+    // A helper the command left behind may hold the pipes open: it gets what is left of the deadline, and at least a
+    // moment for the output of a command that exited right at it. Waited in slices, so a caller that gives up meanwhile
+    // is not held to the deadline.
+    let end = end.max(Instant::now() + Duration::from_millis(100));
+    let mut pipes = 0;
+    while pipes < 2 {
         let left = end.saturating_duration_since(Instant::now());
-        let Ok((is_stdout, bytes)) = read.recv_timeout(left.max(Duration::from_millis(100))) else {
-            kill_group();
-            return Err(RunError::TimedOut(deadline));
-        };
-        if is_stdout {
-            stdout = bytes;
-        } else {
-            stderr = bytes;
+        match read.recv_timeout(left.min(Duration::from_millis(5))) {
+            Ok((true, bytes)) => stdout = bytes,
+            Ok((false, bytes)) => stderr = bytes,
+            Err(_) if Instant::now() < end && !given_up() => continue,
+            Err(_) => {
+                kill_group();
+                return Err(RunError::TimedOut(deadline));
+            }
         }
+        pipes += 1;
     }
     let output = Output {
         status,
