@@ -516,7 +516,8 @@ pub fn rows(
 // ---------------------------------------------------------------------------------------------------------------
 // The map's changes in git.
 
-use crate::map::{default_ref, git};
+use crate::map::{GIT_READ_LIMIT, default_ref, git};
+use studio_workbench::run::{self, RunError, run_until};
 
 /// An item the part sheet says is not yet ratified.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -565,20 +566,46 @@ fn first_parents(repo: &Path, reference: &str, max: usize) -> Vec<Landed> {
         .collect()
 }
 
-fn map_at(repo: &Path, commit: &str) -> Option<String> {
-    git(
-        repo,
-        &["show", &format!("{commit}:{}", system_map::MAP_FILE)],
-    )
-    .ok()
+/// What git said of the map at a commit.
+enum MapRead {
+    /// The map's text.
+    Read(String),
+    /// Git answered that the commit has no map: its tree does not list the file.
+    Absent,
+    /// Git did not answer: it did not start, ran past its limit, or failed to show a map the tree lists.
+    Unanswered,
+}
+
+impl MapRead {
+    fn text(&self) -> Option<&str> {
+        match self {
+            MapRead::Read(text) => Some(text),
+            MapRead::Absent | MapRead::Unanswered => None,
+        }
+    }
+}
+
+/// The map at `commit`. A `git show` that exits non-zero is either an answer (the commit has no map) or a failed read (an
+/// object out of reach), so the tree is asked which.
+fn map_at(repo: &Path, commit: &str) -> MapRead {
+    let show = |args: &[&str]| run_until(run::git(repo).args(args), GIT_READ_LIMIT);
+    match show(&["show", &format!("{commit}:{}", system_map::MAP_FILE)]) {
+        Ok(out) => MapRead::Read(String::from_utf8_lossy(&out.stdout).trim_end().to_string()),
+        Err(RunError::Failed(_)) => {
+            match show(&["ls-tree", "--name-only", commit, "--", system_map::MAP_FILE]) {
+                Ok(out) if out.stdout.iter().all(u8::is_ascii_whitespace) => MapRead::Absent,
+                _ => MapRead::Unanswered,
+            }
+        }
+        Err(RunError::Start(_) | RunError::TimedOut(_)) => MapRead::Unanswered,
+    }
 }
 
 /// The map items each commit changed, by repository and commit (`changes_of`), kept for the server's life on `App`.
 pub(crate) type ChangesCache = Mutex<HashMap<(String, String), Vec<MapItem>>>;
 
-/// The map items `commit` changed, from its map and its parent's. A commit never changes, so the answer is kept, but
-/// only one read from both maps: a `git show` that failed may work the next time, so its answer is read again. That
-/// includes a commit whose parent has no map, which git reports the same way.
+/// The map items `commit` changed, from its map and its parent's. A commit never changes, so the answer is kept once git
+/// answered both reads, a map that is absent included; a read git did not answer may work the next time, so it is read again.
 fn changes_of(cache: &ChangesCache, repo: &Path, commit: &str) -> Vec<MapItem> {
     let key = (repo.display().to_string(), commit.to_string());
     if let Some(known) = cache.lock().unwrap().get(&key) {
@@ -586,8 +613,8 @@ fn changes_of(cache: &ChangesCache, repo: &Path, commit: &str) -> Vec<MapItem> {
     }
     let old = map_at(repo, &format!("{commit}^"));
     let new = map_at(repo, commit);
-    let found = map_items(old.as_deref(), new.as_deref());
-    if old.is_some() && new.is_some() {
+    let found = map_items(old.text(), new.text());
+    if !matches!(old, MapRead::Unanswered) && !matches!(new, MapRead::Unanswered) {
         cache.lock().unwrap().insert(key, found.clone());
     }
     found
@@ -619,12 +646,7 @@ fn pr_changes_in(
     };
     if let Some(head) = open_head {
         let items = git(repo, &["merge-base", &reference, head])
-            .map(|base| {
-                map_items(
-                    map_at(repo, &base).as_deref(),
-                    map_at(repo, head).as_deref(),
-                )
-            })
+            .map(|base| map_items(map_at(repo, &base).text(), map_at(repo, head).text()))
             .unwrap_or_default();
         return (items, None);
     }
@@ -1324,6 +1346,38 @@ mod tests {
             std::fs::rename(&aside, &object).unwrap();
             let (read, _) = pr_changes(&changes, repo, 2, None);
             assert_eq!(read.len(), 3, "the failed read was kept: {read:?}");
+        }
+
+        #[test]
+        fn a_commit_with_no_map_is_answered_from_the_cache_on_the_next_call() {
+            let (dir, main) = repo();
+            let root = dir.path();
+            commit(root, OLD, "Map (#1)", "1000000000");
+            // PR 2 removes the map: git answers that its commit has none, which is an answer to keep.
+            std::fs::remove_file(root.join("system-map.json")).unwrap();
+            run(root, &["add", "-A"]);
+            run(
+                root,
+                &[
+                    "-c",
+                    "user.name=S",
+                    "-c",
+                    "user.email=s@e.com",
+                    "commit",
+                    "-q",
+                    "-m",
+                    "Drop the map (#2)",
+                ],
+            );
+            let head = run(root, &["rev-parse", "HEAD"]);
+            let repo = Path::new(&main);
+            let changes = ChangesCache::default();
+            assert_eq!(changes_of(&changes, repo, &head), vec![]);
+            let key = (repo.display().to_string(), head.clone());
+            assert!(
+                changes.lock().unwrap().contains_key(&key),
+                "a commit with no map is read again on every call"
+            );
         }
 
         #[test]
