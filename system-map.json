@@ -95,7 +95,8 @@
         { "name": "The left panel", "text": "A session's story, History, a turn's diff, a worker's log or Settings, open over the map.", "paths": ["ui/panel.ts", "ui/story.ts", "ui/diff.ts"] },
         { "name": "The writer's settings", "text": "Pick the program that writes the summaries, or set up an API-key writer, and test it with one tiny call.", "paths": ["ui/settings.ts", "ui/writers.ts"] },
         { "name": "Patch review", "text": "A back a law run's proven test patch, to open as a draft PR or discard.", "paths": ["ui/patch-review.ts"] },
-        { "name": "Wait tips", "text": "While a session runs, one line in its Intention box teaches one feature, chosen with a cooldown; settings can turn them off.", "paths": ["ui/tips.ts"] }
+        { "name": "Wait tips", "text": "While a session runs, one line in its Intention box teaches one feature, chosen with a cooldown; settings can turn them off.", "paths": ["ui/tips.ts"] },
+        { "name": "What's new", "text": "After an update to a new version, one toast with a link to that version's GitHub Release.", "paths": ["ui/whats-new.ts"] }
       ],
       "tier": "core", "paths": ["ui/"]
     },

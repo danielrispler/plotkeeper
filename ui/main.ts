@@ -36,9 +36,10 @@ import { drawFeed, showView } from "./story.js";
 import { startRailBriefs } from "./rail-brief.js";
 import { barKeyDown } from "./story-bar.js";
 import { startWriters } from "./writers.js";
-import { jumpToNeedsYou, showToast, watchToasts } from "./toast.js";
+import { jumpToNeedsYou, showToast, showWhatsNewToast, watchToasts } from "./toast.js";
 import { askOnce, notifyIfAway, type Alert } from "./alerts.js";
 import { type Copied, finishedNote, showCopyToast, showNote, watchNotes } from "./notes.js";
+import { startWhatsNew } from "./whats-new.js";
 import type { SavedProject, Selection, Session, SessionCards } from "./types.js";
 import { HOVERS } from "./hovers.js";
 import { explanationsApplied, startExplanations, toggleExplanations } from "./explanations.js";
@@ -278,6 +279,10 @@ window.addEventListener("copy-for-agent", (event) => {
   const { outcome, prompt } = (event as CustomEvent<Copied>).detail;
   showCopyToast(outcome, prompt);
 });
+// After an update to a new version, once (#527): "Updated to X.Y.Z" and a link to its GitHub Release.
+invoke("about")
+  .then(({ version }) => startWhatsNew(version, showWhatsNewToast))
+  .catch(failure("about"));
 listen<string[]>("finished", (ids) => {
   const note = finishedNote(ids, studio.listed);
   if (note) showNote(note);

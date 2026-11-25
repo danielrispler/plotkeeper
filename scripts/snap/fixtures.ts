@@ -2756,6 +2756,24 @@ const snapRealKeys = (): Fixture => ({
   realKeys: true, snapDone: "keys ok",
 });
 
+// What's new (#527): a page that last showed 0.1.2 opens on 0.2.0, so one toast says "Updated to 0.2.0" with a link to that
+// version's GitHub Release, and the new version is stored; its × closes it. The screenshot is the toast open.
+const whatsNewToast = (): Fixture => ({
+  ...list(),
+  storage: { "shown-version": "0.1.2" },
+  snapScript: `
+      const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+      await wait(300);
+      const toast = document.getElementById("whats-new-toast");
+      if (!toast.matches(":popover-open") || !document.getElementById("toasts").contains(toast)) return log("snap:fail the what's-new toast is not an open popover in the region");
+      if (!toast.textContent.includes("Updated to 0.2.0")) log("snap:fail the toast says " + toast.textContent);
+      const link = toast.querySelector("a");
+      if (link?.textContent !== "What's new" || link.href !== "https://github.com/danielrispler/plotkeeper/releases/tag/v0.2.0") log("snap:fail the link: " + link?.outerHTML);
+      if (!toast.querySelector("[aria-label=Dismiss]")) log("snap:fail the toast has no ×");
+      if (localStorage.getItem("shown-version") !== "0.2.0") log("snap:fail the shown version is " + localStorage.getItem("shown-version"));
+      log("whats new ok");`,
+  snapDone: "whats new ok",
+});
 // The toasts from the keyboard (#457): the needs-you, the note and the Clear toasts open at once in the Notifications region, apart.
 // A real press on Undo leaves the focus where it was. From the control before the region, a real Tab reaches each main action and
 // each ×; a real Enter on a × closes its toast and puts the focus on the next toast, and the last one hands it back. A modal dialog
@@ -2999,6 +3017,8 @@ const listNarrow = (): Fixture => ({
 
 export const fixtures = {
   ...railFixtures,
+  // What's new after an update (#527).
+  whatsNewToast,
   // The toasts from the keyboard (#457).
   toastKeys,
   // Real keys from a fixture (#454).

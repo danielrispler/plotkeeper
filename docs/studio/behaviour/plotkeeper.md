@@ -25,6 +25,10 @@ At start it applies the writer `settings.json` names (`summaries.writer`, `claud
 
 `PLOTKEEPER_NO_BROWSER=1` leaves the browser closed; the address is printed either way (`plotkeeper: <url>`).
 
+## What's new after an update
+
+At start the page asks the server for plotkeeper's package version (`about`, #527). The page keeps the last version it showed in `localStorage` (`shown-version`). With none stored, a first install, it stores the current one and shows nothing; with the same version it shows nothing, so a rebuild without a version change stays quiet. With a different one it shows one toast, "Updated to X.Y.Z" with a "What's new" link to that version's GitHub Release (`https://github.com/danielrispler/plotkeeper/releases/tag/vX.Y.Z`) and a ×, in the toasts' region under the copy toast, not in colour. It stays until its ×. The new version is stored only once the toast has shown while the tab was visible: a page reloaded in a hidden tab stores it at the tab's first visible moment. The changelog's text stays on GitHub; a version published without a Release links to a missing page.
+
 ## Seen and notices
 
 Seen and notices are the page's (danielrispler/plotkeeper#331); the Dock badge, the macOS notifications and the sounds are gone.

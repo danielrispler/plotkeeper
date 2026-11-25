@@ -91,6 +91,7 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
         "cards" => out(crate::cards(app)),
         "writer_notice" => out(app.writer_notice.lock().unwrap().clone()),
         "wired" => out(crate::wired()),
+        "about" => out(crate::about()),
         "ask" => res(crate::ask(
             app,
             arg(a, "session")?,
