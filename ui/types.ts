@@ -510,7 +510,12 @@ export type PrBrief = {
 // `guard`: Guard with a law's offer (#401), the parts a bug fix touched; none when the PR offers none, or in a brief from before it.
 // `shape`: what code decided the brief's shape would be; the window never reads it.
 export type BriefShape = { chapters: boolean; required: string[]; also: string[]; overview: boolean; flows_changed: string[] };
-export type StoredBrief = { version: number; pr: number; head: string; written_at: number; stale: boolean; model: string; shape?: BriefShape; brief: PrBrief; guard?: Guard | null };
+// `partial_facts` (#477, #491): what the brief was written without, absent when nothing was missing or in a brief from before it.
+export type StoredBrief = { version: number; pr: number; head: string; written_at: number; stale: boolean; model: string; shape?: BriefShape; brief: PrBrief; guard?: Guard | null; partial_facts?: PartialFacts };
+// The cut diff's files none of whose hunks were sent and those sent in part, with its bytes sent and not sent; the claim check's error; the
+// extensions of the diff's source languages no extractor of the map reads (`understanding/src/pr_brief.rs`, `PartialFacts`).
+export type DiffCut = { files_cut: string[]; files_partial: string[]; bytes_sent: number; bytes_cut: number };
+export type PartialFacts = { cut?: DiffCut; claim_error?: string; no_extractor?: string[] };
 export type Guard = { parts: string[] };
 // A new law (#401): drafted by the writer from a PR's facts, confirmed or edited by Daniel, then added with its test by a run.
 export type NewLaw = { id: string; on: string; text: string };

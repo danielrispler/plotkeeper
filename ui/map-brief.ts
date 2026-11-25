@@ -2,11 +2,11 @@
 // a brief's steps one at a time under the map. A light runs the step's links at one speed and a part lights as it arrives; the camera frames the
 // parts the brief lights; the panel is one narrow width, as tall as the step it shows (its CSS scrolls a taller step inside it, #449), and
 // crossfades between steps; a figure for a change inside one part is drawn under the step's words by `figureShapes` from the writer's labels;
-// citations sit in quiet type, and the panel says when the writer saw only part of the diff and which
-// items are not confirmed from the facts. A step's "See the code" opens its parts' files in the drawer (`map-drawer.ts`) above it. Opening a brief returns the map to now.
+// citations sit in quiet type, a "Partial facts · N" chip lists what the brief was written without (#491), and an item not confirmed
+// from the facts carries a mark whose popover lists why. A step's "See the code" opens its parts' files in the drawer (`map-drawer.ts`) above it. Opening a brief returns the map to now.
 // A step's check (#340) is answered in place: a pick in the panel, an order by tapping parts on the map into numbered slots (`pickRun`, `orderRun`);
 // Check grades it, a wrong answer shows the correction, and an order check replays the right path along the links.
-// Esc (`brief` layer) closes it and keeps its step. `map-model.ts` holds the logic: `briefPlayer`, `briefCamera`, `figureShapes`.
+// Esc (`brief` layer) closes it and keeps its step; an open not-confirmed popover (`popover` layer) closes first, and a new step closes it. `map-model.ts` holds the logic: `briefPlayer`, `briefCamera`, `figureShapes`.
 // A part catch-up (#391) plays in the same reader (`openCatchUpOf`): one story of a fogged part, under a negative number of its own (one per
 // fog list, `catchUpIds`) so the player keeps its step apart from the PR briefs and from an older story of the part; read to its end it
 // clears the part's fog (`part_catch_up_done`) and completes no brief.
@@ -23,7 +23,7 @@ import { scrubTo } from "./map-history.js";
 import { overturnNote, ratifyActions, ratifyDetail } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
-import { actorSize, alsoAt, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureMax, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, stageLabel, storySteps, type Rect, type Shape, stepCode, unconfirmed } from "./map-model.js";
+import { actorSize, alsoAt, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureMax, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, partialFactsLines, pickRun, type PickRun, playlist, plateSize, stageLabel, storySteps, type Rect, type Shape, stepCode, unconfirmed, unconfirmedReasons } from "./map-model.js";
 import type { BriefCheck, BriefFigure, BriefStep, BriefView, CatchUpOffer, CommitFiles, PrBrief, PrDiffArgs, RatifyRow, ReadyPr, StoredCatchUp } from "./types.js";
 
 const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
@@ -61,6 +61,58 @@ let watching: (() => void) | null = null;
 // The "not confirmed from the facts" marks shown, watched until seen or the brief closes (#346).
 let marks: (() => void)[] = [];
 const stopWatching = () => (watching?.(), (watching = null));
+// The not-confirmed popover (#491): one manual popover of the panel, so Esc reaches the map's layers, which close it before the brief. It
+// shows the reasons of the mark that opened it, anchored to that mark (`showPopover`'s source); a redraw of the same step anchors it to the
+// mark's new copy, and a new step closes it.
+let why: HTMLElement | null = null;
+// The open popover's mark, by its key (`step`, or `decision:<id>`).
+let whyOf: string | null = null;
+const popoverOpen = () => !!why?.isConnected && why.matches(":popover-open");
+const markOf = (key: string) => panel().querySelector<HTMLElement>(`.brief-why-mark[data-why="${CSS.escape(key)}"]`);
+function closePopover() {
+  if (popoverOpen()) why!.hidePopover();
+  if (whyOf) markOf(whyOf)?.setAttribute("aria-expanded", "false");
+  whyOf = null;
+}
+function openPopover(mark: HTMLElement, reasons: string[]) {
+  if (!why) {
+    why = text("div", "", "brief-why");
+    why.id = "brief-why";
+    why.setAttribute("popover", "manual");
+  }
+  if (why.parentElement !== panel()) panel().append(why);
+  const list = reasons.length ? text("ul", "", "brief-why-list") : text("p", "The checks gave no reason.", "brief-why-none");
+  list.append(...reasons.map((reason) => text("li", reason)));
+  why.replaceChildren(text("p", "Why it is not confirmed", "brief-why-title"), list);
+  if (popoverOpen()) why.hidePopover();
+  why.showPopover({ source: mark });
+  whyOf = mark.dataset.why ?? null;
+  mark.setAttribute("aria-expanded", "true");
+}
+// After a redraw of the same step: the open popover follows its mark's new copy, or closes when the mark is gone.
+function reanchorPopover() {
+  if (!whyOf || !popoverOpen()) return;
+  const mark = markOf(whyOf);
+  if (!mark) return closePopover();
+  why!.hidePopover();
+  why!.showPopover({ source: mark });
+  mark.setAttribute("aria-expanded", "true");
+}
+// The "not confirmed from the facts" mark of a step or a flagged decision: a button whose popover lists the item's reasons, the mark's
+// own words left out. Seeing the mark counts for the stop rules (#346).
+function unconfirmedMark(view: MapView, pr: number, flags: string[], key: string): HTMLElement {
+  const wrap = text("p", "", "brief-quiet brief-unconfirmed");
+  const mark = text("button", "not confirmed from the facts", "btn quiet brief-why-mark");
+  mark.setAttribute("type", "button");
+  mark.title = "Show why the checks could not confirm this";
+  mark.dataset.why = key;
+  mark.setAttribute("aria-controls", "brief-why");
+  mark.setAttribute("aria-expanded", String(whyOf === key && popoverOpen()));
+  mark.addEventListener("click", () => (whyOf === key && popoverOpen() ? closePopover() : openPopover(mark, unconfirmedReasons(flags))));
+  marks.push(watchSeen(mark, { active: () => mark.isConnected && panel().classList.contains("open"), onSeen: () => logStop("unconfirmed-seen", view.project, prOf(pr)) }));
+  wrap.append(mark);
+  return wrap;
+}
 // The end-of-story bar of each chapter played since the brief opened (#393), kept so a redraw keeps what is typed; a reopened brief starts
 // them empty.
 const bars = new Map<string, Bar>();
@@ -283,6 +335,7 @@ export function closeBrief() {
   stopWatching();
   marks.forEach((stop) => stop());
   marks = [];
+  closePopover();
   player.close();
   playing = null;
   catchUp = null;
@@ -517,12 +570,7 @@ function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["als
       if (now) show(now, true);
     }));
   }
-  if (unconfirmed(step)) {
-    const mark = text("p", "not confirmed from the facts", "brief-quiet brief-unconfirmed");
-    mark.title = step.flags.join("\n");
-    marks.push(watchSeen(mark, { active: () => mark.isConnected && panel().classList.contains("open"), onSeen: () => logStop("unconfirmed-seen", view.project, prOf(pr)) }));
-    words.append(mark);
-  }
+  if (unconfirmed(step)) words.append(unconfirmedMark(view, pr, step.flags, "step"));
   if (also.length) {
     const lines = text("div", "", "brief-also");
     lines.append(text("p", "Also touched", "brief-quiet"));
@@ -618,6 +666,8 @@ function ratifyNode(view: MapView, rows: RatifyRow[]) {
     }
     const detail = ratifyDetail(row);
     if (detail) item.append(detail);
+    const decided = row.kind === "decision" ? playing?.brief.brief.decisions.find((each) => each.id === row.id) : undefined;
+    if (decided && unconfirmed(decided)) item.append(unconfirmedMark(view, row.pr, decided.flags, `decision:${row.id}`));
     list.append(item);
   }
   const note = overturnNote(view.project, (item) => rows.some((row) => row.pr === item.pr && row.kind === item.kind && row.id === item.id));
@@ -808,6 +858,8 @@ function show(view: MapView, same: boolean) {
   box.classList.add("open");
   const cols = box.querySelector<HTMLElement>(".brief-cols")!;
   const also = alsoAt(playing.brief.brief, now.chapter, now.step, storySteps(list).length);
+  // A new step closes the popover of the one before.
+  if (!same) closePopover();
   const fill = () => {
     const node = stepNode(view, step, pr, also);
     figureExplore(view, node, step, pr, now.chapter);
@@ -819,6 +871,7 @@ function show(view: MapView, same: boolean) {
     if (!same) cols.scrollTop = 0;
     bar?.offer();
     watchLast(node, now.step);
+    reanchorPopover();
     aim(view, step);
   };
   clearTimeout(swap);
@@ -878,7 +931,6 @@ function buildPanel(view: MapView, list: BriefStep[]) {
   // The brief's one live region (#456): Back and Next put the new step's title in it, and nothing else; the step itself is not live.
   const live = text("p", "", "visually-hidden brief-live");
   live.setAttribute("aria-live", "polite");
-  const partial = playing?.partial ? text("span", "Written from part of the diff", "brief-partial") : text("span", "", "brief-partial");
   const back = text("button", "Back", "btn brief-back");
   back.title = "The step before";
   back.addEventListener("click", () => move(-1));
@@ -887,10 +939,34 @@ function buildPanel(view: MapView, list: BriefStep[]) {
   next.title = "The next step";
   next.addEventListener("click", () => advance());
   const foot = text("div", "", "brief-foot");
-  foot.append(dots, partial, back, next);
+  foot.append(dots, back, next);
   // A PR that closes the pre-flighted issue, or a ticket under it (#394): what Daniel expected against what it touched.
   const line = expectedLine(playing?.expected, view.doc);
-  box.replaceChildren(leave, ...(line ? [text("p", line, "brief-expected")] : []), cols, foot, live);
+  const facts = factsChip();
+  box.replaceChildren(leave, ...(facts ? [facts] : []), ...(line ? [text("p", line, "brief-expected")] : []), cols, foot, live);
+}
+
+// "Partial facts · N" (#491): what the brief was written without, one line per input, opening below the panel's head. Built with the
+// panel, so it stays open across steps. None when nothing was missing.
+function factsChip(): HTMLElement | null {
+  const lines = partialFactsLines(playing?.brief.partial_facts, playing?.partial ?? false);
+  if (!lines.length) return null;
+  const chip = text("details", "", "brief-facts");
+  const summary = text("summary", `Partial facts · ${lines.length}`);
+  summary.title = "What this brief was written without";
+  const list = text("ul", "", "brief-facts-list");
+  for (const { line, files } of lines) {
+    const item = text("li", line);
+    if (files.length) {
+      const paths = text("ul", "", "brief-facts-files");
+      paths.setAttribute("translate", "no");
+      paths.append(...files.map((path) => text("li", path)));
+      item.append(paths);
+    }
+    list.append(item);
+  }
+  chip.append(summary, list);
+  return chip;
 }
 
 function move(by: number) {
@@ -925,4 +1001,5 @@ const onResize = () => {
   if (view && player.current()) show(view, true);
 };
 
+registerLayer("popover", { open: popoverOpen, close: closePopover });
 registerLayer("brief", { open: briefOpen, close: closeBrief });

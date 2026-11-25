@@ -1,7 +1,7 @@
 // The Map view's pure logic (spec danielrispler/plotkeeper#306, ticket #309): the map file as the window reads it, where parts
 // are placed, the drag threshold, the link's rim points, the layered Esc and the camera. `map.ts` draws and wires them.
 
-import type { BriefFigure, BriefStep, CatchUpOffer, CatchUpStage, FogListEntry, Camera, Ci, CommitFiles, Fog, FogEntry, HistoricalMap, HistoryEntry, PrBrief, Proof, ReadyPr } from "./types.js";
+import type { BriefFigure, PartialFacts, BriefStep, CatchUpOffer, CatchUpStage, FogListEntry, Camera, Ci, CommitFiles, Fog, FogEntry, HistoricalMap, HistoryEntry, PrBrief, Proof, ReadyPr } from "./types.js";
 
 export type Tier = "core" | "interface" | "black-box";
 export type Point = { x: number; y: number };
@@ -24,9 +24,9 @@ export const actorSize: Size = { w: 120, h: 28 };
 // How far the pointer moves before a press on a plate becomes a drag, so a click never nudges it.
 export const dragThreshold = 6;
 // The layers Esc peels, first to last (user story 5, spec #334 and spec #380): an overlay over the map (a micro-world, #399, then the pre-flight,
-// #394; spec #378, "Layers and keys"), the patch review (#398), a drawer, a PR brief (closing it keeps its step), a scrubbed past commit (back to now), a part's sheet, then the left panel (#385). The
+// #394; spec #378, "Layers and keys"), the patch review (#398), a drawer, a brief's "not confirmed" popover (#491), a PR brief (closing it keeps its step), a scrubbed past commit (back to now), a part's sheet, then the left panel (#385). The
 // tickets that add them register a `Layer` under its name in `map.ts`; the Map view itself is left only when none is open.
-export const layerOrder = ["micro-world", "pre-flight", "patch-review", "drawer", "brief", "scrubbed", "sheet", "panel"] as const;
+export const layerOrder = ["micro-world", "pre-flight", "patch-review", "drawer", "popover", "brief", "scrubbed", "sheet", "panel"] as const;
 export type LayerName = (typeof layerOrder)[number];
 export type Layer = { open: () => boolean; close: () => void };
 
@@ -116,7 +116,7 @@ export function rimPoint(center: Point, size: Size, toward: Point): Point {
 
 // A project switch: closes the layers that belong to the project shown, whatever the next one draws, since it may have no map to draw.
 export function switchProject(layers: Partial<Record<LayerName, Layer>>) {
-  for (const name of ["micro-world", "pre-flight", "patch-review", "brief"] as const) if (layers[name]?.open()) layers[name].close();
+  for (const name of ["micro-world", "pre-flight", "patch-review", "popover", "brief"] as const) if (layers[name]?.open()) layers[name].close();
 }
 
 // Esc: closes the first layer that is open, in `layerOrder`, and says which; null when none was: on the bare map Esc does nothing, since the
@@ -477,6 +477,24 @@ export function figureShapes(fig: BriefFigure): Shape[] {
 
 // An item the checks left flagged shows "not confirmed from the facts".
 export const unconfirmed = (step: Pick<BriefStep, "flags">): boolean => step.flags.length > 0;
+// What the check adds to an item still flagged after the retry (`UNCONFIRMED`, `understanding/src/pr_brief_check.rs`): the mark's own words.
+const UNCONFIRMED = "not confirmed from the facts";
+// Why an item is not confirmed, as its popover lists it (#491): its flags without the mark's own words.
+export const unconfirmedReasons = (flags: string[]): string[] => flags.filter((flag) => flag !== UNCONFIRMED);
+
+// The "Partial facts · N" chip's lines (#491): one per input the brief was written without, the cut diff's with its files. A brief stored
+// before the facts has only `partial`, whether its diff was cut, so it says that without the list. None when nothing was missing.
+export type PartialLine = { line: string; files: string[] };
+const kib = (bytes: number) => (bytes < 1024 ? `${bytes}\u00a0B` : `${Math.round(bytes / 1024)}\u00a0KiB`);
+export function partialFactsLines(facts: PartialFacts | undefined, partial: boolean): PartialLine[] {
+  const lines: PartialLine[] = [];
+  const cut = facts?.cut;
+  if (cut) lines.push({ line: `The diff was cut: ${kib(cut.bytes_sent)} sent, ${kib(cut.bytes_cut)} not`, files: [...cut.files_cut, ...cut.files_partial.map((path) => `${path} (in part)`)] });
+  else if (partial) lines.push({ line: "The diff was cut", files: [] });
+  if (facts?.claim_error) lines.push({ line: `The claim check failed: ${facts.claim_error}`, files: [] });
+  if (facts?.no_extractor?.length) lines.push({ line: `No extractor reads ${facts.no_extractor.join(", ")} files, so their imports are not on the map`, files: [] });
+  return lines;
+}
 
 // Which files a step's "See the code" asks `pr_diff` for (#490), the step at `index` of the played `list`: "all" on the Ratify step, and
 // on the last step when the list has no Ratify step; else the map's parts it lights (actors left out), or "none" when it lights no part.
