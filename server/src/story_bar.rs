@@ -6,10 +6,7 @@
 
 use crate::stop_rules::{self, Event, Kind};
 use serde::{Deserialize, Serialize};
-use std::{
-    path::Path,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::path::Path;
 
 /// The longest explain-back line kept, in characters; a longer one is refused.
 pub const LINE_MAX: usize = 300;
@@ -105,9 +102,7 @@ fn bar_in(
     }
     let line = Line {
         event: Event {
-            at: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_or(0, |d| d.as_secs()),
+            at: studio_workbench::clock::now_ms() / 1000,
             day: day.into(),
             kind,
             project: Some(project.into()),

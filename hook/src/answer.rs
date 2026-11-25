@@ -27,7 +27,7 @@ use std::{
     os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
     thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 /// A heartbeat older than this counts as nobody watching (decision 22).
@@ -146,12 +146,7 @@ pub fn is_file_safe(session: &str) -> bool {
     !session.is_empty() && session.chars().all(plain)
 }
 
-pub fn now_ms() -> u64 {
-    let since = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    since.as_millis() as u64
-}
+pub use studio_workbench::clock::now_ms;
 
 /// Writes `value` to `path` whole, readable by its user only, so a reader never sees half a file.
 pub fn write_private(path: &Path, value: &Value) -> io::Result<()> {

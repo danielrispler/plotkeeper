@@ -315,9 +315,7 @@ pub fn brief_chapter_done(
         .ok_or("that brief is not stored")?;
     let lit = lit_parts(&stored.brief);
     let file = crate::map::state_file()?;
-    let at = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs());
+    let at = studio_workbench::clock::now_ms() / 1000;
     let done = crate::fog::mark_read(&file, &project, number, chapter, &head, lit, at)?;
     crate::fog::clear_pr(Path::new(&project), &file, &project, number, &done)?;
     app.events.emit("map-landed", serde_json::json!(project));

@@ -7,6 +7,7 @@
 // Spec #548, Group 3: these two crates document their public API.
 #![warn(missing_docs)]
 
+pub mod clock;
 pub mod run;
 
 use serde::Serialize;

@@ -230,8 +230,7 @@ impl Fingerprints {
 
 /// The Unix second now.
 fn now() -> u64 {
-    let since = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH);
-    since.map_or(0, |since| since.as_secs())
+    studio_workbench::clock::now_ms() / 1000
 }
 
 /// The first line of a worktree's reflog: the commit it was created at, when, and how many bytes

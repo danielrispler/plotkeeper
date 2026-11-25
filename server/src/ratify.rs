@@ -227,11 +227,9 @@ pub fn file() -> Result<PathBuf, String> {
     Ok(studio_hook::data_dir(&home).join(FILE))
 }
 
+/// Now, in Unix seconds, as ratify, staleness and the map keep time.
 pub fn now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+    studio_workbench::clock::now_ms() / 1000
 }
 
 // ---------------------------------------------------------------------------------------------------------------

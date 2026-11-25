@@ -10,7 +10,6 @@ use std::{
     fs::{self, File},
     io::{self, Write},
     path::{Path, PathBuf},
-    time::UNIX_EPOCH,
 };
 use studio_core::{CardRequest, Decision, LiveFacts, Session, Step, Studio, SummaryRequest};
 
@@ -257,9 +256,7 @@ pub struct SessionCards {
 }
 
 /// Now, in Unix milliseconds, as the store's records keep time.
-pub fn millis() -> u64 {
-    UNIX_EPOCH.elapsed().unwrap_or_default().as_millis() as u64
-}
+pub use studio_workbench::clock::now_ms as millis;
 
 /// The store's cards, and its briefs by session or worker, kept in memory and written to their files on each
 /// change: the briefs to `briefs.json` beside the cards (danielrispler/Falinks#369, decision 17).
