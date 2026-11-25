@@ -163,6 +163,12 @@ test("a map that reads gives its parts, actors, links and laws; one that does no
   assert.deepEqual([map.parts.length, map.actors.length, map.links.length, map.laws.length], [1, 1, 1, 1]);
   assert.equal(parseMap("{ nope").ok, false);
   assert.equal(parseMap('{"version":1}').ok, false);
+  // #548: a file that is JSON but no object is a broken map with its reason, never a throw.
+  for (const text of ["null", "[]", "3", '"parts"', "true"]) {
+    const read = parseMap(text);
+    assert.equal(read.ok, false, text);
+    assert.equal(read.why, "the map is not a JSON object", text);
+  }
 });
 
 test("the plate's size here is the stylesheet's, so rim points land on the drawn edge", () => {

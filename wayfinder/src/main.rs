@@ -52,7 +52,7 @@ fn command_output(
         });
     }
     drop(send);
-    let group = -(child.id() as i32);
+    let group = -libc::pid_t::try_from(child.id())?;
     let kill_group = || {
         // SAFETY: only the separately created group belonging to this child is killed.
         unsafe {

@@ -2,6 +2,8 @@
 // now, drawn by code from the map file's text, never a writer call, so it shows at once: the part's sheet already holds its caption,
 // purpose, held items, laws and "Talks to" (spec #473), and the refresher adds the flows through the part. `map-stale.ts` draws it.
 
+import { isObject } from "./settings.js";
+
 export type Refresher = {
   // Each flow with a hop on a link at the part, and those hops' sentences, in the flow's order; its id is what a micro-world is built from.
   flows: { id: string; name: string; hops: string[] }[];
@@ -14,12 +16,13 @@ const list = <T>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) 
 
 // The refresher of `part` from the map file's text; null when the text does not read or has no such part.
 export function refresherOf(source: string, part: string): Refresher | null {
-  let file: Record<string, unknown>;
+  let file: unknown;
   try {
     file = JSON.parse(source);
   } catch {
     return null;
   }
+  if (!isObject(file)) return null;
   const parts = list<WithId>(file.parts);
   if (!parts.some((each) => each.id === part)) return null;
   // The ids of the links at the part: a hop on one of them crosses it.

@@ -345,10 +345,12 @@ export function oneAtATime(run: (id: string) => Promise<void>): (id: string) => 
     const id = busy ? undefined : queue.shift();
     if (id === undefined) return;
     busy = true;
-    void run(id).finally(() => {
-      busy = false;
-      next();
-    });
+    run(id)
+      .catch(failure("queued run"))
+      .finally(() => {
+        busy = false;
+        next();
+      });
   };
   return (id) => {
     queue.push(id);

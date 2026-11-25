@@ -1061,8 +1061,10 @@ impl ClaudeWriter {
         let (Some((out, err)), Some(status)) = (out, status) else {
             // The group's id stays taken while the unreaped call or a process holding its output
             // lives, so this stops no one else.
-            // SAFETY: `kill` takes no pointers.
-            unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL) };
+            if let Ok(group) = libc::pid_t::try_from(child.id()) {
+                // SAFETY: `kill` takes no pointers.
+                unsafe { libc::kill(-group, libc::SIGKILL) };
+            }
             let _ = child.wait();
             let error = WriterError::new(
                 FailureKind::Timeout,

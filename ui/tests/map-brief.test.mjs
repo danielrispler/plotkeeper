@@ -451,3 +451,31 @@ test("See the code of a Since you read story asks for the diff from the head it 
   assert.deepEqual(diffArgs("/p", { brief, partial: false }), { project: "/p", number: 7, head: "bbb", title: "Fog" });
   assert.deepEqual(diffArgs("/p", { brief, partial: false, since: "aaa" }), { project: "/p", number: 7, head: "bbb", title: "Fog", base: "aaa" });
 });
+
+// #548: the brief draws its step again on every map draw, resize and explanations toggle. Each draw stops watching the marks of the
+// draw before, so a drag of the window's edge leaves one seen-watcher per mark, not one per draw.
+test("drawing a step again, as a resize does, keeps one seen-watcher per not-confirmed mark", async () => {
+  const { fakeDocument } = await import("./dom.mjs");
+  const observers = [];
+  globalThis.IntersectionObserver = class {
+    constructor() {
+      observers.push(this);
+    }
+    observe() {}
+    disconnect() {
+      this.gone = true;
+    }
+  };
+  globalThis.document = fakeDocument();
+  const { stepNode } = await import("../../dist/map-brief.js");
+  const view = { project: "/p", doc: { parts: [], laws: [] }, scrub: null };
+  const flagged = step("Now", { flags: ["claim check: the quote is not in the diff", "not confirmed from the facts"] });
+  const live = () => observers.filter((o) => !o.gone).length;
+  stepNode(view, flagged, 7);
+  assert.equal(live(), 1);
+  for (let i = 0; i < 20; i++) stepNode(view, flagged, 7);
+  assert.equal(live(), 1, "the watchers of the draws before are stopped");
+  // The next step has no mark: the one before is not watched on.
+  stepNode(view, step("Before"), 7);
+  assert.equal(live(), 0);
+});

@@ -62,7 +62,7 @@ export async function select(id: string, agent: string | null = null) {
     }
     failure("select", "error")(e);
   }
-  await catchUp();
+  await catchUp().catch(failure("catch up"));
 }
 
 // A press on a session's row in the list or its chip on the map: a second press on the session the panel shows closes the panel (#385);
@@ -89,12 +89,12 @@ export async function deselect() {
 }
 
 // Draws the selection and cards that events sent while a press waited; fetched again, since an
-// event held back may predate the press's reply.
+// event held back may predate the press's reply. A read that fails leaves them missed, for the next press's catch-up.
 async function catchUp() {
   if (studio.pending || !studio.missed) return;
-  studio.missed = false;
   const [selected, cards] = await Promise.all([invoke("selected"), invoke("cards")]);
-  if (studio.pending) return; // a newer press draws its own reply
+  if (studio.pending) return; // a newer press draws its own reply, and catches up after it
+  studio.missed = false;
   show(selected);
   showCards(cards);
 }

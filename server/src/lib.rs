@@ -818,18 +818,6 @@ pub fn process_ends(studio: &Mutex<Studio>, alive: impl Fn(u32) -> bool) -> Vec<
         .collect()
 }
 
-/// Whether process `pid` exists: signal 0 only checks, it sends nothing.
-pub fn pid_alive(pid: u32) -> bool {
-    let Ok(pid) = i32::try_from(pid) else {
-        return false;
-    };
-    // SAFETY: signal 0 is an existence check; it delivers no signal.
-    unsafe {
-        libc::kill(pid, 0) == 0
-            || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-    }
-}
-
 /// Daniel marked session `id` unseen (danielrispler/Falinks#556), from the rail's menu.
 pub fn mark_unseen(app: &App, id: String) {
     if let Some((id, turns)) = app.core.lock().unwrap().mark_unseen(&id) {
@@ -1362,16 +1350,6 @@ mod tests {
             studio_core::State::Ended
         );
         assert!(super::process_ends(&studio, alive).is_empty());
-    }
-
-    #[test]
-    fn this_process_is_alive_and_a_vanished_pid_is_not() {
-        assert!(super::pid_alive(std::process::id()));
-        // A child that has exited and been waited for.
-        let mut child = std::process::Command::new("true").spawn().unwrap();
-        let pid = child.id();
-        child.wait().unwrap();
-        assert!(!super::pid_alive(pid));
     }
 
     #[test]

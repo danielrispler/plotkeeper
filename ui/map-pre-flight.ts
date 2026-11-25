@@ -206,7 +206,7 @@ function show(next: Phase | null) {
 // A pre-flight framed: logged for the stop rules, and the map read again, so its plates are marked.
 function framed(pre: PreFlight, project: string) {
   logStop("pre-flight-run", project);
-  void reloadMap();
+  reloadMap().catch(failure("reload the map"));
   return pre;
 }
 

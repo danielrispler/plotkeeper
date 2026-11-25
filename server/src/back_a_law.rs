@@ -1199,8 +1199,10 @@ impl Sandbox {
         {
             Ok(status) => status.is_ok_and(|status| status.success()),
             Err(_) => {
-                // SAFETY: a signal to the process group this proof's child leads, which it made for itself.
-                unsafe { libc::killpg(pid as i32, libc::SIGKILL) };
+                if let Ok(group) = libc::pid_t::try_from(pid) {
+                    // SAFETY: a signal to the process group this proof's child leads, which it made for itself.
+                    unsafe { libc::killpg(group, libc::SIGKILL) };
+                }
                 let _ = waited.recv();
                 return Ran {
                     ok: false,

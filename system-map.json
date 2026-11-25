@@ -19,7 +19,8 @@
         { "name": "The event log", "text": "One append-only JSON Lines file, the only source of session state.", "paths": ["hook/src/lib.rs"] },
         { "name": "The recorder", "text": "Appends each event with the agent its entry names, and drops another harness's event, which that harness records.", "paths": ["hook/src/main.rs"] },
         { "name": "IDE sessions", "text": "Records no process for an agent inside an IDE app such as VS Code, so its session goes idle instead of ending." },
-        { "name": "The answer hook", "text": "Waits for your answer to a question or a blocked command, given on the page.", "paths": ["hook/src/answer.rs", "hook/src/bin/plotkeeper-answer.rs"] }
+        { "name": "The answer hook", "text": "Waits for your answer to a question or a blocked command, given on the page.", "paths": ["hook/src/answer.rs", "hook/src/bin/plotkeeper-answer.rs"] },
+        { "name": "The process check", "text": "The one test of whether a pid is alive, which the answer hook and the server both use.", "paths": ["hook/src/sys.rs"] }
       ],
       "tier": "core", "paths": ["hook/"]
     },

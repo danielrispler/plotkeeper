@@ -6,7 +6,7 @@ import { initial, reload } from "../../dist/settings.js";
 test("missing files give the defaults", () => {
   const loaded = reload(initial, { settings: null, keymap: null });
   assert.deepEqual(loaded.settings.summaries, { model: "haiku", effort: "", on_open: false, writer: "claude" });
-  assert.equal(loaded.keymap.Workspace["cmd-1"], "studio::ToggleList");
+  assert.equal(loaded.keymap.get("Workspace").get("cmd-1"), "studio::ToggleList");
   assert.deepEqual(loaded.errors, []);
 });
 
@@ -45,7 +45,7 @@ test("a broken file keeps the last good settings and reports the error", () => {
   const good = reload(initial, { settings: `{ "summaries": { "model": "sonnet" } }`, keymap: `[{ "bindings": { "cmd-l": "studio::ToggleList" } }]` });
   const broken = reload(good, { settings: `{ "summaries": { "model": "opus" }, `, keymap: `[{ "bindings": ` });
   assert.equal(broken.settings.summaries.model, "sonnet");
-  assert.equal(broken.keymap.Workspace["cmd-l"], "studio::ToggleList");
+  assert.equal(broken.keymap.get("Workspace").get("cmd-l"), "studio::ToggleList");
   assert.equal(broken.errors.length, 2);
   assert.match(broken.errors[0], /^settings\.json: /);
   assert.match(broken.errors[1], /^keymap\.json: /);
@@ -58,19 +58,19 @@ test("a later entry's rebind keeps the keys an earlier entry bound", () => {
     { "bindings": { "cmd-1": "studio::ToggleRail" } },
     { "bindings": { "cmd-l": "studio::ToggleList" } },
   ]`;
-  const { Workspace } = reload(initial, { settings: null, keymap }).keymap;
-  assert.equal(Workspace["cmd-1"], "studio::ToggleRail");
-  assert.equal(Workspace["cmd-l"], "studio::ToggleList");
-  assert.equal(Workspace["cmd-2"], undefined);
+  const Workspace = reload(initial, { settings: null, keymap }).keymap.get("Workspace");
+  assert.equal(Workspace.get("cmd-1"), "studio::ToggleRail");
+  assert.equal(Workspace.get("cmd-l"), "studio::ToggleList");
+  assert.equal(Workspace.get("cmd-2"), undefined);
 });
 
 test("a key that is not a keystroke is reported and the rest of the keymap stays", () => {
   const keymap = `[{ "bindings": { "": "studio::Dismiss", "cmd-l": "studio::ToggleList" } }]`;
   const loaded = reload(initial, { settings: null, keymap });
   assert.deepEqual(loaded.errors, [`keymap.json: "" is not a keystroke`]);
-  assert.equal(loaded.keymap.Workspace["cmd-l"], "studio::ToggleList");
+  assert.equal(loaded.keymap.get("Workspace").get("cmd-l"), "studio::ToggleList");
   // The skipped binding does not move Dismiss off its default key.
-  assert.equal(loaded.keymap.Workspace.escape, "studio::Dismiss");
+  assert.equal(loaded.keymap.get("Workspace").get("escape"), "studio::Dismiss");
 });
 
 test("a file of the wrong shape is reported", () => {
@@ -118,4 +118,34 @@ test("tips are on by default, `\"tips\": false` turns them off, and a wrong type
   const wrong = reload(initial, { settings: `{ "tips": "no" }`, keymap: null });
   assert.equal(wrong.settings.tips, true);
   assert.deepEqual(wrong.errors, ["settings.json: tips: expected a boolean"]);
+});
+
+// #548: contexts, keystrokes and action names come from the file, so none of them may reach what every object inherits.
+test("__proto__, constructor and toString in a keymap are ordinary names and leave Object.prototype untouched", async () => {
+  const { bound } = await import("../../dist/keys.js");
+  const cmd = (n) => ({ key: n, code: `Digit${n}`, metaKey: true, ctrlKey: false, altKey: false, shiftKey: false });
+  const keymap = `[
+    { "context": "__proto__", "bindings": { "cmd-9": "studio::ToggleList" } },
+    { "context": "constructor", "bindings": { "cmd-9": "studio::ToggleRail" } },
+    { "bindings": { "cmd-8": "constructor", "cmd-7": "toString", "cmd-6": "__proto__", "cmd-5": ["toString", "1"] } }
+  ]`;
+  let loaded;
+  let leaked;
+  try {
+    loaded = reload(initial, { settings: null, keymap });
+    leaked = Object.keys(Object.getOwnPropertyDescriptors(Object.prototype)).filter((name) => name.startsWith("cmd-"));
+  } finally {
+    for (const name of Object.keys(Object.prototype)) delete Object.prototype[name];
+  }
+  assert.deepEqual(leaked, [], "a context named __proto__ wrote its keys onto every object");
+  assert.deepEqual(loaded.errors, []);
+  assert.equal(bound(loaded.keymap, "Workspace", cmd("8")), "constructor");
+  assert.equal(bound(loaded.keymap, "Workspace", cmd("7")), "toString");
+  assert.equal(bound(loaded.keymap, "Workspace", cmd("6")), "__proto__");
+  assert.deepEqual(bound(loaded.keymap, "Workspace", cmd("5")), ["toString", "1"]);
+  // Contexts of those names are contexts like any other.
+  assert.equal(bound(loaded.keymap, "__proto__", cmd("9")), "studio::ToggleList");
+  assert.equal(bound(loaded.keymap, "constructor", cmd("9")), "studio::ToggleRail");
+  assert.equal(bound(loaded.keymap, "toString", cmd("9")), undefined);
+  assert.equal(bound(loaded.keymap, "Workspace", cmd("1")), "studio::ToggleList", "the defaults stay");
 });

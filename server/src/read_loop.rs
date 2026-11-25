@@ -4,9 +4,9 @@
 //! the page shows (`rail_shown`, `split_shown`) from the [`App`].
 
 use crate::{
-    App, CardsKey, PROCESS_CHECK, append_to, ask_notes, cards, current_cards_key, pid_alive,
-    process_ends, refresh_landed, report, resume, save_roots, save_state, selected, sessions,
-    unsaved, wanted_notes, warn_log,
+    App, CardsKey, PROCESS_CHECK, append_to, ask_notes, cards, current_cards_key, process_ends,
+    refresh_landed, report, resume, save_roots, save_state, selected, sessions, unsaved,
+    wanted_notes, warn_log,
 };
 use std::{
     collections::HashMap,
@@ -433,7 +433,7 @@ impl Follower {
         // A session whose agent is gone ends within about 30 s (#330); the lines are read on the next pass.
         if self.live && self.checked.is_none_or(|at| at.elapsed() >= PROCESS_CHECK) {
             self.checked = Some(Instant::now());
-            let ends = process_ends(state, pid_alive);
+            let ends = process_ends(state, studio_hook::sys::pid_alive);
             if !ends.is_empty()
                 && let Err(e) = append_to(&self.log, &ends)
             {

@@ -607,17 +607,20 @@ fn map_at(repo: &Path, commit: &str) -> Option<String> {
 type Cache = Mutex<HashMap<(String, String), Vec<MapItem>>>;
 static CHANGES: LazyLock<Cache> = LazyLock::new(Mutex::default);
 
-/// The map items `commit` changed, from its map and its parent's. A commit never changes, so the answer is kept.
+/// The map items `commit` changed, from its map and its parent's. A commit never changes, so the answer is kept, but
+/// only one read from both maps: a `git show` that failed may work the next time, so its answer is read again. That
+/// includes a commit whose parent has no map, which git reports the same way.
 fn changes_of(repo: &Path, commit: &str) -> Vec<MapItem> {
     let key = (repo.display().to_string(), commit.to_string());
     if let Some(known) = CHANGES.lock().unwrap().get(&key) {
         return known.clone();
     }
-    let found = map_items(
-        map_at(repo, &format!("{commit}^")).as_deref(),
-        map_at(repo, commit).as_deref(),
-    );
-    CHANGES.lock().unwrap().insert(key, found.clone());
+    let old = map_at(repo, &format!("{commit}^"));
+    let new = map_at(repo, commit);
+    let found = map_items(old.as_deref(), new.as_deref());
+    if old.is_some() && new.is_some() {
+        CHANGES.lock().unwrap().insert(key, found.clone());
+    }
     found
 }
 
@@ -1319,6 +1322,26 @@ mod tests {
             assert_eq!(pr_changes(repo, 99, None), (vec![], None));
             // Only when the walk was cut short may it have landed before the cut: long ago.
             assert_eq!(pr_changes_in(repo, 99, None, 1), (vec![], Some(0)));
+        }
+
+        #[test]
+        fn a_map_that_git_failed_to_show_is_read_again_on_the_next_call() {
+            let (dir, main) = repo();
+            let root = dir.path();
+            commit(root, OLD, "Map (#1)", "1000000000");
+            commit(root, &new_map(), "Change laws (#2)", "1100000000");
+            let repo = Path::new(&main);
+            // The new map's object is out of reach for a moment: `git log` still answers, `git show` of the map fails.
+            let blob = run(root, &["rev-parse", "HEAD:system-map.json"]);
+            let object = root.join(".git/objects").join(&blob[..2]).join(&blob[2..]);
+            let aside = root.join("aside");
+            std::fs::rename(&object, &aside).unwrap();
+            let (failed, landed) = pr_changes(repo, 2, None);
+            assert_eq!(landed, Some(1_100_000_000));
+            assert_ne!(failed.len(), 3, "the map was read without its object");
+            std::fs::rename(&aside, &object).unwrap();
+            let (read, _) = pr_changes(repo, 2, None);
+            assert_eq!(read.len(), 3, "the failed read was kept: {read:?}");
         }
 
         #[test]
