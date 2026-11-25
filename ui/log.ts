@@ -102,7 +102,7 @@ function drawLog(place: HTMLElement, agent: Subagent | null, log: SubagentLog | 
     fullTitle(pressable(text("button", "Parent's terminal"), null, toParent), "Back to the terminal of the session that started this subagent"),
   );
   const note = logNote(log, agent?.status ?? "");
-  const body = note ? [text("p", note, "empty")] : logRows(log!.entries).map(drawRow);
+  const body = note || !log ? [text("p", note ?? "", "empty")] : logRows(log.entries).map(drawRow);
   place.replaceChildren(head, ...body);
 }
 

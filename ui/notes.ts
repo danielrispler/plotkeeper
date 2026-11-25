@@ -17,9 +17,10 @@ const FADE_MS = 6000;
 // turn's intention, and "N finished" when there are more. Null when none is listed.
 export function finishedNote(ids: string[], listed: Session[]): Note | null {
   const sessions = ids.flatMap((id) => listed.filter((s) => s.id === id));
-  if (!sessions.length) return null;
+  const first = sessions[0];
+  if (!first) return null;
   const count = sessions.length > 1 ? `${sessions.length} finished` : "";
-  return { session: sessions[0], count, line: sessions[0].transcript.intention ?? "" };
+  return { session: first, count, line: first.transcript.intention ?? "" };
 }
 
 export type Hold = "pointer" | "focus" | "modal";
@@ -32,7 +33,10 @@ export function noteFade(clock: Clock, hide: () => void) {
   let shown = false;
   const later = () => {
     if (timer !== undefined) clock.clear(timer);
-    timer = shown && !holds.size ? clock.set(() => ((shown = false), hide()), FADE_MS) : undefined;
+    timer = shown && !holds.size ? clock.set(() => {
+          shown = false;
+          hide();
+        }, FADE_MS) : undefined;
   };
   return {
     start() {
@@ -78,7 +82,7 @@ export function showNote(note: Note) {
   const action = () => {
     const button = text("button", "", "btn quiet toast-main");
     button.addEventListener("click", () => {
-      if (noted) select(noted.session.id);
+      if (noted) void select(noted.session.id);
       close();
     });
     return button;
@@ -97,7 +101,10 @@ export function showNote(note: Note) {
 // The toast's hover, focus and a modal dialog hold its fade; once, at start.
 export function watchNotes() {
   const toast = element("note-toast");
-  document.addEventListener("toggle", () => (modalHolds(), copyHolds()), true);
+  document.addEventListener("toggle", () => {
+    modalHolds();
+    copyHolds();
+  }, true);
   toast.addEventListener("pointerenter", () => fade.hold("pointer"));
   toast.addEventListener("pointerleave", () => fade.release("pointer"));
   toast.addEventListener("focusin", () => fade.hold("focus"));
@@ -131,7 +138,7 @@ export function showCopyToast(outcome: Copied["outcome"], prompt: string) {
   copied = prompt;
   if (!copyBody || !copyButton) {
     const body = text("div", "", "copy-body");
-    const button = text("button", "Copy", "btn small") as HTMLButtonElement;
+    const button = text("button", "Copy", "btn small");
     button.setAttribute("type", "button");
     button.title = "Copy the prompt to paste into your agent";
     // The clipboard refused already, so this is the browser's older route, which a click may use.

@@ -1,7 +1,9 @@
 // The window's small parts: the shell's calls, and the elements every region builds.
 
 import { showError } from "./notice.js";
-import type { Command, Commands, Step } from "./types.js";
+import type { Args, Command, Reply, Step } from "./types.js";
+
+type None = Record<string, never>;
 
 declare global {
   interface Window {
@@ -13,9 +15,9 @@ declare global {
   }
 }
 
-// Only a command of the map, and its reply's type comes from there (#144).
-export const invoke = <C extends Command>(command: C, args?: Record<string, unknown>) =>
-  window.__TAURI__.core.invoke<Commands[C]>(command, args);
+// Only a command of the map, with its arguments' and its reply's types from there (#144, #554); one with no arguments takes none.
+export const invoke = <C extends Command>(command: C, ...args: Args<C> extends None ? [] : [args: Args<C>]) =>
+  window.__TAURI__.core.invoke<Reply<C>>(command, args[0]);
 export const listen = <T>(event: string, handler: (payload: T) => void) =>
   window.__TAURI__.event.listen<T>(event, (e) => handler(e.payload));
 
@@ -31,10 +33,11 @@ export function newest() {
 
 // The Studio log (#190): the line is the command's name and the error's message, nothing else of the error. `error` is for a
 // failed action Daniel asked for, `warn` for a call that degrades and carries on. A log that fails is dropped.
-const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
+/** The words of a caught error: an `Error`'s message, such as a refused command's reason, else the value as text. */
+export const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 // What of a line may reach the log, as Rust's `scrubbed` keeps it: one line, up to the first quote mark, so a writer's words never do.
 const kept = (line: string) =>
-  line.replace(/\s*\n\s*/g, " ").split('"')[0].replace(/[: ]+$/, "");
+  (line.replace(/\s*\n\s*/g, " ").split('"')[0] ?? "").replace(/[: ]+$/, "");
 // An `error` also shows in the notice line (#191), whole; the server does not send the UI's own lines back as `server-error`.
 export function logLine(level: "warn" | "error", line: string) {
   if (level === "error") {
@@ -52,7 +55,17 @@ export function logUncaught(target: Pick<Window, "addEventListener">) {
   target.addEventListener("unhandledrejection", (event) => logLine("error", `unhandled rejection: ${messageOf(event.reason)}`));
 }
 
-export const element = (id: string) => document.getElementById(id)!;
+// The page's element `id`, which `index.html` holds; with `type`, checked to be one, so a caller needs no cast. A missing or mistyped
+// element is a broken page, and fails here by its id.
+export function element(id: string): HTMLElement;
+export function element<T extends HTMLElement>(id: string, type: abstract new () => T): T;
+export function element(id: string, type?: abstract new () => HTMLElement): HTMLElement {
+  const found = document.getElementById(id);
+  if (!found) throw new Error(`#${id} is not on the page`);
+  const kind = found.constructor.name;
+  if (type && !(found instanceof type)) throw new Error(`#${id} is ${kind}, not ${type.name}`);
+  return found;
+}
 
 // A question before a button destroys something (#459): the dialog's heading, what is lost, and the confirm button's words, which repeat
 // the button's verb.
@@ -62,12 +75,14 @@ export type Confirm = { heading: string; lost: string; verb: string };
 // with the press, not from its close event, which Chrome fires at the next frame and snap's Chrome never draws. Since it comes a frame
 // late, a close that finds the dialog open is an earlier ask's, after the dialog was opened again; it leaves this ask waiting.
 export function confirmed(ask: Confirm): Promise<boolean> {
-  const dialog = element("confirm-dialog") as HTMLDialogElement;
+  const dialog = element("confirm-dialog", HTMLDialogElement);
   element("confirm-heading").textContent = ask.heading;
   element("confirm-lost").textContent = ask.lost;
   element("confirm-yes").textContent = ask.verb;
+  const form = dialog.querySelector("form");
+  if (!form) throw new Error("#confirm-dialog has no form");
   return new Promise((resolve) => {
-    dialog.querySelector("form")!.onsubmit = (event) => resolve((event.submitter as HTMLButtonElement | null)?.value === "confirm");
+    form.onsubmit = (event) => resolve((event.submitter as HTMLButtonElement | null)?.value === "confirm");
     dialog.oncancel = () => resolve(false);
     dialog.onclose = () => {
       if (!dialog.open) resolve(false);
@@ -76,7 +91,7 @@ export function confirmed(ask: Confirm): Promise<boolean> {
   });
 }
 
-export function text(tag: string, content: string, className = ""): HTMLElement {
+export function text<K extends keyof HTMLElementTagNameMap>(tag: K, content: string, className = ""): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   node.className = className;
   node.textContent = content;
@@ -228,6 +243,7 @@ export function patch(parent: Node, next: Node[]) {
   targets.forEach(({ was }, i) => {
     if (!was) return;
     const to = next[i];
+    if (!to) return;
     if (was.nodeType !== 1) {
       if (was.nodeValue !== to.nodeValue) was.nodeValue = to.nodeValue;
       return;

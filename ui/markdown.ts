@@ -5,7 +5,7 @@
 declare const marked: typeof import("marked");
 
 const entities: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
-const escapeHtml = (text: string) => text.replace(/[&<>"']/g, (c) => entities[c]);
+const escapeHtml = (text: string) => text.replace(/[&<>"']/g, (c) => entities[c] ?? c);
 
 // A link's hover names its target (#220): the page has no status bar to show it.
 const opens = (target: string) => escapeHtml(`Open ${target} in a new tab`);
@@ -27,7 +27,10 @@ const create = () =>
 let renderer: ReturnType<typeof create> | undefined;
 
 // `text` as safe HTML.
-export const markdown = (text: string) => (renderer ??= create()).parse(text, { async: false });
+export const markdown = (text: string) => {
+  renderer ??= create();
+  return renderer.parse(text, { async: false });
+};
 
 // An element showing `text` rendered; its links open in a new tab.
 export function rendered(tag: string, text: string, className = ""): HTMLElement {

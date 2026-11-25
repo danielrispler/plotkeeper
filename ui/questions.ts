@@ -19,6 +19,7 @@ const pickedFor = (nonce: string) => {
   return picks.picked;
 };
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: ratcheted at #554; split it rather than grow it
 export function questionElement(question: Question): HTMLElement {
   const { questions, answer } = question;
   const ask = answer === "open" ? askFor(question) : null;
@@ -32,9 +33,12 @@ export function questionElement(question: Question): HTMLElement {
   const send = () => {
     if (ask === null || picked.size < questions.length) return;
     const answers = Object.fromEntries(
-      questions.map((asked) => [asked.question, asked.multiSelect ? picked.get(asked.question)! : picked.get(asked.question)![0]]),
+      questions.map((asked) => {
+        const chosen = picked.get(asked.question) ?? [];
+        return [asked.question, asked.multiSelect ? chosen : (chosen[0] ?? "")];
+      }),
     );
-    sendAnswer(ask, { answers });
+    void sendAnswer(ask, { answers });
   };
   // One single-choice question is sent by its click; anything more by "Send".
   const sendButton = ask !== null && (questions.length > 1 || questions.some((asked) => asked.multiSelect));
@@ -134,7 +138,7 @@ function answerButtons(ask: Ask, buttons: [AnswerButton, () => void, string?][])
   const row = document.createElement("p");
   row.className = "answer-buttons";
   const button = (label: string, hover: string, click: () => void, className = "") => {
-    const node = text("button", label, `btn ${className}`.trim()) as HTMLButtonElement;
+    const node = text("button", label, `btn ${className}`.trim());
     node.type = "button";
     node.title = hover;
     node.addEventListener("click", click);
@@ -142,6 +146,6 @@ function answerButtons(ask: Ask, buttons: [AnswerButton, () => void, string?][])
   };
   row.append(...buttons.map(([label, click, className]) => button(label, answerHovers[label], click, className)));
   readySend(row, false);
-  row.append(button("Answer in the terminal", "Leave the card and answer in the session's terminal", () => sendAnswer(ask, null)));
+  row.append(button("Answer in the terminal", "Leave the card and answer in the session's terminal", () => void sendAnswer(ask, null)));
   return row;
 }

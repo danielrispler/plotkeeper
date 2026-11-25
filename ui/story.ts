@@ -42,6 +42,7 @@ import {
   type TurnSummary,
 } from "./types.js";
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: `showView`: spec #548 Group 4 splits it; remove this when it does
 export function showView(selected: Selection | null) {
   element("empty").hidden = selected !== null;
   element("view").hidden = selected === null;
@@ -188,7 +189,7 @@ export function subagentHistory(session: Pick<Session, "agents" | "capabilities"
 
 // A subagent's entry in the turn that ran it; its click opens that subagent.
 function historyElement(session: string, entry: HistoryEntry): HTMLElement {
-  const button = pressable(document.createElement("button"), null, () => select(session, entry.agent));
+  const button = pressable(document.createElement("button"), null, () => void select(session, entry.agent));
   button.classList.add("subagent");
   const lines = [text("span", entry.purpose, "asked"), ...(entry.asked ? [prose("span", entry.asked)] : [])];
   button.append(...lines, prose("span", entry.result), text("span", entry.details, "kind"));
@@ -215,7 +216,7 @@ export function headlineOf(summary: TurnSummary | null, message: string | null):
     return { headline: stored.headline.trim() || message?.trim() || null, body: stored.lines ?? [] };
   }
   const lines = (summary?.summary.summary ?? "").split("\n").map((line) => line.trim()).filter(Boolean);
-  if (lines.length) return { headline: lines[0], body: lines.slice(1).map((text) => ({ kind: "reported", text })) };
+  if (lines[0]) return { headline: lines[0], body: lines.slice(1).map((text) => ({ kind: "reported", text })) };
   return { headline: message?.trim() || null, body: [] };
 }
 
@@ -292,7 +293,7 @@ export const cardTime = (id: string) => Number(id.slice(id.lastIndexOf("@") + 1)
 // The index of the turn that runs at `at`: the latest that started at or before it, else null.
 export function turnAt(turns: Pick<Turn, "started_at">[], at: number): number | null {
   let index = turns.length - 1;
-  while (index >= 0 && turns[index].started_at > at) index--;
+  while (index >= 0 && (turns[index]?.started_at ?? 0) > at) index--;
   return index < 0 ? null : index;
 }
 
@@ -319,13 +320,14 @@ export function feedTurns(
     questions: [],
     blocked: [],
   }));
-  const at = (index: number | null) => blocks[index !== null && index < turns.length ? index : turns.length];
+  const rest = blocks[turns.length] ?? { index: null, turn: null, agents: [], questions: [], blocked: [] };
+  const at = (index: number | null) => (index !== null && blocks[index]) || rest;
   // Each list is oldest first; the blocks show the newest first.
   for (const agent of [...agents].sort((a, b) => b.started_at - a.started_at)) at(agent.turn).agents.push(agent);
   for (const question of [...questions].reverse()) at(question.turn).questions.push(question);
   // A blocked command's card is in the turn running when its retry started, else when it was blocked.
   for (const card of [...blocked].reverse()) at(turnAt(turns, card.run_at ?? card.at)).blocked.push(card);
-  const rest = blocks.pop()!;
+  blocks.pop();
   const empty = !rest.agents.length && !rest.questions.length && !rest.blocked.length;
   return [...blocks.reverse(), ...(empty ? [] : [rest])];
 }
@@ -438,6 +440,7 @@ export function checkElement(line: ListedCheck): HTMLElement {
 }
 
 // One block of the feed. The newest turn's summary is at the top, so its block leaves it out.
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: `turnContent`: spec #548 Group 4 splits it; remove this when it does
 function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLElement {
   const { turn, index } = block;
   const node = document.createElement("li");
@@ -508,7 +511,7 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
     if (latest) fill(responses);
     else if (fetched !== undefined) fill([fetched]);
     const fetch = () => {
-      if (latest || replies.has(key)) return;
+      if (latest || index === null || replies.has(key)) return;
       invoke("turn_reply", { id: session.id, index })
         .then((reply) => {
           replies.set(key, reply ?? "");
@@ -529,8 +532,9 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
   const node = document.createElement("li");
   node.className = "turn past";
   const key = `${session.id} ${block.index} turn`;
+  const turn = block.turn;
+  if (!turn) return node;
   const draw = () => {
-    const turn = block.turn!;
     const summary = turn.id ? summaryOf(turn.id) : null;
     const { headline } = headlineOf(summary, turn.message);
     const open = opened.has(key);
@@ -550,7 +554,7 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
       // The ✕ is for the eye; assistive tech hears "failed" once (#456).
       ...(line.failed ? [glyphOnly("✕", "mark check-failed"), unseenWords("failed")] : []),
     );
-    if (line.failed) button.querySelector(".check-failed")!.setAttribute("title", "A check ended failed");
+    if (line.failed) button.querySelector(".check-failed")?.setAttribute("title", "A check ended failed");
     node.replaceChildren(button, ...(open ? [...turnContent(session, block, null).children] : []));
   };
   draw();
@@ -595,18 +599,19 @@ export function drawFeed() {
   const now = drawNow(session, latest);
   // The banner sits above the newest turn, and holds the Brief while it shows.
   const last = session.turns.at(-1);
-  const lives = own && bannerLives(banner, session) && last !== undefined;
+  const kept = own && banner && bannerLives(banner, session) ? banner : null;
+  const lives = kept !== null && last !== undefined;
   const cards = studio.cards;
   element("banner-slot").replaceChildren(
-    ...(lives ? [bannerElement({ headline: headlineOf(last.id ? summaryOf(last.id) : null, last.message).headline, endedAt: last.ended_at, since: banner!.since, open: cards.open, brief: briefNodes(cards) })] : []),
+    ...(lives ? [bannerElement({ headline: headlineOf(last.id ? summaryOf(last.id) : null, last.message).headline, endedAt: last.ended_at, since: kept.since, open: cards.open, brief: briefNodes(cards) })] : []),
   );
   element("brief-fold").hidden = lives || briefNodes(cards).length === 0;
   element("feed").replaceChildren(...blocks.map((block, i) => turnElement(session, block, own && i === 0 && block.index !== null ? now : null)));
 }
 // Rename (danielrispler/Falinks#469): the row's name, kept in the event log. An empty name gives the row its folder's again.
 function askName(session: Session) {
-  const dialog = element("rename-dialog") as HTMLDialogElement;
-  const field = element("rename-field") as HTMLInputElement;
+  const dialog = element("rename-dialog", HTMLDialogElement);
+  const field = element("rename-field", HTMLInputElement);
   field.value = session.name ?? "";
   dialog.onclose = async () => {
     if (dialog.returnValue !== "rename") return;
@@ -632,7 +637,7 @@ function choice(dialog: HTMLDialogElement): Promise<string> {
 
 // Delete: asks, then drops the row; the cards are kept.
 export async function askDelete(session: Session) {
-  const dialog = element("delete-dialog") as HTMLDialogElement;
+  const dialog = element("delete-dialog", HTMLDialogElement);
   element("delete-name").textContent = sessionName(session);
   if ((await choice(dialog)) !== "delete") return;
   await invoke("delete_session", { id: session.id });

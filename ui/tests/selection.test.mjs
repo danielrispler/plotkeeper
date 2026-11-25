@@ -42,7 +42,8 @@ test("a catch-up whose read fails keeps the missed event for the next press", as
     return null;
   });
   const logged = [];
-  window.__TAURI__.log = { warn: async (line) => void logged.push(line) };
+  // Only `warn` is stood in for: an `error` line would fail to log, as no line here should be one.
+  window.__TAURI__.log = /** @type {any} */ ({ warn: async (line) => void logged.push(line) });
   ({ studio } = await import("../../dist/state.js"));
   const { select } = await import("../../dist/selection.js");
   await select("s1");

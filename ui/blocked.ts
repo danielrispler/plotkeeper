@@ -3,7 +3,7 @@
 // lets the agent retry it once and Decline closes the card; there is no edit, so what runs is what the card shows.
 
 import { blockedRequestFor, sendBlockedAnswer } from "./answer.js";
-import { code, failure, invoke, text } from "./dom.js";
+import { code, failure, invoke, messageOf, text } from "./dom.js";
 import { counts, duration } from "./times.js";
 import { blockedWaits, type BlockedCommand, type BlockedStatus, type RiskLevel, type RiskView } from "./types.js";
 
@@ -189,14 +189,14 @@ export function blockedElement(session: string, card: BlockedCommand, agent: str
         pre.textContent = tailText(output);
       })
       .catch((e) => {
-        pre.textContent = `The output could not be read: ${e}`;
+        pre.textContent = `The output could not be read: ${messageOf(e)}`;
       });
   } else if (view.tail !== null) block.append(text("pre", view.tail, "evidence-output"));
   if (view.buttons.length > 0) {
     const row = document.createElement("p");
     row.className = "answer-buttons";
     for (const label of view.buttons) {
-      const button = text("button", label, "btn") as HTMLButtonElement;
+      const button = text("button", label, "btn");
       button.type = "button";
       button.title = blockedHovers[label];
       button.addEventListener("click", async () => {

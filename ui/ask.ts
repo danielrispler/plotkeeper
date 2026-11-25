@@ -4,7 +4,7 @@
 // those facts and, for a file, its hunk; the answer stays here, labelled as interpretation under the facts as recorded and the session never sees it. A failed call or a reply with no answer shows why, with
 // a retry.
 
-import { failure, fullTitle, invoke, onEnter, text } from "./dom.js";
+import { failure, fullTitle, invoke, messageOf, onEnter, text } from "./dom.js";
 import { rendered } from "./markdown.js";
 
 // What Ask is opened on: the core's `Anchor`.
@@ -42,8 +42,9 @@ const keyOf = (session: string, anchor: Anchor, scope: string) => `${scope}${ses
 // The "Ask" box of `anchor` in session `session`, labelled `what` for the model ("this file").
 export function askAnchor(session: string, anchor: Anchor, what: string, scope = ""): HTMLDetailsElement {
   const key = keyOf(session, anchor, scope);
-  if (!asks.has(key)) asks.set(key, askBox(session, anchor, what));
-  return asks.get(key)!;
+  const box = asks.get(key) ?? askBox(session, anchor, what);
+  asks.set(key, box);
+  return box;
 }
 
 // Opens the box of `anchor` and puts the cursor in it, when it is drawn; false when it is not.
@@ -56,6 +57,7 @@ export function openAsk(session: string, anchor: Anchor): boolean {
   return true;
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: ratcheted at #554; split it rather than grow it
 function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsElement {
   const node = document.createElement("details");
   node.className = "ask-about";
@@ -74,7 +76,7 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
         recorded.replaceChildren(...(sections.length ? sections.flat() : [text("p", "Nothing was recorded about this.", "asking")]));
         if (anchor.kind === "file") showHunk(anchor);
       })
-      .catch((e) => recorded.replaceChildren(text("p", `The facts could not be read: ${e}`, "ask-error")));
+      .catch((e) => recorded.replaceChildren(text("p", `The facts could not be read: ${messageOf(e)}`, "ask-error")));
   };
   const hunk = text("pre", "", "evidence-hunk");
   const showHunk = (a: Extract<Anchor, { kind: "file" }>) => {
@@ -109,7 +111,7 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
     } catch (e) {
       const retry = button("Retry", "Ask the same question again");
       retry.addEventListener("click", ask);
-      reply.replaceChildren(text("p", `No answer: ${e}.`, "ask-error"), retry);
+      reply.replaceChildren(text("p", `No answer: ${messageOf(e)}.`, "ask-error"), retry);
     }
     send.disabled = false;
     send.title = sendHover;
@@ -178,19 +180,19 @@ function whyNotBox(session: string, turn: number): HTMLElement {
       out.replaceChildren(whyNotElement(name, result));
     } catch (e) {
       failure("ask_why_not", "error")(e);
-      out.replaceChildren(text("p", `No answer: ${e}.`, "ask-error"));
+      out.replaceChildren(text("p", `No answer: ${messageOf(e)}.`, "ask-error"));
     }
     go.disabled = false;
     go.title = goHover;
   };
   go.addEventListener("click", run);
-  onEnter(field, run);
+  onEnter(field, () => void run());
   node.append(field, go, out);
   return node;
 }
 
 function button(label: string, hover: string): HTMLButtonElement {
-  const node = text("button", label, "btn") as HTMLButtonElement;
+  const node = text("button", label, "btn");
   node.type = "button";
   node.title = hover;
   return node;

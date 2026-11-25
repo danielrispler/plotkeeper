@@ -28,7 +28,9 @@ const marks = new Map<string, MarkWhy[]>();
 let marksStale = true;
 const whyText: Record<MarkWhy, string> = { fog: "A Core part you track has changed", broken: "A test that backs a law failed on main", brief: "A PR brief is waiting" };
 const dotTitle = (why: MarkWhy[]): string => why.map((reason) => whyText[reason]).join("\n");
-export const staleDots = () => void (marksStale = true);
+export const staleDots = () => {
+  marksStale = true;
+};
 // One read at a time asked for: `marksStale` is cleared when it starts and set again when it fails, so the next draw of the list asks again;
 // a read's answer that came after a newer one asked is dropped.
 const latestDots = newest();
@@ -199,8 +201,9 @@ export function childrenOf(session: Pick<Session, "agents">): Children {
   const children: Children = new Map();
   for (const agent of session.agents) {
     const parent = typeof agent.parent === "string" ? agent.parent : agent.parent.agent;
-    if (!children.has(parent)) children.set(parent, []);
-    children.get(parent)!.push(agent);
+    const siblings = children.get(parent) ?? [];
+    siblings.push(agent);
+    children.set(parent, siblings);
   }
   return children;
 }
@@ -238,7 +241,7 @@ export function folds(session: Pick<Session, "asker">, children: Children, paren
   const count = (under: boolean) => parents.flatMap((parent) => drawn(session, children, parent, 0, shut, under)).length;
   const all = count(false);
   if (!all) return null;
-  const open = !shut.has(parents[0]);
+  const open = !parents[0] || !shut.has(parents[0]);
   return { open, hiding: open ? 0 : all - count(true) };
 }
 
@@ -253,7 +256,7 @@ function rowLines(button: HTMLElement, state: string, name: HTMLElement[], below
   const first = text("span", "", "l1");
   first.append(...name, glyph(state, unseen, landed, unwatched));
   button.append(first);
-  button.title = `${name[0].textContent} · ${status(state, unseen, landed, unwatched)[1]}`;
+  button.title = `${name[0]?.textContent ?? ""} · ${status(state, unseen, landed, unwatched)[1]}`;
   button.classList.toggle("unseen", unseen);
   if (below) {
     const second = text("span", "", "l2");
@@ -266,7 +269,9 @@ function rowLines(button: HTMLElement, state: string, name: HTMLElement[], below
 // A row's button, keyed by what it selects (`patch` keeps it across updates). It selects on the press,
 // so the row shows selected at once (danielrispler/Falinks#570); a click without a pointer, from the keyboard, selects too.
 function selecting(id: string, agent: string | null, key = `${id} ${agent ?? ""}`): HTMLButtonElement {
-  const button = pressable(document.createElement("button"), isSelected(id, agent), (event: MouseEvent) => event.detail === 0 && pressSession(id, agent));
+  const button = pressable(document.createElement("button"), isSelected(id, agent), (event: MouseEvent) => {
+    if (event.detail === 0) void pressSession(id, agent);
+  });
   button.dataset.key = key;
   button.addEventListener("pointerdown", (event) => event.button === 0 && pressSession(id, agent));
   return button;
@@ -452,7 +457,7 @@ export function strip(sessions: Session[]): HTMLElement[] {
       const button = selecting(session.id, null, `strip ${session.id}`);
       button.setAttribute("aria-pressed", String(isSelected(session.id)));
       button.title = `${sessionName(session)} · ${status(session.state, session.unseen, session.landed)[1]}`;
-      button.append(glyph(session.state, session.unseen, session.landed), labels[i]);
+      button.append(glyph(session.state, session.unseen, session.landed), labels[i] ?? "");
       return button;
     }),
     ...(rest ? [Object.assign(pressable(text("button", `${rest} idle`), null, toggle), { title: titled(studio.files.keymap, "Open the session list, idle sessions among it", "studio::ToggleList") })] : []),
@@ -463,6 +468,7 @@ export function strip(sessions: Session[]): HTMLElement[] {
 // that is still landed goes through today's Delete (`commit`); Undo commits nothing. `changed` hears the sessions still pending.
 export type Clock = { set(run: () => void, ms: number): unknown; clear(id: unknown): void };
 export const CLEAR_WINDOW_MS = 8000;
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: spec #548 Group 4 splits list.ts's pure parts from its DOM; remove this when it does
 export function clearing(
   time: Clock,
   deps: { landed(id: string): Session | undefined; commit(session: Session): Promise<unknown> | void; changed(pending: Session[], writing: Session[]): void },

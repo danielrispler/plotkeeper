@@ -104,7 +104,7 @@ function runner(dryRun) {
     const change = !(["ls-remote", "rev-parse", "show"].includes(args[0]) || args[1] === "view");
     if (change && dryRun) {
       console.log(`would run: ${[command, ...args].join(" ")}${input === undefined ? "" : `, with notes:\n${input}`}`);
-      return { status: 0, stdout: "" };
+      return { status: 0, stdout: "", stderr: "" };
     }
     const result = spawnSync(command, args, { input, encoding: "utf8" });
     if (result.error) throw result.error;
@@ -119,6 +119,7 @@ function git(args) {
   return stdout;
 }
 
+/** @param {string[]} argv the command, its argument, the output folder, then flags */
 function main([command, arg, out, ...flags]) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
   const read = (path) => readFileSync(resolve(root, path), "utf8");

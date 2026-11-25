@@ -4,7 +4,7 @@
 // and the tail of its output. Opening changes only the nodes it opens: the open state is kept by key, so a redraw of the rail
 // draws the line open again.
 
-import { code, failure, fullTitle, glyphOnly, invoke, pressable, scrollingPre, statusRegion, text } from "./dom.js";
+import { code, failure, fullTitle, glyphOnly, invoke, messageOf, pressable, scrollingPre, statusRegion, text } from "./dom.js";
 import { askAnchor, type Hunk, hunkText } from "./ask.js";
 import { diffRequest } from "./diff.js";
 import type { Capabilities, Check, Turn, TurnFile } from "./types.js";
@@ -92,7 +92,8 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
     item.append(text("span", row.label), ...(row.agent ? [text("span", row.agent, "evidence-agent")] : []));
     return item;
   }
-  const key = `${session} ${row.agent ?? ""} ${row.call}`;
+  const call = row.call;
+  const key = `${session} ${row.agent ?? ""} ${call}`;
   const pre = scrollingPre(outputs.get(key) ?? "", "evidence-output", `Output of ${row.label}`);
   // Why the output could not be read is said aloud, in a region the row holds before the read (#456); the output itself is not.
   const live = statusRegion();
@@ -101,13 +102,14 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
     if (outputs.has(key)) return;
     pre.textContent = "Reading the output…";
     live.textContent = "";
-    invoke("check_output", { session, agent: row.agent, call: row.call })
+    invoke("check_output", { session, agent: row.agent ?? null, call })
       .then((output) => {
-        outputs.set(key, output ? outputText(output) : "No output was recorded.");
-        pre.textContent = outputs.get(key)!;
+        const words = output ? outputText(output) : "No output was recorded.";
+        outputs.set(key, words);
+        pre.textContent = words;
       })
       .catch((e) => {
-        pre.textContent = live.textContent = `The output could not be read: ${e}`;
+        pre.textContent = live.textContent = `The output could not be read: ${messageOf(e)}`;
       });
   };
   const button = pressable(document.createElement("button"), null, () => {
@@ -135,8 +137,9 @@ const hunks = new Map<string, { hunk: Hunk | null; ended: boolean; added: number
 
 // A file's row: its label, which opens the real hunk between the turn's two trees under it, with "Open in editor" at its
 // first changed line. Only this row changes.
-export function fileRow(session: string, index: number, row: EvidenceRow, scope = "", ended = false): HTMLElement {
-  const file = row.file!;
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: ratcheted at #554; split it rather than grow it
+export function fileRow(session: string, index: number, row: EvidenceRow & { file: TurnFile }, scope = "", ended = false): HTMLElement {
+  const { file } = row;
   const key = `${session} ${index} ${file.root} ${file.path}`;
   // Whether it is open is its own to each place that draws it; the hunk read is shared.
   const openKey = `${scope}${key}`;
@@ -148,7 +151,8 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
     const same = entry && entry.added === file.added && entry.removed === file.removed;
     return entry && (entry.ended || (!ended && same)) ? entry : undefined;
   };
-  const pre = scrollingPre(kept() ? hunkText(kept()!.hunk, false) : "", "evidence-hunk", `Changes to ${file.path}`);
+  const was = kept();
+  const pre = scrollingPre(was ? hunkText(was.hunk, false) : "", "evidence-hunk", `Changes to ${file.path}`);
   // As a check's output: only why the hunk could not be read is said aloud.
   const live = statusRegion();
   const left = (h: Hunk | null) => {
@@ -175,7 +179,7 @@ export function fileRow(session: string, index: number, row: EvidenceRow, scope 
         left(h);
       })
       .catch((e) => {
-        pre.textContent = live.textContent = `The hunk could not be read: ${e}`;
+        pre.textContent = live.textContent = `The hunk could not be read: ${messageOf(e)}`;
       });
   };
   const button = pressable(document.createElement("button"), null, () => {
@@ -231,7 +235,7 @@ export function evidenceElement(session: string, index: number, turn: Facts & En
   list.className = "evidence-rows";
   list.append(
     ...evidenceRows(facts).map((row) =>
-      row.kind === "check" ? checkRow(session, row) : row.kind === "merged" ? mergedRow(row) : fileRow(session, index, row, "", turn.ended_at != null),
+      row.kind === "check" ? checkRow(session, row) : row.kind === "merged" || !row.file ? mergedRow(row) : fileRow(session, index, { ...row, file: row.file }, "", turn.ended_at != null),
     ),
     ...(facts.files?.files.length ? [fullDiffRow(session, index)] : []),
   );

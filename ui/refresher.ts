@@ -9,10 +9,15 @@ export type Refresher = {
   flows: { id: string; name: string; hops: string[] }[];
 };
 
-type WithId = { id: string };
-type Link = { id: string; from: string; to: string };
-type Flow = { id: string; name: string; hops: { link: string; text: string }[] };
-const list = <T>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : []);
+// The map file's entries the refresher reads, each checked for the fields it reads; an entry without them is left out, as a missing
+// list is.
+type Hop = { link: string; text: string };
+const named = (value: unknown, fields: string[]): value is Record<string, unknown> => isObject(value) && fields.every((field) => typeof value[field] === "string");
+const isPart = (value: unknown): value is { id: string } => named(value, ["id"]);
+const isLink = (value: unknown): value is { id: string; from: string; to: string } => named(value, ["id", "from", "to"]);
+const isFlow = (value: unknown): value is { id: string; name: string; hops: unknown } => named(value, ["id", "name"]);
+const isHop = (value: unknown): value is Hop => named(value, ["link", "text"]);
+const listOf = <T>(value: unknown, is: (entry: unknown) => entry is T): T[] => (Array.isArray(value) ? value.filter(is) : []);
 
 // The refresher of `part` from the map file's text; null when the text does not read or has no such part.
 export function refresherOf(source: string, part: string): Refresher | null {
@@ -23,12 +28,12 @@ export function refresherOf(source: string, part: string): Refresher | null {
     return null;
   }
   if (!isObject(file)) return null;
-  const parts = list<WithId>(file.parts);
+  const parts = listOf(file.parts, isPart);
   if (!parts.some((each) => each.id === part)) return null;
   // The ids of the links at the part: a hop on one of them crosses it.
-  const ids = new Set(list<Link>(file.links).flatMap((link) => (link.from === part || link.to === part ? [link.id] : [])));
-  const flows = list<Flow>(file.flows)
-    .map((flow) => ({ id: flow.id, name: flow.name, hops: list<Flow["hops"][number]>(flow.hops).filter((hop) => ids.has(hop.link)).map((hop) => hop.text) }))
+  const ids = new Set(listOf(file.links, isLink).flatMap((link) => (link.from === part || link.to === part ? [link.id] : [])));
+  const flows = listOf(file.flows, isFlow)
+    .map((flow) => ({ id: flow.id, name: flow.name, hops: listOf(flow.hops, isHop).filter((hop) => ids.has(hop.link)).map((hop) => hop.text) }))
     .filter((flow) => flow.hops.length > 0);
   return { flows };
 }

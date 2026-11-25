@@ -17,7 +17,7 @@ const holds = (shown) => shown.pr === item.pr && shown.kind === item.kind && sho
 
 test("an overturn says its line once, in the page's action region; the note drawn with the sheet or brief is not live (#465)", async () => {
   const decided = [];
-  const box = ratifyActions("/w/app", item, (state) => decided.push(state));
+  const box = /** @type {any} */ (ratifyActions("/w/app", item, (state) => decided.push(state)));
   // The stand-in DOM has no selectors; the actions look up their own buttons.
   box.querySelectorAll = () => box.find("button");
   assert.equal(overturnNote("/w/app", holds), null, "no note before an overturn");
@@ -26,7 +26,7 @@ test("an overturn says its line once, in the page's action region; the note draw
   assert.deepEqual(decided, ["overturned"]);
   assert.equal(calls.filter(([command]) => command === "ratify_set").length, 1, "the decision is recorded");
   // No clipboard here, as when a browser refuses it: the note holds the prompt to copy by hand.
-  const note = overturnNote("/w/app", holds);
+  const note = /** @type {any} */ (overturnNote("/w/app", holds));
   assert.match(note.text, /Copy this prompt and paste it into your agent/);
   assert.deepEqual(statuses(note), [], "the note is drawn again with its sheet or brief, so it is not live");
   const [live] = statuses(document.body);

@@ -6,7 +6,9 @@ import { fakeDocument } from "./dom.mjs";
 globalThis.document = fakeDocument();
 const { briefRowFor } = await import("../../dist/rail-brief.js");
 
-const session = (pr, state = "idle", extra = {}) => ({ id: "s", cwd: "/w/p", state, terminal: 3, identity: { issue: null, branch: "b", pr, worktree: "/w/p", name: "n" }, ...extra });
+// A session as the core sends it, less the fields the row never reads.
+/** @param {number | null} pr @param {import("../../dist/types.js").SessionState} state */
+const session = (pr, state = "idle", extra = {}) => /** @type {Pick<import("../../dist/types.js").Session, "identity" | "state">} */ ({ id: "s", cwd: "/w/p", state, terminal: 3, identity: { issue: null, branch: "b", pr, worktree: "/w/p", name: "n" }, ...extra });
 const waiting = { project: "/p", numbers: [7] };
 
 test("the row is there for a live session whose PR has a brief waiting, and says so quietly", () => {
@@ -27,7 +29,8 @@ test("no row while no brief waits for the session's PR", () => {
 
 test("pressing the row opens the Map view on that brief", () => {
   const opened = [];
-  const row = briefRowFor(session(7), waiting, (project, number) => opened.push([project, number]));
+  // The stand-in DOM's node, read as such.
+  const row = /** @type {any} */ (briefRowFor(session(7), waiting, (project, number) => opened.push([project, number])));
   row.listeners.click();
   assert.deepEqual(opened, [["/p", 7]]);
 });

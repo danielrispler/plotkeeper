@@ -71,7 +71,8 @@ new MutationObserver(syncHover).observe(document.body, { attributes: true, attri
 const held = (event: PointerEvent) => event.buttons !== 0;
 window.addEventListener("pointerdown", () => listHover.pressed(true), true);
 for (const type of ["pointerup", "pointercancel"]) window.addEventListener(type, () => listHover.pressed(false), true);
-const list = document.querySelector(".list")!;
+const list = document.querySelector<HTMLElement>(".list");
+if (!list) throw new Error(".list is not on the page");
 list.addEventListener("pointerenter", (event) => {
   listHover.pressed(held(event as PointerEvent));
   listHover.enter("list");
@@ -131,9 +132,10 @@ const named: Record<string, (arg?: string) => void> = {
   // Ask (danielrispler/plotkeeper#125) on the selected session's newest turn: its Headline's box, in the rail, opened.
   "studio::AskAbout": () => {
     const turn = (studio.selection?.session.turns.length ?? 0) - 1;
-    if (turn < 0) return;
-    showPanel({ kind: "story", session: selectedId()! });
-    openAsk(selectedId()!, { kind: "headline", turn });
+    const session = selectedId();
+    if (turn < 0 || session === null) return;
+    showPanel({ kind: "story", session });
+    openAsk(session, { kind: "headline", turn });
   },
   "studio::Dismiss": () => {
     // Esc peels the map's layers (`map.ts`) and on the bare map does nothing (#386); the list open over it closes first. The palette, a
@@ -245,7 +247,7 @@ list.addEventListener("click", (event) => listSpace(event.target as HTMLElement)
 // The needs-you chip (danielrispler/Falinks#572) selects the first session that needs Daniel.
 element("needs-you").addEventListener("click", () => {
   const first = studio.listed.find((session) => session.state === "needs_you");
-  if (first) select(first.id);
+  if (first) void select(first.id);
 });
 
 // The saved project list (#381): the list's headers and the map follow it; its first arrival opens the last viewed project's map (#386).
@@ -292,7 +294,10 @@ listen<string[]>("finished", (ids) => {
 // While a press waits for its reply, the reply draws the rail once, with its cards; an event between
 // would draw it with the last session's cards for a frame (danielrispler/Falinks#570).
 // The press's settling fetches what it held back.
-listen<Selection | null>("selected", (selected) => (studio.pending ? (studio.missed = true) : show(selected)));
+listen<Selection | null>("selected", (selected) => {
+  if (studio.pending) studio.missed = true;
+  else show(selected);
+});
 // A session selected before the page opened opens in the left panel, its story or its worker's log, over its project's map.
 invoke("selected")
   .then((selected) => {
@@ -301,7 +306,10 @@ invoke("selected")
     if (selected) showPanel(selectedView(selected.session.id, projectOfCwd(selected.session.cwd), selected.agent).panel);
   })
   .catch(failure("selected"));
-listen<SessionCards>("cards", (cards) => (studio.pending ? (studio.missed = true) : showCards(cards)));
+listen<SessionCards>("cards", (cards) => {
+  if (studio.pending) studio.missed = true;
+  else showCards(cards);
+});
 // Claude Code's version changed: re-record the subagent fixture.
 listen<string>("notice", showNotice);
 // A notice the server found due while no tab was focused (#331): the browser notification. The permission is asked once, on the first press.

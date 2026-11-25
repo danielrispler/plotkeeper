@@ -31,6 +31,7 @@ test("a long path shows its last 2 segments, with the full path in its title", (
 });
 
 test("only the row being looked at shows a clock, at minute level", () => {
+  /** @type {Pick<import("../../dist/types.js").Session, "state" | "started_at" | "last_event_at" | "turn_span">} */
   const session = { state: "running", started_at: 0, last_event_at: 0, turn_span: { start: 0, end: null } };
   assert.equal(rowTime(session, false), null);
   assert.equal(rowTime(session, true)[1](12 * MIN + 59_000), "Turn 12m");

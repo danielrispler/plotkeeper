@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { finishedNote, noteFade } from "../../dist/notes.js";
 
-const session = (id, rest = {}) => ({
+const session = (id, rest = {}) => /** @type {import("../../dist/types.js").Session} */ ({
   id,
   name: id,
   state: "running",

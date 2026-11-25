@@ -8,7 +8,12 @@ import { El, fakeDocument, tauri } from "./dom.mjs";
 const calls = [];
 tauri(calls, (command) => (command === "set_explanations" ? '{ "explanations": false }' : null));
 globalThis.document = fakeDocument({ body: new El("body") });
-const { BRIEF, BRIEF_HEADINGS, RATIFY, RATIFY_HEADINGS, SHEET, SHEET_HEADINGS, explained, stepLine, explainedChoice, explainToggle, explainedLinks, explanationsApplied, onExplanations, startExplanations } = await import("../../dist/explanations.js");
+const { BRIEF, BRIEF_HEADINGS, RATIFY, RATIFY_HEADINGS, SHEET, SHEET_HEADINGS, explained: explainedNodes, stepLine, explainedChoice, explainToggle: toggleNode, explainedLinks, explanationsApplied, onExplanations, startExplanations } = await import("../../dist/explanations.js");
+// The page's nodes here are the stand-in DOM's, which the tests read as such.
+/** @param {Parameters<typeof explainedNodes>} args @returns {any[]} */
+const explained = (...args) => explainedNodes(...args);
+/** @param {Parameters<typeof toggleNode>} args @returns {any} */
+const explainToggle = (...args) => toggleNode(...args);
 const { studio } = await import("../../dist/state.js");
 
 // A word has a letter: the arrows → and ← are marks, not words.
@@ -60,6 +65,7 @@ test("a step's line is its kind's, and on the Ratify step its title's; a kind wi
 });
 
 // The Agent plugins part's links: two kinds, the first and third not yet ratified.
+/** @type {{ kind?: import("../../dist/map-model.js").LinkKind; unratified: boolean }[]} */
 const talks = [
   { kind: "file", unratified: true },
   { kind: "spawn", unratified: false },
@@ -77,7 +83,7 @@ test("with Explanations on, a heading, the selected tier and the links carry the
 
   const tiers = new El("div");
   const [core, iface] = [new El("button"), new El("button")];
-  const [box, meaning] = explainedChoice(tiers, core, SHEET.tiers.core, true);
+  const [box, meaning] = /** @type {any[]} */ (explainedChoice(tiers, core, SHEET.tiers.core, true));
   assert.equal(box, tiers);
   assert.equal(meaning.text, SHEET.tiers.core);
   assert.equal(core.getAttribute("aria-describedby"), meaning.id);
@@ -137,15 +143,17 @@ test("a double click on the ? ends where two flips end, with no write refused: t
   let file = '{ "explanations": true }';
   const refused = [];
   const writes = [];
-  window.__TAURI__.core.invoke = async (command, args) => {
+  // biome-ignore lint/suspicious/useAwait: a stand-in for an async API, so a throw in it rejects as the real one's would
+  window.__TAURI__.core.invoke = /** @type {any} */ (async (command, args) => {
     if (command !== "set_explanations") return null;
     writes.push(args.on);
     if (args.expected !== file) {
       refused.push(args);
       throw new Error("settings.json changed since the page read it: try again");
     }
-    return (file = JSON.stringify({ explanations: args.on }));
-  };
+    file = JSON.stringify({ explanations: args.on });
+    return file;
+  });
   // The page applies the returned text, as `main.ts` does.
   startExplanations((settings) => {
     studio.texts = { settings, keymap: null };

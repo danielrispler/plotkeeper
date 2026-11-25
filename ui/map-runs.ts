@@ -86,7 +86,7 @@ function rowNode(row: RunRow, act: RunActs, note: CopyNote | null): HTMLElement 
       show(made);
       sayAction(made.line);
       act.noted?.(made);
-    }) as HTMLButtonElement;
+    });
     actions.append(copy);
   }
   const title = row.state === "ended" ? "Remove this run from the list" : row.state === "running" ? "Stop this run and remove what it made" : "Take this run out of the queue";
@@ -96,7 +96,7 @@ function rowNode(row: RunRow, act: RunActs, note: CopyNote | null): HTMLElement 
     cancel.disabled = true;
     await act.cancel(row.id);
     cancel.disabled = false;
-  }) as HTMLButtonElement;
+  });
   actions.append(cancel);
   node.append(actions);
   if (note?.id === row.id) show(note);

@@ -5,7 +5,8 @@ import assert from "node:assert/strict";
 import { knownProjects, projectGroups, projectOfCwd, repositoryOf, selectedProject, sessionProjectName, sidebarOrder } from "../../dist/projects.js";
 import { studio } from "../../dist/state.js";
 
-const at = (id, state, cwd) => ({ id, state, cwd });
+// A session with only the fields the projects read.
+const at = (id, state, cwd) => /** @type {import("../../dist/types.js").Session} */ ({ id, state, cwd });
 
 test("a task's worktree belongs to its main checkout's project, any other folder to its own", () => {
   assert.equal(repositoryOf("/r/plotkeeper/.claude/worktrees/issue-1/ui"), "/r/plotkeeper");

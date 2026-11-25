@@ -95,7 +95,7 @@ test("the stored v3 brief of #317 plays as three chapters of four steps, in orde
   const full = brief({ ...writer, chapters: writer.chapters.map((c) => ({ ...c, flags: [], steps: c.steps.map((s) => step(s.k, s)) })) });
   assert.deepEqual(full.chapters.map((c) => c.behaviour), ["Fog", "Broken laws", "Seen gate"]);
   assert.deepEqual([0, 1, 2].map((i) => playlist(full, i, i === 0).length), [4, 4, 4]);
-  const rows = trayRows([{ number: 317, title: "The Map view", head: "a", brief: { stale: false, writing: false, chapters: full.chapters.map((c) => c.title) } }]);
+  const rows = trayRows([{ number: 317, title: "The Map view", head: "a", brief: /** @type {NonNullable<import("../../dist/types.js").ReadyPr["brief"]>} */ ({ stale: false, writing: false, chapters: full.chapters.map((c) => c.title) }) }]);
   assert.equal(rows.length, 3);
   assert.deepEqual(rows.map((r) => r.chapter), [0, 1, 2]);
 });
@@ -125,7 +125,11 @@ test("a brief reopens at the step left, and finishing it starts it over", () => 
 test("opening a brief while the map is scrubbed returns it to now first", () => {
   let scrubbed = true;
   let backs = 0;
-  const player = briefPlayer({ scrubbed: () => scrubbed, backToNow: () => (backs++, (scrubbed = false)) });
+  const player = briefPlayer({ scrubbed: () => scrubbed, backToNow: () => {
+      backs++;
+      scrubbed = false;
+    },
+  });
   player.open("/p", 7, 0);
   assert.equal(backs, 1);
   player.close();
@@ -447,7 +451,7 @@ test("a not-confirmed decision and the No part group copy as prompts too", () =>
 });
 
 test("See the code of a Since you read story asks for the diff from the head it was read at, the full brief's from the PR's base (#497)", () => {
-  const brief = { version: 1, pr: 7, head: "bbb", written_at: 1, stale: false, model: "opus", brief: { title: "Fog", overview: [], chapters: [], also: [] } };
+  const brief = /** @type {import("../../dist/types.js").BriefView["brief"]} */ ({ version: 1, pr: 7, head: "bbb", written_at: 1, stale: false, model: "opus", brief: { title: "Fog", overview: [], chapters: [], also: [] } });
   assert.deepEqual(diffArgs("/p", { brief, partial: false }), { project: "/p", number: 7, head: "bbb", title: "Fog" });
   assert.deepEqual(diffArgs("/p", { brief, partial: false, since: "aaa" }), { project: "/p", number: 7, head: "bbb", title: "Fog", base: "aaa" });
 });
@@ -457,18 +461,22 @@ test("See the code of a Since you read story asks for the diff from the head it 
 test("drawing a step again, as a resize does, keeps one seen-watcher per not-confirmed mark", async () => {
   const { fakeDocument } = await import("./dom.mjs");
   const observers = [];
-  globalThis.IntersectionObserver = class {
-    constructor() {
-      observers.push(this);
+  // A stand-in for the browser's observer, typed as any at this boundary.
+  globalThis.IntersectionObserver = /** @type {any} */ (
+    class {
+      constructor() {
+        observers.push(this);
+      }
+      observe() {}
+      disconnect() {
+        this.gone = true;
+      }
     }
-    observe() {}
-    disconnect() {
-      this.gone = true;
-    }
-  };
+  );
   globalThis.document = fakeDocument();
   const { stepNode } = await import("../../dist/map-brief.js");
-  const view = { project: "/p", doc: { parts: [], laws: [] }, scrub: null };
+  // A view with only what a step's words read: no map is drawn.
+  const view = /** @type {import("../../dist/map.js").MapView} */ (/** @type {unknown} */ ({ project: "/p", doc: { parts: [], laws: [] }, scrub: null }));
   const flagged = step("Now", { flags: ["claim check: the quote is not in the diff", "not confirmed from the facts"] });
   const live = () => observers.filter((o) => !o.gone).length;
   stepNode(view, flagged, 7);

@@ -7,7 +7,9 @@ import { patch } from "../../dist/dom.js";
 import { isSelected } from "../../dist/selection.js";
 import { studio } from "../../dist/state.js";
 
-const selection = (id, agent = null) => ({ session: { id }, agent });
+// A selection as the core sends it, less the session's fields the mark never reads.
+/** @returns {import("../../dist/types.js").Selection} */
+const selection = (id, agent = null) => /** @type {import("../../dist/types.js").Selection} */ ({ session: { id }, agent });
 
 test("a pressed row shows selected before the shell replies", () => {
   studio.selection = selection("a");

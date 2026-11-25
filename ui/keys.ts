@@ -22,7 +22,7 @@ const names: Record<string, string> = {
 
 // The key as Zed's keymap writes it, such as "cmd-shift-k", by the physical key.
 export function keystroke({ code, metaKey, ctrlKey, altKey, shiftKey }: Key): string {
-  const name = /^(?:Key|Digit)(.)$/.exec(code)?.[1].toLowerCase() ?? names[code] ?? code.toLowerCase();
+  const name = /^(?:Key|Digit)(.)$/.exec(code)?.[1]?.toLowerCase() ?? names[code] ?? code.toLowerCase();
   const held = { ctrl: ctrlKey, alt: altKey, shift: shiftKey, cmd: metaKey };
   return [...MODIFIERS.filter((m) => held[m]), name].join("-");
 }
@@ -57,7 +57,7 @@ export function run(actions: Actions, binding: Binding | undefined): boolean {
 // subagent lines count, Null at the end.
 export function stepLine(lines: { classes: string[]; current: boolean }[], by: 1 | -1): number | null {
   const steps = lines.flatMap((line, at) => (["session-row", "worker", "helper"].some((c) => line.classes.includes(c)) ? [at] : []));
-  const here = steps.findIndex((at) => lines[at].current);
+  const here = steps.findIndex((at) => lines[at]?.current);
   return steps[here === -1 ? (by === 1 ? 0 : steps.length - 1) : here + by] ?? null;
 }
 
@@ -67,7 +67,7 @@ export function stepSession(sessions: { id: string }[], selected: string | null,
   if (!sessions.length) return null;
   const at = sessions.findIndex((session) => session.id === selected);
   const from = at === -1 ? (by === 1 ? -1 : 0) : at;
-  return sessions[(from + by + sessions.length) % sessions.length].id;
+  return sessions[(from + by + sessions.length) % sessions.length]?.id ?? null;
 }
 
 // The first session that needs Daniel after `selected`, wrapping; with none, the first unseen (danielrispler/Falinks#556).
@@ -86,7 +86,7 @@ const symbols: Record<string, string> = { ctrl: "⌃", alt: "⌥", shift: "⇧",
 
 // A keystroke as macOS menus show it: "cmd-shift-p" is "⇧⌘P".
 export function keyLabel(stroke: string): string {
-  const [, mods, name] = new RegExp(`^((?:(?:${MODIFIERS.join("|")})-)*)(.+)$`).exec(stroke)!;
+  const [, mods = "", name = stroke] = new RegExp(`^((?:(?:${MODIFIERS.join("|")})-)*)(.+)$`).exec(stroke) ?? [];
   return [...MODIFIERS.filter((m) => mods.includes(`${m}-`)), name].map((part) => symbols[part] ?? part.toUpperCase()).join("");
 }
 
@@ -106,7 +106,7 @@ export function titled(keymap: Keymap, label: string, name: string): string {
 const title = (binding: Binding) => {
   const [name, arg] = typeof binding === "string" ? [binding] : binding;
   const words = name.replace(/^.*::/, "").replace(/(?<=[a-z])(?=[A-Z])/g, " ").toLowerCase();
-  return [words[0].toUpperCase() + words.slice(1), arg].filter(Boolean).join(" ");
+  return [words.charAt(0).toUpperCase() + words.slice(1), arg].filter(Boolean).join(" ");
 };
 
 // `note`: a second line, such as a Doctor entry's cost.

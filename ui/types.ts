@@ -3,7 +3,7 @@
 // check (`scripts/wire/`, #246) types real values of the shell's against these, so a field one lacks fails `npm run check`.
 
 import type { Ask } from "./answer.js";
-import type { Facts, Hunk } from "./ask.js";
+import type { Anchor, Facts, Hunk } from "./ask.js";
 import type { CheckOutput } from "./evidence.js";
 import type { SettingsFiles } from "./settings.js";
 
@@ -593,90 +593,109 @@ export type WhyNot = { facts: Facts; reasons: string | null };
 // Who took Daniel's answer to a blocked command (`answer_blocked_command`, `server/src/answer.rs`): its hook, or the studio itself.
 export type BlockedAnswer = "hook" | "late";
 
-// Every command the window invokes, with what the server replies (`server/src/api.rs`): `void` where the
-// window ignores the reply, `null` where the shell may answer none. `invoke` takes only these names, and the snap fixtures
-// (`scripts/snap/`) are typed against it, and `scripts/snap/base.ts` answers every command that is not `void`, so a fixture
-// that lacks a command or a field fails `tsc` (#144).
+// Every command the window invokes (`server/src/api.rs`): its arguments, by the names the page writes them in camel case, and what the
+// server replies, `void` where the window ignores the reply, `null` where the server may answer none. An argument the server reads as
+// an `Option` may be left out. `invoke` takes only these names with these arguments, and the wire check (`server/tests/wire.rs`, #554)
+// fails when a command's argument names differ from its handler's. The snap fixtures (`scripts/snap/`) are typed against the replies,
+// and `scripts/snap/base.ts` answers every command that is not `void`, so a fixture that lacks a command or a field fails `tsc` (#144).
+type None = Record<string, never>;
+type Project = { project: string };
+type InPart = { project: string; part: string };
+type InPr = { project: string; number: number };
+type Expecting = { expected?: string | null };
 export interface Commands {
-  agent_summary: string | null;
-  alive: void;
-  about: About;
-  answer: void;
-  answer_blocked_command: BlockedAnswer;
-  ask: string;
-  ask_again: void;
-  ask_anchor: string;
-  ask_facts: Facts | null;
-  ask_why_not: WhyNot;
-  cards: SessionCards;
-  check_lists: void;
-  check_output: CheckOutput | null;
-  delete_session: void;
-  failed_check_name: string;
-  map_place: Record<string, string[]>;
-  map_save_positions: UserMap;
-  map_save_view: void;
-  map_set_tier: UserMap;
-  map_know: UserMap;
-  map_refresher: UserMap;
-  map_history: HistoryEntry[];
-  map_at: HistoricalMap;
-  map_commit: CommitFiles;
-  map_marks: ProjectMark[];
-  stop_log: null;
-  stop_facts: StopFacts;
-  stop_dismiss: null;
-  story_bar: void;
-  map_proof: Proof[];
-  map_state: MapState;
-  pr_brief: BriefOpened | null;
-  part_catch_up: CatchUpOpened | null;
-  part_catch_up_done: void;
-  pr_diff: CommitFiles;
-  pre_flight_issues: OpenIssue[];
-  pre_flight_predict: PreFlight;
-  pre_flight_pick: PreFlight;
-  pre_flight_clear: null;
-  micro_world_explore: Explored;
-  micro_world_page: string;
-  brief_chapter_done: void;
-  brief_since_done: void;
-  briefs_waiting: WaitingBriefs | null;
-  pr_ratify: RatifyRow[];
-  projects: SavedProject[];
-  remove_project: SavedProject[];
-  ratify_set: void;
-  mark_unseen: void;
-  open: Selection | null;
-  rail_shown: void;
-  refresh_landed_tasks: void;
-  remove_api_key: string | null;
-  rename: void;
-  run_cancel: void;
-  back_a_law: BackLawStarted;
-  law_patch_discard: void;
-  law_patch_open: LawPatchOpened;
-  new_law: BackLawStarted;
-  guard_draft: NewLaw;
-  runs_resume: void;
-  select: Selection | null;
-  selected: Selection | null;
-  sessions: Session[];
-  set_api_key: string | null;
-  set_explanations: string;
-  settings_files: SettingsFiles;
-  subagent_log: SubagentLog | null;
-  summary_settings: void;
-  test_writer: WriterTest;
-  turn_file_hunk: Hunk | null;
-  turn_reply: string | null;
-  turn_summary: TurnSummary | null;
-  watch: Ask | null;
-  wired: boolean;
-  writer_notice: string | null;
-  writers: Writers;
+  agent_summary: { args: { agentId: string }; reply: string | null };
+  alive: { args: None; reply: void };
+  about: { args: None; reply: About };
+  answer: { args: { session: string; nonce: string; answers?: Record<string, string | string[]> | null; decision?: "allow" | "deny" | null }; reply: void };
+  answer_blocked_command: { args: { session: string; nonce: string; decision: "allow" | "deny" }; reply: BlockedAnswer };
+  ask: { args: { session: string; item: string; question: string }; reply: string };
+  ask_again: { args: { session: string; command: string; cwd: string }; reply: void };
+  ask_anchor: { args: { session: string; anchor: Anchor; what: string; question: string }; reply: string };
+  ask_facts: { args: { session: string; anchor: Anchor }; reply: Facts | null };
+  ask_why_not: { args: { session: string; turn: number; name: string }; reply: WhyNot };
+  cards: { args: None; reply: SessionCards };
+  check_lists: { args: { lists: Record<string, string[]> }; reply: void };
+  check_output: { args: { session: string; agent?: string | null; call: string }; reply: CheckOutput | null };
+  delete_session: { args: { id: string }; reply: void };
+  failed_check_name: { args: { tail: string; suite: string; worktree: string }; reply: string };
+  map_place: { args: Project & { groups: Record<string, string[]> }; reply: Record<string, string[]> };
+  map_save_positions: { args: Project & { positions: Record<string, [number, number]> }; reply: UserMap };
+  map_save_view: { args: Project & { view: Camera }; reply: void };
+  map_set_tier: { args: InPart & { tier?: string | null }; reply: UserMap };
+  map_know: { args: InPart; reply: UserMap };
+  map_refresher: { args: InPart; reply: UserMap };
+  map_history: { args: InPart; reply: HistoryEntry[] };
+  map_at: { args: Project & { commit: string }; reply: HistoricalMap };
+  map_commit: { args: Project & { commit: string }; reply: CommitFiles };
+  map_marks: { args: { projects: string[] }; reply: ProjectMark[] };
+  stop_log: { args: { kind: StopKind; project?: string | null; day: string; pr?: number | null }; reply: null };
+  stop_facts: { args: Project; reply: StopFacts };
+  stop_dismiss: { args: { projects: string[]; modules: string[]; day: string }; reply: null };
+  story_bar: {
+    args: Project & {
+      kind: "explain-back-given" | "explain-back-marked";
+      day: string;
+      about: { pr: number; chapter: number } | { part: string };
+      line?: string | null;
+      mark?: "got-it" | "partly" | "missed" | null;
+    };
+    reply: void;
+  };
+  map_proof: { args: Project & { law: string }; reply: Proof[] };
+  map_state: { args: Project & { fetch: boolean }; reply: MapState };
+  pr_brief: { args: InPr & { full?: boolean | null }; reply: BriefOpened | null };
+  part_catch_up: { args: InPart; reply: CatchUpOpened | null };
+  part_catch_up_done: { args: InPart & { fog: string[] }; reply: void };
+  pr_diff: { args: PrDiffArgs; reply: CommitFiles };
+  pre_flight_issues: { args: Project; reply: OpenIssue[] };
+  pre_flight_predict: { args: Project & { issue?: number | null; text?: string | null }; reply: PreFlight };
+  pre_flight_pick: { args: Project & { parts: string[] }; reply: PreFlight };
+  pre_flight_clear: { args: Project; reply: null };
+  micro_world_explore: { args: Project & { subject: { kind: "flow"; id: string } | { kind: "figure"; pr: number; chapter: number; step: number } }; reply: Explored };
+  micro_world_page: { args: Project & { key: string }; reply: string };
+  brief_chapter_done: { args: InPr & { chapter: number; head: string }; reply: void };
+  brief_since_done: { args: InPr & { head: string }; reply: void };
+  briefs_waiting: { args: { cwd: string }; reply: WaitingBriefs | null };
+  pr_ratify: { args: InPr; reply: RatifyRow[] };
+  projects: { args: None; reply: SavedProject[] };
+  remove_project: { args: { path: string }; reply: SavedProject[] };
+  ratify_set: { args: Project & { pr: number; kind: string; id: string; state: "accepted" | "overturned" | "pending"; text: string }; reply: void };
+  mark_unseen: { args: { id: string }; reply: void };
+  open: { args: { agentId: string }; reply: Selection | null };
+  rail_shown: { args: { shown: boolean }; reply: void };
+  refresh_landed_tasks: { args: None; reply: void };
+  remove_api_key: { args: { writer: WriterKind } & Expecting; reply: string | null };
+  rename: { args: { id: string; name: string }; reply: void };
+  run_cancel: { args: { id: string }; reply: void };
+  back_a_law: { args: Project & { law: string; guards?: number | null }; reply: BackLawStarted };
+  law_patch_discard: { args: Project & { id: string }; reply: void };
+  law_patch_open: { args: Project & { id: string }; reply: LawPatchOpened };
+  new_law: { args: Project & { law: NewLaw; guards?: number | null }; reply: BackLawStarted };
+  guard_draft: { args: InPr; reply: NewLaw };
+  runs_resume: { args: None; reply: void };
+  select: { args: { id: string | null }; reply: Selection | null };
+  selected: { args: None; reply: Selection | null };
+  sessions: { args: None; reply: Session[] };
+  set_api_key: { args: { writer: WriterKind; key?: string | null; baseUrl?: string | null } & Expecting; reply: string | null };
+  set_explanations: { args: { on: boolean } & Expecting; reply: string };
+  settings_files: { args: None; reply: SettingsFiles };
+  subagent_log: { args: { session: string; agentId: string; offset: number }; reply: SubagentLog | null };
+  summary_settings: { args: { model: string; effort: string; writer: WriterKind; onOpen: boolean }; reply: void };
+  test_writer: { args: { writer: WriterKind; model: string; effort: string } & Expecting; reply: WriterTest };
+  turn_file_hunk: { args: { session: string; turn: number; root: string; path: string; from?: string | null; all?: boolean | null }; reply: Hunk | null };
+  turn_reply: { args: { id: string; index: number }; reply: string | null };
+  turn_summary: { args: { id: string }; reply: TurnSummary | null };
+  watch: { args: { session?: string | null }; reply: Ask | null };
+  wired: { args: None; reply: boolean };
+  writer_notice: { args: None; reply: string | null };
+  writers: { args: None; reply: Writers };
 }
 export type Command = keyof Commands;
+/** What command `C` takes, by the page's camel-case names. */
+export type Args<C extends Command> = Commands[C]["args"];
+/** What the server replies to command `C`. */
+export type Reply<C extends Command> = Commands[C]["reply"];
 
 // What the shell counted of Daniel's use (`stop_rules.rs`), for the one-time review: days, merged PRs and the uses of each module.
 export type StopKind = "session" | "map-open" | "map-action" | "scrub" | "proof" | "know" | "brief-offered" | "brief-opened" | "chapter-done" | "check-answered" | "ratify" | "unconfirmed-seen" | "explain-back-given" | "explain-back-marked" | "refresher-entered" | "stale-entered" | "catch-up-offered" | "catch-up-opened" | "catch-up-done" | "pre-flight-run" | "micro-world-opened" | "back-law-started" | "guard-offered" | "guard-started";

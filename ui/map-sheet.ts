@@ -88,7 +88,7 @@ function resize(px: number | null) {
 let resizeHandle: HTMLButtonElement | null = null;
 function handle() {
   if (resizeHandle) return resizeHandle;
-  const bar = text("button", "", "btn quiet sheet-resize") as HTMLButtonElement;
+  const bar = text("button", "", "btn quiet sheet-resize");
   bar.type = "button";
   bar.setAttribute("aria-label", "Resize the sheet: the left arrow widens it, the right arrow narrows it");
   bar.title = "Drag to resize the sheet; double-click for its first width";
@@ -117,7 +117,8 @@ function handle() {
     event.stopPropagation();
     resize(width() + step);
   });
-  return (resizeHandle = bar);
+  resizeHandle = bar;
+  return bar;
 }
 
 // The part whose sheet is open on the shown map, null with none.
@@ -134,7 +135,8 @@ export function closeSheet() {
 function drawSheet(view: MapView) {
   const slot = view.slots.sheet;
   view.slots.canvas.querySelectorAll(".plate.open").forEach((plate) => plate.classList.remove("open"));
-  const there = open && open.project === view.project ? view.doc.parts.find((each) => each.id === open!.part) : undefined;
+  const asked = open && open.project === view.project ? open.part : null;
+  const there = asked === null ? undefined : view.doc.parts.find((each) => each.id === asked);
   if (there && !view.scrub) remembered = there;
   const part = there ?? (view.scrub && open?.project === view.project && remembered?.id === open.part ? remembered : undefined);
   if (!part) {
@@ -160,6 +162,7 @@ function drawSheet(view: MapView) {
 }
 
 // The sheet's card for `part` on `view`, its `.sheet-extra` foot (the history strip's, drawn once the card is in the page) and its `?`.
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: ratcheted at #554; split it rather than grow it
 export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra: HTMLElement; toggle: HTMLElement } {
   const tier = effectiveTier(part, view.state.user.tiers);
   const sheet = sheetOf(part, view.doc.laws, tier, view.scrub ? undefined : view.state.fog?.[part.id]);
@@ -171,7 +174,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
   // Explanations (#522): a line under each heading, the selected tier's meaning under the tiers, a link kind's and "not yet ratified"'s
   // at their first link, and the fog actions' under them. The `?` beside the × shows or hides them all.
   const explain = explanationsOn();
-  const heading = (words: string) => explained(text("h3", words, "sheet-heading"), SHEET_HEADINGS[words], explain);
+  const heading = (words: string) => explained(text("h3", words, "sheet-heading"), SHEET_HEADINGS[words] ?? "", explain);
   const header = text("div", "", "sheet-header");
   const toggle = explainToggle(explain);
   header.append(toggle, closer);
@@ -181,13 +184,13 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
     const button = pressable(text("button", each.label, "btn"), each.pressed, () => setTier(view, part.id, each.tier).catch(failure("map_set_tier")));
     // Each tier's meaning on hover, so the ones not picked compare without a change.
     button.title = SHEET.tiers[each.tier];
-    if (view.scrub) (button as HTMLButtonElement).disabled = true;
+    if (view.scrub) button.disabled = true;
     if (each.pressed) selected = button;
     tiers.append(button);
   }
   // The laws and links at this part that landed without Daniel's say: marked "not yet ratified", with accept and overturn. Of now only.
   const unratified = view.scrub ? sheetPending([], part.id, []) : sheetPending(view.state.ratify ?? [], part.id, view.doc.links);
-  const ratified = () => void reloadMap();
+  const ratified = () => void reloadMap().catch(failure("map_state"));
   const laws = sheet.laws.map((law) => {
     const mark = text("span", "", `law-mark ${law.backing}`);
     const row = text("li", "", "sheet-law");
@@ -242,7 +245,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
   const fogButtons: HTMLElement[] = [];
   if (actions.main) {
     const { open: opens, label, title, note } = actions.main;
-    const main = text("button", label, "btn primary sheet-catch-up") as HTMLButtonElement;
+    const main = text("button", label, "btn primary sheet-catch-up");
     main.title = title;
     main.addEventListener("click", () => {
       if (opens.kind === "chapter") return void openBriefOf(view.project, opens.pr, opens.chapter, true);
@@ -260,7 +263,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
     }
   }
   if (sheet.canClear && actions.second) {
-    const clear = text("button", actions.second, "btn quiet sheet-know") as HTMLButtonElement;
+    const clear = text("button", actions.second, "btn quiet sheet-know");
     clear.title = "Clear this part's fog: you have caught up with what changed";
     clear.addEventListener("click", () => {
       clear.disabled = true;
@@ -279,7 +282,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
   // A part with no fog offers the refresher (#392).
   const refresher = !view.scrub && refreshing === part.id ? refresherNode(view, part.id) : null;
   if (!view.scrub && !sheet.canClear && !refresher) {
-    const enter = text("button", "Refresher", "btn quiet sheet-refresher") as HTMLButtonElement;
+    const enter = text("button", "Refresher", "btn quiet sheet-refresher");
     enter.title = "The flows through this part, hop by hop";
     // It shows at once, drawn from the map; the shell records the activity behind it, and the reload drops the band.
     enter.addEventListener("click", () => {

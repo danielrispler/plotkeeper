@@ -7,7 +7,7 @@ import { readdirSync, readFileSync } from "node:fs";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 const filesIn = (dir, ending) =>
-  readdirSync(new URL(dir, import.meta.url), { recursive: true })
+  readdirSync(new URL(dir, import.meta.url), { recursive: true, encoding: "utf8" })
     .filter((name) => name.endsWith(ending))
     .map((name) => ({ file: `${dir}${name}`, source: read(`${dir}${name}`) }));
 

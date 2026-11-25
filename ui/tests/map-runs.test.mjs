@@ -5,16 +5,31 @@ import assert from "node:assert/strict";
 import { El, fakeDocument } from "./dom.mjs";
 
 globalThis.document = fakeDocument({ body: new El("body") });
-const { paintRuns, runRows, runsNodes } = await import("../../dist/map-runs.js");
+const { paintRuns, runRows, runsNodes: drawnRuns } = await import("../../dist/map-runs.js");
+// The runs' nodes, which here are the stand-in DOM's, whose fields the tests read.
+/** @type {(...args: Parameters<typeof drawnRuns>) => any[]} */
+const runsNodes = (...args) => drawnRuns(...args);
 
+/** @returns {import("../../dist/types.js").RunView} */
 const run = (id, state, extra = {}) => ({ id, kind: "back-law", state, at: Date.UTC(2026, 10, 23, 12, 0), outcome: null, line: null, denials: [], prompt: null, ...extra });
 const ended = (id, outcome, line, extra = {}) => run(id, "ended", { outcome, line, prompt: outcome === "done" ? null : "Write a test that backs the law.", ...extra });
 // `confirm` answers a confirm dialog with `yes`, and notes what it asked.
+/**
+ * @param {any[]} calls
+ * @param {(prompt: string) => Promise<"copied" | "manual">} [copy]
+ * @returns {import("../../dist/map-runs.js").RunActs}
+ */
 const acts = (calls, copy = async () => "copied", yes = true) => ({
   cancel: (id) => calls.push(["cancel", id]),
-  confirm: async (ask) => (calls.push(["confirm", ask]), yes),
+  confirm: (ask) => {
+    calls.push(["confirm", ask]);
+    return Promise.resolve(yes);
+  },
   resume: () => calls.push(["resume"]),
-  copy: (prompt) => (calls.push(["copy", prompt]), copy(prompt)),
+  copy: (prompt) => {
+    calls.push(["copy", prompt]);
+    return copy(prompt);
+  },
 });
 // The buttons of a node, by their words.
 const button = (node, words) => node.find("button").find((each) => each.text === words);
@@ -44,7 +59,8 @@ test("Cancel on a queued run asks the server at once; on a running run it asks f
   button(rows[1], "Cancel").listeners.click();
   assert.deepEqual(calls, [["cancel", "b"]], "a queued run leaves at once");
   await button(rows[0], "Cancel").listeners.click();
-  const [asked, ask] = calls[1] ?? [];
+  // `deepEqual` above narrowed `calls` to its expected strings; the confirm call carries the ask itself.
+  const [asked, ask] = /** @type {any[]} */ (calls[1] ?? []);
   assert.equal(asked, "confirm", "a running run asks before it is cancelled");
   assert.equal(ask.verb, "Cancel run", "the confirm button repeats the verb");
   assert.match(ask.lost, /worktree/);
@@ -147,7 +163,13 @@ test("a second click while the copy is on its way adds no second note, and the p
 test("Cancel waits for the server's answer, so a second click asks nothing twice", async () => {
   const calls = [];
   let answer;
-  const act = { ...acts(calls), cancel: (id) => (calls.push(["cancel", id]), new Promise((done) => (answer = done))) };
+  const act = { ...acts(calls), cancel: (id) => {
+      calls.push(["cancel", id]);
+      return new Promise((done) => {
+        answer = done;
+      });
+    },
+  };
   const [row] = runsNodes({ paused: null, runs: [run("a", "queued")] }, act).filter((node) => node.dataset.run);
   const cancel = button(row, "Cancel");
   const clicked = cancel.listeners.click();

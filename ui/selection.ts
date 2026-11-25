@@ -106,5 +106,5 @@ export function show(selected: Selection | null) {
   showView(selected);
   showSession(selected?.session ?? null, false, selected?.agent ?? null);
   followSelection(selected?.session.id ?? null);
-  rewatch();
+  rewatch().catch(failure("watch"));
 }

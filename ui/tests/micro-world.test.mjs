@@ -33,27 +33,27 @@ test("a world that failed twice offers its prompt to copy and another try, and s
   const failed = worlds(true, { "flow:turn": view("failed", { line: "verify.mjs failed", prompt: "In the repository…" }) });
   assert.deepEqual(words(exploreOffers(failed, "flow:turn")), [["Copy prompt", "copy"], ["Try again", "explore"]]);
   const calls = [];
-  const node = exploreNode(failed, "flow:turn", { explore: () => calls.push("explore"), open: () => calls.push("open"), copy: (prompt) => calls.push(["copy", prompt]) });
+  const node = /** @type {any} */ (exploreNode(failed, "flow:turn", { explore: () => calls.push("explore"), open: () => calls.push("open"), copy: (prompt) => calls.push(["copy", prompt]) }));
   assert.match(node.text, /verify\.mjs failed/);
   node.find("button")[0].listeners.click();
   assert.deepEqual(calls, [["copy", "In the repository…"]]);
 });
 
 test("an out-of-date world says it may be out of date", () => {
-  const node = exploreNode(worlds(true, { "flow:turn": view("ready", { page: true, stale: true }) }), "flow:turn", { explore() {}, open() {}, copy() {} });
+  const node = /** @type {any} */ (exploreNode(worlds(true, { "flow:turn": view("ready", { page: true, stale: true }) }), "flow:turn", { explore() {}, open() {}, copy() {} }));
   assert.match(node.text, /may be out of date/);
 });
 
 test("the page is shown by srcdoc in a frame with allow-scripts and never allow-same-origin", () => {
   const html = `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'"><p>world</p>`;
-  const frame = frameNode(html);
+  const frame = /** @type {any} */ (frameNode(html));
   assert.equal(frame.tag, "iframe");
   assert.equal(frame.getAttribute("sandbox"), "allow-scripts");
   assert.equal(frame.getAttribute("srcdoc"), html);
   assert.equal(frame.getAttribute("src"), null, "never a URL of plotkeeper's");
   assert.equal(frame.getAttribute("referrerpolicy"), "no-referrer");
   // The overlay holds that frame, and no other way in.
-  const nodes = worldNodes("A turn", html, view("ready", { page: true }), { rebuild() {}, close() {} });
+  const nodes = /** @type {any} */ (worldNodes("A turn", html, view("ready", { page: true }), { rebuild() {}, close() {} }));
   const frames = nodes.flatMap((node) => node.find("iframe"));
   assert.equal(frames.length, 1);
   for (const each of frames) assert.doesNotMatch(each.getAttribute("sandbox"), /allow-same-origin/);
@@ -61,7 +61,7 @@ test("the page is shown by srcdoc in a frame with allow-scripts and never allow-
 
 test("the overlay of an out-of-date world offers Rebuild beside Close", () => {
   const calls = [];
-  const nodes = worldNodes("A turn", "<p>x</p>", view("ready", { page: true, stale: true }), { rebuild: () => calls.push("rebuild"), close: () => calls.push("close") });
+  const nodes = /** @type {any} */ (worldNodes("A turn", "<p>x</p>", view("ready", { page: true, stale: true }), { rebuild: () => calls.push("rebuild"), close: () => calls.push("close") }));
   const buttons = nodes.flatMap((node) => node.find("button"));
   assert.deepEqual(buttons.map((b) => b.text), ["Rebuild", "Close"]);
   buttons.forEach((b) => b.listeners.click());
@@ -71,7 +71,7 @@ test("the overlay of an out-of-date world offers Rebuild beside Close", () => {
 
 test("Copy prompt shows its outcome at once, and the prompt to copy by hand when the clipboard refuses it, though the map is unchanged", async () => {
   const failed = worlds(true, { "flow:turn": view("failed", { line: "verify.mjs failed", prompt: "In the repository…" }) });
-  const row = exploreRow("/w/app", failed, "flow:turn", "A turn", { kind: "flow", id: "turn" });
+  const row = /** @type {any} */ (exploreRow("/w/app", failed, "flow:turn", "A turn", { kind: "flow", id: "turn" }));
   // No clipboard here, as when a browser refuses it; nothing on the server changes, so the map is not drawn again.
   const copy = () => row.find("button").find((b) => b.text === "Copy prompt").listeners.click();
   copy();
@@ -102,7 +102,7 @@ test("a copy says its line once, in the page's action region; the row's note is 
   const all = (node) => [node, ...node.childNodes.filter((child) => child instanceof El).flatMap(all)];
   const statuses = (node) => all(node).filter((each) => each.getAttribute("role") === "status");
   const failed = worlds(true, { "flow:world-465": view("failed", { line: "verify.mjs failed", prompt: "In the repository…" }) });
-  const row = exploreRow("/w/app", failed, "flow:world-465", "A turn", { kind: "flow", id: "world-465" });
+  const row = /** @type {any} */ (exploreRow("/w/app", failed, "flow:world-465", "A turn", { kind: "flow", id: "world-465" }));
   row.find("button").find((b) => b.text === "Copy prompt").listeners.click();
   await new Promise((done) => setTimeout(done, 10));
   assert.match(row.text, /Copy this prompt and paste it into your agent/);
@@ -113,7 +113,7 @@ test("a copy says its line once, in the page's action region; the row's note is 
   await new Promise((done) => setTimeout(done, 150));
   assert.equal(live.text, "Copy this prompt and paste it into your agent");
   // The map drawn again draws the row and its note anew; the region keeps its node and says nothing new.
-  const again = exploreRow("/w/app", failed, "flow:world-465", "A turn", { kind: "flow", id: "world-465" });
+  const again = /** @type {any} */ (exploreRow("/w/app", failed, "flow:world-465", "A turn", { kind: "flow", id: "world-465" }));
   assert.match(again.text, /Copy this prompt and paste it into your agent/);
   assert.deepEqual(statuses(again), []);
   assert.deepEqual(statuses(document.body), [live]);

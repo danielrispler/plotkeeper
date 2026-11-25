@@ -67,6 +67,7 @@ const final = [
   "I did not open the window; the rows are checked by their CSS and by the tests only.",
 ].join("\n");
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: a fixture's whole session, one field a line; spec #548 Group 4 splits the snap fixtures
 const session = (state: SessionState, { running = false, question = false } = {}): Session => {
   const now = Date.now();
   const ended = !running && state !== "needs_you";
@@ -516,7 +517,8 @@ const blockedCommand = (status: BlockedCommand["status"], at: number, extra: Par
 });
 const withBlocked = (state: SessionState, card: (turnStart: number) => BlockedCommand, snapScript: string) => {
   const fixture = build(state);
-  const turn = fixture.selected.session.turns.at(-1)!;
+  const turn = fixture.selected.session.turns.at(-1);
+  if (!turn) throw new Error("the rail fixture has a turn");
   fixture.selected.session.blocked_commands = [card(turn.started_at + 30e3)];
   return { ...fixture, snapScript };
 };
@@ -614,7 +616,9 @@ export const railFixtures = {
   railHunk: () => ({ ...build("your_turn"), snapScript: hunkScript }),
   railMerged: () => {
     const fixture = build("your_turn");
-    fixture.selected.session.turns[4].files!.merged = 2;
+    const files = fixture.selected.session.turns[4]?.files;
+    if (!files) throw new Error("the rail fixture's fifth turn has files");
+    files.merged = 2;
     return { ...fixture, snapScript: mergedScript };
   },
   railNamedFailure: () => ({ ...build("your_turn"), failed_check_name: "Window tests failed: delete keeps a live terminal (+1 more)", snapScript: namedFailureScript }),

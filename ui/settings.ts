@@ -3,6 +3,7 @@
 // text at start and each time one is saved; a file that does not parse is reported and the last good
 // one stays in effect.
 
+import { messageOf } from "./dom.js";
 import type { WriterKind } from "./types.js";
 
 // An action, or an action with its argument, as Zed writes `["terminal::SendText", "\u0001"]`.
@@ -38,9 +39,12 @@ export interface Files {
   broken: boolean;
 }
 
+const writerKinds: readonly WriterKind[] = ["claude", "agy", "codex", "copilot", "cursor", "anthropic", "openai"];
+const isWriterKind = (value: unknown): value is WriterKind => writerKinds.some((kind) => kind === value);
 // The writer the file names, or undefined, reporting a name that is none of them.
 function writerKind(value: unknown, report: (line: string) => void): WriterKind | undefined {
-  if (value === undefined || value === "claude" || value === "agy" || value === "codex" || value === "copilot" || value === "cursor" || value === "anthropic" || value === "openai") return value;
+  if (value === undefined) return undefined;
+  if (isWriterKind(value)) return value;
   report('summaries.writer: expected "claude", "agy", "codex", "copilot", "cursor", "anthropic" or "openai"');
   return undefined;
 }
@@ -141,7 +145,7 @@ export const MODIFIERS = ["ctrl", "alt", "shift", "cmd"] as const;
 function normal(stroke: string): string | null {
   const parsed = new RegExp(`^((?:(?:${MODIFIERS.join("|")})-)*)(.+)$`).exec(stroke.toLowerCase());
   if (!parsed) return null;
-  const [, mods, key] = parsed;
+  const [, mods = "", key = ""] = parsed;
   return [...MODIFIERS.filter((m) => mods.includes(`${m}-`)), key].join("-");
 }
 
@@ -197,7 +201,7 @@ export function reload(previous: Files, files: SettingsFiles): Files {
     try {
       return parse(parseJsonc(text), (problem) => errors.push(`${name}: ${problem}`));
     } catch (e) {
-      errors.push(`${name}: ${e instanceof Error ? e.message : e}`);
+      errors.push(`${name}: ${messageOf(e)}`);
       if (name === "settings.json") broken = true;
       return last;
     }

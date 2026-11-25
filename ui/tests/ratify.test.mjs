@@ -3,7 +3,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { copyOverturn, decideWith, detailLines, noteFor, openRows, overturnPrompt, overturnReport, ratifyStep, sheetLinkItem, sheetPending, statusWords } from "../../dist/ratify.js";
 
-const row = (kind, id, status = "not-yet", extra = {}) => ({ pr: 7, kind, id, text: `${id} text`, change: "", status, ...extra });
+// A row with no detail of its own, as the page reads one whose kind has none.
+const row = (kind, id, status = "not-yet", extra = {}) => /** @type {import("../../dist/types.js").RatifyRow} */ ({ pr: 7, kind, id, text: `${id} text`, change: "", status, ...extra });
 
 test("the sheet marks a law and a link at the part that are not yet ratified, with the PR that changed them", () => {
   const links = [{ id: "a-b", from: "a", to: "b" }, { id: "c-d", from: "c", to: "d" }, { id: "x-a", from: "x", to: "a" }];
@@ -30,6 +31,7 @@ test("the overturn prompt stands alone: the PR, its branch while it is open, the
 });
 
 const words = (before, after) => ({ before, after });
+/** @type {import("../../dist/types.js").RatifyDetail} */
 const partDetail = {
   of: "part",
   name: words("Server", "Server"),
@@ -43,6 +45,7 @@ const partDetail = {
   paths_added: ["server/src/"],
   paths_removed: ["src-tauri/"],
 };
+/** @type {import("../../dist/types.js").RatifyDetail} */
 const linkDetail = { of: "link", kind: words("import", "http"), reason: words("", "The page calls the server over HTTP.") };
 
 test("an overturn of a part quotes its new purpose and its held items' names, and of a link its ends, kind and reason", () => {
@@ -89,6 +92,7 @@ test("a detail shows only what changed, old beside new, and an added part shows 
     { label: "Briefs: paths", before: null, after: "server/src/pr_briefs.rs", code: true },
     { label: "Holds Locks", before: "One writer.", after: null },
   ]);
+  /** @type {import("../../dist/types.js").RatifyDetail} */
   const added = { of: "part", name: words(null, "Install"), purpose: words(null, "Installs the hook."), holds: [{ name: "Copies", text: words(null, "The hook's copies."), paths_added: [], paths_removed: [] }], paths_added: ["server/src/install.rs"], paths_removed: [] };
   assert.deepEqual(detailLines(added), [
     { label: "Name", before: null, after: "Install" },
@@ -156,7 +160,10 @@ test("an overturn's note shows only where its item is drawn: its project, and th
 
 test("an overturn copies its prompt within the click, before the decision's round trip, and Accept copies nothing", async () => {
   const order = [];
-  const copy = async () => (order.push("copy"), "copied");
+  const copy = () => {
+    order.push("copy");
+    return Promise.resolve("copied");
+  };
   const record = async () => {
     order.push("record");
     await new Promise((resolve) => setTimeout(resolve, 1));

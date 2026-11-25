@@ -9,7 +9,9 @@ const { expectedLine, paintPreFlight, preFlightNodes, preFlightRows, settle } = 
 const { windowBinding } = await import("../../dist/keys.js");
 const { initial } = await import("../../dist/settings.js");
 
+/** @returns {import("../../dist/map-model.js").Part} */
 const part = (id, name) => ({ id, name, caption: "", purpose: "", holds: [], tier: "core", paths: [] });
+/** @type {import("../../dist/map.js").LoadedMap} */
 const doc = {
   ok: true,
   parts: [part("hook", "Hook"), part("core", "Core"), part("window", "Window")],
@@ -21,7 +23,10 @@ const doc = {
     { id: "hook-held", on: "hook", backing: "trust", text: "A held question blocks the agent." },
   ],
 };
+// A map state holding only the fields pre-flight reads.
+/** @type {any} */
 const state = { fog: { core: "thick" } };
+/** @returns {import("../../dist/types.js").PreFlight} */
 const pre = (extra = {}) => ({ issue: 378, title: "Studio: Spec: the modules", parts: ["core", "hook"], predicted: true, at: 1, ...extra });
 const acts = (calls) => ({
   predict: (issue, text) => calls.push(["predict", issue, text]),
@@ -29,8 +34,11 @@ const acts = (calls) => ({
   pick: (parts) => calls.push(["pick", parts]),
   clear: () => calls.push(["clear"]),
 });
+// The page's nodes as the stand-in DOM holds them.
+/** @param {any[]} nodes */
 const buttons = (nodes) => nodes.flatMap((node) => node.find("button"));
 const button = (nodes, words) => buttons(nodes).find((each) => each.text.includes(words));
+/** @param {any[]} nodes */
 const texts = (nodes) => nodes.map((node) => node.text).join("\n");
 
 test("the predicted parts show with their laws on trust, their fog and their staleness band, in the pre-flight's order", () => {
@@ -48,7 +56,7 @@ test("a failed prediction shows the hand picker with why; a prediction frames it
 
 test("the inputs: an open issue, one or two lines of text, or parts by hand", () => {
   const calls = [];
-  const nodes = preFlightNodes({ kind: "start", issues: [{ number: 394, title: "Studio: pre-flight" }] }, doc, state, acts(calls));
+  const nodes = /** @type {any[]} */ (preFlightNodes({ kind: "start", issues: [{ number: 394, title: "Studio: pre-flight" }] }, doc, state, acts(calls)));
   button(nodes, "#394").listeners.click();
   const [field] = nodes.flatMap((node) => node.find("textarea"));
   assert.ok(field, "the free text is a text field");
@@ -68,7 +76,7 @@ test("no single-key shortcut fires while typing in the pre-flight's field, and E
 
 test("the hand picker lists every part and frames the ones ticked", () => {
   const calls = [];
-  const nodes = preFlightNodes({ kind: "pick", why: "the writer named no part on the map" }, doc, state, acts(calls));
+  const nodes = /** @type {any[]} */ (preFlightNodes({ kind: "pick", why: "the writer named no part on the map" }, doc, state, acts(calls)));
   assert.match(texts(nodes), /the writer named no part on the map/);
   const boxes = nodes.flatMap((node) => node.find("input"));
   assert.deepEqual(boxes.map((box) => box.value), ["hook", "core", "window"]);
@@ -100,6 +108,7 @@ test("a matched brief says what was expected against what it touched; an unmatch
 test("a map redraw keeps what was typed and ticked in the overlay, and its focus, until the overlay moves on", async () => {
   const { El } = await import("./dom.mjs");
   const box = new El("div");
+  /** @type {import("../../dist/map-pre-flight.js").Phase} */
   const start = { kind: "start", issues: [] };
   paintPreFlight(box, start, doc, state, acts([]));
   const [field] = box.find("textarea");
@@ -109,6 +118,7 @@ test("a map redraw keeps what was typed and ticked in the overlay, and its focus
   assert.equal(box.find("textarea")[0], field, "the same field, so its focus stays");
   assert.equal(field.value, "Make the hook faster");
 
+  /** @type {import("../../dist/map-pre-flight.js").Phase} */
   const pick = { kind: "pick", why: null };
   paintPreFlight(box, pick, doc, state, acts([]));
   const ticked = box.find("input")[1];

@@ -3,6 +3,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { blockedView, docksInDock, outputCall, stateInDock } from "../../dist/blocked.js";
 
+/**
+ * @param {import("../../dist/types.js").BlockedStatus} [status]
+ * @param {string | null} [agent]
+ * @returns {import("../../dist/types.js").BlockedCommand}
+ */
 const card = (status = "blocked", agent = null) => ({
   call: "toolu_1",
   command: 'claude -p "summarise" > /tmp/out.txt',
@@ -36,6 +41,7 @@ test("with no request file there is nothing to answer", () => {
 });
 
 test("a card docks exactly when it shows a button, for each status, with and without a standing request", () => {
+  /** @type {import("../../dist/types.js").BlockedStatus[]} */
   const statuses = ["blocked", "allowed", "allowed_not_run", "running", "finished", "running_in_background", "blocked_again", "declined"];
   const docked = (answerable) => statuses.filter((status) => docksInDock(card(status), answerable));
   assert.deepEqual(docked(true), ["blocked", "allowed_not_run", "blocked_again"]);
@@ -58,7 +64,7 @@ test("an allowed command waits for the agent's retry with no buttons, and a decl
 });
 
 test("the card has no edit: it offers only Allow and Decline", () => {
-  const all = ["blocked", "allowed"].flatMap((s) => blockedView(card(s), null, true).buttons);
+  const all = /** @type {const} */ (["blocked", "allowed"]).flatMap((s) => blockedView(card(s), null, true).buttons);
   assert.deepEqual(all.filter((b) => !["Allow", "Decline"].includes(b)), []);
 });
 
@@ -132,11 +138,12 @@ import { blockedRequestFor, sendBlockedAnswer, startWatching } from "../../dist/
 // The shell as `invoke` and `listen` see it: `answers` is what `answer_blocked_command` returns, or an error to throw.
 function shell(answers) {
   const handlers = {};
-  globalThis.document = { addEventListener() {}, visibilityState: "hidden" };
-  globalThis.setInterval = () => 0;
-  globalThis.window = {
+  globalThis.document = /** @type {any} */ ({ addEventListener() {}, visibilityState: "hidden" });
+  globalThis.setInterval = /** @type {any} */ (() => 0);
+  globalThis.window = /** @type {any} */ ({
     __TAURI__: {
       core: {
+        // biome-ignore lint/suspicious/useAwait: a stand-in for an async API, so a throw in it rejects as the real one's would
         invoke: async (command) => {
           if (command !== "answer_blocked_command") return null;
           const next = answers.shift();
@@ -144,9 +151,14 @@ function shell(answers) {
           return next;
         },
       },
-      event: { listen: async (name, handler) => void (handlers[name] = (payload) => handler({ payload })) },
+      event: {
+        listen: (name, handler) => {
+          handlers[name] = (payload) => handler({ payload });
+          return Promise.resolve();
+        },
+      },
     },
-  };
+  });
   startWatching(() => {});
   return handlers;
 }
@@ -174,6 +186,10 @@ test("a failed answer puts the request back so the card keeps its buttons", asyn
 // The risk note (danielrispler/plotkeeper#298).
 import { riskLevels } from "../../dist/blocked.js";
 
+/**
+ * @param {import("../../dist/types.js").RiskLevel} level
+ * @returns {import("../../dist/types.js").RiskView}
+ */
 const arrived = (level, line = "Deletes the remote branch feature-x on GitHub") => ({ call: "toolu_1", state: "arrived", level, line, at: 5 });
 
 test("a card with buttons has the note's place from the start, which reads that the note is on its way, with no note sent yet", () => {
@@ -186,7 +202,7 @@ test("a note shows at each of the six levels as 'Risk: Level · line', in plain 
   const levels = { none: "None", low: "Low", medium: "Medium", high: "High", very_high: "Very high", not_sure: "Not sure" };
   assert.deepEqual(riskLevels, levels);
   for (const [level, label] of Object.entries(levels)) {
-    const risk = blockedView(card(), null, true, 0, undefined, arrived(level)).risk;
+    const risk = blockedView(card(), null, true, 0, undefined, arrived(/** @type {import("../../dist/types.js").RiskLevel} */ (level))).risk;
     assert.deepEqual(risk, { state: "arrived", level: label, line: "Deletes the remote branch feature-x on GitHub", text: `Risk: ${label} · Deletes the remote branch feature-x on GitHub` }, level);
   }
 });
@@ -197,8 +213,9 @@ test("a failed note reads that no risk note came, which is not a level", () => {
 });
 
 test("a card's buttons and state do not depend on its note", () => {
-  const notes = [undefined, { call: "toolu_1", state: "reading" }, { call: "toolu_1", state: "failed" }, ...Object.keys(riskLevels).map((level) => arrived(level))];
-  for (const status of ["blocked", "allowed", "allowed_not_run", "running", "finished", "blocked_again"]) {
+  /** @type {(import("../../dist/types.js").RiskView | undefined)[]} */
+  const notes = [undefined, { call: "toolu_1", state: "reading" }, { call: "toolu_1", state: "failed" }, ...Object.keys(riskLevels).map((level) => arrived(/** @type {import("../../dist/types.js").RiskLevel} */ (level)))];
+  for (const status of /** @type {import("../../dist/types.js").BlockedStatus[]} */ (["blocked", "allowed", "allowed_not_run", "running", "finished", "blocked_again"])) {
     for (const answerable of [true, false]) {
       const bare = blockedView(card(status), null, answerable);
       for (const note of notes) {
@@ -234,14 +251,14 @@ test("the note's place is a polite live region whose full text is its hover, so 
   globalThis.document = fakeDocument();
   const long = Array.from({ length: 16 }, (_, i) => `word${i}`).join(" ");
   const risk = blockedView(card(), null, true, 0, undefined, arrived("very_high", long)).risk;
-  const place = riskElement(risk);
+  const place = /** @type {any} */ (riskElement(risk));
   assert.equal(place.className, "risk-note");
   assert.equal(place.getAttribute("aria-live"), "polite");
   assert.equal(place.title, `Risk: Very high · ${long}`);
   assert.equal(place.text, `Risk: Very high · ${long}`);
   assert.deepEqual(place.find("strong").map((s) => s.text), ["Very high"]);
   // Waiting and failed read as plain text, with no level in bold.
-  const waiting = riskElement(blockedView(card(), null, true).risk);
+  const waiting = /** @type {any} */ (riskElement(blockedView(card(), null, true).risk));
   assert.equal(waiting.text, "Reading the command…");
   assert.deepEqual(waiting.find("strong"), []);
 });
@@ -267,7 +284,8 @@ class Card extends El {
   }
 }
 const cardWithReason = () => {
-  const block = new Card("article");
+  // `Card` extends the stand-in, which is `any`, so its constructor is typed as taking no arguments.
+  const block = new (/** @type {any} */ (Card))("article");
   const reason = new El("p");
   reason.className = "description reason";
   const after = new El("p");
@@ -298,11 +316,12 @@ test("a docked card with no place gets one after the rule when its note is known
 import { blockedElement } from "../../dist/blocked.js";
 
 // A page with a notice line and a Studio log: `notice` is the line, `logged` the lines the page sent to the log.
+/** @param {(command: string, args: unknown) => Promise<unknown>} [invoke] */
 function page(invoke = async () => null) {
   const notice = { textContent: "", hidden: true };
   const logged = [];
   globalThis.document = fakeDocument({ getElementById: () => notice });
-  globalThis.window = { __TAURI__: { core: { invoke }, log: { warn: async (m) => void logged.push(m), error: async (m) => void logged.push(m) } } };
+  globalThis.window = /** @type {any} */ ({ __TAURI__: { core: { invoke }, log: { warn: async (m) => void logged.push(m), error: async (m) => void logged.push(m) } } });
   return { notice, logged };
 }
 
@@ -310,9 +329,13 @@ function page(invoke = async () => null) {
 // line was shown and the notice line's text.
 async function askAgain(renew) {
   const asked = [];
-  const { notice } = page(async (command, args) => (asked.push([command, args]), renew()));
+  // biome-ignore lint/suspicious/useAwait: a stand-in for an async API, so `renew`'s throw rejects as the real one's would
+  const { notice } = page(async (command, args) => {
+    asked.push([command, args]);
+    return renew();
+  });
   const retried = [];
-  const element = blockedElement("s1", card("allowed_not_run"), null, (c) => retried.push(c.call));
+  const element = /** @type {any} */ (blockedElement("s1", card("allowed_not_run"), null, (c) => retried.push(c.call)));
   await element.find("button")[0].listeners.click();
   assert.deepEqual(asked, [["ask_again", { session: "s1", command: card().command, cwd: "/work/repo" }]]);
   return { retried, notice: notice.textContent };
@@ -332,7 +355,7 @@ import { retryNotice } from "../../dist/story.js";
 
 test("a late Allow shows the line to tell the session, with no command's name before it, and logs nothing", () => {
   const { notice, logged } = page();
-  retryNotice({ state: "working" }, card("allowed"), null);
+  retryNotice({ state: "running" }, card("allowed"), null);
   assert.equal(notice.textContent, 'Allowed. Tell the session: Daniel approved the blocked command: `claude -p "summarise" > /tmp/out.txt`. Run it again.');
   assert.equal(notice.hidden, false);
   assert.deepEqual(logged, []);

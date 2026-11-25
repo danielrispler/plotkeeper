@@ -48,7 +48,9 @@ export const onDraw = (hook: (view: MapView) => void) => void drawHooks.push(hoo
 // Runs when a draw has no map to show (none yet, or a past commit's cannot be read), with the banner and the scrub still set.
 const unreadHooks: ((banner: HTMLElement, scrub: Scrub | null) => void)[] = [];
 export const onUnread = (hook: (banner: HTMLElement, scrub: Scrub | null) => void) => void unreadHooks.push(hook);
-export const registerLayer = (name: LayerName, layer: Layer) => void (layers[name] = layer);
+export const registerLayer = (name: LayerName, layer: Layer) => {
+  layers[name] = layer;
+};
 
 // What `startMap` is given by `main.ts`, which owns what the Map view may not import.
 export type MapDeps = {
@@ -235,7 +237,7 @@ export function fitMap() {
 export const mapEscape = () => void escapeMap(layers);
 
 // The side area shows while any of its slots holds something; the tray floats on its own (#385).
-export const syncSide = (slots: MapView["slots"]) => {
+export const syncSide = (slots: Omit<MapView["slots"], "canvas">) => {
   slots.side.hidden = ![slots.notPlaced, slots.runs, slots.sheet, slots.drawer].some((slot) => slot.childElementCount > 0);
   // When a part's sheet opens, the camera pans just enough to show that part whole beside it, once per part, so a later draw never pans
   // Daniel's view back; positions are never written here.
@@ -351,9 +353,11 @@ function drawLinks(layer: Element, view: MapView) {
     const points = markPoints(a, b, laws.length);
     laws.forEach((law, i) => {
       const at = points[i];
+      if (!at) return;
       const mark = svg("rect", { class: `link-mark ${law.backing}`, width: "7", height: "7", x: "-3.5", y: "-3.5", transform: `translate(${at.x} ${at.y}) rotate(45)` });
-      mark.append(svg("title", {}));
-      mark.firstChild!.textContent = `${law.backing === "check" ? "Backed by a check" : "On trust"}: ${law.text}`;
+      const title = svg("title", {});
+      mark.append(title);
+      title.textContent = `${law.backing === "check" ? "Backed by a check" : "On trust"}: ${law.text}`;
       nodes.push(mark);
     });
   }
@@ -366,6 +370,7 @@ const place = (node: HTMLElement, at: Point) => {
 };
 
 // Draws the parts as plates, the actors as labels and the links between them, placing what has no saved position once.
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: `drawMap`: spec #548 Group 4 splits it; remove this when it does
 function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub | null) {
   const saved = Object.fromEntries(Object.entries(state.user.positions).map(([id, [x, y]]) => [id, { x, y }]));
   const items = [...doc.parts, ...doc.actors];
@@ -398,8 +403,11 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub
 
   // In reading order, so Tab walks the parts top to bottom, then left to right.
   const parts = new Map(doc.parts.map((part) => [part.id, part]));
-  const byId = Object.fromEntries(doc.parts.map((part) => [part.id, positions[part.id]]));
-  for (const part of readingOrder(byId).map((id) => parts.get(id)!)) {
+  const byId = Object.fromEntries(doc.parts.flatMap((part) => {
+    const at = positions[part.id];
+    return at ? [[part.id, at]] : [];
+  }));
+  for (const part of readingOrder(byId).flatMap((id) => parts.get(id) ?? [])) {
     const tier = effectiveTier(part, state.user.tiers);
     // Fog under Daniel's effective tier, as the shell worked it out (`fog.rs`); a part not listed is clear.
     const mist = past ? undefined : state.fog?.[part.id];
@@ -433,7 +441,10 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub
     nodes.set(actor.id, label);
     elements.push(label);
   }
-  for (const [id, node] of nodes) place(node, positions[id]);
+  for (const [id, node] of nodes) {
+    const at = positions[id];
+    if (at) place(node, at);
+  }
   world.append(...elements);
   canvas.append(world);
   // The keyboard on a part's button stays on that part's new button (#452's review).
@@ -474,7 +485,10 @@ function pan(canvas: HTMLElement) {
       canvas.removeEventListener("pointerup", end);
       canvas.removeEventListener("pointercancel", end);
       if (ended.type !== "pointerup" || Math.max(far, Math.hypot(ended.clientX - from.x, ended.clientY - from.y)) > clickSlop) return;
-      for (const name of ["drawer", "sheet"] as const) if (layers[name]?.open()) layers[name]!.close();
+      for (const name of ["drawer", "sheet"] as const) {
+        const layer = layers[name];
+        if (layer?.open()) layer.close();
+      }
     };
     canvas.addEventListener("pointermove", move);
     canvas.addEventListener("pointerup", end);
@@ -503,6 +517,7 @@ function grab(node: HTMLElement, id: string, current: MapView, links: Element, f
     if (event.button !== 0 || (event.target as Element).closest("button:not(.plate-open)")) return;
     scale = rig?.shown().scale ?? 1;
     const at = current.positions[id];
+    if (!at) return;
     drag = dragStart(id, { x: event.clientX, y: event.clientY }, { x: at.x * scale, y: at.y * scale });
     node.setPointerCapture(event.pointerId);
   });
@@ -527,6 +542,7 @@ function grab(node: HTMLElement, id: string, current: MapView, links: Element, f
     swallow = true;
     if (current.scrub) return;
     const at = current.positions[id];
+    if (!at) return;
     current.state.user.positions = { ...current.state.user.positions, [id]: [at.x, at.y] };
     invoke("map_save_positions", { project: current.project, positions: { [id]: [at.x, at.y] } }).catch(failure("map_save_positions"));
   };
@@ -546,12 +562,12 @@ function draw() {
   const doc = loaded?.status === "loaded" && loaded.source !== null ? parseMap(past?.source ?? loaded.source) : null;
   if (loaded && doc?.ok) return drawMap(body, loaded, doc, past);
   view = null;
-  const unreadable = doc && !doc.ok ? { ...loaded!, status: "unreadable" as const, note: doc.why } : loaded;
+  const unreadable = loaded && doc && !doc.ok ? { ...loaded, status: "unreadable" as const, note: doc.why } : loaded;
   drawEmpty(body, unreadable);
   const slots = { side: element("map-side"), notPlaced: element("map-not-placed"), tray: element("map-tray"), runs: element("map-runs"), sheet: element("map-sheet"), drawer: element("map-drawer"), banner: element("map-banner") };
   // No map is drawn, so nothing of the last one may stay: its banner, sheet and drawer would belong to another project.
   [slots.notPlaced, slots.tray, slots.runs, slots.sheet, slots.drawer, slots.banner].forEach((slot) => slot.replaceChildren());
-  syncSide(slots as MapView["slots"]);
+  syncSide(slots);
   // A scrubbed commit whose map cannot be read still shows the way back to now.
   unreadHooks.forEach((hook) => hook(slots.banner, scrub));
 }

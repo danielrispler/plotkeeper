@@ -6,7 +6,8 @@ import { arrange, litAgents, liveAgents, notPlacedLine } from "../../dist/map-ag
 const file = (path, agent = null) => ({ root: "/w/p", path, from: null, added: 1, removed: 0, agent });
 const turn = (files) => ({ started_at: 1, ended_at: null, prompt: "", id: null, message: null, checks: [], listed: [], files: files === null ? null : { files, merged: 0 } });
 const worker = (id, extra = {}) => ({ id, parent: "session", kind: "worker", name: `worker ${id}`, status: "running", ...extra });
-const session = (id, state, extra = {}) => ({
+// A session with the fields the map's agents read.
+const session = (id, state, extra = {}) => /** @type {import("../../dist/types.js").Session} */ ({
   id, state, name: `session ${id}`, cwd: "/w/p", shell: false, status_only: false, asker: null, agents: [], turns: [turn([])], last_step: null,
   capabilities: { turn_trees: true }, identity: { name: `identity ${id}` }, ...extra,
 });

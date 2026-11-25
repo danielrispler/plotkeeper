@@ -57,7 +57,11 @@ export function arrange(live: Live[], placed: Record<string, string[]>): { byPar
   for (const agent of live) {
     const parts = placed[agent.key] ?? [];
     if (!parts.length) notPlaced.push(agent);
-    for (const part of parts) (byPart[part] ??= []).push(agent);
+    for (const part of parts) {
+    const here = byPart[part] ?? [];
+    here.push(agent);
+    byPart[part] = here;
+  }
   }
   return { byPart, notPlaced };
 }
@@ -126,7 +130,8 @@ const notPlacedList = () => {
   summary.title = "The agents whose turn touched no part yet: click to show or hide them";
   const chips = text("div", "", "not-placed-chips");
   details.append(summary, chips);
-  return (kept = { details, summary, chips });
+  kept = { details, summary, chips };
+  return kept;
 };
 
 // Puts the chips on the plates and the not placed list in its slot, from what the last refresh found.
@@ -137,7 +142,7 @@ function paint() {
   const { byPart, notPlaced } = arrange(live, placed);
   const lit = litAgents(live, hovered, opened);
   for (const plate of view.slots.canvas.querySelectorAll<HTMLElement>(".plate[data-id]")) {
-    plate.querySelector(".plate-chips")?.replaceChildren(...(byPart[plate.dataset.id!] ?? []).map((agent) => chip(agent, deps.select, lit)));
+    plate.querySelector(".plate-chips")?.replaceChildren(...(byPart[plate.dataset.id ?? ""] ?? []).map((agent) => chip(agent, deps.select, lit)));
   }
   // One line that a click opens (#472), so an agent joining or leaving changes its count and not its height. The same element is kept
   // from paint to paint, so an opened list stays open, and its line keeps the focus, while agents come and go.

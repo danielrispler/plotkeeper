@@ -12,7 +12,7 @@
 // fog list, `catchUpIds`) so the player keeps its step apart from the PR briefs and from an older story of the part; read to its end it
 // clears the part's fog (`part_catch_up_done`) and completes no brief.
 
-import { failure, invoke, text } from "./dom.js";
+import { element, failure, invoke, messageOf, text } from "./dom.js";
 import { currentMap, currentScrub, giveCameraBack, lendCamera, onDraw, registerLayer, type MapView } from "./map.js";
 import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { watchSeen } from "./seen.js";
@@ -65,8 +65,14 @@ const storyDone = new Map<string, Set<number>>();
 let watching: (() => void) | null = null;
 // The "not confirmed from the facts" marks of the step drawn, watched until seen, the step is drawn again or the brief closes (#346).
 let marks: (() => void)[] = [];
-const stopMarks = () => (marks.forEach((stop) => stop()), (marks = []));
-const stopWatching = () => (watching?.(), (watching = null));
+const stopMarks = () => {
+  for (const stop of marks) stop();
+  marks = [];
+};
+const stopWatching = () => {
+  watching?.();
+  watching = null;
+};
 // The not-confirmed popover (#491): one manual popover of the panel, so Esc reaches the map's layers, which close it before the brief. It
 // shows the reasons of the mark that opened it, anchored to that mark (`showPopover`'s source); a redraw of the same step anchors it to the
 // mark's new copy, and a new step closes it.
@@ -76,7 +82,7 @@ let whyOf: string | null = null;
 const popoverOpen = () => !!why?.isConnected && why.matches(":popover-open");
 const markOf = (key: string) => panel().querySelector<HTMLElement>(`.brief-why-mark[data-why="${CSS.escape(key)}"]`);
 function closePopover() {
-  if (popoverOpen()) why!.hidePopover();
+  if (popoverOpen()) why?.hidePopover();
   if (whyOf) markOf(whyOf)?.setAttribute("aria-expanded", "false");
   whyOf = null;
 }
@@ -105,8 +111,8 @@ function reanchorPopover() {
   if (!whyOf || !popoverOpen()) return;
   const mark = markOf(whyOf);
   if (!mark) return closePopover();
-  why!.hidePopover();
-  why!.showPopover({ source: mark });
+  why?.hidePopover();
+  why?.showPopover({ source: mark });
   mark.setAttribute("aria-expanded", "true");
 }
 // The "not confirmed from the facts" mark of a step or a flagged decision: a button whose popover lists the item's reasons, the mark's
@@ -160,7 +166,8 @@ function filesOf(view: MapView, step: BriefStep): Files {
   if (!found) {
     const files: Files = { done: null, wait: invoke("pr_diff", { ...diffArgs(view.project, playing), parts }).then((got) => got.files.map((file) => file.path), () => []) };
     void files.wait.then((paths) => (files.done = paths));
-    litFiles.set(key, (found = files));
+    found = files;
+    litFiles.set(key, found);
   }
   return found;
 }
@@ -216,7 +223,7 @@ function watchLast(node: Element, index: number) {
   watching = watchSeen(node, { active: () => player.current()?.step === index && panel().classList.contains("open"), onSeen: () => gate.sawLast() });
 }
 
-const panel = () => document.getElementById("map-brief")!;
+const panel = () => element("map-brief");
 const briefOpen = () => player.current() !== null;
 
 // Opens `chapter` of PR `number`'s brief: reads it, returns the map to now and plays it. A stale or unwritten brief is written in the
@@ -238,7 +245,7 @@ export async function openBriefOf(project: string, number: number, chapter: numb
     got = await invoke("pr_brief", { project, number, full });
   } catch (e) {
     // A superseded open's failure is not this PR's problem: only a wanted answer may set it.
-    if (wanted()) problems.set(number, String(e));
+    if (wanted()) problems.set(number, messageOf(e));
     got = null;
   }
   clearTimeout(slow);
@@ -256,10 +263,14 @@ export async function openBriefOf(project: string, number: number, chapter: numb
     if (!got && !problems.has(number)) problems.set(number, "the brief is not written yet");
     // The tray says why, in the row's place of its note, until the map is drawn again.
     const note = number === null ? null : document.querySelector(`#map-tray .tray-row[data-pr="${number}"] .tray-note`);
-    if (note && problems.has(number)) note.textContent = problems.get(number)!;
+    const problem = problems.get(number);
+    if (note && problem) note.textContent = problem;
     return;
   }
-  const rows = await invoke("pr_ratify", { project, number }).catch((e) => (failure("pr_ratify")(e), [] as RatifyRow[]));
+  const rows = await invoke("pr_ratify", { project, number }).catch((e: unknown): RatifyRow[] => {
+    failure("pr_ratify")(e);
+    return [];
+  });
   if (!wanted()) return;
   // Another brief or chapter open: leave it (it keeps its step) so the panel is built afresh for this one.
   if (briefOpen()) closeBrief();
@@ -461,7 +472,10 @@ const chapterParts = (): string[] => {
 // What a brief frames: the parts its steps light and the ones their hops reach, with room around them.
 function frameOf(view: MapView, list: BriefStep[]): Rect | null {
   const ids = new Set([...list.flatMap((step) => [...step.on, ...step.hops.flatMap((hop) => ends(view, hop) ?? [])]), ...chapterParts()]);
-  const boxes = [...ids].filter((id) => centre(view, id)).map((id) => ({ at: centre(view, id), size: sizeOf(view, id) }));
+  const boxes = [...ids].flatMap((id) => {
+    const at = centre(view, id);
+    return at ? [{ at, size: sizeOf(view, id) }] : [];
+  });
   if (!boxes.length) return null;
   return {
     x0: Math.min(...boxes.map((b) => b.at.x - b.size.w / 2)) - 70,
@@ -521,7 +535,8 @@ async function runLight(view: MapView, hops: [string, boolean][]) {
     return [{ from, to, ids: pair, len: Math.hypot(to.x - from.x, to.y - from.y) }];
   });
   const lit = (leg: (typeof legs)[number]) => svg("line", { class: "light-trail", x1: String(leg.from.x), y1: String(leg.from.y), x2: String(leg.to.x), y2: String(leg.to.y) });
-  if (!legs.length) return;
+  const first = legs[0];
+  if (!first) return;
   if (reduced()) {
     for (const leg of legs) {
       layer.append(lit(leg));
@@ -531,7 +546,7 @@ async function runLight(view: MapView, hops: [string, boolean][]) {
   }
   const spark = svg("circle", { class: "light-spark", r: "5" });
   layer.append(spark);
-  arrive(view, legs[0].ids[0]);
+  arrive(view, first.ids[0]);
   for (const leg of legs) {
     const trail = lit(leg);
     layer.insertBefore(trail, spark);
@@ -612,10 +627,11 @@ function bodyNode(body: string) {
   const node = text("p", "", "brief-body");
   const runs = body.split(/(<\/?b>)/);
   for (let i = 0; i < runs.length; i++) {
-    if (runs[i] === "<b>" && runs[i + 2] === "</b>") {
-      node.append(text("b", runs[i + 1]!));
+    const run = runs[i];
+    if (run === "<b>" && runs[i + 2] === "</b>") {
+      node.append(text("b", runs[i + 1] ?? ""));
       i += 2;
-    } else if (runs[i]) node.append(runs[i]!);
+    } else if (run) node.append(run);
   }
   return node;
 }
@@ -637,7 +653,7 @@ export function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBri
   if (step.list.length) words.append(listNode(step.list));
   if (step.risks.length) words.append(listNode(step.risks.map((r) => `${part(r.part)}: ${r.trigger} To see it: ${r.check}`)));
   if (step.covered_by) words.append(text("p", `Covered by the test ${step.covered_by}.`, "brief-quiet"));
-  if (step.check) words.append(checkNode(view, step));
+  if (step.check) words.append(checkNode(view, step, step.check));
   if (step.k === "Ratify") {
     words.append(ratifyNode(view, ratifying));
     const guard = playing?.brief.guard;
@@ -701,7 +717,10 @@ function codeInto(view: MapView, node: HTMLElement, list: BriefStep[], index: nu
   button.addEventListener("click", () => {
     // The PR's diff (the files the writer read); when git cannot give it, what the step quoted.
     const drawer = want === "all" ? diff().then(commitDrawer) : want === "none" ? diff().then(unlit) : diff(want).then((found) => (found.files.length ? commitDrawer(found) : diff().then(unlit)));
-    drawer.then(openDrawer).catch((e) => (failure("pr_diff")(e), openDrawer(citeDrawer(step))));
+    drawer.then(openDrawer).catch((e: unknown) => {
+      failure("pr_diff")(e);
+      openDrawer(citeDrawer(step));
+    });
   });
   const row = text("div", "", "brief-step-code");
   row.append(button);
@@ -772,7 +791,7 @@ function ratifyNode(view: MapView, rows: RatifyRow[]) {
     const item = text("li", "", "ratify-row");
     item.dataset.kind = row.kind;
     item.dataset.id = row.id;
-    const kind = row.kind === "decision" ? "Decided" : `${row.change ? `${row.change[0].toUpperCase()}${row.change.slice(1)} ` : ""}${row.kind}`;
+    const kind = row.kind === "decision" ? "Decided" : `${row.change ? `${row.change.charAt(0).toUpperCase()}${row.change.slice(1)} ` : ""}${row.kind}`;
     item.append(text("span", kind, "ratify-kind"), text("span", row.text || row.id, "ratify-text"));
     if (row.status === "not-yet") {
       item.append(ratifyActions(view.project, row, (state) => {
@@ -820,17 +839,19 @@ function runOf(view: MapView, check: BriefCheck): Run | null {
   return found ?? null;
 }
 const nameOf = (view: MapView, id: string) => view.doc.parts.find((p) => p.id === id)?.name ?? id;
-const keyOf = (check: BriefCheck) => (Array.isArray(check.key) ? (check.key as string[]) : []);
+const keyOf = (check: BriefCheck | null) => (check && Array.isArray(check.key) ? (check.key as string[]) : []);
 
 // What an order check lets Daniel tap: the parts the step lights, and the ones of the key.
-const tappable = (view: MapView, step: BriefStep) => new Set([...step.on, ...keyOf(step.check!)].filter((id) => view.doc.parts.some((p) => p.id === id)));
+const tappable = (view: MapView, step: BriefStep) => new Set([...step.on, ...keyOf(step.check)].filter((id) => view.doc.parts.some((p) => p.id === id)));
 
 // The panel's part of a check, drawn from its run: the question (the answer's words once graded), the options or the numbered slots.
-function checkNode(view: MapView, step: BriefStep) {
-  const check = step.check!;
+function checkNode(view: MapView, step: BriefStep, check: BriefCheck) {
   const box = text("div", "", "brief-check");
   const found = runOf(view, check);
-  if (!found) return box.appendChild(text("p", check.q, "brief-body")), box;
+  if (!found) {
+    box.append(text("p", check.q, "brief-body"));
+    return box;
+  }
   const done = found.run.answered();
   const right = found.kind === "pick" ? found.run.picked() === Number(check.key) : keyOf(check).every((id, i) => id === found.run.picked()[i]);
   // The question is the step's own heading when the writer put it there; then only the answer's words add to it.
@@ -869,7 +890,7 @@ function checkNode(view: MapView, step: BriefStep) {
 function redrawCheck(view: MapView, step: BriefStep) {
   if (step.check && runs.get(step.check)?.run.answered()) gateOf()?.answered();
   const old = panel().querySelector(".brief-check");
-  if (old) old.replaceWith(checkNode(view, step));
+  if (old && step.check) old.replaceWith(checkNode(view, step, step.check));
   paintOrder(view, step);
   syncNext(step);
 }
@@ -882,10 +903,10 @@ function clearOrder(view: MapView) {
 function paintOrder(view: MapView, step: BriefStep) {
   clearOrder(view);
   const found = step.check?.kind === "order" ? runOf(view, step.check) : null;
-  if (!found || found.kind !== "order") return;
+  if (found?.kind !== "order") return;
   const open = tappable(view, step);
   const answered = found.run.answered();
-  const shown = answered ? keyOf(step.check!) : found.run.picked();
+  const shown = answered ? keyOf(step.check) : found.run.picked();
   open.forEach((id) => plateOf(view, id)?.classList.toggle("pick", !answered));
   shown.forEach((id, i) => {
     const plate = plateOf(view, id);
@@ -905,13 +926,14 @@ function wireTaps(view: MapView) {
       const now = player.current();
       const step = now ? steps()[now.step] : undefined;
       const current = currentMap();
-      if (!step?.check || step.check.kind !== "order" || !current) return;
+      if (step?.check?.kind !== "order" || !current) return;
       const plate = (event.target as HTMLElement).closest<HTMLElement>(".plate");
       if (!plate) return;
       event.stopPropagation();
       const found = runOf(current, step.check);
-      if (!found || found.kind !== "order" || found.run.answered() || !tappable(current, step).has(plate.dataset.id ?? "")) return;
-      found.run.tap(plate.dataset.id!);
+      const id = plate.dataset.id;
+      if (found?.kind !== "order" || found.run.answered() || id === undefined || !tappable(current, step).has(id)) return;
+      found.run.tap(id);
       redrawCheck(current, step);
     },
     true,
@@ -926,14 +948,15 @@ const answeredCheck = () => {
 
 // Check on a check: graded, its right answer shown, and an order check's right path replayed along the links.
 function grade(view: MapView, step: BriefStep) {
-  const found = runOf(view, step.check!);
-  if (!found || !found.run.ready()) return;
+  const found = step.check ? runOf(view, step.check) : null;
+  if (!found?.run.ready()) return;
   if (found.kind === "pick") {
     found.run.grade();
     answeredCheck();
     return redrawCheck(view, step);
   }
-  const result = found.run.grade()!;
+  const result = found.run.grade();
+  if (!result) return;
   answeredCheck();
   const wrong = result.wrong;
   redrawCheck(view, step);
@@ -959,11 +982,11 @@ function syncNext(step: BriefStep) {
   const list = steps();
   if (!next) return;
   const found = step.check ? runs.get(step.check) : undefined;
-  const waiting = !!step.check && (!found || !found.run.answered());
+  const waiting = !!step.check && !found?.run.answered();
   const last = player.current()?.step === list.length - 1;
   next.textContent = waiting ? "Check" : last ? "Done" : "Next";
-  next.dataset.check = waiting ? step.check!.kind : "";
-  next.disabled = waiting && !(found && found.run.ready());
+  next.dataset.check = waiting ? (step.check?.kind ?? "") : "";
+  next.disabled = waiting && !found?.run.ready();
 }
 
 let swap = 0;
@@ -982,7 +1005,8 @@ function show(view: MapView, same: boolean) {
   // A reflow first, so the panel rises from where it was hidden.
   void box.offsetWidth;
   box.classList.add("open");
-  const cols = box.querySelector<HTMLElement>(".brief-cols")!;
+  const cols = box.querySelector<HTMLElement>(".brief-cols");
+  if (!cols) return;
   const also = alsoAt(playing.brief.brief, now.chapter, now.step, storySteps(list).length);
   // A new step closes the popover of the one before.
   if (!same) closePopover();
@@ -1006,10 +1030,13 @@ function show(view: MapView, same: boolean) {
     fill();
   } else {
     cols.classList.add("swap");
-    swap = window.setTimeout(() => (fill(), cols.classList.remove("swap")), 130);
+    swap = window.setTimeout(() => {
+      fill();
+      cols.classList.remove("swap");
+    }, 130);
   }
   box.querySelectorAll(".brief-dots i").forEach((dot, i) => dot.classList.toggle("at", i === now.step));
-  box.querySelector(".brief-dots")!.setAttribute("aria-label", `Step ${now.step + 1} of ${list.length}`);
+  box.querySelector(".brief-dots")?.setAttribute("aria-label", `Step ${now.step + 1} of ${list.length}`);
   (box.querySelector(".brief-back") as HTMLButtonElement).disabled = now.step === 0;
   if (step.check) runOf(view, step.check);
   syncNext(step);
@@ -1026,7 +1053,10 @@ function endBar(node: HTMLElement, index: number, count: number): Bar | null {
   let bar = bars.get(key);
   // A part catch-up's bar is keyed by its part (#391).
   const about = catchUp ? { project: now.project, part: catchUp.part } : { project: now.project, pr: now.pr, chapter: now.chapter };
-  if (!bar) bars.set(key, (bar = storyBar(about, gistOf(now.chapter))));
+  if (!bar) {
+    bar = storyBar(about, gistOf(now.chapter));
+    bars.set(key, bar);
+  }
   node.append(bar.node);
   return bar;
 }

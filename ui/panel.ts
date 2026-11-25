@@ -28,7 +28,11 @@ let shown: PanelContent | null = null;
 
 export const panelShown = () => (mapShown() ? shown : null);
 
-const rail = () => document.querySelector<HTMLElement>(".rail")!;
+const rail = () => {
+  const node = document.querySelector<HTMLElement>(".rail");
+  if (!node) throw new Error(".rail is not on the page");
+  return node;
+};
 // The story is the rail itself: it moves into the panel while the panel shows it, and back to its column otherwise.
 function placeRail(inPanel: boolean) {
   const node = rail();
@@ -78,7 +82,7 @@ export function followPanelLog() {
 
 // The parts the panel's content is about, kept clear of it and of the sheet: the sheet's part, and the parts the open session's chips are on.
 function reveal() {
-  const lit = [...element("map-body").querySelectorAll<HTMLElement>(".plate[data-id]:has(.agent-chip.lit)")].map((plate) => plate.dataset.id!);
+  const lit = [...element("map-body").querySelectorAll<HTMLElement>(".plate[data-id]:has(.agent-chip.lit)")].flatMap((plate) => plate.dataset.id ?? []);
   const sheet = sheetPart();
   revealParts([...(sheet === null ? [] : [sheet]), ...lit]);
 }
@@ -113,7 +117,9 @@ export function followSelection(session: string | null) {
 
 // The list changed under History or the diff: drawn again in place.
 export function redrawPanel() {
-  if (mapShown() && shown?.kind === "history") deps.history(element("panel-body").querySelector<HTMLElement>(".panel-view")!);
+  if (!mapShown() || shown?.kind !== "history") return;
+  const place = element("panel-body").querySelector<HTMLElement>(".panel-view");
+  if (place) deps.history(place);
 }
 
 export function startPanel(given: PanelDeps) {

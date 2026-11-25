@@ -7,7 +7,9 @@ import { sidebarSessions } from "../../dist/list.js";
 import { windowBinding } from "../../dist/keys.js";
 import { initial } from "../../dist/settings.js";
 
-const session = (id, state, last_event_at, extra = {}) => ({
+// A session as the core sends it, less the fields History never reads.
+/** @param {string} id @param {import("../../dist/types.js").SessionState} state @param {number} last_event_at */
+const session = (id, state, last_event_at, extra = {}) => /** @type {import("../../dist/types.js").Session} */ ({
   id, state, last_event_at, name: null, prompt_name: null, cwd: `/w/plotkeeper`, folder_name: "plotkeeper",
   identity: { issue: null, branch: null, pr: null, worktree: "", name: id }, transcript: { branch: null }, ...extra,
 });
@@ -28,8 +30,10 @@ test("a session that starts again is no longer ended, so it leaves History", () 
 });
 
 test("the project is the repository's name, from a task's worktree too, else the folder's", () => {
-  assert.equal(projectName({ cwd: "/w/Falinks/.claude/worktrees/issue-9-x", folder_name: "issue-9-x" }), "Falinks");
-  assert.equal(projectName({ cwd: "/w/plotkeeper", folder_name: "plotkeeper" }), "plotkeeper");
+  // The core's `folder_name` rides along, unread: the name comes from `cwd` alone.
+  const [task, plain] = [{ cwd: "/w/Falinks/.claude/worktrees/issue-9-x", folder_name: "issue-9-x" }, { cwd: "/w/plotkeeper", folder_name: "plotkeeper" }];
+  assert.equal(projectName(task), "Falinks");
+  assert.equal(projectName(plain), "plotkeeper");
 });
 
 test("the search matches name, project and branch, as a case-insensitive substring", () => {

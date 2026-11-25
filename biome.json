@@ -8,18 +8,22 @@
     "enabled": true,
     "rules": {
       "complexity": {
-        "noCommaOperator": "off",
-        "noImportantStyles": "off",
-        "useOptionalChain": "off"
+        "noExcessiveLinesPerFunction": "error",
+        "noImportantStyles": "off"
+      },
+      "nursery": {
+        "noFloatingPromises": "error",
+        "noMisusedPromises": "error",
+        "useExhaustiveSwitchCases": "error"
       },
       "style": {
         "noDescendingSpecificity": "off",
-        "noNonNullAssertion": "off",
-        "useTemplate": "off"
+        "useTemplate": "off",
+        "useThrowOnlyError": "error"
       },
       "suspicious": {
-        "noAssignInExpressions": "off",
         "noConfusingVoidType": "off",
+        "useAwait": "error",
         "useIterableCallbackReturn": "off"
       }
     }

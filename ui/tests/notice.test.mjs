@@ -4,9 +4,10 @@ import assert from "node:assert/strict";
 
 const line = { textContent: "", hidden: true };
 let present = true;
-globalThis.document = { getElementById: () => (present ? line : null) };
+// The stand-in page: the notice line alone, and a log that keeps its lines.
+globalThis.document = /** @type {any} */ ({ getElementById: () => (present ? line : null) });
 const logged = [];
-globalThis.window = { __TAURI__: { log: { warn: async (m) => logged.push(["warn", m]), error: async (m) => logged.push(["error", m]) } } };
+globalThis.window = /** @type {any} */ ({ __TAURI__: { log: { warn: async (m) => logged.push(["warn", m]), error: async (m) => logged.push(["error", m]) } } });
 const { showError, dismissNotice, setSettingsErrors, showNotice } = await import("../../dist/notice.js");
 const { failure, logLine } = await import("../../dist/dom.js");
 // What the page does with a `server-error` event (`main.ts`), whose payload is the error's message.

@@ -18,7 +18,8 @@ export function whatsNew(stored: string | null, current: string, visible: boolea
 
 // Whether version `a` is newer than `b`, X.Y.Z compared part by part as numbers.
 function newer(a: string, b: string): boolean {
-  const [x, y] = [a, b].map((version) => version.split(".").map((part) => Number.parseInt(part, 10) || 0));
+  const parts = (version: string) => version.split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const [x, y] = [parts(a), parts(b)];
   for (let at = 0; at < Math.max(x.length, y.length); at++) if ((x[at] ?? 0) !== (y[at] ?? 0)) return (x[at] ?? 0) > (y[at] ?? 0);
   return false;
 }
