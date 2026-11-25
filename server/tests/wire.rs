@@ -937,11 +937,18 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
                 text: "Events apply in the order they were made.".into(),
             }),
         ),
+        ("About", json(studio_server::about())),
     ];
+    // The page's version is the package's, which the release bumps with npm's (#512).
+    assert_eq!(
+        json(studio_server::about())["version"],
+        env!("CARGO_PKG_VERSION")
+    );
     write(
         env!("CARGO_MANIFEST_DIR"),
         "server-replies",
         &[
+            "About",
             "HistoryEntry",
             "HistoricalMap",
             "CommitFiles",

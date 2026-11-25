@@ -569,6 +569,9 @@ export type PrDiffArgs = { project: string; number: number; head: string; title:
 
 // A project of the saved list (`server/src/projects.rs`): its main checkout, and whether its folder was moved or deleted.
 export type SavedProject = { path: string; gone: boolean };
+
+// What the page asks at start (#527): plotkeeper's package version, for the toast after an update (`whats-new.ts`).
+export type About = { version: string };
 // Why a project header's quiet dot lights (`map.rs`, #386): fog on a Core part, a broken law, a PR brief waiting.
 export type MarkWhy = "fog" | "broken" | "brief";
 export type ProjectMark = { project: string; why: MarkWhy[] };
@@ -597,6 +600,7 @@ export type BlockedAnswer = "hook" | "late";
 export interface Commands {
   agent_summary: string | null;
   alive: void;
+  about: About;
   answer: void;
   answer_blocked_command: BlockedAnswer;
   ask: string;

@@ -1057,6 +1057,18 @@ pub fn forward_writer_notices(app: &Arc<App>, notices: mpsc::Receiver<Option<Str
     });
 }
 
+/// What the page asks at start (#527): plotkeeper's package version, for the "Updated to X.Y.Z" toast after an update.
+#[derive(serde::Serialize)]
+pub struct About {
+    pub version: String,
+}
+
+pub fn about() -> About {
+    About {
+        version: env!("CARGO_PKG_VERSION").into(),
+    }
+}
+
 /// Whether any harness is wired (#437), from install's record, read on each ask: the page shows "not recording: run
 /// `plotkeeper install`" while none is, and asks again at its focus. No home folder counts as nothing wired.
 pub fn wired() -> bool {
