@@ -32,16 +32,18 @@ pub(crate) fn unlinked(
     parts: &[PartFiles],
     links: &[Link],
 ) -> (Vec<Edge>, Vec<String>) {
-    let (pairs, problems) = file_pairs(root, names, files);
+    let (pairs, problems) = file_pairs(root, names, files, true);
     (edges_between_parts(&pairs, parts, links), problems)
 }
 
 /// The `(dependent, dependency)` file pairs the named extractors find, each pair once, and the
-/// problems of extractors that are unknown or cannot run.
-fn file_pairs(
+/// problems of extractors that are unknown or cannot run. Without `root_mod_lines`, a crate root's
+/// `mod` lines give no pair, as the imports report counts them: they declare the module tree.
+pub(crate) fn file_pairs(
     root: &Path,
     names: &[String],
     files: &[String],
+    root_mod_lines: bool,
 ) -> (BTreeSet<(String, String)>, Vec<String>) {
     let mut problems = Vec::new();
     let mut pairs = BTreeSet::new();
@@ -58,7 +60,7 @@ fn file_pairs(
                     ));
                     Vec::new()
                 });
-                Ok(rust_modules(root, &tracked, &crates))
+                Ok(rust_modules(root, &tracked, &crates, root_mod_lines))
             }
             "typescript-imports" => Ok(typescript_imports(root, &tracked)),
             other => Err(format!(
@@ -545,8 +547,14 @@ fn use_tree(
 /// `benches`) that no `mod` line names. A path reaches the file that defines the longest stretch
 /// of it that names a module: from the crate's root after `crate::`, from a module the file (or an
 /// inline module it sits in) declares, through a name a `use` line brought in, or, by a
-/// workspace library's name in `crates`, from that library's root.
-fn rust_modules(root: &Path, tracked: &BTreeSet<&str>, crates: &[Crate]) -> Pairs {
+/// workspace library's name in `crates`, from that library's root. Without `root_mod_lines`, a
+/// crate root's `mod` lines pair nothing.
+fn rust_modules(
+    root: &Path,
+    tracked: &BTreeSet<&str>,
+    crates: &[Crate],
+    root_mod_lines: bool,
+) -> Pairs {
     let parse: HashMap<&str, RustFile> = tracked
         .iter()
         .filter(|f| f.ends_with(".rs"))
@@ -602,6 +610,9 @@ fn rust_modules(root: &Path, tracked: &BTreeSet<&str>, crates: &[Crate]) -> Pair
         declared = next;
     }
     for (file, scanned) in &parse {
+        if !root_mod_lines && is_crate_root(file) && !declared.contains(file) {
+            continue;
+        }
         for (path, in_own_file) in &scanned.mods {
             if let (true, Some(target)) = (*in_own_file, resolve(&declared, file, path)) {
                 pairs.push((file.to_string(), target.to_string()));
@@ -820,7 +831,7 @@ mod tests {
         }
         let names = vec!["rust-modules".to_string()];
         let listed: Vec<String> = files.iter().map(|(f, _)| f.to_string()).collect();
-        let (pairs, problems) = file_pairs(dir.path(), &names, &listed);
+        let (pairs, problems) = file_pairs(dir.path(), &names, &listed, true);
         assert_eq!(problems, Vec::<String>::new());
         pairs
     }

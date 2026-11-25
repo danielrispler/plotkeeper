@@ -1,5 +1,6 @@
 //! `system-map check [--json] [--root <dir>]` checks the repository's system map;
-//! `system-map touched [--json] [--root <dir>] [path...]` names the parts some paths touch.
+//! `system-map touched [--json] [--root <dir>] [path...]` names the parts some paths touch;
+//! `system-map imports [--json] [--root <dir>]` counts the imports inside and across parts.
 
 use std::{
     path::{Path, PathBuf},
@@ -19,9 +20,9 @@ fn main() -> ExitCode {
 fn run() -> Result<ExitCode, String> {
     let mut args = std::env::args().skip(1);
     let command = args.next();
-    if !matches!(command.as_deref(), Some("check" | "touched")) {
+    if !matches!(command.as_deref(), Some("check" | "touched" | "imports")) {
         return Err(
-            "usage: system-map check [--json] [--root <dir>] | system-map touched [--json] [--root <dir>] [path...]"
+            "usage: system-map check [--json] [--root <dir>] | system-map touched [--json] [--root <dir>] [path...] | system-map imports [--json] [--root <dir>]"
                 .into(),
         );
     }
@@ -43,6 +44,9 @@ fn run() -> Result<ExitCode, String> {
     };
     if touched {
         return run_touched(&root, paths, json);
+    }
+    if command.as_deref() == Some("imports") {
+        return run_imports(&root, json);
     }
     let report = system_map::check(&root);
     if json {
@@ -121,6 +125,82 @@ fn run_touched(root: &Path, mut paths: Vec<String>, json: bool) -> Result<ExitCo
         if !found.unowned.is_empty() {
             println!("unowned: {}", found.unowned.join(", "));
         }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `imports`: exits 0 on any counts, and 2 with the problems of a map that does not load.
+fn run_imports(root: &Path, json: bool) -> Result<ExitCode, String> {
+    let found = match system_map::imports(root) {
+        Ok(found) => found,
+        Err(problems) => {
+            for problem in problems {
+                eprintln!("{problem}");
+            }
+            return Ok(ExitCode::from(2));
+        }
+    };
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&found).map_err(|e| e.to_string())?
+        );
+        return Ok(ExitCode::SUCCESS);
+    }
+    for problem in &found.problems {
+        println!("note: {problem}");
+    }
+    println!(
+        "{} imports between owned files: {} inside parts, {} across ({:.1}% raw, {:.1}% weighted)",
+        found.total.raw,
+        found.inside.raw,
+        found.across.raw,
+        found.across_share.raw,
+        found.across_share.weighted
+    );
+    let rule = format!("degree at least 3 x the mean of {:.2}", found.mean_degree);
+    if found.hubs.is_empty() {
+        println!("hubs: none ({rule})");
+    } else {
+        println!("hubs ({rule}):");
+    }
+    for hub in &found.hubs {
+        println!(
+            "  {} ({}): degree {}, {} in, {} out",
+            hub.file, hub.part, hub.degree, hub.fan_in, hub.fan_out
+        );
+    }
+    println!("inside:");
+    for part in &found.parts {
+        println!(
+            "  {}: {} (weighted {:.2})",
+            part.part, part.count.raw, part.count.weighted
+        );
+    }
+    println!(
+        "across:{}",
+        if found.between.is_empty() {
+            " none"
+        } else {
+            ""
+        }
+    );
+    for pair in &found.between {
+        println!(
+            "  {} -> {}: {} (weighted {:.2})",
+            pair.from, pair.to, pair.count.raw, pair.count.weighted
+        );
+    }
+    println!(
+        "both ways:{}",
+        if found.both_ways.is_empty() {
+            " none"
+        } else {
+            ""
+        }
+    );
+    for [a, b] in &found.both_ways {
+        println!("  {a} <-> {b}");
     }
     Ok(ExitCode::SUCCESS)
 }

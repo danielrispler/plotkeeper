@@ -4,6 +4,7 @@
 //! links and the problems out.
 
 mod edges;
+mod imports;
 mod laws;
 mod pattern;
 mod touched;
@@ -16,6 +17,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+pub use imports::{Across, Count, Hub, Imports, Inside, Share, imports};
 pub use laws::{LawReport, LawTest, Tag, law_tests, tag_id, test_name_after};
 use pattern::Pattern;
 pub use touched::{Touched, touched, touched_for_map};
