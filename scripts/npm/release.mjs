@@ -22,9 +22,9 @@ function next(version, level) {
   throw new Error(`bump takes patch or minor, not ${JSON.stringify(level)}`);
 }
 
-// Replaces the one match of `pattern` (its first group kept, the old version swapped), or fails naming `what`.
-function swap(text, pattern, version, what) {
-  if (!pattern.test(text)) throw new Error(`${what} has no version ${version}`);
+// Replaces the one match of `pattern` (its first group kept, the old version swapped), or fails naming `what` and `old`.
+function swap(text, pattern, old, version, what) {
+  if (!pattern.test(text)) throw new Error(`${what} has no version ${old}`);
   return text.replace(pattern, (_match, head) => `${head}${version}`);
 }
 
@@ -36,16 +36,18 @@ export function bump(texts, level) {
   const version = next(old, level);
   const v = escapeRegExp(old);
   return {
-    npmManifest: swap(texts.npmManifest, new RegExp(`^(  "version": ")${v}(?=",?$)`, "m"), version, FILES.npmManifest),
+    npmManifest: swap(texts.npmManifest, new RegExp(`^(  "version": ")${v}(?=",?$)`, "m"), old, version, FILES.npmManifest),
     crateManifest: swap(
       texts.crateManifest,
       new RegExp(`^(\\[package\\]\\n(?:(?!\\[)[^\\n]*\\n)*?version = ")${v}(?="$)`, "m"),
+      old,
       version,
       FILES.crateManifest,
     ),
     lockfile: swap(
       texts.lockfile,
       new RegExp(`^(name = "studio-server"\\nversion = ")${v}(?="$)`, "m"),
+      old,
       version,
       FILES.lockfile,
     ),

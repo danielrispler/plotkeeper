@@ -8,7 +8,7 @@ Daniel typed this, so he wants the next release prepared (spec #512; `docs/studi
 
 ## Steps
 
-1. **Since the tag.** `git fetch origin --tags`. The last release is the newest `v*` tag by version (`git tag --list 'v*' --sort=-v:refname | head -1`). List every commit since it: `git log --first-parent --format='%h %s' <tag>..origin/main`. PRs are squash-merged, so a subject ending in `(#N)` is PR N: read each one's title and body (`gh pr view N --json title,body,files`). A commit with no PR number is read from its own diff. Done when every commit in the list has a verdict: a draft note line, or "none" with its reason.
+1. **Since the tag.** `git fetch origin --tags`. The last release is the newest `v*` tag by version (`git tag --list 'v*' --sort=-v:refname | head -1`). When it prints nothing, no release is tagged: say "no `v*` tag on origin, so there is no release to start from (the tags are backfilled by #516)", and stop. List every commit since it: `git log --first-parent --format='%h %s' <tag>..origin/main`. PRs are squash-merged, so a subject ending in `(#N)` is PR N: read each one's title and body (`gh pr view N --json title,body,files`). A commit with no PR number is read from its own diff. Done when every commit in the list has a verdict: a draft note line, or "none" with its reason.
 2. **Notes**, by the notes rule below. When no line remains, say "nothing to release since `<tag>`" with the verdicts, and stop.
 3. **Level**, by the level rule below: `patch` or `minor`, with the reason (the line that decides it).
 4. **Propose** the level, the version it makes, and the draft section in chat, and wait. Daniel may revise either; carry on only when he agrees, with what he agreed to.

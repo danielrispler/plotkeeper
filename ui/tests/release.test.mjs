@@ -1,5 +1,6 @@
 // The release script (danielrispler/plotkeeper#512): `bump` writes one version into the npm package's manifest, the
-// server crate's manifest and the lockfile's `studio-server` entry, and `notesFor` reads a version's changelog section.
+// server crate's manifest and the lockfile's `studio-server` entry, `notesFor` reads a version's changelog section,
+// `checkReleaseCommit` is the publish guard on HEAD's commit, and `tagAndRelease` tags a commit and creates its Release.
 // Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -92,6 +93,11 @@ test("bump rejects major and unknown levels", () => {
   for (const level of ["major", "premajor", "", undefined]) {
     assert.throws(() => bump(texts, level), /patch or minor/);
   }
+});
+
+test("bump names the old version a file lacks", () => {
+  const stale = { ...texts, crateManifest: crateManifest.replace('version = "0.1.2"\n\n', 'version = "0.1.1"\n\n') };
+  assert.throws(() => bump(stale, "patch"), /^Error: server\/Cargo\.toml has no version 0\.1\.2$/);
 });
 
 const changelog = `# Changelog
