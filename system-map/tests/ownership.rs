@@ -137,3 +137,65 @@ fn a_pattern_beaten_by_a_later_one_still_counts_as_matching() {
     let got = owned(&map, &["alpha/a.rs", "beta/b", "docs/d"]);
     assert_eq!(got[1].1, files(&["beta/b"]));
 }
+
+/// `base` with no `ignored` entry for the map file.
+fn without_map_entry() -> Value {
+    let mut map = base();
+    map["ignored"] = json!(["docs/"]);
+    map
+}
+
+/// A project whose map file is on disk but no longer tracked.
+fn untracked_map(map: &Value) -> (tempfile::TempDir, String) {
+    let (dir, root) = project(map, &["alpha/a.rs", "beta/b", "docs/d"]);
+    studio_test_support::git(dir.path(), &["rm", "-q", "--cached", "system-map.json"]);
+    studio_test_support::git(dir.path(), &["commit", "-q", "-m", "Untrack the map"]);
+    (dir, root)
+}
+
+#[test]
+fn a_tracked_map_file_needs_no_owner_and_no_ignored_entry() {
+    let (_dir, root) = project(&without_map_entry(), &["alpha/a.rs", "beta/b", "docs/d"]);
+    let report = system_map::check(Path::new(&root));
+    assert_eq!(report.problems, Vec::<String>::new());
+    assert_eq!(report.counts.ignored, 2);
+}
+
+#[test]
+fn an_untracked_map_file_passes() {
+    let (_dir, root) = untracked_map(&without_map_entry());
+    assert_eq!(problems(&root), Vec::<String>::new());
+}
+
+#[test]
+fn an_ignored_entry_for_the_untracked_map_file_never_matches_nothing() {
+    let (_dir, root) = untracked_map(&base());
+    assert_eq!(problems(&root), Vec::<String>::new());
+}
+
+#[test]
+fn a_part_pattern_naming_only_the_map_file_fails_saying_it_needs_no_owner() {
+    for tracked in [true, false] {
+        let mut map = without_map_entry();
+        map["parts"][1]["paths"] = json!(["beta/", "system-map.json"]);
+        let (_dir, root) = if tracked {
+            project(&map, &["alpha/a.rs", "beta/b", "docs/d"])
+        } else {
+            untracked_map(&map)
+        };
+        let found = problems(&root);
+        assert_eq!(found.len(), 1, "tracked {tracked}: {found:?}");
+        assert!(
+            has(&found, &["beta", "system-map.json", "needs no owner"]),
+            "{found:?}"
+        );
+    }
+}
+
+#[test]
+fn a_part_pattern_matching_the_map_file_and_other_files_passes() {
+    let mut map = without_map_entry();
+    map["parts"][1]["paths"] = json!(["beta/", "*.json"]);
+    let got = owned(&map, &["alpha/a.rs", "beta/b", "docs/d", "package.json"]);
+    assert_eq!(got[1].1, files(&["beta/b", "package.json"]));
+}

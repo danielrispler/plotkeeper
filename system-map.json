@@ -61,7 +61,6 @@
   "ignored": [
     ".agents/", ".claude/", ".github/", ".gitignore", "AGENTS.md", "CLAUDE.md", "Cargo.lock", "Cargo.toml", "LICENSE",
     "README.md", "package-lock.json", "package.json", "npm/", "rust-toolchain.toml", "tsconfig.json", "biome.json",
-    "system-map.json",
     "docs/", "scripts/", "archive/",
     "wayfinder/", "test-support/", "system-map/"
   ],

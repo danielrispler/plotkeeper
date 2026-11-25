@@ -492,11 +492,12 @@ fn check_prints_an_edge_on_a_line_no_problem_looks_like_and_json_lists_it() {
     let out = run_check(&root, &[]);
     assert!(out.status.success());
     let text = String::from_utf8(out.stdout).unwrap();
-    assert_eq!(text.lines().count(), 1, "{text}");
+    assert_eq!(text.lines().count(), 2, "{text}");
     assert!(
         text.starts_with("note: ") && text.contains("alpha") && text.contains("beta"),
         "{text}"
     );
+    assert!(text.lines().last().unwrap().starts_with("ok: "), "{text}");
 
     let out = run_check(&root, &["--json"]);
     let value: Value = serde_json::from_slice(&out.stdout).unwrap();
