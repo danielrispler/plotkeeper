@@ -513,6 +513,25 @@ const mapBriefStory = (): Fixture => mapBrief(briefOf(storySteps(), false), 2, `
       document.querySelector("#map-brief .brief-code").click();
       await wait(250);
       if (!document.querySelector("#map-drawer .drawer-code")?.textContent.includes("+the brief")) log("snap:fail See the code does not open the PR's diff");`, true);
+// #490: a step's own See the code asks for the files of the parts it lights ("Now" lights the Shell and Understanding), not the PR's every file.
+const prFile = (path: string) => ({ path, diff: `@@ -1 +1,2 @@\n+${path}` });
+const mapBriefStepCode = (): Fixture => ({
+  ...mapBrief(briefOf(storySteps(), false), 2, `
+      const button = document.querySelector("#map-brief .brief-txt .brief-code");
+      if (!button) return log("snap:fail the step has no See the code of its own");
+      if (document.querySelector("#map-brief .brief-foot .brief-code")) log("snap:fail the foot still holds a See the code");
+      button.click();
+      await wait(250);
+      const shown = [...document.querySelectorAll("#map-drawer .drawer-label")].map((label) => label.textContent);
+      if (shown.join("|") !== "src-tauri/src/pr_briefs.rs|understanding/src/pr_brief.rs") log("snap:fail the step's drawer shows " + shown.join("|"));`, true),
+  pr_diff: {
+    __by: "parts",
+    values: {
+      "shell,understanding": { commit: "b".repeat(40), short: "bbbbbbb", label: "#334 PR briefs on the map", url: null, files: [prFile("src-tauri/src/pr_briefs.rs"), prFile("understanding/src/pr_brief.rs")] },
+      undefined: { commit: "b".repeat(40), short: "bbbbbbb", label: "#334 PR briefs on the map", url: null, files: [prFile("src-tauri/src/pr_briefs.rs"), prFile("understanding/src/pr_brief.rs"), prFile("ui/map-brief.ts"), prFile("docs/studio/behaviour/pr-briefs.md")] },
+    },
+  },
+});
 // Each figure kind filled to the limits `figureShapes` draws (#449): six states, five steps, four lines a side, each label long.
 const fullFigure = (kind: string): BriefFigure => {
   const label = (i: number) => `a long label ${i + 1} here`;
@@ -945,7 +964,7 @@ const mapCatchUp = (): Fixture => ({
       const panel = document.getElementById("map-brief");
       if (panel.hidden || !panel.classList.contains("open")) return log("snap:fail the part catch-up did not open");
       if (!panel.querySelector(".brief-kick").textContent.includes("Part catch-up")) log("snap:fail the kick does not say part catch-up");
-      if (!panel.querySelector(".brief-code").hidden) log("snap:fail a part catch-up offers a PR's code");
+      if (panel.querySelector(".brief-code")) log("snap:fail a part catch-up offers a PR's code");
       document.getElementById("brief-next").click();
       await wait(200);
       document.getElementById("brief-next").click();
@@ -2795,6 +2814,7 @@ ${writerStatusAfter("Keychain refused")}
   // The contrast pass (#455) runs here too.
   mapBriefStory: (): Fixture => ({ ...mapBriefStory(), contrast: true }),
   mapBriefAnnounce,
+  mapBriefStepCode,
   mapBriefStates: () => mapBriefFigure("states"),
   mapBriefSequence: () => mapBriefFigure("sequence"),
   mapBriefCompare: () => mapBriefFigure("compare"),
