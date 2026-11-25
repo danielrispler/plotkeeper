@@ -594,6 +594,10 @@ fn an_inline_crate_path_outside_a_use_line_reaches_the_module_file() {
     for text in [
         "fn f() -> crate::a::A { crate::a::A }\n",
         "fn f() { let _ = crate::a::inner::make(); }\n",
+        "pub fn f(x: crate::a::A) {}\n",
+        "pub struct S { x: crate::a::A }\n",
+        "fn f<T: crate::a::inner::Tr>() {}\n",
+        "fn f() { S { x: crate::a::inner::make() }; }\n",
     ] {
         let found = rust_edges(
             &[
@@ -714,6 +718,9 @@ fn a_path_into_a_workspace_crate_reaches_the_module_file_it_names() {
         "use studio_server::runner::launch;\n",
         "fn main() { studio_server::runner::launch(); }\n",
         "use studio_server::{runner, Other};\nfn main() { runner::launch(); }\n",
+        "use ::studio_server::runner::launch;\n",
+        "fn main() { ::studio_server::runner::launch(); }\n",
+        "fn main() { let _: ::studio_server::runner::Launch; }\n",
     ] {
         let report = rust_workspace(
             &[
@@ -732,6 +739,25 @@ fn a_path_into_a_workspace_crate_reaches_the_module_file_it_names() {
         assert_eq!(other_problems(&report), Vec::<String>::new(), "{text}");
         assert_eq!(edges(&report), ["beta>alpha"], "{text}");
     }
+}
+
+#[test]
+fn a_glob_of_a_workspace_crate_s_root_reaches_its_lib_rs() {
+    let report = rust_workspace(
+        &[
+            ("studio-server", "server", "", ""),
+            ("studio-app", "app", "", ON_SERVER),
+        ],
+        &[
+            ("server/src/lib.rs", "pub struct Other;\n"),
+            ("app/src/main.rs", "use studio_server::*;\n"),
+        ],
+        &["server/"],
+        &["app/"],
+        &[],
+    );
+    assert_eq!(other_problems(&report), Vec::<String>::new());
+    assert_eq!(edges(&report), ["beta>alpha"]);
 }
 
 #[test]
@@ -873,6 +899,33 @@ fn when_cargo_cannot_run_workspace_crate_paths_are_not_read_and_one_problem_says
     );
     // The paths inside a crate are still read.
     assert_eq!(edges(&report), ["alpha>beta", "beta>alpha"]);
+}
+
+#[test]
+fn when_cargo_cannot_run_an_import_link_a_workspace_crate_path_may_prove_passes_as_unproven() {
+    let mut map = split_map(&["rust-modules"], &["server/"], &["app/"]);
+    map["links"] = json!([{ "id": "app-server", "from": "beta", "to": "alpha", "kind": "import" }]);
+    map["ignored"] = json!(["system-map.json", "Cargo.toml", "**/Cargo.toml"]);
+    let (_dir, root) = tree(
+        &map,
+        &[
+            ("Cargo.toml", "this is not toml ["),
+            ("server/Cargo.toml", "[package]\nname = \"studio-server\"\n"),
+            ("server/src/lib.rs", "pub mod runner;\n"),
+            ("server/src/runner.rs", "pub fn launch() {}\n"),
+            (
+                "app/src/main.rs",
+                "fn main() { studio_server::runner::launch(); }\n",
+            ),
+        ],
+    );
+    let report = report(&root);
+    assert_eq!(report.problems.len(), 1, "{:?}", report.problems);
+    assert!(
+        has(&report.problems, &["workspace-crate paths were not read"]),
+        "{:?}",
+        report.problems
+    );
 }
 
 fn ts_edges(files: &[(&str, &str)]) -> Vec<String> {

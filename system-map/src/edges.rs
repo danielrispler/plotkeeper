@@ -32,8 +32,8 @@ pub(crate) struct LinkCheck {
 
 /// Holds the map's import links to the edges the named extractors compute (spec #473, "The link check"). Between two read
 /// parts, an import link with no edge in its direction fails, and so does an edge with no import link in its direction,
-/// whatever run-time links join the pair. An import link with an unread end passes as unproven. Also the problems of
-/// extractors that are unknown or cannot run.
+/// whatever run-time links join the pair. An import link with an unread end passes as unproven, and so does one no edge
+/// proves while an extractor is unknown or cannot run. Also the problems of those extractors.
 pub(crate) fn check_links(
     root: &Path,
     names: &[String],
@@ -42,6 +42,8 @@ pub(crate) fn check_links(
     links: &[Link],
 ) -> LinkCheck {
     let (pairs, mut problems) = file_pairs(root, names, files, true);
+    // An extractor that could not run leaves pairs unread, so a missing edge proves nothing.
+    let incomplete = !problems.is_empty();
     let edges = edges_between_parts(&pairs, parts);
     let read: HashSet<&str> = parts
         .iter()
@@ -65,10 +67,10 @@ pub(crate) fn check_links(
         if !part_ids.contains(from) || !part_ids.contains(to) {
             continue;
         }
-        if !read.contains(from) || !read.contains(to) {
-            unproven += 1;
-        } else if computed.contains(&(from, to)) {
+        if computed.contains(&(from, to)) && read.contains(from) && read.contains(to) {
             proven += 1;
+        } else if !read.contains(from) || !read.contains(to) || incomplete {
+            unproven += 1;
         } else if computed.contains(&(to, from)) {
             problems.push(format!(
                 "import link {:?} runs from {from:?} to {to:?}, but the code shows no dependency of {from:?} on {to:?}, only of \
@@ -495,8 +497,8 @@ fn skip_char_escape(chars: &[char], mut i: usize) -> usize {
 struct RustFile {
     /// `(module path from this file's module, whether the module is declared in a file of its own)`
     mods: Vec<(Vec<String>, bool)>,
-    /// Each path of two words or more, in a `use` line or inline: `(the inline modules it sits in,
-    /// its words)`.
+    /// Each path in a `use` line, and each inline path of two words or more: `(the inline modules
+    /// it sits in, its words)`.
     paths: Vec<(Vec<String>, Vec<String>)>,
     /// Each name a `use` line brings in: `(the inline modules the line sits in, the name, the path
     /// it names)`.
@@ -527,6 +529,12 @@ fn scan_rust(text: &str) -> RustFile {
                 .collect::<Vec<String>>()
         };
         let after_colon = i > 0 && sym(i - 1, ':');
+        // Inside a path whose start the scan did not read (after `>` in `Vec::<u8>::new`, or after a
+        // word): a leading `::`, as in `::studio_server::x`, follows neither.
+        let mid_path = i > 1
+            && sym(i - 1, ':')
+            && sym(i - 2, ':')
+            && (i < 3 || ident(i - 3).is_some() || sym(i - 3, '>'));
         if sym(i, '{') {
             depth += 1;
         } else if sym(i, '}') {
@@ -547,7 +555,9 @@ fn scan_rust(text: &str) -> RustFile {
                 inline.push((name, depth));
                 i += 2;
             }
-        } else if ident(i) == Some("use") && ident(i + 1).is_some() {
+        } else if ident(i) == Some("use")
+            && (ident(i + 1).is_some() || (sym(i + 1, ':') && sym(i + 2, ':')))
+        {
             let mut end = i + 1;
             let mut found = Vec::new();
             use_tree(&tokens, &mut end, Vec::new(), &mut found);
@@ -555,14 +565,14 @@ fn scan_rust(text: &str) -> RustFile {
                 if let Some(alias) = alias {
                     file.aliases.push((scope(), alias, path.clone()));
                 }
-                if path.len() > 1 {
+                if !path.is_empty() {
                     file.paths.push((scope(), path));
                 }
             }
             i = end;
             continue;
         } else if let Some(first) =
-            ident(i).filter(|_| !after_colon && sym(i + 1, ':') && sym(i + 2, ':'))
+            ident(i).filter(|_| !mid_path && sym(i + 1, ':') && sym(i + 2, ':'))
         {
             // An inline path: words joined by `::`, read up to the first thing that is no word.
             let mut words = vec![first.to_string()];
