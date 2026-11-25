@@ -115,10 +115,9 @@ const deserialized = (source) => {
     scan: for (; end < lines.length; end++) {
       for (const c of bare(lines[end])) {
         if (c === "{") {
-        depth++;
-        opened = true;
-      }
-        else if (c === "}") depth--;
+          depth++;
+          opened = true;
+        } else if (c === "}") depth--;
         else if (c === "(" || c === "[") inner++;
         else if (c === ")" || c === "]") inner--;
         // A unit or tuple struct ends at its `;`, one inside a field's `[u8; 4]` aside.
