@@ -362,3 +362,35 @@ fn a_part_made_only_of_test_files_is_not_read() {
     let read = super::read_parts(&[&one], &names(&["one"]), &repo, &parts);
     assert_eq!(read, ["q"].into_iter().collect());
 }
+
+#[test]
+fn a_merged_pair_keeps_the_lowest_group_with_none_lowest() {
+    let files = names(&["a.x", "b.x", "c.x"]);
+    let repo = Repo::new(std::path::Path::new("."), &files, |_| false);
+    let grouped = |from: &str, to: &str, group: Option<&str>| Pair {
+        group: group.map(ToString::to_string),
+        ..Pair::new(from, to)
+    };
+    let one = Fake {
+        pairs: vec![
+            grouped("a.x", "b.x", Some("q/")),
+            grouped("a.x", "c.x", Some("q/")),
+        ],
+        ..fake("one", &[])
+    };
+    let two = Fake {
+        pairs: vec![
+            grouped("a.x", "b.x", Some("p/")),
+            grouped("a.x", "c.x", None),
+        ],
+        ..fake("two", &[])
+    };
+    let out = run(&[&one, &two], &names(&["one", "two"]), &repo);
+    assert_eq!(
+        out.pairs,
+        [
+            grouped("a.x", "b.x", Some("p/")),
+            grouped("a.x", "c.x", None)
+        ]
+    );
+}
