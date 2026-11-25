@@ -3,7 +3,7 @@
 // lets the agent retry it once and Decline closes the card; there is no edit, so what runs is what the card shows.
 
 import { blockedRequestFor, sendBlockedAnswer } from "./answer.js";
-import { code, failure, invoke, messageOf, text } from "./dom.js";
+import { code, failure, invoke, messageOf, pressable, text } from "./dom.js";
 import { counts, duration } from "./times.js";
 import { blockedWaits, type BlockedCommand, type BlockedStatus, type RiskLevel, type RiskView } from "./types.js";
 
@@ -196,8 +196,7 @@ export function blockedElement(session: string, card: BlockedCommand, agent: str
     const row = document.createElement("p");
     row.className = "answer-buttons";
     for (const label of view.buttons) {
-      const button = text("button", label, "btn");
-      button.type = "button";
+      const button = pressable(text("button", label, "btn"), null);
       button.title = blockedHovers[label];
       button.addEventListener("click", async () => {
         if (label === "Ask again") {

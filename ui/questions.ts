@@ -138,8 +138,7 @@ function answerButtons(ask: Ask, buttons: [AnswerButton, () => void, string?][])
   const row = document.createElement("p");
   row.className = "answer-buttons";
   const button = (label: string, hover: string, click: () => void, className = "") => {
-    const node = text("button", label, `btn ${className}`.trim());
-    node.type = "button";
+    const node = pressable(text("button", label, `btn ${className}`.trim()), null);
     node.title = hover;
     node.addEventListener("click", click);
     return node;

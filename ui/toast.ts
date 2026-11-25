@@ -9,7 +9,7 @@
 // text is announced with `ariaNotify`. A modal dialog holds them back until it closes. A toast closed with the focus in it hands
 // the focus to the next toast, else back to where it was before it entered the toasts.
 
-import { element, fullTitle, text } from "./dom.js";
+import { element, fullTitle, pressable, text } from "./dom.js";
 import type { LayoutMode } from "./layout.js";
 import { sessionName } from "./list-model.js";
 import { setFocus, studio } from "./state.js";
@@ -56,7 +56,7 @@ export function toastButtons(toast: HTMLElement, main: () => HTMLElement, close:
   if (found) return found;
   const action = main();
   if (!toast.contains(action)) toast.replaceChildren(action);
-  const button = text("button", "×", "btn quiet small");
+  const button = pressable(text("button", "×", "btn quiet small"), null);
   button.setAttribute("aria-label", "Dismiss");
   button.title = hover;
   button.addEventListener("click", close);
@@ -146,7 +146,7 @@ export function showToast() {
   toast.hidden = shown === null;
   if (shown) {
     const action = () => {
-      const button = text("button", "", "btn quiet toast-main");
+      const button = pressable(text("button", "", "btn quiet toast-main"), null);
       button.addEventListener("click", jumpToNeedsYou);
       return button;
     };
@@ -190,7 +190,7 @@ export function showClearToast(count: number, undo: () => void) {
   const message = `Cleared ${count} landed`;
   if (!clearName) {
     const name = text("strong", "", "name");
-    const undoButton = text("button", "Undo", "btn small");
+    const undoButton = pressable(text("button", "Undo", "btn small"), null);
     undoButton.title = "Bring the cleared sessions back";
     undoButton.addEventListener("click", () => undoClear());
     toast.replaceChildren(name, undoButton);

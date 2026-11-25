@@ -8,7 +8,7 @@
 // by project and by PR and chapter or by part. The line is an input, so the window's single keys stay off while it is typed, and an
 // Enter that confirms an input method's composition does not submit it. Nothing is read back: a bar opened again starts empty.
 
-import { failure, invoke, onEnter, text } from "./dom.js";
+import { failure, invoke, onEnter, pressable, text } from "./dom.js";
 import { localDay } from "./stop-rules.js";
 
 type BarKind = "explain-back-given" | "explain-back-marked";
@@ -89,8 +89,7 @@ export function storyBar(about: StoryAbout, gist?: string): Bar {
   node.setAttribute("aria-label", "End of the story");
   const slot = text("div", "", "bar-slot");
   if (gist) slot.append(explainBack(model, gist));
-  const skip = text("button", "Skip", "btn quiet small bar-skip");
-  skip.setAttribute("type", "button");
+  const skip = pressable(text("button", "Skip", "btn quiet small bar-skip"), null);
   skip.title = `Skip this bar (key ${SKIP_KEY.toUpperCase()})`;
   skip.addEventListener("click", () => {
     model.skip();

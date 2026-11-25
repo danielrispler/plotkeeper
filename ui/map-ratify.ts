@@ -3,7 +3,7 @@
 // too, then copies a prompt that quotes the item to the clipboard for him to paste into his agent (port decision Q2); when the clipboard
 // refuses, the prompt shows in a small box with a Copy button.
 
-import { failure, invoke, promptBox, sayAction, text } from "./dom.js";
+import { failure, invoke, pressable, promptBox, sayAction, text } from "./dom.js";
 import { currentMap } from "./map.js";
 import { copyOverturn, decideWith, detailLines, noteFor, overturnPrompt, overturnReport, type Overturned } from "./ratify.js";
 import { logStop } from "./stop-rules.js";
@@ -36,8 +36,7 @@ export function overturnNote(project: string, holds: (item: Pick<Ratifiable, "pr
   const manual = shown.manual;
   if (manual === null) return note;
   const area = promptBox(manual);
-  const copy = text("button", "Copy", "btn quiet ratify-copy");
-  copy.setAttribute("type", "button");
+  const copy = pressable(text("button", "Copy", "btn quiet ratify-copy"), null);
   copy.title = "Copy the prompt to paste into your agent";
   copy.addEventListener("click", () => {
     area.select();
@@ -92,13 +91,12 @@ export function ratifyActions(project: string, item: Ratifiable, done: (state: "
         failure("ratify_set")(e);
       });
   };
-  const accept = text("button", "Accept", "btn quiet ratify-accept");
+  const accept = pressable(text("button", "Accept", "btn quiet ratify-accept"), null);
   accept.title = "Record that you have looked at this and it stands; nothing waits on it";
   accept.addEventListener("click", () => decide("accepted"));
-  const overturn = text("button", "Overturn", "btn quiet ratify-overturn");
+  const overturn = pressable(text("button", "Overturn", "btn quiet ratify-overturn"), null);
   overturn.title = "Undo it: copies a prompt that quotes it, to paste into your agent";
   overturn.addEventListener("click", () => decide("overturned"));
-  for (const button of [accept, overturn]) button.setAttribute("type", "button");
   box.append(accept, overturn);
   return box;
 }

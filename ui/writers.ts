@@ -9,7 +9,7 @@
 // `settings.json` as `summaries.base_url` (none: OpenAI's own), and an optional key, also kept in the Keychain, as a local
 // Ollama needs none.
 
-import { confirmed, drawWithStatus, failure, invoke, messageOf, text } from "./dom.js";
+import { confirmed, drawWithStatus, failure, invoke, messageOf, pressable, text } from "./dom.js";
 import type { Settings } from "./settings.js";
 import type { SettingsFiles, Writers, WriterKind, WriterTest } from "./types.js";
 import { GATE } from "./writer-notice.js";
@@ -139,9 +139,8 @@ function draw(panel: HTMLElement, hooks: Hooks) {
         choice = { ...choice, effort: value };
         outcome = null;
       })));
-  const test = text("button", testing ? "Testing…" : "Test", "btn small writer-test");
+  const test = pressable(text("button", testing ? "Testing…" : "Test", "btn small writer-test"), null);
   test.id = "writer-test";
-  test.setAttribute("type", "button");
   test.title = "Make one tiny call with this writer, model and effort; a pass saves them and summaries are written with them";
   test.disabled = testing;
   test.addEventListener("click", () => run(panel, hooks));
@@ -180,9 +179,8 @@ function keyRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[]
   input.placeholder = set ? "Replace the API key…" : "Add an API key…";
   input.setAttribute("aria-label", "Anthropic API key");
   input.title = "An Anthropic API key; it is kept in the macOS Keychain and never shown again";
-  const save = text("button", "Save key", "btn small");
+  const save = pressable(text("button", "Save key", "btn small"), null);
   save.id = "writer-key-save";
-  save.setAttribute("type", "button");
   save.title = "Keep the pasted key in the macOS Keychain, in place of any key set; the page never shows it again";
   save.addEventListener("click", () => {
     const key = input.value.trim();
@@ -203,9 +201,8 @@ function keyRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[]
   const row = text("div", "", "writer-key");
   row.append(input, save);
   if (set) {
-    const remove = text("button", "Remove key", "btn small");
+    const remove = pressable(text("button", "Remove key", "btn small"), null);
     remove.id = "writer-key-remove";
-    remove.setAttribute("type", "button");
     remove.title = "Remove the key from the macOS Keychain; the API-key writer then cannot write";
     remove.addEventListener("click", async () => {
       const lost = "The Anthropic API key is deleted from the macOS Keychain; the API-key writer cannot write until a key is pasted again.";
@@ -290,9 +287,8 @@ function openaiRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElemen
   input.placeholder = keySet(known, "openai") ? "Replace the key (optional)…" : "Its API key (optional)…";
   input.setAttribute("aria-label", "API key of the OpenAI-compatible API");
   input.title = "The endpoint's API key, if it needs one; it is kept in the macOS Keychain and never shown again";
-  const save = text("button", "Save", "btn small");
+  const save = pressable(text("button", "Save", "btn small"), null);
   save.id = "writer-openai-save";
-  save.setAttribute("type", "button");
   save.title = "Keep the base URL in settings.json and any pasted key in the macOS Keychain; the page never shows the key again";
   save.addEventListener("click", () => {
     const key = input.value.trim();
@@ -315,9 +311,8 @@ function openaiRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElemen
   const keyRow = text("div", "", "writer-key");
   keyRow.append(input, save);
   if (found) {
-    const remove = text("button", "Remove", "btn small");
+    const remove = pressable(text("button", "Remove", "btn small"), null);
     remove.id = "writer-openai-remove";
-    remove.setAttribute("type", "button");
     remove.title = "Remove the base URL from settings.json and the key from the macOS Keychain";
     remove.addEventListener("click", async () => {
       const url = known.base_url ? `The base URL ${known.base_url}` : "The base URL";

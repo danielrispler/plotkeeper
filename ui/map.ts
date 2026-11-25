@@ -385,7 +385,7 @@ function plateNode(part: Part, current: MapView, links: SVGElement, fit: () => v
   }
   // The keyboard's way in (#460): a real button over the text area, named by the name and caption, beside the chips rather than around
   // them. Its click reaches the plate's own, so Enter and Space open the sheet, or answer a brief's order question, as a tap does.
-  const open = text("button", "", "btn plate-open");
+  const open = pressable(text("button", "", "btn plate-open"), null);
   open.append(text("span", part.name, "plate-name"), text("span", part.caption, "plate-caption"));
   plate.append(fog, open, marks, chips);
   plate.title = plateTitle(part);

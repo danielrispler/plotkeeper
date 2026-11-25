@@ -12,7 +12,7 @@
 // fog list, `catchUpIds`) so the player keeps its step apart from the PR briefs and from an older story of the part; read to its end it
 // clears the part's fog (`part_catch_up_done`) and completes no brief.
 
-import { failure, invoke, messageOf, svg, text } from "./dom.js";
+import { failure, invoke, messageOf, pressable, svg, text } from "./dom.js";
 import { currentMap, onDraw, registerLayer, type MapView } from "./map.js";
 import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { watchSeen } from "./seen.js";
@@ -96,8 +96,7 @@ function reanchorPopover() {
 // own words left out. Seeing the mark counts for the stop rules (#346).
 function unconfirmedMark(view: MapView, pr: number, flags: string[], key: string, copy: Prompt | null): HTMLElement {
   const wrap = text("p", "", "brief-quiet brief-unconfirmed");
-  const mark = text("button", "not confirmed from the facts", "btn quiet brief-why-mark");
-  mark.setAttribute("type", "button");
+  const mark = pressable(text("button", "not confirmed from the facts", "btn quiet brief-why-mark"), null);
   mark.title = "Show why the checks could not confirm this";
   mark.dataset.why = key;
   mark.setAttribute("aria-controls", "brief-why");
@@ -115,8 +114,7 @@ function unconfirmedMark(view: MapView, pr: number, flags: string[], key: string
 type Prompt = () => string | Promise<string>;
 const COPY_ICON = '<svg viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="4.5" width="7" height="7" rx="1.5"/><path d="M9.5 2.5h-6a1 1 0 0 0-1 1v6"/></svg>';
 function copyButton(label: string, hover: string, prompt: Prompt): HTMLElement {
-  const button = text("button", "", "btn quiet brief-copy");
-  button.setAttribute("type", "button");
+  const button = pressable(text("button", "", "btn quiet brief-copy"), null);
   button.setAttribute("aria-label", label);
   button.title = hover;
   button.innerHTML = COPY_ICON;
@@ -498,7 +496,7 @@ function codeInto(view: MapView, node: HTMLElement, list: BriefStep[], index: nu
     const drawer = commitDrawer(found);
     return { ...drawer, note: `This step lights no changed files · ${drawer.note}` };
   };
-  const button = text("button", "See the code", "btn quiet brief-code");
+  const button = pressable(text("button", "See the code", "btn quiet brief-code"), null);
   button.title = want === "all" ? "Open every file the PR changed, above the brief" : "Open the changed files of the parts this step lights, above the brief";
   button.addEventListener("click", () => {
     // The PR's diff (the files the writer read); when git cannot give it, what the step quoted.
@@ -530,7 +528,7 @@ function alsoInto(view: MapView, node: HTMLElement, groups: AlsoRow[]) {
     const row = text("div", "", "brief-also-group");
     const head = text("div", "", "brief-also-head");
     head.append(text("h5", group.name, "brief-also-name"), text("span", group.counts, "brief-quiet brief-also-counts"));
-    const button = text("button", "See the code", "btn quiet brief-code");
+    const button = pressable(text("button", "See the code", "btn quiet brief-code"), null);
     button.title = `Open the ${group.name} files, above the brief`;
     button.setAttribute("aria-label", `See the code: ${group.name}`);
     button.addEventListener("click", () => {
@@ -710,7 +708,7 @@ function gistOf(chapter: number): string | undefined {
 function buildPanel(view: MapView, list: BriefStep[]) {
   const playing = playingBrief();
   const box = panel();
-  const leave = text("button", "Leave", "btn quiet brief-leave");
+  const leave = pressable(text("button", "Leave", "btn quiet brief-leave"), null);
   leave.title = "Close the brief; it opens again at this step";
   leave.addEventListener("click", closeBrief);
   // The explanations' `?` beside Leave (#524), as beside the sheet's ×; kept for the brief, its state set again when they switch.
@@ -723,10 +721,10 @@ function buildPanel(view: MapView, list: BriefStep[]) {
   // The brief's one live region (#456): Back and Next put the new step's title in it, and nothing else; the step itself is not live.
   const live = text("p", "", "visually-hidden brief-live");
   live.setAttribute("aria-live", "polite");
-  const back = text("button", "Back", "btn brief-back");
+  const back = pressable(text("button", "Back", "btn brief-back"), null);
   back.title = "The step before";
   back.addEventListener("click", () => move(-1));
-  const next = text("button", "Next", "btn primary brief-next");
+  const next = pressable(text("button", "Next", "btn primary brief-next"), null);
   next.id = "brief-next";
   next.title = "The next step";
   next.addEventListener("click", () => advance());
@@ -749,8 +747,7 @@ function sinceLine(): HTMLElement | null {
   const from = text("code", playing.since.slice(0, 7), "brief-since-head");
   from.setAttribute("translate", "no");
   line.append(from, ": only what this push changed. ");
-  const full = text("button", "Full brief", "btn quiet brief-since-full");
-  full.setAttribute("type", "button");
+  const full = pressable(text("button", "Full brief", "btn quiet brief-since-full"), null);
   full.setAttribute("aria-label", `Full brief of PR #${now.pr}`);
   full.title = "Open the whole PR's brief at this head";
   const { project, pr } = now;

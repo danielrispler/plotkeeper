@@ -7,7 +7,7 @@
 // hooks there.
 
 import { logStop } from "./stop-rules.js";
-import { failure, invoke, text } from "./dom.js";
+import { failure, invoke, pressable, text } from "./dom.js";
 import { currentMap, currentScrub, onDraw, onUnread, registerLayer, setScrub, type MapView } from "./map.js";
 import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { hideAgents } from "./map-agents.js";
@@ -48,11 +48,11 @@ function rows(view: MapView, list: HTMLElement, entries: HistoryEntry[]) {
     ...stripOf(entries, view.scrub?.commit ?? null).map((row) => {
       const item = text("li", "", `hist-row${row.fogged ? " fogged" : ""}${row.current ? " current" : ""}`);
       item.dataset.commit = row.commit;
-      const scrub = text("button", row.label, "btn quiet hist-commit");
+      const scrub = pressable(text("button", row.label, "btn quiet hist-commit"), null);
       scrub.title = row.title;
       scrub.setAttribute("aria-pressed", String(row.current));
       scrub.addEventListener("click", () => scrubTo(row.current ? null : row.commit).catch(failure("map_at")));
-      const files = text("button", "Files", "btn quiet hist-files");
+      const files = pressable(text("button", "Files", "btn quiet hist-files"), null);
       files.title = `Show the files and diff of ${row.short}`;
       files.addEventListener("click", () => {
         invoke("map_commit", { project: view.project, commit: row.commit })
@@ -64,7 +64,7 @@ function rows(view: MapView, list: HTMLElement, entries: HistoryEntry[]) {
       const actions = text("span", "", "hist-actions");
       const offer = briefOffer(row);
       if (offer) {
-        const brief = text("button", offer.label, "btn quiet hist-brief");
+        const brief = pressable(text("button", offer.label, "btn quiet hist-brief"), null);
         brief.title = offer.title;
         brief.addEventListener("click", () => void deps.openBriefOf(view.project, offer.number, 0, true));
         actions.append(brief);
@@ -105,7 +105,7 @@ export function showBanner(banner: HTMLElement, scrub: Scrub | null) {
     return banner.replaceChildren();
   }
   const words = scrubBanner(scrub);
-  const back = text("button", words.back, "btn quiet banner-back");
+  const back = pressable(text("button", words.back, "btn quiet banner-back"), null);
   back.title = "Show the map as it is now";
   back.addEventListener("click", () => scrubTo(null).catch(failure("map_at")));
   banner.title = scrub.label;

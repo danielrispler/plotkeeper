@@ -7,7 +7,7 @@
 // different project's map closes it.
 
 import { logStop } from "./stop-rules.js";
-import { scrollingPre, text } from "./dom.js";
+import { pressable, scrollingPre, text } from "./dom.js";
 import { currentMap, onDraw, registerLayer, syncSide, type MapView } from "./map.js";
 import type { Drawer, Jump } from "./map-model.js";
 
@@ -50,7 +50,7 @@ function drawDrawer(view: MapView) {
     return syncSide(view.slots);
   }
   const { drawer } = open;
-  const closer = text("button", "×", "btn quiet sheet-close");
+  const closer = pressable(text("button", "×", "btn quiet sheet-close"), null);
   closer.title = "Close the drawer";
   closer.setAttribute("aria-label", "Close");
   closer.addEventListener("click", closeDrawer);

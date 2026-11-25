@@ -234,13 +234,16 @@ export function age(from: number, to = Date.now()): string {
   return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h`;
 }
 
-// A button: the one button component (danielrispler/Falinks#566), its type, pressed state and click. Only a real toggle has a pressed
-// state; any other button, a disclosure among them (which says `aria-expanded`), passes null and has no `aria-pressed` (#456).
-export function pressable<T extends HTMLElement>(button: T, pressed: boolean | null, click: (event: MouseEvent) => void): T {
+/**
+ * A button: the one button component (danielrispler/Falinks#566), its type, pressed state and click. Only a real toggle has a pressed
+ * state; any other button, a disclosure among them (which says `aria-expanded`), passes null and has no `aria-pressed` (#456). A
+ * button whose caller wires its own listeners passes no `click`.
+ */
+export function pressable<T extends HTMLElement>(button: T, pressed: boolean | null, click?: (event: MouseEvent) => void): T {
   button.classList.add("btn");
   button.setAttribute("type", "button");
   if (pressed !== null) button.setAttribute("aria-pressed", String(pressed));
-  button.addEventListener("click", click);
+  if (click) button.addEventListener("click", click);
   return button;
 }
 

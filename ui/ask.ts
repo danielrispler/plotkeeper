@@ -4,7 +4,7 @@
 // those facts and, for a file, its hunk; the answer stays here, labelled as interpretation under the facts as recorded and the session never sees it. A failed call or a reply with no answer shows why, with
 // a retry.
 
-import { failure, fullTitle, invoke, messageOf, onEnter, text } from "./dom.js";
+import { failure, fullTitle, invoke, messageOf, onEnter, pressable, text } from "./dom.js";
 import { rendered } from "./markdown.js";
 import type { Anchor, Facts, Hunk } from "./types.js";
 
@@ -182,8 +182,7 @@ function whyNotBox(session: string, turn: number): HTMLElement {
 }
 
 function button(label: string, hover: string): HTMLButtonElement {
-  const node = text("button", label, "btn");
-  node.type = "button";
-  node.title = hover;
-  return node;
+  const made = pressable(text("button", label, "btn"), null);
+  made.title = hover;
+  return made;
 }

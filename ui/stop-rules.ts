@@ -4,7 +4,7 @@
 // already happen (a session list, the Map view opening, an entered action on the map, a scrub, a drawer, "I know this") and the evaluation
 // runs when the Map view opens. The review shows on the map only (spec #380, "Stop rules").
 
-import { failure, invoke, text } from "./dom.js";
+import { failure, invoke, pressable, text } from "./dom.js";
 import type { StopFacts, StopKind } from "./types.js";
 
 export type Facts = StopFacts;
@@ -134,7 +134,7 @@ export const dismissReview = (projects: string[], modules: Module[]) => invoke("
 // shell has it.
 export function reviewNode(modules: Module[], projects: string[], dismissed: () => void): HTMLElement {
   const node = text("div", "", "review");
-  const button = text("button", "Dismiss", "btn quiet small");
+  const button = pressable(text("button", "Dismiss", "btn quiet small"), null);
   button.title = "Do not show this again";
   button.addEventListener("click", () => {
     dismissReview(projects, modules).then(dismissed).catch(failure("stop_dismiss"));

@@ -79,8 +79,7 @@ function resize(px: number | null) {
 let resizeHandle: HTMLButtonElement | null = null;
 function handle() {
   if (resizeHandle) return resizeHandle;
-  const bar = text("button", "", "btn quiet sheet-resize");
-  bar.type = "button";
+  const bar = pressable(text("button", "", "btn quiet sheet-resize"), null);
   bar.setAttribute("aria-label", "Resize the sheet: the left arrow widens it, the right arrow narrows it");
   bar.title = "Drag to resize the sheet; double-click for its first width";
   const width = () => element("map-side").getBoundingClientRect().width;
@@ -158,7 +157,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
   const tier = effectiveTier(part, view.state.user.tiers);
   const sheet = sheetOf(part, view.doc.laws, tier, view.scrub ? undefined : view.state.fog?.[part.id]);
 
-  const closer = text("button", "×", "btn quiet sheet-close");
+  const closer = pressable(text("button", "×", "btn quiet sheet-close"), null);
   closer.setAttribute("aria-label", "Close");
   closer.title = "Close the sheet (Esc)";
   closer.addEventListener("click", closeSheet);
@@ -190,7 +189,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
     row.append(mark, text("span", law.text, "sheet-law-text"), text("span", law.label, "sheet-law-backing"), acts);
     row.title = `${law.label}: ${law.text}`;
     if (law.backing === "check" && !view.scrub) {
-      const proof = text("button", "See the proof", "btn quiet");
+      const proof = pressable(text("button", "See the proof", "btn quiet"), null);
       proof.title = "Show the test that stands behind this law, read from the default branch";
       proof.addEventListener("click", () => {
         invoke("map_proof", { project: view.project, law: law.id })
@@ -236,7 +235,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
   const fogButtons: HTMLElement[] = [];
   if (actions.main) {
     const { open: opens, label, title, note } = actions.main;
-    const main = text("button", label, "btn primary sheet-catch-up");
+    const main = pressable(text("button", label, "btn primary sheet-catch-up"), null);
     main.title = title;
     main.addEventListener("click", () => {
       if (opens.kind === "chapter") return void openBriefOf(view.project, opens.pr, opens.chapter, true);
@@ -254,7 +253,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
     }
   }
   if (sheet.canClear && actions.second) {
-    const clear = text("button", actions.second, "btn quiet sheet-know");
+    const clear = pressable(text("button", actions.second, "btn quiet sheet-know"), null);
     clear.title = "Clear this part's fog: you have caught up with what changed";
     clear.addEventListener("click", () => {
       clear.disabled = true;
@@ -273,7 +272,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
   // A part with no fog offers the refresher (#392).
   const refresher = !view.scrub && refreshing === part.id ? refresherNode(view, part.id) : null;
   if (!view.scrub && !sheet.canClear && !refresher) {
-    const enter = text("button", "Refresher", "btn quiet sheet-refresher");
+    const enter = pressable(text("button", "Refresher", "btn quiet sheet-refresher"), null);
     enter.title = "The flows through this part, hop by hop";
     // It shows at once, drawn from the map; the shell records the activity behind it, and the reload drops the band.
     enter.addEventListener("click", () => {
@@ -289,7 +288,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
     ci.append(text("p", state.line, "sheet-ci-line"));
     if (state.drill && view.state.ci) {
       const found = view.state.ci;
-      const drill = text("button", "See the CI log", "btn quiet");
+      const drill = pressable(text("button", "See the CI log", "btn quiet"), null);
       drill.title = "Show the run's status and the end of its failed log, with a link to the run on GitHub";
       drill.addEventListener("click", () => openDrawer(ciDrawer(found)));
       ci.append(drill);

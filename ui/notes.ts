@@ -2,7 +2,7 @@
 // over the map's top-right corner; it fades after a few seconds, and a hover or the keyboard's focus in it holds it (#457). A newer
 // note replaces it. Its main button selects its session, and its × hides it.
 
-import { element, fullTitle, promptBox, text } from "./dom.js";
+import { element, fullTitle, pressable, promptBox, text } from "./dom.js";
 import { type Clock, realClock } from "./hover.js";
 import { sessionName } from "./list-model.js";
 import { select } from "./selection.js";
@@ -80,7 +80,7 @@ export function showNote(note: Note) {
   noted = note;
   const toast = element("note-toast");
   const action = () => {
-    const button = text("button", "", "btn quiet toast-main");
+    const button = pressable(text("button", "", "btn quiet toast-main"), null);
     button.addEventListener("click", () => {
       if (noted) void select(noted.session.id);
       close();
@@ -138,8 +138,7 @@ export function showCopyToast(outcome: Copied["outcome"], prompt: string) {
   copied = prompt;
   if (!copyBody || !copyButton) {
     const body = text("div", "", "copy-body");
-    const button = text("button", "Copy", "btn small");
-    button.setAttribute("type", "button");
+    const button = pressable(text("button", "Copy", "btn small"), null);
     button.title = "Copy the prompt to paste into your agent";
     // The clipboard refused already, so this is the browser's older route, which a click may use.
     button.addEventListener("click", () => {
