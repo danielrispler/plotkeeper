@@ -233,7 +233,18 @@ pub fn push_of(
         // The default branch merged into the PR: H1..H2 holds main's changes, so the PR's own commits are compared instead.
         let base = |head: &str| git(&["merge-base", reference, head]).ok();
         if base(old) != base(new) {
-            return compare(Push::Merged, MERGED);
+            // A merge commit's own edits are in no non-merge patch: the PR's whole diff must match too.
+            return match compare(Push::Merged, MERGED) {
+                (Push::Merged, true) => match (
+                    whole_patch(repo, reference, old),
+                    whole_patch(repo, reference, new),
+                ) {
+                    (Some(before), Some(after)) if before == after => (Push::Merged, true),
+                    (Some(_), Some(_)) => (Push::Rewrite(Some(MERGED.into())), true),
+                    _ => (Push::Rewrite(Some(MERGED.into())), false),
+                },
+                other => other,
+            };
         }
         let meta = studio_understanding::pr_brief::PrMeta {
             number: pr,
@@ -261,15 +272,32 @@ fn patches(repo: &Path, reference: &str, head: &str) -> Option<(usize, Vec<Strin
         .ok()?
         .parse()
         .ok()?;
-    let log = std::process::Command::new("git")
-        .args([
+    let mut ids = patch_ids(
+        repo,
+        &[
             "log",
             "-p",
             "--no-merges",
             "--no-color",
             "--no-ext-diff",
             &range,
-        ])
+        ],
+    )?;
+    ids.sort();
+    Some((count, ids))
+}
+
+/// The `git patch-id --stable` of the PR's whole diff, from its merge base with `reference` to `head`; "" when the diff is empty.
+fn whole_patch(repo: &Path, reference: &str, head: &str) -> Option<String> {
+    let base = crate::map::git(repo, &["merge-base", reference, head]).ok()?;
+    let ids = patch_ids(repo, &["diff", "--no-color", "--no-ext-diff", &base, head])?;
+    Some(ids.into_iter().next().unwrap_or_default())
+}
+
+/// The patch-ids `git patch-id --stable` reads from the output of `git args`, in order.
+fn patch_ids(repo: &Path, args: &[&str]) -> Option<Vec<String>> {
+    let log = std::process::Command::new("git")
+        .args(args)
         .current_dir(repo)
         .output()
         .ok()
@@ -289,12 +317,12 @@ fn patches(repo: &Path, reference: &str, head: &str) -> Option<(usize, Vec<Strin
         .wait_with_output()
         .ok()
         .filter(|out| out.status.success())?;
-    let mut ids: Vec<String> = String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter_map(|line| line.split_whitespace().next().map(String::from))
-        .collect();
-    ids.sort();
-    Some((count, ids))
+    Some(
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter_map(|line| line.split_whitespace().next().map(String::from))
+            .collect(),
+    )
 }
 
 /// When the PR moved from the newest stored brief's head to `head`, what that push does to Daniel's read, kept in
@@ -2344,6 +2372,18 @@ mod tests {
             push.note().as_deref(),
             Some("Main merged into the branch, nothing new in the PR")
         );
+        // A merge that also edits the PR's own file: its non-merge commits are the same, but the PR's diff is not.
+        repo.git(&["reset", "-q", "--hard", &h1]);
+        repo.git(&["merge", "-q", "--no-commit", "main"]);
+        std::fs::write(repo.dir.path().join("alpha/a.rs"), "edited in the merge").unwrap();
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "--no-edit"]);
+        let edited = repo.head();
+        assert_eq!(
+            repo.push(Some(&read), &h1, &edited),
+            Push::Rewrite(Some(MERGED.into()))
+        );
+        repo.git(&["reset", "-q", "--hard", &merged]);
         // A commit of the PR's own on top of the merge: the full brief is rewritten, saying why.
         let more = repo.commit(&[("alpha/a.rs", "3")]);
         assert_eq!(
