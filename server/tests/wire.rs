@@ -129,6 +129,7 @@ fn ready() -> Vec<Ready> {
         quiet: false,
         failed: true,
         note: Some("Rebased onto main, nothing new in the PR".into()),
+        since: Some("What changed since you read".into()),
     };
     vec![
         Ready {
@@ -664,6 +665,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
         partial: true,
         expected,
         stale_base: None,
+        since: None,
     };
     let kinds = [
         StopKind::Session,
@@ -785,6 +787,14 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
                     partial_facts: Default::default(),
                     ..brief()
                 },
+                ..view(None)
+            }),
+        ),
+        (
+            "BriefView",
+            json(BriefView {
+                // A "Since you read" story (#497): the head it runs from.
+                since: Some(COMMIT.into()),
                 ..view(None)
             }),
         ),

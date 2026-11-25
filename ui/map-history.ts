@@ -62,7 +62,7 @@ function rows(view: MapView, list: HTMLElement, entries: HistoryEntry[]) {
       if (offer) {
         const brief = text("button", offer.label, "btn quiet hist-brief");
         brief.title = offer.title;
-        brief.addEventListener("click", () => void openBriefOf(view.project, offer.number, 0));
+        brief.addEventListener("click", () => void openBriefOf(view.project, offer.number, 0, true));
         actions.append(brief);
       }
       actions.append(files);

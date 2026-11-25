@@ -364,6 +364,11 @@ test("an open waiting on its write opens the brief once it is stored, stops on a
   assert.equal(awaitedWrite(pr(info({ chapters: ["Fog"], stale: true, failed: true }))), "stop");
   assert.equal(awaitedWrite(pr(info({ quiet: true }))), "stop");
   assert.equal(awaitedWrite(undefined), "stop", "no longer ready");
+  // A Since you read story (#497) opens once it is stored, while the full brief is still of the older head; an open of the full brief waits for it.
+  const story = info({ chapters: ["Fog"], stale: true, since: "Since" });
+  assert.equal(awaitedWrite(pr(story)), "open");
+  assert.equal(awaitedWrite(pr(story), true), "wait");
+  assert.equal(awaitedWrite(pr({ ...story, writing: true })), "wait");
 });
 
 // Copy for the agent (#493): the prompt code writes for each item kind, which stands alone for any agent.

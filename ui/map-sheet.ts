@@ -212,7 +212,7 @@ function drawSheet(view: MapView) {
     const main = text("button", label, "btn primary sheet-catch-up") as HTMLButtonElement;
     main.title = title;
     main.addEventListener("click", () => {
-      if (opens.kind === "chapter") return void openBriefOf(view.project, opens.pr, opens.chapter);
+      if (opens.kind === "chapter") return void openBriefOf(view.project, opens.pr, opens.chapter, true);
       void openCatchUpOf(view.project, part.id);
     });
     fog.append(main);

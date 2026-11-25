@@ -491,7 +491,8 @@ export type RatifyDetail =
   | { of: "link"; kind: RatifyWords; reason: RatifyWords };
 // What a ready PR's brief is doing (`pr_briefs.rs`): a newer head was pushed (stale), being written now, and the chapters' titles, or the one story's.
 // `note` (#477, part B): why the brief at this head is what it is after a push: the read carried over, or it was rewritten.
-export type BriefInfo = { stale: boolean; writing: boolean; chapters: string[]; quiet: boolean; read?: boolean; failed?: boolean; note?: string };
+// `since` (#497): the title of the "Since you read" story stored for this head, which the tray opens first.
+export type BriefInfo = { stale: boolean; writing: boolean; chapters: string[]; quiet: boolean; read?: boolean; failed?: boolean; note?: string; since?: string };
 export type ReadyPr = { number: number; title: string; head: string; branch?: string; brief: BriefInfo | null };
 // A PR brief as the writer made it and `pr_brief` returns it (`understanding/src/pr_brief.rs`). A step's `flags` are what the checks found wrong with it
 // that the one rewrite did not mend: it shows "not confirmed from the facts".
@@ -527,10 +528,11 @@ export type Guard = { parts: string[] };
 export type NewLaw = { id: string; on: string; text: string };
 // `partial`: the writer did not see the whole diff.
 // `expected`: the PR matched the project's pre-flight (#394).
+// `since` (#497): this is a "Since you read" story, of the push from that head to its own.
 // What main changed since an open PR's merge base that bears on its brief (#494): laws, links and flows at a lit part, lit parts whose
 // `paths` changed, and changed files of lit parts and root build manifests.
 export type StaleBase = { laws: string[]; links: string[]; flows: string[]; paths: string[]; files: string[] };
-export type BriefView = { brief: StoredBrief; partial: boolean; expected?: Expected; stale_base?: StaleBase };
+export type BriefView = { brief: StoredBrief; partial: boolean; expected?: Expected; stale_base?: StaleBase; since?: string };
 // What `pr_brief` answers: the brief, or that its write has started (it comes through `map-landed`).
 export type BriefOpened = BriefView | { writing: true };
 export type Fog = "thin" | "thick";
@@ -634,6 +636,7 @@ export interface Commands {
   micro_world_explore: Explored;
   micro_world_page: string;
   brief_chapter_done: void;
+  brief_since_done: void;
   briefs_waiting: WaitingBriefs | null;
   pr_ratify: RatifyRow[];
   projects: SavedProject[];

@@ -359,7 +359,8 @@ export function alsoRows(groups: AlsoGroup[]): AlsoRow[] {
 }
 
 // `overview`: this chapter plays the brief's overview first. It is the first chapter opened, and keeps it until it is finished, so it plays once.
-export type Playing = { project: string; pr: number; chapter: number; step: number; overview: boolean };
+// `story`: a "Since you read" story's head it runs from (#497), played apart from the full brief of the same PR; "" for a brief.
+export type Playing = { project: string; pr: number; chapter: number; step: number; overview: boolean; story: string };
 
 // A chapter is complete when its last step was seen and its check answered, right or wrong, when it holds one (#342). Leaving
 // mid-chapter completes nothing. `fire` runs once, the moment both hold.
@@ -383,7 +384,7 @@ export function chapterGate(list: Pick<BriefStep, "check">[], fire: () => void):
 
 export type Player = {
   current: () => Playing | null;
-  open: (project: string, pr: number, chapter: number) => void;
+  open: (project: string, pr: number, chapter: number, story?: string) => void;
   // Moves by `by` steps within `length`; "done" past the last one, which closes the brief and starts it over next time.
   go: (by: number, length: number) => "moved" | "done";
   // Leaves the brief where it is; the next `open` of it continues from there.
@@ -395,16 +396,16 @@ export function briefPlayer(deps: { scrubbed: () => boolean; backToNow: () => vo
   // Per brief: the chapter that carries the overview (the first opened), and whether it has been played to its end.
   const carrier = new Map<string, number>();
   const played = new Set<string>();
-  const briefKey = (p: { project: string; pr: number }) => `${p.project}|${p.pr}`;
-  const key = (p: { project: string; pr: number; chapter: number }) => `${briefKey(p)}|${p.chapter}`;
+  const briefKey = (p: { project: string; pr: number; story: string }) => `${p.project}|${p.pr}|${p.story}`;
+  const key = (p: { project: string; pr: number; story: string; chapter: number }) => `${briefKey(p)}|${p.chapter}`;
   let now: Playing | null = null;
   return {
     current: () => now,
-    open(project, pr, chapter) {
+    open(project, pr, chapter, story = "") {
       if (deps.scrubbed()) deps.backToNow();
       // Opening over a brief that is open leaves that one where it is.
       if (now) left.set(key(now), now.step);
-      const at = { project, pr, chapter, step: 0 };
+      const at = { project, pr, chapter, step: 0, story };
       const brief = briefKey(at);
       if (!played.has(brief) && !carrier.has(brief)) carrier.set(brief, chapter);
       now = { ...at, step: left.get(key(at)) ?? 0, overview: !played.has(brief) && carrier.get(brief) === chapter };
@@ -606,9 +607,11 @@ export function orderRun(key: string[], links: { id: string; from: string; to: s
 // What an open waiting on its brief's write does when the map draws `pr` (the ready PR, gone when undefined): "open" once the brief of
 // its head is stored, "stop" when the write failed, the PR is quiet or no longer ready, and "wait" while it is written or the map still
 // shows how it stood before the write started.
-export function awaitedWrite(pr: ReadyPr | undefined): "open" | "stop" | "wait" {
+export function awaitedWrite(pr: ReadyPr | undefined, full = false): "open" | "stop" | "wait" {
   const brief = pr?.brief;
   if (!pr || brief?.quiet || (brief?.failed && !brief.writing)) return "stop";
+  // A "Since you read" story (#497) opens once stored, whatever head the full brief is of; asking for the full brief waits for that.
+  if (!full && brief?.since && !brief.writing) return "open";
   return brief && !brief.writing && !brief.stale && brief.chapters.length > 0 ? "open" : "wait";
 }
 
