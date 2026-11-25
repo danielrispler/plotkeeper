@@ -68,6 +68,25 @@ test("an unkeyed span drawn again leaves no hint of its first draw in #hints", (
   assert.ok(inHints(line.childNodes[0].getAttribute("data-hint")));
 });
 
+test("an unkeyed summary drawn again while its hint is open keeps that hint until it closes", () => {
+  const line = row();
+  const draw = () => [hint(document.createElement("summary"), "Show or hide the sessions")];
+  patch(line, draw());
+  const [kept] = line.childNodes;
+  kept.listeners.pointerenter({});
+  mock.timers.tick(501);
+  const [shown] = open();
+  const id = shown.getAttribute("id");
+  patch(line, draw());
+  mock.timers.tick(300);
+  assert.ok(inHints(id), "the open hint stays while the pointer rests on its trigger");
+  assert.ok(shown.popoverOpen);
+  kept.listeners.pointerleave({});
+  mock.timers.tick(200);
+  mock.timers.tick(300);
+  assert.equal(inHints(id), false);
+});
+
 test("a keyed span drawn again ten times keeps one set of listeners on its hint", () => {
   const line = row();
   const draw = () => [hint(keyed(document.createElement("span"), "mark-redrawn"), "A plain terminal")];

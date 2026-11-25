@@ -262,18 +262,24 @@ const squeezed = (words: string | null) => (words ?? "").replace(/\s+/g, " ").tr
 const named = (trigger: Element) => trigger.getAttribute("interestfor") ?? trigger.getAttribute("data-hint");
 
 // A hint stays while a trigger on the page names it, or while its trigger, kept off the page, still does. A trigger drawn again with
-// other words, as an unkeyed one is, names a new hint, so the old one goes.
+// other words, as an unkeyed one is, names a new hint, so the old one goes, once it is closed: an open one waits for the next prune.
 function pruneHints() {
   pruneQueued = false;
   if (!document.querySelectorAll) return;
   const wired = new Set([...document.querySelectorAll("[interestfor], [data-hint]")].map(named));
+  let waiting = false;
   for (const [id, node] of hints) {
     const owner = owners.get(id)?.deref();
     if (wired.has(id) || (owner && named(owner) === id)) continue;
+    if (node.matches(":popover-open")) {
+      waiting = true;
+      continue;
+    }
     node.remove();
     owners.delete(id);
     hints.delete(id);
   }
+  if (waiting) queuePrune();
 }
 function queuePrune() {
   if (pruneQueued) return;
