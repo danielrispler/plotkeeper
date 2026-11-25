@@ -144,7 +144,7 @@ pub(crate) fn check_link_fields(links: &[Link], actors: &HashSet<&str>) -> Vec<S
         } else if length > REASON_CAP {
             problems.push(format!(
                 "link {id:?}: reason is {} characters, the cap is {REASON_CAP}; keep one sentence here and move the detail \
-                 into the area's doc",
+                 into the area's doc under docs/studio/behaviour/",
                 crate::parts::grouped(length)
             ));
         }

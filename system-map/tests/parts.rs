@@ -49,8 +49,7 @@ fn a_purpose_over_the_cap_fails_with_its_length_the_cap_and_where_the_detail_goe
                 "part \"alpha\"",
                 "purpose is 3,986 characters",
                 "the cap is 240",
-                "held item",
-                "split the part"
+                "keep the job here, move the detail into a held item or the area's doc under docs/studio/behaviour/, or split the part"
             ]
         ),
         "{found:?}"
@@ -75,7 +74,8 @@ fn a_held_text_over_the_cap_fails_with_its_length_and_the_cap() {
                 "part \"alpha\"",
                 "\"Reader\"",
                 "141 characters",
-                "the cap is 140"
+                "the cap is 140",
+                "the area's doc under docs/studio/behaviour/"
             ]
         ),
         "{found:?}"
@@ -91,7 +91,13 @@ fn more_than_eight_held_items_fail_and_say_the_part_may_need_splitting() {
     assert!(
         has(
             &found,
-            &["part \"alpha\"", "9 items", "the cap is 8", "split"]
+            &[
+                "part \"alpha\"",
+                "9 items",
+                "the cap is 8",
+                "the area's doc under docs/studio/behaviour/",
+                "split"
+            ]
         ),
         "{found:?}"
     );

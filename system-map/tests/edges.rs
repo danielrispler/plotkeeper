@@ -237,7 +237,8 @@ fn a_link_needs_a_kind_and_a_run_time_link_a_reason_of_at_most_140_characters() 
             &long,
             &[
                 "link \"joined\"",
-                "reason is 141 characters, the cap is 140"
+                "reason is 141 characters, the cap is 140",
+                "the area's doc under docs/studio/behaviour/"
             ]
         ),
         "{long:?}"

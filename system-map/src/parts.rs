@@ -96,13 +96,14 @@ pub(crate) fn check(map: &Map) -> Vec<String> {
         } else if length > PURPOSE_CAP {
             problems.push(format!(
                 "part {id:?}: purpose is {} characters, the cap is {PURPOSE_CAP}; keep the job here, move the detail into a held \
-                 item or the area's doc, or split the part",
+                 item or the area's doc under docs/studio/behaviour/, or split the part",
                 grouped(length)
             ));
         }
         if part.holds.len() > ITEMS_CAP {
             problems.push(format!(
-                "part {id:?}: holds {} items, the cap is {ITEMS_CAP}; merge the smaller ones into the area's doc, or split the part",
+                "part {id:?}: holds {} items, the cap is {ITEMS_CAP}; merge the smaller ones into the area's doc under \
+                 docs/studio/behaviour/, or split the part",
                 part.holds.len()
             ));
         }
@@ -126,7 +127,7 @@ pub(crate) fn check(map: &Map) -> Vec<String> {
             } else if length > TEXT_CAP {
                 problems.push(format!(
                     "part {id:?}: the held item {name:?} text is {} characters, the cap is {TEXT_CAP}; keep one sentence here and \
-                     move the detail into the area's doc",
+                     move the detail into the area's doc under docs/studio/behaviour/",
                     grouped(length)
                 ));
             }
