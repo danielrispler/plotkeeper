@@ -11,7 +11,7 @@ mod typescript;
 
 use std::{
     cell::OnceCell,
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet, btree_map::Entry},
     path::Path,
 };
 
@@ -150,6 +150,9 @@ pub(crate) struct Pair {
     pub(crate) lines: BTreeSet<u32>,
     /// A crate root's `mod` line: kept for the check, left out of the imports report.
     pub(crate) declaration: bool,
+    /// The one target an import named that covers several files (a Go package's folder, say): the imports report
+    /// counts the pairs of one import of it as one unit per part. None for a pair that is its own unit.
+    pub(crate) group: Option<String>,
 }
 
 impl Pair {
@@ -159,6 +162,7 @@ impl Pair {
             to: to.to_string(),
             lines: BTreeSet::new(),
             declaration: false,
+            group: None,
         }
     }
 
@@ -181,12 +185,13 @@ pub(crate) struct Output {
 
 /// Runs the extractors `names` names from `registry`, in that order, and holds their output to the contract: a pair
 /// whose ends are not both tracked, from a file to itself, or from a file the extractor reads and skips is dropped,
-/// and a pair two extractors (or one, twice) find is kept once, sorted, with the lines of every finding, and as a
-/// declaration only if every finding of it is one. A name the registry lacks is a problem.
+/// and a pair two extractors (or one, twice) find is kept once, sorted, with the lines of every finding, as a
+/// declaration only if every finding of it is one, and with the lowest of its findings' groups, none counting as lowest.
+/// A name the registry lacks is a problem.
 pub(crate) fn run(registry: &[&dyn Extractor], names: &[String], repo: &Repo) -> Output {
     let mut problems = Vec::new();
-    // Each pair's ends, with the lines of its findings and whether every finding of it is a declaration.
-    let mut pairs: BTreeMap<(String, String), (BTreeSet<u32>, bool)> = BTreeMap::new();
+    // Each pair by its ends, merged from its findings.
+    let mut pairs: BTreeMap<(String, String), Pair> = BTreeMap::new();
     for name in names {
         let Some(extractor) = registry.iter().find(|e| e.name() == name) else {
             problems.push(format!(
@@ -215,26 +220,23 @@ pub(crate) fn run(registry: &[&dyn Extractor], names: &[String], repo: &Repo) ->
             {
                 continue;
             }
-            pairs
-                .entry((pair.from, pair.to))
-                .and_modify(|(lines, declaration)| {
-                    lines.extend(&pair.lines);
-                    *declaration &= pair.declaration;
-                })
-                .or_insert((pair.lines, pair.declaration));
+            match pairs.entry((pair.from.clone(), pair.to.clone())) {
+                Entry::Vacant(entry) => {
+                    entry.insert(pair);
+                }
+                Entry::Occupied(mut entry) => {
+                    let kept = entry.get_mut();
+                    kept.lines.extend(&pair.lines);
+                    kept.declaration &= pair.declaration;
+                    // `Option`'s order puts none first, so none is the lowest group.
+                    kept.group = kept.group.take().min(pair.group);
+                }
+            }
         }
     }
     Output {
         problems,
-        pairs: pairs
-            .into_iter()
-            .map(|((from, to), (lines, declaration))| Pair {
-                from,
-                to,
-                lines,
-                declaration,
-            })
-            .collect(),
+        pairs: pairs.into_values().collect(),
     }
 }
 

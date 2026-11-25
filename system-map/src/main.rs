@@ -179,8 +179,8 @@ fn run_imports(root: &Path, json: bool) -> Result<ExitCode, String> {
     }
     for hub in &found.hubs {
         println!(
-            "  {} ({}): degree {}, {} in, {} out",
-            hub.file, hub.part, hub.degree, hub.fan_in, hub.fan_out
+            "  {}: degree {}, {} in, {} out",
+            hub.label, hub.degree, hub.fan_in, hub.fan_out
         );
     }
     println!("inside:");

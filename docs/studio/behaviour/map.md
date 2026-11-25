@@ -110,12 +110,16 @@ The checker runs only `git` and, when the map names `cargo` or `rust-modules`, `
 `system-map imports [--json] [--root <dir>]` tests a cut of the code into parts. It reads the map and runs the extractors it names, and counts the file pairs they find (each pair once) whose two files a part owns. A crate root's `mod` and `pub mod` lines are left out of the counts, since they declare the module tree rather than use it; the same pair still counts when the root also writes a path into that module. A map that names `cargo` counts its manifest pairs too. It prints:
 
 - one line of totals: the imports between owned files, how many are inside parts and how many across, and the across share raw and weighted;
-- **hubs**: files whose degree (imports in plus out) is at least three times the mean degree, taken over the files with at least one counted pair (Bunch's rule). They are listed apart, and their pairs stay in the counts;
+- **hubs**: nodes whose degree (imports in plus out) is at least three times the mean degree, taken over the nodes with at least one counted import (Bunch's rule). They are listed apart, and their imports stay in the counts;
 - **inside**: each part's imports inside it;
 - **across**: each ordered pair of parts with the imports from the first to the second;
 - **both ways**: the pairs of parts that import each other.
 
-Every count is given raw and **weighted**: each pair weighs 1 / the fan-in of its target, the number of counted pairs into that file. So a hub that many files import adds little weight, and a utility file does not make two parts look tangled. The weighted across share is across weight over total weight.
+What it counts are **units**. An extractor may give a pair a **group**, the one target an import named that covers several files (a Go package's folder, say). The report counts one unit per importing file, group and target part, so an import of a package of several files is one unit, and one of a package split across parts P and Q, from a file in P, is two: one inside P and one across P→Q. A pair with no group is its own unit, which is how every `cargo`, `rust-modules` and `typescript-imports` pair counts. When two findings of one pair carry different groups, the pair keeps the lowest, none counting as lowest.
+
+Degree, fan-in, fan-out, the mean degree and hubs are counted over **nodes**. A grouped pair's target is a **slice**, its group's files in one part, and its importer is the slice of its own group when a grouped pair names one for that file (a Go file counts as its package's slice), else the file. An ungrouped pair's ends are files. A slice's hub names its group in `file` and its part in `part`; the text output adds ` (part)` only when the group's files sit in more than one part, where a file's hub always shows its part.
+
+Every count is given raw and **weighted**: each unit weighs 1 / the fan-in of its target, the number of distinct files that import that node. So a hub that many files import adds little weight, and a utility file does not make two parts look tangled. The weighted across share is across weight over total weight.
 
 It suggests no grouping. To test a cut, edit the map's paths and run it again. It exits 0 on any counts; an extractor that cannot run prints a `note:` and its pairs are missing from the counts. A map that does not load exits 2 with its problems on standard error, as `touched` does. `--json` prints the same numbers: `total`, `inside` and `across` (`raw`, `weighted`), `across_share` (percentages), `mean_degree`, `hubs` (`file`, `part`, `degree`, `fan_in`, `fan_out`), `parts` and `between` (each with `raw` and `weighted`), `both_ways` and `problems`.
 
