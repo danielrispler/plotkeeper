@@ -9,7 +9,7 @@
 
 import { element, text } from "./dom.js";
 import { mapShown, onDraw, registerLayer, revealParts } from "./map.js";
-import { openAgents } from "./map-agents.js";
+import { openAgents, spotlitParts } from "./map-agents.js";
 import { closeSheet, refreshHere, sheetPart } from "./map-sheet.js";
 import { panelSession, type PanelContent, withPanel, withSheet } from "./map-model.js";
 import { writersIn } from "./writers.js";
@@ -78,11 +78,11 @@ export function followPanelLog() {
   if (shown?.kind === "log" && place) deps.log(place, shown.session, shown.agent, true);
 }
 
-// The parts the panel's content is about, kept clear of it and of the sheet: the sheet's part, and the parts the open session's chips are on.
+// The parts the panel's content is about, kept clear of it and of the sheet: the sheet's part, and the spotlit session's latest turn's parts
+// (#562), the open session's while no row is hovered.
 function reveal() {
-  const lit = [...element("map-body").querySelectorAll<HTMLElement>(".plate[data-id]:has(.agent-chip.lit)")].map((plate) => plate.dataset.id!);
   const sheet = sheetPart();
-  revealParts([...(sheet === null ? [] : [sheet]), ...lit]);
+  revealParts([...(sheet === null ? [] : [sheet]), ...spotlitParts()]);
 }
 
 // Opens `content` in the panel, or closes it with null; the sheet closes too when the window is narrow or the content is the widened diff.
@@ -121,7 +121,7 @@ export function redrawPanel() {
 export function startPanel(given: PanelDeps) {
   deps = given;
   element("panel-close").addEventListener("click", closePanel);
-  // A redraw of the map draws its chips again: the open session's stay lit.
+  // A redraw of the map draws its badges again: the open session stays spotlit.
   onDraw(() => openAgents(panelSession(panelShown())));
   registerLayer("panel", { open: () => panelShown() !== null, close: closePanel });
 }

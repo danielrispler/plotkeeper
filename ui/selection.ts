@@ -65,7 +65,7 @@ export async function select(id: string, agent: string | null = null) {
   await catchUp();
 }
 
-// A press on a session's row in the list or its chip on the map: a second press on the session the panel shows closes the panel (#385);
+// A press on a session's row in the list or in a session badge's list on the map: a second press on the session the panel shows closes the panel (#385);
 // otherwise it selects.
 export function pressSession(id: string, agent: string | null = null) {
   if (agent === null && pressRow(panelShown(), id) === null) return closePanel();

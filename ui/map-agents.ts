@@ -1,92 +1,26 @@
-// Live agents on the Map view (spec danielrispler/plotkeeper#306, ticket #311): a chip on every part a running or needs-you session's
-// or Worker's current turn touched, and a quiet "not placed" list beside the map for the ones no part holds. The pure rules come first;
-// the drawing below them reads the sessions the window already has, and `map_place` (the shell, `studio-system-map`) says which parts a
-// list of paths touches. Since #559 it asks one group per path (`placeGroups`, `map-live.ts`) and folds the answers back, and it draws the
-// spotlit session's footprint as corner brackets around its plates beside the chips.
+// Live sessions on the Map view (spec danielrispler/plotkeeper#306, ticket #311; spec #549): since #562 one count badge per part that marked
+// sessions' latest turns touch (`sessionBadges`, `map-live.ts`), whose press opens one kept list of those sessions; a quiet "not placed" list
+// beside the map for the marked sessions no part holds; and, while a session is spotlit, its footprint as corner brackets (#559), its chip on
+// its latest turn's parts with its line on the home part, and the other badges dimmed. The pure rules are `map-live.ts`'s; this file draws
+// them from the sessions the window already has, and `map_place` (the shell, `studio-system-map`) says which part owns each path.
 
 import { failure, invoke, newest, pressable, text } from "./dom.js";
-import { currentMap, onDraw, revealParts, syncSide } from "./map.js";
+import { currentMap, onCamera, onDraw, registerLayer, revealParts, syncSide } from "./map.js";
 import { logStop } from "./stop-rules.js";
-import { footprint, footprintNote, partsOf, placeGroups, type Placement, spotlit, turnLight } from "./map-live.js";
-import type { Session, Turn } from "./types.js";
+import { logo, logoKey } from "./logos.js";
+import { sidebarOrder } from "./projects.js";
+import { type Badge, footprint, footprintNote, isolate, latestParts, notPlacedLine, placeGroups, type Placement, sessionBadges, spotlit, turnLight } from "./map-live.js";
+import { stateLabels, type Session, type Subagent, type Turn } from "./types.js";
 
-// One agent on the map: a session's own, or a Worker's. `key` is the session's id, and `session/worker` for a Worker.
-export type Live = { key: string; session: string; agent: string | null; label: string; needsYou: boolean; paths: string[] };
-
-const editing = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
-
-// The file an Edit or Write in flight works on, from the session's folder: null for any other step.
-const inFlight = (step: Session["last_step"], cwd: string): string | null => {
-  const path = step && editing.includes(step.tool) ? step.detail : null;
-  if (!path) return null;
-  return path.startsWith(`${cwd}/`) ? path.slice(cwd.length + 1) : path;
-};
-
-// The agents on the map: sessions in `Running` or `Needs you` of a project (`inProject` says whether a folder is one's), and their
-// running Workers. A Helper, a finished Worker, a plain shell and a session in any other state are never on it. A session's own
-// paths are its current turn's changed files that no running Worker's call or worktree names, with an Edit or Write in flight; a
-// Worker's are the ones its own name or id is on.
-export function liveAgents(sessions: Session[], inProject: (cwd: string) => boolean): Live[] {
-  const live: Live[] = [];
-  for (const session of sessions) {
-    if ((session.state !== "running" && session.state !== "needs_you") || session.shell || !inProject(session.cwd)) continue;
-    const workers = session.agents.filter((agent) => agent.kind === "worker" && agent.status === "running");
-    const named = (name: string | null) => workers.find((worker) => worker.id === name || worker.name === name);
-    const files = session.capabilities.turn_trees ? (session.turns.at(-1)?.files?.files ?? []) : [];
-    const flight = inFlight(session.last_step, session.cwd);
-    const own = files.filter((file) => !named(file.agent)).map((file) => file.path);
-    const askedByWorker = session.asker?.agent != null && named(session.asker.agent) !== undefined;
-    live.push({
-      key: session.id,
-      session: session.id,
-      agent: null,
-      label: session.name ?? session.identity.name,
-      needsYou: session.state === "needs_you" && !askedByWorker,
-      paths: [...new Set([...own, ...(flight ? [flight] : [])])],
-    });
-    for (const worker of workers) {
-      const paths = files.filter((file) => file.agent === worker.id || file.agent === worker.name).map((file) => file.path);
-      live.push({ key: `${session.id}/${worker.id}`, session: session.id, agent: worker.id, label: worker.name, needsYou: session.asker?.agent === worker.id, paths });
-    }
-  }
-  return live;
-}
-
-// Where each agent goes: on every part `placed` (its key to part ids) gives it, else in the not placed list.
-export function arrange(live: Live[], placed: Record<string, string[]>): { byPart: Record<string, Live[]>; notPlaced: Live[] } {
-  const byPart: Record<string, Live[]> = {};
-  const notPlaced: Live[] = [];
-  for (const agent of live) {
-    const parts = placed[agent.key] ?? [];
-    if (!parts.length) notPlaced.push(agent);
-    for (const part of parts) (byPart[part] ??= []).push(agent);
-  }
-  return { byPart, notPlaced };
-}
-
-// Each agent's parts from the per-path placement (#559): its key to the parts its paths touch, which `arrange` reads.
-export const agentParts = (live: Live[], placed: Placement): Record<string, string[]> =>
-  Object.fromEntries(live.map((agent) => [agent.key, partsOf(agent.paths, placed)]));
-
-// The not placed list's closed line (#472): how many agents no part holds, and how many of them need you, so a needs-you agent stays loud.
-export function notPlacedLine(notPlaced: Live[]): { count: string; needsYou: string | null } {
-  const asking = notPlaced.filter((agent) => agent.needsYou).length;
-  return { count: `${notPlaced.length} not placed`, needsYou: asking ? `${asking} ${asking === 1 ? "needs" : "need"} you` : null };
-}
-
-// The chips a hovered list row lights (#382): every chip of the `hovered` session, its Workers' too; and those of the session `open` in the left
-// panel (#385), which stay lit while it is open. None without either.
-export function litAgents(live: Live[], hovered: string | null, open: string | null = null): string[] {
-  return live.filter((agent) => agent.session === hovered || agent.session === open).map((agent) => agent.key);
-}
-
-// What the drawing needs of the window, given by `main.ts`: the sessions, a folder's project, the jump to a session, and whether a PR
-// brief plays (no footprint then).
+// What the drawing needs of the window, given by `main.ts`: the sessions, a folder's project, the jump to a session or a Worker's log,
+// whether a PR brief plays (no spotlight then), and a session's name and second line as the session list shows them.
 export type AgentDeps = {
   sessions: () => Session[];
   projectOf: (cwd: string) => string | null;
   select: (session: string, agent: string | null) => void;
   briefOpen: () => boolean;
+  name: (session: Session) => string;
+  line: (session: Session) => string | null;
 };
 let deps: AgentDeps;
 let hidden = false;
@@ -97,8 +31,9 @@ let placed: Placement = {};
 export const currentPlacement = (): Placement => placed;
 const latest = newest();
 
-// The session whose list or History row the pointer is on (#382), whose chips are lit and whose footprint shows (#559), and that row: a
-// hover ends when the row leaves the page (a session moving to History, a redraw), which `pointerleave` never reports.
+// The session whose row the pointer is on (a session list or History row, a badge list's or the not placed list's), which is spotlit
+// (#559, #562), and that row: a hover ends when the row leaves the page (a session moving to History, a redraw, a list closing), which
+// `pointerleave` never reports.
 let hovered: string | null = null;
 let hoveredRow: Element | null = null;
 export function hoverAgents(session: string | null, row: Element | null = null) {
@@ -108,7 +43,7 @@ export function hoverAgents(session: string | null, row: Element | null = null) 
   paint();
 }
 
-// The session open in the left panel (#385), whose chips stay lit while it is open.
+// The session open in the left panel (#385), spotlit while no row is hovered.
 let opened: string | null = null;
 export function openAgents(session: string | null) {
   if (session === opened) return;
@@ -116,35 +51,11 @@ export function openAgents(session: string | null) {
   paint();
 }
 
-// Hides every chip and the not placed list, or shows them again: for a view of a past commit, where nothing is live.
+// Hides every badge, chip and the not placed list, or shows them again: for a view of a past commit, where nothing is live.
 export function hideAgents(hide: boolean) {
   hidden = hide;
   paint();
 }
-
-const chip = (agent: Live, select: AgentDeps["select"], lit: string[]) => {
-  const button = pressable(text("button", agent.needsYou ? `${agent.label} needs you` : agent.label, `agent-chip${agent.needsYou ? " needs-you" : ""}${lit.includes(agent.key) ? " lit" : ""}`), null, () => {
-    const view = currentMap();
-    if (view) logStop("map-action", view.project);
-    select(agent.session, agent.agent);
-  });
-  // The chip's press opens its session, not the plate's sheet under it (#385).
-  button.addEventListener("click", (event) => event.stopPropagation());
-  button.title = `${agent.label}${agent.needsYou ? " needs you" : ""}\nGo to this ${agent.agent === null ? "session" : "worker"}`;
-  return button;
-};
-
-// The not placed list: a closed <details> whose summary is the line, made at the first paint and kept.
-let kept: { details: HTMLDetailsElement; summary: HTMLElement; chips: HTMLElement } | undefined;
-const notPlacedList = () => {
-  if (kept) return kept;
-  const details = document.createElement("details");
-  const summary = text("summary", "", "side-title");
-  summary.title = "The agents whose turn touched no part yet: click to show or hide them";
-  const chips = text("div", "", "not-placed-chips");
-  details.append(summary, chips);
-  return (kept = { details, summary, chips });
-};
 
 // The shown project's sessions, whose turns are placed: none on a past commit's map.
 const shownSessions = (project: string) => (hidden ? [] : deps.sessions().filter((session) => !session.shell && deps.projectOf(session.cwd) === project));
@@ -157,13 +68,162 @@ export function rowNote(id: string): string | null {
   return session ? footprintNote(session, placed, Date.now()) : null;
 }
 
-// Corner brackets around the spotlit session's plates (#559): firm on its latest turn's parts, faint on the rest within the cut.
-function paintFootprint(view: NonNullable<ReturnType<typeof currentMap>>) {
+type View = NonNullable<ReturnType<typeof currentMap>>;
+
+// The spotlit session of the map shown: the hovered row's, else the open one's; none while a brief plays or a past commit shows.
+function spotOf(view: View, sessions: Session[]): Session | null {
   if (hoveredRow && !hoveredRow.isConnected) [hovered, hoveredRow] = [null, null];
-  const sessions = shownSessions(view.project);
   const id = spotlit({ hovered, open: opened, brief: deps.briefOpen(), past: view.scrub !== null, shown: sessions.map((session) => session.id) });
-  const session = sessions.find((one) => one.id === id);
-  const { firm, faint } = session ? footprint(session, placed, Date.now()) : { firm: [], faint: [] };
+  return sessions.find((one) => one.id === id) ?? null;
+}
+
+// The parts the spotlit session's latest turn touched, which the left panel keeps clear of itself when it opens (#385).
+export function spotlitParts(): string[] {
+  const view = currentMap();
+  if (!view) return [];
+  const spot = spotOf(view, shownSessions(view.project));
+  return spot ? latestParts(spot, placed, Date.now()) : [];
+}
+
+const logMapAction = () => {
+  const view = currentMap();
+  if (view) logStop("map-action", view.project);
+};
+
+// A session's state as its row in a list says it, an unseen one's included.
+const stateWord = (session: Session) => `${stateLabels[session.state]}${session.unseen && session.state !== "needs_you" && session.state !== "running" ? ", not seen" : ""}`;
+
+// The Needs-you pill, in the session list's colours.
+const needsYouPill = () => {
+  const pill = text("span", "Needs you", "glyph");
+  pill.dataset.glyph = "pill";
+  return pill;
+};
+
+// A session's row in a badge's list or the not placed list: its agent's logo, its full name, its state and its line; hovering it spotlights
+// the session, pressing it opens its story. A badge's list follows it with the session's Workers on the part, each opening its log.
+function sessionRows(session: Session, workers: Subagent[], close: () => void): HTMLElement[] {
+  const line = deps.line(session);
+  const row = pressable(text("button", "", "session-pick"), null, () => {
+    logMapAction();
+    close();
+    deps.select(session.id, null);
+  });
+  const state = text("span", stateWord(session), `session-pick-state${session.state === "needs_you" ? " needs-you" : ""}`);
+  row.append(logo(logoKey(session)), text("span", deps.name(session), "session-pick-name"), state, ...(line ? [text("span", line, "session-pick-line")] : []));
+  row.title = [deps.name(session), stateWord(session), ...(line ? [line] : []), "Open its story"].join("\n");
+  row.dataset.session = session.id;
+  row.addEventListener("pointerenter", () => hoverAgents(session.id, row));
+  row.addEventListener("pointerleave", () => hoverAgents(null));
+  return [row, ...workers.map((worker) => {
+    const asks = session.asker?.agent === worker.id || session.asker?.agent === worker.name;
+    const button = pressable(text("button", "", "session-pick worker"), null, () => {
+      logMapAction();
+      close();
+      deps.select(session.id, worker.id);
+    });
+    button.append(text("span", worker.name, "session-pick-name"), ...(asks ? [text("span", "Needs you", "session-pick-state needs-you")] : []));
+    button.title = `${worker.name}${asks ? " needs you" : ""}\nRead this worker's log`;
+    return button;
+  })];
+}
+
+// Fills `box` with rows built by `build`, only when what they show (`key`) changed: a row rebuilt under the pointer would end its own hover.
+function fillRows(box: HTMLElement, key: string, build: () => HTMLElement[]) {
+  if (box.dataset.rows === key) return;
+  box.dataset.rows = key;
+  box.replaceChildren(...build());
+}
+const rowsKey = (rows: { session: Session; workers: Subagent[] }[]) =>
+  JSON.stringify(rows.map(({ session, workers }) => [session.id, session.state, session.unseen, deps.name(session), deps.line(session), session.asker?.agent ?? null, workers.map((worker) => worker.id)]));
+
+// The badge's list (#562): one element, kept outside the transformed map world, a native popover in the top layer. It is placed by its
+// badge's on-screen box when it opens and closed by any camera move, so it never floats away from its badge.
+let listPart: string | null = null;
+let listProject: string | null = null;
+let listWasOpen = false;
+const badgeList = () => document.getElementById("map-badge-list")!;
+const listOpen = () => listPart !== null && badgeList().matches(":popover-open");
+const badgeOn = (part: string) => currentMap()?.slots.canvas.querySelector<HTMLElement>(`.plate[data-id="${CSS.escape(part)}"] .session-badge`) ?? null;
+
+export function closeBadgeList() {
+  if (badgeList().matches(":popover-open")) badgeList().hidePopover();
+}
+
+// The list closed, by a press outside, Esc or any of the cases above: its badge says so, and a focus inside it goes back to the badge.
+function listClosed() {
+  const part = listPart;
+  listPart = null;
+  listProject = null;
+  if (part === null) return;
+  const badge = badgeOn(part);
+  badge?.setAttribute("aria-expanded", "false");
+  if (badge && (document.activeElement === document.body || badgeList().contains(document.activeElement))) badge.focus({ preventScroll: true });
+}
+
+function openList(part: string, badge: HTMLElement, rows: Badge["rows"], byKeyboard: boolean) {
+  const list = badgeList();
+  closeBadgeList();
+  listPart = part;
+  listProject = currentMap()?.project ?? null;
+  list.dataset.rows = "";
+  fillRows(list, rowsKey(rows), () => rows.flatMap((row) => sessionRows(row.session, row.workers, closeBadgeList)));
+  list.showPopover({ source: badge });
+  badge.setAttribute("aria-expanded", "true");
+  // Below the badge, its end edge at the badge's end; over it when there is no room below; always inside the window.
+  const box = badge.getBoundingClientRect();
+  const [w, h, gap] = [list.offsetWidth, list.offsetHeight, 8];
+  const below = box.bottom + gap + h <= window.innerHeight - gap;
+  list.style.left = `${Math.max(gap, Math.min(box.right - w, window.innerWidth - w - gap))}px`;
+  list.style.top = `${Math.max(gap, below ? box.bottom + gap : box.top - gap - h)}px`;
+  if (byKeyboard) list.querySelector<HTMLElement>("button")?.focus();
+}
+
+// A part's badge: the count of its sessions, accented when one needs you, dimmed while another session is spotlit. Its press opens its list
+// (a badge of one too, never the story directly) and stops there, so the plate's sheet does not open; hovering it spotlights nothing.
+function badgeButton(part: string, badge: Badge, dim: boolean): HTMLElement {
+  const count = badge.rows.length;
+  const asking = badge.rows.filter((row) => row.session.state === "needs_you").length;
+  const button = pressable(text("button", String(count), `session-badge${badge.accent ? " needs-you" : ""}${dim ? " dim" : ""}`), null, (event) => {
+    const close = listWasOpen || (listOpen() && listPart === part);
+    listWasOpen = false;
+    logMapAction();
+    if (close) return closeBadgeList();
+    openList(part, button, badge.rows, event.detail === 0);
+  });
+  button.addEventListener("pointerdown", () => (listWasOpen = listOpen() && listPart === part));
+  button.addEventListener("click", (event) => event.stopPropagation());
+  button.dataset.part = part;
+  button.setAttribute("aria-label", `${count} ${count === 1 ? "session" : "sessions"} on this part${asking ? `, ${asking} ${asking === 1 ? "needs" : "need"} you` : ""}`);
+  button.setAttribute("aria-expanded", String(listOpen() && listPart === part));
+  button.title = [...badge.rows.map((row) => `${deps.name(row.session)} · ${stateWord(row.session)}`), "Show these sessions"].join("\n");
+  return button;
+}
+
+// The spotlit session's chip on a part of its latest turn: its logo, full name and Needs-you pill, and on its home part its line.
+function spotChip(session: Session, home: boolean): HTMLElement {
+  const line = home ? deps.line(session) : null;
+  const chip = text("span", "", `spot-chip${session.state === "needs_you" ? " needs-you" : ""}`);
+  chip.append(logo(logoKey(session)), text("span", deps.name(session), "spot-chip-name"), ...(session.state === "needs_you" ? [needsYouPill()] : []), ...(line ? [text("span", line, "spot-chip-line")] : []));
+  chip.title = [deps.name(session), stateWord(session), ...(line ? [line] : [])].join("\n");
+  return chip;
+}
+
+// The not placed list: a closed <details> whose summary is the line, made at the first paint and kept.
+let kept: { details: HTMLDetailsElement; summary: HTMLElement; rows: HTMLElement } | undefined;
+const notPlacedList = () => {
+  if (kept) return kept;
+  const details = document.createElement("details");
+  const summary = text("summary", "", "side-title");
+  summary.title = "The sessions whose latest turn touched no part: click to show or hide them";
+  const rows = text("div", "", "not-placed-rows");
+  details.append(summary, rows);
+  return (kept = { details, summary, rows });
+};
+
+// Corner brackets around the spotlit session's plates (#559): firm on its latest turn's parts, faint on the rest within the cut.
+function paintFootprint(view: View, spot: Session | null) {
+  const { firm, faint } = spot ? footprint(spot, placed, Date.now()) : { firm: [], faint: [] };
   for (const plate of view.slots.canvas.querySelectorAll<HTMLElement>(".plate[data-id]")) {
     plate.classList.toggle("foot-firm", firm.includes(plate.dataset.id!));
     plate.classList.toggle("foot-faint", faint.includes(plate.dataset.id!));
@@ -199,30 +259,44 @@ export function revealTurn(turn: LitTurn) {
   if (parts.length) revealParts(parts);
 }
 
-// Draws the footprint again: a brief opened or closed, or the update that painted is done.
+// Draws the badges, the spotlight and the footprint again: a brief opened or closed, or the update that painted is done.
 export function repaintFootprint() {
-  const view = currentMap();
-  if (view) paintFootprint(view);
+  paint();
 }
 
-// Puts the chips on the plates and the not placed list in its slot, from what the last refresh found, and the spotlit session's footprint.
+// Puts the badges or the spotlit session's chips on the plates, the not placed list in its slot and the footprint, from what the last refresh
+// found; keeps the open badge list while its part still has a badge, and the keyboard on a part's badge.
 function paint() {
   const view = currentMap();
   if (!view) return;
-  const live = hidden ? [] : liveAgents(deps.sessions(), (cwd) => deps.projectOf(cwd) === view.project);
-  const { byPart, notPlaced } = arrange(live, agentParts(live, placed));
-  const lit = litAgents(live, hovered, opened);
-  for (const plate of view.slots.canvas.querySelectorAll<HTMLElement>(".plate[data-id]")) {
-    plate.querySelector(".plate-chips")?.replaceChildren(...(byPart[plate.dataset.id!] ?? []).map((agent) => chip(agent, deps.select, lit)));
+  const sessions = shownSessions(view.project);
+  const now = Date.now();
+  const { byPart, notPlaced } = sessionBadges(sidebarOrder(sessions), placed, now, (cwd) => deps.projectOf(cwd) === view.project);
+  const spot = spotOf(view, sessions);
+  const plates = [...view.slots.canvas.querySelectorAll<HTMLElement>(".plate[data-id]")];
+  // The plates are drawn in the map's reading order.
+  const shown = isolate(byPart, spot, placed, now, plates.map((plate) => plate.dataset.id!));
+  const focused = document.activeElement?.matches(".session-badge") ? (document.activeElement as HTMLElement).dataset.part : undefined;
+  for (const plate of plates) {
+    const id = plate.dataset.id!;
+    const slot = plate.querySelector(".plate-chips");
+    if (spot && shown.chips.includes(id)) slot?.replaceChildren(spotChip(spot, id === shown.home));
+    else slot?.replaceChildren(...(byPart[id] ? [badgeButton(id, byPart[id], shown.dimmed.includes(id))] : []));
   }
-  // One line that a click opens (#472), so an agent joining or leaving changes its count and not its height. The same element is kept
-  // from paint to paint, so an opened list stays open, and its line keeps the focus, while agents come and go.
+  if (focused) badgeOn(focused)?.focus({ preventScroll: true });
+  if (listPart !== null) {
+    const rows = byPart[listPart]?.rows;
+    if (!rows || listProject !== view.project || deps.briefOpen()) closeBadgeList();
+    else fillRows(badgeList(), rowsKey(rows), () => rows.flatMap((row) => sessionRows(row.session, row.workers, closeBadgeList)));
+  }
+  // One line that a click opens (#472), so a session joining or leaving changes its count and not its height. The same element is kept
+  // from paint to paint, so an opened list stays open, and its line keeps the focus, while sessions come and go.
   const slot = view.slots.notPlaced;
   if (notPlaced.length) {
     const list = notPlacedList();
     const line = notPlacedLine(notPlaced);
     list.summary.replaceChildren(text("span", line.count), ...(line.needsYou ? [text("span", ` · ${line.needsYou}`, "not-placed-asking")] : []));
-    list.chips.replaceChildren(...notPlaced.map((agent) => chip(agent, deps.select, lit)));
+    fillRows(list.rows, rowsKey(notPlaced.map((session) => ({ session, workers: [] }))), () => notPlaced.flatMap((session) => sessionRows(session, [], () => {})));
     // Back in its slot after it emptied or the map was cleared, the list comes back closed, so it never drops the sheet without a click.
     if (list.details.parentElement !== slot) {
       list.details.open = false;
@@ -230,21 +304,19 @@ function paint() {
     }
   } else slot.replaceChildren();
   syncSide(view.slots);
-  paintFootprint(view);
+  paintFootprint(view, spot);
   // The row hovered may leave the page in the same update that painted (the list and History are drawn after the sessions are read):
   // looked at again once that update is done.
-  if (hoveredRow) queueMicrotask(repaintFootprint);
+  if (hoveredRow) queueMicrotask(() => hoveredRow && !hoveredRow.isConnected && paint());
 }
 
-// Reads which parts the shown project's paths touch (when they changed) and draws the chips and the footprint. Called when the sessions change and when the map draws.
+// Reads which parts the shown project's paths touch (when they changed) and draws the badges and the footprint. Called when the sessions change and when the map draws.
 export const refreshAgents = () => read().catch(failure("map_place"));
 async function read() {
   const view = currentMap();
   if (!view) return;
-  const live = hidden ? [] : liveAgents(deps.sessions(), (cwd) => deps.projectOf(cwd) === view.project);
-  // One group per path (#559): every file of the shown project's turns within the cut, and the chips' own paths (a Needs you session's
-  // last edit among them), so the chips land as they did when each was asked by agent.
-  const groups = placeGroups(shownSessions(view.project), Date.now(), live.flatMap((agent) => agent.paths));
+  // One group per path (#559): every file of the shown project's turns within the cut, and each Running session's in-flight edit.
+  const groups = placeGroups(shownSessions(view.project), Date.now());
   const key = JSON.stringify([view.project, view.state.commit, Object.keys(groups).sort()]);
   if (key !== asked) {
     const found = await latest(invoke("map_place", { project: view.project, groups }));
@@ -255,8 +327,14 @@ async function read() {
   paint();
 }
 
-// Wires the drawing: a map that draws gets its chips, and `list.ts` calls `refreshAgents` as the sessions change.
+// Wires the drawing: a map that draws gets its badges, and `list.ts` calls `refreshAgents` as the sessions change. The badge list closes
+// on any pan, zoom or drag of the map, and is Esc's layer of its own before the sheet.
 export function startMapAgents(given: AgentDeps) {
   deps = given;
   onDraw(() => void refreshAgents());
+  onCamera(closeBadgeList);
+  badgeList().addEventListener("toggle", (event) => {
+    if ((event as ToggleEvent).newState === "closed") listClosed();
+  });
+  registerLayer("badges", { open: listOpen, close: closeBadgeList });
 }

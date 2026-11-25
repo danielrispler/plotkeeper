@@ -24,7 +24,7 @@ import "./micro-world.js";
 import { openPreFlight } from "./map-pre-flight.js";
 import { startMapAgents } from "./map-agents.js";
 import { briefOpen } from "./map-brief.js";
-import { drawSidebar, listSpace, showSessions, staleDots } from "./list.js";
+import { drawSidebar, listSpace, secondLine, sessionName, showSessions, staleDots } from "./list.js";
 import { deselect, pressSession, select, show } from "./selection.js";
 import { diffIn, historyIn, logIn, showHistory, startPanes } from "./panes.js";
 import { closePanel, panelShown, showPanel, startPanel } from "./panel.js";
@@ -33,7 +33,7 @@ import { projectOfCwd, selectedProject, sidebarOrder } from "./projects.js";
 import { narrowBelow, selectedView } from "./map-model.js";
 import { reload, type SettingsFiles } from "./settings.js";
 import { studio } from "./state.js";
-import { drawFeed, showTurn, showView, turnHeadline } from "./story.js";
+import { drawFeed, lastHeadline, showTurn, showView, turnHeadline } from "./story.js";
 import { startRailBriefs } from "./rail-brief.js";
 import { barKeyDown } from "./story-bar.js";
 import { startWriters } from "./writers.js";
@@ -232,7 +232,10 @@ startPanes();
 startRailBriefs(drawFeed);
 startMap({ selectedProject, removeProject, shown: drawSidebar });
 element("pre-flight-button").addEventListener("click", () => openPreFlight());
-startMapAgents({ sessions: () => studio.listed, projectOf: projectOfCwd, select: (id, agent) => void pressSession(id, agent), briefOpen });
+startMapAgents({
+  sessions: () => studio.listed, projectOf: projectOfCwd, select: (id, agent) => void pressSession(id, agent), briefOpen,
+  name: sessionName, line: (session) => secondLine(session, lastHeadline),
+});
 // The left panel over the map (#385): History, a turn's diff and a worker's log; closing a story or a log selects none and leaves the bare map.
 startPanel({ history: historyIn, diff: diffIn, log: logIn, deselect: () => void deselect() });
 // "This session here" on the part sheet reads the story (#561).

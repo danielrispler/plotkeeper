@@ -65,4 +65,6 @@
   /* The footprint (#549, #559): corner brackets just outside a plate, in the neutral text tone (no hue, no warm, so they read apart from
      fog's cool mist and the warm ring); firm for the spotlit session's latest turn, faint for its earlier turns of the last 7 days. */
   --foot-firm: #e7e5dfb0; --foot-faint: #e7e5df40; --foot-arm: 14px; --foot-gap: 7px;
+  /* Session badges (#562): a count at a plate's foot, dimmed to about a third while another session is spotlit; its list's width. */
+  --badge: 20px; --badge-dim: .33; --badge-list: 320px;
 }

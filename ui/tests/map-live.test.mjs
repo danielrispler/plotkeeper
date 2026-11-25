@@ -2,7 +2,7 @@
 // the spotlit session, run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { footprint, footprintNote, marked, placeGroups, sessionHere, spotlit, turnLight, oldTurn, OLD_TURN } from "../../dist/map-live.js";
+import { footprint, footprintNote, homePart, isolate, marked, notPlacedLine, placeGroups, sessionBadges, sessionHere, spotlit, turnLight, oldTurn, OLD_TURN } from "../../dist/map-live.js";
 
 const day = 24 * 60 * 60 * 1000;
 const now = 100 * day;
@@ -133,4 +133,110 @@ test("a turn past the cut says its files aren't shown, only for an agent that re
   assert.equal(oldTurn(turn(["core/x.rs"], 6 * day), true, now), false);
   // An agent without turn trees never records files: no line blames the cut.
   assert.equal(oldTurn(turn(null, 8 * day), false, now), false);
+});
+
+// Session badges (#562): one badge per part, counting the marked sessions whose latest turn touches it.
+const here = () => true;
+const counts = (byPart) => Object.fromEntries(Object.entries(byPart).map(([part, badge]) => [part, badge.rows.map((row) => row.session.id)]));
+
+test("a badge counts a session once with its Workers, and a Worker-only part counts the Worker's session", () => {
+  const s = session("a", "running", { agents: [worker("w1"), worker("w2")], turns: [
+    turn(["hook/h.rs"], 2 * day),
+    turn(["core/x.rs", ["core/y.rs", "w1"], ["ui/w.ts", "w2"]]),
+  ] });
+  const { byPart } = sessionBadges([s], placed, now, here);
+  assert.deepEqual(counts(byPart), { core: ["a"], window: ["a"] });
+  assert.deepEqual(byPart.core.rows[0].workers.map((w) => w.id), ["w1"]);
+  assert.deepEqual(byPart.window.rows[0].workers.map((w) => w.id), ["w2"]);
+});
+
+test("Running, Needs you and Unseen sessions are counted; a seen Your turn or Idle, a shell, an Ended and another project's are not", () => {
+  const on = () => turn(["core/x.rs"]);
+  const sessions = [
+    session("run", "running", { turns: [on()] }),
+    session("ask", "needs_you", { turns: [on()] }),
+    session("new", "your_turn", { unseen: true, turns: [on()] }),
+    session("rest", "idle", { unseen: true, turns: [on()] }),
+    session("seen", "your_turn", { turns: [on()] }),
+    session("calm", "idle", { turns: [on()] }),
+    session("shell", "running", { shell: true, turns: [on()] }),
+    session("done", "ended", { unseen: true, turns: [on()] }),
+    session("away", "running", { cwd: "/elsewhere", turns: [on()] }),
+  ];
+  const { byPart } = sessionBadges(sessions, placed, now, (cwd) => cwd === "/w/p");
+  // Needs you first, then the order given (the session list's).
+  assert.deepEqual(counts(byPart), { core: ["ask", "run", "new", "rest"] });
+});
+
+test("a badge carries the accent when any of its sessions needs you, a Worker's ask included, on a Worker-only part too", () => {
+  const asking = session("a", "needs_you", { agents: [worker("w1")], asker: { agent: "w1", since: 1 }, turns: [turn([["ui/w.ts", "w1"]])] });
+  const calm = session("b", "running", { turns: [turn(["core/x.rs", "ui/w.ts"])] });
+  const { byPart } = sessionBadges([calm, asking], placed, now, here);
+  assert.equal(byPart.window.accent, true);
+  assert.equal(byPart.core.accent, false);
+  assert.deepEqual(counts(byPart), { core: ["b"], window: ["a", "b"] });
+});
+
+test("the not placed rows are the marked sessions, Unseen included, whose latest turn touches no part, one row each", () => {
+  const sessions = [
+    session("none", "running", { turns: [turn([])] }),
+    session("stray", "needs_you", { agents: [worker("w1")], turns: [turn(["stray.txt", ["docs/a.md", "w1"]])] }),
+    session("unseen", "idle", { unseen: true, turns: [turn(["docs/a.md"])] }),
+    session("codex", "running", { status_only: true, capabilities: { turn_trees: false } }),
+    // An earlier turn's part does not place the session.
+    session("before", "your_turn", { unseen: true, turns: [turn(["core/x.rs"], day), turn([])] }),
+    session("placed", "running", { turns: [turn(["core/x.rs"])] }),
+    session("seen", "idle", { turns: [turn([])] }),
+  ];
+  const { byPart, notPlaced } = sessionBadges(sessions, placed, now, here);
+  assert.deepEqual(notPlaced.map((s) => s.id), ["stray", "none", "unseen", "codex", "before"]);
+  assert.deepEqual(counts(byPart), { core: ["placed"] });
+});
+
+// The home part (#562): where the spotlit session's line sits.
+test("the home part is a Running session's in-flight edit's part, else the part with most changed files, a tie to reading order", () => {
+  const order = ["window", "server", "core", "hook"];
+  const turns = [turn(["core/x.rs", "core/y.rs", "server/s.rs"])];
+  // Running with an edit in flight in a part: that part, though core holds more files.
+  assert.equal(homePart(session("a", "running", { turns, last_step: { tool: "Edit", detail: "/w/p/hook/h.rs" } }), placed, now, order), "hook");
+  // An in-flight file no part owns falls through to most files.
+  assert.equal(homePart(session("a", "running", { turns, last_step: { tool: "Write", detail: "/w/p/stray.txt" } }), placed, now, order), "core");
+  // A stale last edit of a session that is not Running falls through too.
+  assert.equal(homePart(session("a", "needs_you", { turns, last_step: { tool: "Edit", detail: "/w/p/hook/h.rs" } }), placed, now, order), "core");
+  // A tie goes to the map's reading order; a Worker's files count.
+  const tie = [turn(["core/x.rs", ["ui/w.ts", "w1"], "server/s.rs"])];
+  assert.equal(homePart(session("a", "running", { turns: tie }), placed, now, order), "window");
+  assert.equal(homePart(session("a", "running", { turns: tie }), placed, now, ["server", "core", "window"]), "server");
+  // No part: no home.
+  assert.equal(homePart(session("a", "running", { turns: [turn(["stray.txt"])] }), placed, now, order), null);
+});
+
+test("a spotlit session's chip replaces the badge on its latest turn's parts; the other badges dim, a Needs-you one stays full", () => {
+  const spot = session("a", "idle", { turns: [turn(["server/s.rs"], 2 * day), turn(["core/x.rs", "core/y.rs", "ui/w.ts"])] });
+  const others = [
+    session("b", "running", { turns: [turn(["core/x.rs", "hook/h.rs"])] }),
+    session("c", "needs_you", { turns: [turn(["server/s.rs"])] }),
+  ];
+  const { byPart } = sessionBadges(others, placed, now, here);
+  const order = ["window", "server", "core", "hook"];
+  const shown = isolate(byPart, spot, placed, now, order);
+  assert.deepEqual(shown.chips.sort(), ["core", "window"]);
+  assert.equal(shown.home, "core");
+  // Core's badge gives way to the chip; hook dims; server needs you and stays full.
+  assert.deepEqual(shown.dimmed, ["hook"]);
+  // With no spotlit session nothing is isolated.
+  assert.deepEqual(isolate(byPart, null, placed, now, order), { chips: [], home: null, dimmed: [] });
+});
+
+test("a spotlit session with no part in its latest turn has no chip and no home, and still dims the badges", () => {
+  const spot = session("a", "ended", { turns: [turn(["core/x.rs"], 3 * day), turn([])] });
+  const { byPart } = sessionBadges([session("b", "running", { turns: [turn(["hook/h.rs"])] })], placed, now, here);
+  assert.deepEqual(isolate(byPart, spot, placed, now, []), { chips: [], home: null, dimmed: ["hook"] });
+});
+
+test("the not placed line counts the sessions no part holds, and says how many need you (#472)", () => {
+  const of = (...states) => states.map((state) => ({ state }));
+  assert.deepEqual(notPlacedLine(of("running")), { count: "1 not placed", needsYou: null });
+  assert.deepEqual(notPlacedLine(of("running", "needs_you", "needs_you")), { count: "3 not placed", needsYou: "2 need you" });
+  assert.deepEqual(notPlacedLine(of("needs_you")), { count: "1 not placed", needsYou: "1 needs you" });
 });

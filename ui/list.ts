@@ -292,7 +292,7 @@ export function row(session: Session, children: Children, token: string | null =
     session.landed,
     !session.pid,
   );
-  // Hovering the row lights its session's chips on the map (#382) and shows its footprint (#559); a session that touched no part in the
+  // Hovering the row spotlights its session on the map (#382, #562) and shows its footprint (#559); a session that touched no part in the
   // last 7 days says so in the row's hover text.
   button.addEventListener("pointerenter", () => {
     button.title = withNote(button.title, rowNote(session.id));
