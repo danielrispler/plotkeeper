@@ -25,6 +25,7 @@ use studio_workbench::run::{RunError, git, run_until};
 use serde::{Deserialize, Serialize};
 
 pub use edges::{Edge, FilePair, Site};
+pub use extract::Unsure;
 pub use imports::{Across, Count, Hub, Imports, Inside, Share, imports};
 pub use laws::{LawReport, LawTest, Tag, attribute_brackets, law_tests, tag_id, test_name_after};
 pub use parts::{convert, convert_value, part_text};
@@ -47,10 +48,45 @@ pub struct Report {
     pub laws: Vec<LawReport>,
     /// One line per problem; the check fails when there is any.
     pub problems: Vec<String>,
+    /// The Unsure files the parts own, each with its owned candidates; never a failure. Left out of the JSON when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unsure: Vec<Unsure>,
     /// What the check covered, for the line a pass prints.
     pub counts: Counts,
     /// The registered extractors the map does not name that could read the repository, which `check` notes.
     pub suggested: Vec<String>,
+}
+
+impl Report {
+    /// One note per Unsure finding whose candidates another part owns, naming the name in doubt and the parts its part's
+    /// links to pass as unproven (spec #569, "Unsure").
+    pub fn unsure_notes(&self) -> Vec<String> {
+        let owner: std::collections::HashMap<&str, &str> = self
+            .parts
+            .iter()
+            .flat_map(|part| part.files.iter().map(|f| (f.as_str(), part.id.as_str())))
+            .collect();
+        self.unsure
+            .iter()
+            .filter_map(|u| {
+                let own = owner.get(u.file.as_str());
+                let parts: BTreeSet<&str> = u
+                    .candidates
+                    .iter()
+                    .filter_map(|c| owner.get(c.as_str()).copied())
+                    .filter(|part| Some(part) != own)
+                    .collect();
+                (!parts.is_empty()).then(|| {
+                    format!(
+                        "{} is unsure of {}; its links to {} pass as unproven",
+                        u.file,
+                        u.name,
+                        parts.into_iter().collect::<Vec<_>>().join(", ")
+                    )
+                })
+            })
+            .collect()
+    }
 }
 
 /// What a check covered: parts, the tracked files they own and the ones ignored, links, and laws
@@ -69,7 +105,7 @@ pub struct Counts {
     pub laws: LawCounts,
 }
 
-/// The links by kind, and the import links proven by a computed edge or unproven, with an end no extractor reads.
+/// The links by kind, and the import links proven by a computed edge or passed unproven.
 #[derive(Debug, Default, Serialize)]
 pub struct LinkCounts {
     /// Every link.
@@ -84,7 +120,8 @@ pub struct LinkCounts {
     pub file: usize,
     /// The import links a computed edge runs the way of.
     pub proven: usize,
-    /// The import links with an end that no extractor reads.
+    /// The import links passed unproven: with an end that no extractor reads, while an extractor is unknown or cannot run,
+    /// or from a part that owns an Unsure file to a part that owns one of its candidates.
     pub unproven: usize,
 }
 
@@ -347,6 +384,7 @@ fn check_with(
             );
             report.problems.extend(found.problems);
             report.edges = found.edges;
+            report.unsure = found.unsure;
             report.suggested = extract::registry::EXTRACTORS
                 .iter()
                 .filter(|e| !names.iter().any(|n| n == e.name()) && e.detect(&repo))

@@ -37,7 +37,11 @@ impl Extractor for TypescriptImports {
 
     fn extract(&self, repo: &Repo) -> Output {
         let (pairs, problems) = typescript_imports(repo);
-        Output { problems, pairs }
+        Output {
+            problems,
+            pairs,
+            ..Output::default()
+        }
     }
 
     #[cfg(test)]

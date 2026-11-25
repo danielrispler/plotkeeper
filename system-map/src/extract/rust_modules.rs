@@ -32,6 +32,7 @@ impl Extractor for RustModules {
         Output {
             problems,
             pairs: rust_modules(repo, &crates),
+            ..Output::default()
         }
     }
 

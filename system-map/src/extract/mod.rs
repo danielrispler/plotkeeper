@@ -5,6 +5,7 @@
 mod cargo;
 #[cfg(test)]
 mod contract;
+mod names;
 pub(crate) mod registry;
 mod rust_modules;
 mod typescript;
@@ -14,6 +15,8 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     path::Path,
 };
+
+use serde::Serialize;
 
 use crate::PartFiles;
 
@@ -171,20 +174,39 @@ impl Pair {
     }
 }
 
-/// What an extractor found: the problems that say it could not run, or not fully, and its pairs, together when both
-/// apply.
+/// A tracked file an extractor reads but cannot resolve with certainty: an import in it could name more than one target
+/// (spec #569, "Unsure").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Unsure {
+    /// The importing file.
+    pub file: String,
+    /// The name in doubt, such as the import path `example.com/a`.
+    pub name: String,
+    /// Why it is in doubt, such as `declared twice`.
+    pub reason: String,
+    /// The tracked files the name could mean, sorted; never empty.
+    pub candidates: Vec<String>,
+}
+
+/// What an extractor found: the problems that say it could not run, or not fully, its pairs and its Unsure files,
+/// together when they apply.
 #[derive(Debug, Default)]
 pub(crate) struct Output {
     pub(crate) problems: Vec<String>,
     pub(crate) pairs: Vec<Pair>,
+    pub(crate) unsure: Vec<Unsure>,
 }
 
 /// Runs the extractors `names` names from `registry`, in that order, and holds their output to the contract: a pair
 /// whose ends are not both tracked, from a file to itself, or from a file the extractor reads and skips is dropped,
 /// and a pair two extractors (or one, twice) find is kept once, sorted, with the lines of every finding, and as a
-/// declaration only if every finding of it is one. A name the registry lacks is a problem.
+/// declaration only if every finding of it is one. An Unsure finding with no candidates is a problem, one in an untracked,
+/// ignored or skipped file is dropped, and findings of one file, name and reason are kept once, sorted, with the union of
+/// their candidates. A name the registry lacks is a problem.
 pub(crate) fn run(registry: &[&dyn Extractor], names: &[String], repo: &Repo) -> Output {
     let mut problems = Vec::new();
+    // Each Unsure finding's file, name and reason, with the candidates of every finding of them.
+    let mut unsure: BTreeMap<(String, String, String), BTreeSet<String>> = BTreeMap::new();
     // Each pair's ends, with the lines of its findings and whether every finding of it is a declaration.
     let mut pairs: BTreeMap<(String, String), (BTreeSet<u32>, bool)> = BTreeMap::new();
     for name in names {
@@ -201,18 +223,37 @@ pub(crate) fn run(registry: &[&dyn Extractor], names: &[String], repo: &Repo) ->
         };
         let found = extractor.extract(repo);
         problems.extend(found.problems);
-        // Whether each `from` file it reads is skipped, asked once per file, since `skips` may read the file.
+        // Whether each file it reads is skipped, asked once per file, since `skips` may read the file.
         let mut skipped: HashMap<String, bool> = HashMap::new();
+        let mut skips = |file: &str| {
+            extractor.reads(file)
+                && *skipped
+                    .entry(file.to_string())
+                    .or_insert_with(|| extractor.skips(repo, file))
+        };
+        let tracked = |f: &str| repo.files.contains(f);
+        for finding in found.unsure {
+            if finding.candidates.is_empty() {
+                problems.push(format!(
+                    "extractor {name:?} found {} unsure of {:?} with no candidates; an Unsure finding names at least one \
+                     candidate file",
+                    finding.file, finding.name
+                ));
+                continue;
+            }
+            if !tracked(&finding.file) || repo.is_ignored(&finding.file) || skips(&finding.file) {
+                continue;
+            }
+            unsure
+                .entry((finding.file, finding.name, finding.reason))
+                .or_default()
+                .extend(finding.candidates);
+        }
         for pair in found.pairs {
-            let tracked = |f: &str| repo.files.contains(f);
             if pair.from == pair.to || !tracked(&pair.from) || !tracked(&pair.to) {
                 continue;
             }
-            if extractor.reads(&pair.from)
-                && *skipped
-                    .entry(pair.from.clone())
-                    .or_insert_with(|| extractor.skips(repo, &pair.from))
-            {
+            if skips(&pair.from) {
                 continue;
             }
             pairs
@@ -233,6 +274,15 @@ pub(crate) fn run(registry: &[&dyn Extractor], names: &[String], repo: &Repo) ->
                 to,
                 lines,
                 declaration,
+            })
+            .collect(),
+        unsure: unsure
+            .into_iter()
+            .map(|((file, name, reason), candidates)| Unsure {
+                file,
+                name,
+                reason,
+                candidates: candidates.into_iter().collect(),
             })
             .collect(),
     }

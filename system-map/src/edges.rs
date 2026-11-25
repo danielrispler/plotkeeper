@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::{
     Kind, Link, PartFiles,
-    extract::{self, Extractor, Pair, Repo},
+    extract::{self, Extractor, Pair, Repo, Unsure},
 };
 
 /// A computed dependency of the part `from` on the part `to`, with the deduplicated file pairs that make it (spec #473,
@@ -51,12 +51,15 @@ pub(crate) struct LinkCheck {
     pub(crate) problems: Vec<String>,
     pub(crate) proven: usize,
     pub(crate) unproven: usize,
+    /// The Unsure files the parts own, each with only its owned candidates.
+    pub(crate) unsure: Vec<Unsure>,
 }
 
 /// Holds the map's import links to the edges the named extractors compute (spec #473, "The link check"). Between two read
 /// parts, an import link with no edge in its direction fails, and so does an edge with no import link in its direction,
 /// whatever run-time links join the pair. An import link with an unread end passes as unproven, and so does one no edge
-/// proves while an extractor is unknown or cannot run. Also the problems of those extractors.
+/// proves while an extractor is unknown or cannot run, and so does one no edge proves from a part that owns an Unsure file
+/// to a part that owns one of its candidates (spec #569, "Unsure"). Also the problems of those extractors.
 pub(crate) fn check_links(
     registry: &[&dyn Extractor],
     names: &[String],
@@ -69,6 +72,16 @@ pub(crate) fn check_links(
     // An extractor that could not run leaves pairs unread, so a missing edge proves nothing.
     let incomplete = !problems.is_empty();
     let edges = edges_between_parts(&found.pairs, parts);
+    let unsure = owned_unsure(found.unsure, parts);
+    let owner = &owners(parts);
+    // The part-to-part links an Unsure file leaves unproven: from its part to each part owning one of its candidates.
+    let relaxed: HashSet<(&str, &str)> = unsure
+        .iter()
+        .flat_map(|u| {
+            let from = owner[u.file.as_str()];
+            u.candidates.iter().map(move |c| (from, owner[c.as_str()]))
+        })
+        .collect();
     let read = extract::read_parts(registry, names, repo, parts);
     let part_ids: HashSet<&str> = parts.iter().map(|p| p.id.as_str()).collect();
     let imports: HashSet<(&str, &str)> = links
@@ -89,7 +102,11 @@ pub(crate) fn check_links(
         }
         if computed.contains(&(from, to)) && read.contains(from) && read.contains(to) {
             proven += 1;
-        } else if !read.contains(from) || !read.contains(to) || incomplete {
+        } else if !read.contains(from)
+            || !read.contains(to)
+            || incomplete
+            || relaxed.contains(&(from, to))
+        {
             unproven += 1;
         } else if computed.contains(&(to, from)) {
             problems.push(format!(
@@ -119,7 +136,35 @@ pub(crate) fn check_links(
         problems,
         proven,
         unproven,
+        unsure,
     }
+}
+
+/// `unsure` with the findings in files no part owns dropped, and each kept one's candidates no part owns: a finding
+/// left with no candidate relaxes nothing, so it is dropped too.
+pub(crate) fn owned_unsure(unsure: Vec<Unsure>, parts: &[PartFiles]) -> Vec<Unsure> {
+    let owner = owners(parts);
+    unsure
+        .into_iter()
+        .filter(|u| owner.contains_key(u.file.as_str()))
+        .map(|u| Unsure {
+            candidates: u
+                .candidates
+                .into_iter()
+                .filter(|c| owner.contains_key(c.as_str()))
+                .collect(),
+            ..u
+        })
+        .filter(|u| !u.candidates.is_empty())
+        .collect()
+}
+
+/// The part that owns each owned file.
+fn owners(parts: &[PartFiles]) -> HashMap<&str, &str> {
+    parts
+        .iter()
+        .flat_map(|part| part.files.iter().map(|f| (f.as_str(), part.id.as_str())))
+        .collect()
 }
 
 /// The problems of each link's own fields: a missing kind, a run-time link without a reason or with one past its cap, and
@@ -168,10 +213,7 @@ const REASON_CAP: usize = 140;
 /// Turns pairs of files into edges between the parts that own them, dropping pairs inside one
 /// part and pairs touching a file no part owns (ignored files too).
 fn edges_between_parts(pairs: &[Pair], parts: &[PartFiles]) -> Vec<Edge> {
-    let owner: HashMap<&str, &str> = parts
-        .iter()
-        .flat_map(|part| part.files.iter().map(|f| (f.as_str(), part.id.as_str())))
-        .collect();
+    let owner = owners(parts);
     let mut edges: BTreeMap<(&str, &str), Vec<FilePair>> = BTreeMap::new();
     for pair in pairs {
         let (Some(from), Some(to)) = (owner.get(pair.from.as_str()), owner.get(pair.to.as_str()))

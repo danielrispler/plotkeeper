@@ -34,6 +34,9 @@ pub struct Imports {
     pub both_ways: Vec<[String; 2]>,
     /// Extractors that are unknown or could not run; the counts leave out what they would find.
     pub problems: Vec<String>,
+    /// The Unsure files the parts own, each with its owned candidates. Left out of the JSON when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unsure: Vec<crate::Unsure>,
 }
 
 /// A number of import pairs, raw and weighted.
@@ -101,7 +104,10 @@ pub fn imports(root: &Path) -> Result<Imports, Vec<String>> {
     let names = map.extractors.as_deref().unwrap_or_default();
     let repo = crate::repo(root, &map, &files);
     let found = crate::extract::run(crate::extract::registry::EXTRACTORS, names, &repo);
-    Ok(count(&parts, &counted(&found.pairs), found.problems))
+    Ok(Imports {
+        unsure: crate::edges::owned_unsure(found.unsure, &parts),
+        ..count(&parts, &counted(&found.pairs), found.problems)
+    })
 }
 
 /// The pairs the report counts: a crate root's `mod` lines declare the module tree, so their pairs are left out.
@@ -208,6 +214,7 @@ fn count(
         between,
         both_ways,
         problems,
+        unsure: Vec::new(),
     }
 }
 
