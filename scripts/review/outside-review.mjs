@@ -1,6 +1,11 @@
 // The outside review (#279, #284): Gemini, through `agy`, reads a risky diff before its PR is opened.
 //
 //   node scripts/review/outside-review.mjs [--force] [--model <id>] [--out <folder>]
+//     [--subagents] [--variant <name> --trial <id>]
+//
+// The last three are for the review trial Daniel starts by hand (`outside-review-trial.mjs`, #502):
+// `--subagents` lets the reviewer split its reading among subagents, and a run with `--variant` and
+// `--trial` records both, and names its findings file after its variant.
 //
 // It reviews the commits of HEAD since the merge-base with `origin/main`, once: there is no second
 // round. Its first line is the verdict: `reviewed: <n> findings`,
@@ -34,9 +39,11 @@ export const options = (argv) => {
   for (let i = 0; i < argv.length; i++) {
     const name = argv[i].replace(/^--/, "");
     if (argv[i] === "--force") opts.force = true;
-    else if (["--model", "--out"].includes(argv[i]) && argv[i + 1]) opts[name] = argv[++i];
+    else if (argv[i] === "--subagents") opts.subagents = true;
+    else if (["--model", "--out", "--variant", "--trial"].includes(argv[i]) && argv[i + 1]) opts[name] = argv[++i];
     else throw new Usage(`unknown or incomplete option ${argv[i]}`);
   }
+  if (!opts.variant !== !opts.trial) throw new Usage("--variant and --trial go together");
   return opts;
 };
 
@@ -164,9 +171,13 @@ const SCHEMA = {
 
 // What the reviewer is asked. It names files by absolute path, the only form its read tool takes,
 // and holds no at-sign: a file mentioned that way may be read with no tool call, past the hook.
-export const brief = (folder) => `You are reviewing a code change for defects, before its pull request is opened.
+export const brief = (folder, { subagents = false } = {}) => `You are reviewing a code change for defects, before its pull request is opened.
 
-You can change nothing. Your only working tool is read_file, and it takes absolute paths only. Do not try to write a file or run a command: those calls are denied, and so is a read outside ${folder}.
+${
+  subagents
+    ? `You can change nothing. Your working tools are read_file, which takes absolute paths only, and invoke_subagent. You may split the reading among subagents: give each one part of the files to read and ask it to report what it finds. Tell each subagent that it too can only read, with absolute paths, inside ${folder}. Do not try to write a file or run a command: those calls are denied, for you and for your subagents, and so is a read outside ${folder}.`
+    : `You can change nothing. Your only working tool is read_file, and it takes absolute paths only. Do not try to write a file or run a command: those calls are denied, and so is a read outside ${folder}.`
+}
 
 - The change, as a unified diff: ${folder}/review/diff.patch
 - The changed files, one absolute path a line: ${folder}/review/changed.txt
@@ -229,6 +240,12 @@ export const quota = (stdout) => {
   }
 };
 
+/** The Gemini quota left now, asked of `agy` the way the review runs it; null when it cannot say. */
+export const quotaLeft = () => {
+  const env = agyCall(options([]), { env: process.env }).env;
+  return quota(spawnSync("agy", ["-p", "/usage", "--output-format", "json"], { env, encoding: "utf8", cwd: tmpdir(), timeout: 30_000 }).stdout);
+};
+
 const safe = (f, otherwise) => {
   try {
     return f();
@@ -262,6 +279,8 @@ const main = async (opts) => {
   const head = git("rev-parse", "HEAD");
   const base = git("merge-base", "HEAD", "origin/main");
   const about = { branch: git("rev-parse", "--abbrev-ref", "HEAD"), head, base, model: opts.model, round: 1 };
+  // A trial's three runs overlap, so each one's quota before and after counts the others' use too.
+  if (opts.trial) Object.assign(about, { variant: opts.variant, trial: opts.trial, quotaShared: true });
   // One line per run in the main checkout's local-evidence/, and a reviewed run's findings beside
   // it. Only where git ignores that folder, so no other repository gets an untracked file; a record
   // that cannot be written changes nothing else.
@@ -294,9 +313,6 @@ const main = async (opts) => {
   // Before any quota is spent: the findings must have somewhere to go.
   if (safe(() => mkdirSync(opts.out, { recursive: true }), null) === null) throw new Usage(`--out ${opts.out} cannot be made`);
 
-  const env = agyCall(opts, { env: process.env }).env;
-  const usage = { env, encoding: "utf8", cwd: tmpdir(), timeout: 30_000 };
-  const left = () => quota(spawnSync("agy", ["-p", "/usage", "--output-format", "json"], usage).stdout);
   const folder = realpathSync(mkdtempSync(join(tmpdir(), "outside-review-")));
   const repo = join(folder, "repo");
   const log = join(folder, "hook.log");
@@ -308,8 +324,13 @@ const main = async (opts) => {
     safe(() => git("worktree", "prune"));
   };
   // Killed mid-review (Ctrl-C, a stopped background task): end agy and leave no worktree behind.
+  // The handler stays on: a trial's run gets Ctrl-C twice, from the process group and from the trial,
+  // and a second signal with no handler would end it halfway through the cleanup.
+  let ending = false;
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
-    process.once(signal, () => {
+    process.on(signal, () => {
+      if (ending) return;
+      ending = true;
       child?.kill();
       cleanup();
       process.exit(1);
@@ -327,14 +348,14 @@ const main = async (opts) => {
     writeFileSync(join(folder, "review/tree.txt"), absolute(git("ls-tree", "-r", "--name-only", head)));
     writeFileSync(join(folder, "review/schema.json"), JSON.stringify(SCHEMA));
     const hook = join(import.meta.dirname, "deny-hook.mjs");
-    const command = [process.execPath, hook, folder, log].map((part) => `'${part}'`).join(" ");
+    const command = [process.execPath, hook, folder, log, ...(opts.subagents ? ["--subagents"] : [])].map((part) => `'${part}'`).join(" ");
     mkdirSync(join(folder, ".agents"));
     writeFileSync(
       join(folder, ".agents/hooks.json"),
       JSON.stringify({ readonly: { PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command, timeout: 10 }] }] } }),
     );
-    const quotaBefore = left();
-    const call = agyCall(opts, { schema: join(folder, "review/schema.json"), prompt: brief(folder), env: process.env });
+    const quotaBefore = quotaLeft();
+    const call = agyCall(opts, { schema: join(folder, "review/schema.json"), prompt: brief(folder, { subagents: opts.subagents }), env: process.env });
     const ran = await spawned(call.args, { cwd: folder, env: call.env }, (TIMEOUT_MINUTES + 2) * 60_000, (c) => (child = c));
     child = null;
     const logged = safe(() => readFileSync(log, "utf8"), "").split("\n");
@@ -343,10 +364,10 @@ const main = async (opts) => {
     const dirty = safe(() => git("-C", repo, "status", "--porcelain"), "");
     if (dirty) notes.push(`warning: the review changed its throwaway tree, so the deny hook let a write through:\n${dirty}`);
     if (safe(() => git("status", "--porcelain"), before) !== before) notes.push("warning: the reviewed checkout changed during the review");
-    const name = `outside-review-${head.slice(0, 9)}`;
+    const name = `outside-review-${head.slice(0, 9)}${opts.variant ? `-${opts.variant}` : ""}`;
     verdict = result.line;
     if (result.findings) {
-      const quotaAfter = left();
+      const quotaAfter = quotaLeft();
       const denied = decisions.filter((d) => d.decision === "deny").map(({ tool, path, command }) => ({ tool, path, command }));
       const { findings, tokens, seconds } = result;
       const report = { model: opts.model, base, head, why: decided.why, findings, tokens, seconds, denied, quotaBefore, quotaAfter, notes };
@@ -386,7 +407,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === import.meta.filename) {
     await main(options(process.argv.slice(2)));
   } catch (error) {
     if (error instanceof Usage) {
-      console.error(`${error.message}\nusage: outside-review [--force] [--model <id>] [--out <folder>]`);
+      console.error(`${error.message}\nusage: outside-review [--force] [--model <id>] [--out <folder>] [--subagents] [--variant <name> --trial <id>]`);
       process.exit(2);
     }
     // Whatever else stops the review, the PR goes ahead with the reason.
