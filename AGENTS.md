@@ -50,6 +50,10 @@ A change that adds, moves or removes files, changes what a part does or how part
 
 ## Agent skills
 
+### UI changes
+
+Every UI change (HTML, CSS or client-side JS, in `ui/` or elsewhere) uses two skills: run `$modern-web-guidance` before writing the code, and `$web-design-guidelines` on the result before handing it off.
+
 ### Learning
 
 Before planning, grilling or explanations, read `docs/agents/learning.md`. During session openings, planning, grilling, decision questions and explanations, it overrides any terse or brevity output mode. Follow its state/goal brief and explanation guidance during grilling, Wayfinder, and ordinary planning. After a meaningful ticket that merges a diff, suggest `$dsh-explain-diff` in the final message. Explanations are optional and never block ticket resolution or progress; run the skill only when explicitly invoked.
