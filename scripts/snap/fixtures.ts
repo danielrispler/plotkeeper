@@ -668,6 +668,26 @@ const mapBriefPartialFacts = (open: boolean): Fixture =>
       await wait(300);` : `if (chip.open) log("snap:fail the chip opens closed");`}`, true);
 const mapBriefNoFacts = (): Fixture =>
   mapBrief(briefOf(storySteps()), 0, `if (document.querySelector("#map-brief .brief-facts")) log("snap:fail a chip shows with nothing missing");`, true);
+// The stale-base line (#494): main moved since the PR's merge base on what the brief relies on. It sits under the panel's head, above
+// the step, and names each kind once; past three names the rest are counted. With no `stale_base` there is no line.
+const mapBriefStaleBase = (): Fixture =>
+  mapBrief(
+    {
+      ...briefOf(storySteps()),
+      stale_base: { laws: ["wire-types-agree"], links: ["server-window"], flows: [], paths: [], files: ["Cargo.toml", "server/src/map.rs", "server/src/pr_briefs.rs", "ui/types.ts"] },
+    },
+    0,
+    `
+      const line = document.querySelector("#map-brief .brief-stale");
+      if (!line) return log("snap:fail no stale-base line");
+      const want = "Main moved since this PR's base: law wire-types-agree · link server-window · files Cargo.toml, server/src/map.rs, server/src/pr_briefs.rs +1 more";
+      if (line.textContent !== want) log("snap:fail the stale-base line reads " + JSON.stringify(line.textContent));
+      if (line.compareDocumentPosition(document.querySelector("#map-brief .brief-cols")) !== Node.DOCUMENT_POSITION_FOLLOWING) log("snap:fail the line is not above the step");
+      if ([...line.querySelectorAll(".brief-stale-names")].some((names) => names.getAttribute("translate") !== "no")) log("snap:fail a name would be translated");`,
+    true,
+  );
+const mapBriefNoStaleBase = (): Fixture =>
+  mapBrief(briefOf(storySteps()), 0, `if (document.querySelector("#map-brief .brief-stale")) log("snap:fail a stale-base line shows with nothing moved");`, true);
 // The not-confirmed popover (#491): the mark on a step, or on a flagged decision in the ratify step, opens a popover under it listing its
 // reasons without the mark's own words. \`esc\` checks that Esc closes only the popover, and that a step on closes it.
 const whyFlags = ["claim check: no fact says a turn is written once", "claim check: the order of events is not in the diff", "not confirmed from the facts"];
@@ -2931,6 +2951,8 @@ ${writerStatusAfter("Keychain refused")}
   mapBriefPartialFacts: () => mapBriefPartialFacts(false),
   mapBriefPartialFactsOpen: () => mapBriefPartialFacts(true),
   mapBriefNoFacts,
+  mapBriefStaleBase,
+  mapBriefNoStaleBase,
   mapBriefWhy: () => mapBriefWhy(false),
   mapBriefWhyEsc: () => mapBriefWhy(true),
   mapBriefWhyDecision,

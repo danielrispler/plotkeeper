@@ -562,7 +562,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
         history::{At, Commit, Entry as HistoryEntry, File},
         micro_worlds::Explored,
         part_catch_ups::Opened as CatchUpOpened,
-        pr_briefs::{BriefView, Opened as BriefOpened, Waiting},
+        pr_briefs::{BriefView, Opened as BriefOpened, StaleBase, Waiting},
         pre_flight::OpenIssue,
         projects::Project,
         ratify::{Detail, HeldDetail, LinkDetail, PartDetail, Row, Status as Ratified, Words},
@@ -641,6 +641,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
         brief: brief(),
         partial: true,
         expected,
+        stale_base: None,
     };
     let kinds = [
         StopKind::Session,
@@ -726,10 +727,20 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
         ("Proof", json(proof(None))),
         (
             "BriefView",
-            json(view(Some(studio_understanding::pre_flight::Expected {
-                expected: vec!["server".into()],
-                touched: vec!["server".into(), "window".into()],
-            }))),
+            json(BriefView {
+                // The stale-base line (#494): what main changed since the merge base.
+                stale_base: Some(StaleBase {
+                    laws: vec!["wire-types-agree".into()],
+                    links: vec!["server-window".into()],
+                    flows: vec!["turn-writing".into()],
+                    paths: vec!["server".into()],
+                    files: vec!["Cargo.toml".into(), "server/src/map.rs".into()],
+                }),
+                ..view(Some(studio_understanding::pre_flight::Expected {
+                    expected: vec!["server".into()],
+                    touched: vec!["server".into(), "window".into()],
+                }))
+            }),
         ),
         (
             "BriefView",
