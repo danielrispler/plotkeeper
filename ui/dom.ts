@@ -116,6 +116,11 @@ export const pageStore = (key: string) => ({
   },
 });
 
+/** Drops every entry of `cache` whose key `keep` refuses: a page cache pruned to what is still listed (spec #548, Group 4). */
+export function keepOnly<K>(cache: { keys(): Iterable<K>; delete(key: K): unknown }, keep: (key: K) => boolean) {
+  for (const key of [...cache.keys()]) if (!keep(key)) cache.delete(key);
+}
+
 /** An SVG element `tag` with its attributes. */
 export function svg(tag: string, attrs: Record<string, string> = {}): SVGElement {
   const node = document.createElementNS("http://www.w3.org/2000/svg", tag);

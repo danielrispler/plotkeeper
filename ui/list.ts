@@ -3,7 +3,7 @@
 // a strip of glyphs and labels, which opens the full list on hover, on click or on ⌘1. Its pure parts are `list-model.ts`.
 
 import { logStop } from "./stop-rules.js";
-import { age, element, failure, fullTitle, glyphOnly, invoke, newest, patch, prose, pressable, stepText, text } from "./dom.js";
+import { age, element, failure, fullTitle, glyphOnly, invoke, keepOnly, newest, patch, pressable, prose, stepText, text } from "./dom.js";
 import { hideClearToast, showClearToast } from "./toast.js";
 import { counts } from "./times.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
@@ -45,8 +45,10 @@ type ListDeps = {
   pressSession(id: string, agent: string | null): unknown;
   askDelete(session: Session): Promise<void>;
   lastHeadline(session: Pick<Session, "turns">): string | null;
+  // What the page keeps of sessions, pruned to those listed whenever the list arrives.
+  forget(sessions: Session[]): void;
 };
-let deps: ListDeps = { pressSession: () => {}, askDelete: async () => {}, lastHeadline: () => null };
+let deps: ListDeps = { pressSession: () => {}, askDelete: async () => {}, lastHeadline: () => null, forget: () => {} };
 
 /** Wires the list to the page: what it asks of it, and its project dots read again when the window gains focus. */
 export function startList(given: ListDeps) {
@@ -455,6 +457,9 @@ function clearLanded(landed: Session[]): HTMLElement[] {
 // (danielrispler/Falinks#572).
 export function showSessions(sessions: Session[]) {
   setListed(sessions);
+  // The page's caches keep only the listed sessions (spec #548, Group 4).
+  keepOnly(folded, (key) => sessions.some((session) => key.startsWith(`${session.id} `)));
+  deps.forget(sessions);
   if (sessions.length) logStop("session");
   void refreshAgents();
   landedClear.sync();

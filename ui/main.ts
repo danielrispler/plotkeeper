@@ -7,7 +7,7 @@ import "./transport.js";
 import { dismissNotice, NOT_RECORDING, setSettingsErrors, showError, showNotice } from "./notice.js";
 import { withGateNotice, withWriterNotice } from "./writer-notice.js";
 import { startWatching } from "./answer.js";
-import { openAsk } from "./ask.js";
+import { forgetAsks, openAsk } from "./ask.js";
 import { recheckSeen } from "./seen.js";
 import { diffRequest, newestDiff } from "./diff.js";
 import { element, failure, invoke, listen, logUncaught } from "./dom.js";
@@ -33,7 +33,8 @@ import { projectOfCwd, selectedProject, sidebarOrder } from "./projects.js";
 import { narrowBelow, selectedView } from "./map-model.js";
 import { reload } from "./settings.js";
 import { setFocus, setMissed, setProjects, setSettings, studio } from "./state.js";
-import { askDelete, drawFeed, lastHeadline, showCards, showView, startStory } from "./story.js";
+import { askDelete, drawFeed, forgetStories, lastHeadline, showCards, showView, startStory } from "./story.js";
+import { forgetTails } from "./blocked.js";
 import { startRailBriefs } from "./rail-brief.js";
 import { barKeyDown } from "./story-bar.js";
 import { startWriters } from "./writers.js";
@@ -239,7 +240,16 @@ startMapTray();
 startMapRuns();
 startPanes(select);
 startStory((id, agent) => void select(id, agent));
-startList({ pressSession, askDelete, lastHeadline });
+startList({
+  pressSession,
+  askDelete,
+  lastHeadline,
+  forget: (sessions) => {
+    forgetStories(sessions);
+    forgetTails(sessions);
+    forgetAsks(new Set(sessions.map((session) => session.id)));
+  },
+});
 startRailBriefs(drawFeed);
 startMap({ selectedProject, removeProject, shown: drawSidebar });
 element("pre-flight-button").addEventListener("click", () => openPreFlight());

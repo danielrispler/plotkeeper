@@ -4,7 +4,7 @@
 // those facts and, for a file, its hunk; the answer stays here, labelled as interpretation under the facts as recorded and the session never sees it. A failed call or a reply with no answer shows why, with
 // a retry.
 
-import { failure, fullTitle, invoke, messageOf, onEnter, pressable, text } from "./dom.js";
+import { failure, fullTitle, invoke, keepOnly, messageOf, onEnter, pressable, text } from "./dom.js";
 import { rendered } from "./markdown.js";
 import type { Anchor, Facts, Hunk } from "./types.js";
 
@@ -24,8 +24,16 @@ export const suggestions = (anchor: Anchor): string[] => questions[anchor.kind];
 const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour12: false });
 
 // Each anchor's box, kept across the view's redraws (every second), so a question being typed, an open box and an answer all
-// stay. shortcut: never pruned; prune by the listed sessions if it grows.
+// stay; a session that leaves the list takes its boxes with it (`forgetAsks`).
 const asks = new Map<string, HTMLDetailsElement>();
+// The session of each box's key.
+const askedIn = new Map<string, string>();
+
+/** Drops the boxes of sessions no longer listed. */
+export function forgetAsks(listed: ReadonlySet<string>) {
+  keepOnly(asks, (key) => listed.has(askedIn.get(key) ?? ""));
+  keepOnly(askedIn, (key) => asks.has(key));
+}
 // `scope` keeps the boxes of one anchor drawn in two places apart, as a node has one parent.
 const keyOf = (session: string, anchor: Anchor, scope: string) => `${scope}${session}\n${JSON.stringify(anchor)}`;
 
@@ -34,6 +42,7 @@ export function askAnchor(session: string, anchor: Anchor, what: string, scope =
   const key = keyOf(session, anchor, scope);
   const box = asks.get(key) ?? askBox(session, anchor, what);
   asks.set(key, box);
+  askedIn.set(key, session);
   return box;
 }
 

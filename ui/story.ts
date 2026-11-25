@@ -7,7 +7,7 @@
 
 import { modelLine, reports } from "./capabilities.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
-import { age, code, element, failure, fullTitle, glyphOnly, invoke, pressable, prose, text, unseenWords } from "./dom.js";
+import { age, code, element, failure, fullTitle, glyphOnly, invoke, keepOnly, pressable, prose, text, unseenWords } from "./dom.js";
 import { askAnchor } from "./ask.js";
 import { rendered } from "./markdown.js";
 import { drawSidebar } from "./list.js";
@@ -425,6 +425,19 @@ function forgetMissingSummaries() {
 // replies, fetched at their first opening.
 const opened = new Set<string>();
 const replies = new Map<string, string>();
+
+/**
+ * Drops what the story kept of sessions no longer listed: their turns' summaries and failed writes, their subagents' summaries and
+ * failed writes, and their opened blocks and fetched replies. What is being asked for now is left to finish.
+ */
+export function forgetStories(sessions: Session[]) {
+  const turns = new Set(sessions.flatMap((session) => session.turns.flatMap((turn) => turn.id ?? [])));
+  const agents = new Set(sessions.flatMap((session) => session.agents.map((agent) => agent.id)));
+  const listed = (key: string) => sessions.some((session) => key.startsWith(`${session.id} `));
+  for (const cache of [summaries, failedTurns]) keepOnly(cache, (id) => turns.has(id));
+  for (const cache of [agentSummaries, failed]) keepOnly(cache, (id) => agents.has(id));
+  for (const cache of [opened, replies]) keepOnly(cache, listed);
+}
 
 // A folded block keyed `key`, open while Daniel keeps it open; `onOpen` runs at each opening. `hover` says what it holds.
 function folded(key: string, title: string, hover: string, body: HTMLElement[], onOpen?: () => void): HTMLElement {

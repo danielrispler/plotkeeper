@@ -3,7 +3,7 @@
 // lets the agent retry it once and Decline closes the card; there is no edit, so what runs is what the card shows.
 
 import { blockedRequestFor, sendBlockedAnswer } from "./answer.js";
-import { code, failure, invoke, messageOf, pressable, text } from "./dom.js";
+import { code, failure, invoke, keepOnly, messageOf, pressable, text } from "./dom.js";
 import { counts, duration } from "./times.js";
 import { blockedWaits, type BlockedCommand, type BlockedStatus, type RiskLevel, type RiskView } from "./types.js";
 
@@ -123,6 +123,12 @@ const tailText = (read: BlockedOutput | null): string => (read?.tail.trim() ? re
 
 // The tails read so far, by the run's call id.
 const tails = new Map<string, BlockedOutput | null>();
+
+/** Drops the tails of runs no listed session's card holds. */
+export function forgetTails(sessions: { blocked_commands: BlockedCommand[] }[]) {
+  const runs = new Set(sessions.flatMap((session) => session.blocked_commands.flatMap((card) => card.run ?? [])));
+  keepOnly(tails, (call) => runs.has(call));
+}
 
 // The line to give the session to have the agent retry `card`'s command: for the session's own block, or,
 // when `agent` (the subagent's name) asked, one that tells the session to run it in the subagent's folder.
