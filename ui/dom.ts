@@ -98,6 +98,13 @@ export function text<K extends keyof HTMLElementTagNameMap>(tag: K, content: str
   return node;
 }
 
+/** An SVG element `tag` with its attributes. */
+export function svg(tag: string, attrs: Record<string, string> = {}): SVGElement {
+  const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+  return node;
+}
+
 // A glyph drawn for the eye alone, such as ☰ or ✗, hidden from assistive tech (#456); its button or row is named in words.
 export function glyphOnly(glyph: string, className = ""): HTMLElement {
   const node = text("span", glyph, className);

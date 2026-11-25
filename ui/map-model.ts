@@ -22,6 +22,8 @@ export type MapDoc = { ok: true; parts: Part[]; actors: Actor[]; links: MapLink[
 // The sizes the stylesheet draws, `--plate-w` and the rest of tokens.css; a test holds them equal.
 export const plateSize: Size = { w: 264, h: 76 };
 export const actorSize: Size = { w: 120, h: 28 };
+/** The size drawn for `id`: an actor's, else a plate's. */
+export const sizeOf = (doc: { actors: { id: string }[] }, id: string): Size => (doc.actors.some((actor) => actor.id === id) ? actorSize : plateSize);
 // How far the pointer moves before a press on a plate becomes a drag, so a click never nudges it.
 export const dragThreshold = 6;
 // The layers Esc peels, first to last (user story 5, spec #334 and spec #380): an overlay over the map (a micro-world, #399, then the pre-flight,

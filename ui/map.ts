@@ -16,10 +16,10 @@
 //   a PR brief borrows the camera with `lendCamera` and `giveCameraBack` shows Daniel's view again (`cameraRig` in `map-model.ts`).
 
 import { logStop, reviewNode, reviewOf } from "./stop-rules.js";
-import { element, failure, invoke, listen, newest, pressable, text } from "./dom.js";
+import { element, failure, invoke, listen, newest, pressable, svg, text } from "./dom.js";
 import {
-  actorSize, autoPlace, brokenParts, brokenText, cameraRig, type CameraRig, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, fitCamera, panTo, type Drag,
-  type Law, type Layer, type LayerName, type MapDoc, startProject, switchProject, parseMap, type Part, type Point, plateSize, plateTitle, linkLines, markPoints, readingOrder, revealPan, rimPoint, type Scrub, type Tier, zoomAt,
+  autoPlace, brokenParts, brokenText, cameraRig, type CameraRig, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, fitCamera, panTo, type Drag,
+  type Law, type Layer, type LayerName, type MapDoc, startProject, switchProject, parseMap, type Part, type Point, plateSize, plateTitle, sizeOf, linkLines, markPoints, readingOrder, revealPan, rimPoint, type Scrub, type Tier, zoomAt,
 } from "./map-model.js";
 import { recheckSeen } from "./seen.js";
 import { knownProjects, projectGone } from "./projects.js";
@@ -219,7 +219,7 @@ export function giveCameraBack() {
 
 // Where every plate and label of the view lies in the world, edges included.
 const worldBox = (current: MapView) => {
-  const edges = Object.entries(current.positions).map(([id, at]) => ({ at, size: sizeOf(id, current) }));
+  const edges = Object.entries(current.positions).map(([id, at]) => ({ at, size: sizeOf(current.doc, id) }));
   return {
     x0: Math.min(...edges.map(({ at, size }) => at.x - size.w / 2)), y0: Math.min(...edges.map(({ at, size }) => at.y - size.h / 2)),
     x1: Math.max(...edges.map(({ at, size }) => at.x + size.w / 2)), y1: Math.max(...edges.map(({ at, size }) => at.y + size.h / 2)),
@@ -265,7 +265,7 @@ export function revealParts(ids: string[]) {
   if (!shown || !rig || rig.lent() || !shown.slots.canvas.clientWidth) return;
   const spans = ids.flatMap((id) => {
     const at = shown.positions[id];
-    return at ? [at.x - sizeOf(id, shown).w / 2, at.x + sizeOf(id, shown).w / 2] : [];
+    return at ? [at.x - sizeOf(shown.doc, id).w / 2, at.x + sizeOf(shown.doc, id).w / 2] : [];
   });
   if (!spans.length) return;
   const to = revealPan(rig.user(), Math.min(...spans), Math.max(...spans), clearBand(shown.slots.canvas), mapGutter);
@@ -331,13 +331,6 @@ function drawEmpty(body: HTMLElement, state: MapState | null) {
   body.replaceChildren(box);
 }
 
-const svg = (tag: string, attrs: Record<string, string>) => {
-  const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
-  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
-  return node;
-};
-
-const sizeOf = (id: string, view: MapView) => (view.doc.actors.some((actor) => actor.id === id) ? actorSize : plateSize);
 
 // The links as lines from rim to rim, one per pair of ends (spec #473), with the laws on any of its links as marks about its middle, 10px apart. A line's
 // `data-link` holds all its links' ids, space-separated, and `data-from` the end it is drawn from.
@@ -346,8 +339,8 @@ function drawLinks(layer: Element, view: MapView) {
   for (const line of linkLines(view.doc.links)) {
     const [from, to] = [view.positions[line.from], view.positions[line.to]];
     if (!from || !to) continue;
-    const a = rimPoint(from, sizeOf(line.from, view), to);
-    const b = rimPoint(to, sizeOf(line.to, view), from);
+    const a = rimPoint(from, sizeOf(view.doc, line.from), to);
+    const b = rimPoint(to, sizeOf(view.doc, line.to), from);
     nodes.push(svg("line", { class: "link", "data-link": line.ids.join(" "), "data-from": line.from, x1: String(a.x), y1: String(a.y), x2: String(b.x), y2: String(b.y) }));
     const laws = view.doc.laws.filter((law) => line.ids.includes(law.on));
     const points = markPoints(a, b, laws.length);
@@ -392,7 +385,7 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub
   const current: MapView = { project: state.project, state, doc, positions, scrub: past, slots };
 
   const fit = () => {
-    const reach = Object.entries(positions).map(([id, at]) => ({ x: at.x + sizeOf(id, current).w / 2, y: at.y + sizeOf(id, current).h / 2 }));
+    const reach = Object.entries(positions).map(([id, at]) => ({ x: at.x + sizeOf(current.doc, id).w / 2, y: at.y + sizeOf(current.doc, id).h / 2 }));
     world.style.width = `${Math.max(canvas.clientWidth, ...reach.map((p) => p.x + plateSize.w / 2))}px`;
     world.style.height = `${Math.max(canvas.clientHeight, ...reach.map((p) => p.y + plateSize.h / 2))}px`;
     links.setAttribute("width", world.style.width.replace("px", ""));
@@ -526,7 +519,7 @@ function grab(node: HTMLElement, id: string, current: MapView, links: Element, f
     const step = dragMove(drag, { x: event.clientX, y: event.clientY });
     drag = step.drag;
     if (!step.to) return;
-    const half = sizeOf(id, current);
+    const half = sizeOf(current.doc, id);
     const to = { x: Math.max(half.w / 2, step.to.x / scale), y: Math.max(half.h / 2, step.to.y / scale) };
     current.positions[id] = to;
     node.classList.add("dragging");

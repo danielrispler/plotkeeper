@@ -403,7 +403,7 @@ export function lastHeadline(session: Pick<Session, "turns">): string | null {
 }
 
 // A new card store revision may hold a summary that was missing: ask again for those.
-export function forgetMissingSummaries() {
+function forgetMissingSummaries() {
   for (const [id, summary] of summaries) if (summary === null) summaries.delete(id);
 }
 
@@ -578,7 +578,7 @@ export function citedTurn(turns: Pick<Turn, "id" | "started_at">[], id: string):
 }
 
 // Opens the turn a citation names in the rail: a folded turn opens, and the feed scrolls to it. Only that node changes.
-export function openCitation(id: string) {
+function openCitation(id: string) {
   const selected = studio.selection;
   if (selected === null || selected.agent !== null) return;
   const { session } = selected;
@@ -631,7 +631,7 @@ function askName(session: Session) {
 }
 
 // Shows a failed delete's reason over the story.
-export function report(error: unknown) {
+function report(error: unknown) {
   failure("delete", "error")(error);
 }
 
@@ -690,7 +690,7 @@ function drawDock({ session, agent: id }: Selection) {
 // Shows the note of each docked blocked command, from the cards the window holds: in the place that stands, where it stands, since a note
 // arriving changes no card's buttons and rebuilding the dock would make the live region a new node and drop the focus on Allow
 // (danielrispler/plotkeeper#298); and in a new place for a card drawn before its note was known, as when a selection draws before its cards.
-export function fillDockNotes() {
+function fillDockNotes() {
   const session = studio.selection?.session;
   if (!session) return;
   for (const node of element("dock").querySelectorAll<HTMLElement>(".blocked-command[data-call]")) {
