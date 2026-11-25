@@ -290,165 +290,11 @@ impl Follower {
     }
 
     /// One pass: reads what the log gained, applies it, and sends what changed to the sink.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "#556 splits it by responsibility (spec #548, Group 4)"
-    )]
     pub fn pass(&mut self) {
         let shared = self.app.clone();
         let app: &App = &shared;
-        let log = self.log.as_path();
         let state = &app.core;
-        let writing = &app.writing;
-        let mut read = false;
-        if let Ok(mut file) = File::open(log)
-            && file.seek(SeekFrom::Start(self.read_to)).is_ok()
-        {
-            let mut reader = BufReader::new(file);
-            let mut line = Vec::new();
-            let mut outputs = Vec::new();
-            let read_from = self.read_to;
-            // The core is locked per line, and not while the fingerprint runs `git`, so the pane's
-            // commands do not wait on it.
-            while reader.read_until(b'\n', &mut line).unwrap_or(0) > 0 && line.ends_with(b"\n") {
-                self.read_to += line.len() as u64;
-                let text = String::from_utf8_lossy(&line);
-                if self.live {
-                    // shortcut: fingerprints when the line is read, up to one poll after the prompt,
-                    // so an edit in between counts as Daniel's; take the fingerprint in the hook if a
-                    // card ever misses one.
-                    let looks = state.lock().unwrap().fingerprint_folders(&text);
-                    let changes = fingerprint_changes(looks, &mut self.fingerprints);
-                    outputs.extend(state.lock().unwrap().apply_with_changes(&text, changes));
-                } else {
-                    state.lock().unwrap().replay(&text);
-                }
-                line.clear();
-            }
-            // A worktree's first fingerprint only records it, so the turns still open after the
-            // replay get their base now, and their `Stop` has something to compare with. The list
-            // goes first, so Daniel sees it while `git` runs.
-            if !self.live {
-                let mut studio = state.lock().unwrap();
-                // What the replay made, before the card store's facts change it.
-                let replayed = studio.save();
-                let store = app.cards.lock().unwrap();
-                store.restore(&mut studio);
-                drop((store, studio));
-                let log = log.to_path_buf();
-                thread::spawn(move || save_state(&log, &replayed));
-                state.lock().unwrap().tick(millis());
-                self.sent.list(app);
-                // The terminals' revival waits only for the replay, not for this pass's `git` work, which
-                // can take a minute on a long log, while a click's pane waits on it (#182).
-                app.events.replayed();
-                // The first lookup of the PRs, which writes the briefs of the ready ones the start picks (`pr_briefs::Startup`).
-                crate::prs::ask_later(&shared, crate::prs::Trigger::TurnEnd, None);
-                let waiting = state.lock().unwrap().waiting_folders();
-                fingerprint_changes(waiting, &mut self.fingerprints);
-            }
-            for output in outputs {
-                match output {
-                    Output::Card(request) | Output::Brief(request) => writing.brief(request),
-                    Output::Summary(request) => writing.summary(request),
-                    Output::Name(request) => writing.name(request),
-                    Output::NeedsYou { session_id, agent } => {
-                        tell(app, Notice::NeedsYou, &session_id, agent.as_deref());
-                    }
-                    Output::YourTurn { session_id } => {
-                        refresh_landed(&shared, Some(session_id.clone()));
-                        crate::prs::ask_later(&shared, crate::prs::Trigger::TurnEnd, None);
-                        tell(app, Notice::YourTurn, &session_id, None);
-                    }
-                    Output::CommandBlocked { session_id, agent } => {
-                        // The card's buttons are live now; its note is asked for beside the notification, which waits for nothing.
-                        let asks = {
-                            let studio = state.lock().unwrap();
-                            let blocked = studio.session(&session_id);
-                            let asks =
-                                blocked.map(|session| app.notes.lock().unwrap().asks(session));
-                            drop(studio);
-                            asks
-                        };
-                        ask_notes(app, asks.unwrap_or_default());
-                        tell(
-                            app,
-                            Notice::Titled("Auto mode blocked a command"),
-                            &session_id,
-                            agent.as_deref(),
-                        );
-                    }
-                    Output::Failed { session_id, agent } => {
-                        tell(
-                            app,
-                            Notice::Titled("Worker failed"),
-                            &session_id,
-                            Some(&agent),
-                        );
-                    }
-                    Output::Promoted { agent } => {
-                        unsaved(app.cards.lock().unwrap().promoted(&agent));
-                    }
-                    Output::Unrecognised {
-                        session_id,
-                        task_id,
-                    } => log::warn!(
-                        "unrecognised wake-up: a prompt of session {session_id} names \
-                         task {task_id} in markup the studio does not know"
-                    ),
-                    Output::Mismatch { line } => mismatch(&line),
-                    Output::Interrupted {
-                        session_id,
-                        prompt_id,
-                    } => {
-                        thread::spawn(move || interrupted(&session_id, &prompt_id));
-                    }
-                    Output::AgyVersion => match agy_version() {
-                        Some(version) => {
-                            match self
-                                .agy_versions
-                                .check(&version, AGY_FIXTURE_VERSION, millis())
-                            {
-                                Ok(Some(notice)) => {
-                                    log::warn!("{notice}");
-                                    app.events.emit("notice", notice.into());
-                                }
-                                Ok(None) => {}
-                                Err(e) => log::warn!("keep agy's version: {e}"),
-                            }
-                        }
-                        None => log::warn!("agy's version: `agy --version` did not run"),
-                    },
-                    // Reads the transcript's lines and nothing else (`AGENTS.md`).
-                    Output::Version { transcript_path } => {
-                        match self.versions.check(Path::new(&transcript_path), millis()) {
-                            Ok(Some(notice)) => {
-                                log::warn!("{notice}");
-                                app.events.emit("notice", notice.into());
-                            }
-                            Ok(None) => {}
-                            Err(e) => log::warn!("keep Claude Code's version: {e}"),
-                        }
-                    }
-                }
-            }
-            read = self.read_to > read_from;
-            if read {
-                let roots = state.lock().unwrap().known_roots();
-                if roots.len() != self.roots_saved {
-                    self.roots_saved = roots.len();
-                    save_roots(log, &roots);
-                }
-                let keys = state.lock().unwrap().live_keys();
-                self.fingerprints.retain(|key, _| keys.contains(key));
-                // The decision history goes to the store, which keeps it across restarts (danielrispler/Falinks#479).
-                let studio = state.lock().unwrap();
-                let mut store = app.cards.lock().unwrap();
-                for session in studio.sessions() {
-                    unsaved(store.keep_decisions(&session.agent.id, &session.decisions));
-                }
-            }
-        }
+        let read = self.read_log();
         // A session whose agent is gone ends within about 30 s (#330); the lines are read on the next pass.
         if self.live && self.checked.is_none_or(|at| at.elapsed() >= PROCESS_CHECK) {
             self.checked = Some(Instant::now());
@@ -464,76 +310,267 @@ impl Follower {
         let list_changed = app.list_changed.swap(false, Ordering::AcqRel);
         let files_changed = turn_files(state);
         let changed = read || transcripts_changed || list_changed || files_changed;
-        // The open request goes in the same pass as the list that shows "needs you" (danielrispler/Falinks#569).
-        if let Ok(data) = crate::answer::data()
-            && let Some(ask) = app
-                .watching
-                .lock()
-                .unwrap()
-                .pass(&data, studio_hook::answer::now_ms())
-        {
-            app.events.emit("ask", serde_json::to_value(ask).unwrap());
-        }
-        if let Ok(data) = crate::answer::data()
-            && let Some(blocked) = app.watching.lock().unwrap().changed_blocked_requests(&data)
-        {
-            app.events
-                .emit("blocked", serde_json::to_value(blocked).unwrap());
-        }
-        // Asking for focus waits on the main thread, which never takes this lock.
-        let focused = || app.events.focused();
-        // Daniel sees the selected session in a focused window while the story rail shows it (danielrispler/Falinks#556);
-        // the sink is asked only while it is unseen, and not under the core's lock, which the main
-        // thread's commands take.
-        let unseen = state.lock().unwrap().selected().is_some_and(|s| s.unseen);
-        let shown = unseen && app.rail_shown.load(Ordering::Acquire) && focused();
-        let seen = state.lock().unwrap().see_selected(shown);
-        if let Some((id, turns)) = &seen {
-            unsaved(app.cards.lock().unwrap().seen(id, *turns));
-        }
-        if state.lock().unwrap().tick(millis()) || changed || seen.is_some() {
+        emit_watched(app);
+        let seen = see_selected(app);
+        if state.lock().unwrap().tick(millis()) || changed || seen {
             self.sent.list(app);
         }
-        // Takes the core's lock under the notices' lock; `tell` never holds both.
-        let needs_you = |id: &str| {
-            let studio = state.lock().unwrap();
-            studio.session(id).is_some_and(|s| s.state == NeedsYou)
-        };
-        let due = app
-            .notices
-            .lock()
-            .unwrap()
-            .due(uptime(), focused, needs_you, || {
-                // The split's pane shows a terminal: a status-only row's id, or a session's in it.
-                let split = app.split_shown.lock().unwrap().clone();
-                let studio = state.lock().unwrap();
-                let selected = studio.selected().map(|s| s.agent.id.clone());
-                let mut on_screen: Vec<String> = selected.into_iter().collect();
-                if let Some(terminal) = split {
-                    let in_it = studio.sessions().into_iter();
-                    let in_it = in_it.filter(|s| s.terminal.as_ref() == Some(&terminal));
-                    on_screen.extend(in_it.map(|s| s.agent.id.clone()));
-                    on_screen.push(terminal);
-                }
-                drop(studio);
-                on_screen
-            });
-        if let Some((title, body)) = due.notification {
-            // The page shows it as a browser notification, when no tab of it is visible and focused (#331).
-            app.events.emit(
-                "notification",
-                serde_json::json!({ "title": title, "body": body }),
-            );
-        }
-        if !due.finished.is_empty() {
-            app.events
-                .emit("finished", serde_json::to_value(&due.finished).unwrap());
-        }
+        notify(app);
         // The cards also change with no line read: a card arrives, or one turns 30 minutes old.
         self.sent.cards(app);
         self.sent.settings(app);
         self.live = true;
         // Also when the log did not open, so its replay block never ran.
         app.events.replayed();
+    }
+
+    /// Reads what the log gained and applies it: replayed before the first pass ends, live after,
+    /// with the outputs acted on. Returns whether a line was read.
+    fn read_log(&mut self) -> bool {
+        let shared = self.app.clone();
+        let app: &App = &shared;
+        let state = &app.core;
+        let Ok(mut file) = File::open(&self.log) else {
+            return false;
+        };
+        if file.seek(SeekFrom::Start(self.read_to)).is_err() {
+            return false;
+        }
+        let mut reader = BufReader::new(file);
+        let mut line = Vec::new();
+        let mut outputs = Vec::new();
+        let read_from = self.read_to;
+        // The core is locked per line, and not while the fingerprint runs `git`, so the pane's
+        // commands do not wait on it.
+        while reader.read_until(b'\n', &mut line).unwrap_or(0) > 0 && line.ends_with(b"\n") {
+            self.read_to += line.len() as u64;
+            let text = String::from_utf8_lossy(&line);
+            if self.live {
+                // shortcut: fingerprints when the line is read, up to one poll after the prompt,
+                // so an edit in between counts as Daniel's; take the fingerprint in the hook if a
+                // card ever misses one.
+                let looks = state.lock().unwrap().fingerprint_folders(&text);
+                let changes = fingerprint_changes(looks, &mut self.fingerprints);
+                outputs.extend(state.lock().unwrap().apply_with_changes(&text, changes));
+            } else {
+                state.lock().unwrap().replay(&text);
+            }
+            line.clear();
+        }
+        if !self.live {
+            self.replayed();
+        }
+        for output in outputs {
+            self.act(output);
+        }
+        let read = self.read_to > read_from;
+        if read {
+            let roots = state.lock().unwrap().known_roots();
+            if roots.len() != self.roots_saved {
+                self.roots_saved = roots.len();
+                save_roots(&self.log, &roots);
+            }
+            let keys = state.lock().unwrap().live_keys();
+            self.fingerprints.retain(|key, _| keys.contains(key));
+            // The decision history goes to the store, which keeps it across restarts (danielrispler/Falinks#479).
+            let studio = state.lock().unwrap();
+            let mut store = app.cards.lock().unwrap();
+            for session in studio.sessions() {
+                unsaved(store.keep_decisions(&session.agent.id, &session.decisions));
+            }
+        }
+        read
+    }
+
+    /// The replay is done. A worktree's first fingerprint only records it, so the turns still open
+    /// after the replay get their base now, and their `Stop` has something to compare with. The
+    /// list goes first, so Daniel sees it while `git` runs.
+    fn replayed(&mut self) {
+        let shared = self.app.clone();
+        let app: &App = &shared;
+        let state = &app.core;
+        let mut studio = state.lock().unwrap();
+        // What the replay made, before the card store's facts change it.
+        let replayed = studio.save();
+        let store = app.cards.lock().unwrap();
+        store.restore(&mut studio);
+        drop((store, studio));
+        let log = self.log.clone();
+        thread::spawn(move || save_state(&log, &replayed));
+        state.lock().unwrap().tick(millis());
+        self.sent.list(app);
+        // The terminals' revival waits only for the replay, not for this pass's `git` work, which
+        // can take a minute on a long log, while a click's pane waits on it (#182).
+        app.events.replayed();
+        // The first lookup of the PRs, which writes the briefs of the ready ones the start picks (`pr_briefs::Startup`).
+        crate::prs::ask_later(&shared, crate::prs::Trigger::TurnEnd, None);
+        let waiting = state.lock().unwrap().waiting_folders();
+        fingerprint_changes(waiting, &mut self.fingerprints);
+    }
+
+    /// Does what one live line's output asks.
+    fn act(&mut self, output: Output) {
+        let shared = self.app.clone();
+        let app: &App = &shared;
+        let writing = &app.writing;
+        match output {
+            Output::Card(request) | Output::Brief(request) => writing.brief(request),
+            Output::Summary(request) => writing.summary(request),
+            Output::Name(request) => writing.name(request),
+            Output::NeedsYou { session_id, agent } => {
+                tell(app, Notice::NeedsYou, &session_id, agent.as_deref());
+            }
+            Output::YourTurn { session_id } => {
+                refresh_landed(&shared, Some(session_id.clone()));
+                crate::prs::ask_later(&shared, crate::prs::Trigger::TurnEnd, None);
+                tell(app, Notice::YourTurn, &session_id, None);
+            }
+            Output::CommandBlocked { session_id, agent } => {
+                // The card's buttons are live now; its note is asked for beside the notification, which waits for nothing.
+                let asks = {
+                    let studio = app.core.lock().unwrap();
+                    let blocked = studio.session(&session_id);
+                    let asks = blocked.map(|session| app.notes.lock().unwrap().asks(session));
+                    drop(studio);
+                    asks
+                };
+                ask_notes(app, asks.unwrap_or_default());
+                tell(
+                    app,
+                    Notice::Titled("Auto mode blocked a command"),
+                    &session_id,
+                    agent.as_deref(),
+                );
+            }
+            Output::Failed { session_id, agent } => {
+                tell(
+                    app,
+                    Notice::Titled("Worker failed"),
+                    &session_id,
+                    Some(&agent),
+                );
+            }
+            Output::Promoted { agent } => {
+                unsaved(app.cards.lock().unwrap().promoted(&agent));
+            }
+            Output::Unrecognised {
+                session_id,
+                task_id,
+            } => log::warn!(
+                "unrecognised wake-up: a prompt of session {session_id} names \
+                 task {task_id} in markup the studio does not know"
+            ),
+            Output::Mismatch { line } => mismatch(&line),
+            Output::Interrupted {
+                session_id,
+                prompt_id,
+            } => {
+                thread::spawn(move || interrupted(&session_id, &prompt_id));
+            }
+            Output::AgyVersion => match agy_version() {
+                Some(version) => {
+                    match self
+                        .agy_versions
+                        .check(&version, AGY_FIXTURE_VERSION, millis())
+                    {
+                        Ok(Some(notice)) => {
+                            log::warn!("{notice}");
+                            app.events.emit("notice", notice.into());
+                        }
+                        Ok(None) => {}
+                        Err(e) => log::warn!("keep agy's version: {e}"),
+                    }
+                }
+                None => log::warn!("agy's version: `agy --version` did not run"),
+            },
+            // Reads the transcript's lines and nothing else (`AGENTS.md`).
+            Output::Version { transcript_path } => {
+                match self.versions.check(Path::new(&transcript_path), millis()) {
+                    Ok(Some(notice)) => {
+                        log::warn!("{notice}");
+                        app.events.emit("notice", notice.into());
+                    }
+                    Ok(None) => {}
+                    Err(e) => log::warn!("keep Claude Code's version: {e}"),
+                }
+            }
+        }
+    }
+}
+
+/// Sends the open answer request and the blocked requests when they changed. The open request goes
+/// in the same pass as the list that shows "needs you" (danielrispler/Falinks#569).
+fn emit_watched(app: &App) {
+    if let Ok(data) = crate::answer::data()
+        && let Some(ask) = app
+            .watching
+            .lock()
+            .unwrap()
+            .pass(&data, studio_hook::answer::now_ms())
+    {
+        app.events.emit("ask", serde_json::to_value(ask).unwrap());
+    }
+    if let Ok(data) = crate::answer::data()
+        && let Some(blocked) = app.watching.lock().unwrap().changed_blocked_requests(&data)
+    {
+        app.events
+            .emit("blocked", serde_json::to_value(blocked).unwrap());
+    }
+}
+
+/// Daniel sees the selected session in a focused window while the story rail shows it
+/// (danielrispler/Falinks#556); the sink is asked only while it is unseen, and not under the core's
+/// lock, which the main thread's commands take. Returns whether a turn was seen.
+fn see_selected(app: &App) -> bool {
+    let state = &app.core;
+    let unseen = state.lock().unwrap().selected().is_some_and(|s| s.unseen);
+    // Asking for focus waits on the main thread, which never takes this lock.
+    let shown = unseen && app.rail_shown.load(Ordering::Acquire) && app.events.focused();
+    let seen = state.lock().unwrap().see_selected(shown);
+    if let Some((id, turns)) = &seen {
+        unsaved(app.cards.lock().unwrap().seen(id, *turns));
+    }
+    seen.is_some()
+}
+
+/// Shows the notices that are due, as one notification, and sends the sessions whose turn finished.
+fn notify(app: &App) {
+    let state = &app.core;
+    // Asking for focus waits on the main thread, which never takes this lock.
+    let focused = || app.events.focused();
+    // Takes the core's lock under the notices' lock; `tell` never holds both.
+    let needs_you = |id: &str| {
+        let studio = state.lock().unwrap();
+        studio.session(id).is_some_and(|s| s.state == NeedsYou)
+    };
+    let due = app
+        .notices
+        .lock()
+        .unwrap()
+        .due(uptime(), focused, needs_you, || {
+            // The split's pane shows a terminal: a status-only row's id, or a session's in it.
+            let split = app.split_shown.lock().unwrap().clone();
+            let studio = state.lock().unwrap();
+            let selected = studio.selected().map(|s| s.agent.id.clone());
+            let mut on_screen: Vec<String> = selected.into_iter().collect();
+            if let Some(terminal) = split {
+                let in_it = studio.sessions().into_iter();
+                let in_it = in_it.filter(|s| s.terminal.as_ref() == Some(&terminal));
+                on_screen.extend(in_it.map(|s| s.agent.id.clone()));
+                on_screen.push(terminal);
+            }
+            drop(studio);
+            on_screen
+        });
+    if let Some((title, body)) = due.notification {
+        // The page shows it as a browser notification, when no tab of it is visible and focused (#331).
+        app.events.emit(
+            "notification",
+            serde_json::json!({ "title": title, "body": body }),
+        );
+    }
+    if !due.finished.is_empty() {
+        app.events
+            .emit("finished", serde_json::to_value(&due.finished).unwrap());
     }
 }
