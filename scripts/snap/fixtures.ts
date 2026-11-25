@@ -612,7 +612,76 @@ const mapBriefTallScroll = (): Fixture =>
 const mapBriefUnconfirmed = (): Fixture =>
   mapBrief(briefOf([step("Now", "Cards are written once per turn", "A turn is written once, whatever the order of events.", ["understanding"], { flags: ["the claim is not in the facts"] })], true), 0, `
       if (!document.querySelector("#map-brief .brief-unconfirmed")?.textContent.includes("not confirmed from the facts")) log("snap:fail no unconfirmed mark");
-      if (!document.querySelector("#map-brief .brief-partial")?.textContent.includes("Written from part of the diff")) log("snap:fail no partial line");`);
+      // A brief from before its partial facts were stored knows only that its diff was cut (#491).
+      const chip = document.querySelector("#map-brief .brief-facts");
+      if (chip?.querySelector("summary").textContent !== "Partial facts · 1") return log("snap:fail an older partial brief has no chip of one: " + chip?.textContent);
+      if ([...chip.querySelectorAll(".brief-facts-list > li")].map((li) => li.textContent).join("|") !== "The diff was cut") log("snap:fail the older brief's line: " + chip.textContent);`);
+// The Partial facts chip (#491): a brief written from a cut diff, without its claim check, over a language no extractor reads. Closed, it says
+// how many inputs it lacks; `open` opens it, and a step on it stays open, since it belongs to the panel, not the step.
+const partialView = (): BriefView => {
+  const view = briefOf(storySteps(), true);
+  view.brief.partial_facts = {
+    cut: { files_cut: ["ui/map-tray.ts", "ui/map-brief.ts"], files_partial: ["server/src/pr_briefs.rs"], bytes_sent: 65_536, bytes_cut: 20_480 },
+    claim_error: "the claim check timed out after 120 s",
+    no_extractor: [".py"],
+  };
+  return view;
+};
+const mapBriefPartialFacts = (open: boolean): Fixture =>
+  mapBrief(partialView(), 0, `
+      const chip = document.querySelector("#map-brief .brief-facts");
+      if (!chip) return log("snap:fail no Partial facts chip");
+      if (chip.querySelector("summary").textContent !== "Partial facts · 3") log("snap:fail the chip's count: " + chip.querySelector("summary").textContent);
+      if (document.getElementById("map-brief").textContent.includes("Written from part of the diff")) log("snap:fail the old partial line is still shown");
+      if (chip.compareDocumentPosition(document.querySelector("#map-brief .brief-cols")) !== Node.DOCUMENT_POSITION_FOLLOWING) log("snap:fail the chip is not above the step");
+      ${open ? `chip.querySelector("summary").click();
+      await wait(50);
+      const lines = [...chip.querySelectorAll(".brief-facts-list > li")];
+      if (lines.length !== 3) return log("snap:fail the chip lists " + lines.length + " inputs, not 3");
+      if (!lines[0].textContent.startsWith("The diff was cut: 64\\u00a0KiB sent, 20\\u00a0KiB not") || lines[0].querySelectorAll(".brief-facts-files li").length !== 3) log("snap:fail the cut line: " + lines[0].textContent);
+      if (!lines[0].textContent.includes("server/src/pr_briefs.rs (in part)")) log("snap:fail the file sent in part is not marked");
+      if (lines[1].textContent !== "The claim check failed: the claim check timed out after 120 s") log("snap:fail the claim line: " + lines[1].textContent);
+      if (!lines[2].textContent.startsWith("No extractor reads .py files")) log("snap:fail the language line: " + lines[2].textContent);
+      document.getElementById("brief-next").click();
+      await wait(300);
+      if (document.querySelector("#map-brief .brief-facts") !== chip || !chip.open) log("snap:fail a step on reset the chip");
+      document.querySelector("#map-brief .brief-back").click();
+      await wait(300);` : `if (chip.open) log("snap:fail the chip opens closed");`}`, true);
+const mapBriefNoFacts = (): Fixture =>
+  mapBrief(briefOf(storySteps()), 0, `if (document.querySelector("#map-brief .brief-facts")) log("snap:fail a chip shows with nothing missing");`, true);
+// The not-confirmed popover (#491): the mark on a step, or on a flagged decision in the ratify step, opens a popover under it listing its
+// reasons without the mark's own words. \`esc\` checks that Esc closes only the popover, and that a step on closes it.
+const whyFlags = ["claim check: no fact says a turn is written once", "claim check: the order of events is not in the diff", "not confirmed from the facts"];
+const whyStep = () => step("Now", "Cards are written once per turn", "A turn is written once, whatever the order of events.", ["understanding"], { flags: whyFlags });
+const openWhy = (scope: string) => `
+      const mark = document.querySelector("${scope} .brief-why-mark");
+      if (!mark) return log("snap:fail no not-confirmed mark in ${scope}");
+      mark.click();
+      await wait(100);
+      const why = document.getElementById(mark.getAttribute("aria-controls"));
+      if (!why?.matches(":popover-open") || mark.getAttribute("aria-expanded") !== "true") return log("snap:fail the mark did not open its popover");
+      const reasons = [...why.querySelectorAll(".brief-why-list li")].map((li) => li.textContent);
+      if (reasons.join("|") !== ${JSON.stringify(whyFlags.slice(0, 2).join("|"))}) log("snap:fail the popover's reasons: " + reasons.join("|"));
+      const [m, w] = [mark.getBoundingClientRect(), why.getBoundingClientRect()];
+      if (!(Math.abs(w.top - m.bottom) < 16 || Math.abs(w.bottom - m.top) < 16) || w.right < m.left || w.left > m.right) log("snap:fail the popover is not anchored to its mark: " + JSON.stringify([m, w]));`;
+const mapBriefWhy = (esc: boolean): Fixture =>
+  mapBrief(briefOf([whyStep(), storySteps()[1]]), 0, `${openWhy("#map-brief .brief-step")}
+      ${esc ? `document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", key: "Escape", bubbles: true }));
+      await wait(100);
+      if (why.matches(":popover-open")) return log("snap:fail Esc did not close the popover");
+      if (document.getElementById("map-brief").hidden) return log("snap:fail Esc closed the brief with the popover");
+      document.querySelector("#map-brief .brief-why-mark").click();
+      await wait(100);
+      if (!why.matches(":popover-open")) return log("snap:fail the mark did not open its popover again");
+      document.getElementById("brief-next").click();
+      await wait(300);
+      if (document.querySelector(".brief-why:popover-open")) log("snap:fail a step on left the popover open");` : `await wait(800);
+      if (!why.matches(":popover-open")) log("snap:fail the popover closed by itself");`}`, true);
+const mapBriefWhyDecision = (): Fixture => ({
+  ...mapBrief(briefOf(storySteps(), false, { decisions: [{ id: "d1", text: "A brief is stored per project, since PR numbers repeat across repositories.", flags: whyFlags }] }), 4, `${openWhy("#map-brief .ratify-row[data-id=d1]")}
+      if (document.querySelectorAll("#map-brief .ratify-row .brief-why-mark").length !== 1) log("snap:fail only the flagged decision carries the mark");`, false, 100),
+  pr_ratify: ratifyRows,
+});
 // The prediction check (#340). A pick on a case inside one part: pick, take back, Check, then the right option and the way on.
 const pickCheck: NonNullable<BriefStep["check"]> = {
   kind: "pick", q: "A worker's card comes from a turn that ended in Needs you. Is its Quiz stored?", opts: ["Yes: workers skip the rule", "No: the card is stored without its Quiz"], key: 1,
@@ -946,6 +1015,8 @@ const mapCatchUp = (): Fixture => ({
       if (panel.hidden || !panel.classList.contains("open")) return log("snap:fail the part catch-up did not open");
       if (!panel.querySelector(".brief-kick").textContent.includes("Part catch-up")) log("snap:fail the kick does not say part catch-up");
       if (!panel.querySelector(".brief-code").hidden) log("snap:fail a part catch-up offers a PR's code");
+      // Its diff was cut (#491): its only input of the Partial facts chip.
+      if (panel.querySelector(".brief-facts summary")?.textContent !== "Partial facts · 1") log("snap:fail a cut part catch-up has no chip of one");
       document.getElementById("brief-next").click();
       await wait(200);
       document.getElementById("brief-next").click();
@@ -956,7 +1027,7 @@ const mapCatchUp = (): Fixture => ({
       fog: { understanding: "thick", shell: "thin" },
       catch_ups: { understanding: { kind: "catch-up", ready: true, writing: false, failed: false }, shell: { kind: "chapter", pr: 334, chapter: 0 } },
     }),
-    part_catch_up: storedCatchUp(),
+    part_catch_up: { ...storedCatchUp(), partial: true },
   }),
   snapDone: "catch-up ok",
 });
@@ -2803,6 +2874,12 @@ ${writerStatusAfter("Keychain refused")}
   mapBriefTaller,
   mapBriefTallScroll,
   mapBriefUnconfirmed,
+  mapBriefPartialFacts: () => mapBriefPartialFacts(false),
+  mapBriefPartialFactsOpen: () => mapBriefPartialFacts(true),
+  mapBriefNoFacts,
+  mapBriefWhy: () => mapBriefWhy(false),
+  mapBriefWhyEsc: () => mapBriefWhy(true),
+  mapBriefWhyDecision,
   mapBriefPickRight: () => mapBriefPick(1),
   mapBriefPickWrong: () => mapBriefPick(0),
   mapBriefOrderSlots,

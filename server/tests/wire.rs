@@ -520,8 +520,17 @@ fn brief() -> studio_understanding::pr_brief::StoredBrief {
         guard: Some(Guard {
             parts: vec!["server".into()],
         }),
-        // The page reads it with the Partial facts chip (#491), which fills it here.
-        partial_facts: PartialFacts::default(),
+        // The page reads it with the Partial facts chip (#491).
+        partial_facts: PartialFacts {
+            cut: Some(DiffCut {
+                files_cut: vec!["ui/map.ts".into()],
+                files_partial: vec!["server/src/map.rs".into()],
+                bytes_sent: 65_536,
+                bytes_cut: 20_480,
+            }),
+            claim_error: Some("the check timed out".into()),
+            no_extractor: vec![".go".into()],
+        },
     }
 }
 
@@ -688,6 +697,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
             json(BriefView {
                 brief: studio_understanding::pr_brief::StoredBrief {
                     guard: None,
+                    partial_facts: Default::default(),
                     ..brief()
                 },
                 ..view(None)

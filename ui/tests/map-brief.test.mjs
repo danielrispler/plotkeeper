@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { alsoAt, awaitedWrite, chapterGate, storySteps, briefCamera, briefPlayer, latestRequest, escapeMap, figureShapes, figureSize, playlist, unconfirmed } from "../../dist/map-model.js";
+import { alsoAt, awaitedWrite, chapterGate, storySteps, briefCamera, briefPlayer, latestRequest, escapeMap, figureShapes, figureSize, playlist, partialFactsLines, unconfirmed, unconfirmedReasons } from "../../dist/map-model.js";
 import { trayRows } from "../../dist/map-tray.js";
 
 const step = (k, extra = {}) => ({ k, h: k, b: "", on: [], hops: [], law: null, covered_by: null, list: [], risks: [], fig: null, check: null, cites: [], flags: [], ...extra });
@@ -125,6 +125,21 @@ test("Esc closes the drawer, then the brief, then returns to now, then the sheet
   assert.equal(player.current().step, 1, "closing with Esc kept the step");
 });
 
+// #491: a "not confirmed from the facts" popover is its own Esc layer, ahead of the brief, so Esc closes it and leaves the brief open.
+test("Esc with a not-confirmed popover open closes only the popover, then the brief", () => {
+  const player = briefPlayer({ scrubbed: () => false, backToNow: () => {} });
+  player.open("/p", 7, 0);
+  let popover = true;
+  const layers = {
+    popover: { open: () => popover, close: () => (popover = false) },
+    brief: { open: () => player.current() !== null, close: () => player.close() },
+  };
+  assert.equal(escapeMap(layers), "popover");
+  assert.equal(popover, false);
+  assert.notEqual(player.current(), null, "the brief stays open");
+  assert.equal(escapeMap(layers), "brief");
+});
+
 test("the camera fits the lit parts into the room the panel leaves, never past the largest scale", () => {
   const area = { w: 1000, h: 800 };
   const big = briefCamera({ x0: 0, y0: 0, x1: 2000, y1: 1000 }, area, { top: 20, bottom: 300 }, 1.35);
@@ -158,6 +173,27 @@ test("each figure kind is drawn from the writer's labels, inside its frame", () 
 test("a step with a flag left after the rewrite is unconfirmed", () => {
   assert.equal(unconfirmed(step("Now", { flags: ["a quote is not in the facts"] })), true);
   assert.equal(unconfirmed(step("Now")), false);
+});
+
+// #491: the popover lists why an item is not confirmed; the mark's own words, the sentinel the check adds, are not a reason.
+test("a not-confirmed item's reasons are its flags without the sentinel", () => {
+  assert.deepEqual(unconfirmedReasons(["claim check: the quote is not in the diff", "not confirmed from the facts"]), ["claim check: the quote is not in the diff"]);
+  assert.deepEqual(unconfirmedReasons(["not confirmed from the facts"]), []);
+});
+
+// #491: the Partial facts chip has one line per missing input, from the facts stored with the brief; a brief from before them knows only
+// that its diff was cut.
+test("the Partial facts lines come from the stored facts, one per input, and none when nothing is missing", () => {
+  assert.deepEqual(partialFactsLines(undefined, false), [], "nothing missing: no chip");
+  assert.deepEqual(partialFactsLines({}, false), []);
+  const cut = { files_cut: ["ui/a.ts", "ui/b.ts"], files_partial: ["server/src/c.rs"], bytes_sent: 65_536, bytes_cut: 20_480 };
+  assert.deepEqual(partialFactsLines({ cut, claim_error: "the check timed out", no_extractor: [".go", ".py"] }, true), [
+    { line: "The diff was cut: 64\u00a0KiB sent, 20\u00a0KiB not", files: ["ui/a.ts", "ui/b.ts", "server/src/c.rs (in part)"] },
+    { line: "The claim check failed: the check timed out", files: [] },
+    { line: "No extractor reads .go, .py files, so their imports are not on the map", files: [] },
+  ]);
+  assert.deepEqual(partialFactsLines(undefined, true), [{ line: "The diff was cut", files: [] }], "an older brief has only its flag");
+  assert.deepEqual(partialFactsLines({ claim_error: "no answer" }, false), [{ line: "The claim check failed: no answer", files: [] }]);
 });
 
 test("See the code opens what the step quoted, with its source and no jump, as the page has no editor", async () => {
