@@ -537,7 +537,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
         pr_briefs::{BriefView, Opened as BriefOpened, Waiting},
         pre_flight::OpenIssue,
         projects::Project,
-        ratify::{Row, Status as Ratified},
+        ratify::{Detail, HeldDetail, LinkDetail, PartDetail, Row, Status as Ratified, Words},
         stop_rules::{Facts, Kind as StopKind},
     };
     use studio_understanding::part_catch_up::{FogEntry, StoredCatchUp, Summary};
@@ -572,6 +572,42 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
         text: "The window's types and the Rust wire types agree.".into(),
         change: change.into(),
         status,
+        detail: None,
+    };
+    let words = |before: Option<&str>, after: &str| Words {
+        before: before.map(String::from),
+        after: Some(after.into()),
+    };
+    let part_row = Row {
+        kind: "part".into(),
+        id: "server".into(),
+        text: "Server".into(),
+        detail: Some(Detail::Part(PartDetail {
+            name: words(Some("Server"), "Server"),
+            purpose: words(
+                Some("Serves the page."),
+                "Serves the page and keeps its state.",
+            ),
+            holds: vec![HeldDetail {
+                name: "Fog".into(),
+                text: words(None, "Greys a part a PR changed."),
+                paths_added: vec!["server/src/fog.rs".into()],
+                paths_removed: vec![],
+            }],
+            paths_added: vec!["server/src/".into()],
+            paths_removed: vec!["src-tauri/".into()],
+        })),
+        ..row(Ratified::NotYet, "changed")
+    };
+    let link_row = Row {
+        kind: "link".into(),
+        id: "ui-server".into(),
+        text: "ui to server".into(),
+        detail: Some(Detail::Link(LinkDetail {
+            kind: words(Some("import"), "http"),
+            reason: words(Some(""), "The page calls the server over HTTP."),
+        })),
+        ..row(Ratified::NotYet, "changed")
     };
     let view = |expected| BriefView {
         brief: brief(),
@@ -668,6 +704,8 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
         ("RatifyRow", json(row(Ratified::Accepted, "changed"))),
         ("RatifyRow", json(row(Ratified::Overturned, "removed"))),
         ("RatifyRow", json(row(Ratified::NotYet, ""))),
+        ("RatifyRow", json(part_row)),
+        ("RatifyRow", json(link_row)),
         (
             "StopFacts",
             json(Facts {

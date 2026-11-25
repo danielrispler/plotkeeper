@@ -20,7 +20,7 @@ import { expectedLine } from "./map-pre-flight.js";
 import { exploreRow } from "./micro-world.js";
 import { guardRow } from "./patch-review.js";
 import { scrubTo } from "./map-history.js";
-import { overturnNote, ratifyActions } from "./map-ratify.js";
+import { overturnNote, ratifyActions, ratifyDetail } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
 import { actorSize, alsoAt, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureMax, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, stageLabel, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
@@ -588,6 +588,8 @@ function ratifyNode(view: MapView, rows: RatifyRow[]) {
     } else {
       item.append(text("span", statusWords[row.status], "ratify-mark done"));
     }
+    const detail = ratifyDetail(row);
+    if (detail) item.append(detail);
     list.append(item);
   }
   const note = overturnNote(view.project, (item) => rows.some((row) => row.pr === item.pr && row.kind === item.kind && row.id === item.id));

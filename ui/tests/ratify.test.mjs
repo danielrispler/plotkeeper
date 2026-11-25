@@ -1,7 +1,7 @@
 // Ratifying's pure part (ticket #343), run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { copyOverturn, decideWith, noteFor, openRows, overturnPrompt, overturnReport, ratifyStep, sheetPending, statusWords } from "../../dist/ratify.js";
+import { copyOverturn, decideWith, detailLines, noteFor, openRows, overturnPrompt, overturnReport, ratifyStep, sheetPending, statusWords } from "../../dist/ratify.js";
 
 const row = (kind, id, status = "not-yet", extra = {}) => ({ pr: 7, kind, id, text: `${id} text`, change: "", status, ...extra });
 
@@ -27,6 +27,58 @@ test("the overturn prompt stands alone: the PR, its branch while it is open, the
   const decision = overturnPrompt(row("decision", "d1", "not-yet", { text: "Briefs are kept per project." }), null);
   assert.match(decision, /decision d1: “Briefs are kept per project\.”/);
   assert.match(decision, /PR #7/);
+});
+
+const words = (before, after) => ({ before, after });
+const partDetail = {
+  of: "part",
+  name: words("Server", "Server"),
+  purpose: words("Serves the page.", "Serves the page and keeps its state."),
+  holds: [
+    { name: "Fog", text: words("Greys a part.", "Greys a part a PR changed."), paths_added: ["server/src/fog/"], paths_removed: [] },
+    { name: "Same", text: words("Unchanged.", "Unchanged."), paths_added: [], paths_removed: [] },
+    { name: "Briefs", text: words(null, "Tells a PR's story."), paths_added: ["server/src/pr_briefs.rs"], paths_removed: [] },
+    { name: "Locks", text: words("One writer.", null), paths_added: [], paths_removed: [] },
+  ],
+  paths_added: ["server/src/"],
+  paths_removed: ["src-tauri/"],
+};
+const linkDetail = { of: "link", kind: words("import", "http"), reason: words("", "The page calls the server over HTTP.") };
+
+test("an overturn of a part quotes its new purpose and its held items' names, and of a link its ends, kind and reason", () => {
+  const part = overturnPrompt(row("part", "server", "not-yet", { text: "Server", change: "changed", detail: partDetail }), null);
+  assert.match(part, /part server \(changed\): “Server”/);
+  assert.match(part, /purpose: “Serves the page and keeps its state\.”/);
+  assert.match(part, /holds Fog, Same, Briefs\./, "the new side's held items, not the removed one");
+  const link = overturnPrompt(row("link", "ui-server", "not-yet", { text: "ui to server", change: "changed", detail: linkDetail }), null);
+  assert.match(link, /link ui-server \(changed\): “ui to server”/);
+  assert.match(link, /kind http, reason “The page calls the server over HTTP\.”/);
+  const removed = overturnPrompt(row("part", "old", "not-yet", { text: "Old", change: "removed", detail: { ...partDetail, purpose: words("Gone.", null), holds: [] } }), null);
+  assert.doesNotMatch(removed, /purpose/, "a removed part has no new text to quote");
+});
+
+test("a detail shows only what changed, old beside new, and an added part shows everything with nothing before", () => {
+  assert.deepEqual(detailLines(partDetail), [
+    { label: "Purpose", before: "Serves the page.", after: "Serves the page and keeps its state." },
+    { label: "Paths", before: "src-tauri/", after: "server/src/", code: true },
+    { label: "Holds Fog", before: "Greys a part.", after: "Greys a part a PR changed." },
+    { label: "Fog: paths", before: null, after: "server/src/fog/", code: true },
+    { label: "Holds Briefs", before: null, after: "Tells a PR's story." },
+    { label: "Briefs: paths", before: null, after: "server/src/pr_briefs.rs", code: true },
+    { label: "Holds Locks", before: "One writer.", after: null },
+  ]);
+  const added = { of: "part", name: words(null, "Install"), purpose: words(null, "Installs the hook."), holds: [{ name: "Copies", text: words(null, "The hook's copies."), paths_added: [], paths_removed: [] }], paths_added: ["server/src/install.rs"], paths_removed: [] };
+  assert.deepEqual(detailLines(added), [
+    { label: "Name", before: null, after: "Install" },
+    { label: "Purpose", before: null, after: "Installs the hook." },
+    { label: "Paths", before: null, after: "server/src/install.rs", code: true },
+    { label: "Holds Copies", before: null, after: "The hook's copies." },
+  ]);
+  assert.deepEqual(detailLines(linkDetail), [
+    { label: "Kind", before: "import", after: "http", code: true },
+    { label: "Reason", before: "", after: "The page calls the server over HTTP." },
+  ]);
+  assert.deepEqual(detailLines(null), []);
 });
 
 test("copying the prompt says so, and a clipboard that fails or is missing leaves the prompt to copy by hand", async () => {
