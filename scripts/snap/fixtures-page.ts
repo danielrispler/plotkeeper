@@ -540,3 +540,29 @@ export const hints = (): Fixture => ({
       log("hints ok");`,
   realKeys: true, realPointer: true, snapDone: "hints ok",
 });
+
+/**
+ * Cut text scrolls in place (spec #582, ticket 3), with real input: the pointer on a second line the row cuts moves its text inside its
+ * own box, and on one that fits it moves nothing. The text stays the element's own, whole.
+ */
+export const cutText = (): Fixture => ({
+  ...listLines(),
+  sessions: (listLines().sessions as Session[]).map((s) => (s.id === "s7" ? { ...s, transcript: { ...s.transcript, intention: "Probing." } } : s)),
+  snapScript: `
+      const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+      const steps = [...document.querySelectorAll(".list .row-step.cut")];
+      const cuts = steps.filter((node) => node.scrollWidth > node.clientWidth);
+      const fits = steps.filter((node) => node.scrollWidth <= node.clientWidth);
+      if (!cuts.length || !fits.length) return log("snap:fail the list shows no cut second line or no fitting one: " + cuts.length + ", " + fits.length);
+      const moved = (node) => getComputedStyle(node.firstElementChild).translate !== "none";
+      if (steps.some((node) => node.hasAttribute("title") || node.textContent !== node.firstElementChild.textContent)) log("snap:fail a second line holds its text outside its box or has a title");
+      await __snapMove(cuts[0]);
+      await wait(600);
+      if (!moved(cuts[0])) log("snap:fail a cut second line did not scroll on hover");
+      await __snapMove(fits[0]);
+      await wait(600);
+      if (moved(fits[0])) log("snap:fail a second line that fits scrolled on hover");
+      if (moved(cuts[0])) log("snap:fail a cut second line stayed scrolled after the pointer left");
+      log("cut text ok");`,
+  realPointer: true, snapDone: "cut text ok",
+});
