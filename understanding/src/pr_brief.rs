@@ -121,6 +121,9 @@ pub struct PrSource {
     pub tier_overrides: BTreeMap<String, String>,
     /// The decisions of an earlier brief of this PR, which a rewrite keeps the ids of.
     pub earlier_decisions: Vec<Decision>,
+    /// A "Since you read" story (#497, spec #477 part B): the head Daniel fully read, which the diff runs from. Its brief is
+    /// stored apart from the full briefs (`BriefStore::since`).
+    pub since: Option<String>,
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -297,6 +300,62 @@ pub struct Also {
     pub flags: Vec<String>,
 }
 
+/// One of the PR's changed files, as Also touched sorts it (#477, "Also touched by kind").
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct TouchedFile {
+    pub path: String,
+    /// Lines added and removed.
+    #[serde(default)]
+    pub lines: usize,
+    /// The part that owns it, none when it is ignored or owned by no part.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part: Option<String>,
+    /// The map ignores it. The page tags it "ignored" in the Tests, Config/build and Docs groups.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ignored: bool,
+    /// The laws its `@law:` tags name, sorted, each once.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub laws: Vec<String>,
+}
+
+/// Also touched's groups, in the order they show; a file goes in the first that matches.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AlsoKind {
+    /// Owned by no part and not ignored: the PR's map check failed.
+    #[default]
+    NoPart,
+    Tests,
+    Config,
+    Docs,
+    /// Ignored, and of none of the kinds above.
+    Ignored,
+    Other,
+}
+
+impl AlsoKind {
+    /// The group's name, lowercase.
+    pub fn label(self) -> &'static str {
+        match self {
+            AlsoKind::NoPart => "no part",
+            AlsoKind::Tests => "tests",
+            AlsoKind::Config => "config/build",
+            AlsoKind::Docs => "docs",
+            AlsoKind::Ignored => "ignored",
+            AlsoKind::Other => "other",
+        }
+    }
+}
+
+/// One group of Also touched, its files sorted by path.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AlsoGroup {
+    pub kind: AlsoKind,
+    pub files: Vec<TouchedFile>,
+    /// The files' lines added and removed, together.
+    pub lines: usize,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Brief {
     #[serde(default)]
@@ -305,8 +364,12 @@ pub struct Brief {
     pub overview: Vec<Step>,
     #[serde(default)]
     pub chapters: Vec<Chapter>,
+    /// The model's lines on touched, unlit parts, retired by #477: read from an older brief, never written now.
     #[serde(default)]
     pub also: Vec<Also>,
+    /// Also touched (#477): the PR's changed files that belong to no part a chapter lights, sorted by code into groups.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub also_groups: Vec<AlsoGroup>,
     #[serde(default)]
     pub unseen: Vec<String>,
     #[serde(default)]
@@ -404,8 +467,9 @@ pub struct CheckContext {
     pub chapters_mode: bool,
     /// The parts the chapters (or the single story) must light.
     pub required: Vec<String>,
-    /// The parts that only get a line in "also".
-    pub also: Vec<String>,
+    /// The PR's changed files, which Also touched sorts once the chapters say which parts they light.
+    #[serde(default)]
+    pub files: Vec<TouchedFile>,
     pub overview: bool,
     pub parts: BTreeSet<String>,
     pub actors: BTreeSet<String>,
@@ -831,6 +895,7 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
         .filter(|f| map_diff.contains(&format!("\"{f}\"")))
         .collect();
     let overview = chapters_mode && !flows_changed.is_empty();
+    // The touched parts that fog nothing: kept on the shape for the pre-flight; the writer is not told of them (#477).
     let also = quiet;
     // The map's Core parts under Daniel's tiers: a chapter lighting one carries a gist (#397).
     let core: Vec<String> = all_parts
@@ -851,14 +916,9 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
             core.join(", ")
         }
     );
-    let also_text = if also.is_empty() {
-        "none".to_string()
-    } else {
-        also.join(", ")
-    };
     let shape_text = if chapters_mode {
         format!(
-            "chapters by behaviour: 2 to 4 chapters, each one behaviour, lighting every part it crosses\nrequired parts (together the chapters must light every one): {}\noverview: {}\nalso-touched (one line each, no chapter): {also_text}",
+            "chapters by behaviour: 2 to 4 chapters, each one behaviour, lighting every part it crosses\nrequired parts (together the chapters must light every one): {}\noverview: {}",
             required.join(", "),
             if overview {
                 format!("yes, for flow(s) {}", flows_changed.join(", "))
@@ -868,7 +928,7 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
         )
     } else {
         format!(
-            "single story (one chapter with part \"story\") about: {}\noverview: no\nalso-touched (one line each): {also_text}",
+            "single story (one chapter with part \"story\") about: {}\noverview: no",
             required.join(", "),
         )
     };
@@ -1065,6 +1125,16 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
         ),
         ("SPEC".into(), spec_text),
     ];
+    if let Some(from) = &source.since {
+        sections.push((
+            "SINCE YOU READ".into(),
+            format!(
+                "Daniel read this PR's full brief at {from}. This story tells only what the push since changed: the diff, the map \
+                 diff and the law tags here run from {from} to {}, not from the PR's base. Tell what is new since, not the whole PR.",
+                meta.head
+            ),
+        ));
+    }
     if !source.earlier_decisions.is_empty() {
         let lines: Vec<String> = source
             .earlier_decisions
@@ -1197,7 +1267,7 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
     let shape = Shape {
         chapters: chapters_mode,
         required: required.clone(),
-        also: also.clone(),
+        also,
         overview,
         flows_changed: flows_changed.clone(),
     };
@@ -1206,7 +1276,24 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
         diff: source.diff.clone(),
         chapters_mode,
         required,
-        also,
+        files: files
+            .iter()
+            .map(|f| {
+                let laws: BTreeSet<String> = source
+                    .tagged
+                    .iter()
+                    .filter(|t| t.path == f.path)
+                    .map(|t| t.law.clone())
+                    .collect();
+                TouchedFile {
+                    path: f.path.clone(),
+                    lines: f.added + f.removed,
+                    part: part_of(&f.path),
+                    ignored: touched.ignored.contains(&f.path),
+                    laws: laws.into_iter().collect(),
+                }
+            })
+            .collect(),
         overview,
         parts: all_parts,
         actors: ids(&mj, "actors"),
@@ -1260,7 +1347,6 @@ Reply with ONE JSON object and nothing else:
   "title": "a plain title, at most 9 words",
   "overview": [ step, ... ],   only when SHAPE says an overview: at most 2 steps that run the changed flow's hops; the flow's order check, if any, is its last step
   "chapters": [ { "behaviour": "the behaviour, at most 4 words (or \"story\" for a single story)", "parts": [ "part ids this chapter covers" ], "title": "at most 6 words", "gist": "only on a chapter that lights a Core part (SHAPE's core parts); leave it out on any other: the chapter's whole story in ONE plain sentence, at most 30 words, that the owner could say back from memory; it says only what the chapter's steps say", "steps": [ step, ... ] } ],
-  "also": [ { "part": "part id from SHAPE's also-touched list, or a required part no chapter could light", "line": "one line, what changed in it" } ],
   "unseen": [ "a gap you noticed in the facts" ],
   "decisions": [ { "id": "the id of the same decision in EARLIER DECISIONS, when there is one; else leave it out", "text": "a decision the agent made that the owner may want to accept or overturn, one sentence, from the PR body or spec" } ]
 }
@@ -1763,6 +1849,72 @@ fn check_gist(c: &mut Chapter, ctx: &CheckContext) {
     prose_flags(&gist, ctx, &mut c.gist_flags);
 }
 
+/// The kind of a file by its path (#477, "Also touched by kind"), the first rule that matches winning: tests, then
+/// config/build, then docs. Its test rule is spec #477's, not `logic_file::is_test`'s: no `test_` prefix.
+fn path_kind(path: &str) -> Option<AlsoKind> {
+    let (dirs, name) = path.rsplit_once('/').unwrap_or(("", path));
+    let ext = name.rfind('.').map_or("", |at| &name[at..]);
+    let test_dir = dirs
+        .split('/')
+        .any(|d| matches!(d, "tests" | "test" | "__tests__"));
+    let test_name = name.contains(".test.")
+        || name.contains(".spec.")
+        || name[..name.len() - ext.len()].ends_with("_test");
+    const MANIFESTS: &[&str] = &[
+        "go.mod",
+        "go.sum",
+        "Gemfile",
+        "Pipfile",
+        "requirements.txt",
+        "bun.lockb",
+    ];
+    if test_dir || test_name {
+        Some(AlsoKind::Tests)
+    } else if path.starts_with(".github/")
+        || MANIFESTS.contains(&name)
+        || matches!(ext, ".toml" | ".yml" | ".yaml" | ".json" | ".lock")
+    {
+        Some(AlsoKind::Config)
+    } else if path.starts_with("docs/") || ext == ".md" {
+        Some(AlsoKind::Docs)
+    } else {
+        None
+    }
+}
+
+/// Also touched: `files` that belong to no part in `lit`, in groups by kind, the first that matches winning (No part,
+/// tests, config/build, docs, Ignored, other), each group's files sorted by path. Empty groups are left out.
+pub fn also_groups(files: &[TouchedFile], lit: &BTreeSet<String>) -> Vec<AlsoGroup> {
+    let mut groups: BTreeMap<AlsoKind, Vec<TouchedFile>> = BTreeMap::new();
+    for f in files {
+        if f.part.as_ref().is_some_and(|p| lit.contains(p)) {
+            continue;
+        }
+        let kind = if f.part.is_none() && !f.ignored {
+            AlsoKind::NoPart
+        } else if let Some(kind) = path_kind(&f.path) {
+            kind
+        } else if f.ignored {
+            AlsoKind::Ignored
+        } else {
+            AlsoKind::Other
+        };
+        groups.entry(kind).or_default().push(f.clone());
+    }
+    groups
+        .into_iter()
+        .map(|(kind, mut files)| {
+            files.sort_by(|a, b| a.path.cmp(&b.path));
+            files.dedup_by(|a, b| a.path == b.path);
+            AlsoGroup {
+                kind,
+                lines: files.iter().map(|f| f.lines).sum(),
+                files,
+            }
+        })
+        .collect()
+}
+
 pub fn check_brief(brief: &mut Brief, ctx: &CheckContext) -> usize {
     let facts_norm = norm_quote(&ctx.facts);
     brief.flags.clear();
@@ -1810,13 +1962,19 @@ pub fn check_brief(brief: &mut Brief, ctx: &CheckContext) -> usize {
         c.flags = f;
         check_gist(c, ctx);
     }
+    brief.also = Vec::new();
+    brief.also_groups = also_groups(&ctx.files, &lit_by_chapters);
     for r in &ctx.required {
         if !lit_by_chapters.contains(r) {
-            let kept = brief.also.iter().any(|a| &a.part == r);
+            let kept = brief
+                .also_groups
+                .iter()
+                .flat_map(|g| &g.files)
+                .any(|f| f.part.as_ref() == Some(r));
             whole.push(format!(
                 "required part `{r}` lit by no chapter{}",
                 if kept {
-                    " (in also: it keeps its fog)"
+                    " (in Also touched: it keeps its fog)"
                 } else {
                     ""
                 }
@@ -1832,14 +1990,6 @@ pub fn check_brief(brief: &mut Brief, ctx: &CheckContext) -> usize {
         whole.push(format!("{checks} checks"));
     }
     brief.flags = whole;
-    for a in &mut brief.also {
-        a.flags.clear();
-        if !ctx.also.contains(&a.part) && !ctx.required.contains(&a.part) {
-            a.flags
-                .push(format!("also-touched `{}`, not on code's list", a.part));
-        }
-        prose_flags(&a.line, ctx, &mut a.flags);
-    }
     for d in &mut brief.decisions {
         d.flags.clear();
         prose_flags(&d.text, ctx, &mut d.flags);
@@ -1976,6 +2126,50 @@ impl BriefStore {
             .max_by_key(|b| b.written_at)
     }
 
+    /// The "Since you read" stories (#497) live in `since/`, one per `{pr}-{from}-{to}.json`, so `latest` only ever finds a full brief.
+    fn since_path(&self, pr: u64, from: &str, to: &str) -> PathBuf {
+        let clean = |h: &str| {
+            h.chars()
+                .filter(char::is_ascii_alphanumeric)
+                .collect::<String>()
+        };
+        self.dir
+            .join("since")
+            .join(format!("{pr}-{}-{}.json", clean(from), clean(to)))
+    }
+
+    /// The "Since you read" story of `pr` that ends at `head`, with the head it runs from; the newest when there are several.
+    pub fn since(&self, pr: u64, head: &str) -> Option<(String, StoredBrief)> {
+        let head: String = head.chars().filter(char::is_ascii_alphanumeric).collect();
+        let (prefix, suffix) = (format!("{pr}-"), format!("-{head}.json"));
+        std::fs::read_dir(self.dir.join("since"))
+            .ok()?
+            .flatten()
+            .filter_map(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                let from = name
+                    .strip_prefix(&prefix)?
+                    .strip_suffix(&suffix)?
+                    .to_string();
+                let brief: StoredBrief =
+                    serde_json::from_slice(&std::fs::read(e.path()).ok()?).ok()?;
+                (brief.pr == pr && !from.is_empty()).then_some((from, brief))
+            })
+            .max_by_key(|(_, b)| b.written_at)
+    }
+
+    /// Writes the "Since you read" story `brief`, which runs from head `from` to its own.
+    pub fn put_since(&self, from: &str, brief: &StoredBrief) -> std::io::Result<()> {
+        let path = self.since_path(brief.pr, from, &brief.head);
+        std::fs::create_dir_all(path.parent().unwrap_or(&self.dir))?;
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(
+            &tmp,
+            serde_json::to_vec_pretty(brief).map_err(std::io::Error::other)?,
+        )?;
+        std::fs::rename(tmp, path)
+    }
+
     /// Writes `brief`, through a temporary file so a crash leaves the old one.
     pub fn put(&self, brief: &StoredBrief) -> std::io::Result<()> {
         let path = self.path(brief.pr, &brief.head);
@@ -2022,7 +2216,7 @@ impl BriefStore {
 // ---------------------------------------------------------------------------------------------------------------
 // The entry.
 
-/// Writes the brief of `source`'s PR at its head: builds the facts, asks the writer once, parses and checks the
+/// Writes the brief of `source`'s PR at its head (a "Since you read" story when `source.since` is set, stored apart): builds the facts, asks the writer once, parses and checks the
 /// reply, runs the claim check and the one retry (`pr_brief_check`), stores the brief and appends its one
 /// record line. `log` hears one line per problem that does not stop the write.
 pub fn write_pr_brief(
@@ -2081,9 +2275,11 @@ pub fn write_pr_brief(
             ..facts.partial_facts.clone()
         },
     };
-    store
-        .put(&stored)
-        .map_err(|e| format!("keep the brief of #{}: {e}", stored.pr))?;
+    match &source.since {
+        Some(from) => store.put_since(from, &stored),
+        None => store.put(&stored),
+    }
+    .map_err(|e| format!("keep the brief of #{}: {e}", stored.pr))?;
     record.at = stored.written_at;
     record.flags_after = stored.brief.all_flags();
     record.unconfirmed = stored

@@ -302,8 +302,20 @@ The second sandboxed call that checks each claim of a **PR brief** against the s
 _Avoid_: Fact check, verification
 
 **Partial facts**:
-The mark on a **PR brief** written from less than its full facts: its diff was cut, the **Claim check** did not run, a language in it has no extractor, or the link check has no run at its head. One mark with a count, opening to one line per missing fact.
+The mark on a **PR brief** written from less than its full facts: its diff was cut, the **Claim check** did not run, or a language in it has no extractor. One mark with a count, opening to one line per missing fact.
 _Avoid_: Partial checks (a **Check** is a command run in a worktree), not the full picture
+
+**Also touched**:
+The end of a **PR brief**'s last chapter: the files the PR changed that no chapter tells, in groups by kind (No part, Tests, Config/build, Docs, Ignored, Other), each with its counts, its files and a See the code of only them. A test file names the laws its `@law:` tags name.
+_Avoid_: Other changes, the rest of the diff
+
+**Since you read**:
+The short story of what a push changed since Daniel read a **PR brief** in full, written from the diff between the head he read and the new one. The tray opens it before the full brief, which is one click away; reading it to its end carries his read over to the new head.
+_Avoid_: Delta brief, update, changelog
+
+**Stale base**:
+What the default branch changed, since an open PR's merge base, that bears on the parts its **PR brief** lights: their files, the map's laws, links, flows and paths at them, and root build manifests. The brief shows it as one line under its head; the brief itself still reads the older base.
+_Avoid_: Out of date, behind main (a PR's branch count), stale brief (a brief of an older head)
 
 **Background run**:
 A headless agent run with scoped tools that plotkeeper starts on Daniel's click, inside Claude Code's OS sandbox, queued one at a time per project and cancellable from the map. It is not a session and has no terminal. [Background runs](behaviour/background-runs.md) has the rules.

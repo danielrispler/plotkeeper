@@ -104,7 +104,7 @@ fn the_facts_put_the_parts_structure_before_the_entries_and_the_entries_before_t
     // Code decides the shape: one story over the one part.
     assert!(!facts.shape.chapters);
     assert_eq!(facts.shape.required, ["alpha"]);
-    assert!(facts.context.also.is_empty());
+    assert!(facts.context.files.is_empty());
 }
 
 #[test]

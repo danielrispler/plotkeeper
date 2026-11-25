@@ -60,3 +60,36 @@ test("without claude, a PR with no stored brief says briefs need Claude and does
   const stored = trayRows([pr(8, "Fog", { stale: false, writing: false, chapters: ["Fog"] })], false)[0];
   assert.equal(stored.openable, true);
 });
+
+test("after a push the row says why the brief is what it is: the read carried over, or it was rewritten (#477, part B)", () => {
+  const carried = trayRows([pr(7, "Fog", { stale: false, writing: false, chapters: ["Fog"], quiet: false, read: true, note: "Rebased onto main, nothing new in the PR" })])[0];
+  assert.equal(carried.note, "#7 · Rebased onto main, nothing new in the PR");
+  const chaptered = trayRows([pr(7, "PR briefs", { stale: false, writing: false, chapters: ["Fog", "Ratify"], quiet: false, note: "Rewritten after a new push; you had read 1 of 2" })]);
+  assert.match(chaptered[0].note, /1 of 2 · Rewritten after a new push; you had read 1 of 2$/);
+  assert.doesNotMatch(chaptered[1].note, /Rewritten/);
+  // While the newer push is not yet rewritten, the row says that, not the note.
+  const stale = trayRows([pr(7, "Fog", { stale: true, writing: false, chapters: ["Fog"], quiet: false, note: "Rewritten: the branch was rebased" })])[0];
+  assert.match(stale.note, /newer push; rewritten when opened$/);
+});
+
+test("a head with a Since you read story opens it first, and the full brief's rows are one click away (#497)", () => {
+  const rows = trayRows([pr(7, "PR briefs", { stale: false, writing: false, chapters: ["Fog", "Ratify"], quiet: false, since: "The fix since you read" })]);
+  assert.deepEqual(
+    rows.map((r) => [r.title, r.chapter, r.full]),
+    [["The fix since you read", 0, false], ["Fog", 0, true], ["Ratify", 1, true]],
+  );
+  assert.equal(rows[0].note, "#7 · since you read");
+  // The full brief may still be of the older head: its rows say so, and open it, written then.
+  const stale = trayRows([pr(7, "Fog", { stale: true, writing: false, chapters: ["Fog"], quiet: false, since: "Since" })]);
+  assert.deepEqual(stale.map((r) => [r.full, r.openable]), [[false, true], [true, true]]);
+  assert.match(stale[1].note, /full brief · a newer push; rewritten when opened$/);
+  // A story of chapters has one row each, so every chapter of it can be read to its end.
+  const chaptered = trayRows([pr(7, "PR briefs", { stale: false, writing: false, chapters: ["Fog"], quiet: false, since: "The fix since you read", since_chapters: ["The read", "The fog"] })]);
+  assert.deepEqual(
+    chaptered.map((r) => [r.title, r.chapter, r.full]),
+    [["The read", 0, false], ["The fog", 1, false], ["Fog", 0, true]],
+  );
+  assert.deepEqual(chaptered.slice(0, 2).map((r) => r.note), ["#7 The fix since you read · since you read · 1 of 2", "#7 The fix since you read · since you read · 2 of 2"]);
+  // With no story, a row opens as before: the server writes the story first when the push calls for one.
+  assert.deepEqual(trayRows([pr(7, "Fog", { stale: true, writing: false, chapters: ["Fog"], quiet: false })]).map((r) => r.full ?? false), [false]);
+});

@@ -192,7 +192,7 @@ h1 { margin: 0 0 var(--sp-4); }
 /* A split's divider (danielrispler/Falinks#529), in the gap between its two panes. */
 /* The terminal panel (danielrispler/Falinks#542): a band under the panes, its height set by `panel.ts`; its divider on its top edge. */
 /* The toasts (#457): manual popovers in the top layer, so no z-index; the region spans the map's box less a margin, and
-   `toast.ts` places each open toast in it: the needs-you and the note toasts down its top-right corner, the Clear toast at its
+   `toast.ts` places each open toast in it: the needs-you, the note and the copy toasts down its top-right corner, the Clear toast at its
    bottom-left. The needs-you toast (danielrispler/Falinks#573) takes none of the map's space. */
 .toasts { position: absolute; inset: var(--sp-5); pointer-events: none; }
 .toast { position: fixed; inset: auto; margin: 0; border: 0; padding: 0; overflow: visible; pointer-events: auto; max-width: var(--toast); display: grid;
@@ -216,6 +216,13 @@ h1 { margin: 0 0 var(--sp-4); }
 /* The note toast: a turn that ended off screen; not in colour. */
 .toast.note { background: var(--raised); box-shadow: inset 0 0 0 var(--hair) var(--edge), var(--shadow); }
 .toast.note .name { color: var(--fg); }
+/* The copy toast (#493): what was copied and its first lines, each cut at the toast's width, or the whole prompt to copy by hand; then
+   Copy, when the clipboard refused, and ×. */
+.toast.copy { grid-template-columns: minmax(0, 1fr) auto auto; }
+.toast.copy .copy-body { min-width: 0; display: grid; gap: var(--sp-2); padding: var(--sp-4) var(--sp-2) var(--sp-4) var(--sp-5); }
+.toast.copy .copy-lines { margin: 0; color: var(--muted); white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.toast.copy .ratify-prompt { margin-top: 0; resize: vertical; }
+.toast.copy > .btn.small:not(.quiet) { margin: var(--sp-3) 0 0; }
 #probe { position: absolute; visibility: hidden; white-space: pre; font: var(--term-size)/var(--term-line) var(--mono); }
 
 /* The rail (danielrispler/Falinks#574): a header of two lines (#444), the open question docked under it, then the story: "now" and the
@@ -742,6 +749,12 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .sheet-ci { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
 .sheet-ci-line { margin: 0; font-size: var(--size-small); color: var(--muted); }
 .sheet-ci.broken .sheet-ci-line { color: var(--conflict); }
+/* Why the plate carries its marks (#495), first on the sheet: one quiet line per mark, in the tone its mark has on the plate. */
+.sheet-marks { list-style: none; margin: var(--sp-3) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); font-size: var(--size-small); color: var(--muted); }
+.sheet-mark { overflow-wrap: anywhere; }
+.sheet-mark-fog { color: var(--mist); }
+.sheet-mark-more { margin-left: var(--sp-2); color: var(--muted); white-space: nowrap; }
+.sheet-mark-broken { color: var(--conflict); }
 /* The history strip (#313): a commit per row, oldest first. A commit Daniel has not caught up on has a filled mist dot; an older one a
    hollow dot. The one being viewed is raised. The strip scrolls; its labels wrap, so none is cut. */
 .hist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); max-height: var(--strip-height); overflow-y: auto; }
@@ -837,9 +850,36 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .brief-pts li::before { content: ""; position: absolute; left: 0; top: .85em; width: var(--law-mark); height: var(--link-width); background: var(--faint); }
 .brief-quiet { margin: var(--sp-5) 0 0; color: var(--faint); font-size: var(--size-small); }
 .brief-unconfirmed { font-style: italic; }
+/* The not-confirmed mark (#491): quiet words that open, under them, a popover of the item's reasons, through the popover's implicit anchor;
+   it flips over the mark, or to its other side, when it would leave the window. Needs Chrome 157+, as the rail's menu does. */
+.btn.brief-why-mark { padding: 0 var(--sp-1); margin-inline-start: calc(-1 * var(--sp-1)); font-style: italic; text-decoration: underline dotted; text-underline-offset: var(--sp-1); }
+.btn.brief-why-mark:hover { color: var(--muted); text-decoration-style: solid; }
+.ratify-row > .brief-unconfirmed { grid-column: 1 / -1; margin: var(--sp-1) 0 0; }
+.brief-why { position: fixed; inset: auto; margin: 0; margin-block: var(--sp-2); position-area: block-end span-inline-end; position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
+             width: max-content; max-width: min(var(--popover), calc(100vw - 2 * var(--sp-5))); border: 0; padding: var(--sp-4) var(--sp-5); border-radius: var(--radius);
+             background: var(--surface); color: var(--fg); box-shadow: var(--shadow); font-style: normal; font-size: var(--size-small); overflow-wrap: anywhere; }
+.brief-why-title { margin: 0; color: var(--faint); font-size: var(--size-xs); }
+.brief-why-list { margin: var(--sp-3) 0 0; padding-inline-start: var(--sp-6); }
+.brief-why-list li + li { margin-top: var(--sp-2); }
+.brief-why-none { margin: var(--sp-3) 0 0; color: var(--muted); }
 .brief-also { margin-top: var(--sp-5); }
 .brief-also .brief-quiet { margin-top: var(--sp-2); }
+.brief-also-title { font-weight: inherit; }
+.brief-also-group { margin-top: var(--sp-4); }
+.brief-also-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2) var(--sp-4); }
+.brief-also-name { margin: 0; color: var(--muted); font-size: var(--size); font-weight: 600; }
+.brief-also-head .brief-quiet { margin: 0; }
+.brief-also-head .brief-code { margin-inline-start: auto; }
+.brief-also-files { margin: var(--sp-2) 0 0; padding: 0; list-style: none; color: var(--muted); font: var(--size-xs)/1.6 var(--mono); }
+.brief-also-files li { overflow-wrap: anywhere; }
+.brief-also-law { color: var(--fg); }
 
+.brief-step-code { margin-top: var(--sp-5); display: flex; align-items: center; gap: var(--sp-2); }
+/* Copy for the agent (#493): a quiet icon, a 24px target with a 14px glyph, beside a See the code and in the not-confirmed popover. */
+.btn.brief-copy { display: inline-grid; place-items: center; min-width: var(--control); min-height: var(--control); padding: 0; color: var(--muted); }
+.btn.brief-copy:hover, .btn.brief-copy:focus-visible { color: var(--fg); }
+.btn.brief-copy svg { width: var(--icon); height: var(--icon); }
+.brief-why-copy { display: flex; justify-content: flex-end; margin-top: var(--sp-3); }
 .brief-cites { margin-top: var(--sp-5); color: var(--faint); font-size: var(--size-xs); }
 .brief-cites summary { cursor: pointer; }
 .brief-cite { margin: var(--sp-2) 0 0; font-family: var(--mono); }
@@ -897,8 +937,22 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .brief-dots { display: flex; gap: var(--sp-3); flex: 1; }
 .brief-dots i { width: var(--brief-dot); height: var(--halo); border-radius: var(--sp-1); background: var(--selected); transition: background var(--motion), width var(--motion); }
 .brief-dots i.at { background: var(--brief-light); width: var(--brief-dot-at); }
-.brief-partial { font-size: var(--size-xs); color: var(--faint); }
+/* "Partial facts · N" (#491): a quiet chip under the panel's head, its list opening below it. */
+.brief-facts { flex: none; margin: 0 0 var(--sp-3); font-size: var(--size-xs); color: var(--faint); }
+.brief-facts summary { width: max-content; cursor: pointer; }
+.brief-facts-list { margin: var(--sp-2) 0 0; padding-inline-start: var(--sp-6); color: var(--muted); }
+.brief-facts-list li + li { margin-top: var(--sp-2); }
+.brief-facts-files { margin: var(--sp-1) 0 0; padding-inline-start: var(--sp-5); font-family: var(--mono); overflow-wrap: anywhere; }
+/* Its end leaves room for Leave, which sits over the panel's top right corner. */
+.brief-stale { flex: none; margin: 0 0 var(--sp-3); padding-inline-end: 5.5em; font-size: var(--size-xs); color: var(--muted); text-wrap: pretty; }
+.brief-stale-names { font-family: var(--mono); overflow-wrap: anywhere; }
+/* "Since you read" (#497): the story's head, first under the panel's head, with the full brief one click away; it leaves room for Leave too. */
+.brief-since { flex: none; margin: 0 0 var(--sp-3); padding-inline-end: 5.5em; font-size: var(--size-xs); color: var(--muted); text-wrap: pretty; }
+.brief-since-head { font-family: var(--mono); }
+.brief-since-full { font-size: var(--size-xs); }
+/* Leave sits over the top of the step's scrollbar when a tall step scrolls (#490): its own background keeps the thumb from under its word. */
 .brief-leave { position: absolute; top: var(--sp-5); right: var(--sp-5); color: var(--faint); }
+.btn.quiet.brief-leave { background: var(--surface); }
 .btn.primary.brief-next { min-inline-size: var(--brief-next); background: var(--brief-light); color: var(--bg); }
 .map-world.glide { transition: transform var(--brief-camera); }
 .map-world.briefing .plate:not(.lit), .map-world.briefing .actor:not(.lit) { opacity: var(--brief-dim); transition: opacity var(--motion); }

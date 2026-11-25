@@ -1,7 +1,7 @@
 // The Map view's pure logic (spec danielrispler/plotkeeper#306, ticket #309): the map file as the window reads it, where parts
 // are placed, the drag threshold, the link's rim points, the layered Esc and the camera. `map.ts` draws and wires them.
 
-import type { BriefFigure, BriefStep, CatchUpOffer, CatchUpStage, FogListEntry, Camera, Ci, CommitFiles, Fog, HistoricalMap, HistoryEntry, PrBrief, Proof, ReadyPr } from "./types.js";
+import type { AlsoGroup, AlsoKind, BriefFigure, PartialFacts, BriefStep, BriefView, CatchUpOffer, CatchUpStage, FogListEntry, Camera, Ci, CommitFiles, Fog, FogEntry, HistoricalMap, HistoryEntry, PrBrief, PrDiffArgs, Proof, ReadyPr } from "./types.js";
 
 export type Tier = "core" | "interface" | "black-box";
 export type Point = { x: number; y: number };
@@ -24,9 +24,9 @@ export const actorSize: Size = { w: 120, h: 28 };
 // How far the pointer moves before a press on a plate becomes a drag, so a click never nudges it.
 export const dragThreshold = 6;
 // The layers Esc peels, first to last (user story 5, spec #334 and spec #380): an overlay over the map (a micro-world, #399, then the pre-flight,
-// #394; spec #378, "Layers and keys"), the patch review (#398), a drawer, a PR brief (closing it keeps its step), a scrubbed past commit (back to now), a part's sheet, then the left panel (#385). The
+// #394; spec #378, "Layers and keys"), the patch review (#398), a drawer, a brief's "not confirmed" popover (#491), a PR brief (closing it keeps its step), a scrubbed past commit (back to now), a part's sheet, then the left panel (#385). The
 // tickets that add them register a `Layer` under its name in `map.ts`; the Map view itself is left only when none is open.
-export const layerOrder = ["micro-world", "pre-flight", "patch-review", "drawer", "brief", "scrubbed", "sheet", "panel"] as const;
+export const layerOrder = ["micro-world", "pre-flight", "patch-review", "drawer", "popover", "brief", "scrubbed", "sheet", "panel"] as const;
 export type LayerName = (typeof layerOrder)[number];
 export type Layer = { open: () => boolean; close: () => void };
 
@@ -116,7 +116,7 @@ export function rimPoint(center: Point, size: Size, toward: Point): Point {
 
 // A project switch: closes the layers that belong to the project shown, whatever the next one draws, since it may have no map to draw.
 export function switchProject(layers: Partial<Record<LayerName, Layer>>) {
-  for (const name of ["micro-world", "pre-flight", "patch-review", "brief"] as const) if (layers[name]?.open()) layers[name].close();
+  for (const name of ["micro-world", "pre-flight", "patch-review", "popover", "brief"] as const) if (layers[name]?.open()) layers[name].close();
 }
 
 // Esc: closes the first layer that is open, in `layerOrder`, and says which; null when none was: on the bare map Esc does nothing, since the
@@ -174,6 +174,25 @@ export function sheetOf(part: Part, laws: Law[], tier: Tier, fog: Fog | undefine
     laws: laws.filter((law) => law.on === part.id).map((law) => ({ id: law.id, text: law.text, backing: law.backing, label: law.backing === "check" ? "Backed by a check" : "On trust" })),
     fogLine,
     canClear: fog !== undefined,
+  };
+}
+
+// Why a part's plate carries its marks, at the top of its sheet (#495), from the facts of this case: its newest thick fog entry (else its
+// newest) with its PR and why, and how many more; its staleness band with its last engagement (the server's line); a broken law, never
+// named. Null where the part has no such mark.
+export type SheetMarks = { fog: { line: string; more: number } | null; stale: string | null; broken: string | null };
+export function sheetMarks(part: string, fog: Fog | undefined, entries: FogEntry[], stale: string | undefined, ci: Ci | null): SheetMarks {
+  // Entries are filed oldest first.
+  const newest = [...entries].reverse();
+  const shown = newest.find((entry) => entry.strength === "thick") ?? newest[0];
+  const strength = (entry: FogEntry) => (entry.strength === "thick" ? "Thick" : "Thin");
+  const from = (entry: FogEntry) => (entry.pr ? `#${entry.pr}` : `commit ${entry.commit.slice(0, 7)}`);
+  const why = (entry: FogEntry) => (entry.why?.length ? `: ${entry.why.join(", ")}` : "");
+  const date = ci?.at ? `, ${ci.at.slice(0, 10)}` : "";
+  return {
+    fog: fog && shown ? { line: `${strength(shown)} fog from ${from(shown)}${why(shown)}`, more: entries.length - 1 } : null,
+    stale: stale ?? null,
+    broken: brokenParts(ci).has(part) ? `A check behind a law of this part failed in main's latest CI${date}` : null,
   };
 }
 
@@ -315,13 +334,32 @@ export function storySteps<T extends { k: string }>(list: T[]): T[] {
   return list.filter((step) => step.k !== "Ratify");
 }
 
-// The "also touched" lines, which show with the last step of the last chapter.
-export function alsoAt(brief: PrBrief, chapter: number, step: number, length: number): PrBrief["also"] {
-  return chapter === brief.chapters.length - 1 && step === length - 1 ? brief.also : [];
+// "Also touched", which shows with the last step of the last chapter: an older brief's writer lines, a newer one's groups by kind (#492).
+export function alsoAt(brief: PrBrief, chapter: number, step: number, length: number): { lines: PrBrief["also"]; groups: AlsoRow[] } {
+  return chapter === brief.chapters.length - 1 && step === length - 1 ? { lines: brief.also, groups: alsoRows(brief.also_groups ?? []) } : { lines: [], groups: [] };
+}
+
+// One Also touched group as the reader shows it (#492): its name, its counts, its files, each with the laws its `@law:` tags name and the
+// "ignored" tag (only in the Tests, Config/build and Docs groups; the Ignored group is a plain list), and the paths its See the code asks for.
+export type AlsoRow = { kind: AlsoKind; name: string; counts: string; files: { path: string; ignored: boolean; laws: string[] }[]; paths: string[] };
+const alsoNames: Record<AlsoKind, string> = { "no-part": "No part", tests: "Tests", config: "Config/build", docs: "Docs", ignored: "Ignored", other: "Other" };
+const tagsIgnored: ReadonlySet<AlsoKind> = new Set<AlsoKind>(["tests", "config", "docs"]);
+const many = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+export function alsoRows(groups: AlsoGroup[]): AlsoRow[] {
+  return groups
+    .filter((group) => group.files.length)
+    .map((group) => ({
+      kind: group.kind,
+      name: alsoNames[group.kind] ?? group.kind,
+      counts: `${many(group.files.length, "file")} · ${many(group.lines, "line")}`,
+      files: group.files.map((file) => ({ path: file.path, ignored: tagsIgnored.has(group.kind) && file.ignored === true, laws: file.laws ?? [] })),
+      paths: group.files.map((file) => file.path),
+    }));
 }
 
 // `overview`: this chapter plays the brief's overview first. It is the first chapter opened, and keeps it until it is finished, so it plays once.
-export type Playing = { project: string; pr: number; chapter: number; step: number; overview: boolean };
+// `story`: a "Since you read" story's head it runs from (#497), played apart from the full brief of the same PR; "" for a brief.
+export type Playing = { project: string; pr: number; chapter: number; step: number; overview: boolean; story: string };
 
 // A chapter is complete when its last step was seen and its check answered, right or wrong, when it holds one (#342). Leaving
 // mid-chapter completes nothing. `fire` runs once, the moment both hold.
@@ -345,7 +383,7 @@ export function chapterGate(list: Pick<BriefStep, "check">[], fire: () => void):
 
 export type Player = {
   current: () => Playing | null;
-  open: (project: string, pr: number, chapter: number) => void;
+  open: (project: string, pr: number, chapter: number, story?: string) => void;
   // Moves by `by` steps within `length`; "done" past the last one, which closes the brief and starts it over next time.
   go: (by: number, length: number) => "moved" | "done";
   // Leaves the brief where it is; the next `open` of it continues from there.
@@ -357,16 +395,16 @@ export function briefPlayer(deps: { scrubbed: () => boolean; backToNow: () => vo
   // Per brief: the chapter that carries the overview (the first opened), and whether it has been played to its end.
   const carrier = new Map<string, number>();
   const played = new Set<string>();
-  const briefKey = (p: { project: string; pr: number }) => `${p.project}|${p.pr}`;
-  const key = (p: { project: string; pr: number; chapter: number }) => `${briefKey(p)}|${p.chapter}`;
+  const briefKey = (p: { project: string; pr: number; story: string }) => `${p.project}|${p.pr}|${p.story}`;
+  const key = (p: { project: string; pr: number; story: string; chapter: number }) => `${briefKey(p)}|${p.chapter}`;
   let now: Playing | null = null;
   return {
     current: () => now,
-    open(project, pr, chapter) {
+    open(project, pr, chapter, story = "") {
       if (deps.scrubbed()) deps.backToNow();
       // Opening over a brief that is open leaves that one where it is.
       if (now) left.set(key(now), now.step);
-      const at = { project, pr, chapter, step: 0 };
+      const at = { project, pr, chapter, step: 0, story };
       const brief = briefKey(at);
       if (!played.has(brief) && !carrier.has(brief)) carrier.set(brief, chapter);
       now = { ...at, step: left.get(key(at)) ?? 0, overview: !played.has(brief) && carrier.get(brief) === chapter };
@@ -458,6 +496,40 @@ export function figureShapes(fig: BriefFigure): Shape[] {
 
 // An item the checks left flagged shows "not confirmed from the facts".
 export const unconfirmed = (step: Pick<BriefStep, "flags">): boolean => step.flags.length > 0;
+// What the check adds to an item still flagged after the retry (`UNCONFIRMED`, `understanding/src/pr_brief_check.rs`): the mark's own words.
+const UNCONFIRMED = "not confirmed from the facts";
+// Why an item is not confirmed, as its popover lists it (#491): its flags without the mark's own words.
+export const unconfirmedReasons = (flags: string[]): string[] => flags.filter((flag) => flag !== UNCONFIRMED);
+
+// The "Partial facts · N" chip's lines (#491): one per input the brief was written without, the cut diff's with its files. A brief stored
+// before the facts has only `partial`, whether its diff was cut, so it says that without the list. None when nothing was missing.
+export type PartialLine = { line: string; files: string[] };
+const kib = (bytes: number) => (bytes < 1024 ? `${bytes}\u00a0B` : `${Math.round(bytes / 1024)}\u00a0KiB`);
+export function partialFactsLines(facts: PartialFacts | undefined, partial: boolean): PartialLine[] {
+  const lines: PartialLine[] = [];
+  const cut = facts?.cut;
+  if (cut) lines.push({ line: `The diff was cut: ${kib(cut.bytes_sent)} sent, ${kib(cut.bytes_cut)} not`, files: [...cut.files_cut, ...cut.files_partial.map((path) => `${path} (in part)`)] });
+  else if (partial) lines.push({ line: "The diff was cut", files: [] });
+  if (facts?.claim_error) lines.push({ line: `The claim check failed: ${facts.claim_error}`, files: [] });
+  if (facts?.no_extractor?.length) lines.push({ line: `No extractor reads ${facts.no_extractor.join(", ")} files, so their imports are not on the map`, files: [] });
+  return lines;
+}
+
+// What every `pr_diff` of the brief played in `project` asks; a caller adds the files it wants (`parts` or `paths`). A "Since you read"
+// story's diff runs from the head it was read at (#497), the full brief's from where the PR left the default branch.
+export function diffArgs(project: string, view: BriefView): PrDiffArgs {
+  const ask: PrDiffArgs = { project, number: view.brief.pr, head: view.brief.head, title: view.brief.brief.title };
+  return view.since ? { ...ask, base: view.since } : ask;
+}
+
+// Which files a step's "See the code" asks `pr_diff` for (#490), the step at `index` of the played `list`: "all" on the Ratify step, and
+// on the last step when the list has no Ratify step; else the map's parts it lights (actors left out), or "none" when it lights no part.
+export function stepCode(list: Pick<BriefStep, "k" | "on">[], index: number, parts: ReadonlySet<string>): "all" | "none" | string[] {
+  const last = list.some((each) => each.k === "Ratify") ? list[index]?.k === "Ratify" : index === list.length - 1;
+  if (last) return "all";
+  const lit = (list[index]?.on ?? []).filter((id) => parts.has(id));
+  return lit.length ? lit : "none";
+}
 
 // What "See the code" opens in the drawer for a step: what the writer quoted, each with its source. The page has no editor to jump to.
 export function citeDrawer(step: Pick<BriefStep, "h" | "cites">): Drawer {
@@ -541,9 +613,12 @@ export function orderRun(key: string[], links: { id: string; from: string; to: s
 // What an open waiting on its brief's write does when the map draws `pr` (the ready PR, gone when undefined): "open" once the brief of
 // its head is stored, "stop" when the write failed, the PR is quiet or no longer ready, and "wait" while it is written or the map still
 // shows how it stood before the write started.
-export function awaitedWrite(pr: ReadyPr | undefined): "open" | "stop" | "wait" {
+export function awaitedWrite(pr: ReadyPr | undefined, full = false): "open" | "stop" | "wait" {
   const brief = pr?.brief;
   if (!pr || brief?.quiet || (brief?.failed && !brief.writing)) return "stop";
+  // A "Since you read" story (#497) opens once stored, whatever head the full brief is of and while it is written after the story;
+  // asking for the full brief waits for that.
+  if (!full && brief?.since) return "open";
   return brief && !brief.writing && !brief.stale && brief.chapters.length > 0 ? "open" : "wait";
 }
 
@@ -723,4 +798,43 @@ export function markPoints(a: Point, b: Point, count: number): Point[] {
     const along = (i - (count - 1) / 2) * 10;
     return { x: (a.x + b.x) / 2 + (along * dx) / length, y: (a.y + b.y) / 2 + (along * dy) / length };
   });
+}
+
+// ---- Copy for the agent (#493): a prompt code writes, with no model, that stands alone for any agent.
+
+// What is copied: a step (a Could break step, or one not confirmed) with the changed files of the parts it lights; a not-confirmed
+// decision; the No part group's files.
+export type AgentItem =
+  | { of: "step"; step: Pick<BriefStep, "k" | "h" | "b" | "risks" | "cites" | "flags">; files: string[] }
+  | { of: "decision"; text: string; flags: string[] }
+  | { of: "no-part"; files: string[] };
+
+// The prompt for `item` of PR `pr`, naming its branch while it is open: a line that says what to do, the item's words, its risks, why
+// it is not confirmed (the mark's own words left out), its citations as `from: "quote"`, and its files as paths. Citations carry no
+// lines, so neither does the prompt. An empty section is left out.
+export function agentPrompt(pr: number, branch: string | null, item: AgentItem): string {
+  const where = branch ? `In PR #${pr} (branch ${branch})` : `In PR #${pr}`;
+  const list = (title: string | null, items: string[]) => (items.length ? [...(title ? [title] : []), ...items.map((each) => `- ${each}`)] : []);
+  const reasons = (flags: string[]) => list("Why it is not confirmed:", unconfirmedReasons(flags));
+  if (item.of === "no-part") {
+    return [`${where}, these changed files belong to no part of the map (system-map.json). Assign these files to a part, or ignore them, and tell me what you changed.`, ...list(null, item.files)].join("\n");
+  }
+  if (item.of === "decision") {
+    return [`${where}, you declared a decision the checks could not confirm from the facts. Check it against the code, correct it or say why it holds, and tell me what you changed.`, `Decided: ${item.text}`, ...reasons(item.flags)].join("\n");
+  }
+  const { step } = item;
+  const lead =
+    step.k === "Could break"
+      ? `${where}, the brief warns this could break. Check whether it does, fix it if so, and tell me what you changed.`
+      : `${where}, the brief says this, but its checks could not confirm it from the facts. Check it against the code, fix what is wrong, and tell me what you changed.`;
+  const body = step.b.replace(/<b>([\s\S]*?)<\/b>/g, "$1");
+  return [
+    lead,
+    `${step.k}: ${step.h}`,
+    ...(body ? [body] : []),
+    ...list(null, step.risks.map((risk) => `${risk.part}: ${risk.trigger} To see it: ${risk.check}`)),
+    ...reasons(step.flags),
+    ...list("It rests on:", step.cites.map((cite) => `${cite.from}: "${cite.quote}"`)),
+    ...list("Changed files of the parts it lights:", item.files),
+  ].join("\n");
 }

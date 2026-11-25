@@ -2,11 +2,12 @@
 // a brief's steps one at a time under the map. A light runs the step's links at one speed and a part lights as it arrives; the camera frames the
 // parts the brief lights; the panel is one narrow width, as tall as the step it shows (its CSS scrolls a taller step inside it, #449), and
 // crossfades between steps; a figure for a change inside one part is drawn under the step's words by `figureShapes` from the writer's labels;
-// citations sit in quiet type, and the panel says when the writer saw only part of the diff and which
-// items are not confirmed from the facts. "See the code" opens the drawer (`map-drawer.ts`) above it. Opening a brief returns the map to now.
+// citations sit in quiet type, a "Partial facts · N" chip lists what the brief was written without (#491), and an item not confirmed
+// from the facts carries a mark whose popover lists why. A step's "See the code" opens its parts' files in the drawer (`map-drawer.ts`) above it. Opening a brief returns the map to now.
+// A quiet copy icon (#493) on a Could break step, in the not-confirmed popover and on the No part group copies a prompt for the agent.
 // A step's check (#340) is answered in place: a pick in the panel, an order by tapping parts on the map into numbered slots (`pickRun`, `orderRun`);
 // Check grades it, a wrong answer shows the correction, and an order check replays the right path along the links.
-// Esc (`brief` layer) closes it and keeps its step. `map-model.ts` holds the logic: `briefPlayer`, `briefCamera`, `figureShapes`.
+// Esc (`brief` layer) closes it and keeps its step; an open not-confirmed popover (`popover` layer) closes first, and a new step closes it. `map-model.ts` holds the logic: `briefPlayer`, `briefCamera`, `figureShapes`.
 // A part catch-up (#391) plays in the same reader (`openCatchUpOf`): one story of a fogged part, under a negative number of its own (one per
 // fog list, `catchUpIds`) so the player keeps its step apart from the PR briefs and from an older story of the part; read to its end it
 // clears the part's fog (`part_catch_up_done`) and completes no brief.
@@ -20,11 +21,12 @@ import { expectedLine } from "./map-pre-flight.js";
 import { exploreRow } from "./micro-world.js";
 import { guardRow } from "./patch-review.js";
 import { scrubTo } from "./map-history.js";
-import { overturnNote, ratifyActions, ratifyDetail } from "./map-ratify.js";
-import { ratifyStep, statusWords } from "./ratify.js";
+import { branchOf, overturnNote, ratifyActions, ratifyDetail } from "./map-ratify.js";
+import { copyOverturn, ratifyStep, statusWords } from "./ratify.js";
+import type { Copied } from "./notes.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
-import { actorSize, alsoAt, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureMax, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, pickRun, type PickRun, playlist, plateSize, stageLabel, storySteps, type Rect, type Shape, unconfirmed } from "./map-model.js";
-import type { BriefCheck, BriefFigure, BriefStep, BriefView, CatchUpOffer, PrBrief, RatifyRow, ReadyPr, StoredCatchUp } from "./types.js";
+import { actorSize, agentPrompt, alsoAt, diffArgs, type AlsoRow, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureMax, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, partialFactsLines, pickRun, type PickRun, playlist, plateSize, stageLabel, storySteps, type Rect, type Shape, stepCode, unconfirmed, unconfirmedReasons } from "./map-model.js";
+import type { BriefCheck, BriefFigure, BriefStep, BriefView, CatchUpOffer, CommitFiles, PrBrief, RatifyRow, ReadyPr, StaleBase, StoredCatchUp } from "./types.js";
 
 const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
 // The brief being played, as `pr_brief` returned it.
@@ -57,23 +59,141 @@ const svg = (tag: string, attrs: Record<string, string> = {}) => {
 
 // Reading a chapter to its end (#342): one gate per chapter of a brief, kept while the window runs; it tells the shell once.
 const gates = new Map<string, Gate>();
+// The chapters of each "Since you read" story read to their end while the window runs (#497).
+const storyDone = new Map<string, Set<number>>();
 let watching: (() => void) | null = null;
 // The "not confirmed from the facts" marks shown, watched until seen or the brief closes (#346).
 let marks: (() => void)[] = [];
 const stopWatching = () => (watching?.(), (watching = null));
+// The not-confirmed popover (#491): one manual popover of the panel, so Esc reaches the map's layers, which close it before the brief. It
+// shows the reasons of the mark that opened it, anchored to that mark (`showPopover`'s source); a redraw of the same step anchors it to the
+// mark's new copy, and a new step closes it.
+let why: HTMLElement | null = null;
+// The open popover's mark, by its key (`step`, or `decision:<id>`).
+let whyOf: string | null = null;
+const popoverOpen = () => !!why?.isConnected && why.matches(":popover-open");
+const markOf = (key: string) => panel().querySelector<HTMLElement>(`.brief-why-mark[data-why="${CSS.escape(key)}"]`);
+function closePopover() {
+  if (popoverOpen()) why!.hidePopover();
+  if (whyOf) markOf(whyOf)?.setAttribute("aria-expanded", "false");
+  whyOf = null;
+}
+function openPopover(mark: HTMLElement, reasons: string[], copy: Prompt | null) {
+  if (!why) {
+    why = text("div", "", "brief-why");
+    why.id = "brief-why";
+    why.setAttribute("popover", "manual");
+  }
+  if (why.parentElement !== panel()) panel().append(why);
+  const list = reasons.length ? text("ul", "", "brief-why-list") : text("p", "The checks gave no reason.", "brief-why-none");
+  list.append(...reasons.map((reason) => text("li", reason)));
+  why.replaceChildren(text("p", "Why it is not confirmed", "brief-why-title"), list);
+  if (copy) {
+    const row = text("div", "", "brief-why-copy");
+    row.append(copyButton("Copy for your agent: why it is not confirmed", "Copy a prompt for your agent: the item and why it is not confirmed", copy));
+    why.append(row);
+  }
+  if (popoverOpen()) why.hidePopover();
+  why.showPopover({ source: mark });
+  whyOf = mark.dataset.why ?? null;
+  mark.setAttribute("aria-expanded", "true");
+}
+// After a redraw of the same step: the open popover follows its mark's new copy, or closes when the mark is gone.
+function reanchorPopover() {
+  if (!whyOf || !popoverOpen()) return;
+  const mark = markOf(whyOf);
+  if (!mark) return closePopover();
+  why!.hidePopover();
+  why!.showPopover({ source: mark });
+  mark.setAttribute("aria-expanded", "true");
+}
+// The "not confirmed from the facts" mark of a step or a flagged decision: a button whose popover lists the item's reasons, the mark's
+// own words left out. Seeing the mark counts for the stop rules (#346).
+function unconfirmedMark(view: MapView, pr: number, flags: string[], key: string, copy: Prompt | null): HTMLElement {
+  const wrap = text("p", "", "brief-quiet brief-unconfirmed");
+  const mark = text("button", "not confirmed from the facts", "btn quiet brief-why-mark");
+  mark.setAttribute("type", "button");
+  mark.title = "Show why the checks could not confirm this";
+  mark.dataset.why = key;
+  mark.setAttribute("aria-controls", "brief-why");
+  mark.setAttribute("aria-expanded", String(whyOf === key && popoverOpen()));
+  mark.addEventListener("click", () => (whyOf === key && popoverOpen() ? closePopover() : openPopover(mark, unconfirmedReasons(flags), copy)));
+  marks.push(watchSeen(mark, { active: () => mark.isConnected && panel().classList.contains("open"), onSeen: () => logStop("unconfirmed-seen", view.project, prOf(pr)) }));
+  wrap.append(mark);
+  return wrap;
+}
+// Copy for the agent (#493): a quiet copy icon puts a prompt that stands alone for any agent on the clipboard (`agentPrompt`), through
+// Overturn's path (`copyOverturn`), and the copy toast shows it, or holds it to copy by hand when the clipboard refuses: the reader says so
+// with a `copy-for-agent` event, which `main.ts` hands to the toast, so the reader loads none of the shell's modules. A prompt is a
+// string, or waits for the changed files of a step's lit parts; those are asked for when the step is drawn, so a click usually has them
+// and the clipboard is written inside it.
+type Prompt = () => string | Promise<string>;
+const COPY_ICON = '<svg viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="4.5" width="7" height="7" rx="1.5"/><path d="M9.5 2.5h-6a1 1 0 0 0-1 1v6"/></svg>';
+function copyButton(label: string, hover: string, prompt: Prompt): HTMLElement {
+  const button = text("button", "", "btn quiet brief-copy");
+  button.setAttribute("type", "button");
+  button.setAttribute("aria-label", label);
+  button.title = hover;
+  button.innerHTML = COPY_ICON;
+  button.addEventListener("click", () => {
+    const write = navigator.clipboard?.writeText?.bind(navigator.clipboard);
+    const copy = (made: string) =>
+      void copyOverturn(made, write).then((outcome) => window.dispatchEvent(new CustomEvent<Copied>("copy-for-agent", { detail: { outcome, prompt: made } })));
+    const made = prompt();
+    if (typeof made === "string") copy(made);
+    else void made.then(copy);
+  });
+  return button;
+}
+// The changed files of the parts `step` lights (actors left out), asked of `pr_diff` once per brief and parts; none when git cannot give them.
+type Files = { done: string[] | null; wait: Promise<string[]> };
+const litFiles = new Map<string, Files>();
+function filesOf(view: MapView, step: BriefStep): Files {
+  const parts = step.on.filter((id) => view.doc.parts.some((part) => part.id === id));
+  if (!playing || !parts.length) return { done: [], wait: Promise.resolve([]) };
+  const { pr, head } = playing.brief;
+  // A since story shares its full brief's head, but not its diff.
+  const key = `${view.project}|${pr}|${playing.since ?? ""}|${head}|${parts.join(",")}`;
+  let found = litFiles.get(key);
+  if (!found) {
+    const files: Files = { done: null, wait: invoke("pr_diff", { ...diffArgs(view.project, playing), parts }).then((got) => got.files.map((file) => file.path), () => []) };
+    void files.wait.then((paths) => (files.done = paths));
+    litFiles.set(key, (found = files));
+  }
+  return found;
+}
+// A step's prompt, with its lit parts' files: at once when they have come, else once they come.
+function stepPrompt(view: MapView, step: BriefStep, pr: number): Prompt {
+  const files = filesOf(view, step);
+  const make = (paths: string[]) => agentPrompt(pr, branchOf(pr), { of: "step", step, files: paths });
+  return () => (files.done ? make(files.done) : files.wait.then(make));
+}
+
 // The end-of-story bar of each chapter played since the brief opened (#393), kept so a redraw keeps what is typed; a reopened brief starts
 // them empty.
 const bars = new Map<string, Bar>();
 function gateOf(): Gate | null {
   const now = player.current();
   if (!now || !playing) return null;
-  const key = `${now.project}|${now.pr}|${playing.brief.head}|${now.chapter}`;
+  const story = `${now.project}|${now.pr}|${playing.brief.head}|${now.story}`;
+  const key = `${story}|${now.chapter}`;
   let gate = gates.get(key);
   if (!gate) {
     const { project, pr, chapter } = now;
     const head = playing.brief.head;
     const caught = catchUp;
+    const chapters = playing.since ? playing.brief.brief.chapters.length : 0;
     gate = chapterGate(storySteps(steps()), () => {
+      if (chapters) {
+        // A "Since you read" story (#497) read to its end, every chapter of it: the read carries over to its head. Its chapters are not
+        // the full brief's, so none is marked read on its own.
+        const done = storyDone.get(story) ?? new Set<number>();
+        storyDone.set(story, done.add(chapter));
+        if (done.size < chapters) return;
+        logStop("chapter-done", project, pr);
+        void invoke("brief_since_done", { project, number: pr, head }).catch(failure("brief_since_done"));
+        return;
+      }
       if (caught) {
         logStop("catch-up-done", project);
         void invoke("part_catch_up_done", { project, part: caught.part, fog: caught.fog }).catch(failure("part_catch_up_done"));
@@ -101,8 +221,9 @@ export const briefOpen = () => player.current() !== null;
 // background (port decision Q5): the panel and the PR's tray row say "Writing the brief…", the map stays usable, and the brief opens
 // when it lands (`map-landed` draws the map again), unless another open or a close came since.
 const latest = latestRequest();
-let awaiting: { project: string; number: number; chapter: number; wanted: () => boolean } | null = null;
-export async function openBriefOf(project: string, number: number, chapter: number) {
+let awaiting: { project: string; number: number; chapter: number; full: boolean; wanted: () => boolean } | null = null;
+// `full` opens the full brief past the head's "Since you read" story (#497), which opens first otherwise.
+export async function openBriefOf(project: string, number: number, chapter: number, full = false) {
   problems.delete(number);
   awaiting = null;
   awaitingCatchUp = null;
@@ -112,7 +233,7 @@ export async function openBriefOf(project: string, number: number, chapter: numb
   const slow = window.setTimeout(() => wanted() && showWriting(number), WRITING_AFTER_MS);
   try {
     panel().dataset.waiting = String(number);
-    got = await invoke("pr_brief", { project, number });
+    got = await invoke("pr_brief", { project, number, full });
   } catch (e) {
     // A superseded open's failure is not this PR's problem: only a wanted answer may set it.
     if (wanted()) problems.set(number, String(e));
@@ -123,7 +244,7 @@ export async function openBriefOf(project: string, number: number, chapter: numb
   if (!wanted()) return;
   delete panel().dataset.waiting;
   if (got && "writing" in got) {
-    awaiting = { project, number, chapter, wanted };
+    awaiting = { project, number, chapter, full, wanted };
     showWriting(number);
     return;
   }
@@ -148,7 +269,7 @@ export async function openBriefOf(project: string, number: number, chapter: numb
     addEventListener("resize", onResize);
   }
   closeDrawer();
-  player.open(project, number, chapter);
+  player.open(project, number, chapter, got.since ?? "");
   show(view, false);
 }
 
@@ -262,11 +383,11 @@ onDraw((view) => {
     if (!briefOpen()) hideWriting();
     return;
   }
-  const { project, number, chapter } = awaiting;
-  const next = awaitedWrite((view.state.ready ?? []).find((pr) => pr.number === number));
+  const { project, number, chapter, full } = awaiting;
+  const next = awaitedWrite((view.state.ready ?? []).find((pr) => pr.number === number), full);
   if (next === "wait") return;
   awaiting = null;
-  if (next === "open") void openBriefOf(project, number, chapter);
+  if (next === "open") void openBriefOf(project, number, chapter, full);
   else if (!briefOpen()) hideWriting();
 });
 onDraw((view) => {
@@ -283,6 +404,8 @@ export function closeBrief() {
   stopWatching();
   marks.forEach((stop) => stop());
   marks = [];
+  closePopover();
+  litFiles.clear();
   player.close();
   playing = null;
   catchUp = null;
@@ -517,12 +640,7 @@ function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["als
       if (now) show(now, true);
     }));
   }
-  if (unconfirmed(step)) {
-    const mark = text("p", "not confirmed from the facts", "brief-quiet brief-unconfirmed");
-    mark.title = step.flags.join("\n");
-    marks.push(watchSeen(mark, { active: () => mark.isConnected && panel().classList.contains("open"), onSeen: () => logStop("unconfirmed-seen", view.project, prOf(pr)) }));
-    words.append(mark);
-  }
+  if (unconfirmed(step)) words.append(unconfirmedMark(view, pr, step.flags, "step", pr > 0 ? stepPrompt(view, step, pr) : null));
   if (also.length) {
     const lines = text("div", "", "brief-also");
     lines.append(text("p", "Also touched", "brief-quiet"));
@@ -559,6 +677,72 @@ function figureExplore(view: MapView, node: HTMLElement, step: BriefStep, pr: nu
 }
 
 // A long part catch-up's first step says it summarises the main shifts, with the full fog list behind it (#396).
+// A step's own "See the code" (#490), under its words: the files of the parts it lights; every file on the Ratify step, or on the last
+// step when there is none; every file with a note on a step that lights no changed file. A part catch-up has no one PR's code to show.
+function codeInto(view: MapView, node: HTMLElement, list: BriefStep[], index: number) {
+  const step = list[index];
+  const words = node.querySelector(".brief-txt");
+  if (!playing || catchUp || !step || !words) return;
+  const want = stepCode(list, index, new Set(view.doc.parts.map((part) => part.id)));
+  const ask = diffArgs(view.project, playing);
+  const diff = (parts?: string[]) => invoke("pr_diff", parts ? { ...ask, parts } : ask);
+  const unlit = (found: CommitFiles) => {
+    const drawer = commitDrawer(found);
+    return { ...drawer, note: `This step lights no changed files · ${drawer.note}` };
+  };
+  const button = text("button", "See the code", "btn quiet brief-code");
+  button.title = want === "all" ? "Open every file the PR changed, above the brief" : "Open the changed files of the parts this step lights, above the brief";
+  button.addEventListener("click", () => {
+    // The PR's diff (the files the writer read); when git cannot give it, what the step quoted.
+    const drawer = want === "all" ? diff().then(commitDrawer) : want === "none" ? diff().then(unlit) : diff(want).then((found) => (found.files.length ? commitDrawer(found) : diff().then(unlit)));
+    drawer.then(openDrawer).catch((e) => (failure("pr_diff")(e), openDrawer(citeDrawer(step))));
+  });
+  const row = text("div", "", "brief-step-code");
+  row.append(button);
+  // A Could break step's copy icon (#493), one per step.
+  if (step.k === "Could break") row.append(copyButton("Copy for your agent: this risk", "Copy a prompt for your agent: this step, its risks and its parts' changed files", stepPrompt(view, step, playing.brief.pr)));
+  words.append(row);
+}
+
+// Also touched by kind (#492), on the last step of the last chapter: each group its name and counts, its files, each with the laws its
+// `@law:` tags name and the "ignored" tag where `alsoRows` keeps it, and a See the code of only its files.
+function alsoInto(view: MapView, node: HTMLElement, groups: AlsoRow[]) {
+  const words = node.querySelector(".brief-txt");
+  if (!playing || catchUp || !groups.length || !words) return;
+  const ask = diffArgs(view.project, playing);
+  const box = text("section", "", "brief-also");
+  box.setAttribute("aria-label", "Also touched");
+  box.append(text("h4", "Also touched", "brief-quiet brief-also-title"));
+  for (const group of groups) {
+    const row = text("div", "", "brief-also-group");
+    const head = text("div", "", "brief-also-head");
+    head.append(text("h5", group.name, "brief-also-name"), text("span", group.counts, "brief-quiet brief-also-counts"));
+    const button = text("button", "See the code", "btn quiet brief-code");
+    button.title = `Open the ${group.name} files, above the brief`;
+    button.setAttribute("aria-label", `See the code: ${group.name}`);
+    button.addEventListener("click", () => {
+      invoke("pr_diff", { ...ask, paths: group.paths }).then((found) => openDrawer(commitDrawer(found))).catch(failure("pr_diff"));
+    });
+    head.append(button);
+    if (group.kind === "no-part") {
+      const pr = playing.brief.pr;
+      head.append(copyButton("Copy for your agent: assign these files to a part, or ignore them", "Copy a prompt for your agent: assign these files to a part, or ignore them", () => agentPrompt(pr, branchOf(pr), { of: "no-part", files: group.paths })));
+    }
+    row.append(head);
+    const files = text("ul", "", "brief-also-files");
+    files.setAttribute("role", "list");
+    for (const file of group.files) {
+      const item = text("li", file.path);
+      if (file.laws.length) item.append(" ", text("span", `@law: ${file.laws.join(", ")}`, "brief-also-law"));
+      if (file.ignored) item.append(" ", text("span", "ignored", "brief-tag"));
+      files.append(item);
+    }
+    row.append(files);
+    box.append(row);
+  }
+  words.append(box);
+}
+
 function summaryInto(node: HTMLElement) {
   const summary = catchUp?.summary;
   const words = node.querySelector(".brief-txt");
@@ -593,6 +777,11 @@ function ratifyNode(view: MapView, rows: RatifyRow[]) {
     }
     const detail = ratifyDetail(row);
     if (detail) item.append(detail);
+    const decided = row.kind === "decision" ? playing?.brief.brief.decisions.find((each) => each.id === row.id) : undefined;
+    if (decided && unconfirmed(decided)) {
+      const copy = () => agentPrompt(row.pr, branchOf(row.pr), { of: "decision", text: decided.text, flags: decided.flags });
+      item.append(unconfirmedMark(view, row.pr, decided.flags, `decision:${row.id}`, copy));
+    }
     list.append(item);
   }
   const note = overturnNote(view.project, (item) => rows.some((row) => row.pr === item.pr && row.kind === item.kind && row.id === item.id));
@@ -783,9 +972,13 @@ function show(view: MapView, same: boolean) {
   box.classList.add("open");
   const cols = box.querySelector<HTMLElement>(".brief-cols")!;
   const also = alsoAt(playing.brief.brief, now.chapter, now.step, storySteps(list).length);
+  // A new step closes the popover of the one before.
+  if (!same) closePopover();
   const fill = () => {
-    const node = stepNode(view, step, pr, also);
+    const node = stepNode(view, step, pr, also.lines);
     figureExplore(view, node, step, pr, now.chapter);
+    codeInto(view, node, list, now.step);
+    alsoInto(view, node, also.groups);
     if (now.step === 0) summaryInto(node);
     const bar = endBar(node, now.step, list.length);
     cols.replaceChildren(node);
@@ -793,6 +986,7 @@ function show(view: MapView, same: boolean) {
     if (!same) cols.scrollTop = 0;
     bar?.offer();
     watchLast(node, now.step);
+    reanchorPopover();
     aim(view, step);
   };
   clearTimeout(swap);
@@ -804,9 +998,6 @@ function show(view: MapView, same: boolean) {
   }
   box.querySelectorAll(".brief-dots i").forEach((dot, i) => dot.classList.toggle("at", i === now.step));
   box.querySelector(".brief-dots")!.setAttribute("aria-label", `Step ${now.step + 1} of ${list.length}`);
-  const code = box.querySelector<HTMLButtonElement>(".brief-code")!;
-  // A part catch-up has no one PR's code to show.
-  code.hidden = catchUp !== null;
   (box.querySelector(".brief-back") as HTMLButtonElement).disabled = now.step === 0;
   if (step.check) runOf(view, step.check);
   syncNext(step);
@@ -819,7 +1010,7 @@ function show(view: MapView, same: boolean) {
 function endBar(node: HTMLElement, index: number, count: number): Bar | null {
   const now = player.current();
   if (!now || index !== count - 1) return null;
-  const key = `${now.project}|${now.pr}|${now.chapter}`;
+  const key = `${now.project}|${now.pr}|${now.story}|${now.chapter}`;
   let bar = bars.get(key);
   // A part catch-up's bar is keyed by its part (#391).
   const about = catchUp ? { project: now.project, part: catchUp.part } : { project: now.project, pr: now.pr, chapter: now.chapter };
@@ -855,18 +1046,6 @@ function buildPanel(view: MapView, list: BriefStep[]) {
   // The brief's one live region (#456): Back and Next put the new step's title in it, and nothing else; the step itself is not live.
   const live = text("p", "", "visually-hidden brief-live");
   live.setAttribute("aria-live", "polite");
-  const partial = playing?.partial ? text("span", "Written from part of the diff", "brief-partial") : text("span", "", "brief-partial");
-  const code = text("button", "See the code", "btn quiet brief-code");
-  code.title = "Open the PR's changed files, above the brief";
-  code.addEventListener("click", () => {
-    const step = steps()[player.current()?.step ?? 0];
-    const now = player.current();
-    if (!step || !now || !playing) return;
-    // The PR's diff (the files the writer read); when git cannot give it, what the step quoted.
-    invoke("pr_diff", { project: now.project, number: now.pr, head: playing.brief.head, title: playing.brief.brief.title })
-      .then((found) => openDrawer(commitDrawer(found)))
-      .catch((e) => (failure("pr_diff")(e), openDrawer(citeDrawer(step))));
-  });
   const back = text("button", "Back", "btn brief-back");
   back.title = "The step before";
   back.addEventListener("click", () => move(-1));
@@ -875,10 +1054,81 @@ function buildPanel(view: MapView, list: BriefStep[]) {
   next.title = "The next step";
   next.addEventListener("click", () => advance());
   const foot = text("div", "", "brief-foot");
-  foot.append(dots, partial, code, back, next);
+  foot.append(dots, back, next);
   // A PR that closes the pre-flighted issue, or a ticket under it (#394): what Daniel expected against what it touched.
   const line = expectedLine(playing?.expected, view.doc);
-  box.replaceChildren(leave, ...(line ? [text("p", line, "brief-expected")] : []), cols, foot, live);
+  const facts = factsChip();
+  const stale = staleBaseLine(playing?.stale_base);
+  const since = sinceLine();
+  box.replaceChildren(leave, ...(since ? [since] : []), ...(facts ? [facts] : []), ...(stale ? [stale] : []), ...(line ? [text("p", line, "brief-expected")] : []), cols, foot, live);
+}
+
+// A "Since you read" story's head (#497): what it tells, from which head, and the full brief one click away, at the chapter played.
+function sinceLine(): HTMLElement | null {
+  const now = player.current();
+  if (!playing?.since || !now) return null;
+  const line = text("p", "Since you read ", "brief-since");
+  const from = text("code", playing.since.slice(0, 7), "brief-since-head");
+  from.setAttribute("translate", "no");
+  line.append(from, ": only what this push changed. ");
+  const full = text("button", "Full brief", "btn quiet brief-since-full");
+  full.setAttribute("type", "button");
+  full.setAttribute("aria-label", `Full brief of PR #${now.pr}`);
+  full.title = "Open the whole PR's brief at this head";
+  const { project, pr } = now;
+  full.addEventListener("click", () => void openBriefOf(project, pr, 0, true));
+  line.append(full);
+  return line;
+}
+
+// The stale-base line (#494): what main changed since an open PR's merge base that the brief relies on, under the panel's head. The
+// server sends it for open PRs only, and only when something moved. Each kind is named once, its names left untranslated.
+function staleBaseLine(stale: StaleBase | undefined): HTMLElement | null {
+  if (!stale) return null;
+  const groups: [string, string, string[]][] = [
+    ["law", "laws", stale.laws],
+    ["link", "links", stale.links],
+    ["flow", "flows", stale.flows],
+    ["paths of", "paths of", stale.paths],
+    ["file", "files", stale.files],
+  ];
+  const shown = groups.filter(([, , names]) => names.length);
+  if (!shown.length) return null;
+  const line = text("p", "Main moved since this PR's base: ", "brief-stale");
+  shown.forEach(([one, many, names], n) => {
+    if (n) line.append(" · ");
+    line.append(`${names.length === 1 ? one : many} `);
+    // A kind shows its first three names; the rest are counted.
+    const list = text("span", names.slice(0, 3).join(", "), "brief-stale-names");
+    list.setAttribute("translate", "no");
+    line.append(list);
+    if (names.length > 3) line.append(` +${names.length - 3} more`);
+  });
+  line.title = "The brief compares against the merge base; check these against main";
+  return line;
+}
+
+// "Partial facts · N" (#491): what the brief was written without, one line per input, opening below the panel's head. Built with the
+// panel, so it stays open across steps. None when nothing was missing.
+function factsChip(): HTMLElement | null {
+  const lines = partialFactsLines(playing?.brief.partial_facts, playing?.partial ?? false);
+  if (!lines.length) return null;
+  const chip = text("details", "", "brief-facts");
+  const summary = text("summary", `Partial facts · ${lines.length}`);
+  summary.title = "What this brief was written without";
+  const list = text("ul", "", "brief-facts-list");
+  for (const { line, files } of lines) {
+    const item = text("li", line);
+    if (files.length) {
+      const paths = text("ul", "", "brief-facts-files");
+      paths.setAttribute("translate", "no");
+      paths.append(...files.map((path) => text("li", path)));
+      item.append(paths);
+    }
+    list.append(item);
+  }
+  chip.append(summary, list);
+  return chip;
 }
 
 function move(by: number) {
@@ -913,4 +1163,5 @@ const onResize = () => {
   if (view && player.current()) show(view, true);
 };
 
+registerLayer("popover", { open: popoverOpen, close: closePopover });
 registerLayer("brief", { open: briefOpen, close: closeBrief });

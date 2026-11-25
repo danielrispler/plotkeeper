@@ -1,5 +1,6 @@
 // The part sheet of the Map view (spec danielrispler/plotkeeper#306, ticket #310): a click on a plate opens it over the map's right, in the
-// side area's `sheet` slot, in the glass the left panel shares (#385). It holds the part's purpose, then the named things it holds, each with its key files (spec #473), its tier (changed in place), its laws, what it talks to (its links) and its fog, with a quiet
+// side area's `sheet` slot, in the glass the left panel shares (#385). It starts with why its plate carries its marks (#495: fog, staleness,
+// a broken law; `sheetMarks`), then holds the part's purpose, then the named things it holds, each with its key files (spec #473), its tier (changed in place), its laws, what it talks to (its links) and its fog, with a quiet
 // "I know this" that lifts the mist. `map-model.ts`'s `sheetOf` is what it shows; Esc closes it (the `sheet` layer). A fogged part's main
 // button is its part catch-up (#391), or the one PR brief chapter that lights it (`fogActions`); "I know this" is the quiet second.
 //
@@ -18,8 +19,8 @@ import { drawStrip } from "./map-history.js";
 import { overturnNote, ratifyActions } from "./map-ratify.js";
 import { sheetLinkItem, sheetPending, statusWords } from "./ratify.js";
 import { besideSheet } from "./panel.js";
-import { enterRefresher, refresherNode, staleLine } from "./map-stale.js";
-import { ciDrawer, effectiveTier, fogActions, type Part, proofDrawer, type Sheet, sheetCi, sheetOf, talksTo, type Tier } from "./map-model.js";
+import { enterRefresher, refresherNode, staleWhy } from "./map-stale.js";
+import { ciDrawer, effectiveTier, fogActions, type Part, proofDrawer, type Sheet, sheetCi, sheetMarks, sheetOf, talksTo, type Tier } from "./map-model.js";
 import { openBriefOf, openCatchUpOf } from "./map-brief.js";
 import { lawAction, lawActionNodes, patchActs } from "./patch-review.js";
 
@@ -211,7 +212,7 @@ function drawSheet(view: MapView) {
     const main = text("button", label, "btn primary sheet-catch-up") as HTMLButtonElement;
     main.title = title;
     main.addEventListener("click", () => {
-      if (opens.kind === "chapter") return void openBriefOf(view.project, opens.pr, opens.chapter);
+      if (opens.kind === "chapter") return void openBriefOf(view.project, opens.pr, opens.chapter, true);
       void openCatchUpOf(view.project, part.id);
     });
     fog.append(main);
@@ -233,9 +234,7 @@ function drawSheet(view: MapView) {
     });
     fog.append(clear);
   }
-  // A Core part Daniel has not engaged with for weeks says so, and a part with no fog offers the refresher (#392).
-  const stale = staleLine(view, part.id);
-  if (stale) fog.append(stale);
+  // A part with no fog offers the refresher (#392).
   const refresher = !view.scrub && refreshing === part.id ? refresherNode(view, part.id) : null;
   if (!view.scrub && !sheet.canClear && !refresher) {
     const enter = text("button", "Refresher", "btn quiet sheet-refresher") as HTMLButtonElement;
@@ -266,6 +265,7 @@ function drawSheet(view: MapView) {
     closer,
     text("h2", sheet.name, "sheet-name"),
     text("p", sheet.caption, "sheet-caption"),
+    ...(view.scrub ? [] : marksList(view, part.id)),
     // A converted version 1 map may have had an empty description: no empty paragraph for it.
     ...(sheet.purpose ? [text("p", sheet.purpose, "sheet-purpose")] : []),
     ...(sheet.holds.length ? [text("h3", "Holds", "sheet-heading"), heldList(sheet.holds)] : []),
@@ -300,6 +300,30 @@ function drawSheet(view: MapView) {
   slot.append(card);
   drawStrip(view, part.id, extra);
   syncSide(view.slots);
+}
+
+// Why the part's plate carries its marks (#495), first on its sheet: its fog, its staleness band and a broken law, each from this case's
+// facts; nothing when it carries none.
+function marksList(view: MapView, part: string): HTMLElement[] {
+  const shown = view.state.fog?.[part];
+  const stale = staleWhy(view, part);
+  const marks = sheetMarks(part, shown, view.state.user.fog?.parts[part] ?? [], stale?.line, view.state.ci);
+  const rows: HTMLElement[] = [];
+  if (marks.fog) {
+    const row = text("li", "", `sheet-mark sheet-mark-fog ${shown}`);
+    // The line names ids (laws, links, flows, a commit): code tokens, never machine-translated.
+    row.append(Object.assign(text("span", marks.fog.line), { translate: false }));
+    if (marks.fog.more) row.append(text("span", `+${marks.fog.more} more`, "sheet-mark-more"));
+    rows.push(row);
+  }
+  if (marks.stale && stale) rows.push(text("li", marks.stale, `sheet-mark sheet-stale stale-${stale.band}`));
+  if (marks.broken) rows.push(text("li", marks.broken, "sheet-mark sheet-mark-broken"));
+  if (!rows.length) return [];
+  const list = text("ul", "", "sheet-marks");
+  // Safari drops a list's semantics under `list-style: none`; the role brings them back.
+  list.setAttribute("role", "list");
+  list.append(...rows);
+  return [list];
 }
 
 // The things a part holds, each its name, its sentence and its key files.

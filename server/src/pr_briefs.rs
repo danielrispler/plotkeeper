@@ -9,7 +9,7 @@ use crate::App;
 use crate::prs::Ready;
 use serde::Serialize;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     path::Path,
     sync::{Arc, Mutex},
 };
@@ -32,6 +32,15 @@ pub struct BriefInfo {
     pub quiet: bool,
     /// The last write at this head failed (told to the log); opening it tries again.
     pub failed: bool,
+    /// Why the brief at this head is what it is after a push (spec #477, part B): the read carried over, or it was rewritten.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// The title of the "Since you read" story stored for this head (#497), which the tray opens first.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+    /// The story's chapters' titles when it has more than one: one tray row each, so each chapter can be read to its end.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub since_chapters: Vec<String>,
 }
 
 /// What a lookup of a ready PR did.
@@ -47,6 +56,8 @@ pub enum Did {
     Failed,
     /// No part the PR touches would fog at Daniel's tiers, so it gets no brief.
     Quiet,
+    /// The new head carried Daniel's read over (a pure rebase or a push that fogs nothing): the brief is copied to it.
+    Carried,
 }
 
 /// The heads the lookups saw last, per PR, for "the same head at two lookups in a row".
@@ -57,6 +68,10 @@ pub struct Seen {
     quiet: HashSet<(u64, String)>,
     /// The head whose write failed, per PR: it is not retried at every lookup, only when the head changes or Daniel opens the brief.
     failed: HashMap<u64, String>,
+    /// What the push to the head each PR is at did to Daniel's read (spec #477, part B), and whether that is settled: a settled
+    /// verdict is worked out once, an unsettled one again at each ask. Kept in memory, as the rest of `Seen`: after a restart the
+    /// tray's note is gone, while a carried read and its copied brief are on disk.
+    pushes: HashMap<u64, (String, Push, bool)>,
 }
 
 impl Seen {
@@ -67,6 +82,14 @@ impl Seen {
     fn has_failed(&self, pr: u64, head: &str) -> bool {
         self.failed.get(&pr).is_some_and(|h| h == head)
     }
+
+    /// The tray's note for PR `pr` at `head`.
+    fn note(&self, pr: u64, head: &str) -> Option<String> {
+        self.pushes
+            .get(&pr)
+            .filter(|(h, _, _)| h == head)
+            .and_then(|(_, push, _)| push.note())
+    }
 }
 
 /// What writes and keeps the briefs: the writer, the model of the "PR briefs" setting and the store.
@@ -74,6 +97,355 @@ pub struct Writing<'a> {
     pub writer: &'a dyn BriefWriter,
     pub model: &'a str,
     pub store: &'a BriefStore,
+    /// What a new head does to Daniel's read, and carrying it over (spec #477, part B); `None` treats every new head as today.
+    pub reading: Option<&'a dyn Reading>,
+}
+
+/// What a new head H2 does to the brief Daniel read at H1 (spec #477, part B, "Since you read").
+#[derive(Debug, Clone, PartialEq)]
+pub enum Push {
+    /// Fully read at H1, H2 descends from it, and H1..H2 fogs nothing: the read carries over.
+    Quiet,
+    /// Fully read at H1, which still resolves, and the old and new ranges hold the same patches: the read carries over.
+    Rebased,
+    /// Fully read at H1, and H2 only merged the default branch into it: the PR's own commits hold the same patches, so the read
+    /// carries over.
+    Merged,
+    /// Fully read at H1 (held here), H2 descends from it, and H1..H2 fogs something: a "Since you read" story is written from the
+    /// diff H1..H2 (#497), and the full brief at H2 as before.
+    Since(String),
+    /// The full brief is rewritten, with the note that says why; none when nothing of it was read.
+    Rewrite(Option<String>),
+}
+
+impl Push {
+    /// The note the tray row shows while the PR stays at H2.
+    pub fn note(&self) -> Option<String> {
+        match self {
+            Push::Quiet => Some("New push touched nothing on your map".into()),
+            Push::Rebased => Some("Rebased onto main, nothing new in the PR".into()),
+            Push::Merged => Some("Main merged into the branch, nothing new in the PR".into()),
+            Push::Since(_) => None,
+            Push::Rewrite(note) => note.clone(),
+        }
+    }
+
+    fn carries(&self) -> bool {
+        matches!(self, Push::Quiet | Push::Rebased | Push::Merged)
+    }
+}
+
+/// Daniel's read of the briefs, as a new head meets it.
+pub trait Reading {
+    /// What the push from `old`'s head to `head` does to the read of `old`, and whether that is settled (`push_of`).
+    fn push(&self, old: &StoredBrief, head: &str) -> (Push, bool);
+    /// Moves the read of PR `pr` from head `from` to `to` (`fog::carry_read`).
+    fn carry(&self, pr: u64, from: &str, to: &str) -> Result<(), String>;
+    /// What the since story of the push from `from` reads (#497): `full`'s PR, with the diff, map diff and tags from `from` to its head.
+    fn since_source(&self, full: &PrSource, from: &str) -> Result<PrSource, String>;
+}
+
+/// The server's `Reading`: Daniel's state in `file`, `git` in `project`, and its default branch `reference`.
+pub struct GitReading {
+    pub project: String,
+    pub file: std::path::PathBuf,
+    pub reference: Option<String>,
+}
+
+impl Reading for GitReading {
+    fn push(&self, old: &StoredBrief, head: &str) -> (Push, bool) {
+        let user = crate::map::read_user(&self.file, &self.project);
+        let read = user.fog.reads.get(&old.pr);
+        let Some(reference) = &self.reference else {
+            let settled = read.is_some_and(|r| r.fully_read_at(&old.head));
+            let note = partial_note(read, &old.head).or(Some(REBASED.into()));
+            return (Push::Rewrite(note), settled);
+        };
+        push_of(
+            Path::new(&self.project),
+            reference,
+            read,
+            &user.tiers,
+            old.pr,
+            &old.head,
+            head,
+        )
+    }
+
+    fn carry(&self, pr: u64, from: &str, to: &str) -> Result<(), String> {
+        crate::fog::carry_read(&self.file, &self.project, pr, from, to)
+    }
+
+    fn since_source(&self, full: &PrSource, from: &str) -> Result<PrSource, String> {
+        let mut source = gather(
+            Path::new(&self.project),
+            from,
+            &full.meta.head,
+            full.meta.clone(),
+        )?;
+        source.tier_overrides = full.tier_overrides.clone();
+        source.earlier_decisions = full.earlier_decisions.clone();
+        source.since = Some(from.to_string());
+        Ok(source)
+    }
+}
+
+/// The note of a rewrite after Daniel had read only part of the brief at `old`, or none when he had read none of it.
+fn partial_note(read: Option<&crate::fog::PrRead>, old: &str) -> Option<String> {
+    let read = read?;
+    let n = read.chapters.values().filter(|c| c.head == old).count();
+    (n > 0).then(|| format!("{PUSHED}; you had read {n} of {}", read.lit.len()))
+}
+
+const REBASED: &str = "Rewritten: the branch was rebased";
+const PUSHED: &str = "Rewritten after a new push";
+const MERGED: &str = "Rewritten: main was merged into the branch";
+
+/// What the push of PR `pr` from `old` to `new` does to `read`, by `git` in `repo`: `reference` is the default branch the
+/// patch-ids' ranges start from, `tiers` Daniel's, which decide whether H1..H2 fogs something. With it, whether the verdict is
+/// settled: one from a brief not fully read, or from git failing, can change while the PR stays at `new`, so it is worked out again.
+pub fn push_of(
+    repo: &Path,
+    reference: &str,
+    read: Option<&crate::fog::PrRead>,
+    tiers: &std::collections::BTreeMap<String, String>,
+    pr: u64,
+    old: &str,
+    new: &str,
+) -> (Push, bool) {
+    if !read.is_some_and(|r| r.fully_read_at(old)) {
+        return (Push::Rewrite(partial_note(read, old)), false);
+    }
+    let git = |args: &[&str]| crate::map::git(repo, args);
+    if git(&["cat-file", "-e", &format!("{old}^{{commit}}")]).is_err() {
+        return (Push::Rewrite(Some(REBASED.into())), true);
+    }
+    // The PR's own commits at `old` and `new`: the same patches carry the read as `same`; unsettled when git cannot tell.
+    let compare = |same: Push, note: &str| match (
+        patches(repo, reference, old),
+        patches(repo, reference, new),
+    ) {
+        (Some(before), Some(after)) if before == after => (same, true),
+        (Some(_), Some(_)) => (Push::Rewrite(Some(note.into())), true),
+        _ => (Push::Rewrite(Some(note.into())), false),
+    };
+    if git(&["merge-base", "--is-ancestor", old, new]).is_ok() {
+        // The default branch merged into the PR: H1..H2 holds main's changes, so the PR's own commits are compared instead.
+        let base = |head: &str| git(&["merge-base", reference, head]).ok();
+        if base(old) != base(new) {
+            // A merge commit's own edits are in no non-merge patch: the PR's whole diff must match too.
+            return match compare(Push::Merged, MERGED) {
+                (Push::Merged, true) => match (
+                    whole_patch(repo, reference, old),
+                    whole_patch(repo, reference, new),
+                ) {
+                    (Some(before), Some(after)) if before == after => (Push::Merged, true),
+                    (Some(_), Some(_)) => (Push::Rewrite(Some(MERGED.into())), true),
+                    _ => (Push::Rewrite(Some(MERGED.into())), false),
+                },
+                other => other,
+            };
+        }
+        let meta = studio_understanding::pr_brief::PrMeta {
+            number: pr,
+            head: new.to_string(),
+            ..Default::default()
+        };
+        return match gather(repo, old, new, meta).and_then(|mut source| {
+            source.tier_overrides = tiers.clone();
+            fogs_nothing(&source)
+        }) {
+            Ok(true) => (Push::Quiet, true),
+            Ok(false) => (Push::Since(old.to_string()), true),
+            Err(_) => (Push::Rewrite(Some(PUSHED.into())), false),
+        };
+    }
+    compare(Push::Rebased, REBASED)
+}
+
+/// The PR's commits from the merge base with `reference` to `head`, merges left out: their count, and the multiset of their
+/// `git patch-id --stable`, sorted. A commit with an empty diff has no patch-id, so the count is kept apart.
+fn patches(repo: &Path, reference: &str, head: &str) -> Option<(usize, Vec<String>)> {
+    let base = crate::map::git(repo, &["merge-base", reference, head]).ok()?;
+    let range = format!("{base}..{head}");
+    let count = crate::map::git(repo, &["rev-list", "--count", "--no-merges", &range])
+        .ok()?
+        .parse()
+        .ok()?;
+    let mut ids = patch_ids(
+        repo,
+        &[
+            "log",
+            "-p",
+            "--no-merges",
+            "--no-color",
+            "--no-ext-diff",
+            &range,
+        ],
+    )?;
+    ids.sort();
+    Some((count, ids))
+}
+
+/// The `git patch-id --stable` of the PR's whole diff, from its merge base with `reference` to `head`; "" when the diff is empty.
+fn whole_patch(repo: &Path, reference: &str, head: &str) -> Option<String> {
+    let base = crate::map::git(repo, &["merge-base", reference, head]).ok()?;
+    let ids = patch_ids(repo, &["diff", "--no-color", "--no-ext-diff", &base, head])?;
+    Some(ids.into_iter().next().unwrap_or_default())
+}
+
+/// The patch-ids `git patch-id --stable` reads from the output of `git args`, in order.
+fn patch_ids(repo: &Path, args: &[&str]) -> Option<Vec<String>> {
+    let log = std::process::Command::new("git")
+        .args(args)
+        .current_dir(repo)
+        .output()
+        .ok()
+        .filter(|out| out.status.success())?;
+    let mut ids = std::process::Command::new("git")
+        .args(["patch-id", "--stable"])
+        .current_dir(repo)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .ok()?;
+    {
+        use std::io::Write;
+        ids.stdin.take()?.write_all(&log.stdout).ok()?;
+    }
+    let out = ids
+        .wait_with_output()
+        .ok()
+        .filter(|out| out.status.success())?;
+    Some(
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter_map(|line| line.split_whitespace().next().map(String::from))
+            .collect(),
+    )
+}
+
+/// When the PR moved from the newest stored brief's head to `head`, what that push does to Daniel's read, kept in
+/// `seen` (for the tray's note, and for the since story once the full brief at `head` is stored too): worked out once per head when
+/// settled, else again (`push_of`).
+fn push_at(with: &Writing, seen: &Mutex<Seen>, pr: u64, head: &str) -> Option<Push> {
+    let known = seen
+        .lock()
+        .unwrap()
+        .pushes
+        .get(&pr)
+        .filter(|(h, _, settled)| h == head && *settled)
+        .map(|(_, p, _)| p.clone());
+    if known.is_some() {
+        return known;
+    }
+    let reading = with.reading?;
+    let old = with.store.latest(pr).filter(|old| old.head != head)?;
+    let (push, settled) = reading.push(&old, head);
+    seen.lock()
+        .unwrap()
+        .pushes
+        .insert(pr, (head.to_string(), push.clone(), settled));
+    Some(push)
+}
+
+/// A push that carries the read over (`push_at`) moves it and copies the brief to `head`, which is returned. `None`: the brief
+/// is rewritten, as before.
+fn carried(
+    with: &Writing,
+    seen: &Mutex<Seen>,
+    pr: u64,
+    head: &str,
+    mut log: impl FnMut(String),
+) -> Option<StoredBrief> {
+    let reading = with.reading?;
+    if !push_at(with, seen, pr, head)?.carries() {
+        return None;
+    }
+    let old = with.store.latest(pr).filter(|old| old.head != head)?;
+    // The read moves first: a copy whose read did not move would be a brief to read again.
+    let copy = StoredBrief {
+        head: head.to_string(),
+        stale: false,
+        written_at: studio_understanding::millis().max(old.written_at + 1),
+        ..old.clone()
+    };
+    match reading.carry(pr, &old.head, head).and_then(|()| {
+        with.store
+            .put(&copy)
+            .map_err(|e| format!("keep the brief of #{pr}: {e}"))
+    }) {
+        Ok(()) => Some(copy),
+        Err(why) => {
+            log(format!("carry the read over: {why}"));
+            None
+        }
+    }
+}
+
+/// Writes the "Since you read" story of the push from `from` to `full`'s head (#497), stored apart (`BriefStore::since`); its
+/// failure is told to `log` and returned.
+fn write_since(
+    with: &Writing,
+    full: &PrSource,
+    from: &str,
+    mut log: impl FnMut(String),
+) -> Result<StoredBrief, String> {
+    let written = with
+        .reading
+        .ok_or_else(|| "no read to write a since story from".to_string())
+        .and_then(|reading| reading.since_source(full, from))
+        .and_then(|source| write_brief(with, &source, &mut log));
+    if let Err(why) = &written {
+        log(format!("write the since story: {why}"));
+    }
+    written
+}
+
+/// Opening PR `pr` at `head` when the push to it is the since case (#497): its stored "Since you read" story, or one written now
+/// from `source`'s PR. A story written now is told to `landed`, so it opens, and when `landed` says to go on the full brief at
+/// `head` is written after it, as today (`on_open`). `None`: this head has no story, and the full brief opens (`on_open`), as it
+/// does when the story fails.
+pub fn on_open_since(
+    with: &Writing,
+    seen: &Mutex<Seen>,
+    pr: u64,
+    head: &str,
+    source: impl FnOnce() -> Result<PrSource, String>,
+    landed: impl FnOnce() -> bool,
+    log: impl FnMut(String),
+) -> Option<Result<StoredBrief, String>> {
+    if let Some((_, story)) = with.store.since(pr, head) {
+        return Some(Ok(story));
+    }
+    let Some(Push::Since(from)) = push_at(with, seen, pr, head) else {
+        return None;
+    };
+    let full = match source() {
+        Ok(full) => full,
+        Err(why) => return Some(Err(why)),
+    };
+    let mut log = log;
+    let story = write_since(with, &full, &from, &mut log);
+    if story.is_ok() && landed() {
+        // A failure is kept in `seen` (the tray row says so) and told to the log; the story still opens.
+        let _ = on_open(with, seen, pr, head, move || Ok(full), log);
+    }
+    Some(story)
+}
+
+/// The "Since you read" story of PR `pr` at `head` was read to its end (#497): Daniel's read carries over from the head the story runs
+/// from to `head`, every chapter's, the parts they light kept (`Reading::carry`).
+pub fn since_read(
+    store: &BriefStore,
+    reading: &dyn Reading,
+    pr: u64,
+    head: &str,
+) -> Result<(), String> {
+    let (from, _) = store
+        .since(pr, head)
+        .ok_or("that since story is not stored")?;
+    reading.carry(pr, &from, head)
 }
 
 /// The one call into the understanding crate that writes a brief.
@@ -127,13 +499,24 @@ pub fn on_lookup(
     if skip || with.store.get(pr, head).is_some() {
         return Did::Kept;
     }
+    let mut log = log;
+    if carried(with, seen, pr, head, &mut log).is_some() {
+        return Did::Carried;
+    }
     if !again && let Some(old) = with.store.latest(pr) {
         let _ = with.store.mark_stale(pr, &old.head);
         return Did::Staled;
     }
     // The first brief of a ready PR is written at once; a stale one when the same head is seen twice. The write takes minutes and
-    // holds no lock.
-    match write_now(with, source, log) {
+    // holds no lock. In the since case the story is written first, since the tray opens it first (#497).
+    let built = source();
+    if let Ok(full) = &built
+        && with.store.since(pr, head).is_none()
+        && let Some(Push::Since(from)) = push_at(with, seen, pr, head)
+    {
+        let _ = write_since(with, full, &from, &mut log);
+    }
+    match write_now(with, move || built, log) {
         Ok(Some(_)) => Did::Wrote,
         Ok(None) => {
             seen.lock().unwrap().quiet.insert((pr, head.to_string()));
@@ -159,6 +542,10 @@ pub fn on_open(
     match with.store.get(pr, head) {
         Some(stored) if !stored.stale => Ok(stored),
         _ => {
+            let mut log = log;
+            if let Some(copy) = carried(with, seen, pr, head, &mut log) {
+                return Ok(copy);
+            }
             seen.lock().unwrap().failed.remove(&pr);
             write_now(with, source, log)
                 .inspect_err(|_| {
@@ -182,6 +569,141 @@ pub struct BriefView {
     /// The PR matched the project's pre-flight (#394): the parts it expected against the parts the PR touched.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expected: Option<studio_understanding::pre_flight::Expected>,
+    /// What the default branch changed since the PR's merge base that bears on the brief (#494); open PRs only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stale_base: Option<StaleBase>,
+    /// This is a "Since you read" story (#497), of the push from this head to its own; the full brief is one click away.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+}
+
+/// The build manifests at the repository's root whose change on the default branch bears on every brief (#494). A lockfile or a
+/// manifest below the root is not one.
+const ROOT_MANIFESTS: [&str; 4] = [
+    "Cargo.toml",
+    "package.json",
+    "rust-toolchain.toml",
+    "tsconfig.json",
+];
+
+/// What the default branch changed since a PR's merge base that the brief relies on (#494), each list sorted and each id once: the
+/// map's laws, links and flows whose say on a lit part changed, the lit parts whose `paths` changed, and the changed files of lit
+/// parts and root manifests.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct StaleBase {
+    pub laws: Vec<String>,
+    pub links: Vec<String>,
+    pub flows: Vec<String>,
+    pub paths: Vec<String>,
+    pub files: Vec<String>,
+}
+
+/// What the default branch of `repo` changed, by one net diff from the merge base of `head` to its tip, that bears on the parts in
+/// `lit`: none when nothing did, or when git cannot answer.
+pub fn stale_base(repo: &Path, head: &str, lit: &BTreeSet<String>) -> Option<StaleBase> {
+    use crate::map::git;
+    let (tip, _) = crate::map::default_ref(repo)?;
+    let base = git(repo, &["merge-base", &tip, head]).ok()?;
+    let changed = git(repo, &["diff", "--name-only", &base, &tip]).ok()?;
+    let changed: Vec<String> = changed.lines().map(String::from).collect();
+    let map_at = |commit: &str| -> serde_json::Value {
+        git(
+            repo,
+            &["show", &format!("{commit}:{}", system_map::MAP_FILE)],
+        )
+        .ok()
+        .and_then(|text| system_map::convert_value(&text).ok())
+        .unwrap_or_default()
+    };
+    let new_map = map_at(&tip);
+    let mut stale = StaleBase::default();
+    // (i) A changed file a lit part owns by the current map, and (iii) a root build manifest.
+    if let Ok(map) = system_map::parse_lenient(&new_map.to_string()) {
+        let touched = system_map::touched_for_map(&map, &changed);
+        stale.files = touched
+            .parts
+            .into_iter()
+            .filter(|p| lit.contains(&p.id))
+            .flat_map(|p| p.files)
+            .collect();
+    }
+    stale.files.extend(
+        changed
+            .iter()
+            .filter(|path| ROOT_MANIFESTS.contains(&path.as_str()))
+            .cloned(),
+    );
+    // (ii) The map's say on a lit part, read as the brief reads it: laws on it or on a link at it, links at it, flows through those.
+    if changed.iter().any(|path| path == system_map::MAP_FILE) {
+        let old_map = map_at(&base);
+        for part in lit {
+            map_moves(&old_map, &new_map, part, &mut stale);
+        }
+    }
+    for list in [
+        &mut stale.laws,
+        &mut stale.links,
+        &mut stale.flows,
+        &mut stale.paths,
+        &mut stale.files,
+    ] {
+        list.sort();
+        list.dedup();
+    }
+    (stale != StaleBase::default()).then_some(stale)
+}
+
+/// Adds to `stale` what differs between `old` and `new` in the map's say on `part`: an item counts when it is at the part in either
+/// map and its value is not the same in both.
+fn map_moves(old: &serde_json::Value, new: &serde_json::Value, part: &str, stale: &mut StaleBase) {
+    use serde_json::Value;
+    let items =
+        |map: &Value, key: &str| -> Vec<Value> { map[key].as_array().cloned().unwrap_or_default() };
+    let id = |item: &Value| item["id"].as_str().unwrap_or_default().to_string();
+    let links_at = |map: &Value| -> BTreeSet<String> {
+        items(map, "links")
+            .iter()
+            .filter(|l| l["from"] == part || l["to"] == part)
+            .map(id)
+            .collect()
+    };
+    let links: BTreeSet<String> = links_at(old).union(&links_at(new)).cloned().collect();
+    let at = |link: &Value| links.contains(link.as_str().unwrap_or_default());
+    let moved = |key: &str, here: &dyn Fn(&Value) -> bool| -> Vec<String> {
+        let of = |map: &Value| -> HashMap<String, Value> {
+            items(map, key)
+                .into_iter()
+                .filter(|i| here(i))
+                .map(|i| (id(&i), i))
+                .collect()
+        };
+        let (was, now) = (of(old), of(new));
+        was.keys()
+            .chain(now.keys())
+            .filter(|k| was.get(*k) != now.get(*k))
+            .cloned()
+            .collect()
+    };
+    stale
+        .laws
+        .extend(moved("laws", &|l| l["on"] == part || at(&l["on"])));
+    stale.links.extend(moved("links", &|l| at(&l["id"])));
+    stale.flows.extend(moved("flows", &|f| {
+        f["hops"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|h| at(&h["link"]))
+    }));
+    let paths_of = |map: &Value| {
+        items(map, "parts")
+            .into_iter()
+            .find(|p| p["id"] == part)
+            .map(|p| p["paths"].clone())
+    };
+    if paths_of(old) != paths_of(new) {
+        stale.paths.push(part.to_string());
+    }
 }
 
 /// What opening a brief answers: the brief, or that it is being written (it comes through `map-landed`).
@@ -316,8 +838,8 @@ impl PrBriefs {
         ready: &mut [Ready],
     ) {
         let busy = self.busy.lock().unwrap().clone();
+        let seen = self.seen_of(project);
         let (quiet, failed) = {
-            let seen = self.seen_of(project);
             let seen = seen.lock().unwrap();
             (seen.quiet.clone(), seen.failed.clone())
         };
@@ -334,6 +856,9 @@ impl PrBriefs {
                         quiet: true,
                         read: false,
                         failed: false,
+                        note: None,
+                        since: None,
+                        since_chapters: vec![],
                     });
                 }
                 continue;
@@ -342,6 +867,7 @@ impl PrBriefs {
                 .as_ref()
                 .map(|b| chapter_titles(&b.brief))
                 .unwrap_or_default();
+            let story = store.since(pr.number, &pr.head).map(|(_, story)| story);
             pr.brief = Some(BriefInfo {
                 stale: latest
                     .as_ref()
@@ -351,6 +877,13 @@ impl PrBriefs {
                 read: user.is_some_and(|u| crate::fog::fully_read(u, pr.number)),
                 quiet: false,
                 failed,
+                note: seen.lock().unwrap().note(pr.number, &pr.head),
+                since: story.as_ref().map(|story| story.brief.title.clone()),
+                since_chapters: story
+                    .as_ref()
+                    .filter(|story| story.brief.chapters.len() > 1)
+                    .map(|story| chapter_titles(&story.brief))
+                    .unwrap_or_default(),
             });
         }
     }
@@ -426,6 +959,15 @@ pub fn waiting_numbers(
         .filter(|pr| !user.is_some_and(|u| crate::fog::fully_read_at(u, pr.number, &pr.head)))
         .map(|pr| pr.number)
         .collect()
+}
+
+/// Daniel's read of `project`'s briefs, as the lookups and opens meet a new head; `None` without a state file.
+fn reading_of(project: &str) -> Option<GitReading> {
+    Some(GitReading {
+        project: project.to_string(),
+        file: crate::map::state_file().ok()?,
+        reference: crate::map::default_ref(Path::new(project)).map(|(r, _)| r),
+    })
 }
 
 fn user_of(project: &str) -> Option<crate::map::UserState> {
@@ -570,10 +1112,12 @@ pub fn lookup_later(app: &Arc<App>, project: &str, ready: Vec<Ready>) {
             };
             let model = briefs.model();
             let seen = briefs.seen_of(&project);
+            let reading = reading_of(&project);
             let with = Writing {
                 writer: writer.as_ref(),
                 model: &model,
                 store: &store,
+                reading: reading.as_ref().map(|r| r as &dyn Reading),
             };
             let did = on_lookup(
                 &with,
@@ -597,8 +1141,14 @@ pub fn lookup_later(app: &Arc<App>, project: &str, ready: Vec<Ready>) {
 }
 
 /// Opening a PR's brief from the tray: the stored one, or, when it is stale or not written, the write starts in the background and
-/// the answer says it is being written. A merged PR's brief is read as stored.
-pub fn pr_brief(app: &Arc<App>, project: String, number: u64) -> Result<Option<Opened>, String> {
+/// the answer says it is being written. A merged PR's brief is read as stored. An open PR whose head has a "Since you read" story
+/// (#497) opens it first, written first in the since case, unless `full` asks for the full brief.
+pub fn pr_brief(
+    app: &Arc<App>,
+    project: String,
+    number: u64,
+    full: bool,
+) -> Result<Option<Opened>, String> {
     let briefs = &app.briefs;
     let store = store_of(&project).ok_or("no data folder")?;
     let head = app
@@ -610,17 +1160,20 @@ pub fn pr_brief(app: &Arc<App>, project: String, number: u64) -> Result<Option<O
     let Some(head) = head else {
         return Ok(store
             .latest(number)
-            .map(|b| Opened::Brief(Box::new(view_of(&project, &store, b)))));
+            .map(|b| Opened::Brief(Box::new(view_of(&project, &store, b, false)))));
     };
+    if !full && let Some((from, story)) = store.since(number, &head) {
+        return Ok(Some(Opened::Brief(Box::new(since_view(from, story)))));
+    }
     if let Some(stored) = store.get(number, &head).filter(|b| !b.stale) {
         return Ok(Some(Opened::Brief(Box::new(view_of(
-            &project, &store, stored,
+            &project, &store, stored, true,
         )))));
     }
     let Some(writer) = briefs.writer.clone() else {
         return Ok(store
             .latest(number)
-            .map(|b| Opened::Brief(Box::new(view_of(&project, &store, b)))));
+            .map(|b| Opened::Brief(Box::new(view_of(&project, &store, b, true)))));
     };
     let write = {
         let (app, project) = (app.clone(), project.clone());
@@ -628,20 +1181,47 @@ pub fn pr_brief(app: &Arc<App>, project: String, number: u64) -> Result<Option<O
             let briefs = &app.briefs;
             let model = briefs.model();
             let seen = briefs.seen_of(&project);
+            let reading = reading_of(&project);
             let with = Writing {
                 writer: writer.as_ref(),
                 model: &model,
                 store: &store,
+                reading: reading.as_ref().map(|r| r as &dyn Reading),
             };
+            let log = |line: String| log::warn!("pr brief of #{number}: {line}");
+            // In the since case the story is written, and opens; the full brief is written after it, under a claim of its own so
+            // the tray stops saying the story is written. When the story fails, the full brief is written instead.
+            let mut claim = Some(claim);
+            let story = (!full)
+                .then(|| {
+                    on_open_since(
+                        &with,
+                        &seen,
+                        number,
+                        &head,
+                        || source_of(&project, number),
+                        || {
+                            drop(claim.take());
+                            app.events
+                                .emit("map-landed", serde_json::json!(project.clone()));
+                            claim = briefs.claim(&project, number);
+                            claim.is_some()
+                        },
+                        log,
+                    )
+                })
+                .flatten();
             // A failure is kept in `seen` (the tray row says so) and told to the log.
-            let _ = on_open(
-                &with,
-                &seen,
-                number,
-                &head,
-                || source_of(&project, number),
-                |line| log::warn!("pr brief of #{number}: {line}"),
-            );
+            if !matches!(story, Some(Ok(_))) {
+                let _ = on_open(
+                    &with,
+                    &seen,
+                    number,
+                    &head,
+                    || source_of(&project, number),
+                    log,
+                );
+            }
             drop(claim);
             app.events.emit("map-landed", serde_json::json!(project));
         }
@@ -653,8 +1233,9 @@ pub fn pr_brief(app: &Arc<App>, project: String, number: u64) -> Result<Option<O
     Ok(Some(opened))
 }
 
-/// A stored brief as the window plays it, with whether the writer saw all of the diff and the line of a matched pre-flight.
-fn view_of(project: &str, store: &BriefStore, brief: StoredBrief) -> BriefView {
+/// A stored brief as the window plays it, with whether the writer saw all of the diff, the line of a matched pre-flight, and, for an
+/// `open` PR, what the default branch changed since its merge base that bears on the parts it lights (#494).
+fn view_of(project: &str, store: &BriefStore, brief: StoredBrief, open: bool) -> BriefView {
     let partial = store
         .records()
         .iter()
@@ -662,10 +1243,30 @@ fn view_of(project: &str, store: &BriefStore, brief: StoredBrief) -> BriefView {
         .find(|r| r.pr == brief.pr && r.head == brief.head)
         .is_some_and(|r| r.budget.files_cut + r.budget.files_partial > 0);
     let expected = crate::pre_flight::expected(project, brief.pr, &brief);
+    let stale_base = open
+        .then(|| {
+            let lit: BTreeSet<String> = lit_parts(&brief.brief).into_iter().flatten().collect();
+            stale_base(Path::new(project), &brief.head, &lit)
+        })
+        .flatten();
     BriefView {
         brief,
         partial,
         expected,
+        stale_base,
+        since: None,
+    }
+}
+
+/// A "Since you read" story as the window plays it (#497): its own Partial facts (its `partial` flag from them alone, since its record
+/// shares the full brief's head), and the head it runs from. No stale-base line or pre-flight: those are the full brief's.
+fn since_view(from: String, story: StoredBrief) -> BriefView {
+    BriefView {
+        partial: story.partial_facts.cut.is_some(),
+        brief: story,
+        expected: None,
+        stale_base: None,
+        since: Some(from),
     }
 }
 
@@ -693,6 +1294,20 @@ pub fn guard_draft(
         &map_text,
         &brief,
     )
+}
+
+/// PR `number`'s "Since you read" story at `head` was read to its end (#497): the read carries over to `head` (`since_read`).
+pub fn brief_since_done(
+    app: &App,
+    project: String,
+    number: u64,
+    head: String,
+) -> Result<(), String> {
+    let store = store_of(&project).ok_or("no data folder")?;
+    let reading = reading_of(&project).ok_or("no state file")?;
+    since_read(&store, &reading, number, &head)?;
+    app.events.emit("map-landed", serde_json::json!(project));
+    Ok(())
 }
 
 /// Chapter `chapter` of PR `number`'s brief was read to its end (the page saw its last step, focused, and the check was answered): the
@@ -742,6 +1357,216 @@ mod tests {
         }
     }
 
+    /// The map of the stale-base tests: `alpha` is lit; the link `ab` is at it, `bg` is not; `f1` runs through `ab`, `f2` only
+    /// through `bg`; `law-ab` sits on the link at it.
+    fn stale_map() -> serde_json::Value {
+        serde_json::json!({ "version": 2,
+          "parts": [
+            { "id": "alpha", "name": "Alpha", "caption": "c", "purpose": "p", "holds": [], "tier": "core", "paths": ["alpha/"] },
+            { "id": "beta", "name": "Beta", "caption": "c", "purpose": "p", "holds": [], "tier": "core", "paths": ["beta/"] },
+            { "id": "gamma", "name": "Gamma", "caption": "c", "purpose": "p", "holds": [], "tier": "core", "paths": ["gamma/"] }],
+          "actors": [],
+          "links": [
+            { "id": "ab", "from": "alpha", "to": "beta", "kind": "import", "reason": "Alpha calls beta." },
+            { "id": "bg", "from": "beta", "to": "gamma", "kind": "import", "reason": "Beta calls gamma." }],
+          "ignored": ["tools/"],
+          "laws": [
+            { "id": "law-a", "on": "alpha", "backing": "trust", "text": "Alpha keeps order." },
+            { "id": "law-ab", "on": "ab", "backing": "trust", "text": "The wire agrees." },
+            { "id": "law-g", "on": "gamma", "backing": "trust", "text": "Gamma keeps order." }],
+          "flows": [
+            { "id": "f1", "name": "One", "hops": [{ "link": "ab", "text": "Alpha asks beta." }] },
+            { "id": "f2", "name": "Two", "hops": [{ "link": "bg", "text": "Beta asks gamma." }] }] })
+    }
+
+    fn put(dir: &Path, path: &str, text: &str) {
+        let file = dir.join(path);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, text).unwrap();
+    }
+
+    /// A repository whose PR changed `alpha` off the merge base, and whose `main` then wrote `files` and the map `change` made: its
+    /// folder, and the PR's head.
+    fn moved_main(
+        files: &[&str],
+        change: impl FnOnce(&mut serde_json::Value),
+    ) -> (tempfile::TempDir, String) {
+        use studio_test_support::{git, repo};
+        let (dir, _) = repo();
+        let at = dir.path();
+        let mut map = stale_map();
+        put(at, "system-map.json", &map.to_string());
+        for path in [
+            "alpha/a.rs",
+            "beta/b.rs",
+            "beta/package.json",
+            "gamma/g.rs",
+            "tools/Cargo.toml",
+            "Cargo.toml",
+            "Cargo.lock",
+            "package.json",
+            "package-lock.json",
+            "rust-toolchain.toml",
+            "tsconfig.json",
+        ] {
+            put(at, path, "one\n");
+        }
+        git(at, &["add", "-A"]);
+        git(at, &["commit", "-q", "-m", "base"]);
+        git(at, &["checkout", "-q", "-b", "pr"]);
+        put(at, "alpha/a.rs", "the PR\n");
+        git(at, &["commit", "-q", "-am", "the PR"]);
+        let head = git(at, &["rev-parse", "HEAD"]);
+        git(at, &["checkout", "-q", "main"]);
+        for path in files {
+            put(at, path, "main moved\n");
+        }
+        change(&mut map);
+        put(at, "system-map.json", &map.to_string());
+        git(at, &["add", "-A"]);
+        git(at, &["commit", "-q", "--allow-empty", "-m", "main moved"]);
+        (dir, head)
+    }
+
+    fn stale_of(files: &[&str], change: impl FnOnce(&mut serde_json::Value)) -> Option<StaleBase> {
+        let (dir, head) = moved_main(files, change);
+        stale_base(dir.path(), &head, &BTreeSet::from(["alpha".to_string()]))
+    }
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn main_changing_a_file_of_a_lit_part_names_the_file() {
+        assert_eq!(
+            stale_of(&["alpha/new.rs", "beta/b.rs"], |_| {}),
+            Some(StaleBase {
+                files: names(&["alpha/new.rs"]),
+                ..StaleBase::default()
+            })
+        );
+    }
+
+    #[test]
+    fn main_changing_the_map_at_a_lit_part_names_each_law_link_flow_and_paths_that_moved() {
+        let law = stale_of(&[], |m| {
+            m["laws"][0]["text"] = "Alpha keeps a new order.".into()
+        });
+        assert_eq!(law.map(|s| s.laws), Some(names(&["law-a"])));
+        // A law on a link at the lit part is the brief's reading, not fog's.
+        let on_link = stale_of(&[], |m| {
+            m["laws"][1]["text"] = "The wire agrees again.".into()
+        });
+        assert_eq!(on_link.map(|s| s.laws), Some(names(&["law-ab"])));
+        let link = stale_of(&[], |m| {
+            m["links"][0]["reason"] = "Alpha now asks beta.".into()
+        });
+        assert_eq!(
+            link,
+            Some(StaleBase {
+                links: names(&["ab"]),
+                ..StaleBase::default()
+            })
+        );
+        let flow = stale_of(&[], |m| {
+            m["flows"][0]["hops"][0]["text"] = "Alpha tells beta.".into()
+        });
+        assert_eq!(flow.map(|s| s.flows), Some(names(&["f1"])));
+        let paths = stale_of(&[], |m| {
+            m["parts"][0]["paths"] = serde_json::json!(["alpha/", "extra/"])
+        });
+        assert_eq!(paths.map(|s| s.paths), Some(names(&["alpha"])));
+        // A law added on the lit part moved too.
+        let added = stale_of(&[], |m| {
+            m["laws"].as_array_mut().unwrap().push(
+                serde_json::json!({ "id": "law-new", "on": "alpha", "backing": "trust", "text": "New." }),
+            )
+        });
+        assert_eq!(added.map(|s| s.laws), Some(names(&["law-new"])));
+    }
+
+    #[test]
+    fn main_changing_a_root_build_manifest_names_it() {
+        assert_eq!(
+            stale_of(
+                &[
+                    "Cargo.toml",
+                    "package.json",
+                    "rust-toolchain.toml",
+                    "tsconfig.json"
+                ],
+                |_| {}
+            ),
+            Some(StaleBase {
+                files: names(&[
+                    "Cargo.toml",
+                    "package.json",
+                    "rust-toolchain.toml",
+                    "tsconfig.json"
+                ]),
+                ..StaleBase::default()
+            })
+        );
+    }
+
+    #[test]
+    fn lockfiles_and_manifests_below_the_root_are_no_stale_base() {
+        assert_eq!(
+            stale_of(
+                &[
+                    "Cargo.lock",
+                    "package-lock.json",
+                    "tools/Cargo.toml",
+                    "beta/package.json"
+                ],
+                |_| {}
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn main_moving_only_elsewhere_is_no_stale_base() {
+        let elsewhere = stale_of(&["beta/b.rs", "gamma/g.rs"], |m| {
+            m["laws"][2]["text"] = "Gamma keeps a new order.".into();
+            m["links"][1]["reason"] = "Beta now asks gamma.".into();
+            m["flows"][1]["hops"][0]["text"] = "Beta tells gamma.".into();
+            m["parts"][1]["paths"] = serde_json::json!(["beta/", "more/"]);
+        });
+        assert_eq!(elsewhere, None);
+    }
+
+    #[test]
+    fn a_merged_prs_brief_gets_no_stale_base_and_an_open_ones_does() {
+        let (dir, head) = moved_main(&["alpha/new.rs"], |_| {});
+        let data = tempfile::tempdir().unwrap();
+        let store = BriefStore::open(data.path()).unwrap();
+        let mut stored = StoredBrief {
+            pr: 7,
+            head,
+            ..StoredBrief::default()
+        };
+        stored.brief.chapters = vec![studio_understanding::pr_brief::Chapter {
+            steps: vec![studio_understanding::pr_brief::Step {
+                on: vec!["alpha".into()],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }];
+        let project = dir.path().display().to_string();
+        assert_eq!(
+            view_of(&project, &store, stored.clone(), false).stale_base,
+            None
+        );
+        assert_eq!(
+            view_of(&project, &store, stored, true)
+                .stale_base
+                .map(|s| s.files),
+            Some(names(&["alpha/new.rs"]))
+        );
+    }
+
     struct Fake(Cell<usize>, RefCell<Vec<String>>);
     impl Fake {
         fn new() -> Self {
@@ -764,6 +1589,7 @@ mod tests {
             writer: fake,
             model: "opus",
             store,
+            reading: None,
         };
         on_lookup(&with, seen, 7, head, || Ok(source(head)), |_| {})
     }
@@ -810,6 +1636,7 @@ mod tests {
             writer: &fake,
             model: "opus",
             store: &store,
+            reading: None,
         };
         let open = |head: &str| on_open(&with, &seen, 7, head, || Ok(source(head)), |_| {});
         assert_eq!(open("aaa").unwrap().head, "aaa");
@@ -841,6 +1668,7 @@ mod tests {
             writer: &fake,
             model: "opus",
             store: &store,
+            reading: None,
         };
         let black = MAP.replace("\"core\"", "\"black-box\"");
         let interface = MAP.replace("\"core\"", "\"interface\"");
@@ -878,6 +1706,7 @@ mod tests {
             writer: &fake,
             model: "opus",
             store: &store,
+            reading: None,
         };
         let black = MAP.replace("\"core\"", "\"black-box\"");
         let gathered = Cell::new(0);
@@ -911,6 +1740,7 @@ mod tests {
             writer: &fake,
             model: "opus",
             store: &store,
+            reading: None,
         };
         let black = MAP.replace("\"core\"", "\"black-box\"");
         let opened = on_open(
@@ -947,6 +1777,7 @@ mod tests {
             writer: &fake,
             model: "opus",
             store: &store,
+            reading: None,
         };
         on_lookup(&with, &seen, 7, "aaa", || Ok(source("aaa")), |_| {});
         // #8 has none yet; #7 does; the stale one still waits.
@@ -970,6 +1801,7 @@ mod tests {
             writer: &fake,
             model: "opus",
             store: &store,
+            reading: None,
         };
         let did = on_lookup(
             &with,
@@ -1059,6 +1891,7 @@ mod tests {
                     writer: &blocking,
                     model: "opus",
                     store: &store,
+                    reading: None,
                 };
                 on_lookup(&with, &seen, 7, "aaa", || Ok(source("aaa")), |_| {});
                 briefs.busy("/p", 7, false);
@@ -1130,6 +1963,7 @@ mod tests {
             writer: &fake,
             model: "opus",
             store: &store,
+            reading: None,
         };
         let failed = |pr: u64, head: &str| {
             let mut tray = [ready_pr(pr, head)];
@@ -1157,6 +1991,7 @@ mod tests {
             writer: &fake,
             model: "opus",
             store: &store,
+            reading: None,
         };
         let sourced = Cell::new(0);
         let failing = || {
@@ -1374,5 +2209,517 @@ mod tests {
         // The first lookup that answers is the start: every head is old, so all wait to be opened.
         let first = startup.allowed("/p", true, &ready, &old, NOW, 2 * HOUR, &|_| false);
         assert!(first.is_empty(), "the start cap still holds: {first:?}");
+    }
+
+    // ---- Since you read: a new head after a full read (spec #477, part B).
+
+    const REPO_MAP: &str = r#"{ "version": 1,
+      "parts": [{ "id": "alpha", "name": "Alpha", "caption": "c", "description": "d", "tier": "core", "paths": ["alpha/"] }],
+      "actors": [], "links": [], "ignored": ["docs/"], "laws": [], "flows": [] }"#;
+
+    /// A repository whose `main` holds the map and alpha's file, and a PR branch `pr` with one commit on alpha.
+    struct Repo {
+        dir: tempfile::TempDir,
+        path: String,
+    }
+    impl Repo {
+        fn new() -> Repo {
+            let (dir, path) = studio_test_support::repo();
+            let repo = Repo { dir, path };
+            repo.commit(&[
+                ("system-map.json", REPO_MAP),
+                ("alpha/a.rs", "1"),
+                ("docs/d.md", "1"),
+            ]);
+            repo.git(&["checkout", "-q", "-b", "pr"]);
+            repo.commit(&[("alpha/a.rs", "2")]);
+            repo
+        }
+        fn git(&self, args: &[&str]) -> String {
+            studio_test_support::git(self.dir.path(), args)
+        }
+        fn commit(&self, files: &[(&str, &str)]) -> String {
+            for (name, text) in files {
+                let path = self.dir.path().join(name);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, text).unwrap();
+            }
+            self.git(&["add", "-A"]);
+            self.git(&["commit", "-q", "-m", "change"]);
+            self.head()
+        }
+        fn head(&self) -> String {
+            self.git(&["rev-parse", "HEAD"])
+        }
+        /// Main moves on with a commit of its own, and the branch is rebased onto it.
+        fn rebase(&self) -> String {
+            self.git(&["checkout", "-q", "main"]);
+            self.commit(&[("docs/main.md", "main")]);
+            self.git(&["checkout", "-q", "pr"]);
+            self.git(&["rebase", "-q", "main"]);
+            self.head()
+        }
+        fn push(&self, read: Option<&crate::fog::PrRead>, old: &str, new: &str) -> Push {
+            push_of(
+                Path::new(&self.path),
+                "main",
+                read,
+                &Default::default(),
+                7,
+                old,
+                new,
+            )
+            .0
+        }
+    }
+
+    /// A read of a brief of `chapters` chapters, each lighting alpha, with chapter `i` read at `heads[i]` (none for "").
+    fn read_of(chapters: usize, heads: &[&str]) -> crate::fog::PrRead {
+        let mut read = crate::fog::PrRead {
+            lit: (0..chapters).map(|_| vec!["alpha".to_string()]).collect(),
+            ..Default::default()
+        };
+        for (i, head) in heads.iter().enumerate().filter(|(_, h)| !h.is_empty()) {
+            read.chapters.insert(
+                i,
+                crate::fog::ChapterRead {
+                    head: head.to_string(),
+                    at: 1 + i as u64,
+                },
+            );
+        }
+        read
+    }
+
+    #[test]
+    fn a_push_after_a_full_read_that_fogs_nothing_carries_the_read_over() {
+        let repo = Repo::new();
+        let h1 = repo.head();
+        let h2 = repo.commit(&[("docs/d.md", "2")]);
+        let push = repo.push(Some(&read_of(1, &[&h1])), &h1, &h2);
+        assert_eq!(push, Push::Quiet);
+        assert_eq!(
+            push.note().as_deref(),
+            Some("New push touched nothing on your map")
+        );
+    }
+
+    #[test]
+    fn a_push_after_a_full_read_that_fogs_something_is_the_since_case() {
+        let repo = Repo::new();
+        let h1 = repo.head();
+        let h2 = repo.commit(&[("alpha/a.rs", "3")]);
+        assert_eq!(
+            repo.push(Some(&read_of(1, &[&h1])), &h1, &h2),
+            Push::Since(h1.clone())
+        );
+    }
+
+    #[test]
+    fn a_pure_rebase_after_a_full_read_carries_the_read_over() {
+        let repo = Repo::new();
+        let h1 = repo.head();
+        let h2 = repo.rebase();
+        assert_ne!(h1, h2);
+        let push = repo.push(Some(&read_of(1, &[&h1])), &h1, &h2);
+        assert_eq!(push, Push::Rebased);
+        assert_eq!(
+            push.note().as_deref(),
+            Some("Rebased onto main, nothing new in the PR")
+        );
+    }
+
+    #[test]
+    fn a_rebase_that_drops_or_changes_a_commit_rewrites_the_brief() {
+        let repo = Repo::new();
+        repo.commit(&[("alpha/b.rs", "1")]);
+        let h1 = repo.head();
+        let read = read_of(1, &[&h1]);
+        // The branch is rebuilt on a moved main with only its second commit: the counts differ.
+        repo.git(&["checkout", "-q", "main"]);
+        repo.commit(&[("docs/main.md", "main")]);
+        repo.git(&["checkout", "-q", "-B", "pr"]);
+        repo.git(&["cherry-pick", &h1]);
+        let dropped = repo.head();
+        assert_eq!(
+            repo.push(Some(&read), &h1, &dropped),
+            Push::Rewrite(Some(REBASED.into()))
+        );
+        // The branch rebuilt with as many commits, one of them a different patch.
+        repo.git(&["checkout", "-q", "-B", "pr", "main"]);
+        repo.commit(&[("alpha/a.rs", "other")]);
+        let changed = repo.commit(&[("alpha/b.rs", "1")]);
+        assert_eq!(
+            repo.push(Some(&read), &h1, &changed),
+            Push::Rewrite(Some(REBASED.into()))
+        );
+    }
+
+    #[test]
+    fn merging_main_into_the_branch_is_judged_by_the_prs_own_commits_not_mains() {
+        let repo = Repo::new();
+        let h1 = repo.head();
+        let read = read_of(1, &[&h1]);
+        // Main changes alpha, which would fog, and is merged into the branch: the PR's own commits are as they were.
+        repo.git(&["checkout", "-q", "main"]);
+        repo.commit(&[("alpha/main.rs", "main")]);
+        repo.git(&["checkout", "-q", "pr"]);
+        repo.git(&["merge", "-q", "--no-edit", "main"]);
+        let merged = repo.head();
+        let push = repo.push(Some(&read), &h1, &merged);
+        assert_eq!(push, Push::Merged);
+        assert_eq!(
+            push.note().as_deref(),
+            Some("Main merged into the branch, nothing new in the PR")
+        );
+        // A merge that also edits the PR's own file: its non-merge commits are the same, but the PR's diff is not.
+        repo.git(&["reset", "-q", "--hard", &h1]);
+        repo.git(&["merge", "-q", "--no-commit", "main"]);
+        std::fs::write(repo.dir.path().join("alpha/a.rs"), "edited in the merge").unwrap();
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "--no-edit"]);
+        let edited = repo.head();
+        assert_eq!(
+            repo.push(Some(&read), &h1, &edited),
+            Push::Rewrite(Some(MERGED.into()))
+        );
+        repo.git(&["reset", "-q", "--hard", &merged]);
+        // A commit of the PR's own on top of the merge: the full brief is rewritten, saying why.
+        let more = repo.commit(&[("alpha/a.rs", "3")]);
+        assert_eq!(
+            repo.push(Some(&read), &h1, &more),
+            Push::Rewrite(Some(MERGED.into()))
+        );
+    }
+
+    #[test]
+    fn a_push_whose_diff_cannot_be_gathered_rewrites_a_read_brief_with_a_note() {
+        let repo = Repo::new();
+        let h1 = repo.head();
+        // The new head's map does not parse, so what the push fogs cannot be told.
+        let h2 = repo.commit(&[("system-map.json", "{ not a map")]);
+        assert_eq!(
+            repo.push(Some(&read_of(1, &[&h1])), &h1, &h2),
+            Push::Rewrite(Some("Rewritten after a new push".into()))
+        );
+    }
+
+    #[test]
+    fn a_missing_old_head_rewrites_the_brief() {
+        let repo = Repo::new();
+        let gone = "0".repeat(40);
+        let h2 = repo.head();
+        assert_eq!(
+            repo.push(Some(&read_of(1, &[&gone])), &gone, &h2),
+            Push::Rewrite(Some(REBASED.into()))
+        );
+    }
+
+    #[test]
+    fn a_partial_read_rewrites_the_brief_and_says_how_much_was_read() {
+        let repo = Repo::new();
+        let h0 = repo.git(&["rev-parse", "HEAD~1"]);
+        let h1 = repo.head();
+        let h2 = repo.commit(&[("docs/d.md", "2")]);
+        let note = |read: &crate::fog::PrRead| repo.push(Some(read), &h1, &h2);
+        let one_of_two = Push::Rewrite(Some(
+            "Rewritten after a new push; you had read 1 of 2".into(),
+        ));
+        assert_eq!(note(&read_of(2, &[&h1, ""])), one_of_two);
+        // The lit parts did not change, so an earlier chapter's read stayed at its old head: not fully read at H1.
+        assert_eq!(note(&read_of(2, &[&h0, &h1])), one_of_two);
+        // Nothing read: the rewrite has no note.
+        assert_eq!(note(&read_of(2, &[])), Push::Rewrite(None));
+        assert_eq!(repo.push(None, &h1, &h2), Push::Rewrite(None));
+    }
+
+    /// Daniel's read kept in a state file, as the server's `Reading`.
+    struct Rig {
+        repo: Repo,
+        state: tempfile::TempDir,
+        store_dir: tempfile::TempDir,
+    }
+    impl Rig {
+        fn new() -> Rig {
+            Rig {
+                repo: Repo::new(),
+                state: tempfile::tempdir().unwrap(),
+                store_dir: tempfile::tempdir().unwrap(),
+            }
+        }
+        fn reading(&self) -> GitReading {
+            GitReading {
+                project: self.repo.path.clone(),
+                file: self.state.path().join("map-state.json"),
+                reference: Some("main".into()),
+            }
+        }
+        fn user(&self) -> crate::map::UserState {
+            crate::map::read_user(&self.reading().file, &self.repo.path)
+        }
+    }
+
+    #[test]
+    fn after_a_carry_over_the_pr_stops_waiting_and_the_next_lookup_keeps_the_copied_brief() {
+        let rig = Rig::new();
+        let store = BriefStore::open(rig.store_dir.path()).unwrap();
+        let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+        let reading = rig.reading();
+        let with = Writing {
+            writer: &fake,
+            model: "opus",
+            store: &store,
+            reading: Some(&reading),
+        };
+        let look = |head: &str| on_lookup(&with, &seen, 7, head, || Ok(source(head)), |_| {});
+        let h1 = rig.repo.head();
+        assert_eq!(look(&h1), Did::Wrote);
+        let calls = fake.0.get();
+        let lit = lit_parts(&store.get(7, &h1).unwrap().brief);
+        crate::fog::mark_read(&reading.file, &rig.repo.path, 7, 0, &h1, lit.clone(), 1).unwrap();
+        let h2 = rig.repo.rebase();
+        assert_eq!(look(&h2), Did::Carried);
+        let copied = store
+            .get(7, &h2)
+            .expect("the brief is copied to the new head");
+        assert_eq!((copied.head.as_str(), copied.stale), (h2.as_str(), false));
+        assert_eq!(store.latest(7).unwrap().head, h2);
+        assert_eq!(rig.user().fog.reads[&7].lit, lit, "the lit parts are kept");
+        assert!(waiting_numbers(&store, &[ready_pr(7, &h2)], Some(&rig.user())).is_empty());
+        assert_eq!(look(&h2), Did::Kept);
+        assert_eq!(look(&h2), Did::Kept);
+        assert_eq!(fake.0.get(), calls, "the writer was not asked again");
+        // The tray says why the read carried over.
+        let briefs = PrBriefs::new(None);
+        *briefs.seen_of("/p").lock().unwrap() = std::mem::take(&mut *seen.lock().unwrap());
+        let mut tray = [ready_pr(7, &h2)];
+        briefs.annotate_with("/p", &store, Some(&rig.user()), &mut tray);
+        let info = tray[0].brief.clone().unwrap();
+        assert_eq!(
+            info.note.as_deref(),
+            Some("Rebased onto main, nothing new in the PR")
+        );
+        assert!(info.read && !info.stale);
+    }
+
+    #[test]
+    fn a_push_that_does_not_carry_stales_the_brief_as_before_and_the_tray_says_why() {
+        let rig = Rig::new();
+        let store = BriefStore::open(rig.store_dir.path()).unwrap();
+        let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+        let reading = rig.reading();
+        let with = Writing {
+            writer: &fake,
+            model: "opus",
+            store: &store,
+            reading: Some(&reading),
+        };
+        let h1 = rig.repo.head();
+        on_lookup(&with, &seen, 7, &h1, || Ok(source(&h1)), |_| {});
+        let h2 = rig.repo.rebase();
+        // Never read: the brief is rewritten, with no note.
+        assert_eq!(
+            on_lookup(&with, &seen, 7, &h2, || Ok(source(&h2)), |_| {}),
+            Did::Staled
+        );
+        let opened = on_open(&with, &seen, 7, &h2, || Ok(source(&h2)), |_| {}).unwrap();
+        assert_eq!(opened.head, h2);
+        // Read in full at H2, then a push the branch does not descend from.
+        let lit = lit_parts(&opened.brief);
+        crate::fog::mark_read(&reading.file, &rig.repo.path, 7, 0, &h2, lit, 2).unwrap();
+        rig.repo.git(&["checkout", "-q", "-B", "pr", "main"]);
+        let h3 = rig.repo.commit(&[("alpha/a.rs", "4")]);
+        assert_eq!(
+            on_lookup(&with, &seen, 7, &h3, || Ok(source(&h3)), |_| {}),
+            Did::Staled
+        );
+        let briefs = PrBriefs::new(None);
+        *briefs.seen_of("/p").lock().unwrap() = std::mem::take(&mut *seen.lock().unwrap());
+        let mut tray = [ready_pr(7, &h3)];
+        briefs.annotate_with("/p", &store, Some(&rig.user()), &mut tray);
+        assert_eq!(
+            tray[0].brief.clone().unwrap().note.as_deref(),
+            Some(REBASED)
+        );
+    }
+
+    #[test]
+    fn a_read_finished_at_the_old_head_after_a_push_was_judged_still_carries_over() {
+        let rig = Rig::new();
+        let store = BriefStore::open(rig.store_dir.path()).unwrap();
+        let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+        let reading = rig.reading();
+        let with = Writing {
+            writer: &fake,
+            model: "opus",
+            store: &store,
+            reading: Some(&reading),
+        };
+        let h1 = rig.repo.head();
+        on_lookup(&with, &seen, 7, &h1, || Ok(source(&h1)), |_| {});
+        let lit = vec![vec!["alpha".to_string()], vec!["alpha".to_string()]];
+        let read = |chapter| {
+            crate::fog::mark_read(
+                &reading.file,
+                &rig.repo.path,
+                7,
+                chapter,
+                &h1,
+                lit.clone(),
+                1,
+            )
+            .unwrap()
+        };
+        read(0);
+        // A push that fogs nothing, seen while one chapter of two is read: the brief would be rewritten.
+        let h2 = rig.repo.commit(&[("docs/d.md", "2")]);
+        assert_eq!(
+            on_lookup(&with, &seen, 7, &h2, || Ok(source(&h2)), |_| {}),
+            Did::Staled
+        );
+        // Daniel finishes the brief at H1 before it is rewritten: the read carries over.
+        read(1);
+        assert_eq!(
+            on_lookup(&with, &seen, 7, &h2, || Ok(source(&h2)), |_| {}),
+            Did::Carried
+        );
+    }
+
+    // ---- The since story (#497).
+
+    #[test]
+    fn a_push_that_fogs_something_after_a_full_read_writes_a_since_story_apart_and_the_full_brief_as_before()
+     {
+        let rig = Rig::new();
+        let store = BriefStore::open(rig.store_dir.path()).unwrap();
+        let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+        let reading = rig.reading();
+        let with = Writing {
+            writer: &fake,
+            model: "opus",
+            store: &store,
+            reading: Some(&reading),
+        };
+        let look = |head: &str| on_lookup(&with, &seen, 7, head, || Ok(source(head)), |_| {});
+        let h1 = rig.repo.head();
+        assert_eq!(look(&h1), Did::Wrote);
+        let lit = lit_parts(&store.get(7, &h1).unwrap().brief);
+        crate::fog::mark_read(&reading.file, &rig.repo.path, 7, 0, &h1, lit, 1).unwrap();
+        let h2 = rig.repo.commit(&[("alpha/a.rs", "3")]);
+        assert_eq!(look(&h2), Did::Staled);
+        assert_eq!(look(&h2), Did::Wrote);
+        let (from, story) = store.since(7, &h2).expect("the since story is stored");
+        assert_eq!(
+            (from.as_str(), story.head.as_str()),
+            (h1.as_str(), h2.as_str())
+        );
+        assert_eq!(
+            store.latest(7).unwrap().head,
+            h2,
+            "the latest brief is the full one at H2"
+        );
+        assert!(store.get(7, &h2).is_some());
+        // The tray opens the story first.
+        let briefs = PrBriefs::new(None);
+        *briefs.seen_of("/p").lock().unwrap() = std::mem::take(&mut *seen.lock().unwrap());
+        let mut tray = [ready_pr(7, &h2)];
+        briefs.annotate_with("/p", &store, Some(&rig.user()), &mut tray);
+        let info = tray[0].brief.clone().unwrap();
+        assert_eq!(info.since.as_deref(), Some("Alpha"));
+        assert!(info.since_chapters.is_empty(), "a single story has one row");
+        // A story of two chapters has a tray row for each.
+        let mut two = story.clone();
+        let chapter = two.brief.chapters[0].clone();
+        two.brief.chapters = vec![
+            studio_understanding::pr_brief::Chapter {
+                title: "The read".into(),
+                ..chapter.clone()
+            },
+            studio_understanding::pr_brief::Chapter {
+                title: "The fog".into(),
+                ..chapter
+            },
+        ];
+        store.put_since(&from, &two).unwrap();
+        briefs.annotate_with("/p", &store, Some(&rig.user()), &mut tray);
+        assert_eq!(
+            tray[0].brief.clone().unwrap().since_chapters,
+            ["The read", "The fog"]
+        );
+    }
+
+    #[test]
+    fn opening_the_since_case_writes_the_story_first_and_reading_it_to_the_end_carries_every_chapters_read_over()
+     {
+        let rig = Rig::new();
+        let store = BriefStore::open(rig.store_dir.path()).unwrap();
+        let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+        let reading = rig.reading();
+        let with = Writing {
+            writer: &fake,
+            model: "opus",
+            store: &store,
+            reading: Some(&reading),
+        };
+        let h1 = rig.repo.head();
+        on_lookup(&with, &seen, 7, &h1, || Ok(source(&h1)), |_| {});
+        // A brief of two chapters, both read at H1.
+        let lit = vec![vec!["alpha".to_string()], vec!["alpha".to_string()]];
+        for chapter in 0..2 {
+            crate::fog::mark_read(
+                &reading.file,
+                &rig.repo.path,
+                7,
+                chapter,
+                &h1,
+                lit.clone(),
+                1,
+            )
+            .unwrap();
+        }
+        let h2 = rig.repo.commit(&[("alpha/a.rs", "3")]);
+        assert_eq!(
+            on_lookup(&with, &seen, 7, &h2, || Ok(source(&h2)), |_| {}),
+            Did::Staled
+        );
+        let landed = Cell::new(false);
+        let story = on_open_since(
+            &with,
+            &seen,
+            7,
+            &h2,
+            || Ok(source(&h2)),
+            || {
+                // The story opens before the full brief is written.
+                assert!(store.since(7, &h2).is_some() && store.get(7, &h2).is_none());
+                landed.set(true);
+                true
+            },
+            |_| {},
+        )
+        .expect("the since case has a story")
+        .unwrap();
+        assert!(landed.get(), "the story was told before the full brief");
+        assert_eq!(store.since(7, &h2).map(|(from, _)| from), Some(h1.clone()));
+        assert_eq!(story.head, h2);
+        assert!(
+            store.get(7, &h2).is_some_and(|b| !b.stale),
+            "the full brief at H2 is written after the story"
+        );
+        // Opened again, the stored story is read as it is.
+        let calls = fake.0.get();
+        on_open_since(&with, &seen, 7, &h2, || Ok(source(&h2)), || true, |_| {});
+        assert_eq!(fake.0.get(), calls);
+        // Not read yet: the PR still waits at H2.
+        assert!(!crate::fog::fully_read_at(&rig.user(), 7, &h2));
+        since_read(&store, &reading, 7, &h2).unwrap();
+        let read = &rig.user().fog.reads[&7];
+        assert_eq!(read.lit, lit, "the lit parts are kept");
+        assert!(
+            read.fully_read_at(&h2),
+            "both chapters moved to H2: {read:?}"
+        );
+        // A head with no story carries nothing.
+        assert!(since_read(&store, &reading, 7, &h1).is_err());
     }
 }

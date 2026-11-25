@@ -371,9 +371,12 @@ export type Work = {
 export type FogState = {
   first: string | null;
   processed: string | null;
-  parts: Record<string, { commit: string; strength: Fog }[]>;
+  parts: Record<string, FogEntry[]>;
   reads: Record<string, { lit: string[][]; chapters: Record<string, { head: string; at: number }> }>;
 };
+// One commit Daniel has not caught up on, on one part: the PR its subject names, and why it fogs the part (`fog::Change`: "added",
+// "paths", `law <id>`, `link <id>`, `flow <id>`, a changed word such as "caption", and `N files`); an entry filed before #495 has neither.
+export type FogEntry = { commit: string; strength: Fog; pr: number | null; why: string[] };
 // The map's camera (#383): a world point `p` shows at `p * scale + (x, y)` in the map area.
 export type Camera = { scale: number; x: number; y: number };
 // `view`: the project's saved camera, none until it was first moved.
@@ -403,6 +406,9 @@ export type MapState = {
   catch_ups: Record<string, CatchUpOffer>;
   // The staleness band (1 to 3) of each Core part not engaged with for 3, 6 or 12 weeks (`staleness.rs`); a part not listed is not stale.
   stale: Record<string, number>;
+  // What each stale part's sheet says (`staleness::lines`, #495): the band, and when Daniel last engaged with the part, or "not engaged
+  // since tracking began on <date>".
+  stale_why: Record<string, string>;
   // The project's pre-flight (`pre_flight.rs`, #394): the parts a piece of work will likely cross; null when none is run.
   pre_flight?: PreFlight | null;
   // The project's micro-worlds (`micro_worlds.rs`, #399) by subject key (`flow:<id>`, `figure:<pr>:<chapter>:<step>`), and whether a run can
@@ -484,7 +490,9 @@ export type RatifyDetail =
   | { of: "part"; name: RatifyWords; purpose: RatifyWords; holds: RatifyHeld[]; paths_added: string[]; paths_removed: string[] }
   | { of: "link"; kind: RatifyWords; reason: RatifyWords };
 // What a ready PR's brief is doing (`pr_briefs.rs`): a newer head was pushed (stale), being written now, and the chapters' titles, or the one story's.
-export type BriefInfo = { stale: boolean; writing: boolean; chapters: string[]; quiet: boolean; read?: boolean; failed?: boolean };
+// `note` (#477, part B): why the brief at this head is what it is after a push: the read carried over, or it was rewritten.
+// `since` (#497): the title of the "Since you read" story stored for this head, which the tray opens first; `since_chapters`, its chapters' titles when it has more than one, one tray row each.
+export type BriefInfo = { stale: boolean; writing: boolean; chapters: string[]; quiet: boolean; read?: boolean; failed?: boolean; note?: string; since?: string; since_chapters?: string[] };
 export type ReadyPr = { number: number; title: string; head: string; branch?: string; brief: BriefInfo | null };
 // A PR brief as the writer made it and `pr_brief` returns it (`understanding/src/pr_brief.rs`). A step's `flags` are what the checks found wrong with it
 // that the one rewrite did not mend: it shows "not confirmed from the facts".
@@ -497,20 +505,34 @@ export type BriefStep = {
 };
 // `gist` (#397): the story in one sentence, on a chapter that lights a Core part and on a part catch-up; absent or empty in older briefs.
 export type BriefChapter = { behaviour: string; parts: string[]; title: string; steps: BriefStep[]; flags: string[]; gist?: string; gist_flags?: string[] };
+// `also`: the writer's Also touched lines of an older brief; `also_groups` (#489): code's groups by kind, absent in an older brief.
 export type PrBrief = {
-  title: string; overview: BriefStep[]; chapters: BriefChapter[]; also: { part: string; line: string; flags: string[] }[]; unseen: string[];
-  decisions: { id: string | null; text: string; flags: string[] }[]; flags: string[];
+  title: string; overview: BriefStep[]; chapters: BriefChapter[]; also: { part: string; line: string; flags: string[] }[]; also_groups?: AlsoGroup[];
+  unseen: string[]; decisions: { id: string | null; text: string; flags: string[] }[]; flags: string[];
 };
+// One Also touched group (`pr_brief.rs`), in the order shown, its files sorted by path; `lines` added and removed.
+export type AlsoKind = "no-part" | "tests" | "config" | "docs" | "ignored" | "other";
+export type TouchedFile = { path: string; lines: number; part?: string; ignored?: boolean; laws?: string[] };
+export type AlsoGroup = { kind: AlsoKind; files: TouchedFile[]; lines: number };
 // `guard`: Guard with a law's offer (#401), the parts a bug fix touched; none when the PR offers none, or in a brief from before it.
 // `shape`: what code decided the brief's shape would be; the window never reads it.
 export type BriefShape = { chapters: boolean; required: string[]; also: string[]; overview: boolean; flows_changed: string[] };
-export type StoredBrief = { version: number; pr: number; head: string; written_at: number; stale: boolean; model: string; shape?: BriefShape; brief: PrBrief; guard?: Guard | null };
+// `partial_facts` (#477, #491): what the brief was written without, absent when nothing was missing or in a brief from before it.
+export type StoredBrief = { version: number; pr: number; head: string; written_at: number; stale: boolean; model: string; shape?: BriefShape; brief: PrBrief; guard?: Guard | null; partial_facts?: PartialFacts };
+// The cut diff's files none of whose hunks were sent and those sent in part, with its bytes sent and not sent; the claim check's error; the
+// extensions of the diff's source languages no extractor of the map reads (`understanding/src/pr_brief.rs`, `PartialFacts`).
+export type DiffCut = { files_cut: string[]; files_partial: string[]; bytes_sent: number; bytes_cut: number };
+export type PartialFacts = { cut?: DiffCut; claim_error?: string; no_extractor?: string[] };
 export type Guard = { parts: string[] };
 // A new law (#401): drafted by the writer from a PR's facts, confirmed or edited by Daniel, then added with its test by a run.
 export type NewLaw = { id: string; on: string; text: string };
 // `partial`: the writer did not see the whole diff.
 // `expected`: the PR matched the project's pre-flight (#394).
-export type BriefView = { brief: StoredBrief; partial: boolean; expected?: Expected };
+// `since` (#497): this is a "Since you read" story, of the push from that head to its own.
+// What main changed since an open PR's merge base that bears on its brief (#494): laws, links and flows at a lit part, lit parts whose
+// `paths` changed, and changed files of lit parts and root build manifests.
+export type StaleBase = { laws: string[]; links: string[]; flows: string[]; paths: string[]; files: string[] };
+export type BriefView = { brief: StoredBrief; partial: boolean; expected?: Expected; stale_base?: StaleBase; since?: string };
 // What `pr_brief` answers: the brief, or that its write has started (it comes through `map-landed`).
 export type BriefOpened = BriefView | { writing: true };
 export type Fog = "thin" | "thick";
@@ -528,6 +550,8 @@ export type Ci = {
   laws: string[];
   tail: string;
   note: string | null;
+  // When that run finished, as GitHub gives it (ISO 8601, UTC); null in an answer kept before #495.
+  at: string | null;
 };
 // A tagged test shown by "See the proof": its file and tag line, and the code from the tag on, starting at line `first`.
 export type Proof = { file: string; line: number; test: string | null; first: number; snippet: string };
@@ -540,6 +564,8 @@ export type WaitingBriefs = { project: string; numbers: number[] };
 // The map as of a commit (a scrub), and a commit's files with their diffs (the drill-down).
 export type HistoricalMap = { commit: string; short: string; label: string; source: string };
 export type CommitFiles = { commit: string; short: string; label: string; url: string | null; files: { path: string; diff: string }[] };
+// What `pr_diff` is asked (`map.rs`): `parts`, only the files these parts own; `paths`, only these files; every file the PR changed when both are absent; `base`, a since story's head, which the diff runs from (#497).
+export type PrDiffArgs = { project: string; number: number; head: string; title: string; parts?: string[]; paths?: string[]; base?: string };
 
 // A project of the saved list (`server/src/projects.rs`): its main checkout, and whether its folder was moved or deleted.
 export type SavedProject = { path: string; gone: boolean };
@@ -610,6 +636,7 @@ export interface Commands {
   micro_world_explore: Explored;
   micro_world_page: string;
   brief_chapter_done: void;
+  brief_since_done: void;
   briefs_waiting: WaitingBriefs | null;
   pr_ratify: RatifyRow[];
   projects: SavedProject[];

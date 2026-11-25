@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { alsoAt, awaitedWrite, chapterGate, storySteps, briefCamera, briefPlayer, latestRequest, escapeMap, figureShapes, figureSize, playlist, unconfirmed } from "../../dist/map-model.js";
+import { alsoAt, alsoRows, awaitedWrite, chapterGate, storySteps, briefCamera, briefPlayer, latestRequest, escapeMap, figureShapes, figureSize, playlist, partialFactsLines, unconfirmed, unconfirmedReasons, agentPrompt, diffArgs } from "../../dist/map-model.js";
 import { trayRows } from "../../dist/map-tray.js";
 
 const step = (k, extra = {}) => ({ k, h: k, b: "", on: [], hops: [], law: null, covered_by: null, list: [], risks: [], fig: null, check: null, cites: [], flags: [], ...extra });
@@ -56,13 +56,37 @@ test("each chapter resumes at the step it was left on", () => {
   assert.equal(player.current().step, 2);
 });
 
-test("the also-touched lines show on the last step of the last chapter only", () => {
+const none = { lines: [], groups: [] };
+const docs = { kind: "docs", files: [{ path: "docs/a.md", lines: 3 }], lines: 3 };
+
+test("Also touched shows on the last step of the last chapter only: an older brief's lines, a newer one's groups", () => {
   const also = [{ part: "hook", line: "A wording change.", flags: [] }];
   const b = brief({ also, chapters: [chapter("Fog", "Before", "Now"), chapter("Laws", "Now", "Could break")] });
-  assert.deepEqual(alsoAt(b, 1, 1, 2), also);
-  assert.deepEqual(alsoAt(b, 1, 0, 2), []);
-  assert.deepEqual(alsoAt(b, 0, 1, 2), []);
-  assert.deepEqual(alsoAt(brief({ chapters: [chapter("Fog", "Now")] }), 0, 0, 1), []);
+  assert.deepEqual(alsoAt(b, 1, 1, 2), { lines: also, groups: [] });
+  assert.deepEqual(alsoAt(b, 1, 0, 2), none);
+  assert.deepEqual(alsoAt(b, 0, 1, 2), none);
+  assert.deepEqual(alsoAt(brief({ chapters: [chapter("Fog", "Now")] }), 0, 0, 1), none);
+  const grouped = brief({ also_groups: [docs], chapters: [chapter("Fog", "Before", "Now")] });
+  assert.deepEqual(alsoAt(grouped, 0, 1, 2).groups.map((g) => g.name), ["Docs"]);
+  assert.deepEqual(alsoAt(grouped, 0, 0, 2), none);
+});
+
+test("each Also touched group shows its name, file and line counts and its files, each with its laws, the ignored tag only in tests, config/build and docs", () => {
+  // The frozen sample #489 stored (`pr-brief-v8`): no part, tests (one ignored file), ignored, other.
+  const stored = JSON.parse(readFileSync("understanding/tests/fixtures/stored/pr-brief-v8/stored-brief-also.json", "utf8"));
+  const rows = alsoRows([...stored.brief.also_groups, { kind: "config", files: [{ path: "a.toml", lines: 1, ignored: true }], lines: 1 }, { kind: "docs", files: [], lines: 0 }]);
+  assert.deepEqual(rows.map((r) => [r.name, r.counts]), [
+    ["No part", "1 file · 3 lines"],
+    ["Tests", "2 files · 6 lines"],
+    ["Ignored", "1 file · 1 line"],
+    ["Other", "1 file · 5 lines"],
+    ["Config/build", "1 file · 1 line"],
+  ], "an empty group is not shown");
+  // A file holding a `@law:` tag names its law on its own row.
+  assert.deepEqual(rows[1].files, [{ path: "beta/tests/order.rs", ignored: false, laws: ["seen-gate"] }, { path: "scripts/run.spec.ts", ignored: true, laws: [] }]);
+  assert.deepEqual(rows[2].files, [{ path: "scripts/tool.sh", ignored: false, laws: [] }], "the Ignored group is a plain list");
+  assert.deepEqual(rows[4].files, [{ path: "a.toml", ignored: true, laws: [] }]);
+  assert.deepEqual(rows[1].paths, ["beta/tests/order.rs", "scripts/run.spec.ts"], "See the code asks for the group's files");
 });
 
 test("the stored v3 brief of #317 plays as three chapters of four steps, in order, with the overview none", () => {
@@ -125,6 +149,21 @@ test("Esc closes the drawer, then the brief, then returns to now, then the sheet
   assert.equal(player.current().step, 1, "closing with Esc kept the step");
 });
 
+// #491: a "not confirmed from the facts" popover is its own Esc layer, ahead of the brief, so Esc closes it and leaves the brief open.
+test("Esc with a not-confirmed popover open closes only the popover, then the brief", () => {
+  const player = briefPlayer({ scrubbed: () => false, backToNow: () => {} });
+  player.open("/p", 7, 0);
+  let popover = true;
+  const layers = {
+    popover: { open: () => popover, close: () => (popover = false) },
+    brief: { open: () => player.current() !== null, close: () => player.close() },
+  };
+  assert.equal(escapeMap(layers), "popover");
+  assert.equal(popover, false);
+  assert.notEqual(player.current(), null, "the brief stays open");
+  assert.equal(escapeMap(layers), "brief");
+});
+
 test("the camera fits the lit parts into the room the panel leaves, never past the largest scale", () => {
   const area = { w: 1000, h: 800 };
   const big = briefCamera({ x0: 0, y0: 0, x1: 2000, y1: 1000 }, area, { top: 20, bottom: 300 }, 1.35);
@@ -158,6 +197,27 @@ test("each figure kind is drawn from the writer's labels, inside its frame", () 
 test("a step with a flag left after the rewrite is unconfirmed", () => {
   assert.equal(unconfirmed(step("Now", { flags: ["a quote is not in the facts"] })), true);
   assert.equal(unconfirmed(step("Now")), false);
+});
+
+// #491: the popover lists why an item is not confirmed; the mark's own words, the sentinel the check adds, are not a reason.
+test("a not-confirmed item's reasons are its flags without the sentinel", () => {
+  assert.deepEqual(unconfirmedReasons(["claim check: the quote is not in the diff", "not confirmed from the facts"]), ["claim check: the quote is not in the diff"]);
+  assert.deepEqual(unconfirmedReasons(["not confirmed from the facts"]), []);
+});
+
+// #491: the Partial facts chip has one line per missing input, from the facts stored with the brief; a brief from before them knows only
+// that its diff was cut.
+test("the Partial facts lines come from the stored facts, one per input, and none when nothing is missing", () => {
+  assert.deepEqual(partialFactsLines(undefined, false), [], "nothing missing: no chip");
+  assert.deepEqual(partialFactsLines({}, false), []);
+  const cut = { files_cut: ["ui/a.ts", "ui/b.ts"], files_partial: ["server/src/c.rs"], bytes_sent: 65_536, bytes_cut: 20_480 };
+  assert.deepEqual(partialFactsLines({ cut, claim_error: "the check timed out", no_extractor: [".go", ".py"] }, true), [
+    { line: "The diff was cut: 64\u00a0KiB sent, 20\u00a0KiB not", files: ["ui/a.ts", "ui/b.ts", "server/src/c.rs (in part)"] },
+    { line: "The claim check failed: the check timed out", files: [] },
+    { line: "No extractor reads .go, .py files, so their imports are not on the map", files: [] },
+  ]);
+  assert.deepEqual(partialFactsLines(undefined, true), [{ line: "The diff was cut", files: [] }], "an older brief has only its flag");
+  assert.deepEqual(partialFactsLines({ claim_error: "no answer" }, false), [{ line: "The claim check failed: no answer", files: [] }]);
 });
 
 test("See the code opens what the step quoted, with its source and no jump, as the page has no editor", async () => {
@@ -260,8 +320,8 @@ test("the Ratify step that ends the last chapter is no part of the story: the ga
   const played = [...playlist(b, 0, false), step("Ratify")];
   const story = storySteps(played);
   assert.deepEqual(story.map((s) => s.k), ["Before", "Now"]);
-  assert.deepEqual(alsoAt(b, 0, 1, story.length), also, "the last story step carries them");
-  assert.deepEqual(alsoAt(b, 0, 2, story.length), [], "the Ratify step does not");
+  assert.deepEqual(alsoAt(b, 0, 1, story.length).lines, also, "the last story step carries them");
+  assert.deepEqual(alsoAt(b, 0, 2, story.length), none, "the Ratify step does not");
   // Reading the last story step completes the chapter; the Ratify step is never needed.
   let fired = 0;
   const gate = chapterGate(story, () => fired++);
@@ -303,4 +363,91 @@ test("an open waiting on its write opens the brief once it is stored, stops on a
   assert.equal(awaitedWrite(pr(info({ chapters: ["Fog"], stale: true, failed: true }))), "stop");
   assert.equal(awaitedWrite(pr(info({ quiet: true }))), "stop");
   assert.equal(awaitedWrite(undefined), "stop", "no longer ready");
+  // A Since you read story (#497) opens once it is stored, while the full brief is still of the older head; an open of the full brief waits for it.
+  const story = info({ chapters: ["Fog"], stale: true, since: "Since" });
+  assert.equal(awaitedWrite(pr(story)), "open");
+  assert.equal(awaitedWrite(pr(story), true), "wait");
+  // The full brief is written after the story: the story opens meanwhile.
+  assert.equal(awaitedWrite(pr({ ...story, writing: true })), "open");
+  assert.equal(awaitedWrite(pr({ ...story, writing: true }), true), "wait");
+});
+
+// Copy for the agent (#493): the prompt code writes for each item kind, which stands alone for any agent.
+const risky = step("Could break", {
+  h: "Fog could clear early",
+  b: "A push with <b>no read</b> clears it.",
+  on: ["fog"],
+  risks: [{ part: "fog", trigger: "A second push lands before the read.", check: "Push twice and open the map." }],
+  cites: [{ from: "DIFF", quote: "entries.clear()" }],
+});
+const fileLine = /[\w.-]+\.\w+:\d+/;
+
+test("a Could break step copies as a prompt: the PR and its branch, the step, its risks, its citations and its lit parts' changed files", () => {
+  const prompt = agentPrompt(12, "fog-fix", { of: "step", step: risky, files: ["server/src/fog.rs", "server/src/pr_briefs.rs"] });
+  assert.equal(
+    prompt,
+    [
+      "In PR #12 (branch fog-fix), the brief warns this could break. Check whether it does, fix it if so, and tell me what you changed.",
+      "Could break: Fog could clear early",
+      "A push with no read clears it.",
+      "- fog: A second push lands before the read. To see it: Push twice and open the map.",
+      "It rests on:",
+      '- DIFF: "entries.clear()"',
+      "Changed files of the parts it lights:",
+      "- server/src/fog.rs",
+      "- server/src/pr_briefs.rs",
+    ].join("\n"),
+  );
+  assert.doesNotMatch(prompt, fileLine, "no file:line");
+  assert.equal(agentPrompt(12, null, { of: "step", step: { ...risky, cites: [] }, files: [] }).split("\n")[0].startsWith("In PR #12, the brief"), true, "a merged PR has no branch");
+  assert.doesNotMatch(agentPrompt(12, null, { of: "step", step: { ...risky, cites: [] }, files: [] }), /It rests on|Changed files/, "an empty section is left out");
+});
+
+test("a not-confirmed step adds its reasons, without the mark's own words", () => {
+  const now = step("Now", { h: "Reads move to the new head", b: "The read carries over.", cites: [{ from: "PR", quote: "carries the read over" }], flags: ["claim check: the quote is not in the diff", "not confirmed from the facts"] });
+  const prompt = agentPrompt(12, null, { of: "step", step: now, files: ["server/src/fog.rs"] });
+  assert.equal(
+    prompt,
+    [
+      "In PR #12, the brief says this, but its checks could not confirm it from the facts. Check it against the code, fix what is wrong, and tell me what you changed.",
+      "Now: Reads move to the new head",
+      "The read carries over.",
+      "Why it is not confirmed:",
+      "- claim check: the quote is not in the diff",
+      "It rests on:",
+      '- PR: "carries the read over"',
+      "Changed files of the parts it lights:",
+      "- server/src/fog.rs",
+    ].join("\n"),
+  );
+  assert.doesNotMatch(prompt, /not confirmed from the facts/);
+  assert.match(agentPrompt(12, null, { of: "step", step: { ...risky, flags: ["risk names no law"] }, files: [] }), /warns this could break[\s\S]*Why it is not confirmed:\n- risk names no law/, "a not-confirmed Could break step keeps its lead and adds its reasons");
+});
+
+test("a not-confirmed decision and the No part group copy as prompts too", () => {
+  assert.equal(
+    agentPrompt(12, "fog-fix", { of: "decision", text: "Briefs are kept per project.", flags: ["not confirmed from the facts", "the diff keeps one store"] }),
+    [
+      "In PR #12 (branch fog-fix), you declared a decision the checks could not confirm from the facts. Check it against the code, correct it or say why it holds, and tell me what you changed.",
+      "Decided: Briefs are kept per project.",
+      "Why it is not confirmed:",
+      "- the diff keeps one store",
+    ].join("\n"),
+  );
+  const prompt = agentPrompt(12, "fog-fix", { of: "no-part", files: ["scripts/new.sh", "tools/x.py"] });
+  assert.equal(
+    prompt,
+    [
+      "In PR #12 (branch fog-fix), these changed files belong to no part of the map (system-map.json). Assign these files to a part, or ignore them, and tell me what you changed.",
+      "- scripts/new.sh",
+      "- tools/x.py",
+    ].join("\n"),
+  );
+  assert.doesNotMatch(prompt, fileLine, "no file:line");
+});
+
+test("See the code of a Since you read story asks for the diff from the head it was read at, the full brief's from the PR's base (#497)", () => {
+  const brief = { version: 1, pr: 7, head: "bbb", written_at: 1, stale: false, model: "opus", brief: { title: "Fog", overview: [], chapters: [], also: [] } };
+  assert.deepEqual(diffArgs("/p", { brief, partial: false }), { project: "/p", number: 7, head: "bbb", title: "Fog" });
+  assert.deepEqual(diffArgs("/p", { brief, partial: false, since: "aaa" }), { project: "/p", number: 7, head: "bbb", title: "Fog", base: "aaa" });
 });

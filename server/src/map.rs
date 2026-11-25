@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     path::{Path, PathBuf},
     process::Command,
     sync::{Arc, Mutex},
@@ -67,6 +67,9 @@ pub struct MapState {
     /// The staleness band (1 to 3) of each Core part Daniel has not engaged with for 3, 6 or 12 weeks (`staleness.rs`); a part not listed
     /// is not stale.
     pub stale: BTreeMap<String, u8>,
+    /// What each stale part's sheet says of its band (`staleness::lines`): the band, and when Daniel last engaged with the part or that
+    /// he has not since tracking began (#495).
+    pub stale_why: BTreeMap<String, String>,
     /// The project's pre-flight (`pre_flight.rs`): the parts a piece of work will likely cross, framed on the map.
     pub pre_flight: Option<studio_understanding::pre_flight::PreFlight>,
     /// The project's micro-worlds and whether a run can build one (`micro_worlds.rs`).
@@ -156,6 +159,7 @@ pub fn read_map(repo: &Path) -> MapState {
         runs: crate::runner::Runs::default(),
         catch_ups: BTreeMap::new(),
         stale: BTreeMap::new(),
+        stale_why: BTreeMap::new(),
         pre_flight: None,
         micro_worlds: crate::micro_worlds::WorldsState::default(),
         law_patches: Vec::new(),
@@ -359,12 +363,10 @@ pub fn map_state(project: String, fetch: bool, app: &Arc<crate::App>) -> Result<
     state.user = read_user(&file, &project);
     if let Some(source) = &state.source {
         state.fog = crate::fog::effective(&state.user, source);
-        state.stale = crate::staleness::bands(
-            &state.user,
-            source,
-            &crate::staleness::births(repo, source),
-            crate::ratify::now(),
-        );
+        let born = crate::staleness::births(repo, source);
+        let now = crate::ratify::now();
+        state.stale = crate::staleness::bands(&state.user, source, &born, now);
+        state.stale_why = crate::staleness::lines(&state.user, source, &born, now);
     }
     state.ci = cache.get(&project);
     state.ready = app.prs.ready(&project);
@@ -441,14 +443,72 @@ pub fn map_commit(project: String, commit: String) -> Result<crate::history::Com
     crate::history::commit_files(Path::new(&project), &commit)
 }
 
+/// What "See the code" of a PR's brief asks for (`PrDiffArgs` in `ui/types.ts`). `parts`: only the files owned by these parts, under the
+/// map at `head` (the default branch's when `head` has none); `paths`: only these files (an Also touched group's, #492); all the PR's
+/// files when both are absent.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PrDiffArgs {
+    pub project: String,
+    pub number: u64,
+    pub head: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parts: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paths: Option<Vec<String>>,
+    /// A "Since you read" story's (#497): the head it runs from, so the diff runs from there, not from where the PR left the default
+    /// branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
+}
+
 /// "See the code" of a PR's brief: the files its head changed since it left the default branch, with their diffs, for the drawer.
-pub fn pr_diff(
-    project: String,
-    number: u64,
-    head: String,
-    title: String,
-) -> Result<crate::history::Commit, String> {
-    crate::history::pr_files(Path::new(&project), &head, &format!("#{number} {title}"))
+pub fn pr_diff(args: PrDiffArgs) -> Result<crate::history::Commit, String> {
+    let PrDiffArgs {
+        project,
+        number,
+        head,
+        title,
+        parts,
+        paths,
+        base,
+    } = args;
+    let repo = Path::new(&project);
+    // The map at the PR's head, as its brief's chapters light parts by it; the default branch's when the head has none.
+    let map = parts.as_ref().and_then(|_| {
+        crate::history::at(repo, &head)
+            .map(|at| at.source)
+            .ok()
+            .or_else(|| read_map(repo).source)
+            .and_then(|text| system_map::parse_lenient(&text).ok())
+    });
+    let keep = |all: Vec<String>| match (parts, paths) {
+        (None, None) => all,
+        (None, Some(paths)) => all
+            .into_iter()
+            .filter(|path| paths.contains(path))
+            .collect(),
+        (Some(parts), paths) => {
+            let owned: BTreeSet<String> = map
+                .map(|map| system_map::touched_for_map(&map, &all).parts)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|found| parts.contains(&found.id))
+                .flat_map(|found| found.files)
+                .collect();
+            all.into_iter()
+                .filter(|path| owned.contains(path))
+                .filter(|path| paths.as_ref().is_none_or(|paths| paths.contains(path)))
+                .collect()
+        }
+    };
+    crate::history::pr_files(
+        repo,
+        &head,
+        base.as_deref(),
+        &format!("#{number} {title}"),
+        keep,
+    )
 }
 
 /// Why a project header's quiet dot lights (#344, #386): fog on a Core part, a broken law, a PR brief waiting, in that order.
@@ -679,6 +739,176 @@ mod tests {
         // With no map on the branch, nothing is placed.
         let bare = origin();
         assert!(place(&bare.main, &groups)["both"].is_empty());
+    }
+
+    #[test]
+    fn see_the_code_of_a_step_keeps_its_parts_files_before_the_cap_of_80() {
+        let o = origin();
+        let map = r#"{"version":1,"parts":[
+            {"id":"a","name":"A","caption":"","description":"","tier":"core","paths":["a/"]},
+            {"id":"z","name":"Z","caption":"","description":"","tier":"core","paths":["z/"]},
+            {"id":"zz","name":"ZZ","caption":"","description":"","tier":"core","paths":["z/own/"]}],
+            "actors":[],"links":[],"ignored":["z/docs/"],"laws":[]}"#;
+        commit_file(&o.seed, MAP_FILE, map);
+        git(&o.seed, &["push", "-q", "origin", "HEAD"]);
+        git(&o.main, &["fetch", "-q", "origin"]);
+        git(&o.main, &["checkout", "-q", "-b", "work", "origin/trunk"]);
+        // 85 files of part a sort before part z's, so the cap of 80 would cut z's away.
+        for i in 0..85 {
+            let dir = o.main.join("a");
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(format!("f{i:02}")), "x\n").unwrap();
+        }
+        for name in ["z/one", "z/two", "z/own/three", "z/docs/four"] {
+            let path = o.main.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "x\n").unwrap();
+        }
+        git(&o.main, &["add", "-A"]);
+        git(&o.main, &["commit", "-q", "-m", "work"]);
+        let head = git(&o.main, &["rev-parse", "HEAD"]);
+        let diff = |parts: Option<&[&str]>| {
+            let found = pr_diff(PrDiffArgs {
+                project: o.main.display().to_string(),
+                number: 7,
+                head: head.clone(),
+                title: "Work".into(),
+                parts: parts.map(|p| p.iter().map(|s| s.to_string()).collect()),
+                paths: None,
+                base: None,
+            })
+            .unwrap();
+            found.files.into_iter().map(|f| f.path).collect::<Vec<_>>()
+        };
+        // A later part's pattern wins its files, and an ignored file is no part's.
+        assert_eq!(diff(Some(&["z"])), ["z/one", "z/two"]);
+        assert_eq!(diff(Some(&["zz", "nobody"])), ["z/own/three"]);
+        assert!(diff(Some(&[])).is_empty());
+        assert_eq!(diff(None).len(), 80);
+        // An Also touched group's files (#492), by path, before the cap too; a path the PR did not change is not shown.
+        let found = pr_diff(PrDiffArgs {
+            project: o.main.display().to_string(),
+            number: 7,
+            head: head.clone(),
+            title: "Work".into(),
+            parts: None,
+            paths: Some(vec!["z/docs/four".into(), "z/one".into(), "nowhere".into()]),
+            base: None,
+        })
+        .unwrap();
+        let shown: Vec<_> = found.files.into_iter().map(|f| f.path).collect();
+        assert_eq!(shown, ["z/docs/four", "z/one"]);
+    }
+
+    #[test]
+    fn see_the_code_of_a_step_places_files_by_the_map_at_the_prs_head() {
+        let o = origin();
+        let map = r#"{"version":1,"parts":[
+            {"id":"a","name":"A","caption":"","description":"","tier":"core","paths":["a/"]}],
+            "actors":[],"links":[],"ignored":[],"laws":[]}"#;
+        commit_file(&o.seed, MAP_FILE, map);
+        git(&o.seed, &["push", "-q", "origin", "HEAD"]);
+        git(&o.main, &["fetch", "-q", "origin"]);
+        git(&o.main, &["checkout", "-q", "-b", "work", "origin/trunk"]);
+        // The PR adds part n, and moves a/new.rs to it, as its brief's chapters light them.
+        let at_head = r#"{"version":1,"parts":[
+            {"id":"a","name":"A","caption":"","description":"","tier":"core","paths":["a/"]},
+            {"id":"n","name":"N","caption":"","description":"","tier":"core","paths":["n/","a/new.rs"]}],
+            "actors":[],"links":[],"ignored":[],"laws":[]}"#;
+        for (name, text) in [
+            (MAP_FILE, at_head),
+            ("n/one", "x\n"),
+            ("a/new.rs", "x\n"),
+            ("a/old.rs", "x\n"),
+        ] {
+            let path = o.main.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        }
+        git(&o.main, &["add", "-A"]);
+        git(&o.main, &["commit", "-q", "-m", "work"]);
+        let head = git(&o.main, &["rev-parse", "HEAD"]);
+        let diff = |part: &str| {
+            pr_diff(PrDiffArgs {
+                project: o.main.display().to_string(),
+                number: 7,
+                head: head.clone(),
+                title: "Work".into(),
+                parts: Some(vec![part.into()]),
+                paths: None,
+                base: None,
+            })
+            .unwrap()
+            .files
+            .into_iter()
+            .map(|f| f.path)
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(diff("n"), ["a/new.rs", "n/one"]);
+        assert_eq!(diff("a"), ["a/old.rs"]);
+    }
+
+    #[test]
+    fn see_the_code_of_a_step_places_files_by_the_default_branchs_map_when_the_head_has_none() {
+        let o = origin();
+        let map = r#"{"version":1,"parts":[
+            {"id":"a","name":"A","caption":"","description":"","tier":"core","paths":["a/"]}],
+            "actors":[],"links":[],"ignored":[],"laws":[]}"#;
+        commit_file(&o.seed, MAP_FILE, map);
+        git(&o.seed, &["push", "-q", "origin", "HEAD"]);
+        git(&o.main, &["fetch", "-q", "origin"]);
+        // A PR branched before the map was born: its head has no map.
+        git(&o.main, &["checkout", "-q", "-b", "work", "origin/trunk~1"]);
+        std::fs::create_dir_all(o.main.join("a")).unwrap();
+        commit_file(&o.main, "a/one.rs", "x\n");
+        let head = git(&o.main, &["rev-parse", "HEAD"]);
+        let found = pr_diff(PrDiffArgs {
+            project: o.main.display().to_string(),
+            number: 7,
+            head,
+            title: "Work".into(),
+            parts: Some(vec!["a".into()]),
+            paths: None,
+            base: None,
+        })
+        .unwrap();
+        let shown: Vec<_> = found.files.into_iter().map(|f| f.path).collect();
+        assert_eq!(shown, ["a/one.rs"]);
+    }
+
+    #[test]
+    fn see_the_code_of_a_since_story_runs_from_the_head_it_was_read_at() {
+        let o = origin();
+        let map = r#"{"version":1,"parts":[
+            {"id":"a","name":"A","caption":"","description":"","tier":"core","paths":["a/"]}],
+            "actors":[],"links":[],"ignored":[],"laws":[]}"#;
+        commit_file(&o.seed, MAP_FILE, map);
+        git(&o.seed, &["push", "-q", "origin", "HEAD"]);
+        git(&o.main, &["fetch", "-q", "origin"]);
+        git(&o.main, &["checkout", "-q", "-b", "work", "origin/trunk"]);
+        std::fs::create_dir_all(o.main.join("a")).unwrap();
+        commit_file(&o.main, "a/read.rs", "x\n");
+        let read_at = git(&o.main, &["rev-parse", "HEAD"]);
+        commit_file(&o.main, "a/new.rs", "x\n");
+        let head = git(&o.main, &["rev-parse", "HEAD"]);
+        let diff = |base: Option<&str>| {
+            pr_diff(PrDiffArgs {
+                project: o.main.display().to_string(),
+                number: 7,
+                head: head.clone(),
+                title: "Work".into(),
+                parts: Some(vec!["a".into()]),
+                paths: None,
+                base: base.map(String::from),
+            })
+            .unwrap()
+            .files
+            .into_iter()
+            .map(|f| f.path)
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(diff(None), ["a/new.rs", "a/read.rs"]);
+        assert_eq!(diff(Some(&read_at)), ["a/new.rs"]);
     }
 
     #[test]

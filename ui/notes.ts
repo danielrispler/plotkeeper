@@ -2,7 +2,7 @@
 // over the map's top-right corner; it fades after a few seconds, and a hover or the keyboard's focus in it holds it (#457). A newer
 // note replaces it. Its main button selects its session, and its × hides it.
 
-import { element, fullTitle, text } from "./dom.js";
+import { element, fullTitle, promptBox, text } from "./dom.js";
 import { type Clock, realClock } from "./hover.js";
 import { sessionName } from "./list.js";
 import { select } from "./selection.js";
@@ -97,9 +97,67 @@ export function showNote(note: Note) {
 // The toast's hover, focus and a modal dialog hold its fade; once, at start.
 export function watchNotes() {
   const toast = element("note-toast");
-  document.addEventListener("toggle", modalHolds, true);
+  document.addEventListener("toggle", () => (modalHolds(), copyHolds()), true);
   toast.addEventListener("pointerenter", () => fade.hold("pointer"));
   toast.addEventListener("pointerleave", () => fade.release("pointer"));
   toast.addEventListener("focusin", () => fade.hold("focus"));
   toast.addEventListener("focusout", () => fade.release("focus"));
+  const copy = element("copy-toast");
+  copy.addEventListener("pointerenter", () => copyFade.hold("pointer"));
+  copy.addEventListener("pointerleave", () => copyFade.release("pointer"));
+  copy.addEventListener("focusin", () => copyFade.hold("focus"));
+  copy.addEventListener("focusout", () => copyFade.release("focus"));
 }
+
+// The copy toast (#493): a prompt Copy for the agent put on the clipboard, under the note toast. A copied prompt shows "Prompt
+// copied" and its first 3 lines and fades as a note does, 6 s, held by a hover or the keyboard's focus in it; a prompt the clipboard
+// refused shows whole in a box with a Copy button, Overturn's manual way, and stays until its ×. A newer copy replaces it.
+const COPY_LINES = 3;
+let copyBody: HTMLElement | null = null;
+let copyButton: HTMLButtonElement | null = null;
+let copied = "";
+const hideCopy = () => {
+  element("copy-toast").hidden = true;
+  stackToasts();
+};
+const copyFade = noteFade(realClock, hideCopy);
+const closeCopy = () => {
+  copyFade.stop();
+  hideCopy();
+};
+export type Copied = { outcome: "copied" | "manual"; prompt: string };
+export function showCopyToast(outcome: Copied["outcome"], prompt: string) {
+  const toast = element("copy-toast");
+  copied = prompt;
+  if (!copyBody || !copyButton) {
+    const body = text("div", "", "copy-body");
+    const button = text("button", "Copy", "btn small") as HTMLButtonElement;
+    button.setAttribute("type", "button");
+    button.title = "Copy the prompt to paste into your agent";
+    // The clipboard refused already, so this is the browser's older route, which a click may use.
+    button.addEventListener("click", () => {
+      body.querySelector("textarea")?.select();
+      if (document.execCommand("copy")) showCopyToast("copied", copied);
+    });
+    toast.replaceChildren(body, button);
+    toastButtons(toast, () => button, closeCopy, "Hide this toast");
+    copyBody = body;
+    copyButton = button;
+  }
+  const line = outcome === "copied" ? "Prompt copied, paste it into your agent" : "Copy this prompt and paste it into your agent";
+  const lines = prompt.split("\n").slice(0, COPY_LINES).join("\n");
+  // Each is cut at the toast's width; its title holds it whole.
+  const shown = outcome === "copied" ? fullTitle(text("p", lines, "copy-lines"), lines) : promptBox(prompt, 6);
+  copyBody.replaceChildren(fullTitle(text("strong", line, "name"), line), shown);
+  // Copy, once it worked, hides; the keyboard's focus on it moves to the ×.
+  const moveFocus = outcome === "copied" && document.activeElement === copyButton;
+  copyButton.hidden = outcome === "copied";
+  if (moveFocus) toast.querySelector<HTMLElement>("[aria-label=Dismiss]")?.focus();
+  toast.dataset.say = toastSays([line]);
+  toast.hidden = false;
+  stackToasts();
+  copyHolds();
+  if (outcome === "copied") copyFade.start();
+  else copyFade.stop();
+}
+const copyHolds = () => (document.querySelector("dialog:modal") ? copyFade.hold("modal") : copyFade.release("modal"));

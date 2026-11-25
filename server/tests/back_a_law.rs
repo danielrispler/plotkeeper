@@ -885,6 +885,52 @@ fn guarded_brief() -> StoredBrief {
 }
 
 #[test]
+fn the_draft_hears_also_touched_by_its_groups() {
+    use studio_understanding::pr_brief::{AlsoGroup, AlsoKind, TouchedFile};
+    let mut brief = guarded_brief();
+    brief.brief.also_groups = vec![
+        AlsoGroup {
+            kind: AlsoKind::Tests,
+            files: vec![TouchedFile {
+                path: "tests/add.rs".into(),
+                lines: 4,
+                laws: vec!["adds-whole".into()],
+                ..TouchedFile::default()
+            }],
+            lines: 4,
+        },
+        AlsoGroup {
+            kind: AlsoKind::Docs,
+            files: vec![
+                TouchedFile {
+                    path: "README.md".into(),
+                    lines: 2,
+                    ignored: true,
+                    ..TouchedFile::default()
+                },
+                TouchedFile {
+                    path: "docs/add.md".into(),
+                    lines: 1,
+                    ..TouchedFile::default()
+                },
+            ],
+            lines: 3,
+        },
+    ];
+    let writer = Writer {
+        reply: r#"{"on": "adder", "id": "adds-whole-2", "text": "add never returns a fraction."}"#
+            .into(),
+        asked: Mutex::default(),
+    };
+    back_a_law::draft(&writer, "opus", MAP, &brief).unwrap();
+    let asked = writer.asked.lock().unwrap()[0].clone();
+    assert!(
+        asked.contains("- also touched, tests: tests/add.rs (law adds-whole)\n- also touched, docs: README.md, docs/add.md"),
+        "{asked}"
+    );
+}
+
+#[test]
 fn the_writer_drafts_a_new_law_on_a_part_the_pr_touched_from_the_briefs_facts() {
     let writer = Writer {
         reply: r#"Here it is: {"on": "adder", "id": "adds-whole", "text": "add never returns a fraction."}"#

@@ -12,7 +12,7 @@ import type { RatifyRow } from "./types.js";
 export type Ratifiable = Pick<RatifyRow, "pr" | "kind" | "id" | "text" | "change"> & { detail?: RatifyRow["detail"] };
 
 // The branch of PR `pr` while it is open: the Map view's ready PRs name it.
-const branchOf = (pr: number): string | null => currentMap()?.state.ready?.find((ready) => ready.number === pr)?.branch || null;
+export const branchOf = (pr: number): string | null => currentMap()?.state.ready?.find((ready) => ready.number === pr)?.branch || null;
 
 // What the last overturn did with its prompt, and for which item, kept so the sheet and the brief that hold the item, which draw again
 // once the decision is recorded, show it.

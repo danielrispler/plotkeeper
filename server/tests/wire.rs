@@ -46,10 +46,20 @@ fn user() -> UserState {
             processed: Some(COMMIT.into()),
             parts: BTreeMap::from([(
                 "server".into(),
-                vec![Entry {
-                    commit: COMMIT.into(),
-                    strength: Strength::Thick,
-                }],
+                vec![
+                    Entry {
+                        commit: COMMIT.into(),
+                        strength: Strength::Thick,
+                        pr: Some(334),
+                        why: vec!["law wire-types-agree".into(), "paths".into()],
+                    },
+                    Entry {
+                        commit: COMMIT.into(),
+                        strength: Strength::Thin,
+                        pr: None,
+                        why: Vec::new(),
+                    },
+                ],
             )]),
             reads,
         },
@@ -83,6 +93,7 @@ fn cis() -> Vec<Ci> {
         laws: Vec::new(),
         tail: String::new(),
         note: None,
+        at: None,
     };
     let broken = Ci {
         status: Broken,
@@ -93,6 +104,7 @@ fn cis() -> Vec<Ci> {
         laws: vec!["wire-types-agree".into()],
         tail: "FAIL wire\nSummary 1 failed".into(),
         note: None,
+        at: Some("2026-11-24T10:00:00Z".into()),
     };
     let unknown = Ci {
         note: Some("gh is not installed".into()),
@@ -116,6 +128,9 @@ fn ready() -> Vec<Ready> {
         read: false,
         quiet: false,
         failed: true,
+        note: Some("Rebased onto main, nothing new in the PR".into()),
+        since: Some("What changed since you read".into()),
+        since_chapters: vec!["The read".into(), "The fog".into()],
     };
     vec![
         Ready {
@@ -152,6 +167,7 @@ fn empty(status: Status) -> MapState {
         runs: Runs::default(),
         catch_ups: BTreeMap::new(),
         stale: BTreeMap::new(),
+        stale_why: BTreeMap::new(),
         pre_flight: None,
         micro_worlds: WorldsState::default(),
         law_patches: Vec::new(),
@@ -331,6 +347,10 @@ fn the_wire_samples_of_the_map_view_are_written_for_tsc() {
                     ),
                 ]),
                 stale: BTreeMap::from([("core".into(), 2)]),
+                stale_why: BTreeMap::from([(
+                    "core".into(),
+                    "6 weeks or more: not engaged since tracking began on 2026-10-01".into(),
+                )]),
                 pre_flight: Some(studio_understanding::pre_flight::PreFlight {
                     issue: Some(378),
                     title: "Studio: Spec: the modules".into(),
@@ -482,6 +502,29 @@ fn story() -> studio_understanding::pr_brief::Brief {
             line: "Nothing changed in core.".into(),
             flags: Vec::new(),
         }],
+        // Also touched's groups (#492): a file with every field, and one with only its path and lines.
+        also_groups: vec![
+            AlsoGroup {
+                kind: AlsoKind::Tests,
+                files: vec![TouchedFile {
+                    path: "core/tests/order.rs".into(),
+                    lines: 4,
+                    part: Some("core".into()),
+                    ignored: true,
+                    laws: vec!["wire-types-agree".into()],
+                }],
+                lines: 4,
+            },
+            AlsoGroup {
+                kind: AlsoKind::NoPart,
+                files: vec![TouchedFile {
+                    path: "loose.rs".into(),
+                    lines: 2,
+                    ..TouchedFile::default()
+                }],
+                lines: 2,
+            },
+        ],
         unseen: vec!["Cargo.lock".into()],
         decisions: vec![
             Decision {
@@ -520,8 +563,17 @@ fn brief() -> studio_understanding::pr_brief::StoredBrief {
         guard: Some(Guard {
             parts: vec!["server".into()],
         }),
-        // The page reads it with the Partial facts chip (#491), which fills it here.
-        partial_facts: PartialFacts::default(),
+        // The page reads it with the Partial facts chip (#491).
+        partial_facts: PartialFacts {
+            cut: Some(DiffCut {
+                files_cut: vec!["ui/map.ts".into()],
+                files_partial: vec!["server/src/map.rs".into()],
+                bytes_sent: 65_536,
+                bytes_cut: 20_480,
+            }),
+            claim_error: Some("the check timed out".into()),
+            no_extractor: vec![".go".into()],
+        },
     }
 }
 
@@ -534,7 +586,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
         history::{At, Commit, Entry as HistoryEntry, File},
         micro_worlds::Explored,
         part_catch_ups::Opened as CatchUpOpened,
-        pr_briefs::{BriefView, Opened as BriefOpened, Waiting},
+        pr_briefs::{BriefView, Opened as BriefOpened, StaleBase, Waiting},
         pre_flight::OpenIssue,
         projects::Project,
         ratify::{Detail, HeldDetail, LinkDetail, PartDetail, Row, Status as Ratified, Words},
@@ -613,6 +665,8 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
         brief: brief(),
         partial: true,
         expected,
+        stale_base: None,
+        since: None,
     };
     let kinds = [
         StopKind::Session,
@@ -674,22 +728,89 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
             json(commit(Some("https://github.com/o/r/commit/0123456"))),
         ),
         ("CommitFiles", json(commit(None))),
+        (
+            "PrDiffArgs",
+            json(studio_server::map::PrDiffArgs {
+                project: "/repo".into(),
+                number: 334,
+                head: COMMIT.into(),
+                title: "PR briefs".into(),
+                parts: Some(vec!["server".into()]),
+                paths: None,
+                base: None,
+            }),
+        ),
+        (
+            "PrDiffArgs",
+            json(studio_server::map::PrDiffArgs {
+                project: "/repo".into(),
+                number: 334,
+                head: COMMIT.into(),
+                title: "PR briefs".into(),
+                parts: None,
+                paths: None,
+                base: None,
+            }),
+        ),
+        (
+            "PrDiffArgs",
+            json(studio_server::map::PrDiffArgs {
+                project: "/repo".into(),
+                number: 334,
+                head: COMMIT.into(),
+                title: "PR briefs".into(),
+                parts: None,
+                paths: Some(vec!["docs/a.md".into()]),
+                base: None,
+            }),
+        ),
+        (
+            "PrDiffArgs",
+            json(studio_server::map::PrDiffArgs {
+                project: "/repo".into(),
+                number: 334,
+                head: COMMIT.into(),
+                title: "PR briefs".into(),
+                parts: Some(vec!["server".into()]),
+                paths: None,
+                base: Some(COMMIT.into()),
+            }),
+        ),
         ("Proof", json(proof(Some("the_wire_samples")))),
         ("Proof", json(proof(None))),
         (
             "BriefView",
-            json(view(Some(studio_understanding::pre_flight::Expected {
-                expected: vec!["server".into()],
-                touched: vec!["server".into(), "window".into()],
-            }))),
+            json(BriefView {
+                // The stale-base line (#494): what main changed since the merge base.
+                stale_base: Some(StaleBase {
+                    laws: vec!["wire-types-agree".into()],
+                    links: vec!["server-window".into()],
+                    flows: vec!["turn-writing".into()],
+                    paths: vec!["server".into()],
+                    files: vec!["Cargo.toml".into(), "server/src/map.rs".into()],
+                }),
+                ..view(Some(studio_understanding::pre_flight::Expected {
+                    expected: vec!["server".into()],
+                    touched: vec!["server".into(), "window".into()],
+                }))
+            }),
         ),
         (
             "BriefView",
             json(BriefView {
                 brief: studio_understanding::pr_brief::StoredBrief {
                     guard: None,
+                    partial_facts: Default::default(),
                     ..brief()
                 },
+                ..view(None)
+            }),
+        ),
+        (
+            "BriefView",
+            json(BriefView {
+                // A "Since you read" story (#497): the head it runs from.
+                since: Some(COMMIT.into()),
                 ..view(None)
             }),
         ),
@@ -824,6 +945,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
             "HistoryEntry",
             "HistoricalMap",
             "CommitFiles",
+            "PrDiffArgs",
             "Proof",
             "BriefView",
             "WaitingBriefs",

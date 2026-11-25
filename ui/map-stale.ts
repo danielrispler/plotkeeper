@@ -17,10 +17,11 @@ onPlate(({ view, part, plate }) => {
   plate.title = `${plate.title}\n\n${staleWords(band)}`;
 });
 
-// The band's line on the sheet, or null when the part is not stale (or a past commit is shown).
-export function staleLine(view: MapView, part: string): HTMLElement | null {
+// The band's line at the top of the sheet (#495): the server's, with the last engagement's date, else the band alone; null when the part
+// is not stale (or a past commit is shown).
+export function staleWhy(view: MapView, part: string): { line: string; band: number } | null {
   const band = view.scrub ? undefined : view.state.stale?.[part];
-  return band ? text("p", staleWords(band), `sheet-stale stale-${band}`) : null;
+  return band ? { line: view.state.stale_why?.[part] ?? staleWords(band), band } : null;
 }
 
 // Enters `part`'s refresher: logged (with "stale-entered" when the part had a band) and kept by the shell as an activity on the part.

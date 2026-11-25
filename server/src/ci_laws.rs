@@ -328,9 +328,12 @@ pub struct Run {
     pub conclusion: Option<String>,
     pub head_sha: String,
     pub url: String,
+    /// When the run last changed, which for a finished run is when it finished, as GitHub gives it (`2026-11-24T10:00:00Z`).
+    #[serde(default)]
+    pub updated_at: Option<String>,
 }
 
-/// The runs `gh run list --json databaseId,status,conclusion,headSha,url` printed, newest first.
+/// The runs `gh run list --json databaseId,status,conclusion,headSha,url,updatedAt` printed, newest first.
 pub fn parse_runs(json: &str) -> Result<Vec<Run>, String> {
     serde_json::from_str(json).map_err(|e| format!("gh's run list does not read: {e}"))
 }
@@ -371,6 +374,9 @@ pub struct Ci {
     /// Why `status` is `unknown`.
     #[serde(default)]
     pub note: Option<String>,
+    /// When that run finished, as GitHub gives it; none in an answer kept before #495.
+    #[serde(default)]
+    pub at: Option<String>,
 }
 
 impl Ci {
@@ -384,6 +390,7 @@ impl Ci {
             laws: Vec::new(),
             tail: String::new(),
             note: Some(note.into()),
+            at: None,
         }
     }
 }
@@ -518,7 +525,7 @@ pub fn read(repo: &Path) -> Ci {
             "--limit",
             "20",
             "--json",
-            "databaseId,status,conclusion,headSha,url",
+            "databaseId,status,conclusion,headSha,url,updatedAt",
         ],
     );
     let runs = match listed.and_then(|json| parse_runs(&json)) {
@@ -537,6 +544,7 @@ pub fn read(repo: &Path) -> Ci {
         laws: Vec::new(),
         tail: String::new(),
         note: None,
+        at: run.updated_at.clone(),
     };
     if run.conclusion.as_deref() == Some("success") {
         return ci;
@@ -1109,15 +1117,22 @@ mod tests {
             conclusion: conclusion.map(String::from),
             head_sha: format!("sha{id}"),
             url: format!("https://github.com/o/r/actions/runs/{id}"),
+            updated_at: None,
         }
     }
 
     #[test]
     fn gh_run_list_json_reads_into_runs() {
-        let json = r#"[{"conclusion":"failure","databaseId":42,"headSha":"abc","status":"completed","url":"https://github.com/o/r/actions/runs/42"},
+        let json = r#"[{"conclusion":"failure","databaseId":42,"headSha":"abc","status":"completed","url":"https://github.com/o/r/actions/runs/42","updatedAt":"2026-11-24T10:00:00Z"},
                        {"conclusion":"","databaseId":41,"headSha":"abd","status":"in_progress","url":"u"}]"#;
         let runs = parse_runs(json).unwrap();
-        assert_eq!(runs[0], run(42, "completed", Some("failure")).with("abc"));
+        let mut finished = run(42, "completed", Some("failure")).with("abc");
+        finished.updated_at = Some("2026-11-24T10:00:00Z".into());
+        assert_eq!(runs[0], finished);
+        assert_eq!(
+            runs[1].updated_at, None,
+            "an answer without the field reads"
+        );
         assert_eq!(runs[1].conclusion.as_deref(), Some(""));
         assert!(parse_runs("not json").is_err());
     }
@@ -1233,6 +1248,7 @@ mod tests {
             laws: Vec::new(),
             tail: String::new(),
             note: None,
+            at: None,
         }
     }
 
