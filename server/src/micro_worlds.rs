@@ -143,14 +143,9 @@ pub fn flow_topic(source: &str, id: &str) -> Option<Topic> {
         .collect();
     let mut parts: Vec<String> = Vec::new();
     let mut lead = format!("The flow \"{name}\", hop by hop:\n");
-    for (n, hop) in items(flow, "hops").enumerate() {
-        let link = items(&map, "links").find(|link| link["id"] == hop["link"]);
-        let ends = link.map(|link| {
-            (
-                link["from"].as_str().unwrap_or(""),
-                link["to"].as_str().unwrap_or(""),
-            )
-        });
+    let ends = studio_understanding::pr_brief::hop_ends(&map, flow);
+    for (n, (hop, ends)) in items(flow, "hops").zip(ends).enumerate() {
+        let ends = ends.as_ref().map(|(from, to)| (from.as_str(), to.as_str()));
         let between = ends.map_or(String::new(), |(from, to)| {
             format!(" ({} to {})", named(&map, from), named(&map, to))
         });

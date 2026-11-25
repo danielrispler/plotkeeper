@@ -682,39 +682,71 @@ pub(crate) fn cut_to(text: &str, max: usize) -> String {
     format!("{}\n[{} more bytes cut]", &text[..end], text.len() - end)
 }
 
-/// The parts a flow's hops run through, each once, in the order the flow first reaches it; actors are left out. A hop
-/// that leaves the part the flow is at through a link's `to` end is read backwards. A part the flow revisits is not
-/// repeated: an order check taps each part once, so a key that repeated one could not be answered.
+/// The parts a flow's hops run through, each once, in the order the flow first reaches it; actors are left out. Each hop runs
+/// the way `hop_ends` reads it. A part the flow revisits is not repeated: an order check taps each part once, so a key that
+/// repeated one could not be answered.
 pub(crate) fn flow_key(
     map: &serde_json::Value,
     flow: &serde_json::Value,
     parts: &BTreeSet<String>,
 ) -> Vec<String> {
     let mut key: Vec<String> = Vec::new();
-    for hop in flow["hops"].as_array().into_iter().flatten() {
-        let link = map["links"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .find(|l| l["id"] == hop["link"]);
-        if let Some(link) = link {
-            let (from, to) = (
-                link["from"].as_str().unwrap_or(""),
-                link["to"].as_str().unwrap_or(""),
-            );
-            let ends = if key.last().map(String::as_str) == Some(to) {
-                [to, from]
-            } else {
-                [from, to]
-            };
-            for id in ends {
-                if parts.contains(id) && !key.iter().any(|k| k == id) {
-                    key.push(id.to_string());
-                }
+    for (from, to) in hop_ends(map, flow).into_iter().flatten() {
+        for id in [from, to] {
+            if parts.contains(&id) && !key.contains(&id) {
+                key.push(id);
             }
         }
     }
     key
+}
+
+/// Each hop of `flow` as `(the end it leaves, the end it reaches)`, none for a hop whose link is not on `map`. A hop that
+/// leaves the end the flow is at through its link's `to` runs backwards; the first hop runs backwards when the second
+/// leaves from its link's `from` end and not its `to`.
+pub fn hop_ends(
+    map: &serde_json::Value,
+    flow: &serde_json::Value,
+) -> Vec<Option<(String, String)>> {
+    let ends = |hop: &serde_json::Value| {
+        let link = map["links"]
+            .as_array()?
+            .iter()
+            .find(|l| l["id"] == hop["link"])?;
+        Some((
+            link["from"].as_str().unwrap_or("").to_string(),
+            link["to"].as_str().unwrap_or("").to_string(),
+        ))
+    };
+    let hops: Vec<Option<(String, String)>> = flow["hops"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(ends)
+        .collect();
+    let mut at: Option<String> = None;
+    let mut out = Vec::new();
+    for (n, hop) in hops.iter().enumerate() {
+        let Some((from, to)) = hop.clone() else {
+            out.push(None);
+            continue;
+        };
+        let backwards = match &at {
+            Some(at) => *at == to,
+            None => hops
+                .get(n + 1)
+                .cloned()
+                .flatten()
+                .is_some_and(|(next_from, next_to)| {
+                    let joins = |end: &str| end == next_from || end == next_to;
+                    joins(&from) && !joins(&to)
+                }),
+        };
+        let (from, to) = if backwards { (to, from) } else { (from, to) };
+        at = Some(to.clone());
+        out.push(Some((from, to)));
+    }
+    out
 }
 
 /// Assembles the writer's facts: structure first, then the diff hunk by hunk inside `BUDGET`.
@@ -2335,5 +2367,20 @@ mod flow_key_tests {
         let flow = serde_json::json!({"hops": [{"link": "a-b"}, {"link": "c-b"}]});
         let parts: BTreeSet<String> = ["a", "b", "c"].map(String::from).into();
         assert_eq!(flow_key(&map, &flow, &parts), ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn a_first_hop_run_backwards_keys_the_end_the_second_hop_leaves_from_last() {
+        // Turn writing: core to the server against `server-core`, then on from the server.
+        let map = serde_json::json!({"links": [
+            {"id": "server-core", "from": "server", "to": "core"},
+            {"id": "server-understanding", "from": "server", "to": "understanding"},
+        ]});
+        let flow = serde_json::json!({"hops": [{"link": "server-core"}, {"link": "server-understanding"}]});
+        let parts: BTreeSet<String> = ["core", "server", "understanding"].map(String::from).into();
+        assert_eq!(
+            flow_key(&map, &flow, &parts),
+            ["core", "server", "understanding"]
+        );
     }
 }

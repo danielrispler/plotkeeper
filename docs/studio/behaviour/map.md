@@ -13,7 +13,7 @@ JSON, one object. A field the checker does not know fails the check.
 - `links`: each has `id`, `from` and `to`, a part or an actor at each end, a `kind` and, for every kind but `import`, a `reason` (below).
 - `ignored`: path patterns that belong to no part on purpose.
 - `laws`: each has `id`, `on` (the id of a part, a link or a flow), `backing` (`check` or `trust`) and `text`, one plain sentence.
-- `flows`: optional. Each has `id`, `name` and `hops`, each hop a `link` id and one plain sentence `text`. A hop may run its link backwards; the sentence says which way.
+- `flows`: optional. Each has `id`, `name` and `hops`, each hop a `link` id and one plain sentence `text`. A hop may run its link backwards; the sentence says which way. Readers that need a hop's direction (a PR brief's order key, a flow's micro-world) read it from the part the flow is at: a hop leaving through its link's `to` end runs backwards, and the first hop runs backwards when the second leaves from its link's `from` end and not its `to` (`pr_brief::hop_ends`).
 
 A part's `holds` is a list, which may be empty, of the named things it holds, each `{ "name", "text", "paths" }`: a name unique within the part, one sentence of `text`, and optional `paths`, the item's key files, in the parts' pattern syntax. Each of an item's `paths` must match a file its part owns. "One or two sentences" and "one sentence" are guidance; the check counts characters (spec #473):
 

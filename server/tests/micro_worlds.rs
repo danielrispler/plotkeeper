@@ -208,6 +208,25 @@ fn a_flows_topic_holds_only_map_text_its_parts_and_their_paths() {
 }
 
 #[test]
+fn a_flows_first_hop_run_backwards_is_told_and_ordered_the_way_it_runs() {
+    let map = MAP
+        .replace(
+            r#"{ "id": "core-server", "from": "core", "to": "server" }"#,
+            r#"{ "id": "server-core", "from": "server", "to": "core" }"#,
+        )
+        .replace(r#"{ "link": "core-server""#, r#"{ "link": "server-core""#);
+    let topic = flow_topic(&map, "turn").unwrap();
+    assert_eq!(topic.parts, ["core", "server", "ui"]);
+    assert!(
+        topic
+            .text
+            .contains("1. Core sees the turn end. (Core to Server)\n"),
+        "{}",
+        topic.text
+    );
+}
+
+#[test]
 fn a_topic_quotes_each_parts_purpose_and_held_items_on_either_version() {
     let topic = flow_topic(MAP, "turn").unwrap();
     assert!(
