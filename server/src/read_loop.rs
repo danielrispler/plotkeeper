@@ -48,7 +48,7 @@ impl Sent {
     /// Sends the session list, the saved projects and the selection, each only if it changed. A session in a repository not
     /// yet saved adds it first (`projects.rs`).
     fn list(&mut self, app: &App) {
-        let seen = app.projects.see(&app.core.lock().unwrap().sessions());
+        let seen = app.projects.see(&app.core().sessions());
         if let Err(e) = seen {
             log::error!("save the project list: {e}");
         }
@@ -101,7 +101,7 @@ fn turn_files(state: &Mutex<studio_core::Studio>) -> bool {
 /// The daemon's `list` (danielrispler/Falinks#560): the core's status-only rows and mismatch lines follow its terminals'
 /// OSC 7501 status. A row's notices go out as a Claude session's do.
 pub fn listed(app: &App, terms: Vec<studio_core::Terminal>) {
-    let outputs = app.core.lock().unwrap().terminals(&terms, millis());
+    let outputs = app.core().terminals(&terms, millis());
     for output in outputs {
         match output {
             Output::NeedsYou { session_id, agent } => {
@@ -196,8 +196,8 @@ impl Effects for ServerEffects {
 /// Adds a notice on session `session_id`'s line, naming its subagent `agent`, if any; the read loop
 /// shows it. Called without the core's lock held.
 pub fn tell(app: &App, notice: Notice, session_id: &str, agent: Option<&str>) {
-    let body = app.core.lock().unwrap().notice_body(session_id, agent);
-    let mut notices = app.notices.lock().unwrap();
+    let body = app.core().notice_body(session_id, agent);
+    let mut notices = app.notices();
     match notice {
         Notice::Titled(title) => notices.push(title, body, uptime()),
         Notice::NeedsYou => notices.push_needs_you(session_id, body, uptime()),
@@ -293,12 +293,11 @@ impl Follower {
     pub fn pass(&mut self) {
         let shared = self.app.clone();
         let app: &App = &shared;
-        let state = &app.core;
         let read = self.read_log();
         // A session whose agent is gone ends within about 30 s (#330); the lines are read on the next pass.
         if self.live && self.checked.is_none_or(|at| at.elapsed() >= PROCESS_CHECK) {
             self.checked = Some(Instant::now());
-            let ends = process_ends(state, studio_hook::sys::pid_alive);
+            let ends = process_ends(&app.core, studio_hook::sys::pid_alive);
             if !ends.is_empty()
                 && let Err(e) = append_to(&self.log, &ends)
             {
@@ -306,13 +305,13 @@ impl Follower {
             }
         }
         // Reads the transcripts' lines and nothing else (`AGENTS.md`).
-        let transcripts_changed = state.lock().unwrap().follow_transcripts(report);
+        let transcripts_changed = app.core().follow_transcripts(report);
         let list_changed = app.list_changed.swap(false, Ordering::AcqRel);
-        let files_changed = turn_files(state);
+        let files_changed = turn_files(&app.core);
         let changed = read || transcripts_changed || list_changed || files_changed;
         emit_watched(app);
         let seen = see_selected(app);
-        if state.lock().unwrap().tick(millis()) || changed || seen {
+        if app.core().tick(millis()) || changed || seen {
             self.sent.list(app);
         }
         notify(app);
@@ -329,7 +328,6 @@ impl Follower {
     fn read_log(&mut self) -> bool {
         let shared = self.app.clone();
         let app: &App = &shared;
-        let state = &app.core;
         let Ok(mut file) = File::open(&self.log) else {
             return false;
         };
@@ -349,11 +347,11 @@ impl Follower {
                 // shortcut: fingerprints when the line is read, up to one poll after the prompt,
                 // so an edit in between counts as Daniel's; take the fingerprint in the hook if a
                 // card ever misses one.
-                let looks = state.lock().unwrap().fingerprint_folders(&text);
+                let looks = app.core().fingerprint_folders(&text);
                 let changes = fingerprint_changes(looks, &mut self.fingerprints);
-                outputs.extend(state.lock().unwrap().apply_with_changes(&text, changes));
+                outputs.extend(app.core().apply_with_changes(&text, changes));
             } else {
-                state.lock().unwrap().replay(&text);
+                app.core().replay(&text);
             }
             line.clear();
         }
@@ -365,16 +363,15 @@ impl Follower {
         }
         let read = self.read_to > read_from;
         if read {
-            let roots = state.lock().unwrap().known_roots();
+            let roots = app.core().known_roots();
             if roots.len() != self.roots_saved {
                 self.roots_saved = roots.len();
                 save_roots(&self.log, &roots);
             }
-            let keys = state.lock().unwrap().live_keys();
+            let keys = app.core().live_keys();
             self.fingerprints.retain(|key, _| keys.contains(key));
             // The decision history goes to the store, which keeps it across restarts (danielrispler/Falinks#479).
-            let studio = state.lock().unwrap();
-            let mut store = app.cards.lock().unwrap();
+            let (studio, mut store) = app.core_and_cards();
             for session in studio.sessions() {
                 unsaved(store.keep_decisions(&session.agent.id, &session.decisions));
             }
@@ -388,23 +385,21 @@ impl Follower {
     fn replayed(&mut self) {
         let shared = self.app.clone();
         let app: &App = &shared;
-        let state = &app.core;
-        let mut studio = state.lock().unwrap();
+        let (mut studio, store) = app.core_and_cards();
         // What the replay made, before the card store's facts change it.
         let replayed = studio.save();
-        let store = app.cards.lock().unwrap();
         store.restore(&mut studio);
         drop((store, studio));
         let log = self.log.clone();
         thread::spawn(move || save_state(&log, &replayed));
-        state.lock().unwrap().tick(millis());
+        app.core().tick(millis());
         self.sent.list(app);
         // The terminals' revival waits only for the replay, not for this pass's `git` work, which
         // can take a minute on a long log, while a click's pane waits on it (#182).
         app.events.replayed();
         // The first lookup of the PRs, which writes the briefs of the ready ones the start picks (`pr_briefs::Startup`).
         crate::prs::ask_later(&shared, crate::prs::Trigger::TurnEnd, None);
-        let waiting = state.lock().unwrap().waiting_folders();
+        let waiting = app.core().waiting_folders();
         fingerprint_changes(waiting, &mut self.fingerprints);
     }
 
@@ -428,10 +423,10 @@ impl Follower {
             Output::CommandBlocked { session_id, agent } => {
                 // The card's buttons are live now; its note is asked for beside the notification, which waits for nothing.
                 let asks = {
-                    let studio = app.core.lock().unwrap();
+                    let (studio, mut notes) = app.core_and_notes();
                     let blocked = studio.session(&session_id);
-                    let asks = blocked.map(|session| app.notes.lock().unwrap().asks(session));
-                    drop(studio);
+                    let asks = blocked.map(|session| notes.asks(session));
+                    drop((notes, studio));
                     asks
                 };
                 ask_notes(app, asks.unwrap_or_default());
@@ -451,7 +446,7 @@ impl Follower {
                 );
             }
             Output::Promoted { agent } => {
-                unsaved(app.cards.lock().unwrap().promoted(&agent));
+                unsaved(app.cards().promoted(&agent));
             }
             Output::Unrecognised {
                 session_id,
@@ -502,16 +497,12 @@ impl Follower {
 /// in the same pass as the list that shows "needs you" (danielrispler/Falinks#569).
 fn emit_watched(app: &App) {
     if let Ok(data) = crate::answer::data()
-        && let Some(ask) = app
-            .watching
-            .lock()
-            .unwrap()
-            .pass(&data, studio_hook::answer::now_ms())
+        && let Some(ask) = app.watching().pass(&data, studio_hook::answer::now_ms())
     {
         app.events.emit("ask", serde_json::to_value(ask).unwrap());
     }
     if let Ok(data) = crate::answer::data()
-        && let Some(blocked) = app.watching.lock().unwrap().changed_blocked_requests(&data)
+        && let Some(blocked) = app.watching().changed_blocked_requests(&data)
     {
         app.events
             .emit("blocked", serde_json::to_value(blocked).unwrap());
@@ -522,46 +513,40 @@ fn emit_watched(app: &App) {
 /// (danielrispler/Falinks#556); the sink is asked only while it is unseen, and not under the core's
 /// lock, which the main thread's commands take. Returns whether a turn was seen.
 fn see_selected(app: &App) -> bool {
-    let state = &app.core;
-    let unseen = state.lock().unwrap().selected().is_some_and(|s| s.unseen);
+    let unseen = app.core().selected().is_some_and(|s| s.unseen);
     // Asking for focus waits on the main thread, which never takes this lock.
     let shown = unseen && app.rail_shown.load(Ordering::Acquire) && app.events.focused();
-    let seen = state.lock().unwrap().see_selected(shown);
+    let seen = app.core().see_selected(shown);
     if let Some((id, turns)) = &seen {
-        unsaved(app.cards.lock().unwrap().seen(id, *turns));
+        unsaved(app.cards().seen(id, *turns));
     }
     seen.is_some()
 }
 
 /// Shows the notices that are due, as one notification, and sends the sessions whose turn finished.
 fn notify(app: &App) {
-    let state = &app.core;
     // Asking for focus waits on the main thread, which never takes this lock.
     let focused = || app.events.focused();
     // Takes the core's lock under the notices' lock; `tell` never holds both.
     let needs_you = |id: &str| {
-        let studio = state.lock().unwrap();
+        let studio = app.core();
         studio.session(id).is_some_and(|s| s.state == NeedsYou)
     };
-    let due = app
-        .notices
-        .lock()
-        .unwrap()
-        .due(uptime(), focused, needs_you, || {
-            // The split's pane shows a terminal: a status-only row's id, or a session's in it.
-            let split = app.split_shown.lock().unwrap().clone();
-            let studio = state.lock().unwrap();
-            let selected = studio.selected().map(|s| s.agent.id.clone());
-            let mut on_screen: Vec<String> = selected.into_iter().collect();
-            if let Some(terminal) = split {
-                let in_it = studio.sessions().into_iter();
-                let in_it = in_it.filter(|s| s.terminal.as_ref() == Some(&terminal));
-                on_screen.extend(in_it.map(|s| s.agent.id.clone()));
-                on_screen.push(terminal);
-            }
-            drop(studio);
-            on_screen
-        });
+    let due = app.notices().due(uptime(), focused, needs_you, || {
+        // The split's pane shows a terminal: a status-only row's id, or a session's in it.
+        let split = app.split_shown().clone();
+        let studio = app.core();
+        let selected = studio.selected().map(|s| s.agent.id.clone());
+        let mut on_screen: Vec<String> = selected.into_iter().collect();
+        if let Some(terminal) = split {
+            let in_it = studio.sessions().into_iter();
+            let in_it = in_it.filter(|s| s.terminal.as_ref() == Some(&terminal));
+            on_screen.extend(in_it.map(|s| s.agent.id.clone()));
+            on_screen.push(terminal);
+        }
+        drop(studio);
+        on_screen
+    });
     if let Some((title, body)) = due.notification {
         // The page shows it as a browser notification, when no tab of it is visible and focused (#331).
         app.events.emit(

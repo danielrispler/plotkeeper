@@ -238,7 +238,7 @@ pub fn ask_later(app: &Arc<App>, trigger: Trigger, also: Option<&str>) {
     let (app, also) = (app.clone(), also.map(str::to_string));
     std::thread::spawn(move || {
         let mut projects = BTreeMap::<String, Vec<(String, String)>>::new();
-        let branches = app.core.lock().unwrap().branches();
+        let branches = app.core().branches();
         for (cwd, branch) in branches {
             if let Ok(project) = studio_workbench::main_checkout(Path::new(&cwd)) {
                 projects.entry(project).or_default().push((cwd, branch));
@@ -271,7 +271,7 @@ pub fn ask_later(app: &Arc<App>, trigger: Trigger, also: Option<&str>) {
             );
             let Some(asked) = asked else { continue };
             for (branch, number) in asked {
-                if app.core.lock().unwrap().set_pr(&branch, number) {
+                if app.core().set_pr(&branch, number) {
                     app.list_changed();
                 }
             }

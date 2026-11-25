@@ -93,7 +93,7 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "offset")?,
         )),
         "cards" => out(crate::cards(app)),
-        "writer_notice" => out(app.writer_notice.lock().unwrap().clone()),
+        "writer_notice" => out(app.writer_notice().clone()),
         "wired" => out(crate::wired()),
         "about" => out(crate::about()),
         "ask" => res(crate::ask(
