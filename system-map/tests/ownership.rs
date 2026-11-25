@@ -19,7 +19,7 @@ fn paths(map: &mut Value, alpha: Value, beta: Value) {
 }
 
 fn files(list: &[&str]) -> Vec<String> {
-    list.iter().map(|s| s.to_string()).collect()
+    list.iter().map(ToString::to_string).collect()
 }
 
 #[test]

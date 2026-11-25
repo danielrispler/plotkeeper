@@ -159,7 +159,8 @@ pub struct ServerEffects(OnceLock<Weak<App>>);
 impl ServerEffects {
     /// Gives the effects the state they work on; the first call wins.
     pub fn attach(&self, app: &Arc<App>) {
-        let _ = self.0.set(Arc::downgrade(app));
+        // Set once; a later set keeps the first value, which is the same.
+        self.0.set(Arc::downgrade(app)).ok();
     }
 
     fn app(&self) -> Option<Arc<App>> {
@@ -289,6 +290,10 @@ impl Follower {
     }
 
     /// One pass: reads what the log gained, applies it, and sends what changed to the sink.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "#556 splits it by responsibility (spec #548, Group 4)"
+    )]
     pub fn pass(&mut self) {
         let shared = self.app.clone();
         let app: &App = &shared;
@@ -360,7 +365,10 @@ impl Follower {
                         let asks = {
                             let studio = state.lock().unwrap();
                             let blocked = studio.session(&session_id);
-                            blocked.map(|session| app.notes.lock().unwrap().asks(session))
+                            let asks =
+                                blocked.map(|session| app.notes.lock().unwrap().asks(session));
+                            drop(studio);
+                            asks
                         };
                         ask_notes(app, asks.unwrap_or_default());
                         tell(
@@ -496,16 +504,18 @@ impl Follower {
             .lock()
             .unwrap()
             .due(uptime(), focused, needs_you, || {
+                // The split's pane shows a terminal: a status-only row's id, or a session's in it.
+                let split = app.split_shown.lock().unwrap().clone();
                 let studio = state.lock().unwrap();
                 let selected = studio.selected().map(|s| s.agent.id.clone());
                 let mut on_screen: Vec<String> = selected.into_iter().collect();
-                // The split's pane shows a terminal: a status-only row's id, or a session's in it.
-                if let Some(terminal) = app.split_shown.lock().unwrap().clone() {
+                if let Some(terminal) = split {
                     let in_it = studio.sessions().into_iter();
                     let in_it = in_it.filter(|s| s.terminal.as_ref() == Some(&terminal));
                     on_screen.extend(in_it.map(|s| s.agent.id.clone()));
                     on_screen.push(terminal);
                 }
+                drop(studio);
                 on_screen
             });
         if let Some((title, body)) = due.notification {

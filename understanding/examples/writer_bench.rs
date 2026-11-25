@@ -23,6 +23,10 @@ use studio_understanding::pr_brief::{
     Brief, BriefRecord, BriefStore, CallKind, build_facts, fetch_meta, gather, write_pr_brief,
 };
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "a hand-run trial's whole script, read top to bottom"
+)]
 fn main() {
     let mut args = std::env::args().skip(1);
     let kind = args.next().unwrap_or_default();

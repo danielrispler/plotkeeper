@@ -38,10 +38,11 @@ jobs:
         with:
           rustflags: ""
           cache-workspaces: . -> target
-      # `check` runs the Rust tests with nextest, then type-checks the wire samples they wrote (`scripts/wire/`, #246).
+      # `check` runs the Rust tests with nextest, then type-checks the wire samples they wrote (`scripts/wire/`, #246),
+      # and looks for unused Rust dependencies with cargo machete.
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-nextest
+          tool: cargo-nextest,cargo-machete
       - run: npm ci
       # The same command an agent runs locally (package.json, `check`).
       # The runner has 3 cores and most tests wait on git, processes and timers, so nextest runs 5 at once, not 3.

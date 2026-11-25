@@ -2,6 +2,7 @@
 //! check, a command's answer against the function behind it, an event reaching a subscriber, and one plotkeeper per data folder.
 
 mod isolated_home;
+use std::fmt::Write as _;
 use std::{
     io::{BufRead, BufReader, Read, Write},
     net::TcpStream,
@@ -81,9 +82,10 @@ fn request(port: u16, method: &str, path: &str, host: &str, extra: &[&str], body
         .unwrap();
     let mut text = format!("{method} {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n");
     for line in extra {
-        text += &format!("{line}\r\n");
+        // Writing to a `String` cannot fail.
+        write!(text, "{line}\r\n").ok();
     }
-    text += &format!("Content-Length: {}\r\n\r\n{body}", body.len());
+    write!(text, "Content-Length: {}\r\n\r\n{body}", body.len()).ok();
     stream.write_all(text.as_bytes()).unwrap();
     let mut raw = String::new();
     stream.read_to_string(&mut raw).unwrap();
@@ -375,7 +377,8 @@ fn another_command_answers_while_a_subagents_log_is_read() {
     let reader = std::thread::spawn(move || {
         studio_server::subagent_log_through(&app, session.into(), agent.into(), 0, |file| {
             reading.send(()).unwrap();
-            let _ = released.recv();
+            // A closed channel or a timeout both mean carry on.
+            released.recv().ok();
             file.read()
         })
     });
@@ -526,7 +529,8 @@ fn a_hand_edit_of_settings_json_reaches_the_page_and_its_next_save_succeeds() {
 #[test]
 fn only_an_error_of_the_servers_own_reaches_the_page_as_server_error() {
     let f = fixture();
-    let _ = log::set_logger(&studio_server::LOGGER);
+    // Another test of this binary may have set it already.
+    log::set_logger(&studio_server::LOGGER).ok();
     log::set_max_level(log::LevelFilter::Trace);
     studio_server::LOGGER.send_errors_to(f.web.sink());
     let stream = open_stream(f.web.port());

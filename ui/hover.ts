@@ -8,10 +8,10 @@
 export type Clock = { set(run: () => void, ms: number): number; clear(timer: number): void };
 export const realClock: Clock = { set: (run, ms) => window.setTimeout(run, ms), clear: (timer) => window.clearTimeout(timer) };
 
-export const openAfter = 300;
-export const closeAfter = 400;
+const openAfter = 300;
+const closeAfter = 400;
 // A peek marks its turn seen only once the rail has stayed open this long.
-export const seenAfter = 2000;
+const seenAfter = 2000;
 
 export type Hover = {
   /** The pointer came onto / left a zone: a target or the layer. */

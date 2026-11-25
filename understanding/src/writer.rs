@@ -503,7 +503,10 @@ fn schema_file(folder: &Path, schema: &str) -> std::path::PathBuf {
             std::process::id(),
             std::thread::current().id()
         ));
-        let _ = std::fs::write(&part, schema).and_then(|()| std::fs::rename(&part, &file));
+        // Not written, the run fails and says why (the doc above).
+        std::fs::write(&part, schema)
+            .and_then(|()| std::fs::rename(&part, &file))
+            .ok();
     }
     file
 }
@@ -516,6 +519,7 @@ pub fn read_reply(
     status: &ExitStatus,
     stdout: &str,
 ) -> Result<WriterReply, WriterError> {
+    let status = *status;
     match kind {
         WriterKind::Codex => return read_codex(schema, status, stdout),
         WriterKind::Copilot => return read_copilot(schema, status, stdout),
@@ -593,12 +597,12 @@ pub fn read_reply(
 pub(crate) fn read_reply_and_stderr(
     kind: WriterKind,
     schema: bool,
-    status: &ExitStatus,
+    status: ExitStatus,
     stdout: &str,
     stderr: &str,
 ) -> Result<WriterReply, WriterError> {
     let said: String = stderr.trim().chars().take(300).collect();
-    match read_reply(kind, schema, status, stdout) {
+    match read_reply(kind, schema, &status, stdout) {
         Err(error) if error.kind == FailureKind::Other && !said.is_empty() => {
             Err(WriterError::new(
                 classify(kind, status, &said),
@@ -612,7 +616,7 @@ pub(crate) fn read_reply_and_stderr(
 
 /// `read_reply` for `codex exec --json`: one JSON event a line. The reply is the last `agent_message` item, the usage the
 /// `turn.completed`'s; a `turn.failed`, or the last `error` event of a run that exited with an error, says why it failed.
-fn read_codex(schema: bool, status: &ExitStatus, stdout: &str) -> Result<WriterReply, WriterError> {
+fn read_codex(schema: bool, status: ExitStatus, stdout: &str) -> Result<WriterReply, WriterError> {
     let kind = WriterKind::Codex;
     let (mut text, mut usage, mut failed, mut error) = (None, None, None, None);
     for event in stdout
@@ -621,7 +625,7 @@ fn read_codex(schema: bool, status: &ExitStatus, stdout: &str) -> Result<WriterR
     {
         match event["type"].as_str() {
             Some("item.completed") if event["item"]["type"] == "agent_message" => {
-                text = event["item"]["text"].as_str().map(String::from)
+                text = event["item"]["text"].as_str().map(String::from);
             }
             Some("turn.completed") => usage = Some(event["usage"].clone()),
             Some("turn.failed") => failed = event["error"]["message"].as_str().map(String::from),
@@ -650,7 +654,7 @@ fn read_codex(schema: bool, status: &ExitStatus, stdout: &str) -> Result<WriterR
 /// `data.message` says why it failed; output with no JSON line (`-s` printing the reply alone) is the reply.
 fn read_copilot(
     schema: bool,
-    status: &ExitStatus,
+    status: ExitStatus,
     stdout: &str,
 ) -> Result<WriterReply, WriterError> {
     let kind = WriterKind::Copilot;
@@ -678,9 +682,10 @@ fn read_copilot(
             format!("({status}): {head:?}"),
         );
     }
-    let text = match records.is_empty() {
-        true => stdout,
-        false => last("assistant.message", "content").unwrap_or_default(),
+    let text = if records.is_empty() {
+        stdout
+    } else {
+        last("assistant.message", "content").unwrap_or_default()
     };
     finish(kind, schema, text.into(), None, None)
 }
@@ -715,7 +720,7 @@ pub(crate) fn finish(
 }
 
 /// Why a failed call failed, from what it printed and how it exited.
-fn classify(kind: WriterKind, status: &ExitStatus, said: &str) -> FailureKind {
+fn classify(kind: WriterKind, status: ExitStatus, said: &str) -> FailureKind {
     if let Some(found) = login_or_quota(said) {
         found
     } else if kind == WriterKind::Agy && status.code() == Some(3) {

@@ -217,7 +217,7 @@ function watchLast(node: Element, index: number) {
 }
 
 const panel = () => document.getElementById("map-brief")!;
-export const briefOpen = () => player.current() !== null;
+const briefOpen = () => player.current() !== null;
 
 // Opens `chapter` of PR `number`'s brief: reads it, returns the map to now and plays it. A stale or unwritten brief is written in the
 // background (port decision Q5): the panel and the PR's tray row say "Writing the brief…", the map stays usable, and the brief opens
@@ -399,7 +399,7 @@ onDraw((view) => {
   void openBriefOf(project, number, 0);
 });
 
-export function closeBrief() {
+function closeBrief() {
   latest.cancel();
   delete panel().dataset.waiting;
   hideWriting();

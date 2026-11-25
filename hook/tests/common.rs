@@ -9,7 +9,8 @@ use std::{
 /// An empty scratch `HOME`, named by `label` and this process.
 pub fn scratch(label: &str) -> PathBuf {
     let home = std::env::temp_dir().join(format!("studio-{label}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
     fs::create_dir_all(&home).unwrap();
     home
 }

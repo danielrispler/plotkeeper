@@ -6,6 +6,29 @@ exclude = ["archive"]
 default-members = ["core", "wayfinder", "hook", "understanding", "workbench", "system-map", "server"]
 resolver = "3"
 
+# Every crate sets `lints.workspace = true` (spec #548, Group 3, "Clippy and rustc"). `npm run check` runs clippy
+# with `-D warnings`, so each lint here is binding. An allow names its lint and gives a `reason`; one that points at
+# a #556 split goes when the split lands. `missing_docs` is set in `system-map` and `workbench` only, in their
+# `lib.rs`. `unreachable_pub` comes with #556's visibility change.
+[workspace.lints.clippy]
+let_underscore_must_use = "warn"
+significant_drop_tightening = "warn"
+significant_drop_in_scrutinee = "warn"
+map_err_ignore = "warn"
+too_many_lines = "warn"
+cast_possible_wrap = "warn"
+cast_sign_loss = "warn"
+allow_attributes_without_reason = "warn"
+redundant_closure_for_method_calls = "warn"
+format_push_string = "warn"
+match_bool = "warn"
+semicolon_if_nothing_returned = "warn"
+trivially_copy_pass_by_ref = "warn"
+ref_option = "warn"
+undocumented_unsafe_blocks = "warn"
+dbg_macro = "warn"
+todo = "warn"
+
 # Lighter debug info links faster; line tables keep file and line in backtraces.
 [profile.dev]
 debug = "line-tables-only"

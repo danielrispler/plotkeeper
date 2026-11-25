@@ -13,7 +13,7 @@ export type Facts = StopFacts;
 export type Module = string;
 
 // The review is due once both hold, whichever comes last.
-export const dueAfter = { days: 14, prs: 20 };
+const dueAfter = { days: 14, prs: 20 };
 
 // One module's row: its words in the review, its "kept if" bar over the shell's counts, and an optional exception before which it is not
 // judged at all: a calendar wait of `weeks` from its rollout (`from`, a local day, or read from the project's facts, null while it has

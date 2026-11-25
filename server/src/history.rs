@@ -240,7 +240,7 @@ fn subject_of(repo: &Path, commit: &str) -> Result<(String, String), String> {
 pub fn at(repo: &Path, commit: &str) -> Result<At, String> {
     let (full, label) = subject_of(repo, commit)?;
     let source = git(repo, &["show", &format!("{full}:{}", system_map::MAP_FILE)])
-        .map_err(|_| format!("{} has no map at {}", system_map::MAP_FILE, &full[..7]))?;
+        .map_err(|e| format!("{} has no map at {}: {e}", system_map::MAP_FILE, &full[..7]))?;
     // A map from before version 2 is sent converted, as `read_map` stores it.
     let source = system_map::convert(&source)?;
     system_map::parse_lenient(&source)?;

@@ -147,7 +147,8 @@ impl Web {
     pub fn stop(mut self) {
         self.server.unblock();
         if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
+            // A panic in it was already reported by the panic hook.
+            thread.join().ok();
         }
     }
 }
@@ -163,14 +164,18 @@ fn same(a: &str, b: &str) -> bool {
 }
 
 fn refuse(request: Request, status: u16, why: &str) {
-    let _ = request.respond(Response::from_string(why).with_status_code(status));
+    // The client may have hung up; there is no one left to answer.
+    request
+        .respond(Response::from_string(why).with_status_code(status))
+        .ok();
 }
 
 fn json(request: Request, status: u16, body: &Value) {
     let response = Response::from_string(body.to_string())
         .with_status_code(status)
         .with_header(Header::from_bytes("Content-Type", "application/json").unwrap());
-    let _ = request.respond(response);
+    // The client may have hung up; there is no one left to answer.
+    request.respond(response).ok();
 }
 
 fn content_type(path: &str) -> &'static str {
@@ -228,7 +233,8 @@ fn handle(context: &Context, mut request: Request) {
                 )
                 .unwrap(),
             );
-        let _ = request.respond(response);
+        // The client may have hung up; there is no one left to answer.
+        request.respond(response).ok();
         return;
     }
     if !has_cookie {
@@ -257,7 +263,7 @@ fn handle(context: &Context, mut request: Request) {
             match api::call(&context.app, &*context.bus, &command[5..], args) {
                 Ok(reply) => json(request, 200, &reply),
                 Err(Failure::Unknown) => {
-                    json(request, 404, &Value::String("no such command".into()))
+                    json(request, 404, &Value::String("no such command".into()));
                 }
                 Err(Failure::Bad(why)) => json(request, 400, &Value::String(why)),
                 Err(Failure::Failed(why)) => json(request, 500, &Value::String(why)),
@@ -281,7 +287,8 @@ fn handle(context: &Context, mut request: Request) {
                             Header::from_bytes("Content-Security-Policy", "frame-src 'none'")
                                 .unwrap(),
                         );
-                    let _ = request.respond(response);
+                    // The client may have hung up; there is no one left to answer.
+                    request.respond(response).ok();
                 }
                 None => refuse(request, 404, "Not found"),
             }

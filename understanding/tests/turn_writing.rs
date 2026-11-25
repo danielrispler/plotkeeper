@@ -429,7 +429,8 @@ fn diff(paths: &[&str]) -> String {
 fn returns_in_time<T: Send + 'static>(what: &str, call: impl FnOnce() -> T + Send + 'static) -> T {
     let (done, finished) = mpsc::channel();
     thread::spawn(move || {
-        let _ = done.send(call());
+        // The receiver may have gone, and then no one waits for this.
+        done.send(call()).ok();
     });
     finished
         .recv_timeout(Duration::from_secs(5))
@@ -493,7 +494,7 @@ fn every_entry_point_returns_within_a_few_seconds_against_a_core_with_no_such_tu
     called("the queued jobs", |w| assert_eq!(w.run_queued(), 3));
     // A summary of a session that is not there parks nothing, so opening its turn finds none.
     called("settings, on open", |w| {
-        w.settings(SummarySetup::default(), true)
+        w.settings(SummarySetup::default(), true);
     });
     let parked = SummaryRequest {
         id: "s1@7".into(),
@@ -651,7 +652,7 @@ struct ReadingWriter {
 
 impl CardWriter for ReadingWriter {
     fn goal(&self, prompts: &[&str]) -> Result<String, String> {
-        let kept = prompts.iter().map(|p| p.to_string()).collect();
+        let kept = prompts.iter().map(ToString::to_string).collect();
         self.reading.goals.lock().unwrap().push(kept);
         self.recorded.goal(prompts)
     }
@@ -888,8 +889,7 @@ fn the_goal_is_written_again_only_when_a_prompt_of_daniels_came_and_reads_his_pr
             vec!["Add a", "Add b", "Add d"]
         ]
     );
-    let store = day.store.lock().unwrap();
-    let brief = store.brief("s1").unwrap();
+    let brief = day.store.lock().unwrap().brief("s1").unwrap().clone();
     assert_eq!((brief.goal_prompts, brief.text.as_str()), (3, ""));
 }
 
@@ -998,8 +998,8 @@ fn a_session_deleted_while_its_brief_waited_gets_nothing_and_the_queue_goes_on_t
     day.event("StudioDelete", json!({}));
 
     assert_eq!(day.writing.run_queued(), 2);
-    let store = day.store.lock().unwrap();
-    assert!(store.brief("s1").is_none() && store.brief("s2").is_some());
+    assert!(day.store.lock().unwrap().brief("s1").is_none());
+    assert!(day.store.lock().unwrap().brief("s2").is_some());
 }
 
 #[test]

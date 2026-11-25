@@ -669,6 +669,10 @@ fn use_tree(
 /// inline module it sits in) declares, through a name a `use` line brought in, or, by a
 /// workspace library's name in `crates`, from that library's root. Without `root_mod_lines`, a
 /// crate root's `mod` lines pair nothing.
+#[allow(
+    clippy::too_many_lines,
+    reason = "left whole when the lint came in (#555); spec #548 names no split of it"
+)]
 fn rust_modules(
     root: &Path,
     tracked: &BTreeSet<&str>,
@@ -778,7 +782,7 @@ fn rust_modules(
         (min..=words.len())
             .rev()
             .find_map(|n| tree.modules.get(&words[..n]))
-            .map(|t| t.to_string())
+            .map(ToString::to_string)
     };
     for (root_file, tree) in &trees {
         let externs = extern_crates(root_file, crates);

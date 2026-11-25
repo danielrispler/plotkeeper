@@ -9,8 +9,11 @@ use crate::{Map, Owners, PartFiles, Placement};
 /// What `touched` found.
 #[derive(Debug, Default, Serialize)]
 pub struct Touched {
+    /// The parts the paths touch, in the map's order, each with its paths.
     pub parts: Vec<PartFiles>,
+    /// The paths an ignore pattern places.
     pub ignored: Vec<String>,
+    /// The paths no part owns and no pattern ignores.
     pub unowned: Vec<String>,
 }
 

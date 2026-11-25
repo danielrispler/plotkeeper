@@ -421,7 +421,8 @@ static FATE: Mutex<Fate> = Mutex::new(Fate::Open);
 /// while the lock is held cannot leave it half written. The hook is a short-lived process of its own, which the
 /// server's panic hook does not cover (spec danielrispler/plotkeeper#548).
 fn fate() -> std::sync::MutexGuard<'static, Fate> {
-    FATE.lock().unwrap_or_else(|e| e.into_inner())
+    FATE.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Gives up the trees this process is still recording: its `git` calls are killed, and `trees`
@@ -485,12 +486,15 @@ pub fn record_tree_within(folder: &Path, files: usize, bytes: u64) -> Option<(St
     let call = CALLS.fetch_add(1, Ordering::Relaxed);
     let scratch = env::temp_dir().join(format!("plotkeeper-hook-{}-{call}.index", process::id()));
     // A copy of the real index keeps git's stat cache, so only changed files are hashed again.
-    let _ = fs::copy(Path::new(&root).join(index), &scratch);
+    // Without the copy, `add` builds the index from scratch, only slower.
+    fs::copy(Path::new(&root).join(index), &scratch).ok();
     let added = git(Path::new(&root), &["add", "-A"], Some(&scratch));
     let tree = added.and_then(|_| git(Path::new(&root), &["write-tree"], Some(&scratch)));
-    let _ = fs::remove_file(&scratch);
+    // Best effort: a file already gone is fine.
+    fs::remove_file(&scratch).ok();
     // A killed `add` leaves its lock behind.
-    let _ = fs::remove_file(scratch.with_extension("index.lock"));
+    // Best effort: a file already gone is fine.
+    fs::remove_file(scratch.with_extension("index.lock")).ok();
     Some((root, tree?))
 }
 
@@ -538,8 +542,10 @@ fn untracked_within(root: &Path, files: usize, bytes: u64) -> Result<(), String>
         }
     };
     if let Some(why) = passed {
-        let _ = child.kill();
-        let _ = child.wait();
+        // The child may have exited already.
+        child.kill().ok();
+        // Only reaps the child; its exit status is not used.
+        child.wait().ok();
         return Err(why);
     }
     let status = child.wait().map_err(|e| format!("git ls-files: {e}"))?;
@@ -819,6 +825,10 @@ fn cursor_shaped(event: &Line) -> Line {
     shaped
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "left whole when the lint came in (#555); spec #548 names no split of it"
+)]
 fn claude_trees(event: &mut Line, data: &Path) -> Result<(), Box<dyn std::error::Error>> {
     use serde_json::{Map, Value, json};
     use std::io::{Seek, Write};
@@ -834,7 +844,8 @@ fn claude_trees(event: &mut Line, data: &Path) -> Result<(), Box<dyn std::error:
     let state = turns.join(format!("{session}.json"));
     // A session's record goes with it; a start, which is rare, prunes those whose end never came.
     if name == "SessionEnd" && plain {
-        let _ = fs::remove_file(&state);
+        // Best effort: a file already gone is fine.
+        fs::remove_file(&state).ok();
     }
     if name == "SessionStart" {
         prune_turns(&turns);
@@ -1015,7 +1026,8 @@ fn prune_turns(turns: &Path) {
         let modified = entry.metadata().and_then(|m| m.modified());
         let age = modified.ok().and_then(|t| t.elapsed().ok());
         if age.is_some_and(|age| age > week) {
-            let _ = fs::remove_file(entry.path());
+            // Best effort: a file already gone is fine.
+            fs::remove_file(entry.path()).ok();
         }
     }
 }

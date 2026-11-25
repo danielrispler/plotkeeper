@@ -211,7 +211,8 @@ fn start_plotkeeper_in(
     );
     let (tell, changes) = mpsc::channel();
     laws.on_change(move |_| {
-        let _ = tell.send(());
+        // The receiver may have gone, and then no one waits for this.
+        tell.send(()).ok();
     });
     runner.pick_up();
     (runner, laws, changes)
@@ -243,9 +244,10 @@ impl Bench {
                 "run {id} was never proven or rejected: {:?}",
                 self.runner.runs(&self.project)
             );
-            let _ = self
-                .changes
-                .recv_timeout(left.min(Duration::from_millis(500)));
+            // A timeout only means look again.
+            self.changes
+                .recv_timeout(left.min(Duration::from_millis(500)))
+                .ok();
         }
     }
 

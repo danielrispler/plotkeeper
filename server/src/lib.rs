@@ -82,7 +82,8 @@ pub struct Events(OnceLock<Arc<dyn Sink>>);
 impl Events {
     /// Sets where events go; the first call wins.
     pub fn set(&self, sink: Arc<dyn Sink>) {
-        let _ = self.0.set(sink);
+        // Set once; a later set keeps the first value, which is the same.
+        self.0.set(sink).ok();
     }
 
     /// Sends event `name` with `payload`, or drops it while nothing is set.
@@ -173,21 +174,22 @@ impl App {
         let cards: Cards = Arc::new(Mutex::new(CardStore::open_beside(log)?));
         let notes: Notes = Arc::new(Mutex::new(RiskNotes::open_beside(log)?));
         let fake = std::env::var("PLOTKEEPER_CARD_WRITER").as_deref() == Ok("fake");
-        let writer: Writer = match fake {
-            true => Arc::new(FakeWriter),
-            false => {
-                let writer = ClaudeWriter::beside(log)?;
-                let writer_notices = Mutex::new(writer_notices);
-                Arc::new(writer.on_availability(move |notice| {
-                    let _ = writer_notices.lock().unwrap().send(notice);
-                }))
-            }
+        let writer: Writer = if fake {
+            Arc::new(FakeWriter)
+        } else {
+            let writer = ClaudeWriter::beside(log)?;
+            let writer_notices = Mutex::new(writer_notices);
+            Arc::new(writer.on_availability(move |notice| {
+                // The receiver may have gone, and then no one waits for this.
+                writer_notices.lock().unwrap().send(notice).ok();
+            }))
         };
         let app = Self::open_with(log, cards, notes, writer, effects)?;
         // The checks' fake writer keeps its key in memory, so no check reads the Keychain.
-        Ok(match fake {
-            true => app,
-            false => app.with_keys(Arc::new(settings::Keychain::default())),
+        Ok(if fake {
+            app
+        } else {
+            app.with_keys(Arc::new(settings::Keychain::default()))
         })
     }
 
@@ -257,7 +259,7 @@ impl App {
         // A part catch-up's write that moves on to its next call draws its stage on the waiting card (#450).
         let told = events.clone();
         let catch_ups = part_catch_ups::CatchUps::telling(move |project| {
-            told.emit("map-landed", project.into())
+            told.emit("map-landed", project.into());
         });
         Ok(App {
             core,
@@ -602,7 +604,9 @@ pub fn check_output(
     let row = {
         let studio = app.core.lock().unwrap();
         let ledger = &studio.session(&session).map(|s| &s.ledger);
-        ledger.and_then(|l| l.row(agent.as_deref(), &call)).cloned()
+        let row = ledger.and_then(|l| l.row(agent.as_deref(), &call)).cloned();
+        drop(studio);
+        row
     };
     let Some(row) = row else { return Ok(None) };
     let log = studio_hook::event_log(&std::env::home_dir().ok_or("no home folder")?);
@@ -666,8 +670,10 @@ pub fn agent_summary(app: &App, agent_id: String) -> Option<String> {
     let (prompt, message) = {
         let studio = app.core.lock().unwrap();
         let mut agents = studio.sessions().into_iter().flat_map(|s| &s.agents);
-        let agent = agents.find(|a| a.agent.id == agent_id && a.ended_at.is_some())?;
-        (agent.prompt.clone(), agent.message.clone())
+        let agent = agents.find(|a| a.agent.id == agent_id && a.ended_at.is_some());
+        let found = agent.map(|agent| (agent.prompt.clone(), agent.message.clone()));
+        drop(studio);
+        found?
     };
     // A subagent that ended without a last message (killed, or its session ended) has no result to sum up.
     if message.is_empty() {
@@ -716,7 +722,9 @@ pub fn select(app: &App, id: Option<String>) -> serde_json::Value {
         Some(id) => studio.select(&id),
         None => studio.select_none(),
     }
-    selection(&studio)
+    let shown = selection(&studio);
+    drop(studio);
+    shown
 }
 
 /// Daniel started a session in studio terminal `terminal`; returns the selection, `null` until the
@@ -724,7 +732,9 @@ pub fn select(app: &App, id: Option<String>) -> serde_json::Value {
 pub fn select_terminal(app: &App, terminal: String) -> serde_json::Value {
     let mut studio = app.core.lock().unwrap();
     studio.select_terminal(&terminal);
-    selection(&studio)
+    let shown = selection(&studio);
+    drop(studio);
+    shown
 }
 
 /// Daniel opened subagent `agent_id`'s line; returns the selection, which names it. The card store
@@ -734,7 +744,9 @@ pub fn open(app: &App, agent_id: String) -> serde_json::Value {
     if studio.open(&agent_id) {
         unsaved(app.cards.lock().unwrap().opened(&agent_id));
     }
-    selection(&studio)
+    let shown = selection(&studio);
+    drop(studio);
+    shown
 }
 
 /// The log of subagent `agent_id` of session `session` from byte `offset`: its entries after it and
@@ -746,7 +758,13 @@ pub fn subagent_log(
     agent_id: String,
     offset: u64,
 ) -> Option<studio_core::SubagentLog> {
-    subagent_log_through(app, session, agent_id, offset, |file| file.read())
+    subagent_log_through(
+        app,
+        session,
+        agent_id,
+        offset,
+        studio_core::SubagentLogFile::read,
+    )
 }
 
 /// `subagent_log` with the file read by `read`, which runs with no lock on the studio held (spec
@@ -895,7 +913,8 @@ pub fn process_ends(studio: &Mutex<Studio>, alive: impl Fn(u32) -> bool) -> Vec<
 
 /// Daniel marked session `id` unseen (danielrispler/Falinks#556), from the rail's menu.
 pub fn mark_unseen(app: &App, id: String) {
-    if let Some((id, turns)) = app.core.lock().unwrap().mark_unseen(&id) {
+    let marked = app.core.lock().unwrap().mark_unseen(&id);
+    if let Some((id, turns)) = marked {
         unsaved(app.cards.lock().unwrap().seen(&id, turns));
         app.list_changed();
     }
@@ -926,8 +945,10 @@ pub fn cards(app: &App) -> SessionCards {
     if let Some(session) = session {
         shown.open = open_items(session, studio.task_facts(owner), &cards);
     }
+    drop(cards);
     // Each blocked command's note is joined here, so the core's type holds none.
     join_notes(&studio, &app.notes.lock().unwrap(), &mut shown);
+    drop(studio);
     shown
 }
 
@@ -983,9 +1004,9 @@ pub fn current_cards_key(app: &App) -> CardsKey {
 pub fn wanted_notes(app: &App) -> Vec<RiskRequest> {
     let studio = app.core.lock().unwrap();
     let shown = noted_session(&studio);
-    shown
-        .map(|session| app.notes.lock().unwrap().asks(session))
-        .unwrap_or_default()
+    let asks = shown.map(|session| app.notes.lock().unwrap().asks(session));
+    drop(studio);
+    asks.unwrap_or_default()
 }
 
 /// Starts the judge on each of `asks`, the risk notes a session wants (danielrispler/plotkeeper#298; `RiskNotes::asks`): a block that arrives
@@ -1256,6 +1277,7 @@ pub fn refresh_landed(app: &Arc<App>, session: Option<String>) {
                 let path = studio.task_of(&session);
                 tasks.retain(|t| Some(&t.path) == path.as_ref());
             }
+            drop(studio);
             tasks
         };
         let gh = studio_workbench::gh_path();

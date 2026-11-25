@@ -35,7 +35,7 @@ fn a_panic_on_any_thread_is_logged_and_exits_non_zero() {
     let exits = exits.lock().unwrap();
     assert_eq!(exits.len(), 1, "{exits:?}");
     assert_ne!(exits[0], 0);
-    let logged = LOGGED.lock().unwrap();
+    let logged = LOGGED.lock().unwrap().clone();
     let [(level, line)] = &logged[..] else {
         panic!("one line: {logged:?}")
     };

@@ -125,6 +125,7 @@ impl Claim {
             // The stage goes while the part is still this claim's, so it never wipes a new write's.
             self.stages.lock().unwrap().remove(&self.key);
             busy.remove(&self.key);
+            drop(busy);
             self.released = true;
         }
         queued
@@ -169,6 +170,7 @@ impl CatchUps {
             return None;
         }
         busy.insert(key.clone(), (fog.to_vec(), None));
+        drop(busy);
         Some(Claim {
             busy: self.busy.clone(),
             failed: self.failed.clone(),
@@ -279,7 +281,10 @@ pub const ON_SHOW: usize = 8;
 /// Starts writing `part`'s catch-up over `fog` in the background. While one over another list is being written, `fog` is written
 /// once that one ends, so the part is never left with neither a write nor a catch-up for its list. `done` runs when the writes end,
 /// written or failed. Whether a write started.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "no type groups these inputs, and one made only for this call would be a new abstraction (#555)"
+)]
 fn start(
     catch_ups: &CatchUps,
     writer: SharedWriter,
@@ -337,7 +342,10 @@ fn start(
 
 /// What a click on `part`'s catch-up over `fog` answers: the stored one when it covers `fog`, else a write starts (a failed one is
 /// tried again) and the answer says it is being written.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "no type groups these inputs, and one made only for this call would be a new abstraction (#555)"
+)]
 pub fn ask(
     catch_ups: &CatchUps,
     writer: Option<SharedWriter>,
@@ -367,7 +375,10 @@ pub fn ask(
 /// (not a part that opens its one PR's chapter) are written, oldest fog first. One already stored for its part's fog list, being
 /// written, or failed for that list is not written again, and still takes its place among the `ON_SHOW`. Returns the parts whose
 /// write started; `done` runs as each ends.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "no type groups these inputs, and one made only for this call would be a new abstraction (#555)"
+)]
 pub fn show(
     catch_ups: &CatchUps,
     writer: &SharedWriter,
@@ -568,7 +579,7 @@ mod tests {
         Some(
             chapters
                 .iter()
-                .map(|c| c.iter().map(|p| p.to_string()).collect())
+                .map(|c| c.iter().map(ToString::to_string).collect())
                 .collect(),
         )
     }
@@ -664,7 +675,7 @@ mod tests {
     fn a_stored_catch_up_is_read_as_it_is_only_for_the_fog_list_it_covers() {
         let data = tempfile::tempdir().unwrap();
         let store = CatchUpStore::open(data.path()).unwrap();
-        let fog = |c: &[&str]| c.iter().map(|c| c.to_string()).collect::<Vec<_>>();
+        let fog = |c: &[&str]| c.iter().map(ToString::to_string).collect::<Vec<_>>();
         assert!(fresh(&store, "a", &fog(&["c1"])).is_none());
         let stored = StoredCatchUp {
             part: "a".into(),

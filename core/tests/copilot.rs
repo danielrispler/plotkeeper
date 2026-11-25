@@ -122,7 +122,7 @@ fn a_session_with_the_ides_pid_goes_idle_and_is_never_ended_by_the_process_check
 fn a_copilot_session_ended_by_the_process_check_or_interrupted_stays_copilot() {
     // The camelCase session up to its second turn's tool, before its own stop and end, then the server's lines for
     // an interrupt and for its gone process.
-    let lines: Vec<String> = fixture()[..14].iter().map(|l| l.to_string()).collect();
+    let lines: Vec<String> = fixture()[..14].iter().map(ToString::to_string).collect();
     let synthetic = [
         json!({ "session_id": CAMEL, "hook_event_name": "StudioInterrupted", "prompt_id": "p_2", "studio_received_ms": 1_794_700_011_000_u64 }).to_string(),
         json!({ "session_id": CAMEL, "hook_event_name": "SessionEnd", "reason": "process_gone", "studio_received_ms": 1_794_700_012_000_u64 }).to_string(),

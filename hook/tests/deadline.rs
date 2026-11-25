@@ -48,7 +48,8 @@ fn a_held_lock_gives_a_drops_line_and_no_log_line_once_its_patience_runs_out() {
     assert_eq!(drops.lines().count(), 1);
     assert_eq!(&fields[1..], ["PostToolUse", "t-1"]);
     assert!(fields[0].parse::<u64>().is_ok());
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
 }
 
 #[test]
@@ -60,5 +61,6 @@ fn a_free_lock_writes_the_log_and_leaves_the_drops_file_alone() {
 
     assert_eq!(fs::read_to_string(&log).unwrap().lines().count(), 1);
     assert!(!studio_hook::drops_file(&log).exists());
-    let _ = fs::remove_dir_all(&home);
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&home).ok();
 }
