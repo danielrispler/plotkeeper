@@ -1,16 +1,42 @@
 {
   "name": "plotkeeper",
-  "version": "0.1.1",
-  "description": "Turns your coding agents' sessions into a learning layer on a local page",
+  "version": "0.1.2",
+  "description": "Local macOS control room for coding agents (Claude Code, Codex, Cursor, agy) that explains what your prompts changed",
   "license": "MIT",
+  "author": "Daniel Rispler",
+  "homepage": "https://github.com/danielrispler/plotkeeper#readme",
+  "bugs": {
+    "url": "https://github.com/danielrispler/plotkeeper/issues"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/danielrispler/plotkeeper.git"
   },
+  "keywords": [
+    "claude-code",
+    "codex",
+    "cursor",
+    "coding-agents",
+    "ai-agents",
+    "agent-hooks",
+    "code-review",
+    "pr-review",
+    "diff",
+    "devtools",
+    "cli",
+    "macos"
+  ],
   "os": ["darwin"],
   "cpu": ["arm64", "x64"],
   "bin": {
     "plotkeeper": "bin/plotkeeper"
   },
-  "files": ["bin/plotkeeper", "bin/plotkeeper-hook", "bin/plotkeeper-answer", "bin/plotkeeper-run"]
+  "files": [
+    "README.md",
+    "LICENSE",
+    "bin/plotkeeper",
+    "bin/plotkeeper-hook",
+    "bin/plotkeeper-answer",
+    "bin/plotkeeper-run"
+  ]
 }

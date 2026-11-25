@@ -5,8 +5,9 @@ name: npm package
 # only when Daniel runs it by hand from main with "publish" ticked, by npm trusted publishing with no token
 # (docs/studio/development.md, "Cutting a release").
 # It runs on each push to main, by hand, and for a ready pull request that touches what the package is built from:
-# the dependencies, the toolchain, the package, its scripts and the plugins `plotkeeper install` renders. A pull
-# request's other changes, an Intel-only build break among them, show here only after the merge to main.
+# the dependencies, the toolchain, the package, its scripts, the README/LICENSE bundled into it, and the plugins
+# `plotkeeper install` renders. A pull request's other changes, an Intel-only build break among them, show here only
+# after the merge to main.
 on:
   workflow_dispatch:
     inputs:
@@ -25,6 +26,8 @@ on:
       - "npm/**"
       - "scripts/npm/**"
       - "plugin*/**"
+      - README.md
+      - LICENSE
       - .github/workflows/release.yml
       - "!archive/**"
   push:
