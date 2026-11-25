@@ -444,7 +444,7 @@ pub fn map_commit(project: String, commit: String) -> Result<crate::history::Com
 }
 
 /// What "See the code" of a PR's brief asks for (`PrDiffArgs` in `ui/types.ts`). `parts`: only the files owned by these parts, under the
-/// default branch's map; `paths`: only these files (an Also touched group's, #492); all the PR's files when both are absent.
+/// map at `head`; `paths`: only these files (an Also touched group's, #492); all the PR's files when both are absent.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PrDiffArgs {
     pub project: String,
@@ -468,10 +468,11 @@ pub fn pr_diff(args: PrDiffArgs) -> Result<crate::history::Commit, String> {
         paths,
     } = args;
     let repo = Path::new(&project);
+    // The map at the PR's head, as its brief's chapters light parts by it.
     let map = parts.as_ref().and_then(|_| {
-        read_map(repo)
-            .source
-            .and_then(|text| system_map::parse_lenient(&text).ok())
+        crate::history::at(repo, &head)
+            .ok()
+            .and_then(|at| system_map::parse_lenient(&at.source).ok())
     });
     let keep = |all: Vec<String>| match (parts, paths) {
         (None, None) => all,
@@ -781,6 +782,53 @@ mod tests {
         .unwrap();
         let shown: Vec<_> = found.files.into_iter().map(|f| f.path).collect();
         assert_eq!(shown, ["z/docs/four", "z/one"]);
+    }
+
+    #[test]
+    fn see_the_code_of_a_step_places_files_by_the_map_at_the_prs_head() {
+        let o = origin();
+        let map = r#"{"version":1,"parts":[
+            {"id":"a","name":"A","caption":"","description":"","tier":"core","paths":["a/"]}],
+            "actors":[],"links":[],"ignored":[],"laws":[]}"#;
+        commit_file(&o.seed, MAP_FILE, map);
+        git(&o.seed, &["push", "-q", "origin", "HEAD"]);
+        git(&o.main, &["fetch", "-q", "origin"]);
+        git(&o.main, &["checkout", "-q", "-b", "work", "origin/trunk"]);
+        // The PR adds part n, and moves a/new.rs to it, as its brief's chapters light them.
+        let at_head = r#"{"version":1,"parts":[
+            {"id":"a","name":"A","caption":"","description":"","tier":"core","paths":["a/"]},
+            {"id":"n","name":"N","caption":"","description":"","tier":"core","paths":["n/","a/new.rs"]}],
+            "actors":[],"links":[],"ignored":[],"laws":[]}"#;
+        for (name, text) in [
+            (MAP_FILE, at_head),
+            ("n/one", "x\n"),
+            ("a/new.rs", "x\n"),
+            ("a/old.rs", "x\n"),
+        ] {
+            let path = o.main.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        }
+        git(&o.main, &["add", "-A"]);
+        git(&o.main, &["commit", "-q", "-m", "work"]);
+        let head = git(&o.main, &["rev-parse", "HEAD"]);
+        let diff = |part: &str| {
+            pr_diff(PrDiffArgs {
+                project: o.main.display().to_string(),
+                number: 7,
+                head: head.clone(),
+                title: "Work".into(),
+                parts: Some(vec![part.into()]),
+                paths: None,
+            })
+            .unwrap()
+            .files
+            .into_iter()
+            .map(|f| f.path)
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(diff("n"), ["a/new.rs", "n/one"]);
+        assert_eq!(diff("a"), ["a/old.rs"]);
     }
 
     #[test]
