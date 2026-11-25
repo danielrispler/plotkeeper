@@ -59,6 +59,8 @@ const svg = (tag: string, attrs: Record<string, string> = {}) => {
 
 // Reading a chapter to its end (#342): one gate per chapter of a brief, kept while the window runs; it tells the shell once.
 const gates = new Map<string, Gate>();
+// The chapters of each "Since you read" story read to their end while the window runs (#497).
+const storyDone = new Map<string, Set<number>>();
 let watching: (() => void) | null = null;
 // The "not confirmed from the facts" marks shown, watched until seen or the brief closes (#346).
 let marks: (() => void)[] = [];
@@ -173,13 +175,25 @@ const bars = new Map<string, Bar>();
 function gateOf(): Gate | null {
   const now = player.current();
   if (!now || !playing) return null;
-  const key = `${now.project}|${now.pr}|${playing.brief.head}|${now.chapter}`;
+  const story = `${now.project}|${now.pr}|${playing.brief.head}|${now.story}`;
+  const key = `${story}|${now.chapter}`;
   let gate = gates.get(key);
   if (!gate) {
     const { project, pr, chapter } = now;
     const head = playing.brief.head;
     const caught = catchUp;
+    const chapters = playing.since ? playing.brief.brief.chapters.length : 0;
     gate = chapterGate(storySteps(steps()), () => {
+      if (chapters) {
+        // A "Since you read" story (#497) read to its end, every chapter of it: the read carries over to its head. Its chapters are not
+        // the full brief's, so none is marked read on its own.
+        const done = storyDone.get(story) ?? new Set<number>();
+        storyDone.set(story, done.add(chapter));
+        if (done.size < chapters) return;
+        logStop("chapter-done", project, pr);
+        void invoke("brief_since_done", { project, number: pr, head }).catch(failure("brief_since_done"));
+        return;
+      }
       if (caught) {
         logStop("catch-up-done", project);
         void invoke("part_catch_up_done", { project, part: caught.part, fog: caught.fog }).catch(failure("part_catch_up_done"));
@@ -207,8 +221,9 @@ export const briefOpen = () => player.current() !== null;
 // background (port decision Q5): the panel and the PR's tray row say "Writing the brief…", the map stays usable, and the brief opens
 // when it lands (`map-landed` draws the map again), unless another open or a close came since.
 const latest = latestRequest();
-let awaiting: { project: string; number: number; chapter: number; wanted: () => boolean } | null = null;
-export async function openBriefOf(project: string, number: number, chapter: number) {
+let awaiting: { project: string; number: number; chapter: number; full: boolean; wanted: () => boolean } | null = null;
+// `full` opens the full brief past the head's "Since you read" story (#497), which opens first otherwise.
+export async function openBriefOf(project: string, number: number, chapter: number, full = false) {
   problems.delete(number);
   awaiting = null;
   awaitingCatchUp = null;
@@ -218,7 +233,7 @@ export async function openBriefOf(project: string, number: number, chapter: numb
   const slow = window.setTimeout(() => wanted() && showWriting(number), WRITING_AFTER_MS);
   try {
     panel().dataset.waiting = String(number);
-    got = await invoke("pr_brief", { project, number });
+    got = await invoke("pr_brief", { project, number, full });
   } catch (e) {
     // A superseded open's failure is not this PR's problem: only a wanted answer may set it.
     if (wanted()) problems.set(number, String(e));
@@ -229,7 +244,7 @@ export async function openBriefOf(project: string, number: number, chapter: numb
   if (!wanted()) return;
   delete panel().dataset.waiting;
   if (got && "writing" in got) {
-    awaiting = { project, number, chapter, wanted };
+    awaiting = { project, number, chapter, full, wanted };
     showWriting(number);
     return;
   }
@@ -254,7 +269,7 @@ export async function openBriefOf(project: string, number: number, chapter: numb
     addEventListener("resize", onResize);
   }
   closeDrawer();
-  player.open(project, number, chapter);
+  player.open(project, number, chapter, got.since ?? "");
   show(view, false);
 }
 
@@ -368,11 +383,11 @@ onDraw((view) => {
     if (!briefOpen()) hideWriting();
     return;
   }
-  const { project, number, chapter } = awaiting;
-  const next = awaitedWrite((view.state.ready ?? []).find((pr) => pr.number === number));
+  const { project, number, chapter, full } = awaiting;
+  const next = awaitedWrite((view.state.ready ?? []).find((pr) => pr.number === number), full);
   if (next === "wait") return;
   awaiting = null;
-  if (next === "open") void openBriefOf(project, number, chapter);
+  if (next === "open") void openBriefOf(project, number, chapter, full);
   else if (!briefOpen()) hideWriting();
 });
 onDraw((view) => {
@@ -995,7 +1010,7 @@ function show(view: MapView, same: boolean) {
 function endBar(node: HTMLElement, index: number, count: number): Bar | null {
   const now = player.current();
   if (!now || index !== count - 1) return null;
-  const key = `${now.project}|${now.pr}|${now.chapter}`;
+  const key = `${now.project}|${now.pr}|${now.story}|${now.chapter}`;
   let bar = bars.get(key);
   // A part catch-up's bar is keyed by its part (#391).
   const about = catchUp ? { project: now.project, part: catchUp.part } : { project: now.project, pr: now.pr, chapter: now.chapter };
@@ -1044,7 +1059,26 @@ function buildPanel(view: MapView, list: BriefStep[]) {
   const line = expectedLine(playing?.expected, view.doc);
   const facts = factsChip();
   const stale = staleBaseLine(playing?.stale_base);
-  box.replaceChildren(leave, ...(facts ? [facts] : []), ...(stale ? [stale] : []), ...(line ? [text("p", line, "brief-expected")] : []), cols, foot, live);
+  const since = sinceLine();
+  box.replaceChildren(leave, ...(since ? [since] : []), ...(facts ? [facts] : []), ...(stale ? [stale] : []), ...(line ? [text("p", line, "brief-expected")] : []), cols, foot, live);
+}
+
+// A "Since you read" story's head (#497): what it tells, from which head, and the full brief one click away, at the chapter played.
+function sinceLine(): HTMLElement | null {
+  const now = player.current();
+  if (!playing?.since || !now) return null;
+  const line = text("p", "Since you read ", "brief-since");
+  const from = text("code", playing.since.slice(0, 7), "brief-since-head");
+  from.setAttribute("translate", "no");
+  line.append(from, ": only what this push changed. ");
+  const full = text("button", "Full brief", "btn quiet brief-since-full");
+  full.setAttribute("type", "button");
+  full.setAttribute("aria-label", `Full brief of PR #${now.pr}`);
+  full.title = "Open the whole PR's brief at this head";
+  const { project, pr } = now;
+  full.addEventListener("click", () => void openBriefOf(project, pr, 0, true));
+  line.append(full);
+  return line;
 }
 
 // The stale-base line (#494): what main changed since an open PR's merge base that the brief relies on, under the panel's head. The

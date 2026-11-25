@@ -945,6 +945,10 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 /* Its end leaves room for Leave, which sits over the panel's top right corner. */
 .brief-stale { flex: none; margin: 0 0 var(--sp-3); padding-inline-end: 5.5em; font-size: var(--size-xs); color: var(--muted); text-wrap: pretty; }
 .brief-stale-names { font-family: var(--mono); overflow-wrap: anywhere; }
+/* "Since you read" (#497): the story's head, first under the panel's head, with the full brief one click away; it leaves room for Leave too. */
+.brief-since { flex: none; margin: 0 0 var(--sp-3); padding-inline-end: 5.5em; font-size: var(--size-xs); color: var(--muted); text-wrap: pretty; }
+.brief-since-head { font-family: var(--mono); }
+.brief-since-full { font-size: var(--size-xs); }
 /* Leave sits over the top of the step's scrollbar when a tall step scrolls (#490): its own background keeps the thumb from under its word. */
 .brief-leave { position: absolute; top: var(--sp-5); right: var(--sp-5); color: var(--faint); }
 .btn.quiet.brief-leave { background: var(--surface); }

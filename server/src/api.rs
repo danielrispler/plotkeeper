@@ -178,6 +178,13 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arc,
             arg(a, "project")?,
             arg(a, "number")?,
+            arg::<Option<bool>>(a, "full")?.unwrap_or(false),
+        )),
+        "brief_since_done" => res(crate::pr_briefs::brief_since_done(
+            app,
+            arg(a, "project")?,
+            arg(a, "number")?,
+            arg(a, "head")?,
         )),
         "brief_chapter_done" => res(crate::pr_briefs::brief_chapter_done(
             app,

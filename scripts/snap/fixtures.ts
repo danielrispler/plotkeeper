@@ -611,6 +611,46 @@ const mapBriefCopy = (clipboard: boolean): Fixture => ({
     },
   },
 });
+// #497: a "Since you read" story, which the tray opens first: its head line with the full brief one click away, its own Partial facts, the
+// Could break copy and the not-confirmed popover. Full brief opens the whole PR's brief at the same head.
+const sinceView = (): BriefView => {
+  const story = briefOf([{ ...copySteps()[1], flags: whyFlags }, storySteps()[1]]);
+  story.brief.brief.title = "The push since you read";
+  story.brief.partial_facts = { claim_error: "the claim check timed out after 120 s", no_extractor: [] };
+  return { ...story, since: "a".repeat(40) };
+};
+const mapBriefSince = (): Fixture => ({
+  ...mapBrief(sinceView(), 0, `
+      const line = panel.querySelector(".brief-since");
+      if (!line) return log("snap:fail the story has no Since you read line");
+      if (!line.textContent.startsWith("Since you read aaaaaaa: only what this push changed.")) log("snap:fail the since line reads " + JSON.stringify(line.textContent));
+      if (line.compareDocumentPosition(panel.querySelector(".brief-facts")) !== Node.DOCUMENT_POSITION_FOLLOWING) log("snap:fail the since line is not first under the head");
+      if (panel.querySelector(".brief-facts summary")?.textContent !== "Partial facts · 1") log("snap:fail the story's own Partial facts are not shown");
+      if (!panel.querySelector(".brief-step-code .brief-copy")) log("snap:fail the story's Could break step has no copy icon");
+      ${openWhy("#map-brief .brief-step")}
+      why.hidePopover();
+      const rows = [...document.querySelectorAll('#map-tray .tray-row[data-pr="334"]')].map((row) => row.querySelector(".tray-title").textContent);
+      if (rows.join("|") !== "The push since you read|PR briefs on the map") log("snap:fail the tray does not offer the story first: " + rows.join("|"));
+      const full = line.querySelector(".brief-since-full");
+      if (!full || full.getAttribute("aria-label") !== "Full brief of PR #334") return log("snap:fail no named Full brief button");
+      full.click();
+      await wait(400);
+      if (panel.querySelector(".brief-since")) return log("snap:fail Full brief still plays the story");
+      if (!panel.querySelector(".brief-step")?.textContent.includes("A ready PR now brings its own brief to the map")) log("snap:fail Full brief did not open the full brief");
+      panel.querySelector(".brief-leave").click();
+      await wait(100);
+      document.querySelector('#map-tray .tray-row[data-pr="334"]').click();
+      await wait(400);
+      if (!panel.querySelector(".brief-since")) log("snap:fail the tray's first row no longer opens the story");`, true),
+  map_state: mapState({ fog: { shell: "thick", understanding: "thin" }, ready: [{ number: 334, title: "PR briefs on the map", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false, since: "The push since you read" } }] }),
+  pr_brief: { __by: "full", values: { false: sinceView(), true: briefOf(storySteps()) } },
+  pr_diff: {
+    __by: "parts",
+    values: {
+      "shell,understanding": { commit: "b".repeat(40), short: "bbbbbbb", label: "#334 PR briefs on the map", url: null, files: [prFile("src-tauri/src/pr_briefs.rs"), prFile("understanding/src/pr_brief.rs")] },
+    },
+  },
+});
 const mapBriefCopied = (): Fixture => mapBriefCopy(true);
 const mapBriefCopyByHand = (): Fixture => mapBriefCopy(false);
 // Each figure kind filled to the limits `figureShapes` draws (#449): six states, five steps, four lines a side, each label long.
@@ -3025,6 +3065,7 @@ ${writerStatusAfter("Keychain refused")}
   mapBriefAlsoGroups,
   mapBriefCopied,
   mapBriefCopyByHand,
+  mapBriefSince,
   mapBriefStates: () => mapBriefFigure("states"),
   mapBriefSequence: () => mapBriefFigure("sequence"),
   mapBriefCompare: () => mapBriefFigure("compare"),

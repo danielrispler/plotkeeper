@@ -121,6 +121,9 @@ pub struct PrSource {
     pub tier_overrides: BTreeMap<String, String>,
     /// The decisions of an earlier brief of this PR, which a rewrite keeps the ids of.
     pub earlier_decisions: Vec<Decision>,
+    /// A "Since you read" story (#497, spec #477 part B): the head Daniel fully read, which the diff runs from. Its brief is
+    /// stored apart from the full briefs (`BriefStore::since`).
+    pub since: Option<String>,
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -1122,6 +1125,16 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
         ),
         ("SPEC".into(), spec_text),
     ];
+    if let Some(from) = &source.since {
+        sections.push((
+            "SINCE YOU READ".into(),
+            format!(
+                "Daniel read this PR's full brief at {from}. This story tells only what the push since changed: the diff, the map \
+                 diff and the law tags here run from {from} to {}, not from the PR's base. Tell what is new since, not the whole PR.",
+                meta.head
+            ),
+        ));
+    }
     if !source.earlier_decisions.is_empty() {
         let lines: Vec<String> = source
             .earlier_decisions
@@ -2113,6 +2126,50 @@ impl BriefStore {
             .max_by_key(|b| b.written_at)
     }
 
+    /// The "Since you read" stories (#497) live in `since/`, one per `{pr}-{from}-{to}.json`, so `latest` only ever finds a full brief.
+    fn since_path(&self, pr: u64, from: &str, to: &str) -> PathBuf {
+        let clean = |h: &str| {
+            h.chars()
+                .filter(char::is_ascii_alphanumeric)
+                .collect::<String>()
+        };
+        self.dir
+            .join("since")
+            .join(format!("{pr}-{}-{}.json", clean(from), clean(to)))
+    }
+
+    /// The "Since you read" story of `pr` that ends at `head`, with the head it runs from; the newest when there are several.
+    pub fn since(&self, pr: u64, head: &str) -> Option<(String, StoredBrief)> {
+        let head: String = head.chars().filter(char::is_ascii_alphanumeric).collect();
+        let (prefix, suffix) = (format!("{pr}-"), format!("-{head}.json"));
+        std::fs::read_dir(self.dir.join("since"))
+            .ok()?
+            .flatten()
+            .filter_map(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                let from = name
+                    .strip_prefix(&prefix)?
+                    .strip_suffix(&suffix)?
+                    .to_string();
+                let brief: StoredBrief =
+                    serde_json::from_slice(&std::fs::read(e.path()).ok()?).ok()?;
+                (brief.pr == pr && !from.is_empty()).then_some((from, brief))
+            })
+            .max_by_key(|(_, b)| b.written_at)
+    }
+
+    /// Writes the "Since you read" story `brief`, which runs from head `from` to its own.
+    pub fn put_since(&self, from: &str, brief: &StoredBrief) -> std::io::Result<()> {
+        let path = self.since_path(brief.pr, from, &brief.head);
+        std::fs::create_dir_all(path.parent().unwrap_or(&self.dir))?;
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(
+            &tmp,
+            serde_json::to_vec_pretty(brief).map_err(std::io::Error::other)?,
+        )?;
+        std::fs::rename(tmp, path)
+    }
+
     /// Writes `brief`, through a temporary file so a crash leaves the old one.
     pub fn put(&self, brief: &StoredBrief) -> std::io::Result<()> {
         let path = self.path(brief.pr, &brief.head);
@@ -2159,7 +2216,7 @@ impl BriefStore {
 // ---------------------------------------------------------------------------------------------------------------
 // The entry.
 
-/// Writes the brief of `source`'s PR at its head: builds the facts, asks the writer once, parses and checks the
+/// Writes the brief of `source`'s PR at its head (a "Since you read" story when `source.since` is set, stored apart): builds the facts, asks the writer once, parses and checks the
 /// reply, runs the claim check and the one retry (`pr_brief_check`), stores the brief and appends its one
 /// record line. `log` hears one line per problem that does not stop the write.
 pub fn write_pr_brief(
@@ -2218,9 +2275,11 @@ pub fn write_pr_brief(
             ..facts.partial_facts.clone()
         },
     };
-    store
-        .put(&stored)
-        .map_err(|e| format!("keep the brief of #{}: {e}", stored.pr))?;
+    match &source.since {
+        Some(from) => store.put_since(from, &stored),
+        None => store.put(&stored),
+    }
+    .map_err(|e| format!("keep the brief of #{}: {e}", stored.pr))?;
     record.at = stored.written_at;
     record.flags_after = stored.brief.all_flags();
     record.unconfirmed = stored

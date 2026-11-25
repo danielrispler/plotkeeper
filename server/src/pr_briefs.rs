@@ -35,6 +35,9 @@ pub struct BriefInfo {
     /// Why the brief at this head is what it is after a push (spec #477, part B): the read carried over, or it was rewritten.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// The title of the "Since you read" story stored for this head (#497), which the tray opens first.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
 }
 
 /// What a lookup of a ready PR did.
@@ -101,9 +104,9 @@ pub enum Push {
     Quiet,
     /// Fully read at H1, which still resolves, and the old and new ranges hold the same patches: the read carries over.
     Rebased,
-    /// Fully read at H1, H2 descends from it, and H1..H2 fogs something: the since story's case (#497). Until it is written the
-    /// full brief is rewritten, as today.
-    Since,
+    /// Fully read at H1 (held here), H2 descends from it, and H1..H2 fogs something: a "Since you read" story is written from the
+    /// diff H1..H2 (#497), and the full brief at H2 as before.
+    Since(String),
     /// The full brief is rewritten, with the note that says why; none when nothing of it was read.
     Rewrite(Option<String>),
 }
@@ -114,7 +117,7 @@ impl Push {
         match self {
             Push::Quiet => Some("New push touched nothing on your map".into()),
             Push::Rebased => Some("Rebased onto main, nothing new in the PR".into()),
-            Push::Since => None,
+            Push::Since(_) => None,
             Push::Rewrite(note) => note.clone(),
         }
     }
@@ -130,6 +133,8 @@ pub trait Reading {
     fn push(&self, old: &StoredBrief, head: &str) -> Push;
     /// Moves the read of PR `pr` from head `from` to `to` (`fog::carry_read`).
     fn carry(&self, pr: u64, from: &str, to: &str) -> Result<(), String>;
+    /// What the since story of the push from `from` reads (#497): `full`'s PR, with the diff, map diff and tags from `from` to its head.
+    fn since_source(&self, full: &PrSource, from: &str) -> Result<PrSource, String>;
 }
 
 /// The server's `Reading`: Daniel's state in `file`, `git` in `project`, and its default branch `reference`.
@@ -159,6 +164,19 @@ impl Reading for GitReading {
 
     fn carry(&self, pr: u64, from: &str, to: &str) -> Result<(), String> {
         crate::fog::carry_read(&self.file, &self.project, pr, from, to)
+    }
+
+    fn since_source(&self, full: &PrSource, from: &str) -> Result<PrSource, String> {
+        let mut source = gather(
+            Path::new(&self.project),
+            from,
+            &full.meta.head,
+            full.meta.clone(),
+        )?;
+        source.tier_overrides = full.tier_overrides.clone();
+        source.earlier_decisions = full.earlier_decisions.clone();
+        source.since = Some(from.to_string());
+        Ok(source)
     }
 }
 
@@ -205,7 +223,7 @@ pub fn push_of(
             fogs_nothing(&source)
         }) {
             Ok(true) => Push::Quiet,
-            Ok(false) => Push::Since,
+            Ok(false) => Push::Since(old.to_string()),
             Err(_) => Push::Rewrite(None),
         };
     }
@@ -261,8 +279,30 @@ fn patches(repo: &Path, reference: &str, head: &str) -> Option<(usize, Vec<Strin
 }
 
 /// When the PR moved from the newest stored brief's head to `head`, what that push does to Daniel's read, worked out once per
-/// head and kept in `seen` for the tray's note; a push that carries the read over moves it and copies the brief to `head`, which
-/// is returned. `None`: the brief is rewritten, as before.
+/// head and kept in `seen` (for the tray's note, and for the since story once the full brief at `head` is stored too).
+fn push_at(with: &Writing, seen: &Mutex<Seen>, pr: u64, head: &str) -> Option<Push> {
+    let known = seen
+        .lock()
+        .unwrap()
+        .pushes
+        .get(&pr)
+        .filter(|(h, _)| h == head)
+        .map(|(_, p)| p.clone());
+    if known.is_some() {
+        return known;
+    }
+    let reading = with.reading?;
+    let old = with.store.latest(pr).filter(|old| old.head != head)?;
+    let push = reading.push(&old, head);
+    seen.lock()
+        .unwrap()
+        .pushes
+        .insert(pr, (head.to_string(), push.clone()));
+    Some(push)
+}
+
+/// A push that carries the read over (`push_at`) moves it and copies the brief to `head`, which is returned. `None`: the brief
+/// is rewritten, as before.
 fn carried(
     with: &Writing,
     seen: &Mutex<Seen>,
@@ -271,25 +311,10 @@ fn carried(
     mut log: impl FnMut(String),
 ) -> Option<StoredBrief> {
     let reading = with.reading?;
-    let old = with.store.latest(pr).filter(|old| old.head != head)?;
-    let known = seen
-        .lock()
-        .unwrap()
-        .pushes
-        .get(&pr)
-        .filter(|(h, _)| h == head)
-        .map(|(_, p)| p.clone());
-    let push = known.unwrap_or_else(|| {
-        let push = reading.push(&old, head);
-        seen.lock()
-            .unwrap()
-            .pushes
-            .insert(pr, (head.to_string(), push.clone()));
-        push
-    });
-    if !push.carries() {
+    if !push_at(with, seen, pr, head)?.carries() {
         return None;
     }
+    let old = with.store.latest(pr).filter(|old| old.head != head)?;
     // The read moves first: a copy whose read did not move would be a brief to read again.
     let copy = StoredBrief {
         head: head.to_string(),
@@ -308,6 +333,58 @@ fn carried(
             None
         }
     }
+}
+
+/// Writes the "Since you read" story of the push from `from` to `full`'s head (#497), stored apart (`BriefStore::since`); its
+/// failure is told to `log` and returned.
+fn write_since(
+    with: &Writing,
+    full: &PrSource,
+    from: &str,
+    mut log: impl FnMut(String),
+) -> Result<StoredBrief, String> {
+    let written = with
+        .reading
+        .ok_or_else(|| "no read to write a since story from".to_string())
+        .and_then(|reading| reading.since_source(full, from))
+        .and_then(|source| write_brief(with, &source, &mut log));
+    if let Err(why) = &written {
+        log(format!("write the since story: {why}"));
+    }
+    written
+}
+
+/// Opening PR `pr` at `head` when the push to it is the since case (#497): its stored "Since you read" story, or one written now
+/// from `source`'s PR. `None`: this head has no story, and the full brief opens (`on_open`), as it does when the story fails.
+pub fn on_open_since(
+    with: &Writing,
+    seen: &Mutex<Seen>,
+    pr: u64,
+    head: &str,
+    source: impl FnOnce() -> Result<PrSource, String>,
+    log: impl FnMut(String),
+) -> Option<Result<StoredBrief, String>> {
+    if let Some((_, story)) = with.store.since(pr, head) {
+        return Some(Ok(story));
+    }
+    let Some(Push::Since(from)) = push_at(with, seen, pr, head) else {
+        return None;
+    };
+    Some(source().and_then(|full| write_since(with, &full, &from, log)))
+}
+
+/// The "Since you read" story of PR `pr` at `head` was read to its end (#497): Daniel's read carries over from the head the story runs
+/// from to `head`, every chapter's, the parts they light kept (`Reading::carry`).
+pub fn since_read(
+    store: &BriefStore,
+    reading: &dyn Reading,
+    pr: u64,
+    head: &str,
+) -> Result<(), String> {
+    let (from, _) = store
+        .since(pr, head)
+        .ok_or("that since story is not stored")?;
+    reading.carry(pr, &from, head)
 }
 
 /// The one call into the understanding crate that writes a brief.
@@ -370,8 +447,15 @@ pub fn on_lookup(
         return Did::Staled;
     }
     // The first brief of a ready PR is written at once; a stale one when the same head is seen twice. The write takes minutes and
-    // holds no lock.
-    match write_now(with, source, log) {
+    // holds no lock. In the since case the story is written first, since the tray opens it first (#497).
+    let built = source();
+    if let Ok(full) = &built
+        && with.store.since(pr, head).is_none()
+        && let Some(Push::Since(from)) = push_at(with, seen, pr, head)
+    {
+        let _ = write_since(with, full, &from, &mut log);
+    }
+    match write_now(with, move || built, log) {
         Ok(Some(_)) => Did::Wrote,
         Ok(None) => {
             seen.lock().unwrap().quiet.insert((pr, head.to_string()));
@@ -427,6 +511,9 @@ pub struct BriefView {
     /// What the default branch changed since the PR's merge base that bears on the brief (#494); open PRs only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stale_base: Option<StaleBase>,
+    /// This is a "Since you read" story (#497), of the push from this head to its own; the full brief is one click away.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
 }
 
 /// The build manifests at the repository's root whose change on the default branch bears on every brief (#494). A lockfile or a
@@ -709,6 +796,7 @@ impl PrBriefs {
                         read: false,
                         failed: false,
                         note: None,
+                        since: None,
                     });
                 }
                 continue;
@@ -727,6 +815,9 @@ impl PrBriefs {
                 quiet: false,
                 failed,
                 note: seen.lock().unwrap().note(pr.number, &pr.head),
+                since: store
+                    .since(pr.number, &pr.head)
+                    .map(|(_, story)| story.brief.title),
             });
         }
     }
@@ -984,8 +1075,14 @@ pub fn lookup_later(app: &Arc<App>, project: &str, ready: Vec<Ready>) {
 }
 
 /// Opening a PR's brief from the tray: the stored one, or, when it is stale or not written, the write starts in the background and
-/// the answer says it is being written. A merged PR's brief is read as stored.
-pub fn pr_brief(app: &Arc<App>, project: String, number: u64) -> Result<Option<Opened>, String> {
+/// the answer says it is being written. A merged PR's brief is read as stored. An open PR whose head has a "Since you read" story
+/// (#497) opens it first, written first in the since case, unless `full` asks for the full brief.
+pub fn pr_brief(
+    app: &Arc<App>,
+    project: String,
+    number: u64,
+    full: bool,
+) -> Result<Option<Opened>, String> {
     let briefs = &app.briefs;
     let store = store_of(&project).ok_or("no data folder")?;
     let head = app
@@ -999,6 +1096,9 @@ pub fn pr_brief(app: &Arc<App>, project: String, number: u64) -> Result<Option<O
             .latest(number)
             .map(|b| Opened::Brief(Box::new(view_of(&project, &store, b, false)))));
     };
+    if !full && let Some((from, story)) = store.since(number, &head) {
+        return Ok(Some(Opened::Brief(Box::new(since_view(from, story)))));
+    }
     if let Some(stored) = store.get(number, &head).filter(|b| !b.stale) {
         return Ok(Some(Opened::Brief(Box::new(view_of(
             &project, &store, stored, true,
@@ -1022,15 +1122,31 @@ pub fn pr_brief(app: &Arc<App>, project: String, number: u64) -> Result<Option<O
                 store: &store,
                 reading: reading.as_ref().map(|r| r as &dyn Reading),
             };
+            let log = |line: String| log::warn!("pr brief of #{number}: {line}");
+            // In the since case the story is written, and opens; when it fails, the full brief is written instead.
+            let story = (!full)
+                .then(|| {
+                    on_open_since(
+                        &with,
+                        &seen,
+                        number,
+                        &head,
+                        || source_of(&project, number),
+                        log,
+                    )
+                })
+                .flatten();
             // A failure is kept in `seen` (the tray row says so) and told to the log.
-            let _ = on_open(
-                &with,
-                &seen,
-                number,
-                &head,
-                || source_of(&project, number),
-                |line| log::warn!("pr brief of #{number}: {line}"),
-            );
+            if !matches!(story, Some(Ok(_))) {
+                let _ = on_open(
+                    &with,
+                    &seen,
+                    number,
+                    &head,
+                    || source_of(&project, number),
+                    log,
+                );
+            }
             drop(claim);
             app.events.emit("map-landed", serde_json::json!(project));
         }
@@ -1063,6 +1179,19 @@ fn view_of(project: &str, store: &BriefStore, brief: StoredBrief, open: bool) ->
         partial,
         expected,
         stale_base,
+        since: None,
+    }
+}
+
+/// A "Since you read" story as the window plays it (#497): its own Partial facts (its `partial` flag from them alone, since its record
+/// shares the full brief's head), and the head it runs from. No stale-base line or pre-flight: those are the full brief's.
+fn since_view(from: String, story: StoredBrief) -> BriefView {
+    BriefView {
+        partial: story.partial_facts.cut.is_some(),
+        brief: story,
+        expected: None,
+        stale_base: None,
+        since: Some(from),
     }
 }
 
@@ -1090,6 +1219,20 @@ pub fn guard_draft(
         &map_text,
         &brief,
     )
+}
+
+/// PR `number`'s "Since you read" story at `head` was read to its end (#497): the read carries over to `head` (`since_read`).
+pub fn brief_since_done(
+    app: &App,
+    project: String,
+    number: u64,
+    head: String,
+) -> Result<(), String> {
+    let store = store_of(&project).ok_or("no data folder")?;
+    let reading = reading_of(&project).ok_or("no state file")?;
+    since_read(&store, &reading, number, &head)?;
+    app.events.emit("map-landed", serde_json::json!(project));
+    Ok(())
 }
 
 /// Chapter `chapter` of PR `number`'s brief was read to its end (the page saw its last step, focused, and the check was answered): the
@@ -2090,7 +2233,10 @@ mod tests {
         let repo = Repo::new();
         let h1 = repo.head();
         let h2 = repo.commit(&[("alpha/a.rs", "3")]);
-        assert_eq!(repo.push(Some(&read_of(1, &[&h1])), &h1, &h2), Push::Since);
+        assert_eq!(
+            repo.push(Some(&read_of(1, &[&h1])), &h1, &h2),
+            Push::Since(h1.clone())
+        );
     }
 
     #[test]
@@ -2270,5 +2416,110 @@ mod tests {
             tray[0].brief.clone().unwrap().note.as_deref(),
             Some(REBASED)
         );
+    }
+
+    // ---- The since story (#497).
+
+    #[test]
+    fn a_push_that_fogs_something_after_a_full_read_writes_a_since_story_apart_and_the_full_brief_as_before()
+     {
+        let rig = Rig::new();
+        let store = BriefStore::open(rig.store_dir.path()).unwrap();
+        let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+        let reading = rig.reading();
+        let with = Writing {
+            writer: &fake,
+            model: "opus",
+            store: &store,
+            reading: Some(&reading),
+        };
+        let look = |head: &str| on_lookup(&with, &seen, 7, head, || Ok(source(head)), |_| {});
+        let h1 = rig.repo.head();
+        assert_eq!(look(&h1), Did::Wrote);
+        let lit = lit_parts(&store.get(7, &h1).unwrap().brief);
+        crate::fog::mark_read(&reading.file, &rig.repo.path, 7, 0, &h1, lit, 1).unwrap();
+        let h2 = rig.repo.commit(&[("alpha/a.rs", "3")]);
+        assert_eq!(look(&h2), Did::Staled);
+        assert_eq!(look(&h2), Did::Wrote);
+        let (from, story) = store.since(7, &h2).expect("the since story is stored");
+        assert_eq!(
+            (from.as_str(), story.head.as_str()),
+            (h1.as_str(), h2.as_str())
+        );
+        assert_eq!(
+            store.latest(7).unwrap().head,
+            h2,
+            "the latest brief is the full one at H2"
+        );
+        assert!(store.get(7, &h2).is_some());
+        // The tray opens the story first.
+        let briefs = PrBriefs::new(None);
+        *briefs.seen_of("/p").lock().unwrap() = std::mem::take(&mut *seen.lock().unwrap());
+        let mut tray = [ready_pr(7, &h2)];
+        briefs.annotate_with("/p", &store, Some(&rig.user()), &mut tray);
+        assert_eq!(
+            tray[0].brief.clone().unwrap().since.as_deref(),
+            Some("Alpha")
+        );
+    }
+
+    #[test]
+    fn opening_the_since_case_writes_the_story_first_and_reading_it_to_the_end_carries_every_chapters_read_over()
+     {
+        let rig = Rig::new();
+        let store = BriefStore::open(rig.store_dir.path()).unwrap();
+        let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+        let reading = rig.reading();
+        let with = Writing {
+            writer: &fake,
+            model: "opus",
+            store: &store,
+            reading: Some(&reading),
+        };
+        let h1 = rig.repo.head();
+        on_lookup(&with, &seen, 7, &h1, || Ok(source(&h1)), |_| {});
+        // A brief of two chapters, both read at H1.
+        let lit = vec![vec!["alpha".to_string()], vec!["alpha".to_string()]];
+        for chapter in 0..2 {
+            crate::fog::mark_read(
+                &reading.file,
+                &rig.repo.path,
+                7,
+                chapter,
+                &h1,
+                lit.clone(),
+                1,
+            )
+            .unwrap();
+        }
+        let h2 = rig.repo.commit(&[("alpha/a.rs", "3")]);
+        assert_eq!(
+            on_lookup(&with, &seen, 7, &h2, || Ok(source(&h2)), |_| {}),
+            Did::Staled
+        );
+        let story = on_open_since(&with, &seen, 7, &h2, || Ok(source(&h2)), |_| {})
+            .expect("the since case has a story")
+            .unwrap();
+        assert_eq!(store.since(7, &h2).map(|(from, _)| from), Some(h1.clone()));
+        assert_eq!(story.head, h2);
+        assert!(
+            store.get(7, &h2).is_none(),
+            "the full brief waits, as before"
+        );
+        // Opened again, the stored story is read as it is.
+        let calls = fake.0.get();
+        on_open_since(&with, &seen, 7, &h2, || Ok(source(&h2)), |_| {});
+        assert_eq!(fake.0.get(), calls);
+        // Not read yet: the PR still waits at H2.
+        assert!(!crate::fog::fully_read_at(&rig.user(), 7, &h2));
+        since_read(&store, &reading, 7, &h2).unwrap();
+        let read = &rig.user().fog.reads[&7];
+        assert_eq!(read.lit, lit, "the lit parts are kept");
+        assert!(
+            read.fully_read_at(&h2),
+            "both chapters moved to H2: {read:?}"
+        );
+        // A head with no story carries nothing.
+        assert!(since_read(&store, &reading, 7, &h1).is_err());
     }
 }

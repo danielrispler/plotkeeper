@@ -2249,3 +2249,42 @@ fn the_step_caps_sit_exactly_where_the_prompt_says() {
     // Two to four chapters.
     assert!(with_steps(&[3]).contains("1 chapters"));
 }
+
+// ---- Since you read (#497, spec #477 part B) ----
+
+#[test]
+fn a_since_story_is_written_from_its_own_facts_and_stored_apart_from_the_full_briefs() {
+    let data = tempfile::tempdir().unwrap();
+    let store = BriefStore::open(data.path()).unwrap();
+    let full = Canned::new(vec![Ok(single_story().to_string()), Ok(none_unsupported())]);
+    write_pr_brief(&full, "opus", &source(&["alpha/a.rs"]), &store, |_| {}).unwrap();
+    let since = PrSource {
+        meta: PrMeta {
+            head: "def456".into(),
+            ..source(&[]).meta
+        },
+        since: Some("abc123".into()),
+        ..source(&["alpha/a.rs"])
+    };
+    let facts = build_facts(&since).unwrap();
+    assert!(
+        section(&facts, "SINCE YOU READ").contains("abc123"),
+        "the writer is told the story covers only the push since abc123"
+    );
+    let writer = Canned::new(vec![Ok(single_story().to_string()), Ok(none_unsupported())]);
+    let story = write_pr_brief(&writer, "opus", &since, &store, |_| {}).unwrap();
+    assert_eq!(story.head, "def456");
+    assert_eq!(
+        store.since(7, "def456"),
+        Some(("abc123".to_string(), story))
+    );
+    assert!(store.since(7, "abc123").is_none() && store.since(8, "def456").is_none());
+    // The full brief is still the latest, and none is stored at the story's head.
+    assert_eq!(store.latest(7).unwrap().head, "abc123");
+    assert!(store.get(7, "def456").is_none());
+    assert_eq!(
+        store.records().len(),
+        2,
+        "the story's write is recorded too"
+    );
+}

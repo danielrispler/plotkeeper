@@ -10,7 +10,8 @@ import { logStop } from "./stop-rules.js";
 import type { ReadyPr } from "./types.js";
 import { briefsWritten } from "./writers.js";
 
-export type TrayRow = { number: number; chapter: number | null; title: string; note: string; openable: boolean };
+// `full`: the row opens the full brief, past the head's "Since you read" story (#497).
+export type TrayRow = { number: number; chapter: number | null; title: string; note: string; openable: boolean; full?: boolean };
 
 // The tray's rows; none when nothing is ready, so the tray is not drawn. Without `claude` (`briefs` false) no brief is written,
 // so a PR with none stored says briefs need Claude (spec #320). A brief at the PR's head says, in place of "brief ready", why it is
@@ -28,14 +29,23 @@ export const trayRows = (ready: ReadyPr[], briefs = true): TrayRow[] =>
       return [{ number: pr.number, chapter: 0, title, note: `#${pr.number} · the brief is written when you open it`, openable: true }];
     }
     const state = brief.writing ? "writing it again…" : brief.failed ? "it could not be rewritten; open it to try again" : brief.stale ? "a newer push; rewritten when opened" : (brief.note ?? "brief ready");
-    if (brief.chapters.length === 1) return [{ number: pr.number, chapter: 0, title: brief.chapters[0] || title, note: `#${pr.number} · ${state}`, openable: true }];
-    return brief.chapters.map((chapter, i) => ({
-      number: pr.number,
-      chapter: i,
-      title: chapter,
-      note: `#${pr.number} ${title} · ${i + 1} of ${brief.chapters.length}${i === 0 ? ` · ${state}` : ""}`,
-      openable: true,
-    }));
+    // A head with a "Since you read" story (#497): its row comes first, and the full brief's rows open past it.
+    const since = brief.since;
+    const story: TrayRow[] = since ? [{ number: pr.number, chapter: 0, title: since, note: `#${pr.number} · since you read`, openable: true, full: false }] : [];
+    const full = since ? { full: true } : {};
+    const of = since ? "full brief · " : "";
+    if (brief.chapters.length === 1) return [...story, { number: pr.number, chapter: 0, title: brief.chapters[0] || title, note: `#${pr.number} · ${of}${state}`, openable: true, ...full }];
+    return [
+      ...story,
+      ...brief.chapters.map((chapter, i) => ({
+        number: pr.number,
+        chapter: i,
+        title: chapter,
+        note: `#${pr.number} ${title} · ${of}${i + 1} of ${brief.chapters.length}${i === 0 ? ` · ${state}` : ""}`,
+        openable: true,
+        ...full,
+      })),
+    ];
   });
 
 // The rows are built again on every draw; the watchers of the old ones stop with them. An offered brief is told once per PR
@@ -60,7 +70,7 @@ function paint(view: MapView) {
             if (row.openable) {
               item.setAttribute("type", "button");
               item.title = "Play this brief on the map";
-              item.addEventListener("click", () => openBriefOf(view.project, row.number, row.chapter ?? 0));
+              item.addEventListener("click", () => openBriefOf(view.project, row.number, row.chapter ?? 0, row.full ?? false));
               watching.push(watchSeen(item, { active: mapShown, onSeen: () => logStop("brief-offered", view.project, row.number) }));
             }
             return item;
