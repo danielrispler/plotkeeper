@@ -531,7 +531,7 @@ body[data-panel="diff"] .map-stage { --panel-w: min(var(--panel-wide), calc(100%
             max-height: calc(100% - 2 * var(--inset)); z-index: 3; display: flex; flex-direction: column; gap: var(--sp-5); overflow-y: auto; overscroll-behavior: contain; }
 .map-side[hidden] { display: none; }
 .map-side > * { flex: none; }
-#map-sheet:empty, #map-drawer:empty, #map-not-placed:empty, #map-runs:empty { display: none; }
+#map-sheet:empty, #map-drawer:empty, #map-not-placed:empty, #map-runs:empty, #map-tray:empty { display: none; }
 #map-sheet, #map-drawer, #map-runs { padding: var(--sp-6) var(--sp-6) var(--sp-5); animation: glass-in var(--glass-in) var(--glass-ease); }
 #map-sheet { position: relative; }
 /* The sheet's left edge resizes it (#445): a thin focusable bar, lit on hover, while dragged and with the focus ring; the page selects no
@@ -547,8 +547,8 @@ body.resizing { -webkit-user-select: none; user-select: none; cursor: col-resize
 .map-panel[hidden] { display: none; }
 @keyframes panel-in { from { opacity: 0; transform: translateX(calc(-1 * var(--panel-slide))); } }
 @keyframes glass-in { from { opacity: 0; transform: translateY(calc(-1 * var(--panel-slide))); } }
-/* The panel's ×, on its views' header line: the story's "⋯" sits at `.rail-h`'s top padding, `--sp-4` (#571). */
-.panel-close { position: absolute; top: var(--sp-4); right: var(--sp-5); z-index: 2; color: var(--faint); }
+/* The panel's ×, the sheet's size, on its views' header line: the story's smaller "⋯" sits at `.rail-h`'s top padding, `--sp-4` (#571). */
+.panel-close { position: absolute; top: var(--sp-3); right: var(--sp-5); z-index: 2; color: var(--faint); }
 .panel-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
 .panel-body > .rail { flex: 1; min-height: 0; }
 .map-panel .rail-h { padding-right: calc(var(--sp-7) * 2 + var(--sp-5)); }
@@ -559,9 +559,9 @@ body.resizing { -webkit-user-select: none; user-select: none; cursor: col-resize
                             border: 0; border-radius: var(--radius); }
 .panel-view.history .row:hover { background: var(--hover); }
 .map-panel .pane.turn-diff { position: static; inset: auto; overflow: visible; }
-/* Its top padding puts the diff's title on the panel × line (#571). */
+/* Its top padding puts the diff's title on the ×'s line (#571). */
 .map-panel .turn-diff header { background: transparent; border-bottom: 0; padding-top: var(--sp-2); padding-right: calc(var(--sp-7) * 2); }
-/* A worker's log in the left panel (#386): its header clears the panel's Close. */
+/* A worker's log in the left panel (#386): its header clears the panel's ×. */
 .map-panel .pane.subagent-log { position: static; overflow: visible; }
 .map-panel .subagent-log header { background: transparent; border-bottom: 0; padding-right: calc(var(--sp-7) * 2); }
 /* The pre-flight (#394): an overlay over the map in the glass, centred near its top, above the panels, with no rise so it shows at once; the
@@ -616,7 +616,6 @@ body.brief-open .map-panel > *, body.brief-open .map-side > * > * { opacity: var
 /* On the sheet's glass, as the runs (#567), since the map pans under it (#571). */
 .map-tray { position: absolute; left: var(--map-gutter); bottom: var(--sp-7); z-index: 3; width: var(--tray); box-sizing: border-box; padding: var(--sp-5);
             transition: left var(--glass-in) var(--glass-ease); }
-#map-tray:empty { display: none; }
 body.panel-open .map-tray { left: calc(var(--inset) + var(--panel-w) + var(--map-gutter)); }
 /* Below 1007 px (`narrow`, main.ts) an open panel leaves the map too little room for the tray and the legend, in every layout mode (focus
    too): they show again when it closes. */

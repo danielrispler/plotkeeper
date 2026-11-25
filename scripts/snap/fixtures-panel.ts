@@ -757,7 +757,7 @@ export const mapPanelHead = (): Fixture =>
       level(panel.querySelector(".panel-title"), "History");
       await press(row("s1"));
       await palette("Open full diff");
-      level(panel.querySelector(".turn-diff header h2, .turn-diff header > *"), "the diff");
+      level(panel.querySelector(".turn-diff header > *"), "the diff");
       document.getElementById("settings-button").click();
       await wait(300);
       level(panel.querySelector(".panel-title"), "Settings");
