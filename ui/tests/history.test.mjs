@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { branchOf, endedSessions, historyRows, matches, projectName } from "../../dist/history.js";
-import { sidebarSessions } from "../../dist/list.js";
+import { sidebarSessions } from "../../dist/list-model.js";
 import { windowBinding } from "../../dist/keys.js";
 import { initial } from "../../dist/settings.js";
 

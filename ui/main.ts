@@ -8,7 +8,6 @@ import { dismissNotice, NOT_RECORDING, setSettingsErrors, showError, showNotice 
 import { withGateNotice, withWriterNotice } from "./writer-notice.js";
 import { startWatching } from "./answer.js";
 import { openAsk } from "./ask.js";
-import { showCards } from "./cards.js";
 import { recheckSeen } from "./seen.js";
 import { diffRequest, newestDiff } from "./diff.js";
 import { element, failure, invoke, listen, logUncaught } from "./dom.js";
@@ -23,16 +22,17 @@ import "./map-runs.js";
 import "./micro-world.js";
 import { openPreFlight } from "./map-pre-flight.js";
 import { startMapAgents } from "./map-agents.js";
-import { drawSidebar, listSpace, showSessions, staleDots } from "./list.js";
+import { drawSidebar, showSessions, staleDots, startList } from "./list.js";
+import { listSpace } from "./list-model.js";
 import { deselect, pressSession, select, show } from "./selection.js";
-import { diffIn, historyIn, logIn, showHistory, startPanes } from "./panes.js";
-import { closePanel, panelShown, showPanel, startPanel } from "./panel.js";
+import { diffIn, historyIn, logIn, startPanes } from "./panes.js";
+import { closePanel, panelShown, showHistory, showPanel, startPanel } from "./panel.js";
 import { showPalette } from "./palette.js";
 import { projectOfCwd, selectedProject, sidebarOrder } from "./projects.js";
 import { narrowBelow, selectedView } from "./map-model.js";
 import { reload, type SettingsFiles } from "./settings.js";
 import { setFocus, setMissed, setProjects, setSettings, studio } from "./state.js";
-import { drawFeed, showView } from "./story.js";
+import { askDelete, drawFeed, lastHeadline, showCards, showView, startStory } from "./story.js";
 import { startRailBriefs } from "./rail-brief.js";
 import { barKeyDown } from "./story-bar.js";
 import { startWriters } from "./writers.js";
@@ -230,7 +230,9 @@ window.addEventListener("focus", recheckSeen);
 window.addEventListener("blur", recheckSeen);
 window.addEventListener("focus", () => actions.get("studio::RefreshLanded")?.());
 
-startPanes();
+startPanes(select);
+startStory((id, agent) => void select(id, agent));
+startList({ pressSession, askDelete, lastHeadline });
 startRailBriefs(drawFeed);
 startMap({ selectedProject, removeProject, shown: drawSidebar });
 element("pre-flight-button").addEventListener("click", () => openPreFlight());
@@ -274,7 +276,7 @@ const showList = (sessions: Session[]) => {
 listen<Session[]>("sessions", showList);
 invoke("sessions").then(showList).catch(failure("sessions"));
 // The toasts' presses keep the keyboard's focus, and a modal dialog holds them back (#457).
-watchToasts();
+watchToasts(select);
 // A turn that ended off screen in the focused window (the server's notices): the note toast names it.
 watchNotes();
 // Copy for the agent (#493): the brief's copy icons say what they copied, and the copy toast shows it.

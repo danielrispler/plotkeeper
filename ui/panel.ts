@@ -102,6 +102,9 @@ export function showPanel(content: PanelContent | null, keepSelection = false) {
 
 export const closePanel = () => showPanel(null);
 
+// History (`history.ts`), in the left panel: the ended sessions, searchable. Clicking a row selects the session.
+export const showHistory = () => showPanel({ kind: "history" });
+
 // A sheet is opening on part `part`: below 1007 px, or over the widened diff, it takes the panel's place.
 export function besideSheet(part: string) {
   if (shown && withSheet({ panel: shown, sheet: sheetPart() }, part, window.innerWidth).panel === null) closePanel();

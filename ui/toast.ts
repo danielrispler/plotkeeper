@@ -11,8 +11,7 @@
 
 import { element, fullTitle, text } from "./dom.js";
 import type { LayoutMode } from "./layout.js";
-import { sessionName } from "./list.js";
-import { select } from "./selection.js";
+import { sessionName } from "./list-model.js";
 import { setFocus, studio } from "./state.js";
 import { titled } from "./keys.js";
 import type { Session } from "./types.js";
@@ -118,7 +117,11 @@ function placeToasts(toasts: HTMLElement[]) {
 }
 
 // The toasts' press, focus and the modal dialogs; once, at start.
-export function watchToasts() {
+// What a press on the needs-you toast does: select its session (`selection.ts`, given by `main.ts`).
+let select: (id: string) => unknown = () => {};
+
+export function watchToasts(selectSession: (id: string) => unknown) {
+  select = selectSession;
   const region = element("toasts");
   // A press on a toast acts and leaves the keyboard's focus where it was.
   for (const id of TOASTS) element(id).addEventListener("pointerdown", (event) => event.preventDefault());

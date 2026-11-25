@@ -3,7 +3,6 @@
 // selection it returns in the list, the rail and the terminal (danielrispler/Falinks#567).
 
 import { rewatch } from "./answer.js";
-import { showCards } from "./cards.js";
 import { failure, invoke } from "./dom.js";
 import { openMap, shownProject } from "./map.js";
 import { pressRow, selectedView } from "./map-model.js";
@@ -12,7 +11,7 @@ import { showSessions } from "./list.js";
 import { showSession } from "./panes.js";
 import { projectOfCwd } from "./projects.js";
 import { setListed, setMissed, setPending, setSelection, studio } from "./state.js";
-import { showView } from "./story.js";
+import { showCards, showView } from "./story.js";
 import { showToast } from "./toast.js";
 import type { Selection } from "./types.js";
 

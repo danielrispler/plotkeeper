@@ -8,21 +8,21 @@
 import { modelLine, reports } from "./capabilities.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
 import { age, code, element, failure, fullTitle, glyphOnly, invoke, pressable, prose, text, unseenWords } from "./dom.js";
-import { select } from "./selection.js";
 import { askAnchor } from "./ask.js";
 import { rendered } from "./markdown.js";
-import { agentState, drawSidebar, sessionName, showsLanded } from "./list.js";
+import { drawSidebar } from "./list.js";
+import { agentState, sessionName, showsLanded } from "./list-model.js";
 import { blockedRequestFor, openDecision, type Ask } from "./answer.js";
 import { blockedElement, docksInDock, fillCardRisk, retryLine, riskLine } from "./blocked.js";
 import { briefNodes } from "./cards.js";
 import { type Banner, bannerElement, bannerFor, bannerLives } from "./banner.js";
 import { evidenceElement, hasEvidence } from "./evidence.js";
 import { railBriefRow } from "./rail-brief.js";
-import { showCleared } from "./decisions.js";
+import { showCleared, showDecisions } from "./decisions.js";
 import { decisionElement, questionElement } from "./questions.js";
 import { shortPaths } from "./paths.js";
 import { checkTime, counts, estimateText, times } from "./times.js";
-import { studio } from "./state.js";
+import { setCards, studio } from "./state.js";
 import { showError } from "./notice.js";
 import { currentMap } from "./map.js";
 import { pageStore, stretches, tipText } from "./tips.js";
@@ -34,6 +34,7 @@ import {
   type ListedCheck,
   type Question,
   type Selection,
+  type SessionCards,
   type SessionState,
   type Session,
   type Subagent,
@@ -41,6 +42,13 @@ import {
   type SummaryLine,
   type TurnSummary,
 } from "./types.js";
+
+// What a press on a subagent's history line does: select it (`selection.ts`, given by `main.ts`).
+let select: (id: string, agent: string | null) => unknown = () => {};
+/** Wires the story to the selection, which it may not import. */
+export function startStory(selectSession: (id: string, agent: string | null) => unknown) {
+  select = selectSession;
+}
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: `showView`: spec #548 Group 4 splits it; remove this when it does
 export function showView(selected: Selection | null) {
@@ -603,9 +611,9 @@ export function drawFeed() {
   const lives = kept !== null && last !== undefined;
   const cards = studio.cards;
   element("banner-slot").replaceChildren(
-    ...(lives ? [bannerElement({ headline: headlineOf(last.id ? summaryOf(last.id) : null, last.message).headline, endedAt: last.ended_at, since: kept.since, open: cards.open, brief: briefNodes(cards) })] : []),
+    ...(lives ? [bannerElement({ headline: headlineOf(last.id ? summaryOf(last.id) : null, last.message).headline, endedAt: last.ended_at, since: kept.since, open: cards.open, brief: briefNodes(cards, openCitation) })] : []),
   );
-  element("brief-fold").hidden = lives || briefNodes(cards).length === 0;
+  element("brief-fold").hidden = lives || briefNodes(cards, openCitation).length === 0;
   element("feed").replaceChildren(...blocks.map((block, i) => turnElement(session, block, own && i === 0 && block.index !== null ? now : null)));
 }
 // Rename (danielrispler/Falinks#469): the row's name, kept in the event log. An empty name gives the row its folder's again.
@@ -702,4 +710,26 @@ function showQuestions(questions: Question[], blocked: HTMLElement[]) {
   const docked = [...(decision ? [decisionElement(decision)] : []), ...open.map(questionElement), ...blocked];
   element("dock").replaceChildren(...docked);
   element("dock").hidden = docked.length === 0;
+}
+
+// The brief, folded under the feed.
+function showBrief(cards: SessionCards) {
+  const nodes = briefNodes(cards, openCitation);
+  element("brief").replaceChildren(...nodes);
+  element("brief-fold").hidden = nodes.length === 0;
+}
+
+/** The server's session payload: the selected session's brief, cards and decisions, taken in and drawn. */
+export function showCards(cards: SessionCards) {
+  // A risk note that arrived fills its card's place in the dock where it stands, which only a session's own events redraw otherwise.
+  const notes = JSON.stringify(cards.risk_notes) !== JSON.stringify(studio.cards.risk_notes);
+  setCards(cards);
+  showBrief(cards);
+  showDecisions(cards.decisions, cards.decision_notes);
+  // The store changed: a summary missing before may be in it now.
+  forgetMissingSummaries();
+  drawFeed();
+  if (notes) fillDockNotes();
+  // A summary was stored: the list's unseen rows show its Headline (#382).
+  drawSidebar();
 }

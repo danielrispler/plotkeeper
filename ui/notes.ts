@@ -4,7 +4,7 @@
 
 import { element, fullTitle, promptBox, text } from "./dom.js";
 import { type Clock, realClock } from "./hover.js";
-import { sessionName } from "./list.js";
+import { sessionName } from "./list-model.js";
 import { select } from "./selection.js";
 import { stackToasts, toastButtons, toastSays } from "./toast.js";
 import type { Session } from "./types.js";

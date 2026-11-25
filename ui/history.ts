@@ -1,8 +1,9 @@
 // History (#94, spec #90): the view in the terminal column that holds the ended sessions, newest first, with one search box
 // over session name, project and branch. The functions are content functions over the studio state.
 
-import { fullTitle, patch, pressable, text } from "./dom.js";
-import { deleting, item, row, childrenOf, sessionName } from "./list.js";
+import { fullTitle, patch, text } from "./dom.js";
+import { deleting, item, row } from "./list.js";
+import { childrenOf, sessionName } from "./list-model.js";
 import { studio } from "./state.js";
 import { sessionProjectName } from "./projects.js";
 import type { Session } from "./types.js";
@@ -31,16 +32,6 @@ export const historyRows = <T extends Searched & Pick<Session, "state" | "last_e
   endedSessions(sessions).filter((session) => matches(session, query));
 
 let query = "";
-
-// The session list's link: "History · N", with N ended sessions; null when none ended.
-export function historyLink(sessions: Pick<Session, "state">[], open: () => void): HTMLElement[] {
-  const count = sessions.filter((s) => s.state === "ended").length;
-  if (!count) return [];
-  const link = pressable(text("button", `History · ${count}`, "history-link"), null, open);
-  link.title = "Show the ended sessions";
-  link.dataset.key = "history";
-  return [link];
-}
 
 // Draws History into `box`, patched, so the search box keeps focus across the list's updates.
 export function drawHistory(box: HTMLElement, sessions: Session[]) {
