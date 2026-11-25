@@ -9,7 +9,7 @@
 // text is announced with `ariaNotify`. A modal dialog holds them back until it closes. A toast closed with the focus in it hands
 // the focus to the next toast, else back to where it was before it entered the toasts.
 
-import { element, fullTitle, pressable, text } from "./dom.js";
+import { cut, element, pressable, text } from "./dom.js";
 import type { LayoutMode } from "./layout.js";
 import { sessionName } from "./list-model.js";
 import { setFocus, studio } from "./state.js";
@@ -156,7 +156,7 @@ export function showToast() {
     const more = shown.count > 1 ? `+${shown.count - 1} more` : "";
     const name = sessionName(shown.session);
     const line = questionLine(shown.session);
-    main.replaceChildren(fullTitle(text("strong", name, "name"), name), ...(more ? [text("span", more, "count")] : []), fullTitle(text("span", line, "line"), line));
+    main.replaceChildren(cut(text("strong", name, "name")), ...(more ? [text("span", more, "count")] : []), cut(text("span", line, "line")));
     toast.dataset.say = toastSays([name, more, line]);
     toast.title = titled(studio.files.keymap, HOVERS.goToSession, "studio::NextNeedsYou");
   }
@@ -201,8 +201,7 @@ export function showClearToast(count: number, undo: () => void) {
     toastButtons(toast, () => undoButton, hideClearToast, "Hide this toast; the clear goes on");
     clearName = name;
   }
-  clearName.textContent = message;
-  fullTitle(clearName, message);
+  cut(clearName, message);
   toast.dataset.say = toastSays([message]);
   toast.hidden = false;
   stackToasts();

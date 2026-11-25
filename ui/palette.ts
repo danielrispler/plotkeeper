@@ -1,6 +1,6 @@
 // The palette (danielrispler/Falinks#575): every action with its keys, filtered by what Daniel types.
 
-import { element, fullTitle, pressable, text } from "./dom.js";
+import { cut, element, pressable, text } from "./dom.js";
 import type { Entry } from "./keys.js";
 import type { Binding } from "./settings.js";
 
@@ -49,8 +49,8 @@ export function showPalette(entries: Entry[], run: (binding: Binding) => void) {
         button.setAttribute("aria-selected", String(index === highlighted));
         button.title = "Run this action (↩)";
         const line = text("span", "", "l1");
-        line.append(fullTitle(text("span", entry.title, "name"), entry.title), text("span", entry.keys.join("  "), "row-state"));
-        button.append(line, ...(entry.note ? [fullTitle(text("span", entry.note, "l2"), entry.note)] : []));
+        line.append(cut(text("span", entry.title, "name")), text("span", entry.keys.join("  "), "row-state"));
+        button.append(line, ...(entry.note ? [cut(text("span", entry.note, "l2"))] : []));
         return button;
       }),
     );

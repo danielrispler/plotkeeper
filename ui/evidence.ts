@@ -4,7 +4,7 @@
 // and the tail of its output. Opening changes only the nodes it opens: the open state is kept by key, so a redraw of the rail
 // draws the line open again.
 
-import { code, failure, fullTitle, glyphOnly, invoke, messageOf, pressable, scrollingPre, statusRegion, text } from "./dom.js";
+import { code, failure, glyphOnly, hint, invoke, messageOf, pressable, scrollingPre, statusRegion, text } from "./dom.js";
 import { askAnchor, hunkText } from "./ask.js";
 import { diffRequest } from "./diff.js";
 import type { Capabilities, Check, CheckOutput, Hunk, Turn, TurnFile } from "./types.js";
@@ -210,7 +210,7 @@ function mergedRow(row: EvidenceRow): HTMLElement {
 // "Open full diff": the turn's whole diff in the terminal column (`diff.ts`).
 function fullDiffRow(session: string, index: number): HTMLElement {
   const item = document.createElement("li");
-  item.append(fullTitle(pressable(text("button", "Open full diff", "evidence-edit"), null, () => diffRequest.open(session, index)), HOVERS.wholeDiff));
+  item.append(hint(pressable(text("button", "Open full diff", "evidence-edit"), null, () => diffRequest.open(session, index)), HOVERS.wholeDiff));
   return item;
 }
 

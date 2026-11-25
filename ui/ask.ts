@@ -4,7 +4,7 @@
 // those facts and, for a file, its hunk; the answer stays here, labelled as interpretation under the facts as recorded and the session never sees it. A failed call or a reply with no answer shows why, with
 // a retry.
 
-import { failure, fullTitle, invoke, keepOnly, messageOf, onEnter, pressable, text } from "./dom.js";
+import { failure, hint, invoke, keepOnly, messageOf, onEnter, pressable, text } from "./dom.js";
 import { rendered } from "./markdown.js";
 import type { Anchor, Facts, Hunk } from "./types.js";
 
@@ -130,7 +130,7 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
     picks.append(pick);
   }
   node.addEventListener("toggle", () => node.open && read());
-  node.append(fullTitle(text("summary", "Ask", "ask-summary"), `Ask a question about ${what}, from what was recorded`), recorded, picks, field, send, reply, ...(why ? [why] : []));
+  node.append(hint(text("summary", "Ask", "ask-summary"), `Ask a question about ${what}, from what was recorded`), recorded, picks, field, send, reply, ...(why ? [why] : []));
   return node;
 }
 
@@ -150,7 +150,7 @@ export function whyNotElement(name: string, result: { facts: Facts; reasons: str
   }
   if (result.reasons) {
     const reasons = document.createElement("details");
-    reasons.append(fullTitle(text("summary", "possible reasons (not recorded)"), "Show or hide the writer's guesses, which nothing recorded"), rendered("div", result.reasons, ""));
+    reasons.append(hint(text("summary", "possible reasons (not recorded)"), "Show or hide the writer's guesses, which nothing recorded"), rendered("div", result.reasons, ""));
     node.append(reasons);
   }
   return node;

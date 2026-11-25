@@ -259,7 +259,10 @@ startMapAgents({
   briefOpen,
   name: sessionName,
   line: (session) => secondLine(session, lastHeadline),
-  placed: drawFeed,
+  placed: () => {
+    drawFeed();
+    drawSidebar();
+  },
 });
 // The left panel over the map (#385): History, a turn's diff and a worker's log; closing a story or a log selects none and leaves the bare map.
 startPanel({ history: historyIn, diff: diffIn, log: logIn, deselect: () => void deselect() });
