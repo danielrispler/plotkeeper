@@ -27,7 +27,7 @@ mod transcript;
 mod turn_files;
 mod work;
 pub use agy::{CAPABILITIES as AGY_CAPABILITIES, Drift as AgyDrift, DriftKind as AgyDriftKind};
-pub use ask::{Anchor, AskFact, AskFacts, AskSection};
+pub use ask::{Anchor, AskFact, AskFacts, AskRecorded, AskSection};
 use checks::matched;
 pub use checks::{
     Check, CheckLists, Listed, Output as CheckOutput, Run as CheckRun, Status as CheckStatus,
@@ -41,7 +41,7 @@ pub use event::{Capabilities, TranscriptFormat};
 use event::{Event, Happened, Origin, Start, ToolKind};
 pub use ledger::{Bytes, Details, Ledger, Outcome, Row};
 pub use qwen::CAPABILITIES as QWEN_CAPABILITIES;
-pub use transcript::{Context, LogEntry, SubagentLog, Transcript};
+pub use transcript::{Context, LogEntry, SubagentLog, SubagentLogFile, Transcript};
 pub use turn_files::{
     Numstat, RootDiff, TurnDiff, TurnFile, TurnFiles, TurnFilesSnapshot, TurnTrees,
     compute_turn_files,
@@ -4556,11 +4556,24 @@ impl Studio {
     }
 
     /// The log of subagent `agent` of session `session`, from byte `from`: the entries after it and
-    /// the offset read to (danielrispler/plotkeeper#54). A Claude subagent's file is in the parent's
-    /// transcript folder, `<transcript without .jsonl>/subagents/agent-<id>.jsonl`; an agy subagent's
-    /// is its own conversation's transcript. `None` is "no log": an unknown session or subagent, no
-    /// file, or a transcript path that is no `.jsonl`. Stateless: the caller keeps the offset.
+    /// the offset read to (danielrispler/plotkeeper#54). `None` is "no log": an unknown session or subagent, no
+    /// file, or a transcript path that is no `.jsonl`. Stateless: the caller keeps the offset. It reads
+    /// the file, so a caller that holds a lock on the studio takes `subagent_log_file` and reads after.
     pub fn subagent_log(&self, session: &str, agent: &str, from: u64) -> Option<SubagentLog> {
+        self.subagent_log_file(session, agent, from)?.read()
+    }
+
+    /// Where the log of subagent `agent` of session `session` is and how to read it from byte `from`, with
+    /// no file read (spec danielrispler/plotkeeper#548). A Claude subagent's file is in the parent's
+    /// transcript folder, `<transcript without .jsonl>/subagents/agent-<id>.jsonl`; an agy subagent's
+    /// is its own conversation's transcript. `None` for an unknown session or subagent, or a transcript
+    /// path that is no `.jsonl`.
+    pub fn subagent_log_file(
+        &self,
+        session: &str,
+        agent: &str,
+        from: u64,
+    ) -> Option<SubagentLogFile> {
         let session = self.session(session)?;
         session.subagent(agent)?;
         let transcript = std::path::Path::new(&session.transcript_file.path);
@@ -4576,7 +4589,13 @@ impl Studio {
             TranscriptFormat::Agy => agy::subagent_transcript(transcript, agent)?,
             TranscriptFormat::Unread => return None,
         };
-        transcript::read_subagent_log(&path, agent, format, from, &session.cwd)
+        Some(SubagentLogFile {
+            path,
+            agent: agent.into(),
+            format,
+            from,
+            cwd: session.cwd.clone(),
+        })
     }
 
     /// The selected session and the subagent of it Daniel opened; `None` until his first click.

@@ -317,6 +317,26 @@ pub fn logged(metadata: &log::Metadata) -> bool {
     metadata.level() <= log::Level::Warn && !metadata.target().starts_with("ureq")
 }
 
+/// Makes a panic on any thread stop plotkeeper (spec danielrispler/plotkeeper#548): the hook logs the thread, the place
+/// and the message as an error, then calls `exit` with a non-zero code. The binary passes `std::process::exit`, so no
+/// thread goes on with a poisoned lock or without the read loop; a restart is safe, as the state is rebuilt from the
+/// event log. A hook and not `panic = "abort"`, so a test that expects a panic still unwinds.
+pub fn exit_on_panic(exit: impl Fn(i32) + Send + Sync + 'static) {
+    std::panic::set_hook(Box::new(move |info| {
+        let thread = thread::current();
+        let name = thread.name().unwrap_or("unnamed");
+        let place = info.location().map_or("an unknown place".to_string(), |l| {
+            format!("{}:{}:{}", l.file(), l.line(), l.column())
+        });
+        let message = info.payload_as_str().unwrap_or("no message");
+        log::error!("thread '{name}' panicked at {place}: {message}; plotkeeper stops");
+        exit(PANIC_EXIT);
+    }));
+}
+
+/// The exit code of a plotkeeper that panicked, the one Rust's own runtime uses.
+const PANIC_EXIT: i32 = 101;
+
 /// Logs a line from the writers' code: an error when it lost data, a warning otherwise.
 pub fn report(line: String) {
     let line = scrubbed(&line);
@@ -558,7 +578,9 @@ pub fn ask_facts(
     anchor: studio_core::Anchor,
 ) -> Result<Option<studio_core::AskFacts>, String> {
     let log = studio_hook::event_log(&std::env::home_dir().ok_or("no home folder")?);
-    Ok(app.core.lock().unwrap().ask_facts(&session, &anchor, &log))
+    // The lock is held only to copy what the studio holds: the log is read after it is freed.
+    let recorded = app.core.lock().unwrap().ask_recorded(&session, &anchor);
+    Ok(recorded.map(|r| r.read(&log)))
 }
 
 /// A file's hunk of turn `turn` (danielrispler/plotkeeper#114), whole for the diff pane (#131) when `all`: `git diff` between the turn's two trees of worktree
@@ -683,10 +705,23 @@ pub fn subagent_log(
     agent_id: String,
     offset: u64,
 ) -> Option<studio_core::SubagentLog> {
-    app.core
-        .lock()
-        .unwrap()
-        .subagent_log(&session, &agent_id, offset)
+    subagent_log_through(app, session, agent_id, offset, |file| file.read())
+}
+
+/// `subagent_log` with the file read by `read`, which runs with no lock on the studio held (spec
+/// danielrispler/plotkeeper#548): the lock is held only to copy where the log is. The seam its test reads through.
+pub fn subagent_log_through(
+    app: &App,
+    session: String,
+    agent_id: String,
+    offset: u64,
+    read: impl FnOnce(&studio_core::SubagentLogFile) -> Option<studio_core::SubagentLog>,
+) -> Option<studio_core::SubagentLog> {
+    let file = {
+        let studio = app.core.lock().unwrap();
+        studio.subagent_log_file(&session, &agent_id, offset)?
+    };
+    read(&file)
 }
 
 /// The session Daniel selected and the subagent of it he opened, or `null` before his first click.
@@ -968,7 +1003,7 @@ pub fn ask_anchor(
     question: String,
 ) -> Result<String, String> {
     let log = studio_hook::event_log(&std::env::home_dir().ok_or("no home folder")?);
-    let (facts, transcript, trees) = {
+    let (recorded, transcript, trees) = {
         let studio = app.core.lock().unwrap();
         let trees = match &anchor {
             studio_core::Anchor::File { turn, root, .. } => {
@@ -977,9 +1012,10 @@ pub fn ask_anchor(
             _ => None,
         };
         let transcript = studio.session(&session).map(|s| s.transcript.clone());
-        (studio.ask_facts(&session, &anchor, &log), transcript, trees)
+        (studio.ask_recorded(&session, &anchor), transcript, trees)
     };
-    let facts = facts.ok_or("nothing is recorded about this")?;
+    // The event log is read with the studio's lock freed.
+    let facts = recorded.ok_or("nothing is recorded about this")?.read(&log);
     let hunk = match (&anchor, trees) {
         (
             studio_core::Anchor::File {
