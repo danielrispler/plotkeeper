@@ -87,6 +87,16 @@ fn an_ignored_match_wins_over_every_part() {
 }
 
 #[test]
+fn the_map_file_is_ignored_with_no_ignored_entry_for_it() {
+    let mut map = base();
+    map["ignored"] = json!(["docs/"]);
+    map["parts"][0]["paths"] = json!(["alpha/", "*.json"]);
+    let got = touched(&map, &["system-map.json"]);
+    assert_eq!(got.ignored, vec!["system-map.json"]);
+    assert!(got.parts.is_empty() && got.unowned.is_empty(), "{got:?}");
+}
+
+#[test]
 fn paths_no_pattern_matches_are_listed_apart() {
     let got = touched(&base(), &["stray.txt", "alpha/a.rs"]);
     assert_eq!(parts(&got), vec![("alpha", vec!["alpha/a.rs"])]);

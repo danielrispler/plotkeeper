@@ -412,6 +412,292 @@ fn a_use_between_two_parts_is_found_when_the_crate_root_is_ignored() {
     assert_eq!(edges(&report), ["alpha>beta"]);
 }
 
+#[test]
+fn an_inline_crate_path_outside_a_use_line_reaches_the_module_file() {
+    for text in [
+        "fn f() -> crate::a::A { crate::a::A }\n",
+        "fn f() { let _ = crate::a::inner::make(); }\n",
+    ] {
+        let found = rust_edges(
+            &[
+                ("k/src/lib.rs", "mod a;\nmod b;\n"),
+                ("k/src/a.rs", "pub struct A;\npub mod inner {}\n"),
+                ("k/src/b.rs", text),
+            ],
+            &["k/src/lib.rs", "k/src/a.rs"],
+            &["k/src/b.rs"],
+        );
+        assert_eq!(found, ["alpha>beta", "beta>alpha"], "{text}");
+    }
+}
+
+#[test]
+fn a_bare_path_to_a_child_module_reaches_that_module_file() {
+    // The crate root declares `ci_laws` and names a module below it bare, from its own module and
+    // from an inline one. `ci_laws.rs` is ignored, so only the bare path can pair `lib.rs` with
+    // `ci_laws/cache.rs`.
+    for text in [
+        "pub mod ci_laws;\nfn f() -> ci_laws::cache::CiCache { todo!() }\n",
+        "pub mod ci_laws;\nmod tests { use super::*; fn f() { ci_laws::cache::CiCache::new(); } }\n",
+    ] {
+        let mut map = split_map(&["rust-modules"], &["k/src/ci_laws/"], &["k/src/lib.rs"]);
+        map["ignored"] = json!(["system-map.json", "k/src/ci_laws.rs"]);
+        let (_dir, root) = tree(
+            &map,
+            &[
+                ("k/src/lib.rs", text),
+                ("k/src/ci_laws.rs", "pub mod cache;\n"),
+                ("k/src/ci_laws/cache.rs", "pub struct CiCache;\n"),
+            ],
+        );
+        let report = report(&root);
+        assert_eq!(report.problems, Vec::<String>::new(), "{text}");
+        assert_eq!(edges(&report), ["beta>alpha"], "{text}");
+    }
+}
+
+#[test]
+fn a_bare_path_through_a_module_a_use_line_brings_in_reaches_the_module_below() {
+    let mut map = split_map(&["rust-modules"], &["k/src/a/"], &["k/src/b.rs"]);
+    map["ignored"] = json!(["system-map.json", "k/src/lib.rs", "k/src/a.rs"]);
+    let (_dir, root) = tree(
+        &map,
+        &[
+            ("k/src/lib.rs", "mod a;\nmod b;\n"),
+            ("k/src/a.rs", "pub mod inner;\n"),
+            ("k/src/a/inner.rs", "pub struct X;\n"),
+            ("k/src/b.rs", "use crate::a;\nfn f() { a::inner::X; }\n"),
+        ],
+    );
+    assert_eq!(edges(&report(&root)), ["beta>alpha"]);
+}
+
+#[test]
+fn a_bare_path_whose_first_word_is_no_module_gives_no_edge() {
+    let found = rust_edges(
+        &[
+            ("k/src/lib.rs", "mod a;\nmod b;\n"),
+            ("k/src/a.rs", ""),
+            (
+                "k/src/b.rs",
+                "fn f() { std::mem::drop(1); Vec::<u8>::new(); a_thing::X; }\n",
+            ),
+        ],
+        &["k/src/lib.rs", "k/src/b.rs"],
+        &["k/src/a.rs"],
+    );
+    // Only the crate root's `mod a;`: `b.rs` declares no child `a`, so nothing in it reaches `a.rs`.
+    assert_eq!(found, ["alpha>beta"]);
+}
+
+/// A cargo workspace of the packages `(package, folder, library name or "", manifest tail)`, each
+/// with the files given, and a map giving `alpha` and `beta` their paths and ignoring `ignored`.
+fn rust_workspace(
+    packages: &[(&str, &str, &str, &str)],
+    files: &[(&str, &str)],
+    alpha: &[&str],
+    beta: &[&str],
+    ignored: &[&str],
+) -> system_map::Report {
+    let members: Vec<String> = packages.iter().map(|p| format!("{:?}", p.1)).collect();
+    let mut all: Vec<(String, String)> = vec![(
+        "Cargo.toml".into(),
+        format!(
+            "[workspace]\nresolver = \"2\"\nmembers = [{}]\n",
+            members.join(", ")
+        ),
+    )];
+    for (package, folder, lib, tail) in packages {
+        let lib = if lib.is_empty() {
+            String::new()
+        } else {
+            format!("[lib]\nname = \"{lib}\"\n\n")
+        };
+        let text = format!(
+            "[package]\nname = \"{package}\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n{lib}{tail}\n"
+        );
+        all.push((format!("{folder}/Cargo.toml"), text));
+    }
+    all.extend(files.iter().map(|(f, t)| (f.to_string(), t.to_string())));
+    let all: Vec<(&str, &str)> = all.iter().map(|(f, t)| (f.as_str(), t.as_str())).collect();
+    let mut map = split_map(&["rust-modules"], alpha, beta);
+    let mut ignore = vec!["system-map.json", "Cargo.toml", "**/Cargo.toml"];
+    ignore.extend(ignored);
+    map["ignored"] = json!(ignore);
+    let (_dir, root) = tree(&map, &all);
+    report(&root)
+}
+
+const ON_SERVER: &str = "[dependencies]\nstudio-server = { path = \"../server\" }\n";
+
+#[test]
+fn a_path_into_a_workspace_crate_reaches_the_module_file_it_names() {
+    // `lib.rs` is ignored, so an edge to it would be dropped: only a pair with `runner.rs` shows.
+    for text in [
+        "use studio_server::runner::launch;\n",
+        "fn main() { studio_server::runner::launch(); }\n",
+        "use studio_server::{runner, Other};\nfn main() { runner::launch(); }\n",
+    ] {
+        let report = rust_workspace(
+            &[
+                ("studio-server", "server", "", ""),
+                ("studio-app", "app", "", ON_SERVER),
+            ],
+            &[
+                ("server/src/lib.rs", "pub mod runner;\npub struct Other;\n"),
+                ("server/src/runner.rs", "pub fn launch() {}\n"),
+                ("app/src/main.rs", text),
+            ],
+            &["server/src/runner.rs"],
+            &["app/"],
+            &["server/src/lib.rs"],
+        );
+        assert_eq!(report.problems, Vec::<String>::new(), "{text}");
+        assert_eq!(edges(&report), ["beta>alpha"], "{text}");
+    }
+}
+
+#[test]
+fn a_path_to_a_workspace_crate_s_root_reaches_its_lib_rs_not_a_module() {
+    let report = rust_workspace(
+        &[
+            ("studio-server", "server", "", ""),
+            ("studio-app", "app", "", ON_SERVER),
+        ],
+        &[
+            ("server/src/lib.rs", "pub mod runner;\npub struct Other;\n"),
+            ("server/src/runner.rs", ""),
+            ("app/src/main.rs", "use studio_server::Other;\n"),
+        ],
+        &["server/src/runner.rs"],
+        &["app/"],
+        &["server/src/lib.rs"],
+    );
+    assert_eq!(edges(&report), Vec::<String>::new());
+}
+
+#[test]
+fn a_path_into_the_crate_s_own_library_from_its_binary_or_test_is_read() {
+    for (file, text) in [
+        (
+            "server/src/bin/run.rs",
+            "fn main() { studio_server::runner::launch(); }\n",
+        ),
+        ("server/tests/t.rs", "use studio_server::runner;\n"),
+    ] {
+        let report = rust_workspace(
+            &[("studio-server", "server", "", "")],
+            &[
+                ("server/src/lib.rs", "pub mod runner;\n"),
+                ("server/src/runner.rs", "pub fn launch() {}\n"),
+                (file, text),
+            ],
+            &["server/src/lib.rs", "server/src/runner.rs"],
+            &[file],
+            &[],
+        );
+        assert_eq!(report.problems, Vec::<String>::new(), "{file}");
+        assert_eq!(edges(&report), ["beta>alpha"], "{file}");
+    }
+}
+
+#[test]
+fn a_workspace_crate_is_read_by_its_library_name_not_its_package_name() {
+    let dep = "[dependencies]\nstudio-system-map = { path = \"../map\" }\n";
+    for (text, expected) in [
+        ("use system_map::check::run;\n", &["beta>alpha"][..]),
+        ("use studio_system_map::check::run;\n", &[][..]),
+    ] {
+        let report = rust_workspace(
+            &[
+                ("studio-system-map", "map", "system_map", ""),
+                ("studio-app", "app", "", dep),
+            ],
+            &[
+                ("map/src/lib.rs", "pub mod check;\n"),
+                ("map/src/check.rs", "pub fn run() {}\n"),
+                ("app/src/main.rs", text),
+            ],
+            &["map/"],
+            &["app/"],
+            &[],
+        );
+        assert_eq!(report.problems, Vec::<String>::new(), "{text}");
+        assert_eq!(edges(&report), expected, "{text}");
+    }
+}
+
+#[test]
+fn a_crate_named_path_without_a_normal_dependency_gives_no_cross_crate_edge() {
+    // `app` has a local module `studio_server` and only a dev-dependency on the real crate.
+    for (tail, app_files) in [
+        (
+            "",
+            vec![
+                (
+                    "app/src/main.rs",
+                    "mod studio_server;\nuse studio_server::runner;\n",
+                ),
+                ("app/src/studio_server.rs", "pub mod runner {}\n"),
+            ],
+        ),
+        (
+            "[dev-dependencies]\nstudio-server = { path = \"../server\" }\n",
+            vec![("app/tests/t.rs", "use studio_server::runner::launch;\n")],
+        ),
+    ] {
+        let mut files = vec![
+            ("server/src/lib.rs", "pub mod runner;\n"),
+            ("server/src/runner.rs", "pub fn launch() {}\n"),
+            ("app/src/lib.rs", ""),
+        ];
+        files.extend(app_files);
+        let report = rust_workspace(
+            &[
+                ("studio-server", "server", "", ""),
+                ("studio-app", "app", "", tail),
+            ],
+            &files,
+            &["server/"],
+            &["app/"],
+            &[],
+        );
+        assert_eq!(report.problems, Vec::<String>::new(), "{tail}");
+        assert_eq!(edges(&report), Vec::<String>::new(), "{tail}");
+    }
+}
+
+#[test]
+fn when_cargo_cannot_run_workspace_crate_paths_are_not_read_and_one_problem_says_so() {
+    let mut map = split_map(
+        &["rust-modules"],
+        &["k/src/lib.rs", "k/src/a.rs"],
+        &["k/src/b.rs"],
+    );
+    map["ignored"] = json!(["system-map.json", "Cargo.toml"]);
+    let (_dir, root) = tree(
+        &map,
+        &[
+            ("Cargo.toml", "this is not toml ["),
+            ("k/src/lib.rs", "mod a;\nmod b;\n"),
+            ("k/src/a.rs", ""),
+            ("k/src/b.rs", "use crate::a::A;\n"),
+        ],
+    );
+    let report = report(&root);
+    assert_eq!(report.problems.len(), 1, "{:?}", report.problems);
+    assert!(
+        has(
+            &report.problems,
+            &["rust-modules", "workspace-crate paths were not read"]
+        ),
+        "{:?}",
+        report.problems
+    );
+    // The paths inside a crate are still read.
+    assert_eq!(edges(&report), ["alpha>beta", "beta>alpha"]);
+}
+
 fn ts_edges(files: &[(&str, &str)]) -> Vec<String> {
     let map = split_map(&["typescript-imports"], &["alpha/"], &["beta/"]);
     let (_dir, root) = tree(&map, files);
@@ -492,11 +778,12 @@ fn check_prints_an_edge_on_a_line_no_problem_looks_like_and_json_lists_it() {
     let out = run_check(&root, &[]);
     assert!(out.status.success());
     let text = String::from_utf8(out.stdout).unwrap();
-    assert_eq!(text.lines().count(), 1, "{text}");
+    assert_eq!(text.lines().count(), 2, "{text}");
     assert!(
         text.starts_with("note: ") && text.contains("alpha") && text.contains("beta"),
         "{text}"
     );
+    assert!(text.lines().last().unwrap().starts_with("ok: "), "{text}");
 
     let out = run_check(&root, &["--json"]);
     let value: Value = serde_json::from_slice(&out.stdout).unwrap();

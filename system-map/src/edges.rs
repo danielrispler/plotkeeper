@@ -32,15 +32,34 @@ pub(crate) fn unlinked(
     parts: &[PartFiles],
     links: &[Link],
 ) -> (Vec<Edge>, Vec<String>) {
+    let (pairs, problems) = file_pairs(root, names, files);
+    (edges_between_parts(&pairs, parts, links), problems)
+}
+
+/// The `(dependent, dependency)` file pairs the named extractors find, each pair once, and the
+/// problems of extractors that are unknown or cannot run.
+fn file_pairs(
+    root: &Path,
+    names: &[String],
+    files: &[String],
+) -> (BTreeSet<(String, String)>, Vec<String>) {
     let mut problems = Vec::new();
-    let mut pairs = Pairs::new();
+    let mut pairs = BTreeSet::new();
     // Every tracked file, ignored ones too: a module tree may run through a file no part owns, and
     // `edges_between_parts` drops the pairs that touch one.
     let tracked: BTreeSet<&str> = files.iter().map(String::as_str).collect();
     for name in names {
         let found = match name.as_str() {
             "cargo" => cargo(root),
-            "rust-modules" => Ok(rust_modules(root, &tracked)),
+            "rust-modules" => {
+                let crates = workspace_crates(root).unwrap_or_else(|problem| {
+                    problems.push(format!(
+                        "extractor \"rust-modules\": workspace-crate paths were not read: {problem}"
+                    ));
+                    Vec::new()
+                });
+                Ok(rust_modules(root, &tracked, &crates))
+            }
             "typescript-imports" => Ok(typescript_imports(root, &tracked)),
             other => Err(format!(
                 "unknown extractor {other:?} in extractors; use one of {}",
@@ -52,12 +71,16 @@ pub(crate) fn unlinked(
             Err(problem) => problems.push(problem),
         }
     }
-    (edges_between_parts(&pairs, parts, links), problems)
+    (pairs, problems)
 }
 
 /// Turns pairs of files into edges between the parts that own them, dropping pairs inside one
 /// part, pairs touching a file no part owns (ignored files too), and edges a link joins.
-fn edges_between_parts(pairs: &Pairs, parts: &[PartFiles], links: &[Link]) -> Vec<Edge> {
+fn edges_between_parts(
+    pairs: &BTreeSet<(String, String)>,
+    parts: &[PartFiles],
+    links: &[Link],
+) -> Vec<Edge> {
     let owner: HashMap<&str, &str> = parts
         .iter()
         .flat_map(|part| part.files.iter().map(|f| (f.as_str(), part.id.as_str())))
@@ -83,15 +106,8 @@ fn edges_between_parts(pairs: &Pairs, parts: &[PartFiles], links: &[Link]) -> Ve
     edges.into_iter().collect()
 }
 
-/// Each workspace crate's manifest paired with the manifests of the workspace crates it depends
-/// on, dev-dependencies left out.
-fn cargo(root: &Path) -> Result<Pairs, String> {
-    if !root.join("Cargo.toml").is_file() {
-        return Err(
-            "extractor \"cargo\" is named but the repository has no Cargo.toml; remove \"cargo\" from extractors"
-                .into(),
-        );
-    }
+/// `cargo metadata` of the workspace at `root`, as JSON, and the root it reports paths against.
+fn metadata(root: &Path) -> Result<(serde_json::Value, std::path::PathBuf), String> {
     let output = Command::new("cargo")
         .args([
             "metadata",
@@ -102,22 +118,40 @@ fn cargo(root: &Path) -> Result<Pairs, String> {
         ])
         .current_dir(root)
         .output()
-        .map_err(|error| format!("extractor \"cargo\": cannot run cargo: {error}"))?;
+        .map_err(|error| format!("cannot run cargo: {error}"))?;
     if !output.status.success() {
         return Err(format!(
-            "extractor \"cargo\": cargo metadata failed: {}",
+            "cargo metadata failed: {}",
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
-    let metadata: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .map_err(|error| format!("extractor \"cargo\": unreadable cargo metadata: {error}"))?;
-    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let metadata = serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("unreadable cargo metadata: {error}"))?;
+    Ok((
+        metadata,
+        root.canonicalize().unwrap_or_else(|_| root.to_path_buf()),
+    ))
+}
+
+/// `path` relative to `root`, with forward slashes.
+fn relative_to(root: &Path, path: &str) -> Option<String> {
+    let path = Path::new(path).strip_prefix(root).ok()?;
+    Some(path.to_str()?.replace('\\', "/"))
+}
+
+/// Each workspace crate's manifest paired with the manifests of the workspace crates it depends
+/// on, dev-dependencies left out.
+fn cargo(root: &Path) -> Result<Pairs, String> {
+    if !root.join("Cargo.toml").is_file() {
+        return Err(
+            "extractor \"cargo\" is named but the repository has no Cargo.toml; remove \"cargo\" from extractors"
+                .into(),
+        );
+    }
+    let (metadata, root) = metadata(root).map_err(|e| format!("extractor \"cargo\": {e}"))?;
     let packages = metadata["packages"].as_array().map_or(&[][..], |p| p);
-    let manifest = |package: &serde_json::Value| -> Option<String> {
-        let path = Path::new(package["manifest_path"].as_str()?);
-        let path = path.strip_prefix(&root).ok()?;
-        Some(path.to_str()?.replace('\\', "/"))
-    };
+    let manifest =
+        |package: &serde_json::Value| relative_to(&root, package["manifest_path"].as_str()?);
     // A dependency on a workspace crate carries that crate's folder as its `path`; one on the
     // registry's crate of the same name does not.
     let manifests: HashMap<String, String> = packages
@@ -128,11 +162,6 @@ fn cargo(root: &Path) -> Result<Pairs, String> {
             Some((dir.to_string(), manifest))
         })
         .collect();
-    let relative = |path: &str| -> Option<String> {
-        let path = Path::new(path);
-        let path = path.strip_prefix(&root).ok()?;
-        Some(path.to_str()?.replace('\\', "/"))
-    };
     let mut pairs = Pairs::new();
     for package in packages {
         let Some(from) = manifest(package) else {
@@ -144,7 +173,7 @@ fn cargo(root: &Path) -> Result<Pairs, String> {
             }
             if let Some(to) = dep["path"]
                 .as_str()
-                .and_then(relative)
+                .and_then(|p| relative_to(&root, p))
                 .and_then(|dir| manifests.get(&dir))
             {
                 pairs.push((from.clone(), to.clone()));
@@ -152,6 +181,98 @@ fn cargo(root: &Path) -> Result<Pairs, String> {
         }
     }
     Ok(pairs)
+}
+
+/// A workspace package, as the Rust reader needs it.
+struct Crate {
+    /// The package's folder, relative to the repository's root (`""` for the root).
+    dir: String,
+    /// Its library: the name code uses for it and its root file.
+    lib: Option<(String, String)>,
+    /// The folders of the workspace packages it depends on as normal dependencies, each with the
+    /// name it renames that dependency to, if it does.
+    deps: Vec<(String, Option<String>)>,
+}
+
+/// The workspace's packages from `cargo metadata`; none when the repository has no Cargo.toml.
+fn workspace_crates(root: &Path) -> Result<Vec<Crate>, String> {
+    if !root.join("Cargo.toml").is_file() {
+        return Ok(Vec::new());
+    }
+    let (metadata, root) = metadata(root)?;
+    let packages = metadata["packages"].as_array().map_or(&[][..], |p| p);
+    let crates = packages
+        .iter()
+        .filter_map(|package| {
+            let manifest = relative_to(&root, package["manifest_path"].as_str()?)?;
+            let dir = manifest.strip_suffix("Cargo.toml")?.trim_end_matches('/');
+            let lib = package["targets"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find_map(|t| {
+                    let kinds = t["kind"].as_array()?;
+                    let is_lib = kinds.iter().any(|k| {
+                        matches!(
+                            k.as_str(),
+                            Some("lib" | "rlib" | "dylib" | "cdylib" | "staticlib" | "proc-macro")
+                        )
+                    });
+                    is_lib.then_some(())?;
+                    let name = t["name"].as_str()?.replace('-', "_");
+                    Some((name, relative_to(&root, t["src_path"].as_str()?)?))
+                });
+            let deps = package["dependencies"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|dep| dep["kind"].is_null())
+                .filter_map(|dep| {
+                    let dir = relative_to(&root, dep["path"].as_str()?)?;
+                    let rename = dep["rename"].as_str().map(|r| r.replace('-', "_"));
+                    Some((dir, rename))
+                })
+                .collect();
+            Some(Crate {
+                dir: dir.to_string(),
+                lib,
+                deps,
+            })
+        })
+        .collect();
+    Ok(crates)
+}
+
+/// The workspace libraries a crate whose root is `root_file` may name, by the name it uses, each
+/// with its library's root file: its normal dependencies, and its own package's library when the
+/// root is a binary, test or other target of that package.
+fn extern_crates(root_file: &str, crates: &[Crate]) -> HashMap<String, String> {
+    let inside = |dir: &str| dir.is_empty() || root_file.starts_with(&format!("{dir}/"));
+    let Some(own) = crates
+        .iter()
+        .filter(|c| inside(&c.dir))
+        .max_by_key(|c| c.dir.len())
+    else {
+        return HashMap::new();
+    };
+    let mut names = HashMap::new();
+    if let Some((name, lib_root)) = own.lib.as_ref().filter(|(_, r)| r != root_file) {
+        names.insert(name.clone(), lib_root.clone());
+    }
+    for (dir, rename) in &own.deps {
+        let Some((name, lib_root)) = crates
+            .iter()
+            .find(|c| &c.dir == dir)
+            .and_then(|c| c.lib.as_ref())
+        else {
+            continue;
+        };
+        names.insert(
+            rename.clone().unwrap_or_else(|| name.clone()),
+            lib_root.clone(),
+        );
+    }
+    names
 }
 
 /// One token of Rust source that matters to the module scan.
@@ -262,11 +383,16 @@ fn skip_char_escape(chars: &[char], mut i: usize) -> usize {
 }
 
 /// What one Rust file declares: the files its `mod name;` lines name, the module paths its inline
-/// modules and `mod` lines open, and the `use crate::` paths it holds.
+/// modules and `mod` lines open, the paths it writes and the names its `use` lines bring in.
 struct RustFile {
     /// `(module path from this file's module, whether the module is declared in a file of its own)`
     mods: Vec<(Vec<String>, bool)>,
-    uses: Vec<Vec<String>>,
+    /// Each path of two words or more, in a `use` line or inline: `(the inline modules it sits in,
+    /// its words)`.
+    paths: Vec<(Vec<String>, Vec<String>)>,
+    /// Each name a `use` line brings in: `(the inline modules the line sits in, the name, the path
+    /// it names)`.
+    aliases: Vec<(Vec<String>, String, Vec<String>)>,
 }
 
 fn scan_rust(text: &str) -> RustFile {
@@ -278,13 +404,21 @@ fn scan_rust(text: &str) -> RustFile {
     let sym = |i: usize, c: char| tokens.get(i) == Some(&Tok::Sym(c));
     let mut file = RustFile {
         mods: Vec::new(),
-        uses: Vec::new(),
+        paths: Vec::new(),
+        aliases: Vec::new(),
     };
     // Names of the inline modules the scan is inside, with the brace depth that closes each.
     let mut inline: Vec<(String, usize)> = Vec::new();
     let mut depth = 0usize;
     let mut i = 0;
     while i < tokens.len() {
+        let scope = || {
+            inline
+                .iter()
+                .map(|(n, _)| n.clone())
+                .collect::<Vec<String>>()
+        };
+        let after_colon = i > 0 && sym(i - 1, ':');
         if sym(i, '{') {
             depth += 1;
         } else if sym(i, '}') {
@@ -292,9 +426,8 @@ fn scan_rust(text: &str) -> RustFile {
             while inline.last().is_some_and(|(_, d)| *d > depth) {
                 inline.pop();
             }
-        } else if ident(i) == Some("mod") && ident(i + 1).is_some() && !sym(i.wrapping_sub(1), ':')
-        {
-            let mut path: Vec<String> = inline.iter().map(|(n, _)| n.clone()).collect();
+        } else if ident(i) == Some("mod") && ident(i + 1).is_some() && !after_colon {
+            let mut path = scope();
             let name = ident(i + 1).unwrap_or_default().to_string();
             if sym(i + 2, ';') {
                 path.push(name);
@@ -306,12 +439,34 @@ fn scan_rust(text: &str) -> RustFile {
                 inline.push((name, depth));
                 i += 2;
             }
-        } else if ident(i) == Some("use") && ident(i + 1) == Some("crate") && sym(i + 2, ':') {
-            let mut end = i + 4;
-            let mut paths = Vec::new();
-            use_tree(&tokens, &mut end, Vec::new(), &mut paths);
-            file.uses
-                .extend(paths.into_iter().filter(|p| !p.is_empty()));
+        } else if ident(i) == Some("use") && ident(i + 1).is_some() {
+            let mut end = i + 1;
+            let mut found = Vec::new();
+            use_tree(&tokens, &mut end, Vec::new(), &mut found);
+            for (path, alias) in found {
+                if let Some(alias) = alias {
+                    file.aliases.push((scope(), alias, path.clone()));
+                }
+                if path.len() > 1 {
+                    file.paths.push((scope(), path));
+                }
+            }
+            i = end;
+            continue;
+        } else if let Some(first) =
+            ident(i).filter(|_| !after_colon && sym(i + 1, ':') && sym(i + 2, ':'))
+        {
+            // An inline path: words joined by `::`, read up to the first thing that is no word.
+            let mut words = vec![first.to_string()];
+            let mut end = i + 1;
+            while sym(end, ':') && sym(end + 1, ':') {
+                let Some(word) = ident(end + 2) else { break };
+                words.push(word.to_string());
+                end += 3;
+            }
+            if words.len() > 1 {
+                file.paths.push((scope(), words));
+            }
             i = end;
             continue;
         }
@@ -320,15 +475,29 @@ fn scan_rust(text: &str) -> RustFile {
     file
 }
 
-/// Reads the use tree that starts at `*i` below `prefix`, pushing each full path. `self` names the
-/// path before it and `as` renames, so neither adds a step.
-fn use_tree(tokens: &[Tok], i: &mut usize, prefix: Vec<String>, out: &mut Vec<Vec<String>>) {
+/// Reads the use tree that starts at `*i` below `prefix`, pushing each full path with the name it
+/// brings in (none for a glob or `as _`). `self` names the path before it and `as` renames, so
+/// neither adds a step.
+fn use_tree(
+    tokens: &[Tok],
+    i: &mut usize,
+    prefix: Vec<String>,
+    out: &mut Vec<(Vec<String>, Option<String>)>,
+) {
     let start = prefix.len();
     let mut path = prefix;
     let mut names_self = false;
+    let mut rename: Option<Option<String>> = None;
+    let mut glob = false;
     while let Some(token) = tokens.get(*i) {
         match token {
-            Tok::Ident(word) if word == "as" => *i += 2,
+            Tok::Ident(word) if word == "as" => {
+                rename = Some(match tokens.get(*i + 1) {
+                    Some(Tok::Ident(name)) if name != "_" => Some(name.clone()),
+                    _ => None,
+                });
+                *i += 2;
+            }
             Tok::Ident(word) => {
                 if word == "self" {
                     names_self = true;
@@ -353,6 +522,7 @@ fn use_tree(tokens: &[Tok], i: &mut usize, prefix: Vec<String>, out: &mut Vec<Ve
                 }
             }
             Tok::Sym('*') => {
+                glob = true;
                 *i += 1;
                 break;
             }
@@ -360,15 +530,23 @@ fn use_tree(tokens: &[Tok], i: &mut usize, prefix: Vec<String>, out: &mut Vec<Ve
         }
     }
     if path.len() > start || names_self {
-        out.push(path);
+        let alias = match rename {
+            Some(rename) => rename,
+            None if glob => None,
+            None => path.last().cloned(),
+        };
+        out.push((path, alias));
     }
 }
 
 /// Inside each crate, the file a `mod name;` line names (as `name.rs` or `name/mod.rs`) and the
-/// file a `use crate::` path reaches, paired with the file that holds the line. A crate's module
-/// tree starts at a root (`lib.rs`, `main.rs`, `build.rs`, or a file of `bin`, `tests`, `examples`
-/// or `benches`) that no `mod` line names.
-fn rust_modules(root: &Path, tracked: &BTreeSet<&str>) -> Pairs {
+/// file each path reaches, paired with the file that holds the line. A crate's module tree starts
+/// at a root (`lib.rs`, `main.rs`, `build.rs`, or a file of `bin`, `tests`, `examples` or
+/// `benches`) that no `mod` line names. A path reaches the file that defines the longest stretch
+/// of it that names a module: from the crate's root after `crate::`, from a module the file (or an
+/// inline module it sits in) declares, through a name a `use` line brought in, or, by a
+/// workspace library's name in `crates`, from that library's root.
+fn rust_modules(root: &Path, tracked: &BTreeSet<&str>, crates: &[Crate]) -> Pairs {
     let parse: HashMap<&str, RustFile> = tracked
         .iter()
         .filter(|f| f.ends_with(".rs"))
@@ -430,37 +608,89 @@ fn rust_modules(root: &Path, tracked: &BTreeSet<&str>) -> Pairs {
             }
         }
     }
+    // Each crate's module tree: the file that defines each module path, and each file's own path.
+    struct Tree<'a> {
+        modules: HashMap<Vec<String>, &'a str>,
+        files: Vec<(&'a str, Vec<String>)>,
+    }
+    let mut trees: HashMap<&str, Tree> = HashMap::new();
     for root_file in parse
         .keys()
         .filter(|f| is_crate_root(f) && !declared.contains(*f))
     {
-        let mut found: Vec<(Vec<String>, &str)> = Vec::new();
+        let mut tree = Tree {
+            modules: HashMap::new(),
+            files: Vec::new(),
+        };
         let mut seen: HashSet<&str> = HashSet::new();
         let mut queue = vec![(*root_file, Vec::<String>::new())];
         while let Some((file, prefix)) = queue.pop() {
             if !seen.insert(file) {
                 continue;
             }
-            found.push((prefix.clone(), file));
+            tree.modules.entry(prefix.clone()).or_insert(file);
+            tree.files.push((file, prefix.clone()));
             for (path, in_own_file) in parse.get(file).map_or(&[][..], |f| &f.mods[..]) {
                 let mut full = prefix.clone();
                 full.extend(path.iter().cloned());
                 if !*in_own_file {
-                    found.push((full, file));
+                    tree.modules.entry(full).or_insert(file);
                 } else if let Some(target) = resolve(&declared, file, path) {
                     queue.push((target, full));
                 }
             }
         }
-        for (_, file) in &found {
-            for path in parse.get(file).map_or(&[][..], |f| &f.uses[..]) {
-                // The longest prefix of the path that names a module.
-                let target = (0..=path.len())
-                    .rev()
-                    .find_map(|n| found.iter().find(|(m, _)| m[..] == path[..n]))
-                    .map(|(_, target)| *target);
-                if let Some(target) = target.filter(|t| t != file) {
-                    pairs.push((file.to_string(), target.to_string()));
+        trees.insert(*root_file, tree);
+    }
+    // The file that defines the longest stretch of `words`, at least `min` words, in `tree`.
+    let longest = |tree: &Tree, words: &[String], min: usize| -> Option<String> {
+        (min..=words.len())
+            .rev()
+            .find_map(|n| tree.modules.get(&words[..n]))
+            .map(|t| t.to_string())
+    };
+    for (root_file, tree) in &trees {
+        let externs = extern_crates(root_file, crates);
+        for (file, prefix) in &tree.files {
+            let Some(scanned) = parse.get(file) else {
+                continue;
+            };
+            // Where a path reaches from the crate's root, a declared module or a workspace library.
+            let direct = |scope: &[String], words: &[String]| -> Option<String> {
+                let (first, rest) = words.split_first()?;
+                if first == "crate" {
+                    return longest(tree, rest, 0);
+                }
+                // A module the file's module, or an inline module the path sits in, declares.
+                for k in (0..=scope.len()).rev() {
+                    let mut full = prefix.clone();
+                    full.extend(scope[..k].iter().cloned());
+                    let min = full.len() + 1;
+                    full.extend(words.iter().cloned());
+                    if tree.modules.contains_key(&full[..min]) {
+                        return longest(tree, &full, min);
+                    }
+                }
+                let lib = trees.get(externs.get(first)?.as_str())?;
+                longest(lib, rest, 0)
+            };
+            // Else through the innermost `use` line that brought its first word in.
+            let reach = |scope: &[String], words: &[String]| -> Option<String> {
+                direct(scope, words).or_else(|| {
+                    let (first, rest) = words.split_first()?;
+                    let (_, _, path) = scanned
+                        .aliases
+                        .iter()
+                        .filter(|(s, name, _)| name == first && scope.starts_with(s))
+                        .max_by_key(|(s, _, _)| s.len())?;
+                    let mut full = path.clone();
+                    full.extend(rest.iter().cloned());
+                    direct(scope, &full)
+                })
+            };
+            for (scope, words) in &scanned.paths {
+                if let Some(target) = reach(scope, words).filter(|t| t != file) {
+                    pairs.push((file.to_string(), target));
                 }
             }
         }
@@ -574,4 +804,47 @@ fn typescript_imports(root: &Path, tracked: &BTreeSet<&str>) -> Pairs {
         }
     }
     pairs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The file pairs `rust-modules` finds in a folder holding `files`, with no workspace.
+    fn rust_pairs(files: &[(&str, &str)]) -> BTreeSet<(String, String)> {
+        let dir = tempfile::tempdir().unwrap();
+        for (file, text) in files {
+            let path = dir.path().join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        }
+        let names = vec!["rust-modules".to_string()];
+        let listed: Vec<String> = files.iter().map(|(f, _)| f.to_string()).collect();
+        let (pairs, problems) = file_pairs(dir.path(), &names, &listed);
+        assert_eq!(problems, Vec::<String>::new());
+        pairs
+    }
+
+    #[test]
+    fn a_use_group_naming_two_items_of_one_module_gives_one_pair() {
+        let pairs = rust_pairs(&[
+            (
+                "k/src/lib.rs",
+                "pub mod ci_laws;\nmod b;\nfn f() { ci_laws::CiCache::new(); }\n",
+            ),
+            ("k/src/ci_laws.rs", "pub struct CiCache;\n"),
+            (
+                "k/src/b.rs",
+                "use crate::ci_laws::{A, B};\nfn g() { crate::ci_laws::A; }\n",
+            ),
+        ]);
+        let from_b: Vec<_> = pairs.iter().filter(|(f, _)| f == "k/src/b.rs").collect();
+        assert_eq!(from_b.len(), 1, "{pairs:?}");
+        // The bare child-module path in the crate root reaches `ci_laws.rs`, once with its `mod` line.
+        let from_lib: Vec<_> = pairs
+            .iter()
+            .filter(|(f, t)| f == "k/src/lib.rs" && t == "k/src/ci_laws.rs")
+            .collect();
+        assert_eq!(from_lib.len(), 1, "{pairs:?}");
+    }
 }

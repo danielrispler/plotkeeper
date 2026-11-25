@@ -60,12 +60,31 @@ fn run() -> Result<ExitCode, String> {
                 edge.from, edge.to
             );
         }
+        if report.problems.is_empty() {
+            println!("{}", pass_line(&report.counts));
+        }
     }
     Ok(if report.problems.is_empty() {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
     })
+}
+
+/// The one line a pass prints, such as `ok: 7 parts own 581 files (212 ignored); 13 links; 12 laws: 9 check, 3 trust`.
+fn pass_line(counts: &system_map::Counts) -> String {
+    let n =
+        |count: usize, noun: &str| format!("{count} {noun}{}", if count == 1 { "" } else { "s" });
+    format!(
+        "ok: {} own {} ({} ignored); {}; {}: {} check, {} trust",
+        n(counts.parts, "part"),
+        n(counts.files, "file"),
+        counts.ignored,
+        n(counts.links, "link"),
+        n(counts.laws.check + counts.laws.trust, "law"),
+        counts.laws.check,
+        counts.laws.trust
+    )
 }
 
 /// `touched`: paths from the arguments, or one per line on standard input when there are none.

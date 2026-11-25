@@ -37,6 +37,25 @@ pub struct Report {
     pub unlinked: Vec<edges::Edge>,
     /// One line per problem; the check fails when there is any.
     pub problems: Vec<String>,
+    /// What the check covered, for the line a pass prints.
+    pub counts: Counts,
+}
+
+/// What a check covered: parts, the tracked files they own and the ones ignored, links, and laws
+/// by backing.
+#[derive(Debug, Default, Serialize)]
+pub struct Counts {
+    pub parts: usize,
+    pub files: usize,
+    pub ignored: usize,
+    pub links: usize,
+    pub laws: LawCounts,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct LawCounts {
+    pub check: usize,
+    pub trust: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -172,9 +191,27 @@ fn check_with(root: &Path, files: Result<Vec<String>, String>) -> Report {
     report.problems.extend(check_ids_and_references(&map));
     match files {
         Ok(files) => {
-            let (parts, problems) = ownership(&map, &files);
+            let (parts, ignored, problems) = ownership(&map, &files);
             report.problems.extend(problems);
             report.problems.extend(parts::check_paths(&map, &parts));
+            report.counts = Counts {
+                parts: parts.len(),
+                files: parts.iter().map(|p| p.files.len()).sum(),
+                ignored,
+                links: map.links.len(),
+                laws: LawCounts {
+                    check: map
+                        .laws
+                        .iter()
+                        .filter(|l| l.backing == Backing::Check)
+                        .count(),
+                    trust: map
+                        .laws
+                        .iter()
+                        .filter(|l| l.backing == Backing::Trust)
+                        .count(),
+                },
+            };
             let (laws, problems) = laws::check(root, &map, &files);
             report.laws = laws;
             report.problems.extend(problems);
@@ -421,10 +458,10 @@ impl Owners {
         }
     }
 
-    /// The ownership rule, held here for `check` and `touched` alike: a match in `ignored` wins,
-    /// then the last part with a matching pattern.
+    /// The ownership rule, held here for `check` and `touched` alike: the map file needs no owner,
+    /// then a match in `ignored` wins, then the last part with a matching pattern.
     pub(crate) fn place(&self, path: &str) -> Placement {
-        if self.ignored.iter().any(|p| p.matches(path)) {
+        if path == MAP_FILE || self.ignored.iter().any(|p| p.matches(path)) {
             return Placement::Ignored;
         }
         match self
@@ -448,9 +485,11 @@ pub(crate) fn read_tracked(root: &Path, file: &str) -> Option<String> {
     Some(String::from_utf8_lossy(&std::fs::read(path).ok()?).into_owned())
 }
 
-/// Which part owns each file, and the problems of files nobody owns and patterns that match none.
-fn ownership(map: &Map, files: &[String]) -> (Vec<PartFiles>, Vec<String>) {
+/// Which part owns each file, how many files are ignored, and the problems of files nobody owns
+/// and patterns that match none.
+fn ownership(map: &Map, files: &[String]) -> (Vec<PartFiles>, usize, Vec<String>) {
     let mut problems = Vec::new();
+    let mut ignored = 0;
     let owners = Owners::new(map);
     let mut parts: Vec<PartFiles> = map
         .parts
@@ -462,7 +501,7 @@ fn ownership(map: &Map, files: &[String]) -> (Vec<PartFiles>, Vec<String>) {
         .collect();
     for file in files {
         match owners.place(file) {
-            Placement::Ignored => {}
+            Placement::Ignored => ignored += 1,
             Placement::Part(index) => parts[index].files.push(file.clone()),
             Placement::Unowned => problems.push(format!(
                 "{file}: tracked, but no part owns it and no ignored pattern matches it; add it to a part's paths or to ignored"
@@ -479,13 +518,27 @@ fn ownership(map: &Map, files: &[String]) -> (Vec<PartFiles>, Vec<String>) {
     };
     for (part, patterns) in map.parts.iter().zip(&owners.parts) {
         let kind = format!("part {:?}", part.id);
-        problems.extend(patterns.iter().filter_map(|p| unmatched(&kind, p)));
+        for pattern in patterns {
+            let only_the_map = pattern.matches(MAP_FILE)
+                && !files
+                    .iter()
+                    .any(|file| file != MAP_FILE && pattern.matches(file));
+            if only_the_map {
+                problems.push(format!(
+                    "{kind} pattern {:?} names only {MAP_FILE}, which needs no owner; remove it",
+                    pattern.text()
+                ));
+            } else {
+                problems.extend(unmatched(&kind, pattern));
+            }
+        }
     }
     problems.extend(
         owners
             .ignored
             .iter()
+            .filter(|p| p.text() != MAP_FILE)
             .filter_map(|p| unmatched("ignored", p)),
     );
-    (parts, problems)
+    (parts, ignored, problems)
 }

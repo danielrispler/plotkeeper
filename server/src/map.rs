@@ -359,7 +359,12 @@ pub fn map_state(project: String, fetch: bool, app: &Arc<crate::App>) -> Result<
     state.user = read_user(&file, &project);
     if let Some(source) = &state.source {
         state.fog = crate::fog::effective(&state.user, source);
-        state.stale = crate::staleness::bands(&state.user, source, crate::ratify::now());
+        state.stale = crate::staleness::bands(
+            &state.user,
+            source,
+            &crate::staleness::births(repo, source),
+            crate::ratify::now(),
+        );
     }
     state.ci = cache.get(&project);
     state.ready = app.prs.ready(&project);
