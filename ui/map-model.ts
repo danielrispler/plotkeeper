@@ -1,7 +1,7 @@
 // The Map view's pure logic (spec danielrispler/plotkeeper#306, ticket #309): the map file as the window reads it, where parts
 // are placed, the drag threshold, the link's rim points, the layered Esc and the camera. `map.ts` draws and wires them.
 
-import type { BriefFigure, BriefStep, CatchUpOffer, CatchUpStage, FogListEntry, Camera, Ci, CommitFiles, Fog, HistoricalMap, HistoryEntry, PrBrief, Proof, ReadyPr } from "./types.js";
+import type { BriefFigure, BriefStep, CatchUpOffer, CatchUpStage, FogListEntry, Camera, Ci, CommitFiles, Fog, FogEntry, HistoricalMap, HistoryEntry, PrBrief, Proof, ReadyPr } from "./types.js";
 
 export type Tier = "core" | "interface" | "black-box";
 export type Point = { x: number; y: number };
@@ -174,6 +174,25 @@ export function sheetOf(part: Part, laws: Law[], tier: Tier, fog: Fog | undefine
     laws: laws.filter((law) => law.on === part.id).map((law) => ({ id: law.id, text: law.text, backing: law.backing, label: law.backing === "check" ? "Backed by a check" : "On trust" })),
     fogLine,
     canClear: fog !== undefined,
+  };
+}
+
+// Why a part's plate carries its marks, at the top of its sheet (#495), from the facts of this case: its newest thick fog entry (else its
+// newest) with its PR and why, and how many more; its staleness band with its last engagement (the server's line); a broken law, never
+// named. Null where the part has no such mark.
+export type SheetMarks = { fog: { line: string; more: number } | null; stale: string | null; broken: string | null };
+export function sheetMarks(part: string, fog: Fog | undefined, entries: FogEntry[], stale: string | undefined, ci: Ci | null): SheetMarks {
+  // Entries are filed oldest first.
+  const newest = [...entries].reverse();
+  const shown = newest.find((entry) => entry.strength === "thick") ?? newest[0];
+  const strength = (entry: FogEntry) => (entry.strength === "thick" ? "Thick" : "Thin");
+  const from = (entry: FogEntry) => (entry.pr ? `#${entry.pr}` : `commit ${entry.commit.slice(0, 7)}`);
+  const why = (entry: FogEntry) => (entry.why?.length ? `: ${entry.why.join(", ")}` : "");
+  const date = ci?.at ? `, ${ci.at.slice(0, 10)}` : "";
+  return {
+    fog: fog && shown ? { line: `${strength(shown)} fog from ${from(shown)}${why(shown)}`, more: entries.length - 1 } : null,
+    stale: stale ?? null,
+    broken: brokenParts(ci).has(part) ? `A check behind a law of this part failed in main's latest CI${date}` : null,
   };
 }
 

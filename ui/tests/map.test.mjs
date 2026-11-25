@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
-  actorSize, autoPlace, cameraRig, draftPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, plateTitle, rimPoint, revealPan, scrubTickets, sheetOf,
+  actorSize, autoPlace, cameraRig, draftPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, plateTitle, rimPoint, revealPan, scrubTickets, sheetOf, sheetMarks,
   narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject, readingOrder, talksTo, linkLines, markPoints,
 } from "../../dist/map-model.js";
 
@@ -219,6 +219,31 @@ test("a sheet says how the part's fog stands and offers I know this only while i
   assert.notEqual(line("core", "thin").fogLine, line("core", "thick").fogLine);
   assert.match(line("black-box", undefined).fogLine, /never/i);
   assert.match(line("interface", undefined).fogLine, /only when/i);
+});
+
+test("a sheet's marks explain themselves: the newest thick fog entry with its PR and why, staleness by the server's line, a broken law unnamed", () => {
+  const entry = (commit, strength, pr, why) => ({ commit: commit.repeat(40), strength, pr, why });
+  const entries = [entry("1", "thick", 410, ["law wire-types-agree", "paths"]), entry("2", "thin", 412, ["3 files"]), entry("3", "thin", null, ["1 file"])];
+  assert.deepEqual(sheetMarks("core", "thick", entries, undefined, null), {
+    fog: { line: "Thick fog from #410: law wire-types-agree, paths", more: 2 },
+    stale: null,
+    broken: null,
+  });
+  // Thin fog: the newest entry; one with no PR names its commit.
+  assert.deepEqual(sheetMarks("core", "thin", entries.slice(1), undefined, null).fog, { line: "Thin fog from commit 3333333: 1 file", more: 1 });
+  // An entry filed before #495 has neither PR nor why: its strength and commit.
+  assert.deepEqual(sheetMarks("core", "thin", [{ commit: "4".repeat(40), strength: "thin" }], undefined, null).fog, { line: "Thin fog from commit 4444444", more: 0 });
+  // A part whose fog does not show at its tier says nothing of it.
+  assert.equal(sheetMarks("core", undefined, entries, undefined, null).fog, null);
+  const line = "3 weeks or more: not engaged since tracking began on 2026-10-01";
+  assert.equal(sheetMarks("core", undefined, [], line, null).stale, line);
+  const ci = { status: "broken", run_url: null, commit: null, earlier: false, parts: ["core"], laws: ["wire-types-agree"], tail: "", note: null, at: "2026-11-24T10:00:00Z" };
+  const broken = sheetMarks("core", undefined, [], undefined, ci).broken;
+  assert.equal(broken, "A check behind a law of this part failed in main's latest CI, 2026-11-24");
+  assert.doesNotMatch(broken, /wire-types-agree/);
+  assert.equal(sheetMarks("core", undefined, [], undefined, { ...ci, at: null }).broken, "A check behind a law of this part failed in main's latest CI");
+  assert.equal(sheetMarks("shell", undefined, [], undefined, ci).broken, null);
+  assert.equal(sheetMarks("core", undefined, [], undefined, { ...ci, status: "passed" }).broken, null);
 });
 
 test("a scrub that reads slowly is dropped after Back to now or a later click", () => {

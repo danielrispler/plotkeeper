@@ -24,11 +24,16 @@ pub enum Strength {
     Thick,
 }
 
-/// One commit that changed a part and that Daniel has not caught up on.
+/// One commit that changed a part and that Daniel has not caught up on: the PR it came from, when its subject names one, and why it
+/// fogs the part (`Change::why`). An entry filed before #495 has neither.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Entry {
     pub commit: String,
     pub strength: Strength,
+    #[serde(default)]
+    pub pr: Option<u64>,
+    #[serde(default)]
+    pub why: Vec<String>,
 }
 
 /// A project's fog, in `map-state.json`: the commit of the first open, the last commit walked, and each part's entries.
@@ -217,6 +222,30 @@ fn structure(map: &Value, part: &str) -> (Vec<Value>, Vec<Value>, Vec<Value>) {
     (laws, links, flows)
 }
 
+/// What a commit did to a part: its strength, and why, in the order the sheet tells it (#495): "added", "paths", each law, link and flow
+/// whose say on the part changed (`law <id>`, `link <id>`, `flow <id>`; a link's kind or reason too), each of the part's own words that
+/// changed (`name`, `caption`, `purpose`, `holds`), and the count of its files changed (`3 files`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Change {
+    pub strength: Strength,
+    pub why: Vec<String>,
+}
+
+/// The ids, each with its kind's word, of the items whose value differs between `old` and `new`, in `new`'s order, then the removed.
+fn changed_ids(kind: &str, old: &[Value], new: &[Value]) -> Vec<String> {
+    let id = |item: &Value| item["id"].as_str().unwrap_or_default().to_string();
+    let mut ids: Vec<String> = Vec::new();
+    for item in new.iter().chain(old) {
+        let key = id(item);
+        let before = old.iter().find(|o| id(o) == key);
+        let after = new.iter().find(|n| id(n) == key);
+        if before != after && !ids.contains(&key) {
+            ids.push(key);
+        }
+    }
+    ids.into_iter().map(|key| format!("{kind} {key}")).collect()
+}
+
 /// The strength each live part of `new` gets from a commit that changed `changed`, against the map `old` of its parent.
 /// A side whose map is missing or does not read gives no fog: nothing can be told apart.
 pub fn classify(
@@ -224,6 +253,18 @@ pub fn classify(
     new: Option<&str>,
     changed: &[String],
 ) -> BTreeMap<String, Strength> {
+    explain(old, new, changed)
+        .into_iter()
+        .map(|(id, change)| (id, change.strength))
+        .collect()
+}
+
+/// `classify`, with why each part fogs.
+pub fn explain(
+    old: Option<&str>,
+    new: Option<&str>,
+    changed: &[String],
+) -> BTreeMap<String, Change> {
     let mut found = BTreeMap::new();
     let (Some(old), Some(new)) = (old, new) else {
         return found;
@@ -242,32 +283,66 @@ pub fn classify(
         return found;
     };
     // The union of both maps places the paths, so a file that changed hands touches both parts.
-    let touched: Vec<String> = [&old_map, &new_map]
-        .iter()
-        .flat_map(|map| system_map::touched_for_map(map, changed).parts)
-        .map(|part| part.id)
-        .collect();
+    let mut files: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for map in [&old_map, &new_map] {
+        for part in system_map::touched_for_map(map, changed).parts {
+            files.entry(part.id).or_default().extend(part.files);
+        }
+    }
     for part in items(&new, "parts") {
         let Some(id) = part["id"].as_str() else {
             continue;
         };
+        let mut why = Vec::new();
         let strength = match named(&old, "parts", id) {
-            None => Some(Strength::Thick),
-            Some(before)
-                if before["paths"] != part["paths"]
-                    || structure(&old, id) != structure(&new, id) =>
-            {
+            None => {
+                why.push("added".to_string());
                 Some(Strength::Thick)
             }
-            Some(before) => (touched.iter().any(|t| t == id)
-                || ["name", "caption", "purpose", "holds"]
-                    .iter()
-                    .any(|f| before[*f] != part[*f])
-                || link_words(&old, id) != link_words(&new, id))
-            .then_some(Strength::Thin),
+            Some(before) => {
+                let (old_laws, old_links, old_flows) = structure(&old, id);
+                let (new_laws, new_links, new_flows) = structure(&new, id);
+                if before["paths"] != part["paths"] {
+                    why.push("paths".to_string());
+                }
+                why.extend(changed_ids("law", &old_laws, &new_laws));
+                let mut links = changed_ids("link", &old_links, &new_links);
+                let thick = before["paths"] != part["paths"]
+                    || (&old_laws, &old_links, &old_flows) != (&new_laws, &new_links, &new_flows);
+                // A link's kind or reason is thin; its id is told once.
+                let words = |map: &Value| {
+                    link_words(map, id)
+                        .into_iter()
+                        .map(|(id, kind, reason)| {
+                            serde_json::json!({"id": id, "kind": kind, "reason": reason})
+                        })
+                        .collect::<Vec<_>>()
+                };
+                for link in changed_ids("link", &words(&old), &words(&new)) {
+                    if !links.contains(&link) {
+                        links.push(link);
+                    }
+                }
+                why.extend(links);
+                why.extend(changed_ids("flow", &old_flows, &new_flows));
+                why.extend(
+                    ["name", "caption", "purpose", "holds"]
+                        .iter()
+                        .filter(|f| before[**f] != part[**f])
+                        .map(|f| f.to_string()),
+                );
+                if thick {
+                    Some(Strength::Thick)
+                } else {
+                    (!why.is_empty() || files.contains_key(id)).then_some(Strength::Thin)
+                }
+            }
         };
         if let Some(strength) = strength {
-            found.insert(id.to_string(), strength);
+            if let Some(count) = files.get(id).map(BTreeSet::len) {
+                why.push(format!("{count} file{}", if count == 1 { "" } else { "s" }));
+            }
+            found.insert(id.to_string(), Change { strength, why });
         }
     }
     found
@@ -302,7 +377,7 @@ pub fn refresh(repo: &Path, file: &Path, project: &str, open: bool) -> Result<()
         return Ok(());
     }
     // A tip that no longer descends from the last one (a rewritten branch) starts the walk over from the tip, clear.
-    let mut found: Vec<(String, BTreeMap<String, Strength>)> = Vec::new();
+    let mut found: Vec<(String, Option<u64>, BTreeMap<String, Change>)> = Vec::new();
     if git(repo, &["merge-base", "--is-ancestor", &done, &head]).is_ok() {
         let commits = git(
             repo,
@@ -322,16 +397,17 @@ pub fn refresh(repo: &Path, file: &Path, project: &str, open: bool) -> Result<()
                 continue;
             };
             let changed: Vec<String> = changed.lines().map(String::from).collect();
-            let mut strengths = classify(
+            let mut changes = explain(
                 text_at(repo, &parent).as_deref(),
                 text_at(repo, commit).as_deref(),
                 &changed,
             );
+            let pr = subject_pr(repo, commit);
             // A PR whose brief was read before it merged files only what changed since.
-            if let Some(read) = subject_pr(repo, commit).and_then(|pr| fog.reads.get(&pr)) {
-                after_reading(repo, commit, &changed, read, &mut strengths);
+            if let Some(read) = pr.and_then(|pr| fog.reads.get(&pr)) {
+                after_reading(repo, commit, &changed, read, &mut changes);
             }
-            found.push((commit.to_string(), strengths));
+            found.push((commit.to_string(), pr, changes));
         }
     }
     update_user(file, project, |u| apply(&mut u.fog, &done, head, found))?;
@@ -352,7 +428,7 @@ fn late_fog(
     x: &str,
     squash: &str,
     squash_paths: &[String],
-) -> Option<BTreeMap<String, Strength>> {
+) -> Option<BTreeMap<String, Change>> {
     let old = text_at(repo, x)?;
     let since = git(repo, &["diff", "--no-renames", "--name-only", x, squash]).ok()?;
     // Main's changes merged into the branch are in the diff from `x` but not in the squash commit's own: they fog nothing.
@@ -361,7 +437,7 @@ fn late_fog(
         .filter(|path| squash_paths.iter().any(|p| p == path))
         .map(String::from)
         .collect();
-    Some(classify(
+    Some(explain(
         Some(&old),
         text_at(repo, squash).as_deref(),
         &changed,
@@ -374,9 +450,9 @@ fn after_reading(
     squash: &str,
     squash_paths: &[String],
     read: &PrRead,
-    strengths: &mut BTreeMap<String, Strength>,
+    strengths: &mut BTreeMap<String, Change>,
 ) {
-    let mut late: BTreeMap<String, Option<BTreeMap<String, Strength>>> = BTreeMap::new();
+    let mut late: BTreeMap<String, Option<BTreeMap<String, Change>>> = BTreeMap::new();
     for part in read.complete_parts() {
         let Some(head) = read.read_head(&part) else {
             continue;
@@ -385,8 +461,8 @@ fn after_reading(
             .entry(head.to_string())
             .or_insert_with(|| late_fog(repo, head, squash, squash_paths));
         match since.as_ref().map(|s| s.get(&part)) {
-            Some(Some(strength)) => {
-                strengths.insert(part, *strength);
+            Some(Some(change)) => {
+                strengths.insert(part, change.clone());
             }
             Some(None) => {
                 strengths.remove(&part);
@@ -402,18 +478,20 @@ fn apply(
     fog: &mut FogState,
     done: &str,
     head: String,
-    found: Vec<(String, BTreeMap<String, Strength>)>,
+    found: Vec<(String, Option<u64>, BTreeMap<String, Change>)>,
 ) {
     if fog.processed.as_deref() != Some(done) {
         return;
     }
-    for (commit, strengths) in found {
-        for (part, strength) in strengths {
+    for (commit, pr, changes) in found {
+        for (part, change) in changes {
             let entries = fog.parts.entry(part).or_default();
             if !entries.iter().any(|e| e.commit == commit) {
                 entries.push(Entry {
                     commit: commit.clone(),
-                    strength,
+                    strength: change.strength,
+                    pr,
+                    why: change.why,
                 });
             }
         }
@@ -871,6 +949,8 @@ mod tests {
             vec![Entry {
                 commit: "x".into(),
                 strength: Strength::Thin,
+                pr: None,
+                why: Vec::new(),
             }],
         );
         assert!(effective(&user, source).contains_key("a"));
@@ -879,7 +959,17 @@ mod tests {
 
     #[test]
     fn an_overlapping_walk_files_nothing_twice_and_does_not_undo_a_clear() {
-        let walk = |commit: &str| vec![(commit.to_string(), strengths(&[("a", Strength::Thin)]))];
+        let walk = |commit: &str| {
+            let thin = Change {
+                strength: Strength::Thin,
+                why: Vec::new(),
+            };
+            vec![(
+                commit.to_string(),
+                None,
+                BTreeMap::from([("a".to_string(), thin)]),
+            )]
+        };
         let mut fog = FogState {
             processed: Some("d".into()),
             ..FogState::default()
@@ -893,6 +983,65 @@ mod tests {
         apply(&mut fog, "d", "h".into(), walk("x"));
         assert!(!fog.parts.contains_key("a"));
         assert_eq!(fog.processed.as_deref(), Some("h"));
+    }
+
+    /// The PR and the reasons of the last entry filed on `part`.
+    fn why(rig: &Rig, part: &str) -> (Option<u64>, Vec<String>) {
+        rig.fog();
+        let entry = rig.raw().parts[part].last().cloned().unwrap();
+        (entry.pr, entry.why)
+    }
+
+    fn words(list: &[&str]) -> Vec<String> {
+        list.iter().map(|w| w.to_string()).collect()
+    }
+
+    #[test]
+    fn a_fog_entry_keeps_its_pr_and_why_for_each_kind_of_change() {
+        let rig = Rig::new();
+        rig.open();
+        rig.commit(&[("a/x", "2"), ("a/y", "1"), ("b/x", "2")]);
+        assert_eq!(why(&rig, "a"), (None, words(&["2 files"])));
+        assert_eq!(why(&rig, "b"), (None, words(&["1 file"])));
+        // A squash-merge names its PR; a changed law on a.
+        rig.branch();
+        rig.commit(&[("system-map.json", LAW_CHANGED)]);
+        rig.squash();
+        assert_eq!(why(&rig, "a"), (Some(7), words(&["law l1"])));
+        // A new link and a flow across it.
+        let linked = LAW_CHANGED
+            .replace(
+                r#""links":[{"id":"a-b","from":"a","to":"b"}]"#,
+                r#""links":[{"id":"a-b","from":"a","to":"b"},{"id":"b-c","from":"b","to":"c"}]"#,
+            )
+            .replace(
+                r#""laws""#,
+                r#""flows":[{"id":"f","name":"F","hops":[{"link":"b-c","text":"x"}]}],"laws""#,
+            );
+        rig.commit(&[("system-map.json", &linked)]);
+        assert_eq!(why(&rig, "c"), (None, words(&["link b-c", "flow f"])));
+        // Paths, and a part added.
+        let moved = linked
+            .replace(r#""paths":["c/"]"#, r#""paths":["c/","d/"]"#)
+            .replace(r#""parts":["#, r#""parts":[{"id":"e","name":"E","caption":"c","description":"d","tier":"core","paths":["e/"]},"#);
+        rig.commit(&[("system-map.json", &moved)]);
+        assert_eq!(why(&rig, "c"), (None, words(&["paths"])));
+        assert_eq!(why(&rig, "e"), (None, words(&["added"])));
+        // Only its words: the field that changed.
+        rig.commit(&[(
+            "system-map.json",
+            &moved.replace(
+                r#""name":"B","caption":"c""#,
+                r#""name":"B","caption":"new""#,
+            ),
+        )]);
+        assert_eq!(why(&rig, "b"), (None, words(&["caption"])));
+    }
+
+    #[test]
+    fn an_entry_filed_before_it_kept_why_still_loads() {
+        let entry: Entry = serde_json::from_str(r#"{"commit":"abc","strength":"thick"}"#).unwrap();
+        assert_eq!((entry.pr, entry.why), (None, Vec::new()));
     }
 
     #[test]

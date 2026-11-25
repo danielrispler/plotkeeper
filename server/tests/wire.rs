@@ -46,10 +46,20 @@ fn user() -> UserState {
             processed: Some(COMMIT.into()),
             parts: BTreeMap::from([(
                 "server".into(),
-                vec![Entry {
-                    commit: COMMIT.into(),
-                    strength: Strength::Thick,
-                }],
+                vec![
+                    Entry {
+                        commit: COMMIT.into(),
+                        strength: Strength::Thick,
+                        pr: Some(334),
+                        why: vec!["law wire-types-agree".into(), "paths".into()],
+                    },
+                    Entry {
+                        commit: COMMIT.into(),
+                        strength: Strength::Thin,
+                        pr: None,
+                        why: Vec::new(),
+                    },
+                ],
             )]),
             reads,
         },
@@ -83,6 +93,7 @@ fn cis() -> Vec<Ci> {
         laws: Vec::new(),
         tail: String::new(),
         note: None,
+        at: None,
     };
     let broken = Ci {
         status: Broken,
@@ -93,6 +104,7 @@ fn cis() -> Vec<Ci> {
         laws: vec!["wire-types-agree".into()],
         tail: "FAIL wire\nSummary 1 failed".into(),
         note: None,
+        at: Some("2026-11-24T10:00:00Z".into()),
     };
     let unknown = Ci {
         note: Some("gh is not installed".into()),
@@ -152,6 +164,7 @@ fn empty(status: Status) -> MapState {
         runs: Runs::default(),
         catch_ups: BTreeMap::new(),
         stale: BTreeMap::new(),
+        stale_why: BTreeMap::new(),
         pre_flight: None,
         micro_worlds: WorldsState::default(),
         law_patches: Vec::new(),
@@ -331,6 +344,10 @@ fn the_wire_samples_of_the_map_view_are_written_for_tsc() {
                     ),
                 ]),
                 stale: BTreeMap::from([("core".into(), 2)]),
+                stale_why: BTreeMap::from([(
+                    "core".into(),
+                    "6 weeks or more: not engaged since tracking began on 2026-10-01".into(),
+                )]),
                 pre_flight: Some(studio_understanding::pre_flight::PreFlight {
                     issue: Some(378),
                     title: "Studio: Spec: the modules".into(),
