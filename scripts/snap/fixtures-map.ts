@@ -677,7 +677,8 @@ export const mapHeaderDot = (): Fixture =>
       const dot = head.querySelector(".project-dot");
       if (!narrow) {
         if (!dot) return log("snap:fail falinks's header has no dot");
-        if (dot.title !== "A Core part you track has changed\\nA PR brief is waiting") log("snap:fail the dot's hover says " + JSON.stringify(dot.title));
+        const words = document.getElementById(dot.getAttribute("data-hint"))?.textContent;
+        if (words !== "A Core part you track has changed\\nA PR brief is waiting" || dot.getAttribute("aria-label") !== words || dot.hasAttribute("title")) log("snap:fail the dot's hint says " + JSON.stringify(words));
         if (dot.textContent !== "") log("snap:fail the dot carries text, a count?");
         if (document.querySelector('#groups .project-head[data-project="/w/plotkeeper"] .project-dot')) log("snap:fail an unmarked project has a dot");
       }
