@@ -922,7 +922,9 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .brief-facts-list { margin: var(--sp-2) 0 0; padding-inline-start: var(--sp-6); color: var(--muted); }
 .brief-facts-list li + li { margin-top: var(--sp-2); }
 .brief-facts-files { margin: var(--sp-1) 0 0; padding-inline-start: var(--sp-5); font-family: var(--mono); overflow-wrap: anywhere; }
+/* Leave sits over the top of the step's scrollbar when a tall step scrolls (#490): its own background keeps the thumb from under its word. */
 .brief-leave { position: absolute; top: var(--sp-5); right: var(--sp-5); color: var(--faint); }
+.btn.quiet.brief-leave { background: var(--surface); }
 .btn.primary.brief-next { min-inline-size: var(--brief-next); background: var(--brief-light); color: var(--bg); }
 .map-world.glide { transition: transform var(--brief-camera); }
 .map-world.briefing .plate:not(.lit), .map-world.briefing .actor:not(.lit) { opacity: var(--brief-dim); transition: opacity var(--motion); }
