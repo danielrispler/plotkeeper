@@ -437,6 +437,89 @@ pub struct BudgetRecord {
     pub files_cut: usize,
 }
 
+/// What a brief was written without (#477, "Partial facts"), decided when it is written and stored with it, so the reader
+/// lists each missing input without guessing. Every field has a default, so a brief stored before it, or by a newer build,
+/// still reads.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PartialFacts {
+    /// The diff was cut: what the writer did not get whole.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cut: Option<DiffCut>,
+    /// The claim check failed or did not run: its error.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claim_error: Option<String>,
+    /// The extensions of the diff's source languages that no extractor of the map reads, sorted, each once (".go").
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub no_extractor: Vec<String>,
+}
+
+impl PartialFacts {
+    /// Nothing was missing: the reader shows no chip.
+    pub fn is_empty(&self) -> bool {
+        self == &PartialFacts::default()
+    }
+}
+
+/// The files of a cut diff, and its size sent and not sent.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct DiffCut {
+    /// Files none of whose hunks were sent.
+    #[serde(default)]
+    pub cut: Vec<String>,
+    /// Files with some hunks sent and some not.
+    #[serde(default)]
+    pub partial: Vec<String>,
+    /// Bytes of the diff sent to the writer.
+    #[serde(default)]
+    pub bytes_sent: usize,
+    /// Bytes of the whole diff not sent.
+    #[serde(default)]
+    pub bytes_cut: usize,
+}
+
+/// The source languages without an extractor (#477), by extension. `.rs` and the TypeScript and JavaScript ones count only
+/// when the map does not name their extractor; CSS, HTML, JSON, YAML, Markdown and shell are not in the table, so they never
+/// count.
+const UNREAD_LANGUAGES: &[&str] = &[
+    ".go", ".py", ".dart", ".java", ".kt", ".swift", ".rb", ".php", ".cs", ".c", ".cc", ".cpp",
+    ".h", ".hpp", ".ex", ".exs", ".scala", ".m",
+];
+const RUST: &[&str] = &[".rs"];
+const TYPESCRIPT: &[&str] = &[".ts", ".tsx", ".js", ".jsx", ".mjs", ".mts", ".cjs"];
+
+/// The extensions, sorted and each once, of `paths`' files in a source language no extractor of the map in `map_text`
+/// reads. Ignored files never count.
+pub fn no_extractor(map_text: &str, paths: &[String]) -> Result<Vec<String>, String> {
+    let map = system_map::parse_lenient(map_text)?;
+    let mj: serde_json::Value = serde_json::from_str(map_text).map_err(|e| e.to_string())?;
+    let named = |name: &str| {
+        mj["extractors"]
+            .as_array()
+            .is_some_and(|a| a.iter().any(|e| e == name))
+    };
+    let mut table: Vec<&str> = UNREAD_LANGUAGES.to_vec();
+    if !named("rust-modules") {
+        table.extend(RUST);
+    }
+    if !named("typescript-imports") {
+        table.extend(TYPESCRIPT);
+    }
+    let ignored: BTreeSet<String> = system_map::touched_for_map(&map, paths)
+        .ignored
+        .into_iter()
+        .collect();
+    let found: BTreeSet<String> = paths
+        .iter()
+        .filter(|p| !ignored.contains(*p))
+        .filter_map(|p| {
+            let name = p.rsplit('/').next().unwrap_or(p);
+            let ext = &name[name.rfind('.')?..];
+            table.contains(&ext).then(|| ext.to_string())
+        })
+        .collect();
+    Ok(found.into_iter().collect())
+}
+
 /// The shape code decided.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Shape {
@@ -475,6 +558,8 @@ pub struct Facts {
     pub instructions: Option<String>,
     /// Guard with a law's offer, when the PR fixed a bug and left no tagged test behind.
     pub guard: Option<Guard>,
+    /// What the facts lack, as far as building them knows: the cut diff and the languages no extractor reads.
+    pub partial_facts: PartialFacts,
 }
 
 pub(crate) struct FileDiff {
@@ -992,6 +1077,7 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
     let mut room = BUDGET.saturating_sub(used_bytes + CUT_NOTE_ROOM);
     let mut diff_text = String::new();
     let mut cut: Vec<String> = Vec::new();
+    let mut diff_cut = DiffCut::default();
     let mut budget = BudgetRecord {
         diff_bytes_full: source.diff.len(),
         ..BudgetRecord::default()
@@ -1021,8 +1107,10 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
         } else {
             if sent > 0 {
                 budget.files_partial += 1;
+                diff_cut.partial.push(f.path.clone());
             } else {
                 budget.files_cut += 1;
+                diff_cut.cut.push(f.path.clone());
             }
             cut.push(format!(
                 "- {} ({part}): +{}/-{}, {} of {} hunks not sent",
@@ -1050,6 +1138,13 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
             t += "\n";
         }
         t
+    };
+    diff_cut.bytes_sent = diff_text.len();
+    diff_cut.bytes_cut = source.diff.len().saturating_sub(diff_text.len());
+    let partial_facts = PartialFacts {
+        cut: (!cut.is_empty()).then_some(diff_cut),
+        no_extractor: no_extractor(&source.map_text, &paths)?,
+        ..PartialFacts::default()
     };
     sections.push(("DIFF NOT SENT".into(), cut_text));
     sections.push(("DIFF".into(), diff_text));
@@ -1104,6 +1199,7 @@ pub fn build_facts(source: &PrSource) -> Result<Facts, String> {
         context,
         instructions: None,
         guard,
+        partial_facts,
     })
 }
 
@@ -1773,6 +1869,9 @@ pub struct StoredBrief {
     /// Guard with a law's offer (#401), from the facts it was written from; kept after the PR merges.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guard: Option<Guard>,
+    /// What it was written without (#477), when anything was missing.
+    #[serde(default, skip_serializing_if = "PartialFacts::is_empty")]
+    pub partial_facts: PartialFacts,
 }
 
 /// One line per brief written, for tuning prompts, caps and models from real data.
@@ -1945,6 +2044,10 @@ pub fn write_pr_brief(
         shape: facts.shape.clone(),
         brief,
         guard: facts.guard.clone(),
+        partial_facts: PartialFacts {
+            claim_error: record.claim_error.clone(),
+            ..facts.partial_facts.clone()
+        },
     };
     store
         .put(&stored)
