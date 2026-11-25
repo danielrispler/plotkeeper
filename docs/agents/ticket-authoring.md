@@ -39,7 +39,7 @@ The installed skill remains unchanged. Where it and this file differ, follow thi
   ]}
   ```
 
-  The run first checks that the spec is open, every body for `## Reading` and `## Touches` with its **Files**, **Session** and **Route** lines (a tier other than `strong`, `medium` or `cheap`, or an effort other than `medium` or `high`, is refused), every label against the repository, and every blocker for a file of the manifest and for cycles. Any problem stops it before an issue exists, naming the file. Then it creates the issues blockers first, links each to the spec as a sub-issue and adds its blocked-by edges (**Wayfinder tracker operations** below), and prints one row per ticket: its file, issue number and blockers. It records each write in `<folder>/published.json`, so after a failure, fix the cause and run it again: it does only what is missing.
+  The run first checks that the spec is open, every body for `## Reading` and `## Touches` with its **Files**, **Session** and **Route** lines (a Route line not shaped `<tier> · effort <effort> — <reason>` with a reason, a tier other than `strong`, `medium` or `cheap`, or an effort other than `medium` or `high`, is refused), every label against the repository, and every blocker for a file of the manifest and for cycles. Any problem stops it before an issue exists, naming the file. Then it creates the issues blockers first, links each to the spec as a sub-issue and adds its blocked-by edges (**Wayfinder tracker operations** below), and prints one row per ticket: its file, issue number and blockers. It records each write in `<folder>/published.json`, so after a failure, fix the cause and run it again: it does only what is missing.
 
 ## Spec and ticket constraints
 
