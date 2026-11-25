@@ -207,7 +207,6 @@ export const agyCall = (opts, { schema, prompt, env }) => {
 export const outcome = ({ status, missing, stdout, stderr, reads }) => {
   const unavailable = (reason) => ({ line: `review unavailable: ${reason}`, exit: 0 });
   if (missing) return unavailable("agy is not installed");
-  if (status === 3) return unavailable(`the review was cut at ${TIMEOUT_MINUTES} minutes`);
   let result = null;
   try {
     result = JSON.parse(stdout);
@@ -215,7 +214,9 @@ export const outcome = ({ status, missing, stdout, stderr, reads }) => {
   const findings = result?.structured_output?.findings;
   if (status !== 0 || result?.status !== "SUCCESS" || !Array.isArray(findings)) {
     const said = `${stderr}\n${result?.status === "SUCCESS" ? "" : stdout}`;
+    // Checked before the exit code: agy also exits 3 when the quota runs out mid-review.
     if (/quota|resource.exhausted|rate.limit/i.test(said)) return unavailable("the Gemini quota is used up");
+    if (status === 3) return unavailable(`the review was cut at ${TIMEOUT_MINUTES} minutes`);
     const tail = said.trim().split("\n").at(-1).slice(0, 200);
     return unavailable(`agy exited with status ${status}${tail ? `: ${tail}` : ""}`);
   }
@@ -279,7 +280,7 @@ const main = async (opts) => {
   const head = git("rev-parse", "HEAD");
   const base = git("merge-base", "HEAD", "origin/main");
   const about = { branch: git("rev-parse", "--abbrev-ref", "HEAD"), head, base, model: opts.model, round: 1 };
-  // A trial's three runs overlap, so each one's quota before and after counts the others' use too.
+  // A trial's runs overlap, so each one's quota before and after counts the others' use too.
   if (opts.trial) Object.assign(about, { variant: opts.variant, trial: opts.trial, quotaShared: true });
   // One line per run in the main checkout's local-evidence/, and a reviewed run's findings beside
   // it. Only where git ignores that folder, so no other repository gets an untracked file; a record

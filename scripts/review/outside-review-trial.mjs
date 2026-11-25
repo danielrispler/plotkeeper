@@ -1,11 +1,11 @@
-// The review trial (#502): three outside reviews of the same diff, side by side. Only Daniel starts
+// The review trial (#502): two outside reviews of the same diff, side by side. Only Daniel starts
 // it, by hand, on a branch he picks; agents never do (`AGENTS.md`, "Finish with a PR").
 //
 //   node scripts/review/outside-review-trial.mjs [--out <folder>]
 //
-// It runs `outside-review.mjs --force` three times at once, each with its own throwaway folder and
+// It runs `outside-review.mjs --force` twice at once, each with its own throwaway folder and
 // worktree, and prints the Gemini quota left before it starts, then each variant's usual verdict,
-// findings file and cost lines, then the trial's quota cost. The three runs overlap, so each run's
+// findings file and cost lines, then the trial's quota cost. The two runs overlap, so each run's
 // own quota before and after counts the others' use: only the trial's whole cost is its own.
 import { execFileSync, spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
@@ -14,7 +14,6 @@ import { quotaLeft } from "./outside-review.mjs";
 
 const VARIANTS = [
   { name: "medium", args: [] },
-  { name: "high", args: ["--model", "gemini-4-neon-high"] },
   { name: "subagents", args: ["--subagents"] },
 ];
 
@@ -26,7 +25,7 @@ const main = async (argv) => {
     console.error("usage: outside-review-trial [--out <folder>]");
     process.exit(2);
   }
-  // Fetched once here, so the three runs' own fetches find nothing new and all review one base.
+  // Fetched once here, so the runs' own fetches find nothing new and all review one base.
   try {
     execFileSync("git", ["fetch", "--quiet", "origin", "main"], { stdio: "ignore", timeout: 30_000 });
   } catch {}
