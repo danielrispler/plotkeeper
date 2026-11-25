@@ -213,3 +213,12 @@ fn a_map_that_does_not_load_exits_two_with_its_problem() {
             .contains("is not valid JSON")
     );
 }
+
+#[test]
+fn a_map_over_a_cap_still_counts() {
+    let mut over = map(&[], &["alpha/"], &["beta/"]);
+    over["parts"][0]["purpose"] = json!("a".repeat(241));
+    let (_dir, root) = repo(&over, &[("alpha/a.ts", "")]);
+    let out = run(&root, &[]);
+    assert!(out.status.success(), "{out:?}");
+}

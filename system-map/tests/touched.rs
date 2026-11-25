@@ -238,3 +238,11 @@ fn touched_for_map_places_paths_without_reading_the_working_tree() {
     assert_eq!(by_root.ignored, got.ignored);
     assert_eq!(by_root.unowned, got.unowned);
 }
+
+#[test]
+fn a_map_over_a_cap_still_answers() {
+    let mut map = base();
+    map["parts"][0]["purpose"] = json!("a".repeat(241));
+    let got = touched(&map, &["alpha/a.rs"]);
+    assert_eq!(parts(&got), vec![("alpha", vec!["alpha/a.rs"])]);
+}

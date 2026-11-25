@@ -81,7 +81,7 @@ The checker runs only `git` and, when the map names `cargo` or `rust-modules`, `
 
 ## Which parts a change touches
 
-`system-map touched [--json] [--root <dir>] [path...]` names the parts that own the paths, with the ignored paths and the unowned ones listed apart. It takes paths as arguments or one per line on standard input, so `git diff --name-only | system-map touched` works. It matches by pattern alone, so a deleted or moved path is still placed. A map that fails the shape check gets no answer: it fails with every problem `check` would report, one per line on standard error, and exit status 2.
+`system-map touched [--json] [--root <dir>] [path...]` names the parts that own the paths, with the ignored paths and the unowned ones listed apart. It takes paths as arguments or one per line on standard input, so `git diff --name-only | system-map touched` works. It matches by pattern alone, so a deleted or moved path is still placed. A map that fails the shape check, or names an id or reference wrongly, gets no answer: it fails with those problems, one per line on standard error, and exit status 2. A part's purpose and held items, their caps among them, are `check`'s alone, so a map over a cap still answers.
 
 ## How well the parts follow the imports
 

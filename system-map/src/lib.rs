@@ -230,6 +230,8 @@ fn check_with(root: &Path, files: Result<Vec<String>, String>) -> Report {
     };
     report.links = map.links.clone();
     report.problems.extend(check_ids_and_references(&map));
+    // A part's purpose and held items, and their caps, are `check`'s alone: `touched` and `imports` still answer a map over a cap.
+    report.problems.extend(parts::check(&map));
     let actors: HashSet<&str> = map.actors.iter().map(|a| a.id.as_str()).collect();
     report
         .problems
@@ -395,7 +397,6 @@ fn check_ids_and_references(map: &Map) -> Vec<String> {
             map.version
         ));
     }
-    problems.extend(parts::check(map));
     let flows = map.flows.as_deref().unwrap_or_default();
     let ids = map
         .parts
