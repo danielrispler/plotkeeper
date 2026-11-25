@@ -710,6 +710,8 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .sheet-holds { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-4); }
 .sheet-held { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--size-small); line-height: 1.45; }
 .sheet-held-name { font-weight: 600; }
+.sheet-held-note .sheet-held-name { font-style: italic; font-weight: 400; }
+.sheet-held-kind { color: var(--muted); }
 .sheet-held-text { overflow-wrap: anywhere; }
 .sheet-held-files { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); font-size: var(--size-xs); color: var(--muted); }
 .sheet-held-files code { min-width: 0; overflow-wrap: anywhere; }

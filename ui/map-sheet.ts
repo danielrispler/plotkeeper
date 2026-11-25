@@ -339,15 +339,23 @@ function marksList(view: MapView, part: string): HTMLElement[] {
   return [list];
 }
 
-// The things a part holds, each its name, its sentence and its key files.
-function heldList(holds: Sheet["holds"]): HTMLElement {
+// The things a part holds, each its name, its sentence and its key files. An item with no key files is a note (#525): its name in italics,
+// then "· note", so it never reads as a section heading.
+export function heldList(holds: Sheet["holds"]): HTMLElement {
   const list = text("ul", "", "sheet-holds");
   // Safari drops a list's semantics under `list-style: none` and flex; the role brings them back.
   list.setAttribute("role", "list");
   for (const item of holds) {
-    const row = text("li", "", "sheet-held");
-    row.append(text("span", item.name, "sheet-held-name"), text("span", item.text, "sheet-held-text"));
-    if (item.files.length) {
+    const note = !item.files.length;
+    const row = text("li", "", note ? "sheet-held sheet-held-note" : "sheet-held");
+    const name = text("span", item.name, "sheet-held-name");
+    if (note) {
+      const head = text("span", "", "sheet-held-head");
+      head.append(name, " ", text("span", "· note", "sheet-held-kind"));
+      row.append(head);
+    } else row.append(name);
+    row.append(text("span", item.text, "sheet-held-text"));
+    if (!note) {
       const files = text("span", "", "sheet-held-files");
       // A path is a code token: never machine-translated.
       files.append(...item.files.map((file) => Object.assign(text("code", file), { translate: false })));
