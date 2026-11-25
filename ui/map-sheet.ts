@@ -12,7 +12,7 @@
 // The sheet's left edge resizes it (#445), and a click on the empty map closes it and its drawer (`map.ts`'s `pan`).
 
 import { logStop } from "./stop-rules.js";
-import { age, element, failure, fullTitle, invoke, pageStore, pressable, text } from "./dom.js";
+import { age, cut, element, failure, invoke, pageStore, pressable, text } from "./dom.js";
 import { currentMap, onDraw, onPlateClick, reloadMap, registerLayer, syncSide, type MapView } from "./map.js";
 import { openDrawer } from "./map-drawer.js";
 import { drawStrip } from "./map-history.js";
@@ -393,7 +393,7 @@ function fillHere(box: HTMLElement, part: string, live: boolean, explain: boolea
     const button = pressable(text("button", "", "sheet-here-turn"), null, () => deps?.show(row.index));
     button.dataset.turn = String(row.index);
     button.title = "Show this turn in the story";
-    button.append(text("span", row.number, "sheet-here-number"), fullTitle(text("span", row.headline, "sheet-here-headline"), row.headline), text("span", row.age, "sheet-here-age"));
+    button.append(text("span", row.number, "sheet-here-number"), cut(text("span", row.headline, "sheet-here-headline")), text("span", row.age, "sheet-here-age"));
     const item = text("li", "");
     item.append(button);
     list.append(item);

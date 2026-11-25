@@ -1107,3 +1107,23 @@ mark.drawer-line .drawer-n::before { content: "→ " / ""; color: var(--fg); }
 .hint { position-area: block-start; position-try-fallbacks: flip-block; inset: auto; margin-block: var(--hint-gap); margin-inline: 0; width: max-content; max-width: var(--hint);
         padding: var(--sp-2) var(--sp-4); border: var(--hair) solid var(--line); border-radius: var(--radius-small); background: var(--raised); color: var(--fg);
         box-shadow: var(--shadow); font-size: var(--size-small); line-height: 1.4; white-space: pre-line; overflow-wrap: anywhere; }
+
+/* Cut text scrolls in place (spec #582): a `.cut` element, made by `cut()` in dom.ts, is one line the layout ends in an ellipsis (its own rule
+   above does that, with `overflow: hidden`) and keeps its text whole in an inner span. Its own inline scroll timeline sets --truncated only
+   while the text overflows, and only then does the span move, on hover over the text or focus on the control that holds it, so a line that
+   fits stays still. With reduced motion asked for, nothing moves. */
+@property --truncated { syntax: "<integer>"; inherits: false; initial-value: 0; }
+@keyframes truncated { from, to { --truncated: 1; } }
+.cut { animation: truncated linear both; animation-timeline: scroll(self inline); }
+@media (prefers-reduced-motion: no-preference) {
+  .cut:hover, :is(button, a, summary, [tabindex]):focus-visible .cut { text-overflow: clip; }
+  @container style(--truncated: 1) {
+    .cut:hover > span, :is(button, a, summary, [tabindex]):focus-visible .cut > span {
+      display: inline-block;
+      margin-inline-start: 100%;
+      translate: calc(var(--hair) - 100%);
+      transition: margin-inline-start 2s ease-in, translate 2s ease-in;
+    }
+    .cut:hover:dir(rtl) > span, :is(button, a, summary, [tabindex]):focus-visible .cut:dir(rtl) > span { translate: calc(100% - var(--hair)); }
+  }
+}

@@ -3,7 +3,7 @@
 // a strip of glyphs and labels, which opens the full list on hover, on click or on ⌘1. Its pure parts are `list-model.ts`.
 
 import { logStop } from "./stop-rules.js";
-import { age, element, failure, fullTitle, glyphOnly, hint, hintOf, invoke, keepOnly, keyed, newest, patch, pressable, prose, stepText, text } from "./dom.js";
+import { age, cut, element, failure, glyphOnly, hint, invoke, keepOnly, newest, patch, pressable, prose, stepText, text } from "./dom.js";
 import { hideClearToast, showClearToast } from "./toast.js";
 import { counts } from "./times.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
@@ -123,9 +123,13 @@ function nameTitle(session: Session): string {
 
 // The mark's node, with the context's hover.
 function markNode(session: Session): HTMLElement {
-  if (session.shell) return fullTitle(text("span", rowMark(session), "id"), "A plain terminal");
-  if (session.status_only) return fullTitle(text("span", rowMark(session), "id"), "Another agent, followed by its reported status only");
-  return fullTitle(text("span", rowMark(session), "id"), contextTitle(session.transcript.context));
+  const node = text("span", rowMark(session), "id");
+  node.setAttribute("data-key", `mark-${session.id}`);
+  // A span is no button: its hint opens once the helper's pointer path reaches it (#586).
+  if (session.shell) return hint(node, "A plain terminal");
+  if (session.status_only) return hint(node, "Another agent, followed by its reported status only");
+  const context = contextTitle(session.transcript.context);
+  return context ? hint(node, context) : node;
 }
 
 
@@ -152,7 +156,7 @@ function done(all: Children, children: Subagent[] = []): HTMLElement[] {
 
 // A row's lines: its name and status glyph, then, if any, what it is doing, muted. Its hint pairs
 // the name with the status's word, and a note on its footprint when it has one.
-function rowLines(button: HTMLElement, state: string, name: HTMLElement[], below: HTMLElement[] | null, unseen = false, landed = false, unwatched = false, note: string | null = null) {
+function rowLines(button: HTMLElement, state: string, name: HTMLElement[], below: HTMLElement[] | null, unseen = false, landed = false, unwatched = false, note: string | null = null, called = name[0]?.textContent ?? "") {
   const first = text("span", "", "l1");
   first.append(...name, glyph(state, unseen, landed, unwatched));
   button.append(first);
@@ -162,7 +166,7 @@ function rowLines(button: HTMLElement, state: string, name: HTMLElement[], below
     second.append(...below);
     button.append(second);
   }
-  hint(button, withNote(`${name[0]?.textContent ?? ""} · ${status(state, unseen, landed, unwatched)[1]}`, note));
+  hint(button, withNote(`${called} · ${status(state, unseen, landed, unwatched)[1]}`, note));
   return first;
 }
 
@@ -190,22 +194,19 @@ export function row(session: Session, children: Children, token: string | null =
   const first = rowLines(
     button,
     session.state,
-    [fullTitle(text("span", sessionName(session), "name"), nameTitle(session)), markNode(session), ...(token ? [fullTitle(text("span", token, "id token"), token)] : [])],
+    [cut(text("span", sessionName(session), "name")), markNode(session), ...(token ? [cut(text("span", token, "id token"))] : [])],
     line === null
       ? null
-      : [...done(children, children.get("session")), rowLine(line), ...(turn ? [Object.assign(counts(clock, turn[1]), { title: turn[0] })] : [])],
+      : [...done(children, children.get("session")), rowLine(line, session.id), ...(turn ? [Object.assign(counts(clock, turn[1]), { title: turn[0] })] : [])],
     session.unseen,
     session.landed,
     !session.pid,
     rowNote(session.id),
+    nameTitle(session) || sessionName(session),
   );
   // Hovering the row spotlights its session on the map (#382, #562) and shows its footprint (#559); a session that touched no part in the
-  // last 7 days says so in the row's hint, built when the row is drawn and again as the pointer arrives.
-  button.addEventListener("pointerenter", () => {
-    // The footprint may have been placed after the row was drawn, so the hint's note is read again as the pointer arrives.
-    hint(button, withNote(hintOf(button)?.textContent ?? "", rowNote(session.id)));
-    hoverAgents(session.id, button);
-  });
+  // last 7 days says so in the row's hint, built when the row is drawn. The placement can arrive after the row: the sidebar is drawn again then.
+  button.addEventListener("pointerenter", () => hoverAgents(session.id, button));
   button.addEventListener("pointerleave", () => hoverAgents(null));
   // The agent's logo leads the row, apart from its state glyph (#158).
   first.prepend(logo(logoKey(session), noContextNote(session) || undefined));
@@ -214,12 +215,15 @@ export function row(session: Session, children: Children, token: string | null =
 
 // A row's line, such as a card summary stored in Hebrew, laid out by its own direction, its code spans
 // cleaned as a card's are (danielrispler/Falinks#434, decision 40), its paths shortened with the full line on hover (danielrispler/Falinks#571).
-function rowLine(line: string): HTMLElement {
+function rowLine(line: string, key: string): HTMLElement {
   const [shown, full] = rowText(line);
   const node = prose("span", shown);
   node.className = "row-step";
   node.dir = "auto";
-  return fullTitle(node, full || shown);
+  cut(node);
+  if (!full) return node;
+  node.setAttribute("data-key", `step-${key}`);
+  return hint(node, full);
 }
 
 
@@ -242,7 +246,7 @@ export function agentRow(session: Session, children: Children, agent: Subagent, 
     button,
     stateName,
     [text("span", agent.name, "name")],
-    line === null ? null : [...done(children, children.get(agent.id)), rowLine(line)],
+    line === null ? null : [...done(children, children.get(agent.id)), rowLine(line, agent.id)],
   );
   first.classList.toggle("failed", agent.failed && !agent.opened);
   return button;
@@ -444,7 +448,7 @@ function projectNode(group: ProjectGroup<Session>): HTMLElement {
     const id = `${group.key} ${state}`;
     folded.open = opened.has(id);
     folded.addEventListener("toggle", () => (folded.open ? opened.add(id) : opened.delete(id)));
-    folded.append(hint(keyed(text("summary", `${stateLabels[state]} · ${sessions.length}`), `fold ${group.key} ${state}`), `Show or hide the ${stateLabels[state].toLowerCase()} sessions`), ...rows);
+    folded.append(hint(text("summary", `${stateLabels[state]} · ${sessions.length}`), `Show or hide the ${stateLabels[state].toLowerCase()} sessions`), ...rows);
     body.append(folded);
   }
   node.append(body);

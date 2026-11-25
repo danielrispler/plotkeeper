@@ -229,11 +229,16 @@ export function sayAction(words: string) {
 }
 
 /**
- * `node` with `full` as its native hover title: the full text of what the layout cuts (#162). No title for an empty text,
- * which would hide the tooltip of the element under it.
+ * `node` as cut text that scrolls in place (#582): its text stays whole in the page, in an inner box the `cut` class cuts with an ellipsis
+ * and moves on hover or focus, only when it overflows (`style.css`). With `words`, they replace what the node held, as for a node the
+ * page draws once and fills again.
  */
-export function fullTitle<T extends HTMLElement>(node: T, full: string | null | undefined): T {
-  if (full) node.title = full;
+export function cut<T extends HTMLElement>(node: T, words?: string): T {
+  if (!/(^| )cut( |$)/.test(node.className)) node.className = `${node.className} cut`.trim();
+  const inner = document.createElement("span");
+  if (words === undefined) inner.append(...node.childNodes);
+  else inner.textContent = words;
+  node.replaceChildren(inner);
   return node;
 }
 

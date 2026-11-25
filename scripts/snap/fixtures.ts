@@ -6,7 +6,7 @@
 import type { Fixture } from "./base.ts";
 import { railFixtures } from "./rail-fixtures.ts";
 import { list, withSaved } from "./fixtures-shared.ts";
-import { alerts, hints, listClearLanded, listNarrow, listSecondLines, logDone, logFixture, logos, noticeErrors, notRecording, paletteFocus, paletteOpen, projectMenuScript, projectsSaved, recording, skipLink, snapRealKeys, toastKeys, whatsNewToast } from "./fixtures-page.ts";
+import { alerts, cutText, hints, listClearLanded, listNarrow, listSecondLines, logDone, logFixture, logos, noticeErrors, notRecording, paletteFocus, paletteOpen, projectMenuScript, projectsSaved, recording, skipLink, snapRealKeys, toastKeys, whatsNewToast } from "./fixtures-page.ts";
 import { mapBadgeList, mapBase, mapBriefPairLight, mapBriefSwitch, mapBroken, mapBusy, mapCalm, mapCamera, mapDotsOrder, mapDotsRetry, mapEmpty, mapFog, mapFogPlates, mapFresh, mapGlassMotion, mapGoneFocus, mapHeaderDot, mapMarks, mapNoMap, mapPartKeys, mapPartRedraw, mapProjectGone, mapProjectRemoved, mapRefresher, mapReview, mapScrubbed, mapSmallGaps, mapSpotlight, mapStale, mapSwitchSavesViews, mapTalksTo, readmeHero } from "./fixtures-map.ts";
 import { mapFootprint, mapLatePlace, mapPanelBrief, mapPanelDiff, mapNotPlacedHint, mapPanelFieldHints, mapPanelFocus, mapPanelHead, mapPanelHistory, mapPanelNoSession, mapPanelPeel, mapPanelSettings, mapPanelStory, mapPanelToggle, mapSheetClose, mapSheetExplained, mapSheetHere, mapSheetHolds, mapSheetKeptWidth, mapSheetResizeRedraw, mapSheetScrollShort, mapSheetStill, mapSheetUnratified, mapSheetWidth, mapTurnLight } from "./fixtures-panel.ts";
 import { mapBackLaw, mapMicroWorld, mapMicroWorldBuilding, mapPreFlight, mapPreFlightPick, mapPreFlightStatus, mapRuns, mapRunsAnnounced, mapRunsBesideSheet, mapRunsPaused, mapTray, mapTrayAfterPush } from "./fixtures-runs.ts";
@@ -30,6 +30,8 @@ export const fixtures = {
   skipLink,
   // The hints (spec #582).
   hints,
+  // Cut text scrolls in place (spec #582).
+  cutText,
   writersList,
   writersPassed,
   writersFailed,

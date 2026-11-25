@@ -237,7 +237,7 @@ export const railStates = {
 };
 
 // #444: the rail's header in two lines, at a narrow rail. Line 1 the logo, then the name on one line with an ellipsis, its full text
-// in the page and on hover; line 2 the verdict, the mode and the phase, the needs-you verdict in its colour.
+// in the page and scrolling in place on hover; line 2 the verdict, the mode and the phase, the needs-you verdict in its colour.
 const longName = "Check that every snap fixture of the rail renders in…";
 const headerScript = (phase: boolean) => `
   document.querySelector(".map-stage").style.setProperty("--panel-w", "320px");
@@ -247,7 +247,7 @@ const headerScript = (phase: boolean) => `
   const box = (id) => document.getElementById(id).getBoundingClientRect();
   const nameBox = name.getBoundingClientRect();
   if (name.textContent !== full) log("snap:fail the name's text is " + JSON.stringify(name.textContent));
-  if (name.title !== full) log("snap:fail the name's hover text is " + JSON.stringify(name.title));
+  if (name.title || !name.classList.contains("cut")) log("snap:fail the name is not cut text that scrolls in place: " + JSON.stringify(name.title));
   if (nameBox.height >= 2 * parseFloat(getComputedStyle(name).fontSize)) log("snap:fail the name's line is " + nameBox.height + "px high, more than one line");
   if (name.scrollWidth <= name.clientWidth) log("snap:fail the name does not overflow its line: " + name.scrollWidth + " <= " + name.clientWidth);
   const mark = box("mark");

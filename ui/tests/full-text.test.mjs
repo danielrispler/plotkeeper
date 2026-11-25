@@ -1,10 +1,12 @@
-// Full text on hover (#162): every text the layout can cut holds its full text in its own `title` or an ancestor's, and no
-// element has an empty `title`, which hides the tooltip of the element under it. Run: `npm test`.
+// Full text of cut text (#162, spec #582): a text the layout cuts is its element's own text, which scrolls into view in place (the `cut`
+// class), or, when it is shortened or very long, has the full text in a hint of its own or an ancestor's. No `title` holds it, and no
+// element has an empty `title`. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { El, fakeDocument } from "./dom.mjs";
 import { row, projectHead } from "../../dist/list.js";
+import * as dom from "../../dist/dom.js";
 import { hintOf } from "../../dist/dom.js";
 import { showPalette } from "../../dist/palette.js";
 import { showToast } from "../../dist/toast.js";
@@ -25,8 +27,8 @@ const every = (node, out = []) => {
   }
   return out;
 };
-// The words a node or an ancestor shows on hover: its `title` or its hint (spec #582, whose triggers have no title).
-const titled = (node, parents = []) => [node, ...parents].flatMap((p) => [p.title, hintOf(p)?.textContent]).filter((t) => typeof t === "string");
+// The words a node or an ancestor shows on hover: its hint (spec #582, whose triggers have no title).
+const titled = (node, parents = []) => [node, ...parents].map((p) => hintOf(p)?.textContent).filter((t) => typeof t === "string");
 // The path from `root` down to the first element of class `name`, so its ancestors' titles can be read.
 const path = (root, name, trail = []) => {
   const here = [...trail, root];
@@ -41,7 +43,17 @@ const holds = (root, name, full) => {
   const found = path(root, name);
   assert.ok(found, `${name} is drawn`);
   const [node, ...ancestors] = found.reverse();
-  assert.ok(titled(node, ancestors).some((title) => title.includes(full)), `${name} holds its full text in a title`);
+  assert.ok(!node.title, `${name} has no title`);
+  assert.ok(titled(node, ancestors).some((title) => title.includes(full)), `${name} holds its full text in a hint`);
+};
+// A cut text that is its element's own text, whole, and scrolls in place on hover.
+const cuts = (root, name, full) => {
+  const found = path(root, name);
+  assert.ok(found, `${name} is drawn`);
+  const node = found[found.length - 1];
+  assert.equal(node.textContent, full, `${name} keeps its full text as its own`);
+  assert.ok(node.className.split(" ").includes("cut"), `${name} scrolls in place`);
+  assert.ok(!node.title, `${name} has no title`);
 };
 const noEmptyTitle = (root) => {
   for (const node of every(root)) assert.notEqual(node.title, "", `an empty title on <${node.tag} class="${node.className}">`);
@@ -71,52 +83,52 @@ const session = /** @type {import("../../dist/types.js").Session} */ ({
   shell: false,
 });
 
-test("a session row's name, step and token hold their full text in a title or a hint, and none is empty", () => {
+test("a session row's name and token scroll in place, its step and identity are in a hint, and none is empty", () => {
   const button = row(session, new Map(), token);
-  holds(button, "name", long);
+  cuts(button, "name", long);
   holds(button, "name", "PR #9 · issue-9");
   holds(button, "row-step", step);
-  holds(button, "token", token);
+  cuts(button, "token", token);
   noEmptyTitle(button);
 });
 
 test("a named session's name needs no title of its own: the row's hint holds it", () => {
   const button = row({ ...session, name: "Short", prompt_name: null }, new Map());
-  holds(button, "name", "Short");
+  cuts(button, "name", "Short");
   noEmptyTitle(button);
 });
 
-test("a folded turn line's prompt and Headline hold their full text", () => {
+test("a folded turn line's prompt holds its full text in a hint, its Headline scrolls in place", () => {
   const headline = "A Headline the line cuts to fit the rail";
   const turn = { id: null, prompt: "First line of a long prompt\nsecond line", message: headline, checks: [] };
   studio.selection = null;
   // The folded line reads only the session's id, and the block's turn.
   const node = foldedTurn(/** @type {import("../../dist/types.js").Session} */ ({ id: "s" }), /** @type {import("../../dist/story.js").FeedTurn} */ (/** @type {unknown} */ ({ index: 0, turn, cards: [] })));
   holds(node, "prompt", "First line of a long prompt\nsecond line");
-  holds(node, "headline-text", headline);
+  cuts(node, "headline-text", headline);
   noEmptyTitle(node);
 });
 
-test("a toast's name and line hold their full text, and a start toast's message", () => {
+test("a toast's name and line scroll in place", () => {
   studio.selection = null;
   studio.listed = [{ ...session, state: "needs_you", questions: [/** @type {import("../../dist/types.js").Question} */ ({ answer: "open", questions: [{ question: "A long question the toast cuts?" }] })] }];
   showToast();
   const toast = document.getElementById("toast");
   assert.equal(toast.hidden, false);
-  holds(toast, "name", long);
-  holds(toast, "line", "A long question the toast cuts?");
+  cuts(toast, "name", long);
+  cuts(toast, "line", "A long question the toast cuts?");
   noEmptyTitle(toast);
 });
 
-test("a check's command holds its full text in a title", () => {
+test("a check's command scrolls in place", () => {
   const command = "cargo test --locked --workspace --all-targets -- --some-long-flag";
   const node = checkElement({ statement: command, status: "failed", ended_at: 2, started_at: 1, typical_ms: null });
   const code = every(node).find((n) => n.tag === "code");
   assert.ok(code, "the command is drawn");
-  assert.ok(titled(code).some((title) => title.includes(command)));
+  cuts(node, "cut", command);
 });
 
-test("the palette's rows hold their full text in a title", () => {
+test("the palette's rows scroll their cut text in place", () => {
   const palette = document.getElementById("palette");
   // A closed popover, as in the page.
   Object.assign(palette, { matches: () => false, showPopover() {}, hidePopover() {} });
@@ -126,8 +138,8 @@ test("the palette's rows hold their full text in a title", () => {
   const rows = every(palette).filter((n) => n.getAttribute?.("role") === "option");
   assert.ok(rows.length > 0, "the palette draws its rows");
   for (const drawn of rows) {
-    holds(drawn, "name", "Switch to a session with a very long action name");
-    holds(drawn, "l2", "A note the row cuts to fit");
+    cuts(drawn, "name", "Switch to a session with a very long action name");
+    cuts(drawn, "l2", "A note the row cuts to fit");
     noEmptyTitle(drawn);
   }
   document.createElement = make;
@@ -152,7 +164,7 @@ const covered = {
   ".row .token": "list.ts: the token's title",
   ".project-toggle .name": "list.ts: the toggle's hint is the project's path",
   ".session-header .name": "story.ts: the header's title holds the full name",
-  ".session-name": "story.ts: the rail header's name is its own title (#444)",
+  ".session-name": "story.ts: the rail header's name scrolls in place (#444, #582)",
   ".line-2 > .block": "story.ts: the block's kind is its own title",
   ".line-2 > .phase": "story.ts: the estimate is its own title",
   ".intention > .tip": "story.ts: a Wait tip's line is its own title (#523)",
@@ -187,4 +199,16 @@ test("every CSS rule that cuts text is covered by the full-text rule", () => {
     .flatMap(([, selector]) => selector.split(",").map((s) => s.trim().replace(/\s+/g, " ")));
   assert.ok(cutting.length > 10);
   assert.deepEqual(cutting.filter((selector) => !(selector in covered) && !(selector === "html" || selector === "body")), []);
+});
+
+test("fullTitle is retired: no native title holds a cut text", () => {
+  assert.equal(/** @type {any} */ (dom).fullTitle, undefined);
+});
+
+test("cut() keeps the element's text whole, inside its own box that moves", () => {
+  const node = dom.cut(dom.text("span", "A long line the layout cuts", "x"));
+  assert.equal(node.textContent, "A long line the layout cuts");
+  assert.ok(node.className.split(" ").includes("cut"));
+  assert.equal(node.childNodes.length, 1);
+  assert.equal(/** @type {any} */ (node.childNodes[0]).tag, "span");
 });
