@@ -32,7 +32,7 @@ export async function enterRefresher(view: MapView, part: string) {
 }
 
 // The refresher of `part` as the sheet shows it, from the map's text; null when the map does not have the part. The sheet already shows the
-// part's caption, description and laws with their backing, so the refresher adds what the map says around it: the flows through it, hop
+// part's caption, purpose, held items and laws with their backing, so the refresher adds what the map says around it: the flows through it, hop
 // by hop, and what it is linked with.
 export function refresherNode(view: MapView, part: string): HTMLElement | null {
   const found = view.state.source ? refresherOf(view.state.source, part) : null;

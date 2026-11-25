@@ -1,6 +1,6 @@
 // Staleness bands and the refresher (spec danielrispler/plotkeeper#378, ticket #392), as data. The refresher is the part as the map has it
 // now, drawn by code from the map file's text, never a writer call, so it shows at once: the part's sheet already holds its caption,
-// description and laws with their backing, and the refresher adds the flows through the part and its links. `map-stale.ts` draws it.
+// purpose, held items and laws with their backing, and the refresher adds the flows through the part and its links. `map-stale.ts` draws it.
 
 export type Refresher = {
   // Each flow with a hop on a link at the part, and those hops' sentences, in the flow's order; its id is what a micro-world is built from.

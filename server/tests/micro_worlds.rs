@@ -35,6 +35,7 @@ const GOOD: &str = "<!doctype html><title>World</title><p>the turn's journey</p>
 const BAD: &str = "<!doctype html><p>VERIFY-FAIL</p>";
 
 const MAP: &str = r#"{
+  "version": 1,
   "parts": [
     { "id": "core", "name": "Core", "caption": "Turns events into state", "description": "Plain logic.", "tier": "core", "paths": ["core/"] },
     { "id": "server", "name": "Server", "caption": "Serves the page", "description": "The shell.", "tier": "core", "paths": ["server/"] },
@@ -204,6 +205,28 @@ fn a_flows_topic_holds_only_map_text_its_parts_and_their_paths() {
     }
     assert!(flow_topic(MAP, "nowhere").is_none());
     assert_eq!(Subject::Flow { id: "turn".into() }.key(), "flow:turn");
+}
+
+#[test]
+fn a_topic_quotes_each_parts_purpose_and_held_items_on_either_version() {
+    let topic = flow_topic(MAP, "turn").unwrap();
+    assert!(
+        topic
+            .text
+            .contains("(core/): Turns events into state. Plain logic.\n"),
+        "{}",
+        topic.text
+    );
+    let v2 = MAP
+        .replace(r#""version": 1"#, r#""version": 2"#)
+        .replace(r#""description": "The shell.""#, r#""purpose": "The shell.", "holds": [{ "name": "Routes", "text": "One per command.", "paths": ["server/api.rs"] }]"#)
+        .replace(r#""description""#, r#""holds": [], "purpose""#);
+    let topic = flow_topic(&v2, "turn").unwrap();
+    assert!(
+        topic.text.contains("(server/): Serves the page. The shell.\n  - Routes: One per command. (key files: server/api.rs)\n"),
+        "{}",
+        topic.text
+    );
 }
 
 #[test]

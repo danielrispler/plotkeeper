@@ -108,6 +108,35 @@ fn the_facts_put_the_parts_structure_before_the_entries_and_the_entries_before_t
 }
 
 #[test]
+fn the_part_is_quoted_by_its_purpose_and_held_items_on_either_version() {
+    let part = |map: &str| {
+        let mut source = source();
+        source.map_text = map.into();
+        section(&build_catch_up_facts(&source).unwrap().text, "THE PART").to_string()
+    };
+    assert!(
+        part(MAP).contains("## alpha (Alpha)\nd\nlaws:"),
+        "{}",
+        part(MAP)
+    );
+    let v2 = MAP
+        .replace(r#""version": 1"#, r#""version": 2"#)
+        .replacen(
+            r#""description": "d""#,
+            r#""purpose": "Keeps order.", "holds": [{ "name": "Sorter", "text": "Sorts.", "paths": ["alpha/a.rs"] }]"#,
+            1,
+        )
+        .replace(r#""description": "d""#, r#""purpose": "d", "holds": []"#);
+    assert!(
+        part(&v2).contains(
+            "## alpha (Alpha)\nKeeps order.\n  - Sorter: Sorts. (key files: alpha/a.rs)\nlaws:"
+        ),
+        "{}",
+        part(&v2)
+    );
+}
+
+#[test]
 fn the_facts_hold_one_combined_diff_of_the_parts_paths_only() {
     let facts = build_catch_up_facts(&source()).unwrap();
     let diff = section(&facts.text, "DIFF");

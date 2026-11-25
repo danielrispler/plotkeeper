@@ -686,7 +686,12 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .sheet-close { position: absolute; top: 0; right: 0; }
 .sheet-name { margin: 0; font-size: var(--size-large); font-weight: 600; padding-right: var(--sp-7); }
 .sheet-caption { margin: 0; font-size: var(--size-small); color: var(--muted); }
-.sheet-description { margin: var(--sp-3) 0 0; font-size: var(--size-read); line-height: 1.5; }
+.sheet-purpose { margin: var(--sp-3) 0 0; font-size: var(--size-read); line-height: 1.5; text-wrap: pretty; }
+.sheet-holds { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-4); }
+.sheet-held { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--size-small); line-height: 1.45; }
+.sheet-held-name { font-weight: 600; }
+.sheet-held-files { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); font-size: var(--size-xs); color: var(--muted); }
+.sheet-held-files code { min-width: 0; overflow-wrap: anywhere; }
 .sheet-heading { margin: var(--sp-5) 0 0; font-size: var(--size-xs); letter-spacing: .12em; text-transform: uppercase; color: var(--faint); font-weight: 500; }
 .sheet-tiers { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
 .sheet-laws { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-4); }

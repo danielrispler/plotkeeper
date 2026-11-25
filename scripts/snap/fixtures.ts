@@ -109,16 +109,16 @@ const projectMenuScript = (nearBottom: boolean) => `
 
 // The Map view (#309) on a map of plotkeeper's own shape, opened by its key. Positions are saved, as the prototype's Treatment C draws them.
 const mapFile = JSON.stringify({
-  version: 1,
+  version: 2,
   parts: [
-    { id: "plugins", name: "Agent plugins", caption: "Which hooks each agent runs", description: "", tier: "interface", paths: ["plugin/"] },
-    { id: "hook", name: "Hook", caption: "Records every agent event", description: "", tier: "core", paths: ["hook/"] },
-    { id: "core", name: "Core", caption: "Turns events into session state", description: "", tier: "core", paths: ["core/"] },
-    { id: "shell", name: "Shell", caption: "Reads the log, feeds the core, acts", description: "", tier: "core", paths: ["src-tauri/"] },
-    { id: "understanding", name: "Understanding", caption: "Writes what you read, and keeps it", description: "", tier: "core", paths: ["understanding/"] },
-    { id: "window", name: "Window", caption: "Everything you see and press", description: "", tier: "core", paths: ["ui/"] },
-    { id: "daemon", name: "Terminal daemon", caption: "Owns the terminals", description: "", tier: "core", paths: ["terminal-daemon/"] },
-    { id: "workbench", name: "Workbench", caption: "Git and worktrees", description: "", tier: "black-box", paths: ["workbench/"] },
+    { id: "plugins", name: "Agent plugins", caption: "Which hooks each agent runs", purpose: "", holds: [], tier: "interface", paths: ["plugin/"] },
+    { id: "hook", name: "Hook", caption: "Records every agent event", purpose: "", holds: [], tier: "core", paths: ["hook/"] },
+    { id: "core", name: "Core", caption: "Turns events into session state", purpose: "", holds: [], tier: "core", paths: ["core/"] },
+    { id: "shell", name: "Shell", caption: "Reads the log, feeds the core, acts", purpose: "", holds: [], tier: "core", paths: ["src-tauri/"] },
+    { id: "understanding", name: "Understanding", caption: "Writes what you read, and keeps it", purpose: "", holds: [], tier: "core", paths: ["understanding/"] },
+    { id: "window", name: "Window", caption: "Everything you see and press", purpose: "", holds: [], tier: "core", paths: ["ui/"] },
+    { id: "daemon", name: "Terminal daemon", caption: "Owns the terminals", purpose: "", holds: [], tier: "core", paths: ["terminal-daemon/"] },
+    { id: "workbench", name: "Workbench", caption: "Git and worktrees", purpose: "", holds: [], tier: "black-box", paths: ["workbench/"] },
   ],
   actors: [{ id: "agents", name: "Agents" }, { id: "writer", name: "Writer" }, { id: "github", name: "GitHub" }],
   links: [
@@ -1061,7 +1061,7 @@ const mapStale = (): Fixture =>
       log("stale ok");`, {
     map_state: mapState({ stale: { core: 1, shell: 2, understanding: 3 } }),
   });
-// The refresher (#392) on Shell's sheet, a stale part with no fog: drawn at once from the map file (its caption and description, the flows
+// The refresher (#392) on Shell's sheet, a stale part with no fog: drawn at once from the map file (its caption and purpose, the flows
 // through it, its laws with their backing and its links; the sheet already shows the first three), with no writer and no "Writing…".
 const mapRefresher = (): Fixture => {
   const file = JSON.parse(mapFile);
@@ -1071,7 +1071,7 @@ const mapRefresher = (): Fixture => {
     { link: "understanding-writer", text: "Understanding calls the writer." },
     { link: "shell-window", text: "The Shell tells the Window, which shows the summary." },
   ] }];
-  file.parts.find((part: { id: string }) => part.id === "shell").description = "Reads the hook's log, feeds the core, writes the summaries through Understanding and serves the Window.";
+  file.parts.find((part: { id: string }) => part.id === "shell").purpose = "Reads the hook's log, feeds the core, writes the summaries through Understanding and serves the Window.";
   return mapOpened(`
       document.querySelector("#map .plate[data-id=shell]").click();
       await wait(300);
@@ -2007,12 +2007,53 @@ const mapPanelBrief = (): Fixture =>
   pr_brief: briefOf(storySteps()),
 });
 
-// The part sheet in the map (#445). A long description on the shell, whose check-backed law opens a long proof in the drawer.
+// The part sheet in the map (#445). The shell holds eight items, the most a part may, so its sheet is long; its check-backed law opens
+// a long proof in the drawer.
 const longSheet = (() => {
   const doc = JSON.parse(mapFile);
-  doc.parts.find((p: { id: string }) => p.id === "shell").description = "Reads the event log, feeds each line to the core and acts on what the core says. ".repeat(12);
+  const shell = doc.parts.find((p: { id: string }) => p.id === "shell");
+  shell.purpose = "Reads the event log, feeds each line to the core and acts on what the core says, then serves the page and answers its commands.";
+  shell.holds = Array.from({ length: 8 }, (_, i) => ({
+    name: `Held item ${i + 1}`,
+    text: "One sentence on a thing the part holds, long enough to wrap over two lines of the sheet at its first width of 360 px.",
+    paths: [`src-tauri/src/item_${i + 1}.rs`],
+  }));
   return JSON.stringify(doc);
 })();
+// The part sheet with its purpose and held items (#483): the purpose first, then each held item's name, sentence and key files; an item
+// without paths shows none. The plate's hover text is the purpose, never the held items.
+const heldSheet = (() => {
+  const doc = JSON.parse(mapFile);
+  const shell = doc.parts.find((p: { id: string }) => p.id === "shell");
+  shell.purpose = "The program that holds the state, follows the event log and serves the page on 127.0.0.1.";
+  shell.holds = [
+    { name: "Serving the page", text: "The built page, a POST route per command and one event stream, behind a token, a cookie and a Host check.", paths: ["src-tauri/src/web.rs", "src-tauri/src/api.rs"] },
+    { name: "The read loop", text: "Follows the event log and sends what changed to the page.", paths: ["src-tauri/src/read_loop.rs"] },
+    { name: "The quiet log", text: "One line per thing you use, kept for the stop rules, with nothing shown." },
+  ];
+  return JSON.stringify(doc);
+})();
+const mapSheetHolds = (): Fixture =>
+  mapOpened(`
+      const plate = document.querySelector("#map .plate[data-id=shell]");
+      if (!plate.title.endsWith("The program that holds the state, follows the event log and serves the page on 127.0.0.1.")) log("snap:fail the plate's hover text is not the purpose: " + plate.title);
+      if (plate.title.includes("Serving the page")) log("snap:fail the plate's hover text holds the held items");
+      plate.click();
+      await wait(300);
+      const sheet = document.querySelector("#map-sheet .sheet");
+      if (!sheet) return log("snap:fail the sheet did not open");
+      const purpose = sheet.querySelector(".sheet-purpose");
+      const list = sheet.querySelector(".sheet-holds");
+      if (!purpose || !list) return log("snap:fail the sheet lacks its purpose or its held items");
+      if (!(purpose.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING)) log("snap:fail the held items come before the purpose");
+      const rows = [...list.querySelectorAll(".sheet-held")];
+      if (rows.length !== 3) log("snap:fail the sheet shows " + rows.length + " held items, not 3");
+      const files = rows.map((row) => [...row.querySelectorAll(".sheet-held-files code")].map((code) => code.textContent));
+      if (files[0].join() !== "src-tauri/src/web.rs,src-tauri/src/api.rs") log("snap:fail the first item's key files are " + files[0].join());
+      if (files[2].length) log("snap:fail an item without paths shows key files");
+      // The glass's rise ends before the picture is taken.
+      await wait(400);
+      log("sheet holds ok");`, { map_state: mapState({ source: heldSheet }) });
 const longProof = [{ file: "workbench/tests/wire.rs", line: 11, test: "wire_types_match", first: 11, snippet: ["// @law: wire-types-agree", "#[test]", "fn wire_types_match() {", ...Array.from({ length: 40 }, (_, i) => `    let sample_${i} = studio_test_support::sample(${i});`), "}"].join("\n") }];
 const sheetHelpers = `
       const esc = async () => { document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", key: "Escape", bubbles: true })); await wait(100); };
@@ -2981,6 +3022,8 @@ ${writerStatusAfter("Keychain refused")}
   mapNoMapNarrow: mapNoMap,
   // The part sheet in the map: one scrolling column, a resizable width, and a click on the empty map closes it (#445).
   mapSheetScrollShort,
+  // The sheet's purpose, then its held items with their key files (#483).
+  mapSheetHolds,
   mapSheetWidth,
   mapSheetResizeRedraw,
   mapSheetKeptWidth,

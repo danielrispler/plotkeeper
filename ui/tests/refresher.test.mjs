@@ -11,9 +11,9 @@ const { refresherOf, staleWords } = await import("../../dist/refresher.js");
 const map = JSON.stringify({
   version: 1,
   parts: [
-    { id: "hook", name: "Hook", caption: "Records every agent event", description: "Appends one line per event.", tier: "core", paths: ["hook/"] },
-    { id: "server", name: "Server", caption: "Reads the log, acts", description: "Feeds the core and serves the page.", tier: "core", paths: ["server/"] },
-    { id: "window", name: "Window", caption: "What you see", description: "The page.", tier: "core", paths: ["ui/"] },
+    { id: "hook", name: "Hook", caption: "Records every agent event", purpose: "Appends one line per event.", holds: [], tier: "core", paths: ["hook/"] },
+    { id: "server", name: "Server", caption: "Reads the log, acts", purpose: "Feeds the core and serves the page.", holds: [], tier: "core", paths: ["server/"] },
+    { id: "window", name: "Window", caption: "What you see", purpose: "The page.", holds: [], tier: "core", paths: ["ui/"] },
   ],
   actors: [{ id: "agents", name: "Agents" }],
   links: [{ id: "agents-hook", from: "agents", to: "hook" }, { id: "hook-server", from: "hook", to: "server" }, { id: "server-window", from: "server", to: "window" }],

@@ -99,10 +99,10 @@ fn a_hop_on_a_link_that_is_absent_fails() {
 }
 
 #[test]
-fn a_version_other_than_one_fails_and_names_it() {
+fn a_version_other_than_two_fails_and_names_it() {
     let mut map = base();
-    map["version"] = json!(2);
-    assert!(has(&failing(map), &["version", "2", "version 1"]));
+    map["version"] = json!(3);
+    assert!(has(&failing(map), &["version", "3", "version 2"]));
 }
 
 mod lenient {

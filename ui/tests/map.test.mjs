@@ -3,11 +3,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
-  actorSize, autoPlace, cameraRig, draftPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, rimPoint, revealPan, scrubTickets, sheetOf,
+  actorSize, autoPlace, cameraRig, draftPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, plateTitle, rimPoint, revealPan, scrubTickets, sheetOf,
   narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject, readingOrder,
 } from "../../dist/map-model.js";
 
-const part = (id, extra = {}) => ({ id, name: id, caption: "", description: "", tier: "core", paths: [], ...extra });
+const part = (id, extra = {}) => ({ id, name: id, caption: "", purpose: "", holds: [], tier: "core", paths: [], ...extra });
 const overlaps = (a, b) => Math.abs(a.x - b.x) < plateSize.w && Math.abs(a.y - b.y) < plateSize.h;
 
 test("auto-placement puts each part beside what it links to and clear of every other plate", () => {
@@ -176,6 +176,20 @@ test("the plate's size here is the stylesheet's, so rim points land on the drawn
 test("Draft a map's prompt names the map file and the command that checks it", () => {
   assert.match(draftPrompt, /system-map\.json/);
   assert.match(draftPrompt, /system-map check/);
+  assert.match(draftPrompt, /purpose/);
+  assert.match(draftPrompt, /holds/);
+});
+
+test("a part's sheet gives its purpose, then each held item with its key files, and its plate's hover text the purpose", () => {
+  const holds = [{ name: "Adapters", text: "One per agent.", paths: ["core/src/claude.rs", "core/src/agy.rs"] }, { name: "Rules", text: "What must hold." }];
+  const core = part("core", { name: "Core", caption: "Events to state", purpose: "Plain Rust.", holds });
+  const sheet = sheetOf(core, [], "core", undefined);
+  assert.equal(sheet.purpose, "Plain Rust.");
+  assert.deepEqual(sheet.holds, [
+    { name: "Adapters", text: "One per agent.", files: ["core/src/claude.rs", "core/src/agy.rs"] },
+    { name: "Rules", text: "What must hold.", files: [] },
+  ]);
+  assert.equal(plateTitle(core), "Core\n\nEvents to state\n\nPlain Rust.");
 });
 
 test("a part's sheet names it, lists its laws by backing, and offers the three tiers with the effective one pressed", () => {
@@ -184,8 +198,8 @@ test("a part's sheet names it, lists its laws by backing, and offers the three t
     { id: "l2", on: "core", backing: "trust", text: "Applies in order." },
     { id: "l3", on: "hook", backing: "check", text: "Not this part's." },
   ];
-  const sheet = sheetOf(part("core", { name: "Core", caption: "Events to state", description: "Plain Rust." }), laws, "interface", undefined);
-  assert.deepEqual([sheet.name, sheet.caption, sheet.description], ["Core", "Events to state", "Plain Rust."]);
+  const sheet = sheetOf(part("core", { name: "Core", caption: "Events to state", purpose: "Plain Rust." }), laws, "interface", undefined);
+  assert.deepEqual([sheet.name, sheet.caption, sheet.purpose], ["Core", "Events to state", "Plain Rust."]);
   assert.deepEqual(sheet.tiers, [
     { tier: "core", label: "Core", pressed: false },
     { tier: "interface", label: "Interface-only", pressed: true },

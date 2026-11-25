@@ -244,6 +244,8 @@ pub fn at(repo: &Path, commit: &str) -> Result<At, String> {
     let (full, label) = subject_of(repo, commit)?;
     let source = git(repo, &["show", &format!("{full}:{}", system_map::MAP_FILE)])
         .map_err(|_| format!("{} has no map at {}", system_map::MAP_FILE, &full[..7]))?;
+    // A map from before version 2 is sent converted, as `read_map` stores it.
+    let source = system_map::convert(&source)?;
     system_map::parse_lenient(&source)?;
     Ok(At {
         short: full.chars().take(7).collect(),
@@ -451,6 +453,17 @@ mod tests {
         let rig = Rig::new();
         rig.commit("Work", &[("a/x", "1")]);
         assert!(rig.history("a").is_empty());
+    }
+
+    #[test]
+    fn a_commit_from_before_the_migration_sends_its_map_as_version_2() {
+        let rig = Rig::new();
+        let old = rig.commit("The map", &[("system-map.json", MAP)]);
+        let then = at(Path::new(&rig.main), &old).unwrap();
+        let sent: serde_json::Value = serde_json::from_str(&then.source).unwrap();
+        assert_eq!(sent["version"], 2);
+        assert_eq!(sent["parts"][0]["purpose"], "d");
+        assert!(sent["parts"][0].get("description").is_none());
     }
 
     #[test]

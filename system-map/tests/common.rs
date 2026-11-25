@@ -8,6 +8,23 @@ use studio_test_support::{git, repo};
 /// A valid map: two parts, an actor, a link, an ignored folder and a law.
 pub fn base() -> Value {
     json!({
+        "version": 2,
+        "parts": [
+            { "id": "alpha", "name": "Alpha", "caption": "First", "purpose": "The first part.", "holds": [],
+              "tier": "core", "paths": ["alpha/"] },
+            { "id": "beta", "name": "Beta", "caption": "Second", "purpose": "The second part.", "holds": [],
+              "tier": "interface", "paths": ["beta/"] }
+        ],
+        "actors": [{ "id": "writer", "name": "Writer" }],
+        "links": [{ "id": "alpha-beta", "from": "alpha", "to": "beta" }],
+        "ignored": ["docs/", "system-map.json"],
+        "laws": [{ "id": "stay-true", "on": "alpha", "backing": "trust", "text": "It stays true." }]
+    })
+}
+
+/// `base` as a version 1 map holds it: each part's text is one `description`, with no `holds`.
+pub fn base_v1() -> Value {
+    json!({
         "version": 1,
         "parts": [
             { "id": "alpha", "name": "Alpha", "caption": "First", "description": "The first part.",
