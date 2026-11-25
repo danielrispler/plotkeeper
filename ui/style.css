@@ -691,7 +691,20 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 /* The part sheet: in the side area, beside the map. */
 .sheet { position: relative; display: flex; flex-direction: column; gap: var(--sp-3); }
 .sheet-close { position: absolute; top: 0; right: 0; }
-.sheet-name { margin: 0; font-size: var(--size-large); font-weight: 600; padding-right: var(--sp-7); }
+/* The sheet's header (#522): the explanations' `?` beside the ×, at the sheet's top right. */
+.sheet-header { position: absolute; top: 0; right: 0; display: flex; align-items: center; gap: var(--sp-2); }
+.sheet-header .sheet-close { position: static; }
+.sheet-name { margin: 0; font-size: var(--size-large); font-weight: 600; padding-right: calc(2 * var(--sp-7) + var(--sp-4)); }
+/* The `?` toggle: filled while the explanations show, a muted ring while they don't, so it reads as a switch. */
+.btn.explain-toggle { display: grid; place-items: center; width: calc(var(--sp-6) + var(--sp-2)); height: calc(var(--sp-6) + var(--sp-2)); padding: 0;
+                      border-radius: 50%; font-size: var(--size-xs); font-weight: 600; line-height: 1; color: var(--muted); box-shadow: inset 0 0 0 var(--hair) var(--muted); }
+.btn.explain-toggle[aria-pressed="true"] { background: var(--fg); color: var(--bg); box-shadow: none; }
+.btn.explain-toggle[aria-pressed="true"]:hover:not(:disabled) { background: var(--muted); }
+/* An explanation: one short muted line under its heading, pulled up to it; the selected option's and the fog actions' sit under their
+   buttons at the sheet's own gap. */
+.explain { margin: calc(-1 * var(--sp-2)) 0 0; font-size: var(--size-xs); line-height: 1.45; color: var(--muted); text-wrap: pretty; }
+.explain.explain-choice { margin: 0; }
+.sheet-link > .explain-link { margin: 0; }
 .sheet-caption { margin: 0; font-size: var(--size-small); color: var(--muted); }
 .sheet-purpose { margin: var(--sp-3) 0 0; font-size: var(--size-read); line-height: 1.5; text-wrap: pretty; }
 .sheet-holds { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-4); }

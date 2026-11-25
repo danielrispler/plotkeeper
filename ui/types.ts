@@ -659,6 +659,7 @@ export interface Commands {
   selected: Selection | null;
   sessions: Session[];
   set_api_key: string | null;
+  set_explanations: string;
   settings_files: SettingsFiles;
   subagent_log: SubagentLog | null;
   summary_settings: void;

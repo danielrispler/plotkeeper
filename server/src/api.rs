@@ -330,6 +330,10 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             .projects
             .remove(&arg::<String>(a, "path")?, studio_understanding::millis())),
         "settings_files" => out(crate::settings::settings_files()),
+        "set_explanations" => res(crate::settings::save_explanations(
+            arg(a, "expected")?,
+            arg(a, "on")?,
+        )),
         "refresh_landed_tasks" => done!(crate::refresh_landed_tasks(arc)),
         "page_focus" => {
             page.focus(arg(a, "focused")?);

@@ -1467,6 +1467,40 @@ const mapTalksTo = (): Fixture =>
     map_state: mapState({ source: pairFile, ratify: [{ pr: 334, kind: "link", id: "understanding-shell" }] }),
     snapDone: "talks to ok",
   });
+// The part sheet explains itself (#522): Shell's sheet, with links of three kinds and two not yet ratified, with Explanations on (the
+// default) and off. On, each heading and the selected tier are described by their line, a kind's line follows its first link only and
+// "Not yet ratified"'s the first unratified link only, and the ? is pressed; off, no line is drawn and nothing points at one.
+const mapSheetExplained = (on: boolean): Fixture =>
+  mapOpened(`
+      document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(300);
+      const sheet = document.getElementById("map-sheet");
+      const toggle = sheet.querySelector(".sheet-header .explain-toggle");
+      if (!toggle || toggle.nextElementSibling !== sheet.querySelector(".sheet-header .sheet-close")) return log("snap:fail the ? is not beside the ×");
+      if (toggle.getAttribute("aria-pressed") !== "${on}" || toggle.title !== "${on ? "Hide" : "Show"} explanations") log("snap:fail the ?: " + toggle.getAttribute("aria-pressed") + " " + toggle.title);
+      const described = [...sheet.querySelectorAll("[aria-describedby]")];
+      const lines = [...sheet.querySelectorAll(".explain")];
+      if (${!on}) {
+        if (lines.length || described.length) log("snap:fail explanations drawn while off: " + lines.length + " lines, " + described.length + " described");
+        return log("explained ok");
+      }
+      for (const heading of sheet.querySelectorAll(".sheet-heading")) {
+        const line = document.getElementById(heading.getAttribute("aria-describedby"));
+        if (!line?.classList.contains("explain") || heading.nextElementSibling !== line) log("snap:fail the heading's line: " + heading.textContent);
+      }
+      const tier = sheet.querySelector('.sheet-tiers [aria-pressed="true"]');
+      if (document.getElementById(tier.getAttribute("aria-describedby"))?.textContent.startsWith(tier.textContent + ":") !== true) log("snap:fail the selected tier's meaning");
+      const notes = [...sheet.querySelectorAll(".sheet-link .explain-link")].map((note) => note.closest(".sheet-link").dataset.link + "=" + note.textContent.split(":")[0]);
+      const rows = [...sheet.querySelectorAll(".sheet-links .sheet-link")];
+      const first = (test) => rows.find(test).dataset.link;
+      const want = [...new Set(rows.map((row) => row.querySelector(".sheet-link-kind")?.textContent))].map((kind) => first((row) => row.querySelector(".sheet-link-kind")?.textContent === kind) + "=" + kind);
+      want.push(first((row) => row.classList.contains("unratified")) + "=Not yet ratified");
+      if (notes.sort().join("|") !== want.sort().join("|")) log("snap:fail the links' lines: " + notes.join("|") + " want " + want.join("|"));
+      log("explained ok");`, {
+    map_state: mapState({ source: pairFile, ratify: [{ pr: 334, kind: "link", id: "understanding-shell" }, { pr: 334, kind: "link", id: "shell-daemon" }] }),
+    ...(on ? {} : { settings_files: { settings: '{ "explanations": false }', keymap: null } }),
+    snapDone: "explained ok",
+  });
 // A micro-world (#399) in its overlay: from the refresher on Shell's sheet, the Turn writing flow's world is ready but may be out of date, so its
 // row offers Open and Rebuild; Open shows the checked page in a frame sandboxed to scripts alone, in the glass overlay the size of the settings dialog. The page's script is
 // an inline handler: a closing script tag would end the snap page's own.
@@ -3120,6 +3154,8 @@ ${writerStatusAfter("Keychain refused")}
   mapMarksBroken: () => mapMarks("broken"),
   mapRefresher,
   mapTalksTo,
+  mapSheetExplained: () => mapSheetExplained(true),
+  mapSheetExplainedOff: () => mapSheetExplained(false),
   mapBriefPairLight,
   mapBriefChapters,
   mapBriefChapterMid,
