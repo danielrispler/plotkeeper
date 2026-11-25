@@ -89,25 +89,22 @@ fn a_pair_from_a_file_to_itself_is_dropped() {
 }
 
 #[test]
-fn a_pair_two_extractors_find_is_kept_once_with_its_lowest_line() {
+fn a_pair_two_extractors_find_is_kept_once_with_the_lines_of_both() {
     let files = names(&["a.x", "b.x", "c.x"]);
     let repo = Repo::new(std::path::Path::new("."), &files, |_| false);
-    let at = |from: &str, to: &str, line: Option<u32>, declaration: bool| Pair {
-        line,
+    let at = |from: &str, to: &str, lines: &[u32], declaration: bool| Pair {
+        lines: lines.iter().copied().collect(),
         declaration,
         ..Pair::new(from, to)
     };
     let one = Fake {
-        pairs: vec![
-            at("b.x", "c.x", None, false),
-            at("a.x", "b.x", Some(7), true),
-        ],
+        pairs: vec![at("b.x", "c.x", &[], false), at("a.x", "b.x", &[7], true)],
         ..fake("one", &[])
     };
     let two = Fake {
         pairs: vec![
-            at("a.x", "b.x", Some(3), false),
-            at("a.x", "b.x", None, true),
+            at("a.x", "b.x", &[3, 7], false),
+            at("a.x", "b.x", &[], true),
         ],
         ..fake("two", &[])
     };
@@ -115,8 +112,8 @@ fn a_pair_two_extractors_find_is_kept_once_with_its_lowest_line() {
     assert_eq!(
         out.pairs,
         [
-            at("a.x", "b.x", Some(3), false),
-            at("b.x", "c.x", None, false)
+            at("a.x", "b.x", &[3, 7], false),
+            at("b.x", "c.x", &[], false)
         ]
     );
 }
