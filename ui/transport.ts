@@ -42,6 +42,8 @@ export function transport(): Seam {
     return source;
   };
   const logger = (level: "warn" | "error") => async (line: string) => void (await post("log", { level, line }));
+  // The trust boundary: a reply and an event's payload are typed as `Commands` and the listener say, not checked. The wire check
+  // (`server/tests/wire.rs`) holds the server's replies and argument names to those types, so the casts here are the only ones.
   return {
     core: { invoke: <T>(command: string, args?: Record<string, unknown>) => post(command as Command, args) as Promise<T> },
     event: {

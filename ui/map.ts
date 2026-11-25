@@ -235,7 +235,7 @@ export function fitMap() {
 export const mapEscape = () => void escapeMap(layers);
 
 // The side area shows while any of its slots holds something; the tray floats on its own (#385).
-export const syncSide = (slots: MapView["slots"]) => {
+export const syncSide = (slots: Omit<MapView["slots"], "canvas">) => {
   slots.side.hidden = ![slots.notPlaced, slots.runs, slots.sheet, slots.drawer].some((slot) => slot.childElementCount > 0);
   // When a part's sheet opens, the camera pans just enough to show that part whole beside it, once per part, so a later draw never pans
   // Daniel's view back; positions are never written here.
@@ -560,7 +560,7 @@ function draw() {
   const slots = { side: element("map-side"), notPlaced: element("map-not-placed"), tray: element("map-tray"), runs: element("map-runs"), sheet: element("map-sheet"), drawer: element("map-drawer"), banner: element("map-banner") };
   // No map is drawn, so nothing of the last one may stay: its banner, sheet and drawer would belong to another project.
   [slots.notPlaced, slots.tray, slots.runs, slots.sheet, slots.drawer, slots.banner].forEach((slot) => slot.replaceChildren());
-  syncSide(slots as MapView["slots"]);
+  syncSide(slots);
   // A scrubbed commit whose map cannot be read still shows the way back to now.
   unreadHooks.forEach((hook) => hook(slots.banner, scrub));
 }

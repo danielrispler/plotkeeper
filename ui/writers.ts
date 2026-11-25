@@ -188,7 +188,7 @@ function keyRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[]
     const key = input.value.trim();
     if (!key) return;
     input.value = "";
-    invoke("set_api_key", { writer: "anthropic", key, base_url: null, expected: null })
+    invoke("set_api_key", { writer: "anthropic", key, baseUrl: null, expected: null })
       .then(() => {
         delete keyErrors.anthropic;
         const anthropic = known.writers.find((w) => w.kind === "anthropic");
@@ -296,7 +296,7 @@ function openaiRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElemen
   save.addEventListener("click", () => {
     const key = input.value.trim();
     input.value = "";
-    invoke("set_api_key", { writer: "openai", key: key || null, base_url: base.value.trim(), expected: hooks.texts().settings })
+    invoke("set_api_key", { writer: "openai", key: key || null, baseUrl: base.value.trim(), expected: hooks.texts().settings })
       .then((settings) => {
         delete keyErrors.openai;
         if (settings !== null) hooks.saved(settings);

@@ -1,7 +1,9 @@
 // The window's small parts: the shell's calls, and the elements every region builds.
 
 import { showError } from "./notice.js";
-import type { Command, Commands, Step } from "./types.js";
+import type { Args, Command, Reply, Step } from "./types.js";
+
+type None = Record<string, never>;
 
 declare global {
   interface Window {
@@ -13,9 +15,9 @@ declare global {
   }
 }
 
-// Only a command of the map, and its reply's type comes from there (#144).
-export const invoke = <C extends Command>(command: C, args?: Record<string, unknown>) =>
-  window.__TAURI__.core.invoke<Commands[C]>(command, args);
+// Only a command of the map, with its arguments' and its reply's types from there (#144, #554); one with no arguments takes none.
+export const invoke = <C extends Command>(command: C, ...args: Args<C> extends None ? [] : [args: Args<C>]) =>
+  window.__TAURI__.core.invoke<Reply<C>>(command, args[0]);
 export const listen = <T>(event: string, handler: (payload: T) => void) =>
   window.__TAURI__.event.listen<T>(event, (e) => handler(e.payload));
 

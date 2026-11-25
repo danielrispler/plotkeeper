@@ -169,6 +169,13 @@ test("a map that reads gives its parts, actors, links and laws; one that does no
     assert.equal(read.ok, false, text);
     assert.equal(read.why, "the map is not a JSON object", text);
   }
+  // #554: an entry that is not what its list holds, such as a part with no id or a link with no end, is a broken map, never drawn.
+  const good = { parts: [part("core")], actors: [], links: [], laws: [] };
+  for (const bad of [{ parts: [null] }, { parts: [{ name: "No id" }] }, { links: [{ id: "l", from: "core" }] }, { actors: ["w"] }, { laws: [{ id: "x" }] }]) {
+    const read = parseMap(JSON.stringify({ ...good, ...bad }));
+    assert.equal(read.ok, false, JSON.stringify(bad));
+    assert.equal(read.why, "the map lacks its parts, actors, links or laws", JSON.stringify(bad));
+  }
 });
 
 test("the plate's size here is the stylesheet's, so rim points land on the drawn edge", () => {

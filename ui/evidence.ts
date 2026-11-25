@@ -92,7 +92,8 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
     item.append(text("span", row.label), ...(row.agent ? [text("span", row.agent, "evidence-agent")] : []));
     return item;
   }
-  const key = `${session} ${row.agent ?? ""} ${row.call}`;
+  const call = row.call;
+  const key = `${session} ${row.agent ?? ""} ${call}`;
   const pre = scrollingPre(outputs.get(key) ?? "", "evidence-output", `Output of ${row.label}`);
   // Why the output could not be read is said aloud, in a region the row holds before the read (#456); the output itself is not.
   const live = statusRegion();
@@ -101,7 +102,7 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
     if (outputs.has(key)) return;
     pre.textContent = "Reading the output…";
     live.textContent = "";
-    invoke("check_output", { session, agent: row.agent, call: row.call })
+    invoke("check_output", { session, agent: row.agent ?? null, call })
       .then((output) => {
         outputs.set(key, output ? outputText(output) : "No output was recorded.");
         pre.textContent = outputs.get(key)!;

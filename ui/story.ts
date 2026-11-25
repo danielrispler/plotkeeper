@@ -509,7 +509,7 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
     if (latest) fill(responses);
     else if (fetched !== undefined) fill([fetched]);
     const fetch = () => {
-      if (latest || replies.has(key)) return;
+      if (latest || index === null || replies.has(key)) return;
       invoke("turn_reply", { id: session.id, index })
         .then((reply) => {
           replies.set(key, reply ?? "");

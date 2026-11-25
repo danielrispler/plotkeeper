@@ -32,7 +32,14 @@ export type LayerName = (typeof layerOrder)[number];
 export type Layer = { open: () => boolean; close: () => void };
 
 const tiers: Tier[] = ["core", "interface", "black-box"];
-const list = <T>(value: unknown): T[] | null => (Array.isArray(value) ? (value as T[]) : null);
+// The map file's lists, each entry checked for the fields that name it and tie it to the rest; the server read the file leniently, so
+// the other fields are as the map's version writes them. A list that is missing or holds anything else is a broken map.
+const named = (value: unknown, fields: string[]): value is Record<string, string> => isObject(value) && fields.every((field) => typeof value[field] === "string");
+const isPart = (value: unknown): value is Part => named(value, ["id", "name"]);
+const isActor = (value: unknown): value is Actor => named(value, ["id", "name"]);
+const isLink = (value: unknown): value is MapLink => named(value, ["id", "from", "to"]);
+const isLaw = (value: unknown): value is Law => named(value, ["id", "on"]);
+const listOf = <T>(value: unknown, is: (entry: unknown) => entry is T): T[] | null => (Array.isArray(value) && value.every(is) ? value : null);
 
 // The map file's text as the window draws it. The shell already read it leniently, so an unknown field is ignored here too.
 export function parseMap(text: string): MapDoc {
@@ -43,7 +50,7 @@ export function parseMap(text: string): MapDoc {
     return { ok: false, why: String(e) };
   }
   if (!isObject(file)) return { ok: false, why: "the map is not a JSON object" };
-  const [parts, actors, links, laws] = [list<Part>(file.parts), list<Actor>(file.actors), list<MapLink>(file.links), list<Law>(file.laws)];
+  const [parts, actors, links, laws] = [listOf(file.parts, isPart), listOf(file.actors, isActor), listOf(file.links, isLink), listOf(file.laws, isLaw)];
   if (!parts || !actors || !links || !laws) return { ok: false, why: "the map lacks its parts, actors, links or laws" };
   return { ok: true, parts, actors, links, laws };
 }
