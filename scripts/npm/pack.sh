@@ -28,4 +28,5 @@ for name in plotkeeper plotkeeper-hook plotkeeper-answer plotkeeper-run; do
     exit 1
   fi
 done
+node scripts/npm/prepare-readme.mjs
 npm pack ./npm --pack-destination "$out"

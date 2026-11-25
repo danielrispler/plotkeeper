@@ -1,59 +1,74 @@
 # plotkeeper
 
-A control room for coding agents that explains what your prompts changed.
+**A local macOS control room for coding agents that explains what your prompts changed.**
+
+[![npm version](https://img.shields.io/npm/v/plotkeeper)](https://www.npmjs.com/package/plotkeeper)
+[![macOS only](https://img.shields.io/badge/platform-macOS%20only%20(Apple%20Silicon%20%26%20Intel)-black?logo=apple)](#quick-start)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
+```sh
+npx plotkeeper
+```
+
+> **macOS only** (Apple Silicon & Intel) · requires Node.js · Linux and Windows are not supported yet.
 
 ![plotkeeper: the system map of a project, with the session list on the right](docs/studio/assets/readme/hero.png)
 
-plotkeeper is a local page for macOS that sits beside your agent sessions and keeps your understanding of the code in step with what the agents change. It records the sessions you start in your own terminals and editors through their hooks: Claude Code in full, Codex, agy and Cursor (its IDE and its CLI) with fewer details. Copilot, Qwen Code, OpenCode and Cline are coming in v2.
+plotkeeper sits beside the sessions you run in your own terminals and editors. It hooks into your coding agents, tracks unseen changes as [Fog](docs/studio/behaviour/map.md) on your system map, and keeps your understanding in step turn by turn and PR by PR.
 
 ## What you get
 
-- **Know what your prompt changed.** Each turn ends with a one-sentence Headline, and a ready PR gets a brief that tells you what it changes. [The story rail](docs/studio/behaviour/rail.md) and [PR briefs](docs/studio/behaviour/pr-briefs.md) hold both.
+- **Know what your prompt changed.** Every turn ends with a one-sentence Headline, and ready PRs get a stepped brief on your [system map](docs/studio/behaviour/map.md). [The story rail](docs/studio/behaviour/rail.md) and [PR briefs](docs/studio/behaviour/pr-briefs.md) hold both.
 
   ![A finished turn: its Headline and its evidence line](docs/studio/assets/readme/turn.png)
 
-- **Facts kept apart from the model's words.** Files, line counts and check results come from hooks and git, and code in a brief is quoted from the diff, never retyped by a model. On [the rail](docs/studio/behaviour/rail.md), a claimed fix with no passed check is marked "Agent says:".
-- **Pick up where you left off.** "Where we were" and [the Brief](docs/studio/behaviour/brief.md) sum up an idle session: the last Headline, what changed since you looked, and what is still open.
+- **Facts apart from model words.** Files, line counts and check results come from hooks and git; brief code is quoted from the diff, never retyped. On [the rail](docs/studio/behaviour/rail.md), an unverified fix is marked "Agent says:".
+- **Pick up where you left off.** "Where we were" and [the Brief](docs/studio/behaviour/brief.md) sum up an idle session: the last Headline, what changed since you looked, and what is open.
 
   ![Where we were](docs/studio/assets/readme/where-we-were.png)
 
-- **See who needs you.** [Every session is in one list](docs/studio/behaviour/sessions.md), only "needs you" is in colour, and you can answer an agent's question from the rail.
-- **Your subscription, your machine.** The [writer](docs/studio/behaviour/pr-briefs.md#the-writers-limits) runs `claude -p` on your own subscription, with no tools and no MCP servers.
+- **See who needs you.** [Every session sits in one list](docs/studio/behaviour/sessions.md); only "needs you" is in colour, and you can answer Claude Code questions, plans and permissions from the page.
+- **Your subscription, your machine.** The [writer](docs/studio/behaviour/pr-briefs.md#the-writers-limits) runs `claude -p` (or another writer in Settings) with no tools and no MCP servers.
+
+## Supported agents
+
+| Agent | Live turns | Turn diffs | Answer in page | Context |
+| --- | :---: | :---: | :---: | :---: |
+| **Claude Code** | Full | Yes | Yes | Yes |
+| **Codex** | Hooks | Yes | — | — |
+| **Cursor** (IDE & CLI) | Finished calls | Yes | — | — |
+| **agy** | Hooks + transcript | — | — | — |
+
+Copilot and Qwen Code are experimental (wired, untrialled); OpenCode and Cline are planned for v2.
 
 ## Quick start
 
-You need macOS and Node. In any terminal, run:
+**macOS only** (Apple Silicon & Intel) with Node.js. Run `npx plotkeeper`: first start lists detected agents and asks `Wire these? [Y/n]`. Yes wires them and opens the page (in Codex, run `/hooks` once to trust its hooks); No starts without recording. Answers are kept per agent; `Ctrl+C` stops plotkeeper.
 
-    npx plotkeeper
+Summaries default to `claude -p` (`claude` on `~/.zprofile` `PATH`); Settings picks another CLI or API-key writer.
 
-The first time, it lists the agents it found and what wiring each would change, then asks once: `Wire these? [Y/n]`. Yes wires them and opens the page; in Codex, run `/hooks` once to trust its hooks.
+- **Daily use:** `npm i -g plotkeeper && plotkeeper` (avoids ~70 s offline `npx` wait; or `npx --prefer-offline plotkeeper`).
+- **CLI:** `plotkeeper install` (`--yes` for scripts), `plotkeeper uninstall` (undoes wiring, keeps history; [details](docs/studio/plugin.md)), `plotkeeper --version`.
+- **From source** (Rust): `git clone ... && npm ci && npm start`.
 
-No starts it anyway, and the page says it is not recording. Your answer is kept: later starts ask only about an agent you installed since. Ctrl+C stops plotkeeper.
+## Local-first & privacy
 
-Summaries are written by `claude -p` by default, so `claude` must be on your login shell's `PATH` (`~/.zprofile`); the page's settings pick another writer.
-
-- **Daily use:** `npm i -g plotkeeper`, then `plotkeeper`. Offline, `npx plotkeeper` waits about 70 seconds, so use the global install or `npx --prefer-offline plotkeeper`.
-- **By hand:** `plotkeeper install` wires every agent found, declined ones included; `install --yes` does it for scripts. `plotkeeper uninstall` undoes it and forgets your answers, but keeps your recorded history ([install and uninstall](docs/studio/plugin.md)).
-- **From source**, with the Rust toolchain: clone the repository, then `npm ci` and `npm start`.
-
-plotkeeper starts no sessions; it records yours. On your click only, it starts a [background run](docs/studio/behaviour/background-runs.md): one `claude -p` on a copy of your project, to back a law of your system map with a test or explain a mechanism.
-
-Claude Code's sandbox keeps it to writing in that copy and a temp folder, with no network beyond loopback, no commit, push or `gh`, and no reading of plotkeeper's data, Claude Code's login or the usual credential folders. It can still read other files in your home folder.
-
-Its prompt holds only text plotkeeper wrote or you confirmed, never an issue's or a PR's. What it makes becomes a draft PR only when you press Open draft PR.
-
-## Status
-
-Early: one user so far. macOS only, on Apple silicon and Intel. Issues are welcome; pull requests are not reviewed yet.
+- **Local only:** serves on `127.0.0.1` with a per-run token; events stay local, and the writer uses your subscription with no tools.
+- **Consent & credentials:** asks before wiring, never opens `~/.claude/settings.json`, `~/.codex/config.toml` or credential files; `plotkeeper uninstall` reverses everything.
+- **Sandboxed background runs:** never starts sessions unasked. Only on your click does a [background run](docs/studio/behaviour/background-runs.md) run `claude -p` on a project copy inside Claude Code's OS sandbox (loopback only, no push/`gh`, no credentials); draft PRs open only on **Open draft PR**.
 
 ## Why
 
 Coding agents write code faster than I can read their diffs. I was losing track of how my own codebase worked, and every session ended in a long, painful review. I built plotkeeper so I could follow along turn by turn, while the code is being written. If you want to run many agents side by side, herdr and T3 Code are good at that. plotkeeper is for understanding what they changed.
 
+## Status
+
+Early preview · **macOS only** (Apple Silicon and Intel). Issues are welcome; pull requests are not reviewed yet.
+
 ## Documentation
 
 - [Sessions](docs/studio/behaviour/sessions.md), [the story rail](docs/studio/behaviour/rail.md), [blocked commands and wake-ups](docs/studio/behaviour/cards.md), [the Brief](docs/studio/behaviour/brief.md), [checks](docs/studio/behaviour/checks.md), [storage](docs/studio/behaviour/storage.md)
-- [The system map](docs/studio/behaviour/map.md), [background runs](docs/studio/behaviour/background-runs.md)
+- [The system map](docs/studio/behaviour/map.md), [PR briefs](docs/studio/behaviour/pr-briefs.md), [background runs](docs/studio/behaviour/background-runs.md)
 - [Install and uninstall](docs/studio/plugin.md), [settings files](docs/studio/settings.md), [development](docs/studio/development.md)
 
 ## Licence
