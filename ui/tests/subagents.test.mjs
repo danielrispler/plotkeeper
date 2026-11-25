@@ -12,6 +12,7 @@ test("a subagent row has a second line only while it runs or needs you (danielri
 });
 
 const MIN = 60_000;
+/** @returns {import("../../dist/types.js").Subagent} */
 const agent = (id, fields = {}) => ({
   id,
   parent: "session",
@@ -26,8 +27,14 @@ const agent = (id, fields = {}) => ({
   failed: false,
   opened: false,
   faded: false,
+  last_step: null,
+  step_span: null,
+  turn: null,
   ...fields,
 });
+// Claude's capabilities with replies, every other one off, as a field left out read.
+/** @type {import("../../dist/types.js").Capabilities} */
+const claudeReplies = { agent: "claude", asks: false, background_tasks: false, replies: true, permission_mode: false, durations: false, transcript_version: false, transcript_model: false, context: false, turn_trees: false };
 
 test("a finished worker draws no row and counts in its parent's \"N done\"", () => {
   const session = {
@@ -44,7 +51,7 @@ test("a finished worker draws no row and counts in its parent's \"N done\"", () 
 
 test("the rail's history lists every subagent newest first, with its purpose, result and details", () => {
   const session = {
-    capabilities: { agent: "claude", replies: true },
+    capabilities: claudeReplies,
     agents: [
       agent("w1", { status: "completed", ended_at: 7 * MIN, faded: true, asked: "Implement #9.", agent_type: "implementer", result: "Done." }),
       agent("h1", { kind: "helper", started_at: MIN, status: "killed", ended_at: 2 * MIN, failed: true }),
@@ -60,14 +67,14 @@ test("the rail's history lists every subagent newest first, with its purpose, re
 });
 
 test("a written summary takes the place of the first line", () => {
-  const session = { capabilities: { agent: "claude", replies: true }, agents: [agent("w1", { status: "completed", ended_at: MIN, result: "Done." })] };
+  const session = { capabilities: claudeReplies, agents: [agent("w1", { status: "completed", ended_at: MIN, result: "Done." })] };
   const [entry] = subagentHistory(session, new Map([["w1", "Added the parser; its tests pass."]]), MIN);
   assert.equal(entry.result, "Added the parser; its tests pass.");
 });
 
 // A collapsed row hides what it spawned, but not a subagent that needs you or failed unopened.
 const tree = {
-  asker: { agent: "h2" },
+  asker: { agent: "h2", since: 0 },
   agents: [
     agent("w1"),
     agent("h1", { kind: "helper", parent: { agent: "w1" } }),

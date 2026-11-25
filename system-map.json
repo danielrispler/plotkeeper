@@ -181,7 +181,7 @@
     { "id": "check-result-is-last-run", "on": "core", "backing": "trust",
       "text": "A check's result is its last run's." },
     { "id": "wire-types-agree", "on": "server-window", "backing": "check",
-      "text": "The window's types and the Rust types of the server's replies agree; a reply built as bare JSON has none." },
+      "text": "The window's types and the Rust types of the server's replies agree, and each command's argument names are its handler's; a reply built as bare JSON has none." },
     { "id": "session-pieces-in-order", "on": "understanding", "backing": "check",
       "text": "A session's pieces are written one at a time, in order." },
     { "id": "old-stored-files-load", "on": "understanding", "backing": "check",

@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import { briefSlots } from "../../dist/cards.js";
 import { citedTurn } from "../../dist/story.js";
 
-const cards = { brief: null, goal: null, answers: [], open: [], design: [], recent: [], older: [], workers: [], decisions: [] };
+/** @type {import("../../dist/types.js").SessionCards} */
+const cards = { brief: null, goal: null, answers: [], open: [], design: [], decisions: [], risk_notes: [], decision_notes: [] };
 
 test("the slots come in order: Goal, Decisions, Open, each only when it has something", () => {
   assert.deepEqual(briefSlots(cards), []);

@@ -16,10 +16,11 @@ let modal = false;
 // The note's fade falls due only when a test runs the timers.
 const timers = new Map();
 let nextTimer = 1;
-globalThis.window = { setTimeout: (run) => {
+// The stand-in window: its timers alone.
+globalThis.window = /** @type {any} */ ({ setTimeout: (run) => {
     timers.set(nextTimer, run);
     return nextTimer++;
-  }, clearTimeout: (id) => timers.delete(id) };
+  }, clearTimeout: (id) => timers.delete(id) });
 const runTimers = () => {
   for (const [id, run] of [...timers]) {
     timers.delete(id);
@@ -36,7 +37,9 @@ globalThis.document = fakeDocument({
   body: { dataset: { layout: "focus" } },
 });
 
-const session = (id, state = "running", questions = []) => ({
+// A session with only the fields the toasts read; the rest of a `Session` is left out.
+/** @returns {import("../../dist/types.js").Session} */
+const session = (id, state = "running", questions = []) => /** @type {any} */ ({
   id, state, questions, name: null, folder_name: id, identity: { name: id }, last_step: null,
 });
 const asking = (id, text) =>

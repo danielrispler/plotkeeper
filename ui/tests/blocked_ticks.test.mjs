@@ -6,16 +6,21 @@ import { fakeDocument } from "./dom.mjs";
 // The page's one second timer, captured; the clock is ours. Both are set before the import: times.ts starts its timer at load.
 let timer = null;
 let clock = 100_000;
-globalThis.setInterval = (run, ms) => {
-  timer = { run, ms };
-  return 0;
-};
+globalThis.setInterval = /** @type {any} */ (
+  (run, ms) => {
+    timer = { run, ms };
+    return 0;
+  }
+);
 globalThis.document = fakeDocument({ addEventListener() {}, visibilityState: "hidden" });
-globalThis.window = { __TAURI__: { core: { invoke: async () => null }, event: { listen: async () => {} } } };
+globalThis.window = /** @type {any} */ ({ __TAURI__: { core: { invoke: async () => null }, event: { listen: async () => {} } } });
 Date.now = () => clock;
 const { blockedElement } = await import("../../dist/blocked.js");
 
+/** @type {import("../../dist/types.js").BlockedCommand} */
 const running = { call: "toolu_1", command: "sleep 90", cwd: "/work/repo", reason: "r", agent: null, at: 1, status: "running", run: "toolu_2", run_at: 100_000 };
+// The card as the stand-in DOM holds it.
+/** @param {any} card */
 const secondLine = (card) => card.find("p")[5];
 
 test("a Running card's elapsed time counts up each second while it shows", () => {

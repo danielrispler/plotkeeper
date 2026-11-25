@@ -6,7 +6,8 @@ import { El, fakeDocument, tauri } from "./dom.mjs";
 
 tauri([]);
 globalThis.document = fakeDocument({ body: new El("body") });
-globalThis.matchMedia = () => ({ matches: false, addEventListener() {} });
+// The stand-in media query: never reduced motion.
+globalThis.matchMedia = () => /** @type {any} */ ({ matches: false, addEventListener() {} });
 const { sheetCard } = await import("../../dist/map-sheet.js");
 const { SHEET } = await import("../../dist/explanations.js");
 const { studio } = await import("../../dist/state.js");
@@ -17,6 +18,7 @@ const lines = (node) => classed(node, "explain");
 const byId = (node, id) => all(node).find((each) => each.id === id);
 const described = (node) => all(node).filter((each) => each.getAttribute("aria-describedby") !== null);
 
+/** @type {import("../../dist/map-model.js").Part} */
 const plugins = {
   id: "plugins",
   name: "Agent plugins",
@@ -36,7 +38,9 @@ const links = [
   { id: "plugins-data", from: "plugins", to: "data", kind: "file" },
   { id: "plugins-agent", from: "plugins", to: "agent", kind: "spawn" },
 ];
-const view = (state = {}) => ({
+// The view with only what the sheet reads; the rest of a `MapView` is left out.
+/** @returns {import("../../dist/map.js").MapView} */
+const view = (state = {}) => /** @type {any} */ ({
   project: "/w/app",
   scrub: null,
   positions: {},

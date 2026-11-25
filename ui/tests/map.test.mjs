@@ -7,6 +7,7 @@ import {
   narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject, readingOrder, talksTo, linkLines, markPoints,
 } from "../../dist/map-model.js";
 
+/** @returns {import("../../dist/map-model.js").Part} */
 const part = (id, extra = {}) => ({ id, name: id, caption: "", purpose: "", holds: [], tier: "core", paths: [], ...extra });
 const overlaps = (a, b) => Math.abs(a.x - b.x) < plateSize.w && Math.abs(a.y - b.y) < plateSize.h;
 
@@ -99,6 +100,7 @@ test("a project switch closes the PR brief and its popover, the pre-flight, the 
 });
 
 // The left panel and the part's sheet (#385): what opens where.
+/** @returns {import("../../dist/map-model.js").PanelContent} */
 const story = (session) => ({ kind: "story", session });
 const wide = 1900;
 const narrow = 1000;
@@ -123,6 +125,7 @@ test("below 1007 px only one overlay is open: the panel closes the sheet, and th
 });
 
 test("the widened diff closes the part's sheet, and a sheet opened over it closes the diff", () => {
+  /** @type {import("../../dist/map-model.js").PanelContent} */
   const diff = { kind: "diff", session: "s1", turn: 2 };
   assert.deepEqual(withPanel({ panel: story("s1"), sheet: "core" }, diff, wide), { panel: diff, sheet: null });
   assert.deepEqual(withSheet({ panel: diff, sheet: null }, "hook", wide), { panel: null, sheet: "hook" });
@@ -208,6 +211,7 @@ test("a part's sheet gives its purpose, then each held item with its key files, 
 });
 
 test("a part's sheet names it, lists its laws by backing, and offers the three tiers with the effective one pressed", () => {
+  /** @type {import("../../dist/map-model.js").Law[]} */
   const laws = [
     { id: "l1", on: "core", backing: "check", text: "Reads no file." },
     { id: "l2", on: "core", backing: "trust", text: "Applies in order." },
@@ -247,11 +251,13 @@ test("a sheet's marks explain themselves: the newest thick fog entry with its PR
   // Thin fog: the newest entry; one with no PR names its commit.
   assert.deepEqual(sheetMarks("core", "thin", entries.slice(1), undefined, null).fog, { line: "Thin fog from commit 3333333: 1 file", more: 1 });
   // An entry filed before #495 has neither PR nor why: its strength and commit.
+  // @ts-expect-error an entry of an older shape, without the fields #495 added
   assert.deepEqual(sheetMarks("core", "thin", [{ commit: "4".repeat(40), strength: "thin" }], undefined, null).fog, { line: "Thin fog from commit 4444444", more: 0 });
   // A part whose fog does not show at its tier says nothing of it.
   assert.equal(sheetMarks("core", undefined, entries, undefined, null).fog, null);
   const line = "3 weeks or more: not engaged since tracking began on 2026-10-01";
   assert.equal(sheetMarks("core", undefined, [], line, null).stale, line);
+  /** @type {import("../../dist/types.js").Ci} */
   const ci = { status: "broken", run_url: null, commit: null, earlier: false, parts: ["core"], laws: ["wire-types-agree"], tail: "", note: null, at: "2026-11-24T10:00:00Z" };
   const broken = sheetMarks("core", undefined, [], undefined, ci).broken;
   assert.equal(broken, "A check behind a law of this part failed in main's latest CI, 2026-11-24");
@@ -319,6 +325,7 @@ test("the parts' tab order reads the map top to bottom, then left to right, a ro
 });
 
 // Spec #473, "The sheet's links and the drawing": one list of links on the sheet, one line per pair on the map.
+/** @type {import("../../dist/map-model.js").MapLink[]} */
 const pairLinks = [
   { id: "hook-server", from: "hook", to: "server", kind: "import" },
   { id: "server-hook", from: "server", to: "hook", kind: "http", reason: "The server asks the hook for its log." },

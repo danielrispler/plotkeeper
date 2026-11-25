@@ -10,6 +10,7 @@ globalThis.document = fakeDocument();
 const { suggestions, whyNotElement } = await import("../../dist/ask.js");
 
 test("each anchor type offers two or three suggested questions", () => {
+  /** @type {import("../../dist/ask.js").Anchor[]} */
   const anchors = [
     { kind: "file", turn: 0, root: "/r", path: "a.rs" },
     { kind: "check", agent: null, call: "c" },
@@ -24,7 +25,8 @@ const whole = (node) => node.text;
 
 test("why didn't it touch Z shows the recorded facts first and the possible reasons folded and labelled", () => {
   const facts = { sections: [{ label: "Read it", facts: [{ at: null, text: "Read /r/z.rs" }] }] };
-  const out = whyNotElement("z.rs", { facts, reasons: "Perhaps it was not needed." });
+  // The stand-in DOM's nodes, read as such.
+  const out = /** @type {any} */ (whyNotElement("z.rs", { facts, reasons: "Perhaps it was not needed." }));
   const [recorded, reasons] = [out.children[0], out.children[out.children.length - 1]];
   assert.equal(recorded.text, "Read it");
   assert.equal(reasons.tag, "details");
@@ -47,7 +49,7 @@ test("Ask on a renamed file reads the hunk with the file's old path", async () =
   const calls = [];
   tauri(calls, (command) => (command === "ask_facts" ? { sections: [] } : null));
   const { askAnchor } = await import("../../dist/ask.js");
-  const node = askAnchor("s1", { kind: "file", turn: 3, root: "/r", path: "new.rs", from: "old.rs" }, "the file new.rs");
+  const node = /** @type {any} */ (askAnchor("s1", { kind: "file", turn: 3, root: "/r", path: "new.rs", from: "old.rs" }, "the file new.rs"));
   node.open = true;
   node.listeners.toggle();
   await new Promise((done) => setTimeout(done));

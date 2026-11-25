@@ -46,13 +46,14 @@ test("patching by key keeps the slot's card when rows above it change (C11)", as
 // an earlier ask's, and leaves this ask waiting.
 test("an earlier ask's late close does not answer the confirm opened after it", async () => {
   const { confirmed } = await import("../../dist/dom.js");
-  class Dialog extends Field {}
+  /** @type {any} */
+  const Dialog = class Dialog extends Field {};
   globalThis.HTMLDialogElement = Dialog;
   const form = { onsubmit: null };
   const dialog = Object.assign(new Dialog("dialog"), { open: false, querySelector: () => form, showModal: () => (dialog.open = true) });
   const fields = new Map([["confirm-dialog", dialog]]);
   const was = document.getElementById;
-  document.getElementById = (id) => (fields.has(id) ? fields.get(id) : fields.set(id, new Field("div")).get(id));
+  document.getElementById = /** @type {any} */ ((id) => (fields.has(id) ? fields.get(id) : fields.set(id, new Field("div")).get(id)));
   try {
     const ask = { heading: "Remove?", lost: "The key.", verb: "Remove" };
     const first = confirmed(ask);
@@ -73,8 +74,10 @@ test("an earlier ask's late close does not answer the confirm opened after it", 
 // types, not later as a missing method.
 test("element with a type returns that type and names a wrong one", async () => {
   const { element } = await import("../../dist/dom.js");
-  class Dialog extends Field {}
-  class Input extends Field {}
+  /** @type {any} */
+  const Dialog = class Dialog extends Field {};
+  /** @type {any} */
+  const Input = class Input extends Field {};
   const dialog = new Dialog("dialog");
   const was = document.getElementById;
   document.getElementById = (id) => (id === "confirm-dialog" ? dialog : null);

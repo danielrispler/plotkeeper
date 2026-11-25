@@ -39,9 +39,12 @@ export interface Files {
   broken: boolean;
 }
 
+const writerKinds: readonly WriterKind[] = ["claude", "agy", "codex", "copilot", "cursor", "anthropic", "openai"];
+const isWriterKind = (value: unknown): value is WriterKind => writerKinds.some((kind) => kind === value);
 // The writer the file names, or undefined, reporting a name that is none of them.
 function writerKind(value: unknown, report: (line: string) => void): WriterKind | undefined {
-  if (value === undefined || value === "claude" || value === "agy" || value === "codex" || value === "copilot" || value === "cursor" || value === "anthropic" || value === "openai") return value;
+  if (value === undefined) return undefined;
+  if (isWriterKind(value)) return value;
   report('summaries.writer: expected "claude", "agy", "codex", "copilot", "cursor", "anthropic" or "openai"');
   return undefined;
 }

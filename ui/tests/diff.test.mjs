@@ -6,8 +6,12 @@ import { El, fakeDocument, tauri } from "./dom.mjs";
 globalThis.document = fakeDocument();
 const { diffLines, drawDiff, keepsDiff, newestDiff } = await import("../../dist/diff.js");
 
-const file = (path, added, removed, extra = {}) => ({ root: "/r", path, from: null, added, removed, ...extra });
-const turn = (files) => ({ files: files && { files }, checks: [] });
+// A file without its `agent`, which the pane does not read.
+/** @returns {import("../../dist/types.js").TurnFile} */
+const file = (path, added, removed, extra = {}) => /** @type {any} */ ({ root: "/r", path, from: null, added, removed, ...extra });
+// A turn with only its files and checks; the rest of a `Turn` is left out.
+/** @returns {import("../../dist/types.js").Turn} */
+const turn = (files) => /** @type {any} */ ({ files: files && { files }, checks: [] });
 
 test("a hunk's lines are classified for the tint, with the sign kept in the text", () => {
   const lines = diffLines("diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1,2 @@\n ctx\n-old\n+new\n");
@@ -59,7 +63,7 @@ test("a turn with no files says so, and draws no external line", () => {
 
 test("the head counts the files and shows \"+N merged\" for the files a merge brought in", () => {
   const place = new El("div");
-  const merged = { files: { files: [file("a.rs", 1, 0)], merged: 2 }, checks: [] };
+  const merged = { ...turn([file("a.rs", 1, 0)]), files: { files: [file("a.rs", 1, 0)], merged: 2 } };
   drawDiff(place, { id: "s", turns: [merged] }, 0, () => {});
   assert.match(place.text, /1 file · \+2 merged/);
   const plain = new El("div");

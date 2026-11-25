@@ -123,7 +123,6 @@ class FieldStandIn extends StandIn {
   dir = "";
 }
 
-// A document whose elements are `Element`s, for `globalThis.document`; `extra` adds or replaces members.
 // The stand-ins as the tests see them: any, at this one boundary, since they stand in for the DOM's types without being them, so a
 // test may hand one to the page's code typed with the real ones (#554).
 /** @type {any} */
@@ -133,6 +132,7 @@ export const El = StandIn;
 /** @type {any} */
 export const Field = FieldStandIn;
 
+// A document whose elements are `Element`s, for `globalThis.document`; `extra` adds or replaces members.
 /** @returns {any} */
 export const fakeDocument = (extra = {}, Element = El) => ({
   createElement: (tag) => new Element(tag),
@@ -143,8 +143,12 @@ export const fakeDocument = (extra = {}, Element = El) => ({
 });
 
 // Installs `window.__TAURI__` so that every `invoke` is recorded in `calls` as `[command, args]` and answers `reply(command, args)`.
+/**
+ * @param {unknown[][]} calls
+ * @param {(command: string, args?: any) => unknown} [reply]
+ */
 export const tauri = (calls, reply = () => null) => {
-  globalThis.window = {
+  globalThis.window = /** @type {any} */ ({
     __TAURI__: {
       core: {
         // biome-ignore lint/suspicious/useAwait: a stand-in for an async API, so a throw in `reply` rejects as the real one's would
@@ -154,5 +158,5 @@ export const tauri = (calls, reply = () => null) => {
         },
       },
     },
-  };
+  });
 };

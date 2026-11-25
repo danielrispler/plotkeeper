@@ -3,6 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { awaitedCatchUp, fogActions, fogListLines, stageLabel } from "../../dist/map-model.js";
 
+/** @returns {import("../../dist/types.js").CatchUpOffer} */
 const catchUp = (extra = {}) => ({ kind: "catch-up", ready: false, writing: false, failed: false, ...extra });
 
 test("a fogged part's sheet shows its part catch-up as the main button and \"I know this\" as the second", () => {

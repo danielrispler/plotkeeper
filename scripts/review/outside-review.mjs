@@ -208,6 +208,10 @@ Report only defects you can tie to a line the change adds or edits. Give each on
 `;
 
 /** How `agy` is run for the review: hidden from Studio, never recorded (`PLOTKEEPER_INTERNAL`), cut at 15 minutes, answering in SCHEMA. */
+/**
+ * @param {any} opts
+ * @param {{ schema?: unknown; prompt?: string; env: NodeJS.ProcessEnv }} call
+ */
 export const agyCall = (opts, { schema, prompt, env }) => {
   const { PLOTKEEPER_TERMINAL_ID: _, ...rest } = env;
   const args = ["--model", opts.model, "--print-timeout", `${TIMEOUT_MINUTES}m`];
@@ -216,6 +220,7 @@ export const agyCall = (opts, { schema, prompt, env }) => {
 
 // The verdict of a finished `agy` run. `reads` is how many reads the hook allowed: with none, the
 // reviewer saw no file (a broken hook denies every tool), so its empty answer is no review.
+/** @param {{ status: number | null; missing?: boolean; stdout: string; stderr: string; reads: number }} run */
 export const outcome = ({ status, missing, stdout, stderr, reads }) => {
   const unavailable = (reason) => ({ line: `review unavailable: ${reason}`, exit: 0 });
   if (missing) return unavailable("agy is not installed");
@@ -283,7 +288,7 @@ const spawned = (args, more, limit, started) =>
     child.stderr.on("data", (data) => (out.stderr += data));
     child.on("error", (error) => {
       clearTimeout(timer);
-      done({ ...out, status: null, missing: error.code === "ENOENT" });
+      done({ ...out, status: null, missing: /** @type {NodeJS.ErrnoException} */ (error).code === "ENOENT" });
     });
     child.on("close", (status) => {
       clearTimeout(timer);

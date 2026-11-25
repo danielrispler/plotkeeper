@@ -12,8 +12,9 @@
     "start": "npm run build && cargo install --locked --path hook && cargo install --locked --path server && plotkeeper",
     "pack:npm": "sh scripts/npm/pack.sh",
     "smoke:npm": "sh scripts/npm/smoke.sh",
-    "test": "tsc && npm run test:node",
-    "test:node": "node --test ui/tests/*.test.mjs",
+    "test": "npm run test:node",
+    "test:node": "npm run build && npm run test:types && node --test ui/tests/*.test.mjs",
+    "test:types": "tsc -p ui/tests",
     "check": "cargo fmt --all --check && npm run lint && npm run build && cargo clippy --locked --workspace --all-targets -- -D warnings && rm -f scripts/wire/*.ts && cargo nextest run --locked --workspace && cargo run --locked -q -p studio-system-map -- check && tsc -p scripts/wire && npm run test:node"
   },
   "devDependencies": {

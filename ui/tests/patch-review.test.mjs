@@ -60,7 +60,7 @@ test("the law's newest patch decides: being proven, rejected with why and Dismis
 
 test("the review shows the law, the new test, the test patch and both outputs, with Open draft PR and Discard", async () => {
   const calls = [];
-  const nodes = reviewNodes(proven(), "Events apply in order.", acts(calls));
+  const nodes = /** @type {any[]} */ (reviewNodes(proven(), "Events apply in order.", acts(calls)));
   const all = texts(nodes);
   assert.match(all, /Events apply in order\./);
   assert.match(all, /events_apply_in_order in core\/tests\/order\.rs/);
@@ -94,7 +94,7 @@ test("an opened patch says its draft PR, and offers no second run", () => {
   const opened = patch("r4", "opened", { at: 4, pr: 412, url: "https://github.com/someone/app/pull/412" });
   assert.deepEqual(lawAction("core-order", [proven(), opened]), { law: "core-order", kind: "opened", id: "r4", pr: 412, url: "https://github.com/someone/app/pull/412" });
   const calls = [];
-  const nodes = lawActionNodes(lawAction("core-order", [opened]), acts(calls));
+  const nodes = /** @type {any[]} */ (lawActionNodes(lawAction("core-order", [opened]), acts(calls)));
   assert.match(texts(nodes), /Draft PR #412 opened/);
   assert.equal(button(nodes, "Back a law"), undefined);
   const link = nodes.flatMap((node) => [node, ...node.find("a")]).find((node) => node.tag === "a");
@@ -120,6 +120,7 @@ test("the outcome of Open draft PR is said in one line", () => {
 
 // ---- Guard with a law (#401): a row of a bug fix's brief, beside Ratify.
 
+/** @type {import("../../dist/map-model.js").Law[]} */
 const laws = [
   { id: "core-order", on: "core", backing: "trust", text: "Events apply in order." },
   { id: "core-backed", on: "core", backing: "check", text: "Backed already." },
@@ -136,7 +137,7 @@ test("Guard with a law offers backing an on-trust law of a part the PR touched, 
   assert.deepEqual(offer.back.map((law) => law.id), ["core-order"], "on trust and on a touched part only");
   assert.deepEqual(offer.added.map((p) => p.id), ["n1"], "the new laws this PR's guard started");
   const calls = [];
-  const row = guardNodes(offer, [], guardActs(calls));
+  const row = /** @type {any} */ (guardNodes(offer, [], guardActs(calls)));
   assert.match(row.text, /Guard with a law/);
   assert.match(row.text, /Events apply in order\./);
   assert.match(row.text, /A new one\./);
@@ -156,10 +157,12 @@ test("a new law's rejected run offers Dismiss, not a back a law run of a law the
 test("the drafted sentence is shown for confirmation, and the edited one is what starts the run", () => {
   const calls = [];
   const draft = { id: "core-keeps-order", on: "core", text: "Events never reorder." };
-  const nodes = confirmNodes(draft, [{ id: "core", name: "Core" }, { id: "hook", name: "Hook" }], null, {
-    start: (law) => calls.push(["start", law]),
-    cancel: () => calls.push(["cancel"]),
-  });
+  const nodes = /** @type {any[]} */ (
+    confirmNodes(draft, [{ id: "core", name: "Core" }, { id: "hook", name: "Hook" }], null, {
+      start: (law) => calls.push(["start", law]),
+      cancel: () => calls.push(["cancel"]),
+    })
+  );
   const fields = nodes.flatMap((node) => [...node.find("input"), ...node.find("textarea"), ...node.find("select")]);
   const sentence = fields.find((field) => field.tag === "textarea");
   assert.equal(sentence.value, "Events never reorder.", "the writer's draft, to confirm or edit");
@@ -204,6 +207,8 @@ test("a run that cannot start, whose prompt the clipboard refuses, shows the pro
   const box = new El("section");
   globalThis.document = fakeDocument({ getElementById: (id) => (id === "map-patch-review" ? box : new El("div")) });
   tauri([], (command) => (command === "back_a_law" ? { kind: "refused", line: "srt is not installed", prompt: "Write a test for core-order…" } : null));
+  // A map view holding only the fields the guard row reads.
+  /** @type {any} */
   const view = {
     project: "/w/app",
     scrub: null,
@@ -221,7 +226,7 @@ test("a run that cannot start, whose prompt the clipboard refuses, shows the pro
 });
 
 test("each output scrolls on its own, so it takes focus with the name of its heading (#462)", () => {
-  const nodes = reviewNodes(proven(), "Events apply in order.", acts([]));
+  const nodes = /** @type {any[]} */ (reviewNodes(proven(), "Events apply in order.", acts([])));
   const outputs = nodes.filter((node) => node.className === "patch-output");
   assert.equal(outputs.length, 2);
   for (const output of outputs) assert.equal(output.getAttribute("tabindex"), "0");

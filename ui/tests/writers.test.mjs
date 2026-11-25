@@ -15,6 +15,7 @@ const openai = (found) => ({ kind: "openai", name: "OpenAI-compatible API", foun
 // writer's, when one is set.
 const list = (writers, summaries_on = false, briefs = true, keys = writers.filter((w) => w.kind === "anthropic" && w.found).map((w) => w.kind), base_url = null) =>
   ({ writers, summaries_on, briefs, keys, base_url });
+/** @param {import("../../dist/types.js").WriterKind} [writer] */
 const settings = (writer = "claude", model = "haiku", effort = "") => ({ model, effort, on_open: false, writer });
 
 test("the list shows every writer, and one that was not found cannot be picked", () => {
@@ -56,7 +57,7 @@ test("Copilot and Cursor are listed and picked as the others are, and a model ei
 
 test("each Test outcome is its line, passed or failed", () => {
   assert.deepEqual(testLine({ outcome: "passed", line: "Passed: `agy` answered. Summaries are written with it.", settings: "{}" }), { passed: true, text: "Passed: `agy` answered. Summaries are written with it." });
-  for (const outcome of ["not_logged_in", "quota", "timeout", "not_installed", "empty", "other"]) {
+  for (const outcome of /** @type {import("../../dist/types.js").WriterOutcome[]} */ (["not_logged_in", "quota", "timeout", "not_installed", "empty", "other"])) {
     const line = testLine({ outcome, line: "`claude` is not logged in. Run `claude` in a terminal and log in with /login.", settings: null });
     assert.equal(line.passed, false, outcome);
     assert.match(line.text, /^Failed: /, outcome);

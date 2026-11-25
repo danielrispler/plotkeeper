@@ -4,12 +4,12 @@ import assert from "node:assert/strict";
 
 const lines = [];
 const listeners = {};
-globalThis.window = {
+globalThis.window = /** @type {any} */ ({
   __TAURI__: { log: { warn: async (m) => void lines.push(["warn", m]), error: async (m) => void lines.push(["error", m]) } },
   addEventListener: (type, handler) => {
     listeners[type] = handler;
   },
-};
+});
 const { failure, logUncaught } = await import("../../dist/dom.js");
 const last = () => lines[lines.length - 1];
 

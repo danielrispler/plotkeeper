@@ -37,9 +37,12 @@ test("the stub is injected before the app's module script, and the fixture is no
 
 test("the list fixture has a nested, a selected and a landed row", () => {
   const f = fixtures.list();
-  assert.ok(f.sessions.some((s) => s.agents.length > 0));
-  assert.ok(f.sessions.some((s) => s.landed));
-  assert.equal(f.selected.session.id, f.sessions[0].id);
+  // This fixture answers by value, not by an argument.
+  const sessions = /** @type {import("../../dist/types.js").Session[]} */ (f.sessions);
+  const selected = /** @type {import("../../dist/types.js").Selection} */ (f.selected);
+  assert.ok(sessions.some((s) => s.agents.length > 0));
+  assert.ok(sessions.some((s) => s.landed));
+  assert.equal(selected.session.id, sessions[0].id);
 });
 
 // The rail's fixtures (#109): each holds what its state needs.

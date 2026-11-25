@@ -12,6 +12,7 @@ test("durations read in seconds, minutes, then hours and minutes", () => {
 });
 
 test("a running check shows its time against its typical time; an ended one how long it took", () => {
+  /** @type {import("../../dist/types.js").ListedCheck} */
   const line = { statement: "cargo run --bin ci-checks", status: "running", started_at: 0, ended_at: null, typical_ms: 7 * MIN };
   assert.equal(checkTime(line, 3 * MIN + 10_000), "3m of usually 7m");
   assert.equal(checkTime({ ...line, typical_ms: null }, 3 * MIN), "3m");
@@ -22,12 +23,14 @@ test("a running check shows its time against its typical time; an ended one how 
 const drawn = (parts, now) => parts.map(([title, draw]) => [draw(now), title]);
 
 test("the times count running spans to now, each labelled with hover text, empty in their first minute, and stop an ended session at its last event", () => {
+  /** @type {Pick<import("../../dist/types.js").Session, "state" | "started_at" | "last_event_at" | "turn_span">} */
   const session = { state: "running", started_at: 0, last_event_at: 30 * MIN, turn_span: { start: 50 * MIN, end: null } };
   assert.deepEqual(drawn(times(session, { start: 61 * MIN, end: null }), 61 * MIN + 45_000), [
     ["Session 1h 01m", "Time since the session started"],
     ["Turn 11m", "Time on the current prompt"],
     ["", "Time on the current step"],
   ]);
+  /** @type {typeof session} */
   const ended = { ...session, state: "ended", turn_span: { start: 10 * MIN, end: 20 * MIN } };
   assert.deepEqual(drawn(times(ended, null), 999 * MIN), [
     ["Session 30m", "Time since the session started"],

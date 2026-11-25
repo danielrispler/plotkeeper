@@ -41,7 +41,10 @@ test("a summary whose write throws leaves no unhandled rejection and the next on
 
 const html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const rail = html.slice(html.indexOf('<aside class="rail"'), html.indexOf("</aside>"));
-const turn = (started_at, prompt) => ({ started_at, ended_at: null, prompt, id: null, message: null });
+// A turn, a question, a summary and a blocked card as the core sends them, less the fields the feed never reads.
+const turn = (started_at, prompt) => /** @type {import("../../dist/types.js").Turn} */ ({ started_at, ended_at: null, prompt, id: null, message: null });
+/** @param {Partial<import("../../dist/types.js").Question>} fields */
+const question = (fields) => /** @type {import("../../dist/types.js").Question} */ (fields);
 
 test("the rail is the dock, the intention and the feed; the newest card is inside its turn", () => {
   const order = ["dock", "now-asked", "intention", "feed"].map((id) => rail.indexOf(`id="${id}"`));
@@ -60,8 +63,8 @@ test("an event id's time places it in a turn, as a design line's citation of an 
 
 test("turns render newest first, each with its subagents and questions", () => {
   const turns = [turn(10, "Fix the parser"), turn(20, "worker w1 returned"), turn(30, "Open the PR")];
-  const agents = [{ id: "w1", started_at: 11, turn: 0 }];
-  const questions = [{ tool_use_id: "q1", answer: "not_answered", turn: 1 }];
+  const agents = [/** @type {import("../../dist/types.js").Subagent} */ ({ id: "w1", started_at: 11, turn: 0 })];
+  const questions = [question({ tool_use_id: "q1", answer: "not_answered", turn: 1 })];
   const feed = feedTurns(turns, { agents, questions });
   assert.deepEqual(feed.map((b) => b.turn.prompt), ["Open the PR", "worker w1 returned", "Fix the parser"]);
   assert.deepEqual(feed[1].questions.map((q) => q.tool_use_id), ["q1"]);
@@ -69,14 +72,14 @@ test("turns render newest first, each with its subagents and questions", () => {
 });
 
 test("what started in no turn, such as a subagent's question, goes in one last block", () => {
-  const feed = feedTurns([], { agents: [], questions: [{ tool_use_id: "q1", answer: "not_answered", turn: null }] });
+  const feed = feedTurns([], { agents: [], questions: [question({ tool_use_id: "q1", answer: "not_answered", turn: null })] });
   assert.equal(feed.length, 1);
   assert.equal(feed[0].turn, null);
   assert.deepEqual(feed[0].questions.map((q) => q.tool_use_id), ["q1"]);
   assert.deepEqual(feedTurns([], { agents: [], questions: [] }), []);
 });
 
-const summary = { summary: { summary: "Fixed the lint.\nThe test reads the token.\nNot checked: the strip.", quiz: null } };
+const summary = /** @type {import("../../dist/types.js").TurnSummary} */ ({ summary: { summary: "Fixed the lint.\nThe test reads the token.\nNot checked: the strip.", quiz: null } });
 
 test("a stored summary is a Headline and reported lines; with none, the final response's first line", () => {
   assert.deepEqual(headlineOf(summary, "Fixed it, mostly."), {
@@ -91,7 +94,7 @@ test("a stored summary is a Headline and reported lines; with none, the final re
 });
 
 test("a summary with a Headline and typed lines gives them as they are, and a stripped Headline gives the response's first line", () => {
-  const typed = (headline) => ({
+  const typed = (headline) => /** @type {import("../../dist/types.js").TurnSummary} */ ({
     summary: { summary: "x", headline, lines: [{ kind: "open", text: "Nobody looked." }, { kind: "ask", text: "Merge it?" }], quiz: null },
   });
   assert.deepEqual(headlineOf(typed("Agent says: fixed the overlay."), "Done."), {
@@ -118,7 +121,7 @@ test("what now holds in each state", () => {
   assert.equal(done.body.length, 2);
   assert.ok(done.fullResponse);
   // Idle and ended read like your turn; with no summary, the response's first line is the Headline.
-  for (const state of ["idle", "ended"]) assert.equal(nowOf(state, turn, null).headline, "Done.");
+  for (const state of /** @type {const} */ (["idle", "ended"])) assert.equal(nowOf(state, turn, null).headline, "Done.");
 });
 
 test("the block a session needs Daniel for is named by its kind", () => {
@@ -141,7 +144,7 @@ test("a folded turn's line holds the prompt and Headline, and a mark for a faile
 });
 
 // A blocked command's card with no button is in the turn of its latest step: its retry's start, else its block.
-const blocked = (call, at, extra = {}) => ({ call, command: "ls", cwd: "/r", reason: "r", agent: null, at, status: "allowed", ...extra });
+const blocked = (call, at, extra = {}) => /** @type {import("../../dist/types.js").BlockedCommand} */ ({ call, command: "ls", cwd: "/r", reason: "r", agent: null, at, status: "allowed", ...extra });
 const placedCalls = (feed) => feed.map((b) => [b.index, b.blocked.map((c) => c.call)]);
 
 test("a blocked card is in the turn it was blocked in, also once its retry ran in that turn", () => {

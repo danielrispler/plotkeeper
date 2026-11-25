@@ -995,7 +995,9 @@ fn camel(name: &str) -> String {
 /// names, from a value with every field filled.
 fn command_arguments() -> Vec<(String, Vec<String>)> {
     let api = include_str!("../src/api.rs");
-    let body = &api[api.find("match name {").expect("api::call matches on the name")..];
+    let body = &api[api
+        .find("match name {")
+        .expect("api::call matches on the name")..];
     let whole: Vec<String> = match json(studio_server::map::PrDiffArgs {
         project: String::new(),
         number: 0,
@@ -1025,13 +1027,18 @@ fn command_arguments() -> Vec<(String, Vec<String>)> {
             continue;
         };
         if line.contains("whole(a)") {
-            assert_eq!(command, "pr_diff", "a new command reads its arguments whole: give its type here");
+            assert_eq!(
+                command, "pr_diff",
+                "a new command reads its arguments whole: give its type here"
+            );
             names.extend(whole.iter().map(|name| camel(name)));
         }
         let mut rest = line;
         while let Some(at) = rest.find("(a, \"") {
             rest = &rest[at + 5..];
-            let end = rest.find('"').expect("an argument's name is a string literal");
+            let end = rest
+                .find('"')
+                .expect("an argument's name is a string literal");
             names.push(camel(&rest[..end]));
             rest = &rest[end..];
         }
@@ -1051,7 +1058,9 @@ fn command_arguments() -> Vec<(String, Vec<String>)> {
 fn the_command_arguments_are_written_for_tsc() {
     let commands = command_arguments();
     assert!(
-        commands.iter().any(|(c, names)| c == "subagent_log" && names == &["agentId", "offset", "session"]),
+        commands
+            .iter()
+            .any(|(c, names)| c == "subagent_log" && names == &["agentId", "offset", "session"]),
         "the reading found the arms: {commands:?}"
     );
     let mut ts = String::from(
@@ -1063,7 +1072,11 @@ fn the_command_arguments_are_written_for_tsc() {
         let names = if names.is_empty() {
             "never".to_string()
         } else {
-            names.iter().map(|n| format!("\"{n}\"")).collect::<Vec<_>>().join(" | ")
+            names
+                .iter()
+                .map(|n| format!("\"{n}\""))
+                .collect::<Vec<_>>()
+                .join(" | ")
         };
         ts.push_str(&format!("  {command}: {names};\n"));
     }
@@ -1083,6 +1096,7 @@ fn the_command_arguments_are_written_for_tsc() {
         }
     }
     ts.push_str("};\n");
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../scripts/wire/server-args.ts");
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../scripts/wire/server-args.ts");
     std::fs::write(&path, ts).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
 }

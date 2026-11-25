@@ -3,6 +3,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+/** @typedef {import("../../dist/types.js").Session} Session */
+/** @typedef {import("../../dist/types.js").Question} Question */
 import { chipText, clearing, CLEAR_WINDOW_MS, landedToClear, landedWord, listSpace, secondLine, showsLanded, sidebarSessions, status, stripLabels } from "../../dist/list.js";
 
 test("each state has its glyph and a word for its title and accessible name", () => {
@@ -43,23 +45,24 @@ test("a row with blocked commands waiting reads how many, ahead of the step but 
   assert.equal(secondLine(row("running", cards("allowed"))), "Edit src/lib.rs");
   assert.equal(secondLine(row("running", cards("declined"))), "Edit src/lib.rs");
   assert.equal(secondLine(row("ended", cards("blocked"))), null);
-  const asked = { tool_use_id: "t", agent: null, answer: "open", questions: [{ question: "Which name?", options: [] }] };
+  const asked = /** @type {Question} */ ({ tool_use_id: "t", agent: null, answer: "open", questions: [{ question: "Which name?", options: [] }] });
   assert.equal(secondLine({ ...row("needs_you", cards("blocked")), questions: [asked] }), "Which name?");
 });
 
 test("only running and needs-you rows get a second line: the step, or the question's first line", () => {
-  const asked = { tool_use_id: "t", agent: null, answer: "open", questions: [{ question: "Which name?\nMore detail", options: [] }] };
-  const done = { ...asked, answer: { answered: {} }, questions: [{ question: "Old", options: [] }] };
+  const asked = /** @type {Question} */ ({ tool_use_id: "t", agent: null, answer: "open", questions: [{ question: "Which name?\nMore detail", options: [] }] });
+  const done = /** @type {Question} */ ({ ...asked, answer: { answered: {} }, questions: [{ question: "Old", options: [] }] });
   assert.equal(secondLine({ state: "running", line: "Edit src/lib.rs", questions: [] }), "Edit src/lib.rs");
   assert.equal(secondLine({ state: "needs_you", line: "Bash ls · 3m", questions: [done, asked] }), "Which name?");
   // A plan or permission has no question: the row's line says who asks.
   assert.equal(secondLine({ state: "needs_you", line: "Bash ls · 3m", questions: [done] }), "Bash ls · 3m");
   // A redacted question with no text falls back too.
+  // @ts-expect-error a redacted question has no text, which the wire type does not allow
   assert.equal(secondLine({ state: "needs_you", line: "Bash ls · 3m", questions: [{ ...asked, questions: [{ options: [] }] }] }), "Bash ls · 3m");
-  for (const state of ["your_turn", "idle", "ended"]) assert.equal(secondLine({ state, line: "Done.", questions: [] }), null);
+  for (const state of /** @type {const} */ (["your_turn", "idle", "ended"])) assert.equal(secondLine({ state, line: "Done.", questions: [] }), null);
 });
 
-const session = (id, name, folder = name, issue = null) => ({ id, name: null, folder_name: folder, identity: { issue, name } });
+const session = (id, name, folder = name, issue = null) => /** @type {Session} */ ({ id, name: null, folder_name: folder, identity: { issue, name } });
 
 test("the strip's labels come from the names and are distinct when names share a prefix", () => {
   const labels = stripLabels([
@@ -83,7 +86,7 @@ test("the chip counts needs you only, and hides at zero", () => {
 
 test("a landed task's session at your turn, idle or ended shows a check mark and its word instead of its dot or ring", () => {
   assert.equal(landedWord, "Landed — safe to delete");
-  for (const state of ["your_turn", "idle", "ended"]) {
+  for (const state of /** @type {const} */ (["your_turn", "idle", "ended"])) {
     assert.deepEqual(status(state, false, true), ["check", "Landed — safe to delete"]);
     // Even unseen: the mark replaces the filled dot.
     assert.deepEqual(status(state, true, true), ["check", "Landed — safe to delete"]);
@@ -101,7 +104,7 @@ test("a landed task's session at your turn, idle or ended shows a check mark and
 test("second lines by state: the question, the Intention, the last Headline, and none for the rest", () => {
   const headline = (s) => (s.turns.length ? `Headline of ${s.id}` : null);
   const row = (id, state, extra = {}) => ({ id, state, line: "Edit src/lib.rs", questions: [], unseen: false, landed: false, turns: [{}], transcript: { intention: null }, ...extra });
-  const asked = { tool_use_id: "t", agent: null, answer: "open", questions: [{ question: "Which name?", options: [] }] };
+  const asked = /** @type {Question} */ ({ tool_use_id: "t", agent: null, answer: "open", questions: [{ question: "Which name?", options: [] }] });
   assert.equal(secondLine(row("n", "needs_you", { questions: [asked] }), headline), "Which name?");
   assert.equal(secondLine(row("r", "running", { transcript: { intention: "Make the rows reachable by keyboard." } }), headline), "Make the rows reachable by keyboard.");
   // Before its Intention is known, a running row shows its step.
@@ -112,17 +115,17 @@ test("second lines by state: the question, the Intention, the last Headline, and
   assert.equal(secondLine(row("u", "your_turn", { unseen: true, turns: [] }), headline), null);
   // A landed row reads as landed, not unseen; seen, idle and ended rows have none.
   assert.equal(secondLine(row("l", "your_turn", { unseen: true, landed: true }), headline), null);
-  for (const state of ["your_turn", "idle", "ended"]) assert.equal(secondLine(row("s", state), headline), null);
+  for (const state of /** @type {const} */ (["your_turn", "idle", "ended"])) assert.equal(secondLine(row("s", state), headline), null);
 });
 
 // Clear landed at the list's end (#382, #244): it hides the landed rows, Undo brings them back, and nothing is deleted inside the window.
 test("Clear landed hides the landed rows, Undo restores them, and nothing is deleted inside the window", () => {
-  const listed = [
+  const listed = /** @type {Session[]} */ ([
     { id: "r", state: "running", landed: false },
     { id: "a", state: "idle", landed: true },
     { id: "b", state: "your_turn", landed: true },
     { id: "e", state: "ended", landed: true },
-  ];
+  ]);
   const ids = (sessions) => sessions.map((s) => s.id);
   let due = null;
   const time = { set: (run) => (due = run), clear: () => (due = null) };
@@ -190,7 +193,7 @@ function clearMachine(sessions) {
   });
   return { m, time, live, deleted, pending, written, commits };
 }
-const live = (id, state, extra = {}) => ({ id, state, unseen: false, landed: false, turns: [], questions: [], transcript: {}, ...extra });
+const live = (id, state, extra = {}) => /** @type {Session} */ ({ id, state, unseen: false, landed: false, turns: [], questions: [], transcript: {}, ...extra });
 const landed = (id) => live(id, "idle", { landed: true });
 
 test("Clear hides every landed row, and the window's end deletes each once", () => {

@@ -5,12 +5,12 @@ import assert from "node:assert/strict";
 const requests = [];
 let reply = { ok: true, body: null };
 // biome-ignore lint/suspicious/useAwait: a stand-in for an async API, so a throw in it rejects as the real one's would
-globalThis.fetch = async (url, init) => {
+globalThis.fetch = /** @type {any} */ (async (url, init) => {
   requests.push([url, init.method, JSON.parse(init.body)]);
   return { ok: reply.ok, status: reply.ok ? 200 : 500, json: async () => reply.body };
-};
+});
 const sources = [];
-globalThis.EventSource = class {
+globalThis.EventSource = /** @type {any} */ (class {
   handlers = {};
   constructor(url) {
     this.url = url;
@@ -22,10 +22,11 @@ globalThis.EventSource = class {
   removeEventListener(name, handler) {
     this.handlers[name] = (this.handlers[name] ?? []).filter((h) => h !== handler);
   }
-};
-globalThis.document = { visibilityState: "visible", hasFocus: () => true, addEventListener() {} };
+});
+// The page's globals, stood in for with only what transport.ts reads.
+globalThis.document = /** @type {any} */ ({ visibilityState: "visible", hasFocus: () => true, addEventListener() {} });
 globalThis.addEventListener = () => {};
-globalThis.window = {};
+globalThis.window = /** @type {any} */ ({});
 await import("../../dist/transport.js");
 const seam = () => window.__TAURI__;
 
