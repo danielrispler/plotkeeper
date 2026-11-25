@@ -66,7 +66,9 @@ test("none when not Running and none with tips off; neither moves the counter", 
 // A store in memory, as `localStorage` would hold it.
 const memory = () => {
   let text = null;
-  return { get: () => text, set: (value) => void (text = value) };
+  return { get: () => text, set: (value) => {
+      text = value;
+    } };
 };
 
 test("one tip per Running stretch: it stays while the session runs, and the next stretch picks again", () => {

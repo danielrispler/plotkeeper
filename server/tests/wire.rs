@@ -977,3 +977,132 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
         &samples,
     );
 }
+
+/// `name` as the page writes it: `agent_id` is `agentId`. `api::call` turns it back.
+fn camel(name: &str) -> String {
+    let mut out = String::new();
+    let mut upper = false;
+    for c in name.chars() {
+        if c == '_' {
+            upper = true;
+        } else if upper {
+            out.push(c.to_ascii_uppercase());
+            upper = false;
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Each command `api::call` answers and the argument names its arm reads, from the source: an arm is a line opening with the command's
+/// name at the arms' indent, and an argument is each `(a, "<name>")` in it. A command whose arguments are one wire type (`whole(a)`) has that type's field
+/// names, from a value with every field filled.
+fn command_arguments() -> Vec<(String, Vec<String>)> {
+    let api = include_str!("../src/api.rs");
+    let body = &api[api
+        .find("match name {")
+        .expect("api::call matches on the name")..];
+    let whole: Vec<String> = match json(studio_server::map::PrDiffArgs {
+        project: String::new(),
+        number: 0,
+        head: String::new(),
+        title: String::new(),
+        parts: Some(Vec::new()),
+        paths: Some(Vec::new()),
+        base: Some(String::new()),
+    }) {
+        serde_json::Value::Object(fields) => fields.keys().cloned().collect(),
+        _ => unreachable!("a struct serializes as an object"),
+    };
+    let mut commands: Vec<(String, Vec<String>)> = Vec::new();
+    // The arms sit at one indent; a `match` inside an arm, such as `log`'s on the level, is deeper.
+    let mut indent = None;
+    for line in body.lines() {
+        let trimmed = line.trim_start();
+        let depth = line.len() - trimmed.len();
+        if let Some(rest) = trimmed.strip_prefix('"')
+            && let Some((name, after)) = rest.split_once('"')
+            && after.trim_start().starts_with("=>")
+            && *indent.get_or_insert(depth) == depth
+        {
+            commands.push((name.to_string(), Vec::new()));
+        }
+        let Some((command, names)) = commands.last_mut() else {
+            continue;
+        };
+        if line.contains("whole(a)") {
+            assert_eq!(
+                command, "pr_diff",
+                "a new command reads its arguments whole: give its type here"
+            );
+            names.extend(whole.iter().map(|name| camel(name)));
+        }
+        let mut rest = line;
+        while let Some(at) = rest.find("(a, \"") {
+            rest = &rest[at + 5..];
+            let end = rest
+                .find('"')
+                .expect("an argument's name is a string literal");
+            names.push(camel(&rest[..end]));
+            rest = &rest[end..];
+        }
+    }
+    for (_, names) in &mut commands {
+        names.sort();
+        names.dedup();
+    }
+    commands
+}
+
+// @law: wire-types-agree
+/// The page's `Commands` (`ui/types.ts`) against the server's handlers (#554): `scripts/wire/server-args.ts` lists each command's
+/// argument names as `api::call` reads them, and `tsc -p scripts/wire` fails when the page has a command the server lacks, lacks one it
+/// has, or names a command's arguments otherwise.
+#[test]
+fn the_command_arguments_are_written_for_tsc() {
+    use std::fmt::Write;
+    let commands = command_arguments();
+    assert!(
+        commands
+            .iter()
+            .any(|(c, names)| c == "subagent_log" && names == &["agentId", "offset", "session"]),
+        "the reading found the arms: {commands:?}"
+    );
+    let mut ts = String::from(
+        "// Written by `server/tests/wire.rs` (#554) from `server/src/api.rs`; `tsc -p scripts/wire` checks it.\n\
+         import type { Args, Command } from \"../../ui/types.ts\";\n\n\
+         // Each command the server answers, with the names of the arguments its handler reads.\ntype Server = {\n",
+    );
+    for (command, names) in &commands {
+        let names = if names.is_empty() {
+            "never".to_string()
+        } else {
+            names
+                .iter()
+                .map(|n| format!("\"{n}\""))
+                .collect::<Vec<_>>()
+                .join(" | ")
+        };
+        writeln!(ts, "  {command}: {names};").expect("a String takes a write");
+    }
+    ts.push_str(
+        "};\n\n\
+         // The commands the transport posts itself, not through `invoke`.\n\
+         type Own = \"log\" | \"page_focus\";\n\
+         type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;\n\
+         // A command with no arguments takes `Record<string, never>`, whose keys are any string.\n\
+         type Names<T> = string extends keyof T ? never : keyof T;\n\
+         export const commands: Same<Command, Exclude<keyof Server, Own>> = true;\n\
+         export const names: { [C in Command]: C extends keyof Server ? Same<Names<Args<C>>, Server[C]> : false } = {\n",
+    );
+    for (command, _) in &commands {
+        if command != "log" && command != "page_focus" {
+            writeln!(ts, "  {command}: true,").expect("a String takes a write");
+        }
+    }
+    ts.push_str("};\n");
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../scripts/wire/server-args.ts");
+    std::fs::write(&path, ts).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+}

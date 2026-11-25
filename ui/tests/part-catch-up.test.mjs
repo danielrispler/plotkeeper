@@ -1,8 +1,9 @@
 // The part catch-up on a part's sheet (spec danielrispler/plotkeeper#378, ticket #391): pure logic, run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { awaitedCatchUp, fogActions, fogListLines, stageLabel } from "../../dist/map-model.js";
+import { awaitedCatchUp, fogActions, fogListLines, stageLabel } from "../../dist/map-catch-up.js";
 
+/** @returns {import("../../dist/types.js").CatchUpOffer} */
 const catchUp = (extra = {}) => ({ kind: "catch-up", ready: false, writing: false, failed: false, ...extra });
 
 test("a fogged part's sheet shows its part catch-up as the main button and \"I know this\" as the second", () => {
@@ -54,7 +55,8 @@ test("a long catch-up's full fog list names each PR by number and each direct pu
 });
 
 test("a catch-up rewritten for a new fog list starts at its first step, while the same one reopens where it was left", async () => {
-  const { briefPlayer, catchUpIds } = await import("../../dist/map-model.js");
+  const { briefPlayer } = await import("../../dist/map-brief-model.js");
+  const { catchUpIds } = await import("../../dist/map-catch-up.js");
   const id = catchUpIds();
   const player = briefPlayer({ scrubbed: () => false, backToNow: () => {} });
   const old = id("/p", "a", ["c1"]);

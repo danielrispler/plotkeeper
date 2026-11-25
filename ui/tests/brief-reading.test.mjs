@@ -4,18 +4,22 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const observers = [];
-globalThis.IntersectionObserver = class {
-  constructor(run) {
-    this.run = run;
-    observers.push(this);
+globalThis.IntersectionObserver = /** @type {any} */ (
+  class {
+    constructor(run) {
+      this.run = run;
+      observers.push(this);
+    }
+    observe() {}
+    disconnect() {}
   }
-  observe() {}
-  disconnect() {}
-};
+);
+// The page's document, stood in for with only what seen.ts reads.
+/** @type {any} */
 const doc = { visibilityState: "visible", hasFocus: () => true };
 globalThis.document = doc;
 const { watchSeen, recheckSeen } = await import("../../dist/seen.js");
-const { chapterGate } = await import("../../dist/map-model.js");
+const { chapterGate } = await import("../../dist/map-brief-model.js");
 
 const covering = (observer) =>
   observer.run([{ intersectionRatio: 1, intersectionRect: { width: 100, height: 100 }, rootBounds: { width: 100, height: 100 } }]);
@@ -26,7 +30,7 @@ test("a chapter counts as read, and clears its fog, only when its last step was 
   const gate = chapterGate([], () => cleared++);
   doc.visibilityState = "hidden";
   doc.hasFocus = () => false;
-  watchSeen({}, { active: () => true, onSeen: () => gate.sawLast() });
+  watchSeen(/** @type {any} */ ({}), { active: () => true, onSeen: () => gate.sawLast() });
   covering(observers.at(-1));
   mock.timers.tick(5000);
   assert.equal(cleared, 0, "a hidden tab reads nothing");

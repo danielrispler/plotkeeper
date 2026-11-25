@@ -23,6 +23,7 @@ test("a Zed-style file, with comments and trailing commas, sets its keys and lea
 test("the removed context_warning and notifications keys are ignored (#416)", () => {
   const old = reload(initial, { settings: `{ "context_warning": 50, "notifications": { "while_focused": true } }`, keymap: null });
   assert.deepEqual(old.errors, []);
+  // @ts-expect-error the removed key is gone from `Settings`, and this checks it is gone from the value too
   assert.equal(old.settings.context_warning, undefined);
 });
 

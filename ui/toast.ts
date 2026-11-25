@@ -1,5 +1,5 @@
 // The needs-you toast (danielrispler/Falinks#565, decision 3). While the rail's dock cannot show a block, in focus mode or
-// while the rail is an overlay, the toast floats over the map's top-right corner; the shell plays
+// while the rail is an overlay, the toast floats over the map's top-right corner; the server plays
 // the needs-you sound (danielrispler/Falinks#556). It never resizes anything. Several blocks share it,
 // with a count, and it stays until Daniel acts on them or dismisses it. The session in the focused
 // terminal, the selected one, gets none: its prompt is already there.
@@ -9,11 +9,10 @@
 // text is announced with `ariaNotify`. A modal dialog holds them back until it closes. A toast closed with the focus in it hands
 // the focus to the next toast, else back to where it was before it entered the toasts.
 
-import { element, fullTitle, text } from "./dom.js";
+import { element, fullTitle, pressable, text } from "./dom.js";
 import type { LayoutMode } from "./layout.js";
-import { sessionName } from "./list.js";
-import { select } from "./selection.js";
-import { studio } from "./state.js";
+import { sessionName } from "./list-model.js";
+import { setFocus, studio } from "./state.js";
 import { titled } from "./keys.js";
 import type { Session } from "./types.js";
 import { HOVERS } from "./hovers.js";
@@ -22,19 +21,19 @@ export type Toast = { session: Session; count: number };
 
 export const toastShows = (mode: LayoutMode) => mode === "focus";
 
-// The first line of a session's open question, else of the step it waits on, such as a permission's.
+/** The first line of a session's open question, else of the step it waits on, such as a permission's. */
 export function questionLine(session: Pick<Session, "questions" | "last_step">): string {
   const open = session.questions.find((q) => q.answer === "open");
-  return (open?.questions[0]?.question ?? session.last_step?.detail ?? "").split("\n")[0];
+  return (open?.questions[0]?.question ?? session.last_step?.detail ?? "").split("\n")[0] ?? "";
 }
 
 // Whether `session` is a block the toast is about: it needs Daniel and is not the `focused` one.
 const toasted = (session: Session, focused: string | null) => session.state === "needs_you" && session.id !== focused;
 
-// The toast for the sessions that need Daniel, less the `focused` one and those he dismissed.
+/** The toast for the sessions that need Daniel, less the `focused` one and those he dismissed. */
 export function toastFor(listed: Session[], focused: string | null, dismissed: Set<string>): Toast | null {
   const blocked = listed.filter((s) => toasted(s, focused) && !dismissed.has(s.id));
-  return blocked.length ? { session: blocked[0], count: blocked.length } : null;
+  return blocked[0] ? { session: blocked[0], count: blocked.length } : null;
 }
 
 const dismissed = new Set<string>();
@@ -42,11 +41,11 @@ let shown: Toast | null = null;
 
 // The toasts, in the region's order: the needs-you, the note, the copy (#493) and the what's-new (#527) toasts down its top-right
 // corner, the Clear toast at its bottom-left.
-const TOASTS = ["toast", "note-toast", "copy-toast", "whats-new-toast", "clear-toast"];
+const TOASTS = ["toast", "note-toast", "copy-toast", "whats-new-toast", "clear-toast"] as const;
 const said = new Map<string, string>();
 let returnTo: HTMLElement | null = null;
 
-// What a toast announces: its visible text, never its buttons' names, and that it has an action.
+/** What a toast announces: its visible text, never its buttons' names, and that it has an action. */
 export const toastSays = (parts: string[]) => `${parts.filter(Boolean).join(". ")}. Actions available.`;
 
 // A toast's buttons, made once so a redraw keeps the focus on them: its action, which `main` makes or finds in the toast, and its ×,
@@ -57,7 +56,7 @@ export function toastButtons(toast: HTMLElement, main: () => HTMLElement, close:
   if (found) return found;
   const action = main();
   if (!toast.contains(action)) toast.replaceChildren(action);
-  const button = text("button", "×", "btn quiet small");
+  const button = pressable(text("button", "×", "btn quiet small"), null);
   button.setAttribute("aria-label", "Dismiss");
   button.title = hover;
   button.addEventListener("click", close);
@@ -67,15 +66,18 @@ export function toastButtons(toast: HTMLElement, main: () => HTMLElement, close:
   return buttons;
 }
 
-// Opens each toast that has something to say (`hidden` false) as a manual popover and closes the rest; none opens while a modal
-// dialog is open. A toast newly open, or saying something new, is announced. Then the open ones are placed, and a toast that closed
-// with the focus in it passes the focus on.
+/**
+ * Opens each toast that has something to say (`hidden` false) as a manual popover and closes the rest; none opens while a modal
+ * dialog is open. A toast newly open, or saying something new, is announced. Then the open ones are placed, and a toast that closed
+ * with the focus in it passes the focus on.
+ */
 export function stackToasts() {
   const modal = document.querySelector("dialog:modal") !== null;
   const focused = document.activeElement;
-  const toasts = TOASTS.map(element);
+  const toasts = TOASTS.map((id) => element(id));
   let lost = -1;
   toasts.forEach((toast, i) => {
+    const id = TOASTS[i] ?? toast.id;
     const show = !toast.hidden && !modal;
     const open = toast.matches(":popover-open");
     if (show && !open) toast.showPopover();
@@ -84,8 +86,8 @@ export function stackToasts() {
       toast.hidePopover();
     }
     const say = show ? (toast.dataset.say ?? "") : "";
-    if (say && said.get(TOASTS[i]) !== say) (document as Document & { ariaNotify?: (text: string) => void }).ariaNotify?.(say);
-    said.set(TOASTS[i], say);
+    if (say && said.get(id) !== say) (document as Document & { ariaNotify?: (text: string) => void }).ariaNotify?.(say);
+    said.set(id, say);
   });
   placeToasts(toasts);
   if (lost < 0) return;
@@ -117,7 +119,11 @@ function placeToasts(toasts: HTMLElement[]) {
 }
 
 // The toasts' press, focus and the modal dialogs; once, at start.
-export function watchToasts() {
+// What a press on the needs-you toast does: select its session (`selection.ts`, given by `main.ts`).
+let select: (id: string) => unknown = () => {};
+
+export function watchToasts(selectSession: (id: string) => unknown) {
+  select = selectSession;
   const region = element("toasts");
   // A press on a toast acts and leaves the keyboard's focus where it was.
   for (const id of TOASTS) element(id).addEventListener("pointerdown", (event) => event.preventDefault());
@@ -130,7 +136,7 @@ export function watchToasts() {
   document.addEventListener("toggle", (event) => event.target instanceof HTMLDialogElement && stackToasts(), true);
 }
 
-// Draws the toast from the list, the selection and the layout.
+/** Draws the toast from the list, the selection and the layout. */
 export function showToast() {
   const mode = (document.body.dataset.layout ?? "full") as LayoutMode;
   const focused = studio.selection?.session.id ?? null;
@@ -142,7 +148,7 @@ export function showToast() {
   toast.hidden = shown === null;
   if (shown) {
     const action = () => {
-      const button = text("button", "", "btn quiet toast-main");
+      const button = pressable(text("button", "", "btn quiet toast-main"), null);
       button.addEventListener("click", jumpToNeedsYou);
       return button;
     };
@@ -164,15 +170,17 @@ function dismissToast() {
   showToast();
 }
 
-// Jumps to the toast's session and leaves focus mode; the next-needs-you key does the same. False:
-// no toast shows.
+/**
+ * Jumps to the toast's session and leaves focus mode; the next-needs-you key does the same. False:
+ * no toast shows.
+ */
 export function jumpToNeedsYou(): boolean {
   if (!shown) return false;
   // Leaving focus mode redraws the toast, which then shows none, so the session is read first.
   const { id } = shown.session;
-  studio.focus = false;
+  setFocus(false);
   window.dispatchEvent(new Event("layout"));
-  select(id);
+  void select(id);
   return true;
 }
 
@@ -186,7 +194,7 @@ export function showClearToast(count: number, undo: () => void) {
   const message = `Cleared ${count} landed`;
   if (!clearName) {
     const name = text("strong", "", "name");
-    const undoButton = text("button", "Undo", "btn small");
+    const undoButton = pressable(text("button", "Undo", "btn small"), null);
     undoButton.title = "Bring the cleared sessions back";
     undoButton.addEventListener("click", () => undoClear());
     toast.replaceChildren(name, undoButton);
@@ -205,12 +213,14 @@ export function hideClearToast() {
   stackToasts();
 }
 
-// The what's-new toast (#527): "Updated to X.Y.Z", a "What's new" link to that version's GitHub Release, and ×. Not in colour; it
-// stays until its ×.
+/**
+ * The what's-new toast (#527): "Updated to X.Y.Z", a "What's new" link to that version's GitHub Release, and ×. Not in colour; it
+ * stays until its ×.
+ */
 export function showWhatsNewToast(version: string, url: string) {
   const toast = element("whats-new-toast");
   const message = `Updated to ${version}`;
-  const link = text("a", "What's new", "btn small") as HTMLAnchorElement;
+  const link = text("a", "What's new", "btn small");
   link.href = url;
   link.target = "_blank";
   link.rel = "noopener noreferrer";

@@ -51,6 +51,7 @@ test("a dismissed module is not shown again while the logging goes on, and the o
 });
 
 // Two modules of a later ticket, to drive the table's exceptions: one waits 5 calendar weeks from its rollout, one waits for 3 offers.
+/** @type {import("../../dist/stop-rules.js").Row[]} */
 const later = [
   { module: "refresher", name: "the refresher", kept: (f) => (f.counts["refresher-entered"] ?? 0) >= 2, wait: { from: "2026-12-01", weeks: 5 } },
   { module: "guard", name: "Guard with a law", kept: (f) => (f.counts["guard-started"] ?? 0) >= 1, offers: { kind: "guard-offered", least: 3 } },

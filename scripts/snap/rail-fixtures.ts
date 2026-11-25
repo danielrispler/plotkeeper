@@ -4,8 +4,7 @@
 // subagents, checks, a permission mode, a model, an estimate, a brief and decision history, and a
 // Git line with several tokens. Times are relative to the moment a fixture renders.
 
-import type { Ask } from "../../ui/answer.ts";
-import type { BlockedCommand, ListedCheck, CheckStatus, Decision, OpenItem, RiskView, Session, SessionState, Subagent, Turn, TurnFile, TurnSummary } from "../../ui/types.ts";
+import type { Ask, BlockedCommand, ListedCheck, CheckStatus, Decision, OpenItem, RiskView, Session, SessionState, Subagent, Turn, TurnFile, TurnSummary } from "../../ui/types.ts";
 import { base, type Fixture } from "./base.ts";
 
 const MIN = 60e3;
@@ -67,16 +66,10 @@ const final = [
   "I did not open the window; the rows are checked by their CSS and by the tests only.",
 ].join("\n");
 
-const session = (state: SessionState, { running = false, question = false } = {}): Session => {
-  const now = Date.now();
-  const ended = !running && state !== "needs_you";
-  const intentions = {
-    running: "Reading the delete handler to see why the fold toggle shares its column with the glyph.",
-    needs_you: "I need one decision before I change the row layout.",
-  };
-  const stepTools = { tool: "Edit", detail: `${cwd}/ui/list.ts` };
+// The session's turns, the newest one still running unless it `ended`.
+const turnsOf = (now: number, running: boolean, ended: boolean): Turn[] => {
   const turnStart = [now - 5 * 60 * MIN, now - 4 * 60 * MIN, now - 3 * 60 * MIN, now - 2 * 60 * MIN, now - 40 * MIN];
-  const turns = prompts.map((prompt, i): Turn => ({
+  return prompts.map((prompt, i): Turn => ({
     started_at: turnStart[i],
     ended_at: i < 4 ? turnStart[i] + 20 * MIN : ended ? now - 6 * MIN : null,
     prompt,
@@ -95,6 +88,30 @@ const session = (state: SessionState, { running = false, question = false } = {}
         ]
       : [{ suite: "check", worktree: "/r", foreign: false, status: i === 1 ? "failed" : "passed", retries: 0, runs: [] }],
   }));
+};
+
+// The open question a `question` session asks.
+const questionsOf = (question: boolean): Session["questions"] => question ? [{
+  tool_use_id: "toolu_q1", agent: null, turn: 4, answer: "open",
+  questions: [{
+    question: "Which column should hold the delete button on a row with no subagents?", header: "Delete column", multiSelect: false,
+    options: [
+      { label: "Keep its column", description: "Reserve the space, so names and glyphs stay aligned on every row." },
+      { label: "Collapse the column", description: "Names move left by 20px on rows that cannot be deleted." },
+      { label: "Show it in the strip too", description: "The strip gets a delete as well; its buttons are 52px wide." },
+    ],
+  }],
+}] : [];
+
+const session = (state: SessionState, { running = false, question = false } = {}): Session => {
+  const now = Date.now();
+  const ended = !running && state !== "needs_you";
+  const intentions = {
+    running: "Reading the delete handler to see why the fold toggle shares its column with the glyph.",
+    needs_you: "I need one decision before I change the row layout.",
+  };
+  const stepTools = { tool: "Edit", detail: `${cwd}/ui/list.ts` };
+  const turns = turnsOf(now, running, ended);
   const transcript = {
     intention: ended ? final.split("\n")[0] : intentions[state === "needs_you" ? "needs_you" : "running"],
     steps_ago: ended || state === "needs_you" ? 0 : 7,
@@ -116,17 +133,7 @@ const session = (state: SessionState, { running = false, question = false } = {}
       helper("a1", "Review the diff", "Review the diff on this branch and list anything that breaks the token rules.", "Explore", "No raw colours; two spacing values bypass the tokens.", 4, 30 * MIN, running),
     ]), asker: state === "needs_you" ? { agent: null, since: now - 3 * MIN } : null,
     prompts: [], turns, blocked_commands: [], returned: null, seen: 3, since_looked: { turns: 2, files: 3, passed: 1, failed: 1, ran: 0 },
-    questions: question ? [{
-      tool_use_id: "toolu_q1", agent: null, turn: 4, answer: "open",
-      questions: [{
-        question: "Which column should hold the delete button on a row with no subagents?", header: "Delete column", multiSelect: false,
-        options: [
-          { label: "Keep its column", description: "Reserve the space, so names and glyphs stay aligned on every row." },
-          { label: "Collapse the column", description: "Names move left by 20px on rows that cannot be deleted." },
-          { label: "Show it in the strip too", description: "The strip gets a delete as well; its buttons are 52px wide." },
-        ],
-      }],
-    }] : [],
+    questions: questionsOf(question),
     transcript,
     identity: { issue: 56, branch: "issue-56-row-controls", pr: 61, worktree: cwd, name: "#56 Row controls" },
     work: {
@@ -516,7 +523,8 @@ const blockedCommand = (status: BlockedCommand["status"], at: number, extra: Par
 });
 const withBlocked = (state: SessionState, card: (turnStart: number) => BlockedCommand, snapScript: string) => {
   const fixture = build(state);
-  const turn = fixture.selected.session.turns.at(-1)!;
+  const turn = fixture.selected.session.turns.at(-1);
+  if (!turn) throw new Error("the rail fixture has a turn");
   fixture.selected.session.blocked_commands = [card(turn.started_at + 30e3)];
   return { ...fixture, snapScript };
 };
@@ -614,7 +622,9 @@ export const railFixtures = {
   railHunk: () => ({ ...build("your_turn"), snapScript: hunkScript }),
   railMerged: () => {
     const fixture = build("your_turn");
-    fixture.selected.session.turns[4].files!.merged = 2;
+    const files = fixture.selected.session.turns[4]?.files;
+    if (!files) throw new Error("the rail fixture's fifth turn has files");
+    files.merged = 2;
     return { ...fixture, snapScript: mergedScript };
   },
   railNamedFailure: () => ({ ...build("your_turn"), failed_check_name: "Window tests failed: delete keeps a live terminal (+1 more)", snapScript: namedFailureScript }),

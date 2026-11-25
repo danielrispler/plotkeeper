@@ -9,14 +9,14 @@
 // `settings.json` as `summaries.base_url` (none: OpenAI's own), and an optional key, also kept in the Keychain, as a local
 // Ollama needs none.
 
-import { confirmed, drawWithStatus, failure, invoke, text } from "./dom.js";
-import type { Settings, SettingsFiles } from "./settings.js";
-import type { Writers, WriterKind, WriterTest } from "./types.js";
+import { confirmed, drawWithStatus, failure, invoke, messageOf, pressable, text } from "./dom.js";
+import type { Settings } from "./settings.js";
+import type { SettingsFiles, Writers, WriterKind, WriterTest } from "./types.js";
 import { GATE } from "./writer-notice.js";
 
 export type Choice = { writer: WriterKind; model: string; effort: string };
 
-// The writer picker's options: every writer, one that was not found shown but not pickable.
+/** The writer picker's options: every writer, one that was not found shown but not pickable. */
 export const choiceOptions = (list: Writers): { kind: WriterKind; label: string; disabled: boolean }[] =>
   list.writers.map((w) => ({ kind: w.kind, label: w.found ? w.name : `${w.name} (${apiWriter(w.kind) ? "not set" : "not found"})`, disabled: !w.found }));
 
@@ -26,7 +26,7 @@ const apiWriter = (kind: WriterKind) => kind === "anthropic" || kind === "openai
 // OpenAI's own endpoint, which the OpenAI-compatible writer calls when no base URL is set.
 const OPENAI_URL = "https://api.openai.com/v1";
 
-// Whether writer `kind`'s API key is set, as its key row says it; the key itself never reaches the page.
+/** Whether writer `kind`'s API key is set, as its key row says it; the key itself never reaches the page. */
 export const keySet = (list: Writers, kind: WriterKind = "anthropic"): boolean => list.keys.includes(kind);
 export function keyLine(list: Writers, kind: WriterKind = "anthropic"): string {
   if (kind === "anthropic") return keySet(list) ? "Anthropic API key: set, kept in the macOS Keychain." : "Anthropic API key: not set.";
@@ -47,8 +47,10 @@ function modelOf(list: Writers, kind: WriterKind, model: string): string {
   return !any && !models.includes(model) ? (models[0] ?? model) : model;
 }
 
-// The choice the section opens with: the writer that writes now when summaries are on, else the first found in the
-// spec's order (the server lists them so), at its first model and default effort.
+/**
+ * The choice the section opens with: the writer that writes now when summaries are on, else the first found in the
+ * spec's order (the server lists them so), at its first model and default effort.
+ */
 export function preset(list: Writers, now: Settings["summaries"]): Choice {
   if (list.summaries_on) {
     const efforts = list.writers.find((w) => w.kind === now.writer)?.efforts ?? [];
@@ -58,11 +60,11 @@ export function preset(list: Writers, now: Settings["summaries"]): Choice {
   return { writer: first?.kind ?? "claude", model: first?.models[0] ?? "", effort: "" };
 }
 
-// A Test's outcome as the section shows it.
+/** A Test's outcome as the section shows it. */
 export const testLine = (test: WriterTest): { passed: boolean; text: string } =>
   test.outcome === "passed" ? { passed: true, text: test.line } : { passed: false, text: `Failed: ${test.line}` };
 
-// The writer's notice line while summaries wait for a Test (`writer-notice.ts`).
+/** The writer's notice line while summaries wait for a Test (`writer-notice.ts`). */
 export const gateNotice = (list: Writers): string | null => (list.summaries_on ? null : GATE);
 
 export const briefsLine = (list: Writers): string | null =>
@@ -76,7 +78,7 @@ let testing = false;
 // Each key row's last refusal, such as a pasted text that is no key.
 const keyErrors: Partial<Record<WriterKind, string>> = {};
 
-// Whether PR briefs can be written: until the list is known, yes.
+/** Whether PR briefs can be written: until the list is known, yes. */
 export const briefsWritten = () => list?.briefs ?? true;
 
 function select(id: string, title: string, options: { value: string; label: string; disabled?: boolean }[], value: string, change: (value: string) => void) {
@@ -139,11 +141,10 @@ function draw(panel: HTMLElement, hooks: Hooks) {
         choice = { ...choice, effort: value };
         outcome = null;
       })));
-  const test = text("button", testing ? "Testing…" : "Test", "btn small writer-test");
+  const test = pressable(text("button", testing ? "Testing…" : "Test", "btn small writer-test"), null);
   test.id = "writer-test";
-  test.setAttribute("type", "button");
   test.title = "Make one tiny call with this writer, model and effort; a pass saves them and summaries are written with them";
-  (test as HTMLButtonElement).disabled = testing;
+  test.disabled = testing;
   test.addEventListener("click", () => run(panel, hooks));
   nodes.push(test);
   if (outcome) {
@@ -180,15 +181,14 @@ function keyRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[]
   input.placeholder = set ? "Replace the API key…" : "Add an API key…";
   input.setAttribute("aria-label", "Anthropic API key");
   input.title = "An Anthropic API key; it is kept in the macOS Keychain and never shown again";
-  const save = text("button", "Save key", "btn small");
+  const save = pressable(text("button", "Save key", "btn small"), null);
   save.id = "writer-key-save";
-  save.setAttribute("type", "button");
   save.title = "Keep the pasted key in the macOS Keychain, in place of any key set; the page never shows it again";
   save.addEventListener("click", () => {
     const key = input.value.trim();
     if (!key) return;
     input.value = "";
-    invoke("set_api_key", { writer: "anthropic", key, base_url: null, expected: null })
+    invoke("set_api_key", { writer: "anthropic", key, baseUrl: null, expected: null })
       .then(() => {
         delete keyErrors.anthropic;
         const anthropic = known.writers.find((w) => w.kind === "anthropic");
@@ -196,16 +196,15 @@ function keyRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[]
         outcome = null;
       })
       .catch((e: unknown) => {
-        keyErrors.anthropic = e instanceof Error ? e.message : String(e);
+        keyErrors.anthropic = messageOf(e);
       })
       .finally(() => void refresh(panel, hooks));
   });
   const row = text("div", "", "writer-key");
   row.append(input, save);
   if (set) {
-    const remove = text("button", "Remove key", "btn small");
+    const remove = pressable(text("button", "Remove key", "btn small"), null);
     remove.id = "writer-key-remove";
-    remove.setAttribute("type", "button");
     remove.title = "Remove the key from the macOS Keychain; the API-key writer then cannot write";
     remove.addEventListener("click", async () => {
       const lost = "The Anthropic API key is deleted from the macOS Keychain; the API-key writer cannot write until a key is pasted again.";
@@ -220,7 +219,7 @@ function keyRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[]
     });
     row.append(remove);
   }
-  const nodes = [state, row];
+  const nodes: HTMLElement[] = [state, row];
   if (keyErrors.anthropic) {
     nodes.push(keyError(keyErrors.anthropic, "writer-key-error", [input]));
   }
@@ -266,6 +265,7 @@ function modelInput(models: string[]): HTMLElement {
 
 // The OpenAI-compatible API's row: its base URL (empty: OpenAI's own) and an optional key, saved together, and Remove,
 // which clears both, once either is set.
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: ratcheted at #554; split it rather than grow it
 function openaiRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[] {
   const found = known.writers.some((w) => w.kind === "openai" && w.found);
   const state = text("p", keyLine(known, "openai"), "writer-hint");
@@ -289,14 +289,13 @@ function openaiRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElemen
   input.placeholder = keySet(known, "openai") ? "Replace the key (optional)…" : "Its API key (optional)…";
   input.setAttribute("aria-label", "API key of the OpenAI-compatible API");
   input.title = "The endpoint's API key, if it needs one; it is kept in the macOS Keychain and never shown again";
-  const save = text("button", "Save", "btn small");
+  const save = pressable(text("button", "Save", "btn small"), null);
   save.id = "writer-openai-save";
-  save.setAttribute("type", "button");
   save.title = "Keep the base URL in settings.json and any pasted key in the macOS Keychain; the page never shows the key again";
   save.addEventListener("click", () => {
     const key = input.value.trim();
     input.value = "";
-    invoke("set_api_key", { writer: "openai", key: key || null, base_url: base.value.trim(), expected: hooks.texts().settings })
+    invoke("set_api_key", { writer: "openai", key: key || null, baseUrl: base.value.trim(), expected: hooks.texts().settings })
       .then((settings) => {
         delete keyErrors.openai;
         if (settings !== null) hooks.saved(settings);
@@ -305,7 +304,7 @@ function openaiRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElemen
         outcome = null;
       })
       .catch((e: unknown) => {
-        keyErrors.openai = e instanceof Error ? e.message : String(e);
+        keyErrors.openai = messageOf(e);
       })
       .finally(() => void refresh(panel, hooks));
   });
@@ -314,9 +313,8 @@ function openaiRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElemen
   const keyRow = text("div", "", "writer-key");
   keyRow.append(input, save);
   if (found) {
-    const remove = text("button", "Remove", "btn small");
+    const remove = pressable(text("button", "Remove", "btn small"), null);
     remove.id = "writer-openai-remove";
-    remove.setAttribute("type", "button");
     remove.title = "Remove the base URL from settings.json and the key from the macOS Keychain";
     remove.addEventListener("click", async () => {
       const url = known.base_url ? `The base URL ${known.base_url}` : "The base URL";
@@ -333,7 +331,7 @@ function openaiRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElemen
     });
     keyRow.append(remove);
   }
-  const nodes = [state, row, keyRow];
+  const nodes: HTMLElement[] = [state, row, keyRow];
   if (keyErrors.openai) {
     nodes.push(keyError(keyErrors.openai, "writer-openai-error", [base, input]));
   }
@@ -382,14 +380,16 @@ const sectionNode = () => {
   return section;
 };
 
-// Draws the section and asks for the list once.
+/** Draws the section and asks for the list once. */
 export function startWriters(hooks: Hooks) {
   given = hooks;
   draw(sectionNode(), hooks);
   void refresh(sectionNode(), hooks);
 }
 
-// The Settings panel opened: the section goes into `box`, its choice preset again from the settings, as each opening of its popover did (#363).
+/**
+ * The Settings panel opened: the section goes into `box`, its choice preset again from the settings, as each opening of its popover did (#363).
+ */
 export function writersIn(box: HTMLElement) {
   const panel = sectionNode();
   if (list && !testing) {

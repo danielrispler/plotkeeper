@@ -225,7 +225,7 @@ test("a review that cannot run is `review unavailable`, and the script still exi
   assert.equal(line({ status: 3 }), "review unavailable: the review was cut at 15 minutes");
   assert.equal(line({ status: 1, stderr: "quota exceeded" }), "review unavailable: the Gemini quota is used up");
   assert.equal(line({ status: 1, stderr: "429: rate limit" }), "review unavailable: the Gemini quota is used up");
-  // agy exits 3 when the quota runs out mid-review too, as in the trial of 2026-11-25.
+  // agy exits 3 when the quota runs out mid-review too, as on 2026-11-25.
   const exhausted = JSON.stringify({ status: "ERROR", error: "Individual quota reached. Resets in 2h5m6s." });
   assert.equal(line({ status: 3, stdout: exhausted, stderr: "AGY_ERROR: RESOURCE_EXHAUSTED (code 429)" }), "review unavailable: the Gemini quota is used up");
 });
@@ -240,18 +240,6 @@ test("the brief gives absolute paths and no @ mention, which agy may read withou
   assert.ok(!prompt.includes("@"));
   for (const path of ["review/diff.patch", "review/changed.txt", "review/tree.txt", "repo"])
     assert.ok(prompt.includes(`/tmp/outside-review-x/${path}`), path);
-});
-
-test("a trial run names its variant and trial together, and --subagents tells the reviewer it may split the reading", () => {
-  assert.deepEqual(options(["--subagents", "--variant", "subagents", "--trial", "t1"]), { ...quiet, subagents: true, variant: "subagents", trial: "t1" });
-  assert.throws(() => options(["--variant", "high"]), /--variant and --trial go together/);
-  assert.throws(() => options(["--trial", "t1"]), /--variant and --trial go together/);
-  const plain = brief("/tmp/outside-review-x");
-  const split = brief("/tmp/outside-review-x", { subagents: true });
-  assert.ok(!plain.includes("invoke_subagent"));
-  assert.match(split, /invoke_subagent/);
-  assert.ok(!split.includes("Your only working tool is read_file"));
-  assert.ok(!split.includes("@"));
 });
 
 test("the Gemini quota left is read from agy's usage report", () => {
@@ -297,20 +285,15 @@ test("the deny hook allows a read inside its root and the answer's hand-over, an
   assert.ok(!logged.includes("inside"));
 });
 
-test("--subagents lets the reviewer start a subagent and hear its report, and nothing else new: writes, commands and other agent tools stay denied", () => {
+test("the hook denies the agent tools too: a reviewer can start no subagent", () => {
   const root = mkdtempSync(join(tmpdir(), "deny-hook-"));
-  const decision = (name, flags) => {
+  const decision = (name) => {
     const input = JSON.stringify({ cwd: root, toolCall: { name, args: {} } });
-    const ran = spawnSync(process.execPath, [hook, root, join(root, "hook.log"), ...flags], { input, encoding: "utf8" });
+    const ran = spawnSync(process.execPath, [hook, root, join(root, "hook.log")], { input, encoding: "utf8" });
     return JSON.parse(ran.stdout).decision;
   };
-  assert.equal(decision("invoke_subagent", []), "deny");
-  assert.equal(decision("invoke_subagent", ["--subagents"]), "allow");
-  assert.equal(decision("send_message", []), "deny");
-  assert.equal(decision("send_message", ["--subagents"]), "allow");
-  for (const flags of [[], ["--subagents"]])
-    for (const tool of ["write_file", "run_command", "swarm", "run_workflow", "define_subagent", "manage_subagents"])
-      assert.equal(decision(tool, flags), "deny", `${tool} ${flags}`);
+  for (const tool of ["invoke_subagent", "send_message", "write_file", "run_command", "swarm", "run_workflow", "define_subagent", "manage_subagents"])
+    assert.equal(decision(tool), "deny", tool);
 });
 
 test("the script runs when started through a symlinked path, and a wrong option fails with the usage", () => {
@@ -333,23 +316,11 @@ const dir = process.env.FAKE_AGY_DIR;
 writeFileSync(join(dir, "agy-env.json"), JSON.stringify({ cwd: process.cwd(), keys: Object.keys(process.env) }));
 const hooks = JSON.parse(readFileSync(".agents/hooks.json", "utf8"));
 const command = hooks.readonly.PreToolUse[0].hooks[0].command;
-const call = (name, args, conversationId = "reviewer") => execSync(command, { input: JSON.stringify({ cwd: process.cwd(), conversationId, toolCall: { name, args } }) });
+const call = (name, args) => execSync(command, { input: JSON.stringify({ cwd: process.cwd(), toolCall: { name, args } }) });
 const arg = (name) => process.argv[process.argv.indexOf(name) + 1];
 const run = { cwd: process.cwd(), model: arg("--model"), hook: command, prompt: arg("-p"), worktree: existsSync("repo/.git") };
 appendFileSync(join(dir, "agy-runs.jsonl"), JSON.stringify(run) + "\\n");
 call("read_file", { Path: join(process.cwd(), "review/diff.patch") });
-// With --subagents, starts two subagents, and one of them reads under its own conversation id.
-if (command.endsWith("'--subagents'")) {
-  call("invoke_subagent", {});
-  call("invoke_subagent", {});
-  call("read_file", { Path: join(process.cwd(), "review/diff.patch") }, "subagent-1");
-}
-// Answers only once two runs have started, so a trial whose runs are not parallel fails.
-for (let i = 0; process.env.FAKE_AGY === "together"; i++) {
-  if (readFileSync(join(dir, "agy-runs.jsonl"), "utf8").trim().split("\\n").length >= 2) break;
-  if (i > 200) process.exit(1);
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
-}
 if (process.env.FAKE_AGY === "exit3") process.exit(3);
 if (process.env.FAKE_AGY === "sleep") {
   // Renamed into place, so the test never reads a half-written file.
@@ -446,7 +417,7 @@ test("a review that is killed ends its agy and removes its worktree", async () =
   assert.equal(alive, false, "the stand-in agy outlived the review");
 });
 
-test("a review signalled twice, as a trial's run is by Ctrl-C and then by the trial, still removes its worktree", async () => {
+test("a review signalled twice, as by Ctrl-C to its process group and then to itself, still removes its worktree", async () => {
   const s = scratch();
   const child = spawn(process.execPath, s.args(), { cwd: s.repo, env: { ...s.env, FAKE_AGY: "sleep" }, stdio: "ignore" });
   const closed = new Promise((done) => child.on("close", done));
@@ -515,54 +486,6 @@ test("a reviewed run and a skipped run each leave one line in the main checkout'
   assert.equal(kept.findings[0].summary, "no default");
   assert.ok(!existsSync(join(worktree, "local-evidence")), "the record went to the worktree");
   assert.equal(s.git("status", "--porcelain"), "");
-});
-
-test("a trial run records its variant and trial, its quota as shared, names its findings file after its variant and keeps agy's whole answer beside it, and counts the subagents it started and those that ran", () => {
-  const s = scratch({ ignored: true });
-  const head = s.git("rev-parse", "HEAD").trim().slice(0, 9);
-  const ran = spawnSync(process.execPath, s.args(["--subagents", "--variant", "subagents", "--trial", "t1"]), {
-    cwd: s.repo,
-    env: { ...s.env, FAKE_AGY: "ok" },
-    encoding: "utf8",
-  });
-  assert.match(ran.stdout, new RegExp(`findings: .*outside-review-${head}-subagents\\.json`));
-  assert.ok(existsSync(join(s.dir, "out", `outside-review-${head}-subagents.json`)));
-  assert.ok(existsSync(join(s.repo, `local-evidence/outside-review/outside-review-${head}-subagents.json`)));
-  const answer = JSON.parse(readFileSync(join(s.dir, "out", `outside-review-${head}-subagents-agy.json`), "utf8"));
-  assert.equal(answer.status, "SUCCESS");
-  const [line] = runsOf(s.repo);
-  assert.deepEqual(line.subagents, { started: 2, ran: 1 });
-  assert.deepEqual(JSON.parse(readFileSync(join(s.dir, "out", `outside-review-${head}-subagents.json`), "utf8")).subagents, { started: 2, ran: 1 });
-  assert.equal(line.variant, "subagents");
-  assert.equal(line.trial, "t1");
-  assert.equal(line.quotaShared, true);
-  const [agy] = readFileSync(join(s.dir, "agy-runs.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
-  assert.match(agy.hook, /'--subagents'$/);
-  assert.match(agy.prompt, /invoke_subagent/);
-});
-
-const trial = join(import.meta.dirname, "../../scripts/review/outside-review-trial.mjs");
-
-test("the trial runs its two variants, medium and subagents, in parallel, each in its own throwaway folder and worktree, and leaves nothing behind", () => {
-  const s = scratch({ ignored: true });
-  const head = s.git("rev-parse", "HEAD").trim().slice(0, 9);
-  const ran = spawnSync(process.execPath, [trial, "--out", join(s.dir, "out")], { cwd: s.repo, env: { ...s.env, FAKE_AGY: "together" }, encoding: "utf8" });
-  assert.equal(ran.status, 0, ran.stderr);
-  assert.match(ran.stdout.split("\n")[0], /^Gemini quota left: /);
-  for (const variant of ["medium", "subagents"]) {
-    assert.match(ran.stdout, new RegExp(`== ${variant} ==\nreviewed: 1 finding .*\nfindings: .*outside-review-${head}-${variant}\\.json\ncost: `));
-    assert.ok(existsSync(join(s.dir, "out", `outside-review-${head}-${variant}.json`)), variant);
-  }
-  const agy = readFileSync(join(s.dir, "agy-runs.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
-  assert.equal(new Set(agy.map((a) => a.cwd)).size, 2);
-  assert.ok(agy.every((a) => a.worktree));
-  assert.deepEqual(agy.map((a) => a.model), ["gemini-4-neon-medium", "gemini-4-neon-medium"]);
-  assert.equal(agy.filter((a) => a.hook.endsWith("'--subagents'")).length, 1);
-  const runs = runsOf(s.repo);
-  assert.deepEqual(runs.map((r) => r.variant).sort(), ["medium", "subagents"]);
-  assert.equal(new Set(runs.map((r) => r.trial)).size, 1);
-  assert.ok(runs.every((r) => r.quotaShared === true && r.why === "--force"));
-  assert.deepEqual(s.left(), nothingLeft);
 });
 
 test("a record that cannot be written changes neither the verdict nor the exit code", () => {

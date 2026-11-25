@@ -5,17 +5,19 @@ import { showBanner } from "../../dist/map-history.js";
 import { Field, fakeDocument } from "./dom.mjs";
 import { briefOffer, brokenParts, brokenText, ciDrawer, ciLine, commitDrawer, proofDrawer, scrubBanner, sheetCi, stripOf } from "../../dist/map-model.js";
 
-const ci = (status, extra = {}) => ({ status, run_url: "https://github.com/o/r/actions/runs/9", commit: "abc1234def", earlier: false, parts: [], laws: [], tail: "", note: null, ...extra });
+// CI as the server sends it; `at` is not read here.
+/** @param {import("../../dist/types.js").Ci["status"]} status */
+const ci = (status, extra = {}) => /** @type {import("../../dist/types.js").Ci} */ ({ status, run_url: "https://github.com/o/r/actions/runs/9", commit: "abc1234def", earlier: false, parts: [], laws: [], tail: "", note: null, ...extra });
 const broken = ci("broken", { parts: ["shell"], laws: ["wire-types-agree"], tail: "FAIL wire_types_match\nSummary 1 failed" });
 
 test("only a run that failed in a test that backs a law marks parts", () => {
   assert.deepEqual([...brokenParts(broken)], ["shell"]);
-  for (const status of ["unknown", "passed", "not-run", "unreadable"]) assert.equal(brokenParts(ci(status)).size, 0, status);
+  for (const status of /** @type {const} */ (["unknown", "passed", "not-run", "unreadable"])) assert.equal(brokenParts(ci(status)).size, 0, status);
   assert.equal(brokenParts(null).size, 0);
 });
 
 test("each outcome has its own words, and a missing mark never says every law test passed", () => {
-  const lines = ["passed", "broken", "not-run", "unreadable", "unknown"].map((status) => ciLine(ci(status)));
+  const lines = /** @type {const} */ (["passed", "broken", "not-run", "unreadable", "unknown"]).map((status) => ciLine(ci(status)));
   assert.equal(new Set(lines).size, 5);
   assert.equal(ciLine(broken), brokenText);
   assert.match(ciLine(ci("not-run")), /law tests did not run/);
@@ -81,7 +83,8 @@ test("the strip marks the commit being viewed and the ones Daniel has not caught
 });
 
 test("the banner names the commit and offers the way back", () => {
-  assert.deepEqual(scrubBanner({ commit: "abcdef0123", short: "abcdef0", label: "#4 Thing" }), { text: "Viewing abcdef0", back: "Back to now" });
+  const scrub = { commit: "abcdef0123", short: "abcdef0", label: "#4 Thing" };
+  assert.deepEqual(scrubBanner(scrub), { text: "Viewing abcdef0", back: "Back to now" });
 });
 
 test("a commit's drill-down lists its files with their diffs and opens the commit on GitHub", () => {

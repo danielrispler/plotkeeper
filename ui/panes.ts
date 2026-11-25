@@ -4,23 +4,19 @@
 import { diffRequest, drawDiff } from "./diff.js";
 import { drawHistory } from "./history.js";
 import { followLog, showLog, showMissing } from "./log.js";
-import { followPanelLog, panelShown, redrawPanel, showPanel } from "./panel.js";
-import { select } from "./selection.js";
+import { followPanelLog, panelShown, showPanel } from "./panel.js";
 import { studio } from "./state.js";
 import type { Session } from "./types.js";
 
 let ready = false;
+// What a diff's or a log's way back does: select the session (`selection.ts`, given by `main.ts`).
+let select: (id: string) => unknown = () => {};
 
-// The views are ready to draw.
-export function startPanes() {
+/** The views are ready to draw. */
+export function startPanes(selectSession: (id: string) => unknown) {
+  select = selectSession;
   ready = true;
 }
-
-// History (`history.ts`), in the left panel: the ended sessions, searchable. Clicking a row selects the session.
-export const showHistory = () => showPanel({ kind: "history" });
-
-// Draws History again when the list changed under it.
-export const redrawHistory = () => redrawPanel();
 
 // The selection the server sent: a worker's log that shows reads on when the same worker is sent again.
 let selected: string | null = null;
@@ -39,7 +35,7 @@ diffRequest.open = (id, turn) => {
   showPanel({ kind: "diff", session: id, turn });
 };
 
-// The left panel's History, diff and worker's log, drawn in the panel's box.
+/** The left panel's History, diff and worker's log, drawn in the panel's box. */
 export const historyIn = (place: HTMLElement) => drawHistory(place, studio.listed);
 export function diffIn(place: HTMLElement, id: string, turn: number) {
   const session = studio.listed.find((s) => s.id === id);
@@ -50,5 +46,5 @@ export async function logIn(place: HTMLElement, id: string, agent: string, follo
   const subagent = session?.agents.find((a) => a.id === agent);
   const toParent = () => void select(id);
   if (!subagent) return showMissing(place, toParent);
-  return follow ? followLog(place, id, subagent, toParent) : showLog(place, id, subagent, toParent);
+  await (follow ? followLog(place, id, subagent, toParent) : showLog(place, id, subagent, toParent));
 }

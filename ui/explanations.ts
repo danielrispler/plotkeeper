@@ -106,7 +106,10 @@ let queued: boolean | null = null;
 
 // Turns the explanations `on` or off in `settings.json`, through the server's settings write, from the text the page last read.
 function setExplanations(on: boolean) {
-  if (asked !== null) return void (queued = on);
+  if (asked !== null) {
+    queued = on;
+    return;
+  }
   asked = on;
   invoke("set_explanations", { on, expected: studio.texts.settings })
     .then((settings) => {
@@ -171,11 +174,11 @@ export function explainedChoice(choice: HTMLElement, selected: HTMLElement | und
 
 // "Talks to"'s rows, each `links` entry its link's kind and whether it is not yet ratified: while `on`, a kind's line follows only the
 // first link of that kind, and "not yet ratified"'s only the first unratified link, inside the row.
-export function explainedLinks(rows: HTMLElement[], links: { kind?: LinkKind; unratified: boolean }[], on: boolean): HTMLElement[] {
+export function explainedLinks(rows: HTMLElement[], links: { kind?: LinkKind | undefined; unratified: boolean }[], on: boolean): HTMLElement[] {
   if (!on) return rows;
   const told = new Set<string>();
   rows.forEach((row, at) => {
-    const { kind, unratified } = links[at];
+    const { kind, unratified } = links[at] ?? { unratified: false };
     if (kind && !told.has(kind)) {
       told.add(kind);
       row.append(explainLine(SHEET.kinds[kind], "explain-link"));

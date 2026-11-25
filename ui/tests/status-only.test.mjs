@@ -2,9 +2,11 @@
 // plainly and shows no step, intention or card. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { rowMark, secondLine, sessionName } from "../../dist/list.js";
+import { rowMark, secondLine, sessionName } from "../../dist/list-model.js";
 import { railOf, storyOf } from "../../dist/story.js";
 
+// A status-only session holding only the fields these functions read.
+/** @returns {any} */
 const codex = (state) => ({
   id: "t-7",
   name: null,

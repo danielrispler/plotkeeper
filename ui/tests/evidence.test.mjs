@@ -7,10 +7,20 @@ globalThis.document = fakeDocument();
 const { diffRequest } = await import("../../dist/diff.js");
 const diffOpens = [];
 diffRequest.open = (session, turn) => diffOpens.push([session, turn]);
-const { evidenceLine, evidenceRows, evidenceElement, fileRow, hasEvidence } = await import("../../dist/evidence.js");
+const { evidenceLine, evidenceRows, evidenceElement: drawEvidence, fileRow: drawFileRow, hasEvidence } = await import("../../dist/evidence.js");
+// The page's nodes here are the stand-in DOM's, which the tests read as such.
+/** @param {Parameters<typeof drawEvidence>} args @returns {any} */
+const evidenceElement = (...args) => drawEvidence(...args);
+/** @param {Parameters<typeof drawFileRow>} args @returns {any} */
+const fileRow = (...args) => drawFileRow(...args);
 
-const file = (path, added, removed, extra = {}) => ({ root: "/r", path, from: null, added, removed, ...extra });
-const run = (status, call, exit_code = null) => ({ command: "cargo test", status, exit_code, call, agent: null });
+/** @typedef {import("../../dist/types.js").Check} Check */
+/** @typedef {import("../../dist/types.js").CheckStatus} CheckStatus */
+// A file and a check as the core sends them, less the fields the line never reads.
+const file = (path, added, removed, extra = {}) => /** @type {import("../../dist/types.js").TurnFile} */ ({ root: "/r", path, from: null, added, removed, ...extra });
+/** @param {CheckStatus} status @returns {Check["runs"][number]} */
+const run = (status, call, exit_code = null) => /** @type {Check["runs"][number]} */ ({ command: "cargo test", status, exit_code, call, agent: null });
+/** @param {string} suite @param {CheckStatus} status @returns {Check} */
 const check = (suite, status, retries = 0, runs = [run(status, `c-${suite}`, status === "failed" ? 101 : 0)], worktree = "/r", foreign = false) => ({ suite, worktree, foreign, status, retries, runs });
 const same = (a, b) => a.length === b.length && a.every((node, i) => node === b[i]);
 const files = (list, merged = 0) => ({ files: list, merged });
@@ -74,7 +84,7 @@ test("opened: each file with its line counts and its agent, each check with its 
   ]);
   assert.equal(rows.find((r) => r.label.startsWith("cargo clippy")).call, "c-cargo clippy");
   assert.equal(rows.find((r) => r.label === "go test ran").call, undefined);
-  assert.equal(evidenceRows({ files: files([file("a", 1, 0)]), checks: [] }).some((r) => r.kind === "external"), false);
+  assert.equal(evidenceRows({ files: files([file("a", 1, 0)]), checks: [] }).some((r) => /** @type {string} */ (r.kind) === "external"), false);
   // A file's row names its agent when the core found one, and none otherwise.
   const named = evidenceRows({ files: files([file("a", 1, 0, { agent: "claude" }), file("b", 1, 0, { agent: null })]), checks: [] });
   assert.deepEqual(named.map((r) => r.agent ?? null), ["claude", null]);
@@ -90,7 +100,7 @@ test("no line for an agy session, or a turn with no files and no checks", () => 
 
 test("opening the line, then a failed check's output, changes only those nodes, and the open line outlasts a refresh", async () => {
   tauri([], () => ({ exit_code: 101, tail: "error[E0308]: mismatched types" }));
-  const turn = { files: files([file("a.rs", 3, 1)]), checks: [check("cargo test", "failed")] };
+  const turn = { ended_at: null, files: files([file("a.rs", 3, 1)]), checks: [check("cargo test", "failed")] };
   const make = () => evidenceElement("s1", 4, turn, { only: "all" });
 
   const rail = new El("ul");
@@ -127,11 +137,11 @@ test("opening the line, then a failed check's output, changes only those nodes, 
 });
 
 test("while running, only a check whose last run failed shows", () => {
-  const turn = { files: files([file("a", 1, 0)]), checks: [check("cargo test", "passed"), check("cargo clippy", "failed")] };
+  const turn = { ended_at: null, files: files([file("a", 1, 0)]), checks: [check("cargo test", "passed"), check("cargo clippy", "failed")] };
   const el = evidenceElement("s1", 9, turn, { only: "failed" });
   assert.match(el.text, /✗ cargo clippy failed/);
   assert.doesNotMatch(el.text, /file|cargo test/);
-  assert.equal(evidenceElement("s1", 9, { files: null, checks: [check("cargo test", "passed")] }, { only: "failed" }), null);
+  assert.equal(evidenceElement("s1", 9, { ended_at: null, files: null, checks: [check("cargo test", "passed")] }, { only: "failed" }), null);
 });
 
 test("a file row opens its hunk in place and stays open across a refresh", async () => {
@@ -139,6 +149,7 @@ test("a file row opens its hunk in place and stays open across a refresh", async
   const hunk = { text: "@@ -1 +1,2 @@\n a\n+b\n", left_out: 12, binary: false, first_line: 2 };
   tauri(calls, (command) => (command === "turn_file_hunk" ? hunk : null));
   const turn = {
+    ended_at: null,
     files: files([file("a.rs", 1, 0), file("new.rs", 1, 1, { from: "old.rs" }), file("img.png", null, null)]),
     checks: [check("cargo test", "failed")],
   };
@@ -186,7 +197,7 @@ test("a file row opens its hunk in place and stays open across a refresh", async
 test("a binary file's hunk says so and a hunk that cannot be read says that", async () => {
   let answer = { text: "", left_out: 0, binary: true, first_line: 1 };
   tauri([], () => answer);
-  const turn = { files: files([file("img.png", null, null), file("gone.rs", 1, 0)]), checks: [] };
+  const turn = { ended_at: null, files: files([file("img.png", null, null), file("gone.rs", 1, 0)]), checks: [] };
   const line = evidenceElement("s3", 1, turn, { only: "all" });
   line.find("button")[0].listeners.click();
   const [img, gone] = line.find("li");
@@ -200,19 +211,22 @@ test("a binary file's hunk says so and a hunk that cannot be read says that", as
 });
 
 test("the opened line offers the full diff only when the turn has files", () => {
-  const line = evidenceElement("s9", 1, { files: files([file("a.rs", 1, 0)]), checks: [] }, { only: "all" });
+  const line = evidenceElement("s9", 1, { ended_at: null, files: files([file("a.rs", 1, 0)]), checks: [] }, { only: "all" });
   const open = line.find("button").find((b) => b.text === "Open full diff");
   open.listeners.click();
   assert.deepEqual(diffOpens.at(-1), ["s9", 1]);
-  assert.equal(evidenceElement("s9", 2, { files: null, checks: [check("cargo test", "passed")] }, { only: "all" }).find("button").some((b) => b.text === "Open full diff"), false);
+  assert.equal(evidenceElement("s9", 2, { ended_at: null, files: null, checks: [check("cargo test", "passed")] }, { only: "all" }).find("button").some((b) => b.text === "Open full diff"), false);
 });
 
 test("an open turn's hunk is read again at each opening and once the turn ended, and an ended turn's is kept", async () => {
   let reads = 0;
   tauri([], (command) => (command === "turn_file_hunk" ? { text: `read ${++reads}`, left_out: 0, binary: false, first_line: 1 } : null));
-  const row = { kind: "file", label: "k.rs", file: file("k.rs", 1, 0) };
+  const row = { kind: /** @type {const} */ ("file"), label: "k.rs", file: file("k.rs", 1, 0) };
   const settle = () => new Promise((resolve) => setTimeout(resolve));
-  const toggle = async (item) => (item.find("button")[0].listeners.click(), settle());
+  const toggle = (item) => {
+    item.find("button")[0].listeners.click();
+    return settle();
+  };
   // While the turn is open: open, close, open again reads twice.
   const open = fileRow("s3", 1, row, "", false);
   await toggle(open);
@@ -278,7 +292,7 @@ test("a check whose last run is a worker's shows that worker, as a file row does
   const failed = evidenceRows({ files: null, checks: [byWorker("failed", "w1")] });
   assert.deepEqual([failed[0].call, failed[0].agent], ["w-call", "w1"]);
 
-  const agents = (checks) => evidenceElement("s5", 2, { files: null, checks }, { only: "all" }).find("span").filter((s) => s.className === "evidence-agent");
+  const agents = (checks) => evidenceElement("s5", 2, { ended_at: null, files: null, checks }, { only: "all" }).find("span").filter((s) => s.className === "evidence-agent");
   assert.deepEqual(agents([byWorker("passed", "w1")]).map((s) => s.text), ["w1"]);
   assert.deepEqual(agents([byWorker("failed", "w1")]).map((s) => s.text), ["w1"]);
   assert.deepEqual(agents([check("cargo test", "passed")]), []);
@@ -286,7 +300,7 @@ test("a check whose last run is a worker's shows that worker, as a file row does
 
 test("a failed check's output and a file's hunk scroll on their own, so each takes focus with a name (#462)", () => {
   tauri([], () => null);
-  const line = evidenceElement("s9", 1, { files: files([file("a.rs", 1, 0)]), checks: [check("cargo test", "failed")] }, { only: "all" });
+  const line = evidenceElement("s9", 1, { ended_at: null, files: files([file("a.rs", 1, 0)]), checks: [check("cargo test", "failed")] }, { only: "all" });
   const pres = line.find("pre");
   assert.deepEqual(pres.map((pre) => pre.className).sort(), ["evidence-hunk", "evidence-output"]);
   for (const pre of pres) assert.equal(pre.getAttribute("tabindex"), "0", pre.className);

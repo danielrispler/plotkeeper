@@ -3,16 +3,19 @@
 // text at start and each time one is saved; a file that does not parse is reported and the last good
 // one stays in effect.
 
-import type { WriterKind } from "./types.js";
+import { messageOf } from "./dom.js";
+import type { SettingsFiles, WriterKind } from "./types.js";
 
-// An action, or an action with its argument, as Zed writes `["terminal::SendText", "\u0001"]`.
+/** An action, or an action with its argument, as Zed writes `["terminal::SendText", "\u0001"]`. */
 export type Binding = string | [string, string];
-// Keystrokes, as Zed writes them ("cmd-1", "escape"), to actions, by context: "Workspace" for the
-// page, "List" for the session list while it has focus. Maps, since the contexts and keystrokes come from the file (#548): a context named
-// `__proto__` or `constructor` is a name like any other, and never reaches what every object inherits.
+/**
+ * Keystrokes, as Zed writes them ("cmd-1", "escape"), to actions, by context: "Workspace" for the
+ * page, "List" for the session list while it has focus. Maps, since the contexts and keystrokes come from the file (#548): a context named
+ * `__proto__` or `constructor` is a name like any other, and never reaches what every object inherits.
+ */
 export type Keymap = ReadonlyMap<string, ReadonlyMap<string, Binding>>;
 
-// The settings: `settings.json`'s choices.
+/** The settings: `settings.json`'s choices. */
 export interface Settings {
   // The summary writer's model and effort ("" for the model's default), whether opening a turn
   // writes its summary, and the program that writes cards: Claude Code, the Antigravity CLI (#327), Codex (#364),
@@ -27,7 +30,7 @@ export interface Settings {
   tips: boolean;
 }
 
-// Both settings files, parsed: the settings and keymap in effect.
+/** Both settings files, parsed: the settings and keymap in effect. */
 export interface Files {
   settings: Settings;
   keymap: Keymap;
@@ -38,9 +41,12 @@ export interface Files {
   broken: boolean;
 }
 
+const writerKinds: readonly WriterKind[] = ["claude", "agy", "codex", "copilot", "cursor", "anthropic", "openai"];
+const isWriterKind = (value: unknown): value is WriterKind => writerKinds.some((kind) => kind === value);
 // The writer the file names, or undefined, reporting a name that is none of them.
 function writerKind(value: unknown, report: (line: string) => void): WriterKind | undefined {
-  if (value === undefined || value === "claude" || value === "agy" || value === "codex" || value === "copilot" || value === "cursor" || value === "anthropic" || value === "openai") return value;
+  if (value === undefined) return undefined;
+  if (isWriterKind(value)) return value;
   report('summaries.writer: expected "claude", "agy", "codex", "copilot", "cursor", "anthropic" or "openai"');
   return undefined;
 }
@@ -134,14 +140,14 @@ function readChecks(value: unknown, report: Report): Record<string, string[]> {
   return lists;
 }
 
-// The order modifiers take in a keystroke, here and in `keys.ts`.
+/** The order modifiers take in a keystroke, here and in `keys.ts`. */
 export const MODIFIERS = ["ctrl", "alt", "shift", "cmd"] as const;
 
 // A keystroke with its modifiers in `MODIFIERS` order; null: not a keystroke.
 function normal(stroke: string): string | null {
   const parsed = new RegExp(`^((?:(?:${MODIFIERS.join("|")})-)*)(.+)$`).exec(stroke.toLowerCase());
   if (!parsed) return null;
-  const [, mods, key] = parsed;
+  const [, mods = "", key = ""] = parsed;
   return [...MODIFIERS.filter((m) => mods.includes(`${m}-`)), key].join("-");
 }
 
@@ -185,10 +191,8 @@ function readKeymap(json: unknown, report: Report): Keymap {
   return keymap;
 }
 
-// The two files' text, as the shell sends it; null: no file.
-export type SettingsFiles = { settings: string | null; keymap: string | null };
 
-// The settings files from their text, each falling back to `previous` when it does not parse.
+/** The settings files from their text, each falling back to `previous` when it does not parse. */
 export function reload(previous: Files, files: SettingsFiles): Files {
   const errors: string[] = [];
   let broken = false;
@@ -197,7 +201,7 @@ export function reload(previous: Files, files: SettingsFiles): Files {
     try {
       return parse(parseJsonc(text), (problem) => errors.push(`${name}: ${problem}`));
     } catch (e) {
-      errors.push(`${name}: ${e instanceof Error ? e.message : e}`);
+      errors.push(`${name}: ${messageOf(e)}`);
       if (name === "settings.json") broken = true;
       return last;
     }
