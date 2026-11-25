@@ -604,7 +604,7 @@ body.resizing { -webkit-user-select: none; user-select: none; cursor: col-resize
 .law-patch-note { font-size: var(--size-xs); color: var(--faint); }
 .plate.predicted { outline: var(--hair) dashed var(--faint); outline-offset: var(--sp-2); }
 .plate-predicted { font-size: var(--size-xs); color: var(--faint); }
-.brief-expected { flex: none; margin: 0 0 var(--sp-3); font-size: var(--size-xs); color: var(--faint); }
+.brief-expected { flex: none; margin: 0 0 var(--sp-3); padding-inline-end: 8em; font-size: var(--size-xs); color: var(--faint); }
 /* The PR brief alone dims the map, and both panels with it (#385): what they hold, not their glass, which still covers the dimmed plates under it. */
 body.brief-open .map-panel > *, body.brief-open .map-side > * > * { opacity: var(--brief-dim); transition: opacity var(--motion); }
 /* The gear (#385): quiet, in the top bar, pressed while Settings shows. */
@@ -715,6 +715,10 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .explain { margin: calc(-1 * var(--sp-2)) 0 0; font-size: var(--size-xs); line-height: 1.45; color: var(--muted); text-wrap: pretty; }
 .explain.explain-choice { margin: 0; }
 .sheet-link > .explain-link { margin: 0; }
+/* In the brief (#524): a step's line sits between its title and its body; "not yet ratified"'s spans its item's row. */
+.brief-txt > .explain { margin: calc(-1 * var(--sp-2)) 0 var(--sp-3); }
+.brief-also-title + .explain { margin: var(--sp-1) 0 0; }
+.ratify-row > .explain-link { grid-column: 1 / -1; margin: var(--sp-1) 0 0; }
 .sheet-caption { margin: 0; font-size: var(--size-small); color: var(--muted); }
 .sheet-purpose { margin: var(--sp-3) 0 0; font-size: var(--size-read); line-height: 1.5; text-wrap: pretty; }
 .sheet-holds { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-4); }
@@ -968,15 +972,17 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .brief-facts-list { margin: var(--sp-2) 0 0; padding-inline-start: var(--sp-6); color: var(--muted); }
 .brief-facts-list li + li { margin-top: var(--sp-2); }
 .brief-facts-files { margin: var(--sp-1) 0 0; padding-inline-start: var(--sp-5); font-family: var(--mono); overflow-wrap: anywhere; }
-/* Its end leaves room for Leave, which sits over the panel's top right corner. */
-.brief-stale { flex: none; margin: 0 0 var(--sp-3); padding-inline-end: 5.5em; font-size: var(--size-xs); color: var(--muted); text-wrap: pretty; }
+/* Its end leaves room for the ? and Leave, which sits over the panel's top right corner. */
+.brief-stale { flex: none; margin: 0 0 var(--sp-3); padding-inline-end: 8em; font-size: var(--size-xs); color: var(--muted); text-wrap: pretty; }
 .brief-stale-names { font-family: var(--mono); overflow-wrap: anywhere; }
-/* "Since you read" (#497): the story's head, first under the panel's head, with the full brief one click away; it leaves room for Leave too. */
-.brief-since { flex: none; margin: 0 0 var(--sp-3); padding-inline-end: 5.5em; font-size: var(--size-xs); color: var(--muted); text-wrap: pretty; }
+/* "Since you read" (#497): the story's head, first under the panel's head, with the full brief one click away; it leaves room for the ? and Leave too. */
+.brief-since { flex: none; margin: 0 0 var(--sp-3); padding-inline-end: 8em; font-size: var(--size-xs); color: var(--muted); text-wrap: pretty; }
 .brief-since-head { font-family: var(--mono); }
 .brief-since-full { font-size: var(--size-xs); }
 /* Leave sits over the top of the step's scrollbar when a tall step scrolls (#490): its own background keeps the thumb from under its word. */
-.brief-leave { position: absolute; top: var(--sp-5); right: var(--sp-5); color: var(--faint); }
+/* The brief's header (#524): the explanations' `?` beside Leave, over the panel's top right corner. */
+.brief-header { position: absolute; top: var(--sp-5); right: var(--sp-5); z-index: 1; display: flex; align-items: center; gap: var(--sp-2); }
+.brief-leave { color: var(--faint); }
 .btn.quiet.brief-leave { background: var(--surface); }
 .btn.primary.brief-next { min-inline-size: var(--brief-next); background: var(--brief-light); color: var(--bg); }
 .map-world.glide { transition: transform var(--brief-camera); }

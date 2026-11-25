@@ -27,6 +27,7 @@ import type { Copied } from "./notes.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
 import { actorSize, agentPrompt, alsoAt, diffArgs, type AlsoRow, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureMax, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, partialFactsLines, pickRun, type PickRun, playlist, plateSize, stageLabel, storySteps, type Rect, type Shape, stepCode, unconfirmed, unconfirmedReasons } from "./map-model.js";
 import type { BriefCheck, BriefFigure, BriefStep, BriefView, CatchUpOffer, CommitFiles, PrBrief, RatifyRow, ReadyPr, StaleBase, StoredCatchUp } from "./types.js";
+import { BRIEF, explained, explainLine, explanationsOn, explainToggle, onExplanations, pressToggle, RATIFY, stepLine } from "./explanations.js";
 
 const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
 // The brief being played, as `pr_brief` returned it.
@@ -627,7 +628,9 @@ function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["als
   kick.append(text("span", pr < 0 ? "Part catch-up" : `#${pr}`), text("span", step.k));
   const tag = lawTag(view, step);
   if (tag) kick.append(tag);
-  words.append(kick, text("h3", step.h, "brief-title"), bodyNode(step.b));
+  // Explanations (#524): a line under the title saying what this kind of step is for; on Ratify, what its title asks.
+  const line = explanationsOn() ? stepLine(step) : undefined;
+  words.append(kick, ...explained(text("h3", step.h, "brief-title"), line ?? "", line !== undefined), bodyNode(step.b));
   if (step.list.length) words.append(listNode(step.list));
   if (step.risks.length) words.append(listNode(step.risks.map((r) => `${part(r.part)}: ${r.trigger} To see it: ${r.check}`)));
   if (step.covered_by) words.append(text("p", `Covered by the test ${step.covered_by}.`, "brief-quiet"));
@@ -712,7 +715,7 @@ function alsoInto(view: MapView, node: HTMLElement, groups: AlsoRow[]) {
   const ask = diffArgs(view.project, playing);
   const box = text("section", "", "brief-also");
   box.setAttribute("aria-label", "Also touched");
-  box.append(text("h4", "Also touched", "brief-quiet brief-also-title"));
+  box.append(...explained(text("h4", "Also touched", "brief-quiet brief-also-title"), BRIEF.also, explanationsOn()));
   for (const group of groups) {
     const row = text("div", "", "brief-also-group");
     const head = text("div", "", "brief-also-head");
@@ -760,6 +763,8 @@ function ratifyNode(view: MapView, rows: RatifyRow[]) {
   const list = text("ul", "", "brief-ratify");
   // Safari drops a list's semantics under `list-style: none` and grid; the role brings them back.
   list.setAttribute("role", "list");
+  // "Not yet ratified"'s line (#524), worded as on the sheet, under the first item still undecided only.
+  let told = !explanationsOn();
   for (const row of rows.filter((each) => each.status !== "ratified")) {
     const item = text("li", "", "ratify-row");
     item.dataset.kind = row.kind;
@@ -774,6 +779,10 @@ function ratifyNode(view: MapView, rows: RatifyRow[]) {
       }));
     } else {
       item.append(text("span", statusWords[row.status], "ratify-mark done"));
+    }
+    if (row.status === "not-yet" && !told) {
+      told = true;
+      item.append(explainLine(RATIFY.notYet, "explain-link"));
     }
     const detail = ratifyDetail(row);
     if (detail) item.append(detail);
@@ -1039,6 +1048,9 @@ function buildPanel(view: MapView, list: BriefStep[]) {
   const leave = text("button", "Leave", "btn quiet brief-leave");
   leave.title = "Close the brief; it opens again at this step";
   leave.addEventListener("click", closeBrief);
+  // The explanations' `?` beside Leave (#524), as beside the sheet's ×; kept for the brief, its state set again when they switch.
+  const header = text("div", "", "brief-header");
+  header.append(explainToggle(explanationsOn()), leave);
   const cols = text("div", "", "brief-cols");
   const dots = text("div", "", "brief-dots");
   dots.setAttribute("role", "img");
@@ -1060,7 +1072,7 @@ function buildPanel(view: MapView, list: BriefStep[]) {
   const facts = factsChip();
   const stale = staleBaseLine(playing?.stale_base);
   const since = sinceLine();
-  box.replaceChildren(leave, ...(since ? [since] : []), ...(facts ? [facts] : []), ...(stale ? [stale] : []), ...(line ? [text("p", line, "brief-expected")] : []), cols, foot, live);
+  box.replaceChildren(header, ...(since ? [since] : []), ...(facts ? [facts] : []), ...(stale ? [stale] : []), ...(line ? [text("p", line, "brief-expected")] : []), cols, foot, live);
 }
 
 // A "Since you read" story's head (#497): what it tells, from which head, and the full brief one click away, at the chapter played.
@@ -1162,6 +1174,14 @@ const onResize = () => {
   const view = currentMap();
   if (view && player.current()) show(view, true);
 };
+
+// The explanations switched on or off (#524): the open brief's `?` says so, and its step draws again with or without its lines.
+onExplanations(() => {
+  const toggle = panel().querySelector<HTMLElement>(".brief-header .explain-toggle");
+  if (toggle) pressToggle(toggle, explanationsOn());
+  const view = currentMap();
+  if (view && player.current()) show(view, true);
+});
 
 registerLayer("popover", { open: popoverOpen, close: closePopover });
 registerLayer("brief", { open: briefOpen, close: closeBrief });

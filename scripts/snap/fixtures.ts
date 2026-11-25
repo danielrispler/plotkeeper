@@ -946,6 +946,38 @@ const mapBriefRatify = (): Fixture => ({
       log("ratify ok");`, false, 100),
   pr_ratify: ratifyRows,
 });
+// The brief's reader explains itself (#524), with Explanations on (the default): the ? beside Leave, pressed; the step's title described by
+// its kind's line, directly under it. On the Ratify step (`ratify`), the title's line, and "Not yet ratified"'s under the first undecided
+// item only. `off` then presses the ?: the ? stays, keeps the focus and is no longer pressed, and no line is drawn or pointed at.
+const mapBriefExplained = (at: "where" | "ratify" | "off"): Fixture => ({
+  ...mapBrief(briefOf(storySteps()), at === "ratify" ? 4 : 0, `
+      const box = document.getElementById("map-brief");
+      const toggle = box.querySelector(".brief-header .explain-toggle");
+      if (!toggle || toggle.nextElementSibling !== box.querySelector(".brief-header .brief-leave")) return log("snap:fail the ? is not beside Leave");
+      if (toggle.getAttribute("aria-pressed") !== "true" || toggle.title !== "Hide explanations") log("snap:fail the ?: " + toggle.getAttribute("aria-pressed") + " " + toggle.title);
+      const title = box.querySelector(".brief-title");
+      const line = document.getElementById(title.getAttribute("aria-describedby"));
+      if (!line?.classList.contains("explain") || title.nextElementSibling !== line) log("snap:fail the title's line");
+      const want = ${JSON.stringify(at === "ratify" ? "Changes this PR made to your map; say whether each stands." : "Where this change sits on your map.")};
+      if (line?.textContent !== want) log("snap:fail the title's line says " + JSON.stringify(line?.textContent));
+      if (${at === "ratify"}) {
+        const notes = [...box.querySelectorAll(".ratify-row .explain-link")].map((note) => note.closest(".ratify-row").dataset.id + "=" + note.textContent.split(":")[0]);
+        if (notes.join("|") !== "window-quiet=Not yet ratified") log("snap:fail not yet ratified's line: " + notes.join("|"));
+      }
+      if (${at === "off"}) {
+        toggle.focus();
+        toggle.click();
+        await wait(300);
+        const kept = box.querySelector(".brief-header .explain-toggle");
+        if (kept !== toggle || document.activeElement !== toggle) log("snap:fail the ? did not keep the focus");
+        if (toggle.getAttribute("aria-pressed") !== "false" || toggle.title !== "Show explanations") log("snap:fail the ? after a press: " + toggle.getAttribute("aria-pressed") + " " + toggle.title);
+        const lines = box.querySelectorAll(".explain").length;
+        const described = box.querySelectorAll("[aria-describedby]").length;
+        if (lines || described) log("snap:fail explanations drawn while off: " + lines + " lines, " + described + " described");
+      }`, false, 100),
+  ...(at === "ratify" ? { pr_ratify: ratifyRows } : {}),
+  ...(at === "off" ? { set_explanations: '{ "explanations": false }' } : {}),
+});
 // Old beside new in the brief's ratify step (#485): a changed part (its purpose, a path, a held item reworded, one added, one removed), an
 // added part with nothing before, and a link whose kind and reason changed.
 const ratifyDetailRows: RatifyRow[] = [
@@ -3170,6 +3202,9 @@ ${writerStatusAfter("Keychain refused")}
   mapBriefOrderWrong,
   mapBriefOrderRight,
   mapBriefRatify,
+  mapBriefExplained: () => mapBriefExplained("where"),
+  mapBriefRatifyExplained: () => mapBriefExplained("ratify"),
+  mapBriefExplainedOff: () => mapBriefExplained("off"),
   mapBriefRatifyDetail,
   mapBriefGuard: () => mapBriefGuard(false),
   mapBriefGuardConfirm: () => mapBriefGuard(true),
