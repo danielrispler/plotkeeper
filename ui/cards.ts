@@ -23,8 +23,9 @@ export function briefSlots(cards: SessionCards): BriefSlot[] {
 // A design line's citation: a button that opens the turn it came from in the rail (an older line may cite a card, which opens its turn).
 function citation(id: string, open: (id: string) => void): HTMLElement {
   const button = pressable(text("button", "", "cite"), null, () => open(id));
-  hint(button, "Open the turn it came from");
+  // Named first: `hint()` reads the name to tell a hint that repeats it from one that adds to it.
   button.setAttribute("aria-label", "Open the turn it came from");
+  hint(button, "Open the turn it came from");
   button.append(glyphOnly("↗"));
   return button;
 }
