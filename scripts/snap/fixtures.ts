@@ -2405,6 +2405,86 @@ const mapFootprint = (): Fixture => {
     map_place: { ...busyPlace(), "daemon/old.rs": ["daemon"], "understanding/u.rs": ["understanding"], "core/older.rs": ["core"] },
   });
 };
+// A story's turn on the map (#560): with #311's story open, hovering or focusing a turn lights its parts (a brief's ring, nothing dimmed,
+// no camera move); leaving, or a feed redraw, clears it. Its 9-day-old turn says its files aren't shown and lights nothing; a turn with
+// no files lights nothing; the newest has "Show on map"; under a brief nothing lights. It ends on the 2-day-old turn, hovered.
+const mapTurnLight = (): Fixture => {
+  const day = 24 * 3600e3;
+  const turn = (ago: number, paths: (string | [string, string])[], prompt: string) => ({
+    started_at: Date.now() - ago - 60e3, ended_at: Date.now() - ago, prompt, id: null, message: null, checks: [], listed: [],
+    files: { files: paths.map((given) => { const [path, agent] = typeof given === "string" ? [given, null] : given; return { root: "/w/plotkeeper", path, from: null, added: 3, removed: 1, agent }; }), merged: 0 },
+  });
+  const sessions = busySessions().map((s) => (s.id === "s1" ? { ...s, turns: [turn(9 * day, ["daemon/old.rs"], "Rework the daemon"), turn(2 * day, ["understanding/u.rs", "core/older.rs"], "Read the understanding"), turn(day, [], "Explain the fog"), ...s.turns] } : s));
+  return mapPanel(`
+      const lit = () => [...document.querySelectorAll("#map .plate.turn-lit")].map((p) => p.dataset.id).sort().join();
+      const world = () => document.querySelector("#map .map-world").style.transform;
+      const turns = () => [...document.querySelectorAll("#feed > li.turn")];
+      const at = (i) => turns()[i];
+      const hover = async (node, on = true) => { node.dispatchEvent(new PointerEvent(on ? "pointerenter" : "pointerleave")); await wait(30); };
+      await press(row("s1"));
+      if (!panelOpen()) return log("snap:fail #311's story did not open");
+      // Its four turns, newest first, then the block of what started in no turn.
+      if (turns().length < 4) return log("snap:fail #311's feed has " + turns().length + " turns, not 4");
+      const camera = world();
+      // The 2-day-old turn lights the parts it changed, nothing dims and the camera stays; leaving clears it.
+      await hover(at(2));
+      if (lit() !== "core,understanding") log("snap:fail the hovered turn lights " + JSON.stringify(lit()));
+      const dimmed = [...document.querySelectorAll("#map .plate")].filter((p) => Number(getComputedStyle(p).opacity) < 1).map((p) => p.dataset.id);
+      if (dimmed.length) log("snap:fail a turn's hover dimmed " + dimmed.join());
+      if (world() !== camera) log("snap:fail a turn's hover moved the camera");
+      const ring = getComputedStyle(document.querySelector("#map .plate[data-id=core]")).boxShadow;
+      if (!ring.includes("0px 0px 0px")) log("snap:fail a lit part has no ring: " + ring);
+      await hover(at(2), false);
+      if (lit() !== "") log("snap:fail the light stayed after the pointer left: " + lit());
+      // Keyboard focus lights it too, and moving the focus out clears it.
+      at(2).querySelector(".turn-line").focus();
+      await wait(30);
+      if (lit() !== "core,understanding") log("snap:fail the focused turn lights " + JSON.stringify(lit()));
+      at(2).querySelector(".turn-line").blur();
+      await wait(30);
+      if (lit() !== "") log("snap:fail the light stayed after the focus left: " + lit());
+      // The newest turn lights its parts, its Worker's Shell included, and has "Show on map"; a turn with no files lights nothing.
+      await hover(at(0));
+      if (lit() !== "core,shell,window") log("snap:fail the newest turn lights " + JSON.stringify(lit()));
+      await hover(at(0), false);
+      if (!at(0).querySelector(".show-on-map")) log("snap:fail the newest turn has no Show on map");
+      await hover(at(1));
+      if (lit() !== "") log("snap:fail a turn with no files lights " + lit());
+      await hover(at(1), false);
+      // The 9-day-old turn, unfolded, says its files aren't shown and lights nothing.
+      at(3).querySelector(".turn-line").click();
+      await wait(100);
+      const old = at(3).querySelector(".turn-old");
+      if (old?.textContent !== "Files older than 7 days aren't shown on the map") log("snap:fail the old turn's line: " + JSON.stringify(old?.textContent));
+      if (at(2).querySelector(".turn-old") || at(0).querySelector(".turn-old")) log("snap:fail a turn within 7 days says its files aren't shown");
+      await hover(at(3));
+      if (lit() !== "") log("snap:fail the old turn lights " + lit());
+      await hover(at(3), false);
+      at(3).querySelector(".turn-line").click();
+      await wait(100);
+      // A feed redraw clears the light.
+      await hover(at(2));
+      __snapEmit("selected", { session: ${JSON.stringify(sessions[0])}, agent: null });
+      await wait(100);
+      if (lit() !== "") log("snap:fail the light stayed after the feed redrew: " + lit());
+      // Under a brief, a turn's hover lights nothing.
+      document.querySelector('#map-tray .tray-row[data-pr="334"]').click();
+      await wait(400);
+      if (document.getElementById("map-brief").hidden) return log("snap:fail the brief did not open");
+      await hover(at(2));
+      if (lit() !== "") log("snap:fail a turn lit " + lit() + " under a brief");
+      await hover(at(2), false);
+      await esc();
+      if (!document.getElementById("map-brief").hidden) return log("snap:fail Esc did not close the brief");
+      await hover(at(2));
+      log("turn lit " + lit());
+      log("panel ok");`, {
+    sessions,
+    select: { __by: "id", values: Object.fromEntries(sessions.map((s) => [s.id, { session: s, agent: null }])) },
+    pr_brief: briefOf(storySteps()),
+    map_place: { ...busyPlace(), "daemon/old.rs": ["daemon"], "understanding/u.rs": ["understanding"], "core/older.rs": ["core"] },
+  });
+};
 // The rail with no session picked (#526): the story's session is picked no more while its panel shows, as when it is deleted elsewhere. The
 // rail's empty screen says what will show there, under "Pick a session in the list."; the panel closes with the selection (`followSelection`),
 // so since #385 that screen is not drawn and this checks its words, not its pixels.
@@ -3610,6 +3690,7 @@ ${writerStatusAfter("Keychain refused")}
   },
   mapChipJump: () => mapBusy(true),
   mapFootprint,
+  mapTurnLight,
   // The map from the keyboard (#460).
   mapPartKeys,
   mapPartRedraw,

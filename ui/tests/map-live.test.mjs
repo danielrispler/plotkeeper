@@ -2,7 +2,7 @@
 // the spotlit session, run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { footprint, footprintNote, marked, placeGroups, spotlit } from "../../dist/map-live.js";
+import { footprint, footprintNote, marked, placeGroups, spotlit, turnLight, oldTurn, OLD_TURN } from "../../dist/map-live.js";
 
 const day = 24 * 60 * 60 * 1000;
 const now = 100 * day;
@@ -90,4 +90,23 @@ test("a session that touched no part within the cut says so; one whose placement
   assert.equal(note([turn(["core/x.rs"], 9 * day), turn(["docs/a.md", "stray.txt"], day)]), "Touched no part in the last 7 days");
   assert.equal(note([turn(["core/x.rs"], day)]), null);
   assert.equal(note([turn(["new/file.rs"], day)]), null);
+});
+
+test("a turn lights the parts it changed, Workers' files included; nothing past the cut, without files or while a brief plays", () => {
+  const recent = turn(["core/x.rs", ["ui/w.ts", "w1"], "core/y.rs", "stray.txt"], day);
+  assert.deepEqual(turnLight(recent, placed, now, false), ["core", "window"]);
+  assert.deepEqual(turnLight(recent, placed, now, true), []);
+  // Older than the cut, its files still held: nothing lights.
+  assert.deepEqual(turnLight(turn(["core/x.rs"], 8 * day), placed, now, false), []);
+  assert.deepEqual(turnLight(turn([], day), placed, now, false), []);
+  assert.deepEqual(turnLight(turn(null, 0, true), placed, now, false), []);
+});
+
+test("a turn past the cut says its files aren't shown, only for an agent that records turn files", () => {
+  assert.equal(OLD_TURN, "Files older than 7 days aren't shown on the map");
+  assert.equal(oldTurn(turn(["core/x.rs"], 8 * day), true, now), true);
+  assert.equal(oldTurn(turn(null, 8 * day, true), true, now), true);
+  assert.equal(oldTurn(turn(["core/x.rs"], 6 * day), true, now), false);
+  // An agent without turn trees never records files: no line blames the cut.
+  assert.equal(oldTurn(turn(null, 8 * day), false, now), false);
 });

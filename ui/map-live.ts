@@ -90,3 +90,18 @@ export function footprintNote(session: Session, placed: Placement, now: number):
   const { firm, faint } = footprint(session, placed, now);
   return firm.length || faint.length ? null : NO_FOOTPRINT;
 }
+
+// Turn lighting (ticket #560): a story's turn, hovered or focused, lights the parts it changed; unfolding it or "Show on map" reveals them.
+
+// The parts a turn lights and reveals: the parts it changed (its Workers' files included) while it is within the cut; none for an older
+// turn, a turn with no files, or while a PR brief plays, which keeps the map.
+export function turnLight(turn: Pick<Turn, "files" | "started_at" | "ended_at">, placed: Placement, now: number, brief: boolean): string[] {
+  return brief || !inCut(turn, now) ? [] : turnParts(turn, placed);
+}
+
+export const OLD_TURN = "Files older than 7 days aren't shown on the map";
+
+// Whether a turn says `OLD_TURN`: it is past the cut, and its agent records turn files (an agent that never does blames no rule).
+export function oldTurn(turn: Pick<Turn, "started_at" | "ended_at">, trees: boolean, now: number): boolean {
+  return trees && !inCut(turn, now);
+}
