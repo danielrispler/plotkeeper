@@ -499,8 +499,29 @@ fn story() -> studio_understanding::pr_brief::Brief {
             line: "Nothing changed in core.".into(),
             flags: Vec::new(),
         }],
-        // The page reads them with Also touched's groups (#492), which fills them here.
-        also_groups: Vec::new(),
+        // Also touched's groups (#492): a file with every field, and one with only its path and lines.
+        also_groups: vec![
+            AlsoGroup {
+                kind: AlsoKind::Tests,
+                files: vec![TouchedFile {
+                    path: "core/tests/order.rs".into(),
+                    lines: 4,
+                    part: Some("core".into()),
+                    ignored: true,
+                    laws: vec!["wire-types-agree".into()],
+                }],
+                lines: 4,
+            },
+            AlsoGroup {
+                kind: AlsoKind::NoPart,
+                files: vec![TouchedFile {
+                    path: "loose.rs".into(),
+                    lines: 2,
+                    ..TouchedFile::default()
+                }],
+                lines: 2,
+            },
+        ],
         unseen: vec!["Cargo.lock".into()],
         decisions: vec![
             Decision {
@@ -710,6 +731,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
                 head: COMMIT.into(),
                 title: "PR briefs".into(),
                 parts: Some(vec!["server".into()]),
+                paths: None,
             }),
         ),
         (
@@ -720,6 +742,18 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
                 head: COMMIT.into(),
                 title: "PR briefs".into(),
                 parts: None,
+                paths: None,
+            }),
+        ),
+        (
+            "PrDiffArgs",
+            json(studio_server::map::PrDiffArgs {
+                project: "/repo".into(),
+                number: 334,
+                head: COMMIT.into(),
+                title: "PR briefs".into(),
+                parts: None,
+                paths: Some(vec!["docs/a.md".into()]),
             }),
         ),
         ("Proof", json(proof(Some("the_wire_samples")))),

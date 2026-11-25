@@ -857,6 +857,14 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .brief-why-none { margin: var(--sp-3) 0 0; color: var(--muted); }
 .brief-also { margin-top: var(--sp-5); }
 .brief-also .brief-quiet { margin-top: var(--sp-2); }
+.brief-also-title { font-weight: inherit; }
+.brief-also-group { margin-top: var(--sp-4); }
+.brief-also-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2) var(--sp-4); }
+.brief-also-name { margin: 0; color: var(--muted); font-size: var(--size); font-weight: 600; }
+.brief-also-head .brief-quiet { margin: 0; }
+.brief-also-head .brief-code { margin-inline-start: auto; }
+.brief-also-files { margin: var(--sp-2) 0 0; padding: 0; list-style: none; color: var(--muted); font: var(--size-xs)/1.6 var(--mono); }
+.brief-also-files li { overflow-wrap: anywhere; }
 
 .brief-step-code { margin-top: var(--sp-5); }
 .brief-cites { margin-top: var(--sp-5); color: var(--faint); font-size: var(--size-xs); }

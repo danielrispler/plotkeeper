@@ -23,7 +23,7 @@ import { scrubTo } from "./map-history.js";
 import { overturnNote, ratifyActions, ratifyDetail } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
-import { actorSize, alsoAt, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureMax, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, partialFactsLines, pickRun, type PickRun, playlist, plateSize, stageLabel, storySteps, type Rect, type Shape, stepCode, unconfirmed, unconfirmedReasons } from "./map-model.js";
+import { actorSize, alsoAt, type AlsoRow, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureMax, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, partialFactsLines, pickRun, type PickRun, playlist, plateSize, stageLabel, storySteps, type Rect, type Shape, stepCode, unconfirmed, unconfirmedReasons } from "./map-model.js";
 import type { BriefCheck, BriefFigure, BriefStep, BriefView, CatchUpOffer, CommitFiles, PrBrief, PrDiffArgs, RatifyRow, ReadyPr, StoredCatchUp } from "./types.js";
 
 const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
@@ -632,6 +632,41 @@ function codeInto(view: MapView, node: HTMLElement, list: BriefStep[], index: nu
   words.append(row);
 }
 
+// Also touched by kind (#492), on the last step of the last chapter: each group its name, counts and laws, its files (the "ignored" tag
+// where `alsoRows` keeps it), and a See the code of only its files.
+function alsoInto(view: MapView, node: HTMLElement, groups: AlsoRow[]) {
+  const words = node.querySelector(".brief-txt");
+  if (!playing || catchUp || !groups.length || !words) return;
+  const ask: PrDiffArgs = { project: view.project, number: playing.brief.pr, head: playing.brief.head, title: playing.brief.brief.title };
+  const box = text("section", "", "brief-also");
+  box.setAttribute("aria-label", "Also touched");
+  box.append(text("h4", "Also touched", "brief-quiet brief-also-title"));
+  for (const group of groups) {
+    const row = text("div", "", "brief-also-group");
+    const head = text("div", "", "brief-also-head");
+    head.append(text("h5", group.name, "brief-also-name"), text("span", group.counts, "brief-quiet brief-also-counts"));
+    const button = text("button", "See the code", "btn quiet brief-code");
+    button.title = `Open the ${group.name} files, above the brief`;
+    button.setAttribute("aria-label", `See the code: ${group.name}`);
+    button.addEventListener("click", () => {
+      invoke("pr_diff", { ...ask, paths: group.paths } satisfies PrDiffArgs).then((found) => openDrawer(commitDrawer(found))).catch(failure("pr_diff"));
+    });
+    head.append(button);
+    row.append(head);
+    if (group.laws.length) row.append(text("p", `Laws: ${group.laws.join(", ")}`, "brief-quiet brief-also-laws"));
+    const files = text("ul", "", "brief-also-files");
+    files.setAttribute("role", "list");
+    for (const file of group.files) {
+      const item = text("li", file.path);
+      if (file.ignored) item.append(" ", text("span", "ignored", "brief-tag"));
+      files.append(item);
+    }
+    row.append(files);
+    box.append(row);
+  }
+  words.append(box);
+}
+
 function summaryInto(node: HTMLElement) {
   const summary = catchUp?.summary;
   const words = node.querySelector(".brief-txt");
@@ -861,9 +896,10 @@ function show(view: MapView, same: boolean) {
   // A new step closes the popover of the one before.
   if (!same) closePopover();
   const fill = () => {
-    const node = stepNode(view, step, pr, also);
+    const node = stepNode(view, step, pr, also.lines);
     figureExplore(view, node, step, pr, now.chapter);
     codeInto(view, node, list, now.step);
+    alsoInto(view, node, also.groups);
     if (now.step === 0) summaryInto(node);
     const bar = endBar(node, now.step, list.length);
     cols.replaceChildren(node);
