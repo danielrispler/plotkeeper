@@ -2619,8 +2619,9 @@ const mapSheetWidth = (): Fixture => ({
   ...mapOpened(`${sheetHelpers}
       plate("shell").click();
       await wait(300);
+      // The width is the side column's, as map-sheet.ts measures it: a sheet taller than the window gets the column's scrollbar inside it.
       const sheet = document.getElementById("map-sheet"), stage = document.querySelector(".map-stage");
-      const width = () => Math.round(sheet.getBoundingClientRect().width);
+      const width = () => Math.round(document.getElementById("map-side").getBoundingClientRect().width);
       const near = (a, b) => Math.abs(a - b) <= 2;
       if (!near(width(), 360)) log("snap:fail the sheet opens " + width() + " px wide, not 360");
       const handle = sheet.querySelector(".sheet-resize");
@@ -2660,7 +2661,7 @@ const mapSheetResizeRedraw = (): Fixture => ({
       plate("shell").click();
       await wait(300);
       const sheet = document.getElementById("map-sheet");
-      const width = () => Math.round(sheet.getBoundingClientRect().width);
+      const width = () => Math.round(document.getElementById("map-side").getBoundingClientRect().width);
       const handle = sheet.querySelector(".sheet-resize");
       if (!handle) return log("snap:fail the sheet has no resize handle");
       // The next map_state differs, so the map is drawn again.
@@ -2687,7 +2688,7 @@ const mapSheetKeptWidth = (): Fixture => ({
   ...mapOpened(`${sheetHelpers}
       plate("shell").click();
       await wait(300);
-      const width = Math.round(document.getElementById("map-sheet").getBoundingClientRect().width);
+      const width = Math.round(document.getElementById("map-side").getBoundingClientRect().width);
       if (Math.abs(width - 480) > 2) log("snap:fail the kept width 480 opened the sheet " + width + " px wide");
       await wait(400);
       log("kept width ok");`, { map_state: mapState() }),
