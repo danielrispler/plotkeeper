@@ -7,15 +7,15 @@ use std::env;
 
 #[derive(Debug, PartialEq)]
 pub(crate) struct DonePlan {
-    pub(crate) branch: String,
+    branch: String,
     /// The live worktree that has the branch checked out, if any.
-    pub(crate) worktree: Option<String>,
+    worktree: Option<String>,
 }
 /// Decide whether `--done` may delete the ticket's local branch and worktree: only when a
 /// merged PR ended on the branch's current commit, so nothing unmerged is lost.
 /// `branches` is `<name> <sha>` per local `issue-<n>-*` branch; `fetch_merged` lists the branch's
 /// merged PRs as `headRefName,headRefOid`; `cwd` must lie outside the worktree.
-pub(crate) fn done_plan(
+fn done_plan(
     number: u64,
     worktrees: &str,
     branches: &str,
@@ -62,7 +62,7 @@ pub(crate) fn done_plan(
 /// than an ignored Cargo `target/` build directory, at the root or in a nested crate, or the
 /// ignored `dist/`, `node_modules/`, `archive/src-tauri/gen/` and `scripts/wire/<name>.ts` that `npm ci`
 /// and the check rebuild.
-pub(crate) fn leftovers(status: &str) -> Vec<&str> {
+fn leftovers(status: &str) -> Vec<&str> {
     status
         .lines()
         .filter(|line| {
@@ -79,7 +79,7 @@ pub(crate) fn leftovers(status: &str) -> Vec<&str> {
 }
 /// Refuse while an open PR is based on `branch`: deleting the branch would close it. `open_prs`
 /// is `gh pr list --base <branch> --state open --json number`.
-pub(crate) fn stacked_refusal(branch: &str, open_prs: &Value) -> Result<()> {
+fn stacked_refusal(branch: &str, open_prs: &Value) -> Result<()> {
     let numbers = open_prs
         .as_array()
         .ok_or("expected an open PR list")?

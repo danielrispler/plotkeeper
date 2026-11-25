@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 /// What a ticket body lacks of the context `docs/agents/ticket-authoring.md` requires: `## Reading`,
 /// and `## Touches` with its Files and Session lines.
-pub(crate) fn body_lacks(body: &str) -> Vec<&'static str> {
+fn body_lacks(body: &str) -> Vec<&'static str> {
     let mut lacks = vec![];
     if !body.lines().any(|line| line.trim_end() == "## Reading") {
         lacks.push("## Reading");
@@ -31,21 +31,21 @@ pub(crate) fn body_lacks(body: &str) -> Vec<&'static str> {
 /// A spec's tickets to publish, from `tickets.json` in the `--publish` folder.
 #[derive(Debug)]
 pub(crate) struct Manifest {
-    pub(crate) parent: u64,
-    pub(crate) tickets: Vec<Ticket>,
+    parent: u64,
+    tickets: Vec<Ticket>,
 }
 #[derive(Debug, PartialEq)]
 pub(crate) struct Ticket {
     /// The ticket's body file, relative to the folder.
-    pub(crate) file: String,
-    pub(crate) title: String,
-    pub(crate) labels: Vec<String>,
+    file: String,
+    title: String,
+    labels: Vec<String>,
     /// The files of the tickets that block this one.
-    pub(crate) blocked_by: Vec<String>,
+    blocked_by: Vec<String>,
 }
 /// `{"parent": <issue>, "tickets": [{"file", "title", "labels": [..], "blocked_by": [<file>, ..]}]}`;
 /// `blocked_by` may be left out.
-pub(crate) fn parse_manifest(manifest: &Value) -> Result<Manifest> {
+fn parse_manifest(manifest: &Value) -> Result<Manifest> {
     let parent = manifest["parent"]
         .as_u64()
         .ok_or("tickets.json: missing parent issue number")?;
@@ -90,7 +90,7 @@ pub(crate) fn parse_manifest(manifest: &Value) -> Result<Manifest> {
 }
 /// The tickets in creation order: blockers first, manifest order otherwise. A cycle is an error
 /// naming the files on it. A blocker that names no ticket is `publish_problems`' to report.
-pub(crate) fn publish_order(manifest: &Manifest) -> Result<Vec<&Ticket>> {
+fn publish_order(manifest: &Manifest) -> Result<Vec<&Ticket>> {
     let mut placed: Vec<&Ticket> = vec![];
     let mut left: Vec<&Ticket> = manifest.tickets.iter().collect();
     while !left.is_empty() {
@@ -120,7 +120,7 @@ pub(crate) fn publish_order(manifest: &Manifest) -> Result<Vec<&Ticket>> {
 }
 /// Every reason the folder cannot be published, each naming its file; a run creates nothing unless
 /// this is empty. `bodies` holds each body file the folder has, `labels` the repository's labels.
-pub(crate) fn publish_problems(
+fn publish_problems(
     manifest: &Manifest,
     bodies: &std::collections::HashMap<String, String>,
     labels: &[String],
@@ -176,7 +176,7 @@ pub(crate) enum Step<'a> {
 }
 /// What a run still has to do, ticket by ticket in `order`, given `published.json` from earlier runs:
 /// `{"<file>": {"number": <issue>, "linked": <bool>, "edges": [<blocker file>, ..]}}`.
-pub(crate) fn publish_steps<'a>(order: &[&'a Ticket], published: &Value) -> Vec<Step<'a>> {
+fn publish_steps<'a>(order: &[&'a Ticket], published: &Value) -> Vec<Step<'a>> {
     let mut steps = vec![];
     for ticket in order {
         let record = &published[&ticket.file];

@@ -21,7 +21,7 @@ fn file_spans(body: &str) -> Vec<(&str, &str)> {
         .collect()
 }
 /// The paths in the `**Files:**` line of a ticket's `## Touches`: its backticked spans. No such line, none.
-pub(crate) fn touched_files(body: &str) -> Vec<String> {
+fn touched_files(body: &str) -> Vec<String> {
     file_spans(body)
         .into_iter()
         .map(|(_, span)| span.to_owned())
@@ -31,7 +31,7 @@ pub(crate) fn touched_files(body: &str) -> Vec<String> {
 /// `.`, and no space and no `<placeholder>`. A path the line introduces with the word "new" right
 /// before it is one the ticket creates, so it is skipped, and so is one under `local-evidence/`,
 /// which only the main checkout holds. A glob is looked up by the folder before its first `*`.
-pub(crate) fn missing_paths(body: &str, exists: impl Fn(&str) -> bool) -> Vec<String> {
+fn missing_paths(body: &str, exists: impl Fn(&str) -> bool) -> Vec<String> {
     file_spans(body)
         .into_iter()
         .filter(|(before, span)| {
@@ -57,7 +57,7 @@ pub(crate) fn missing_paths(body: &str, exists: impl Fn(&str) -> bool) -> Vec<St
 pub(crate) struct Overlap {
     pub(crate) first: u64,
     pub(crate) second: u64,
-    pub(crate) files: Vec<String>,
+    files: Vec<String>,
 }
 
 impl Overlap {
@@ -110,7 +110,7 @@ fn active(row: &Value) -> bool {
 #[derive(Debug)]
 pub(crate) struct Stale {
     pub(crate) ticket: u64,
-    pub(crate) paths: Vec<String>,
+    paths: Vec<String>,
 }
 
 impl Stale {

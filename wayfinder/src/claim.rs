@@ -33,14 +33,14 @@ pub(crate) enum Workspace {
 }
 #[derive(Debug, PartialEq)]
 pub(crate) struct ClaimPlan {
-    pub(crate) assign: bool,
-    pub(crate) branch: String,
-    pub(crate) path: String,
-    pub(crate) workspace: Workspace,
+    assign: bool,
+    branch: String,
+    path: String,
+    workspace: Workspace,
 }
 /// Decide whether `--claim` may take `issue` and how to set up its worktree.
 /// `worktrees` is `git worktree list --porcelain`; `branches` lists local and `origin/` branch names one per line.
-pub(crate) fn claim_plan(
+fn claim_plan(
     issue: &Value,
     open_blockers: &[u64],
     caller: &str,
