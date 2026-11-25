@@ -23,6 +23,7 @@
       },
       "suspicious": {
         "noConfusingVoidType": "off",
+        "noImportCycles": "error",
         "useAwait": "error",
         "useIterableCallbackReturn": "off"
       }

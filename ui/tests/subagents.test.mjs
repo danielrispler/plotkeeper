@@ -1,7 +1,7 @@
 // Finished subagents leave the list; the rail keeps their history (danielrispler/Falinks#535). Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { agentLine, childrenOf, doneCount, drawn, folds, hidden } from "../../dist/list.js";
+import { agentLine, childrenOf, doneCount, drawn, folds, hidden } from "../../dist/list-model.js";
 import { subagentHistory } from "../../dist/story.js";
 
 test("a subagent row has a second line only while it runs or needs you (danielrispler/Falinks#572)", () => {

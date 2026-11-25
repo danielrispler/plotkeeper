@@ -5,7 +5,8 @@ import fs from "node:fs";
 import { fakeDocument } from "./dom.mjs";
 
 const { logoKey, logo } = await import("../../dist/logos.js");
-const { row, rowMark, strip: stripOf, projectHead, agentRow } = await import("../../dist/list.js");
+const { row, strip: stripOf, projectHead, agentRow } = await import("../../dist/list.js");
+const { rowMark } = await import("../../dist/list-model.js");
 // The document is set after the import: times.ts starts a timer when one exists at load.
 globalThis.document = fakeDocument({ visibilityState: "hidden" });
 const make = (tag) => document.createElement(tag);

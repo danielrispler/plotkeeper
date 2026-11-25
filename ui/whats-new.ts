@@ -3,12 +3,16 @@
 // showed in `localStorage`: none stored (a first install) stores the current one and shows nothing, the same one shows nothing, and an
 // older one than stored (a downgrade) stores the current one and shows nothing. A browser that keeps nothing shows nothing.
 
+import { pageStore } from "./dom.js";
+
 const KEY = "shown-version";
 
 export type WhatsNew = { toast: boolean; store: boolean };
 
-// Whether a load of version `current` shows the toast and stores `current`, from the `stored` version and whether the tab is visible:
-// the new version is stored only once its toast showed while the tab was visible.
+/**
+ * Whether a load of version `current` shows the toast and stores `current`, from the `stored` version and whether the tab is visible:
+ * the new version is stored only once its toast showed while the tab was visible.
+ */
 export function whatsNew(stored: string | null, current: string, visible: boolean): WhatsNew {
   if (stored === null) return { toast: false, store: true };
   if (stored === current) return { toast: false, store: false };
@@ -25,25 +29,14 @@ function newer(a: string, b: string): boolean {
 }
 
 // The page's storage, read and written in a try: a browser that refuses it (blocked site data) reads none and keeps nothing.
-const kept = {
-  get: (): string | null => {
-    try {
-      return localStorage.getItem(KEY);
-    } catch {
-      return null;
-    }
-  },
-  set: (version: string) => {
-    try {
-      localStorage.setItem(KEY, version);
-    } catch {}
-  },
-};
+const kept = pageStore(KEY);
 
 export const releaseUrl = (version: string) => `https://github.com/danielrispler/plotkeeper/releases/tag/v${version}`;
 
-// At start, with the server's `version`: `show` draws the toast, which stays until dismissed. A tab hidden at the load stores the
-// version at its first visible moment, with the toast still there.
+/**
+ * At start, with the server's `version`: `show` draws the toast, which stays until dismissed. A tab hidden at the load stores the
+ * version at its first visible moment, with the toast still there.
+ */
 export function startWhatsNew(version: string, show: (version: string, url: string) => void) {
   const visible = () => document.visibilityState === "visible";
   const store = () => kept.set(version);

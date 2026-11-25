@@ -1,6 +1,6 @@
 // Live agents on the Map view (spec danielrispler/plotkeeper#306, ticket #311): a chip on every part a running or needs-you session's
 // or Worker's current turn touched, and a quiet "not placed" list beside the map for the ones no part holds. The pure rules come first;
-// the drawing below them reads the sessions the window already has, and `map_place` (the shell, `studio-system-map`) says which parts a
+// the drawing below them reads the sessions the window already has, and `map_place` (the server, `studio-system-map`) says which parts a
 // list of paths touches.
 
 import { failure, invoke, newest, pressable, text } from "./dom.js";
@@ -8,7 +8,7 @@ import { currentMap, onDraw, syncSide } from "./map.js";
 import { logStop } from "./stop-rules.js";
 import type { Session } from "./types.js";
 
-// One agent on the map: a session's own, or a Worker's. `key` is the session's id, and `session/worker` for a Worker.
+/** One agent on the map: a session's own, or a Worker's. `key` is the session's id, and `session/worker` for a Worker. */
 export type Live = { key: string; session: string; agent: string | null; label: string; needsYou: boolean; paths: string[] };
 
 const editing = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
@@ -20,10 +20,12 @@ const inFlight = (step: Session["last_step"], cwd: string): string | null => {
   return path.startsWith(`${cwd}/`) ? path.slice(cwd.length + 1) : path;
 };
 
-// The agents on the map: sessions in `Running` or `Needs you` of a project (`inProject` says whether a folder is one's), and their
-// running Workers. A Helper, a finished Worker, a plain shell and a session in any other state are never on it. A session's own
-// paths are its current turn's changed files that no running Worker's call or worktree names, with an Edit or Write in flight; a
-// Worker's are the ones its own name or id is on.
+/**
+ * The agents on the map: sessions in `Running` or `Needs you` of a project (`inProject` says whether a folder is one's), and their
+ * running Workers. A Helper, a finished Worker, a plain shell and a session in any other state are never on it. A session's own
+ * paths are its current turn's changed files that no running Worker's call or worktree names, with an Edit or Write in flight; a
+ * Worker's are the ones its own name or id is on.
+ */
 export function liveAgents(sessions: Session[], inProject: (cwd: string) => boolean): Live[] {
   const live: Live[] = [];
   for (const session of sessions) {
@@ -50,7 +52,7 @@ export function liveAgents(sessions: Session[], inProject: (cwd: string) => bool
   return live;
 }
 
-// Where each agent goes: on every part `placed` (its key to part ids) gives it, else in the not placed list.
+/** Where each agent goes: on every part `placed` (its key to part ids) gives it, else in the not placed list. */
 export function arrange(live: Live[], placed: Record<string, string[]>): { byPart: Record<string, Live[]>; notPlaced: Live[] } {
   const byPart: Record<string, Live[]> = {};
   const notPlaced: Live[] = [];
@@ -66,19 +68,23 @@ export function arrange(live: Live[], placed: Record<string, string[]>): { byPar
   return { byPart, notPlaced };
 }
 
-// The not placed list's closed line (#472): how many agents no part holds, and how many of them need you, so a needs-you agent stays loud.
+/**
+ * The not placed list's closed line (#472): how many agents no part holds, and how many of them need you, so a needs-you agent stays loud.
+ */
 export function notPlacedLine(notPlaced: Live[]): { count: string; needsYou: string | null } {
   const asking = notPlaced.filter((agent) => agent.needsYou).length;
   return { count: `${notPlaced.length} not placed`, needsYou: asking ? `${asking} ${asking === 1 ? "needs" : "need"} you` : null };
 }
 
-// The chips a hovered list row lights (#382): every chip of the `hovered` session, its Workers' too; and those of the session `open` in the left
-// panel (#385), which stay lit while it is open. None without either.
+/**
+ * The chips a hovered list row lights (#382): every chip of the `hovered` session, its Workers' too; and those of the session `open` in the left
+ * panel (#385), which stay lit while it is open. None without either.
+ */
 export function litAgents(live: Live[], hovered: string | null, open: string | null = null): string[] {
   return live.filter((agent) => agent.session === hovered || agent.session === open).map((agent) => agent.key);
 }
 
-// What the drawing needs of the window, given by `main.ts`: the sessions, a folder's project, and the jump to a session.
+/** What the drawing needs of the window, given by `main.ts`: the sessions, a folder's project, and the jump to a session. */
 export type AgentDeps = { sessions: () => Session[]; projectOf: (cwd: string) => string | null; select: (session: string, agent: string | null) => void };
 let deps: AgentDeps;
 let hidden = false;
@@ -103,7 +109,7 @@ export function openAgents(session: string | null) {
   paint();
 }
 
-// Hides every chip and the not placed list, or shows them again: for a view of a past commit, where nothing is live.
+/** Hides every chip and the not placed list, or shows them again: for a view of a past commit, where nothing is live. */
 export function hideAgents(hide: boolean) {
   hidden = hide;
   paint();
@@ -161,7 +167,9 @@ function paint() {
   syncSide(view.slots);
 }
 
-// Reads which parts the live agents' paths touch (when they changed) and draws them. Called when the sessions change and when the map draws.
+/**
+ * Reads which parts the live agents' paths touch (when they changed) and draws them. Called when the sessions change and when the map draws.
+ */
 export const refreshAgents = () => read().catch(failure("map_place"));
 async function read() {
   const view = currentMap();
@@ -178,7 +186,7 @@ async function read() {
   paint();
 }
 
-// Wires the drawing: a map that draws gets its chips, and `list.ts` calls `refreshAgents` as the sessions change.
+/** Wires the drawing: a map that draws gets its chips, and `list.ts` calls `refreshAgents` as the sessions change. */
 export function startMapAgents(given: AgentDeps) {
   deps = given;
   onDraw(() => void refreshAgents());

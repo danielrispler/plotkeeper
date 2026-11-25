@@ -1,16 +1,14 @@
 // The session's brief in the story rail: its Goal, decisions, open lines and "Design so far". Cards are retired as a turn's or a
-// worker's explanation (danielrispler/plotkeeper#348); the PR brief is. This file keeps the brief and the one place the shell's
-// session payload is taken in (`showCards`).
+// worker's explanation (danielrispler/plotkeeper#348); the PR brief is. The server's session payload is taken in by `showCards`
+// (`story.ts`), which draws the brief from here.
 
-import { element, glyphOnly, pressable, prose, text } from "./dom.js";
-import { drawSidebar } from "./list.js";
-import { studio } from "./state.js";
-import { showDecisions } from "./decisions.js";
-import { drawFeed, fillDockNotes, forgetMissingSummaries, openCitation } from "./story.js";
+import { glyphOnly, pressable, prose, text } from "./dom.js";
 import type { SessionCards } from "./types.js";
 
-// The Brief's slots in order (danielrispler/plotkeeper#122): Goal, Decisions, Open. A brief stored as prose shows as it is,
-// with no title, until the session has a Goal.
+/**
+ * The Brief's slots in order (danielrispler/plotkeeper#122): Goal, Decisions, Open. A brief stored as prose shows as it is,
+ * with no title, until the session has a Goal.
+ */
 export type BriefSlot = { title: string; lines: string[]; cites?: string[] };
 export function briefSlots(cards: SessionCards): BriefSlot[] {
   const slots: BriefSlot[] = [];
@@ -23,8 +21,8 @@ export function briefSlots(cards: SessionCards): BriefSlot[] {
 }
 
 // A design line's citation: a button that opens the turn it came from in the rail (an older line may cite a card, which opens its turn).
-function citation(id: string): HTMLElement {
-  const button = pressable(text("button", "", "cite"), null, () => openCitation(id));
+function citation(id: string, open: (id: string) => void): HTMLElement {
+  const button = pressable(text("button", "", "cite"), null, () => open(id));
   button.title = "Open the turn it came from";
   button.setAttribute("aria-label", "Open the turn it came from");
   button.append(glyphOnly("↗"));
@@ -37,35 +35,14 @@ function slotTitle(title: string): HTMLElement {
   return node;
 }
 
-// The session's brief: each slot with its title and one paragraph per line.
-export const briefNodes = (cards: SessionCards): HTMLElement[] =>
+/** The session's brief: each slot with its title and one paragraph per line. A citation opens its turn with `open`. */
+export const briefNodes = (cards: SessionCards, open: (id: string) => void): HTMLElement[] =>
   briefSlots(cards).flatMap(({ title, lines, cites }) => [
     ...(title ? [slotTitle(title)] : []),
     ...lines.map((line, i) => {
       const node = prose("p", line);
       const cite = cites?.[i];
-      if (cite) node.append(" ", citation(cite));
+      if (cite) node.append(" ", citation(cite, open));
       return node;
     }),
   ]);
-
-// The brief, folded under the feed.
-function showBrief(cards: SessionCards) {
-  const nodes = briefNodes(cards);
-  element("brief").replaceChildren(...nodes);
-  element("brief-fold").hidden = nodes.length === 0;
-}
-
-export function showCards(cards: SessionCards) {
-  // A risk note that arrived fills its card's place in the dock where it stands, which only a session's own events redraw otherwise.
-  const notes = JSON.stringify(cards.risk_notes) !== JSON.stringify(studio.cards.risk_notes);
-  studio.cards = cards;
-  showBrief(cards);
-  showDecisions(cards.decisions, cards.decision_notes);
-  // The store changed: a summary missing before may be in it now.
-  forgetMissingSummaries();
-  drawFeed();
-  if (notes) fillDockNotes();
-  // A summary was stored: the list's unseen rows show its Headline (#382).
-  drawSidebar();
-}

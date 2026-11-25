@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 /** @typedef {import("../../dist/types.js").Session} Session */
 /** @typedef {import("../../dist/types.js").Question} Question */
-import { chipText, clearing, CLEAR_WINDOW_MS, landedToClear, landedWord, listSpace, secondLine, showsLanded, sidebarSessions, status, stripLabels } from "../../dist/list.js";
+import { chipText, clearing, CLEAR_WINDOW_MS, landedToClear, landedWord, listSpace, secondLine, showsLanded, sidebarSessions, status, stripLabels } from "../../dist/list-model.js";
 
 test("each state has its glyph and a word for its title and accessible name", () => {
   assert.deepEqual(status("needs_you"), ["pill", "Needs you"]);

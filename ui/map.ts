@@ -1,5 +1,5 @@
 // The Map view (spec danielrispler/plotkeeper#306, ticket #309): a project's system map as plates on a quiet chart (Treatment C). Since #386
-// it is the page's base: the page opens on the last viewed project's map, and the session list's headers switch it. The shell reads the map from
+// it is the page's base: the page opens on the last viewed project's map, and the session list's headers switch it. The server reads the map from
 // `origin`'s default branch and keeps Daniel's positions (`server/src/map.rs`); `map-model.ts` holds the pure logic.
 //
 // Where the next tickets plug in, so they add to this file rather than reshape it:
@@ -13,20 +13,18 @@
 // - The left panel (`panel.ts`, #385) floats over the map's left; `revealParts` pans the camera so the parts in focus clear it and the sheet.
 // - `MapState` (`types.ts`, `map.rs`) is the one payload; `currentMap()` gives the view as drawn.
 // - The camera (#383): the map area pans and zooms the world rather than scrolling it. Daniel's view is saved per project (`map_save_view`);
-//   a PR brief borrows the camera with `lendCamera` and `giveCameraBack` shows Daniel's view again (`cameraRig` in `map-model.ts`).
+//   a PR brief borrows the camera with `lendCamera` and `giveCameraBack` shows Daniel's view again (`cameraRig` in `map-camera.ts`).
 
 import { logStop, reviewNode, reviewOf } from "./stop-rules.js";
-import { element, failure, invoke, listen, newest, pressable, text } from "./dom.js";
-import {
-  actorSize, autoPlace, brokenParts, brokenText, cameraRig, type CameraRig, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, fitCamera, panTo, type Drag,
-  type Law, type Layer, type LayerName, type MapDoc, startProject, switchProject, parseMap, type Part, type Point, plateSize, plateTitle, linkLines, markPoints, readingOrder, revealPan, rimPoint, type Scrub, type Tier, zoomAt,
-} from "./map-model.js";
+import { element, failure, invoke, listen, newest, pageStore, pressable, svg, text } from "./dom.js";
+import { cameraRig, type CameraRig, fitCamera, panTo, revealPan, zoomAt } from "./map-camera.js";
+import { autoPlace, brokenParts, brokenText, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Drag, type Law, type Layer, type LayerName, type MapDoc, startProject, switchProject, parseMap, type Part, type Point, plateSize, plateTitle, sizeOf, linkLines, markPoints, readingOrder, rimPoint, type Scrub, type Tier } from "./map-model.js";
 import { recheckSeen } from "./seen.js";
 import { knownProjects, projectGone } from "./projects.js";
 import type { Camera, MapState } from "./types.js";
 
 export type LoadedMap = Extract<MapDoc, { ok: true }>;
-// What the view holds once a map loaded: its payload, the map as parsed, and every id's centre in the world.
+/** What the view holds once a map loaded: its payload, the map as parsed, and every id's centre in the world. */
 export type MapView = {
   project: string;
   state: MapState;
@@ -52,7 +50,7 @@ export const registerLayer = (name: LayerName, layer: Layer) => {
   layers[name] = layer;
 };
 
-// What `startMap` is given by `main.ts`, which owns what the Map view may not import.
+/** What `startMap` is given by `main.ts`, which owns what the Map view may not import. */
 export type MapDeps = {
   // The project of the selected session, null with none.
   selectedProject: () => string | null;
@@ -73,14 +71,14 @@ let rig: CameraRig | null = null;
 // The sheet's part the camera last revealed, so a later draw does not pan Daniel's view back to it.
 let revealed: string | null = null;
 
-// The map is the page's base (#386): the body carries `map-open` from the start and never loses it.
+/** The map is the page's base (#386): the body carries `map-open` from the start and never loses it. */
 export const mapShown = () => document.body?.classList.contains("map-open") === true;
-// The project whose map shows; null before the saved list arrives, and on a fresh install.
+/** The project whose map shows; null before the saved list arrives, and on a fresh install. */
 export const shownProject = () => project;
 export const currentMap = (): MapView | null => view;
 export const currentScrub = (): Scrub | null => scrub;
 
-// Shows the map as of `to` read-only, or now again with null (the one setter of a scrub: `scrubTo` in `map-history.ts` calls it).
+/** Shows the map as of `to` read-only, or now again with null (the one setter of a scrub: `scrubTo` in `map-history.ts` calls it). */
 export function setScrub(to: Scrub | null) {
   scrub = to;
   draw();
@@ -88,7 +86,7 @@ export function setScrub(to: Scrub | null) {
 
 const latest = newest();
 
-// Reads the project's map; `fetch` asks `origin` first, within the shell's cooldown. A reply for a project no longer shown, or older than the
+// Reads the project's map; `fetch` asks `origin` first, within the server's cooldown. A reply for a project no longer shown, or older than the
 // newest, is dropped; one that changes nothing draws nothing.
 async function load(path: string, fetch: boolean) {
   const state = await latest(invoke("map_state", { project: path, fetch }));
@@ -101,16 +99,9 @@ async function load(path: string, fetch: boolean) {
 }
 
 // The last viewed project, which the page opens on (#386): a per-browser convenience, so a store that throws only loses it.
-const LAST = "project";
-const lastViewed = (): string | null => {
-  try {
-    return localStorage.getItem(LAST);
-  } catch {
-    return null;
-  }
-};
+const lastViewed = pageStore("project");
 
-// Shows `path`'s map.
+/** Shows `path`'s map. */
 export function openMap(path: string | null) {
   if (path !== project) {
     // A PR brief and the pre-flight belong to the project they opened on; the next may have no map to draw, so they close here, not by a draw.
@@ -121,11 +112,8 @@ export function openMap(path: string | null) {
   loaded = null;
   view = null;
   drawn = "";
-  try {
-    if (path !== null) localStorage.setItem(LAST, path);
-  } catch {
-    // The page opens on the first project instead.
-  }
+  // A store that throws keeps nothing: the page opens on the first project instead.
+  if (path !== null) lastViewed.set(path);
   // The top bar names the project shown; Treatment C's large title on the map is not drawn, so the name is said once.
   element("bar-project").textContent = path === null ? "plotkeeper" : name(path);
   element("bar-project").title = path ?? "";
@@ -161,7 +149,7 @@ export function projectsChanged() {
   started = true;
   // A session selected before the list arrived has already shown its project's map.
   if (project === null) {
-    const opening = startProject(lastViewed(), knownProjects());
+    const opening = startProject(lastViewed.get(), knownProjects());
     if (first || opening !== null) openMap(opening);
     return;
   }
@@ -169,7 +157,7 @@ export function projectsChanged() {
   if (projectGone(project) !== (element("map-body").querySelector(".map-gone") !== null)) openMap(project);
 }
 
-// Reads the map again, for a change the view itself made (a tier, "I know this"); the payload decides whether it draws.
+/** Reads the map again, for a change the view itself made (a tier, "I know this"); the payload decides whether it draws. */
 export const reloadMap = () => (project === null ? Promise.resolve() : load(project, false));
 
 // The gutter around the plates when the camera reveals or fits them: `--map-gutter` in tokens.css.
@@ -206,12 +194,12 @@ function moveCamera(to: Camera, glide: boolean) {
   }, 400));
 }
 
-// A PR brief's camera, shown while it plays (`map-brief.ts`); Daniel's view is kept as it was.
+/** A PR brief's camera, shown while it plays (`map-brief.ts`); Daniel's view is kept as it was. */
 export function lendCamera(camera: Camera) {
   rig?.lend(camera);
   applyCamera(true);
 }
-// Shows Daniel's view again, as the brief found it.
+/** Shows Daniel's view again, as the brief found it. */
 export function giveCameraBack() {
   rig?.giveBack();
   applyCamera(true);
@@ -219,24 +207,26 @@ export function giveCameraBack() {
 
 // Where every plate and label of the view lies in the world, edges included.
 const worldBox = (current: MapView) => {
-  const edges = Object.entries(current.positions).map(([id, at]) => ({ at, size: sizeOf(id, current) }));
+  const edges = Object.entries(current.positions).map(([id, at]) => ({ at, size: sizeOf(current.doc, id) }));
   return {
     x0: Math.min(...edges.map(({ at, size }) => at.x - size.w / 2)), y0: Math.min(...edges.map(({ at, size }) => at.y - size.h / 2)),
     x1: Math.max(...edges.map(({ at, size }) => at.x + size.w / 2)), y1: Math.max(...edges.map(({ at, size }) => at.y + size.h / 2)),
   };
 };
 
-// ⌘0 and the palette's Fit map: the whole map in the area.
+/** ⌘0 and the palette's Fit map: the whole map in the area. */
 export function fitMap() {
   if (!mapShown() || !view || !Object.keys(view.positions).length) return;
   const { canvas } = view.slots;
   moveCamera(fitCamera(worldBox(view), { w: canvas.clientWidth, h: canvas.clientHeight }, mapGutter), true);
 }
 
-// Esc in the Map view: the first open layer (a drawer, a brief, a scrubbed commit, the sheet, the left panel); on the bare map, nothing.
+/**
+ * Esc in the Map view: the first open layer (a drawer, a brief, a scrubbed commit, the sheet, the left panel); on the bare map, nothing.
+ */
 export const mapEscape = () => void escapeMap(layers);
 
-// The side area shows while any of its slots holds something; the tray floats on its own (#385).
+/** The side area shows while any of its slots holds something; the tray floats on its own (#385). */
 export const syncSide = (slots: Omit<MapView["slots"], "canvas">) => {
   slots.side.hidden = ![slots.notPlaced, slots.runs, slots.sheet, slots.drawer].some((slot) => slot.childElementCount > 0);
   // When a part's sheet opens, the camera pans just enough to show that part whole beside it, once per part, so a later draw never pans
@@ -258,14 +248,16 @@ function clearBand(canvas: HTMLElement) {
   return { left, right };
 }
 
-// Pans just enough to show the parts `ids` whole in the band the left panel and the sheet leave (#383, #385). Only the camera moves: no position
-// is written, and a brief's camera is never moved.
+/**
+ * Pans just enough to show the parts `ids` whole in the band the left panel and the sheet leave (#383, #385). Only the camera moves: no position
+ * is written, and a brief's camera is never moved.
+ */
 export function revealParts(ids: string[]) {
   const shown = view;
   if (!shown || !rig || rig.lent() || !shown.slots.canvas.clientWidth) return;
   const spans = ids.flatMap((id) => {
     const at = shown.positions[id];
-    return at ? [at.x - sizeOf(id, shown).w / 2, at.x + sizeOf(id, shown).w / 2] : [];
+    return at ? [at.x - sizeOf(shown.doc, id).w / 2, at.x + sizeOf(shown.doc, id).w / 2] : [];
   });
   if (!spans.length) return;
   const to = revealPan(rig.user(), Math.min(...spans), Math.max(...spans), clearBand(shown.slots.canvas), mapGutter);
@@ -331,13 +323,6 @@ function drawEmpty(body: HTMLElement, state: MapState | null) {
   body.replaceChildren(box);
 }
 
-const svg = (tag: string, attrs: Record<string, string>) => {
-  const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
-  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
-  return node;
-};
-
-const sizeOf = (id: string, view: MapView) => (view.doc.actors.some((actor) => actor.id === id) ? actorSize : plateSize);
 
 // The links as lines from rim to rim, one per pair of ends (spec #473), with the laws on any of its links as marks about its middle, 10px apart. A line's
 // `data-link` holds all its links' ids, space-separated, and `data-from` the end it is drawn from.
@@ -346,8 +331,8 @@ function drawLinks(layer: Element, view: MapView) {
   for (const line of linkLines(view.doc.links)) {
     const [from, to] = [view.positions[line.from], view.positions[line.to]];
     if (!from || !to) continue;
-    const a = rimPoint(from, sizeOf(line.from, view), to);
-    const b = rimPoint(to, sizeOf(line.to, view), from);
+    const a = rimPoint(from, sizeOf(view.doc, line.from), to);
+    const b = rimPoint(to, sizeOf(view.doc, line.to), from);
     nodes.push(svg("line", { class: "link", "data-link": line.ids.join(" "), "data-from": line.from, x1: String(a.x), y1: String(a.y), x2: String(b.x), y2: String(b.y) }));
     const laws = view.doc.laws.filter((law) => line.ids.includes(law.on));
     const points = markPoints(a, b, laws.length);
@@ -369,21 +354,54 @@ const place = (node: HTMLElement, at: Point) => {
   node.style.top = `${at.y}px`;
 };
 
-// Draws the parts as plates, the actors as labels and the links between them, placing what has no saved position once.
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: `drawMap`: spec #548 Group 4 splits it; remove this when it does
-function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub | null) {
+// The positions of the parts and actors: the saved ones, and the rest placed once. A past commit's map is read-only: what it places is
+// not saved.
+function placeAll(state: MapState, doc: LoadedMap, past: Scrub | null) {
   const saved = Object.fromEntries(Object.entries(state.user.positions).map(([id, [x, y]]) => [id, { x, y }]));
   const items = [...doc.parts, ...doc.actors];
   const added = autoPlace(items, doc.links, saved);
-  // A past commit's map is read-only: what it places is not saved, and its parts get no fog or broken-law mark.
   if (Object.keys(added).length && !past) {
     // Saved the first time they are placed, so they never move again on their own.
     const stored = Object.fromEntries(Object.entries(added).map(([id, at]) => [id, [at.x, at.y] as [number, number]]));
     state.user.positions = { ...state.user.positions, ...stored };
     invoke("map_save_positions", { project: state.project, positions: stored }).catch(failure("map_save_positions"));
   }
-  const positions = { ...saved, ...added };
+  return { ...saved, ...added };
+}
 
+// A part's plate: its tier and fog, its laws' marks and a broken law's, and its button. A past commit's parts get no fog or broken-law
+// mark.
+function plateNode(part: Part, current: MapView, links: SVGElement, fit: () => void): HTMLElement {
+  const { state, doc, scrub: past } = current;
+  const tier = effectiveTier(part, state.user.tiers);
+  // Fog under Daniel's effective tier, as the server worked it out (`fog.rs`); a part not listed is clear.
+  const mist = past ? undefined : state.fog?.[part.id];
+  const plate = text("div", "", `plate tier-${tier}${mist ? ` fog-${mist}` : ""}`);
+  plate.dataset.id = part.id;
+  const [fog, marks, chips] = [text("div", "", "plate-fog"), text("div", "", "plate-marks"), text("div", "", "plate-chips")];
+  marks.append(...doc.laws.filter((law) => law.on === part.id).map(lawMark));
+  // A test that backs a law failed on main: one coarse mark, never naming the law. Red, beside Needs you the only loud colour.
+  if (!past && brokenParts(state.ci).has(part.id)) {
+    const broken = text("span", "", "law-broken");
+    broken.title = brokenText;
+    marks.append(broken);
+    plate.classList.add("broken");
+  }
+  // The keyboard's way in (#460): a real button over the text area, named by the name and caption, beside the chips rather than around
+  // them. Its click reaches the plate's own, so Enter and Space open the sheet, or answer a brief's order question, as a tap does.
+  const open = pressable(text("button", "", "btn plate-open"), null);
+  open.append(text("span", part.name, "plate-name"), text("span", part.caption, "plate-caption"));
+  plate.append(fog, open, marks, chips);
+  plate.title = plateTitle(part);
+  const context: PlateContext = { view: current, part, tier, plate, fog, marks, chips };
+  plateHooks.forEach((hook) => hook(context));
+  grab(plate, part.id, current, links, fit, () => clickHooks.forEach((hook) => hook(context)));
+  return plate;
+}
+
+// Draws the parts as plates, the actors as labels and the links between them, placing what has no saved position once.
+function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub | null) {
+  const positions = placeAll(state, doc, past);
   const canvas = text("div", "", "map-canvas");
   const world = text("div", "", "map-world");
   const links = svg("svg", { class: "map-links", "aria-hidden": "true" });
@@ -392,7 +410,7 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub
   const current: MapView = { project: state.project, state, doc, positions, scrub: past, slots };
 
   const fit = () => {
-    const reach = Object.entries(positions).map(([id, at]) => ({ x: at.x + sizeOf(id, current).w / 2, y: at.y + sizeOf(id, current).h / 2 }));
+    const reach = Object.entries(positions).map(([id, at]) => ({ x: at.x + sizeOf(current.doc, id).w / 2, y: at.y + sizeOf(current.doc, id).h / 2 }));
     world.style.width = `${Math.max(canvas.clientWidth, ...reach.map((p) => p.x + plateSize.w / 2))}px`;
     world.style.height = `${Math.max(canvas.clientHeight, ...reach.map((p) => p.y + plateSize.h / 2))}px`;
     links.setAttribute("width", world.style.width.replace("px", ""));
@@ -408,29 +426,7 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub
     return at ? [[part.id, at]] : [];
   }));
   for (const part of readingOrder(byId).flatMap((id) => parts.get(id) ?? [])) {
-    const tier = effectiveTier(part, state.user.tiers);
-    // Fog under Daniel's effective tier, as the shell worked it out (`fog.rs`); a part not listed is clear.
-    const mist = past ? undefined : state.fog?.[part.id];
-    const plate = text("div", "", `plate tier-${tier}${mist ? ` fog-${mist}` : ""}`);
-    plate.dataset.id = part.id;
-    const [fog, marks, chips] = [text("div", "", "plate-fog"), text("div", "", "plate-marks"), text("div", "", "plate-chips")];
-    marks.append(...doc.laws.filter((law) => law.on === part.id).map(lawMark));
-    // A test that backs a law failed on main: one coarse mark, never naming the law. Red, beside Needs you the only loud colour.
-    if (!past && brokenParts(state.ci).has(part.id)) {
-      const broken = text("span", "", "law-broken");
-      broken.title = brokenText;
-      marks.append(broken);
-      plate.classList.add("broken");
-    }
-    // The keyboard's way in (#460): a real button over the text area, named by the name and caption, beside the chips rather than around
-    // them. Its click reaches the plate's own, so Enter and Space open the sheet, or answer a brief's order question, as a tap does.
-    const open = text("button", "", "btn plate-open");
-    open.append(text("span", part.name, "plate-name"), text("span", part.caption, "plate-caption"));
-    plate.append(fog, open, marks, chips);
-    plate.title = plateTitle(part);
-    const context: PlateContext = { view: current, part, tier, plate, fog, marks, chips };
-    plateHooks.forEach((hook) => hook(context));
-    grab(plate, part.id, current, links, fit, () => clickHooks.forEach((hook) => hook(context)));
+    const plate = plateNode(part, current, links, fit);
     nodes.set(part.id, plate);
     elements.push(plate);
   }
@@ -526,7 +522,7 @@ function grab(node: HTMLElement, id: string, current: MapView, links: Element, f
     const step = dragMove(drag, { x: event.clientX, y: event.clientY });
     drag = step.drag;
     if (!step.to) return;
-    const half = sizeOf(id, current);
+    const half = sizeOf(current.doc, id);
     const to = { x: Math.max(half.w / 2, step.to.x / scale), y: Math.max(half.h / 2, step.to.y / scale) };
     current.positions[id] = to;
     node.classList.add("dragging");
@@ -572,7 +568,7 @@ function draw() {
   unreadHooks.forEach((hook) => hook(slots.banner, scrub));
 }
 
-// Wires the view: the project menu, the window's focus and a merge the shell saw.
+/** Wires the view: the project menu, the window's focus and a merge the server saw. */
 export function startMap(given: MapDeps) {
   deps = given;
   element("map-legend").append(

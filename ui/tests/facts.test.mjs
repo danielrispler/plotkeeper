@@ -2,7 +2,7 @@
 // full path on hover, and no clock or estimate says nothing. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { plain, rowText, rowTime } from "../../dist/list.js";
+import { plain, rowText, rowTime } from "../../dist/list-model.js";
 import { shortPath, shortPaths } from "../../dist/paths.js";
 
 const MIN = 60_000;

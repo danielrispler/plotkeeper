@@ -10,12 +10,14 @@ import { logStop } from "./stop-rules.js";
 import type { ReadyPr } from "./types.js";
 import { briefsWritten } from "./writers.js";
 
-// `full`: the row opens the full brief, past the head's "Since you read" story (#497).
+/** `full`: the row opens the full brief, past the head's "Since you read" story (#497). */
 export type TrayRow = { number: number; chapter: number | null; title: string; note: string; openable: boolean; full?: boolean };
 
-// The tray's rows; none when nothing is ready, so the tray is not drawn. Without `claude` (`briefs` false) no brief is written,
-// so a PR with none stored says briefs need Claude (spec #320). A brief at the PR's head says, in place of "brief ready", why it is
-// what it is after a push (`note`, #477 part B): the read carried over, or the brief was rewritten.
+/**
+ * The tray's rows; none when nothing is ready, so the tray is not drawn. Without `claude` (`briefs` false) no brief is written,
+ * so a PR with none stored says briefs need Claude (spec #320). A brief at the PR's head says, in place of "brief ready", why it is
+ * what it is after a push (`note`, #477 part B): the read carried over, or the brief was rewritten.
+ */
 export const trayRows = (ready: ReadyPr[], briefs = true): TrayRow[] =>
   ready.flatMap((pr): TrayRow[] => {
     const title = pr.title || `PR #${pr.number}`;
@@ -87,4 +89,5 @@ function paint(view: MapView) {
   syncSide(view.slots);
 }
 
-onDraw(paint);
+/** Hooks the tray into the map's draws. */
+export const startMapTray = () => onDraw(paint);

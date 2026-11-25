@@ -10,7 +10,7 @@ globalThis.document = fakeDocument();
 const { suggestions, whyNotElement } = await import("../../dist/ask.js");
 
 test("each anchor type offers two or three suggested questions", () => {
-  /** @type {import("../../dist/ask.js").Anchor[]} */
+  /** @type {import("../../dist/types.js").Anchor[]} */
   const anchors = [
     { kind: "file", turn: 0, root: "/r", path: "a.rs" },
     { kind: "check", agent: null, call: "c" },

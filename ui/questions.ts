@@ -3,9 +3,9 @@
 // the terminal" hands it back to the TUI; otherwise answering stays in the terminal. A plan or a
 // permission the hook waits on gets the same card with allow and deny (danielrispler/Falinks#478).
 
-import { askFor, sendAnswer, type Ask } from "./answer.js";
+import { askFor, sendAnswer } from "./answer.js";
 import { code, pressable, prose, text } from "./dom.js";
-import { askKind, type Question } from "./types.js";
+import { type Ask, askKind, type Question } from "./types.js";
 
 // Whether a question is open, answered in the terminal, or not answered: its call failed, or its turn
 // or its agent ended first. An open one needs Daniel, so only it takes the colour.
@@ -87,7 +87,7 @@ export function questionElement(question: Question): HTMLElement {
   return block;
 }
 
-// A plan or a permission the answer hook waits on (danielrispler/Falinks#478): what it asks, then allow or deny.
+/** A plan or a permission the answer hook waits on (danielrispler/Falinks#478): what it asks, then allow or deny. */
 export function decisionElement(ask: Ask): HTMLElement {
   const block = document.createElement("article");
   block.className = "question decision";
@@ -138,8 +138,7 @@ function answerButtons(ask: Ask, buttons: [AnswerButton, () => void, string?][])
   const row = document.createElement("p");
   row.className = "answer-buttons";
   const button = (label: string, hover: string, click: () => void, className = "") => {
-    const node = text("button", label, `btn ${className}`.trim());
-    node.type = "button";
+    const node = pressable(text("button", label, `btn ${className}`.trim()), null);
     node.title = hover;
     node.addEventListener("click", click);
     return node;

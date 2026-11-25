@@ -6,21 +6,23 @@
 // `frame-src 'none'` (`server/src/web.rs`): no frame of it loads a URL. The frame sits in an overlay in the glass the size of the settings
 // dialog, the first layer Esc closes.
 
-import { element, failure, invoke, promptBox, sayAction, text } from "./dom.js";
+import { element, failure, invoke, pressable, promptBox, sayAction, text } from "./dom.js";
 import { onDraw, registerLayer, reloadMap, shownProject } from "./map.js";
 import { copyOverturn, overturnReport } from "./ratify.js";
 import { logStop } from "./stop-rules.js";
 import type { MicroWorldView, MicroWorlds } from "./types.js";
 
-// What a world's row offers: its words, and what a click does; `act` null is a word with no click, such as "Building…".
+/** What a world's row offers: its words, and what a click does; `act` null is a word with no click, such as "Building…". */
 export type Offer = { label: string; title: string; act: "explore" | "open" | "copy" | null };
 export type ExploreActs = { explore: () => void; open: () => void; copy: (prompt: string) => void };
 export type WorldActs = { rebuild: () => void; close: () => void };
 
 const staleWords = "This may be out of date: a part on it changed since it was built";
 
-// What "Explore this" offers for world `key`, by where it stands. Without the setting there is no run, so only the prompt to copy, which the
-// server gives in place of a run; a page built before still opens.
+/**
+ * What "Explore this" offers for world `key`, by where it stands. Without the setting there is no run, so only the prompt to copy, which the
+ * server gives in place of a run; a page built before still opens.
+ */
 export function exploreOffers(worlds: MicroWorlds | null | undefined, key: string): Offer[] {
   const world: MicroWorldView | undefined = worlds?.worlds[key];
   const open: Offer[] = world?.page ? [{ label: "Open", title: "Open the micro-world", act: "open" }] : [];
@@ -41,15 +43,14 @@ export function exploreOffers(worlds: MicroWorlds | null | undefined, key: strin
 }
 
 const button = (words: string, title: string, click: (() => void) | null) => {
-  const node = text("button", words, "btn quiet");
-  node.setAttribute("type", "button");
+  const node = pressable(text("button", words, "btn quiet"), null);
   node.title = title;
   if (click) node.addEventListener("click", click);
   else node.disabled = true;
   return node;
 };
 
-// The row under a flow or a figure: the offers, "may be out of date" when a part on it changed, and why it failed.
+/** The row under a flow or a figure: the offers, "may be out of date" when a part on it changed, and why it failed. */
 export function exploreNode(worlds: MicroWorlds | null | undefined, key: string, act: ExploreActs): HTMLElement {
   const node = text("div", "", "micro-world-row");
   node.dataset.world = key;
@@ -64,8 +65,10 @@ export function exploreNode(worlds: MicroWorlds | null | undefined, key: string,
   return node;
 }
 
-// The frame a checked page is shown in: by `srcdoc`, never a URL, sandboxed to scripts alone, so it has an opaque origin, sends no cookie and
-// cannot reach plotkeeper's API.
+/**
+ * The frame a checked page is shown in: by `srcdoc`, never a URL, sandboxed to scripts alone, so it has an opaque origin, sends no cookie and
+ * cannot reach plotkeeper's API.
+ */
 export function frameNode(html: string): HTMLElement {
   const frame = document.createElement("iframe");
   frame.className = "micro-world-frame";
@@ -76,7 +79,7 @@ export function frameNode(html: string): HTMLElement {
   return frame;
 }
 
-// The overlay's nodes: the head with the world's name, "may be out of date" with Rebuild, and Close; then the frame.
+/** The overlay's nodes: the head with the world's name, "may be out of date" with Rebuild, and Close; then the frame. */
 export function worldNodes(name: string, html: string, world: MicroWorldView | undefined, act: WorldActs): [HTMLElement, HTMLElement] {
   const head = text("div", "", "micro-world-head");
   head.append(text("h2", name, "micro-world-title"));
@@ -90,7 +93,7 @@ type Shown = { project: string; key: string; name: string; html: string; explore
 let shown: Shown | null = null;
 const overlay = () => element("map-micro-world");
 
-// Draws the world into `box`, the overlay; a box that already shows the same page keeps its frame and gets a new head alone.
+/** Draws the world into `box`, the overlay; a box that already shows the same page keeps its frame and gets a new head alone. */
 export function paintWorld(box: HTMLElement, name: string, html: string, world: MicroWorldView | undefined, act: WorldActs) {
   const [head, frame] = worldNodes(name, html, world, act);
   const [shownHead, shownFrame] = box.children;
@@ -156,14 +159,16 @@ async function copyPrompt(key: string, prompt: string, row: HTMLElement) {
   sayAction(note.line);
 }
 
-// "Explore this" (or Rebuild, or Try again) on `subject` of `project`: a run starts, or the server gives the prompt to copy, shown in `row`.
+/**
+ * "Explore this" (or Rebuild, or Try again) on `subject` of `project`: a run starts, or the server gives the prompt to copy, shown in `row`.
+ */
 export function exploreSubject(project: string, key: string, subject: { kind: "flow"; id: string } | { kind: "figure"; pr: number; chapter: number; step: number }, row: HTMLElement) {
   invoke("micro_world_explore", { project, subject })
     .then((explored) => (explored.started || !explored.prompt ? reloadMap() : copyPrompt(key, explored.prompt, row)))
     .catch(failure("micro_world_explore", "error"));
 }
 
-// The row of world `key` on the map `worlds`, wired to the page's commands; `subject` is what the server builds it from.
+/** The row of world `key` on the map `worlds`, wired to the page's commands; `subject` is what the server builds it from. */
 export function exploreRow(project: string, worlds: MicroWorlds | undefined, key: string, name: string, subject: Parameters<typeof exploreSubject>[2]): HTMLElement {
   const explore = () => exploreSubject(project, key, subject, node);
   const node: HTMLElement = exploreNode(worlds, key, {
@@ -175,10 +180,13 @@ export function exploreRow(project: string, worlds: MicroWorlds | undefined, key
   return node;
 }
 
-registerLayer("micro-world", { open: () => shown !== null, close });
-// Another project closes the overlay; otherwise its head is drawn again over the new payload, so "may be out of date" follows the map, and
-// its frame stays.
-onDraw((view) => {
-  if (shown && (view.project !== shown.project || view.scrub)) shown = null;
-  paint(view.state.micro_worlds);
-});
+/** Hooks the overlay into Esc's `micro-world` layer and the map's draws. */
+export function startMicroWorld() {
+  registerLayer("micro-world", { open: () => shown !== null, close });
+  // Another project closes the overlay; otherwise its head is drawn again over the new payload, so "may be out of date" follows the
+  // map, and its frame stays.
+  onDraw((view) => {
+    if (shown && (view.project !== shown.project || view.scrub)) shown = null;
+    paint(view.state.micro_worlds);
+  });
+}

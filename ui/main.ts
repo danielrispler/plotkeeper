@@ -7,8 +7,7 @@ import "./transport.js";
 import { dismissNotice, NOT_RECORDING, setSettingsErrors, showError, showNotice } from "./notice.js";
 import { withGateNotice, withWriterNotice } from "./writer-notice.js";
 import { startWatching } from "./answer.js";
-import { openAsk } from "./ask.js";
-import { showCards } from "./cards.js";
+import { forgetAsks, openAsk } from "./ask.js";
 import { recheckSeen } from "./seen.js";
 import { diffRequest, newestDiff } from "./diff.js";
 import { element, failure, invoke, listen, logUncaught } from "./dom.js";
@@ -16,23 +15,26 @@ import { type Actions, newestUnseen, nextNeedsYou, paletteEntries, run, stepLine
 import { hover, realClock, shownGate } from "./hover.js";
 import { arrange } from "./layout.js";
 import { fitMap, mapEscape, openMap, projectsChanged, startMap } from "./map.js";
-import "./map-history.js";
-import "./map-sheet.js";
-import "./map-tray.js";
-import "./map-runs.js";
-import "./micro-world.js";
+import { startMapHistory } from "./map-history.js";
+import { startMapSheet } from "./map-sheet.js";
+import { startMapTray } from "./map-tray.js";
+import { startMapRuns } from "./map-runs.js";
+import { startMicroWorld } from "./micro-world.js";
+import { openBriefOf } from "./map-brief.js";
 import { openPreFlight } from "./map-pre-flight.js";
 import { startMapAgents } from "./map-agents.js";
-import { drawSidebar, listSpace, showSessions, staleDots } from "./list.js";
+import { drawSidebar, showSessions, staleDots, startList } from "./list.js";
+import { listSpace } from "./list-model.js";
 import { deselect, pressSession, select, show } from "./selection.js";
-import { diffIn, historyIn, logIn, showHistory, startPanes } from "./panes.js";
-import { closePanel, panelShown, showPanel, startPanel } from "./panel.js";
+import { diffIn, historyIn, logIn, startPanes } from "./panes.js";
+import { besideSheet, closePanel, panelShown, showHistory, showPanel, startPanel } from "./panel.js";
 import { showPalette } from "./palette.js";
 import { projectOfCwd, selectedProject, sidebarOrder } from "./projects.js";
 import { narrowBelow, selectedView } from "./map-model.js";
-import { reload, type SettingsFiles } from "./settings.js";
-import { studio } from "./state.js";
-import { drawFeed, showView } from "./story.js";
+import { reload } from "./settings.js";
+import { setFocus, setMissed, setProjects, setSettings, studio } from "./state.js";
+import { askDelete, drawFeed, forgetStories, lastHeadline, showCards, showView, startStory } from "./story.js";
+import { forgetTails } from "./blocked.js";
 import { startRailBriefs } from "./rail-brief.js";
 import { barKeyDown } from "./story-bar.js";
 import { startWriters } from "./writers.js";
@@ -40,7 +42,7 @@ import { jumpToNeedsYou, showToast, showWhatsNewToast, watchToasts } from "./toa
 import { askOnce, notifyIfAway, type Alert } from "./alerts.js";
 import { type Copied, finishedNote, showCopyToast, showNote, watchNotes } from "./notes.js";
 import { startWhatsNew } from "./whats-new.js";
-import type { SavedProject, Selection, Session, SessionCards } from "./types.js";
+import type { SavedProject, Selection, Session, SessionCards, SettingsFiles } from "./types.js";
 import { HOVERS } from "./hovers.js";
 import { explanationsApplied, startExplanations, toggleExplanations } from "./explanations.js";
 
@@ -145,7 +147,7 @@ const named: Record<string, (arg?: string) => void> = {
     document.body.classList.remove("list-open", "list-peek");
   },
   "studio::ToggleFocus": () => {
-    studio.focus = !studio.focus;
+    setFocus(!studio.focus);
     document.body.classList.remove("list-open", "list-peek");
     layout();
   },
@@ -210,8 +212,7 @@ function applySettings(files: SettingsFiles) {
   // A write's returned text and then the watcher's report of the same file are one change: the second does nothing.
   if (applied && files.settings === studio.texts.settings && files.keymap === studio.texts.keymap) return;
   applied = true;
-  studio.texts = files;
-  studio.files = reload(studio.files, files);
+  setSettings(files, reload(studio.files, files));
   const { settings, errors } = studio.files;
   setSettingsErrors(errors);
   layout();
@@ -231,7 +232,24 @@ window.addEventListener("focus", recheckSeen);
 window.addEventListener("blur", recheckSeen);
 window.addEventListener("focus", () => actions.get("studio::RefreshLanded")?.());
 
-startPanes();
+// The Map view's overlays hook into its draws and Esc's layers, in the order their imports gave them.
+startMicroWorld();
+startMapHistory({ openBriefOf });
+startMapSheet(besideSheet);
+startMapTray();
+startMapRuns();
+startPanes(select);
+startStory((id, agent) => void select(id, agent));
+startList({
+  pressSession,
+  askDelete,
+  lastHeadline,
+  forget: (sessions) => {
+    forgetStories(sessions);
+    forgetTails(sessions);
+    forgetAsks(new Set(sessions.map((session) => session.id)));
+  },
+});
 startRailBriefs(drawFeed);
 startMap({ selectedProject, removeProject, shown: drawSidebar });
 element("pre-flight-button").addEventListener("click", () => openPreFlight());
@@ -252,7 +270,7 @@ element("needs-you").addEventListener("click", () => {
 
 // The saved project list (#381): the list's headers and the map follow it; its first arrival opens the last viewed project's map (#386).
 const showProjects = (projects: SavedProject[]) => {
-  studio.projects = projects;
+  setProjects(projects);
   staleDots();
   drawSidebar();
   projectsChanged();
@@ -275,7 +293,7 @@ const showList = (sessions: Session[]) => {
 listen<Session[]>("sessions", showList);
 invoke("sessions").then(showList).catch(failure("sessions"));
 // The toasts' presses keep the keyboard's focus, and a modal dialog holds them back (#457).
-watchToasts();
+watchToasts(select);
 // A turn that ended off screen in the focused window (the server's notices): the note toast names it.
 watchNotes();
 // Copy for the agent (#493): the brief's copy icons say what they copied, and the copy toast shows it.
@@ -295,7 +313,7 @@ listen<string[]>("finished", (ids) => {
 // would draw it with the last session's cards for a frame (danielrispler/Falinks#570).
 // The press's settling fetches what it held back.
 listen<Selection | null>("selected", (selected) => {
-  if (studio.pending) studio.missed = true;
+  if (studio.pending) setMissed(true);
   else show(selected);
 });
 // A session selected before the page opened opens in the left panel, its story or its worker's log, over its project's map.
@@ -307,7 +325,7 @@ invoke("selected")
   })
   .catch(failure("selected"));
 listen<SessionCards>("cards", (cards) => {
-  if (studio.pending) studio.missed = true;
+  if (studio.pending) setMissed(true);
   else showCards(cards);
 });
 // Claude Code's version changed: re-record the subagent fixture.

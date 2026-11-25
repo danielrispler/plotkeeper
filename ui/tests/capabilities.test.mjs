@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 /** @typedef {import("../../dist/types.js").Session} Session */
 /** @typedef {import("../../dist/types.js").Subagent} Subagent */
 import { reports, modelLine } from "../../dist/capabilities.js";
-import { rowMark, secondLine } from "../../dist/list.js";
+import { rowMark, secondLine } from "../../dist/list-model.js";
 import { subagentHistory } from "../../dist/story.js";
 
 /** @returns {import("../../dist/types.js").Capabilities} */

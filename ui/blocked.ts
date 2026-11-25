@@ -3,7 +3,7 @@
 // lets the agent retry it once and Decline closes the card; there is no edit, so what runs is what the card shows.
 
 import { blockedRequestFor, sendBlockedAnswer } from "./answer.js";
-import { code, failure, invoke, messageOf, text } from "./dom.js";
+import { code, failure, invoke, keepOnly, messageOf, pressable, text } from "./dom.js";
 import { counts, duration } from "./times.js";
 import { blockedWaits, type BlockedCommand, type BlockedStatus, type RiskLevel, type RiskView } from "./types.js";
 
@@ -22,16 +22,20 @@ export type BlockedView = {
   risk: RiskLine | null;
 };
 
-// What the note's place says: `text` is all of it in plain text, which is also its hover; `level` and `line` are its two parts once a note
-// arrived, `null` while it is on its way or when none is coming.
+/**
+ * What the note's place says: `text` is all of it in plain text, which is also its hover; `level` and `line` are its two parts once a note
+ * arrived, `null` while it is on its way or when none is coming.
+ */
 export type RiskLine = { state: RiskView["state"]; level: string | null; line: string | null; text: string };
 
-// The levels as the card says them.
+/** The levels as the card says them. */
 export const riskLevels: Record<RiskLevel, string> = { none: "None", low: "Low", medium: "Medium", high: "High", very_high: "Very high", not_sure: "Not sure" };
 
-// What the note's place says for `note`, as the shell joined it to the card. A card with a button has the place from the moment it appears, so
-// the buttons never move, and reads "on its way" until the shell says more; a card with no button has it only once the shell has news of a note.
-// `reads`: a note may still come; an ended session's card asks for none, so with no news it has no place.
+/**
+ * What the note's place says for `note`, as the server joined it to the card. A card with a button has the place from the moment it appears, so
+ * the buttons never move, and reads "on its way" until the server says more; a card with no button has it only once the server has news of a note.
+ * `reads`: a note may still come; an ended session's card asks for none, so with no news it has no place.
+ */
 export function riskLine(note: RiskView | undefined, hasButtons: boolean, reads = true): RiskLine | null {
   if (note?.state === "failed") return { state: "failed", level: null, line: null, text: "No risk note: the judge did not answer" };
   if (note?.state === "arrived") {
@@ -54,14 +58,16 @@ function fillRisk(place: HTMLElement, risk: RiskLine) {
   place.replaceChildren("Risk: ", level, ` · ${risk.line}`);
 }
 
-// Shows `risk` on the docked card `block`: in the place that stands, or, for a card drawn before its note was known, in a new place after the rule.
+/**
+ * Shows `risk` on the docked card `block`: in the place that stands, or, for a card drawn before its note was known, in a new place after the rule.
+ */
 export function fillCardRisk(block: HTMLElement, risk: RiskLine) {
   const place = block.querySelector<HTMLElement>(".risk-note");
   if (place) fillRisk(place, risk);
   else block.querySelector(".reason")?.after(riskElement(risk));
 }
 
-// The note's place on the card: a polite live region, so a screen reader hears the note when it fills.
+/** The note's place on the card: a polite live region, so a screen reader hears the note when it fills. */
 export function riskElement(risk: RiskLine): HTMLElement {
   const place = document.createElement("p");
   place.className = "risk-note";
@@ -104,15 +110,21 @@ function buttonsOf(status: BlockedStatus, answerable: boolean): BlockedButton[] 
   return (status === "blocked" || status === "blocked_again") && answerable ? ["Allow", "Decline"] : [];
 }
 
-// Whether the dock holds `card`: exactly when it shows a button, so orange means Daniel has something to click
-// (danielrispler/plotkeeper#297). Every other card sits in the feed, neutral.
+/**
+ * Whether the dock holds `card`: exactly when it shows a button, so orange means Daniel has something to click
+ * (danielrispler/plotkeeper#297). Every other card sits in the feed, neutral.
+ */
 export const docksInDock = (card: BlockedCommand, answerable: boolean): boolean => buttonsOf(card.status, answerable).length > 0;
 
-// Whether a docked card shows its state line: Blocked again and Allowed, not run say what they are; a plain Blocked card keeps the dock's look.
+/**
+ * Whether a docked card shows its state line: Blocked again and Allowed, not run say what they are; a plain Blocked card keeps the dock's look.
+ */
 export const stateInDock = (status: BlockedStatus): boolean => status === "blocked_again" || status === "allowed_not_run";
 
-// The call whose output a finished card shows, and the agent that ran it, which may be the session's own for a
-// subagent's command; null before it finished, and for a background run, whose output the studio does not read.
+/**
+ * The call whose output a finished card shows, and the agent that ran it, which may be the session's own for a
+ * subagent's command; null before it finished, and for a background run, whose output the studio does not read.
+ */
 export function outputCall(card: BlockedCommand): { agent: string | null; call: string } | null {
   if (card.status !== "finished" || !card.run || card.task) return null;
   return { agent: card.run_by ?? null, call: card.run };
@@ -124,16 +136,26 @@ const tailText = (read: BlockedOutput | null): string => (read?.tail.trim() ? re
 // The tails read so far, by the run's call id.
 const tails = new Map<string, BlockedOutput | null>();
 
-// The line to give the session to have the agent retry `card`'s command: for the session's own block, or,
-// when `agent` (the subagent's name) asked, one that tells the session to run it in the subagent's folder.
+/** Drops the tails of runs no listed session's card holds. */
+export function forgetTails(sessions: { blocked_commands: BlockedCommand[] }[]) {
+  const runs = new Set(sessions.flatMap((session) => session.blocked_commands.flatMap((card) => card.run ?? [])));
+  keepOnly(tails, (call) => runs.has(call));
+}
+
+/**
+ * The line to give the session to have the agent retry `card`'s command: for the session's own block, or,
+ * when `agent` (the subagent's name) asked, one that tells the session to run it in the subagent's folder.
+ */
 export function retryLine(card: BlockedCommand, agent: string | null): string {
   if (agent === null) return `Daniel approved the blocked command: \`${card.command}\`. Run it again.`;
   return `Daniel approved the command subagent \`${agent}\` was blocked on. Run \`cd ${card.cwd}\` as its own Bash call, then run exactly: \`${card.command}\`. Or pass it to the subagent if it still runs.`;
 }
 
-// What the card shows for `card`, asked by `agent` (the subagent's name, null for the session's own agent), or null once
-// Daniel declined it. `answerable`: its request file is still there, so Allow and Decline have something to answer, also after its hook has returned.
-// `output`: what reading its output gave, `undefined` until it is read. `reads`: a risk note may still come for it (`riskLine`).
+/**
+ * What the card shows for `card`, asked by `agent` (the subagent's name, null for the session's own agent), or null once
+ * Daniel declined it. `answerable`: its request file is still there, so Allow and Decline have something to answer, also after its hook has returned.
+ * `output`: what reading its output gave, `undefined` until it is read. `reads`: a risk note may still come for it (`riskLine`).
+ */
 export function blockedView(
   card: BlockedCommand,
   agent: string | null,
@@ -158,7 +180,7 @@ export function blockedView(
   };
 }
 
-// `retry` shows the card's retry line to give the session (`story.ts`).
+/** `retry` shows the card's retry line to give the session (`story.ts`). */
 export function blockedElement(session: string, card: BlockedCommand, agent: string | null, retry: (card: BlockedCommand) => void, note?: RiskView, reads = true): HTMLElement | null {
   const request = blockedRequestFor(card.call);
   const read = outputCall(card);
@@ -196,8 +218,7 @@ export function blockedElement(session: string, card: BlockedCommand, agent: str
     const row = document.createElement("p");
     row.className = "answer-buttons";
     for (const label of view.buttons) {
-      const button = text("button", label, "btn");
-      button.type = "button";
+      const button = pressable(text("button", label, "btn"), null);
       button.title = blockedHovers[label];
       button.addEventListener("click", async () => {
         if (label === "Ask again") {

@@ -1,7 +1,7 @@
 // The session's name and context tokens (danielrispler/Falinks#480). Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { contextText, contextTitle, sessionName } from "../../dist/list.js";
+import { contextText, contextTitle, sessionName } from "../../dist/list-model.js";
 
 const identity = { issue: 480, branch: "issue-480-naming", pr: 490, worktree: "agent-a1b2", name: "#480 · PR #490 · agent-a1b2" };
 

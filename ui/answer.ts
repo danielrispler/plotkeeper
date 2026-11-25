@@ -1,50 +1,42 @@
 // Answering from the card (danielrispler/Falinks#461, decision 16). While a session's view shows and the window is
-// visible, the shell watches it, so the answer hook waits for the card; the shell sends the session's
+// visible, the server watches it, so the answer hook waits for the card; the server sends the session's
 // open request in its read loop (danielrispler/Falinks#569), and the answer echoes its nonce. The hook waits only while the
 // request's card shows: a question asked in a view that is not shown is handed to the terminal.
 
 import { failure, invoke, listen } from "./dom.js";
 import { studio } from "./state.js";
-import { askKind, type Question } from "./types.js";
+import { type Ask, askKind, type Question } from "./types.js";
 
-// The answer hook's request (`hook/src/answer.rs`): a question or a plan at its `PreToolUse`, or a
-// permission request, which names no call (danielrispler/Falinks#478). `agent_id` is the asking subagent's, null for the
-// session's own agent.
-export type Ask = {
-  nonce: string;
-  hook_event_name: string;
-  tool_name: string;
-  tool_use_id: string | null;
-  tool_input: Record<string, unknown>;
-  agent_id: string | null;
-};
-
-// Whether `ask`'s card shows in the view of `agent` (null: the session's own): a question docks only
-// in its asker's view, a plan or a permission in every view of its session (`story.ts`).
+/**
+ * Whether `ask`'s card shows in the view of `agent` (null: the session's own): a question docks only
+ * in its asker's view, a plan or a permission in every view of its session (`story.ts`).
+ */
 export const cardShown = (ask: Ask, agent: string | null) =>
   askKind(ask.tool_name) !== "question" || (ask.agent_id ?? null) === agent;
-// A question's answer: each question's text to its label, or a multi-select's to its labels. A plan's
-// or a permission's: allow or deny. Null answers in the terminal.
+/**
+ * A question's answer: each question's text to its label, or a multi-select's to its labels. A plan's
+ * or a permission's: allow or deny. Null answers in the terminal.
+ */
 export type Reply = { answers: Record<string, string | string[]> } | { decision: "allow" | "deny" } | null;
 
 let current: { session: string; ask: Ask } | null = null;
 let redraw = () => {};
-// The request last answered, which the shell may still return until the hook takes the answer.
+// The request last answered, which the server may still return until the hook takes the answer.
 let sent = "";
 
-// The open request for `question`, if the card can answer it.
+/** The open request for `question`, if the card can answer it. */
 export const askFor = (question: Question) =>
   current?.ask.tool_use_id === question.tool_use_id ? current.ask : null;
 
-// The open plan or permission request, if any (danielrispler/Falinks#478): the core keeps no question for either.
+/** The open plan or permission request, if any (danielrispler/Falinks#478): the core keeps no question for either. */
 export const openDecision = () =>
   current !== null && askKind(current.ask.tool_name) !== "question" ? current.ask : null;
 
-// A blocked command's request (`hook/src/answer.rs`): `waiting` while its hook still waits for Daniel's click.
+/** A blocked command's request (`hook/src/answer.rs`): `waiting` while its hook still waits for Daniel's click. */
 export type BlockedRequest = { nonce: string; tool_use_id: string; waiting: boolean };
 let blockedRequests: BlockedRequest[] = [];
 
-// The request of the denied call `call`, if its card can answer it.
+/** The request of the denied call `call`, if its card can answer it. */
 export const blockedRequestFor = (call: string) => blockedRequests.find((r) => r.tool_use_id === call) ?? null;
 
 const watch = (session: string | null) =>
@@ -53,7 +45,7 @@ const watch = (session: string | null) =>
     return null;
   });
 
-// The view watched last, so a redraw of the same one asks the shell nothing.
+// The view watched last, so a redraw of the same one asks the server nothing.
 let watched = "";
 
 // The session and subagent whose view shows, null while the window is hidden.
@@ -82,8 +74,10 @@ async function take(ask: Ask | null) {
   redraw();
 }
 
-// Tells the shell which session's view shows, when that changed (danielrispler/Falinks#569): the shell keeps the
-// heartbeat and sends the session's open request as an `ask` event, with no poll here.
+/**
+ * Tells the server which session's view shows, when that changed (danielrispler/Falinks#569): the server keeps the
+ * heartbeat and sends the session's open request as an `ask` event, with no poll here.
+ */
 export async function rewatch() {
   const { session, agent } = shown();
   const key = JSON.stringify([session, agent]);
@@ -103,7 +97,7 @@ export function startWatching(draw: () => void) {
   });
   document.addEventListener("visibilitychange", rewatch);
   rewatch().catch(failure("watch"));
-  // Shows the shell the window is alive, so a frozen window lets the hook hand a question to the
+  // Shows the server the window is alive, so a frozen window lets the hook hand a question to the
   // terminal within seconds (danielrispler/Falinks#569). It asks for nothing; the open request still comes as an event.
   setInterval(() => {
     if (document.visibilityState === "visible") invoke("alive").catch(() => {});
@@ -120,11 +114,13 @@ export async function sendAnswer(ask: Ask, reply: Reply) {
   await invoke("answer", args).catch(failure("answer", "error"));
 }
 
-// Which way the shell took Daniel's answer to a blocked command: to its hook, still waiting, or late, the hook having returned.
+/** Which way the server took Daniel's answer to a blocked command: to its hook, still waiting, or late, the hook having returned. */
 export type BlockedAnswered = "hook" | "late";
 
-// Allow or Decline of a blocked command, and which way it went; null when the shell refused it, which puts the request back so the
-// card keeps its buttons. The card stays until the core takes the answer's line.
+/**
+ * Allow or Decline of a blocked command, and which way it went; null when the server refused it, which puts the request back so the
+ * card keeps its buttons. The card stays until the core takes the answer's line.
+ */
 export async function sendBlockedAnswer(session: string, request: BlockedRequest, decision: "allow" | "deny"): Promise<BlockedAnswered | null> {
   blockedRequests = blockedRequests.filter((r) => r.nonce !== request.nonce);
   redraw();
