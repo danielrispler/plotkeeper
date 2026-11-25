@@ -354,6 +354,121 @@ fn imports_json_lists_the_unsure_files_and_the_pass_line_counts_the_relaxed_link
     );
 }
 
+/// The report of [`declared_twice`]'s repository with `work` added, its `go.work` files, which a part `rest` owns, and
+/// an import link from `app` to `xa`.
+fn worked(work: &[(&str, &str)]) -> system_map::Report {
+    let (dir, root) = declared_twice(&[]);
+    let map = map(
+        &[
+            ("rest", &["**"]),
+            ("app", &["app/"]),
+            ("xa", &["a/"]),
+            ("xb", &["b/"]),
+        ],
+        &[("app", "xa")],
+    );
+    write(dir.path(), "system-map.json", &map.to_string());
+    for (file, text) in work {
+        write(dir.path(), file, text);
+    }
+    studio_test_support::git(dir.path(), &["add", "-A"]);
+    studio_test_support::git(dir.path(), &["commit", "-q", "-m", "Work"]);
+    report(&root)
+}
+
+/// The pairs `declared_twice` gives when `a/` wins the tie.
+const A_WINS: [&str; 2] = ["app/main.go>a/sub/s.go", "app/main.go>a/sub/t.go"];
+
+#[test]
+fn a_go_work_using_exactly_one_declarer_breaks_the_tie() {
+    let found = worked(&[(
+        "go.work",
+        "go 1.22\n\nuse (\n\t./app\n\t./a // the real one\n)\n",
+    )]);
+    assert_eq!(pairs(&found), A_WINS);
+    assert_eq!(found.unsure, []);
+    assert_eq!(found.problems, Vec::<String>::new());
+}
+
+#[test]
+fn two_go_work_files_picking_different_winners_leave_the_path_unsure() {
+    let found = worked(&[
+        ("go.work", "use ./a\n"),
+        ("app/go.work", "use (\n\t.\n\t../b\n)\n"),
+    ]);
+    assert_eq!(pairs(&found), Vec::<String>::new());
+    let reasons: Vec<_> = found.unsure.iter().map(|u| u.reason.as_str()).collect();
+    assert_eq!(reasons, ["declared twice"]);
+    assert_eq!(found.problems, Vec::<String>::new());
+}
+
+#[test]
+fn a_go_work_under_an_excluded_folder_is_never_read() {
+    let found = worked(&[
+        ("go.work", "use ./a\n"),
+        ("testdata/go.work", "use ../b\n"),
+        ("_x/go.work", "frobnicate (\n"),
+    ]);
+    assert_eq!(pairs(&found), A_WINS);
+    assert_eq!(found.problems, Vec::<String>::new());
+}
+
+#[test]
+fn a_use_path_is_joined_to_its_go_work_folder_and_cleaned() {
+    for (file, used) in [
+        ("go.work", "./a"),
+        ("go.work", "a/"),
+        ("go.work", "x/../a"),
+        ("go.work", "\"./a/\""),
+        ("w/go.work", "../a"),
+    ] {
+        let found = worked(&[(file, &format!("use {used}\n"))]);
+        assert_eq!(pairs(&found), A_WINS, "{file}: {used}");
+        assert_eq!(found.problems, Vec::<String>::new(), "{file}: {used}");
+    }
+}
+
+#[test]
+fn a_use_outside_the_repository_absolute_or_of_a_folder_with_no_go_mod_declares_nothing() {
+    // Read as `b/`, `/b` would make the root's `go.work` use both declarers, and `../../b` disagree with its pick.
+    let found = worked(&[
+        (
+            "go.work",
+            "use (\n\t./a\n\t/b\n\t./missing\n\t./app/sub\n)\n",
+        ),
+        ("w/go.work", "use ../../b\n"),
+    ]);
+    assert_eq!(pairs(&found), A_WINS);
+    assert_eq!(found.problems, Vec::<String>::new());
+}
+
+#[test]
+fn a_malformed_go_work_is_a_problem_naming_its_file_and_line() {
+    for (text, says) in [
+        (
+            "go 1.22\n\nuse (\n\t./a\n",
+            "go.work:3: a block opened with `(` is never closed",
+        ),
+        (
+            "go 1.22\nrequire example.com/x v1.0.0\n",
+            "go.work:2: unknown directive `require`",
+        ),
+        ("require (\n)\n", "go.work:1: unknown block kind `require`"),
+        ("use \"./a\n", "go.work:1: the line does not tokenise"),
+        (
+            "use ./app\nuse ./a\nuse ./b\n",
+            "go.work:3: uses both a/ and b/, which declare example.com/x",
+        ),
+    ] {
+        let found = worked(&[("go.work", text)]);
+        assert!(
+            has(&found.problems, &[says]),
+            "{text}: {:?}",
+            found.problems
+        );
+    }
+}
+
 #[test]
 fn a_files_own_module_path_means_its_own_module_even_when_a_copy_declares_it() {
     let (_dir, root) = repo(

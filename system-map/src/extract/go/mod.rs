@@ -2,6 +2,8 @@
 //! for which module provides a package (go.dev/ref/mod, "Resolving a package to a module") against every tracked
 //! `go.mod`, and paired with the package files of the folder they name (spec #569).
 
+mod work;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
@@ -122,6 +124,8 @@ struct Modules {
     names: Names<String>,
     /// Each indexed module's root folder, with its path.
     paths: BTreeMap<String, String>,
+    /// Each path two or more indexed modules declare that `go.work` settles, with the winner's root.
+    winners: BTreeMap<String, String>,
 }
 
 impl Modules {
@@ -130,6 +134,7 @@ impl Modules {
             boundaries: BTreeSet::new(),
             names: Names::new(),
             paths: BTreeMap::new(),
+            winners: BTreeMap::new(),
         };
         let mut problems = Vec::new();
         // The `go.mod` files outside the excluded folders, readable or not.
@@ -158,6 +163,9 @@ impl Modules {
         if indexed == 0 {
             problems.push(MISSING.to_string());
         }
+        let (winners, malformed) = work::winners(repo, &modules);
+        modules.winners = winners;
+        problems.extend(malformed);
         (modules, problems)
     }
 
@@ -184,6 +192,10 @@ impl Modules {
         let own_path = self.paths[own].as_str();
         let mut entries = self.entries(path);
         entries.retain(|&(module, root)| root == own || module != own_path);
+        // A tie `go.work` settles keeps only its winner; own's path is settled already.
+        entries.retain(|&(module, root)| {
+            module == own_path || self.winners.get(module).is_none_or(|winner| winner == root)
+        });
         let declared_twice =
             |module: &str| entries.iter().filter(|(m, _)| *m == module).count() > 1;
         let mut folders = Vec::new();
