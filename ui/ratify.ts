@@ -1,7 +1,8 @@
 // Ratifying (spec danielrispler/plotkeeper#334, ticket #343), the pure part: what the part sheet and the brief's ratify step say of an item,
 // and what an overturn copies. `map-sheet.ts` and `map-brief.ts` draw it, the server (`server/src/ratify.rs`) keeps the records.
 
-import type { BriefStep, PendingItem, RatifyDetail, RatifyRow } from "./types.js";
+import type { Drawer } from "./map-model.js";
+import type { BriefStep, ImportSite, LinkSites, PendingItem, RatifyDetail, RatifyRow, SiteSnippet } from "./types.js";
 
 // The state of an item as the brief says it: nothing to ratify when it landed before the first run.
 export const statusWords: Record<RatifyRow["status"], string> = {
@@ -70,20 +71,63 @@ function newText(detail: RatifyDetail | null | undefined): string {
   return `${detail.purpose.after ? `, purpose: “${detail.purpose.after}”` : ""}${held.length ? `, and it holds ${held.join(", ")}` : ""}`;
 }
 
+// Link evidence (#499): an import site as a reader names it, `file:line`, or the file alone when its line is not known.
+const siteLabel = (site: ImportSite) => (site.line ? `${site.file}:${site.line}` : site.file);
+
+// An added link's second line in the ratify step: its first site, then "(+N imports across M files)" for the others; null with no evidence.
+export function evidenceLine(evidence: LinkSites | undefined): { site: string; more: string | null } | null {
+  const [first, ...rest] = evidence?.sites ?? [];
+  if (!first) return null;
+  return { site: siteLabel(first), more: rest.length ? `(+${counted(rest)})` : null };
+}
+
+const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+// "3 imports across 2 files".
+const counted = (sites: ImportSite[]) => `${plural(sites.length, "import")} across ${plural(new Set(sites.map((site) => site.file)).size, "file")}`;
+const short = (head: string) => head.slice(0, 7);
+
+// The drawer of one site's snippet, read from the commit `head`: numbered from its first line, the site's own line marked.
+export function siteDrawer(snippet: SiteSnippet, head: string): Drawer {
+  const block = { label: snippet.file, code: snippet.lines.join("\n"), jumps: [], first: snippet.first };
+  return {
+    title: siteLabel(snippet),
+    note: `As the PR's head ${short(head)} holds it`,
+    blocks: [snippet.line ? { ...block, mark: snippet.line } : block],
+    jumps: [],
+  };
+}
+
+// The drawer of every site behind an added link, each opening its snippet through `open`.
+export function sitesDrawer(row: Pick<RatifyRow, "text" | "evidence">, open: (site: ImportSite) => void): Drawer {
+  const sites = row.evidence?.sites ?? [];
+  return {
+    title: `Imports behind ${row.text}`,
+    note: `${counted(sites)}, as the PR's head ${short(row.evidence?.head ?? "")} holds them`,
+    blocks: [],
+    jumps: [],
+    picks: sites.map((site) => ({ label: siteLabel(site), title: "Show this import's code", open: () => open(site) })),
+  };
+}
+
 // A full stop after `words`, unless they already end with one, inside a closing quote or not.
 const stopped = (words: string) => (/[.!?]”?$/.test(words) ? words : `${words}.`);
 
 const kindWords: Record<string, string> = { part: "part", actor: "outside actor", link: "link", law: "law", flow: "flow", decision: "decision" };
 
 // The prompt an overturn puts on the clipboard: it stands alone for any agent, naming the PR, its branch while it is open, the item's
-// id and its wording.
-export function overturnPrompt(row: Pick<RatifyRow, "pr" | "kind" | "id" | "text" | "change"> & { detail?: RatifyDetail | null }, branch: string | null): string {
+// id and its wording, and for an added link the import sites behind it (#499).
+export function overturnPrompt(
+  row: Pick<RatifyRow, "pr" | "kind" | "id" | "text" | "change"> & { detail?: RatifyDetail | null; evidence?: LinkSites },
+  branch: string | null,
+): string {
   const where = branch ? `PR #${row.pr} (branch ${branch})` : `PR #${row.pr}`;
   const what =
     row.kind === "decision"
       ? `the decision ${row.id}: “${row.text}”`
       : `the ${kindWords[row.kind] ?? row.kind} ${row.id}${row.change ? ` (${row.change})` : ""}: “${row.text}”${newText(row.detail)}`;
-  return `In ${where}, I overturn ${stopped(what)} Undo it and tell me what you changed.`;
+  const sites = row.evidence?.sites ?? [];
+  const imports = sites.length ? ` Its imports at the PR's head: ${sites.map(siteLabel).join(", ")}.` : "";
+  return `In ${where}, I overturn ${stopped(what)}${imports} Undo it and tell me what you changed.`;
 }
 
 // Puts `prompt` on the clipboard through `writeText` (`navigator.clipboard.writeText`): "copied", or "manual" when there is no clipboard or

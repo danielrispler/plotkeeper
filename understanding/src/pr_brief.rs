@@ -167,6 +167,7 @@ pub fn write_pr_brief(
             claim_error: record.claim_error.clone(),
             ..facts.partial_facts.clone()
         },
+        link_evidence: source.link_evidence.clone(),
     };
     match &source.since {
         Some(from) => store.put_since(from, &stored),

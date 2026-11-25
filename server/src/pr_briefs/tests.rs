@@ -2,7 +2,7 @@ use super::*;
 use crate::prs::Ready;
 use std::cell::{Cell, RefCell};
 use std::{collections::BTreeSet, path::Path, sync::Mutex};
-use studio_understanding::pr_brief::{BriefReply, CallUsage, PrMeta};
+use studio_understanding::pr_brief::{BriefReply, CallUsage, ImportSite, LinkEvidence, PrMeta};
 use studio_understanding::pr_brief::{BriefStore, BriefWriter, PrSource, StoredBrief};
 
 const MAP: &str = r#"{ "version": 1,
@@ -1203,6 +1203,71 @@ fn after_a_carry_over_the_pr_stops_waiting_and_the_next_lookup_keeps_the_copied_
         Some("Rebased onto main, nothing new in the PR")
     );
     assert!(info.read && !info.stale);
+}
+
+#[test]
+fn a_carried_brief_holds_the_link_evidence_of_the_new_head() {
+    let rig = Rig::new();
+    let store = BriefStore::open(rig.store_dir.path()).unwrap();
+    let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+    let reading = rig.reading();
+    let with = Writing {
+        writer: &fake,
+        model: "opus",
+        store: &store,
+        reading: Some(&reading),
+    };
+    let part = |id: &str| {
+        serde_json::json!({ "id": id, "name": id, "caption": "c", "purpose": "p", "holds": [], "tier": "core",
+                            "paths": [format!("{id}/")] })
+    };
+    let map = serde_json::json!({
+        "version": 2, "extractors": ["typescript-imports"],
+        "parts": [part("alpha"), part("beta")], "actors": [],
+        "links": [{ "id": "alpha-beta", "from": "alpha", "to": "beta", "kind": "import" }],
+        "ignored": ["system-map.json", "docs/"], "laws": [], "flows": []
+    })
+    .to_string();
+    // The PR adds the link and its one import.
+    let h1 = rig.repo.commit(&[
+        ("system-map.json", &map),
+        ("alpha/a.ts", "import { b } from \"../beta/b\";\n"),
+        ("beta/b.ts", "export const b = 1;\n"),
+    ]);
+    let repo = Path::new(&rig.repo.path);
+    let at = |head: &str| {
+        let mut s = source(head);
+        s.link_evidence = crate::ratify::link_evidence(repo, "main", head);
+        s
+    };
+    assert_eq!(
+        on_lookup(&with, &seen, 7, &h1, || Ok(at(&h1)), |_| {}),
+        Did::Wrote
+    );
+    let lit = lit_parts(&store.get(7, &h1).unwrap().brief);
+    crate::fog::mark_read(&reading.file, &rig.repo.path, 7, 0, &h1, lit, 1).unwrap();
+    // Main gains a second import of beta, and the PR is rebased onto it: the read carries over.
+    rig.repo.git(&["checkout", "-q", "main"]);
+    rig.repo
+        .commit(&[("alpha/z.ts", "// z\nimport { b } from \"../beta/b\";\n")]);
+    rig.repo.git(&["checkout", "-q", "pr"]);
+    rig.repo.git(&["rebase", "-q", "main"]);
+    let h2 = rig.repo.head();
+    assert_eq!(
+        on_lookup(&with, &seen, 7, &h2, || Ok(at(&h2)), |_| {}),
+        Did::Carried
+    );
+    let site = |file: &str, line: u32| ImportSite {
+        file: file.into(),
+        line: Some(line),
+    };
+    assert_eq!(
+        store.get(7, &h2).unwrap().link_evidence,
+        [LinkEvidence {
+            link: "alpha-beta".into(),
+            sites: vec![site("alpha/a.ts", 1), site("alpha/z.ts", 2)],
+        }]
+    );
 }
 
 #[test]

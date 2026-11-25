@@ -5,11 +5,12 @@
 
 import { failure, invoke, pressable, promptBox, sayAction, text } from "./dom.js";
 import { currentMap } from "./map.js";
-import { copyOverturn, decideWith, detailLines, noteFor, overturnPrompt, overturnReport, type Overturned } from "./ratify.js";
+import { openDrawer } from "./map-drawer.js";
+import { copyOverturn, decideWith, detailLines, evidenceLine, noteFor, overturnPrompt, overturnReport, siteDrawer, sitesDrawer, type Overturned } from "./ratify.js";
 import { logStop } from "./stop-rules.js";
-import type { RatifyRow } from "./types.js";
+import type { ImportSite, LinkSites, RatifyRow } from "./types.js";
 
-export type Ratifiable = Pick<RatifyRow, "pr" | "kind" | "id" | "text" | "change"> & { detail?: RatifyRow["detail"] };
+export type Ratifiable = Pick<RatifyRow, "pr" | "kind" | "id" | "text" | "change"> & { detail?: RatifyRow["detail"]; evidence?: LinkSites };
 
 /** The branch of PR `pr` while it is open: the Map view's ready PRs name it. */
 export const branchOf = (pr: number): string | null => currentMap()?.state.ready?.find((ready) => ready.number === pr)?.branch || null;
@@ -70,6 +71,32 @@ export function ratifyDetail(row: Ratifiable): HTMLElement | null {
     list.append(text("dt", line.label), said);
   }
   return list;
+}
+
+/**
+ * An added link's evidence in the brief's ratify step (#499), its second line: one import site, which opens its code in the drawer as
+ * the PR's head holds it, then "(+N imports across M files)", which opens every site there, each opening its code. Null with none.
+ */
+export function ratifyEvidence(project: string, row: Ratifiable): HTMLElement | null {
+  const said = evidenceLine(row.evidence);
+  const evidence = row.evidence;
+  const first = evidence?.sites[0];
+  if (!said || !evidence || !first) return null;
+  const openSite = (site: ImportSite) =>
+    invoke("ratify_site", { project, head: evidence.head, file: site.file, line: site.line ?? null })
+      .then((found) => openDrawer(siteDrawer(found, evidence.head)))
+      .catch(failure("ratify_site"));
+  const line = text("p", "", "ratify-evidence");
+  const site = pressable(text("button", said.site, "btn quiet ratify-site"), null, () => void openSite(first));
+  site.translate = false;
+  site.title = "Show this import's code as the PR's head holds it";
+  line.append(text("span", "Import", "ratify-side"), site);
+  if (said.more) {
+    const more = pressable(text("button", said.more, "btn quiet ratify-more"), null, () => openDrawer(sitesDrawer(row, openSite)));
+    more.title = "List every import behind this link";
+    line.append(more);
+  }
+  return line;
 }
 
 /** `done` runs once the server has the decision. */

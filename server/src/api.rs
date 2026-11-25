@@ -236,6 +236,12 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "state")?,
             arg(a, "text")?,
         )),
+        "ratify_site" => res(crate::ratify::ratify_site(
+            arg(a, "project")?,
+            arg(a, "head")?,
+            arg(a, "file")?,
+            arg(a, "line")?,
+        )),
         "failed_check_name" => out(crate::ci_laws::failed_check_name(
             arg(a, "tail")?,
             arg(a, "suite")?,

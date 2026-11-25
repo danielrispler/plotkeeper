@@ -27,12 +27,16 @@ pub struct Tag {
 }
 
 /// Each law with its tags, and the problems of laws held to the wrong backing and of tags naming
-/// no law. Every tracked file is read, ignored paths included.
-pub(crate) fn check(root: &Path, map: &Map, files: &[String]) -> (Vec<LawReport>, Vec<String>) {
+/// no law. Every tracked file is read through `read`, ignored paths included.
+pub(crate) fn check(
+    read: &dyn Fn(&str) -> Option<String>,
+    map: &Map,
+    files: &[String],
+) -> (Vec<LawReport>, Vec<String>) {
     let mut found: BTreeMap<String, Vec<Tag>> = BTreeMap::new();
     for file in files {
         // A symlink or a file gone from disk carries no tag; other bytes read lossily.
-        let Some(text) = crate::read_tracked(root, file) else {
+        let Some(text) = read(file) else {
             continue;
         };
         for (index, line) in text.lines().enumerate() {

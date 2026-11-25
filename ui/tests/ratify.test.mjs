@@ -1,7 +1,7 @@
 // Ratifying's pure part (ticket #343), run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { copyOverturn, decideWith, detailLines, noteFor, openRows, overturnPrompt, overturnReport, ratifyStep, sheetLinkItem, sheetPending, statusWords } from "../../dist/ratify.js";
+import { copyOverturn, decideWith, detailLines, evidenceLine, noteFor, openRows, overturnPrompt, overturnReport, ratifyStep, sheetLinkItem, sheetPending, siteDrawer, sitesDrawer, statusWords } from "../../dist/ratify.js";
 
 // A row with no detail of its own, as the page reads one whose kind has none.
 const row = (kind, id, status = "not-yet", extra = {}) => /** @type {import("../../dist/types.js").RatifyRow} */ ({ pr: 7, kind, id, text: `${id} text`, change: "", status, ...extra });
@@ -173,4 +173,40 @@ test("an overturn copies its prompt within the click, before the decision's roun
   order.length = 0;
   assert.equal(await decideWith(false, copy, record), null);
   assert.deepEqual(order, ["record"]);
+});
+
+// Link evidence (#499): the import sites an added link's brief stored, read at the PR's head.
+const evidence = { head: "0123456789abcdef", sites: [{ file: "alpha/a.ts", line: 3 }, { file: "alpha/c.ts", line: 1 }, { file: "alpha/c.ts", line: 2 }, { file: "beta/Cargo.toml" }] };
+
+test("an added link's second line is one site, then how many more imports across how many files", () => {
+  assert.deepEqual(evidenceLine(evidence), { site: "alpha/a.ts:3", more: "(+3 imports across 2 files)" });
+  assert.deepEqual(evidenceLine({ head: "h", sites: [{ file: "a.ts", line: 1 }, { file: "a.ts", line: 4 }] }), { site: "a.ts:1", more: "(+1 import across 1 file)" });
+  assert.deepEqual(evidenceLine({ head: "h", sites: [{ file: "Cargo.toml" }] }), { site: "Cargo.toml", more: null }, "a site with no line, and nothing more");
+  assert.equal(evidenceLine(undefined), null);
+  assert.equal(evidenceLine({ head: "h", sites: [] }), null);
+});
+
+test("an overturn of an added link quotes the import sites behind it", () => {
+  const link = row("link", "alpha-gamma", "not-yet", { text: "alpha to gamma", change: "added", evidence });
+  const prompt = overturnPrompt(link, "gamma-calls");
+  assert.match(prompt, /link alpha-gamma \(added\): “alpha to gamma”\. Its imports at the PR's head: alpha\/a\.ts:3, alpha\/c\.ts:1, alpha\/c\.ts:2, beta\/Cargo\.toml\. Undo it/);
+  assert.doesNotMatch(overturnPrompt(row("link", "a-b", "not-yet", { text: "a to b", change: "removed" }), null), /imports/, "a removed link has no evidence");
+});
+
+test("a site's snippet opens in the drawer numbered from its first line, its own line marked", () => {
+  const drawer = siteDrawer({ file: "alpha/a.ts", line: 3, first: 1, lines: ["// a", "", "import { g } from \"../gamma/g\";"] }, evidence.head);
+  assert.equal(drawer.title, "alpha/a.ts:3");
+  assert.equal(drawer.note, "As the PR's head 0123456 holds it");
+  assert.deepEqual(drawer.blocks, [{ label: "alpha/a.ts", code: "// a\n\nimport { g } from \"../gamma/g\";", jumps: [], first: 1, mark: 3 }]);
+  assert.equal(siteDrawer({ file: "Cargo.toml", first: 1, lines: ["[package]"] }, "h").blocks[0].mark, undefined, "no line, nothing marked");
+});
+
+test("the count opens every site in the drawer, each opening its snippet", () => {
+  const opened = [];
+  const drawer = sitesDrawer({ text: "alpha to gamma", evidence }, (site) => opened.push(site));
+  assert.equal(drawer.title, "Imports behind alpha to gamma");
+  assert.equal(drawer.note, "4 imports across 3 files, as the PR's head 0123456 holds them");
+  assert.deepEqual(drawer.picks.map((pick) => pick.label), ["alpha/a.ts:3", "alpha/c.ts:1", "alpha/c.ts:2", "beta/Cargo.toml"]);
+  drawer.picks[1].open();
+  assert.deepEqual(opened, [{ file: "alpha/c.ts", line: 1 }]);
 });

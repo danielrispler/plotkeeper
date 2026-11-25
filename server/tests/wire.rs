@@ -575,6 +575,20 @@ fn brief() -> studio_understanding::pr_brief::StoredBrief {
             claim_error: Some("the check timed out".into()),
             no_extractor: vec![".go".into()],
         },
+        // Ratify joins it to an added link's row (#499).
+        link_evidence: vec![LinkEvidence {
+            link: "ui-server".into(),
+            sites: vec![
+                ImportSite {
+                    file: "ui/map.ts".into(),
+                    line: Some(12),
+                },
+                ImportSite {
+                    file: "Cargo.toml".into(),
+                    line: None,
+                },
+            ],
+        }],
     }
 }
 
@@ -594,7 +608,10 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
         pr_briefs::{BriefView, Opened as BriefOpened, StaleBase, Waiting},
         pre_flight::OpenIssue,
         projects::Project,
-        ratify::{Detail, HeldDetail, LinkDetail, PartDetail, Row, Status as Ratified, Words},
+        ratify::{
+            Detail, Evidence, HeldDetail, LinkDetail, PartDetail, Row, SiteSnippet,
+            Status as Ratified, Words,
+        },
         stop_rules::{Facts, Kind as StopKind},
     };
     use studio_understanding::part_catch_up::{FogEntry, StoredCatchUp, Summary};
@@ -630,6 +647,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
         change: change.into(),
         status,
         detail: None,
+        evidence: None,
     };
     let words = |before: Option<&str>, after: &str| Words {
         before: before.map(String::from),
@@ -806,6 +824,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
                 brief: studio_understanding::pr_brief::StoredBrief {
                     guard: None,
                     partial_facts: Default::default(),
+                    link_evidence: Vec::new(),
                     ..brief()
                 },
                 ..view(None)
@@ -832,6 +851,47 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
         ("RatifyRow", json(row(Ratified::NotYet, ""))),
         ("RatifyRow", json(part_row)),
         ("RatifyRow", json(link_row)),
+        (
+            "RatifyRow",
+            // An added link with the import sites its brief stored (#499).
+            json(Row {
+                kind: "link".into(),
+                id: "ui-server".into(),
+                text: "ui to server".into(),
+                evidence: Some(Evidence {
+                    head: COMMIT.into(),
+                    sites: vec![
+                        studio_understanding::pr_brief::ImportSite {
+                            file: "ui/map.ts".into(),
+                            line: Some(12),
+                        },
+                        studio_understanding::pr_brief::ImportSite {
+                            file: "Cargo.toml".into(),
+                            line: None,
+                        },
+                    ],
+                }),
+                ..row(Ratified::NotYet, "added")
+            }),
+        ),
+        (
+            "SiteSnippet",
+            json(SiteSnippet {
+                file: "ui/map.ts".into(),
+                line: Some(12),
+                first: 8,
+                lines: vec!["import { x } from \"./y.js\";".into()],
+            }),
+        ),
+        (
+            "SiteSnippet",
+            json(SiteSnippet {
+                file: "Cargo.toml".into(),
+                line: None,
+                first: 1,
+                lines: vec!["[package]".into()],
+            }),
+        ),
         (
             "StopFacts",
             json(Facts {
@@ -962,6 +1022,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
             "BriefView",
             "WaitingBriefs",
             "RatifyRow",
+            "SiteSnippet",
             "StopFacts",
             "BlockedAnswer",
             "BriefOpened",

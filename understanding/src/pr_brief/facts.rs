@@ -73,6 +73,25 @@ impl PartialFacts {
     }
 }
 
+/// The import sites behind a link the PR adds (#499, spec #477 "When it is computed"), read from the PR's head in commit
+/// mode when the brief is written, so Ratify shows them without extracting anything live.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct LinkEvidence {
+    /// The added link's id in the map.
+    pub link: String,
+    /// Each import site of the link's computed edge, once per file and line, in the edge's order.
+    #[serde(default)]
+    pub sites: Vec<ImportSite>,
+}
+
+/// Where an import stands: in the importing file, at its 1-based line when one is known.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportSite {
+    pub file: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+}
+
 /// The files of a cut diff, and its size sent and not sent.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct DiffCut {

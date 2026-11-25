@@ -1,6 +1,6 @@
 //! Keeping briefs and records.
 
-use super::{Brief, BudgetRecord, CallUsage, Guard, PartialFacts, Shape};
+use super::{Brief, BudgetRecord, CallUsage, Guard, LinkEvidence, PartialFacts, Shape};
 use serde::{Deserialize, Serialize};
 use std::{
     io::Write,
@@ -31,6 +31,9 @@ pub struct StoredBrief {
     /// What it was written without (#477), when anything was missing.
     #[serde(default, skip_serializing_if = "PartialFacts::is_empty")]
     pub partial_facts: PartialFacts,
+    /// The import sites behind each link the PR adds (#499), from its head; none in a brief stored before it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub link_evidence: Vec<LinkEvidence>,
 }
 
 /// One line per brief written, for tuning prompts, caps and models from real data.

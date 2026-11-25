@@ -6,7 +6,7 @@ use std::{
     path::Path,
     sync::Mutex,
 };
-use studio_understanding::pr_brief::{PrSource, StoredBrief, gather};
+use studio_understanding::pr_brief::{LinkEvidence, PrSource, StoredBrief, gather};
 
 /// The heads the lookups saw last, per PR, for "the same head at two lookups in a row".
 #[derive(Default)]
@@ -82,6 +82,9 @@ pub trait Reading {
     fn carry(&self, pr: u64, from: &str, to: &str) -> Result<(), String>;
     /// What the since story of the push from `from` reads (#497): `full`'s PR, with the diff, map diff and tags from `from` to its head.
     fn since_source(&self, full: &PrSource, from: &str) -> Result<PrSource, String>;
+    /// The link evidence of the PR at `head` (`ratify::link_evidence`, from its merge base with the default branch), for a brief
+    /// carried to `head`; none when the base is unknown.
+    fn link_evidence(&self, head: &str) -> Vec<LinkEvidence>;
 }
 
 /// The server's `Reading`: Daniel's state in `file`, `git` in `project`, and its default branch `reference`.
@@ -126,6 +129,18 @@ impl Reading for GitReading {
         source.earlier_decisions = full.earlier_decisions.clone();
         source.since = Some(from.to_string());
         Ok(source)
+    }
+
+    fn link_evidence(&self, head: &str) -> Vec<LinkEvidence> {
+        let repo = Path::new(&self.project);
+        let Some(base) = self
+            .reference
+            .as_deref()
+            .and_then(|r| crate::map::git(repo, &["merge-base", r, head]).ok())
+        else {
+            return Vec::new();
+        };
+        crate::ratify::link_evidence(repo, base.trim(), head)
     }
 }
 
@@ -286,11 +301,13 @@ pub(super) fn carried(
         return None;
     }
     let old = with.store.latest(pr).filter(|old| old.head != head)?;
-    // The read moves first: a copy whose read did not move would be a brief to read again.
+    // The read moves first: a copy whose read did not move would be a brief to read again. Its link evidence is read again at
+    // `head`, since a rebase or a quiet push can move an import site or remove its file (#499).
     let copy = StoredBrief {
         head: head.to_string(),
         stale: false,
         written_at: studio_understanding::millis().max(old.written_at + 1),
+        link_evidence: reading.link_evidence(head),
         ..old.clone()
     };
     match reading.carry(pr, &old.head, head).and_then(|()| {

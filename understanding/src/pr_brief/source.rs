@@ -1,6 +1,6 @@
 //! The source: what git and gh give, as plain data.
 
-use super::Decision;
+use super::{Decision, LinkEvidence};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 /// A spec or ticket the PR closes.
@@ -69,4 +69,6 @@ pub struct PrSource {
     /// A "Since you read" story (#497, spec #477 part B): the head Daniel fully read, which the diff runs from. Its brief is
     /// stored apart from the full briefs (`BriefStore::since`).
     pub since: Option<String>,
+    /// The import sites behind each link the PR adds (#499), read from its head by the server; stored on the brief as they are.
+    pub link_evidence: Vec<LinkEvidence>,
 }

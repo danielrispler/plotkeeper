@@ -809,6 +809,18 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
                background: var(--raised); font: var(--size-xs)/1.5 var(--mono); white-space: pre; user-select: text; }
 /* A jump out of the drawer is a link that looks like the quiet button it was (#462). */
 .drawer-jump { text-decoration: none; }
+/* An import site's code (#499): numbered lines, the site's own a <mark> with an arrow in its gutter, not colour alone. */
+.drawer-lines { padding-inline: 0; }
+.drawer-lines code { display: block; padding: 0; background: none; border-radius: 0; font: inherit; white-space: pre; overflow: visible; }
+.drawer-line { display: inline-block; min-width: 100%; padding-inline: var(--sp-2) var(--sp-5); border-left: var(--mark) solid transparent; color: inherit; background: none; }
+mark.drawer-line { background: var(--selected); border-left-color: var(--fg); }
+.drawer-n { display: inline-block; min-width: 4ch; margin-right: var(--sp-4); text-align: right; color: var(--faint); user-select: none; }
+mark.drawer-line .drawer-n::before { content: "→ " / ""; color: var(--fg); }
+.drawer-picks { margin: 0; padding: 0; list-style: none; align-self: stretch; display: grid; gap: var(--sp-1); }
+.drawer-pick { font: var(--size-xs)/1.5 var(--mono); overflow-wrap: anywhere; text-align: left; }
+/* An added link's import sites (#499), its second line under the row. */
+.ratify-evidence { grid-column: 1 / -1; margin: var(--sp-1) 0 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); font-size: var(--size-small); }
+.ratify-site { min-width: 0; font: var(--size-xs)/1.5 var(--mono); overflow-wrap: anywhere; text-align: left; }
 @media (prefers-reduced-motion: reduce) {
   .plate, .btn { transition: none; }
   .plate-fog, .plate-fog.lifting { animation: none; }

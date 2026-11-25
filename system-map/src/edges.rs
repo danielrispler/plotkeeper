@@ -1,23 +1,53 @@
 //! The link check: the pairs the map's extractors find (`crate::extract`) as part-to-part edges, and the map's import
 //! links held to them; and each link's own fields.
 
-/// A dependency of the part `from` on the part `to`.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct Edge {
-    pub from: String,
-    pub to: String,
-}
+use std::collections::{BTreeMap, HashMap, HashSet};
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use serde::Serialize;
 
 use crate::{
     Kind, Link, PartFiles,
     extract::{self, Extractor, Pair, Repo},
 };
 
-/// What the link check found: its problems, and how many import links a computed edge proves and how many have an end no
-/// extractor reads.
+/// A computed dependency of the part `from` on the part `to`, with the deduplicated file pairs that make it (spec #473,
+/// "One pair per file pair").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Edge {
+    /// The part that depends.
+    pub from: String,
+    /// The part it depends on.
+    pub to: String,
+    /// Sorted by their files.
+    pub pairs: Vec<FilePair>,
+}
+
+/// A dependency of the tracked file `from` on the tracked file `to`, with the import sites behind it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FilePair {
+    /// The importing file.
+    pub from: String,
+    /// The file it imports.
+    pub to: String,
+    /// One per line, in line order; one site with no line when the extractor finds none.
+    pub sites: Vec<Site>,
+}
+
+/// Where an import stands: always in the importing file, at its 1-based line when one is known (spec #477, "What an
+/// import site is").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Site {
+    /// The importing file.
+    pub file: String,
+    /// The import's 1-based line, when the extractor knows it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+}
+
+/// What the link check found: the computed edges, its problems, and how many import links a computed edge proves and how
+/// many have an end no extractor reads.
 pub(crate) struct LinkCheck {
+    pub(crate) edges: Vec<Edge>,
     pub(crate) problems: Vec<String>,
     pub(crate) proven: usize,
     pub(crate) unproven: usize,
@@ -85,6 +115,7 @@ pub(crate) fn check_links(
         }
     }
     LinkCheck {
+        edges,
         problems,
         proven,
         unproven,
@@ -141,14 +172,36 @@ fn edges_between_parts(pairs: &[Pair], parts: &[PartFiles]) -> Vec<Edge> {
         .iter()
         .flat_map(|part| part.files.iter().map(|f| (f.as_str(), part.id.as_str())))
         .collect();
-    let edges: BTreeSet<Edge> = pairs
-        .iter()
-        .filter_map(|p| Some((owner.get(p.from.as_str())?, owner.get(p.to.as_str())?)))
-        .filter(|(from, to)| from != to)
-        .map(|(from, to)| Edge {
+    let mut edges: BTreeMap<(&str, &str), Vec<FilePair>> = BTreeMap::new();
+    for pair in pairs {
+        let (Some(from), Some(to)) = (owner.get(pair.from.as_str()), owner.get(pair.to.as_str()))
+        else {
+            continue;
+        };
+        if from == to {
+            continue;
+        }
+        let site = |line| Site {
+            file: pair.from.clone(),
+            line,
+        };
+        let sites = if pair.lines.is_empty() {
+            vec![site(None)]
+        } else {
+            pair.lines.iter().map(|line| site(Some(*line))).collect()
+        };
+        edges.entry((from, to)).or_default().push(FilePair {
+            from: pair.from.clone(),
+            to: pair.to.clone(),
+            sites,
+        });
+    }
+    edges
+        .into_iter()
+        .map(|((from, to), pairs)| Edge {
             from: from.to_string(),
             to: to.to_string(),
+            pairs,
         })
-        .collect();
-    edges.into_iter().collect()
+        .collect()
 }

@@ -37,13 +37,7 @@ impl Extractor for TypescriptImports {
 
     fn extract(&self, repo: &Repo) -> Output {
         let (pairs, problems) = typescript_imports(repo);
-        Output {
-            problems,
-            pairs: pairs
-                .into_iter()
-                .map(|(from, to)| Pair::new(&from, &to))
-                .collect(),
-        }
+        Output { problems, pairs }
     }
 
     #[cfg(test)]
@@ -120,12 +114,14 @@ fn regex_may_follow(tokens: &[Tok]) -> bool {
 }
 
 /// The words, strings and punctuation of script source. Comments, regular expressions and the text of template literals
-/// are left out; the code in a template's `${}` is read.
-fn tokens(text: &str) -> Vec<Tok> {
+/// are left out; the code in a template's `${}` is read. Also the 1-based line each token starts on.
+fn tokens(text: &str) -> (Vec<Tok>, Vec<u32>) {
     // A UTF-8 byte order mark, which some editors write, is not code.
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let chars: Vec<char> = text.chars().collect();
     let mut tokens = Vec::new();
+    // Where each token starts: each turn of the loop below reads at most one token, which starts where the turn does.
+    let mut starts = Vec::new();
     // For each template literal whose `${}` is being read, the brace depth its `${` opened at.
     let mut templates: Vec<usize> = Vec::new();
     let mut depth = 0;
@@ -136,6 +132,7 @@ fn tokens(text: &str) -> Vec<Tok> {
         }
     }
     while i < chars.len() {
+        let at = i;
         let c = chars[i];
         let next = chars.get(i + 1).copied();
         if c == '/' && next == Some('/') {
@@ -184,8 +181,18 @@ fn tokens(text: &str) -> Vec<Tok> {
             }
             i += 1;
         }
+        if starts.len() < tokens.len() {
+            starts.push(at);
+        }
     }
-    tokens
+    let mut lines = Vec::with_capacity(starts.len());
+    let (mut line, mut counted) = (1u32, 0usize);
+    for start in starts {
+        line += chars[counted..start].iter().filter(|c| **c == '\n').count() as u32;
+        counted = start;
+        lines.push(line);
+    }
+    (tokens, lines)
 }
 
 /// The index after a string whose body starts at `i` and closes with `quote`, and its text. A string ends at a line
@@ -267,10 +274,10 @@ struct Clause<'a> {
     end: usize,
 }
 
-/// The specifiers a file's tokens import, each with what it takes: `import … from "x"`, `import "x"` (nothing),
-/// `import("x")` and `require("x")` (all), `export … from "x"` (`export *`, `export * as ns`, `export { … }`) and
-/// `export type … from "x"`.
-fn specifiers(tokens: &[Tok]) -> Vec<(&str, Vec<Origin>)> {
+/// The specifiers a file's tokens import, each with what it takes and the line of the word that starts it (`import`,
+/// `export`, `require`): `import … from "x"`, `import "x"` (nothing), `import("x")` and `require("x")` (all), `export … from
+/// "x"` (`export *`, `export * as ns`, `export { … }`) and `export type … from "x"`.
+fn specifiers<'a>(tokens: &'a [Tok], lines: &[u32]) -> Vec<(&'a str, Vec<Origin>, u32)> {
     let mut specs = Vec::new();
     for (at, tok) in tokens.iter().enumerate() {
         let Tok::Ident(word) = tok else { continue };
@@ -303,7 +310,7 @@ fn specifiers(tokens: &[Tok]) -> Vec<(&str, Vec<Origin>)> {
             }
             _ => None,
         };
-        specs.extend(found);
+        specs.extend(found.map(|(spec, origins)| (spec, origins, lines[at])));
     }
     specs
 }
@@ -701,7 +708,7 @@ fn follow<'a>(
 /// Each script file paired with the tracked files its relative imports name and the `package.json` of each workspace
 /// package it imports, and with the file behind each pure barrel it imports that exports what it takes; and the problems
 /// of the workspace's packages.
-fn typescript_imports(repo: &Repo) -> (Vec<(String, String)>, Vec<String>) {
+fn typescript_imports(repo: &Repo) -> (Vec<Pair>, Vec<String>) {
     let tracked = repo.files();
     let (packages, problems) = workspace_packages(repo);
     let resolve = |file: &str, spec: &str| {
@@ -716,10 +723,10 @@ fn typescript_imports(repo: &Repo) -> (Vec<(String, String)>, Vec<String>) {
         let Some(text) = script.then(|| repo.read(file)).flatten() else {
             continue;
         };
-        let tokens = tokens(&text);
-        let targets: Vec<(String, Vec<Origin>)> = specifiers(&tokens)
+        let (tokens, lines) = tokens(&text);
+        let targets: Vec<(String, Vec<Origin>, u32)> = specifiers(&tokens, &lines)
             .into_iter()
-            .filter_map(|(spec, origins)| Some((resolve(file, spec)?, origins)))
+            .filter_map(|(spec, origins, line)| Some((resolve(file, spec)?, origins, line)))
             .collect();
         imports.push((file.to_string(), targets));
         if let Some(found) = barrel(&tokens) {
@@ -746,16 +753,31 @@ fn typescript_imports(repo: &Repo) -> (Vec<(String, String)>, Vec<String>) {
         .collect();
     let mut pairs = Vec::new();
     for (file, targets) in imports {
-        let mut ends = BTreeSet::new();
-        for (target, origins) in targets {
-            ends.insert(target.clone());
+        // Each file an import reaches, with the lines of the imports that reach it: a followed barrel's target too.
+        let mut ends: BTreeMap<String, BTreeSet<u32>> = BTreeMap::new();
+        for (target, origins, line) in targets {
+            let mut reached = BTreeSet::from([target.clone()]);
             for origin in &origins {
                 let seen = &mut BTreeSet::new();
-                follow(&barrels, &folders, &file, &target, origin, seen, &mut ends);
+                follow(
+                    &barrels,
+                    &folders,
+                    &file,
+                    &target,
+                    origin,
+                    seen,
+                    &mut reached,
+                );
+            }
+            for end in reached {
+                ends.entry(end).or_default().insert(line);
             }
         }
         ends.remove(&file);
-        pairs.extend(ends.into_iter().map(|end| (file.clone(), end)));
+        pairs.extend(ends.into_iter().map(|(end, lines)| Pair {
+            lines,
+            ..Pair::new(&file, &end)
+        }));
     }
     (pairs, problems)
 }
