@@ -562,6 +562,41 @@ const mapBriefAlsoGroups = (): Fixture => ({
     },
   },
 });
+// #493: a Could break step's copy icon, beside its See the code, puts a prompt for the agent on the clipboard with the changed files of
+// the parts it lights, and the copy toast shows its first 3 lines; with no clipboard the toast holds the whole prompt to copy by hand.
+const copySteps = (): BriefStep[] => [
+  storySteps()[0],
+  step("Could break", "A push could mark a read brief stale", "A push that lands while you read <b>marks the brief stale</b>, so the next open writes it again.", ["shell", "understanding"], {
+    risks: [{ part: "shell", trigger: "A push lands while the brief is open.", check: "Push while reading and open the brief again." }],
+    cites: [{ from: "DIFF", quote: "A new head marks it stale" }],
+  }),
+];
+const mapBriefCopy = (clipboard: boolean): Fixture => ({
+  ...mapBrief(briefOf(copySteps(), false), 1, `
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: ${clipboard ? "{ writeText: async (words) => void (window.__copied = words) }" : "undefined"} });
+      const copy = document.querySelector("#map-brief .brief-step-code .brief-copy");
+      if (!copy) return log("snap:fail the Could break step has no copy icon beside its See the code");
+      if (!copy.getAttribute("aria-label")) log("snap:fail the copy icon has no name");
+      copy.click();
+      await wait(150);
+      const toast = document.getElementById("copy-toast");
+      if (!toast.matches(":popover-open") || !document.getElementById("toasts").contains(toast)) return log("snap:fail the copy toast is not an open popover in the region");
+      ${clipboard
+        ? `if (!toast.textContent.includes("Prompt copied")) log("snap:fail the toast does not say the prompt was copied");
+      if (!(window.__copied ?? "").includes("Changed files of the parts it lights:\\n- src-tauri/src/pr_briefs.rs\\n- understanding/src/pr_brief.rs")) log("snap:fail the prompt lacks the step's files: " + window.__copied);
+      if (toast.querySelector(".copy-lines").textContent.split("\\n").length !== 3) log("snap:fail the toast does not show the prompt's first 3 lines");`
+        : `const area = toast.querySelector("textarea");
+      if (!area || !area.value.startsWith("In PR #334, the brief warns this could break.")) log("snap:fail the toast does not hold the prompt to copy by hand");
+      if (!toast.textContent.includes("Copy this prompt")) log("snap:fail the toast does not say to copy it by hand");`}`, true),
+  pr_diff: {
+    __by: "parts",
+    values: {
+      "shell,understanding": { commit: "b".repeat(40), short: "bbbbbbb", label: "#334 PR briefs on the map", url: null, files: [prFile("src-tauri/src/pr_briefs.rs"), prFile("understanding/src/pr_brief.rs")] },
+    },
+  },
+});
+const mapBriefCopied = (): Fixture => mapBriefCopy(true);
+const mapBriefCopyByHand = (): Fixture => mapBriefCopy(false);
 // Each figure kind filled to the limits `figureShapes` draws (#449): six states, five steps, four lines a side, each label long.
 const fullFigure = (kind: string): BriefFigure => {
   const label = (i: number) => `a long label ${i + 1} here`;
@@ -2951,6 +2986,8 @@ ${writerStatusAfter("Keychain refused")}
   mapBriefAnnounce,
   mapBriefStepCode,
   mapBriefAlsoGroups,
+  mapBriefCopied,
+  mapBriefCopyByHand,
   mapBriefStates: () => mapBriefFigure("states"),
   mapBriefSequence: () => mapBriefFigure("sequence"),
   mapBriefCompare: () => mapBriefFigure("compare"),

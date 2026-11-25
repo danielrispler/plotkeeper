@@ -40,8 +40,9 @@ export function toastFor(listed: Session[], focused: string | null, dismissed: S
 const dismissed = new Set<string>();
 let shown: Toast | null = null;
 
-// The toasts, in the region's order: the needs-you and the note toasts down its top-right corner, the Clear toast at its bottom-left.
-const TOASTS = ["toast", "note-toast", "clear-toast"];
+// The toasts, in the region's order: the needs-you, the note and the copy toasts (#493) down its top-right corner, the Clear toast at its
+// bottom-left.
+const TOASTS = ["toast", "note-toast", "copy-toast", "clear-toast"];
 const said = new Map<string, string>();
 let returnTo: HTMLElement | null = null;
 
@@ -94,16 +95,16 @@ export function stackToasts() {
   target?.focus();
 }
 
-// Top-layer popovers leave the region's layout, so each open toast is placed in the region's box by hand: the first two down its
-// top-right corner, one under the other, and the Clear toast in its bottom-left corner.
+// Top-layer popovers leave the region's layout, so each open toast is placed in the region's box by hand: the first three down its
+// top-right corner, the copy toast under them, one under the other, and the Clear toast in its bottom-left corner.
 // With none open, nothing is measured, so a resize or an update with no toast forces no layout; every size is read before any is set.
 function placeToasts(toasts: HTMLElement[]) {
-  const [needs, note, clear] = toasts.map((toast) => (toast.matches(":popover-open") ? { toast, w: toast.offsetWidth, h: toast.offsetHeight } : null));
-  if (!needs && !note && !clear) return;
+  const [needs, note, copy, clear] = toasts.map((toast) => (toast.matches(":popover-open") ? { toast, w: toast.offsetWidth, h: toast.offsetHeight } : null));
+  if (!needs && !note && !copy && !clear) return;
   const box = element("toasts").getBoundingClientRect();
   let top = 0;
   let above = 0;
-  for (const open of [needs, note]) {
+  for (const open of [needs, note, copy]) {
     if (!open) continue;
     open.toast.style.top = `calc(${box.top + top}px + ${above} * var(--sp-3))`;
     open.toast.style.left = `${box.right - open.w}px`;

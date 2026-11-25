@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { El, fakeDocument } from "./dom.mjs";
 import { questionLine, showClearToast, showToast, stackToasts, toastFor, toastShows } from "../../dist/toast.js";
-import { showNote, watchNotes } from "../../dist/notes.js";
+import { showCopyToast, showNote, watchNotes } from "../../dist/notes.js";
 import { studio } from "../../dist/state.js";
 
 const ui = new URL("../", import.meta.url);
@@ -82,7 +82,9 @@ test("toasts take keyboard focus: each main action is a button beside its ×, an
   let undone = 0;
   showClearToast(2, () => undone++);
   const clear = page.get("clear-toast");
-  for (const [toast, names] of [[needs, ["main", "×"]], [note, ["main", "×"]], [clear, ["Undo", "×"]]]) {
+  showCopyToast("manual", "In PR #1, do it.");
+  const copy = page.get("copy-toast");
+  for (const [toast, names] of [[needs, ["main", "×"]], [note, ["main", "×"]], [copy, ["Copy", "×"]], [clear, ["Undo", "×"]]]) {
     const buttons = toast.find("button");
     assert.deepEqual(buttons.map((b) => (b.className.includes("toast-main") ? "main" : b.getAttribute("aria-label") === "Dismiss" ? "×" : b.text)), names);
     for (const button of buttons) {
@@ -100,7 +102,7 @@ test("the toasts are manual popovers in one region named Notifications, and none
   const region = read("index.html").match(/<section id="toasts"[^>]*>([\s\S]*?)<\/section>/);
   assert.ok(region, "a region holds the toasts");
   assert.match(region[0], /aria-label="Notifications"/);
-  for (const id of ["toast", "note-toast", "clear-toast"]) {
+  for (const id of ["toast", "note-toast", "copy-toast", "clear-toast"]) {
     const toast = region[1].match(new RegExp(`<div id="${id}"[^>]*>`))?.[0];
     assert.ok(toast, `#${id} is in the region`);
     assert.match(toast, /popover="manual"/);
@@ -135,4 +137,30 @@ test("a note held back by a modal dialog does not fade before it shows", () => {
   assert.equal(note.matches(":popover-open"), true, "the note shows once the dialog closes");
   runTimers();
   assert.equal(note.matches(":popover-open"), false, "then it fades");
+});
+
+// Copy for the agent (#493): the fourth toast. A copied prompt shows its first 3 lines and closes after 6 s; a prompt the clipboard
+// refused shows whole, to copy by hand, and stays until its ×.
+test("the copy toast shows a copied prompt's first 3 lines and closes after 6 s", () => {
+  const copy = page.get("copy-toast");
+  runTimers();
+  showCopyToast("copied", "In PR #12, the brief warns this could break.\nCould break: Fog\nA push clears it.\n- fog: a second push");
+  assert.equal(copy.matches(":popover-open"), true);
+  assert.match(copy.text, /Prompt copied, paste it into your agent/);
+  assert.match(copy.text, /In PR #12, the brief warns this could break\.\s*Could break: Fog\s*A push clears it\./);
+  assert.doesNotMatch(copy.text, /a second push/, "only the first 3 lines");
+  runTimers();
+  assert.equal(copy.matches(":popover-open"), false, "it closes on its own");
+});
+
+test("with no clipboard the copy toast holds the whole prompt to copy by hand, and stays", () => {
+  const copy = page.get("copy-toast");
+  showCopyToast("manual", "In PR #12, do it.\nline 2\nline 3\nline 4");
+  assert.match(copy.text, /Copy this prompt and paste it into your agent/);
+  const area = copy.find("textarea")[0];
+  assert.equal(area?.value, "In PR #12, do it.\nline 2\nline 3\nline 4");
+  const button = copy.find("button").find((b) => b.text === "Copy");
+  assert.equal(button.hidden, false);
+  runTimers();
+  assert.equal(copy.matches(":popover-open"), true, "a prompt to copy by hand does not fade");
 });

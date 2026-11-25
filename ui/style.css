@@ -192,7 +192,7 @@ h1 { margin: 0 0 var(--sp-4); }
 /* A split's divider (danielrispler/Falinks#529), in the gap between its two panes. */
 /* The terminal panel (danielrispler/Falinks#542): a band under the panes, its height set by `panel.ts`; its divider on its top edge. */
 /* The toasts (#457): manual popovers in the top layer, so no z-index; the region spans the map's box less a margin, and
-   `toast.ts` places each open toast in it: the needs-you and the note toasts down its top-right corner, the Clear toast at its
+   `toast.ts` places each open toast in it: the needs-you, the note and the copy toasts down its top-right corner, the Clear toast at its
    bottom-left. The needs-you toast (danielrispler/Falinks#573) takes none of the map's space. */
 .toasts { position: absolute; inset: var(--sp-5); pointer-events: none; }
 .toast { position: fixed; inset: auto; margin: 0; border: 0; padding: 0; overflow: visible; pointer-events: auto; max-width: var(--toast); display: grid;
@@ -216,6 +216,13 @@ h1 { margin: 0 0 var(--sp-4); }
 /* The note toast: a turn that ended off screen; not in colour. */
 .toast.note { background: var(--raised); box-shadow: inset 0 0 0 var(--hair) var(--edge), var(--shadow); }
 .toast.note .name { color: var(--fg); }
+/* The copy toast (#493): what was copied and its first lines, each cut at the toast's width, or the whole prompt to copy by hand; then
+   Copy, when the clipboard refused, and ×. */
+.toast.copy { grid-template-columns: minmax(0, 1fr) auto auto; }
+.toast.copy .copy-body { min-width: 0; display: grid; gap: var(--sp-2); padding: var(--sp-4) var(--sp-2) var(--sp-4) var(--sp-5); }
+.toast.copy .copy-lines { margin: 0; color: var(--muted); white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.toast.copy .ratify-prompt { margin-top: 0; resize: vertical; }
+.toast.copy > .btn.small:not(.quiet) { margin: var(--sp-3) 0 0; }
 #probe { position: absolute; visibility: hidden; white-space: pre; font: var(--term-size)/var(--term-line) var(--mono); }
 
 /* The rail (danielrispler/Falinks#574): a header of two lines (#444), the open question docked under it, then the story: "now" and the
@@ -866,7 +873,12 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .brief-also-files { margin: var(--sp-2) 0 0; padding: 0; list-style: none; color: var(--muted); font: var(--size-xs)/1.6 var(--mono); }
 .brief-also-files li { overflow-wrap: anywhere; }
 
-.brief-step-code { margin-top: var(--sp-5); }
+.brief-step-code { margin-top: var(--sp-5); display: flex; align-items: center; gap: var(--sp-2); }
+/* Copy for the agent (#493): a quiet icon, a 24px target with a 14px glyph, beside a See the code and in the not-confirmed popover. */
+.btn.brief-copy { display: inline-grid; place-items: center; min-width: var(--control); min-height: var(--control); padding: 0; color: var(--muted); }
+.btn.brief-copy:hover, .btn.brief-copy:focus-visible { color: var(--fg); }
+.btn.brief-copy svg { width: var(--icon); height: var(--icon); }
+.brief-why-copy { display: flex; justify-content: flex-end; margin-top: var(--sp-3); }
 .brief-cites { margin-top: var(--sp-5); color: var(--faint); font-size: var(--size-xs); }
 .brief-cites summary { cursor: pointer; }
 .brief-cite { margin: var(--sp-2) 0 0; font-family: var(--mono); }
