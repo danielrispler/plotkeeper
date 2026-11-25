@@ -12,6 +12,7 @@ import { currentMap, currentScrub, onDraw, onUnread, registerLayer, setScrub, ty
 import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { hideAgents } from "./map-agents.js";
 import { openBriefOf } from "./map-brief.js";
+import { explained, explanationsOn, SHEET } from "./explanations.js";
 import { type Scrub, briefOffer, commitDrawer, scrubBanner, scrubTickets, stripOf } from "./map-model.js";
 import type { HistoryEntry } from "./types.js";
 
@@ -76,7 +77,7 @@ function rows(view: MapView, list: HTMLElement, entries: HistoryEntry[]) {
 export function drawStrip(view: MapView, part: string, slot: HTMLElement) {
   const key = `${view.project}|${part}|${view.state.commit}|${view.state.fog?.[part] ?? ""}`;
   const list = text("ul", "", "hist");
-  slot.replaceChildren(text("h3", "History", "sheet-heading"), list);
+  slot.replaceChildren(...explained(text("h3", "History", "sheet-heading"), SHEET.history, explanationsOn()), list);
   const found = known.get(key);
   if (found) return void (rows(view, list, found), (list.scrollTop = list.scrollHeight));
   list.append(text("li", "Reading the history…", "empty"));

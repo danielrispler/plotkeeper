@@ -72,16 +72,22 @@
           <p id="notice" role="status" hidden></p>
           <button id="notice-dismiss" class="btn small" type="button" title="Hide this notice">Dismiss</button>
         </div>
-        <p id="empty" class="empty">Pick a session in the list.</p>
+        <!-- With no session picked, the rail says what will show there (#526). -->
+        <div id="empty" class="rail-empty">
+          <p class="empty">Pick a session in the list.</p>
+          <p class="empty">Its story shows here: what it is doing, and each finished turn.</p>
+        </div>
         <section id="view" hidden>
           <!-- While running: what Daniel asked. At your turn it is in the newest turn's block (danielrispler/plotkeeper#116). -->
           <section id="now-asked"></section>
-          <!-- The intention, boxed as the anchor (mockup C), and the step line (danielrispler/Falinks#472). -->
+          <!-- The intention, boxed as the anchor (mockup C), the step line (danielrispler/Falinks#472) and a Wait tip (#523). -->
           <div id="intention" class="intention">
             <p id="intention-label" class="label" hidden>Why it asks</p>
             <p><span id="intention-text"></span> <span id="intention-age" class="age"></span></p>
             <details id="unavailable" class="unavailable" hidden><summary title="Why only the steps are shown">Steps only</summary><span id="unavailable-why"></span></details>
             <details id="step" class="step"><summary id="step-line" title="The step the agent is on"><span id="tool" class="tool-name"></span> <span id="detail"></span></summary><code id="command"></code></details>
+            <!-- A Wait tip (#523): while the session runs, one muted line under the step teaches one feature. -->
+            <p id="tip" class="tip" hidden></p>
           </div>
           <!-- The feed of turns, newest first, the first being "now" at your turn: each with its prompt, Headline, cards,
                subagents (danielrispler/Falinks#535), checks and folded response. -->
@@ -137,11 +143,12 @@
       <footer id="map-legend" class="map-legend"></footer>
       <!-- The toasts (#457), manual popovers in one region (a named section): the needs-you toast (danielrispler/Falinks#573) over the map's top-right
            corner, under it the note toast, for a turn that ended off screen, under that the copy toast (#493), for a prompt copied for the agent,
-           and the Clear toast in the bottom-left corner. -->
+           under that the what's-new toast (#527), after an update, and the Clear toast in the bottom-left corner. -->
       <section id="toasts" class="toasts" aria-label="Notifications">
         <div id="toast" class="toast" popover="manual" hidden></div>
         <div id="note-toast" class="toast note" popover="manual" hidden></div>
         <div id="copy-toast" class="toast note copy" popover="manual" hidden></div>
+        <div id="whats-new-toast" class="toast note whats-new" popover="manual" hidden></div>
         <div id="clear-toast" class="toast start clear" popover="manual" hidden></div>
       </section>
     </main>

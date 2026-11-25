@@ -23,6 +23,8 @@ import { decisionElement, questionElement } from "./questions.js";
 import { shortPaths } from "./paths.js";
 import { checkTime, counts, estimateText, times } from "./times.js";
 import { studio } from "./state.js";
+import { currentMap } from "./map.js";
+import { pageStore, stretches, tipText } from "./tips.js";
 import {
   askKind,
   stateLabels,
@@ -111,6 +113,7 @@ export function showView(selected: Selection | null) {
   stepLine.title = step?.command ? "Show or hide the step's full command" : "The step the agent is on";
   stepLine.onclick = (event) => void (step?.command || event.preventDefault());
   showIntention(storyOf(session, agent));
+  showTip(session);
   drawDock(selected);
   showCleared(agent === null ? session.cleared : []);
   // A subagent's view has no intention of its own: its written summary takes that line (danielrispler/Falinks#535).
@@ -235,6 +238,16 @@ export function nowOf(
   if (state === "running") return { asked: turn.prompt, intention: "box", headline: null, body: [], soFar: false, fullResponse: false };
   if (state === "needs_you") return { asked: null, intention: "why", headline: null, body: [], soFar: true, fullResponse: false };
   return { asked: turn.prompt, intention: null, ...headlineOf(summary, turn.message), soFar: false, fullResponse: true };
+}
+
+// The Wait tip (#523): one per Running stretch of the session, at the foot of its Intention box; gone at any other state.
+const tipFor = stretches(pageStore);
+function showTip(session: Session) {
+  const map = currentMap();
+  const context = { map: map !== null, brief: (map?.state.ready ?? []).length > 0, trees: reports(session, "turn_trees") };
+  const tip = tipFor(session, studio.listed, context, studio.files.settings.tips);
+  const line = tip ? tipText(tip, studio.files.keymap) : "";
+  Object.assign(element("tip"), { textContent: line, title: line, hidden: tip === null });
 }
 
 // After this many steps the intention dims, as it may no longer say what the agent does (danielrispler/Falinks#472).

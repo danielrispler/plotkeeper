@@ -152,6 +152,7 @@ const covered = {
   ".session-name": "story.ts: the rail header's name is its own title (#444)",
   ".line-2 > .block": "story.ts: the block's kind is its own title",
   ".line-2 > .phase": "story.ts: the estimate is its own title",
+  ".intention > .tip": "story.ts: a Wait tip's line is its own title (#523)",
   ".toast .name": "toast.ts: the name's title",
   ".toast .line": "toast.ts: the line's title",
   ".toast.copy .copy-lines": "notes.ts: the copy toast's lines' title holds them",

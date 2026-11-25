@@ -20,6 +20,10 @@ export interface Settings {
   // The commands that are checks, per project folder (danielrispler/plotkeeper#112): each a command such as
   // "make verify", matched when a session's command runs it. A project not here uses the studio's list.
   checks: Record<string, string[]>;
+  // Whether the dense panels show their explanations (spec #520, #522): on for a fresh install; the `?` beside a panel's × flips it.
+  explanations: boolean;
+  // Wait tips (#523): one line at the foot of a running session's Intention box; `"tips": false` turns them off.
+  tips: boolean;
 }
 
 // Both settings files, parsed: the settings and keymap in effect.
@@ -44,6 +48,8 @@ const defaultSettings: Settings = {
   // Haiku at its default effort (danielrispler/Falinks#517, decision 14).
   summaries: { model: "haiku", effort: "", on_open: false, writer: "claude" },
   checks: {},
+  explanations: true,
+  tips: true,
 };
 
 // Today's shortcuts. "List" holds the keys of the session list while it has focus, over the page's (danielrispler/Falinks#575).
@@ -106,6 +112,8 @@ function readSettings(json: unknown, report: Report): Settings {
       writer: writerKind(summaries.writer, report) ?? d.summaries.writer,
     },
     checks: readChecks(json.checks, report),
+    explanations: pick("explanations", json.explanations, d.explanations),
+    tips: pick("tips", json.tips, d.tips),
   };
 }
 

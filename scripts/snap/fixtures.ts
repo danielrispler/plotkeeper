@@ -946,6 +946,38 @@ const mapBriefRatify = (): Fixture => ({
       log("ratify ok");`, false, 100),
   pr_ratify: ratifyRows,
 });
+// The brief's reader explains itself (#524), with Explanations on (the default): the ? beside Leave, pressed; the step's title described by
+// its kind's line, directly under it. On the Ratify step (`ratify`), the title's line, and "Not yet ratified"'s under the first undecided
+// item only. `off` then presses the ?: the ? stays, keeps the focus and is no longer pressed, and no line is drawn or pointed at.
+const mapBriefExplained = (at: "where" | "ratify" | "off"): Fixture => ({
+  ...mapBrief(briefOf(storySteps()), at === "ratify" ? 4 : 0, `
+      const box = document.getElementById("map-brief");
+      const toggle = box.querySelector(".brief-header .explain-toggle");
+      if (!toggle || toggle.nextElementSibling !== box.querySelector(".brief-header .brief-leave")) return log("snap:fail the ? is not beside Leave");
+      if (toggle.getAttribute("aria-pressed") !== "true" || toggle.title !== "Hide explanations") log("snap:fail the ?: " + toggle.getAttribute("aria-pressed") + " " + toggle.title);
+      const title = box.querySelector(".brief-title");
+      const line = document.getElementById(title.getAttribute("aria-describedby"));
+      if (!line?.classList.contains("explain") || title.nextElementSibling !== line) log("snap:fail the title's line");
+      const want = ${JSON.stringify(at === "ratify" ? "Changes this PR made to your map; say whether each stands." : "Where this change sits on your map.")};
+      if (line?.textContent !== want) log("snap:fail the title's line says " + JSON.stringify(line?.textContent));
+      if (${at === "ratify"}) {
+        const notes = [...box.querySelectorAll(".ratify-row .explain-link")].map((note) => note.closest(".ratify-row").dataset.id + "=" + note.textContent.split(":")[0]);
+        if (notes.join("|") !== "window-quiet=Not yet ratified") log("snap:fail not yet ratified's line: " + notes.join("|"));
+      }
+      if (${at === "off"}) {
+        toggle.focus();
+        toggle.click();
+        await wait(300);
+        const kept = box.querySelector(".brief-header .explain-toggle");
+        if (kept !== toggle || document.activeElement !== toggle) log("snap:fail the ? did not keep the focus");
+        if (toggle.getAttribute("aria-pressed") !== "false" || toggle.title !== "Show explanations") log("snap:fail the ? after a press: " + toggle.getAttribute("aria-pressed") + " " + toggle.title);
+        const lines = box.querySelectorAll(".explain").length;
+        const described = box.querySelectorAll("[aria-describedby]").length;
+        if (lines || described) log("snap:fail explanations drawn while off: " + lines + " lines, " + described + " described");
+      }`, false, 100),
+  ...(at === "ratify" ? { pr_ratify: ratifyRows } : {}),
+  ...(at === "off" ? { set_explanations: '{ "explanations": false }' } : {}),
+});
 // Old beside new in the brief's ratify step (#485): a changed part (its purpose, a path, a held item reworded, one added, one removed), an
 // added part with nothing before, and a link whose kind and reason changed.
 const ratifyDetailRows: RatifyRow[] = [
@@ -1466,6 +1498,40 @@ const mapTalksTo = (): Fixture =>
       log("talks to ok");`, {
     map_state: mapState({ source: pairFile, ratify: [{ pr: 334, kind: "link", id: "understanding-shell" }] }),
     snapDone: "talks to ok",
+  });
+// The part sheet explains itself (#522): Shell's sheet, with links of three kinds and two not yet ratified, with Explanations on (the
+// default) and off. On, each heading and the selected tier are described by their line, a kind's line follows its first link only and
+// "Not yet ratified"'s the first unratified link only, and the ? is pressed; off, no line is drawn and nothing points at one.
+const mapSheetExplained = (on: boolean): Fixture =>
+  mapOpened(`
+      document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(300);
+      const sheet = document.getElementById("map-sheet");
+      const toggle = sheet.querySelector(".sheet-header .explain-toggle");
+      if (!toggle || toggle.nextElementSibling !== sheet.querySelector(".sheet-header .sheet-close")) return log("snap:fail the ? is not beside the ×");
+      if (toggle.getAttribute("aria-pressed") !== "${on}" || toggle.title !== "${on ? "Hide" : "Show"} explanations") log("snap:fail the ?: " + toggle.getAttribute("aria-pressed") + " " + toggle.title);
+      const described = [...sheet.querySelectorAll("[aria-describedby]")];
+      const lines = [...sheet.querySelectorAll(".explain")];
+      if (${!on}) {
+        if (lines.length || described.length) log("snap:fail explanations drawn while off: " + lines.length + " lines, " + described.length + " described");
+        return log("explained ok");
+      }
+      for (const heading of sheet.querySelectorAll(".sheet-heading")) {
+        const line = document.getElementById(heading.getAttribute("aria-describedby"));
+        if (!line?.classList.contains("explain") || heading.nextElementSibling !== line) log("snap:fail the heading's line: " + heading.textContent);
+      }
+      const tier = sheet.querySelector('.sheet-tiers [aria-pressed="true"]');
+      if (document.getElementById(tier.getAttribute("aria-describedby"))?.textContent.startsWith(tier.textContent + ":") !== true) log("snap:fail the selected tier's meaning");
+      const notes = [...sheet.querySelectorAll(".sheet-link .explain-link")].map((note) => note.closest(".sheet-link").dataset.link + "=" + note.textContent.split(":")[0]);
+      const rows = [...sheet.querySelectorAll(".sheet-links .sheet-link")];
+      const first = (test) => rows.find(test).dataset.link;
+      const want = [...new Set(rows.map((row) => row.querySelector(".sheet-link-kind")?.textContent))].map((kind) => first((row) => row.querySelector(".sheet-link-kind")?.textContent === kind) + "=" + kind);
+      want.push(first((row) => row.classList.contains("unratified")) + "=Not yet ratified");
+      if (notes.sort().join("|") !== want.sort().join("|")) log("snap:fail the links' lines: " + notes.join("|") + " want " + want.join("|"));
+      log("explained ok");`, {
+    map_state: mapState({ source: pairFile, ratify: [{ pr: 334, kind: "link", id: "understanding-shell" }, { pr: 334, kind: "link", id: "shell-daemon" }] }),
+    ...(on ? {} : { settings_files: { settings: '{ "explanations": false }', keymap: null } }),
+    snapDone: "explained ok",
   });
 // A micro-world (#399) in its overlay: from the refresher on Shell's sheet, the Turn writing flow's world is ready but may be out of date, so its
 // row offers Open and Rebuild; Open shows the checked page in a frame sandboxed to scripts alone, in the glass overlay the size of the settings dialog. The page's script is
@@ -2175,6 +2241,8 @@ const mapFresh = (): Fixture =>
       const fresh = document.querySelector("#map .map-empty.map-fresh");
       if (!fresh) return log("snap:fail no fresh-install line: " + document.getElementById("map-body").textContent);
       if (fresh.querySelector(".map-empty-title").textContent !== "Run your agent in a repository; it appears here") log("snap:fail the fresh line says " + fresh.textContent);
+      // The teaching sentence (#526) sits under the title, whatever the Explanations switch says.
+      if (fresh.querySelector(".map-empty-title + .empty")?.textContent !== "plotkeeper follows each agent session and maps what it changes.") log("snap:fail no teaching sentence under the fresh line: " + fresh.textContent);
       const link = fresh.querySelector("a.map-install");
       if (!link || !link.href.includes("plugin.md")) log("snap:fail no link to the install docs");
       if (document.getElementById("bar-project").textContent !== "plotkeeper") log("snap:fail the top bar names a project");
@@ -2187,6 +2255,10 @@ const mapNoMap = (): Fixture =>
       const draft = document.querySelector("#map .map-empty .map-draft");
       if (!draft) return log("snap:fail no draft prompt");
       if (document.querySelector("#map .map-empty.map-fresh")) log("snap:fail the fresh line shows for a project");
+      // The teaching sentence (#526) follows the "no system-map.json" line, and the draft prompt stays.
+      const lines = [...document.querySelectorAll("#map .map-empty .empty")].map((p) => p.textContent);
+      const at = lines.findIndex((line) => line.includes("has no system-map.json"));
+      if (at < 0 || lines[at + 1] !== "A map names your parts and their rules; changes light them up.") log("snap:fail no teaching sentence after the no-map line: " + JSON.stringify(lines));
       frame("without a map");
       checkColours("without a map");
       log("base ok");`, { map_state: mapState({ status: "none", source: null }) });
@@ -2286,6 +2358,22 @@ const mapPanel = (check: string, extra: Fixture = {}): Fixture => {
   });
   return { ...f, sessions: extra.sessions ?? sessions, selected: null, snapDone: "panel ok" };
 };
+// The rail with no session picked (#526): the story's session is picked no more while its panel shows, as when it is deleted elsewhere. The
+// rail's empty screen says what will show there, under "Pick a session in the list."; the panel closes with the selection (`followSelection`),
+// so since #385 that screen is not drawn and this checks its words, not its pixels.
+const mapPanelNoSession = (): Fixture =>
+  mapPanel(`
+      await press(row("s2"));
+      if (!panelOpen() || !document.querySelector("#panel-body > .rail")) return log("snap:fail a row's press did not open its story in the left panel");
+      __snapEmit("selected", null);
+      await wait(300);
+      const empty = document.getElementById("empty");
+      if (empty.hidden || !document.getElementById("view").hidden) return log("snap:fail the rail does not show its empty screen with no session picked");
+      const lines = [...empty.querySelectorAll("p.empty")].map((p) => p.textContent);
+      if (JSON.stringify(lines) !== JSON.stringify(["Pick a session in the list.", "Its story shows here: what it is doing, and each finished turn."])) log("snap:fail the rail's empty screen says " + JSON.stringify(lines));
+      if (!document.getElementById("view").hidden) log("snap:fail the story shows with no session picked");
+      if (panelOpen()) log("snap:fail the story's panel stays open with no session picked");
+      log("panel ok");`);
 // The story of Ship PR 286 in the left panel with Understanding's sheet open (both, in a wide window; below 1007 px the sheet takes the
 // panel's place, and the row's press takes it back).
 const mapPanelStory = (): Fixture =>
@@ -2484,6 +2572,9 @@ const mapSheetHolds = (): Fixture =>
       const files = rows.map((row) => [...row.querySelectorAll(".sheet-held-files code")].map((code) => code.textContent));
       if (files[0].join() !== "src-tauri/src/web.rs,src-tauri/src/api.rs") log("snap:fail the first item's key files are " + files[0].join());
       if (files[2].length) log("snap:fail an item without paths shows key files");
+      const notes = rows.map((row) => row.classList.contains("sheet-held-note"));
+      if (notes.join() !== "false,false,true") log("snap:fail only the item without paths is a note: " + notes.join());
+      if (rows[2].querySelector(".sheet-held-head")?.textContent !== "The quiet log · note") log("snap:fail the note's head is " + rows[2].querySelector(".sheet-held-head")?.textContent);
       // The glass's rise ends before the picture is taken.
       await wait(400);
       log("sheet holds ok");`, { map_state: mapState({ source: heldSheet }) });
@@ -2528,8 +2619,9 @@ const mapSheetWidth = (): Fixture => ({
   ...mapOpened(`${sheetHelpers}
       plate("shell").click();
       await wait(300);
+      // The width is the side column's, as map-sheet.ts measures it: a sheet taller than the window gets the column's scrollbar inside it.
       const sheet = document.getElementById("map-sheet"), stage = document.querySelector(".map-stage");
-      const width = () => Math.round(sheet.getBoundingClientRect().width);
+      const width = () => Math.round(document.getElementById("map-side").getBoundingClientRect().width);
       const near = (a, b) => Math.abs(a - b) <= 2;
       if (!near(width(), 360)) log("snap:fail the sheet opens " + width() + " px wide, not 360");
       const handle = sheet.querySelector(".sheet-resize");
@@ -2569,7 +2661,7 @@ const mapSheetResizeRedraw = (): Fixture => ({
       plate("shell").click();
       await wait(300);
       const sheet = document.getElementById("map-sheet");
-      const width = () => Math.round(sheet.getBoundingClientRect().width);
+      const width = () => Math.round(document.getElementById("map-side").getBoundingClientRect().width);
       const handle = sheet.querySelector(".sheet-resize");
       if (!handle) return log("snap:fail the sheet has no resize handle");
       // The next map_state differs, so the map is drawn again.
@@ -2596,7 +2688,7 @@ const mapSheetKeptWidth = (): Fixture => ({
   ...mapOpened(`${sheetHelpers}
       plate("shell").click();
       await wait(300);
-      const width = Math.round(document.getElementById("map-sheet").getBoundingClientRect().width);
+      const width = Math.round(document.getElementById("map-side").getBoundingClientRect().width);
       if (Math.abs(width - 480) > 2) log("snap:fail the kept width 480 opened the sheet " + width + " px wide");
       await wait(400);
       log("kept width ok");`, { map_state: mapState() }),
@@ -2697,6 +2789,24 @@ const snapRealKeys = (): Fixture => ({
   realKeys: true, snapDone: "keys ok",
 });
 
+// What's new (#527): a page that last showed 0.1.2 opens on 0.2.0, so one toast says "Updated to 0.2.0" with a link to that
+// version's GitHub Release, and the new version is stored; its × closes it. The screenshot is the toast open.
+const whatsNewToast = (): Fixture => ({
+  ...list(),
+  storage: { "shown-version": "0.1.2" },
+  snapScript: `
+      const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+      await wait(300);
+      const toast = document.getElementById("whats-new-toast");
+      if (!toast.matches(":popover-open") || !document.getElementById("toasts").contains(toast)) return log("snap:fail the what's-new toast is not an open popover in the region");
+      if (!toast.textContent.includes("Updated to 0.2.0")) log("snap:fail the toast says " + toast.textContent);
+      const link = toast.querySelector("a");
+      if (link?.textContent !== "What's new" || link.href !== "https://github.com/danielrispler/plotkeeper/releases/tag/v0.2.0") log("snap:fail the link: " + link?.outerHTML);
+      if (!toast.querySelector("[aria-label=Dismiss]")) log("snap:fail the toast has no ×");
+      if (localStorage.getItem("shown-version") !== "0.2.0") log("snap:fail the shown version is " + localStorage.getItem("shown-version"));
+      log("whats new ok");`,
+  snapDone: "whats new ok",
+});
 // The toasts from the keyboard (#457): the needs-you, the note and the Clear toasts open at once in the Notifications region, apart.
 // A real press on Undo leaves the focus where it was. From the control before the region, a real Tab reaches each main action and
 // each ×; a real Enter on a × closes its toast and puts the focus on the next toast, and the last one hands it back. A modal dialog
@@ -2940,6 +3050,8 @@ const listNarrow = (): Fixture => ({
 
 export const fixtures = {
   ...railFixtures,
+  // What's new after an update (#527).
+  whatsNewToast,
   // The toasts from the keyboard (#457).
   toastKeys,
   // Real keys from a fixture (#454).
@@ -3091,6 +3203,9 @@ ${writerStatusAfter("Keychain refused")}
   mapBriefOrderWrong,
   mapBriefOrderRight,
   mapBriefRatify,
+  mapBriefExplained: () => mapBriefExplained("where"),
+  mapBriefRatifyExplained: () => mapBriefExplained("ratify"),
+  mapBriefExplainedOff: () => mapBriefExplained("off"),
   mapBriefRatifyDetail,
   mapBriefGuard: () => mapBriefGuard(false),
   mapBriefGuardConfirm: () => mapBriefGuard(true),
@@ -3117,6 +3232,8 @@ ${writerStatusAfter("Keychain refused")}
   mapMarksBroken: () => mapMarks("broken"),
   mapRefresher,
   mapTalksTo,
+  mapSheetExplained: () => mapSheetExplained(true),
+  mapSheetExplainedOff: () => mapSheetExplained(false),
   mapBriefPairLight,
   mapBriefChapters,
   mapBriefChapterMid,
@@ -3469,6 +3586,7 @@ ${writerStatusAfter("Keychain refused")}
   // The left panel over the map (#385): the story with a part's sheet, Esc's peel and a second press, the widened diff, History, Settings,
   // ⌘2's toggle, and a brief over both panels. `mapPanelNarrow` is the story at 1000x800 (snap:all's size for it), where only one overlay opens.
   mapPanelStory,
+  mapPanelNoSession,
   mapPanelPeel,
   mapPanelToggle,
   mapPanelDiff,

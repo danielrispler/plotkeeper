@@ -36,11 +36,13 @@ import { drawFeed, showView } from "./story.js";
 import { startRailBriefs } from "./rail-brief.js";
 import { barKeyDown } from "./story-bar.js";
 import { startWriters } from "./writers.js";
-import { jumpToNeedsYou, showToast, watchToasts } from "./toast.js";
+import { jumpToNeedsYou, showToast, showWhatsNewToast, watchToasts } from "./toast.js";
 import { askOnce, notifyIfAway, type Alert } from "./alerts.js";
 import { type Copied, finishedNote, showCopyToast, showNote, watchNotes } from "./notes.js";
+import { startWhatsNew } from "./whats-new.js";
 import type { SavedProject, Selection, Session, SessionCards } from "./types.js";
 import { HOVERS } from "./hovers.js";
+import { explanationsApplied, startExplanations, toggleExplanations } from "./explanations.js";
 
 // The list's width by the window's (`layout.ts`): in full from 1007 px, else its strip; focus mode folds it. The body is `narrow` below
 // 1007 px in every mode, for what the map hides there.
@@ -171,6 +173,8 @@ const actions: Actions = {
   "studio::ShowSettings": () => void openSettings(),
   // Asks GitHub again which tasks have landed (#53); it is otherwise asked at a turn's end and at the page's focus.
   "studio::RefreshLanded": () => void invoke("refresh_landed_tasks").catch(failure("refresh_landed_tasks")),
+  // The page's explanations on or off (#522), as the `?` beside an explained panel's × does.
+  "studio::ToggleExplanations": () => toggleExplanations(),
   "studio::Palette": () => {
     showPalette(paletteEntries(studio.files.keymap, Object.keys(actions)), (binding) => run(actions, binding));
   },
@@ -210,6 +214,7 @@ function applySettings(files: SettingsFiles) {
   const { model, effort, on_open: onOpen, writer } = settings.summaries;
   invoke("summary_settings", { model, effort, writer, onOpen }).catch(failure("summary_settings"));
   invoke("check_lists", { lists: settings.checks }).catch(failure("check_lists"));
+  explanationsApplied();
   window.dispatchEvent(new Event("settings"));
 }
 listen<SettingsFiles>("settings-files", applySettings);
@@ -274,6 +279,10 @@ window.addEventListener("copy-for-agent", (event) => {
   const { outcome, prompt } = (event as CustomEvent<Copied>).detail;
   showCopyToast(outcome, prompt);
 });
+// After an update to a new version, once (#527): "Updated to X.Y.Z" and a link to its GitHub Release.
+invoke("about")
+  .then(({ version }) => startWhatsNew(version, showWhatsNewToast))
+  .catch(failure("about"));
 listen<string[]>("finished", (ids) => {
   const note = finishedNote(ids, studio.listed);
   if (note) showNote(note);
@@ -330,5 +339,7 @@ startWriters({
   saved: (settings) => applySettings({ settings, keymap: studio.texts.keymap }),
   gate: (gated) => editNotice((text) => withGateNotice(text, gated)),
 });
+// The `?` and `studio::ToggleExplanations` write `explanations` (#522); the returned text applies at once, as a passed Test's save does.
+startExplanations((settings) => applySettings({ settings, keymap: studio.texts.keymap }));
 // The answer hook waits for the card only while its session shows (danielrispler/Falinks#461, decision 16).
 startWatching(() => showView(studio.selection));

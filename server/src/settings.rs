@@ -213,6 +213,27 @@ fn save_writer_in(
     write_in(settings, Some(&text), &key("effort"), effort.as_ref())
 }
 
+/// Turns the page's explanations (spec #520, #522) on or off: `explanations` in `settings.json`, under the one lock of the page's
+/// writes. `expected` is the text the page last read. Returns the new text.
+pub fn save_explanations(expected: Option<String>, on: bool) -> Result<String, String> {
+    let [settings, _] = paths().ok_or("no home folder")?;
+    let _one_at_a_time = WRITING.lock().unwrap_or_else(|e| e.into_inner());
+    save_explanations_in(&settings, expected.as_deref(), on)
+}
+
+fn save_explanations_in(
+    settings: &Path,
+    expected: Option<&str>,
+    on: bool,
+) -> Result<String, String> {
+    write_in(
+        settings,
+        expected,
+        &["explanations".to_string()],
+        Some(&serde_json::json!(on)),
+    )
+}
+
 /// The `repository` setting (danielrispler/Falinks#605): the folder the shell, Workspaces and the picker start in. Read from
 /// the file on each call, so a saved change takes effect; `None` when unset, empty or not a string.
 pub fn repository() -> Option<String> {
@@ -612,7 +633,8 @@ impl ApiKeys for MemoryKeys {
 mod tests {
     use super::{
         brief_backfill_in, edit_text, plain_json, pr_briefs_effort_in, pr_briefs_model_in,
-        repository_in, run_settings_in, save_writer_in, summary_writer_in, write_in,
+        repository_in, run_settings_in, save_explanations_in, save_writer_in, summary_writer_in,
+        write_in,
     };
     use serde_json::json;
     use studio_understanding::WriterKind;
@@ -663,6 +685,23 @@ mod tests {
         ] {
             assert_eq!(at(unset), None, "{unset}");
         }
+    }
+
+    #[test]
+    fn the_explanations_switch_writes_its_one_key_and_keeps_the_rest() {
+        let home = tempfile::tempdir().unwrap();
+        let file = home.path().join("settings.json");
+        std::fs::write(&file, "{ // mine\n  \"checks\": {},\n}").unwrap();
+        let before = std::fs::read_to_string(&file).unwrap();
+        let off = save_explanations_in(&file, Some(&before), false).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&plain_json(&off)).unwrap();
+        assert_eq!(json["explanations"], json!(false), "{off}");
+        assert!(off.contains("// mine"), "{off}");
+        let on = save_explanations_in(&file, Some(&off), true).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&plain_json(&on)).unwrap();
+        assert_eq!(json["explanations"], json!(true), "{on}");
+        // A page that read an older text is refused.
+        assert!(save_explanations_in(&file, Some(&before), false).is_err());
     }
 
     #[test]
