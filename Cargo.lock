@@ -528,6 +528,7 @@ dependencies = [
  "serde",
  "serde_json",
  "studio-test-support",
+ "studio-workbench",
 ]
 
 [[package]]
@@ -557,6 +558,7 @@ dependencies = [
  "serde",
  "serde_json",
  "studio-test-support",
+ "studio-workbench",
  "tempfile",
 ]
 
@@ -579,6 +581,7 @@ dependencies = [
  "studio-hook",
  "studio-system-map",
  "studio-test-support",
+ "studio-workbench",
  "tempfile",
  "tiny_http",
  "ureq",
@@ -588,14 +591,15 @@ dependencies = [
 name = "studio-wayfinder"
 version = "0.1.0"
 dependencies = [
- "libc",
  "serde_json",
+ "studio-workbench",
 ]
 
 [[package]]
 name = "studio-workbench"
 version = "0.0.0"
 dependencies = [
+ "libc",
  "serde",
  "serde_json",
  "studio-test-support",

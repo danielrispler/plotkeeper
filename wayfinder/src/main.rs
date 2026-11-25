@@ -2,11 +2,8 @@
 //! and sets up its worktree; `--done` removes them after merge; `--publish` creates a spec's tickets
 //! from a folder. Nothing else writes.
 use serde_json::{Value, json};
-use std::{
-    env,
-    process::{self, Command},
-    time::Duration,
-};
+use std::{env, path::Path, process, time::Duration};
+use studio_workbench::run::{self, RunError, run_until};
 const REPO: &str = "danielrispler/plotkeeper";
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -19,84 +16,8 @@ fn require(condition: bool, message: &str) -> Result<()> {
     }
 }
 
-/// Runs `command` with no stdin, killing its process group after `timeout`.
-fn command_output(
-    mut command: std::process::Command,
-    timeout: std::time::Duration,
-) -> Result<std::process::Output> {
-    use std::{
-        io::Read,
-        os::unix::process::CommandExt,
-        process::Stdio,
-        sync::mpsc,
-        thread,
-        time::{Duration, Instant},
-    };
-    let mut child = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0)
-        .spawn()?;
-    let (send, receive) = mpsc::channel();
-    let streams: [(bool, Box<dyn Read + Send>); 2] = [
-        (true, Box::new(child.stdout.take().unwrap())),
-        (false, Box::new(child.stderr.take().unwrap())),
-    ];
-    for (stdout, mut stream) in streams {
-        let send = send.clone();
-        thread::spawn(move || {
-            let mut bytes = Vec::new();
-            let result = stream.read_to_end(&mut bytes).map(|_| bytes);
-            let _ = send.send((stdout, result));
-        });
-    }
-    drop(send);
-    let group = -(child.id() as i32);
-    let kill_group = || {
-        // SAFETY: only the separately created group belonging to this child is killed.
-        unsafe {
-            libc::kill(group, libc::SIGKILL);
-        }
-    };
-    let deadline = Instant::now() + timeout;
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if Instant::now() >= deadline {
-            kill_group();
-            let _ = child.wait();
-            return Err("controlled command deadline exceeded".into());
-        }
-        thread::sleep(Duration::from_millis(10));
-    };
-    let mut stdout = vec![];
-    let mut stderr = vec![];
-    for _ in 0..2 {
-        // Descendants may hold the pipes after the child exits: wait at most the caller's
-        // remaining deadline, capped at 5s, before killing the group.
-        let left = deadline.saturating_duration_since(Instant::now());
-        let wait = left.clamp(Duration::from_millis(100), Duration::from_secs(5));
-        let (is_stdout, bytes) = match receive.recv_timeout(wait) {
-            Ok(result) => result,
-            Err(error) => {
-                kill_group();
-                return Err(error.into());
-            }
-        };
-        if is_stdout {
-            stdout = bytes?;
-        } else {
-            stderr = bytes?;
-        }
-    }
-    Ok(std::process::Output {
-        status,
-        stdout,
-        stderr,
-    })
-}
+/// The longest one `git` or `gh` call may take: a fetch and a paginated listing wait on the network.
+const COMMAND_LIMIT: Duration = Duration::from_secs(120);
 
 pub fn open_tickets(pages: &Value) -> Result<Vec<Value>> {
     let mut rows = vec![];
@@ -793,17 +714,19 @@ pub fn stacked_refusal(branch: &str, open_prs: &Value) -> Result<()> {
     )
 }
 fn stdout(program: &str, args: &[&str]) -> Result<String> {
-    let mut command = Command::new(program);
-    command.args(args);
-    let output = command_output(command, Duration::from_secs(120))?;
-    require(
-        output.status.success(),
-        &format!(
+    let here = Path::new(".");
+    let mut command = match program {
+        "git" => run::git(here),
+        gh => run::gh_at(gh, here),
+    };
+    let output = run_until(command.args(args), COMMAND_LIMIT).map_err(|e| match e {
+        RunError::Failed(output) => format!(
             "{program} {}: {}",
             args.join(" "),
             String::from_utf8_lossy(&output.stderr)
         ),
-    )?;
+        e => format!("{program} {}: {e}", args.join(" ")),
+    })?;
     Ok(String::from_utf8(output.stdout)?)
 }
 fn gh(args: &[&str]) -> Result<Value> {

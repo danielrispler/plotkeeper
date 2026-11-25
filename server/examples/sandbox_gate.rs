@@ -394,7 +394,7 @@ fn build_probe(name: &'static str, variant: Variant) -> Probe {
 
 fn clone_repo(g: &Ground, work: &Path) -> Result<(), String> {
     // The working folder exists and is empty: clone into it.
-    let status = Command::new("git")
+    let status = studio_workbench::run::git(Path::new("."))
         .args(["clone", "-q", "--local", "--no-hardlinks"])
         .arg(&g.repo)
         .arg(work)

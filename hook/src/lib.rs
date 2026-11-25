@@ -549,17 +549,10 @@ fn untracked_within(root: &Path, files: usize, bytes: u64) -> Result<(), String>
 /// so it never holds up the agent's own `git` commands, and never starts auto maintenance, whose
 /// repacks stacked up by the dozen in #141.
 fn command(folder: &Path, args: &[&str], index: Option<&Path>) -> Command {
-    let mut command = Command::new("git");
+    let mut command = studio_workbench::run::git(folder);
     command
-        .args([
-            "--no-optional-locks",
-            "-c",
-            "maintenance.auto=false",
-            "-c",
-            "gc.auto=0",
-        ])
-        .args(args)
-        .current_dir(folder);
+        .args(["-c", "maintenance.auto=false", "-c", "gc.auto=0"])
+        .args(args);
     if let Some(index) = index {
         command.env("GIT_INDEX_FILE", index);
     }
@@ -572,41 +565,17 @@ fn git(folder: &Path, args: &[&str], index: Option<&Path>) -> Option<String> {
     if abandoned() {
         return None;
     }
-    let mut child = command(folder, args, index)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    let mut stdout = child.stdout.take()?;
-    // Read as it runs, so a full pipe never stalls it.
-    let reader = thread::spawn(move || {
-        let mut out = String::new();
-        stdout.read_to_string(&mut out).map(|_| out)
-    });
-    let deadline = Instant::now() + GIT_TIMEOUT;
-    let status = loop {
-        if let Some(status) = child.try_wait().ok()? {
-            break status;
-        }
-        if abandoned() {
-            let _ = child.kill();
-            let _ = child.wait();
-            return None;
-        }
-        if Instant::now() > deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            let args = args.join(" ");
-            eprintln!(
-                "plotkeeper-hook: git {args} in {} ran over {GIT_TIMEOUT:?}",
-                folder.display()
-            );
-            return None;
-        }
-        thread::sleep(Duration::from_millis(5));
-    };
-    let out = reader.join().ok()?.ok()?;
-    status.success().then(|| out.trim_end().to_owned())
+    use studio_workbench::run::{RunError, run_until_unless};
+    let ran = run_until_unless(&mut command(folder, args, index), GIT_TIMEOUT, &abandoned);
+    if matches!(ran, Err(RunError::TimedOut(_))) && !abandoned() {
+        let args = args.join(" ");
+        eprintln!(
+            "plotkeeper-hook: git {args} in {} ran over {GIT_TIMEOUT:?}",
+            folder.display()
+        );
+    }
+    let out = String::from_utf8(ran.ok()?.stdout).ok()?;
+    Some(out.trim_end().to_owned())
 }
 
 /// The roots of the worktrees `git worktree list` gives for the repository that holds `folder`, as

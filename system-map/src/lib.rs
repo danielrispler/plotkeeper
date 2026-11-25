@@ -14,8 +14,9 @@ mod typescript;
 use std::{
     collections::{BTreeSet, HashSet},
     path::Path,
-    process::Command,
+    time::Duration,
 };
+use studio_workbench::run::{RunError, git, run_until};
 
 use serde::{Deserialize, Serialize};
 
@@ -464,20 +465,16 @@ fn check_ids_and_references(map: &Map) -> Vec<String> {
     problems
 }
 
+/// The longest listing a repository's files may take.
+const GIT_LIMIT: Duration = Duration::from_secs(30);
+
 /// The files git tracks in `root`, sorted.
 fn tracked_files(root: &Path) -> Result<Vec<String>, String> {
-    let output = Command::new("git")
-        .args(["ls-files", "-z"])
-        .current_dir(root)
-        .output()
-        .map_err(|error| format!("cannot run git in {}: {error}", root.display()))?;
-    if !output.status.success() {
-        return Err(format!(
-            "git ls-files failed in {}: {}",
-            root.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
+    let listed = run_until(git(root).args(["ls-files", "-z"]), GIT_LIMIT);
+    let output = listed.map_err(|error| match error {
+        RunError::Start(error) => format!("cannot run git in {}: {error}", root.display()),
+        error => format!("git ls-files failed in {}: {error}", root.display()),
+    })?;
     let files: BTreeSet<String> = output
         .stdout
         .split(|&b| b == 0)

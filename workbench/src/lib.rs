@@ -4,8 +4,10 @@
 //! only its own tests used is in `archive/workbench/` (#415), with the `claude` command and status line wrapper
 //! a studio terminal ran and the context window its snapshots held (#416).
 
+pub mod run;
+
 use serde::Serialize;
-use std::{path::Path, process::Command, sync::OnceLock};
+use std::{path::Path, process::Command, sync::OnceLock, time::Duration};
 
 /// The main checkout of the repository that holds `folder`, which may be any of its worktrees: the parent
 /// of git's common dir. A folder git does not recognise is refused with a message.
@@ -13,6 +15,7 @@ pub fn main_checkout(folder: &Path) -> Result<String, String> {
     let common = git(
         folder,
         &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        GIT_READ_LIMIT,
     )
     .map_err(|_| format!("{} is not in a git repository", folder.display()))?;
     Path::new(&common)
@@ -25,7 +28,7 @@ pub fn main_checkout(folder: &Path) -> Result<String, String> {
 /// is: the refs are shared. A failure returns git's message and leaves the refs as they were. It
 /// writes `refs/remotes/*` and `FETCH_HEAD` only, never a branch, the index or a worktree's files.
 pub fn fetch(repo: &Path) -> Result<(), String> {
-    git(repo, &["fetch", "--quiet", "origin"]).map(drop)
+    git(repo, &["fetch", "--quiet", "origin"], FETCH_LIMIT).map(drop)
 }
 
 /// The command that brings back an agent other than Claude Code (danielrispler/Falinks#561), by the name of the program a
@@ -83,35 +86,28 @@ pub struct Losses {
 pub fn losses(task: &Path) -> Result<Losses, String> {
     let lines = |text: String| text.lines().map(String::from).collect::<Vec<_>>();
     Ok(Losses {
-        uncommitted: lines(git(task, &["status", "--short"])?),
+        uncommitted: lines(git(task, &["status", "--short"], GIT_READ_LIMIT)?),
         unpushed: lines(git(
             task,
             &["log", "--format=%h %s", "HEAD", "--not", "--remotes"],
+            GIT_READ_LIMIT,
         )?),
     })
 }
 
-/// Runs `git` in `dir` and returns its output, or git's own error message.
-fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
-    let output = run(dir, args)?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().into());
-    }
+/// The longest a read of the repository on this machine may take.
+const GIT_READ_LIMIT: Duration = Duration::from_secs(30);
+/// The longest a fetch may take: it waits on the network.
+const FETCH_LIMIT: Duration = Duration::from_secs(120);
+
+/// Runs `git` in `dir` within `limit` and returns its output, or what went wrong: for a failed git, its own message.
+fn git(dir: &Path, args: &[&str], limit: Duration) -> Result<String, String> {
+    let output = run::run_until(run::git(dir).args(args), limit).map_err(|e| match e {
+        run::RunError::Failed(_) => e.to_string(),
+        e => format!("git {}: {e}", args[0]),
+    })?;
     // Only the end: a status line may start with a space.
     Ok(String::from_utf8_lossy(&output.stdout).trim_end().into())
-}
-
-/// Runs `git` in `dir` and returns its output whatever its exit status, for a caller that reads the status.
-fn run(dir: &Path, args: &[&str]) -> Result<std::process::Output, String> {
-    // No optional locks: a read never holds `index.lock` against an agent's commit (#27).
-    Command::new("git")
-        .arg("--no-optional-locks")
-        // A fetch that wants a password fails, rather than waiting on a prompt nobody sees.
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .map_err(|e| format!("git {}: {e}", args[0]))
 }
 
 /// plotkeeper's plugin for agy (#43, decisions 8 and 9; #49). `agy plugin install` copies the

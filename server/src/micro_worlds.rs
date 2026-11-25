@@ -769,9 +769,9 @@ pub fn micro_world_page(app: &crate::App, project: String, key: String) -> Resul
 /// Fills a run's working `folder` with `repo`'s files at `commit` (`git archive`, so no git data and nothing untracked) and makes
 /// the output folder in it.
 fn fill(repo: &Path, commit: &str, folder: &Path) -> Result<(), String> {
-    let mut archive = Command::new("git")
+    // Streamed into `tar`, so it is waited on by hand; it reads this machine's repository only.
+    let mut archive = studio_workbench::run::git(repo)
         .args(["archive", "--format=tar", commit])
-        .current_dir(repo)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -798,14 +798,10 @@ fn changed(repo: &Path, built: &str, current: &str, paths: &[String]) -> bool {
     if built == current || paths.is_empty() {
         return false;
     }
-    let status = Command::new("git")
-        .args(["diff", "--quiet", built, current, "--"])
-        .args(paths)
-        .current_dir(repo)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-    !status.is_ok_and(|status| status.success())
+    let mut diff = studio_workbench::run::git(repo);
+    diff.args(["diff", "--quiet", built, current, "--"])
+        .args(paths);
+    studio_workbench::run::run_until(&mut diff, crate::map::GIT_READ_LIMIT).is_err()
 }
 
 /// Runs `command` with its output in `log`, killed past `limit`: whether it exited 0, and what it printed.

@@ -102,8 +102,9 @@
     },
     {
       "id": "workbench", "name": "Workbench", "caption": "Worktrees and PRs",
-      "purpose": "Git worktrees and fetches, the `gh` that PR lookups run, other agents' resume commands, and agy's plugin. A black box: it never fogs.",
+      "purpose": "The one runner of `git` and `gh`, git worktrees and fetches, other agents' resume commands, and agy's plugin. A black box: it never fogs.",
       "holds": [
+        { "name": "The runner", "text": "Builds every `git` and `gh` with prompts off and no input, and runs a command to a deadline that kills its process group.", "paths": ["workbench/src/run.rs"] },
         { "name": "Git", "text": "A folder's main checkout, `origin`'s fetch and what removing a worktree would lose, never with force.", "paths": ["workbench/src/lib.rs"] }
       ],
       "tier": "black-box", "paths": ["workbench/"]
@@ -139,6 +140,8 @@
     { "id": "core-workbench", "from": "core", "to": "workbench", "kind": "import" },
     { "id": "understanding-core", "from": "understanding", "to": "core", "kind": "import" },
     { "id": "understanding-hook", "from": "understanding", "to": "hook", "kind": "import" },
+    { "id": "understanding-workbench", "from": "understanding", "to": "workbench", "kind": "import" },
+    { "id": "hook-workbench", "from": "hook", "to": "workbench", "kind": "import" },
     { "id": "understanding-writer", "from": "understanding", "to": "writer", "kind": "spawn",
       "reason": "Understanding runs the writer's program for each summary or brief; an API-key writer is asked over HTTP instead." },
     { "id": "server-window", "from": "server", "to": "window", "kind": "http",
@@ -162,6 +165,8 @@
     "wayfinder/", "test-support/", "system-map/"
   ],
   "laws": [
+    { "id": "git-and-gh-go-through-the-runner", "on": "workbench", "backing": "check",
+      "text": "Every `git` and `gh` the workspace starts is built by the runner, so none can wait on a prompt." },
     { "id": "install-never-opens-claude-settings", "on": "install", "backing": "check",
       "text": "Install and uninstall reach Claude Code only through `claude plugin` and never open its settings file." },
     { "id": "install-never-opens-qwen-settings", "on": "install", "backing": "check",

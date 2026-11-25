@@ -296,27 +296,11 @@ fn whole_patch(repo: &Path, reference: &str, head: &str) -> Option<String> {
 
 /// The patch-ids `git patch-id --stable` reads from the output of `git args`, in order.
 fn patch_ids(repo: &Path, args: &[&str]) -> Option<Vec<String>> {
-    let log = std::process::Command::new("git")
-        .args(args)
-        .current_dir(repo)
-        .output()
-        .ok()
-        .filter(|out| out.status.success())?;
-    let mut ids = std::process::Command::new("git")
-        .args(["patch-id", "--stable"])
-        .current_dir(repo)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .spawn()
-        .ok()?;
-    {
-        use std::io::Write;
-        ids.stdin.take()?.write_all(&log.stdout).ok()?;
-    }
-    let out = ids
-        .wait_with_output()
-        .ok()
-        .filter(|out| out.status.success())?;
+    use studio_workbench::run::{git, run_until, run_until_with_input};
+    let limit = crate::map::GIT_READ_LIMIT;
+    let log = run_until(git(repo).args(args), limit).ok()?;
+    let mut ids = git(repo);
+    let out = run_until_with_input(ids.args(["patch-id", "--stable"]), &log.stdout, limit).ok()?;
     Some(
         String::from_utf8_lossy(&out.stdout)
             .lines()
