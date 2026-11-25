@@ -2,7 +2,7 @@
 // These tests run no real `agy`. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -115,3 +115,298 @@ for (const [run, said] of [
     assert.equal(ranCritic(ran.calls), true);
   });
 }
+
+// `delegate.mjs run`, in a scratch main checkout with a bare origin and stand-ins for `opencode`, `npm`, `gh` and
+// `herdr` first on the PATH. These tests run none of the real ones.
+
+// The stand-in worker. FAKE_OPENCODE says what it does: "edit" (changes a file and exits 0), "commit" (also commits
+// it, twice), "moved" (edits, and someone else moves the integration branch), "conflict" (edits a line someone else
+// also changes on the integration branch), "empty" (exits 0 with no change), "fail" (exits 1) or "silent" (prints
+// nothing and waits). Every call is logged with the environment it got.
+const fakeOpencode = `#!/usr/bin/env node
+const { execFileSync } = require("node:child_process");
+const { appendFileSync, writeFileSync } = require("node:fs");
+const { join } = require("node:path");
+const env = process.env;
+const seen = Object.fromEntries(Object.entries(env).filter(([key]) => key.startsWith("OPENCODE_") || key === "PLOTKEEPER_INTERNAL"));
+appendFileSync(join(env.FAKE_DIR, "opencode-calls.jsonl"), JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), env: seen }) + "\\n");
+const mode = env.FAKE_OPENCODE;
+const event = (type, part) => console.log(JSON.stringify({ type, timestamp: 1, sessionID: "ses_test", part: { sessionID: "ses_test", ...part } }));
+const other = (file, text) => {
+  const git = (...args) => execFileSync("git", args, { cwd: join(env.FAKE_DIR, "other"), stdio: "ignore" });
+  git("pull", "--quiet", "origin", "int");
+  writeFileSync(join(env.FAKE_DIR, "other", file), text);
+  git("add", "--all");
+  git("commit", "--quiet", "-m", "someone else");
+  git("push", "--quiet", "origin", "HEAD:int");
+};
+if (mode === "silent") setTimeout(() => {}, 60000);
+else {
+  event("step_start", { type: "step-start" });
+  event("tool_use", { type: "tool", tool: "read", state: { status: "completed", input: { filePath: join(process.cwd(), "AGENTS.md") }, output: "long" } });
+  if (["edit", "commit", "moved", "conflict"].includes(mode)) {
+    writeFileSync("shared.txt", "the worker's line\\n");
+    event("tool_use", { type: "tool", tool: "edit", state: { status: "completed", input: { filePath: "shared.txt" }, output: "ok" } });
+  }
+  if (mode === "commit") {
+    execFileSync("git", ["commit", "--quiet", "-am", "worker one"]);
+    writeFileSync("added.txt", "more\\n");
+    execFileSync("git", ["add", "added.txt"]);
+    execFileSync("git", ["commit", "--quiet", "-m", "worker two"]);
+  }
+  if (mode === "moved") other("other.txt", "someone else's file\\n");
+  if (mode === "conflict") other("shared.txt", "someone else's line\\n");
+  event("text", { type: "text", text: "Done: the ticket is implemented." });
+  event("step_finish", { type: "step-finish", reason: "stop" });
+  if (mode === "fail") process.exit(1);
+}
+`;
+
+// The stand-in npm: \`ci\` does nothing, \`run check\` passes unless FAKE_NPM_CHECK is "red". Every call is logged.
+const fakeNpm = `#!/usr/bin/env node
+const { appendFileSync } = require("node:fs");
+const { join } = require("node:path");
+const env = process.env;
+appendFileSync(join(env.FAKE_DIR, "npm-calls.jsonl"), JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), internal: env.PLOTKEEPER_INTERNAL }) + "\\n");
+if (process.argv[2] === "run" && process.argv[3] === "check" && env.FAKE_NPM_CHECK === "red") {
+  console.log("test agents::reads ... FAILED");
+  process.exit(1);
+}
+`;
+
+// The stand-in gh: \`issue view <n> --json title,body\` prints \`issues/<n>.json\`.
+const fakeGh = `#!/usr/bin/env node
+const { readFileSync } = require("node:fs");
+const { join } = require("node:path");
+const [noun, verb, number] = process.argv.slice(2);
+if (noun !== "issue" || verb !== "view") process.exit(1);
+process.stdout.write(readFileSync(join(process.env.FAKE_DIR, "issues", number + ".json"), "utf8"));
+`;
+
+// The stand-in herdr. \`tab list\` gives FAKE_HERDR_TABS, \`pane list\` FAKE_HERDR_PANES; \`tab create\` makes tab w1:t9
+// with root pane w1:p9, \`pane split\` makes pane w1:p8. Every call is logged.
+const fakeHerdr = `#!/usr/bin/env node
+const { appendFileSync } = require("node:fs");
+const { join } = require("node:path");
+const env = process.env;
+const argv = process.argv.slice(2);
+appendFileSync(join(env.FAKE_DIR, "herdr-calls.jsonl"), JSON.stringify({ argv }) + "\\n");
+const command = argv.slice(0, 2).join(" ");
+const result =
+  command === "tab list" ? { tabs: JSON.parse(env.FAKE_HERDR_TABS || "[]") }
+  : command === "pane list" ? { panes: JSON.parse(env.FAKE_HERDR_PANES || "[]") }
+  : command === "tab create" ? { tab: { tab_id: "w1:t9", label: "workers" }, root_pane: { pane_id: "w1:p9", tab_id: "w1:t9" } }
+  : command === "pane split" ? { pane: { pane_id: "w1:p8", tab_id: "w1:t2" } }
+  : {};
+console.log(JSON.stringify({ id: "1", result }));
+`;
+
+const ticket = { title: "Workflow: the thing", body: "## Parent\n\n#5\n\n## What to build\n\nThe thing.\n" };
+const spec = { title: "Spec: things", body: "## Problem Statement\n\nNo things.\n" };
+
+/**
+ * A main checkout `repo` whose origin has the integration branch `int`, and a second clone `other` of it.
+ * @param {{ cheap?: object[] }} [options] the `cheap` list of the routing file, one test candidate by default
+ */
+const scratchRun = ({ cheap } = {}) => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "delegate-run-test-")));
+  const repo = join(dir, "repo");
+  for (const folder of ["bin", "issues", "repo"]) mkdirSync(join(dir, folder));
+  for (const [name, text] of Object.entries({ opencode: fakeOpencode, npm: fakeNpm, gh: fakeGh, herdr: fakeHerdr })) {
+    writeFileSync(join(dir, "bin", name), text);
+    chmodSync(join(dir, "bin", name), 0o755);
+  }
+  writeFileSync(join(dir, "issues/7.json"), JSON.stringify(ticket));
+  writeFileSync(join(dir, "issues/5.json"), JSON.stringify(spec));
+  const candidates = cheap ?? [{ cli: "opencode", model: "opencode/test-free", variant: { medium: null, high: "high" } }];
+  writeFileSync(join(dir, "routing.json"), JSON.stringify({ ...routing, cheap: candidates }));
+  writeFileSync(join(dir, "gitconfig"), "[user]\n\tname = t\n\temail = t@example.com\n[commit]\n\tgpgsign = false\n");
+  const env = {
+    ...process.env,
+    PATH: `${join(dir, "bin")}:${process.env.PATH}`,
+    GIT_CONFIG_GLOBAL: join(dir, "gitconfig"),
+    GIT_CONFIG_NOSYSTEM: "1",
+    PLOTKEEPER_INTERNAL: "1",
+    FAKE_DIR: dir,
+  };
+  for (const key of ["HERDR_ENV", "HERDR_WORKSPACE_ID", "HERDR_TAB_ID", "HERDR_PANE_ID"]) delete env[key];
+  const git = (...args) => execFileSync("git", args, { cwd: repo, env, encoding: "utf8" }).trim();
+  git("init", "--quiet", "--initial-branch=main");
+  writeFileSync(join(repo, "shared.txt"), "the first line\n");
+  git("add", "-A");
+  git("commit", "--quiet", "-m", "base");
+  git("clone", "--quiet", "--bare", ".", join(dir, "origin.git"));
+  git("remote", "add", "origin", join(dir, "origin.git"));
+  git("push", "--quiet", "origin", "main:int");
+  git("clone", "--quiet", "--branch", "int", join(dir, "origin.git"), join(dir, "other"));
+  const run = (fake = {}, more = []) => {
+    const args = [script, "run", "--ticket", "7", "--integration", "int", "--effort", "medium", "--routing", join(dir, "routing.json"), ...more];
+    const ran = spawnSync(process.execPath, args, { cwd: repo, env: { ...env, ...fake }, encoding: "utf8" });
+    const calls = (name) => {
+      const log = join(dir, `${name}-calls.jsonl`);
+      return existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line)) : [];
+    };
+    return { ...ran, calls };
+  };
+  const worktree = join(repo, ".claude/worktrees/issue-7-cheap");
+  return { dir, repo, git, run, worktree };
+};
+
+test("run: a worker that edits and exits 0 with a green check gives pass and one commit with the Worker trailer", () => {
+  const { git, run, worktree } = scratchRun();
+  const ran = run({ FAKE_OPENCODE: "edit" });
+  assert.equal(ran.status, 0, ran.stderr);
+  const [verdict, ...rest] = ran.stdout.trimEnd().split("\n");
+  assert.equal(verdict, "pass");
+  assert.match(rest.join("\n"), /shared\.txt \| 2 \+-/);
+  assert.match(rest.at(-1), /^Route outcome: cheap·medium opencode\/test-free → pass \| \d+m$/);
+  const commits = git("log", "--format=%B%x00", "origin/int..issue-7-cheap").split("\0").map((body) => body.trim()).filter(Boolean);
+  assert.deepEqual(commits, ["Workflow: the thing\n\nWorker: opencode/test-free"]);
+  assert.equal(readFileSync(join(worktree, "shared.txt"), "utf8"), "the worker's line\n");
+});
+
+/** The commit bodies on `branch` that are not on the integration branch, merges left out. */
+const commitsOn = (git, branch) =>
+  git("log", "--no-merges", "--format=%B%x00", `origin/int..${branch}`)
+    .split("\0")
+    .map((body) => body.trim())
+    .filter(Boolean);
+
+test("run: on pass, the worker's own commits are squashed into the one commit, and the moved integration tip is merged in", () => {
+  const { git, run, worktree } = scratchRun();
+  const ran = run({ FAKE_OPENCODE: "commit" });
+  assert.equal(ran.status, 0, ran.stderr);
+  assert.match(ran.stdout, /^pass\n/);
+  assert.deepEqual(commitsOn(git, "issue-7-cheap"), ["Workflow: the thing\n\nWorker: opencode/test-free"]);
+  assert.equal(readFileSync(join(worktree, "added.txt"), "utf8"), "more\n");
+
+  const moved = scratchRun();
+  const after = moved.run({ FAKE_OPENCODE: "moved" });
+  assert.match(after.stdout, /^pass\n/);
+  moved.git("fetch", "--quiet", "origin");
+  assert.doesNotThrow(() => moved.git("merge-base", "--is-ancestor", "origin/int", "issue-7-cheap"));
+  assert.deepEqual(commitsOn(moved.git, "issue-7-cheap"), ["Workflow: the thing\n\nWorker: opencode/test-free"]);
+  assert.doesNotMatch(after.stdout, /other\.txt/, "the diff stat shows only the worker's change");
+});
+
+test("run: the worker runs in the worktree with the brief, the ticket and its spec, and no PLOTKEEPER_INTERNAL anywhere", () => {
+  const { run, worktree } = scratchRun();
+  const ran = run({ FAKE_OPENCODE: "edit" });
+  assert.equal(ran.status, 0, ran.stderr);
+  const [worker] = ran.calls("opencode");
+  assert.equal(worker.cwd, worktree);
+  assert.deepEqual(worker.argv.slice(0, 6), ["run", "--auto", "--format", "json", "-m", "opencode/test-free"]);
+  assert.equal(worker.argv.length, 7, "effort medium maps to no --variant for this model");
+  assert.match(worker.argv[6], /Read \.delegate\/ticket\.md/);
+  assert.equal(readFileSync(join(worktree, ".delegate/brief.md"), "utf8").trim(), worker.argv[6]);
+  assert.deepEqual(worker.env, {
+    OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS: "480000",
+    OPENCODE_PERMISSION: JSON.stringify({ bash: { "*": "allow", "git push*": "deny", "gh *": "deny" } }),
+    OPENCODE_DISABLE_CLAUDE_CODE_PROMPT: "1",
+    OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
+  });
+  const npm = ran.calls("npm");
+  assert.deepEqual(npm.map((call) => call.argv.join(" ")), ["ci", "run check"]);
+  assert.ok(npm.every((call) => call.cwd === worktree && call.internal === undefined));
+  const brief = readFileSync(join(worktree, ".delegate/ticket.md"), "utf8");
+  assert.match(brief, /^# Workflow: the thing\n\n## Parent\n\n#5\n/);
+  assert.match(brief, /\n---\n\n# Parent spec: Spec: things\n\n## Problem Statement\n\nNo things\.\n$/);
+  assert.equal(readFileSync(join(worktree, ".delegate/run.log"), "utf8"), `> read {"filePath":"${worktree}/AGENTS.md"}\n> edit {"filePath":"shared.txt"}\nDone: the ticket is implemented.\n`);
+});
+
+test("run: effort high passes the candidate's variant for high", () => {
+  const { run } = scratchRun();
+  const ran = run({ FAKE_OPENCODE: "edit" }, ["--effort", "high"]);
+  assert.equal(ran.status, 0, ran.stderr);
+  const [worker] = ran.calls("opencode");
+  assert.deepEqual(worker.argv.slice(6, 8), ["--variant", "high"]);
+  assert.match(ran.stdout, /Route outcome: cheap·high opencode\/test-free → pass/);
+});
+
+const gone = ({ git, worktree }) => {
+  assert.equal(existsSync(worktree), false, "the worktree is removed");
+  assert.equal(git("branch", "--list", "issue-7-cheap"), "", "the branch is removed");
+};
+
+for (const [what, fake, reason, result] of [
+  ["an empty change", { FAKE_OPENCODE: "empty" }, "red: no change", "red"],
+  ["an error exit", { FAKE_OPENCODE: "fail" }, "exit 1", "error"],
+  ["a red check", { FAKE_OPENCODE: "edit", FAKE_NPM_CHECK: "red" }, "red check", "red"],
+  ["a merge conflict", { FAKE_OPENCODE: "conflict" }, "conflict", "conflict"],
+  ["a worker silent past the limit", { FAKE_OPENCODE: "silent", DELEGATE_SILENCE_MS: "300" }, "silent", "silent"],
+]) {
+  test(`run: ${what} gives escalate medium (${reason}) and removes the worktree and branch`, () => {
+    const scratch = scratchRun();
+    const ran = scratch.run(fake);
+    assert.equal(ran.status, 0, ran.stderr);
+    const lines = ran.stdout.trimEnd().split("\n");
+    assert.equal(lines[0], `escalate medium (${reason})`);
+    assert.match(lines.at(-1), new RegExp(`^Route outcome: cheap·medium opencode/test-free → ${result} \\| \\d+m$`));
+    gone(scratch);
+  });
+}
+
+test("run: a leftover issue-<n>-cheap worktree and branch are removed first", () => {
+  const scratch = scratchRun();
+  const { git, run, worktree } = scratch;
+  git("worktree", "add", "--quiet", "-b", "issue-7-cheap", worktree, "main");
+  writeFileSync(join(worktree, "leftover.txt"), "old\n");
+  execFileSync("git", ["add", "leftover.txt"], { cwd: worktree });
+  execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "--quiet", "-m", "leftover"], { cwd: worktree });
+  const ran = run({ FAKE_OPENCODE: "edit" });
+  assert.equal(ran.status, 0, ran.stderr);
+  assert.match(ran.stdout, /^pass\n/);
+  assert.equal(existsSync(join(worktree, "leftover.txt")), false);
+  assert.deepEqual(commitsOn(git, "issue-7-cheap"), ["Workflow: the thing\n\nWorker: opencode/test-free"]);
+});
+
+test("run: outside Herdr, no pane is opened", () => {
+  const ran = scratchRun().run({ FAKE_OPENCODE: "edit" });
+  assert.equal(ran.status, 0, ran.stderr);
+  assert.deepEqual(ran.calls("herdr"), []);
+});
+
+test("run: in Herdr, a new workers tab tails the log at the worktree, and only its pane is closed", () => {
+  const { run, worktree } = scratchRun();
+  const ran = run({ FAKE_OPENCODE: "edit", HERDR_ENV: "1", HERDR_WORKSPACE_ID: "w1", FAKE_HERDR_TABS: JSON.stringify([{ tab_id: "w1:t1", label: "main" }]) });
+  assert.equal(ran.status, 0, ran.stderr);
+  assert.deepEqual(ran.calls("herdr").map((call) => call.argv), [
+    ["tab", "list", "--workspace", "w1"],
+    ["tab", "create", "--workspace", "w1", "--label", "workers", "--cwd", worktree, "--no-focus"],
+    ["pane", "run", "w1:p9", "tail -f .delegate/run.log"],
+    ["pane", "close", "w1:p9"],
+  ]);
+});
+
+test("run: in Herdr, an existing workers tab gets a split pane without focus, and only that pane is closed", () => {
+  const { run, worktree } = scratchRun();
+  const ran = run({
+    FAKE_OPENCODE: "fail",
+    HERDR_ENV: "1",
+    HERDR_WORKSPACE_ID: "w1",
+    FAKE_HERDR_TABS: JSON.stringify([{ tab_id: "w1:t1", label: "main" }, { tab_id: "w1:t2", label: "workers" }]),
+    FAKE_HERDR_PANES: JSON.stringify([{ pane_id: "w1:p1", tab_id: "w1:t1" }, { pane_id: "w1:p5", tab_id: "w1:t2" }]),
+  });
+  assert.equal(ran.status, 0, ran.stderr);
+  assert.match(ran.stdout, /^escalate medium \(exit 1\)/);
+  const argv = ran.calls("herdr").map((call) => call.argv);
+  assert.deepEqual(argv.slice(2), [
+    ["pane", "split", "w1:p5", "--direction", "down", "--cwd", worktree, "--no-focus"],
+    ["pane", "run", "w1:p8", "tail -f .delegate/run.log"],
+    ["pane", "close", "w1:p8"],
+  ]);
+  assert.equal(argv.filter(([, verb]) => verb === "close").length, 1);
+});
+
+test("run: with no cheap candidate, it escalates as silent without starting a worker", () => {
+  const ran = scratchRun({ cheap: [] }).run({ FAKE_OPENCODE: "edit" });
+  assert.equal(ran.status, 0, ran.stderr);
+  assert.equal(ran.stdout, "escalate medium (silent)\n");
+  assert.deepEqual(ran.calls("opencode"), []);
+});
+
+test("outcomeSegment writes one attempt's tier, effort, worker, result and minutes", async () => {
+  const { outcomeSegment } = await import(script);
+  assert.equal(outcomeSegment({ tier: "cheap", effort: "high", worker: "opencode/beam-free", result: "red", ms: 9.6 * 60_000 }), "cheap·high opencode/beam-free → red | 10m");
+  assert.equal(outcomeSegment({ tier: "cheap", effort: "medium", worker: "opencode/beam-free", result: "pass", ms: 5_000 }), "cheap·medium opencode/beam-free → pass | 1m");
+});

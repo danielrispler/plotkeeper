@@ -11,6 +11,6 @@
     // write and `tsc -p scripts/wire` checks (#246), which are not there when knip reads the tree.
     "ui/types.ts": ["types"]
   },
-  // Commands on Daniel's machine, not npm packages: the installed `plotkeeper`, agy's CLI, and macOS's `sips`.
-  "ignoreBinaries": ["plotkeeper", "agy", "sips"]
+  // Commands on Daniel's machine, not npm packages: the installed `plotkeeper`, agy's and OpenCode's CLIs, and macOS's `sips`.
+  "ignoreBinaries": ["plotkeeper", "agy", "opencode", "sips"]
 }

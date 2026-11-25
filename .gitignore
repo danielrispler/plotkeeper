@@ -10,3 +10,5 @@ archive/src-tauri/gen/
 /npm/bin/
 /npm/README.md
 /npm/LICENSE
+# A cheap worker's ticket, brief and logs in its worktree, written by scripts/agents/delegate.mjs (#592).
+.delegate/
