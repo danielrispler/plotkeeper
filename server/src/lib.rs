@@ -34,6 +34,7 @@ pub mod fog;
 pub mod history;
 pub mod hook_copies;
 pub mod install;
+mod json_file;
 pub mod lock;
 pub mod map;
 pub mod micro_worlds;

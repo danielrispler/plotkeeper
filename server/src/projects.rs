@@ -158,12 +158,7 @@ fn read(file: &Path) -> Saved {
 
 /// Writes the list by a temporary file and a rename.
 fn write(file: &Path, saved: &Saved) -> Result<(), String> {
-    let dir = file.parent().ok_or("no folder for projects.json")?;
-    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    let mut temp = tempfile::NamedTempFile::new_in(dir).map_err(|e| e.to_string())?;
-    serde_json::to_writer_pretty(&mut temp, saved).map_err(|e| e.to_string())?;
-    temp.persist(file).map_err(|e| e.to_string())?;
-    Ok(())
+    Ok(crate::json_file::write_json(file, "projects.json", saved)?)
 }
 
 #[cfg(test)]

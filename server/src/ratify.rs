@@ -162,21 +162,9 @@ impl Project {
 // ---------------------------------------------------------------------------------------------------------------
 // The file.
 
-fn read_all(file: &Path) -> Value {
-    std::fs::read_to_string(file)
-        .ok()
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        .filter(Value::is_object)
-        .unwrap_or_else(|| serde_json::json!({}))
-}
-
 /// The project's state in `file`; a missing or unreadable file, or one of an older format, is an empty state.
 pub fn read(file: &Path, project: &str) -> Project {
-    read_all(file)
-        .get("projects")
-        .and_then(|p| p.get(project))
-        .and_then(|p| serde_json::from_value(p.clone()).ok())
-        .unwrap_or_default()
+    crate::json_file::read_project(file, project)
 }
 
 /// Serialises the writes, so two changes never lose one another.
@@ -188,31 +176,14 @@ fn update(
     project: &str,
     change: impl FnOnce(&mut Project),
 ) -> Result<Project, String> {
-    let _writing = WRITING.lock().unwrap();
-    let mut whole = read_all(file);
-    let mut mine = read(file, project);
-    change(&mut mine);
-    let entry = whole
-        .as_object_mut()
-        .unwrap()
-        .entry("projects")
-        .or_insert_with(|| serde_json::json!({}))
-        .as_object_mut()
-        .ok_or("ratify.json: projects is not an object")?
-        .entry(project)
-        .or_insert_with(|| serde_json::json!({}));
-    let saved = serde_json::to_value(&mine).map_err(|e| e.to_string())?;
-    match entry.as_object_mut() {
-        Some(object) => object.extend(saved.as_object().unwrap().clone()),
-        None => *entry = saved,
-    }
-    whole["version"] = 1.into();
-    let dir = file.parent().ok_or("no folder for ratify.json")?;
-    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    let mut temp = tempfile::NamedTempFile::new_in(dir).map_err(|e| e.to_string())?;
-    serde_json::to_writer_pretty(&mut temp, &whole).map_err(|e| e.to_string())?;
-    temp.persist(file).map_err(|e| e.to_string())?;
-    Ok(mine)
+    Ok(crate::json_file::update_json_file(
+        file,
+        "ratify.json",
+        &WRITING,
+        project,
+        change,
+        |whole| whole["version"] = 1.into(),
+    )?)
 }
 
 /// Records the first run of `project` (once), so everything that landed before it counts as ratified.
