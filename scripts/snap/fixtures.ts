@@ -697,10 +697,10 @@ const mapBriefOrderRight = (): Fixture =>
       if (!document.querySelector("#map-brief .brief-title").textContent.includes("A ready PR now brings")) log("snap:fail the chapter did not follow the overview");`, true);
 // The brief's ratify step (#343): a changed law and a link, and the agent's two decisions, one already accepted.
 const ratifyRows: RatifyRow[] = [
-  { pr: 334, kind: "law", id: "window-quiet", text: "Only needs-you has colour.", change: "changed", status: "not-yet" },
-  { pr: 334, kind: "link", id: "shell-understanding", text: "Shell to Understanding", change: "added", status: "not-yet" },
-  { pr: 334, kind: "decision", id: "d1", text: "A brief is stored per project, since PR numbers repeat across repositories.", change: "", status: "not-yet" },
-  { pr: 334, kind: "decision", id: "d2", text: "A merged PR's brief is read as stored, never rewritten.", change: "", status: "accepted" },
+  { pr: 334, kind: "law", id: "window-quiet", text: "Only needs-you has colour.", change: "changed", status: "not-yet", detail: null },
+  { pr: 334, kind: "link", id: "shell-understanding", text: "Shell to Understanding", change: "added", status: "not-yet", detail: null },
+  { pr: 334, kind: "decision", id: "d1", text: "A brief is stored per project, since PR numbers repeat across repositories.", change: "", status: "not-yet", detail: null },
+  { pr: 334, kind: "decision", id: "d2", text: "A merged PR's brief is read as stored, never rewritten.", change: "", status: "accepted", detail: null },
 ];
 const mapBriefRatify = (): Fixture => ({
   ...mapBrief(briefOf(storySteps()), 4, `
@@ -713,6 +713,56 @@ const mapBriefRatify = (): Fixture => ({
       if (!document.querySelector("#map-brief .ratify-row").textContent.includes("Accepted")) log("snap:fail Accept did not mark the row");
       log("ratify ok");`, false, 100),
   pr_ratify: ratifyRows,
+});
+// Old beside new in the brief's ratify step (#485): a changed part (its purpose, a path, a held item reworded, one added, one removed), an
+// added part with nothing before, and a link whose kind and reason changed.
+const ratifyDetailRows: RatifyRow[] = [
+  {
+    pr: 334, kind: "part", id: "server", text: "Server", change: "changed", status: "not-yet",
+    detail: {
+      of: "part",
+      name: { before: "Server", after: "Server" },
+      purpose: { before: "Serves the page, keeps the state, installs the hook and runs the agents.", after: "Serves the page and keeps the state it shows." },
+      holds: [
+        { name: "Fog", text: { before: "Greys a part.", after: "Greys a part a PR changed until its brief is read." }, paths_added: ["server/src/fog.rs"], paths_removed: [] },
+        { name: "Settings", text: { before: "Kept per user.", after: "Kept per user." }, paths_added: [], paths_removed: [] },
+        { name: "Locks", text: { before: null, after: "One writer per file at a time." }, paths_added: [], paths_removed: [] },
+        { name: "Install", text: { before: "Puts the hook in place.", after: null }, paths_added: [], paths_removed: [] },
+      ],
+      paths_added: [],
+      paths_removed: ["server/src/install.rs"],
+    },
+  },
+  {
+    pr: 334, kind: "part", id: "install", text: "Install", change: "added", status: "not-yet",
+    detail: {
+      of: "part",
+      name: { before: null, after: "Install" },
+      purpose: { before: null, after: "Puts plotkeeper's hook into each agent's settings, and takes it out again." },
+      holds: [{ name: "Hook copies", text: { before: null, after: "The hook file each agent runs." }, paths_added: ["server/src/hook_copies.rs"], paths_removed: [] }],
+      paths_added: ["server/src/install.rs", "server/src/hook_copies.rs"],
+      paths_removed: [],
+    },
+  },
+  {
+    pr: 334, kind: "link", id: "shell-server", text: "Shell to Server", change: "changed", status: "not-yet",
+    detail: { of: "link", kind: { before: "import", after: "http" }, reason: { before: "", after: "The page calls the server over HTTP on 127.0.0.1." } },
+  },
+];
+const mapBriefRatifyDetail = (): Fixture => ({
+  ...mapBrief(briefOf(storySteps()), 4, `
+      const rows = [...document.querySelectorAll("#map-brief .ratify-row")];
+      if (rows.length !== 3) return log("snap:fail expected 3 ratify rows, saw " + rows.length);
+      const [changed, added, link] = rows.map((row) => row.querySelector(".ratify-detail"));
+      if (!changed || !added || !link) return log("snap:fail a part or link row has no detail");
+      const terms = (detail) => [...detail.querySelectorAll("dt")].map((dt) => dt.textContent);
+      if (terms(changed).join("|") !== "Purpose|Paths|Holds Fog|Fog: paths|Holds Locks|Holds Install") log("snap:fail the changed part's lines: " + terms(changed).join("|"));
+      if (!changed.querySelector("del")?.textContent.includes("installs the hook") || !changed.querySelector("ins")?.textContent.includes("keeps the state")) log("snap:fail the purpose is not old beside new");
+      if (added.querySelector("del")) log("snap:fail an added part has something before");
+      if (terms(added)[0] !== "Name" || !added.textContent.includes("Hook copies")) log("snap:fail the added part does not show its name and held items");
+      if (terms(link).join("|") !== "Kind|Reason" || link.querySelector("del").textContent !== "import" || !link.textContent.includes("none")) log("snap:fail the link's kind and reason: " + link.textContent);
+      log("ratify detail ok");`, false, 100),
+  pr_ratify: ratifyDetailRows,
 });
 // Guard with a law (#401): a bug fix's brief, with nothing to ratify, ends with the guard's row: the on-trust laws of Core and Shell, the
 // parts it touched, with Back this law, a new law of an earlier run being proven, and Add a new law. `confirm` presses Add a new law and
@@ -2700,6 +2750,7 @@ ${writerStatusAfter("Keychain refused")}
   mapBriefOrderWrong,
   mapBriefOrderRight,
   mapBriefRatify,
+  mapBriefRatifyDetail,
   mapBriefGuard: () => mapBriefGuard(false),
   mapBriefGuardConfirm: () => mapBriefGuard(true),
   mapBriefBar,

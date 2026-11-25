@@ -5,11 +5,11 @@
 
 import { failure, invoke, promptBox, sayAction, text } from "./dom.js";
 import { currentMap } from "./map.js";
-import { copyOverturn, decideWith, noteFor, overturnPrompt, overturnReport, type Overturned } from "./ratify.js";
+import { copyOverturn, decideWith, detailLines, noteFor, overturnPrompt, overturnReport, type Overturned } from "./ratify.js";
 import { logStop } from "./stop-rules.js";
 import type { RatifyRow } from "./types.js";
 
-export type Ratifiable = Pick<RatifyRow, "pr" | "kind" | "id" | "text" | "change">;
+export type Ratifiable = Pick<RatifyRow, "pr" | "kind" | "id" | "text" | "change"> & { detail?: RatifyRow["detail"] };
 
 // The branch of PR `pr` while it is open: the Map view's ready PRs name it.
 const branchOf = (pr: number): string | null => currentMap()?.state.ready?.find((ready) => ready.number === pr)?.branch || null;
@@ -46,6 +46,27 @@ export function overturnNote(project: string, holds: (item: Pick<Ratifiable, "pr
   });
   note.append(area, copy);
   return note;
+}
+
+// A part's or a link's detail in the brief's ratify step (#485): each changed text, old beside new, in words as well as marks, so the
+// change does not rest on colour or a strike alone. Null for a row with nothing to show.
+export function ratifyDetail(row: Ratifiable): HTMLElement | null {
+  const lines = detailLines(row.detail);
+  if (!lines.length) return null;
+  const list = text("dl", "", "ratify-detail");
+  for (const line of lines) {
+    const said = text("dd", "");
+    if (line.code) said.translate = false;
+    const side = (label: string, words: string, tag: "del" | "ins") => {
+      const each = text("p", "", `ratify-${tag === "del" ? "was" : "now"}`);
+      each.append(text("span", label, "ratify-side"), text(tag, words || "none"));
+      said.append(each);
+    };
+    if (line.before !== null) side("Was", line.before, "del");
+    if (line.after !== null) side("Now", line.after, "ins");
+    list.append(text("dt", line.label), said);
+  }
+  return list;
 }
 
 // `done` runs once the shell has the decision.
