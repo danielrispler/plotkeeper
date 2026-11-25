@@ -103,6 +103,18 @@ test("a detail shows only what changed, old beside new, and an added part shows 
   assert.deepEqual(detailLines(null), []);
 });
 
+test("an import link added or removed without a reason shows no Reason line", () => {
+  assert.deepEqual(detailLines({ of: "link", kind: words(null, "import"), reason: words(null, "") }), [{ label: "Kind", before: null, after: "import", code: true }]);
+  assert.deepEqual(detailLines({ of: "link", kind: words("import", null), reason: words("", null) }), [{ label: "Kind", before: "import", after: null, code: true }]);
+});
+
+test("an overturn of a part with an empty purpose quotes no empty purpose", () => {
+  const empty = { ...partDetail, purpose: words(null, "") };
+  const prompt = overturnPrompt(row("part", "server", "not-yet", { text: "Server", detail: empty }), null);
+  assert.doesNotMatch(prompt, /purpose/);
+  assert.match(prompt, /“Server”, and it holds Fog, Same, Briefs\. Undo it/);
+});
+
 test("copying the prompt says so, and a clipboard that fails or is missing leaves the prompt to copy by hand", async () => {
   const written = [];
   assert.equal(await copyOverturn("the prompt", async (text) => void written.push(text)), "copied");

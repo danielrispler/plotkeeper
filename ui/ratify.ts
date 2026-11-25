@@ -34,7 +34,8 @@ export function detailLines(detail: RatifyDetail | null | undefined): DetailLine
   if (!detail) return [];
   const lines: DetailLine[] = [];
   const words = (label: string, text: { before: string | null; after: string | null }, code = false) => {
-    if (text.before !== text.after) lines.push(code ? { label, ...text, code } : { label, ...text });
+    // An empty text and none are the same: an import link added without a reason has no Reason to show.
+    if ((text.before || null) !== (text.after || null)) lines.push(code ? { label, ...text, code } : { label, ...text });
   };
   const paths = (label: string, added: string[], removed: string[]) => {
     if (added.length || removed.length) lines.push({ label, before: list(removed), after: list(added), code: true });
@@ -63,7 +64,7 @@ function newText(detail: RatifyDetail | null | undefined): string {
   }
   if (detail.purpose.after === null) return "";
   const held = detail.holds.filter((h) => h.text.after !== null).map((h) => h.name);
-  return `, purpose: “${detail.purpose.after}”${held.length ? `, and it holds ${held.join(", ")}` : ""}`;
+  return `${detail.purpose.after ? `, purpose: “${detail.purpose.after}”` : ""}${held.length ? `, and it holds ${held.join(", ")}` : ""}`;
 }
 
 // A full stop after `words`, unless they already end with one, inside a closing quote or not.
