@@ -476,6 +476,27 @@ mod tests {
         assert!(at(Path::new(&rig.main), "deadbeef").is_err());
     }
 
+    /// `git args` in `dir` with committer time `at`, its author time long before: the committer time is what counts, as the author
+    /// time of a rebased or squashed commit stays old.
+    fn git_at(dir: &Path, at: u64, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=Studio",
+                "-c",
+                "user.email=studio@example.com",
+            ])
+            .args(args)
+            .env("GIT_AUTHOR_DATE", "@1000000000 +0000")
+            .env("GIT_COMMITTER_DATE", format!("@{at} +0000"))
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{out:?}");
+    }
+
     #[test]
     fn a_parts_birth_is_the_commit_time_its_id_first_entered_the_map_of_any_version() {
         let rig = Rig::new();
@@ -484,23 +505,7 @@ mod tests {
                 std::fs::write(rig.dir.path().join(name), text).unwrap();
             }
             run(rig.dir.path(), &["add", "-A"]);
-            // The committer time is what counts; the author time of a rebased commit stays old.
-            let date = format!("@{at} +0000");
-            let out = std::process::Command::new("git")
-                .args([
-                    "-c",
-                    "user.name=Studio",
-                    "-c",
-                    "user.email=studio@example.com",
-                ])
-                .args(["commit", "-q", "-m", message, "--date", "@1000000000 +0000"])
-                .env("GIT_COMMITTER_DATE", &date)
-                .env("GIT_CONFIG_GLOBAL", "/dev/null")
-                .env("GIT_CONFIG_NOSYSTEM", "1")
-                .current_dir(rig.dir.path())
-                .output()
-                .unwrap();
-            assert!(out.status.success(), "{out:?}");
+            git_at(rig.dir.path(), at, &["commit", "-q", "-m", message]);
         };
         commit_at("Before the map", &[("x", "1")], 100);
         commit_at("The map", &[("system-map.json", MAP)], 200);
@@ -537,17 +542,20 @@ mod tests {
             r#""paths":["b/"]}"#,
             r#""paths":["b/"]},{"id":"c","name":"C","caption":"c","description":"d","tier":"core","paths":["c/"]}"#,
         );
-        rig.commit("Side adds c", &[("system-map.json", &with_c)]);
+        std::fs::write(rig.dir.path().join("system-map.json"), with_c).unwrap();
+        run(rig.dir.path(), &["add", "-A"]);
+        git_at(rig.dir.path(), 300, &["commit", "-q", "-m", "Side adds c"]);
         run(rig.dir.path(), &["checkout", "-q", "main"]);
         assert!(part_births(Path::new(&rig.main), &["c".to_string()]).is_empty());
-        run(
+        // The side branch's own commit is older; c entered the default branch with the merge.
+        git_at(
             rig.dir.path(),
+            900,
             &["merge", "-q", "--no-ff", "-m", "Merge side (#5)", "side"],
         );
-        let merge = run(rig.dir.path(), &["show", "-s", "--format=%ct", "HEAD"]);
         assert_eq!(
             part_births(Path::new(&rig.main), &["c".to_string()]).get("c"),
-            Some(&merge.parse().unwrap())
+            Some(&900)
         );
     }
 
