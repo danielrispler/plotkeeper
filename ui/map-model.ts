@@ -789,3 +789,42 @@ export function markPoints(a: Point, b: Point, count: number): Point[] {
     return { x: (a.x + b.x) / 2 + (along * dx) / length, y: (a.y + b.y) / 2 + (along * dy) / length };
   });
 }
+
+// ---- Copy for the agent (#493): a prompt code writes, with no model, that stands alone for any agent.
+
+// What is copied: a step (a Could break step, or one not confirmed) with the changed files of the parts it lights; a not-confirmed
+// decision; the No part group's files.
+export type AgentItem =
+  | { of: "step"; step: Pick<BriefStep, "k" | "h" | "b" | "risks" | "cites" | "flags">; files: string[] }
+  | { of: "decision"; text: string; flags: string[] }
+  | { of: "no-part"; files: string[] };
+
+// The prompt for `item` of PR `pr`, naming its branch while it is open: a line that says what to do, the item's words, its risks, why
+// it is not confirmed (the mark's own words left out), its citations as `from: "quote"`, and its files as paths. Citations carry no
+// lines, so neither does the prompt. An empty section is left out.
+export function agentPrompt(pr: number, branch: string | null, item: AgentItem): string {
+  const where = branch ? `In PR #${pr} (branch ${branch})` : `In PR #${pr}`;
+  const list = (title: string | null, items: string[]) => (items.length ? [...(title ? [title] : []), ...items.map((each) => `- ${each}`)] : []);
+  const reasons = (flags: string[]) => list("Why it is not confirmed:", unconfirmedReasons(flags));
+  if (item.of === "no-part") {
+    return [`${where}, these changed files belong to no part of the map (system-map.json). Assign these files to a part, or ignore them, and tell me what you changed.`, ...list(null, item.files)].join("\n");
+  }
+  if (item.of === "decision") {
+    return [`${where}, you declared a decision the checks could not confirm from the facts. Check it against the code, correct it or say why it holds, and tell me what you changed.`, `Decided: ${item.text}`, ...reasons(item.flags)].join("\n");
+  }
+  const { step } = item;
+  const lead =
+    step.k === "Could break"
+      ? `${where}, the brief warns this could break. Check whether it does, fix it if so, and tell me what you changed.`
+      : `${where}, the brief says this, but its checks could not confirm it from the facts. Check it against the code, fix what is wrong, and tell me what you changed.`;
+  const body = step.b.replace(/<b>([\s\S]*?)<\/b>/g, "$1");
+  return [
+    lead,
+    `${step.k}: ${step.h}`,
+    ...(body ? [body] : []),
+    ...list(null, step.risks.map((risk) => `${risk.part}: ${risk.trigger} To see it: ${risk.check}`)),
+    ...reasons(step.flags),
+    ...list("It rests on:", step.cites.map((cite) => `${cite.from}: "${cite.quote}"`)),
+    ...list("Changed files of the parts it lights:", item.files),
+  ].join("\n");
+}

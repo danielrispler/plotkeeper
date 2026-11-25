@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { alsoAt, alsoRows, awaitedWrite, chapterGate, storySteps, briefCamera, briefPlayer, latestRequest, escapeMap, figureShapes, figureSize, playlist, partialFactsLines, unconfirmed, unconfirmedReasons } from "../../dist/map-model.js";
+import { alsoAt, alsoRows, awaitedWrite, chapterGate, storySteps, briefCamera, briefPlayer, latestRequest, escapeMap, figureShapes, figureSize, playlist, partialFactsLines, unconfirmed, unconfirmedReasons, agentPrompt } from "../../dist/map-model.js";
 import { trayRows } from "../../dist/map-tray.js";
 
 const step = (k, extra = {}) => ({ k, h: k, b: "", on: [], hops: [], law: null, covered_by: null, list: [], risks: [], fig: null, check: null, cites: [], flags: [], ...extra });
@@ -364,4 +364,78 @@ test("an open waiting on its write opens the brief once it is stored, stops on a
   assert.equal(awaitedWrite(pr(info({ chapters: ["Fog"], stale: true, failed: true }))), "stop");
   assert.equal(awaitedWrite(pr(info({ quiet: true }))), "stop");
   assert.equal(awaitedWrite(undefined), "stop", "no longer ready");
+});
+
+// Copy for the agent (#493): the prompt code writes for each item kind, which stands alone for any agent.
+const risky = step("Could break", {
+  h: "Fog could clear early",
+  b: "A push with <b>no read</b> clears it.",
+  on: ["fog"],
+  risks: [{ part: "fog", trigger: "A second push lands before the read.", check: "Push twice and open the map." }],
+  cites: [{ from: "DIFF", quote: "entries.clear()" }],
+});
+const fileLine = /[\w.-]+\.\w+:\d+/;
+
+test("a Could break step copies as a prompt: the PR and its branch, the step, its risks, its citations and its lit parts' changed files", () => {
+  const prompt = agentPrompt(12, "fog-fix", { of: "step", step: risky, files: ["server/src/fog.rs", "server/src/pr_briefs.rs"] });
+  assert.equal(
+    prompt,
+    [
+      "In PR #12 (branch fog-fix), the brief warns this could break. Check whether it does, fix it if so, and tell me what you changed.",
+      "Could break: Fog could clear early",
+      "A push with no read clears it.",
+      "- fog: A second push lands before the read. To see it: Push twice and open the map.",
+      "It rests on:",
+      '- DIFF: "entries.clear()"',
+      "Changed files of the parts it lights:",
+      "- server/src/fog.rs",
+      "- server/src/pr_briefs.rs",
+    ].join("\n"),
+  );
+  assert.doesNotMatch(prompt, fileLine, "no file:line");
+  assert.equal(agentPrompt(12, null, { of: "step", step: { ...risky, cites: [] }, files: [] }).split("\n")[0].startsWith("In PR #12, the brief"), true, "a merged PR has no branch");
+  assert.doesNotMatch(agentPrompt(12, null, { of: "step", step: { ...risky, cites: [] }, files: [] }), /It rests on|Changed files/, "an empty section is left out");
+});
+
+test("a not-confirmed step adds its reasons, without the mark's own words", () => {
+  const now = step("Now", { h: "Reads move to the new head", b: "The read carries over.", cites: [{ from: "PR", quote: "carries the read over" }], flags: ["claim check: the quote is not in the diff", "not confirmed from the facts"] });
+  const prompt = agentPrompt(12, null, { of: "step", step: now, files: ["server/src/fog.rs"] });
+  assert.equal(
+    prompt,
+    [
+      "In PR #12, the brief says this, but its checks could not confirm it from the facts. Check it against the code, fix what is wrong, and tell me what you changed.",
+      "Now: Reads move to the new head",
+      "The read carries over.",
+      "Why it is not confirmed:",
+      "- claim check: the quote is not in the diff",
+      "It rests on:",
+      '- PR: "carries the read over"',
+      "Changed files of the parts it lights:",
+      "- server/src/fog.rs",
+    ].join("\n"),
+  );
+  assert.doesNotMatch(prompt, /not confirmed from the facts/);
+  assert.match(agentPrompt(12, null, { of: "step", step: { ...risky, flags: ["risk names no law"] }, files: [] }), /warns this could break[\s\S]*Why it is not confirmed:\n- risk names no law/, "a not-confirmed Could break step keeps its lead and adds its reasons");
+});
+
+test("a not-confirmed decision and the No part group copy as prompts too", () => {
+  assert.equal(
+    agentPrompt(12, "fog-fix", { of: "decision", text: "Briefs are kept per project.", flags: ["not confirmed from the facts", "the diff keeps one store"] }),
+    [
+      "In PR #12 (branch fog-fix), you declared a decision the checks could not confirm from the facts. Check it against the code, correct it or say why it holds, and tell me what you changed.",
+      "Decided: Briefs are kept per project.",
+      "Why it is not confirmed:",
+      "- the diff keeps one store",
+    ].join("\n"),
+  );
+  const prompt = agentPrompt(12, "fog-fix", { of: "no-part", files: ["scripts/new.sh", "tools/x.py"] });
+  assert.equal(
+    prompt,
+    [
+      "In PR #12 (branch fog-fix), these changed files belong to no part of the map (system-map.json). Assign these files to a part, or ignore them, and tell me what you changed.",
+      "- scripts/new.sh",
+      "- tools/x.py",
+    ].join("\n"),
+  );
+  assert.doesNotMatch(prompt, fileLine, "no file:line");
 });

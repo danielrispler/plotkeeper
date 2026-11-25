@@ -38,7 +38,7 @@ import { barKeyDown } from "./story-bar.js";
 import { startWriters } from "./writers.js";
 import { jumpToNeedsYou, showToast, watchToasts } from "./toast.js";
 import { askOnce, notifyIfAway, type Alert } from "./alerts.js";
-import { finishedNote, showNote, watchNotes } from "./notes.js";
+import { type Copied, finishedNote, showCopyToast, showNote, watchNotes } from "./notes.js";
 import type { SavedProject, Selection, Session, SessionCards } from "./types.js";
 import { HOVERS } from "./hovers.js";
 
@@ -269,6 +269,11 @@ invoke("sessions").then(showList);
 watchToasts();
 // A turn that ended off screen in the focused window (the server's notices): the note toast names it.
 watchNotes();
+// Copy for the agent (#493): the brief's copy icons say what they copied, and the copy toast shows it.
+window.addEventListener("copy-for-agent", (event) => {
+  const { outcome, prompt } = (event as CustomEvent<Copied>).detail;
+  showCopyToast(outcome, prompt);
+});
 listen<string[]>("finished", (ids) => {
   const note = finishedNote(ids, studio.listed);
   if (note) showNote(note);

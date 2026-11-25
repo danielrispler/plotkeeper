@@ -4,6 +4,7 @@
 // crossfades between steps; a figure for a change inside one part is drawn under the step's words by `figureShapes` from the writer's labels;
 // citations sit in quiet type, a "Partial facts · N" chip lists what the brief was written without (#491), and an item not confirmed
 // from the facts carries a mark whose popover lists why. A step's "See the code" opens its parts' files in the drawer (`map-drawer.ts`) above it. Opening a brief returns the map to now.
+// A quiet copy icon (#493) on a Could break step, in the not-confirmed popover and on the No part group copies a prompt for the agent.
 // A step's check (#340) is answered in place: a pick in the panel, an order by tapping parts on the map into numbered slots (`pickRun`, `orderRun`);
 // Check grades it, a wrong answer shows the correction, and an order check replays the right path along the links.
 // Esc (`brief` layer) closes it and keeps its step; an open not-confirmed popover (`popover` layer) closes first, and a new step closes it. `map-model.ts` holds the logic: `briefPlayer`, `briefCamera`, `figureShapes`.
@@ -20,10 +21,11 @@ import { expectedLine } from "./map-pre-flight.js";
 import { exploreRow } from "./micro-world.js";
 import { guardRow } from "./patch-review.js";
 import { scrubTo } from "./map-history.js";
-import { overturnNote, ratifyActions, ratifyDetail } from "./map-ratify.js";
-import { ratifyStep, statusWords } from "./ratify.js";
+import { branchOf, overturnNote, ratifyActions, ratifyDetail } from "./map-ratify.js";
+import { copyOverturn, ratifyStep, statusWords } from "./ratify.js";
+import type { Copied } from "./notes.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
-import { actorSize, alsoAt, type AlsoRow, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureMax, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, partialFactsLines, pickRun, type PickRun, playlist, plateSize, stageLabel, storySteps, type Rect, type Shape, stepCode, unconfirmed, unconfirmedReasons } from "./map-model.js";
+import { actorSize, agentPrompt, alsoAt, type AlsoRow, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureMax, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, partialFactsLines, pickRun, type PickRun, playlist, plateSize, stageLabel, storySteps, type Rect, type Shape, stepCode, unconfirmed, unconfirmedReasons } from "./map-model.js";
 import type { BriefCheck, BriefFigure, BriefStep, BriefView, CatchUpOffer, CommitFiles, PrBrief, PrDiffArgs, RatifyRow, ReadyPr, StaleBase, StoredCatchUp } from "./types.js";
 
 const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
@@ -74,7 +76,7 @@ function closePopover() {
   if (whyOf) markOf(whyOf)?.setAttribute("aria-expanded", "false");
   whyOf = null;
 }
-function openPopover(mark: HTMLElement, reasons: string[]) {
+function openPopover(mark: HTMLElement, reasons: string[], copy: Prompt | null) {
   if (!why) {
     why = text("div", "", "brief-why");
     why.id = "brief-why";
@@ -84,6 +86,11 @@ function openPopover(mark: HTMLElement, reasons: string[]) {
   const list = reasons.length ? text("ul", "", "brief-why-list") : text("p", "The checks gave no reason.", "brief-why-none");
   list.append(...reasons.map((reason) => text("li", reason)));
   why.replaceChildren(text("p", "Why it is not confirmed", "brief-why-title"), list);
+  if (copy) {
+    const row = text("div", "", "brief-why-copy");
+    row.append(copyButton("Copy for your agent: why it is not confirmed", "Copy a prompt for your agent: the item and why it is not confirmed", copy));
+    why.append(row);
+  }
   if (popoverOpen()) why.hidePopover();
   why.showPopover({ source: mark });
   whyOf = mark.dataset.why ?? null;
@@ -100,7 +107,7 @@ function reanchorPopover() {
 }
 // The "not confirmed from the facts" mark of a step or a flagged decision: a button whose popover lists the item's reasons, the mark's
 // own words left out. Seeing the mark counts for the stop rules (#346).
-function unconfirmedMark(view: MapView, pr: number, flags: string[], key: string): HTMLElement {
+function unconfirmedMark(view: MapView, pr: number, flags: string[], key: string, copy: Prompt | null): HTMLElement {
   const wrap = text("p", "", "brief-quiet brief-unconfirmed");
   const mark = text("button", "not confirmed from the facts", "btn quiet brief-why-mark");
   mark.setAttribute("type", "button");
@@ -108,11 +115,58 @@ function unconfirmedMark(view: MapView, pr: number, flags: string[], key: string
   mark.dataset.why = key;
   mark.setAttribute("aria-controls", "brief-why");
   mark.setAttribute("aria-expanded", String(whyOf === key && popoverOpen()));
-  mark.addEventListener("click", () => (whyOf === key && popoverOpen() ? closePopover() : openPopover(mark, unconfirmedReasons(flags))));
+  mark.addEventListener("click", () => (whyOf === key && popoverOpen() ? closePopover() : openPopover(mark, unconfirmedReasons(flags), copy)));
   marks.push(watchSeen(mark, { active: () => mark.isConnected && panel().classList.contains("open"), onSeen: () => logStop("unconfirmed-seen", view.project, prOf(pr)) }));
   wrap.append(mark);
   return wrap;
 }
+// Copy for the agent (#493): a quiet copy icon puts a prompt that stands alone for any agent on the clipboard (`agentPrompt`), through
+// Overturn's path (`copyOverturn`), and the copy toast shows it, or holds it to copy by hand when the clipboard refuses: the reader says so
+// with a `copy-for-agent` event, which `main.ts` hands to the toast, so the reader loads none of the shell's modules. A prompt is a
+// string, or waits for the changed files of a step's lit parts; those are asked for when the step is drawn, so a click usually has them
+// and the clipboard is written inside it.
+type Prompt = () => string | Promise<string>;
+const COPY_ICON = '<svg viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="4.5" width="7" height="7" rx="1.5"/><path d="M9.5 2.5h-6a1 1 0 0 0-1 1v6"/></svg>';
+function copyButton(label: string, hover: string, prompt: Prompt): HTMLElement {
+  const button = text("button", "", "btn quiet brief-copy");
+  button.setAttribute("type", "button");
+  button.setAttribute("aria-label", label);
+  button.title = hover;
+  button.innerHTML = COPY_ICON;
+  button.addEventListener("click", () => {
+    const write = navigator.clipboard?.writeText?.bind(navigator.clipboard);
+    const copy = (made: string) =>
+      void copyOverturn(made, write).then((outcome) => window.dispatchEvent(new CustomEvent<Copied>("copy-for-agent", { detail: { outcome, prompt: made } })));
+    const made = prompt();
+    if (typeof made === "string") copy(made);
+    else void made.then(copy);
+  });
+  return button;
+}
+// The changed files of the parts `step` lights (actors left out), asked of `pr_diff` once per brief and parts; none when git cannot give them.
+type Files = { done: string[] | null; wait: Promise<string[]> };
+const litFiles = new Map<string, Files>();
+function filesOf(view: MapView, step: BriefStep): Files {
+  const parts = step.on.filter((id) => view.doc.parts.some((part) => part.id === id));
+  if (!playing || !parts.length) return { done: [], wait: Promise.resolve([]) };
+  const { pr, head, brief } = playing.brief;
+  const key = `${view.project}|${pr}|${head}|${parts.join(",")}`;
+  let found = litFiles.get(key);
+  if (!found) {
+    const ask: PrDiffArgs = { project: view.project, number: pr, head, title: brief.title, parts };
+    const files: Files = { done: null, wait: invoke("pr_diff", ask).then((got) => got.files.map((file) => file.path), () => []) };
+    void files.wait.then((paths) => (files.done = paths));
+    litFiles.set(key, (found = files));
+  }
+  return found;
+}
+// A step's prompt, with its lit parts' files: at once when they have come, else once they come.
+function stepPrompt(view: MapView, step: BriefStep, pr: number): Prompt {
+  const files = filesOf(view, step);
+  const make = (paths: string[]) => agentPrompt(pr, branchOf(pr), { of: "step", step, files: paths });
+  return () => (files.done ? make(files.done) : files.wait.then(make));
+}
+
 // The end-of-story bar of each chapter played since the brief opened (#393), kept so a redraw keeps what is typed; a reopened brief starts
 // them empty.
 const bars = new Map<string, Bar>();
@@ -336,6 +390,7 @@ export function closeBrief() {
   marks.forEach((stop) => stop());
   marks = [];
   closePopover();
+  litFiles.clear();
   player.close();
   playing = null;
   catchUp = null;
@@ -570,7 +625,7 @@ function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["als
       if (now) show(now, true);
     }));
   }
-  if (unconfirmed(step)) words.append(unconfirmedMark(view, pr, step.flags, "step"));
+  if (unconfirmed(step)) words.append(unconfirmedMark(view, pr, step.flags, "step", pr > 0 ? stepPrompt(view, step, pr) : null));
   if (also.length) {
     const lines = text("div", "", "brief-also");
     lines.append(text("p", "Also touched", "brief-quiet"));
@@ -629,6 +684,8 @@ function codeInto(view: MapView, node: HTMLElement, list: BriefStep[], index: nu
   });
   const row = text("div", "", "brief-step-code");
   row.append(button);
+  // A Could break step's copy icon (#493), one per step.
+  if (step.k === "Could break") row.append(copyButton("Copy for your agent: this risk", "Copy a prompt for your agent: this step, its risks and its parts' changed files", stepPrompt(view, step, playing.brief.pr)));
   words.append(row);
 }
 
@@ -652,6 +709,10 @@ function alsoInto(view: MapView, node: HTMLElement, groups: AlsoRow[]) {
       invoke("pr_diff", { ...ask, paths: group.paths } satisfies PrDiffArgs).then((found) => openDrawer(commitDrawer(found))).catch(failure("pr_diff"));
     });
     head.append(button);
+    if (group.kind === "no-part") {
+      const pr = playing.brief.pr;
+      head.append(copyButton("Copy for your agent: assign these files to a part, or ignore them", "Copy a prompt for your agent: assign these files to a part, or ignore them", () => agentPrompt(pr, branchOf(pr), { of: "no-part", files: group.paths })));
+    }
     row.append(head);
     if (group.laws.length) row.append(text("p", `Laws: ${group.laws.join(", ")}`, "brief-quiet brief-also-laws"));
     const files = text("ul", "", "brief-also-files");
@@ -702,7 +763,10 @@ function ratifyNode(view: MapView, rows: RatifyRow[]) {
     const detail = ratifyDetail(row);
     if (detail) item.append(detail);
     const decided = row.kind === "decision" ? playing?.brief.brief.decisions.find((each) => each.id === row.id) : undefined;
-    if (decided && unconfirmed(decided)) item.append(unconfirmedMark(view, row.pr, decided.flags, `decision:${row.id}`));
+    if (decided && unconfirmed(decided)) {
+      const copy = () => agentPrompt(row.pr, branchOf(row.pr), { of: "decision", text: decided.text, flags: decided.flags });
+      item.append(unconfirmedMark(view, row.pr, decided.flags, `decision:${row.id}`, copy));
+    }
     list.append(item);
   }
   const note = overturnNote(view.project, (item) => rows.some((row) => row.pr === item.pr && row.kind === item.kind && row.id === item.id));

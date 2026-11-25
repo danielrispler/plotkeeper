@@ -154,6 +154,7 @@ const covered = {
   ".line-2 > .phase": "story.ts: the estimate is its own title",
   ".toast .name": "toast.ts: the name's title",
   ".toast .line": "toast.ts: the line's title",
+  ".toast.copy .copy-lines": "notes.ts: the copy toast's lines' title holds them",
   ".turn .prompt": "story.ts: the prompt's title",
   ".turn-line .headline-text": "story.ts: the Headline's title",
   ".turn .subagents button": "story.ts: the button's title holds its lines",
