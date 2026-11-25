@@ -1,0 +1,9 @@
+{
+  "strong": [{ "cli": "claude", "model": "opus" }],
+  "medium": [{ "cli": "claude", "model": "sonnet" }],
+  "cheap": [],
+  "critic": [
+    { "cli": "agy", "model": "gemini-4-neon-medium" },
+    { "cli": "claude", "model": "sonnet", "effort": "high" }
+  ]
+}
