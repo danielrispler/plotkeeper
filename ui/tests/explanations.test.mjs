@@ -131,3 +131,41 @@ test("the explained panels draw again only when the setting changes", () => {
   apply(true);
   assert.equal(drawn, 2);
 });
+
+test("a double click on the ? ends where two flips end, with no write refused: the second waits for the first's reply", async () => {
+  // The server's settings write, as `settings.rs` has it: a write from text the file no longer holds is refused.
+  let file = '{ "explanations": true }';
+  const refused = [];
+  const writes = [];
+  window.__TAURI__.core.invoke = async (command, args) => {
+    if (command !== "set_explanations") return null;
+    writes.push(args.on);
+    if (args.expected !== file) {
+      refused.push(args);
+      throw new Error("settings.json changed since the page read it: try again");
+    }
+    return (file = JSON.stringify({ explanations: args.on }));
+  };
+  // The page applies the returned text, as `main.ts` does.
+  startExplanations((settings) => {
+    studio.texts = { settings, keymap: null };
+    studio.files = { ...studio.files, settings: { ...studio.files.settings, explanations: JSON.parse(settings).explanations } };
+  });
+  studio.texts = { settings: file, keymap: null };
+  studio.files = { ...studio.files, settings: { ...studio.files.settings, explanations: true } };
+  const button = explainToggle(true);
+  button.listeners.click();
+  button.listeners.click();
+  await later();
+  assert.deepEqual(refused, [], "no write is refused");
+  assert.equal(JSON.parse(file).explanations, true, "two flips end on again");
+  assert.equal(studio.files.settings.explanations, true);
+  // Three clicks end off, however many writes it takes.
+  button.listeners.click();
+  button.listeners.click();
+  button.listeners.click();
+  await later();
+  assert.deepEqual(refused, []);
+  assert.equal(JSON.parse(file).explanations, false);
+  assert.equal(studio.files.settings.explanations, false);
+});

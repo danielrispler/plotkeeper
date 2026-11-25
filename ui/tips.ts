@@ -45,7 +45,7 @@ export const TIPS: Tip[] = [
   { id: "part-sheet", text: "Click a part on the map to open its sheet.", when: "map" },
   { id: "fog", text: "A fogged part changed on main since you caught up.", when: "map" },
   // The explained panels (the sheet, the brief's reader and Ratify) are all on the map.
-  { id: "explanations", text: "A panel's ? hides explanations ({key}).", action: "studio::ToggleExplanations", when: "map" },
+  { id: "explanations", text: "A panel's ? toggles explanations ({key}).", action: "studio::ToggleExplanations", when: "map" },
   { id: "brief", text: "A PR brief waits in the map's tray; open it there.", when: "brief" },
 ];
 

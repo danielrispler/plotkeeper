@@ -25,7 +25,13 @@ export const SHEET = {
   // The spec's wording was 13 words; one "it" went to keep the 12-word rule.
   notYet: "Not yet ratified: the agent added it; Accept keeps, Overturn undoes it.",
   fog: "Changes on main you haven't caught up on yet.",
-  fogActions: "Part catch-up reads what changed; I know this just clears it.",
+  // Under the fog buttons, by which are shown: the part catch-up (the spec's wording), the PR brief chapter that lights the part, or
+  // "I know this" alone.
+  fogActions: {
+    catchUp: "Part catch-up reads what changed; I know this just clears it.",
+    chapter: "The brief shows what changed; I know this just clears it.",
+    know: "I know this clears the fog without reading what changed.",
+  },
   ci: "The last CI run on main, for this part's laws.",
   history: "Commits on main that changed this part, newest last.",
 } as const;
@@ -91,13 +97,37 @@ export function explanationsApplied() {
   shown = explanationsOn();
 }
 
+// The setting the write in flight asks for, null with none, and what flips made meanwhile ask for, null with none. A write carries the
+// text the page last read, so one sent before the last one's reply lands would be refused as stale: it waits, and once that reply
+// applies, one more write goes only if the setting is not yet what was asked (a double click asks for where it started, so it ends
+// there, with nothing more written).
+let asked: boolean | null = null;
+let queued: boolean | null = null;
+
 // Turns the explanations `on` or off in `settings.json`, through the server's settings write, from the text the page last read.
 function setExplanations(on: boolean) {
-  invoke("set_explanations", { on, expected: studio.texts.settings }).then(saved).catch(failure("set_explanations"));
+  if (asked !== null) return void (queued = on);
+  asked = on;
+  invoke("set_explanations", { on, expected: studio.texts.settings })
+    .then((settings) => {
+      saved(settings);
+      return true;
+    })
+    .catch((e) => {
+      failure("set_explanations")(e);
+      return false;
+    })
+    .then((wrote) => {
+      const next = queued;
+      [asked, queued] = [null, null];
+      // A refused write drops the waiting flip: the page's text may be stale, and the error is already shown.
+      if (wrote && next !== null && next !== explanationsOn()) setExplanations(next);
+    });
 }
 
-// Flips the explanations: the palette's `studio::ToggleExplanations`, and the `?` of each explained panel.
-export const toggleExplanations = () => setExplanations(!explanationsOn());
+// Flips the explanations: the palette's `studio::ToggleExplanations`, and the `?` of each explained panel. A flip while a write is in
+// flight flips what was last asked, not what shows yet.
+export const toggleExplanations = () => setExplanations(!(queued ?? asked ?? explanationsOn()));
 
 // The `?` toggle beside a panel's ×: its name stays "Explanations" while `aria-pressed` says whether they show (the name never repeats
 // the state); filled when on, a muted ring when off (`style.css`).

@@ -15,7 +15,7 @@ The part of the control room that keeps Daniel's understanding in step with the 
 The time Daniel waits on an agent: from his prompt until the agent ends its turn, or until his next prompt if he interrupts it. Answering a permission, a question or a plan inside it does not start a new wait.
 
 **Card**:
-Retired as a turn's or a worker's explanation (danielrispler/plotkeeper#348): a **PR brief** is the explanation now. The cards stored before stay readable and none is shown. A blocked command's card is another thing, see **Blocked command**.
+Retired as a turn's or a worker's explanation (danielrispler/plotkeeper#348): a **PR brief** is the explanation of a change now (not one of the **Explanations**, a panel's lines). The cards stored before stay readable and none is shown. A blocked command's card is another thing, see **Blocked command**.
 _Avoid_: Summary (read after the work, with no question first)
 
 **Turn**:
@@ -288,6 +288,18 @@ _Avoid_: Recap, summary, catch-up (a **Part catch-up** tells what changed)
 **Staleness band**:
 A mild band along the foot of a Core part Daniel has not engaged with in a while: one band after 3 weeks, two after 6, three after 12. Staleness is time since Daniel last engaged with the part, not time since its code changed; engaging with it clears the band.
 _Avoid_: Stale fog, age (**Fog** is what changed unseen; a band is what went unvisited)
+
+**Explanations**:
+The one short muted line, at most 12 words, under each section heading of a dense panel (the part sheet, the **PR brief**'s reader and **Ratify**), and the selected option's meaning under its choice (a tier, the fog buttons). One page-wide switch, the `explanations` setting, shows or hides them all: on for a fresh install, flipped by the `?` beside a panel's × or the palette.
+_Avoid_: Help, hints, tooltip (a hover is its own thing); the explanation (alone — that is a **PR brief** of a change)
+
+**Wait tip**:
+One muted line, "Tip: …", at the foot of a Running session's **Intention** box that teaches one feature, naming its palette action with its live key. One shows per Running stretch, rotating with a cooldown, only where its feature applies, at most 5 times each; `"tips": false` turns them off.
+_Avoid_: Hint, onboarding, tour
+
+**What's new**:
+The one toast after plotkeeper is updated to a newer version, "Updated to X.Y.Z", linking to that version's GitHub Release. It shows once, stays until dismissed, and never on a first install, a same-version load or a downgrade.
+_Avoid_: Changelog (its text stays on GitHub), release notes
 
 **Gist**:
 One plain sentence the writer adds to each chapter of a **PR brief** that lights a Core part, and to each **Part catch-up**: the story's whole point, as Daniel could say it back. It is checked by code and by the **Claim check** like every other item, and shown only after **Explain-back**.
