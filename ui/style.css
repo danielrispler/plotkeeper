@@ -857,6 +857,14 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .brief-why-none { margin: var(--sp-3) 0 0; color: var(--muted); }
 .brief-also { margin-top: var(--sp-5); }
 .brief-also .brief-quiet { margin-top: var(--sp-2); }
+.brief-also-title { font-weight: inherit; }
+.brief-also-group { margin-top: var(--sp-4); }
+.brief-also-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2) var(--sp-4); }
+.brief-also-name { margin: 0; color: var(--muted); font-size: var(--size); font-weight: 600; }
+.brief-also-head .brief-quiet { margin: 0; }
+.brief-also-head .brief-code { margin-inline-start: auto; }
+.brief-also-files { margin: var(--sp-2) 0 0; padding: 0; list-style: none; color: var(--muted); font: var(--size-xs)/1.6 var(--mono); }
+.brief-also-files li { overflow-wrap: anywhere; }
 
 .brief-step-code { margin-top: var(--sp-5); }
 .brief-cites { margin-top: var(--sp-5); color: var(--faint); font-size: var(--size-xs); }
@@ -925,7 +933,9 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 /* Its end leaves room for Leave, which sits over the panel's top right corner. */
 .brief-stale { flex: none; margin: 0 0 var(--sp-3); padding-inline-end: 5.5em; font-size: var(--size-xs); color: var(--muted); text-wrap: pretty; }
 .brief-stale-names { font-family: var(--mono); overflow-wrap: anywhere; }
+/* Leave sits over the top of the step's scrollbar when a tall step scrolls (#490): its own background keeps the thumb from under its word. */
 .brief-leave { position: absolute; top: var(--sp-5); right: var(--sp-5); color: var(--faint); }
+.btn.quiet.brief-leave { background: var(--surface); }
 .btn.primary.brief-next { min-inline-size: var(--brief-next); background: var(--brief-light); color: var(--bg); }
 .map-world.glide { transition: transform var(--brief-camera); }
 .map-world.briefing .plate:not(.lit), .map-world.briefing .actor:not(.lit) { opacity: var(--brief-dim); transition: opacity var(--motion); }

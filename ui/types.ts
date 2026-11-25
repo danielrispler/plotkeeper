@@ -503,10 +503,15 @@ export type BriefStep = {
 };
 // `gist` (#397): the story in one sentence, on a chapter that lights a Core part and on a part catch-up; absent or empty in older briefs.
 export type BriefChapter = { behaviour: string; parts: string[]; title: string; steps: BriefStep[]; flags: string[]; gist?: string; gist_flags?: string[] };
+// `also`: the writer's Also touched lines of an older brief; `also_groups` (#489): code's groups by kind, absent in an older brief.
 export type PrBrief = {
-  title: string; overview: BriefStep[]; chapters: BriefChapter[]; also: { part: string; line: string; flags: string[] }[]; unseen: string[];
-  decisions: { id: string | null; text: string; flags: string[] }[]; flags: string[];
+  title: string; overview: BriefStep[]; chapters: BriefChapter[]; also: { part: string; line: string; flags: string[] }[]; also_groups?: AlsoGroup[];
+  unseen: string[]; decisions: { id: string | null; text: string; flags: string[] }[]; flags: string[];
 };
+// One Also touched group (`pr_brief.rs`), in the order shown, its files sorted by path; `lines` added and removed.
+export type AlsoKind = "no-part" | "tests" | "config" | "docs" | "ignored" | "other";
+export type TouchedFile = { path: string; lines: number; part?: string; ignored?: boolean; laws?: string[] };
+export type AlsoGroup = { kind: AlsoKind; files: TouchedFile[]; lines: number };
 // `guard`: Guard with a law's offer (#401), the parts a bug fix touched; none when the PR offers none, or in a brief from before it.
 // `shape`: what code decided the brief's shape would be; the window never reads it.
 export type BriefShape = { chapters: boolean; required: string[]; also: string[]; overview: boolean; flows_changed: string[] };
@@ -556,8 +561,8 @@ export type WaitingBriefs = { project: string; numbers: number[] };
 // The map as of a commit (a scrub), and a commit's files with their diffs (the drill-down).
 export type HistoricalMap = { commit: string; short: string; label: string; source: string };
 export type CommitFiles = { commit: string; short: string; label: string; url: string | null; files: { path: string; diff: string }[] };
-// What `pr_diff` is asked (`map.rs`): `parts`, only the files these parts own; every file the PR changed when absent.
-export type PrDiffArgs = { project: string; number: number; head: string; title: string; parts?: string[] };
+// What `pr_diff` is asked (`map.rs`): `parts`, only the files these parts own; `paths`, only these files; every file the PR changed when both are absent.
+export type PrDiffArgs = { project: string; number: number; head: string; title: string; parts?: string[]; paths?: string[] };
 
 // A project of the saved list (`server/src/projects.rs`): its main checkout, and whether its folder was moved or deleted.
 export type SavedProject = { path: string; gone: boolean };

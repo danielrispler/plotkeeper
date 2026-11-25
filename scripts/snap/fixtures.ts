@@ -532,6 +532,36 @@ const mapBriefStepCode = (): Fixture => ({
     },
   },
 });
+// #492: the last step ends with Also touched in every group, by kind; a group's See the code asks for only its files, by path.
+const alsoGroups: PrBrief["also_groups"] = [
+  { kind: "no-part", files: [{ path: "loose/notes.rs", lines: 12 }], lines: 12 },
+  { kind: "tests", files: [{ path: "scripts/snap/snap.test.mjs", lines: 6, ignored: true }, { path: "server/tests/wire.rs", lines: 40, part: "shell", laws: ["wire-types-agree"] }], lines: 46 },
+  { kind: "config", files: [{ path: ".github/workflows/studio.yml", lines: 3, ignored: true }, { path: "Cargo.lock", lines: 18, ignored: true }], lines: 21 },
+  { kind: "docs", files: [{ path: "docs/studio/behaviour/pr-briefs.md", lines: 9, ignored: true }], lines: 9 },
+  { kind: "ignored", files: [{ path: "scripts/release.sh", lines: 2, ignored: true }], lines: 2 },
+  { kind: "other", files: [{ path: "hook/src/main.rs", lines: 1, part: "hook" }], lines: 1 },
+];
+const mapBriefAlsoGroups = (): Fixture => ({
+  ...mapBrief(briefOf(storySteps(), false, { also_groups: alsoGroups }), 3, `
+      const groups = [...document.querySelectorAll("#map-brief .brief-also-group")];
+      const names = groups.map((group) => group.querySelector(".brief-also-name").textContent + " " + group.querySelector(".brief-also-counts").textContent);
+      if (names.join("|") !== "No part 1 file · 12 lines|Tests 2 files · 46 lines|Config/build 2 files · 21 lines|Docs 1 file · 9 lines|Ignored 1 file · 2 lines|Other 1 file · 1 line") log("snap:fail the groups show " + names.join("|"));
+      if (!groups[1].textContent.includes("wire-types-agree")) log("snap:fail the Tests group does not name its law");
+      if (groups[1].querySelectorAll(".brief-tag").length !== 1 || groups[4].querySelector(".brief-tag")) log("snap:fail the ignored tag shows outside tests, config/build and docs, or not in them");
+      groups[1].querySelector(".brief-code").click();
+      await wait(250);
+      const shown = [...document.querySelectorAll("#map-drawer .drawer-label")].map((label) => label.textContent);
+      if (shown.join("|") !== "scripts/snap/snap.test.mjs|server/tests/wire.rs") log("snap:fail the Tests group's drawer shows " + shown.join("|"));
+      document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", key: "Escape", bubbles: true }));
+      await wait(250);
+      if (document.querySelector("#map-drawer .drawer-label")?.checkVisibility()) log("snap:fail Esc did not close the drawer");`, true),
+  pr_diff: {
+    __by: "paths",
+    values: {
+      "scripts/snap/snap.test.mjs,server/tests/wire.rs": { commit: "b".repeat(40), short: "bbbbbbb", label: "#334 PR briefs on the map", url: null, files: [prFile("scripts/snap/snap.test.mjs"), prFile("server/tests/wire.rs")] },
+    },
+  },
+});
 // Each figure kind filled to the limits `figureShapes` draws (#449): six states, five steps, four lines a side, each label long.
 const fullFigure = (kind: string): BriefFigure => {
   const label = (i: number) => `a long label ${i + 1} here`;
@@ -2940,6 +2970,7 @@ ${writerStatusAfter("Keychain refused")}
   mapBriefStory: (): Fixture => ({ ...mapBriefStory(), contrast: true }),
   mapBriefAnnounce,
   mapBriefStepCode,
+  mapBriefAlsoGroups,
   mapBriefStates: () => mapBriefFigure("states"),
   mapBriefSequence: () => mapBriefFigure("sequence"),
   mapBriefCompare: () => mapBriefFigure("compare"),

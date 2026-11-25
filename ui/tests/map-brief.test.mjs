@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { alsoAt, awaitedWrite, chapterGate, storySteps, briefCamera, briefPlayer, latestRequest, escapeMap, figureShapes, figureSize, playlist, partialFactsLines, unconfirmed, unconfirmedReasons } from "../../dist/map-model.js";
+import { alsoAt, alsoRows, awaitedWrite, chapterGate, storySteps, briefCamera, briefPlayer, latestRequest, escapeMap, figureShapes, figureSize, playlist, partialFactsLines, unconfirmed, unconfirmedReasons } from "../../dist/map-model.js";
 import { trayRows } from "../../dist/map-tray.js";
 
 const step = (k, extra = {}) => ({ k, h: k, b: "", on: [], hops: [], law: null, covered_by: null, list: [], risks: [], fig: null, check: null, cites: [], flags: [], ...extra });
@@ -56,13 +56,38 @@ test("each chapter resumes at the step it was left on", () => {
   assert.equal(player.current().step, 2);
 });
 
-test("the also-touched lines show on the last step of the last chapter only", () => {
+const none = { lines: [], groups: [] };
+const docs = { kind: "docs", files: [{ path: "docs/a.md", lines: 3 }], lines: 3 };
+
+test("Also touched shows on the last step of the last chapter only: an older brief's lines, a newer one's groups", () => {
   const also = [{ part: "hook", line: "A wording change.", flags: [] }];
   const b = brief({ also, chapters: [chapter("Fog", "Before", "Now"), chapter("Laws", "Now", "Could break")] });
-  assert.deepEqual(alsoAt(b, 1, 1, 2), also);
-  assert.deepEqual(alsoAt(b, 1, 0, 2), []);
-  assert.deepEqual(alsoAt(b, 0, 1, 2), []);
-  assert.deepEqual(alsoAt(brief({ chapters: [chapter("Fog", "Now")] }), 0, 0, 1), []);
+  assert.deepEqual(alsoAt(b, 1, 1, 2), { lines: also, groups: [] });
+  assert.deepEqual(alsoAt(b, 1, 0, 2), none);
+  assert.deepEqual(alsoAt(b, 0, 1, 2), none);
+  assert.deepEqual(alsoAt(brief({ chapters: [chapter("Fog", "Now")] }), 0, 0, 1), none);
+  const grouped = brief({ also_groups: [docs], chapters: [chapter("Fog", "Before", "Now")] });
+  assert.deepEqual(alsoAt(grouped, 0, 1, 2).groups.map((g) => g.name), ["Docs"]);
+  assert.deepEqual(alsoAt(grouped, 0, 0, 2), none);
+});
+
+test("each Also touched group shows its name, file and line counts, its laws and its files, the ignored tag only in tests, config/build and docs", () => {
+  // The frozen sample #489 stored (`pr-brief-v8`): no part, tests (one ignored file), ignored, other.
+  const stored = JSON.parse(readFileSync("understanding/tests/fixtures/stored/pr-brief-v8/stored-brief-also.json", "utf8"));
+  const rows = alsoRows([...stored.brief.also_groups, { kind: "config", files: [{ path: "a.toml", lines: 1, ignored: true }], lines: 1 }, { kind: "docs", files: [], lines: 0 }]);
+  assert.deepEqual(rows.map((r) => [r.name, r.counts]), [
+    ["No part", "1 file · 3 lines"],
+    ["Tests", "2 files · 6 lines"],
+    ["Ignored", "1 file · 1 line"],
+    ["Other", "1 file · 5 lines"],
+    ["Config/build", "1 file · 1 line"],
+  ], "an empty group is not shown");
+  assert.deepEqual(rows[1].laws, ["seen-gate"]);
+  assert.deepEqual(rows[0].laws, []);
+  assert.deepEqual(rows[1].files, [{ path: "beta/tests/order.rs", ignored: false }, { path: "scripts/run.spec.ts", ignored: true }]);
+  assert.deepEqual(rows[2].files, [{ path: "scripts/tool.sh", ignored: false }], "the Ignored group is a plain list");
+  assert.deepEqual(rows[4].files, [{ path: "a.toml", ignored: true }]);
+  assert.deepEqual(rows[1].paths, ["beta/tests/order.rs", "scripts/run.spec.ts"], "See the code asks for the group's files");
 });
 
 test("the stored v3 brief of #317 plays as three chapters of four steps, in order, with the overview none", () => {
@@ -296,8 +321,8 @@ test("the Ratify step that ends the last chapter is no part of the story: the ga
   const played = [...playlist(b, 0, false), step("Ratify")];
   const story = storySteps(played);
   assert.deepEqual(story.map((s) => s.k), ["Before", "Now"]);
-  assert.deepEqual(alsoAt(b, 0, 1, story.length), also, "the last story step carries them");
-  assert.deepEqual(alsoAt(b, 0, 2, story.length), [], "the Ratify step does not");
+  assert.deepEqual(alsoAt(b, 0, 1, story.length).lines, also, "the last story step carries them");
+  assert.deepEqual(alsoAt(b, 0, 2, story.length), none, "the Ratify step does not");
   // Reading the last story step completes the chapter; the Ratify step is never needed.
   let fired = 0;
   const gate = chapterGate(story, () => fired++);
