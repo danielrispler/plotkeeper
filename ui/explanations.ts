@@ -145,8 +145,11 @@ export function explainToggle(on: boolean): HTMLElement {
 }
 
 // Sets a `?`'s pressed state and hover to `on`, in place, so a kept `?` keeps the focus a click gave it.
+// Its hint keeps one id across the presses: a new id each time would leave `aria-describedby` on the first.
+let toggles = 0;
 export function pressToggle(button: HTMLElement, on: boolean): HTMLElement {
   button.setAttribute("aria-pressed", String(on));
+  if (!button.hasAttribute("data-key")) button.setAttribute("data-key", `explain-toggle-${++toggles}`);
   hint(button, on ? "Hide explanations" : "Show explanations");
   return button;
 }
