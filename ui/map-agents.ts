@@ -4,7 +4,7 @@
 // its latest turn's parts with its line on the home part, and the other badges dimmed. The pure rules are `map-live.ts`'s; this file draws
 // them from the sessions the window already has, and `map_place` (the server, `studio-system-map`) says which part owns each path.
 
-import { element, failure, invoke, newest, pressable, text } from "./dom.js";
+import { element, failure, hint, invoke, newest, pressable, text } from "./dom.js";
 import { currentMap, onCamera, onDraw, registerLayer, revealParts, syncSide } from "./map.js";
 import { logStop } from "./stop-rules.js";
 import { logo, logoKey } from "./logos.js";
@@ -118,7 +118,7 @@ function sessionRows(session: Session, workers: Subagent[], close: () => void): 
   });
   const state = text("span", stateWord(session), `session-pick-state${session.state === "needs_you" ? " needs-you" : ""}`);
   row.append(logo(logoKey(session)), text("span", deps.name(session), "session-pick-name"), state, ...(line ? [text("span", line, "session-pick-line")] : []));
-  row.title = [deps.name(session), stateWord(session), ...(line ? [line] : []), "Open its story"].join("\n");
+  hint(row, [deps.name(session), stateWord(session), ...(line ? [line] : []), "Open its story"].join("\n"));
   row.dataset.session = session.id;
   row.addEventListener("pointerenter", () => hoverAgents(session.id, row));
   row.addEventListener("pointerleave", () => hoverAgents(null));
@@ -130,7 +130,7 @@ function sessionRows(session: Session, workers: Subagent[], close: () => void): 
       deps.select(session.id, worker.id);
     });
     button.append(text("span", worker.name, "session-pick-name"), ...(asks ? [text("span", "Needs you", "session-pick-state needs-you")] : []));
-    button.title = `${worker.name}${asks ? " needs you" : ""}\nRead this worker's log`;
+    hint(button, `${worker.name}${asks ? " needs you" : ""}\nRead this worker's log`);
     return button;
   })];
 }
@@ -210,7 +210,7 @@ function badgeButton(part: string, badge: Badge, dim: boolean): HTMLElement {
   button.dataset.part = part;
   button.setAttribute("aria-label", `${count} ${count === 1 ? "session" : "sessions"} on this part${asking ? `, ${asking} ${asking === 1 ? "needs" : "need"} you` : ""}`);
   button.setAttribute("aria-expanded", String(listOpen() && listPart === part));
-  button.title = [...badge.rows.map((row) => `${deps.name(row.session)} · ${stateWord(row.session)}`), "Show these sessions"].join("\n");
+  hint(button, [...badge.rows.map((row) => `${deps.name(row.session)} · ${stateWord(row.session)}`), "Show these sessions"].join("\n"));
   return button;
 }
 

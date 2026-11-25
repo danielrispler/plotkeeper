@@ -2,7 +2,7 @@
 // meaning under its choice. Like `hovers.ts`, a text is written once here and every place that shows it reads it from here; each is
 // worded to "you" from `docs/studio/CONTEXT.md`, at most 12 words. One page-wide setting, `explanations`, shows or hides them all.
 
-import { failure, invoke, pressable, text } from "./dom.js";
+import { failure, hint, invoke, pressable, text } from "./dom.js";
 import type { LinkKind, Tier } from "./map-model.js";
 import { studio } from "./state.js";
 
@@ -147,7 +147,7 @@ export function explainToggle(on: boolean): HTMLElement {
 // Sets a `?`'s pressed state and hover to `on`, in place, so a kept `?` keeps the focus a click gave it.
 export function pressToggle(button: HTMLElement, on: boolean): HTMLElement {
   button.setAttribute("aria-pressed", String(on));
-  button.title = on ? "Hide explanations" : "Show explanations";
+  hint(button, on ? "Hide explanations" : "Show explanations");
   return button;
 }
 

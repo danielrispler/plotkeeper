@@ -3,7 +3,7 @@
 // lights its project header's dot). The server says which PRs have a brief waiting (`briefs_waiting`), asked when a session's PR number is first seen and
 // again when the Map view is told a brief changed (`map-landed`), never on a timer.
 
-import { failure, invoke, listen, pressable, text } from "./dom.js";
+import { failure, hint, invoke, listen, pressable, text } from "./dom.js";
 import { openMap } from "./map.js";
 import { openBriefWhenDrawn } from "./map-brief.js";
 import type { Session, WaitingBriefs } from "./types.js";
@@ -17,7 +17,7 @@ export function briefRowFor(
   const pr = session.identity.pr;
   if (pr === null || session.state === "ended" || !waiting?.numbers.includes(pr)) return null;
   const row = pressable(text("button", "PR brief ready", "btn quiet brief-ready"), null);
-  row.title = `Open the brief of #${pr} on the map`;
+  hint(row, `Open the brief of #${pr} on the map`);
   row.addEventListener("click", () => open(waiting.project, pr));
   return row;
 }

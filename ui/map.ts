@@ -18,7 +18,7 @@
 //   a PR brief borrows the camera with `lendCamera` and `giveCameraBack` shows Daniel's view again (`cameraRig` in `map-camera.ts`).
 
 import { logStop, reviewNode, reviewOf } from "./stop-rules.js";
-import { element, failure, invoke, listen, newest, pageStore, pressable, svg, text } from "./dom.js";
+import { element, failure, hint, invoke, listen, newest, pageStore, pressable, svg, text } from "./dom.js";
 import { cameraRig, type CameraRig, fitCamera, panTo, revealPan, zoomAt } from "./map-camera.js";
 import { autoPlace, brokenParts, brokenText, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Drag, type Law, type Layer, type LayerName, type MapDoc, startProject, switchProject, parseMap, type Part, type Point, plateSize, plateTitle, sizeOf, linkLines, markPoints, readingOrder, rimPoint, type Scrub, type Tier } from "./map-model.js";
 import { recheckSeen } from "./seen.js";
@@ -296,7 +296,7 @@ function drawEmpty(body: HTMLElement, state: MapState | null) {
     const gone = project;
     box.classList.add("map-gone");
     const remove = pressable(text("button", "Remove project", "btn"), null, () => deps.removeProject(gone));
-    remove.title = "Take this project off the list; its sessions stay in History";
+    hint(remove, "Take this project off the list; its sessions stay in History");
     box.append(text("p", "This folder is gone", "map-empty-title"), text("p", `${gone} was moved or deleted. Its ended sessions stay in History.`, "empty"), remove);
   } else if (project === null) {
     // A fresh install (#386): one calm line, and the way to record the agents started in a terminal.
@@ -304,7 +304,7 @@ function drawEmpty(body: HTMLElement, state: MapState | null) {
     install.setAttribute("href", installDocs);
     install.setAttribute("target", "_blank");
     install.setAttribute("rel", "noreferrer");
-    install.title = "How to record the agents you start in your terminals: plotkeeper install";
+    hint(install, "How to record the agents you start in your terminals: plotkeeper install");
     box.classList.add("map-fresh");
     // Each empty screen says what will appear there (#526), whatever the Explanations switch says.
     box.append(
@@ -398,7 +398,8 @@ function plateNode(part: Part, current: MapView, links: SVGElement, fit: () => v
   const open = pressable(text("button", "", "btn plate-open"), null);
   open.append(text("span", part.name, "plate-name"), text("span", part.caption, "plate-caption"));
   plate.append(fog, open, marks, chips);
-  plate.title = plateTitle(part);
+  open.dataset.key = `plate ${part.id}`;
+  hint(open, plateTitle(part));
   const context: PlateContext = { view: current, part, tier, plate, fog, marks, chips };
   plateHooks.forEach((hook) => hook(context));
   grab(plate, part.id, current, links, fit, () => clickHooks.forEach((hook) => hook(context)));

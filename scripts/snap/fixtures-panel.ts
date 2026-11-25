@@ -27,8 +27,9 @@ export const mapSheetExplained = (on: boolean): Fixture =>
       const sheet = document.getElementById("map-sheet");
       const toggle = sheet.querySelector(".sheet-header .explain-toggle");
       if (!toggle || toggle.nextElementSibling !== sheet.querySelector(".sheet-header .sheet-close")) return log("snap:fail the ? is not beside the ×");
-      if (toggle.getAttribute("aria-pressed") !== "${on}" || toggle.title !== "${on ? "Hide" : "Show"} explanations") log("snap:fail the ?: " + toggle.getAttribute("aria-pressed") + " " + toggle.title);
-      const described = [...sheet.querySelectorAll("[aria-describedby]")];
+      if (toggle.getAttribute("aria-pressed") !== "${on}" || document.getElementById(toggle.getAttribute("interestfor"))?.textContent !== "${on ? "Hide" : "Show"} explanations") log("snap:fail the ?: " + toggle.getAttribute("aria-pressed") + " " + document.getElementById(toggle.getAttribute("interestfor"))?.textContent);
+      // What a node is described by besides its own hint (spec #582): the explanation lines.
+      const described = [...sheet.querySelectorAll("[aria-describedby]")].filter((node) => node.getAttribute("aria-describedby") !== node.getAttribute("interestfor"));
       const lines = [...sheet.querySelectorAll(".explain")];
       if (${!on}) {
         if (lines.length || described.length) log("snap:fail explanations drawn while off: " + lines.length + " lines, " + described.length + " described");
@@ -492,8 +493,9 @@ const heldSheet = (() => {
 export const mapSheetHolds = (): Fixture =>
   mapOpened(`
       const plate = document.querySelector("#map .plate[data-id=shell]");
-      if (!plate.title.endsWith("The program that holds the state, follows the event log and serves the page on 127.0.0.1.")) log("snap:fail the plate's hover text is not the purpose: " + plate.title);
-      if (plate.title.includes("Serving the page")) log("snap:fail the plate's hover text holds the held items");
+      const plateHint = document.getElementById(plate.querySelector(".plate-open").getAttribute("interestfor"))?.textContent ?? "";
+      if (!plateHint.endsWith("The program that holds the state, follows the event log and serves the page on 127.0.0.1.")) log("snap:fail the plate's hint is not the purpose: " + plateHint);
+      if (plateHint.includes("Serving the page")) log("snap:fail the plate's hint holds the held items");
       plate.click();
       await wait(300);
       const sheet = document.querySelector("#map-sheet .sheet");

@@ -12,7 +12,7 @@
 // The sheet's left edge resizes it (#445), and a click on the empty map closes it and its drawer (`map.ts`'s `pan`).
 
 import { logStop } from "./stop-rules.js";
-import { age, cut, element, failure, invoke, pageStore, pressable, text } from "./dom.js";
+import { age, cut, element, failure, hint, invoke, pageStore, pressable, text } from "./dom.js";
 import { currentMap, onDraw, onPlateClick, reloadMap, registerLayer, syncSide, type MapView } from "./map.js";
 import { openDrawer } from "./map-drawer.js";
 import { drawStrip } from "./map-history.js";
@@ -85,7 +85,7 @@ function handle() {
   if (resizeHandle) return resizeHandle;
   const bar = pressable(text("button", "", "btn quiet sheet-resize"), null);
   bar.setAttribute("aria-label", "Resize the sheet: the left arrow widens it, the right arrow narrows it");
-  bar.title = "Drag to resize the sheet; double-click for its first width";
+  hint(bar, "Drag to resize the sheet; double-click for its first width");
   const width = () => element("map-side").getBoundingClientRect().width;
   let from = { x: 0, width: 0 };
   bar.addEventListener("pointerdown", (event) => {
@@ -163,7 +163,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
 
   const closer = pressable(text("button", "×", "btn quiet sheet-close"), null);
   closer.setAttribute("aria-label", "Close");
-  closer.title = "Close the sheet (Esc)";
+  hint(closer, "Close the sheet (Esc)");
   closer.addEventListener("click", closeSheet);
   // Explanations (#522): a line under each heading, the selected tier's meaning under the tiers, a link kind's and "not yet ratified"'s
   // at their first link, and the fog actions' under them. The `?` beside the × shows or hides them all.
@@ -177,7 +177,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
   for (const each of sheet.tiers) {
     const button = pressable(text("button", each.label, "btn"), each.pressed, () => setTier(view, part.id, each.tier).catch(failure("map_set_tier")));
     // Each tier's meaning on hover, so the ones not picked compare without a change.
-    button.title = SHEET.tiers[each.tier];
+    hint(button, SHEET.tiers[each.tier]);
     if (view.scrub) button.disabled = true;
     if (each.pressed) selected = button;
     tiers.append(button);
@@ -194,7 +194,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
     row.title = `${law.label}: ${law.text}`;
     if (law.backing === "check" && !view.scrub) {
       const proof = pressable(text("button", "See the proof", "btn quiet"), null);
-      proof.title = "Show the test that stands behind this law, read from the default branch";
+      hint(proof, "Show the test that stands behind this law, read from the default branch");
       proof.addEventListener("click", () => {
         invoke("map_proof", { project: view.project, law: law.id })
           .then((proofs) => openDrawer(proofDrawer(law.id, proofs)))
@@ -240,7 +240,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
   if (actions.main) {
     const { open: opens, label, title, note } = actions.main;
     const main = pressable(text("button", label, "btn primary sheet-catch-up"), null);
-    main.title = title;
+    hint(main, title);
     main.addEventListener("click", () => {
       if (opens.kind === "chapter") return void openBriefOf(view.project, opens.pr, opens.chapter, true);
       void openCatchUpOf(view.project, part.id);
@@ -258,7 +258,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
   }
   if (sheet.canClear && actions.second) {
     const clear = pressable(text("button", actions.second, "btn quiet sheet-know"), null);
-    clear.title = "Clear this part's fog: you have caught up with what changed";
+    hint(clear, "Clear this part's fog: you have caught up with what changed");
     clear.addEventListener("click", () => {
       clear.disabled = true;
       know(view, part.id).catch(failure("map_know"));
@@ -277,7 +277,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
   const refresher = !view.scrub && refreshing === part.id ? refresherNode(view, part.id) : null;
   if (!view.scrub && !sheet.canClear && !refresher) {
     const enter = pressable(text("button", "Refresher", "btn quiet sheet-refresher"), null);
-    enter.title = "The flows through this part, hop by hop";
+    hint(enter, "The flows through this part, hop by hop");
     // It shows at once, drawn from the map; the server records the activity behind it, and the reload drops the band.
     enter.addEventListener("click", () => {
       refreshing = part.id;
@@ -293,7 +293,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
     if (state.drill && view.state.ci) {
       const found = view.state.ci;
       const drill = pressable(text("button", "See the CI log", "btn quiet"), null);
-      drill.title = "Show the run's status and the end of its failed log, with a link to the run on GitHub";
+      hint(drill, "Show the run's status and the end of its failed log, with a link to the run on GitHub");
       drill.addEventListener("click", () => openDrawer(ciDrawer(found)));
       ci.append(drill);
     }
@@ -392,7 +392,7 @@ function fillHere(box: HTMLElement, part: string, live: boolean, explain: boolea
   for (const row of rows) {
     const button = pressable(text("button", "", "sheet-here-turn"), null, () => deps?.show(row.index));
     button.dataset.turn = String(row.index);
-    button.title = "Show this turn in the story";
+    hint(button, "Show this turn in the story");
     button.append(text("span", row.number, "sheet-here-number"), cut(text("span", row.headline, "sheet-here-headline")), text("span", row.age, "sheet-here-age"));
     const item = text("li", "");
     item.append(button);

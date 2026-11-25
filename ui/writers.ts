@@ -9,7 +9,7 @@
 // `settings.json` as `summaries.base_url` (none: OpenAI's own), and an optional key, also kept in the Keychain, as a local
 // Ollama needs none.
 
-import { confirmed, drawWithStatus, failure, invoke, messageOf, pressable, text } from "./dom.js";
+import { confirmed, drawWithStatus, failure, hint, invoke, messageOf, pressable, text } from "./dom.js";
 import type { Settings } from "./settings.js";
 import type { SettingsFiles, Writers, WriterKind, WriterTest } from "./types.js";
 import { GATE } from "./writer-notice.js";
@@ -143,7 +143,7 @@ function draw(panel: HTMLElement, hooks: Hooks) {
       })));
   const test = pressable(text("button", testing ? "Testing…" : "Test", "btn small writer-test"), null);
   test.id = "writer-test";
-  test.title = "Make one tiny call with this writer, model and effort; a pass saves them and summaries are written with them";
+  hint(test, "Make one tiny call with this writer, model and effort; a pass saves them and summaries are written with them");
   test.disabled = testing;
   test.addEventListener("click", () => run(panel, hooks));
   nodes.push(test);
@@ -183,7 +183,7 @@ function keyRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[]
   input.title = "An Anthropic API key; it is kept in the macOS Keychain and never shown again";
   const save = pressable(text("button", "Save key", "btn small"), null);
   save.id = "writer-key-save";
-  save.title = "Keep the pasted key in the macOS Keychain, in place of any key set; the page never shows it again";
+  hint(save, "Keep the pasted key in the macOS Keychain, in place of any key set; the page never shows it again");
   save.addEventListener("click", () => {
     const key = input.value.trim();
     if (!key) return;
@@ -205,7 +205,7 @@ function keyRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[]
   if (set) {
     const remove = pressable(text("button", "Remove key", "btn small"), null);
     remove.id = "writer-key-remove";
-    remove.title = "Remove the key from the macOS Keychain; the API-key writer then cannot write";
+    hint(remove, "Remove the key from the macOS Keychain; the API-key writer then cannot write");
     remove.addEventListener("click", async () => {
       const lost = "The Anthropic API key is deleted from the macOS Keychain; the API-key writer cannot write until a key is pasted again.";
       if (!(await confirmed({ heading: "Remove the API key?", lost, verb: "Remove key" }))) return;
@@ -291,7 +291,7 @@ function openaiRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElemen
   input.title = "The endpoint's API key, if it needs one; it is kept in the macOS Keychain and never shown again";
   const save = pressable(text("button", "Save", "btn small"), null);
   save.id = "writer-openai-save";
-  save.title = "Keep the base URL in settings.json and any pasted key in the macOS Keychain; the page never shows the key again";
+  hint(save, "Keep the base URL in settings.json and any pasted key in the macOS Keychain; the page never shows the key again");
   save.addEventListener("click", () => {
     const key = input.value.trim();
     input.value = "";
@@ -315,7 +315,7 @@ function openaiRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElemen
   if (found) {
     const remove = pressable(text("button", "Remove", "btn small"), null);
     remove.id = "writer-openai-remove";
-    remove.title = "Remove the base URL from settings.json and the key from the macOS Keychain";
+    hint(remove, "Remove the base URL from settings.json and the key from the macOS Keychain");
     remove.addEventListener("click", async () => {
       const url = known.base_url ? `The base URL ${known.base_url}` : "The base URL";
       const lost = `${url} is removed from settings.json, and the endpoint's key, if one is set, from the macOS Keychain.`;

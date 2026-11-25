@@ -164,7 +164,7 @@ export const mapBusy = (): Fixture => {
       const rest = [...document.querySelectorAll("#map-not-placed .session-pick:not(.worker) .session-pick-name")].map((c) => c.textContent);
       if (rest.join("|") !== "#313 · Docs|#312 · CI marks|agy · Name from the prompt|codex · plotkeeper") log("snap:fail not placed: " + rest.join("|"));
       if (document.querySelector("#map-not-placed .session-pick.worker")) log("snap:fail the not placed list shows a Worker row");
-      if (document.querySelector("#map [title*='Read the log'], #map-not-placed [title*='Read the log']")) log("snap:fail a Helper is on the map");
+      if ([...document.querySelectorAll("#map [interestfor], #map-not-placed [interestfor]")].some((node) => document.getElementById(node.getAttribute("interestfor"))?.textContent.includes("Read the log"))) log("snap:fail a Helper is on the map");
       log("badges ok, not placed " + rest.length);`, {
       map_state: mapState(),
       map_place: busyPlace(),
@@ -214,7 +214,7 @@ export const mapBadgeList = (): Fixture =>
         return fetched(url, init);
       };
       if (badge("core")?.textContent !== "3" || !badge("core").matches(".needs-you")) return log("snap:fail Core's badge: " + badge("core")?.outerHTML);
-      if (!badge("core").title.includes("Ship PR 286") || badge("core").getAttribute("aria-label") !== "3 sessions on this part, 1 needs you") log("snap:fail Core's badge names: " + badge("core").title + " / " + badge("core").getAttribute("aria-label"));
+      if (!document.getElementById(badge("core").getAttribute("interestfor"))?.textContent.includes("Ship PR 286") || badge("core").getAttribute("aria-label") !== "3 sessions on this part, 1 needs you") log("snap:fail Core's badge names: " + document.getElementById(badge("core").getAttribute("interestfor"))?.textContent + " / " + badge("core").getAttribute("aria-label"));
       await __snapClick(badge("core"));
       await wait(60);
       if (!listOpen()) return log("snap:fail the badge's press did not open its list");

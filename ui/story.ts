@@ -615,7 +615,7 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
     });
     button.classList.add("turn-line");
     // The line's prompt and Headline carry their own full text; the rest of the line says what a click does (#220).
-    button.title = "Fold or unfold this turn";
+    hint(button, "Fold or unfold this turn");
     button.setAttribute("aria-expanded", String(open));
     // The line's prompt is the turn's first words, so its hint holds the whole prompt; a span, which opens once #586's pointer path is in.
     const first = text("span", line.prompt, "prompt");
@@ -677,7 +677,7 @@ function turnMapNodes(session: Session, turn: Turn, newest: boolean): HTMLElemen
   if (oldTurn(turn, reports(session, "turn_trees"), Date.now())) return [text("p", OLD_TURN, "turn-old")];
   if (!newest || !turnLit(turn, false).length) return [];
   const button = pressable(text("button", "Show on map", "quiet show-on-map"), null, () => revealTurn(turn));
-  button.title = "Pan the map so this turn's parts show beside the story";
+  hint(button, "Pan the map so this turn's parts show beside the story");
   return [button];
 }
 
