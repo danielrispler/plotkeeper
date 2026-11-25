@@ -3,30 +3,55 @@
 use crate::{REPO, Result, gh, require, stdout};
 use serde_json::{Value, json};
 
-/// What a ticket body lacks of the context `docs/agents/ticket-authoring.md` requires: `## Reading`,
-/// and `## Touches` with its Files and Session lines.
-fn body_lacks(body: &str) -> Vec<&'static str> {
-    let mut lacks = vec![];
+/// What is wrong with a ticket body against the context `docs/agents/ticket-authoring.md` requires:
+/// `## Reading`, and `## Touches` with its Files, Session and Route lines, the route well-formed.
+fn body_problems(body: &str) -> Vec<String> {
+    let mut problems = vec![];
     if !body.lines().any(|line| line.trim_end() == "## Reading") {
-        lacks.push("## Reading");
+        problems.push("lacks ## Reading".to_owned());
     }
     let mut after = body
         .lines()
         .skip_while(|line| line.trim_end() != "## Touches");
     if after.next().is_none() {
-        lacks.push("## Touches");
-        return lacks;
+        problems.push("lacks ## Touches".to_owned());
+        return problems;
     }
     let touches: Vec<&str> = after.take_while(|line| !line.starts_with("## ")).collect();
-    for (key, lack) in [
-        ("**Files:**", "a **Files:** line in ## Touches"),
-        ("**Session:**", "a **Session:** line in ## Touches"),
-    ] {
-        if !touches.iter().any(|line| line.contains(key)) {
-            lacks.push(lack);
+    for key in ["**Files:**", "**Session:**", "**Route:**"] {
+        match touches.iter().find_map(|line| line.split_once(key)) {
+            None => problems.push(format!("lacks a {key} line in ## Touches")),
+            Some((_, route)) if key == "**Route:**" => problems.extend(route_problems(route)),
+            Some(_) => {}
         }
     }
-    lacks
+    problems
+}
+/// What is wrong with a Route line's text after `**Route:**`, which reads
+/// `<tier> · effort <effort> — <reason>` (#592, "The route line").
+fn route_problems(route: &str) -> Vec<String> {
+    let shape = route
+        .trim()
+        .split_once(" — ")
+        .filter(|(_, reason)| !reason.trim().is_empty())
+        .and_then(|(head, _)| head.split_once(" · "))
+        .and_then(|(tier, effort)| Some((tier, effort.strip_prefix("effort ")?)));
+    let Some((tier, effort)) = shape else {
+        return vec![format!(
+            "**Route:** reads `{}`, not `<tier> · effort <effort> — <reason>`",
+            route.trim()
+        )];
+    };
+    let mut problems = vec![];
+    if !["strong", "medium", "cheap"].contains(&tier) {
+        problems.push(format!(
+            "**Route:** tier {tier} is not strong, medium or cheap"
+        ));
+    }
+    if !["medium", "high"].contains(&effort) {
+        problems.push(format!("**Route:** effort {effort} is not medium or high"));
+    }
+    problems
 }
 /// A spec's tickets to publish, from `tickets.json` in the `--publish` folder.
 #[derive(Debug)]
@@ -136,9 +161,9 @@ fn publish_problems(
         match bodies.get(file) {
             None => problems.push(format!("{file}: no such file in the folder")),
             Some(body) => problems.extend(
-                body_lacks(body)
+                body_problems(body)
                     .into_iter()
-                    .map(|lack| format!("{file}: lacks {lack}")),
+                    .map(|problem| format!("{file}: {problem}")),
             ),
         }
         // GitHub matches label names ignoring case.
@@ -353,23 +378,24 @@ fn print_published(order: &[&Ticket], published: &Value) -> Result<()> {
 mod publish_tests {
     use super::*;
     use serde_json::json;
-    const BODY: &str = "## What to build\n\nX.\n\n## Reading\n\n- None.\n\n## Touches\n\n- **Files:** `a.rs`\n- **Session:** auto mode\n";
+    const BODY: &str = "## What to build\n\nX.\n\n## Reading\n\n- None.\n\n## Touches\n\n- **Files:** `a.rs`\n- **Session:** auto mode\n- **Route:** cheap · effort medium — one check in one file\n";
     #[test]
-    fn a_complete_body_lacks_nothing() {
-        assert!(body_lacks(BODY).is_empty());
+    fn a_complete_body_has_no_problems() {
+        assert!(body_problems(BODY).is_empty());
     }
     #[test]
     fn a_body_names_each_section_and_line_it_lacks() {
         assert_eq!(
-            body_lacks("## What to build\n\nX.\n"),
-            ["## Reading", "## Touches"]
+            body_problems("## What to build\n\nX.\n"),
+            ["lacks ## Reading", "lacks ## Touches"]
         );
         let no_lines = "## Reading\n\nNone.\n\n## Touches\n\nTBD.\n\n## Notes\n\n- **Files:** `a.rs`\n- **Session:** auto mode\n";
         assert_eq!(
-            body_lacks(no_lines),
+            body_problems(no_lines),
             [
-                "a **Files:** line in ## Touches",
-                "a **Session:** line in ## Touches"
+                "lacks a **Files:** line in ## Touches",
+                "lacks a **Session:** line in ## Touches",
+                "lacks a **Route:** line in ## Touches"
             ]
         );
     }
@@ -494,6 +520,41 @@ mod publish_tests {
                 "c.md: no such file in the folder",
                 "b.md: listed twice in tickets.json",
             ]
+        );
+    }
+    /// The problems of one ticket `a.md` whose body is `BODY` with its Route line replaced by `route`.
+    fn route_problems(route: &str) -> Vec<String> {
+        let manifest = Manifest {
+            parent: 9,
+            tickets: vec![ticket("a.md", &[])],
+        };
+        let body = BODY.replace(
+            "- **Route:** cheap · effort medium — one check in one file\n",
+            route,
+        );
+        let bodies = std::collections::HashMap::from([("a.md".to_owned(), body)]);
+        publish_problems(&manifest, &bodies, &labels())
+    }
+    #[test]
+    fn a_body_without_a_route_is_refused() {
+        assert_eq!(
+            route_problems(""),
+            ["a.md: lacks a **Route:** line in ## Touches"]
+        );
+    }
+    #[test]
+    fn a_route_with_an_unknown_tier_or_effort_is_refused() {
+        assert_eq!(
+            route_problems("- **Route:** sonnet · effort medium — a reason\n"),
+            ["a.md: **Route:** tier sonnet is not strong, medium or cheap"]
+        );
+        assert_eq!(
+            route_problems("- **Route:** cheap · effort low — a reason\n"),
+            ["a.md: **Route:** effort low is not medium or high"]
+        );
+        assert_eq!(
+            route_problems("- **Route:** cheap, medium\n"),
+            ["a.md: **Route:** reads `cheap, medium`, not `<tier> · effort <effort> — <reason>`"]
         );
     }
     #[test]
