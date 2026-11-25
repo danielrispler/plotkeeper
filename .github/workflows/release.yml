@@ -25,11 +25,13 @@ on:
       - "npm/**"
       - "scripts/npm/**"
       - "plugin*/**"
+      - README.md
+      - LICENSE
       - .github/workflows/release.yml
       - "!archive/**"
   push:
     branches: [main]
-    paths: ["**", "!**.md", "README.md", "!archive/**"]
+    paths: ["**", "!**.md", "README.md", "LICENSE", "!archive/**"]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}

@@ -1710,6 +1710,65 @@ const mapBase = (): Fixture =>
       await esc();
       if (!document.querySelector("#map .map-canvas") || panelOpen()) log("snap:fail Esc on the bare map changed the page");
       log("base ok");`);
+// The README hero screenshot: plotkeeper's current system map (no retired parts) framed cleanly inside 1400x800.
+const readmeHeroMapFile = JSON.stringify({
+  version: 1,
+  parts: [
+    { id: "plugins", name: "Agent plugins", caption: "Which hooks each agent runs", description: "", tier: "interface", paths: ["plugin/"] },
+    { id: "hook", name: "Hook", caption: "Records every agent event", description: "", tier: "core", paths: ["hook/"] },
+    { id: "core", name: "Core", caption: "Turns events into session state", description: "", tier: "core", paths: ["core/"] },
+    { id: "server", name: "Server", caption: "Holds the state, answers the commands", description: "", tier: "core", paths: ["server/"] },
+    { id: "understanding", name: "Understanding", caption: "Writes what you read, and keeps it", description: "", tier: "core", paths: ["understanding/"] },
+    { id: "window", name: "Window", caption: "Everything you see and press", description: "", tier: "core", paths: ["ui/"] },
+    { id: "workbench", name: "Workbench", caption: "Worktrees and PRs", description: "", tier: "black-box", paths: ["workbench/"] },
+  ],
+  actors: [{ id: "agents", name: "Agents" }, { id: "writer", name: "Writer" }, { id: "github", name: "GitHub" }],
+  links: [
+    { id: "agents-plugins", from: "agents", to: "plugins" }, { id: "plugins-hook", from: "plugins", to: "hook" },
+    { id: "hook-server", from: "hook", to: "server" }, { id: "core-server", from: "core", to: "server" },
+    { id: "server-understanding", from: "server", to: "understanding" }, { id: "understanding-writer", from: "understanding", to: "writer" },
+    { id: "server-window", from: "server", to: "window" }, { id: "server-workbench", from: "server", to: "workbench" },
+    { id: "workbench-github", from: "workbench", to: "github" },
+  ],
+  ignored: [],
+  laws: [
+    { id: "core-pure", on: "core", backing: "trust", text: "The core does no I/O except reading transcripts." },
+    { id: "hook-fast", on: "hook", backing: "trust", text: "The hook never makes the agent wait, except for your answer." },
+    { id: "server-projects", on: "server", backing: "check", text: "A saved project stays until Remove project." },
+    { id: "server-install", on: "server", backing: "check", text: "Install never opens Claude Code's settings file." },
+    { id: "understanding-kept", on: "understanding", backing: "check", text: "A stored file of an older format still loads." },
+    { id: "understanding-order", on: "understanding", backing: "check", text: "A session's pieces are written one at a time, in order." },
+    { id: "understanding-no-tools", on: "understanding", backing: "check", text: "The writer runs with no tools." },
+    { id: "window-quiet", on: "window", backing: "trust", text: "Loud colour is only for what needs you and for a broken law." },
+  ],
+});
+const readmeHero = (): Fixture =>
+  mapBaseOf(`
+      if (!document.querySelector("#map .map-canvas")) return log("snap:fail the page did not open on a map");
+      frame("on the readme hero");
+      checkColours("on the readme hero");
+      log("base ok");`, {
+    map_state: mapState({
+      source: readmeHeroMapFile,
+      fog: { understanding: "thin" },
+      user: {
+        tiers: {},
+        positions: {
+          core: at(355, 195),
+          understanding: at(770, 265),
+          writer: at(1025, 265),
+          agents: at(65, 435),
+          plugins: at(255, 435),
+          hook: at(565, 435),
+          server: at(885, 435),
+          github: at(145, 605),
+          workbench: at(385, 605),
+          window: at(820, 605),
+        },
+      },
+    }),
+    map_place: { s1: ["core", "window"], "s1/w1": ["server"], s2: ["hook"], s6: [] },
+  });
 // A project with no sessions keeps its header, with the quiet dot drawn as the map's mist; its hover names what lit it. A click on the header
 // shows that project's map.
 const mapHeaderDot = (): Fixture =>
@@ -2966,6 +3025,7 @@ ${writerStatusAfter("Keychain refused")}
   // The map as the page's base (#386), each also below 1007 px, where the list is its strip.
   mapBase,
   mapBaseNarrow: mapBase,
+  readmeHero,
   mapHeaderDot,
   mapHeaderDotNarrow: mapHeaderDot,
   // Switching projects: both views saved, a gone folder never read on focus, a PR brief closed.

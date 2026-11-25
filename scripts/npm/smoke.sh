@@ -64,6 +64,19 @@ server=
 npm i -g --prefix "$prefix" "$tarball"
 package="$prefix/lib/node_modules/plotkeeper"
 
+[ -s "$package/README.md" ] || fail "the packed package has no README.md"
+[ -s "$package/LICENSE" ] || fail "the packed package has no LICENSE"
+grep -q "https://raw.githubusercontent.com/danielrispler/plotkeeper/main/docs/studio/assets/readme/hero.png" "$package/README.md" \
+  || fail "the packed README.md lacks the rewritten hero image URL"
+node -e '
+  const fs = require("node:fs");
+  const text = fs.readFileSync(process.argv[1], "utf8");
+  const rel = [...text.matchAll(/!?\[[^\]]*\]\(([^)\s]+)\)/g)]
+    .map((m) => m[1])
+    .filter((t) => !/^([a-z]+:|#|\/\/)/i.test(t));
+  if (rel.length > 0) { console.error("relative links left:", rel); process.exit(1); }
+' "$package/README.md" || fail "the packed README.md still contains relative links"
+
 version=$(node -p "require('$package/package.json').version")
 [ "$(plotkeeper --version)" = "plotkeeper $version" ] || fail "plotkeeper --version says $(plotkeeper --version)"
 
