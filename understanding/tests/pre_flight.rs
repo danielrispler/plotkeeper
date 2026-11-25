@@ -210,3 +210,20 @@ fn a_matched_brief_says_what_was_expected_against_what_it_touched_and_an_unmatch
         None
     );
 }
+
+#[test]
+fn a_version_1_parts_description_reaches_the_writer_as_its_purpose() {
+    let writer = Fake::new(Ok(r#"{"parts": ["core"]}"#));
+    let map = MAP.replacen(
+        r#""caption": "Turns events into state", "description": """#,
+        r#""caption": "Turns events into state", "description": "Plain Rust logic.""#,
+        1,
+    );
+    predict(&writer, "opus", &map, &Input::Text("Anything")).unwrap();
+    assert!(
+        writer.asked.borrow()[0]
+            .contains("- core: Core (Turns events into state). Plain Rust logic."),
+        "{}",
+        writer.asked.borrow()[0]
+    );
+}

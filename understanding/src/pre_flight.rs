@@ -65,8 +65,8 @@ pub fn predict(
     map_text: &str,
     input: &Input,
 ) -> Result<Vec<String>, String> {
-    let map: serde_json::Value =
-        serde_json::from_str(map_text).map_err(|e| format!("the map does not read: {e}"))?;
+    let map =
+        system_map::convert_value(map_text).map_err(|e| format!("the map does not read: {e}"))?;
     let parts = map["parts"].as_array().cloned().unwrap_or_default();
     let on_map: BTreeSet<&str> = parts.iter().filter_map(|p| p["id"].as_str()).collect();
     let reply = timed_write(writer, model, &prompt(&parts, input))?;
