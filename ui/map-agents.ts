@@ -5,10 +5,10 @@
 // spotlit session's footprint as corner brackets around its plates beside the chips.
 
 import { failure, invoke, newest, pressable, text } from "./dom.js";
-import { currentMap, onDraw, syncSide } from "./map.js";
+import { currentMap, onDraw, revealParts, syncSide } from "./map.js";
 import { logStop } from "./stop-rules.js";
-import { footprint, footprintNote, partsOf, placeGroups, type Placement, spotlit } from "./map-live.js";
-import type { Session } from "./types.js";
+import { footprint, footprintNote, partsOf, placeGroups, type Placement, spotlit, turnLight } from "./map-live.js";
+import type { Session, Turn } from "./types.js";
 
 // One agent on the map: a session's own, or a Worker's. `key` is the session's id, and `session/worker` for a Worker.
 export type Live = { key: string; session: string; agent: string | null; label: string; needsYou: boolean; paths: string[] };
@@ -168,6 +168,35 @@ function paintFootprint(view: NonNullable<ReturnType<typeof currentMap>>) {
     plate.classList.toggle("foot-firm", firm.includes(plate.dataset.id!));
     plate.classList.toggle("foot-faint", faint.includes(plate.dataset.id!));
   }
+  paintTurn(view);
+}
+
+// Turn lighting (#560): the story's turn under the pointer or the focus lights its parts with `turn-lit`; nothing dims and the camera
+// stays. Unfolding a past turn, or "Show on map" on the newest, pans its parts clear of the panel and the sheet (`revealParts`).
+type LitTurn = Pick<Turn, "files" | "started_at" | "ended_at">;
+let litTurn: LitTurn | null = null;
+
+// The parts `turn` lights and reveals now: none past the cut, without files, or while a brief plays (unless `briefing` says otherwise).
+export const turnLit = (turn: LitTurn, briefing = deps?.briefOpen() ?? false) => turnLight(turn, placed, Date.now(), briefing);
+
+// `turn` is hovered or focused (`on`), or no longer is; a feed redraw lights none (`lightTurn(null)`).
+export function lightTurn(turn: LitTurn | null, on = true) {
+  const next = on ? turn : litTurn === turn ? null : litTurn;
+  if (next === litTurn) return;
+  litTurn = next;
+  const view = currentMap();
+  if (view) paintTurn(view);
+}
+
+function paintTurn(view: NonNullable<ReturnType<typeof currentMap>>) {
+  const parts = litTurn ? turnLit(litTurn) : [];
+  for (const plate of view.slots.canvas.querySelectorAll<HTMLElement>(".plate[data-id]")) plate.classList.toggle("turn-lit", parts.includes(plate.dataset.id!));
+}
+
+// Pans `turn`'s parts clear of the panel and the sheet, by `revealParts`'s limits; nothing while a brief plays.
+export function revealTurn(turn: LitTurn) {
+  const parts = turnLit(turn);
+  if (parts.length) revealParts(parts);
 }
 
 // Draws the footprint again: a brief opened or closed, or the update that painted is done.

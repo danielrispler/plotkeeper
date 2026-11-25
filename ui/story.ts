@@ -24,6 +24,8 @@ import { shortPaths } from "./paths.js";
 import { checkTime, counts, estimateText, times } from "./times.js";
 import { studio } from "./state.js";
 import { currentMap } from "./map.js";
+import { lightTurn, revealTurn, turnLit } from "./map-agents.js";
+import { OLD_TURN, oldTurn } from "./map-live.js";
 import { pageStore, stretches, tipText } from "./tips.js";
 import {
   askKind,
@@ -463,6 +465,7 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
     const line = evidenceElement(session.id, index, turn, { only: session.state === "running" && now ? "failed" : "all" });
     if (line) node.append(line);
   }
+  if (turn) node.append(...turnMapNodes(session, turn, now !== null && index !== null));
   // A PR brief waiting for this session's PR: one quiet row in the newest turn, which opens it on the Map view.
   if (now && index !== null) {
     const row = railBriefRow(session, drawFeed);
@@ -536,6 +539,7 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
       if (opened.has(key)) opened.delete(key);
       else opened.add(key);
       draw();
+      if (opened.has(key)) revealTurn(turn);
     });
     button.classList.add("turn-line");
     // The line's prompt and Headline carry their own full text; the rest of the line says what a click does (#220).
@@ -574,12 +578,37 @@ export function openCitation(id: string) {
   (node as HTMLElement | undefined)?.scrollIntoView?.({ block: "start" });
 }
 
-const turnElement = (session: Session, block: FeedTurn, now: Now | null) =>
-  now || block.index === null ? turnContent(session, block, now) : foldedTurn(session, block);
+function turnElement(session: Session, block: FeedTurn, now: Now | null): HTMLElement {
+  const node = now || block.index === null ? turnContent(session, block, now) : foldedTurn(session, block);
+  if (block.turn) lightsTurn(node, block.turn);
+  return node;
+}
+
+// Turn lighting (#560): hovering or focusing a turn lights the parts it changed on the map; leaving it, or a redraw of the feed, clears it.
+function lightsTurn(node: HTMLElement, turn: Turn) {
+  node.addEventListener("pointerenter", () => lightTurn(turn));
+  node.addEventListener("pointerleave", () => lightTurn(turn, false));
+  node.addEventListener("focusin", () => lightTurn(turn));
+  node.addEventListener("focusout", (event) => {
+    if (!(event.relatedTarget instanceof Node && node.contains(event.relatedTarget))) lightTurn(turn, false);
+  });
+}
+
+// What a turn's block says of the map (#560): a turn past the cut, of an agent that records turn files, says its files aren't shown;
+// the newest turn with parts has a quiet "Show on map", which pans them clear of the panel (nothing while a brief plays).
+function turnMapNodes(session: Session, turn: Turn, newest: boolean): HTMLElement[] {
+  if (oldTurn(turn, reports(session, "turn_trees"), Date.now())) return [text("p", OLD_TURN, "turn-old")];
+  if (!newest || !turnLit(turn, false).length) return [];
+  const button = pressable(text("button", "Show on map", "quiet show-on-map"), null, () => revealTurn(turn));
+  button.title = "Pan the map so this turn's parts show beside the story";
+  return [button];
+}
 
 // Draws "now" and the feed from the selection and the brief the shell last sent.
 export function drawFeed() {
   const selected = studio.selection;
+  // The feed's nodes are new: no turn is under the pointer or the focus until one is entered again.
+  lightTurn(null);
   if (selected === null) {
     drawNow(null, null);
     element("banner-slot").replaceChildren();

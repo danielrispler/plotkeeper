@@ -623,6 +623,9 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .tray-title { display: block; font-weight: 500; }
 /* The rail's quiet row for a waiting PR brief (#344): small, muted, no colour. */
 .brief-ready { display: block; margin: 0 0 var(--sp-4); padding: var(--sp-2) 0; font-size: var(--size-small); color: var(--muted); text-align: start; }
+/* A turn's word on the map (#560): a past-the-cut turn's quiet line, and the newest turn's "Show on map". */
+.turn-old { margin: 0 0 var(--sp-4); font-size: var(--size-small); color: var(--muted); }
+.show-on-map { display: block; margin: 0 0 var(--sp-4); padding: var(--sp-2) 0; font-size: var(--size-small); color: var(--muted); text-align: start; }
 .tray-note { display: block; font-size: var(--size-xs); color: var(--faint); }
 /* The map area is a camera (#383): it never scrolls; the world inside it pans and zooms, and the dot grid moves with it. */
 /* Panels, overlays and dialogs keep a wheel at their ends to themselves, as the map does (#462). */
@@ -1000,6 +1003,10 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .map-world.briefing .plate:not(.lit), .map-world.briefing .actor:not(.lit) { opacity: var(--brief-dim); transition: opacity var(--motion); }
 .map-world.briefing .plate.lit { box-shadow: inset 0 0 0 var(--hair) var(--ring-warm), 0 0 0 var(--sp-2) color-mix(in srgb, var(--ring-warm) 35%, transparent), var(--shadow); }
 .map-world.briefing .actor.lit { color: var(--fg); }
+/* A story's turn, hovered or focused (#560): its parts take a brief's lit ring, outside a brief, with nothing dimmed; a broken part keeps
+   its red edge inside the ring. */
+.plate.turn-lit { box-shadow: inset 0 0 0 var(--hair) var(--ring-warm), 0 0 0 var(--sp-2) color-mix(in srgb, var(--ring-warm) 35%, transparent), var(--shadow); }
+.plate.broken.turn-lit { box-shadow: inset 0 0 0 var(--hair) var(--conflict), 0 0 0 var(--sp-2) color-mix(in srgb, var(--ring-warm) 35%, transparent), var(--shadow); }
 .plate.arrive { animation: brief-arrive var(--brief-arrive); }
 .plate.pick { cursor: pointer; }
 .plate.picked { box-shadow: inset 0 0 0 var(--mark) var(--brief-light), var(--shadow); animation: brief-arrive var(--brief-arrive); }
