@@ -67,6 +67,18 @@ test("an overturn from the sheet quotes a link's ends as the brief does, its kin
   assert.match(overturnPrompt(sheetLinkItem({ id: "a-b", from: "a", to: "b" }, 8), null), /link a-b: “a to b”, kind none\. Undo it/);
 });
 
+test("an overturn's sentence ends with one full stop, whatever it quotes last", () => {
+  const ends = (r) => overturnPrompt(r, null).replace(/ Undo it and tell me what you changed\.$/, "");
+  assert.match(ends(row("law", "l1", "not-yet", { text: "The hook never waits" })), /“The hook never waits”\.$/);
+  assert.match(ends(row("law", "l1", "not-yet", { text: "The hook never waits." })), /waits\.”$/, "no second stop after a quote's own");
+  const reason = { of: "link", kind: words(null, "http"), reason: words(null, "The page calls the server") };
+  assert.match(ends(row("link", "a-b", "not-yet", { text: "a to b", detail: reason })), /reason “The page calls the server”\.$/);
+  assert.match(ends(row("link", "a-b", "not-yet", { text: "a to b", detail: { ...reason, reason: words(null, "") } })), /kind http\.$/);
+  const bare = { ...partDetail, purpose: words(null, "Serves the page"), holds: [] };
+  assert.match(ends(row("part", "server", "not-yet", { text: "Server", detail: bare })), /purpose: “Serves the page”\.$/);
+  assert.match(ends(row("part", "server", "not-yet", { text: "Server", detail: { ...bare, holds: partDetail.holds } })), /holds Fog, Same, Briefs\.$/);
+});
+
 test("a detail shows only what changed, old beside new, and an added part shows everything with nothing before", () => {
   assert.deepEqual(detailLines(partDetail), [
     { label: "Purpose", before: "Serves the page.", after: "Serves the page and keeps its state." },

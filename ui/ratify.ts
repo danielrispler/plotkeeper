@@ -59,12 +59,15 @@ function newText(detail: RatifyDetail | null | undefined): string {
   if (!detail) return "";
   if (detail.of === "link") {
     if (detail.kind.after === null) return "";
-    return detail.reason.after ? `, kind ${detail.kind.after || "none"}, reason “${detail.reason.after}”` : `, kind ${detail.kind.after || "none"}.`;
+    return `, kind ${detail.kind.after || "none"}${detail.reason.after ? `, reason “${detail.reason.after}”` : ""}`;
   }
   if (detail.purpose.after === null) return "";
   const held = detail.holds.filter((h) => h.text.after !== null).map((h) => h.name);
-  return `, purpose: “${detail.purpose.after}”${held.length ? `, and it holds ${held.join(", ")}.` : ""}`;
+  return `, purpose: “${detail.purpose.after}”${held.length ? `, and it holds ${held.join(", ")}` : ""}`;
 }
+
+// A full stop after `words`, unless they already end with one, inside a closing quote or not.
+const stopped = (words: string) => (/[.!?]”?$/.test(words) ? words : `${words}.`);
 
 const kindWords: Record<string, string> = { part: "part", actor: "outside actor", link: "link", law: "law", flow: "flow", decision: "decision" };
 
@@ -76,7 +79,7 @@ export function overturnPrompt(row: Pick<RatifyRow, "pr" | "kind" | "id" | "text
     row.kind === "decision"
       ? `the decision ${row.id}: “${row.text}”`
       : `the ${kindWords[row.kind] ?? row.kind} ${row.id}${row.change ? ` (${row.change})` : ""}: “${row.text}”${newText(row.detail)}`;
-  return `In ${where}, I overturn ${what} Undo it and tell me what you changed.`;
+  return `In ${where}, I overturn ${stopped(what)} Undo it and tell me what you changed.`;
 }
 
 // Puts `prompt` on the clipboard through `writeText` (`navigator.clipboard.writeText`): "copied", or "manual" when there is no clipboard or
