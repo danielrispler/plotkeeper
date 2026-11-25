@@ -343,8 +343,8 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
         "log" => {
             let line: String = arg(a, "line")?;
             match arg::<String>(a, "level")?.as_str() {
-                "error" => log::error!("page: {line}"),
-                _ => log::warn!("page: {line}"),
+                "error" => log::error!(target: crate::PAGE_TARGET, "page: {line}"),
+                _ => log::warn!(target: crate::PAGE_TARGET, "page: {line}"),
             }
             out(())
         }

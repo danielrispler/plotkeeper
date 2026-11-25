@@ -16,6 +16,9 @@
 - `GET /events` is one server-sent event stream: `event: <name>` and `data: <json>`, the events the window used to receive (`sessions`, `cards`, `selected`, `notice`, `writer-notice`, `map-landed`, and the rest), and a comment every 15 seconds.
 - The page tells the server whether its tab is visible and focused (`page_focus`); the read loop treats that as the window's focus. With no tab listening, nothing is focused.
 - `POST /api/log` puts the page's log line in plotkeeper's log (stderr).
+- `settings-files` carries the text of `settings.json` and `keymap.json`, as the `settings_files` command answers it. The read loop sends it when either file's text differs from what it last sent (#550), so a hand edit reaches every open page ([settings](../settings.md)).
+- `server-error` carries the message of an error plotkeeper logged, which is also on stderr (#550). The page shows it in the notice line until it is dismissed. Warnings stay on stderr only, the HTTP client's lines are never logged, and a page's own log lines are not sent back, since the page that logged an error already shows it. An error logged while no page is open is on stderr only.
+- A failed `writer_notice` or `wired` at the page's start is a warning in the log, not shown.
 
 ## One plotkeeper per data folder
 

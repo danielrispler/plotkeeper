@@ -4,7 +4,7 @@
 // server's events to the regions and lays the list out by the width rule in `layout.ts`.
 
 import "./transport.js";
-import { dismissNotice, NOT_RECORDING, onLogRecord, setSettingsErrors, showNotice } from "./notice.js";
+import { dismissNotice, NOT_RECORDING, setSettingsErrors, showError, showNotice } from "./notice.js";
 import { withGateNotice, withWriterNotice } from "./writer-notice.js";
 import { startWatching } from "./answer.js";
 import { openAsk } from "./ask.js";
@@ -304,8 +304,8 @@ listen<string>("notice", showNotice);
 listen<Alert>("notification", notifyIfAway);
 window.addEventListener("pointerdown", () => void askOnce(), { once: true });
 window.addEventListener("keydown", () => void askOnce(), { once: true });
-// The server's errors, as a `log://log` record (`notice.ts`).
-listen<{ level: number; message: string }>("log://log", onLogRecord);
+// An error the server logged, by its message (`notice.ts`).
+listen<string>("server-error", showError);
 element("notice-dismiss").addEventListener("click", dismissNotice);
 // No card writer can run, or one can again (danielrispler/plotkeeper#51).
 const editNotice = (edit: (text: string) => string) => {
@@ -316,10 +316,9 @@ const editNotice = (edit: (text: string) => string) => {
 const showWriterNotice = (notice: string | null) => editNotice((text) => withWriterNotice(text, notice));
 listen<string | null>("writer-notice", showWriterNotice);
 // A page opened after the writer failed has missed the event (danielrispler/plotkeeper#328).
-// The desktop shell has no such command, so a rejection is no error there.
 invoke("writer_notice")
   .then((notice) => notice && showWriterNotice(notice))
-  .catch(() => {});
+  .catch(failure("writer_notice"));
 // No harness wired (#437): "not recording" in the map's head until one is. `plotkeeper install` runs in a terminal, so the page asks again at its focus.
 const checkWired = () =>
   invoke("wired")
@@ -328,7 +327,7 @@ const checkWired = () =>
       line.textContent = wired ? "" : NOT_RECORDING;
       line.hidden = wired;
     })
-    .catch(() => {});
+    .catch(failure("wired"));
 checkWired();
 window.addEventListener("focus", checkWired);
 invoke("cards").then(showCards);

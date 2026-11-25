@@ -23,6 +23,7 @@ import { decisionElement, questionElement } from "./questions.js";
 import { shortPaths } from "./paths.js";
 import { checkTime, counts, estimateText, times } from "./times.js";
 import { studio } from "./state.js";
+import { showError } from "./notice.js";
 import { currentMap } from "./map.js";
 import { pageStore, stretches, tipText } from "./tips.js";
 import {
@@ -635,10 +636,11 @@ export async function askDelete(session: Session) {
   await invoke("delete_session", { id: session.id });
 }
 
-// A late Allow reaches no terminal from the page: it shows the line to tell the session, so the agent retries the command.
-function retryNotice(session: Session, card: BlockedCommand, agent: string | null) {
-  if (session.state === "ended") return report("The session has ended: start it again and ask it to run the approved command.");
-  report(`Allowed. Tell the session: ${retryLine(card, agent)}`);
+// A late Allow reaches no terminal from the page: it shows the line to tell the session, so the agent retries the command. The line
+// is no failure: it shows in the notice line until dismissed, under no command's name, and the Studio log gets none of it.
+export function retryNotice(session: Pick<Session, "state">, card: BlockedCommand, agent: string | null) {
+  if (session.state === "ended") return showError("The session has ended: start it again and ask it to run the approved command.");
+  showError(`Allowed. Tell the session: ${retryLine(card, agent)}`);
 }
 
 // The session's blocked commands the view shows, in block order: its own view shows them all, and a subagent's view

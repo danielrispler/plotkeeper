@@ -55,11 +55,11 @@ export const stubSource = (fixture) => `(() => {
   for (const [key, value] of Object.entries(fixture.storage ?? {})) localStorage.setItem(key, value);
   const listeners = {};
   const fire = (name, payload) => (listeners[name] ?? []).forEach((h) => h({ data: JSON.stringify(payload) }));
-  // The app's errors are the fixture's appErrors key (none by default), sent on \`log://log\` as the page's log target sends them.
+  // The app's errors are the fixture's appErrors key (none by default), sent as \`server-error\` events, as the server sends an error it logged.
   window.EventSource = class {
     addEventListener(name, handler) {
       (listeners[name] ??= []).push(handler);
-      if (name === "log://log") for (const message of fixture.appErrors ?? []) setTimeout(() => handler({ data: JSON.stringify({ level: 5, message }) }));
+      if (name === "server-error") for (const message of fixture.appErrors ?? []) setTimeout(() => handler({ data: JSON.stringify(message) }));
     }
     removeEventListener(name, handler) {
       listeners[name] = (listeners[name] ?? []).filter((h) => h !== handler);
@@ -81,7 +81,7 @@ export const stubSource = (fixture) => `(() => {
     }
     return found ?? null;
   };
-  // The page's own log lines (\`/api/log\`) are not echoed back; only an app error reaches the page, on \`log://log\`.
+  // The page's own log lines (\`/api/log\`) are not echoed back; only an app error reaches the page, as \`server-error\`.
   window.fetch = async (url, init) => {
     const command = /\\/api\\/(\\w+)$/.exec(String(url))?.[1];
     if (!command) return { ok: false, status: 404, json: async () => "no such command" };

@@ -26,26 +26,6 @@ mod embedded {
     include!(concat!(env!("OUT_DIR"), "/assets.rs"));
 }
 
-/// Warnings and errors to stderr, with the time; never the HTTP client's (`studio_server::logged`).
-struct Stderr;
-
-impl log::Log for Stderr {
-    fn enabled(&self, metadata: &log::Metadata) -> bool {
-        studio_server::logged(metadata)
-    }
-    fn log(&self, record: &log::Record) {
-        if self.enabled(record.metadata()) {
-            eprintln!(
-                "[{}][{}] {}",
-                record.level(),
-                record.target(),
-                record.args()
-            );
-        }
-    }
-    fn flush(&self) {}
-}
-
 fn address(port: u16, token: &str) -> String {
     format!("http://127.0.0.1:{port}/?token={token}")
 }
@@ -112,7 +92,8 @@ fn main() -> ExitCode {
     };
     refresh_hook_copies(&home);
     wire_on_start(&home);
-    let _ = log::set_logger(&Stderr).map(|()| log::set_max_level(log::LevelFilter::Warn));
+    let _ = log::set_logger(&studio_server::LOGGER)
+        .map(|()| log::set_max_level(log::LevelFilter::Warn));
     match run(&log, held) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
@@ -232,6 +213,7 @@ fn run(log: &std::path::Path, held: lock::Held) -> std::io::Result<()> {
         web::DEFAULT_PORT,
     )?;
     app.events.set(page.sink());
+    studio_server::LOGGER.send_errors_to(page.sink());
     held.publish(page.port(), &token)?;
 
     studio_server::forward_writer_notices(&app, writer_notice_reader);
