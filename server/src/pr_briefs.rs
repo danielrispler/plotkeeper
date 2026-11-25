@@ -32,6 +32,9 @@ pub struct BriefInfo {
     pub quiet: bool,
     /// The last write at this head failed (told to the log); opening it tries again.
     pub failed: bool,
+    /// Why the brief at this head is what it is after a push (spec #477, part B): the read carried over, or it was rewritten.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 /// What a lookup of a ready PR did.
@@ -47,6 +50,8 @@ pub enum Did {
     Failed,
     /// No part the PR touches would fog at Daniel's tiers, so it gets no brief.
     Quiet,
+    /// The new head carried Daniel's read over (a pure rebase or a push that fogs nothing): the brief is copied to it.
+    Carried,
 }
 
 /// The heads the lookups saw last, per PR, for "the same head at two lookups in a row".
@@ -57,6 +62,9 @@ pub struct Seen {
     quiet: HashSet<(u64, String)>,
     /// The head whose write failed, per PR: it is not retried at every lookup, only when the head changes or Daniel opens the brief.
     failed: HashMap<u64, String>,
+    /// What the push to the head each PR is at did to Daniel's read, worked out once (spec #477, part B). Kept in memory, as the
+    /// rest of `Seen`: after a restart the tray's note is gone, while a carried read and its copied brief are on disk.
+    pushes: HashMap<u64, (String, Push)>,
 }
 
 impl Seen {
@@ -67,6 +75,14 @@ impl Seen {
     fn has_failed(&self, pr: u64, head: &str) -> bool {
         self.failed.get(&pr).is_some_and(|h| h == head)
     }
+
+    /// The tray's note for PR `pr` at `head`.
+    fn note(&self, pr: u64, head: &str) -> Option<String> {
+        self.pushes
+            .get(&pr)
+            .filter(|(h, _)| h == head)
+            .and_then(|(_, push)| push.note())
+    }
 }
 
 /// What writes and keeps the briefs: the writer, the model of the "PR briefs" setting and the store.
@@ -74,6 +90,224 @@ pub struct Writing<'a> {
     pub writer: &'a dyn BriefWriter,
     pub model: &'a str,
     pub store: &'a BriefStore,
+    /// What a new head does to Daniel's read, and carrying it over (spec #477, part B); `None` treats every new head as today.
+    pub reading: Option<&'a dyn Reading>,
+}
+
+/// What a new head H2 does to the brief Daniel read at H1 (spec #477, part B, "Since you read").
+#[derive(Debug, Clone, PartialEq)]
+pub enum Push {
+    /// Fully read at H1, H2 descends from it, and H1..H2 fogs nothing: the read carries over.
+    Quiet,
+    /// Fully read at H1, which still resolves, and the old and new ranges hold the same patches: the read carries over.
+    Rebased,
+    /// Fully read at H1, H2 descends from it, and H1..H2 fogs something: the since story's case (#497). Until it is written the
+    /// full brief is rewritten, as today.
+    Since,
+    /// The full brief is rewritten, with the note that says why; none when nothing of it was read.
+    Rewrite(Option<String>),
+}
+
+impl Push {
+    /// The note the tray row shows while the PR stays at H2.
+    pub fn note(&self) -> Option<String> {
+        match self {
+            Push::Quiet => Some("New push touched nothing on your map".into()),
+            Push::Rebased => Some("Rebased onto main, nothing new in the PR".into()),
+            Push::Since => None,
+            Push::Rewrite(note) => note.clone(),
+        }
+    }
+
+    fn carries(&self) -> bool {
+        matches!(self, Push::Quiet | Push::Rebased)
+    }
+}
+
+/// Daniel's read of the briefs, as a new head meets it.
+pub trait Reading {
+    /// What the push from `old`'s head to `head` does to the read of `old`.
+    fn push(&self, old: &StoredBrief, head: &str) -> Push;
+    /// Moves the read of PR `pr` from head `from` to `to` (`fog::carry_read`).
+    fn carry(&self, pr: u64, from: &str, to: &str) -> Result<(), String>;
+}
+
+/// The server's `Reading`: Daniel's state in `file`, `git` in `project`, and its default branch `reference`.
+pub struct GitReading {
+    pub project: String,
+    pub file: std::path::PathBuf,
+    pub reference: Option<String>,
+}
+
+impl Reading for GitReading {
+    fn push(&self, old: &StoredBrief, head: &str) -> Push {
+        let user = crate::map::read_user(&self.file, &self.project);
+        let read = user.fog.reads.get(&old.pr);
+        let Some(reference) = &self.reference else {
+            return Push::Rewrite(partial_note(read, &old.head).or(Some(REBASED.into())));
+        };
+        push_of(
+            Path::new(&self.project),
+            reference,
+            read,
+            &user.tiers,
+            old.pr,
+            &old.head,
+            head,
+        )
+    }
+
+    fn carry(&self, pr: u64, from: &str, to: &str) -> Result<(), String> {
+        crate::fog::carry_read(&self.file, &self.project, pr, from, to)
+    }
+}
+
+/// The note of a rewrite after Daniel had read only part of the brief at `old`, or none when he had read none of it.
+fn partial_note(read: Option<&crate::fog::PrRead>, old: &str) -> Option<String> {
+    let read = read?;
+    let n = read.chapters.values().filter(|c| c.head == old).count();
+    (n > 0).then(|| {
+        format!(
+            "Rewritten after a new push; you had read {n} of {}",
+            read.lit.len()
+        )
+    })
+}
+
+const REBASED: &str = "Rewritten: the branch was rebased";
+
+/// What the push of PR `pr` from `old` to `new` does to `read`, by `git` in `repo`: `reference` is the default branch the
+/// patch-ids' ranges start from, `tiers` Daniel's, which decide whether H1..H2 fogs something.
+pub fn push_of(
+    repo: &Path,
+    reference: &str,
+    read: Option<&crate::fog::PrRead>,
+    tiers: &std::collections::BTreeMap<String, String>,
+    pr: u64,
+    old: &str,
+    new: &str,
+) -> Push {
+    if !read.is_some_and(|r| r.fully_read_at(old)) {
+        return Push::Rewrite(partial_note(read, old));
+    }
+    let git = |args: &[&str]| crate::map::git(repo, args);
+    if git(&["cat-file", "-e", &format!("{old}^{{commit}}")]).is_err() {
+        return Push::Rewrite(Some(REBASED.into()));
+    }
+    if git(&["merge-base", "--is-ancestor", old, new]).is_ok() {
+        let meta = studio_understanding::pr_brief::PrMeta {
+            number: pr,
+            head: new.to_string(),
+            ..Default::default()
+        };
+        return match gather(repo, old, new, meta).and_then(|mut source| {
+            source.tier_overrides = tiers.clone();
+            fogs_nothing(&source)
+        }) {
+            Ok(true) => Push::Quiet,
+            Ok(false) => Push::Since,
+            Err(_) => Push::Rewrite(None),
+        };
+    }
+    match (patches(repo, reference, old), patches(repo, reference, new)) {
+        (Some(before), Some(after)) if before == after => Push::Rebased,
+        _ => Push::Rewrite(Some(REBASED.into())),
+    }
+}
+
+/// The PR's commits from the merge base with `reference` to `head`, merges left out: their count, and the multiset of their
+/// `git patch-id --stable`, sorted. A commit with an empty diff has no patch-id, so the count is kept apart.
+fn patches(repo: &Path, reference: &str, head: &str) -> Option<(usize, Vec<String>)> {
+    let base = crate::map::git(repo, &["merge-base", reference, head]).ok()?;
+    let range = format!("{base}..{head}");
+    let count = crate::map::git(repo, &["rev-list", "--count", "--no-merges", &range])
+        .ok()?
+        .parse()
+        .ok()?;
+    let log = std::process::Command::new("git")
+        .args([
+            "log",
+            "-p",
+            "--no-merges",
+            "--no-color",
+            "--no-ext-diff",
+            &range,
+        ])
+        .current_dir(repo)
+        .output()
+        .ok()
+        .filter(|out| out.status.success())?;
+    let mut ids = std::process::Command::new("git")
+        .args(["patch-id", "--stable"])
+        .current_dir(repo)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .ok()?;
+    {
+        use std::io::Write;
+        ids.stdin.take()?.write_all(&log.stdout).ok()?;
+    }
+    let out = ids
+        .wait_with_output()
+        .ok()
+        .filter(|out| out.status.success())?;
+    let mut ids: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|line| line.split_whitespace().next().map(String::from))
+        .collect();
+    ids.sort();
+    Some((count, ids))
+}
+
+/// When the PR moved from the newest stored brief's head to `head`, what that push does to Daniel's read, worked out once per
+/// head and kept in `seen` for the tray's note; a push that carries the read over moves it and copies the brief to `head`, which
+/// is returned. `None`: the brief is rewritten, as before.
+fn carried(
+    with: &Writing,
+    seen: &Mutex<Seen>,
+    pr: u64,
+    head: &str,
+    mut log: impl FnMut(String),
+) -> Option<StoredBrief> {
+    let reading = with.reading?;
+    let old = with.store.latest(pr).filter(|old| old.head != head)?;
+    let known = seen
+        .lock()
+        .unwrap()
+        .pushes
+        .get(&pr)
+        .filter(|(h, _)| h == head)
+        .map(|(_, p)| p.clone());
+    let push = known.unwrap_or_else(|| {
+        let push = reading.push(&old, head);
+        seen.lock()
+            .unwrap()
+            .pushes
+            .insert(pr, (head.to_string(), push.clone()));
+        push
+    });
+    if !push.carries() {
+        return None;
+    }
+    // The read moves first: a copy whose read did not move would be a brief to read again.
+    let copy = StoredBrief {
+        head: head.to_string(),
+        stale: false,
+        written_at: studio_understanding::millis().max(old.written_at + 1),
+        ..old.clone()
+    };
+    match reading.carry(pr, &old.head, head).and_then(|()| {
+        with.store
+            .put(&copy)
+            .map_err(|e| format!("keep the brief of #{pr}: {e}"))
+    }) {
+        Ok(()) => Some(copy),
+        Err(why) => {
+            log(format!("carry the read over: {why}"));
+            None
+        }
+    }
 }
 
 /// The one call into the understanding crate that writes a brief.
@@ -127,6 +361,10 @@ pub fn on_lookup(
     if skip || with.store.get(pr, head).is_some() {
         return Did::Kept;
     }
+    let mut log = log;
+    if carried(with, seen, pr, head, &mut log).is_some() {
+        return Did::Carried;
+    }
     if !again && let Some(old) = with.store.latest(pr) {
         let _ = with.store.mark_stale(pr, &old.head);
         return Did::Staled;
@@ -159,6 +397,10 @@ pub fn on_open(
     match with.store.get(pr, head) {
         Some(stored) if !stored.stale => Ok(stored),
         _ => {
+            let mut log = log;
+            if let Some(copy) = carried(with, seen, pr, head, &mut log) {
+                return Ok(copy);
+            }
             seen.lock().unwrap().failed.remove(&pr);
             write_now(with, source, log)
                 .inspect_err(|_| {
@@ -316,8 +558,8 @@ impl PrBriefs {
         ready: &mut [Ready],
     ) {
         let busy = self.busy.lock().unwrap().clone();
+        let seen = self.seen_of(project);
         let (quiet, failed) = {
-            let seen = self.seen_of(project);
             let seen = seen.lock().unwrap();
             (seen.quiet.clone(), seen.failed.clone())
         };
@@ -334,6 +576,7 @@ impl PrBriefs {
                         quiet: true,
                         read: false,
                         failed: false,
+                        note: None,
                     });
                 }
                 continue;
@@ -351,6 +594,7 @@ impl PrBriefs {
                 read: user.is_some_and(|u| crate::fog::fully_read(u, pr.number)),
                 quiet: false,
                 failed,
+                note: seen.lock().unwrap().note(pr.number, &pr.head),
             });
         }
     }
@@ -426,6 +670,15 @@ pub fn waiting_numbers(
         .filter(|pr| !user.is_some_and(|u| crate::fog::fully_read_at(u, pr.number, &pr.head)))
         .map(|pr| pr.number)
         .collect()
+}
+
+/// Daniel's read of `project`'s briefs, as the lookups and opens meet a new head; `None` without a state file.
+fn reading_of(project: &str) -> Option<GitReading> {
+    Some(GitReading {
+        project: project.to_string(),
+        file: crate::map::state_file().ok()?,
+        reference: crate::map::default_ref(Path::new(project)).map(|(r, _)| r),
+    })
 }
 
 fn user_of(project: &str) -> Option<crate::map::UserState> {
@@ -570,10 +823,12 @@ pub fn lookup_later(app: &Arc<App>, project: &str, ready: Vec<Ready>) {
             };
             let model = briefs.model();
             let seen = briefs.seen_of(&project);
+            let reading = reading_of(&project);
             let with = Writing {
                 writer: writer.as_ref(),
                 model: &model,
                 store: &store,
+                reading: reading.as_ref().map(|r| r as &dyn Reading),
             };
             let did = on_lookup(
                 &with,
@@ -628,10 +883,12 @@ pub fn pr_brief(app: &Arc<App>, project: String, number: u64) -> Result<Option<O
             let briefs = &app.briefs;
             let model = briefs.model();
             let seen = briefs.seen_of(&project);
+            let reading = reading_of(&project);
             let with = Writing {
                 writer: writer.as_ref(),
                 model: &model,
                 store: &store,
+                reading: reading.as_ref().map(|r| r as &dyn Reading),
             };
             // A failure is kept in `seen` (the tray row says so) and told to the log.
             let _ = on_open(
@@ -764,6 +1021,7 @@ mod tests {
             writer: fake,
             model: "opus",
             store,
+            reading: None,
         };
         on_lookup(&with, seen, 7, head, || Ok(source(head)), |_| {})
     }
@@ -810,6 +1068,7 @@ mod tests {
             writer: &fake,
             model: "opus",
             store: &store,
+            reading: None,
         };
         let open = |head: &str| on_open(&with, &seen, 7, head, || Ok(source(head)), |_| {});
         assert_eq!(open("aaa").unwrap().head, "aaa");
@@ -841,6 +1100,7 @@ mod tests {
             writer: &fake,
             model: "opus",
             store: &store,
+            reading: None,
         };
         let black = MAP.replace("\"core\"", "\"black-box\"");
         let interface = MAP.replace("\"core\"", "\"interface\"");
@@ -878,6 +1138,7 @@ mod tests {
             writer: &fake,
             model: "opus",
             store: &store,
+            reading: None,
         };
         let black = MAP.replace("\"core\"", "\"black-box\"");
         let gathered = Cell::new(0);
@@ -911,6 +1172,7 @@ mod tests {
             writer: &fake,
             model: "opus",
             store: &store,
+            reading: None,
         };
         let black = MAP.replace("\"core\"", "\"black-box\"");
         let opened = on_open(
@@ -947,6 +1209,7 @@ mod tests {
             writer: &fake,
             model: "opus",
             store: &store,
+            reading: None,
         };
         on_lookup(&with, &seen, 7, "aaa", || Ok(source("aaa")), |_| {});
         // #8 has none yet; #7 does; the stale one still waits.
@@ -970,6 +1233,7 @@ mod tests {
             writer: &fake,
             model: "opus",
             store: &store,
+            reading: None,
         };
         let did = on_lookup(
             &with,
@@ -1059,6 +1323,7 @@ mod tests {
                     writer: &blocking,
                     model: "opus",
                     store: &store,
+                    reading: None,
                 };
                 on_lookup(&with, &seen, 7, "aaa", || Ok(source("aaa")), |_| {});
                 briefs.busy("/p", 7, false);
@@ -1130,6 +1395,7 @@ mod tests {
             writer: &fake,
             model: "opus",
             store: &store,
+            reading: None,
         };
         let failed = |pr: u64, head: &str| {
             let mut tray = [ready_pr(pr, head)];
@@ -1157,6 +1423,7 @@ mod tests {
             writer: &fake,
             model: "opus",
             store: &store,
+            reading: None,
         };
         let sourced = Cell::new(0);
         let failing = || {
@@ -1374,5 +1641,284 @@ mod tests {
         // The first lookup that answers is the start: every head is old, so all wait to be opened.
         let first = startup.allowed("/p", true, &ready, &old, NOW, 2 * HOUR, &|_| false);
         assert!(first.is_empty(), "the start cap still holds: {first:?}");
+    }
+
+    // ---- Since you read: a new head after a full read (spec #477, part B).
+
+    const REPO_MAP: &str = r#"{ "version": 1,
+      "parts": [{ "id": "alpha", "name": "Alpha", "caption": "c", "description": "d", "tier": "core", "paths": ["alpha/"] }],
+      "actors": [], "links": [], "ignored": ["docs/"], "laws": [], "flows": [] }"#;
+
+    /// A repository whose `main` holds the map and alpha's file, and a PR branch `pr` with one commit on alpha.
+    struct Repo {
+        dir: tempfile::TempDir,
+        path: String,
+    }
+    impl Repo {
+        fn new() -> Repo {
+            let (dir, path) = studio_test_support::repo();
+            let repo = Repo { dir, path };
+            repo.commit(&[
+                ("system-map.json", REPO_MAP),
+                ("alpha/a.rs", "1"),
+                ("docs/d.md", "1"),
+            ]);
+            repo.git(&["checkout", "-q", "-b", "pr"]);
+            repo.commit(&[("alpha/a.rs", "2")]);
+            repo
+        }
+        fn git(&self, args: &[&str]) -> String {
+            studio_test_support::git(self.dir.path(), args)
+        }
+        fn commit(&self, files: &[(&str, &str)]) -> String {
+            for (name, text) in files {
+                let path = self.dir.path().join(name);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, text).unwrap();
+            }
+            self.git(&["add", "-A"]);
+            self.git(&["commit", "-q", "-m", "change"]);
+            self.head()
+        }
+        fn head(&self) -> String {
+            self.git(&["rev-parse", "HEAD"])
+        }
+        /// Main moves on with a commit of its own, and the branch is rebased onto it.
+        fn rebase(&self) -> String {
+            self.git(&["checkout", "-q", "main"]);
+            self.commit(&[("docs/main.md", "main")]);
+            self.git(&["checkout", "-q", "pr"]);
+            self.git(&["rebase", "-q", "main"]);
+            self.head()
+        }
+        fn push(&self, read: Option<&crate::fog::PrRead>, old: &str, new: &str) -> Push {
+            push_of(
+                Path::new(&self.path),
+                "main",
+                read,
+                &Default::default(),
+                7,
+                old,
+                new,
+            )
+        }
+    }
+
+    /// A read of a brief of `chapters` chapters, each lighting alpha, with chapter `i` read at `heads[i]` (none for "").
+    fn read_of(chapters: usize, heads: &[&str]) -> crate::fog::PrRead {
+        let mut read = crate::fog::PrRead {
+            lit: (0..chapters).map(|_| vec!["alpha".to_string()]).collect(),
+            ..Default::default()
+        };
+        for (i, head) in heads.iter().enumerate().filter(|(_, h)| !h.is_empty()) {
+            read.chapters.insert(
+                i,
+                crate::fog::ChapterRead {
+                    head: head.to_string(),
+                    at: 1 + i as u64,
+                },
+            );
+        }
+        read
+    }
+
+    #[test]
+    fn a_push_after_a_full_read_that_fogs_nothing_carries_the_read_over() {
+        let repo = Repo::new();
+        let h1 = repo.head();
+        let h2 = repo.commit(&[("docs/d.md", "2")]);
+        let push = repo.push(Some(&read_of(1, &[&h1])), &h1, &h2);
+        assert_eq!(push, Push::Quiet);
+        assert_eq!(
+            push.note().as_deref(),
+            Some("New push touched nothing on your map")
+        );
+    }
+
+    #[test]
+    fn a_push_after_a_full_read_that_fogs_something_is_the_since_case() {
+        let repo = Repo::new();
+        let h1 = repo.head();
+        let h2 = repo.commit(&[("alpha/a.rs", "3")]);
+        assert_eq!(repo.push(Some(&read_of(1, &[&h1])), &h1, &h2), Push::Since);
+    }
+
+    #[test]
+    fn a_pure_rebase_after_a_full_read_carries_the_read_over() {
+        let repo = Repo::new();
+        let h1 = repo.head();
+        let h2 = repo.rebase();
+        assert_ne!(h1, h2);
+        let push = repo.push(Some(&read_of(1, &[&h1])), &h1, &h2);
+        assert_eq!(push, Push::Rebased);
+        assert_eq!(
+            push.note().as_deref(),
+            Some("Rebased onto main, nothing new in the PR")
+        );
+    }
+
+    #[test]
+    fn a_rebase_that_drops_or_changes_a_commit_rewrites_the_brief() {
+        let repo = Repo::new();
+        repo.commit(&[("alpha/b.rs", "1")]);
+        let h1 = repo.head();
+        let read = read_of(1, &[&h1]);
+        // The branch is rebuilt on a moved main with only its second commit: the counts differ.
+        repo.git(&["checkout", "-q", "main"]);
+        repo.commit(&[("docs/main.md", "main")]);
+        repo.git(&["checkout", "-q", "-B", "pr"]);
+        repo.git(&["cherry-pick", &h1]);
+        let dropped = repo.head();
+        assert_eq!(
+            repo.push(Some(&read), &h1, &dropped),
+            Push::Rewrite(Some(REBASED.into()))
+        );
+        // The branch rebuilt with as many commits, one of them a different patch.
+        repo.git(&["checkout", "-q", "-B", "pr", "main"]);
+        repo.commit(&[("alpha/a.rs", "other")]);
+        let changed = repo.commit(&[("alpha/b.rs", "1")]);
+        assert_eq!(
+            repo.push(Some(&read), &h1, &changed),
+            Push::Rewrite(Some(REBASED.into()))
+        );
+    }
+
+    #[test]
+    fn a_missing_old_head_rewrites_the_brief() {
+        let repo = Repo::new();
+        let gone = "0".repeat(40);
+        let h2 = repo.head();
+        assert_eq!(
+            repo.push(Some(&read_of(1, &[&gone])), &gone, &h2),
+            Push::Rewrite(Some(REBASED.into()))
+        );
+    }
+
+    #[test]
+    fn a_partial_read_rewrites_the_brief_and_says_how_much_was_read() {
+        let repo = Repo::new();
+        let h0 = repo.git(&["rev-parse", "HEAD~1"]);
+        let h1 = repo.head();
+        let h2 = repo.commit(&[("docs/d.md", "2")]);
+        let note = |read: &crate::fog::PrRead| repo.push(Some(read), &h1, &h2);
+        let one_of_two = Push::Rewrite(Some(
+            "Rewritten after a new push; you had read 1 of 2".into(),
+        ));
+        assert_eq!(note(&read_of(2, &[&h1, ""])), one_of_two);
+        // The lit parts did not change, so an earlier chapter's read stayed at its old head: not fully read at H1.
+        assert_eq!(note(&read_of(2, &[&h0, &h1])), one_of_two);
+        // Nothing read: the rewrite has no note.
+        assert_eq!(note(&read_of(2, &[])), Push::Rewrite(None));
+        assert_eq!(repo.push(None, &h1, &h2), Push::Rewrite(None));
+    }
+
+    /// Daniel's read kept in a state file, as the server's `Reading`.
+    struct Rig {
+        repo: Repo,
+        state: tempfile::TempDir,
+        store_dir: tempfile::TempDir,
+    }
+    impl Rig {
+        fn new() -> Rig {
+            Rig {
+                repo: Repo::new(),
+                state: tempfile::tempdir().unwrap(),
+                store_dir: tempfile::tempdir().unwrap(),
+            }
+        }
+        fn reading(&self) -> GitReading {
+            GitReading {
+                project: self.repo.path.clone(),
+                file: self.state.path().join("map-state.json"),
+                reference: Some("main".into()),
+            }
+        }
+        fn user(&self) -> crate::map::UserState {
+            crate::map::read_user(&self.reading().file, &self.repo.path)
+        }
+    }
+
+    #[test]
+    fn after_a_carry_over_the_pr_stops_waiting_and_the_next_lookup_keeps_the_copied_brief() {
+        let rig = Rig::new();
+        let store = BriefStore::open(rig.store_dir.path()).unwrap();
+        let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+        let reading = rig.reading();
+        let with = Writing {
+            writer: &fake,
+            model: "opus",
+            store: &store,
+            reading: Some(&reading),
+        };
+        let look = |head: &str| on_lookup(&with, &seen, 7, head, || Ok(source(head)), |_| {});
+        let h1 = rig.repo.head();
+        assert_eq!(look(&h1), Did::Wrote);
+        let calls = fake.0.get();
+        let lit = lit_parts(&store.get(7, &h1).unwrap().brief);
+        crate::fog::mark_read(&reading.file, &rig.repo.path, 7, 0, &h1, lit.clone(), 1).unwrap();
+        let h2 = rig.repo.rebase();
+        assert_eq!(look(&h2), Did::Carried);
+        let copied = store
+            .get(7, &h2)
+            .expect("the brief is copied to the new head");
+        assert_eq!((copied.head.as_str(), copied.stale), (h2.as_str(), false));
+        assert_eq!(store.latest(7).unwrap().head, h2);
+        assert_eq!(rig.user().fog.reads[&7].lit, lit, "the lit parts are kept");
+        assert!(waiting_numbers(&store, &[ready_pr(7, &h2)], Some(&rig.user())).is_empty());
+        assert_eq!(look(&h2), Did::Kept);
+        assert_eq!(look(&h2), Did::Kept);
+        assert_eq!(fake.0.get(), calls, "the writer was not asked again");
+        // The tray says why the read carried over.
+        let briefs = PrBriefs::new(None);
+        *briefs.seen_of("/p").lock().unwrap() = std::mem::take(&mut *seen.lock().unwrap());
+        let mut tray = [ready_pr(7, &h2)];
+        briefs.annotate_with("/p", &store, Some(&rig.user()), &mut tray);
+        let info = tray[0].brief.clone().unwrap();
+        assert_eq!(
+            info.note.as_deref(),
+            Some("Rebased onto main, nothing new in the PR")
+        );
+        assert!(info.read && !info.stale);
+    }
+
+    #[test]
+    fn a_push_that_does_not_carry_stales_the_brief_as_before_and_the_tray_says_why() {
+        let rig = Rig::new();
+        let store = BriefStore::open(rig.store_dir.path()).unwrap();
+        let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+        let reading = rig.reading();
+        let with = Writing {
+            writer: &fake,
+            model: "opus",
+            store: &store,
+            reading: Some(&reading),
+        };
+        let h1 = rig.repo.head();
+        on_lookup(&with, &seen, 7, &h1, || Ok(source(&h1)), |_| {});
+        let h2 = rig.repo.rebase();
+        // Never read: the brief is rewritten, with no note.
+        assert_eq!(
+            on_lookup(&with, &seen, 7, &h2, || Ok(source(&h2)), |_| {}),
+            Did::Staled
+        );
+        let opened = on_open(&with, &seen, 7, &h2, || Ok(source(&h2)), |_| {}).unwrap();
+        assert_eq!(opened.head, h2);
+        // Read in full at H2, then a push the branch does not descend from.
+        let lit = lit_parts(&opened.brief);
+        crate::fog::mark_read(&reading.file, &rig.repo.path, 7, 0, &h2, lit, 2).unwrap();
+        rig.repo.git(&["checkout", "-q", "-B", "pr", "main"]);
+        let h3 = rig.repo.commit(&[("alpha/a.rs", "4")]);
+        assert_eq!(
+            on_lookup(&with, &seen, 7, &h3, || Ok(source(&h3)), |_| {}),
+            Did::Staled
+        );
+        let briefs = PrBriefs::new(None);
+        *briefs.seen_of("/p").lock().unwrap() = std::mem::take(&mut *seen.lock().unwrap());
+        let mut tray = [ready_pr(7, &h3)];
+        briefs.annotate_with("/p", &store, Some(&rig.user()), &mut tray);
+        assert_eq!(
+            tray[0].brief.clone().unwrap().note.as_deref(),
+            Some(REBASED)
+        );
     }
 }

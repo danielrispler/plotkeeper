@@ -13,7 +13,8 @@ import { briefsWritten } from "./writers.js";
 export type TrayRow = { number: number; chapter: number | null; title: string; note: string; openable: boolean };
 
 // The tray's rows; none when nothing is ready, so the tray is not drawn. Without `claude` (`briefs` false) no brief is written,
-// so a PR with none stored says briefs need Claude (spec #320).
+// so a PR with none stored says briefs need Claude (spec #320). A brief at the PR's head says, in place of "brief ready", why it is
+// what it is after a push (`note`, #477 part B): the read carried over, or the brief was rewritten.
 export const trayRows = (ready: ReadyPr[], briefs = true): TrayRow[] =>
   ready.flatMap((pr): TrayRow[] => {
     const title = pr.title || `PR #${pr.number}`;
@@ -26,7 +27,7 @@ export const trayRows = (ready: ReadyPr[], briefs = true): TrayRow[] =>
       if (brief?.failed) return [{ number: pr.number, chapter: 0, title, note: `#${pr.number} · the brief could not be written; open it to try again`, openable: true }];
       return [{ number: pr.number, chapter: 0, title, note: `#${pr.number} · the brief is written when you open it`, openable: true }];
     }
-    const state = brief.writing ? "writing it again…" : brief.failed ? "it could not be rewritten; open it to try again" : brief.stale ? "a newer push; rewritten when opened" : "brief ready";
+    const state = brief.writing ? "writing it again…" : brief.failed ? "it could not be rewritten; open it to try again" : brief.stale ? "a newer push; rewritten when opened" : (brief.note ?? "brief ready");
     if (brief.chapters.length === 1) return [{ number: pr.number, chapter: 0, title: brief.chapters[0] || title, note: `#${pr.number} · ${state}`, openable: true }];
     return brief.chapters.map((chapter, i) => ({
       number: pr.number,
