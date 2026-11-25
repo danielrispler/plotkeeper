@@ -237,6 +237,59 @@ export function fullTitle<T extends HTMLElement>(node: T, full: string | null | 
   return node;
 }
 
+// The page's hints (spec #582): each trigger's own `popover="hint"`, kept in `#hints` by id, so a trigger drawn again, as the list's rows
+// are on every update, finds its hint and does not make another. A hint whose trigger left the page is dropped a moment later.
+const hints = new Map<string, HTMLElement>();
+let loose = 0;
+let pruning: ReturnType<typeof setTimeout> | undefined;
+const hintId = (key: string) => `hint-${key.replace(/[^\w-]/g, (c) => `_${c.charCodeAt(0).toString(16)}`)}`;
+const squeezed = (words: string | null) => (words ?? "").replace(/\s+/g, " ").trim();
+
+function pruneHints() {
+  pruning = undefined;
+  if (!document.querySelectorAll) return;
+  const wired = new Set([...document.querySelectorAll("[interestfor]")].map((trigger) => trigger.getAttribute("interestfor")));
+  for (const [id, node] of hints) {
+    if (wired.has(id)) continue;
+    node.remove();
+    hints.delete(id);
+  }
+}
+
+/**
+ * `trigger`, an enabled `<button>` or `<a>`, with its own hint of `words`, the one hover of the page: it shows on hover and on focus,
+ * closes on Esc and sits beside its trigger (`interestfor`, `popover="hint"`; `style.css`). The words are plain text, known when the
+ * trigger is drawn. A hint that adds to the trigger's name (its `aria-label`, else its text) is its description: `role="tooltip"` on the
+ * hint and `aria-describedby` on the trigger, unless the author set one; a hint that only repeats the name adds nothing, as it would be
+ * read twice. Any `title` goes. The trigger's `data-key` or `id` pins its hint across draws; give a trigger one.
+ */
+export function hint<T extends HTMLElement>(trigger: T, words: string): T {
+  const id = hintId(trigger.getAttribute("data-key") ?? trigger.getAttribute("id") ?? `n${++loose}`);
+  let node = hints.get(id);
+  if (!node) {
+    node = document.createElement("div");
+    node.id = id;
+    node.setAttribute("popover", "hint");
+    node.className = "hint";
+    hints.set(id, node);
+    element("hints").append(node);
+  }
+  node.textContent = words;
+  const adds = squeezed(words) !== squeezed(trigger.getAttribute("aria-label") ?? trigger.textContent);
+  if (adds) node.setAttribute("role", "tooltip");
+  else node.removeAttribute("role");
+  trigger.removeAttribute("title");
+  trigger.setAttribute("interestfor", id);
+  const described = trigger.getAttribute("aria-describedby");
+  if (adds && (described === null || described === id)) trigger.setAttribute("aria-describedby", id);
+  else if (!adds && described === id) trigger.removeAttribute("aria-describedby");
+  pruning ??= setTimeout(pruneHints, 300);
+  return trigger;
+}
+
+/** `trigger`'s hint, for a test to read, or null when it has none. */
+export const hintOf = (trigger: HTMLElement): HTMLElement | null => hints.get(trigger.getAttribute("interestfor") ?? "") ?? null;
+
 export const stepText = (step: Step | null) => (step ? `${step.tool} ${step.detail ?? ""}` : "No step yet");
 
 /** The time from `from` to `to`, such as "3m". */
