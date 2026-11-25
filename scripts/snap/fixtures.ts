@@ -2918,6 +2918,11 @@ ${writerStatusAfter("Keychain refused")}
       await show(${JSON.stringify(one)});
       const open = [...document.querySelectorAll("#map-not-placed .agent-chip")].filter((c) => c.checkVisibility()).map((c) => c.textContent);
       if (open.join() !== "#312 · CI marks") log("snap:fail the opened list did not stay open with its chips: " + open.join());
+      // Emptied and filled again, it comes back closed, so it never drops the sheet by a whole list without a click.
+      await show(${JSON.stringify([idle])});
+      await show(${JSON.stringify(three)});
+      if (document.querySelector("#map-not-placed details")?.open) log("snap:fail the list came back open after it emptied");
+      if (top() !== still) log("snap:fail the sheet moved when the list came back: " + top());
       log("sheet still ok");`, { map_state: mapState(), map_place: {} });
     return { ...f, sessions: [idle], selected: { session: idle, agent: null }, snapDone: "sheet still ok" };
   },

@@ -140,14 +140,18 @@ function paint() {
     plate.querySelector(".plate-chips")?.replaceChildren(...(byPart[plate.dataset.id!] ?? []).map((agent) => chip(agent, deps.select, lit)));
   }
   // One line that a click opens (#472), so an agent joining or leaving changes its count and not its height. The same element is kept
-  // from paint to paint, so the list stays open, and its line keeps the focus, while agents come and go.
+  // from paint to paint, so an opened list stays open, and its line keeps the focus, while agents come and go.
   const slot = view.slots.notPlaced;
   if (notPlaced.length) {
     const list = notPlacedList();
     const line = notPlacedLine(notPlaced);
     list.summary.replaceChildren(text("span", line.count), ...(line.needsYou ? [text("span", ` · ${line.needsYou}`, "not-placed-asking")] : []));
     list.chips.replaceChildren(...notPlaced.map((agent) => chip(agent, deps.select, lit)));
-    if (list.details.parentElement !== slot) slot.replaceChildren(list.details);
+    // Back in its slot after it emptied or the map was cleared, the list comes back closed, so it never drops the sheet without a click.
+    if (list.details.parentElement !== slot) {
+      list.details.open = false;
+      slot.replaceChildren(list.details);
+    }
   } else slot.replaceChildren();
   syncSide(view.slots);
 }
