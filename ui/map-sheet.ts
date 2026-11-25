@@ -18,7 +18,6 @@ import { openDrawer } from "./map-drawer.js";
 import { drawStrip } from "./map-history.js";
 import { overturnNote, ratifyActions } from "./map-ratify.js";
 import { sheetLinkItem, sheetPending, statusWords } from "./ratify.js";
-import { besideSheet } from "./panel.js";
 import { enterRefresher, refresherNode, staleWhy } from "./map-stale.js";
 import { ciDrawer, effectiveTier, fogActions, type Part, proofDrawer, type Sheet, sheetCi, sheetMarks, sheetOf, talksTo, type Tier } from "./map-model.js";
 import { openBriefOf, openCatchUpOf } from "./map-brief.js";
@@ -391,18 +390,23 @@ export function heldList(holds: Sheet["holds"]): HTMLElement {
   return list;
 }
 
-onPlateClick(({ view, part }) => {
-  if (open?.part !== part.id) refreshing = null;
-  open = { project: view.project, part: part.id };
-  // Below 1007 px, or over the widened diff, the sheet takes the left panel's place (#385).
-  besideSheet(part.id);
-  logStop("map-action", view.project);
-  drawSheet(view);
-});
-onDraw(drawSheet);
-// The explanations switched on or off (#522): the open sheet draws again with or without them.
-onExplanations(() => {
-  const view = currentMap();
-  if (view && open) drawSheet(view);
-});
-registerLayer("sheet", { open: () => open !== null && currentMap() !== null, close: closeSheet });
+/**
+ * Hooks the sheet into the map's plate clicks and draws, the explanations switch and Esc's `sheet` layer. `besideSheet` is the left
+ * panel's (`panel.ts`), which imports this module: below 1007 px, or over the widened diff, the sheet takes the panel's place (#385).
+ */
+export function startMapSheet(besideSheet: (part: string) => void) {
+  onPlateClick(({ view, part }) => {
+    if (open?.part !== part.id) refreshing = null;
+    open = { project: view.project, part: part.id };
+    besideSheet(part.id);
+    logStop("map-action", view.project);
+    drawSheet(view);
+  });
+  onDraw(drawSheet);
+  // The explanations switched on or off (#522): the open sheet draws again with or without them.
+  onExplanations(() => {
+    const view = currentMap();
+    if (view && open) drawSheet(view);
+  });
+  registerLayer("sheet", { open: () => open !== null && currentMap() !== null, close: closeSheet });
+}

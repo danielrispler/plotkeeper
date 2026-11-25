@@ -175,10 +175,13 @@ export function exploreRow(project: string, worlds: MicroWorlds | undefined, key
   return node;
 }
 
-registerLayer("micro-world", { open: () => shown !== null, close });
-// Another project closes the overlay; otherwise its head is drawn again over the new payload, so "may be out of date" follows the map, and
-// its frame stays.
-onDraw((view) => {
-  if (shown && (view.project !== shown.project || view.scrub)) shown = null;
-  paint(view.state.micro_worlds);
-});
+/** Hooks the overlay into Esc's `micro-world` layer and the map's draws. */
+export function startMicroWorld() {
+  registerLayer("micro-world", { open: () => shown !== null, close });
+  // Another project closes the overlay; otherwise its head is drawn again over the new payload, so "may be out of date" follows the
+  // map, and its frame stays.
+  onDraw((view) => {
+    if (shown && (view.project !== shown.project || view.scrub)) shown = null;
+    paint(view.state.micro_worlds);
+  });
+}

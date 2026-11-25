@@ -15,18 +15,19 @@ import { type Actions, newestUnseen, nextNeedsYou, paletteEntries, run, stepLine
 import { hover, realClock, shownGate } from "./hover.js";
 import { arrange } from "./layout.js";
 import { fitMap, mapEscape, openMap, projectsChanged, startMap } from "./map.js";
-import "./map-history.js";
-import "./map-sheet.js";
-import "./map-tray.js";
-import "./map-runs.js";
-import "./micro-world.js";
+import { startMapHistory } from "./map-history.js";
+import { startMapSheet } from "./map-sheet.js";
+import { startMapTray } from "./map-tray.js";
+import { startMapRuns } from "./map-runs.js";
+import { startMicroWorld } from "./micro-world.js";
+import { openBriefOf } from "./map-brief.js";
 import { openPreFlight } from "./map-pre-flight.js";
 import { startMapAgents } from "./map-agents.js";
 import { drawSidebar, showSessions, staleDots, startList } from "./list.js";
 import { listSpace } from "./list-model.js";
 import { deselect, pressSession, select, show } from "./selection.js";
 import { diffIn, historyIn, logIn, startPanes } from "./panes.js";
-import { closePanel, panelShown, showHistory, showPanel, startPanel } from "./panel.js";
+import { besideSheet, closePanel, panelShown, showHistory, showPanel, startPanel } from "./panel.js";
 import { showPalette } from "./palette.js";
 import { projectOfCwd, selectedProject, sidebarOrder } from "./projects.js";
 import { narrowBelow, selectedView } from "./map-model.js";
@@ -230,6 +231,12 @@ window.addEventListener("focus", recheckSeen);
 window.addEventListener("blur", recheckSeen);
 window.addEventListener("focus", () => actions.get("studio::RefreshLanded")?.());
 
+// The Map view's overlays hook into its draws and Esc's layers, in the order their imports gave them.
+startMicroWorld();
+startMapHistory({ openBriefOf });
+startMapSheet(besideSheet);
+startMapTray();
+startMapRuns();
 startPanes(select);
 startStory((id, agent) => void select(id, agent));
 startList({ pressSession, askDelete, lastHeadline });

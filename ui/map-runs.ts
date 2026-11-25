@@ -149,4 +149,5 @@ function paint(view: MapView) {
   syncSide(view.slots);
 }
 
-onDraw(paint);
+/** Hooks the runs list into the map's draws. */
+export const startMapRuns = () => onDraw(paint);

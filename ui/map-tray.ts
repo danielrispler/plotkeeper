@@ -87,4 +87,5 @@ function paint(view: MapView) {
   syncSide(view.slots);
 }
 
-onDraw(paint);
+/** Hooks the tray into the map's draws. */
+export const startMapTray = () => onDraw(paint);
