@@ -138,11 +138,12 @@ fn append() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+/// What the thread recording the trees sends back: the event with its trees, and how `studio_hook::trees` ended.
+type Recorded = (Map<String, Value>, Result<(), String>);
+
 /// `studio_hook::trees` on `event`, given `budget` when there is one; past it the line keeps none
 /// of the trees, which are given up (`studio_hook::abandon_trees`), and `given_up` gets what says
 /// their work has stopped.
-type Recorded = (Map<String, Value>, Result<(), String>);
-
 fn trees(
     event: &mut Map<String, Value>,
     data: &Path,
