@@ -714,3 +714,13 @@ export function readingOrder(positions: Record<string, Point>): string[] {
   }
   return rows.flatMap((row) => row.sort(([, a], [, b]) => a.x - b.x).map(([id]) => id));
 }
+
+// Where the law marks of a line from `a` to `b` sit: `count` points along it, 10px apart, centred on its middle, so several never stack.
+export function markPoints(a: Point, b: Point, count: number): Point[] {
+  const [dx, dy] = [b.x - a.x, b.y - a.y];
+  const length = Math.hypot(dx, dy) || 1;
+  return Array.from({ length: count }, (_, i) => {
+    const along = (i - (count - 1) / 2) * 10;
+    return { x: (a.x + b.x) / 2 + (along * dx) / length, y: (a.y + b.y) / 2 + (along * dy) / length };
+  });
+}

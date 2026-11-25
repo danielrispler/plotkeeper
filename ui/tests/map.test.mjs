@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
   actorSize, autoPlace, cameraRig, draftPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, plateTitle, rimPoint, revealPan, scrubTickets, sheetOf,
-  narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject, readingOrder, talksTo, linkLines,
+  narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject, readingOrder, talksTo, linkLines, markPoints,
 } from "../../dist/map-model.js";
 
 const part = (id, extra = {}) => ({ id, name: id, caption: "", purpose: "", holds: [], tier: "core", paths: [], ...extra });
@@ -305,4 +305,11 @@ test("a pair with an import link and a run-time link, in either direction, draws
     { ids: ["agents-hook"], from: "agents", to: "hook" },
   ]);
   assert.deepEqual(linkLines([]), []);
+});
+
+test("the law marks on one line sit apart along it, 10px from one another, centred on its middle", () => {
+  assert.deepEqual(markPoints({ x: 0, y: 0 }, { x: 100, y: 0 }, 1), [{ x: 50, y: 0 }]);
+  assert.deepEqual(markPoints({ x: 0, y: 0 }, { x: 100, y: 0 }, 3), [{ x: 40, y: 0 }, { x: 50, y: 0 }, { x: 60, y: 0 }]);
+  assert.deepEqual(markPoints({ x: 0, y: 100 }, { x: 0, y: 0 }, 2), [{ x: 0, y: 55 }, { x: 0, y: 45 }], "along the line's own direction");
+  assert.deepEqual(markPoints({ x: 5, y: 5 }, { x: 5, y: 5 }, 2), [{ x: 5, y: 5 }, { x: 5, y: 5 }], "a line of no length keeps them at its point");
 });
