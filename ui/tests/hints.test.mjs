@@ -45,7 +45,7 @@ test("a session's delete and a project's header have hints and no title", () => 
   assert.equal(words(remove), "Delete this session from the list…");
   assert.equal(remove.getAttribute("title"), null);
   const head = projectHead(/** @type {any} */ ({ key: "/a/repo", name: "repo", rollup: null, states: [], live: false }));
-  const [toggle, more] = head.childNodes;
+  const [toggle, more] = /** @type {HTMLElement[]} */ (/** @type {unknown} */ (head.childNodes));
   assert.match(words(toggle), /^\/a\/repo\n/);
   assert.equal(words(more), "Project");
   for (const button of [toggle, more]) assert.equal(button.getAttribute("title"), null);

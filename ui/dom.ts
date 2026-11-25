@@ -241,12 +241,12 @@ export function fullTitle<T extends HTMLElement>(node: T, full: string | null | 
 // are on every update, finds its hint and does not make another. A hint whose trigger left the page is dropped a moment later.
 const hints = new Map<string, HTMLElement>();
 let loose = 0;
-let pruning: ReturnType<typeof setTimeout> | undefined;
+let pruneQueued = false;
 const hintId = (key: string) => `hint-${key.replace(/[^\w-]/g, (c) => `_${c.charCodeAt(0).toString(16)}`)}`;
 const squeezed = (words: string | null) => (words ?? "").replace(/\s+/g, " ").trim();
 
 function pruneHints() {
-  pruning = undefined;
+  pruneQueued = false;
   if (!document.querySelectorAll) return;
   const wired = new Set([...document.querySelectorAll("[interestfor]")].map((trigger) => trigger.getAttribute("interestfor")));
   for (const [id, node] of hints) {
@@ -283,7 +283,10 @@ export function hint<T extends HTMLElement>(trigger: T, words: string): T {
   const described = trigger.getAttribute("aria-describedby");
   if (adds && (described === null || described === id)) trigger.setAttribute("aria-describedby", id);
   else if (!adds && described === id) trigger.removeAttribute("aria-describedby");
-  pruning ??= setTimeout(pruneHints, 300);
+  if (!pruneQueued) {
+    pruneQueued = true;
+    setTimeout(pruneHints, 300);
+  }
   return trigger;
 }
 
