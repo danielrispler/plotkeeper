@@ -156,6 +156,22 @@ const mapTray = (): Fixture =>
     map_state: mapState({ fog: { shell: "thick" }, ready: [{ number: 334, title: "PR briefs: the brief written for each ready PR", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }, { number: 336, title: "Ready for review tray", head: "a".repeat(40), brief: null }] }),
   });
 
+// After a push (#477, part B): one PR's read carried over a pure rebase, another rewritten after a partial read; each row says why.
+const mapTrayAfterPush = (): Fixture =>
+  mapOpened(`
+      const notes = [...document.querySelectorAll("#map-tray .tray-row .tray-note")].map((n) => n.textContent);
+      if (notes.length !== 2) return log("snap:fail expected 2 tray rows, saw " + notes.length);
+      if (notes[0] !== "#334 · Rebased onto main, nothing new in the PR") log("snap:fail the carried row: " + notes[0]);
+      if (notes[1] !== "#336 · Rewritten after a new push; you had read 1 of 2") log("snap:fail the rewritten row: " + notes[1]);
+      log("tray notes ok");`, {
+    map_state: mapState({
+      ready: [
+        { number: 334, title: "PR briefs: the brief written for each ready PR", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false, read: true, note: "Rebased onto main, nothing new in the PR" } },
+        { number: 336, title: "Ready for review tray", head: "a".repeat(40), brief: { stale: false, writing: false, chapters: ["The tray"], quiet: false, note: "Rewritten after a new push; you had read 1 of 2" } },
+      ],
+    }),
+  });
+
 // The confirm dialog (#459) a destructive button opens: modal, named by its heading, Cancel focused, the confirm button saying `verb`, and
 // naming each of `lost`. Nothing reaches the server's `api` until it is confirmed: Esc and Cancel send nothing. `press` is the script that
 // presses the button, found anew each time, since a refresh redraws it.
@@ -733,6 +749,26 @@ const mapBriefPartialFacts = (open: boolean): Fixture =>
       await wait(300);` : `if (chip.open) log("snap:fail the chip opens closed");`}`, true);
 const mapBriefNoFacts = (): Fixture =>
   mapBrief(briefOf(storySteps()), 0, `if (document.querySelector("#map-brief .brief-facts")) log("snap:fail a chip shows with nothing missing");`, true);
+// The stale-base line (#494): main moved since the PR's merge base on what the brief relies on. It sits under the panel's head, above
+// the step, and names each kind once; past three names the rest are counted. With no `stale_base` there is no line.
+const mapBriefStaleBase = (): Fixture =>
+  mapBrief(
+    {
+      ...briefOf(storySteps()),
+      stale_base: { laws: ["wire-types-agree"], links: ["server-window"], flows: [], paths: [], files: ["Cargo.toml", "server/src/map.rs", "server/src/pr_briefs.rs", "ui/types.ts"] },
+    },
+    0,
+    `
+      const line = document.querySelector("#map-brief .brief-stale");
+      if (!line) return log("snap:fail no stale-base line");
+      const want = "Main moved since this PR's base: law wire-types-agree · link server-window · files Cargo.toml, server/src/map.rs, server/src/pr_briefs.rs +1 more";
+      if (line.textContent !== want) log("snap:fail the stale-base line reads " + JSON.stringify(line.textContent));
+      if (line.compareDocumentPosition(document.querySelector("#map-brief .brief-cols")) !== Node.DOCUMENT_POSITION_FOLLOWING) log("snap:fail the line is not above the step");
+      if ([...line.querySelectorAll(".brief-stale-names")].some((names) => names.getAttribute("translate") !== "no")) log("snap:fail a name would be translated");`,
+    true,
+  );
+const mapBriefNoStaleBase = (): Fixture =>
+  mapBrief(briefOf(storySteps()), 0, `if (document.querySelector("#map-brief .brief-stale")) log("snap:fail a stale-base line shows with nothing moved");`, true);
 // The not-confirmed popover (#491): the mark on a step, or on a flagged decision in the ratify step, opens a popover under it listing its
 // reasons without the mark's own words. \`esc\` checks that Esc closes only the popover, and that a step on closes it.
 const whyFlags = ["claim check: no fact says a turn is written once", "claim check: the order of events is not in the diff", "not confirmed from the facts"];
@@ -2970,6 +3006,7 @@ ${writerStatusAfter("Keychain refused")}
   writersBriefsNeedClaudeNarrow: (): Fixture => fixtures.writersBriefsNeedClaude(),
   // The contrast pass (#455) runs here too.
   mapTray: (): Fixture => ({ ...mapTray(), contrast: true }),
+  mapTrayAfterPush,
   mapRuns,
   // The contrast pass (#455) runs here too.
   mapPreFlight: (): Fixture => ({ ...mapPreFlight(), contrast: true }),
@@ -2999,6 +3036,8 @@ ${writerStatusAfter("Keychain refused")}
   mapBriefPartialFacts: () => mapBriefPartialFacts(false),
   mapBriefPartialFactsOpen: () => mapBriefPartialFacts(true),
   mapBriefNoFacts,
+  mapBriefStaleBase,
+  mapBriefNoStaleBase,
   mapBriefWhy: () => mapBriefWhy(false),
   mapBriefWhyEsc: () => mapBriefWhy(true),
   mapBriefWhyDecision,

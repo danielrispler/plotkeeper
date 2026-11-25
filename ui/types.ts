@@ -490,7 +490,8 @@ export type RatifyDetail =
   | { of: "part"; name: RatifyWords; purpose: RatifyWords; holds: RatifyHeld[]; paths_added: string[]; paths_removed: string[] }
   | { of: "link"; kind: RatifyWords; reason: RatifyWords };
 // What a ready PR's brief is doing (`pr_briefs.rs`): a newer head was pushed (stale), being written now, and the chapters' titles, or the one story's.
-export type BriefInfo = { stale: boolean; writing: boolean; chapters: string[]; quiet: boolean; read?: boolean; failed?: boolean };
+// `note` (#477, part B): why the brief at this head is what it is after a push: the read carried over, or it was rewritten.
+export type BriefInfo = { stale: boolean; writing: boolean; chapters: string[]; quiet: boolean; read?: boolean; failed?: boolean; note?: string };
 export type ReadyPr = { number: number; title: string; head: string; branch?: string; brief: BriefInfo | null };
 // A PR brief as the writer made it and `pr_brief` returns it (`understanding/src/pr_brief.rs`). A step's `flags` are what the checks found wrong with it
 // that the one rewrite did not mend: it shows "not confirmed from the facts".
@@ -526,7 +527,10 @@ export type Guard = { parts: string[] };
 export type NewLaw = { id: string; on: string; text: string };
 // `partial`: the writer did not see the whole diff.
 // `expected`: the PR matched the project's pre-flight (#394).
-export type BriefView = { brief: StoredBrief; partial: boolean; expected?: Expected };
+// What main changed since an open PR's merge base that bears on its brief (#494): laws, links and flows at a lit part, lit parts whose
+// `paths` changed, and changed files of lit parts and root build manifests.
+export type StaleBase = { laws: string[]; links: string[]; flows: string[]; paths: string[]; files: string[] };
+export type BriefView = { brief: StoredBrief; partial: boolean; expected?: Expected; stale_base?: StaleBase };
 // What `pr_brief` answers: the brief, or that its write has started (it comes through `map-landed`).
 export type BriefOpened = BriefView | { writing: true };
 export type Fog = "thin" | "thick";
