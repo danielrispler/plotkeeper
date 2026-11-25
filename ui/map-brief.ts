@@ -3,7 +3,7 @@
 // parts the brief lights; the panel is one narrow width, as tall as the step it shows (its CSS scrolls a taller step inside it, #449), and
 // crossfades between steps; a figure for a change inside one part is drawn under the step's words by `figureShapes` from the writer's labels;
 // citations sit in quiet type, a "Partial facts · N" chip lists what the brief was written without (#491), and an item not confirmed
-// from the facts carries a mark whose popover lists why. "See the code" opens the drawer (`map-drawer.ts`) above it. Opening a brief returns the map to now.
+// from the facts carries a mark whose popover lists why. A step's "See the code" opens its parts' files in the drawer (`map-drawer.ts`) above it. Opening a brief returns the map to now.
 // A step's check (#340) is answered in place: a pick in the panel, an order by tapping parts on the map into numbered slots (`pickRun`, `orderRun`);
 // Check grades it, a wrong answer shows the correction, and an order check replays the right path along the links.
 // Esc (`brief` layer) closes it and keeps its step; an open not-confirmed popover (`popover` layer) closes first, and a new step closes it. `map-model.ts` holds the logic: `briefPlayer`, `briefCamera`, `figureShapes`.
@@ -23,8 +23,8 @@ import { scrubTo } from "./map-history.js";
 import { overturnNote, ratifyActions, ratifyDetail } from "./map-ratify.js";
 import { ratifyStep, statusWords } from "./ratify.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
-import { actorSize, alsoAt, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureMax, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, partialFactsLines, pickRun, type PickRun, playlist, plateSize, stageLabel, storySteps, type Rect, type Shape, unconfirmed, unconfirmedReasons } from "./map-model.js";
-import type { BriefCheck, BriefFigure, BriefStep, BriefView, CatchUpOffer, PrBrief, RatifyRow, ReadyPr, StoredCatchUp } from "./types.js";
+import { actorSize, alsoAt, effectiveTier, awaitedCatchUp, catchUpIds, awaitedWrite, briefCamera, briefPlayer, chapterGate, type Gate, citeDrawer, commitDrawer, figureMax, figureShapes, figureSize, fogListLines, latestRequest, orderRun, type OrderRun, partialFactsLines, pickRun, type PickRun, playlist, plateSize, stageLabel, storySteps, type Rect, type Shape, stepCode, unconfirmed, unconfirmedReasons } from "./map-model.js";
+import type { BriefCheck, BriefFigure, BriefStep, BriefView, CatchUpOffer, CommitFiles, PrBrief, PrDiffArgs, RatifyRow, ReadyPr, StoredCatchUp } from "./types.js";
 
 const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
 // The brief being played, as `pr_brief` returned it.
@@ -607,6 +607,31 @@ function figureExplore(view: MapView, node: HTMLElement, step: BriefStep, pr: nu
 }
 
 // A long part catch-up's first step says it summarises the main shifts, with the full fog list behind it (#396).
+// A step's own "See the code" (#490), under its words: the files of the parts it lights; every file on the Ratify step, or on the last
+// step when there is none; every file with a note on a step that lights no changed file. A part catch-up has no one PR's code to show.
+function codeInto(view: MapView, node: HTMLElement, list: BriefStep[], index: number) {
+  const step = list[index];
+  const words = node.querySelector(".brief-txt");
+  if (!playing || catchUp || !step || !words) return;
+  const want = stepCode(list, index, new Set(view.doc.parts.map((part) => part.id)));
+  const ask: Omit<PrDiffArgs, "parts"> = { project: view.project, number: playing.brief.pr, head: playing.brief.head, title: playing.brief.brief.title };
+  const diff = (parts?: string[]) => invoke("pr_diff", (parts ? { ...ask, parts } : ask) satisfies PrDiffArgs);
+  const unlit = (found: CommitFiles) => {
+    const drawer = commitDrawer(found);
+    return { ...drawer, note: `This step lights no changed files · ${drawer.note}` };
+  };
+  const button = text("button", "See the code", "btn quiet brief-code");
+  button.title = want === "all" ? "Open every file the PR changed, above the brief" : "Open the changed files of the parts this step lights, above the brief";
+  button.addEventListener("click", () => {
+    // The PR's diff (the files the writer read); when git cannot give it, what the step quoted.
+    const drawer = want === "all" ? diff().then(commitDrawer) : want === "none" ? diff().then(unlit) : diff(want).then((found) => (found.files.length ? commitDrawer(found) : diff().then(unlit)));
+    drawer.then(openDrawer).catch((e) => (failure("pr_diff")(e), openDrawer(citeDrawer(step))));
+  });
+  const row = text("div", "", "brief-step-code");
+  row.append(button);
+  words.append(row);
+}
+
 function summaryInto(node: HTMLElement) {
   const summary = catchUp?.summary;
   const words = node.querySelector(".brief-txt");
@@ -838,6 +863,7 @@ function show(view: MapView, same: boolean) {
   const fill = () => {
     const node = stepNode(view, step, pr, also);
     figureExplore(view, node, step, pr, now.chapter);
+    codeInto(view, node, list, now.step);
     if (now.step === 0) summaryInto(node);
     const bar = endBar(node, now.step, list.length);
     cols.replaceChildren(node);
@@ -857,9 +883,6 @@ function show(view: MapView, same: boolean) {
   }
   box.querySelectorAll(".brief-dots i").forEach((dot, i) => dot.classList.toggle("at", i === now.step));
   box.querySelector(".brief-dots")!.setAttribute("aria-label", `Step ${now.step + 1} of ${list.length}`);
-  const code = box.querySelector<HTMLButtonElement>(".brief-code")!;
-  // A part catch-up has no one PR's code to show.
-  code.hidden = catchUp !== null;
   (box.querySelector(".brief-back") as HTMLButtonElement).disabled = now.step === 0;
   if (step.check) runOf(view, step.check);
   syncNext(step);
@@ -908,17 +931,6 @@ function buildPanel(view: MapView, list: BriefStep[]) {
   // The brief's one live region (#456): Back and Next put the new step's title in it, and nothing else; the step itself is not live.
   const live = text("p", "", "visually-hidden brief-live");
   live.setAttribute("aria-live", "polite");
-  const code = text("button", "See the code", "btn quiet brief-code");
-  code.title = "Open the PR's changed files, above the brief";
-  code.addEventListener("click", () => {
-    const step = steps()[player.current()?.step ?? 0];
-    const now = player.current();
-    if (!step || !now || !playing) return;
-    // The PR's diff (the files the writer read); when git cannot give it, what the step quoted.
-    invoke("pr_diff", { project: now.project, number: now.pr, head: playing.brief.head, title: playing.brief.brief.title })
-      .then((found) => openDrawer(commitDrawer(found)))
-      .catch((e) => (failure("pr_diff")(e), openDrawer(citeDrawer(step))));
-  });
   const back = text("button", "Back", "btn brief-back");
   back.title = "The step before";
   back.addEventListener("click", () => move(-1));
@@ -927,7 +939,7 @@ function buildPanel(view: MapView, list: BriefStep[]) {
   next.title = "The next step";
   next.addEventListener("click", () => advance());
   const foot = text("div", "", "brief-foot");
-  foot.append(dots, code, back, next);
+  foot.append(dots, back, next);
   // A PR that closes the pre-flighted issue, or a ticket under it (#394): what Daniel expected against what it touched.
   const line = expectedLine(playing?.expected, view.doc);
   const facts = factsChip();

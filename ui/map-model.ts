@@ -477,6 +477,15 @@ export function partialFactsLines(facts: PartialFacts | undefined, partial: bool
   return lines;
 }
 
+// Which files a step's "See the code" asks `pr_diff` for (#490), the step at `index` of the played `list`: "all" on the Ratify step, and
+// on the last step when the list has no Ratify step; else the map's parts it lights (actors left out), or "none" when it lights no part.
+export function stepCode(list: Pick<BriefStep, "k" | "on">[], index: number, parts: ReadonlySet<string>): "all" | "none" | string[] {
+  const last = list.some((each) => each.k === "Ratify") ? list[index]?.k === "Ratify" : index === list.length - 1;
+  if (last) return "all";
+  const lit = (list[index]?.on ?? []).filter((id) => parts.has(id));
+  return lit.length ? lit : "none";
+}
+
 // What "See the code" opens in the drawer for a step: what the writer quoted, each with its source. The page has no editor to jump to.
 export function citeDrawer(step: Pick<BriefStep, "h" | "cites">): Drawer {
   return {

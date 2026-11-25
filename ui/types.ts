@@ -545,6 +545,8 @@ export type WaitingBriefs = { project: string; numbers: number[] };
 // The map as of a commit (a scrub), and a commit's files with their diffs (the drill-down).
 export type HistoricalMap = { commit: string; short: string; label: string; source: string };
 export type CommitFiles = { commit: string; short: string; label: string; url: string | null; files: { path: string; diff: string }[] };
+// What `pr_diff` is asked (`map.rs`): `parts`, only the files these parts own; every file the PR changed when absent.
+export type PrDiffArgs = { project: string; number: number; head: string; title: string; parts?: string[] };
 
 // A project of the saved list (`server/src/projects.rs`): its main checkout, and whether its folder was moved or deleted.
 export type SavedProject = { path: string; gone: boolean };

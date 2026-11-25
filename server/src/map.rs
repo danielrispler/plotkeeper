@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     path::{Path, PathBuf},
     process::Command,
     sync::{Arc, Mutex},
@@ -441,14 +441,49 @@ pub fn map_commit(project: String, commit: String) -> Result<crate::history::Com
     crate::history::commit_files(Path::new(&project), &commit)
 }
 
+/// What "See the code" of a PR's brief asks for (`PrDiffArgs` in `ui/types.ts`). `parts`: only the files owned by these parts, under the
+/// default branch's map; all the PR's files when absent.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PrDiffArgs {
+    pub project: String,
+    pub number: u64,
+    pub head: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parts: Option<Vec<String>>,
+}
+
 /// "See the code" of a PR's brief: the files its head changed since it left the default branch, with their diffs, for the drawer.
-pub fn pr_diff(
-    project: String,
-    number: u64,
-    head: String,
-    title: String,
-) -> Result<crate::history::Commit, String> {
-    crate::history::pr_files(Path::new(&project), &head, &format!("#{number} {title}"))
+pub fn pr_diff(args: PrDiffArgs) -> Result<crate::history::Commit, String> {
+    let PrDiffArgs {
+        project,
+        number,
+        head,
+        title,
+        parts,
+    } = args;
+    let repo = Path::new(&project);
+    let map = parts.as_ref().and_then(|_| {
+        read_map(repo)
+            .source
+            .and_then(|text| system_map::parse_lenient(&text).ok())
+    });
+    let keep = |all: Vec<String>| match parts {
+        None => all,
+        Some(parts) => {
+            let owned: BTreeSet<String> = map
+                .map(|map| system_map::touched_for_map(&map, &all).parts)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|found| parts.contains(&found.id))
+                .flat_map(|found| found.files)
+                .collect();
+            all.into_iter()
+                .filter(|path| owned.contains(path))
+                .collect()
+        }
+    };
+    crate::history::pr_files(repo, &head, &format!("#{number} {title}"), keep)
 }
 
 /// Why a project header's quiet dot lights (#344, #386): fog on a Core part, a broken law, a PR brief waiting, in that order.
@@ -679,6 +714,50 @@ mod tests {
         // With no map on the branch, nothing is placed.
         let bare = origin();
         assert!(place(&bare.main, &groups)["both"].is_empty());
+    }
+
+    #[test]
+    fn see_the_code_of_a_step_keeps_its_parts_files_before_the_cap_of_80() {
+        let o = origin();
+        let map = r#"{"version":1,"parts":[
+            {"id":"a","name":"A","caption":"","description":"","tier":"core","paths":["a/"]},
+            {"id":"z","name":"Z","caption":"","description":"","tier":"core","paths":["z/"]},
+            {"id":"zz","name":"ZZ","caption":"","description":"","tier":"core","paths":["z/own/"]}],
+            "actors":[],"links":[],"ignored":["z/docs/"],"laws":[]}"#;
+        commit_file(&o.seed, MAP_FILE, map);
+        git(&o.seed, &["push", "-q", "origin", "HEAD"]);
+        git(&o.main, &["fetch", "-q", "origin"]);
+        git(&o.main, &["checkout", "-q", "-b", "work", "origin/trunk"]);
+        // 85 files of part a sort before part z's, so the cap of 80 would cut z's away.
+        for i in 0..85 {
+            let dir = o.main.join("a");
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(format!("f{i:02}")), "x\n").unwrap();
+        }
+        for name in ["z/one", "z/two", "z/own/three", "z/docs/four"] {
+            let path = o.main.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "x\n").unwrap();
+        }
+        git(&o.main, &["add", "-A"]);
+        git(&o.main, &["commit", "-q", "-m", "work"]);
+        let head = git(&o.main, &["rev-parse", "HEAD"]);
+        let diff = |parts: Option<&[&str]>| {
+            let found = pr_diff(PrDiffArgs {
+                project: o.main.display().to_string(),
+                number: 7,
+                head: head.clone(),
+                title: "Work".into(),
+                parts: parts.map(|p| p.iter().map(|s| s.to_string()).collect()),
+            })
+            .unwrap();
+            found.files.into_iter().map(|f| f.path).collect::<Vec<_>>()
+        };
+        // A later part's pattern wins its files, and an ignored file is no part's.
+        assert_eq!(diff(Some(&["z"])), ["z/one", "z/two"]);
+        assert_eq!(diff(Some(&["zz", "nobody"])), ["z/own/three"]);
+        assert!(diff(Some(&[])).is_empty());
+        assert_eq!(diff(None).len(), 80);
     }
 
     #[test]

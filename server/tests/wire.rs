@@ -683,6 +683,26 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
             json(commit(Some("https://github.com/o/r/commit/0123456"))),
         ),
         ("CommitFiles", json(commit(None))),
+        (
+            "PrDiffArgs",
+            json(studio_server::map::PrDiffArgs {
+                project: "/repo".into(),
+                number: 334,
+                head: COMMIT.into(),
+                title: "PR briefs".into(),
+                parts: Some(vec!["server".into()]),
+            }),
+        ),
+        (
+            "PrDiffArgs",
+            json(studio_server::map::PrDiffArgs {
+                project: "/repo".into(),
+                number: 334,
+                head: COMMIT.into(),
+                title: "PR briefs".into(),
+                parts: None,
+            }),
+        ),
         ("Proof", json(proof(Some("the_wire_samples")))),
         ("Proof", json(proof(None))),
         (
@@ -834,6 +854,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
             "HistoryEntry",
             "HistoricalMap",
             "CommitFiles",
+            "PrDiffArgs",
             "Proof",
             "BriefView",
             "WaitingBriefs",

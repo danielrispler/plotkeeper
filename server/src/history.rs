@@ -257,11 +257,17 @@ const DIFF_LINES: usize = 400;
 /// The most files of a commit the drawer lists.
 const FILES: usize = 80;
 
-/// The files that differ between `from` and `to`, each with its diff cut to what the drawer holds.
-fn files_between(repo: &Path, from: &str, to: &str) -> Result<Vec<File>, String> {
+/// The files that differ between `from` and `to`, each with its diff cut to what the drawer holds. `keep` picks among all their paths
+/// before the cap of [`FILES`], so a file it keeps is never cut for sorting late.
+fn files_between(
+    repo: &Path,
+    from: &str,
+    to: &str,
+    keep: impl FnOnce(Vec<String>) -> Vec<String>,
+) -> Result<Vec<File>, String> {
     let names = git(repo, &["diff", "--no-renames", "--name-only", from, to])?;
-    Ok(names
-        .lines()
+    Ok(keep(names.lines().map(String::from).collect())
+        .iter()
         .take(FILES)
         .map(|path| {
             let diff =
@@ -288,7 +294,7 @@ fn files_between(repo: &Path, from: &str, to: &str) -> Result<Vec<File>, String>
 pub fn commit_files(repo: &Path, commit: &str) -> Result<Commit, String> {
     let (full, label) = subject_of(repo, commit)?;
     let parent = parent_of(repo, &full);
-    let files = files_between(repo, &parent, &full)?;
+    let files = files_between(repo, &parent, &full, |all| all)?;
     let url = git(repo, &["remote", "get-url", "origin"])
         .ok()
         .and_then(|remote| github_commit_url(&remote, &full));
@@ -302,8 +308,13 @@ pub fn commit_files(repo: &Path, commit: &str) -> Result<Commit, String> {
 }
 
 /// What a PR changed: its files against where its head left the default branch, each with its diff, as the brief's writer read them
-/// (`git diff base head` from the merge base). `label` names the PR in the drawer.
-pub fn pr_files(repo: &Path, head: &str, label: &str) -> Result<Commit, String> {
+/// (`git diff base head` from the merge base). `label` names the PR in the drawer; `keep` picks the files to show, before the cap.
+pub fn pr_files(
+    repo: &Path,
+    head: &str,
+    label: &str,
+    keep: impl FnOnce(Vec<String>) -> Vec<String>,
+) -> Result<Commit, String> {
     let (reference, _) =
         crate::map::default_ref(repo).ok_or("the repository has no default branch")?;
     let full = git(
@@ -313,7 +324,7 @@ pub fn pr_files(repo: &Path, head: &str, label: &str) -> Result<Commit, String> 
     let base = git(repo, &["merge-base", &reference, &full])?;
     Ok(Commit {
         short: full.chars().take(7).collect(),
-        files: files_between(repo, &base, &full)?,
+        files: files_between(repo, &base, &full, keep)?,
         commit: full,
         label: label.to_string(),
         url: None,
@@ -618,7 +629,7 @@ mod tests {
         run(rig.dir.path(), &["checkout", "-q", "main"]);
         // The default branch moved on meanwhile; the PR's diff is its own, not that.
         rig.commit("Elsewhere", &[("c/y", "y\n")]);
-        let found = pr_files(Path::new(&rig.main), &head, "#7 Edit a").unwrap();
+        let found = pr_files(Path::new(&rig.main), &head, "#7 Edit a", |all| all).unwrap();
         assert_eq!(
             (found.label.as_str(), found.commit.as_str()),
             ("#7 Edit a", head.as_str())
@@ -626,6 +637,6 @@ mod tests {
         let paths: Vec<_> = found.files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(paths, ["a/x", "b/new"]);
         assert!(found.files[0].diff.contains("-one") && found.files[0].diff.contains("+two"));
-        assert!(pr_files(Path::new(&rig.main), "deadbeef", "x").is_err());
+        assert!(pr_files(Path::new(&rig.main), "deadbeef", "x", |all| all).is_err());
     }
 }
