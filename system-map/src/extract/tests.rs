@@ -8,6 +8,8 @@ struct Fake {
     name: &'static str,
     pairs: Vec<Pair>,
     problems: Vec<&'static str>,
+    /// The files it names as test files.
+    tests: Vec<&'static str>,
 }
 
 impl Extractor for Fake {
@@ -17,6 +19,10 @@ impl Extractor for Fake {
 
     fn reads(&self, _file: &str) -> bool {
         true
+    }
+
+    fn is_test(&self, _repo: &Repo, file: &str) -> bool {
+        self.tests.contains(&file)
     }
 
     fn extract(&self, _repo: &Repo) -> Output {
@@ -36,6 +42,7 @@ fn fake(name: &'static str, pairs: &[(&str, &str)]) -> Fake {
         name,
         pairs: pairs.iter().map(|(from, to)| Pair::new(from, to)).collect(),
         problems: Vec::new(),
+        tests: Vec::new(),
     }
 }
 
@@ -166,4 +173,32 @@ fn a_declaration_pair_counts_in_the_check() {
     let found = check_links(&[&one], &names(&["one"]), &repo, &parts, &[]);
     assert_eq!(found.problems.len(), 1, "{:?}", found.problems);
     assert!(found.problems[0].starts_with("part \"p\" depends on part \"q\""));
+}
+
+#[test]
+fn a_pair_that_starts_in_a_test_file_is_dropped() {
+    let files = names(&["a.x", "b.x", "a.test.x"]);
+    let repo = Repo::new(std::path::Path::new("."), &files, |_| false);
+    let one = Fake {
+        tests: vec!["a.test.x"],
+        ..fake(
+            "one",
+            &[("a.test.x", "b.x"), ("a.x", "a.test.x"), ("a.x", "b.x")],
+        )
+    };
+    let out = run(&[&one], &names(&["one"]), &repo);
+    assert_eq!(ends(&out), [("a.x", "a.test.x"), ("a.x", "b.x")]);
+}
+
+#[test]
+fn a_part_made_only_of_test_files_is_not_read() {
+    let files = names(&["a.x", "a.test.x", "b.x"]);
+    let repo = Repo::new(std::path::Path::new("."), &files, |_| false);
+    let one = Fake {
+        tests: vec!["a.test.x"],
+        ..fake("one", &[])
+    };
+    let parts = [part("tests", &["a.test.x"]), part("q", &["a.x", "b.x"])];
+    let read = super::read_parts(&[&one], &names(&["one"]), &repo, &parts);
+    assert_eq!(read, ["q"].into_iter().collect());
 }
