@@ -1,7 +1,7 @@
 // The PR brief's check (#340, spec #548 Group 4): one prediction per step, answered in the panel (a pick) or by tapping parts on the
 // map into numbered slots (an order). Check grades it, a wrong answer shows the correction, and an order check replays the right path.
 
-import { pressable, text } from "./dom.js";
+import { hint, pressable, text } from "./dom.js";
 import { currentMap, type MapView } from "./map.js";
 import { orderRun, type OrderRun, pickRun, type PickRun } from "./map-brief-model.js";
 import { logStop } from "./stop-rules.js";
@@ -42,7 +42,7 @@ export function checkNode(view: MapView, step: BriefStep, check: BriefCheck) {
     const row = text("div", "", "brief-opts");
     check.opts.forEach((opt, i) => {
       const button = pressable(text("button", opt, "btn brief-opt"), null);
-      button.title = "Pick this answer; press it again to take it back";
+      hint(button, "Pick this answer; press it again to take it back");
       button.setAttribute("aria-pressed", String(run.picked() === i));
       if (done) button.classList.add(i === Number(check.key) ? "right" : "miss");
       button.addEventListener("click", () => {

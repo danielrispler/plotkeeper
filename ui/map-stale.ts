@@ -4,7 +4,7 @@
 // once with no writer call; entering it is an activity on the part, which clears its band. A past commit's map shows no band.
 
 import { logStop } from "./stop-rules.js";
-import { invoke, text } from "./dom.js";
+import { hint, hintOf, invoke, text } from "./dom.js";
 import { onPlate, reloadMap, type MapView } from "./map.js";
 import { exploreRow } from "./micro-world.js";
 import { refresherOf, staleWords } from "./refresher.js";
@@ -14,7 +14,8 @@ onPlate(({ view, part, plate }) => {
   if (!band) return;
   plate.classList.add("stale", `stale-${band}`);
   plate.append(text("div", "", "plate-stale"));
-  plate.title = `${plate.title}\n\n${staleWords(band)}`;
+  const open = plate.querySelector<HTMLElement>(".plate-open");
+  if (open) hint(open, `${hintOf(open)?.textContent ?? ""}\n\n${staleWords(band)}`);
 });
 
 /**

@@ -1,8 +1,8 @@
 // The hover rule (#220), checked in every snap page after its fixture's script: every control the page holds, drawn or not,
-// says something on hover, in its own hint (spec #582) or `title`, or an ancestor's title; its own hint or title never just repeats its
+// says something on hover, in its own hint (spec #582) or `title`, or an ancestor's title (the toasts' buttons have hints of their own, spec #582); its own hint or title never just repeats its
 // label; and no hinted or titled element, a disabled control among them, sits where the pointer cannot reach it. A broken rule logs a `snap:fail` line.
 export const hoverAudit = `
-  const controls = [...document.querySelectorAll("button, summary, a[href], [role=button], #toast, #note-toast, #spine")]
+  const controls = [...document.querySelectorAll("button, summary, a[href], [role=button], #spine")]
     .filter((node) => !node.closest(".xterm"));
   const words = (text) => (text ?? "").replace(/\\s+/g, " ").trim();
   const named = (node) => node.tagName.toLowerCase() + (node.id ? "#" + node.id : "") + (typeof node.className === "string" && node.className ? "." + node.className.trim().split(/\\s+/).join(".") : "") + " " + JSON.stringify(words(node.textContent).slice(0, 40));

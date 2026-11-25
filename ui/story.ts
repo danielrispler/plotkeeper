@@ -7,7 +7,7 @@
 
 import { modelLine, reports } from "./capabilities.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
-import { age, code, element, failure, fullTitle, glyphOnly, invoke, keepOnly, pressable, prose, text, unseenWords } from "./dom.js";
+import { age, code, element, failure, fullTitle, glyphOnly, hint, invoke, keepOnly, pressable, prose, text, unseenWords } from "./dom.js";
 import { askAnchor } from "./ask.js";
 import { rendered } from "./markdown.js";
 import { drawSidebar } from "./list.js";
@@ -218,7 +218,7 @@ function historyElement(session: string, entry: HistoryEntry): HTMLElement {
   button.classList.add("subagent");
   const lines = [text("span", entry.purpose, "asked"), ...(entry.asked ? [prose("span", entry.asked)] : [])];
   button.append(...lines, prose("span", entry.result), text("span", entry.details, "kind"));
-  fullTitle(button, [entry.purpose, entry.asked, entry.result, entry.details].filter(Boolean).join(" · "));
+  hint(button, [entry.purpose, entry.asked, entry.result, entry.details].filter(Boolean).join(" · "));
   const item = document.createElement("li");
   item.append(button, askAnchor(session, { kind: "subagent", agent: entry.agent }, `the subagent ${entry.purpose}`));
   return item;
@@ -609,7 +609,7 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
     });
     button.classList.add("turn-line");
     // The line's prompt and Headline carry their own full text; the rest of the line says what a click does (#220).
-    button.title = "Fold or unfold this turn";
+    hint(button, "Fold or unfold this turn");
     button.setAttribute("aria-expanded", String(open));
     button.append(
       fullTitle(text("span", line.prompt, "prompt"), turn.prompt.trim() || line.prompt),
@@ -668,7 +668,7 @@ function turnMapNodes(session: Session, turn: Turn, newest: boolean): HTMLElemen
   if (oldTurn(turn, reports(session, "turn_trees"), Date.now())) return [text("p", OLD_TURN, "turn-old")];
   if (!newest || !turnLit(turn, false).length) return [];
   const button = pressable(text("button", "Show on map", "quiet show-on-map"), null, () => revealTurn(turn));
-  button.title = "Pan the map so this turn's parts show beside the story";
+  hint(button, "Pan the map so this turn's parts show beside the story");
   return [button];
 }
 

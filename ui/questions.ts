@@ -4,7 +4,7 @@
 // permission the hook waits on gets the same card with allow and deny (danielrispler/Falinks#478).
 
 import { askFor, sendAnswer } from "./answer.js";
-import { code, pressable, prose, text } from "./dom.js";
+import { code, hint, pressable, prose, text } from "./dom.js";
 import { type Ask, askKind, type Question } from "./types.js";
 
 // Whether a question is open, answered in the terminal, or not answered: its call failed, or its turn
@@ -70,7 +70,7 @@ export function questionElement(question: Question): HTMLElement {
             if (!sendButton) send();
           });
           button.append(...content);
-          button.title = asked.multiSelect ? "Tick or untick this choice" : "Choose this answer";
+          hint(button, asked.multiSelect ? "Tick or untick this choice" : "Choose this answer");
           item.append(button);
         } else item.append(...content);
         // A label may hold a comma, so only a multi-select answer is split (danielrispler/Falinks#434, decision 41).
@@ -139,7 +139,9 @@ function answerButtons(ask: Ask, buttons: [AnswerButton, () => void, string?][])
   row.className = "answer-buttons";
   const button = (label: string, hover: string, click: () => void, className = "") => {
     const node = pressable(text("button", label, `btn ${className}`.trim()), null);
-    node.title = hover;
+    // Send is disabled until every question has a choice and says why in its title (aria-disabled, #586); the rest have hints.
+    if (label === "Send") node.title = hover;
+    else hint(node, hover);
     node.addEventListener("click", click);
     return node;
   };

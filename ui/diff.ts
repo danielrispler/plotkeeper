@@ -3,7 +3,7 @@
 // whole from git (`turn_file_hunk`, `all`), added and removed lines marked by a sign and a tint. The other changes in the
 // worktree are one folded line at the end. The pane is drawn once when it opens, so folding a file moves nothing else.
 
-import { fullTitle, invoke, messageOf, pressable, text } from "./dom.js";
+import { fullTitle, hint, invoke, messageOf, pressable, text } from "./dom.js";
 import type { Capabilities, Session, Turn, TurnFile } from "./types.js";
 
 type DiffLineKind = "add" | "del" | "hunk" | "meta" | "ctx";
@@ -73,7 +73,7 @@ export function drawDiff(place: HTMLElement, session: Pick<Session, "id" | "turn
   head.append(
     text("span", "Full diff", "log-title"),
     text("span", `${files.length} ${files.length === 1 ? "file" : "files"}${turn?.files?.merged ? ` · +${turn.files.merged} merged` : ""}`, "log-type"),
-    fullTitle(pressable(text("button", "Back"), null, back), "Back to the session"),
+    hint(pressable(text("button", "Back"), null, back), "Back to the session"),
   );
   place.replaceChildren(head, ...(files.length ? files.map((f) => fileFold(session.id, index, f)) : [text("p", "This turn changed no files.", "empty")]));
 }

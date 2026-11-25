@@ -33,7 +33,7 @@
         <div id="groups"></div>
         <!-- A project header's "⋯" (#381): `list.ts` opens it under the header it was pressed on. -->
         <div id="project-actions" class="menu project-actions" popover>
-          <button id="remove-project" class="btn small" type="button" title="Take this project off the list; its sessions stay in History">Remove project</button>
+          <button id="remove-project" class="btn small" type="button">Remove project</button>
         </div>
         <!-- "History · N" (#94): the ended sessions, which are not in the list. -->
         <div class="list-foot">
@@ -56,13 +56,13 @@
           <p class="line-1"><span id="mark" class="mark"></span><span id="session-name" class="session-name"></span></p>
           <p class="line-2"><span id="state" class="state"></span><span id="block" class="block"></span><span id="mode" class="mode"></span><span id="phase" class="phase"></span></p>
         </div>
-        <button id="rail-more" class="btn small" type="button" popovertarget="rail-actions" aria-label="More actions" title="Rename, mark unseen or delete this session" hidden>⋯</button>
+        <button id="rail-more" class="btn small" type="button" popovertarget="rail-actions" aria-label="More actions" hidden>⋯</button>
         <div id="rail-actions" class="menu" popover>
           <!-- Rename and close (danielrispler/Falinks#469). -->
-          <button id="rename" class="btn small" type="button" title="Give this session a name of your own" hidden>Rename</button>
+          <button id="rename" class="btn small" type="button" hidden>Rename</button>
           <!-- Unseen (danielrispler/Falinks#556): the row's mark comes back until Daniel selects it again. -->
-          <button id="mark-unseen" class="btn small" type="button" title="Mark this session unseen, to come back to it" hidden>Mark unseen</button>
-          <button id="delete" class="btn small" type="button" title="Remove this session from the list; its cards are kept" hidden>Delete</button>
+          <button id="mark-unseen" class="btn small" type="button" hidden>Mark unseen</button>
+          <button id="delete" class="btn small" type="button" hidden>Delete</button>
         </div>
       </div>
       <!-- "Now" starts with the open question, docked so it never scrolls away. -->
@@ -70,7 +70,7 @@
       <div id="story" class="story">
         <div class="notice-row">
           <p id="notice" role="status" hidden></p>
-          <button id="notice-dismiss" class="btn small" type="button" title="Hide this notice">Dismiss</button>
+          <button id="notice-dismiss" class="btn small" type="button">Dismiss</button>
         </div>
         <!-- With no session picked, the rail says what will show there (#526). -->
         <div id="empty" class="rail-empty">
@@ -106,7 +106,7 @@
       <header class="map-head">
         <span id="map-ref" class="map-ref"></span>
         <!-- Pre-flight (#394): the parts a piece of work will likely cross; the palette's `studio::PreFlight` opens it too. -->
-        <button id="pre-flight-button" class="btn quiet small" type="button" title="Before you start: the parts this work will likely cross">Pre-flight</button>
+        <button id="pre-flight-button" class="btn quiet small" type="button">Pre-flight</button>
         <div id="map-review" class="map-review" hidden></div>
         <!-- Not recording (#437): while no agent is wired, in the head the base view always shows, never in the story's notice line. -->
         <p id="map-wiring" class="map-wiring" role="status" hidden></p>
@@ -127,7 +127,7 @@
         <!-- The left panel (#385): a session's story (the rail, moved in), History, a turn's diff (widened) or Settings, floating over the map
              in the part sheet's glass; `panel.ts` fills it. It never darkens the map. -->
         <section id="map-panel" class="map-panel glass" aria-label="Panel" hidden>
-          <button id="panel-close" class="btn quiet panel-close" type="button" aria-label="Close" title="Close the panel (Esc)">×</button>
+          <button id="panel-close" class="btn quiet panel-close" type="button" aria-label="Close">×</button>
           <div id="panel-body" class="panel-body"></div>
         </section>
         <!-- The right side, floating over the map: the sessions not placed, then the part's sheet and the drawer under it, each in the same glass,
@@ -163,7 +163,7 @@
       <label for="rename-field">Name this session</label>
       <input id="rename-field" name="session-name" autocomplete="off" spellcheck="false" autofocus>
       <!-- The default button comes first, so Enter in the field renames. -->
-      <div class="ask-buttons"><button type="submit" class="btn" value="rename" title="Save this name (↩)">Rename</button><button type="submit" class="btn" value="cancel" title="Keep the old name (Esc)">Cancel</button></div>
+      <div class="ask-buttons"><button id="rename-dialog-save" type="submit" class="btn" value="rename">Rename</button><button id="rename-dialog-cancel" type="submit" class="btn" value="cancel">Cancel</button></div>
     </form>
   </dialog>
   <!-- Delete: the row leaves the list; its cards are kept. -->
@@ -171,7 +171,7 @@
     <form method="dialog">
       <h2 id="delete-heading" class="ask-title">Delete session?</h2>
       <p>Delete <strong id="delete-name"></strong> from the list? Its cards are kept.</p>
-      <div class="ask-buttons"><button type="submit" class="btn" value="delete" title="Remove it from the list">Delete</button><button type="submit" class="btn" value="cancel" autofocus title="Keep it (Esc)">Cancel</button></div>
+      <div class="ask-buttons"><button id="delete-dialog-delete" type="submit" class="btn" value="delete">Delete</button><button id="delete-dialog-cancel" type="submit" class="btn" value="cancel" autofocus>Cancel</button></div>
     </form>
   </dialog>
   <!-- A confirm before a button destroys something (#459): its heading, what is lost and the verb come from \`confirmed\` in dom.ts. -->
@@ -179,7 +179,7 @@
     <form method="dialog">
       <h2 id="confirm-heading" class="ask-heading">Go ahead?</h2>
       <p id="confirm-lost"></p>
-      <div class="ask-buttons"><button type="submit" class="btn" id="confirm-yes" value="confirm" title="Go ahead; this cannot be undone">Go ahead</button><button type="submit" class="btn" value="cancel" autofocus title="Keep it (Esc)">Cancel</button></div>
+      <div class="ask-buttons"><button type="submit" class="btn" id="confirm-yes" value="confirm">Go ahead</button><button id="confirm-dialog-cancel" type="submit" class="btn" value="cancel" autofocus>Cancel</button></div>
     </form>
   </dialog>
   <!-- The page's hints (spec #582): each trigger's own `popover="hint"`, made by `hint()` in dom.ts. -->

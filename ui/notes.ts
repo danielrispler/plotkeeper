@@ -2,10 +2,11 @@
 // over the map's top-right corner; it fades after a few seconds, and a hover or the keyboard's focus in it holds it (#457). A newer
 // note replaces it. Its main button selects its session, and its × hides it.
 
-import { element, fullTitle, pressable, promptBox, text } from "./dom.js";
+import { element, fullTitle, hint, pressable, promptBox, text } from "./dom.js";
 import { type Clock, realClock } from "./hover.js";
 import { sessionName } from "./list-model.js";
 import { select } from "./selection.js";
+import { HOVERS } from "./hovers.js";
 import { stackToasts, toastButtons, toastSays } from "./toast.js";
 import type { Session } from "./types.js";
 
@@ -85,6 +86,7 @@ export function showNote(note: Note) {
   const toast = element("note-toast");
   const action = () => {
     const button = pressable(text("button", "", "btn quiet toast-main"), null);
+    button.dataset.key = "note-toast-main";
     button.addEventListener("click", () => {
       if (noted) void select(noted.session.id);
       close();
@@ -92,6 +94,7 @@ export function showNote(note: Note) {
     return button;
   };
   const { main } = toastButtons(toast, action, close, "Hide this note");
+  hint(main, HOVERS.goToSession);
   const name = sessionName(note.session);
   const count = note.count ? [text("span", note.count, "count")] : [];
   main.replaceChildren(fullTitle(text("strong", name, "name"), name), ...count, fullTitle(text("span", note.line, "line"), note.line));
@@ -143,7 +146,7 @@ export function showCopyToast(outcome: Copied["outcome"], prompt: string) {
   if (!copyBody || !copyButton) {
     const body = text("div", "", "copy-body");
     const button = pressable(text("button", "Copy", "btn small"), null);
-    button.title = "Copy the prompt to paste into your agent";
+    hint(button, "Copy the prompt to paste into your agent");
     // The clipboard refused already, so this is the browser's older route, which a click may use.
     button.addEventListener("click", () => {
       body.querySelector("textarea")?.select();

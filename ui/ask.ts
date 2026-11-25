@@ -4,7 +4,7 @@
 // those facts and, for a file, its hunk; the answer stays here, labelled as interpretation under the facts as recorded and the session never sees it. A failed call or a reply with no answer shows why, with
 // a retry.
 
-import { failure, fullTitle, invoke, keepOnly, messageOf, onEnter, pressable, text } from "./dom.js";
+import { failure, fullTitle, hint, invoke, keepOnly, messageOf, onEnter, pressable, text } from "./dom.js";
 import { rendered } from "./markdown.js";
 import type { Anchor, Facts, Hunk } from "./types.js";
 
@@ -108,7 +108,7 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
       // The recorded facts are above; the answer is the model's reading of them.
       reply.replaceChildren(text("p", "Interpretation", "label"), rendered("div", answer, ""));
     } catch (e) {
-      const retry = button("Retry", "Ask the same question again");
+      const retry = hint(button("Retry", null), "Ask the same question again");
       retry.addEventListener("click", ask);
       reply.replaceChildren(text("p", `No answer: ${messageOf(e)}.`, "ask-error"), retry);
     }
@@ -122,7 +122,7 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
   const picks = document.createElement("div");
   picks.className = "ask-suggestions";
   for (const question of suggestions(anchor)) {
-    const pick = button(question, "Ask this question about it");
+    const pick = hint(button(question, null), "Ask this question about it");
     pick.addEventListener("click", () => {
       field.value = question;
       void ask();
@@ -192,8 +192,9 @@ function whyNotBox(session: string, turn: number): HTMLElement {
   return node;
 }
 
-function button(label: string, hover: string): HTMLButtonElement {
+// `hover` is the title of a button that goes disabled and says why (#586); null: the caller gives it a hint.
+function button(label: string, hover: string | null): HTMLButtonElement {
   const made = pressable(text("button", label, "btn"), null);
-  made.title = hover;
+  if (hover !== null) made.title = hover;
   return made;
 }

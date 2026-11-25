@@ -2,7 +2,7 @@
 // offset and the pane keeps that offset, reading on when the server re-sends the selection. Tool calls show as rows,
 // folded once they have a result. The header's name and state come from the core's tracking, never from the log.
 
-import { fullTitle, invoke, pressable, scrollingPre, text } from "./dom.js";
+import { fullTitle, hint, invoke, pressable, scrollingPre, text } from "./dom.js";
 import type { LogCall, LogEntry, LogResult, LogRow, Subagent, SubagentLog } from "./types.js";
 
 /**
@@ -104,7 +104,7 @@ function drawLog(place: HTMLElement, agent: Subagent | null, log: SubagentLog | 
     fullTitle(text("span", agent?.name ?? "Subagent", "log-title"), agent?.name ?? "Subagent"),
     ...(agent?.agent_type ? [text("span", agent.agent_type, "log-type")] : []),
     ...(agent ? [text("span", stateLabel(agent.status), `log-state ${agent.status === "running" ? "running" : "done"}`)] : []),
-    fullTitle(pressable(text("button", "Parent's terminal"), null, toParent), "Back to the terminal of the session that started this subagent"),
+    hint(pressable(text("button", "Parent's terminal"), null, toParent), "Back to the terminal of the session that started this subagent"),
   );
   const note = logNote(log, agent?.status ?? "");
   const body = note || !log ? [text("p", note ?? "", "empty")] : logRows(log.entries).map(drawRow);

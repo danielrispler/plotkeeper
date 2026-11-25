@@ -2,7 +2,7 @@
 // not drafts, which the server finds on a turn's end, the page's focus and the view's opening (`server/src/prs.rs`). A PR whose brief is
 // stored has one row, or one row per chapter of a chaptered brief; a row opens that brief on the map (`map-brief.ts`).
 
-import { text } from "./dom.js";
+import { hint, text } from "./dom.js";
 import { mapShown, onDraw, syncSide, type MapView } from "./map.js";
 import { briefProblem, openBriefOf } from "./map-brief.js";
 import { watchSeen } from "./seen.js";
@@ -77,7 +77,7 @@ function paint(view: MapView) {
             item.append(text("span", row.title, "tray-title"), text("span", problem ?? row.note, "tray-note"));
             if (row.openable) {
               item.setAttribute("type", "button");
-              item.title = "Play this brief on the map";
+              hint(item, "Play this brief on the map");
               item.addEventListener("click", () => openBriefOf(view.project, row.number, row.chapter ?? 0, row.full ?? false));
               watching.push(watchSeen(item, { active: mapShown, onSeen: () => logStop("brief-offered", view.project, row.number) }));
             }

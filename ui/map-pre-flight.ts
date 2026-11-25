@@ -5,7 +5,7 @@
 // layer Esc closes (`layerOrder`), and its field is a text field, so single-key shortcuts do not fire while Daniel types (`windowBinding`).
 // A brief of a PR that closes the pre-flighted issue, or a ticket under it, carries `expectedLine` (`map-brief.ts`).
 
-import { drawWithStatus, element, failure, invoke, messageOf, pressable, text } from "./dom.js";
+import { drawWithStatus, element, failure, hint, invoke, messageOf, pressable, text } from "./dom.js";
 import { currentMap, onDraw, onPlate, registerLayer, reloadMap, shownProject, type LoadedMap } from "./map.js";
 import { staleWords } from "./refresher.js";
 import { logStop } from "./stop-rules.js";
@@ -69,7 +69,7 @@ export function expectedLine(expected: Expected | undefined | null, doc: LoadedM
 // A button of the component (`btn`), with `kind` beside it, such as "primary" or "quiet".
 const button = (words: string, title: string, click: () => void, kind = "") => {
   const node = pressable(text("button", words, `btn ${kind}`.trim()), null);
-  node.title = title;
+  hint(node, title);
   node.addEventListener("click", click);
   return node;
 };

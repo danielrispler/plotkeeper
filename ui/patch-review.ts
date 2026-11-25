@@ -10,7 +10,7 @@
 // the PR touched, or a new law: the no-tools writer drafts its sentence from the PR's facts, Daniel confirms or edits it, and only what he
 // confirmed reaches the run, which adds the law to the map with its tagged test in one patch, proven and reviewed like back a law.
 
-import { confirmed, failure, invoke, messageOf, pressable, promptBox, scrollingPre, text, type Confirm } from "./dom.js";
+import { confirmed, failure, hint, invoke, messageOf, pressable, promptBox, scrollingPre, text, type Confirm } from "./dom.js";
 import { diffLines } from "./diff.js";
 import { currentMap, onDraw, registerLayer, reloadMap, shownProject } from "./map.js";
 import { copyOverturn, overturnReport } from "./ratify.js";
@@ -68,7 +68,7 @@ export function openedLine(opened: LawPatchOpened): string {
 
 const button = (words: string, title: string, click: () => void, kind = "quiet") => {
   const node = pressable(text("button", words, `btn ${kind}`.trim()), null);
-  node.title = title;
+  hint(node, title);
   node.addEventListener("click", click);
   return node;
 };
