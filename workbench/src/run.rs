@@ -1,6 +1,7 @@
 //! The one process runner (#548, "One process runner in `studio-workbench`"): every `git` and `gh` the workspace
-//! starts is built here, so none waits on a prompt nobody sees, and every wait on a child with a deadline goes through
-//! `run_until`, which leaves no helper of a stopped command behind.
+//! starts is built here, so none waits on a prompt nobody sees, and their waits with a deadline go through `run_until`,
+//! which leaves no helper of a stopped command behind. The launcher's waits do not yet: `server/src/runner.rs`'s
+//! `wait_until` and `server/src/micro_worlds.rs`'s `run_logged` keep their own, a follow-up to #548.
 
 use std::{
     ffi::OsStr,
