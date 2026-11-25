@@ -180,9 +180,26 @@ fn is_word(tok: Option<&Tok>, word: &str) -> bool {
     matches!(tok, Some(Tok::Ident(w)) if w == word)
 }
 
-/// The specifiers a file's tokens import: `import … from "x"`, `import "x"`, `import("x")`, `require("x")`,
-/// `export … from "x"` (`export *`, `export * as ns`, `export { … }`) and `export type … from "x"`.
-fn specifiers(tokens: &[Tok]) -> Vec<&str> {
+/// What a binding of an import or re-export clause takes from the module it names: one export by name (`default` for a
+/// default import), or all of them (`* as ns`, `export *`, a call to `import()` or `require()`).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Origin {
+    Name(String),
+    All,
+}
+
+/// An import or re-export clause: the specifier its `from "x"` names, each binding's origin and the name it takes in this
+/// file (`*` for a bare `export *`), and the index after the clause.
+struct Clause<'a> {
+    spec: &'a str,
+    names: Vec<(Origin, String)>,
+    end: usize,
+}
+
+/// The specifiers a file's tokens import, each with what it takes: `import … from "x"`, `import "x"` (nothing),
+/// `import("x")` and `require("x")` (all), `export … from "x"` (`export *`, `export * as ns`, `export { … }`) and
+/// `export type … from "x"`.
+fn specifiers(tokens: &[Tok]) -> Vec<(&str, Vec<Origin>)> {
     let mut specs = Vec::new();
     for (at, tok) in tokens.iter().enumerate() {
         let Tok::Ident(word) = tok else { continue };
@@ -190,15 +207,18 @@ fn specifiers(tokens: &[Tok]) -> Vec<&str> {
             continue;
         }
         let call = || match (tokens.get(at + 1), tokens.get(at + 2)) {
-            (Some(Tok::Sym('(')), Some(Tok::Str(spec))) => Some(spec.as_str()),
+            (Some(Tok::Sym('(')), Some(Tok::Str(spec))) => Some((spec.as_str(), vec![Origin::All])),
             _ => None,
+        };
+        let clause = |i| {
+            from_clause(tokens, i).map(|c| (c.spec, c.names.into_iter().map(|(o, _)| o).collect()))
         };
         let found = match word.as_str() {
             "require" => call(),
             "import" => match tokens.get(at + 1) {
-                Some(Tok::Str(spec)) => Some(spec.as_str()),
+                Some(Tok::Str(spec)) => Some((spec.as_str(), Vec::new())),
                 Some(Tok::Sym('(')) => call(),
-                _ => from_clause(tokens, at + 1),
+                _ => clause(at + 1),
             },
             "export" => {
                 let mut i = at + 1;
@@ -206,7 +226,7 @@ fn specifiers(tokens: &[Tok]) -> Vec<&str> {
                     i += 1;
                 }
                 match tokens.get(i) {
-                    Some(Tok::Sym('*' | '{')) => from_clause(tokens, i),
+                    Some(Tok::Sym('*' | '{')) => clause(i),
                     _ => None,
                 }
             }
@@ -217,22 +237,149 @@ fn specifiers(tokens: &[Tok]) -> Vec<&str> {
     specs
 }
 
-/// The specifier of the `from "x"` that ends an import or re-export clause starting at `i`: names, `type`, `as`, `*`,
-/// commas and braces, nothing else.
-fn from_clause(tokens: &[Tok], mut i: usize) -> Option<&str> {
-    while let Some(tok) = tokens.get(i) {
-        match tok {
-            Tok::Ident(word) if word == "from" => {
-                if let Some(Tok::Str(spec)) = tokens.get(i + 1) {
-                    return Some(spec);
+/// The bindings of an import or re-export clause starting at `i` (names, `type`, `as`, `*`, commas and braces), and the
+/// index of the first token after them.
+fn bindings(tokens: &[Tok], mut i: usize) -> (Vec<(Origin, String)>, usize) {
+    let mut names = Vec::new();
+    let mut braced = false;
+    loop {
+        let alias = |at: usize| match (tokens.get(at), tokens.get(at + 1)) {
+            (Some(Tok::Ident(word)), Some(Tok::Ident(name))) if word == "as" => Some(name.clone()),
+            _ => None,
+        };
+        match tokens.get(i) {
+            Some(Tok::Ident(word))
+                if word == "from" && matches!(tokens.get(i + 1), Some(Tok::Str(_))) =>
+            {
+                break;
+            }
+            Some(Tok::Ident(word))
+                if word == "type"
+                    && match tokens.get(i + 1) {
+                        // `type` is a modifier unless it is the name itself: `import type from "x"`, `{ type as t }`.
+                        Some(Tok::Ident(next)) => next != "from" && next != "as",
+                        Some(Tok::Sym(c)) => matches!(c, '{' | '*'),
+                        _ => false,
+                    } =>
+            {
+                i += 1;
+            }
+            Some(Tok::Ident(word)) => {
+                let origin = Origin::Name(if braced {
+                    word.clone()
+                } else {
+                    "default".to_string()
+                });
+                match alias(i + 1) {
+                    Some(name) => {
+                        names.push((origin, name));
+                        i += 3;
+                    }
+                    None => {
+                        names.push((origin, word.clone()));
+                        i += 1;
+                    }
                 }
             }
-            Tok::Ident(_) | Tok::Sym('*' | '{' | '}' | ',') => {}
+            Some(Tok::Sym('*')) => match alias(i + 1) {
+                Some(name) => {
+                    names.push((Origin::All, name));
+                    i += 3;
+                }
+                None => {
+                    names.push((Origin::All, "*".to_string()));
+                    i += 1;
+                }
+            },
+            Some(Tok::Sym(c @ ('{' | '}' | ','))) => {
+                braced = match c {
+                    '{' => true,
+                    '}' => false,
+                    _ => braced,
+                };
+                i += 1;
+            }
+            _ => break,
+        }
+    }
+    (names, i)
+}
+
+/// The import or re-export clause starting at `i` that ends with `from "x"`.
+fn from_clause(tokens: &[Tok], i: usize) -> Option<Clause<'_>> {
+    let (names, i) = bindings(tokens, i);
+    match (tokens.get(i), tokens.get(i + 1)) {
+        (Some(Tok::Ident(word)), Some(Tok::Str(spec))) if word == "from" => Some(Clause {
+            spec,
+            names,
+            end: i + 2,
+        }),
+        _ => None,
+    }
+}
+
+/// What a pure barrel exposes: each name it exports with the specifiers and origins it comes from, and the specifiers of
+/// its `export *`.
+#[derive(Default)]
+struct Barrel<S> {
+    named: BTreeMap<String, Vec<(S, Origin)>>,
+    stars: Vec<S>,
+}
+
+/// The barrel a file's tokens make, if it is a pure one: its statements are only re-exports, the imports they use and
+/// directives such as `"use client"`, and it exports something.
+fn barrel(tokens: &[Tok]) -> Option<Barrel<&str>> {
+    let mut found = Barrel::default();
+    // The names the file imports, and the names it exports again without a `from`, each with the name it exports as.
+    let mut imported: BTreeMap<String, (&str, Origin)> = BTreeMap::new();
+    let mut local: Vec<(String, String)> = Vec::new();
+    let mut i = 0;
+    while let Some(tok) = tokens.get(i) {
+        match tok {
+            Tok::Sym(';') | Tok::Str(_) => i += 1,
+            Tok::Ident(word) if word == "import" => {
+                let clause = from_clause(tokens, i + 1)?;
+                for (origin, name) in clause.names {
+                    imported.insert(name, (clause.spec, origin));
+                }
+                i = clause.end;
+            }
+            Tok::Ident(word) if word == "export" => {
+                if let Some(clause) = from_clause(tokens, i + 1) {
+                    for (origin, name) in clause.names {
+                        if name == "*" {
+                            found.stars.push(clause.spec);
+                            continue;
+                        }
+                        found
+                            .named
+                            .entry(name)
+                            .or_default()
+                            .push((clause.spec, origin));
+                    }
+                    i = clause.end;
+                } else {
+                    if tokens.get(i + 1) != Some(&Tok::Sym('{')) {
+                        return None;
+                    }
+                    let (names, end) = bindings(tokens, i + 1);
+                    for (origin, name) in names {
+                        let Origin::Name(inner) = origin else {
+                            return None;
+                        };
+                        local.push((inner, name));
+                    }
+                    i = end;
+                }
+            }
             _ => return None,
         }
-        i += 1;
     }
-    None
+    for (inner, name) in local {
+        let source = imported.get(&inner)?.clone();
+        found.named.entry(name).or_default().push(source);
+    }
+    (!found.named.is_empty() || !found.stars.is_empty()).then_some(found)
 }
 
 /// A tracked file a relative import specifier of `from` names, if one exists.
@@ -373,14 +520,59 @@ fn package_name(spec: &str) -> Option<&str> {
     Some(&spec[..end])
 }
 
+/// The files a binding with `origin` reaches through the file `at`: `at` itself unless it is a pure barrel, else the files
+/// the re-exports that bring in what it takes reach in turn. `seen` holds the barrels and origins already followed, so a
+/// cycle of barrels ends.
+fn follow<'a>(
+    barrels: &'a BTreeMap<String, Barrel<String>>,
+    at: &'a str,
+    origin: &Origin,
+    seen: &mut BTreeSet<(&'a str, Origin)>,
+    out: &mut BTreeSet<String>,
+) {
+    if !seen.insert((at, origin.clone())) {
+        return;
+    }
+    let Some(barrel) = barrels.get(at) else {
+        out.insert(at.to_string());
+        return;
+    };
+    let mut next: Vec<(&'a String, Origin)> = Vec::new();
+    match origin {
+        Origin::Name(name) => match barrel.named.get(name) {
+            Some(sources) => next.extend(sources.iter().map(|(target, o)| (target, o.clone()))),
+            // An over-count: every `export *` target, as the name's real source is not read.
+            None => next.extend(barrel.stars.iter().map(|target| (target, origin.clone()))),
+        },
+        Origin::All => {
+            next.extend(
+                barrel
+                    .named
+                    .values()
+                    .flatten()
+                    .map(|(target, o)| (target, o.clone())),
+            );
+            next.extend(barrel.stars.iter().map(|target| (target, Origin::All)));
+        }
+    }
+    for (target, origin) in next {
+        follow(barrels, target, &origin, seen, out);
+    }
+}
+
 /// Each script file paired with the tracked files its relative imports name and the `package.json` of each workspace
-/// package it imports, and the problems of the workspace's packages.
+/// package it imports, and with the file behind each pure barrel it imports that exports what it takes; and the problems
+/// of the workspace's packages.
 pub(crate) fn typescript_imports(
     root: &Path,
     tracked: &BTreeSet<&str>,
 ) -> (Vec<(String, String)>, Vec<String>) {
     let (packages, problems) = workspace_packages(root, tracked);
-    let mut pairs = Vec::new();
+    let resolve = |file: &str, spec: &str| {
+        resolve_import(file, spec, tracked).or_else(|| packages.get(package_name(spec)?).cloned())
+    };
+    let mut imports = Vec::new();
+    let mut barrels: BTreeMap<String, Barrel<String>> = BTreeMap::new();
     for file in tracked {
         let script = file
             .rsplit_once('.')
@@ -388,13 +580,40 @@ pub(crate) fn typescript_imports(
         let Some(text) = script.then(|| crate::read_tracked(root, file)).flatten() else {
             continue;
         };
-        for spec in specifiers(&tokens(&text)) {
-            let target = resolve_import(file, spec, tracked)
-                .or_else(|| packages.get(package_name(spec)?).cloned());
-            if let Some(target) = target.filter(|t| t != file) {
-                pairs.push((file.to_string(), target));
+        let tokens = tokens(&text);
+        let targets: Vec<(String, Vec<Origin>)> = specifiers(&tokens)
+            .into_iter()
+            .filter_map(|(spec, origins)| Some((resolve(file, spec)?, origins)))
+            .collect();
+        imports.push((file.to_string(), targets));
+        if let Some(found) = barrel(&tokens) {
+            let mut resolved = Barrel::default();
+            for (name, sources) in found.named {
+                let sources = sources
+                    .into_iter()
+                    .filter_map(|(spec, origin)| Some((resolve(file, spec)?, origin)))
+                    .collect();
+                resolved.named.insert(name, sources);
+            }
+            resolved.stars = found
+                .stars
+                .into_iter()
+                .filter_map(|spec| resolve(file, spec))
+                .collect();
+            barrels.insert(file.to_string(), resolved);
+        }
+    }
+    let mut pairs = Vec::new();
+    for (file, targets) in imports {
+        let mut ends = BTreeSet::new();
+        for (target, origins) in targets {
+            ends.insert(target.clone());
+            for origin in &origins {
+                follow(&barrels, &target, origin, &mut BTreeSet::new(), &mut ends);
             }
         }
+        ends.remove(&file);
+        pairs.extend(ends.into_iter().map(|end| (file.clone(), end)));
     }
     (pairs, problems)
 }
