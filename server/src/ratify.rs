@@ -426,11 +426,7 @@ pub fn map_items(old: Option<&str>, new: Option<&str>) -> Vec<MapItem> {
     let (Some(old), Some(new)) = (old, new) else {
         return vec![];
     };
-    let read = |text: &str| {
-        system_map::convert(text)
-            .ok()
-            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-    };
+    let read = |text: &str| system_map::convert_value(text).ok();
     let (Some(old), Some(new)) = (read(old), read(new)) else {
         return vec![];
     };

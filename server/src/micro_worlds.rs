@@ -135,7 +135,7 @@ fn parts_text(map: &Json, parts: &[String], lead: String) -> (Vec<String>, Strin
 
 /// The topic of flow `id` in the map file's text `source`; none when the map does not read or has no such flow.
 pub fn flow_topic(source: &str, id: &str) -> Option<Topic> {
-    let map: Json = serde_json::from_str(&system_map::convert(source).ok()?).ok()?;
+    let map: Json = system_map::convert_value(source).ok()?;
     let flow = items(&map, "flows").find(|flow| flow["id"] == id)?;
     let name = flow["name"].as_str().unwrap_or(id).to_string();
     let part_ids: BTreeSet<String> = items(&map, "parts")
@@ -179,7 +179,7 @@ pub fn flow_topic(source: &str, id: &str) -> Option<Topic> {
 /// figure's own labels are the writer's words from a PR, so they never reach the prompt. None when the map does not read or
 /// has none of the parts.
 pub fn figure_topic(source: &str, key: String, lit: &[String]) -> Option<Topic> {
-    let map: Json = serde_json::from_str(&system_map::convert(source).ok()?).ok()?;
+    let map: Json = system_map::convert_value(source).ok()?;
     let parts: Vec<String> = lit
         .iter()
         .filter(|id| items(&map, "parts").any(|part| part["id"] == id.as_str()))

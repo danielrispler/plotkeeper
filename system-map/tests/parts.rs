@@ -156,9 +156,27 @@ fn an_unknown_field_of_a_held_item_fails() {
 
 mod conversion {
     use serde_json::{Value, json};
-    use system_map::{convert, parse_lenient};
+    use system_map::{convert, convert_value, parse_lenient};
 
     use crate::common::{base, base_v1};
+
+    #[test]
+    fn the_converted_value_is_the_converted_text_read() {
+        for map in [base_v1(), base()] {
+            let text = map.to_string();
+            let read: Value = serde_json::from_str(&convert(&text).unwrap()).unwrap();
+            assert_eq!(convert_value(&text).unwrap(), read);
+        }
+        assert_eq!(
+            convert_value(&base_v1().to_string()).unwrap()["parts"][1]["purpose"],
+            "The second part."
+        );
+        assert!(
+            convert_value("{ nope")
+                .unwrap_err()
+                .contains("not valid JSON")
+        );
+    }
 
     #[test]
     fn a_version_1_map_becomes_version_2_with_its_description_as_purpose_untruncated_and_no_held_items()

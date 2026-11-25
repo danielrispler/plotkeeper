@@ -27,13 +27,28 @@ const TEXT_CAP: usize = 140;
 /// The most items a part holds.
 const ITEMS_CAP: usize = 8;
 
+/// `convert`'s answer read as JSON, for a reader that wants the map's value rather than its text.
+pub fn convert_value(text: &str) -> Result<Value, String> {
+    Ok(upgrade(text)?.0)
+}
+
 /// A version 1 map's text as version 2: each part's `description` becomes its `purpose`, untruncated, and its `holds` is
 /// empty. A map of any other version comes back as it was. Fails only when the text is not JSON.
 pub fn convert(text: &str) -> Result<String, String> {
+    let (map, was_1) = upgrade(text)?;
+    Ok(if was_1 {
+        map.to_string()
+    } else {
+        text.to_string()
+    })
+}
+
+/// The map in `text` read as version 2, and whether it was version 1.
+fn upgrade(text: &str) -> Result<(Value, bool), String> {
     let mut map: Value = serde_json::from_str(text)
         .map_err(|error| format!("{MAP_FILE}: is not valid JSON: {error}"))?;
     if map["version"] != 1 {
-        return Ok(text.to_string());
+        return Ok((map, false));
     }
     map["version"] = 2.into();
     if let Some(parts) = map.get_mut("parts").and_then(Value::as_array_mut) {
@@ -43,7 +58,7 @@ pub fn convert(text: &str) -> Result<String, String> {
             part.entry("holds").or_insert_with(|| Value::Array(vec![]));
         }
     }
-    Ok(map.to_string())
+    Ok((map, true))
 }
 
 /// A part of a version 2 map as a prompt quotes it: its purpose, then each held item on a line of its own with its key

@@ -146,8 +146,7 @@ pub fn draft(
     map_text: &str,
     brief: &studio_understanding::pr_brief::StoredBrief,
 ) -> Result<NewLaw, String> {
-    let map: serde_json::Value = system_map::convert(map_text)
-        .and_then(|text| serde_json::from_str(&text).map_err(|e| e.to_string()))
+    let map = system_map::convert_value(map_text)
         .map_err(|e| format!("system-map.json does not read: {e}"))?;
     let touched = brief
         .guard

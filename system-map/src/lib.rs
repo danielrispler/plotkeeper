@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 
 pub use imports::{Across, Count, Hub, Imports, Inside, Share, imports};
 pub use laws::{LawReport, LawTest, Tag, law_tests, tag_id, test_name_after};
-pub use parts::{convert, part_text};
+pub use parts::{convert, convert_value, part_text};
 use pattern::Pattern;
 pub use touched::{Touched, touched, touched_for_map};
 
@@ -346,8 +346,7 @@ const HOP_FIELDS: &[&str] = &["link", "text"];
 /// breaks a walk through old commits. Fails only when the text is not JSON or lacks a field the
 /// map must hold.
 pub fn parse_lenient(text: &str) -> Result<Map, String> {
-    let mut value: serde_json::Value = serde_json::from_str(&convert(text)?)
-        .map_err(|error| format!("{MAP_FILE}: is not valid JSON: {error}"))?;
+    let mut value = convert_value(text)?;
     prune(&mut value, MAP_FIELDS);
     for (key, fields, nested) in [
         ("parts", PART_FIELDS, Some(("holds", parts::HELD_FIELDS))),

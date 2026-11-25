@@ -229,10 +229,6 @@ pub fn classify(
         return found;
     };
     // Both sides as version 2, so a version 1 map's `description` is compared as its `purpose`.
-    let (Ok(old), Ok(new)) = (system_map::convert(old), system_map::convert(new)) else {
-        return found;
-    };
-    let (old, new) = (old.as_str(), new.as_str());
     let (Ok(old_map), Ok(new_map)) = (
         system_map::parse_lenient(old),
         system_map::parse_lenient(new),
@@ -240,8 +236,8 @@ pub fn classify(
         return found;
     };
     let (Ok(old), Ok(new)) = (
-        serde_json::from_str::<Value>(old),
-        serde_json::from_str::<Value>(new),
+        system_map::convert_value(old),
+        system_map::convert_value(new),
     ) else {
         return found;
     };
