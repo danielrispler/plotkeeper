@@ -1850,7 +1850,7 @@ fn check_gist(c: &mut Chapter, ctx: &CheckContext) {
 }
 
 /// The kind of a file by its path (#477, "Also touched by kind"), the first rule that matches winning: tests, then
-/// config/build, then docs.
+/// config/build, then docs. Its test rule is spec #477's, not `logic_file::is_test`'s: no `test_` prefix.
 fn path_kind(path: &str) -> Option<AlsoKind> {
     let (dirs, name) = path.rsplit_once('/').unwrap_or(("", path));
     let ext = name.rfind('.').map_or("", |at| &name[at..]);
