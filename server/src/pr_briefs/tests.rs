@@ -1136,6 +1136,22 @@ fn a_partial_read_rewrites_the_brief_and_says_how_much_was_read() {
     assert_eq!(repo.push(None, &h1, &h2), Push::Rewrite(None));
 }
 
+/// A fake `gh` in `dir`, which says the PR is by someone other than Daniel and writes each call to `dir/gh.calls`: no test runs
+/// the real one.
+fn fake_gh(dir: &Path) -> String {
+    let gh = dir.join("gh");
+    std::fs::write(
+        &gh,
+        format!(
+            "#!/bin/sh\necho \"$@\" >> '{}'\ncase \"$1 $2\" in\n  'api user') echo daniel ;;\n  'pr view') echo someone ;;\n  *) exit 1 ;;\nesac\n",
+            dir.join("gh.calls").display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&gh, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    gh.to_string_lossy().into_owned()
+}
+
 /// Daniel's read kept in a state file, as the server's `Reading`.
 struct Rig {
     repo: Repo,
@@ -1155,6 +1171,7 @@ impl Rig {
             project: self.repo.path.clone(),
             file: self.state.path().join("map-state.json"),
             reference: Some("main".into()),
+            gh: fake_gh(self.state.path()),
         }
     }
     fn user(&self) -> crate::map::UserState {
@@ -1277,6 +1294,9 @@ fn a_carried_brief_holds_the_link_evidence_and_map_problems_of_the_new_head() {
     assert!(store.get(7, &h1).unwrap().map_problems.is_empty());
     assert_eq!(carried.map_problems.len(), 1, "{:?}", carried.map_problems);
     assert!(carried.map_problems[0].contains("stray/s.ts"));
+    // Whether the head is Daniel's was asked of the reading's own `gh`, never the real one.
+    let calls = std::fs::read_to_string(rig.state.path().join("gh.calls")).unwrap_or_default();
+    assert!(calls.contains("pr view 7"), "{calls}");
 }
 
 #[test]
@@ -1643,6 +1663,7 @@ fn a_short_brief_read_in_full_is_carried_over_a_quiet_push_and_counts_the_new_he
         project: repo.path().canonicalize().unwrap().display().to_string(),
         file: state.path().join("map-state.json"),
         reference: Some("main".into()),
+        gh: fake_gh(state.path()),
     };
     let h1 = source.meta.head.clone();
     let dir = tempfile::tempdir().unwrap();

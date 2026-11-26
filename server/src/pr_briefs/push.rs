@@ -91,11 +91,14 @@ pub trait Reading {
     fn map_counts(&self, head: &str) -> Option<MapCounts>;
 }
 
-/// The server's `Reading`: Daniel's state in `file`, `git` in `project`, and its default branch `reference`.
+/// The server's `Reading`: Daniel's state in `file`, `git` in `project`, its default branch `reference`, and the `gh` that says
+/// whether a PR is by Daniel's own login (`prs::by_own_login_with`): his own in the server, a fake in the tests, which never run
+/// the real one.
 pub struct GitReading {
     pub project: String,
     pub file: std::path::PathBuf,
     pub reference: Option<String>,
+    pub gh: String,
 }
 
 impl Reading for GitReading {
@@ -146,7 +149,7 @@ impl Reading for GitReading {
         else {
             return HeadCheck::default();
         };
-        let trusted = crate::prs::by_own_login(repo, pr);
+        let trusted = crate::prs::by_own_login_with(&self.gh, repo, pr);
         crate::ratify::head_check(repo, base.trim(), head, trusted)
     }
 

@@ -70,7 +70,7 @@ fn between(repo: &Path, number: u64, base: String, head: String) -> Option<(MapD
     Some((diff, counts))
 }
 
-/// What the Map diff from `base` to `head` marks, counted per Ratify map item for the short brief's sentence (#644): none when the PR
+/// What the Map diff from `base` to `head` marks, counted per Ratify map item and links per line, for the short brief's sentence (#644): none when the PR
 /// changed nothing on the map, or only its layout.
 pub fn counts(repo: &Path, base: &str, head: &str) -> Option<MapCounts> {
     between(repo, 0, base.to_string(), head.to_string()).map(|(_, counts)| counts)

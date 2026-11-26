@@ -32,6 +32,7 @@ fn reading_of(project: &str) -> Option<GitReading> {
         project: project.to_string(),
         file: crate::map::state_file().ok()?,
         reference: crate::map::default_ref(Path::new(project)).map(|(r, _)| r),
+        gh: studio_workbench::gh_path().to_string(),
     })
 }
 

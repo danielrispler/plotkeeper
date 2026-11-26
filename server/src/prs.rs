@@ -309,13 +309,29 @@ pub(crate) fn by_own_login_with(program: &str, repo: &Path, number: u64) -> bool
         "--jq",
         ".author.login",
     ]);
-    let me = login(&["api", "user", "--jq", ".login"]);
-    author.is_some() && author == me
+    // With no author there is nothing to compare, so Daniel's own login is not asked.
+    author.is_some_and(|author| login(&["api", "user", "--jq", ".login"]) == Some(author))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_author_gh_cannot_tell_is_not_daniels_and_his_own_login_is_not_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let (gh, calls) = (dir.path().join("gh"), dir.path().join("calls"));
+        std::fs::write(
+            &gh,
+            format!("#!/bin/sh\necho \"$@\" >> '{}'\ncase \"$1 $2\" in\n  'api user') echo daniel ;;\n  *) exit 1 ;;\nesac\n", calls.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&gh, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        assert!(!by_own_login_with(&gh.to_string_lossy(), dir.path(), 7));
+        let asked = std::fs::read_to_string(&calls).unwrap();
+        assert!(asked.contains("pr view 7"), "{asked}");
+        assert!(!asked.contains("api user"), "{asked}");
+    }
 
     const OPEN: &str = r#"{"number":7,"title":"Fog on the map","isDraft":false,"state":"OPEN","headRefOid":"aaa111","body":"Closes #5","closingIssuesReferences":[{"number":5}]}"#;
     const PUSHED: &str = r#"{"number":7,"title":"Fog on the map","isDraft":false,"state":"OPEN","headRefOid":"bbb222","body":"Closes #5","closingIssuesReferences":[{"number":5}]}"#;
