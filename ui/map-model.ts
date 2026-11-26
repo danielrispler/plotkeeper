@@ -309,7 +309,8 @@ export function foldOrder(ci: { broken: boolean } | null, holds: boolean): FoldK
   return ci?.broken ? ["ci", ...order] : order;
 }
 
-const counted = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+/** `n` and the word for it, `one` or `many`. */
+export const counted = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 // CI on main in a word, beside its fold's title and on its chip.
 const ciWord = (ci: Ci | null): string => {
   switch (ci?.status) {

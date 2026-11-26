@@ -1,5 +1,6 @@
 // The part catch-up's pure logic (spec #378, ticket #391; spec #548 Group 4). Split from `map-model.ts` by concern.
 
+import { counted } from "./map-model.js";
 import type { CatchUpOffer, CatchUpStage, Fog, FogEntry, FogListEntry } from "./types.js";
 
 // ---- The part catch-up (spec #378, ticket #391): what a fogged part's sheet offers, from the server's `catch_ups`.
@@ -17,7 +18,7 @@ export function fogActions(fog: Fog | undefined, offer: CatchUpOffer | undefined
     offer.kind === "chapter"
       ? { label: `Read #${offer.pr}'s brief`, title: "Open the chapter of this PR's brief that covers this part", note: null, disabled: false, open: { kind: "chapter", pr: offer.pr, chapter: offer.chapter } }
       : {
-          label: offer.outline ? `Catch up · ${offer.outline.steps.length} ${offer.outline.steps.length === 1 ? "step" : "steps"}` : "Catch up",
+          label: offer.outline ? `Catch up · ${counted(offer.outline.steps.length, "step", "steps")}` : "Catch up",
           title: "One story of everything that landed here since you last caught up; reading it to the end clears this part's fog",
           note: offer.writing ? stageLabel(offer.stage) : offer.failed ? "The last write failed; press to try again" : null,
           disabled: false,
@@ -37,7 +38,7 @@ export function awaitedCatchUp(offer: CatchUpOffer | undefined): "open" | "stop"
 }
 
 /** The catch-up card's eyebrow (#636): how many fog entries landed since Daniel last caught up on the part. */
-export const changesLine = (n: number): string => `${n} ${n === 1 ? "change" : "changes"} since you last caught up`;
+export const changesLine = (n: number): string => `${counted(n, "change", "changes")} since you last caught up`;
 
 /**
  * What "Read the one you have" (#638) says the older catch-up covers, of the part's fog entries (`entries`): how many of them, then each, a PR
@@ -48,7 +49,7 @@ export function olderLine(older: { fog: string[] }, entries: FogEntry[]): string
     const pr = entries.find((e) => e.commit === commit)?.pr;
     return pr == null ? commit.slice(0, 7) : `#${pr}`;
   });
-  return `Covers ${older.fog.length} of ${entries.length} ${entries.length === 1 ? "change" : "changes"}: ${names.join(", ")}`;
+  return `Covers ${older.fog.length} of ${counted(entries.length, "change", "changes")}: ${names.join(", ")}`;
 }
 
 /**

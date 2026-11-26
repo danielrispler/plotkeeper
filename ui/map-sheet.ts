@@ -1,15 +1,19 @@
 // The part sheet of the Map view (spec danielrispler/plotkeeper#306, ticket #310): a click on a plate opens it over the map's right, in the
-// side area's `sheet` slot, in the glass the left panel shares (#385). It starts with why its plate carries its marks (#495: fog, staleness,
-// a broken law; `sheetMarks`), then the catch-up card (#636), then holds the part's purpose, then the named things it holds, each with its
-// key files (spec #473), its tier (changed in place), its laws and what it talks to (its links). `map-model.ts`'s `sheetOf` is what it
-// shows; Esc closes it (the `sheet` layer). A fogged part's card says how many changes landed and shows the waiting catch-up's outline; its
-// main button is its part catch-up (#391), or the one PR brief chapter that lights it (`fogActions`), and "I know this", which lifts the
-// mist, is the quiet second. A part with no fog's card says "Caught up" and holds the Refresher (#392).
+// side area's `sheet` slot, in the glass the left panel shares (#385). `map-model.ts`'s `sheetOf` is what it shows; Esc closes it (the
+// `sheet` layer). Under its name it starts with why its plate carries its marks (#495: fog, staleness, a broken law; `sheetMarks`), then
+// the catch-up card (#636), then the part's purpose, clamped to two lines until More shows it whole (#637), then the chips that open the
+// folds, then the folds (#637, `foldOrder`): Laws, Talks to (its links), This session here, Holds (the named things it holds, each with
+// its key files, spec #473), Tier (changed in place), CI on main and History (the history strip, `map-history.ts`, #313). CI on main
+// leads, open, when a run breaks one of the part's laws.
+//
+// A fogged part's catch-up card says how many changes landed and shows the waiting catch-up's outline; its main button is its part
+// catch-up (#391), or the one PR brief chapter that lights it (`fogActions`), and "I know this", which lifts the mist, is the quiet
+// second. While a newer one is written, "Read the one you have" opens the older one (#638). A part with no fog's card says "Caught up"
+// and holds the Refresher (#392).
 //
 // "See the proof" (`.sheet-law-actions` of a law a check backs) and the CI line with its drill-down open the drawer (`map-drawer.ts`).
-// A law on trust has Back a law there instead, or its run's patch (`patch-review.ts`, #398).
-// `.sheet-extra` at the foot holds the history strip (`map-history.ts`, #313). While a past commit is shown the sheet is read-only:
-// no tier change, no proof, no CI section, no catch-up card.
+// A law on trust has Back a law there instead, or its run's patch (`patch-review.ts`, #398). While a past commit is shown the sheet is
+// read-only: no tier change, no proof, no CI fold, no catch-up card.
 //
 // The sheet's left edge resizes it (#445), and a click on the empty map closes it and its drawer (`map.ts`'s `pan`).
 
@@ -239,9 +243,10 @@ function sheetFolds(view: MapView, part: Part, sheet: Sheet, ci: ReturnType<type
   return { folds, extra, chips };
 }
 
-// A list of `rows` with `className`. Safari drops a list's semantics under `list-style: none`; the role brings them back.
-function listOf(className: string, rows: HTMLElement[]): HTMLElement {
-  const list = text("ul", "", className);
+// A list (`ul`, or `ol` when its order counts) of `rows` with `className`. Safari drops a list's semantics under `list-style: none`; the
+// role brings them back.
+function listOf(className: string, rows: HTMLElement[], tag: "ul" | "ol" = "ul"): HTMLElement {
+  const list = text(tag, "", className);
   list.setAttribute("role", "list");
   list.append(...rows);
   return list;
@@ -380,15 +385,12 @@ function caughtUp(view: MapView, part: string, sheet: Sheet, card: HTMLElement) 
 
 // A stored catch-up's outline: its title, then one row per step, its kind and headline.
 function outlineNodes(outline: CatchUpOutline): HTMLElement[] {
-  const steps = text("ol", "", "catch-up-steps");
-  // Safari drops a list's semantics under `list-style: none`; the role brings them back.
-  steps.setAttribute("role", "list");
-  for (const step of outline.steps) {
+  const rows = outline.steps.map((step) => {
     const row = text("li", "", "catch-up-step");
     row.append(text("span", step.k, "catch-up-kind"), text("span", step.h, "catch-up-headline"));
-    steps.append(row);
-  }
-  return [text("h3", outline.title, "catch-up-title"), steps];
+    return row;
+  });
+  return [text("h3", outline.title, "catch-up-title"), listOf("catch-up-steps", rows, "ol")];
 }
 
 // The card's buttons in a row, the write's stage or failure under them, and, with the explanations on, the fog actions' line, which each
