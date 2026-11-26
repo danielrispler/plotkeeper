@@ -140,7 +140,7 @@ for (const [run, said] of [
 // The stand-in worker. FAKE_OPENCODE says what it does: "edit" (changes a file and exits 0), "commit" (also commits
 // it, twice), "moved" (edits, and someone else moves the integration branch), "conflict" (edits a line someone else
 // also changes on the integration branch), "pull" (someone else moves the integration branch, the worker pulls it, then
-// edits), "linger" (edits and exits 0, leaving a \`sleep\` that holds its stdout and writes its pid to sleeper.pid), "pushint" (edits, commits and pushes its commit to the integration branch), "lost" (edits, and origin goes away), "empty" (exits 0 with no change), "fail" (exits 1), "chatty" (prints an event
+// edits), "pullmoved" (as "pull", then someone else changes the pulled file again), "linger" (edits and exits 0, leaving a \`sleep\` that holds its stdout and writes its pid to sleeper.pid), "pushint" (edits, commits and pushes its commit to the integration branch), "lost" (edits, and origin goes away), "empty" (exits 0 with no change), "fail" (exits 1), "chatty" (prints an event
 // every 50 ms and never ends), "push" (edits, commits and pushes its commit to a branch of its own), "branch" (edits and
 // pushes the integration tip as \`issue-7-cheap\`, no commit of its own) or "silent" (prints nothing and waits). FAKE_SILENT_MODELS, a comma-separated list, makes those models "silent" whatever FAKE_OPENCODE says;
 // a silent worker leaves a stray file first. Every worker call is logged with the environment it got. \`models opencode\`
@@ -175,11 +175,11 @@ else if (mode === "silent") {
 else {
   event("step_start", { type: "step-start" });
   event("tool_use", { type: "tool", tool: "read", state: { status: "completed", input: { filePath: join(process.cwd(), "AGENTS.md") }, output: "long" } });
-  if (mode === "pull") {
+  if (mode === "pull" || mode === "pullmoved") {
     other("other.txt", "someone else's file\\n");
     execFileSync("git", ["pull", "--quiet", "--no-rebase", "--no-edit", "origin", "int"]);
   }
-  if (["edit", "commit", "moved", "conflict", "lost", "push", "pushint", "branch", "pull", "linger"].includes(mode)) {
+  if (["edit", "commit", "moved", "conflict", "lost", "push", "pushint", "branch", "pull", "pullmoved", "linger"].includes(mode)) {
     writeFileSync("shared.txt", "the worker's line\\n");
     event("tool_use", { type: "tool", tool: "edit", state: { status: "completed", input: { filePath: "shared.txt" }, output: "ok" } });
   }
@@ -203,6 +203,7 @@ else {
     sleeper.unref();
   }
   if (mode === "branch") execFileSync("git", ["push", "--quiet", "origin", "origin/int:refs/heads/issue-7-cheap"]);
+  if (mode === "pullmoved") other("other.txt", "someone else's file, changed again\\n");
   if (mode === "moved") other("other.txt", "someone else's file\\n");
   if (mode === "conflict") other("shared.txt", "someone else's line\\n");
   if (mode === "lost") require("node:fs").renameSync(join(env.FAKE_DIR, "origin.git"), join(env.FAKE_DIR, "origin-gone.git"));
@@ -515,6 +516,16 @@ test("run: a worker that pulls the moved integration branch gives pass, not stop
   assert.match(ran.stdout, /^pass\n/);
 });
 
+test("run: the worker's commit holds only its own change when it pulled the integration branch, which then moved again", () => {
+  const { git, run } = scratchRun();
+  const ran = run({ FAKE_OPENCODE: "pullmoved" });
+  assert.equal(ran.status, 0, ran.stderr);
+  assert.match(ran.stdout, /^pass\n/);
+  const [worker, ...more] = git("log", "--no-merges", "--format=%H", "origin/int..issue-7-cheap").split("\n").filter(Boolean);
+  assert.equal(more.length, 0, "one commit of the worker's");
+  assert.equal(git("show", "--format=", "--name-only", worker), "shared.txt");
+});
+
 /** A PATH with the stand-ins and node only, so that a stand-in removed from `bin` is missing, never the real one. */
 const bare = (dir) => {
   mkdirSync(join(dir, "node-bin"));
@@ -542,10 +553,20 @@ test("run: with no cheap candidate in opencode's models, the run could not start
   gone(scratch);
 });
 
-test("run: with one cheap candidate left in opencode's models, the run goes on", () => {
+test("run: with one cheap candidate left in opencode's models, the run goes on with that one, not the first", () => {
   const ran = scratchRun({ cheap: two }).run({ FAKE_OPENCODE: "edit", FAKE_MODELS: "opencode/b-free" });
   assert.equal(ran.status, 0, ran.stderr);
   assert.match(ran.stdout, /^pass\n/);
+  assert.deepEqual(models(ran.calls("opencode")), ["opencode/b-free"], "the unserved a-free never runs");
+});
+
+test("run: with the served candidates all marked out, it escalates as silent without starting a worker", () => {
+  const scratch = scratchRun({ cheap: two });
+  writeFileSync(join(scratch.repo, ".git/delegate-silent.json"), JSON.stringify({ "opencode/b-free": "2999-01-01T00:00:00.000Z" }));
+  const ran = scratch.run({ FAKE_OPENCODE: "edit", FAKE_MODELS: "opencode/b-free" });
+  assert.equal(ran.status, 0, ran.stderr);
+  assert.equal(ran.stdout, "escalate medium (silent)\n");
+  assert.deepEqual(ran.calls("opencode"), []);
 });
 
 test("run: a worker that exits 0 while a process it started holds its output gives pass, and that process is killed", () => {

@@ -292,11 +292,17 @@ const closePane = (worktree, pane) => {
   if (pane) exec(worktree, "herdr", ["pane", "close", pane]);
 };
 
-/** Stages the worker's change as one change on `base`, its own commits undone; false when there is none. */
-const stage = (worktree, base) => {
-  git(worktree, "reset", "--quiet", "--mixed", base);
+/**
+ * Stages the worker's change as one change, its own commits undone; false when there is none. It goes onto the last
+ * integration commit the worker has, as the guard's fetch left `origin`: not the run's base, which would fold the
+ * commits the worker pulled into its change, so that the merge of the integration tip could conflict on files the
+ * worker never touched. When the worker pulled nothing, that commit is the base.
+ */
+const stage = (worktree, integration) => {
+  const onto = git(worktree, "merge-base", "HEAD", `origin/${integration}`);
+  git(worktree, "reset", "--quiet", "--mixed", onto);
   git(worktree, "add", "--all", "--", ".", ":(exclude).delegate");
-  return exec(worktree, "git", ["diff", "--cached", "--quiet", base]).status !== 0;
+  return exec(worktree, "git", ["diff", "--cached", "--quiet", "HEAD"]).status !== 0;
 };
 
 /** Why a worker run that ended this way stops or escalates, or null when its work goes to the check. */
@@ -312,8 +318,8 @@ const failure = (exit) => {
 const TAIL_LINES = 60;
 
 /** Checks the staged work: null when green, otherwise why it is red and what the retry is told. */
-const check = (worktree, base) => {
-  if (!stage(worktree, base)) return { escalate: "red: no change", tell: "No change was made: nothing differs from the integration branch. Implement the ticket in .delegate/ticket.md, then run `npm run check` until it is green. Do not commit or push." };
+const check = (worktree, integration) => {
+  if (!stage(worktree, integration)) return { escalate: "red: no change", tell: "No change was made: nothing differs from the integration branch. Implement the ticket in .delegate/ticket.md, then run `npm run check` until it is green. Do not commit or push." };
   const out = join(worktree, ".delegate/check.txt");
   if (exec(worktree, "npm", ["run", "check"], { out }).status === 0) return null;
   const tail = readFileSync(out, "utf8").trimEnd().split("\n").slice(-TAIL_LINES).join("\n");
@@ -376,15 +382,15 @@ const attempt = async (worktree, { candidate, effort, base, integration, title, 
     let exit = await timed({ message: WORKER_BRIEF, limit: ATTEMPT_MS });
     let stop = failure(exit);
     if (stop) return last(stop);
-    let red = check(worktree, base);
+    let red = check(worktree, integration);
     if (red && exit.session) {
       runs.at(-1).result = "red";
       exit = await timed({ message: red.tell, session: exit.session, limit: RETRY_MS });
       stop = failure(exit);
       if (stop) return last(stop);
-      red = check(worktree, base);
+      red = check(worktree, integration);
     }
-    const stat = git(worktree, "diff", "--cached", "--stat", base) || undefined;
+    const stat = git(worktree, "diff", "--cached", "--stat", "HEAD") || undefined;
     if (red) return last({ result: "red", escalate: red.escalate, stat });
     git(worktree, "commit", "--quiet", "-m", `${title}\n\nWorker: ${candidate.model}`);
     git(worktree, "fetch", "--quiet", "origin");
@@ -478,15 +484,20 @@ const runTicket = async ({ ticket, integration, effort, routing }) => {
     root = dirname(common);
     worktree = join(root, ".claude/worktrees", branch);
     removeWorktree(root, worktree, branch);
-    const next = () => cheap.find((candidate) => !isOut(marks, candidate.model));
-    const candidate = next();
-    if (!candidate) {
+    if (!cheap.length) {
       console.log("escalate medium (silent)");
       return 0;
     }
     // The free models withdrawn: OpenCode serves none of them (spec #592, "`delegate.mjs run`, a cheap ticket").
     const served = must(root, "opencode", ["models", "opencode"]).split("\n").map((line) => line.trim());
     if (!cheap.some((each) => served.includes(each.model))) throw new CouldNotStart(`opencode serves none of the cheap models ${cheap.map((each) => each.model).join(", ")}`);
+    // A candidate OpenCode no longer serves is passed over, as one marked out is.
+    const next = () => cheap.find((each) => served.includes(each.model) && !isOut(marks, each.model));
+    const candidate = next();
+    if (!candidate) {
+      console.log("escalate medium (silent)");
+      return 0;
+    }
     git(root, "fetch", "--quiet", "origin");
     const base = git(root, "rev-parse", `origin/${integration}^{commit}`);
     git(root, "worktree", "add", "--quiet", "--no-track", "-b", branch, worktree, base);
