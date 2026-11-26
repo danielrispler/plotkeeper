@@ -21,7 +21,7 @@ fn file_spans(body: &str) -> Vec<(&str, &str)> {
         .collect()
 }
 /// The paths in the `**Files:**` line of a ticket's `## Touches`: its backticked spans. No such line, none.
-fn touched_files(body: &str) -> Vec<String> {
+pub(crate) fn touched_files(body: &str) -> Vec<String> {
     file_spans(body)
         .into_iter()
         .map(|(_, span)| span.to_owned())

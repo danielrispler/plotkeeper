@@ -4,7 +4,8 @@ use crate::{REPO, Result, gh, require, stdout};
 use serde_json::{Value, json};
 
 /// What is wrong with a ticket body against the context `docs/agents/ticket-authoring.md` requires:
-/// `## Reading`, and `## Touches` with its Files, Session and Route lines, the route well-formed.
+/// `## Reading`, and `## Touches` with its Files, Session and Route lines, the route well-formed and
+/// sound for its files.
 fn body_problems(body: &str) -> Vec<String> {
     let mut problems = vec![];
     if !body.lines().any(|line| line.trim_end() == "## Reading") {
@@ -18,25 +19,52 @@ fn body_problems(body: &str) -> Vec<String> {
         return problems;
     }
     let touches: Vec<&str> = after.take_while(|line| !line.starts_with("## ")).collect();
+    let line = |key: &str| touches.iter().copied().find(|line| line.contains(key));
     for key in ["**Files:**", "**Session:**", "**Route:**"] {
-        match touches.iter().find_map(|line| line.split_once(key)) {
-            None => problems.push(format!("lacks a {key} line in ## Touches")),
-            Some((_, route)) if key == "**Route:**" => problems.extend(route_problems(route)),
-            Some(_) => {}
+        if line(key).is_none() {
+            problems.push(format!("lacks a {key} line in ## Touches"));
         }
+    }
+    if let Some((_, route)) = line("**Route:**").and_then(|line| line.split_once("**Route:**")) {
+        let files = line("**Files:**").map_or(vec![], crate::touches::touched_files);
+        problems.extend(route_problems(route, &files));
     }
     problems
 }
+/// Whether a Touches path is UI, which is never `cheap` (`docs/agents/issue-tracker.md`, Routing,
+/// rule 3): under `ui/` or `scripts/snap/`, or an `.html` or `.css` file.
+fn is_ui(path: &str) -> bool {
+    path.starts_with("ui/")
+        || path.starts_with("scripts/snap/")
+        || path.ends_with(".html")
+        || path.ends_with(".css")
+}
+/// The terms one of which an `effort high` route's reason must name: a risk area of rule 3, a
+/// risky-UI trigger, or an edge case the stated tests cannot check (`docs/agents/issue-tracker.md`,
+/// Routing, "Effort"). The check catches a forgotten reason, not a weak one.
+const RISKS: [&str; 10] = [
+    "persistence",
+    "stored",
+    "queue",
+    "concurrency",
+    "wire",
+    "redraw",
+    "layout",
+    "handler",
+    "trust boundary",
+    "untested edge case",
+];
 /// What is wrong with a Route line's text after `**Route:**`, which reads
-/// `<tier> · effort <effort> — <reason>` (#592, "The route line").
-fn route_problems(route: &str) -> Vec<String> {
+/// `<tier> · effort <effort> — <reason>` (#592, "The route line"), for a ticket whose Touches
+/// **Files** line names `files`.
+fn route_problems(route: &str, files: &[String]) -> Vec<String> {
     let shape = route
         .trim()
         .split_once(" — ")
         .filter(|(_, reason)| !reason.trim().is_empty())
-        .and_then(|(head, _)| head.split_once(" · "))
-        .and_then(|(tier, effort)| Some((tier, effort.strip_prefix("effort ")?)));
-    let Some((tier, effort)) = shape else {
+        .and_then(|(head, reason)| Some((head.split_once(" · ")?, reason)))
+        .and_then(|((tier, effort), reason)| Some((tier, effort.strip_prefix("effort ")?, reason)));
+    let Some((tier, effort, reason)) = shape else {
         return vec![format!(
             "**Route:** reads `{}`, not `<tier> · effort <effort> — <reason>`",
             route.trim()
@@ -50,6 +78,24 @@ fn route_problems(route: &str) -> Vec<String> {
     }
     if !["medium", "high"].contains(&effort) {
         problems.push(format!("**Route:** effort {effort} is not medium or high"));
+    }
+    let reason = reason.to_lowercase();
+    if effort == "high" && !RISKS.iter().any(|risk| reason.contains(risk)) {
+        problems.push(format!(
+            "**Route:** effort high, but its reason names no risk ({}); effort is medium otherwise (issue-tracker.md, Routing)",
+            RISKS.join(", ")
+        ));
+    }
+    let ui: Vec<String> = files
+        .iter()
+        .filter(|path| is_ui(path))
+        .map(|path| format!("`{path}`"))
+        .collect();
+    if tier == "cheap" && !ui.is_empty() {
+        problems.push(format!(
+            "**Route:** cheap, but **Files:** names UI ({}), and UI is never cheap (issue-tracker.md, Routing, rule 3)",
+            ui.join(", ")
+        ));
     }
     problems
 }
@@ -524,14 +570,21 @@ mod publish_tests {
     }
     /// The problems of one ticket `a.md` whose body is `BODY` with its Route line replaced by `route`.
     fn problems_with_route(route: &str) -> Vec<String> {
+        problems_with("`a.rs`", route)
+    }
+    /// The problems of one ticket `a.md` whose body is `BODY` with its Files line naming `files` and
+    /// its Route line replaced by `route`.
+    fn problems_with(files: &str, route: &str) -> Vec<String> {
         let manifest = Manifest {
             parent: 9,
             tickets: vec![ticket("a.md", &[])],
         };
-        let body = BODY.replace(
-            "- **Route:** cheap · effort medium — one check in one file\n",
-            route,
-        );
+        let body = BODY
+            .replace(
+                "- **Route:** cheap · effort medium — one check in one file\n",
+                route,
+            )
+            .replace("- **Files:** `a.rs`", &format!("- **Files:** {files}"));
         let bodies = std::collections::HashMap::from([("a.md".to_owned(), body)]);
         publish_problems(&manifest, &bodies, &labels())
     }
@@ -556,6 +609,48 @@ mod publish_tests {
             problems_with_route("- **Route:** cheap, medium\n"),
             ["a.md: **Route:** reads `cheap, medium`, not `<tier> · effort <effort> — <reason>`"]
         );
+    }
+    #[test]
+    fn a_cheap_route_that_edits_ui_is_refused_naming_the_ui_files() {
+        let cheap = "- **Route:** cheap · effort medium — one check in one file\n";
+        assert_eq!(
+            problems_with(
+                "`server/src/a.rs`, `ui/rail.ts`, new `scripts/snap/b.mjs`, `docs/c.html`, `d.css`",
+                cheap
+            ),
+            [
+                "a.md: **Route:** cheap, but **Files:** names UI (`ui/rail.ts`, `scripts/snap/b.mjs`, `docs/c.html`, `d.css`), and UI is never cheap (issue-tracker.md, Routing, rule 3)"
+            ]
+        );
+        assert!(problems_with("`server/src/a.rs`, `docs/ui.md`", cheap).is_empty());
+        assert!(
+            problems_with(
+                "`ui/rail.ts`",
+                "- **Route:** medium · effort medium — presentational UI\n"
+            )
+            .is_empty()
+        );
+    }
+    #[test]
+    fn a_high_effort_whose_reason_names_no_risk_is_refused() {
+        assert_eq!(
+            problems_with_route(
+                "- **Route:** medium · effort high — five files and a new module\n"
+            ),
+            [
+                "a.md: **Route:** effort high, but its reason names no risk (persistence, stored, queue, concurrency, wire, redraw, layout, handler, trust boundary, untested edge case); effort is medium otherwise (issue-tracker.md, Routing)"
+            ]
+        );
+        for reason in [
+            "a Stored type gains a field",
+            "the event queues",
+            "two handlers across a redraw",
+            "crosses the trust boundary",
+            "an untested edge case in the parser",
+        ] {
+            let route = format!("- **Route:** strong · effort high — {reason}\n");
+            assert!(problems_with_route(&route).is_empty(), "{reason}");
+        }
     }
     #[test]
     fn a_cycle_is_a_problem() {
