@@ -81,24 +81,39 @@ test("with both Gemini windows at their floors, pick critic runs the Gemini crit
 
 const ranCritic = (calls) => calls.some((call) => !call.argv.includes("/usage"));
 
-test("with the 5-hour window below its floor, pick critic names Sonnet at high without running Gemini", () => {
+/** Splits what `pick critic` printed for a Claude critic into its first lines and the prompt it printed after them. */
+const claudeCritic = (stdout) => {
+  const [head, ...rest] = stdout.split("\n\n");
+  return { head, prompt: rest.join("\n\n") };
+};
+
+// The prompt a Claude critic gets: the critic's brief, then the draft.
+const BRIEFED = /^You are the critic of a draft spec[^]*Check every claim[^]*\n\nThe draft:\n\n# A draft\n\nThe store reads `src\/store\.rs:7`\.\n$/;
+
+test("with the 5-hour window below its floor, pick critic names Sonnet at high and prints its prompt, without running Gemini", () => {
   const ran = pickCritic({ FAKE_AGY_5H: "0.49", FAKE_AGY_WEEKLY: "0.9", FAKE_AGY_RUN: "ok" });
   assert.equal(ran.status, 0, ran.stderr);
-  assert.equal(ran.stdout, "critic: claude sonnet effort high\nwhy: agy gemini-test-model has 49% of its 5h window and 90% of its weekly window left, under its floors of 50% and 30%\n");
+  const { head, prompt } = claudeCritic(ran.stdout);
+  assert.equal(head, "critic: claude sonnet effort high\nwhy: agy gemini-test-model has 49% of its 5h window and 90% of its weekly window left, under its floors of 50% and 30%");
+  assert.match(prompt, BRIEFED);
   assert.equal(ranCritic(ran.calls), false);
 });
 
 test("with the weekly window below its floor, pick critic names Sonnet at high without running Gemini", () => {
   const ran = pickCritic({ FAKE_AGY_5H: "0.9", FAKE_AGY_WEEKLY: "0.29", FAKE_AGY_RUN: "ok" });
   assert.equal(ran.status, 0, ran.stderr);
-  assert.equal(ran.stdout, "critic: claude sonnet effort high\nwhy: agy gemini-test-model has 90% of its 5h window and 29% of its weekly window left, under its floors of 50% and 30%\n");
+  const { head, prompt } = claudeCritic(ran.stdout);
+  assert.equal(head, "critic: claude sonnet effort high\nwhy: agy gemini-test-model has 90% of its 5h window and 29% of its weekly window left, under its floors of 50% and 30%");
+  assert.match(prompt, BRIEFED);
   assert.equal(ranCritic(ran.calls), false);
 });
 
 test("with no quota reading, pick critic names Sonnet at high without running Gemini", () => {
   const ran = pickCritic({ FAKE_AGY_USAGE: "none", FAKE_AGY_RUN: "ok" });
   assert.equal(ran.status, 0, ran.stderr);
-  assert.equal(ran.stdout, "critic: claude sonnet effort high\nwhy: agy gemini-test-model gave no quota reading\n");
+  const { head, prompt } = claudeCritic(ran.stdout);
+  assert.equal(head, "critic: claude sonnet effort high\nwhy: agy gemini-test-model gave no quota reading");
+  assert.match(prompt, BRIEFED);
   assert.equal(ran.calls.length, 1);
   assert.ok(ran.calls[0].argv.includes("/usage"));
 });
@@ -108,11 +123,14 @@ for (const [run, said] of [
   ["error", "agy gemini-test-model failed: status ERROR"],
   ["timeout", "agy gemini-test-model was cut at 15 minutes"],
 ]) {
-  test(`a Gemini critic run that ends with "${run}" names Sonnet at high as the fallback`, () => {
+  test(`a Gemini critic run that ends with "${run}" names Sonnet at high as the fallback, with the prompt Gemini got`, () => {
     const ran = pickCritic({ FAKE_AGY_5H: "0.9", FAKE_AGY_WEEKLY: "0.9", FAKE_AGY_RUN: run });
     assert.equal(ran.status, 0, ran.stderr);
-    assert.equal(ran.stdout, `critic: claude sonnet effort high\nwhy: ${said}; Sonnet is the fallback\n`);
+    const { head, prompt } = claudeCritic(ran.stdout);
+    assert.equal(head, `critic: claude sonnet effort high\nwhy: ${said}; Sonnet is the fallback`);
     assert.equal(ranCritic(ran.calls), true);
+    const gemini = ran.calls.find((call) => !call.argv.includes("/usage")).argv;
+    assert.equal(prompt, gemini[gemini.indexOf("-p") + 1], "the Claude critic gets the prompt Gemini got");
   });
 }
 

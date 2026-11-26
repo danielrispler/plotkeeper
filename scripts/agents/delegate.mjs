@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // `node scripts/agents/delegate.mjs pick critic --spec <draft> [--routing <file>]`: names the critic of a draft
-// spec from `routing.json`'s `critic` list (spec #592, "The cold critic and the veto gate"), and runs it when it
-// is Gemini. The orchestrator writes what it prints to `reports/critic.md`.
+// spec from `routing.json`'s `critic` list (spec #592, "The cold critic and the veto gate"). When it is Gemini, it runs
+// it and prints its answer, which the orchestrator writes to `reports/critic.md`; when it is Claude, it prints the
+// prompt that critic gets, the one Gemini gets. This script is where the critic's brief is written.
 //
 // `node scripts/agents/delegate.mjs run --ticket <n> --integration <branch> --effort <medium|high> [--routing <file>]`:
 // takes a cheap ticket through an OpenCode worker in its own worktree and prints the verdict (spec #592,
@@ -13,7 +14,6 @@ import { agyCall, options, quotaLeft } from "../review/outside-review.mjs";
 
 const MINUTES = 15;
 
-// The critic's brief, the one `docs/agents/learning.md` ("Critic and veto gate") gives.
 const BRIEF = `You are the critic of a draft spec for this repository. Check every claim of the draft against the repository. Mark each claim verified, with its file:line or a command and its output, or unverified. Flag contradictions with AGENTS.md, system-map.json and existing code. Rate each finding high, medium or low. You can change nothing: answer with your findings only.
 
 The draft:
@@ -91,14 +91,15 @@ const named = (candidate) => [`critic: ${candidate.cli} ${candidate.model}`, can
 
 const pickCritic = ({ spec, routing }) => {
   let why = null;
+  const prompt = BRIEF + readFileSync(spec, "utf8");
   for (const candidate of JSON.parse(readFileSync(routing, "utf8")).critic) {
     const short = shortOf(candidate);
     if (short) {
       why = short;
       continue;
     }
-    if (candidate.cli !== "agy") return [named(candidate), why && `why: ${why}`].filter(Boolean).join("\n");
-    const { answer, failed } = runAgy(candidate.model, BRIEF + readFileSync(spec, "utf8"));
+    if (candidate.cli !== "agy") return `${[named(candidate), why && `why: ${why}`].filter(Boolean).join("\n")}\n\n${prompt.trimEnd()}`;
+    const { answer, failed } = runAgy(candidate.model, prompt);
     if (answer) return `${named(candidate)}\n\n${answer.trimEnd()}`;
     why = `${candidate.cli} ${candidate.model} ${failed}; Sonnet is the fallback`;
   }
