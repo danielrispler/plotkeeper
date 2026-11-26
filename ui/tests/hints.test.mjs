@@ -59,3 +59,21 @@ test("the top bar's Needs you chip has a hint of its own and no title", async ()
   assert.equal(chip.getAttribute("title"), null);
   assert.equal(chip.textContent, "1 needs you");
 });
+
+test("a hint given the start placement is marked for it, and one given none is not", async () => {
+  const { hint } = await import("../../dist/dom.js");
+  const start = hint(Object.assign(document.createElement("button"), { id: "placed-start" }), "Opens to its start", "start");
+  const plain = hint(Object.assign(document.createElement("button"), { id: "placed-default" }), "Opens above");
+  assert.equal(hintOf(start)?.getAttribute("data-place"), "start");
+  assert.equal(hintOf(plain)?.getAttribute("data-place"), null);
+});
+
+test("a session's chevron and a worker's chevron are named for their row", async () => {
+  const { item, agentRow } = await import("../../dist/list.js");
+  const fold = (node) => /** @type {HTMLElement} */ (node.childNodes[0]);
+  const top = item("s session", 0, { open: true, hiding: 0 }, row(session, new Map()), null);
+  assert.equal(fold(top).getAttribute("aria-label"), "Subagents of Fix the build");
+  const worker = /** @type {any} */ ({ id: "w", kind: "worker", name: "Builder", last_step: null, failed: false, opened: false });
+  const under = item("s w", 1, { open: true, hiding: 0 }, agentRow(session, new Map(), worker, 1), null);
+  assert.equal(fold(under).getAttribute("aria-label"), "Subagents of Builder");
+});

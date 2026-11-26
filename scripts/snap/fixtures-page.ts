@@ -547,6 +547,41 @@ export const hints = (): Fixture => ({
 });
 
 /**
+ * The list's hints open left of the list (spec #658), with the real pointer: a session row's and a project header's sit past the list's
+ * left edge, level with their trigger, while a hint elsewhere, the map head's Pre-flight, sits above or below its trigger as before.
+ */
+export const listHints = (): Fixture => ({
+  ...list(),
+  snapScript: `
+      const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+      const hintOf = (node) => document.getElementById(node.getAttribute("interestfor"));
+      const list = document.querySelector(".list").getBoundingClientRect();
+      const shown = async (trigger, what) => {
+        await __snapMove(trigger);
+        await wait(650);
+        const hint = hintOf(trigger);
+        if (!hint?.matches(":popover-open")) return log("snap:fail the " + what + " hint did not open"), null;
+        return [hint.getBoundingClientRect(), trigger.getBoundingClientRect()];
+      };
+      const leftOfList = ([h, t]) => h.right <= list.left + 1 && h.bottom > t.top && h.top < t.bottom;
+      const row = await shown(document.querySelector(".list .row"), "row's");
+      if (!row) return;
+      if (!leftOfList(row)) log("snap:fail the row's hint is not left of the list " + JSON.stringify([...row, list]));
+      await __snapKey("Escape");
+      const head = await shown(document.querySelector(".list .project-toggle"), "project header's");
+      if (!head) return;
+      if (!leftOfList(head)) log("snap:fail the project header's hint is not left of the list " + JSON.stringify([...head, list]));
+      await __snapKey("Escape");
+      const preFlight = await shown(document.getElementById("pre-flight-button"), "Pre-flight's");
+      if (!preFlight) return;
+      const [h, t] = preFlight;
+      const apart = Math.max(h.top - t.bottom, t.top - h.bottom);
+      if (!(apart >= 0 && apart <= 24 && h.right > t.left && h.left < t.right)) log("snap:fail the Pre-flight hint is not above or below it " + JSON.stringify(preFlight));
+      log("list hints ok");`,
+  realKeys: true, realPointer: true, snapDone: "list hints ok",
+});
+
+/**
  * Cut text scrolls in place (spec #582, ticket 3), with real input: the pointer on a second line the row cuts moves its text inside its
  * own box, and on one that fits it moves nothing. The text stays the element's own, whole.
  */
