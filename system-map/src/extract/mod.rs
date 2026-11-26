@@ -6,6 +6,7 @@ mod cargo;
 #[cfg(test)]
 mod contract;
 mod go;
+mod java;
 mod names;
 pub(crate) mod registry;
 mod rust_modules;
