@@ -7,13 +7,13 @@
 
 import { modelLine, reports } from "./capabilities.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
-import { age, code, cut, element, failure, glyphOnly, hint, invoke, keepOnly, keyed, pressable, prose, text, unhint, unseenWords } from "./dom.js";
+import { age, code, cut, element, failure, glyphOnly, hint, invoke, keepOnly, keyed, patch, pressable, prose, text, unhint, unseenWords } from "./dom.js";
 import { askAnchor } from "./ask.js";
+import { askFor, openDecision } from "./answer.js";
 import { rendered } from "./markdown.js";
 import { drawSidebar } from "./list.js";
 import { agentState, sessionName, showsLanded } from "./list-model.js";
-import { openDecision } from "./answer.js";
-import { briefNodes } from "./cards.js";
+import { briefNodes, briefSlots } from "./cards.js";
 import { type Banner, bannerElement, bannerFor, bannerLives } from "./banner.js";
 import { evidenceElement, hasEvidence } from "./evidence.js";
 import { railBriefRow } from "./rail-brief.js";
@@ -221,7 +221,7 @@ function historyElement(session: string, entry: HistoryEntry): HTMLElement {
   button.append(...lines, prose("span", entry.result), text("span", entry.details, "kind"));
   button.setAttribute("data-key", `subagent-${session}-${entry.agent}`);
   hint(button, [entry.purpose, entry.asked, entry.result, entry.details].filter(Boolean).join(" · "));
-  const item = document.createElement("li");
+  const item = keyed(document.createElement("li"), `subagent-item ${session} ${entry.agent}`);
   item.append(button, askAnchor(session, { kind: "subagent", agent: entry.agent }, `the subagent ${entry.purpose}`));
   return item;
 }
@@ -461,7 +461,7 @@ export function forgetStories(sessions: Session[]) {
 
 // A folded block keyed `key`, open while Daniel keeps it open; `onOpen` runs at each opening. `hover` says what it holds.
 function folded(key: string, title: string, hover: string, body: HTMLElement[], onOpen?: () => void): HTMLElement {
-  const node = document.createElement("details");
+  const node = keyed(document.createElement("details"), `fold ${key}`);
   node.className = "fold";
   node.open = opened.has(key);
   const summary = text("summary", title);
@@ -481,7 +481,7 @@ function folded(key: string, title: string, hover: string, body: HTMLElement[], 
 function drawNow(session: Session | null, latest: Turn | null): Now | null {
   const now = session && latest ? nowOf(session.state, latest, latest.id ? summaryOf(latest.id) : null) : null;
   const asked = now && latest && session?.state === "running" ? [text("p", askedLabel(latest), "label"), text("p", latest.prompt || "No prompt", "prompt")] : [];
-  element("now-asked").replaceChildren(...asked);
+  patch(element("now-asked"), asked);
   element("intention").hidden = now !== null && now.intention === null;
   element("intention-label").hidden = now?.intention !== "why";
   return now;
@@ -494,7 +494,7 @@ function drawNow(session: Session | null, latest: Turn | null): Now | null {
 export function checkElement(line: ListedCheck): HTMLElement {
   const item = document.createElement("li");
   const label = line.status === "running" ? "Running" : "Failed";
-  const time = counts(text("span", "", "check-time"), (now) => checkTime(line, now));
+  const time = counts(text("span", "", "check-time"), (now) => checkTime(line, now), `check ${line.statement} ${line.started_at}`);
   item.append(text("span", label, "outcome"), cut(code(line.statement)), time);
   return item;
 }
@@ -591,7 +591,7 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
     list.append(...lines.map(bodyLine));
     node.append(list);
   }
-  node.append(...block.questions.filter((q) => q.answer === "not_answered").map(questionElement));
+  node.append(...block.questions.filter((q) => q.answer === "not_answered").map((q) => keyed(questionElement(q), `question ${q.tool_use_id}`)));
   node.append(...subagentsOf(session, block, now), ...checksOf(turn));
   const response = turn ? responseFold(session, turn, index, key) : null;
   if (response) node.append(response);
@@ -600,7 +600,8 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
 
 /**
  * A turn before the newest (danielrispler/plotkeeper#117): one line, which opens the turn's block under it and folds it
- * again. Only this node changes, so the others and the scroll position stay; the opened turns outlast a redraw.
+ * again. The feed is drawn again, which changes only this node, so the others and the scroll position stay; the opened turns
+ * outlast a redraw.
  */
 export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
   const node = document.createElement("li");
@@ -608,35 +609,32 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
   const key = `${session.id} ${block.index} turn`;
   const turn = block.turn;
   if (!turn) return node;
-  const draw = () => {
-    const summary = turn.id ? summaryOf(turn.id) : null;
-    const { headline } = headlineOf(summary, turn.message);
-    const open = opened.has(key);
-    const line = foldedLine(turn, headline);
-    const button = pressable(document.createElement("button"), null, () => {
-      if (opened.has(key)) opened.delete(key);
-      else opened.add(key);
-      draw();
-      if (opened.has(key)) revealTurn(turn);
-    });
-    button.classList.add("turn-line");
-    // The line's prompt and Headline carry their own full text; the rest of the line says what a click does (#220).
-    hint(button, "Fold or unfold this turn");
-    button.setAttribute("aria-expanded", String(open));
-    // The line's prompt is the turn's first words, so its hint holds the whole prompt; a span, which opens once #586's pointer path is in.
-    // A wake-up's prompt is the returning task, marked as one in the DOM's own words (#675).
-    const first = text("span", turn.wake_up ? "" : line.prompt, "prompt");
-    if (turn.wake_up) first.append(text("span", "Woken by", "woken"), ` ${line.prompt}`);
-    first.setAttribute("data-key", `turn-${key}`);
-    button.append(
-      hint(first, turn.prompt.trim() || line.prompt),
-      cut(text("span", line.headline ?? "", "headline-text")),
-      // The ✕ is for the eye; assistive tech hears "failed" once (#456).
-      ...(line.failed ? [hint(keyed(glyphOnly("✕", "mark check-failed"), `failed-${key}`), "A check ended failed"), unseenWords("failed")] : []),
-    );
-    node.replaceChildren(button, ...(open ? [...turnContent(session, block, null).children] : []));
-  };
-  draw();
+  const summary = turn.id ? summaryOf(turn.id) : null;
+  const { headline } = headlineOf(summary, turn.message);
+  const open = opened.has(key);
+  const line = foldedLine(turn, headline);
+  const button = pressable(keyed(document.createElement("button"), `turn-line ${key}`), null, () => {
+    if (opened.has(key)) opened.delete(key);
+    else opened.add(key);
+    drawFeed();
+    if (opened.has(key)) revealTurn(turn);
+  });
+  button.classList.add("turn-line");
+  // The line's prompt and Headline carry their own full text; the rest of the line says what a click does (#220).
+  hint(button, "Fold or unfold this turn");
+  button.setAttribute("aria-expanded", String(open));
+  // The line's prompt is the turn's first words, so its hint holds the whole prompt; a span, which opens once #586's pointer path is in.
+  // A wake-up's prompt is the returning task, marked as one in the DOM's own words (#675).
+  const first = text("span", turn.wake_up ? "" : line.prompt, "prompt");
+  if (turn.wake_up) first.append(text("span", "Woken by", "woken"), ` ${line.prompt}`);
+  first.setAttribute("data-key", `turn-${key}`);
+  button.append(
+    hint(first, turn.prompt.trim() || line.prompt),
+    cut(text("span", line.headline ?? "", "headline-text")),
+    // The ✕ is for the eye; assistive tech hears "failed" once (#456).
+    ...(line.failed ? [hint(keyed(glyphOnly("✕", "mark check-failed"), `failed-${key}`), "A check ended failed"), unseenWords("failed")] : []),
+  );
+  node.append(button, ...(open ? [...turnContent(session, block, null).children] : []));
   return node;
 }
 
@@ -664,18 +662,48 @@ function openCitation(id: string) {
 
 function turnElement(session: Session, block: FeedTurn, now: Now | null): HTMLElement {
   const node = now || block.index === null ? turnContent(session, block, now) : foldedTurn(session, block);
+  keyed(node, turnKey(session, block, now ? "now" : "past"));
   if (block.turn) lightsTurn(node, block.turn);
   return flashing(session, block.index, node);
 }
 
-// Turn lighting (#560): hovering or focusing a turn lights the parts it changed on the map; leaving it, or a redraw of the feed, clears it.
+/**
+ * A turn's key in the feed (spec #661): its session, its index, whether it is "now" or a past row, and a stamp of what its handlers
+ * read, its id, prompt, message, summary and files. A draw keeps a turn whose key is the same, with its listeners, and swaps one whose
+ * content its listeners read changed.
+ */
+function turnKey(session: Session, { index, turn }: FeedTurn, place: "now" | "past"): string {
+  const read = turn ? [turn.id, turn.prompt, turn.message, turn.id ? summaryOf(turn.id) : null, turn.files] : [];
+  return `turn ${session.id} ${index ?? "rest"} ${place} ${stamp(JSON.stringify(read))}`;
+}
+
+// A short stamp of `words` (FNV-1a), so a key stays short however long the reply it stamps.
+function stamp(words: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < words.length; i++) hash = Math.imul(hash ^ words.charCodeAt(i), 0x01000193);
+  return (hash >>> 0).toString(36);
+}
+
+// Turn lighting (#560): hovering or focusing a turn lights the parts it changed on the map; leaving it clears it, and so does a draw
+// that drops or swaps the node that lit it (spec #661). A draw that keeps it keeps the light.
+let litBy: HTMLElement | null = null;
 function lightsTurn(node: HTMLElement, turn: Turn) {
-  node.addEventListener("pointerenter", () => lightTurn(turn));
-  node.addEventListener("pointerleave", () => lightTurn(turn, false));
-  node.addEventListener("focusin", () => lightTurn(turn));
+  const light = (on: boolean) => {
+    if (on) litBy = node;
+    else if (litBy === node) litBy = null;
+    lightTurn(turn, on);
+  };
+  node.addEventListener("pointerenter", () => light(true));
+  node.addEventListener("pointerleave", () => light(false));
+  node.addEventListener("focusin", () => light(true));
   node.addEventListener("focusout", (event) => {
-    if (!(event.relatedTarget instanceof Node && node.contains(event.relatedTarget))) lightTurn(turn, false);
+    if (!(event.relatedTarget instanceof Node && node.contains(event.relatedTarget))) light(false);
   });
+}
+function unlightGone() {
+  if (litBy?.isConnected) return;
+  litBy = null;
+  lightTurn(null);
 }
 
 // What a turn's block says of the map (#560): a turn past the cut, of an agent that records turn files, says its files aren't shown;
@@ -683,20 +711,22 @@ function lightsTurn(node: HTMLElement, turn: Turn) {
 function turnMapNodes(session: Session, turn: Turn, newest: boolean): HTMLElement[] {
   if (oldTurn(turn, reports(session, "turn_trees"), Date.now())) return [text("p", OLD_TURN, "turn-old")];
   if (!newest || !turnLit(turn, false).length) return [];
-  const button = pressable(text("button", "Show on map", "quiet show-on-map"), null, () => revealTurn(turn));
+  const button = keyed(pressable(text("button", "Show on map", "quiet show-on-map"), null, () => revealTurn(turn)), `show-on-map ${session.id} ${turn.started_at}`);
   hint(button, "Pan the map so this turn's parts show beside the story");
   return [button];
 }
 
-/** Draws "now" and the feed from the selection and the brief the server last sent. */
+/**
+ * Draws "now", the banner and the feed from the selection and the brief the server last sent, through `patch` (spec #661): a node
+ * whose key is the same stays the node it was, so the scroll, the focus, an open fold and a press on its way stay with it.
+ */
 export function drawFeed() {
   const selected = studio.selection;
-  // The feed's nodes are new: no turn is under the pointer or the focus until one is entered again.
-  lightTurn(null);
   if (selected === null) {
     drawNow(null, null);
-    element("banner-slot").replaceChildren();
-    element("feed").replaceChildren();
+    patch(element("banner-slot"), []);
+    patch(element("feed"), []);
+    unlightGone();
     return;
   }
   const session = selected.session;
@@ -708,11 +738,15 @@ export function drawFeed() {
   const kept = own && banner && bannerLives(banner, session) ? banner : null;
   const lives = kept !== null && last !== undefined;
   const cards = studio.cards;
-  element("banner-slot").replaceChildren(
-    ...(lives ? [bannerElement({ headline: headlineOf(last.id ? summaryOf(last.id) : null, last.message).headline, endedAt: last.ended_at, since: kept.since, open: cards.open, brief: briefNodes(cards, openCitation) })] : []),
+  patch(
+    element("banner-slot"),
+    lives
+      ? [bannerElement({ session: session.id, headline: headlineOf(last.id ? summaryOf(last.id) : null, last.message).headline, endedAt: last.ended_at, since: kept.since, open: cards.open, brief: briefNodes(cards, openCitation) })]
+      : [],
   );
   element("brief-fold").hidden = lives || briefNodes(cards, openCitation).length === 0;
-  element("feed").replaceChildren(...blocks.map((block, i) => turnElement(session, block, own && i === 0 && block.index !== null ? now : null)));
+  patch(element("feed"), blocks.map((block, i) => turnElement(session, block, own && i === 0 && block.index !== null ? now : null)));
+  unlightGone();
   // The open part sheet's "This session here" follows the story (#561).
   refreshHere();
 }
@@ -759,17 +793,26 @@ function drawDock({ session, agent: id }: Selection) {
 
 // The open question of the viewed agent, docked at the top of the rail, newest first; a plan or a
 // permission the answer hook waits on docks too, whichever agent asks (danielrispler/Falinks#478). A question never
-// answered shows in its turn; an answered one is in the decision history (danielrispler/Falinks#479).
+// answered shows in its turn; an answered one is in the decision history (danielrispler/Falinks#479). The dock is drawn again
+// only when what it shows changed (spec #661), so a choice on its way stays under the pointer.
+let docked = "";
 function showQuestions(questions: Question[]) {
   const open = [...questions].reverse().filter((question) => question.answer === "open");
   const decision = openDecision();
-  const docked = [...(decision ? [decisionElement(decision)] : []), ...open.map(questionElement)];
-  element("dock").replaceChildren(...docked);
-  element("dock").hidden = docked.length === 0;
+  const shown = JSON.stringify([decision, open.map((question) => [question, askFor(question)])]);
+  if (shown === docked) return;
+  docked = shown;
+  const nodes = [...(decision ? [decisionElement(decision)] : []), ...open.map(questionElement)];
+  element("dock").replaceChildren(...nodes);
+  element("dock").hidden = nodes.length === 0;
 }
 
-// The brief, folded under the feed.
+// The brief, folded under the feed, drawn again only when it changed.
+let briefShown = "";
 function showBrief(cards: SessionCards) {
+  const shown = JSON.stringify(briefSlots(cards));
+  if (shown === briefShown) return;
+  briefShown = shown;
   const nodes = briefNodes(cards, openCitation);
   element("brief").replaceChildren(...nodes);
   element("brief-fold").hidden = nodes.length === 0;

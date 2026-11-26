@@ -4,7 +4,7 @@
 // and the tail of its output. Opening changes only the nodes it opens: the open state is kept by key, so a redraw of the rail
 // draws the line open again.
 
-import { code, failure, glyphOnly, hint, invoke, messageOf, pressable, scrollingPre, statusRegion, text } from "./dom.js";
+import { code, failure, glyphOnly, hint, invoke, keyed, messageOf, pressable, scrollingPre, statusRegion, text } from "./dom.js";
 import { askAnchor, hunkText } from "./ask.js";
 import { diffRequest } from "./diff.js";
 import type { Capabilities, Check, CheckOutput, Hunk, Turn, TurnFile } from "./types.js";
@@ -85,7 +85,8 @@ const wordsKey = (session: string, c: Check) => {
 
 const outputText = (output: CheckOutput) => `${output.exit_code === null ? "No exit code" : `exit code ${output.exit_code}`}\n${output.tail}`;
 
-// A failed check's row: its label, which opens its exit code and the output's tail under it. Only this row changes.
+// A failed check's row: its label, which opens its exit code and the output's tail under it. Only this row changes. It is keyed by its
+// run, which its listeners read, so the rail's `patch` keeps it only for the same run (spec #661).
 function checkRow(session: string, row: EvidenceRow): HTMLElement {
   const item = document.createElement("li");
   item.className = "evidence-check";
@@ -95,6 +96,7 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
   }
   const call = row.call;
   const key = `${session} ${row.agent ?? ""} ${call}`;
+  keyed(item, `check-row ${key}`);
   const pre = scrollingPre(outputs.get(key) ?? "", "evidence-output", `Output of ${row.label}`);
   // Why the output could not be read is said aloud, in a region the row holds before the read (#456); the output itself is not.
   const live = statusRegion();
@@ -144,7 +146,8 @@ export function fileRow(session: string, index: number, row: EvidenceRow & { fil
   const key = `${session} ${index} ${file.root} ${file.path}`;
   // Whether it is open is its own to each place that draws it; the hunk read is shared.
   const openKey = `${scope}${key}`;
-  const item = document.createElement("li");
+  // Keyed by what its listeners read, so the rail's `patch` keeps it only while that holds (spec #661).
+  const item = keyed(document.createElement("li"), `file-row ${openKey} ${file.from ?? ""} ${file.added} ${file.removed} ${ended}`);
   item.className = "evidence-file";
   // What is kept of its hunk: final, or the read of an open turn while the turn is still open.
   const kept = () => {
@@ -232,7 +235,8 @@ export function evidenceElement(session: string, index: number, turn: Facts & En
   const line = evidenceLine(facts, words);
   if (!line) return null;
   const key = `${session} ${index} evidence`;
-  const node = document.createElement("div");
+  // Its listeners read its rows, so a line whose rows changed is a new node (spec #661).
+  const node = keyed(document.createElement("div"), `${key} ${only} ${evidenceRows(facts).map((row) => row.label).join("\n")}`);
   node.className = "evidence";
   const list = document.createElement("ul");
   list.className = "evidence-rows";

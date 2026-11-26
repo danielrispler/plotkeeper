@@ -4,7 +4,7 @@
 // those facts and, for a file, its hunk; the answer stays here, labelled as interpretation under the facts as recorded and the session never sees it. A failed call or a reply with no answer shows why, with
 // a retry.
 
-import { availability, failure, hint, invoke, isUnavailable, keepOnly, messageOf, onEnter, pressable, text } from "./dom.js";
+import { availability, failure, held, hint, invoke, isUnavailable, keepOnly, messageOf, onEnter, pressable, text } from "./dom.js";
 import { rendered } from "./markdown.js";
 import type { Anchor, Facts, Hunk } from "./types.js";
 
@@ -23,8 +23,8 @@ export const suggestions = (anchor: Anchor): string[] => questions[anchor.kind];
 
 const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour12: false });
 
-// Each anchor's box, kept across the view's redraws (every second), so a question being typed, an open box and an answer all
-// stay; a session that leaves the list takes its boxes with it (`forgetAsks`).
+// Each anchor's box, kept across the view's draws (one each time the session, its cards or a summary changes), so a question being
+// typed, an open box and an answer all stay; a session that leaves the list takes its boxes with it (`forgetAsks`).
 const asks = new Map<string, HTMLDetailsElement>();
 // The session of each box's key.
 const askedIn = new Map<string, string>();
@@ -37,13 +37,17 @@ export function forgetAsks(listed: ReadonlySet<string>) {
 // `scope` keeps the boxes of one anchor drawn in two places apart, as a node has one parent.
 const keyOf = (session: string, anchor: Anchor, scope: string) => `${scope}${session}\n${JSON.stringify(anchor)}`;
 
-/** The "Ask" box of `anchor` in session `session`, labelled `what` for the model ("this file"). */
+/**
+ * The "Ask" box of `anchor` in session `session`, labelled `what` for the model ("this file"), keyed by its key and held, so the
+ * view's `patch` keeps it where it is, the focus in it too (spec #661).
+ */
 export function askAnchor(session: string, anchor: Anchor, what: string, scope = ""): HTMLDetailsElement {
   const key = keyOf(session, anchor, scope);
   const box = asks.get(key) ?? askBox(session, anchor, what);
+  box.setAttribute("data-key", `ask ${key}`);
   asks.set(key, box);
   askedIn.set(key, session);
-  return box;
+  return held(box);
 }
 
 /** Opens the box of `anchor` and puts the cursor in it, when it is drawn; false when it is not. */
