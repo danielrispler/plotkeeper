@@ -103,6 +103,11 @@ pub struct Prs {
     found: Mutex<HashMap<String, BTreeMap<String, Pr>>>,
     /// The projects whose `gh pr list` has answered at least once.
     listed: Mutex<HashSet<String>>,
+    /// The order of the lookup whose answers `found` holds, per project: a lookup that ends after a later one keeps none of its
+    /// own, so what is found never moves back.
+    seqs: Mutex<HashMap<String, u64>>,
+    /// The lookups started, in order.
+    started: std::sync::atomic::AtomicU64,
 }
 
 impl Prs {
@@ -124,9 +129,15 @@ impl Prs {
         };
         let mut asked = Vec::new();
         let mut listed = None;
+        let mut seq = 0;
         let outcome = self
             .guard
             .run_after(&format!("prs:{project}"), now, cooldown, || {
+                // The guard runs one lookup of a project at a time, so the order they start in is the order of what they saw.
+                seq = self
+                    .started
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                    + 1;
                 for branch in branches {
                     asked.push((branch.clone(), view(branch)));
                 }
@@ -137,6 +148,15 @@ impl Prs {
             return None;
         }
         let mut found = self.found.lock().unwrap();
+        let mut seqs = self.seqs.lock().unwrap();
+        if seqs.get(project).is_some_and(|seen| *seen > seq) {
+            // A later lookup's answers are kept already: this one's are older.
+            asked.clear();
+            listed = None;
+        } else {
+            seqs.insert(project.to_string(), seq);
+        }
+        drop(seqs);
         let of_project = found.entry(project.to_string()).or_default();
         let mut numbers = Vec::new();
         for (branch, looked) in asked {
@@ -180,26 +200,37 @@ impl Prs {
         self.listed.lock().unwrap().contains(project)
     }
 
+    /// The ready PRs of `project`, by number, with the order of the lookup they are from (`MapReviews::head_now`).
+    pub fn ready_seq(&self, project: &str) -> (u64, Vec<Ready>) {
+        let found = self.found.lock().unwrap();
+        // Read under `found`'s lock, which every change of `seqs` holds: the order is the one of the answers read.
+        let seq = self.seqs.lock().unwrap().get(project).copied().unwrap_or(0);
+        (seq, ready_of(&found, project))
+    }
+
     /// The ready PRs of `project`, by number.
     pub fn ready(&self, project: &str) -> Vec<Ready> {
-        let found = self.found.lock().unwrap();
-        let mut ready: Vec<Ready> = found
-            .get(project)
-            .into_iter()
-            .flat_map(|branches| branches.values())
-            .filter(|pr| pr.ready())
-            .map(|pr| Ready {
-                number: pr.number,
-                title: pr.title.clone(),
-                head: pr.head.clone(),
-                branch: pr.branch.clone(),
-                brief: None,
-            })
-            .collect();
-        drop(found);
-        ready.sort_by_key(|r| r.number);
-        ready
+        ready_of(&self.found.lock().unwrap(), project)
     }
+}
+
+/// The ready PRs of `project` in `found`, by number.
+fn ready_of(found: &HashMap<String, BTreeMap<String, Pr>>, project: &str) -> Vec<Ready> {
+    let mut ready: Vec<Ready> = found
+        .get(project)
+        .into_iter()
+        .flat_map(|branches| branches.values())
+        .filter(|pr| pr.ready())
+        .map(|pr| Ready {
+            number: pr.number,
+            title: pr.title.clone(),
+            head: pr.head.clone(),
+            branch: pr.branch.clone(),
+            brief: None,
+        })
+        .collect();
+    ready.sort_by_key(|r| r.number);
+    ready
 }
 
 /// Runs `gh pr view <branch>` in `cwd`, as Daniel with its own login; no credential file is read.
@@ -275,12 +306,12 @@ pub fn ask_later(app: &Arc<App>, trigger: Trigger, also: Option<&str>) {
                     app.list_changed();
                 }
             }
-            let ready = prs.ready(&project);
+            let (seq, ready) = prs.ready_seq(&project);
             if ready != before {
                 app.events
                     .emit("map-landed", serde_json::json!(project.clone()));
             }
-            crate::pr_briefs::lookup_later(&app, &project, ready);
+            crate::pr_briefs::lookup_later(&app, &project, ready, seq);
         }
     });
 }

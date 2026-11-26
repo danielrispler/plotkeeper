@@ -531,7 +531,7 @@ fn a_new_head_cancels_the_running_review_of_an_older_one() {
         Some(&first),
         &[("cache/lib.rs", "pub fn get() -> u8 { 1 }\n")],
     );
-    bench.reviews.head_now(&bench.project(), 7, &second);
+    bench.reviews.head_now(&bench.project(), 7, &second, 1);
     let runs = bench.runner.runs(&bench.project()).runs;
     assert!(runs.iter().all(|run| run.id != old), "{runs:?}");
     let view = bench.reviews.view(&bench.project(), 7, &first).unwrap();
@@ -585,7 +585,7 @@ fn a_late_brief_of_an_older_head_neither_cancels_the_current_heads_review_nor_st
         &[("cache/lib.rs", "pub fn get() -> u8 { 1 }\n")],
     );
     // The lookup sees the second head, and its brief starts its review.
-    bench.reviews.head_now(&bench.project(), 7, &second);
+    bench.reviews.head_now(&bench.project(), 7, &second, 1);
     bench.reviews.brief_stored(&bench.project(), 7, &second);
     // The first head's brief, whose write was slow, is stored only now.
     bench.reviews.brief_stored(&bench.project(), 7, &first);
@@ -765,4 +765,26 @@ fn a_long_id_whose_text_did_not_change_is_not_counted_as_left_out() {
     let map = base.replace(r#""paths":["server/"]"#, r#""paths":["server/","web/"]"#);
     let head = bench.push(None, &[("system-map.json", &map)]);
     assert_eq!(bench.reviews.view(&bench.project(), 7, &head), None);
+}
+
+#[test]
+fn an_older_lookup_that_ends_last_does_not_move_the_prs_head_back() {
+    let bench = bench();
+    bench.author("daniel");
+    bench.all_supported();
+    let first = bench.first_head();
+    let second = bench.push(
+        Some(&first),
+        &[("cache/lib.rs", "pub fn get() -> u8 { 1 }\n")],
+    );
+    // The second lookup saw the new head; the first, which saw the old one, ends after it.
+    bench.reviews.head_now(&bench.project(), 7, &second, 2);
+    bench.reviews.head_now(&bench.project(), 7, &first, 1);
+    bench.reviews.brief_stored(&bench.project(), 7, &second);
+    let view = bench.settled(&second);
+    assert_eq!(
+        (view.state, view.checked),
+        (ReviewState::Done, 7),
+        "{view:?}"
+    );
 }

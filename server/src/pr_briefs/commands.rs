@@ -129,7 +129,7 @@ pub(super) fn has_fresh_brief(store: &BriefStore, pr: &Ready) -> bool {
 /// Looks at each ready PR of `project` after a lookup of `prs.rs`: the first brief is written at once, a new head stales it. Each
 /// PR goes on a thread of its own, since a write takes minutes; the Map view is told (`map-landed`) when a brief changed. At the
 /// first lookup after start only the PRs `Startup` picks are written; the rest are written when opened.
-pub fn lookup_later(app: &Arc<App>, project: &str, ready: Vec<Ready>) {
+pub fn lookup_later(app: &Arc<App>, project: &str, ready: Vec<Ready>, seq: u64) {
     let Some(store) = store_of(project) else {
         return;
     };
@@ -142,9 +142,9 @@ pub fn lookup_later(app: &Arc<App>, project: &str, ready: Vec<Ready>) {
         crate::settings::brief_backfill().window_ms,
         &|pr| has_fresh_brief(&store, pr),
     );
-    // A new head cancels the map text review of an older one.
+    // A new head cancels the map text review of an older one; `seq`, the lookup's order, keeps a late older lookup from moving it back.
     for pr in &ready {
-        app.reviews.head_now(project, pr.number, &pr.head);
+        app.reviews.head_now(project, pr.number, &pr.head, seq);
     }
     for pr in ready.into_iter().filter(|pr| allowed.contains(&pr.number)) {
         let (app, project) = (app.clone(), project.to_string());

@@ -329,9 +329,9 @@ pub struct MapReviews {
     reading: Mutex<HashSet<String>>,
     /// Serialises the read, change and write of a PR's file.
     writing: Mutex<()>,
-    /// Each PR's head as the lookups last saw it ([`MapReviews::head_now`]), by project and number: only that head's review may
-    /// start or cancel another's.
-    current: Mutex<BTreeMap<(String, u64), String>>,
+    /// Each PR's head as the latest lookup saw it ([`MapReviews::head_now`]), by project and number, with that lookup's order:
+    /// only that head's review may start or cancel another's.
+    current: Mutex<BTreeMap<(String, u64), (u64, String)>>,
     me: Weak<MapReviews>,
 }
 
@@ -409,7 +409,7 @@ impl MapReviews {
         let current = self.current.lock().unwrap_or_else(PoisonError::into_inner);
         current
             .get(&(project.to_string(), pr))
-            .is_none_or(|now| now == head)
+            .is_none_or(|(_, now)| now == head)
     }
 
     /// A brief of PR `pr` was stored at `head`: a head with changed text is reviewed when the PR is by Daniel's own login, unless
@@ -443,15 +443,22 @@ impl MapReviews {
         self.view(project, pr, head)
     }
 
-    /// PR `pr` is at `head` now: the review of any older head, queued or running, is cancelled.
-    pub fn head_now(&self, project: &str, pr: u64, head: &str) {
+    /// PR `pr` is at `head` now, as lookup `seq` saw it (`prs::Prs::ready_seq`): the review of any older head, queued or running,
+    /// is cancelled. A lookup older than the one already seen, which ended after it, changes nothing, so the head never moves
+    /// back. It holds the lock throughout, so a start of an older head either claims its head first, and is cancelled here, or
+    /// finds the new head and starts nothing.
+    pub fn head_now(&self, project: &str, pr: u64, head: &str, seq: u64) {
+        let guard = self.lock();
         let mut current = self.current.lock().unwrap_or_else(PoisonError::into_inner);
-        current.insert((project.to_string(), pr), head.to_string());
+        let key = (project.to_string(), pr);
+        if current.get(&key).is_some_and(|(seen, _)| *seen > seq) {
+            return;
+        }
+        current.insert(key, (seq, head.to_string()));
         drop(current);
         if !self.file(project, pr).exists() {
             return;
         }
-        let guard = self.lock();
         let mut record = self.read(project, pr);
         let Some(runs) = replace_others(&mut record, head) else {
             return;
