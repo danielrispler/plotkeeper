@@ -141,7 +141,9 @@ const named: Record<string, (arg?: string) => void> = {
   },
   "studio::Dismiss": () => {
     // Esc peels the map's layers (`map.ts`) and on the bare map does nothing (#386); the list open over it closes first. The palette, a
-    // popover, and a modal dialog close on Esc themselves (#458).
+    // popover, and a modal dialog close on Esc themselves (#458). An open hint is among them, and Esc closes it alone: the layers under
+    // it stay (spec #582, user story 5).
+    if (document.querySelector("#hints :popover-open")) return;
     const overlaid = ["list-open", "list-peek"].some((name) => document.body.classList.contains(name));
     if (!overlaid) return mapEscape();
     document.body.classList.remove("list-open", "list-peek");

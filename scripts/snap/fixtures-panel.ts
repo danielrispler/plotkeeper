@@ -462,8 +462,8 @@ export const mapPanelFieldHints = (): Fixture => ({
       await __snapKey("Escape");
       await wait(50);
       if (open(pickHint)) log("snap:fail Esc left the picker's hint open");
-      // Esc also peels the map's layers, so Settings may have closed with the hint: open it again.
-      if (!panelOpen()) document.getElementById("settings-button").click();
+      // Esc closes the open hint only: the map's layers stay as they were (spec #582, user story 5).
+      if (!panelOpen()) return log("snap:fail Esc on an open hint also closed Settings");
       await __snapMove(document.body);
       await wait(150);
       await __snapKey("Tab");
