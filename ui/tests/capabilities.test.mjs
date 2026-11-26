@@ -61,6 +61,11 @@ test("a recorded Qwen Code session's model line names Qwen Code and the model it
   assert.equal(modelLine(qwen), "Qwen Code · Qwen3 coder plus");
 });
 
+test("a recorded OpenCode session's model line names OpenCode and the model its turns name (#370)", () => {
+  const opencode = /** @type {Session} */ ({ capabilities: caps("opencode", { asks: true }), model: "big-pickle", transcript: { context: null, model: null } });
+  assert.match(modelLine(opencode), /^OpenCode · /);
+});
+
 test("the model line takes the transcript's model by the capability flag, never by the agent's name", () => {
   // A Claude session whose capabilities say its transcript names no model shows the model on the session.
   assert.equal(modelLine({ ...claude, capabilities: { ...claude.capabilities, transcript_model: false }, model: "claude-haiku-5" }), "Claude · Haiku 5");

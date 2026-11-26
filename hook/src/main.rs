@@ -70,10 +70,14 @@ fn append() -> Result<(), Box<dyn Error>> {
     if let Ok(terminal) = terminal {
         event.insert("studio_terminal_id".into(), terminal.into());
     }
-    // The agent's process, so the studio ends a session whose agent is gone (#330).
+    // The agent's process, so the studio ends a session whose agent is gone (#330). OpenCode's
+    // plugin runs in its shared background service, which outlives its sessions (#370).
     let wrapper = env::var("PLOTKEEPER_AGENT_PID").ok();
     let parent = std::os::unix::process::parent_id();
-    if let Some(pid) = studio_hook::agent_pid(wrapper.as_deref(), parent, studio_hook::inspect) {
+    let shared = agent.as_deref() == Some("opencode");
+    if let Some(pid) =
+        studio_hook::agent_pid(wrapper.as_deref(), parent, studio_hook::inspect).filter(|_| !shared)
+    {
         event.insert("studio_pid".into(), pid.into());
     }
     if let Some(agent) = agent {

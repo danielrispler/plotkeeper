@@ -14,6 +14,7 @@ mod cursor;
 mod event;
 mod ledger;
 mod notifications;
+mod opencode;
 mod output;
 mod qwen;
 mod saved;
@@ -35,6 +36,7 @@ pub use cursor::CAPABILITIES as CURSOR_CAPABILITIES;
 pub use event::{Capabilities, TranscriptFormat};
 pub use ledger::{Bytes, Details, Ledger, Outcome, Row};
 pub use notifications::{Due, Notifications, Sound};
+pub use opencode::CAPABILITIES as OPENCODE_CAPABILITIES;
 pub use output::{
     Asker, Base, CardRequest, CatchUp, Change, DELETE, FactFile, Facts, Fingerprint, INTERRUPTED,
     LiveFacts, NameRequest, Output, PROMPT_NAME, Purpose, RENAME, STUDIO_ANSWER, SummaryRequest,

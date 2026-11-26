@@ -24,6 +24,7 @@ mod ledger;
 mod naming;
 mod needs_you;
 mod notices;
+mod opencode;
 mod phases;
 mod prompt_name;
 mod questions;

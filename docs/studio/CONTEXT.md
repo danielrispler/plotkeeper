@@ -221,11 +221,11 @@ The state of an agent session left at your turn with no events for 2 hours or mo
 The state of an agent session from its own end event until it starts again under its id. The control room never guesses that a session is gone.
 
 **Agent session**:
-One worker runtime session running one agent on a task, such as a Claude Code session in a terminal. The unit the control room watches. Claude Code and agy sessions are followed fully, from their hooks and transcripts; Codex, Qwen Code, Cursor and Copilot sessions from their hooks only (sessions, turns, prompts and calls; no transcript is read, and turn trees are recorded for Codex and Cursor only); each as far as its **agent adapter**'s **capabilities** reach. A session of another agent has its status only.
+One worker runtime session running one agent on a task, such as a Claude Code session in a terminal. The unit the control room watches. Claude Code and agy sessions are followed fully, from their hooks and transcripts; Codex, Qwen Code, Cursor, Copilot and OpenCode sessions from their hooks (OpenCode's, its plugin) only (sessions, turns, prompts and calls; no transcript is read, and turn trees are recorded for Codex and Cursor only); each as far as its **agent adapter**'s **capabilities** reach. A session of another agent has its status only.
 _Avoid_: Run (alone)
 
 **Agent adapter**:
-The part of the core that turns one agent's hook lines and transcript into the studio's events. Claude Code, agy, Codex, Qwen Code, Copilot and Cursor each have one.
+The part of the core that turns one agent's hook lines and transcript into the studio's events. Claude Code, agy, Codex, Qwen Code, Copilot, Cursor and OpenCode each have one.
 
 **Capability**:
 What an agent adapter can report, such as a question that waits on Daniel, a permission mode, a subagent's last message or how full the session's context is. It decides what its sessions' views show: a part of the view hides when the adapter cannot report it, never by the agent's name.
