@@ -1,16 +1,36 @@
 // The part catch-up on a part's sheet (spec danielrispler/plotkeeper#378, ticket #391): pure logic, run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { awaitedCatchUp, fogActions, fogListLines, stageLabel } from "../../dist/map-catch-up.js";
+import { awaitedCatchUp, changesLine, fogActions, fogListLines, stageLabel } from "../../dist/map-catch-up.js";
 
 /** @returns {import("../../dist/types.js").CatchUpOffer} */
 const catchUp = (extra = {}) => ({ kind: "catch-up", ready: false, writing: false, failed: false, ...extra });
 
 test("a fogged part's sheet shows its part catch-up as the main button and \"I know this\" as the second", () => {
   const actions = fogActions("thin", catchUp());
-  assert.equal(actions.main.label, "Part catch-up");
+  assert.equal(actions.main.label, "Catch up");
   assert.deepEqual(actions.main.open, { kind: "catch-up" });
   assert.equal(actions.second, "I know this");
+});
+
+// The catch-up card (#636): a ready catch-up's button says how many steps its outline has; the card's eyebrow how many changes landed.
+const outline = (n) => ({ title: "Store writes go atomic", steps: ["Where", "Before", "Now", "Must stay true"].slice(0, n).map((k) => ({ k, h: `${k} line` })) });
+
+test("a ready catch-up's main button says how many steps it has, from its outline", () => {
+  assert.equal(fogActions("thin", catchUp({ ready: true, outline: outline(4) })).main.label, "Catch up · 4 steps");
+  assert.equal(fogActions("thin", catchUp({ ready: true, outline: outline(1) })).main.label, "Catch up · 1 step");
+  assert.equal(fogActions("thin", catchUp({ ready: true, outline: outline(3) })).main.note, null);
+});
+
+test("a catch-up being written says the call that runs now on the card, and a failed one says to try again", () => {
+  assert.equal(fogActions("thin", catchUp({ writing: true, stage: { kind: "checking" } })).main.note, "Checking claims…");
+  assert.equal(fogActions("thin", catchUp({ writing: true, stage: { kind: "fixing", claims: 2 } })).main.label, "Catch up");
+  assert.equal(fogActions("thin", catchUp({ failed: true })).main.note, "The last write failed; press to try again");
+});
+
+test("the card's eyebrow says how many changes landed since the last catch-up", () => {
+  assert.equal(changesLine(3), "3 changes since you last caught up");
+  assert.equal(changesLine(1), "1 change since you last caught up");
 });
 
 test("a part fogged by one PR whose brief lights it offers that chapter instead, with \"I know this\" second", () => {

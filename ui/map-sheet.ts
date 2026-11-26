@@ -1,13 +1,15 @@
 // The part sheet of the Map view (spec danielrispler/plotkeeper#306, ticket #310): a click on a plate opens it over the map's right, in the
 // side area's `sheet` slot, in the glass the left panel shares (#385). It starts with why its plate carries its marks (#495: fog, staleness,
-// a broken law; `sheetMarks`), then holds the part's purpose, then the named things it holds, each with its key files (spec #473), its tier (changed in place), its laws, what it talks to (its links) and its fog, with a quiet
-// "I know this" that lifts the mist. `map-model.ts`'s `sheetOf` is what it shows; Esc closes it (the `sheet` layer). A fogged part's main
-// button is its part catch-up (#391), or the one PR brief chapter that lights it (`fogActions`); "I know this" is the quiet second.
+// a broken law; `sheetMarks`), then the catch-up card (#636), then holds the part's purpose, then the named things it holds, each with its
+// key files (spec #473), its tier (changed in place), its laws and what it talks to (its links). `map-model.ts`'s `sheetOf` is what it
+// shows; Esc closes it (the `sheet` layer). A fogged part's card says how many changes landed and shows the waiting catch-up's outline; its
+// main button is its part catch-up (#391), or the one PR brief chapter that lights it (`fogActions`), and "I know this", which lifts the
+// mist, is the quiet second. A part with no fog's card says "Caught up" and holds the Refresher (#392).
 //
 // "See the proof" (`.sheet-law-actions` of a law a check backs) and the CI line with its drill-down open the drawer (`map-drawer.ts`).
 // A law on trust has Back a law there instead, or its run's patch (`patch-review.ts`, #398).
 // `.sheet-extra` at the foot holds the history strip (`map-history.ts`, #313). While a past commit is shown the sheet is read-only:
-// no tier change, no proof, no CI section, no fog section.
+// no tier change, no proof, no CI section, no catch-up card.
 //
 // The sheet's left edge resizes it (#445), and a click on the empty map closes it and its drawer (`map.ts`'s `pan`).
 
@@ -23,7 +25,7 @@ import { sessionHere } from "./map-live.js";
 import { studio } from "./state.js";
 import type { Session } from "./types.js";
 import { enterRefresher, refresherNode, staleWhy } from "./map-stale.js";
-import { fogActions } from "./map-catch-up.js";
+import { changesLine, fogActions } from "./map-catch-up.js";
 import { ciDrawer, effectiveTier, type PanelContent, type Part, proofDrawer, type Sheet, sheetCi, sheetMarks, sheetOf, talksTo, type Tier } from "./map-model.js";
 import { openBriefOf, openCatchUpOf } from "./map-brief.js";
 import { lawAction, lawActionNodes, patchActs } from "./patch-review.js";
@@ -233,59 +235,6 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
     return row;
   });
   const links = explainedLinks(rows, talks.map((talk) => ({ kind: talk.kind, unratified: pending.has(talk.link) })), explain);
-  const fog = text("div", "", `sheet-fog${!view.scrub && view.state.fog?.[part.id] ? ` ${view.state.fog[part.id]}` : ""}`);
-  fog.append(text("p", sheet.fogLine, "sheet-fog-line"));
-  const actions = fogActions(view.scrub ? undefined : view.state.fog?.[part.id], view.state.catch_ups?.[part.id]);
-  const fogButtons: HTMLElement[] = [];
-  if (actions.main) {
-    const { open: opens, label, title, note } = actions.main;
-    const main = pressable(text("button", label, "btn primary sheet-catch-up"), null);
-    hint(main, title);
-    main.addEventListener("click", () => {
-      if (opens.kind === "chapter") return void openBriefOf(view.project, opens.pr, opens.chapter, true);
-      void openCatchUpOf(view.project, part.id);
-    });
-    fog.append(main);
-    fogButtons.push(main);
-    if (note) fog.append(text("span", note, "sheet-catch-up-note"));
-    if (opens.kind === "catch-up") {
-      const key = `${view.project}|${part.id}`;
-      if (!offered.has(key)) {
-        offered.add(key);
-        logStop("catch-up-offered", view.project);
-      }
-    }
-  }
-  if (sheet.canClear && actions.second) {
-    const clear = pressable(text("button", actions.second, "btn quiet sheet-know"), null);
-    hint(clear, "Clear this part's fog: you have caught up with what changed");
-    clear.addEventListener("click", () => {
-      clear.disabled = true;
-      know(view, part.id).catch(failure("map_know"));
-    });
-    fog.append(clear);
-    fogButtons.push(clear);
-    // The fog actions' line under the buttons shown, each button described by it.
-    if (explain) {
-      const kind = actions.main ? (actions.main.open.kind === "chapter" ? "chapter" : "catchUp") : "know";
-      const note = explainLine(SHEET.fogActions[kind], "explain-choice");
-      for (const button of fogButtons) button.setAttribute("aria-describedby", note.id);
-      fog.append(note);
-    }
-  }
-  // A part with no fog offers the refresher (#392).
-  const refresher = !view.scrub && refreshing === part.id ? refresherNode(view, part.id) : null;
-  if (!view.scrub && !sheet.canClear && !refresher) {
-    const enter = pressable(text("button", "Refresher", "btn quiet sheet-refresher"), null);
-    hint(enter, "The flows through this part, hop by hop");
-    // It shows at once, drawn from the map; the server records the activity behind it, and the reload drops the band.
-    enter.addEventListener("click", () => {
-      refreshing = part.id;
-      drawSheet(view);
-      enterRefresher(view, part.id).catch(failure("map_refresher"));
-    });
-    fog.append(enter);
-  }
   const state = view.scrub ? null : sheetCi(view.state.ci, part.id, sheet.laws.some((law) => law.backing === "check"));
   const ci = text("div", "", `sheet-ci${state?.broken ? " broken" : ""}`);
   if (state) {
@@ -311,6 +260,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
     text("h2", sheet.name, "sheet-name"),
     text("p", sheet.caption, "sheet-caption"),
     ...(view.scrub ? [] : marksList(view, part.id)),
+    ...(view.scrub ? [] : [catchUpCard(view, part.id, sheet, explain)]),
     // A converted version 1 map may have had an empty description: no empty paragraph for it.
     ...(sheet.purpose ? [text("p", sheet.purpose, "sheet-purpose")] : []),
     ...(sheet.holds.length ? [...heading("Holds"), heldList(sheet.holds)] : []),
@@ -320,9 +270,7 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
     ...(laws.length ? [lawList] : [text("p", "No laws on this part", "empty")]),
     ...heading("Talks to"),
     ...(links.length ? [linkList] : [text("p", "No link at this part", "empty")]),
-    // Fog and CI are of now: a past commit shows neither.
-    ...(refresher ? [refresher] : []),
-    ...(view.scrub ? [] : [...heading("Fog"), fog]),
+    // CI is of now: a past commit shows none.
     ...(state ? [...heading("CI on main"), ci] : []),
   );
   const here = text("div", "", "sheet-here");
@@ -334,6 +282,92 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
   );
   if (overturned) card.append(overturned);
   return { card, extra, toggle };
+}
+
+// The catch-up card (spec #633, ticket #636), of now only. A fogged part's says how many changes landed since Daniel last caught up and, once
+// the catch-up is stored, its outline: its title and each step's kind and headline, never its gist, which stays behind Explain-back. Under
+// them the main button and "I know this", with the write's stage or failure. A part with no fog's says "Caught up" and holds the Refresher,
+// which opens inside it.
+function catchUpCard(view: MapView, part: string, sheet: Sheet, explain: boolean): HTMLElement {
+  const shown = view.state.fog?.[part];
+  const card = text("article", "", `catch-up-card ${shown ?? "clear"}`);
+  const changes = view.state.user.fog?.parts[part]?.length ?? 0;
+  const eyebrow = text("p", shown ? changesLine(Math.max(1, changes)) : "Caught up", "catch-up-eyebrow");
+  card.append(...explained(eyebrow, SHEET.fog, explain));
+  if (!shown) {
+    // A part that never fogs, or fogs only on its laws, links or flows, says so.
+    if (sheet.tier !== "core") card.append(text("p", sheet.fogLine, "catch-up-line"));
+    const refresher = refreshing === part ? refresherNode(view, part) : null;
+    if (refresher) card.append(refresher);
+    else {
+      const enter = pressable(text("button", "Refresher", "btn quiet sheet-refresher"), null);
+      hint(enter, "The flows through this part, hop by hop");
+      // It shows at once in the button's place, drawn from the map; the server records the activity behind it, and the reload, which
+      // draws the sheet again with it open, drops the band.
+      enter.addEventListener("click", () => {
+        refreshing = part;
+        const opened = refresherNode(view, part);
+        if (opened) card.replaceChild(opened, enter);
+        enterRefresher(view, part).catch(failure("map_refresher"));
+      });
+      card.append(enter);
+    }
+    return card;
+  }
+  const offer = view.state.catch_ups?.[part];
+  const outline = offer?.kind === "catch-up" ? offer.outline : undefined;
+  if (outline) {
+    const steps = text("ol", "", "catch-up-steps");
+    // Safari drops a list's semantics under `list-style: none`; the role brings them back.
+    steps.setAttribute("role", "list");
+    for (const step of outline.steps) {
+      const row = text("li", "", "catch-up-step");
+      row.append(text("span", step.k, "catch-up-kind"), text("span", step.h, "catch-up-headline"));
+      steps.append(row);
+    }
+    card.append(text("h3", outline.title, "catch-up-title"), steps);
+  }
+  const actions = fogActions(shown, offer);
+  const row = text("div", "", "catch-up-actions");
+  const buttons: HTMLElement[] = [];
+  let note: HTMLElement | null = null;
+  if (actions.main) {
+    const { open: opens, label, title } = actions.main;
+    const main = pressable(text("button", label, "btn primary sheet-catch-up"), null);
+    hint(main, title);
+    main.addEventListener("click", () => {
+      if (opens.kind === "chapter") return void openBriefOf(view.project, opens.pr, opens.chapter, true);
+      void openCatchUpOf(view.project, part);
+    });
+    buttons.push(main);
+    if (actions.main.note) note = text("p", actions.main.note, "sheet-catch-up-note");
+    if (opens.kind === "catch-up") {
+      const key = `${view.project}|${part}`;
+      if (!offered.has(key)) {
+        offered.add(key);
+        logStop("catch-up-offered", view.project);
+      }
+    }
+  }
+  if (actions.second) {
+    const clear = pressable(text("button", actions.second, "btn quiet sheet-know"), null);
+    hint(clear, "Clear this part's fog: you have caught up with what changed");
+    clear.addEventListener("click", () => {
+      clear.disabled = true;
+      know(view, part).catch(failure("map_know"));
+    });
+    buttons.push(clear);
+  }
+  row.append(...buttons);
+  card.append(row, ...(note ? [note] : []));
+  // The fog actions' line under the buttons, each button described by it.
+  if (explain) {
+    const kind = actions.main ? (actions.main.open.kind === "chapter" ? "chapter" : "catchUp") : "know";
+    const line = explainLine(SHEET.fogActions[kind], "explain-choice");
+    for (const button of buttons) button.setAttribute("aria-describedby", line.id);
+    card.append(line);
+  }
+  return card;
 }
 
 // "This session here" (#561): while a session's story is open in the left panel beside the sheet, its turns of the last 7 days that changed

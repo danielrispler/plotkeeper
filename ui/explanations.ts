@@ -24,11 +24,12 @@ export const SHEET = {
   } satisfies Record<LinkKind, string>,
   // The spec's wording was 13 words; one "it" went to keep the 12-word rule.
   notYet: "Not yet ratified: the agent added it; Accept keeps, Overturn undoes it.",
+  // The catch-up card's line (#636), under its eyebrow; it was the Fog section's.
   fog: "Changes on main you haven't caught up on yet.",
-  // Under the fog buttons, by which are shown: the part catch-up (the spec's wording), the PR brief chapter that lights the part, or
-  // "I know this" alone.
+  // Under the catch-up card's buttons (#636), by which are shown: the part catch-up (the spec's wording, with the button's "Catch up"), the
+  // PR brief chapter that lights the part, or "I know this" alone.
   fogActions: {
-    catchUp: "Part catch-up reads what changed; I know this just clears it.",
+    catchUp: "Catch up reads what changed; I know this just clears it.",
     chapter: "The brief shows what changed; I know this just clears it.",
     know: "I know this clears the fog without reading what changed.",
   },

@@ -77,7 +77,8 @@ test("on: each heading, the selected tier and the links carry their lines, kinds
   assert.equal(toggle.getAttribute("aria-pressed"), "true");
   assert.equal(hintOf(toggle)?.textContent, "Hide explanations");
   const headings = classed(card, "sheet-heading");
-  assert.deepEqual(headings.map((h) => h.text), ["Holds", "Tier", "Laws", "Talks to", "Fog", "CI on main"]);
+  // The Fog section's line is the catch-up card's now (#636).
+  assert.deepEqual(headings.map((h) => h.text), ["Holds", "Tier", "Laws", "Talks to", "CI on main"]);
   for (const heading of headings) {
     const line = byId(card, heading.getAttribute("aria-describedby"));
     assert.ok(line, `"${heading.text}" points at its line`);
@@ -108,20 +109,20 @@ test("off: no line is drawn, nothing points at one, and the ? is not pressed", (
   assert.equal(classed(card, "sheet-held-note").length, 1, "a note is a note either way");
 });
 
-// The line under the fog buttons and the buttons it sits under, for a fogged part with `offer`.
+// The line under the fog buttons, in the catch-up card (#636), and the buttons it sits under, for a fogged part with `offer`.
 const fogLine = (offer) => {
   explanations(true);
   const { card } = sheetCard(view({ fog: { plugins: "thick" }, catch_ups: offer ? { plugins: offer } : {} }), plugins);
-  const fog = classed(card, "sheet-fog")[0];
-  const buttons = fog.childNodes.filter((child) => child instanceof El && child.tag === "button");
-  const last = buttons.at(-1);
-  const line = fog.childNodes[fog.childNodes.indexOf(last) + 1];
+  const fog = classed(card, "catch-up-card")[0];
+  const row = classed(fog, "catch-up-actions")[0];
+  const buttons = row.childNodes.filter((child) => child instanceof El && child.tag === "button");
+  const line = fog.childNodes[fog.childNodes.indexOf(row) + 1];
   return { line, buttons, card };
 };
 
 test("on: a line sits under the fog buttons whatever they are, saying what the buttons shown do, and the buttons point at it", () => {
   const catchUp = fogLine({ kind: "catch-up", ready: false, writing: false, failed: false });
-  assert.deepEqual(catchUp.buttons.map((b) => b.text), ["Part catch-up", "I know this"]);
+  assert.deepEqual(catchUp.buttons.map((b) => b.text), ["Catch up", "I know this"]);
   assert.equal(catchUp.line?.text, SHEET.fogActions.catchUp);
 
   const chapter = fogLine({ kind: "chapter", pr: 12, chapter: 1 });
