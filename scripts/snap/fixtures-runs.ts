@@ -339,6 +339,40 @@ export const mapMicroWorld = (): Fixture => {
   });
 };
 /**
+ * A micro-world that is still building (spec #582, ticket 2): its row's "Building…" is `aria-disabled`, not `disabled`, so it stays
+ * focusable; the pointer on it opens its reason as a hint, and a click on it changes nothing.
+ */
+export const mapMicroWorldBuilding = (): Fixture => {
+  const file = JSON.parse(mapFile);
+  file.flows = [{ id: "turn-writing", name: "Turn writing", hops: [{ link: "hook-shell", text: "The hook's line reaches the Shell, which reads the log." }] }];
+  const f = mapOpened(`
+      document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(300);
+      document.querySelector("#map-sheet .sheet-refresher")?.click();
+      await wait(300);
+      const row = document.querySelector('#map-sheet .micro-world-row[data-world="flow:turn-writing"]');
+      const wait1 = row?.querySelector("button");
+      if (!wait1) return log("snap:fail the building row has no button");
+      if (wait1.disabled || wait1.getAttribute("aria-disabled") !== "true") log("snap:fail Building… is not aria-disabled alone");
+      const hint = document.getElementById(wait1.getAttribute("interestfor"));
+      wait1.scrollIntoView({ block: "center" });
+      await __snapMove(wait1);
+      await wait(700);
+      if (!hint?.matches(":popover-open") || hint.textContent !== "A background run is building it") log("snap:fail the reason did not show as a hint on hover");
+      const before = row.innerHTML;
+      await __snapClick(wait1);
+      await wait(100);
+      if (row.innerHTML !== before || !document.getElementById("map-micro-world").hidden) log("snap:fail a click on Building… changed something");
+      log("building ok");`, {
+    map_state: mapState({
+      source: JSON.stringify(file),
+      stale: { shell: 2 },
+      micro_worlds: { on: true, worlds: { "flow:turn-writing": { phase: "building", page: false, stale: false, line: null, prompt: null } } },
+    }),
+  });
+  return { ...f, realKeys: true, realPointer: true, snapDone: "building ok" };
+};
+/**
  * The dark page (#455): the metas, the root's colour scheme, no ::-webkit-scrollbar rule left, and the pre-flight's hand picker,
  * whose native checkbox draws dark, sampled from Chrome's own screenshot.
  */

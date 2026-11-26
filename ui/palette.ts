@@ -1,6 +1,6 @@
 // The palette (danielrispler/Falinks#575): every action with its keys, filtered by what Daniel types.
 
-import { element, fullTitle, pressable, text } from "./dom.js";
+import { cut, element, hint, pressable, text } from "./dom.js";
 import type { Entry } from "./keys.js";
 import type { Binding } from "./settings.js";
 
@@ -23,7 +23,7 @@ export function showPalette(entries: Entry[], run: (binding: Binding) => void) {
   };
   const close = pressable(text("button", "×", "palette-close"), null, () => picker.hidePopover());
   close.setAttribute("aria-label", "Close");
-  close.title = "Close the palette (esc)";
+  hint(close, "Close the palette (esc)");
   const form = document.createElement("form");
   form.className = "new-task";
   const field = Object.assign(document.createElement("input"), { name: "action", autocomplete: "off", placeholder: "Run an action…", spellcheck: false });
@@ -47,10 +47,10 @@ export function showPalette(entries: Entry[], run: (binding: Binding) => void) {
         button.tabIndex = -1;
         button.setAttribute("role", "option");
         button.setAttribute("aria-selected", String(index === highlighted));
-        button.title = "Run this action (↩)";
+        hint(button, "Run this action (↩)");
         const line = text("span", "", "l1");
-        line.append(fullTitle(text("span", entry.title, "name"), entry.title), text("span", entry.keys.join("  "), "row-state"));
-        button.append(line, ...(entry.note ? [fullTitle(text("span", entry.note, "l2"), entry.note)] : []));
+        line.append(cut(text("span", entry.title, "name")), text("span", entry.keys.join("  "), "row-state"));
+        button.append(line, ...(entry.note ? [cut(text("span", entry.note, "l2"))] : []));
         return button;
       }),
     );

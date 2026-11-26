@@ -237,7 +237,7 @@ export const railStates = {
 };
 
 // #444: the rail's header in two lines, at a narrow rail. Line 1 the logo, then the name on one line with an ellipsis, its full text
-// in the page and on hover; line 2 the verdict, the mode and the phase, the needs-you verdict in its colour.
+// in the page and scrolling in place on hover; line 2 the verdict, the mode and the phase, the needs-you verdict in its colour.
 const longName = "Check that every snap fixture of the rail renders in…";
 const headerScript = (phase: boolean) => `
   document.querySelector(".map-stage").style.setProperty("--panel-w", "320px");
@@ -247,7 +247,7 @@ const headerScript = (phase: boolean) => `
   const box = (id) => document.getElementById(id).getBoundingClientRect();
   const nameBox = name.getBoundingClientRect();
   if (name.textContent !== full) log("snap:fail the name's text is " + JSON.stringify(name.textContent));
-  if (name.title !== full) log("snap:fail the name's hover text is " + JSON.stringify(name.title));
+  if (name.title || !name.classList.contains("cut")) log("snap:fail the name is not cut text that scrolls in place: " + JSON.stringify(name.title));
   if (nameBox.height >= 2 * parseFloat(getComputedStyle(name).fontSize)) log("snap:fail the name's line is " + nameBox.height + "px high, more than one line");
   if (name.scrollWidth <= name.clientWidth) log("snap:fail the name does not overflow its line: " + name.scrollWidth + " <= " + name.clientWidth);
   const mark = box("mark");
@@ -518,13 +518,13 @@ const readmeTurn = () => ({ ...build("your_turn"), snapScript: cropScript("", ".
 const readmeWhere = () => ({ ...build("idle", { withBrief: true }), snapScript: cropScript("", "#banner", "#banner") });
 
 // #523: a Wait tip while running, the Intention box's last line under the step, set apart by a hair line, muted, one line ending in
-// "…" when cut, its full text the hover. The first tip of a fresh history teaches the palette, with its key from the keymap.
+// "…" when cut, which scrolls in place on hover. The first tip of a fresh history teaches the palette, with its key from the keymap.
 const tipScript = `
   const tip = document.getElementById("tip");
   if (tip.hidden || !tip.checkVisibility()) return log("snap:fail no tip shows while running");
   if (tip.parentElement.id !== "intention" || tip.previousElementSibling?.id !== "step") log("snap:fail the tip is not under the step in the Intention box");
   if (tip.textContent !== "Tip: Every action is in the palette (⇧⌘P).") log("snap:fail the tip reads " + JSON.stringify(tip.textContent));
-  if (tip.title !== tip.textContent) log("snap:fail the tip's hover text is " + JSON.stringify(tip.title));
+  if (!tip.classList.contains("cut") || tip.hasAttribute("title")) log("snap:fail the tip does not scroll in place, or still has a title");
   const style = getComputedStyle(tip);
   if (style.borderTopStyle !== "solid" || style.whiteSpace !== "nowrap" || style.textOverflow !== "ellipsis") log("snap:fail the tip is not one cut line under a hair line");
   if (tip.getBoundingClientRect().height >= 2 * parseFloat(style.fontSize) + parseFloat(style.paddingTop)) log("snap:fail the tip takes more than one line");

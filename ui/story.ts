@@ -7,7 +7,7 @@
 
 import { modelLine, reports } from "./capabilities.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
-import { age, code, element, failure, fullTitle, glyphOnly, invoke, keepOnly, pressable, prose, text, unseenWords } from "./dom.js";
+import { age, code, cut, element, failure, glyphOnly, hint, invoke, keepOnly, keyed, pressable, prose, text, unhint, unseenWords } from "./dom.js";
 import { askAnchor } from "./ask.js";
 import { rendered } from "./markdown.js";
 import { drawSidebar } from "./list.js";
@@ -54,7 +54,6 @@ export function startStory(selectSession: (id: string, agent: string | null) => 
 // The rail with no session selected: its header empty, its dock and its cleared decisions too.
 function clearView() {
   for (const id of ["state", "block", "mode", "mark", "session-name", "phase"]) element(id).textContent = "";
-  for (const id of ["session-name", "block", "phase"]) element(id).removeAttribute("title");
   showQuestions([]);
   showCleared([]);
   shownSession = null;
@@ -71,27 +70,23 @@ function showHeader(session: Session, agent: Subagent | null) {
   element("state").textContent = agent === null && showsLanded(state, session.landed) ? "Landed" : label;
   element("state").dataset.state = state;
   const open = session.questions.filter((question) => question.agent === (agent?.id ?? null));
-  element("block").textContent = (state === "needs_you" ? blockKind(open, openDecision()) : null) ?? "";
+  cut(element("block"), (state === "needs_you" ? blockKind(open, openDecision()) : null) ?? "");
   // A subagent runs in its session's mode.
   element("mode").textContent = reports(session, "permission_mode") ? modeText(session.permission_mode) : "";
   // The agent's logo, titled with its model line when it has one (#158); agy's keeps its note that it has no context size.
   const key = logoKey(session);
   const title = [agent === null ? modelLine(session) : "", noContextNote(session)].filter(Boolean).join("\n");
-  element("mark").replaceChildren(logo(key, title || undefined));
-  for (const id of ["block", "phase"]) element(id).removeAttribute("title");
+  element("mark").replaceChildren(logo(key, title || undefined, "story"));
   const name = sessionName(session);
-  element("session-name").textContent = name;
-  element("session-name").title = name;
-  element("phase").textContent = agent === null && state === "running" ? estimateText(session.work) : "";
-  // The block's kind and the estimate may end in "…" at a narrow rail: each is its own hover text.
-  for (const id of ["block", "phase"]) fullTitle(element(id), element(id).textContent);
+  // The name, the block's kind and the estimate may be cut at a narrow rail: each scrolls in place on hover.
+  cut(element("session-name"), name);
+  cut(element("phase"), agent === null && state === "running" ? estimateText(session.work) : "");
   // The model and effort the session runs at (danielrispler/Falinks#517, decision 8); none for a subagent, whose transcript the studio does not read.
   const effort = session.transcript.effort;
   const runsAt = agent === null ? [modelLine(session), effort && `effort ${effort}`].filter(Boolean).join(" · ") : "";
-  element("headline").onmouseenter = () => {
-    const now = Date.now();
-    element("headline").title = [...times(session, stepSpan).map(([, draw]) => draw(now)), runsAt].filter(Boolean).join(" · ");
-  };
+  // The times and the model, counted when the header is drawn (spec #582); #headline is no button, so its hint opens once #586's pointer path is in.
+  const now = Date.now();
+  hint(element("headline"), [...times(session, stepSpan).map(([, draw]) => draw(now)), runsAt].filter(Boolean).join(" · "));
 }
 
 // The "⋯" menu's actions. Another agent's row (danielrispler/Falinks#560) has no name of its own to keep, nor turns to mark, and comes
@@ -116,17 +111,21 @@ function showStep(session: Session, agent: Subagent | null) {
     : (step?.tool ?? (agent === null ? session.returned : null) ?? "No step yet");
   const [detail, fullDetail] = shortPaths(step?.detail ?? "");
   element("detail").textContent = detail;
-  element("detail").removeAttribute("title");
-  fullTitle(element("detail"), fullDetail);
+  // A shortened path says itself whole in a hint; a detail that is not shortened has none, and drops one left from the last draw.
+  if (fullDetail) hint(element("detail"), fullDetail);
+  else unhint(element("detail"));
   element("command").textContent = step?.command ?? "";
   element("step").classList.toggle("has-command", Boolean(step?.command));
   // Without a command the step has nothing to unfold, but its line keeps its hover, the full path among it (#220).
   const stepLine = element("step-line");
-  stepLine.title = step?.command ? "Show or hide the step's full command" : "The step the agent is on";
+  hint(stepLine, step?.command ? "Show or hide the step's full command" : "The step the agent is on");
   stepLine.onclick = (event) => void (step?.command || event.preventDefault());
 }
 
 export function showView(selected: Selection | null) {
+  hint(element("step-line"), "The step the agent is on");
+  hint(element("unavailable-summary"), "Why only the steps are shown");
+  hint(element("brief-summary"), "Show or hide the Brief: where the session stands");
   element("empty").hidden = selected !== null;
   element("view").hidden = selected === null;
   element("rail-more").hidden = selected === null;
@@ -218,7 +217,8 @@ function historyElement(session: string, entry: HistoryEntry): HTMLElement {
   button.classList.add("subagent");
   const lines = [text("span", entry.purpose, "asked"), ...(entry.asked ? [prose("span", entry.asked)] : [])];
   button.append(...lines, prose("span", entry.result), text("span", entry.details, "kind"));
-  fullTitle(button, [entry.purpose, entry.asked, entry.result, entry.details].filter(Boolean).join(" · "));
+  button.setAttribute("data-key", `subagent-${session}-${entry.agent}`);
+  hint(button, [entry.purpose, entry.asked, entry.result, entry.details].filter(Boolean).join(" · "));
   const item = document.createElement("li");
   item.append(button, askAnchor(session, { kind: "subagent", agent: entry.agent }, `the subagent ${entry.purpose}`));
   return item;
@@ -282,7 +282,7 @@ function showTip(session: Session) {
   const context = { map: map !== null, brief: (map?.state.ready ?? []).length > 0, trees: reports(session, "turn_trees") };
   const tip = tipFor(session, studio.listed, context, studio.files.settings.tips);
   const line = tip ? tipText(tip, studio.files.keymap) : "";
-  Object.assign(element("tip"), { textContent: line, title: line, hidden: tip === null });
+  Object.assign(cut(element("tip"), line), { hidden: tip === null });
 }
 
 // After this many steps the intention dims, as it may no longer say what the agent does (danielrispler/Falinks#472).
@@ -457,7 +457,9 @@ function folded(key: string, title: string, hover: string, body: HTMLElement[], 
   const node = document.createElement("details");
   node.className = "fold";
   node.open = opened.has(key);
-  node.append(fullTitle(text("summary", title), hover), ...body);
+  const summary = text("summary", title);
+  summary.setAttribute("data-key", `fold-${key}`);
+  node.append(hint(summary, hover), ...body);
   node.addEventListener("toggle", () => {
     if (node.open) opened.add(key);
     else opened.delete(key);
@@ -486,7 +488,7 @@ export function checkElement(line: ListedCheck): HTMLElement {
   const item = document.createElement("li");
   const label = line.status === "running" ? "Running" : "Failed";
   const time = counts(text("span", "", "check-time"), (now) => checkTime(line, now));
-  item.append(text("span", label, "outcome"), fullTitle(code(line.statement), line.statement), time);
+  item.append(text("span", label, "outcome"), cut(code(line.statement)), time);
   return item;
 }
 
@@ -545,7 +547,10 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
   const key = `${session.id} ${index ?? "rest"}`;
   // While running, "now" holds what Daniel asked.
   if (turn && !(now && session.state === "running")) {
-    const prompt = fullTitle(text("p", turn.prompt || "No prompt", "prompt"), turn.prompt || "No prompt");
+    // A prompt can be a whole question: a hint holds it, not a scroll.
+    const prompt = text("p", turn.prompt || "No prompt", "prompt");
+    prompt.setAttribute("data-key", `prompt-${key}`);
+    hint(prompt, turn.prompt || "No prompt");
     node.append(...(now?.asked ? [text("p", "You asked", "label")] : []), prompt);
   }
   if (now?.soFar) node.append(text("p", "So far this turn", "label"));
@@ -609,15 +614,17 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
     });
     button.classList.add("turn-line");
     // The line's prompt and Headline carry their own full text; the rest of the line says what a click does (#220).
-    button.title = "Fold or unfold this turn";
+    hint(button, "Fold or unfold this turn");
     button.setAttribute("aria-expanded", String(open));
+    // The line's prompt is the turn's first words, so its hint holds the whole prompt; a span, which opens once #586's pointer path is in.
+    const first = text("span", line.prompt, "prompt");
+    first.setAttribute("data-key", `turn-${key}`);
     button.append(
-      fullTitle(text("span", line.prompt, "prompt"), turn.prompt.trim() || line.prompt),
-      fullTitle(text("span", line.headline ?? "", "headline-text"), line.headline),
+      hint(first, turn.prompt.trim() || line.prompt),
+      cut(text("span", line.headline ?? "", "headline-text")),
       // The ✕ is for the eye; assistive tech hears "failed" once (#456).
-      ...(line.failed ? [glyphOnly("✕", "mark check-failed"), unseenWords("failed")] : []),
+      ...(line.failed ? [hint(keyed(glyphOnly("✕", "mark check-failed"), `failed-${key}`), "A check ended failed"), unseenWords("failed")] : []),
     );
-    if (line.failed) button.querySelector(".check-failed")?.setAttribute("title", "A check ended failed");
     node.replaceChildren(button, ...(open ? [...turnContent(session, block, null).children] : []));
   };
   draw();
@@ -668,7 +675,7 @@ function turnMapNodes(session: Session, turn: Turn, newest: boolean): HTMLElemen
   if (oldTurn(turn, reports(session, "turn_trees"), Date.now())) return [text("p", OLD_TURN, "turn-old")];
   if (!newest || !turnLit(turn, false).length) return [];
   const button = pressable(text("button", "Show on map", "quiet show-on-map"), null, () => revealTurn(turn));
-  button.title = "Pan the map so this turn's parts show beside the story";
+  hint(button, "Pan the map so this turn's parts show beside the story");
   return [button];
 }
 

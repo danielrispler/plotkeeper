@@ -6,7 +6,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const reasons = {
-  ".map-links": "the Map view's lines run under the plates and are no control; a plate and a link's mark take their own pointer",
+  ".map-links": "the Map view's lines run under the plates and are no control; a plate takes its own pointer and a link's mark turns pointer events back on, for its hint (#588)",
+  ".hint-anchor": "the invisible box an SVG mark's hint anchors to holds no control and takes no pointer, so the mark under it does",
   ".map-light": "the PR brief's light runs over the links and is no control; the plates under it take the pointer",
   ".map-side": "the side area's empty space over the map lets the pointer reach the map; its sheet, drawer and not placed list turn pointer events back on",
   ".plate-fog": "the mist behind a plate holds no control, and the plate over it takes the pointer",

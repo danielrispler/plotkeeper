@@ -2,10 +2,11 @@
 // over the map's top-right corner; it fades after a few seconds, and a hover or the keyboard's focus in it holds it (#457). A newer
 // note replaces it. Its main button selects its session, and its × hides it.
 
-import { element, fullTitle, pressable, promptBox, text } from "./dom.js";
+import { cut, element, hint, pressable, promptBox, text } from "./dom.js";
 import { type Clock, realClock } from "./hover.js";
 import { sessionName } from "./list-model.js";
 import { select } from "./selection.js";
+import { HOVERS } from "./hovers.js";
 import { stackToasts, toastButtons, toastSays } from "./toast.js";
 import type { Session } from "./types.js";
 
@@ -85,6 +86,7 @@ export function showNote(note: Note) {
   const toast = element("note-toast");
   const action = () => {
     const button = pressable(text("button", "", "btn quiet toast-main"), null);
+    button.dataset.key = "note-toast-main";
     button.addEventListener("click", () => {
       if (noted) void select(noted.session.id);
       close();
@@ -92,9 +94,10 @@ export function showNote(note: Note) {
     return button;
   };
   const { main } = toastButtons(toast, action, close, "Hide this note");
+  hint(main, HOVERS.goToSession);
   const name = sessionName(note.session);
   const count = note.count ? [text("span", note.count, "count")] : [];
-  main.replaceChildren(fullTitle(text("strong", name, "name"), name), ...count, fullTitle(text("span", note.line, "line"), note.line));
+  main.replaceChildren(cut(text("strong", name, "name")), ...count, cut(text("span", note.line, "line")));
   toast.dataset.say = toastSays([name, note.count, note.line]);
   toast.hidden = false;
   stackToasts();
@@ -143,7 +146,7 @@ export function showCopyToast(outcome: Copied["outcome"], prompt: string) {
   if (!copyBody || !copyButton) {
     const body = text("div", "", "copy-body");
     const button = pressable(text("button", "Copy", "btn small"), null);
-    button.title = "Copy the prompt to paste into your agent";
+    hint(button, "Copy the prompt to paste into your agent");
     // The clipboard refused already, so this is the browser's older route, which a click may use.
     button.addEventListener("click", () => {
       body.querySelector("textarea")?.select();
@@ -156,9 +159,9 @@ export function showCopyToast(outcome: Copied["outcome"], prompt: string) {
   }
   const line = outcome === "copied" ? "Prompt copied, paste it into your agent" : "Copy this prompt and paste it into your agent";
   const lines = prompt.split("\n").slice(0, COPY_LINES).join("\n");
-  // Each is cut at the toast's width; its title holds it whole.
-  const shown = outcome === "copied" ? fullTitle(text("p", lines, "copy-lines"), lines) : promptBox(prompt, 6);
-  copyBody.replaceChildren(fullTitle(text("strong", line, "name"), line), shown);
+  // Each is cut at the toast's width; the name scrolls in place, and the lines, which may be many, have a hint of their own.
+  const shown = outcome === "copied" ? hint(text("p", lines, "copy-lines"), lines) : promptBox(prompt, 6);
+  copyBody.replaceChildren(cut(text("strong", line, "name")), shown);
   // Copy, once it worked, hides; the keyboard's focus on it moves to the ×.
   const moveFocus = outcome === "copied" && document.activeElement === copyButton;
   copyButton.hidden = outcome === "copied";

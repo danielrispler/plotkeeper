@@ -3,7 +3,7 @@
 // a strip of glyphs and labels, which opens the full list on hover, on click or on ⌘1. Its pure parts are `list-model.ts`.
 
 import { logStop } from "./stop-rules.js";
-import { age, element, failure, fullTitle, glyphOnly, invoke, keepOnly, newest, patch, pressable, prose, stepText, text } from "./dom.js";
+import { age, cut, element, failure, glyphOnly, hint, invoke, keepOnly, keyed, mark, newest, patch, pressable, prose, stepText, text } from "./dom.js";
 import { hideClearToast, showClearToast } from "./toast.js";
 import { counts } from "./times.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
@@ -116,27 +116,41 @@ const projectOpen = (key: string) => !shut.has(key);
 
 
 // The name's hover, only for a prompt-named session: its full name, then the identity's PR and worktree, which the prompt
-// name leaves out. Any other name is in the row's own title.
+// name leaves out. Any other name is in the row's own hint.
 function nameTitle(session: Session): string {
   return session.name || !session.prompt_name ? "" : `${sessionName(session)} · ${session.identity.name}`;
 }
 
-// The mark's node, with the context's hover.
+// The name's node: cut text that scrolls in place, keyed before its hint, which only a prompt-named session has.
+function nameNode(session: Session): HTMLElement {
+  const node = keyed(cut(text("span", sessionName(session), "name")), `name-${session.id}`);
+  const full = nameTitle(session);
+  return full ? hint(node, full) : node;
+}
+
+// The mark's node: a mark named by what it says in full, the context's tokens among them; an empty one, with no context, is none.
 function markNode(session: Session): HTMLElement {
-  if (session.shell) return fullTitle(text("span", rowMark(session), "id"), "A plain terminal");
-  if (session.status_only) return fullTitle(text("span", rowMark(session), "id"), "Another agent, followed by its reported status only");
-  return fullTitle(text("span", rowMark(session), "id"), contextTitle(session.transcript.context));
+  const node = text("span", rowMark(session), "id");
+  node.setAttribute("data-key", `mark-${session.id}`);
+  // A span is no button: its hint opens once the helper's pointer path reaches it (#586).
+  if (session.shell) return mark(node, "A plain terminal");
+  if (session.status_only) return mark(node, "Another agent, followed by its reported status only");
+  const context = contextTitle(session.transcript.context);
+  return context ? mark(node, context) : node;
 }
 
 
 // A status's glyph, named by its word, so the shape is never alone. The pill shows its word.
-function glyph(state: string, unseen = false, landed = false, unwatched = false): HTMLElement {
+function glyph(where: string, state: string, unseen = false, landed = false, unwatched = false): HTMLElement {
   const [shape, word] = status(state, unseen, landed, unwatched);
   const node = text("span", shape === "pill" ? word : "", "glyph");
   node.dataset.glyph = shape;
   node.setAttribute("role", "img");
   node.setAttribute("aria-label", word);
-  if (shape === "check") node.title = word;
+  if (shape === "check") {
+    node.setAttribute("data-key", `glyph ${where}`);
+    return mark(node, word);
+  }
   return node;
 }
 
@@ -150,19 +164,19 @@ function done(all: Children, children: Subagent[] = []): HTMLElement[] {
   return faded ? [text("span", `${faded} done`, "id")] : [];
 }
 
-// A row's lines: its name and status glyph, then, if any, what it is doing, muted. Its title pairs
-// the name with the status's word.
-function rowLines(button: HTMLElement, state: string, name: HTMLElement[], below: HTMLElement[] | null, unseen = false, landed = false, unwatched = false) {
+// A row's lines: its name and status glyph, then, if any, what it is doing, muted. Its hint pairs
+// the name with the status's word, and a note on its footprint when it has one.
+function rowLines(button: HTMLElement, state: string, name: HTMLElement[], below: HTMLElement[] | null, unseen = false, landed = false, unwatched = false, note: string | null = null) {
   const first = text("span", "", "l1");
-  first.append(...name, glyph(state, unseen, landed, unwatched));
+  first.append(...name, glyph(button.getAttribute("data-key") ?? "", state, unseen, landed, unwatched));
   button.append(first);
-  button.title = `${name[0]?.textContent ?? ""} · ${status(state, unseen, landed, unwatched)[1]}`;
   button.classList.toggle("unseen", unseen);
   if (below) {
     const second = text("span", "", "l2");
     second.append(...below);
     button.append(second);
   }
+  hint(button, withNote(`${name[0]?.textContent ?? ""} · ${status(state, unseen, landed, unwatched)[1]}`, note));
   return first;
 }
 
@@ -190,34 +204,35 @@ export function row(session: Session, children: Children, token: string | null =
   const first = rowLines(
     button,
     session.state,
-    [fullTitle(text("span", sessionName(session), "name"), nameTitle(session)), markNode(session), ...(token ? [fullTitle(text("span", token, "id token"), token)] : [])],
+    [nameNode(session), markNode(session), ...(token ? [cut(text("span", token, "id token"))] : [])],
     line === null
       ? null
-      : [...done(children, children.get("session")), rowLine(line), ...(turn ? [Object.assign(counts(clock, turn[1]), { title: turn[0] })] : [])],
+      : [...done(children, children.get("session")), rowLine(line, session.id), ...(turn ? [hint(counts(clock, turn[1]), turn[0])] : [])],
     session.unseen,
     session.landed,
     !session.pid,
+    rowNote(session.id),
   );
   // Hovering the row spotlights its session on the map (#382, #562) and shows its footprint (#559); a session that touched no part in the
-  // last 7 days says so in the row's hover text.
-  button.addEventListener("pointerenter", () => {
-    button.title = withNote(button.title, rowNote(session.id));
-    hoverAgents(session.id, button);
-  });
+  // last 7 days says so in the row's hint, built when the row is drawn. The placement can arrive after the row: the sidebar is drawn again then.
+  button.addEventListener("pointerenter", () => hoverAgents(session.id, button));
   button.addEventListener("pointerleave", () => hoverAgents(null));
   // The agent's logo leads the row, apart from its state glyph (#158).
-  first.prepend(logo(logoKey(session), noContextNote(session) || undefined));
+  first.prepend(logo(logoKey(session), noContextNote(session) || undefined, `row-${session.id}`));
   return button;
 }
 
 // A row's line, such as a card summary stored in Hebrew, laid out by its own direction, its code spans
 // cleaned as a card's are (danielrispler/Falinks#434, decision 40), its paths shortened with the full line on hover (danielrispler/Falinks#571).
-function rowLine(line: string): HTMLElement {
+function rowLine(line: string, key: string): HTMLElement {
   const [shown, full] = rowText(line);
   const node = prose("span", shown);
   node.className = "row-step";
   node.dir = "auto";
-  return fullTitle(node, full || shown);
+  cut(node);
+  if (!full) return node;
+  node.setAttribute("data-key", `step-${key}`);
+  return hint(node, full);
 }
 
 
@@ -240,7 +255,7 @@ export function agentRow(session: Session, children: Children, agent: Subagent, 
     button,
     stateName,
     [text("span", agent.name, "name")],
-    line === null ? null : [...done(children, children.get(agent.id)), rowLine(line)],
+    line === null ? null : [...done(children, children.get(agent.id)), rowLine(line, agent.id)],
   );
   first.classList.toggle("failed", agent.failed && !agent.opened);
   return button;
@@ -268,10 +283,11 @@ export function item(key: string, depth: number, toggle: { open: boolean; hiding
       if (!folded.delete(key)) folded.add(key);
       drawSidebar();
     });
-    // A fixed name and hover; whether it is open is said by `aria-expanded` alone (#456).
-    fold.title = "Show or hide its subagents";
+    // A fixed name and hint; whether it is open is said by `aria-expanded` alone (#456).
+    fold.dataset.key = `${key} fold`;
     fold.setAttribute("aria-label", "Subagents");
     fold.setAttribute("aria-expanded", String(toggle.open));
+    hint(fold, "Show or hide its subagents");
     // The count goes after the name, as the toggle's column has room only for its chevron.
     if (toggle.hiding) row.querySelector(".name")?.after(text("span", `${toggle.hiding} hidden`, "id"));
     fold.style.insetInlineStart = `calc(var(--indent) * ${depth})`;
@@ -287,8 +303,9 @@ export function deleting(session: Session): HTMLElement | null {
   // `patch` keeps the first button and its listener, so the press reads the session as it is now.
   const now = () => studio.listed.find((listed) => listed.id === session.id) ?? session;
   const button = icon("delete", CROSS, () => void deps.askDelete(now()).catch(failure("delete", "error")));
-  button.title = "Delete this session from the list…";
+  button.dataset.key = `${session.id} delete`;
   button.setAttribute("aria-label", `Delete ${sessionName(session)}…`);
+  hint(button, "Delete this session from the list…");
   return button;
 }
 
@@ -311,6 +328,13 @@ function tree(session: Session, token: string | null): HTMLElement[] {
 }
 
 
+// The strip's count of the sessions collapsed.
+function idle(count: number, toggle: () => void): HTMLElement {
+  const button = pressable(text("button", `${count} idle`), null, toggle);
+  button.dataset.key = "strip idle";
+  return hint(button, titled(studio.files.keymap, "Open the session list, idle sessions among it", "studio::ToggleList"));
+}
+
 /**
  * The strip: a button per session that is not idle or ended, by its glyph and strip label, then one
  * count for those collapsed, which opens the full list.
@@ -321,7 +345,8 @@ export function strip(sessions: Session[]): HTMLElement[] {
   open.classList.add("open");
   open.setAttribute("aria-label", "Session list");
   open.append(glyphOnly("☰"));
-  open.title = titled(studio.files.keymap, "Open the session list", "studio::ToggleList");
+  open.dataset.key = "strip open";
+  hint(open, titled(studio.files.keymap, "Open the session list", "studio::ToggleList"));
   const shown = sessions.filter((session) => !collapsed.includes(session.state));
   const labels = stripLabels(shown);
   const rest = sessions.length - shown.length;
@@ -330,11 +355,10 @@ export function strip(sessions: Session[]): HTMLElement[] {
     ...shown.map((session, i) => {
       const button = selecting(session.id, null, `strip ${session.id}`);
       button.setAttribute("aria-pressed", String(isSelected(session.id)));
-      button.title = `${sessionName(session)} · ${status(session.state, session.unseen, session.landed)[1]}`;
-      button.append(glyph(session.state, session.unseen, session.landed), labels[i] ?? "");
-      return button;
+      button.append(glyph(`strip ${session.id}`, session.state, session.unseen, session.landed), labels[i] ?? "");
+      return hint(button, `${sessionName(session)} · ${status(session.state, session.unseen, session.landed)[1]}`);
     }),
-    ...(rest ? [Object.assign(pressable(text("button", `${rest} idle`), null, toggle), { title: titled(studio.files.keymap, "Open the session list, idle sessions among it", "studio::ToggleList") })] : []),
+    ...(rest ? [idle(rest, toggle)] : []),
   ];
 }
 
@@ -377,9 +401,9 @@ function projectMore(group: ProjectGroup<Session>): HTMLElement {
     menu.showPopover({ source: more });
   });
   more.addEventListener("pointerdown", () => (wasOpen = openHere()));
-  more.title = "Project";
+  more.dataset.key = `more ${group.key}`;
   more.setAttribute("aria-label", `More actions for ${group.name}`);
-  return more;
+  return hint(more, "Project");
 }
 
 /**
@@ -393,17 +417,14 @@ export function projectHead(group: ProjectGroup<Session>): HTMLElement {
   head.dataset.project = group.key;
   const toggle = pressable(text("button", "", "project-toggle"), null, () => pressHead(group.key));
   toggle.setAttribute("aria-expanded", String(projectOpen(group.key)));
-  fullTitle(toggle, `${group.gone ? `${group.key} is gone` : group.key || group.name}\n${group.key === shownProject() ? "Fold or unfold its sessions" : "Show its map"}`);
+  toggle.dataset.key = `toggle ${group.key}`;
   toggle.append(text("span", group.name, "name"));
-  if (group.rollup) toggle.append(glyph(group.rollup));
+  if (group.rollup) toggle.append(glyph(`head ${group.key}`, group.rollup));
   const why = marks.get(group.key);
   if (why?.length) {
-    const dot = text("span", "", "project-dot mist-swatch");
-    dot.title = dotTitle(why);
-    dot.setAttribute("role", "img");
-    dot.setAttribute("aria-label", dot.title);
-    toggle.append(dot);
+    toggle.append(mark(keyed(text("span", "", "project-dot mist-swatch"), `dot ${group.key}`), dotTitle(why)));
   }
+  hint(toggle, `${group.gone ? `${group.key} is gone` : group.key || group.name}\n${group.key === shownProject() ? "Fold or unfold its sessions" : "Show its map"}`);
   head.append(toggle, ...(group.live ? [] : [projectMore(group)]));
   return head;
 }
@@ -432,7 +453,7 @@ function projectNode(group: ProjectGroup<Session>): HTMLElement {
     const id = `${group.key} ${state}`;
     folded.open = opened.has(id);
     folded.addEventListener("toggle", () => (folded.open ? opened.add(id) : opened.delete(id)));
-    folded.append(fullTitle(text("summary", `${stateLabels[state]} · ${sessions.length}`), `Show or hide the ${stateLabels[state].toLowerCase()} sessions`), ...rows);
+    folded.append(hint(text("summary", `${stateLabels[state]} · ${sessions.length}`), `Show or hide the ${stateLabels[state].toLowerCase()} sessions`), ...rows);
     body.append(folded);
   }
   node.append(body);
@@ -454,18 +475,16 @@ function historyLink(sessions: Pick<Session, "state">[]): HTMLElement[] {
   const count = sessions.filter((s) => s.state === "ended").length;
   if (!count) return [];
   const link = pressable(text("button", `History · ${count}`, "history-link"), null, showHistory);
-  link.title = "Show the ended sessions";
   link.dataset.key = "history";
-  return [link];
+  return [hint(link, "Show the ended sessions")];
 }
 
 // "Clear landed" at the list's end (#382), quiet, only while a landed session shows: Home's Clear (#244), with its Undo.
 function clearLanded(landed: Session[]): HTMLElement[] {
   if (!landed.length) return [];
   const button = pressable(text("button", "Clear landed", "clear-landed quiet"), null, () => landedClear.clear(landedToClear(studio.listed, landedClear.hidden)));
-  button.title = "Clear every landed session; Undo for a few seconds";
   button.dataset.key = "clear";
-  return [button];
+  return [hint(button, "Clear every landed session; Undo for a few seconds")];
 }
 
 /**
@@ -484,10 +503,15 @@ export function showSessions(sessions: Session[]) {
   // History, in the left panel, is drawn again when the list changed under it.
   redrawPanel();
   drawShown();
+  drawChip(sessions);
+}
+
+/** The top bar's Needs you chip: how many sessions need Daniel, hidden when none, with its hint. */
+export function drawChip(sessions: Pick<Session, "state">[]) {
   const chip = element("needs-you");
   chip.textContent = chipText(sessions);
   chip.hidden = chip.textContent === "";
-  chip.title = "Go to the first session that needs you";
+  hint(chip, "Go to the first session that needs you");
 }
 
 // What shows the listed sessions but those Clear landed hid: the list, the strip and the tab's title.

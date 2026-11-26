@@ -14,6 +14,50 @@ class TextNode {
 
 const node = (item) => (typeof item === "string" ? new TextNode(item) : item);
 
+// Whether `el` fits `selector`: a comma list of compounds, each a tag or `*`, then any `.class`, `[name]`, `[name="value"]` and
+// `:not(compound)`. No combinators: what the page's code under test asks of one node.
+const fits = (el, selector) => splitList(selector).some((one) => fitsCompound(el, one.trim()));
+const splitList = (selector) => {
+  const out = [""];
+  let depth = 0;
+  for (const c of selector) {
+    if (c === "(") depth++;
+    if (c === ")") depth--;
+    if (c === "," && depth === 0) out.push("");
+    else out[out.length - 1] += c;
+  }
+  return out;
+};
+function fitsCompound(el, compound) {
+  let rest = compound;
+  const tag = /^[a-zA-Z*][\w-]*/.exec(rest)?.[0];
+  if (tag) {
+    if (tag !== "*" && el.tag !== tag.toLowerCase()) return false;
+    rest = rest.slice(tag.length);
+  }
+  // Each simple selector: its pattern, and whether a node fits it given the pattern's match.
+  const simple = [
+    { pattern: /^\.([\w-]+)/, test: (m) => el.className.split(" ").includes(m[1]) },
+    { pattern: /^\[([\w-]+)(?:="([^"]*)")?\]/, test: (m) => (m[2] === undefined ? el.hasAttribute(m[1]) : el.getAttribute(m[1]) === m[2]) },
+    { pattern: /^:not\(((?:[^()]|\([^()]*\))*)\)/, test: (m) => !fits(el, m[1]) },
+  ];
+  while (rest) {
+    const found = simple.map(({ pattern, test }) => ({ m: pattern.exec(rest), test })).find(({ m }) => m);
+    if (!found?.m) throw new Error(`the stand-in DOM does not read the selector ${JSON.stringify(compound)}`);
+    const { m, test } = found;
+    if (!test(m)) return false;
+    rest = rest.slice(m[0].length);
+  }
+  return true;
+}
+
+// Which stand-in each node was put in last, for `remove()`; weak, so it holds no node alive.
+const held = new WeakMap();
+const hold = (parent, item) => {
+  if (typeof item === "object" && item !== null) held.set(item, parent);
+  return item;
+};
+
 class StandIn {
   nodeType = 1;
   attrs = new Map();
@@ -51,22 +95,28 @@ class StandIn {
     return this.childNodes.length > 0;
   }
   append(...items) {
-    this.childNodes.push(...items.map(node));
+    this.childNodes.push(...items.map((item) => hold(this, node(item))));
   }
   replaceChildren(...items) {
     this.childNodes = items.map(node);
   }
   prepend(...items) {
-    this.childNodes.unshift(...items.map(node));
+    this.childNodes.unshift(...items.map((item) => hold(this, node(item))));
   }
   appendChild(item) {
-    this.childNodes.push(item);
+    this.childNodes.push(hold(this, item));
+  }
+  // Takes the node out of whichever stand-in holds it: the one it was last put in by `append`, `appendChild`, `prepend` or
+  // `insertBefore`.
+  remove() {
+    const from = held.get(this);
+    if (from?.childNodes.includes(this)) from.removeChild(this);
   }
   insertBefore(item, ref) {
     const was = this.childNodes.indexOf(item);
     if (was >= 0) this.childNodes.splice(was, 1);
     const at = ref ? this.childNodes.indexOf(ref) : this.childNodes.length;
-    this.childNodes.splice(at < 0 ? this.childNodes.length : at, 0, item);
+    this.childNodes.splice(at < 0 ? this.childNodes.length : at, 0, hold(this, item));
   }
   removeChild(item) {
     this.childNodes.splice(this.childNodes.indexOf(item), 1);
@@ -74,11 +124,26 @@ class StandIn {
   replaceChild(item, old) {
     this.childNodes[this.childNodes.indexOf(old)] = item;
   }
+  // `listeners[name]` calls every listener added for `name`, in order, as a browser's dispatch does, and returns the last one's
+  // result; `added[name]` holds them, so a test can count them.
+  added = {};
   addEventListener(name, run) {
-    this.listeners[name] = run;
+    if (!this.added[name]) this.added[name] = [];
+    const all = this.added[name];
+    all.push(run);
+    this.listeners[name] ??= (...args) => {
+      let result;
+      for (const each of [...all]) result = each(...args);
+      return result;
+    };
   }
-  removeEventListener(name) {
-    delete this.listeners[name];
+  removeEventListener(name, run) {
+    const all = this.added[name] ?? [];
+    if (all.includes(run)) all.splice(all.indexOf(run), 1);
+    if (run === undefined || all.length === 0) {
+      delete this.listeners[name];
+      delete this.added[name];
+    }
   }
   get textContent() {
     return this.text;
@@ -91,8 +156,10 @@ class StandIn {
   }
   // A popover's state, and the geometry and focus a toast's placing reads (all zero here).
   popoverOpen = false;
-  showPopover() {
+  source = null;
+  showPopover(options) {
     this.popoverOpen = true;
+    this.source = options?.source ?? null;
   }
   hidePopover() {
     this.popoverOpen = false;
@@ -109,6 +176,22 @@ class StandIn {
   offsetWidth = 0;
   offsetHeight = 0;
   focus() {}
+  // Compound selectors only (`fits`), as the views under test ask for.
+  querySelectorAll(selector) {
+    const out = [];
+    const walk = (node) => {
+      for (const c of node.childNodes) {
+        if (!(c instanceof StandIn)) continue;
+        if (fits(c, selector)) out.push(c);
+        walk(c);
+      }
+    };
+    walk(this);
+    return out;
+  }
+  querySelector(selector) {
+    return this.querySelectorAll(selector)[0] ?? null;
+  }
   find(tag, out = []) {
     if (this.tag === tag) out.push(this);
     for (const c of this.childNodes) if (c instanceof StandIn) c.find(tag, out);

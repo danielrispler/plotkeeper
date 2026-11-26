@@ -4,7 +4,7 @@
 // its latest turn's parts with its line on the home part, and the other badges dimmed. The pure rules are `map-live.ts`'s; this file draws
 // them from the sessions the window already has, and `map_place` (the server, `studio-system-map`) says which part owns each path.
 
-import { element, failure, invoke, newest, pressable, text } from "./dom.js";
+import { element, failure, hint, invoke, keyed, newest, pressable, text } from "./dom.js";
 import { currentMap, onCamera, onDraw, registerLayer, revealParts, syncSide } from "./map.js";
 import { logStop } from "./stop-rules.js";
 import { logo, logoKey } from "./logos.js";
@@ -117,8 +117,8 @@ function sessionRows(session: Session, workers: Subagent[], close: () => void): 
     deps.select(session.id, null);
   });
   const state = text("span", stateWord(session), `session-pick-state${session.state === "needs_you" ? " needs-you" : ""}`);
-  row.append(logo(logoKey(session)), text("span", deps.name(session), "session-pick-name"), state, ...(line ? [text("span", line, "session-pick-line")] : []));
-  row.title = [deps.name(session), stateWord(session), ...(line ? [line] : []), "Open its story"].join("\n");
+  row.append(logo(logoKey(session), undefined, `pick-${session.id}`), text("span", deps.name(session), "session-pick-name"), state, ...(line ? [text("span", line, "session-pick-line")] : []));
+  hint(row, [deps.name(session), stateWord(session), ...(line ? [line] : []), "Open its story"].join("\n"));
   row.dataset.session = session.id;
   row.addEventListener("pointerenter", () => hoverAgents(session.id, row));
   row.addEventListener("pointerleave", () => hoverAgents(null));
@@ -130,7 +130,7 @@ function sessionRows(session: Session, workers: Subagent[], close: () => void): 
       deps.select(session.id, worker.id);
     });
     button.append(text("span", worker.name, "session-pick-name"), ...(asks ? [text("span", "Needs you", "session-pick-state needs-you")] : []));
-    button.title = `${worker.name}${asks ? " needs you" : ""}\nRead this worker's log`;
+    hint(button, `${worker.name}${asks ? " needs you" : ""}\nRead this worker's log`);
     return button;
   })];
 }
@@ -210,17 +210,17 @@ function badgeButton(part: string, badge: Badge, dim: boolean): HTMLElement {
   button.dataset.part = part;
   button.setAttribute("aria-label", `${count} ${count === 1 ? "session" : "sessions"} on this part${asking ? `, ${asking} ${asking === 1 ? "needs" : "need"} you` : ""}`);
   button.setAttribute("aria-expanded", String(listOpen() && listPart === part));
-  button.title = [...badge.rows.map((row) => `${deps.name(row.session)} · ${stateWord(row.session)}`), "Show these sessions"].join("\n");
+  hint(button, [...badge.rows.map((row) => `${deps.name(row.session)} · ${stateWord(row.session)}`), "Show these sessions"].join("\n"));
   return button;
 }
 
 // The spotlit session's chip on a part of its latest turn: its logo, full name and Needs-you pill, and on its home part its line.
-function spotChip(session: Session, home: boolean): HTMLElement {
+function spotChip(session: Session, home: boolean, part: string): HTMLElement {
   const line = home ? deps.line(session) : null;
   const chip = text("span", "", `spot-chip${session.state === "needs_you" ? " needs-you" : ""}`);
-  chip.append(logo(logoKey(session)), text("span", deps.name(session), "spot-chip-name"), ...(session.state === "needs_you" ? [needsYouPill()] : []), ...(line ? [text("span", line, "spot-chip-line")] : []));
-  chip.title = [deps.name(session), stateWord(session), ...(line ? [line] : [])].join("\n");
-  return chip;
+  chip.append(logo(logoKey(session), undefined, `chip-${session.id}-${part}`), text("span", deps.name(session), "spot-chip-name"), ...(session.state === "needs_you" ? [needsYouPill()] : []), ...(line ? [text("span", line, "spot-chip-line")] : []));
+  chip.setAttribute("data-key", `chip-${session.id}-${part}`);
+  return hint(chip, [deps.name(session), stateWord(session), ...(line ? [line] : [])].join("\n"));
 }
 
 // The not placed list: a closed <details> whose summary is the line, made at the first paint and kept.
@@ -229,7 +229,6 @@ const notPlacedList = () => {
   if (kept) return kept;
   const details = document.createElement("details");
   const summary = text("summary", "", "side-title");
-  summary.title = "The sessions whose latest turn touched no part: click to show or hide them";
   const rows = text("div", "", "not-placed-rows");
   details.append(summary, rows);
   details.addEventListener("toggle", () => details.open || endHoverIn(rows));
@@ -294,7 +293,7 @@ export function paint() {
   for (const plate of plates) {
     const id = plate.dataset.id ?? "";
     const slot = plate.querySelector(".plate-chips");
-    if (spot && shown.chips.includes(id)) slot?.replaceChildren(spotChip(spot, id === shown.home));
+    if (spot && shown.chips.includes(id)) slot?.replaceChildren(spotChip(spot, id === shown.home, id));
     else slot?.replaceChildren(...(byPart[id] ? [badgeButton(id, byPart[id], shown.dimmed.includes(id))] : []));
   }
   // A focused badge a spotlit chip replaced (its session's story opened from its list) leaves the keyboard on its part's button, as a redraw does.
@@ -311,6 +310,8 @@ export function paint() {
     const list = notPlacedList();
     const line = notPlacedLine(notPlaced);
     list.summary.replaceChildren(text("span", line.count), ...(line.needsYou ? [text("span", ` · ${line.needsYou}`, "not-placed-asking")] : []));
+    // Drawn each time: the kept line's hint is dropped while the line is off the page.
+    hint(keyed(list.summary, "not-placed"), "The sessions whose latest turn touched no part: click to show or hide them");
     fillRows(list.rows, rowsKey(notPlaced.map((session) => ({ session, workers: [] }))), () => notPlaced.flatMap((session) => sessionRows(session, [], () => {})));
     // Back in its slot after it emptied or the map was cleared, the list comes back closed, so it never drops the sheet without a click.
     if (list.details.parentElement !== slot) {

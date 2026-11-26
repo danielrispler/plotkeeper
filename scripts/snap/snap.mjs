@@ -37,7 +37,7 @@ const fixture = fixtures[name]();
 writeFileSync(join(site, "index.html"), snapPage(readFileSync(join(dist, "index.html"), "utf8"), fixture, { bodyClasses }));
 
 // A fixture with `realPointer` or `realKeys` runs Chrome with its DevTools port open, and the page's `__snapClick`, `__snapDrag`,
-// `__snapDoubleClick` and `__snapKey` ask here for real input, sent as Chrome's own (`Input.dispatchMouseEvent`, `Input.dispatchKeyEvent`):
+// `__snapDoubleClick`, `__snapMove` and `__snapKey` ask here for real input, sent as Chrome's own (`Input.dispatchMouseEvent`, `Input.dispatchKeyEvent`):
 // what `element.click()` or a synthetic KeyboardEvent skips, such as pointer capture, Tab moving focus or Esc closing a popover, then
 // happens as in use. `events` are that method's params in order; it returns Chrome's replies in that order.
 async function devtools(method, events) {
@@ -92,6 +92,8 @@ const press = (x, y, clickCount = 1) => [
   { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount },
 ];
 const realClick = (x, y) => realMouse([{ type: "mouseMoved", x, y }, ...press(x, y)]);
+// The pointer moved to (x, y) with no press, as a hover: a hint then waits its delay, as in use.
+const realMove = (x, y) => realMouse([{ type: "mouseMoved", x, y }]);
 const realDoubleClick = (x, y) => realMouse([{ type: "mouseMoved", x, y }, ...press(x, y, 1), ...press(x, y, 2)]);
 // A press at (x, y), a move to (toX, toY) in eight steps with the button held, and the release there; `realDragStart` is the press and
 // the first four steps, `realDragEnd` the last four and the release, so the page can act with the button held halfway.
@@ -201,7 +203,7 @@ const server = createServer(async (req, res) => {
     }
     return;
   }
-  const input = { "/__snap/click": realClick, "/__snap/dblclick": realDoubleClick, "/__snap/drag": realDrag, "/__snap/drag-start": realDragStart, "/__snap/drag-end": realDragEnd }[url.pathname];
+  const input = { "/__snap/click": realClick, "/__snap/dblclick": realDoubleClick, "/__snap/move": realMove, "/__snap/drag": realDrag, "/__snap/drag-start": realDragStart, "/__snap/drag-end": realDragEnd }[url.pathname];
   if (input || url.pathname === "/__snap/key") {
     try {
       if (input && !fixture.realPointer) throw new Error("the fixture has no realPointer");
@@ -231,6 +233,7 @@ const budget = fixture.contrast ? 6000 : 5000;
 const chromeArgs = [
   "--headless=new", "--enable-logging=stderr", "--v=0", "--disable-gpu", `--force-device-scale-factor=${scale}`, `--user-data-dir=${profile}`, `--window-size=${width},${height}`,
   `--virtual-time-budget=${budget}`, `--screenshot=${resolve(out)}`, ...(fixture.realPointer || fixture.realKeys || fixture.contrast ? ["--remote-debugging-port=0"] : []),
+  ...(fixture.motion ? [fixture.motion === "reduce" ? "--force-prefers-reduced-motion" : "--force-prefers-no-reduced-motion"] : []),
   `http://127.0.0.1:${server.address().port}/index.html`,
 ];
 // A screenshot left from an earlier run must not pass for this one's.
