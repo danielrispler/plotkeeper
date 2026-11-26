@@ -132,3 +132,81 @@ fn no_pid_when_the_agent_is_codexs_shared_daemon() {
     let t = table(&[(9735, "/opt/homebrew/bin/codex", 100)]);
     assert_eq!(agent_pid(None, 9735, t), Some(9735));
 }
+
+/// On Linux the lookup gives `/proc/<pid>/exe`, a full path, so the checks above see what macOS's
+/// `ps` gives them (#702). The rows are the paths VS Code and Cursor run from under each install shape
+/// (system package, `/opt`, snap, AppImage mount), and Codex's daemon in a Linux release.
+#[test]
+fn no_pid_when_the_agent_is_an_ide_installed_on_linux() {
+    const IDES: [&str; 11] = [
+        "/usr/share/code/code",
+        "/usr/share/code-insiders/code-insiders",
+        "/usr/share/cursor/cursor",
+        "/opt/Cursor/cursor",
+        "/opt/cursor/cursor",
+        "/opt/visual-studio-code/code",
+        "/opt/VSCode-linux-x64/code",
+        "/snap/code/178/usr/share/code/code",
+        "/snap/cursor/12/usr/share/cursor/cursor",
+        "/tmp/.mount_cursorAb12Cd/cursor",
+        "/tmp/.mount_VSCodeXy34Zq/code",
+    ];
+    for ide in IDES {
+        let rows: &'static [(u32, &'static str, u32)] =
+            Box::leak(Box::new([(600, "/bin/dash", 700), (700, ide, 1)]));
+        assert_eq!(agent_pid(None, 700, table(rows)), None, "{ide}");
+        // Through a shell too.
+        assert_eq!(agent_pid(None, 600, table(rows)), None, "{ide}");
+    }
+}
+
+/// An agent's own CLI, and a Codex that is no daemon, keep their pid on Linux, whatever its folder.
+#[test]
+fn a_terminal_agent_on_linux_keeps_its_own_pid() {
+    for exe in [
+        "/home/me/.local/share/claude/versions/2.1.0/claude",
+        "/usr/lib/node_modules/@openai/codex/vendor/x86_64-unknown-linux-musl/codex/codex",
+        "/home/me/.local/share/cursor-agent/versions/2025.11.25/node",
+        "/usr/bin/copilot",
+        "/tmp/.mount_codexAb12Cd/codex",
+        "/usr/share/codec/player",
+    ] {
+        let rows: &'static [(u32, &'static str, u32)] = Box::leak(Box::new([
+            (800, "/usr/bin/bash", 900),
+            (900, exe, 100),
+            (100, "/usr/share/code/code", 1),
+        ]));
+        assert_eq!(agent_pid(None, 900, table(rows)), Some(900), "{exe}");
+        assert_eq!(agent_pid(None, 800, table(rows)), Some(900), "{exe}");
+    }
+}
+
+#[test]
+fn no_pid_when_the_agent_is_codexs_shared_daemon_on_linux() {
+    const DAEMON: &str = "/home/me/.codex/packages/app-server-daemon/releases/0.172.0-x86_64-unknown-linux-musl/bin/codex";
+    let t = table(&[(37109, DAEMON, 70019), (70019, DAEMON, 1)]);
+    assert_eq!(agent_pid(None, 37109, t), None);
+    let t = table(&[(601, "/usr/bin/bash", 37109), (37109, DAEMON, 70019)]);
+    assert_eq!(agent_pid(None, 601, t), None);
+}
+
+/// The real lookup reads the real process table: a child's executable and its parent. A stand-in table
+/// cannot catch `ps -o comm=` giving a bare name on Linux, so this runs there against `/proc`.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_real_lookup_finds_a_childs_executable_and_its_parent() {
+    // A shell waiting on its stdin stays the child's executable, whichever shell `/bin/sh` is.
+    let mut child = std::process::Command::new("/bin/sh")
+        .args(["-c", "read line"])
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let found = studio_hook::inspect(child.id());
+    drop(child.stdin.take());
+    child.wait().unwrap();
+    let exe = fs::canonicalize("/bin/sh").unwrap();
+    assert_eq!(
+        found,
+        Some((exe.to_string_lossy().into_owned(), std::process::id()))
+    );
+}
