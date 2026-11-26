@@ -13,8 +13,9 @@ dir=${1:?usage: scripts/npm/smoke.sh <dir>}
 dir=$(cd "$dir" && pwd)
 node_bin=$(dirname "$(command -v node)")
 work=$(mktemp -d)
-server=
+server= group=
 cleanup() {
+  [ -n "$group" ] && node -e "process.kill(-$group, 'SIGTERM')" 2>/dev/null || true
   [ -n "$server" ] && kill "$server" 2>/dev/null || true
   rm -rf "$work"
 }
@@ -68,16 +69,25 @@ serves() {
 
 # The one command, as a first-time user runs it. CI gives it no terminal, so it never asks or wires: it serves and
 # prints the command that wires (#434), on stderr: stdout's first line is the address.
-npx --yes --package "$platform_tarball" --package "$launcher_tarball" plotkeeper < /dev/null > "$work/npx-out" 2> "$work/npx-err" &
+# npx runs the command through `sh -c`, and Linux's sh (dash) catches a SIGINT sent to it alone and waits on its child,
+# so the start gets a process group of its own (perl's setpgrp, on macOS and Linux alike) and Ctrl+C goes to the
+# whole group, as a terminal sends it.
+perl -e 'setpgrp(0, 0); exec @ARGV or die "exec: $!"' \
+  npx --yes --package "$platform_tarball" --package "$launcher_tarball" plotkeeper < /dev/null > "$work/npx-out" 2> "$work/npx-err" &
 server=$!
+group=$server
 serves "$work/npx-out"
 head -n 1 "$work/npx-out" | grep -q "^plotkeeper: http" || fail "npx plotkeeper's first line on stdout is not its address: $(cat "$work/npx-out")"
 grep -q "plotkeeper install --yes" "$work/npx-err" || fail "npx plotkeeper did not print the command that wires on stderr: $(cat "$work/npx-err")"
 [ ! -e "$HOME/claude-calls" ] || fail "npx plotkeeper with no terminal ran claude: $(cat "$HOME/claude-calls")"
 [ ! -e "$data/install" ] || fail "npx plotkeeper with no terminal wired or stored an answer"
-kill -INT "$server"
-wait "$server" || fail "npx plotkeeper did not stop cleanly on Ctrl+C"
-server=
+node -e "process.kill(-$group, 'SIGINT')"
+# plotkeeper stops cleanly and exits 0; a shell between npm and the launcher that caught the SIGINT then ends by it,
+# so npx exits 130 (128 + SIGINT). The running file going, checked next, is the clean stop.
+status=0
+wait "$server" || status=$?
+[ "$status" = 0 ] || [ "$status" = 130 ] || fail "npx plotkeeper exited $status on Ctrl+C: $(cat "$work/npx-err")"
+server= group=
 [ ! -e "$data/plotkeeper.running.json" ] || fail "the npx start is still running"
 
 npm i -g --prefix "$prefix" "$platform_tarball" "$launcher_tarball"
