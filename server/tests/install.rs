@@ -4,6 +4,7 @@
 
 use std::{
     collections::BTreeMap,
+    ffi::OsStr,
     fs,
     io::{Read, Write},
     os::unix::fs::{FileTypeExt, PermissionsExt},
@@ -153,11 +154,7 @@ esac"#,
 
     fn starting(&self, terminal: bool) -> Command {
         let mut command = if terminal {
-            let mut script = Command::new("/usr/bin/script");
-            script
-                .args(["-q", "/dev/null"])
-                .arg(self.tools.join("plotkeeper"));
-            script
+            in_terminal(&[self.tools.join("plotkeeper").as_os_str()])
         } else {
             Command::new(self.tools.join("plotkeeper"))
         };
@@ -172,7 +169,7 @@ esac"#,
         command
     }
 
-    /// A bare `plotkeeper` start in a terminal, given through macOS's `/usr/bin/script`: each `Wire these? [Y/n]` it
+    /// A bare `plotkeeper` start in a terminal, given through `/usr/bin/script` (`in_terminal`): each `Wire these? [Y/n]` it
     /// asks is answered with the next of `answers`, and once it prints its address it is stopped with Ctrl+C. Returns
     /// all it printed, with the terminal's line endings made plain.
     fn start(&self, answers: &[&str]) -> String {
@@ -278,6 +275,30 @@ fn served(child: &mut Child, mut each: impl FnMut(&str, bool)) -> String {
         reader.join().unwrap();
     }
     text.lock().unwrap().clone()
+}
+
+/// `command` run in a terminal of its own by `/usr/bin/script`, which logs to `/dev/null`. macOS's BSD `script`
+/// takes the command's words after the log file; Linux's util-linux `script` takes one shell line after `-c`, so
+/// there each word is single-quoted.
+fn in_terminal(command: &[&OsStr]) -> Command {
+    let mut script = Command::new("/usr/bin/script");
+    #[cfg(target_os = "macos")]
+    script.args(["-q", "/dev/null"]).args(command);
+    #[cfg(target_os = "linux")]
+    {
+        let words: Vec<String> = command
+            .iter()
+            .map(|word| format!("'{}'", word.to_string_lossy().replace('\'', r"'\''")))
+            .collect();
+        script.args([
+            "-q",
+            "-e",
+            "-c",
+            &format!("exec {}", words.join(" ")),
+            "/dev/null",
+        ]);
+    }
+    script
 }
 
 fn script(path: &Path, body: &str) {
@@ -1878,11 +1899,14 @@ fn with_stdout_sent_to_a_file_the_question_still_reaches_the_terminal_and_stdout
     let machine = Machine::new(true, false);
     let log = machine.home.join("log");
     // As `plotkeeper > log` in a terminal: stdin and stderr are the terminal, stdout the file.
-    let mut command = Command::new("/usr/bin/script");
-    command
-        .args(["-q", "/dev/null", "/bin/sh", "-c", r#"exec "$0" > "$1""#])
-        .arg(machine.tools.join("plotkeeper"))
-        .arg(&log);
+    let plotkeeper = machine.tools.join("plotkeeper");
+    let mut command = in_terminal(&[
+        "/bin/sh".as_ref(),
+        "-c".as_ref(),
+        r#"exec "$0" > "$1""#.as_ref(),
+        plotkeeper.as_os_str(),
+        log.as_os_str(),
+    ]);
     for (key, value) in machine.starting(true).get_envs() {
         match value {
             Some(value) => command.env(key, value),
