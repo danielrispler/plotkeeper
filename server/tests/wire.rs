@@ -954,6 +954,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
                     ratify_id: "held:server/2@0123456789abcdef-fedcba9876543210".into(),
                     decided: false,
                 }],
+                changed: true,
             }),
         ),
         (
@@ -967,6 +968,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
                 line: Some("The run ended at its time limit".into()),
                 left_out: 1,
                 still_true: vec![],
+                changed: true,
             }),
         ),
         (

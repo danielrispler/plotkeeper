@@ -121,15 +121,14 @@ const kindWords: Record<string, string> = { part: "part", actor: "outside actor"
 
 // The prompt an overturn puts on the clipboard: it stands alone for any agent, naming the PR, its branch while it is open, the item's
 // id and its wording, for an added link the import sites behind it (#499), and for a row the Map text review flagged its why (`flags`,
-// `reviewFlags`, #645).
+// `reviewFlags`, #645). A Still true? row (#698) names its review item (`item`, the flag's id) and asks for a correction.
 export function overturnPrompt(
-  row: Pick<RatifyRow, "pr" | "kind" | "id" | "text" | "change"> & { detail?: RatifyDetail | null; evidence?: LinkSites; flags?: string[] },
+  row: Pick<RatifyRow, "pr" | "kind" | "id" | "text" | "change"> & { detail?: RatifyDetail | null; evidence?: LinkSites; flags?: string[]; item?: string },
   branch: string | null,
 ): string {
   const where = branch ? `PR #${row.pr} (branch ${branch})` : `PR #${row.pr}`;
   if (row.kind === "still-true") {
-    // The id is the review item's, then `@` and the verdict key (`map_review.rs`).
-    const item = row.id.slice(0, row.id.lastIndexOf("@"));
+    const item = row.item ?? row.id;
     const why = row.flags?.length ? ` The map text review flagged it: ${row.flags.join(" ")}` : "";
     return `In ${where}, I overturn the map text ${item}: “${row.text}”, which the PR left unchanged.${why} Correct the map text to what the code does, or the code when the text states the intent, and tell me what you changed.`;
   }
@@ -185,7 +184,7 @@ export function noteFor(last: Overturned | null, project: string, holds: (item: 
 // guard's row, drawn by `map-brief.ts`. `on` is the parts the brief lit, so the map stays as the brief left it.
 export const ratifyStep = (rows: RatifyRow[], on: string[] = [], guard = false, head = false): BriefStep | null => {
   const step = { k: "Ratify", on, hops: [], law: null, covered_by: null, list: [], risks: [], fig: null, check: null, cites: [], flags: [] };
-  if (rows.length) return { ...step, h: "Accept or overturn", b: "What changed the map, and what the agent decided. Nothing waits on this." };
+  if (rows.length) return { ...step, h: "Accept or overturn", b: "What this PR changed or decided, and map text the review doubts. Nothing waits on this." };
   if (guard) return { ...step, h: "Guard with a law", b: "This PR fixed a bug and left no law behind it." };
   return head ? { ...step, h: "The map at this head", b: "Nothing here to accept or overturn." } : null;
 };
@@ -230,23 +229,26 @@ export function reviewFlags(review: MapReview | null, row: Pick<RatifyRow, "kind
 }
 
 /**
- * The flagged still-true items not yet decided (#698, spec #687 "Still true? rows"), as Ratify rows of kind `still-true`: the id is the
- * flag's `ratify_id`, which `ratify_set` keeps the decision under, and the text the head's. `map-brief.ts` draws them as "Still true?" rows.
+ * The flagged still-true items as Ratify rows of kind `still-true` (#698, spec #687 "Still true? rows"): the id is the flag's `ratify_id`,
+ * which `ratify_set` keeps the decision under, and the text the head's. A flag decided before is left out; one decided while the brief
+ * plays (`here`, by ratify id) stays, with its decision, as any Ratify row does. `map-brief.ts` draws them as "Still true?" rows.
  */
-export const stillTrueRows = (review: MapReview | null, pr: number): RatifyRow[] =>
-  (review?.still_true ?? []).filter((flag) => !flag.decided).map((flag) => ({ pr, kind: "still-true", id: flag.ratify_id, text: flag.text, change: "", status: "not-yet", detail: null }));
+export const stillTrueRows = (review: MapReview | null, pr: number, here: ReadonlyMap<string, RatifyRow["status"]> = new Map()): RatifyRow[] =>
+  (review?.still_true ?? [])
+    .filter((flag) => !flag.decided || here.has(flag.ratify_id))
+    .map((flag) => ({ pr, kind: "still-true", id: flag.ratify_id, text: flag.text, change: "", status: here.get(flag.ratify_id) ?? "not-yet", detail: null }));
 
 /** What the not-confirmed popover lists for a flagged still-true item: the verdict, the reviewer's why and the lines it cites. */
 export const stillTrueFlags = (flag: MapReviewFlag): string[] => [`Unchanged text (${flag.verdict}): ${stopped(flag.why)}${flag.cites.length ? ` See ${flag.cites.join(", ")}.` : ""}`];
 
 /**
  * The Map text review's line at Ratify's head (#645): its words, and the button that starts it, "Review map text" before any review of a
- * PR not by Daniel's login, "Run again" after a failure (both `map_review_start`). None when the head changed no map text.
+ * PR not by Daniel's login, "Run again" after a failure (both `map_review_start`). None when the head changed no map text and its review did not
+ * fail (#698).
  */
 export function reviewLine(review: MapReview | null): { line: string | null; start: "Review map text" | "Run again" | null } | null {
-  if (!review) return null;
-  // A head whose only items are still-true ones has no changed item to count: its finished review says nothing (#698).
-  if (review.state === "done" && review.checked === 0 && !review.left_out) return null;
+  // A head that changed no map text has still-true items alone (#698): only a failure says anything, with Run again.
+  if (!review || (!review.changed && review.state !== "failed")) return null;
   // Items whose id the review does not take are left out of its prompt (`map_review.rs`, `takes`), and the line says so.
   const left = review.left_out ?? 0;
   if (review.state === "idle") return { line: left ? `${left} left out for an id the review does not take` : null, start: "Review map text" };
@@ -257,7 +259,8 @@ export function reviewLine(review: MapReview | null): { line: string | null; sta
 }
 
 // Whether Ratify's head alone brings the Ratify step, with nothing to ratify (`ratifyStep`'s `head`): the map check fails at the PR's head
-// (#641), or the Map text review runs, has flagged something or left an item out (#645), or offers its button: "Review map text" before
-// it ran, for a PR not by Daniel's login, and "Run again" after it failed, which would be unreachable otherwise.
+// (#641), or the Map text review of a head that changed map text runs, has flagged something or left an item out (#645), or offers its
+// button: "Review map text" before it ran, for a PR not by Daniel's login, and "Run again" after any review failed, which would be
+// unreachable otherwise. A still-true flag brings the step as a row (`stillTrueRows`, #698), not here.
 export const headBrings = (problems: string[] | undefined, review: MapReview | null): boolean =>
-  !!mapCheckLine(problems) || ["reviewing", "idle", "failed"].includes(review?.state ?? "") || (review?.flagged ?? 0) > 0 || (review?.left_out ?? 0) > 0;
+  !!mapCheckLine(problems) || review?.state === "failed" || (!!review?.changed && ["reviewing", "idle"].includes(review.state)) || (review?.flagged ?? 0) > 0 || (review?.left_out ?? 0) > 0;

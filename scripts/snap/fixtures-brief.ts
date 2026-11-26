@@ -518,11 +518,11 @@ export const mapBriefReview = (at: "flag" | "running"): Fixture => ({
       log("review running ok");`, false, 100),
   pr_ratify: at === "flag" ? ratifyRows : [],
   pr_map_review: at === "flag"
-    ? { head: "cafe", state: "done", checked: 2, flagged: 1, line: null, left_out: 0, still_true: [], items: [
+    ? { head: "cafe", state: "done", checked: 2, flagged: 1, line: null, left_out: 0, still_true: [], changed: true, items: [
       { id: "law:window-quiet/text", verdict: "contradicted", why: reviewWhy, cites: ["server/src/runner.rs:83", "server/src/pr_briefs/queue.rs:12"], flagged: true },
       { id: "link:shell-understanding/reason", verdict: "supported", why: "The shell imports it.", cites: [], flagged: false },
     ] }
-    : { head: "cafe", state: "reviewing", checked: 0, flagged: 0, line: null, left_out: 0, still_true: [], items: [] },
+    : { head: "cafe", state: "reviewing", checked: 0, flagged: 0, line: null, left_out: 0, still_true: [], changed: true, items: [] },
 });
 // Still true? rows (#698, spec #687): a flagged still-true item is a row in Ratify with the not-confirmed popover. `row`: beside the
 // PR's other rows, its popover open; `alone`: a review whose only items are still-true ones brings the Ratify step with that one row.
@@ -552,7 +552,7 @@ export const mapBriefStillTrue = (at: "row" | "alone"): Fixture => ({
       }
       log("still true ok");`, false, 100),
   pr_ratify: at === "row" ? ratifyRows : [],
-  pr_map_review: { head: "cafe", state: "done", checked: 0, flagged: 0, line: null, left_out: 0, items: [], still_true: [stillFlag] },
+  pr_map_review: { head: "cafe", state: "done", checked: 0, flagged: 0, line: null, left_out: 0, items: [], still_true: [stillFlag], changed: false },
 });
 /**
  * The brief's reader explains itself (#524), with Explanations on (the default): the ? beside Leave, pressed; the step's title described by
@@ -568,7 +568,7 @@ export const mapBriefExplained = (at: "where" | "ratify" | "off"): Fixture => ({
       const title = box.querySelector(".brief-title");
       const line = document.getElementById(title.getAttribute("aria-describedby"));
       if (!line?.classList.contains("explain") || title.nextElementSibling !== line) log("snap:fail the title's line");
-      const want = ${JSON.stringify(at === "ratify" ? "Changes this PR made to your map; say whether each stands." : "Where this change sits on your map.")};
+      const want = ${JSON.stringify(at === "ratify" ? "Map changes, and text the review doubts; say whether each stands." : "Where this change sits on your map.")};
       if (line?.textContent !== want) log("snap:fail the title's line says " + JSON.stringify(line?.textContent));
       if (${at === "ratify"}) {
         const notes = [...box.querySelectorAll(".ratify-row .explain-link")].map((note) => note.closest(".ratify-row").dataset.id + "=" + note.textContent.split(":")[0]);

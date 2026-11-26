@@ -68,7 +68,7 @@ export const BRIEF = {
 // Ratify, the brief's last step (#524): a line under its title, and "not yet ratified"'s under its first undecided item, worded as
 // on the sheet.
 export const RATIFY = {
-  accept: "Changes this PR made to your map; say whether each stands.",
+  accept: "Map changes, and text the review doubts; say whether each stands.",
   guard: "A law with a test keeps this bug from coming back.",
   head: "How the map stands at this PR's head.",
   notYet: SHEET.notYet,

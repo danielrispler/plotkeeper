@@ -16,7 +16,8 @@
 //!   whose items were all judged before, by id, kind and hash, runs nothing. A run the login or a limit stopped is submitted again and
 //!   waits for Resume; a run whose answer is kept is dismissed.
 //! - **Kept** in the data folder, `map-reviews/<project>-<hash>/<pr>.json`: each verdict by item id, kind and hash, and each head's
-//!   items and state. A missing kind, in a file from before still-true items, is `changed`.
+//!   items and state. A missing kind, in a file from before still-true items, is `changed`, unless the key is a still-true one
+//!   ([`Record::with_kinds`]).
 
 use crate::ratify::{Detail, MapItem};
 use crate::runner::{End, Kind, Limits, Outcome, Request, Runner};
@@ -410,6 +411,10 @@ pub struct ReviewView {
     pub left_out: usize,
     /// The head's still-true items that have a flag, in the order they were asked; a supported one is never sent.
     pub still_true: Vec<StillTrueFlag>,
+    /// Whether the head changed map text, an item left out included. A head that did not has still-true items alone, and the page
+    /// shows of its review only a failure, with "Run again", and the flags not decided: no "Reviewing map text…", no count and no
+    /// "Review map text" (spec #687, "What the page reads").
+    pub changed: bool,
 }
 
 /// A flagged still-true item (spec #687): its verdict, and its name and text as the head's map has them.
@@ -474,6 +479,22 @@ struct Record {
 }
 
 impl Record {
+    /// The record with each still-true item and verdict of its kind again. A build from before still-true items drops the kind
+    /// when it writes the file back, so a missing kind reads as `changed`; a still-true key is two hashes joined by `-`, which a
+    /// changed item's never is ([`still_true_items`]).
+    fn with_kinds(mut self) -> Self {
+        let items = self.heads.values_mut().flat_map(|head| &mut head.items);
+        let kinds = items
+            .map(|item| (&item.hash, &mut item.kind))
+            .chain(self.verdicts.iter_mut().map(|v| (&v.hash, &mut v.kind)));
+        for (hash, kind) in kinds {
+            if hash.contains('-') {
+                *kind = ItemKind::StillTrue;
+            }
+        }
+        self
+    }
+
     fn verdict(&self, item: &ReviewItem) -> Option<&Verdict> {
         self.verdicts
             .iter()
@@ -633,6 +654,7 @@ impl MapReviews {
     fn read(&self, project: &str, pr: u64) -> Record {
         let read = fs::read(self.file(project, pr)).ok();
         read.and_then(|text| serde_json::from_slice(&text).ok())
+            .map(Record::with_kinds)
             .unwrap_or_else(|| Record {
                 project: project.into(),
                 pr,
@@ -905,10 +927,10 @@ impl MapReviews {
                 }
             })
             .collect();
-        // A head whose only items are still-true ones shows nothing while it is not started, runs, or ends with no flag: only a
-        // failure, with "Run again", or a flag. So it offers no "Review map text" and brings no Ratify step by itself.
-        let changed = items.iter().any(|item| item.kind == ItemKind::Changed);
-        if !changed && left_out == 0 && state != ReviewState::Failed && still_true.is_empty() {
+        // A head whose only items are still-true ones is none while it is not started, runs, or ends with no flag; with a flag or a
+        // failure the page shows of it only the failure, with "Run again", and the flags not decided (`changed`).
+        let changed = left_out > 0 || items.iter().any(|item| item.kind == ItemKind::Changed);
+        if !changed && state != ReviewState::Failed && still_true.is_empty() {
             return None;
         }
         Some(ReviewView {
@@ -920,6 +942,7 @@ impl MapReviews {
             line: kept.and_then(|kept| kept.why.clone()),
             left_out,
             still_true,
+            changed,
         })
     }
 

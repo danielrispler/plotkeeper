@@ -116,7 +116,7 @@ test("a Ratify row carries its mark's id and lights it on hover and focus with a
 });
 
 // The Map text review's line at Ratify's head (#645), in each state `pr_map_review` gives.
-const review = (state, extra = {}) => ({ head: "cafe", state, items: [], checked: 0, flagged: 0, line: null, left_out: 0, still_true: [], ...extra });
+const review = (state, extra = {}) => ({ head: "cafe", state, items: [], checked: 0, flagged: 0, line: null, left_out: 0, still_true: [], changed: true, ...extra });
 
 test("the review's line says each state at Ratify's head, and its button starts the review once (#645)", async () => {
   assert.equal(mapReviewNode(null, async () => {}), null, "a head that changed no map text has no line");

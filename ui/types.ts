@@ -594,8 +594,9 @@ export type MapReviewItem = { id: string; verdict: "supported" | "overreach" | "
 export type MapReviewFlag = { id: string; verdict: "overreach" | "contradicted" | "unreadable"; why: string; cites: string[]; name: string; text: string; ratify_id: string; decided: boolean };
 // `left_out`: how many of the head's changed map items the review left out of its prompt, for an id it does not take (over 40 characters).
 // `items`, `checked` and `flagged` are of changed items only; `still_true` holds the flagged still-true items, never a supported one. A
-// head whose only items are still-true ones is null but when its review failed or has a flag.
-export type MapReview = { head: string; state: "idle" | "reviewing" | "done" | "failed"; items: MapReviewItem[]; checked: number; flagged: number; line: string | null; left_out: number; still_true: MapReviewFlag[] };
+// head whose only items are still-true ones is null but when its review failed or has a flag; its `changed` is false, and the page shows
+// of it only a failure, with "Run again", and the flags not decided.
+export type MapReview = { head: string; state: "idle" | "reviewing" | "done" | "failed"; items: MapReviewItem[]; checked: number; flagged: number; line: string | null; left_out: number; still_true: MapReviewFlag[]; changed: boolean };
 // What a ready PR's brief is doing (`pr_briefs.rs`): a newer head was pushed (stale), being written now, and the chapters' titles, or the one story's.
 // `note` (#477, part B): why the brief at this head is what it is after a push: the read carried over, or it was rewritten.
 // `since` (#497): the title of the "Since you read" story stored for this head, which the tray opens first; `since_chapters`, its chapters' titles when it has more than one, one tray row each.

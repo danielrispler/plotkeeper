@@ -246,6 +246,12 @@ impl Bench {
 
     /// Waits until the one run started so far is running: its working folder.
     fn running(&self) -> PathBuf {
+        self.until_running();
+        self.work()
+    }
+
+    /// Waits until a run is running.
+    fn until_running(&self) {
         let deadline = Instant::now() + Duration::from_secs(30);
         while !self
             .runner
@@ -257,7 +263,6 @@ impl Bench {
             assert!(Instant::now() < deadline, "the review never ran");
             std::thread::sleep(Duration::from_millis(20));
         }
-        self.work()
     }
 
     /// The working folder of the one run started so far.
@@ -599,9 +604,10 @@ fn a_strangers_pr_is_reviewed_only_on_request() {
         "no run starts by itself for a PR by another login"
     );
     let view = bench.reviews.view(&bench.project(), 7, &head).unwrap();
+    // It changed map text, so the page offers "Review map text".
     assert_eq!(
-        (view.state, view.checked),
-        (ReviewState::Idle, 0),
+        (view.state, view.checked, view.changed),
+        (ReviewState::Idle, 0, true),
         "{view:?}"
     );
     // The author was asked of `gh`, as Daniel's normal `gh`.
@@ -1075,38 +1081,97 @@ fn a_flagged_still_true_item_is_in_the_view_with_its_name_its_text_at_the_head_a
 }
 
 #[test]
-fn a_record_file_from_before_still_true_items_reads_with_its_verdicts() {
+fn a_head_with_still_true_items_alone_says_it_changed_no_map_text_while_its_kept_flags_show() {
     let bench = bench();
-    let head = bench.first_head();
-    // Written by the build before still-true items, for this test's first head: no item or verdict has a kind.
-    let before = include_str!("map-review/record-before-687.json");
-    assert!(!before.contains("\"kind\""));
-    // The project's folder in the store, as `micro_worlds::project_folder` names it: its path, readable, and its FNV-1a hash.
-    let project = bench.project();
-    let name: String = project
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-        .collect();
-    let fnv = project
-        .bytes()
-        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-            (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
-        });
-    let folder = bench
-        .root()
-        .join("data/map-reviews")
-        .join(format!("{name}-{fnv:016x}"));
-    fs::create_dir_all(&folder).unwrap();
-    fs::write(folder.join("7.json"), before).unwrap();
-    let view = bench.reviews.view(&project, 7, &head).unwrap();
-    assert_eq!((view.checked, view.flagged), (7, 3), "{view:?}");
-    let purpose = view
-        .items
-        .iter()
-        .find(|item| item.id == "part:core/purpose")
-        .unwrap();
+    bench.author("daniel");
+    bench.base(RICH);
+    bench.answer(&RICH_FLAGS);
+    let head = bench.push(None, &[("core/lib.rs", "pub fn fold() -> u8 { 1 }\n")]);
+    bench.reviews.brief_stored(&bench.project(), 7, &head);
+    assert_eq!(bench.settled(&head).still_true.len(), 3);
+    // A push that adds a file of Cache's reuses Core's flags while Cache's still-true items run: the view holds the flags and says
+    // the head changed no map text, so the page shows no "Reviewing map text…", as it offers no "Review map text" on such a head.
+    bench.answer(&[
+        ("part:cache/purpose", "supported", "It caches."),
+        ("part:cache/caption", "supported", "It keeps them."),
+        ("link:server-cache/reason", "supported", "It caches."),
+        ("law:caches-expire/text", "supported", "They expire."),
+    ]);
+    fs::write(bench.root().join("slow"), "").unwrap();
+    let cache = bench.push(Some(&head), &[("cache/lib.rs", "pub fn get() {}\n")]);
+    bench.reviews.brief_stored(&bench.project(), 7, &cache);
+    bench.until_running();
+    let view = bench.reviews.view(&bench.project(), 7, &cache).unwrap();
     assert_eq!(
-        (purpose.verdict.as_str(), purpose.why.as_str()),
-        ("overreach", "Only the events of one kind are folded.")
+        (view.state, view.changed, view.still_true.len()),
+        (ReviewState::Reviewing, false, 3),
+        "{view:?}"
     );
+    fs::remove_file(bench.root().join("slow")).unwrap();
+    let view = bench.settled(&cache);
+    assert_eq!(
+        (view.state, view.changed, view.still_true.len()),
+        (ReviewState::Done, false, 3),
+        "{view:?}"
+    );
+}
+
+#[test]
+fn a_record_file_from_before_still_true_items_reads_with_its_verdicts() {
+    // A case: its name, the file, and the still-true flags its view shows. Neither file has a kind on any item or verdict.
+    let cases = [
+        (
+            // Written by the build before still-true items, for this test's first head.
+            "written before still-true items",
+            include_str!("map-review/record-before-687.json"),
+            vec![],
+        ),
+        (
+            // Written back by that build after this one kept a still-true verdict: it drops the kinds it does not know. A still-true
+            // verdict's key, two hashes joined by `-`, says its kind.
+            "rewritten by a build before still-true items",
+            include_str!("map-review/record-rewritten-by-a-build-before-687.json"),
+            vec![("part:core/caption", "contradicted")],
+        ),
+    ];
+    for (case, before, still_true) in cases {
+        let bench = bench();
+        let head = bench.first_head();
+        assert!(!before.contains("\"kind\""), "{case}");
+        // The project's folder in the store, as `micro_worlds::project_folder` names it: its path, readable, and its FNV-1a hash.
+        let project = bench.project();
+        let name: String = project
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect();
+        let fnv = project
+            .bytes()
+            .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+                (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+            });
+        let folder = bench
+            .root()
+            .join("data/map-reviews")
+            .join(format!("{name}-{fnv:016x}"));
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("7.json"), before).unwrap();
+        let view = bench.reviews.view(&project, 7, &head).unwrap();
+        assert_eq!((view.checked, view.flagged), (7, 3), "{case}: {view:?}");
+        let purpose = view
+            .items
+            .iter()
+            .find(|item| item.id == "part:core/purpose")
+            .unwrap();
+        assert_eq!(
+            (purpose.verdict.as_str(), purpose.why.as_str()),
+            ("overreach", "Only the events of one kind are folded."),
+            "{case}"
+        );
+        let flags: Vec<(&str, &str)> = view
+            .still_true
+            .iter()
+            .map(|flag| (flag.id.as_str(), flag.verdict.as_str()))
+            .collect();
+        assert_eq!(flags, still_true, "{case}: {view:?}");
+    }
 }
