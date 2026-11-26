@@ -23,7 +23,18 @@ use studio_server::{
 
 const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 
-/// A part catch-up ready with its outline, one being written at its stage, and a part whose one PR's chapter opens.
+fn outline() -> studio_server::part_catch_ups::Outline {
+    studio_server::part_catch_ups::Outline {
+        title: "Store writes go atomic".into(),
+        steps: vec![studio_server::part_catch_ups::OutlineStep {
+            k: "Where".into(),
+            h: "The store keeps each project's map state".into(),
+        }],
+    }
+}
+
+/// A part catch-up ready with its outline, one being written at its stage with the older one stored to read meanwhile, and a part
+/// whose one PR's chapter opens.
 fn catch_ups() -> BTreeMap<String, studio_server::part_catch_ups::Offer> {
     BTreeMap::from([
         (
@@ -33,13 +44,8 @@ fn catch_ups() -> BTreeMap<String, studio_server::part_catch_ups::Offer> {
                 writing: false,
                 failed: false,
                 stage: None,
-                outline: Some(studio_server::part_catch_ups::Outline {
-                    title: "Store writes go atomic".into(),
-                    steps: vec![studio_server::part_catch_ups::OutlineStep {
-                        k: "Where".into(),
-                        h: "The store keeps each project's map state".into(),
-                    }],
-                }),
+                outline: Some(outline()),
+                older: None,
             },
         ),
         (
@@ -50,6 +56,10 @@ fn catch_ups() -> BTreeMap<String, studio_server::part_catch_ups::Offer> {
                 failed: false,
                 stage: Some(studio_understanding::pr_brief_check::Stage::Fixing { claims: 2 }),
                 outline: None,
+                older: Some(studio_server::part_catch_ups::Older {
+                    outline: outline(),
+                    fog: vec![COMMIT.into()],
+                }),
             },
         ),
         (

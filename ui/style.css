@@ -821,6 +821,9 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .catch-up-actions .sheet-catch-up { flex: 1 1 auto; text-align: center; background: var(--selected); font-weight: 600; }
 .catch-up-card .sheet-refresher { align-self: flex-start; }
 .sheet-catch-up-note { margin: calc(-1 * var(--sp-2)) 0 0; font-size: var(--size-small); color: var(--muted); }
+/* "Read the one you have" (#638), while a newer catch-up is written: the older one's button and the changes it covers. */
+.catch-up-older { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); padding-top: var(--sp-4); border-top: var(--hair) solid var(--edge); }
+.catch-up-older-line { margin: 0; font-size: var(--size-small); color: var(--muted); overflow-wrap: anywhere; }
 .sheet-ci { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
 .sheet-ci-line { margin: 0; font-size: var(--size-small); color: var(--muted); }
 .sheet-ci.broken .sheet-ci-line { color: var(--conflict); }

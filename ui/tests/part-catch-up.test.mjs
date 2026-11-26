@@ -1,7 +1,7 @@
 // The part catch-up on a part's sheet (spec danielrispler/plotkeeper#378, ticket #391): pure logic, run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { awaitedCatchUp, changesLine, fogActions, fogListLines, stageLabel } from "../../dist/map-catch-up.js";
+import { awaitedCatchUp, changesLine, fogActions, fogListLines, olderLine, stageLabel } from "../../dist/map-catch-up.js";
 
 /** @returns {import("../../dist/types.js").CatchUpOffer} */
 const catchUp = (extra = {}) => ({ kind: "catch-up", ready: false, writing: false, failed: false, ...extra });
@@ -31,6 +31,14 @@ test("a catch-up being written says the call that runs now on the card, and a fa
 test("the card's eyebrow says how many changes landed since the last catch-up", () => {
   assert.equal(changesLine(3), "3 changes since you last caught up");
   assert.equal(changesLine(1), "1 change since you last caught up");
+});
+
+// The older catch-up (#638): what "Read the one you have" says it covers, of the part's fog entries, oldest first.
+test("the older catch-up's line says how many of the part's changes it covers and names each, a PR by its number, a push by its commit", () => {
+  const fogged = (commit, pr) => ({ commit, strength: "thin", pr, why: ["paths"] });
+  const entries = [fogged("a".repeat(40), 612), fogged("b".repeat(40), null), fogged("c".repeat(40), 630)];
+  assert.equal(olderLine({ outline: outline(3), fog: ["a".repeat(40), "b".repeat(40)] }, entries), "Covers 2 of 3 changes: #612, bbbbbbb");
+  assert.equal(olderLine({ outline: outline(3), fog: ["a".repeat(40)] }, entries.slice(0, 2)), "Covers 1 of 2 changes: #612");
 });
 
 test("a part fogged by one PR whose brief lights it offers that chapter instead, with \"I know this\" second", () => {
