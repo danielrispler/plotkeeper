@@ -213,13 +213,17 @@ impl Packages {
 
 /// Whether the `pubspec.yaml` in `folder` is a fixture, not a package: a folder strictly between its enclosing package's
 /// root (the nearest tracked pubspec above it, else the repository's root) and its own folder is a test folder. Its own
-/// folder's name never counts, so `pkgs/test/pubspec.yaml` is the `test` package.
+/// folder's name never counts, so `pkgs/test/pubspec.yaml` is the `test` package. A pubspec whose enclosing package is a
+/// fixture is one too.
 fn is_fixture(repo: &Repo, folder: &str) -> bool {
     let Some(above) = parent(folder) else {
         return false;
     };
-    let enclosing = nearest_package(repo, above).unwrap_or("");
-    above[enclosing.len()..].split('/').any(is_test_folder)
+    let enclosing = nearest_package(repo, above);
+    above[enclosing.unwrap_or("").len()..]
+        .split('/')
+        .any(is_test_folder)
+        || enclosing.is_some_and(|enclosing| is_fixture(repo, enclosing))
 }
 
 /// The package a `pubspec.yaml` declares: the value of its first line that starts at column 0 with `name:`, bare or in

@@ -240,7 +240,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// The metadata whose `@` was just read: a dotted name, type arguments and arguments. Whether it was metadata.
+    /// The metadata whose `@` was just read: a dotted name, type arguments with an optional `.constructor`, and arguments. Whether it was metadata.
     fn skip_metadata(&mut self) -> Option<bool> {
         if !matches!(self.next()?, Token::Ident(_)) {
             return Some(false);
@@ -260,6 +260,13 @@ impl<'a> Lexer<'a> {
                     Token::Punct('>') => depth -= 1,
                     Token::Punct(';') | Token::Eof => return None,
                     _ => {}
+                }
+            }
+            // A named constructor after the type arguments: `@C<T>.named(…)`.
+            if matches!(self.peek()?, Token::Punct('.')) {
+                self.next()?;
+                if !matches!(self.next()?, Token::Ident(_)) {
+                    return Some(false);
                 }
             }
         }

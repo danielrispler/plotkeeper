@@ -533,6 +533,21 @@ fn a_file_of_a_fixture_package_is_skipped_with_no_pair_and_no_failed_link() {
     assert_eq!(found.counts.links.unproven, 1);
 }
 
+#[test]
+fn a_pubspec_whose_enclosing_package_is_a_fixture_is_a_fixture_too() {
+    // `test/fixtures/ws/` is a fixture of the root package, so the member package `a` inside it is one as well: it is not
+    // indexed, and its files are skipped though no test folder sits between `ws/` and `a/`.
+    let found = dart_pairs(&[
+        ("pubspec.yaml", "name: app\n"),
+        ("lib/main.dart", "import 'package:a/a.dart';\n"),
+        ("test/fixtures/ws/pubspec.yaml", "name: ws\n"),
+        ("test/fixtures/ws/pkgs/a/pubspec.yaml", "name: a\n"),
+        ("test/fixtures/ws/pkgs/a/lib/a.dart", "import 'b.dart';\n"),
+        ("test/fixtures/ws/pkgs/a/lib/b.dart", ""),
+    ]);
+    assert_eq!(found, Vec::<String>::new());
+}
+
 /// `xa/` and `xb/` both declare `x` and hold `lib/s.dart`; `app/` imports `package:x/s.dart`, and `xc/` holds an
 /// unrelated package. The map has `links` and ignores `ignored`, and has no root pubspec to ignore.
 fn declared_twice(links: &[(&str, &str)], ignored: &[&str]) -> (tempfile::TempDir, String) {
@@ -795,6 +810,17 @@ fn metadata_is_skipped_with_the_strings_inside_it_lexed_in_full() {
 }
 
 #[test]
+fn metadata_with_type_arguments_may_name_a_constructor() {
+    // Dart's `@C<T>.named(…)`: the `.identifier` after the type arguments is part of the metadata.
+    let found = dart_pairs(&[
+        PUBSPEC,
+        ("a/lib/x.dart", "@Foo<int>.bar(1)\nimport 'y.dart';\n"),
+        ("a/lib/y.dart", ""),
+    ]);
+    assert_eq!(found, ["a/lib/x.dart>a/lib/y.dart"]);
+}
+
+#[test]
 fn adjacent_and_raw_uris_are_joined_and_an_interpolated_one_gives_no_pair() {
     let found = dart_pairs(&[
         PUBSPEC,
@@ -937,6 +963,14 @@ fn with_unlexable(header: &str, extra: &[(&str, &str)]) -> system_map::Report {
 
 #[test]
 fn a_header_that_cannot_be_lexed_gives_no_pair_no_unsure_and_no_problem() {
+    // Two packages declare `x`, and each header imports `package:x/s.dart` before the point where lexing fails, so a
+    // reader that kept the directives read before the failure would make `s/bad.dart` Unsure.
+    let doubled = [
+        ("lib/xa/pubspec.yaml", "name: x\n"),
+        ("lib/xa/lib/s.dart", ""),
+        ("lib/xb/pubspec.yaml", "name: x\n"),
+        ("lib/xb/lib/s.dart", ""),
+    ];
     for header in [
         "import '../lib/y.dart';\n/* never closed\n",
         "/* outer /* inner */ import '../lib/y.dart';\n",
@@ -948,7 +982,8 @@ fn a_header_that_cannot_be_lexed_gives_no_pair_no_unsure_and_no_problem() {
         "@C<int import '../lib/y.dart';\n",
         "import '../lib/y.dart';\nexport 'a${'}.dart';\n",
     ] {
-        let found = with_unlexable(header, &[]);
+        let header = format!("import 'package:x/s.dart';\n{header}");
+        let found = with_unlexable(&header, &doubled);
         assert_eq!(pairs(&found), Vec::<String>::new(), "{header}");
         assert_eq!(found.problems, Vec::<String>::new(), "{header}");
         assert_eq!(found.unsure, Vec::new(), "{header}");
