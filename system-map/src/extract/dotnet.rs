@@ -3,7 +3,7 @@
 
 use quick_xml::{Reader, XmlVersion, escape::resolve_predefined_entity, events::Event};
 
-use super::{Extractor, Output, Pair, Repo};
+use super::{Extractor, Output, Pair, Repo, Unsure};
 
 pub(crate) struct DotnetProjects;
 
@@ -37,8 +37,30 @@ impl Extractor for DotnetProjects {
             };
             for reference in project.references {
                 for piece in pieces(&reference.include) {
-                    // A piece that is built from a property, an item list or a wildcard resolves to nothing for now.
-                    if is_computed(&piece) {
+                    // A piece built from a property, an item list or a wildcard cannot be resolved without evaluation.
+                    if let Some(reason) = computed_reason(&piece) {
+                        let tail = literal_tail(&piece);
+                        let candidates: Vec<String> = repo
+                            .files()
+                            .iter()
+                            .copied()
+                            .filter(|other| {
+                                *other != file
+                                    && other.to_ascii_lowercase().ends_with("proj")
+                                    && !repo.is_ignored(other)
+                                    && other.ends_with(tail.as_str())
+                            })
+                            .map(String::from)
+                            .collect();
+                        // A tail that matches no file is no finding.
+                        if !candidates.is_empty() {
+                            output.unsure.push(Unsure {
+                                file: file.to_string(),
+                                name: piece,
+                                reason: reason.into(),
+                                candidates,
+                            });
+                        }
                         continue;
                     }
                     if let Some(to) = resolve(folder_of(file), &piece)
@@ -234,10 +256,39 @@ fn strip_property<'a>(piece: &'a str, property: &str) -> Option<&'a str> {
         .then(|| &piece[property.len()..])
 }
 
-/// Whether a piece still shows a path the extractor cannot resolve without evaluating the project: it holds a property,
-/// an item list or a wildcard.
-fn is_computed(piece: &str) -> bool {
-    piece.contains("$(") || piece.contains("@(") || piece.contains(['*', '?'])
+/// Why a piece is a path the extractor cannot resolve without evaluating the project, the first that applies: it holds
+/// a property, an item list or a wildcard. None for a literal piece.
+fn computed_reason(piece: &str) -> Option<&'static str> {
+    if piece.contains("$(") {
+        Some("built from a property")
+    } else if piece.contains("@(") {
+        Some("built from an item list")
+    } else if piece.contains(['*', '?']) {
+        Some("holds a wildcard")
+    } else {
+        None
+    }
+}
+
+/// What a computed piece spells out literally at its end: the text after its last `)`, `*` or `?`, escapes decoded and
+/// `\` read as `/`, then collapsed (repeated `/`, `.` segments, `x/..`) and stripped of its leading `..` segments, so
+/// that a project file's path ending with it, as text, is a candidate for the piece. Empty when nothing is literal.
+fn literal_tail(piece: &str) -> String {
+    let after = piece
+        .rfind([')', '*', '?'])
+        .map_or(piece, |at| &piece[at + 1..]);
+    let mut parts: Vec<&str> = Vec::new();
+    let path = unescape(after).replace('\\', "/");
+    for part in path.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            part => parts.push(part),
+        }
+    }
+    parts.join("/")
 }
 
 /// `%XX` escapes decoded, as MSBuild does after it has split the value; one that is not two hex digits stays as written.

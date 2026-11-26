@@ -237,18 +237,163 @@ fn a_project_file_is_read_whatever_the_case_of_its_extension() {
     assert_eq!(found, ["a/App.CSPROJ>core/Core.FsProj"]);
 }
 
+/// What `a/App.csproj`, which holds `include` as a reference, leaves Unsure with the project files `others` tracked: each
+/// finding's name, reason and candidates.
+fn unsure_of(include: &str, others: &[&str]) -> Vec<(String, String, Vec<String>)> {
+    let app = refers(include);
+    let mut files = vec![("a/App.csproj", app.as_str())];
+    files.extend(others.iter().map(|f| (*f, EMPTY)));
+    let (_dir, root) = repo(&map(&[("b", &["**"]), ("a", &["a/App.*"])], &[]), &files);
+    report(&root)
+        .unsure
+        .into_iter()
+        .map(|u| {
+            assert_eq!(u.file, "a/App.csproj");
+            (u.name, u.reason, u.candidates)
+        })
+        .collect()
+}
+
+/// `unsure_of`'s one finding, as its reason and candidates.
+fn one_unsure(include: &str, others: &[&str]) -> (String, Vec<String>) {
+    let mut found = unsure_of(include, others);
+    assert_eq!(found.len(), 1, "{include}: {found:?}");
+    let (name, reason, candidates) = found.remove(0);
+    assert_eq!(name, include);
+    (reason, candidates)
+}
+
+fn strings(items: &[&str]) -> Vec<String> {
+    items.iter().map(ToString::to_string).collect()
+}
+
+/// `a/` holds the app, which refers to `src/Core/Core.csproj` through a property; `src/` and `lib/` are the other parts.
+fn property_repo(links: &[(&str, &str)]) -> (tempfile::TempDir, String) {
+    let parts: &[(&str, &[&str])] = &[("app", &["a/"]), ("core", &["src/"]), ("lib", &["lib/"])];
+    repo(
+        &map(parts, links),
+        &[
+            (
+                "a/App.csproj",
+                &refers("$(SourceRoot)src\\Core\\Core.csproj"),
+            ),
+            ("src/Core/Core.csproj", EMPTY),
+            ("lib/Lib.csproj", EMPTY),
+        ],
+    )
+}
+
 #[test]
-fn a_path_still_holding_a_property_an_item_list_or_a_wildcard_gives_nothing_for_now() {
-    for include in [
-        "$(SourceRoot)core\\Core.csproj",
-        "@(Refs)",
-        "..\\*\\Core.csproj",
-        "..\\cor?\\Core.csproj",
-        "$(MSBuildProjectDirectory)Core.csproj",
-    ] {
-        let found = from_app(include, &["core/Core.csproj", "a/Core.csproj"]);
-        assert_eq!(found, Vec::<String>::new(), "{include}");
-    }
+fn a_property_path_makes_the_file_unsure_and_relaxes_only_the_link_to_its_candidates_part() {
+    let (_dir, root) = property_repo(&[("app", "core"), ("app", "lib")]);
+    let out = run(&root, "check", &[]);
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        "note: a/App.csproj is unsure of $(SourceRoot)src\\Core\\Core.csproj; its links to core pass as unproven\n"
+    );
+    // The link to `lib`, another one from the same part, still fails.
+    let problems = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(problems.lines().count(), 1, "{problems}");
+    assert!(problems.contains("import link \"app-lib\""), "{problems}");
+    let out = run(&root, "check", &["--json"]);
+    let value: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        value["unsure"],
+        json!([{
+            "file": "a/App.csproj",
+            "name": "$(SourceRoot)src\\Core\\Core.csproj",
+            "reason": "built from a property",
+            "candidates": ["src/Core/Core.csproj"]
+        }])
+    );
+    assert_eq!(value["edges"], json!([]));
+}
+
+#[test]
+fn a_property_a_glued_name_and_a_wholly_computed_path_give_wide_candidates() {
+    let all = ["src/MyCore.csproj", "src/Core.csproj", "web/Web.fsproj"];
+    let (reason, candidates) = one_unsure("$(P)Core.csproj", &all);
+    assert_eq!(reason, "built from a property");
+    assert_eq!(candidates, ["src/Core.csproj", "src/MyCore.csproj"]);
+    // An empty tail matches every other project file, but not the importing one.
+    let (_, candidates) = one_unsure("$(CoreProject)", &all);
+    assert_eq!(
+        candidates,
+        strings(&["src/Core.csproj", "src/MyCore.csproj", "web/Web.fsproj"])
+    );
+    let (_, candidates) = one_unsure("$(X)\\$(Y).csproj", &all);
+    assert_eq!(
+        candidates,
+        strings(&["src/Core.csproj", "src/MyCore.csproj"])
+    );
+}
+
+#[test]
+fn an_item_list_and_a_wildcard_are_unsure_with_their_own_reasons() {
+    let others = ["core/X.csproj", "web/X.csproj", "web/Y.csproj", "web/X.cs"];
+    let (reason, candidates) = one_unsure("@(Refs)", &others);
+    assert_eq!(reason, "built from an item list");
+    assert_eq!(candidates.len(), 3);
+    let (reason, candidates) = one_unsure("..\\*\\X.csproj", &others);
+    assert_eq!(reason, "holds a wildcard");
+    assert_eq!(candidates, ["core/X.csproj", "web/X.csproj"]);
+    let (reason, _) = one_unsure("..\\cor?\\X.csproj", &others);
+    assert_eq!(reason, "holds a wildcard");
+    // A property wins over an item list, which wins over a wildcard.
+    assert_eq!(one_unsure("$(A)@(B)*", &others).0, "built from a property");
+    assert_eq!(one_unsure("@(B)*", &others).0, "built from an item list");
+}
+
+#[test]
+fn the_tail_is_decoded_normalised_and_stripped_of_its_leading_dots() {
+    let others = ["src/Core/Core.csproj", "lib/Core/Core.csproj"];
+    let (_, candidates) = one_unsure("$(Root)src\\..\\src\\\\Core\\.\\Core.csproj", &others);
+    assert_eq!(candidates, ["src/Core/Core.csproj"]);
+    let (_, candidates) = one_unsure("$(Root)..\\..\\.\\lib/Core/Core.csproj", &others);
+    assert_eq!(candidates, ["lib/Core/Core.csproj"]);
+    let (_, candidates) = one_unsure("$(Root)src%5CCore%5CCore.csproj", &others);
+    assert_eq!(candidates, ["src/Core/Core.csproj"]);
+    // The tail starts after the last `)`, `*` or `?`.
+    let (_, candidates) = one_unsure("$(Root)\\lib\\*\\Core\\Core.csproj", &others);
+    assert_eq!(candidates, ["lib/Core/Core.csproj", "src/Core/Core.csproj"]);
+}
+
+#[test]
+fn a_property_path_to_a_tracked_esproj_lists_it() {
+    let (_, candidates) = one_unsure("$(Ui)Ui.esproj", &["ui/Ui.esproj", "ui/Ui.cs"]);
+    assert_eq!(candidates, ["ui/Ui.esproj"]);
+}
+
+#[test]
+fn a_semicolon_list_mixing_a_property_piece_and_a_literal_one_gives_one_unsure_and_one_pair() {
+    let include = "$(P)Core.csproj;..\\core\\Core.csproj";
+    let app = refers(include);
+    let files = [("a/App.csproj", app.as_str()), ("core/Core.csproj", EMPTY)];
+    let (_dir, root) = repo(&map(&[("b", &["**"]), ("a", &["a/App.*"])], &[]), &files);
+    let found = report(&root);
+    assert_eq!(pairs(&found), ["a/App.csproj>core/Core.csproj"]);
+    assert_eq!(found.unsure.len(), 1, "{:?}", found.unsure);
+    assert_eq!(found.unsure[0].name, "$(P)Core.csproj");
+}
+
+#[test]
+fn glued_to_a_name_the_project_directory_property_is_unsure_and_no_pair() {
+    let others = ["a/Core.csproj", "core/Core.csproj"];
+    assert_eq!(
+        from_app("$(MSBuildProjectDirectory)Core.csproj", &others),
+        Vec::<String>::new()
+    );
+    let (reason, candidates) = one_unsure("$(MSBuildProjectDirectory)Core.csproj", &others);
+    assert_eq!(reason, "built from a property");
+    assert_eq!(candidates, strings(&others));
+}
+
+#[test]
+fn a_tail_matching_no_file_gives_no_finding() {
+    assert_eq!(unsure_of("$(P)Gone.csproj", &["core/Core.csproj"]), []);
+    assert_eq!(unsure_of("@(Refs)", &[]), []);
+    // Only a project file is a candidate, and the importing file never is.
+    assert_eq!(unsure_of("$(P)App.csproj", &["core/App.cs"]), []);
 }
 
 /// The pairs from `a/App.csproj`, holding `text`, with `core/Core.csproj` tracked.
