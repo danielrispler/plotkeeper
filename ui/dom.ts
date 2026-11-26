@@ -514,8 +514,16 @@ export function pressable<T extends HTMLElement>(button: T, pressed: boolean | n
  * listener does, such as its session's id. A node `next` names by `held` is put in as it is, never patched.
  */
 export function patch(parent: Node, next: Node[]) {
+  // A test's page may have no document.
+  const focused = (globalThis.document?.activeElement ?? null) as HTMLElement | null;
   patchInto(parent, next);
   standing.clear();
+  // A held node whose old parent left the page, such as an Ask box going with its turn into the turn's past row (spec #661), was
+  // out of the page a moment, which dropped the focus in it: it gets it back.
+  const now = globalThis.document?.activeElement ?? null;
+  if (focused && focused !== now && (now === null || now === globalThis.document?.body) && focused.isConnected && parent.contains(focused)) {
+    focused.focus({ preventScroll: true });
+  }
 }
 function patchInto(parent: Node, given: Node[]) {
   const next = given.map((node) => heldBy.get(node) ?? node);

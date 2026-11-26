@@ -284,3 +284,74 @@ test("a woken turn reads \"Woken by\" with the returning task; Daniel's turn rea
   assert.equal(promptOf(past({ prompt: "worker bqv59 returned", wake_up: true })), "Woken by worker bqv59 returned");
   assert.equal(promptOf(past({ prompt: "Fix the parser" })), "Fix the parser");
 });
+
+// Spec #661, Q7 and Q29: a side question's box and answer stay with their turn. When the session starts a new turn, the turn asked
+// about is a past row, which starts unfolded with the same box under it.
+const headlineBox = (row) => row.querySelector("details.ask-about");
+// The answer under "Interpretation", rendered from Markdown.
+const answerIn = (box) => box.querySelector("div.ask-reply").childNodes.map((node) => node.innerHTML ?? node.text).join(" ");
+// The row's line, the button that folds it (the stand-in DOM keeps no classList).
+const lineOf = (row) => row.querySelector("button[aria-expanded]");
+const unfolded = (row) => lineOf(row).getAttribute("aria-expanded") === "true";
+const nextTurn = (session) => ({ ...session, state: "running", turns: [...session.turns, { ...ended(3, { id: `${session.id}-3` }), ended_at: null }] });
+const asking = (session) => sessionOf({ id: session, turns: [ended(1, { id: `${session}-1` }), ended(2, { id: `${session}-2` })] });
+
+test("an answered Ask on the newest turn shows in that turn's past row, unfolded, after a new turn starts", async () => {
+  replies.set("ask_anchor", () => "It changed the parser.");
+  const session = asking("s5");
+  draw(session);
+  const box = headlineBox(feed().childNodes[0]);
+  box.open = true;
+  box.querySelector("div.ask-suggestions").querySelector("button").listeners.click({});
+  await settle();
+  box.open = false;
+  draw(nextTurn(session));
+  const row = feed().childNodes[1];
+  assert.ok(unfolded(row), "the past row starts unfolded");
+  assert.equal(headlineBox(row), box, "the past row holds the box asked in");
+  assert.match(answerIn(headlineBox(row)), /It changed the parser\./);
+  replies.delete("ask_anchor");
+});
+
+test("an open Ask box with a question being typed keeps it, and the focus, in the past row", () => {
+  const session = asking("s6");
+  draw(session);
+  const box = headlineBox(feed().childNodes[0]);
+  box.open = true;
+  const field = box.querySelector("textarea");
+  field.value = "Why the lexer?";
+  field.focus();
+  draw(nextTurn(session));
+  const row = feed().childNodes[1];
+  assert.ok(unfolded(row));
+  assert.equal(headlineBox(row)?.querySelector("textarea").value, "Why the lexer?");
+  assert.equal(document.activeElement, field, "the focus stays in the question box");
+});
+
+test("an answer that arrives after the turn ended shows in the past row", async () => {
+  /** @type {(value: unknown) => void} */
+  let arrive = () => {};
+  replies.set("ask_anchor", () => new Promise((resolve) => (arrive = resolve)));
+  const session = asking("s7");
+  draw(session);
+  const box = headlineBox(feed().childNodes[0]);
+  box.querySelector("div.ask-suggestions").querySelector("button").listeners.click({});
+  draw(nextTurn(session));
+  const row = feed().childNodes[1];
+  assert.ok(unfolded(row), "a box waiting on its answer counts as asked");
+  arrive("It was slow.");
+  await settle();
+  assert.match(answerIn(headlineBox(feed().childNodes[1])), /It was slow\./);
+  replies.delete("ask_anchor");
+});
+
+test("a past row with no Ask stays folded, and unfolded draws its Headline's Ask box", () => {
+  const session = asking("s8");
+  draw(session);
+  draw(nextTurn(session));
+  const row = feed().childNodes[1];
+  assert.ok(!unfolded(row));
+  assert.equal(headlineBox(row), null);
+  lineOf(row).listeners.click({});
+  assert.ok(headlineBox(feed().childNodes[1]), "an unfolded past row offers Ask on its Headline");
+});
