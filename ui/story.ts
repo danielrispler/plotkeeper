@@ -7,13 +7,13 @@
 
 import { modelLine, reports } from "./capabilities.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
-import { age, code, cut, element, failure, glyphOnly, hint, invoke, keepOnly, keyed, pressable, prose, text, unhint, unseenWords } from "./dom.js";
-import { askAnchor } from "./ask.js";
+import { age, code, cut, element, failure, glyphOnly, hint, invoke, keepOnly, keyed, patch, pressable, prose, revealsOnOpen, text, unhint, unseenWords } from "./dom.js";
+import { askAnchor, asked } from "./ask.js";
+import { askFor, openDecision } from "./answer.js";
 import { rendered } from "./markdown.js";
 import { drawSidebar } from "./list.js";
 import { agentState, sessionName, showsLanded } from "./list-model.js";
-import { openDecision } from "./answer.js";
-import { briefNodes } from "./cards.js";
+import { briefNodes, briefSlots } from "./cards.js";
 import { type Banner, bannerElement, bannerFor, bannerLives } from "./banner.js";
 import { evidenceElement, hasEvidence } from "./evidence.js";
 import { railBriefRow } from "./rail-brief.js";
@@ -30,6 +30,7 @@ import { stretches, tipStore, tipText } from "./tips.js";
 import {
   askKind,
   stateLabels,
+  type Anchor,
   type Ask,
   type AskKind,
   type ListedCheck,
@@ -49,6 +50,8 @@ let select: (id: string, agent: string | null) => unknown = () => {};
 /** Wires the story to the selection, which it may not import. */
 export function startStory(selectSession: (id: string, agent: string | null) => unknown) {
   select = selectSession;
+  // Brief and Decisions sit at the panel's foot, so each opens into view (spec #661, Q33).
+  for (const id of ["brief-fold", "decisions"]) revealsOnOpen(element(id));
 }
 
 // The rail with no session selected: its header empty, its dock and its cleared decisions too.
@@ -221,7 +224,7 @@ function historyElement(session: string, entry: HistoryEntry): HTMLElement {
   button.append(...lines, prose("span", entry.result), text("span", entry.details, "kind"));
   button.setAttribute("data-key", `subagent-${session}-${entry.agent}`);
   hint(button, [entry.purpose, entry.asked, entry.result, entry.details].filter(Boolean).join(" · "));
-  const item = document.createElement("li");
+  const item = keyed(document.createElement("li"), `subagent-item ${session} ${entry.agent}`);
   item.append(button, askAnchor(session, { kind: "subagent", agent: entry.agent }, `the subagent ${entry.purpose}`));
   return item;
 }
@@ -259,6 +262,11 @@ export type FoldedLine = { prompt: string; headline: string | null; failed: bool
 export function foldedLine(turn: Pick<Turn, "prompt" | "checks">, headline: string | null): FoldedLine {
   const prompt = turn.prompt.split("\n").map((line) => line.trim()).find(Boolean) ?? "No prompt";
   return { prompt, headline, failed: turn.checks.some((check) => check.status === "failed") };
+}
+
+// What a turn's prompt is labelled: a wake-up's returning task, never Daniel's prompt (#675).
+export function askedLabel(turn: Pick<Turn, "wake_up">): "Woken by" | "You asked" {
+  return turn.wake_up ? "Woken by" : "You asked";
 }
 
 /**
@@ -439,6 +447,8 @@ function forgetMissingSummaries() {
 // The folded blocks Daniel opened, by key, which outlast the feed's redraws, and the older turns'
 // replies, fetched at their first opening.
 const opened = new Set<string>();
+// The past rows drawn so far, by key: the first draw of one unfolds it when its Headline's Ask box is open or answered (spec #661, Q29).
+const drawnPast = new Set<string>();
 const replies = new Map<string, string>();
 
 /**
@@ -451,12 +461,12 @@ export function forgetStories(sessions: Session[]) {
   const listed = (key: string) => sessions.some((session) => key.startsWith(`${session.id} `));
   for (const cache of [summaries, failedTurns]) keepOnly(cache, (id) => turns.has(id));
   for (const cache of [agentSummaries, failed]) keepOnly(cache, (id) => agents.has(id));
-  for (const cache of [opened, replies]) keepOnly(cache, listed);
+  for (const cache of [opened, drawnPast, replies]) keepOnly(cache, listed);
 }
 
 // A folded block keyed `key`, open while Daniel keeps it open; `onOpen` runs at each opening. `hover` says what it holds.
 function folded(key: string, title: string, hover: string, body: HTMLElement[], onOpen?: () => void): HTMLElement {
-  const node = document.createElement("details");
+  const node = keyed(document.createElement("details"), `fold ${key}`);
   node.className = "fold";
   node.open = opened.has(key);
   const summary = text("summary", title);
@@ -475,8 +485,8 @@ function folded(key: string, title: string, hover: string, body: HTMLElement[], 
 // the turn ended. A subagent's view and a turn-less session keep the box.
 function drawNow(session: Session | null, latest: Turn | null): Now | null {
   const now = session && latest ? nowOf(session.state, latest, latest.id ? summaryOf(latest.id) : null) : null;
-  const asked = now && session?.state === "running" ? [text("p", "You asked", "label"), text("p", latest?.prompt || "No prompt", "prompt")] : [];
-  element("now-asked").replaceChildren(...asked);
+  const prompted = now && latest && session?.state === "running" ? [text("p", askedLabel(latest), "label"), text("p", latest.prompt || "No prompt", "prompt")] : [];
+  patch(element("now-asked"), prompted);
   element("intention").hidden = now !== null && now.intention === null;
   element("intention-label").hidden = now?.intention !== "why";
   return now;
@@ -489,7 +499,7 @@ function drawNow(session: Session | null, latest: Turn | null): Now | null {
 export function checkElement(line: ListedCheck): HTMLElement {
   const item = document.createElement("li");
   const label = line.status === "running" ? "Running" : "Failed";
-  const time = counts(text("span", "", "check-time"), (now) => checkTime(line, now));
+  const time = counts(text("span", "", "check-time"), (now) => checkTime(line, now), `check ${line.statement} ${line.started_at}`);
   item.append(text("span", label, "outcome"), cut(code(line.statement)), time);
   return item;
 }
@@ -516,23 +526,47 @@ function checksOf(turn: Turn | null): HTMLElement[] {
   return [list];
 }
 
+/**
+ * The reply as Full response shows it (spec #661, Q32): when the turn's Headline is its message, the reply's first line, that line is
+ * left out, so the fold never opens on the sentence the Headline already shows. A stored Headline leaves the reply whole.
+ */
+function belowHeadline(reply: string, summary: TurnSummary | null, message: string | null): string {
+  const stored = summary?.summary;
+  const own = stored?.headline != null ? stored.headline.trim() : (stored?.summary ?? "").trim();
+  const headline = message?.trim();
+  if (own || !headline) return reply;
+  const lines = reply.split("\n");
+  const first = lines.findIndex((line) => line.trim() !== "");
+  if (first < 0 || lines[first]?.trim() !== headline) return reply;
+  return lines.slice(first + 1).join("\n").trim();
+}
+
 // The full response, folded: the latest turn's from the transcript, an older one's fetched at its first opening. None for a turn with
-// neither.
+// neither, nor for the latest turn when its reply was only its Headline; an older turn's fold says so once its reply is fetched.
 function responseFold(session: Session, turn: Turn, index: number | null, key: string): HTMLElement | null {
   const latest = index !== null && index === session.turns.length - 1;
-  const responses = latest ? session.transcript.responses : [];
+  const summary = turn.id ? summaryOf(turn.id) : null;
+  const below = (reply: string) => belowHeadline(reply, summary, turn.message);
+  // The Headline is the final reply's first line, so only the last of the newest turn's texts can hold it.
+  const all = latest ? session.transcript.responses : [];
+  const responses = all.map((t, i) => (i === all.length - 1 ? below(t) : t)).filter((t) => t.trim() !== "");
   if (!(latest ? responses.length : turn.id)) return null;
   const body = document.createElement("div");
   const fill = (texts: string[]) => body.replaceChildren(...texts.map((t) => rendered("div", t, "response")));
+  const fillReply = (reply: string) => {
+    const left = below(reply);
+    if (left || !reply.trim()) fill([left]);
+    else body.replaceChildren(text("p", "The reply was only its Headline.", "response-only"));
+  };
   const fetched = replies.get(key);
   if (latest) fill(responses);
-  else if (fetched !== undefined) fill([fetched]);
+  else if (fetched !== undefined) fillReply(fetched);
   const fetchReply = () => {
     if (latest || index === null || replies.has(key)) return;
     invoke("turn_reply", { id: session.id, index })
       .then((reply) => {
         replies.set(key, reply ?? "");
-        fill([reply ?? ""]);
+        fillReply(reply ?? "");
       })
       .catch(failure("turn_reply"));
   };
@@ -553,7 +587,7 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
     const prompt = text("p", turn.prompt || "No prompt", "prompt");
     prompt.setAttribute("data-key", `prompt-${key}`);
     hint(prompt, turn.prompt || "No prompt");
-    node.append(...(now?.asked ? [text("p", "You asked", "label")] : []), prompt);
+    node.append(...(now?.asked ? [text("p", askedLabel(turn), "label")] : []), prompt);
   }
   if (now?.soFar) node.append(text("p", "So far this turn", "label"));
   const summary = turn?.id ? summaryOf(turn.id) : null;
@@ -565,8 +599,11 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
   if (now) {
     if (now.headline) {
       node.append(rendered("p", now.headline, "headline-text"));
-      if (index !== null) node.append(askAnchor(session.id, { kind: "headline", turn: index }, "this turn's Headline"));
+      if (index !== null) node.append(headlineAsk(session, index));
     }
+  } else if (turn && index !== null) {
+    // A past row's Headline is on its line; its Ask box is the one made while the turn was newest, answer and all (spec #661, Q7).
+    node.append(headlineAsk(session, index));
   }
   // The evidence line, under the Headline: a running turn shows only a check that ended failed.
   if (turn && index !== null && hasEvidence(turn, session.capabilities)) {
@@ -586,7 +623,7 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
     list.append(...lines.map(bodyLine));
     node.append(list);
   }
-  node.append(...block.questions.filter((q) => q.answer === "not_answered").map(questionElement));
+  node.append(...block.questions.filter((q) => q.answer === "not_answered").map((q) => keyed(questionElement(q), `question ${q.tool_use_id}`)));
   node.append(...subagentsOf(session, block, now), ...checksOf(turn));
   const response = turn ? responseFold(session, turn, index, key) : null;
   if (response) node.append(response);
@@ -595,7 +632,8 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
 
 /**
  * A turn before the newest (danielrispler/plotkeeper#117): one line, which opens the turn's block under it and folds it
- * again. Only this node changes, so the others and the scroll position stay; the opened turns outlast a redraw.
+ * again. The feed is drawn again, which changes only this node, so the others and the scroll position stay; the opened turns
+ * outlast a redraw.
  */
 export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
   const node = document.createElement("li");
@@ -603,33 +641,34 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
   const key = `${session.id} ${block.index} turn`;
   const turn = block.turn;
   if (!turn) return node;
-  const draw = () => {
-    const summary = turn.id ? summaryOf(turn.id) : null;
-    const { headline } = headlineOf(summary, turn.message);
-    const open = opened.has(key);
-    const line = foldedLine(turn, headline);
-    const button = pressable(document.createElement("button"), null, () => {
-      if (opened.has(key)) opened.delete(key);
-      else opened.add(key);
-      draw();
-      if (opened.has(key)) revealTurn(turn);
-    });
-    button.classList.add("turn-line");
-    // The line's prompt and Headline carry their own full text; the rest of the line says what a click does (#220).
-    hint(button, "Fold or unfold this turn");
-    button.setAttribute("aria-expanded", String(open));
-    // The line's prompt is the turn's first words, so its hint holds the whole prompt; a span, which opens once #586's pointer path is in.
-    const first = text("span", line.prompt, "prompt");
-    first.setAttribute("data-key", `turn-${key}`);
-    button.append(
-      hint(first, turn.prompt.trim() || line.prompt),
-      cut(text("span", line.headline ?? "", "headline-text")),
-      // The ✕ is for the eye; assistive tech hears "failed" once (#456).
-      ...(line.failed ? [hint(keyed(glyphOnly("✕", "mark check-failed"), `failed-${key}`), "A check ended failed"), unseenWords("failed")] : []),
-    );
-    node.replaceChildren(button, ...(open ? [...turnContent(session, block, null).children] : []));
-  };
-  draw();
+  const summary = turn.id ? summaryOf(turn.id) : null;
+  const { headline } = headlineOf(summary, turn.message);
+  if (!drawnPast.has(key) && block.index !== null && asked(session.id, headlineAnchor(block.index))) opened.add(key);
+  drawnPast.add(key);
+  const open = opened.has(key);
+  const line = foldedLine(turn, headline);
+  const button = pressable(keyed(document.createElement("button"), `turn-line ${key}`), null, () => {
+    if (opened.has(key)) opened.delete(key);
+    else opened.add(key);
+    drawFeed();
+    if (opened.has(key)) revealTurn(turn);
+  });
+  button.classList.add("turn-line");
+  // The line's prompt and Headline carry their own full text; the rest of the line says what a click does (#220).
+  hint(button, "Fold or unfold this turn");
+  button.setAttribute("aria-expanded", String(open));
+  // The line's prompt is the turn's first words, so its hint holds the whole prompt; a span, which opens once #586's pointer path is in.
+  // A wake-up's prompt is the returning task, marked as one in the DOM's own words (#675).
+  const first = text("span", turn.wake_up ? "" : line.prompt, "prompt");
+  if (turn.wake_up) first.append(text("span", askedLabel(turn), "woken"), ` ${line.prompt}`);
+  first.setAttribute("data-key", `turn-${key}`);
+  button.append(
+    hint(first, turn.prompt.trim() || line.prompt),
+    cut(text("span", line.headline ?? "", "headline-text")),
+    // The ✕ is for the eye; assistive tech hears "failed" once (#456).
+    ...(line.failed ? [hint(keyed(glyphOnly("✕", "mark check-failed"), `failed-${key}`), "A check ended failed"), unseenWords("failed")] : []),
+  );
+  node.append(button, ...(open ? [...turnContent(session, block, null).children] : []));
   return node;
 }
 
@@ -655,20 +694,58 @@ function openCitation(id: string) {
   (node as HTMLElement | undefined)?.scrollIntoView?.({ block: "start" });
 }
 
+// A turn's Headline as the anchor of a side question, and its Ask box.
+function headlineAnchor(turn: number): Anchor {
+  return { kind: "headline", turn };
+}
+function headlineAsk(session: Session, turn: number): HTMLDetailsElement {
+  return askAnchor(session.id, headlineAnchor(turn), "this turn's Headline");
+}
+
 function turnElement(session: Session, block: FeedTurn, now: Now | null): HTMLElement {
   const node = now || block.index === null ? turnContent(session, block, now) : foldedTurn(session, block);
+  keyed(node, turnKey(session, block, now ? "now" : "past"));
   if (block.turn) lightsTurn(node, block.turn);
   return flashing(session, block.index, node);
 }
 
-// Turn lighting (#560): hovering or focusing a turn lights the parts it changed on the map; leaving it, or a redraw of the feed, clears it.
+/**
+ * A turn's key in the feed (spec #661): its session, its index, whether it is "now" or a past row, and a stamp of what its handlers
+ * read, its id, prompt, message, summary and files. A draw keeps a turn whose key is the same, with its listeners, and swaps one whose
+ * content its listeners read changed.
+ */
+function turnKey(session: Session, { index, turn }: FeedTurn, place: "now" | "past"): string {
+  const read = turn ? [turn.id, turn.prompt, turn.message, turn.id ? summaryOf(turn.id) : null, turn.files] : [];
+  return `turn ${session.id} ${index ?? "rest"} ${place} ${stamp(JSON.stringify(read))}`;
+}
+
+// A short stamp of `words` (FNV-1a), so a key stays short however long the reply it stamps.
+function stamp(words: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < words.length; i++) hash = Math.imul(hash ^ words.charCodeAt(i), 0x01000193);
+  return (hash >>> 0).toString(36);
+}
+
+// Turn lighting (#560): hovering or focusing a turn lights the parts it changed on the map; leaving it clears it, and so does a draw
+// that drops or swaps the node that lit it (spec #661). A draw that keeps it keeps the light.
+let litBy: HTMLElement | null = null;
 function lightsTurn(node: HTMLElement, turn: Turn) {
-  node.addEventListener("pointerenter", () => lightTurn(turn));
-  node.addEventListener("pointerleave", () => lightTurn(turn, false));
-  node.addEventListener("focusin", () => lightTurn(turn));
+  const light = (on: boolean) => {
+    if (on) litBy = node;
+    else if (litBy === node) litBy = null;
+    lightTurn(turn, on);
+  };
+  node.addEventListener("pointerenter", () => light(true));
+  node.addEventListener("pointerleave", () => light(false));
+  node.addEventListener("focusin", () => light(true));
   node.addEventListener("focusout", (event) => {
-    if (!(event.relatedTarget instanceof Node && node.contains(event.relatedTarget))) lightTurn(turn, false);
+    if (!(event.relatedTarget instanceof Node && node.contains(event.relatedTarget))) light(false);
   });
+}
+function unlightGone() {
+  if (litBy?.isConnected) return;
+  litBy = null;
+  lightTurn(null);
 }
 
 // What a turn's block says of the map (#560): a turn past the cut, of an agent that records turn files, says its files aren't shown;
@@ -676,20 +753,22 @@ function lightsTurn(node: HTMLElement, turn: Turn) {
 function turnMapNodes(session: Session, turn: Turn, newest: boolean): HTMLElement[] {
   if (oldTurn(turn, reports(session, "turn_trees"), Date.now())) return [text("p", OLD_TURN, "turn-old")];
   if (!newest || !turnLit(turn, false).length) return [];
-  const button = pressable(text("button", "Show on map", "quiet show-on-map"), null, () => revealTurn(turn));
+  const button = keyed(pressable(text("button", "Show on map", "quiet show-on-map"), null, () => revealTurn(turn)), `show-on-map ${session.id} ${turn.started_at}`);
   hint(button, "Pan the map so this turn's parts show beside the story");
   return [button];
 }
 
-/** Draws "now" and the feed from the selection and the brief the server last sent. */
+/**
+ * Draws "now", the banner and the feed from the selection and the brief the server last sent, through `patch` (spec #661): a node
+ * whose key is the same stays the node it was, so the scroll, the focus, an open fold and a press on its way stay with it.
+ */
 export function drawFeed() {
   const selected = studio.selection;
-  // The feed's nodes are new: no turn is under the pointer or the focus until one is entered again.
-  lightTurn(null);
   if (selected === null) {
     drawNow(null, null);
-    element("banner-slot").replaceChildren();
-    element("feed").replaceChildren();
+    patch(element("banner-slot"), []);
+    patch(element("feed"), []);
+    unlightGone();
     return;
   }
   const session = selected.session;
@@ -701,11 +780,15 @@ export function drawFeed() {
   const kept = own && banner && bannerLives(banner, session) ? banner : null;
   const lives = kept !== null && last !== undefined;
   const cards = studio.cards;
-  element("banner-slot").replaceChildren(
-    ...(lives ? [bannerElement({ headline: headlineOf(last.id ? summaryOf(last.id) : null, last.message).headline, endedAt: last.ended_at, since: kept.since, open: cards.open, brief: briefNodes(cards, openCitation) })] : []),
+  patch(
+    element("banner-slot"),
+    lives
+      ? [bannerElement({ session: session.id, headline: headlineOf(last.id ? summaryOf(last.id) : null, last.message).headline, endedAt: last.ended_at, since: kept.since, open: cards.open, brief: briefNodes(cards, openCitation) })]
+      : [],
   );
   element("brief-fold").hidden = lives || briefNodes(cards, openCitation).length === 0;
-  element("feed").replaceChildren(...blocks.map((block, i) => turnElement(session, block, own && i === 0 && block.index !== null ? now : null)));
+  patch(element("feed"), blocks.map((block, i) => turnElement(session, block, own && i === 0 && block.index !== null ? now : null)));
+  unlightGone();
   // The open part sheet's "This session here" follows the story (#561).
   refreshHere();
 }
@@ -752,20 +835,29 @@ function drawDock({ session, agent: id }: Selection) {
 
 // The open question of the viewed agent, docked at the top of the rail, newest first; a plan or a
 // permission the answer hook waits on docks too, whichever agent asks (danielrispler/Falinks#478). A question never
-// answered shows in its turn; an answered one is in the decision history (danielrispler/Falinks#479).
+// answered shows in its turn; an answered one is in the decision history (danielrispler/Falinks#479). The dock is drawn again
+// only when what it shows changed (spec #661), so a choice on its way stays under the pointer.
+let docked = "";
 function showQuestions(questions: Question[]) {
   const open = [...questions].reverse().filter((question) => question.answer === "open");
   const decision = openDecision();
-  const docked = [...(decision ? [decisionElement(decision)] : []), ...open.map(questionElement)];
-  element("dock").replaceChildren(...docked);
-  element("dock").hidden = docked.length === 0;
+  const shown = JSON.stringify([decision, open.map((question) => [question, askFor(question)])]);
+  if (shown === docked) return;
+  const nodes = [...(decision ? [decisionElement(decision)] : []), ...open.map(questionElement)];
+  element("dock").replaceChildren(...nodes);
+  element("dock").hidden = nodes.length === 0;
+  docked = shown;
 }
 
-// The brief, folded under the feed.
+// The brief, folded under the feed, drawn again only when it changed.
+let briefShown = "";
 function showBrief(cards: SessionCards) {
+  const shown = JSON.stringify(briefSlots(cards));
+  if (shown === briefShown) return;
   const nodes = briefNodes(cards, openCitation);
   element("brief").replaceChildren(...nodes);
   element("brief-fold").hidden = nodes.length === 0;
+  briefShown = shown;
 }
 
 /** The server's session payload: the selected session's brief, cards and decisions, taken in and drawn. */
@@ -787,14 +879,19 @@ export function turnHeadline(session: Session, index: number): string | null {
   return turn ? headlineOf(turn.id ? summaryOf(turn.id) : null, turn.message).headline : null;
 }
 
-// The turn whose outline flashes, and when its flash ends: a redraw meanwhile carries the flash on from where it was.
+// The turn whose outline flashes, when its flash ends, and the delay each node drawn for it got, by its key: a redraw meanwhile carries
+// the flash on from where it was. A node the draw keeps gets the delay it already has, so its running animation is left as it is; a
+// node drawn anew starts as far into the flash as the flash is.
 const flashMs = 1000;
-let flashed: { session: string; index: number; until: number } | null = null;
+let flashed: { session: string; index: number; until: number; delays: Map<string, string> } | null = null;
 function flashing(session: Session, index: number | null, node: HTMLElement): HTMLElement {
   const left = flashed && flashed.session === session.id && flashed.index === index ? flashed.until - Date.now() : 0;
-  if (left > 0) {
+  if (flashed && left > 0) {
+    const key = node.getAttribute("data-key") ?? "";
+    const delay = flashed.delays.get(key) ?? `${left - flashMs}ms`;
+    flashed.delays.set(key, delay);
     node.classList.add("flash");
-    node.style.animationDelay = `${left - flashMs}ms`;
+    node.style.animationDelay = delay;
   }
   return node;
 }
@@ -806,7 +903,7 @@ export function showTurn(index: number) {
   const turn = session.turns[index];
   if (!turn) return;
   if (index < session.turns.length - 1) opened.add(`${session.id} ${index} turn`);
-  const flash = { session: session.id, index, until: Date.now() + flashMs };
+  const flash = { session: session.id, index, until: Date.now() + flashMs, delays: new Map<string, string>() };
   flashed = flash;
   drawFeed();
   const node = element("feed").children[session.turns.length - 1 - index] as HTMLElement | undefined;

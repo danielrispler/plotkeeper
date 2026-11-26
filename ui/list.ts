@@ -200,7 +200,7 @@ export function row(session: Session, children: Children, token: string | null =
     [nameNode(session), markNode(session), ...(token ? [cut(text("span", token, "id token"))] : [])],
     line === null
       ? null
-      : [...done(children, children.get("session")), rowLine(line, session.id), ...(turn ? [hint(counts(clock, turn[1]), turn[0], "start")] : [])],
+      : [...done(children, children.get("session")), rowLine(line, session.id), ...(turn ? [hint(counts(clock, turn[1], `row ${session.id}`), turn[0], "start")] : [])],
     session.unseen,
     session.landed,
     !session.pid,

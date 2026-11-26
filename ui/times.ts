@@ -67,26 +67,31 @@ export function estimateText(work: Pick<Work, "phases" | "estimate">): string {
   return `${phaseNames[phase]} · est. ${duration(range[0])}–${duration(range[1])} left`;
 }
 
-// The elements whose text counts up, each with how to draw it at a time.
-const counting = new Map<HTMLElement, (now: number) => string>();
+// The elements whose text counts up, each with the key of what it counts, and how to draw each key's time, from its latest draw.
+const counting = new Map<HTMLElement, string>();
+const drawn = new Map<string, (now: number) => string>();
 
-// Sets `node`'s text from `draw` now, and again each second while it is in the window.
-// Each gets its own key, so `patch` swaps it in rather than keep an old node counting the old time.
-let made = 0;
-export function counts(node: HTMLElement, draw: (now: number) => string): HTMLElement {
+/**
+ * Sets `node`'s text from `draw` now, and again each second while it is in the window. `key`, its `data-key`, names the one thing it
+ * counts (spec #661): `patch` keeps the node a draw before made for the same key, and that node counts on with this draw's `draw`.
+ */
+export function counts(node: HTMLElement, draw: (now: number) => string, key: string): HTMLElement {
   node.textContent = draw(Date.now());
-  node.dataset.key = `count ${++made}`;
-  counting.set(node, draw);
+  node.dataset.key = `count ${key}`;
+  counting.set(node, key);
+  drawn.set(key, draw);
   return node;
 }
 
 if (typeof setInterval === "function" && typeof document === "object") {
   setInterval(() => {
     const now = Date.now();
-    for (const [node, draw] of counting) {
-      const next = draw(now);
+    for (const [node, key] of counting) {
+      const next = drawn.get(key)?.(now) ?? "";
       if (!node.isConnected) counting.delete(node);
       else if (node.textContent !== next) node.textContent = next; // a minute clock changes once a minute
     }
+    const counted = new Set(counting.values());
+    for (const key of [...drawn.keys()]) if (!counted.has(key)) drawn.delete(key);
   }, 1000);
 }

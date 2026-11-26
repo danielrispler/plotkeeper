@@ -53,7 +53,11 @@ export function riskText(decision: Decision, notes: RiskView[]): string | null {
 const when = (at: number) =>
   new Date(at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
+// What the list shows, so it is drawn again only when that changed (spec #661): a plan left open stays open.
+let drawn = "";
 function draw() {
+  const shown = JSON.stringify([decisions, cleared, notes]);
+  if (shown === drawn) return;
   const entries: [number, HTMLElement][] = [
     ...decisions.map((d): [number, HTMLElement] => [d.at, entry(d)]),
     ...cleared.map((at): [number, HTMLElement] => [at, marker(at)]),
@@ -63,6 +67,7 @@ function draw() {
   element("decisions-title").textContent = `Decisions (${decisions.length})`;
   hint(element("decisions-title"), "Show or hide the decisions made in this session");
   element("decisions").hidden = entries.length === 0;
+  drawn = shown;
 }
 
 function marker(at: number): HTMLElement {

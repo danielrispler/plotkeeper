@@ -254,7 +254,7 @@ let litTurn: LitTurn | null = null;
 // The parts `turn` lights and reveals now: none past the cut, without files, or while a brief plays (unless `briefing` says otherwise).
 export const turnLit = (turn: LitTurn, briefing = deps?.briefOpen() ?? false) => turnLight(turn, placed, Date.now(), briefing);
 
-// `turn` is hovered or focused (`on`), or no longer is; a feed redraw lights none (`lightTurn(null)`).
+// `turn` is hovered or focused (`on`), or no longer is; a feed draw that drops or swaps the node that lit it lights none (`lightTurn(null)`).
 export function lightTurn(turn: LitTurn | null, on = true) {
   const next = on ? turn : litTurn === turn ? null : litTurn;
   if (next === litTurn) return;

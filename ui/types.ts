@@ -136,6 +136,8 @@ export type Turn = {
   started_at: number;
   ended_at: number | null;
   prompt: string;
+  // Whether a wake-up opened it, so `prompt` is "worker <name> returned", never Daniel's (#675); absent reads as his.
+  wake_up?: boolean;
   id: string | null;
   message: string | null;
   checks: Check[];

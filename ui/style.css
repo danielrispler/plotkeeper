@@ -322,6 +322,7 @@ h1 { margin: 0 0 var(--sp-4); }
 .turn .subagents li { margin: 0 0 var(--sp-2); }
 .fold > summary { font-size: var(--size); color: var(--muted); cursor: pointer; }
 .fold .response { margin: var(--sp-4) 0 0; }
+.fold .response-only { margin: var(--sp-4) 0 0; font-size: var(--size-small); color: var(--muted); }
 /* Rendered Markdown (danielrispler/Falinks#525): responses and "ask about this" replies. */
 .markdown { font-size: var(--size-read); overflow-wrap: anywhere; }
 .markdown > :first-child { margin-top: 0; }
@@ -459,6 +460,7 @@ h1 { margin: 0 0 var(--sp-4); }
 .turn.past { padding: var(--sp-2) 0; }
 .turn-line { display: flex; align-items: baseline; gap: var(--sp-4); width: 100%; min-width: 0; text-align: start; background: none; border: 0; padding: var(--sp-2) 0; color: var(--fg); cursor: pointer; }
 .turn-line .prompt { flex: 0 1 35%; min-width: 0; margin: 0; }
+.turn-line .woken { color: var(--muted); }
 .turn-line .headline-text { flex: 1 1 0; min-width: 0; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--size-small); }
 .turn-line .mark { flex: none; font-size: var(--size-small); color: var(--muted); }
 .turn .subagents button { flex-direction: row; align-items: baseline; gap: var(--sp-4); white-space: nowrap; overflow: hidden; }

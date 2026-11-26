@@ -364,18 +364,23 @@ impl Take<'_> {
             session.turn.clone_from(&event.prompt_id);
             session.reopen_turn();
             session.woken = false;
-            let queued = std::mem::take(&mut session.queued);
-            for (index, mut prompt) in queued.into_iter().enumerate() {
-                // The turn this event opens, pushed below.
-                prompt.turn = Some(session.turns.len());
-                session.take_prompt(prompt, index == 0);
-            }
         }
         if opens {
             session.turns.push(Turn {
                 started_at: at,
                 ..Turn::default()
             });
+        }
+        if self.starts {
+            // Taken once the turn this event opens is pushed (a start always opens one), so the
+            // first names it and marks a wake-up's (danielrispler/plotkeeper#675).
+            let queued = std::mem::take(&mut session.queued);
+            for (index, mut prompt) in queued.into_iter().enumerate() {
+                prompt.turn = session.current_turn();
+                session.take_prompt(prompt, index == 0);
+            }
+        }
+        if opens {
             session.turn_span = Some(Span {
                 start: at,
                 end: None,

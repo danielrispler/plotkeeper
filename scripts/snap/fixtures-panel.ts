@@ -215,7 +215,7 @@ export const mapLatePlace = (): Fixture => {
       log("panel ok");`, { sessions });
 };
 // A story's turn on the map (#560): with #311's story open, hovering or focusing a turn lights its parts (a brief's ring, nothing dimmed,
-// no camera move); leaving, or a feed redraw, clears it. Its 9-day-old turn says its files aren't shown and lights nothing; a turn with
+// no camera move); leaving clears it, and so does a feed draw that swaps its node, while a draw that keeps the node keeps it (spec #661). Its 9-day-old turn says its files aren't shown and lights nothing; a turn with
 // no files lights nothing; the newest has "Show on map"; under a brief nothing lights. It ends on the 2-day-old turn, hovered.
 export const mapTurnLight = (): Fixture => {
   const day = 24 * 3600e3;
@@ -271,11 +271,17 @@ export const mapTurnLight = (): Fixture => {
       await hover(at(3), false);
       at(3).querySelector(".turn-line").click();
       await wait(100);
-      // A feed redraw clears the light.
+      // A feed draw that keeps the hovered turn keeps its light; one that swaps it, as a new reply does, clears it.
       await hover(at(2));
+      const hovered = at(2);
       __snapEmit("selected", { session: ${JSON.stringify(sessions[0])}, agent: null });
-      await wait(100);
-      if (lit() !== "") log("snap:fail the light stayed after the feed redrew: " + lit());
+      await wait(50);
+      if (at(2) !== hovered) log("snap:fail a draw of the same story swapped the hovered turn");
+      if (lit() !== "core,understanding") log("snap:fail the light went with a draw that kept its turn: " + JSON.stringify(lit()));
+      __snapEmit("selected", { session: ${JSON.stringify({ ...sessions[0], turns: sessions[0].turns.map((t, i) => (i === 1 ? { ...t, message: "Read the understanding again" } : t)) })}, agent: null });
+      await wait(50);
+      if (at(2) === hovered) log("snap:fail a draw after the turn's reply changed kept its node");
+      if (lit() !== "") log("snap:fail the light stayed after its turn's node was swapped: " + lit());
       // Under a brief, a turn's hover lights nothing.
       document.querySelector('#map-tray .tray-row[data-pr="334"]').click();
       await wait(400);
@@ -292,6 +298,93 @@ export const mapTurnLight = (): Fixture => {
     select: { __by: "id", values: Object.fromEntries(sessions.map((s) => [s.id, { session: s, agent: null }])) },
     pr_brief: briefOf(storySteps()),
     map_place: { ...busyPlace(), "daemon/old.rs": ["daemon"], "understanding/u.rs": ["understanding"], "core/older.rs": ["core"] },
+  });
+};
+/**
+ * The story patched in place (spec #661): with #311's story at your turn in the panel, its Headline's Ask box open and the question box
+ * focused, a live update (a new step, a later event) keeps every turn, fold and button the node it was, the focus in the question box
+ * and the panel's scroll; a real press on "What did this turn change?" right after it lands on that suggestion and asks it.
+ */
+export const mapPanelPatched = (): Fixture => {
+  const ago = (ms: number) => Date.now() - ms;
+  const turn = (n: number, at: number) => ({ started_at: ago(at + 60e3), ended_at: ago(at), prompt: "Prompt " + n, id: "p" + n, message: "Reply " + n + ".\nMore of reply " + n + ".", checks: [], listed: [], files: { files: [{ root: "/w/plotkeeper", path: "core/lib.rs", from: null, added: 3, removed: 1, agent: null }], merged: 0 } });
+  const sessions = busySessions().map((s) => (s.id === "s1" ? { ...s, state: "your_turn" as const, turns: [turn(1, 900e3), turn(2, 600e3), turn(3, 300e3)], transcript: { ...s.transcript, responses: ["Reply 3.\nMore of reply 3."] } } : s));
+  const [s1] = sessions;
+  const later = { ...s1, last_event_at: Date.now(), last_step: { tool: "Read", detail: "core/lib.rs", command: null } };
+  return mapPanel(`
+      await press(row("s1"));
+      if (!panelOpen()) return log("snap:fail #311's story did not open");
+      const box = document.querySelector("#feed .now-turn .ask-about");
+      if (!box) return log("snap:fail the newest turn's Headline has no Ask box");
+      box.open = true;
+      await wait(200);
+      const pick = [...box.querySelectorAll(".ask-suggestions button")].find((b) => b.textContent === "What did this turn change?");
+      if (!pick) return log("snap:fail the Ask box offers no 'What did this turn change?'");
+      const field = box.querySelector("textarea");
+      field.focus();
+      const scroller = document.getElementById("story");
+      scroller.scrollTop = Math.min(40, scroller.scrollHeight - scroller.clientHeight);
+      const top = scroller.scrollTop;
+      const nodes = [...document.querySelectorAll("#feed li, #feed details, #feed button")];
+      const where = JSON.stringify(pick.getBoundingClientRect());
+      const asked = [];
+      const fetched = window.fetch;
+      window.fetch = (url, init) => (String(url).endsWith("/api/ask_anchor") && asked.push(JSON.parse(init.body).question), fetched(url, init));
+      __snapEmit("selected", { session: ${JSON.stringify(later)}, agent: null });
+      const now = [...document.querySelectorAll("#feed li, #feed details, #feed button")];
+      const swapped = nodes.filter((node, i) => node !== now[i]).length;
+      if (swapped || now.length !== nodes.length) log("snap:fail the live update swapped " + swapped + " of the feed's " + nodes.length + " turns, folds and buttons");
+      if (document.activeElement !== field) log("snap:fail the live update took the focus from the question box");
+      if (scroller.scrollTop !== top) log("snap:fail the live update moved the story's scroll from " + top + " to " + scroller.scrollTop);
+      if (!pick.isConnected || JSON.stringify(pick.getBoundingClientRect()) !== where) log("snap:fail the suggestion moved under the pointer");
+      await __snapClick(pick);
+      await wait(300);
+      window.fetch = fetched;
+      if (JSON.stringify(asked) !== JSON.stringify(["What did this turn change?"])) log("snap:fail the press after the update asked " + JSON.stringify(asked));
+      log("panel ok");`, {
+    sessions,
+    select: { __by: "id", values: Object.fromEntries(sessions.map((s) => [s.id, { session: s, agent: null }])) },
+    ask_anchor: "It changed core/lib.rs.",
+    realPointer: true,
+  });
+};
+/**
+ * A side question stays with its turn (spec #661, Q7): with #311's story at your turn, a press on the newest Headline's "What did this
+ * turn change?", then a new turn starts; the turn asked about is a past row, unfolded, and the answer is on screen under it.
+ */
+export const mapPanelAskStays = (): Fixture => {
+  const ago = (ms: number) => Date.now() - ms;
+  const turn = (n: number, at: number) => ({ started_at: ago(at + 60e3), ended_at: ago(at), prompt: "Prompt " + n, id: "q" + n, message: "Reply " + n + ".\nMore of reply " + n + ".", checks: [], listed: [], files: { files: [{ root: "/w/plotkeeper", path: "core/lib.rs", from: null, added: 3, removed: 1, agent: null }], merged: 0 } });
+  const sessions = busySessions().map((s) => (s.id === "s1" ? { ...s, state: "your_turn" as const, turns: [turn(1, 900e3), turn(2, 600e3)], transcript: { ...s.transcript, responses: ["Reply 2.\nMore of reply 2."] } } : s));
+  const [s1] = sessions;
+  const next = { ...s1, state: "running" as const, last_event_at: Date.now(), turns: [...s1.turns, { ...turn(3, 0), ended_at: null, message: null }] };
+  return mapPanel(`
+      await press(row("s1"));
+      if (!panelOpen()) return log("snap:fail #311's story did not open");
+      const box = document.querySelector("#feed .now-turn .ask-about");
+      if (!box) return log("snap:fail the newest turn's Headline has no Ask box");
+      box.open = true;
+      await wait(200);
+      const pick = [...box.querySelectorAll(".ask-suggestions button")].find((b) => b.textContent === "What did this turn change?");
+      if (!pick) return log("snap:fail the Ask box offers no 'What did this turn change?'");
+      await __snapClick(pick);
+      await wait(300);
+      __snapEmit("selected", { session: ${JSON.stringify(next)}, agent: null });
+      await wait(200);
+      const past = document.querySelector("#feed").children[1];
+      if (!past?.classList.contains("past")) return log("snap:fail the turn asked about is not a past row");
+      if (past.querySelector(".turn-line")?.getAttribute("aria-expanded") !== "true") log("snap:fail the past row asked about is folded");
+      const reply = past.querySelector(".ask-about .ask-reply");
+      if (!reply?.textContent.includes("It changed core/lib.rs.")) return log("snap:fail the past row shows no answer: " + JSON.stringify(reply?.textContent));
+      reply.scrollIntoView({ block: "nearest" });
+      await wait(100);
+      const [r, view] = [reply.getBoundingClientRect(), document.getElementById("story").getBoundingClientRect()];
+      if (!r.height || r.top < view.top || r.bottom > view.bottom) log("snap:fail the answer is not on screen");
+      log("panel ok");`, {
+    sessions,
+    select: { __by: "id", values: Object.fromEntries(sessions.map((s) => [s.id, { session: s, agent: null }])) },
+    ask_anchor: "It changed core/lib.rs.",
+    realPointer: true,
   });
 };
 /**
@@ -699,6 +792,55 @@ export const mapPanelBrief = (): Fixture =>
       log("panel ok");`, {
   pr_brief: briefOf(storySteps()),
 });
+
+/**
+ * Brief at the panel's foot (spec #661, Q33): with #311's story long enough to scroll and its session's Brief folded under the feed, the
+ * story scrolled so only the Brief's line shows at the panel's foot, opening it scrolls the panel until the opened Brief is in view, to the
+ * nearest edge. Reduced motion, so the scroll is at once; Decisions opens the same way.
+ */
+export const mapPanelBriefFoot = (): Fixture => {
+  const ago = (ms: number) => Date.now() - ms;
+  const long = "The rail draws each turn's Headline over its Body lines, and the reply below it, folded, so a long turn wraps over several lines here.";
+  const count = 30;
+  const turn = (n: number) => ({ started_at: ago((count + 1 - n) * 120e3 + 60e3), ended_at: ago((count + 1 - n) * 120e3), prompt: "Prompt " + n + ": " + long, id: "f" + n, message: "Reply " + n + ". " + long, checks: [], listed: [], files: { files: [], merged: 0 } });
+  const turns = Array.from({ length: count }, (_, k) => turn(k + 1));
+  const sessions = busySessions().map((s) => (s.id === "s1" ? { ...s, state: "your_turn" as const, turns, transcript: { ...s.transcript, responses: [turns[count - 1].message] } } : s));
+  const design = Array.from({ length: 4 }, (_, i) => ({ text: "Design line " + (i + 1) + ": " + long, cite: "f1" }));
+  const decisions = [1, 2, 3].map((n) => ({ call: "c" + n, agent: null, tool: "Bash", input: { command: "git push" }, answer: "allow" as const, at: ago(n * 600e3), source: "terminal" as const }));
+  return mapPanel(`
+      await press(row("s1"));
+      if (!panelOpen()) return log("snap:fail #311's story did not open");
+      await wait(200);
+      const scroller = (node) => { for (let n = node.parentElement; n; n = n.parentElement) if (n.scrollHeight > n.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(n).overflowY)) return n; return null; };
+      for (const id of ["brief-fold", "decisions"]) {
+        const fold = document.getElementById(id);
+        if (fold.hidden) return log("snap:fail " + id + " is not shown under the feed");
+        const view = scroller(fold);
+        if (!view) return log("snap:fail the story does not scroll");
+        // Only the fold's line shows, at the panel's foot.
+        const line = fold.querySelector("summary");
+        view.scrollTop += line.getBoundingClientRect().bottom - view.getBoundingClientRect().bottom;
+        await wait(50);
+        const top = view.scrollTop;
+        line.click();
+        await wait(200);
+        if (!fold.open) return log("snap:fail the press did not open " + id);
+        const [f, v] = [fold.getBoundingClientRect(), view.getBoundingClientRect()];
+        if (view.scrollTop <= top) log("snap:fail opening " + id + " did not scroll the panel: " + top + " to " + view.scrollTop);
+        const inView = f.height <= v.height ? f.top >= v.top - 1 && f.bottom <= v.bottom + 1 : Math.abs(f.top - v.top) <= 1;
+        if (!inView) log("snap:fail the opened " + id + " is not in view: " + [f.top, f.bottom].map(Math.round) + " in " + [v.top, v.bottom].map(Math.round));
+        line.click();
+        await wait(100);
+      }
+      document.getElementById("brief-summary").click();
+      await wait(200);
+      log("panel ok");`, {
+    sessions,
+    select: { __by: "id", values: Object.fromEntries(sessions.map((s) => [s.id, { session: s, agent: null }])) },
+    cards: { brief: null, goal: "Keep the story panel still while a session runs.", answers: [], open: [], design, decisions, risk_notes: [], decision_notes: [] },
+    motion: "reduce",
+  });
+};
 
 // The part sheet in the map (#445). The shell holds eight items, the most a part may, so its sheet is long; its check-backed law opens
 // a long proof in the drawer.
