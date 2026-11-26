@@ -31,11 +31,12 @@ fn a_start_with_no_bin_creates_it_with_both_copies() {
         done,
         Refresh::Replaced(vec!["plotkeeper-hook", "plotkeeper-answer"])
     );
-    assert_eq!(
-        bin,
-        home.path()
-            .join("Library/Application Support/plotkeeper/bin")
-    );
+    #[cfg(target_os = "macos")]
+    let expected = "Library/Application Support/plotkeeper/bin";
+    // With no `XDG_DATA_HOME`, as the tests run.
+    #[cfg(target_os = "linux")]
+    let expected = ".local/share/plotkeeper/bin";
+    assert_eq!(bin, home.path().join(expected));
     for name in ["plotkeeper-hook", "plotkeeper-answer"] {
         assert_eq!(
             read(&bin.join(name)),

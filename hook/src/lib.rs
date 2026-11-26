@@ -20,9 +20,35 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// The data folder, `~/Library/Application Support/plotkeeper/`: the one place that names it.
+/// The data folder, the one place that names it: `~/Library/Application Support/plotkeeper/` on macOS, and on Linux
+/// `$XDG_DATA_HOME/plotkeeper/`, else `~/.local/share/plotkeeper/` (#510, "Folders").
 pub fn data_dir(home: &Path) -> PathBuf {
-    home.join("Library/Application Support").join(DATA_FOLDER)
+    #[cfg(target_os = "macos")]
+    let base = home.join("Library/Application Support");
+    #[cfg(not(target_os = "macos"))]
+    let base = xdg_base(home, "XDG_DATA_HOME", ".local/share");
+    base.join(DATA_FOLDER)
+}
+
+/// The runs folder, outside the data folder and with no space in its path: `~/Library/Caches/plotkeeper/runs/` on
+/// macOS, and on Linux `$XDG_CACHE_HOME/plotkeeper/runs/`, else `~/.cache/plotkeeper/runs/`, so a cache cleaner treats
+/// the runs as cache.
+pub fn runs_dir(home: &Path) -> PathBuf {
+    #[cfg(target_os = "macos")]
+    let base = home.join("Library/Caches");
+    #[cfg(not(target_os = "macos"))]
+    let base = xdg_base(home, "XDG_CACHE_HOME", ".cache");
+    base.join(DATA_FOLDER).join("runs")
+}
+
+/// An XDG base folder: the variable `var` when it holds an absolute path, else `home/fallback`. The XDG Base Directory
+/// spec ignores an empty or relative value.
+#[cfg(not(target_os = "macos"))]
+fn xdg_base(home: &Path, var: &str, fallback: &str) -> PathBuf {
+    match env::var_os(var).map(PathBuf::from) {
+        Some(dir) if dir.is_absolute() => dir,
+        _ => home.join(fallback),
+    }
 }
 
 const DATA_FOLDER: &str = "plotkeeper";
@@ -42,8 +68,12 @@ const OLD_DATA_FOLDER: &str = "dev.falinks.studio";
 /// The one move (#322): when the old data folder exists as a real folder and the new one does not,
 /// renames it to the new name and leaves a symbolic link at the old path, so the plugin path in
 /// `~/.zshrc` (through the folder's `checkout` link) and a hook still built with the old path keep
-/// working. Never moves over an existing new folder. Returns whether it moved.
+/// working. Never moves over an existing new folder. Returns whether it moved. macOS only: the old folder never
+/// existed on Linux, where this moves nothing.
 pub fn move_old_data_dir(home: &Path) -> std::io::Result<bool> {
+    if !cfg!(target_os = "macos") {
+        return Ok(false);
+    }
     let (new, old) = (
         data_dir(home),
         home.join("Library/Application Support")

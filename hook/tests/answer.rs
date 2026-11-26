@@ -119,6 +119,7 @@ fn decided(name: &str, payload: &Value, answer: Value) -> Value {
 fn start(home: &Path, timeout_ms: u64, payload: &Value) -> Child {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_plotkeeper-answer"));
     cmd.env("HOME", home)
+        .env_remove("XDG_DATA_HOME")
         .env("PLOTKEEPER_ANSWER_TIMEOUT_MS", timeout_ms.to_string())
         .stdout(Stdio::piped());
     feed(cmd, payload)
@@ -459,6 +460,7 @@ fn a_payload_with_another_harness_marker_raises_no_card_on_the_claude_entry() {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_plotkeeper-answer"));
     cmd.args(["--agent", "claude"])
         .env("HOME", &home)
+        .env_remove("XDG_DATA_HOME")
         .env("PLOTKEEPER_ANSWER_TIMEOUT_MS", WAIT_MS.to_string())
         .stdout(Stdio::piped());
     let since = Instant::now();

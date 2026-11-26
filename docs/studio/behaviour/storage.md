@@ -1,8 +1,12 @@
 # Storage
 
+## The data folder
+
+plotkeeper keeps its data in one folder, the data folder: `~/Library/Application Support/plotkeeper/` on macOS, and on Linux `$XDG_DATA_HOME/plotkeeper/` when `XDG_DATA_HOME` holds an absolute path, else `~/.local/share/plotkeeper/` (#510). The paths below name the macOS folder.
+
 ## The event log
 
-`~/Library/Application Support/plotkeeper/events.jsonl`, one hook payload per line, with added fields:
+`~/Library/Application Support/plotkeeper/events.jsonl` (on Linux, `events.jsonl` in the data folder above), one hook payload per line, with added fields:
 
 - `studio_terminal_id`: the session's `PLOTKEEPER_TERMINAL_ID`, when set;
 - `studio_agent`: the agent its hook entry named (`--agent claude`, `--agent agy`, `--agent codex`, `--agent qwen`, `--agent cursor`, `--agent copilot`), by which the core picks the line's parser and a prune finds its session (#355). A name plotkeeper has no parser for is counted as drift, not read as Claude's; a line with no name, written before entries named one or by the app, is read by its shape;
@@ -11,7 +15,7 @@
 
 The app appends lines of its own, named `Studio…`, such as `StudioInterrupted`, which ends a turn Daniel interrupted, by its `prompt_id`, with that turn's end trees.
 
-The data folder was `~/Library/Application Support/dev.falinks.studio/` before plotkeeper. At the first start of the hook or the app, if that folder exists and `plotkeeper/` does not, it is renamed to `plotkeeper/` and a symbolic link to it is left at the old path, so the plugin path in `~/.zshrc` (through the folder's `checkout` link) and a hook built with the old path keep working. The move never goes over an existing `plotkeeper/`.
+The data folder was `~/Library/Application Support/dev.falinks.studio/` before plotkeeper. At the first start of the hook or the app, if that folder exists and `plotkeeper/` does not, it is renamed to `plotkeeper/` and a symbolic link to it is left at the old path, so the plugin path in `~/.zshrc` (through the folder's `checkout` link) and a hook built with the old path keep working. The move never goes over an existing `plotkeeper/`. It is macOS-only: on Linux there was never an old folder, and nothing moves.
 
 The hooks are async, so Claude Code never waits for them, and they append whether the app runs or not. Two events that fire within a few milliseconds can land in either order.
 
@@ -27,7 +31,7 @@ The app also keeps `roots.json` beside the log: the git worktree root of each fo
 
 ## Background runs
 
-`background-runs.jsonl` in the data folder holds one line per [background run](background-runs.md): its time, id, kind, project, outcome, denials, cost and duration. The runs themselves, each a folder with its working folder, its lock and its status, live outside the data folder, in `~/Library/Caches/plotkeeper/runs/`, because a run may not read the data folder.
+`background-runs.jsonl` in the data folder holds one line per [background run](background-runs.md): its time, id, kind, project, outcome, denials, cost and duration. The runs themselves, each a folder with its working folder, its lock and its status, live outside the data folder, in the runs folder, because a run may not read the data folder: `~/Library/Caches/plotkeeper/runs/` on macOS, and on Linux `$XDG_CACHE_HOME/plotkeeper/runs/` when `XDG_CACHE_HOME` holds an absolute path, else `~/.cache/plotkeeper/runs/`, so a cache cleaner treats the runs as cache.
 
 ## Usage snapshots (retired)
 

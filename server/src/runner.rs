@@ -450,11 +450,6 @@ pub struct Config {
     pub harness: Arc<dyn Harness>,
 }
 
-/// The runs folder: `~/Library/Caches/plotkeeper/runs`, outside the data folder and with no space in its path.
-pub fn runs_dir(home: &Path) -> PathBuf {
-    home.join("Library/Caches/plotkeeper/runs")
-}
-
 impl Config {
     /// The runner of the plotkeeper whose event log is `log`: the data folder is the log's, the launcher sits beside this
     /// executable, and the harness is Claude Code.
@@ -463,8 +458,10 @@ impl Config {
         let exe = std::env::current_exe().and_then(|exe| exe.canonicalize());
         let beside = exe.ok().and_then(|exe| exe.parent().map(Path::to_path_buf));
         Config {
-            runs: std::env::home_dir()
-                .map_or_else(|| data.join("../plotkeeper-runs"), |h| runs_dir(&h)),
+            runs: std::env::home_dir().map_or_else(
+                || data.join("../plotkeeper-runs"),
+                |h| studio_hook::runs_dir(&h),
+            ),
             settings: data.join("settings.json"),
             launcher: beside.unwrap_or_default().join("plotkeeper-run"),
             harness: Arc::new(Claude),

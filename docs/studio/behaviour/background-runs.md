@@ -59,7 +59,7 @@ All in `settings.json` ([Settings files](../settings.md)), read by the server an
 
 ## A run's folder
 
-Runs live in the runs folder, `~/Library/Caches/plotkeeper/runs/`, outside plotkeeper's data folder, which a run may not read. A run's folder is `<id>/`, and it holds:
+Runs live in the runs folder, `~/Library/Caches/plotkeeper/runs/` on macOS and `~/.cache/plotkeeper/runs/` (or under `$XDG_CACHE_HOME`) on Linux ([storage](storage.md)), outside plotkeeper's data folder, which a run may not read. A run's folder is `<id>/`, and it holds:
 
 - `work/`: the working folder, the agent's current folder and the only place it writes. The module that asks for the run fills it first, with a clone or nothing.
 - `run.json`: the run as asked for, with its built command, its sandbox check and its private temp folder.
