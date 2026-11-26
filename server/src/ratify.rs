@@ -450,11 +450,7 @@ fn swapped(before: Option<&Value>, after: Option<&Value>) -> Option<Words> {
 fn mark_of(kind: &str, item: &Value) -> Option<String> {
     match kind {
         "part" | "actor" | "law" => Some(format!("{kind}:{}", field(item, "id"))),
-        "link" => {
-            let mut ends = [field(item, "from"), field(item, "to")];
-            ends.sort_unstable();
-            Some(format!("line:{}|{}", ends[0], ends[1]))
-        }
+        "link" => crate::map_diff::ends(item).map(|[a, b]| format!("line:{a}|{b}")),
         _ => None,
     }
 }

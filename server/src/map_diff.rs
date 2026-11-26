@@ -176,8 +176,8 @@ fn by_id<'a>(map: &'a Value, key: &str) -> BTreeMap<&'a str, &'a Value> {
         .collect()
 }
 
-/// A link's ends in sorted order: the line it is drawn on.
-fn ends(link: &Value) -> Option<[String; 2]> {
+/// A link's ends in sorted order: the line it is drawn on. Ratify's rows key a link's mark by it too (`ratify::mark_of`).
+pub(crate) fn ends(link: &Value) -> Option<[String; 2]> {
     let mut ends = [
         link["from"].as_str()?.to_string(),
         link["to"].as_str()?.to_string(),

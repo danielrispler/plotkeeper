@@ -134,12 +134,9 @@ fn items_of(changes: &[MapItem]) -> (Vec<ReviewItem>, usize) {
     (items, left_out)
 }
 
-/// FNV-1a of `text`, in hex: the same in every build, as a hash kept across builds must be.
+/// FNV-1a of `text`, in hex (`micro_worlds::fnv1a`).
 fn hash(text: &str) -> String {
-    let hash = text.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
-    });
-    format!("{hash:016x}")
+    format!("{:016x}", crate::micro_worlds::fnv1a(text))
 }
 
 /// Where a head's review stands.

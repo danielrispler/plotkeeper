@@ -782,13 +782,14 @@ pub(crate) fn project_folder(store: &Path, project: &str) -> PathBuf {
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect();
-    // FNV-1a: the same in every build, as a folder name kept across builds must be.
-    let hash = project
-        .bytes()
-        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-            (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
-        });
-    store.join(format!("{name}-{hash:016x}"))
+    store.join(format!("{name}-{:016x}", fnv1a(project)))
+}
+
+/// FNV-1a of `text`: the same in every build, as a name or hash kept across builds must be.
+pub(crate) fn fnv1a(text: &str) -> u64 {
+    text.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+    })
 }
 
 /// Fills a run's working `folder` with `repo`'s files at `commit` and makes the output folder in it.
