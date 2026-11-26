@@ -898,8 +898,8 @@ export const mapDotsRetry = (): Fixture =>
   dots(`
       if (dot()) return log("snap:fail a dot shows though the read failed");
       answer(() => falinks);
-      // A press on the shown project's header folds it, which draws the list again.
-      document.querySelector('#groups .project-head[data-project="/w/plotkeeper"] .project-toggle').click();
+      // A press on the shown project's chevron folds it, which draws the list again.
+      document.querySelector('#groups .project-head[data-project="/w/plotkeeper"] .fold').click();
       await wait(200);
       if (!dot()) log("snap:fail the failed read was never tried again");`, { map_marks: { __throw: "the server is busy" } as never });
 export const mapDotsOrder = (): Fixture =>

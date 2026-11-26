@@ -499,6 +499,38 @@ export const projectsSaved = () =>
     log("headers " + order);`);
 
 /**
+ * A project header's chevron (#674): it folds and unfolds its group and the fold survives a redraw; the name always opens the map, the
+ * shown project's included, and has no `aria-expanded`; the chevron's name and `aria-expanded` are its own; a project with no live
+ * session has no chevron.
+ */
+export const projectChevron = () =>
+  withSaved(`
+    const group = (name) => named(name).closest(".project");
+    const chevron = (name) => named(name).querySelector(".fold");
+    const button = chevron("plotkeeper");
+    if (!button) return log("snap:fail a project with live sessions has no chevron");
+    if (button.getAttribute("aria-label") !== "Sessions of plotkeeper") log("snap:fail the chevron is named " + button.getAttribute("aria-label"));
+    if (window.__snapName(button) !== "Sessions of plotkeeper") log("snap:fail the chevron's accessible name is " + window.__snapName(button));
+    if (button.getAttribute("aria-expanded") !== "true" || !group("plotkeeper").querySelector(".row")) log("snap:fail the group starts folded");
+    if (chevron("falinks") || chevron("pokedex")) log("snap:fail a project with no live session has a chevron");
+    const toggle = named("plotkeeper").querySelector(".project-toggle");
+    if (toggle.hasAttribute("aria-expanded")) log("snap:fail the project's name carries aria-expanded");
+    chevron("plotkeeper").click();
+    await wait(100);
+    if (chevron("plotkeeper").getAttribute("aria-expanded") !== "false" || group("plotkeeper").querySelector(".row")) log("snap:fail the chevron did not fold the group");
+    // The fold survives the list being drawn again, by pressing another project's name and back.
+    named("falinks").querySelector(".project-toggle").click();
+    await wait(200);
+    if (chevron("plotkeeper").getAttribute("aria-expanded") !== "false" || group("plotkeeper").querySelector(".row")) log("snap:fail the fold did not survive an update");
+    named("plotkeeper").querySelector(".project-toggle").click();
+    await wait(200);
+    if (!named("plotkeeper").classList.contains("current") || group("plotkeeper").querySelector(".row")) log("snap:fail the name did not open the map without unfolding");
+    chevron("plotkeeper").click();
+    await wait(100);
+    if (chevron("plotkeeper").getAttribute("aria-expanded") !== "true" || !group("plotkeeper").querySelector(".row")) log("snap:fail the chevron did not unfold the group");
+    log("chevron ok");`);
+
+/**
  * The hints (spec #582, ticket 1), with real input: the pointer on the top bar's gear opens its hint after the delay, beside the gear, and
  * on the hint it stays open; Esc closes it; Tab to the gear opens it too; and sliding from one session row to the next opens the next
  * row's hint at once, closing the first.
