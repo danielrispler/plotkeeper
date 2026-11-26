@@ -122,7 +122,7 @@ pub struct TaskFacts {
 }
 
 /// What the shell asks `gh pr view` about: a branch, the folder of a session on it, and that session's project, whose PRs
-/// the answer joins.
+/// the answer joins and in whose folder `gh` runs (spec #659).
 #[derive(Clone, Debug, PartialEq)]
 pub struct BranchQuery {
     pub project: String,

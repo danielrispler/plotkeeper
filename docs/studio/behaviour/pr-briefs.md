@@ -6,7 +6,7 @@ Code: `server/src/prs.rs`, `server/src/pr_briefs.rs`, `server/src/part_catch_ups
 
 ## Ready detection
 
-The server asks `gh pr view <branch> --json number,title,isDraft,state,headRefOid,body,closingIssuesReferences` for each listed session's branch on Landed's triggers, never on a timer: at once when a turn ends, and when the page gains focus or the Map view opens, through one cooldown of a minute per repository with an in-flight guard (`prs.rs`). A PR is **ready** when it is open and not a draft. Its head is kept in memory and replaced by a later lookup. Any PR number found still names its session ("PR #N").
+The server asks `gh pr view <branch> --json number,title,isDraft,state,headRefOid,body,closingIssuesReferences` for each listed session's branch, in its session's project folder (spec #659), so a session that `cd`ed out of its repository still asks its own, on Landed's triggers, never on a timer: at once when a turn ends, and when the page gains focus or the Map view opens, through one cooldown of a minute per repository with an in-flight guard (`prs.rs`). A PR is **ready** when it is open and not a draft. Its head is kept in memory and replaced by a later lookup. Any PR number found still names its session ("PR #N").
 
 A lookup of a ready PR (`pr_briefs.rs`):
 

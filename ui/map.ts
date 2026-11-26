@@ -20,7 +20,7 @@
 import { logStop, reviewNode, reviewOf } from "./stop-rules.js";
 import { element, failure, hint, invoke, keyed, listen, mark, newest, pageStore, pressable, svg, text } from "./dom.js";
 import { cameraRig, type CameraRig, fitCamera, panTo, revealPan, zoomAt } from "./map-camera.js";
-import { brokenParts, brokenText, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Drag, type Law, type Layer, type LayerName, type MapDoc, startProject, switchProject, parseMap, type Part, type Point, placement, plateSize, plateTitle, sizeOf, lineTag, linkLines, markPoints, readingOrder, rimPoint, type Scrub, tagWord, type Tier } from "./map-model.js";
+import { brokenParts, brokenText, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Drag, type Law, type Layer, type LayerName, type MapDoc, startProject, switchProject, wasRemoved, parseMap, type Part, type Point, placement, plateSize, plateTitle, sizeOf, lineTag, linkLines, markPoints, readingOrder, rimPoint, type Scrub, tagWord, type Tier } from "./map-model.js";
 import { copyButton } from "./copy-button.js";
 import { recheckSeen } from "./seen.js";
 import { knownProjects, listedProjects, projectGone } from "./projects.js";
@@ -155,20 +155,23 @@ async function showReview(path: string) {
   box.hidden = false;
 }
 
-// The saved project list changed (#381): its first arrival opens the last viewed project, else the first the list shows, unless a selected
-// session's already shows (#386); a fresh install's first project opens when it is added; a shown project that was removed gives way to the
-// first the list shows, and one whose folder went or came back is drawn again.
+// The saved project list changed (#381): its first arrival opens the last viewed project, else the first the list shows (`startProject`),
+// unless a selected session's already shows (#386); a fresh install's first project opens when it is added; a shown project that was
+// removed gives way the same way, and one whose folder went or came back is drawn again. `saved` is the list before this change.
 let started = false;
+let saved: string[] = [];
 export function projectsChanged() {
   const first = !started;
   started = true;
+  const [before, now] = [saved, knownProjects()];
+  saved = now;
   // A session selected before the list arrived has already shown its project's map.
   if (project === null) {
-    const opening = startProject(lastViewed.get(), knownProjects(), listedProjects());
+    const opening = startProject(lastViewed.get(), now, listedProjects());
     if (first || opening !== null) openMap(opening);
     return;
   }
-  if (!first && !knownProjects().includes(project)) return openMap(listedProjects()[0] ?? null);
+  if (wasRemoved(project, before, now)) return openMap(startProject(null, now, listedProjects()));
   if (projectGone(project) !== (element("map-body").querySelector(".map-gone") !== null)) openMap(project);
 }
 

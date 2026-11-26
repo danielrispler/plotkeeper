@@ -445,10 +445,16 @@ export const panelSession = (panel: PanelContent | null): string | null =>
   panel?.kind === "story" || panel?.kind === "diff" || panel?.kind === "log" ? panel.session : null;
 /**
  * The project the page opens on (#386): the last viewed, while the saved list still holds it, else the first of those the session list
- * shows (`listed`: not a gone or temporary one, spec #659); none on a fresh install.
+ * shows (`listed`: not a gone or temporary one, spec #659), else, when it shows none, or the sessions are not read yet, the first saved;
+ * none on a fresh install.
  */
 export const startProject = (last: string | null, projects: string[], listed: string[]): string | null =>
-  last !== null && projects.includes(last) ? last : (listed[0] ?? null);
+  last !== null && projects.includes(last) ? last : (listed[0] ?? projects[0] ?? null);
+/**
+ * Whether the shown project was removed from the saved list (`before` to `now`), so the map gives way: a project never saved, a temporary
+ * one or a live session's, stays shown through another project's change.
+ */
+export const wasRemoved = (shown: string, before: string[], now: string[]): boolean => before.includes(shown) && !now.includes(shown);
 /** What the page shows (#386): a project's map, and what the left panel holds over it. */
 export type PageView = { project: string | null; panel: PanelContent | null };
 /** Selecting a session shows its project's map, with its story, or a worker's log, in the left panel. */

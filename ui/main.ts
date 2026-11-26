@@ -86,7 +86,8 @@ list.addEventListener("pointerenter", (event) => {
   holdList(true);
 });
 // A hint opens in `#hints`, outside `.list`, and a project dot's over the list's rows: the pointer on the hint of something in the list is
-// still in it, and the hold ends when it leaves that hint for somewhere else.
+// still in it, and the hold ends when it leaves a hint for somewhere else, also one whose row went while the pointer rested on it. A hint is
+// reached while held only from the list, so leaving any hint is that.
 const listsHint = (node: EventTarget | null) => {
   const open = node instanceof Element ? node.closest(".hint") : null;
   return open !== null && list.querySelector(`[interestfor="${CSS.escape(open.id)}"], [data-hint="${CSS.escape(open.id)}"]`) !== null;
@@ -97,7 +98,7 @@ list.addEventListener("pointerleave", (event) => {
   if (!listsHint(event.relatedTarget)) holdList(false);
 });
 element("hints").addEventListener("pointerout", (event) => {
-  if (listsHint(event.target) && !inList(event.relatedTarget)) holdList(false);
+  if (event.target instanceof Element && event.target.closest(".hint") && !inList(event.relatedTarget)) holdList(false);
 });
 // Leaving focus mode from the toast.
 window.addEventListener("layout", layout);

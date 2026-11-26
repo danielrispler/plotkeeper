@@ -668,7 +668,7 @@ export const cutTextStill = (): Fixture => ({
  * The held order (spec #659): while the pointer is in the list, a session that changed state keeps its row, with its new glyph, its group
  * keeps its place, a new session joins the end of its project's group, and the strip holds the same way; ⌘] and ↓ follow the order on
  * screen. The strip's flat list reads the sidebar's order, held or not. The pointer on a hint of the list's, which opens outside `.list`,
- * is still in the list; when it leaves the hint for the map, the list and the strip take the real order. The pointer's moves are synthetic
+ * is still in the list, also once the hint's row is gone; when it leaves the hint for the map, the list and the strip take the real order. The pointer's moves are synthetic
  * events on `.list` and the hint.
  */
 export const listHeld = (): Fixture => {
@@ -729,11 +729,15 @@ export const listHeld = (): Fixture => {
       list.dispatchEvent(new PointerEvent("pointerleave", { relatedTarget: onHint }));
       await wait(200);
       expect("the rows with the pointer on a row's hint", rows(), "s1,s2,s4,s3");
+      // s1 ends while the pointer rests on its hint: its row leaves at once, and leaving the hint still ends the hold.
+      window.__snapEmit("sessions", ${JSON.stringify(later.filter(({ id }) => id !== "s1"))});
+      await wait(200);
+      expect("the rows once s1 ended under its hint", rows(), "s2,s4,s3");
       onHint.dispatchEvent(new PointerEvent("pointerout", { bubbles: true, relatedTarget: document.querySelector("#map") }));
       await wait(200);
-      expect("the rows once the pointer left", rows(), "s3,s2,s1,s4");
+      expect("the rows once the pointer left", rows(), "s3,s2,s4");
       expect("the headers once the pointer left", heads(), "timburr,plotkeeper");
-      expect("the strip once the pointer left", strip(), "s3,s2,s1,s4");
+      expect("the strip once the pointer left", strip(), "s3,s2,s4");
       log("held ok");`,
     snapDone: "held ok",
   };

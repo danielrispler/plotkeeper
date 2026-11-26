@@ -263,23 +263,33 @@ fn gh_list(project: &str) -> Option<String> {
     Some(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+/// The lookups `ask_later` runs, by project: each branch with the folder its `gh pr view` runs in. Each branch is asked about
+/// under its session's project (spec #659), the project its row is listed under, and in that project's folder, the main checkout of
+/// the same repository, never the session's folder, which a `cd` may have taken out of it. `also` is asked about even with no session
+/// in it, so the Map view's project's hand-made PRs are found.
+fn lookups(
+    queries: Vec<studio_core::BranchQuery>,
+    also: Option<String>,
+) -> BTreeMap<String, Vec<(String, String)>> {
+    let mut projects = BTreeMap::<String, Vec<(String, String)>>::new();
+    for query in queries {
+        if !query.project.is_empty() {
+            let folder = query.project.clone();
+            (projects.entry(query.project).or_default()).push((folder, query.branch));
+        }
+    }
+    if let Some(project) = also {
+        projects.entry(project).or_default();
+    }
+    projects
+}
+
 /// Asks about the PRs of every listed session's branch on `trigger`, on a thread of its own so no loop waits on the network.
 /// `also` is a project to ask about beyond the sessions' ones. A session's name takes the PR number found; the Map view is told (`map-landed`) when a project's ready PRs changed.
 pub fn ask_later(app: &Arc<App>, trigger: Trigger, also: Option<&str>) {
     let (app, also) = (app.clone(), also.map(str::to_string));
     std::thread::spawn(move || {
-        let mut projects = BTreeMap::<String, Vec<(String, String)>>::new();
-        // Each branch is asked about under its session's project (spec #659), the project its row is listed under.
-        let branches = app.core().branches();
-        for query in branches {
-            if !query.project.is_empty() {
-                (projects.entry(query.project).or_default()).push((query.cwd, query.branch));
-            }
-        }
-        // The project the Map view shows is asked about even with no session in it, so its hand-made PRs are found.
-        if let Some(project) = also {
-            projects.entry(project).or_default();
-        }
+        let projects = lookups(app.core().branches(), also);
         let prs = &app.prs;
         for (project, sessions) in projects {
             let before = prs.ready(&project);
@@ -657,6 +667,37 @@ mod tests {
     #[test]
     fn output_that_is_not_a_pr_is_none() {
         assert_eq!(parse("no pull requests found"), None);
+    }
+
+    #[test]
+    fn a_branch_is_asked_about_in_its_project_s_folder_where_its_session_went() {
+        let query = |project: &str, cwd: &str, branch: &str| studio_core::BranchQuery {
+            project: project.into(),
+            cwd: cwd.into(),
+            branch: branch.into(),
+        };
+        let asked = lookups(
+            vec![
+                // A session that `cd`ed out of its repository, and one in a task's worktree.
+                query("/r/p", "/tmp/elsewhere", "fix-hook"),
+                query("/r/p", "/r/p/.claude/worktrees/a", "issue-7"),
+                query("", "/tmp/x", "loose"),
+            ],
+            Some("/r/q".into()),
+        );
+        assert_eq!(
+            asked,
+            BTreeMap::from([
+                (
+                    "/r/p".to_string(),
+                    vec![
+                        ("/r/p".to_string(), "fix-hook".to_string()),
+                        ("/r/p".to_string(), "issue-7".to_string()),
+                    ]
+                ),
+                ("/r/q".to_string(), vec![]),
+            ])
+        );
     }
 
     /// A `gh` that prints `author` for `pr view` and `me` for `api user`, and fails when either is empty.
