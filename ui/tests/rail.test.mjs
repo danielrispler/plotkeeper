@@ -16,7 +16,7 @@ globalThis.document = fakeDocument(
 globalThis.marked = createRequire(import.meta.url)("marked");
 const replies = new Map();
 tauri([], (command, args) => replies.get(command)?.(args) ?? null);
-const { askedLabel, blockKind, cardTime, feedTurns, foldedLine, foldedTurn, headlineOf, nowOf, oneAtATime, showView, turnAt } = await import("../../dist/story.js");
+const { askedLabel, blockKind, cardTime, feedTurns, foldedLine, foldedTurn, headlineOf, nowOf, oneAtATime, showView, startStory, turnAt } = await import("../../dist/story.js");
 const state = await import("../../dist/state.js");
 const { setSelection, studio } = state;
 
@@ -283,4 +283,84 @@ test("a woken turn reads \"Woken by\" with the returning task; Daniel's turn rea
   const promptOf = (node) => node.querySelector(".prompt").textContent;
   assert.equal(promptOf(past({ prompt: "worker bqv59 returned", wake_up: true })), "Woken by worker bqv59 returned");
   assert.equal(promptOf(past({ prompt: "Fix the parser" })), "Fix the parser");
+});
+
+// Spec #661, Q32: a Headline taken from the reply's first line is not shown again at the top of Full response.
+const responseOf = (turn) => [...turn.querySelectorAll("details.fold")].find((fold) => fold.querySelector("summary")?.textContent === "Full response") ?? null;
+const responseText = (fold) => fold.querySelectorAll("div.response").map((div) => div.innerHTML).join("\n");
+
+test("the newest turn's Full response leaves out the first line its Headline already shows", () => {
+  const reply = "Fixed the parser.\n\nThe lexer now reads tabs.";
+  const session = sessionOf({ id: "f1", turns: [ended(1, { id: "x1" }), ended(2, { id: "x2", message: "Fixed the parser." })], transcript: { ...sessionOf().transcript, responses: ["Looking at the lexer first.", reply] } });
+  draw(session);
+  const fold = responseOf(feed().childNodes[0]);
+  assert.ok(fold, "the newest turn has its Full response");
+  const shown = responseText(fold);
+  assert.ok(!shown.includes("Fixed the parser."), "the Headline's line is left out");
+  assert.ok(shown.includes("The lexer now reads tabs."));
+  assert.ok(shown.includes("Looking at the lexer first."), "the turn's earlier texts stay");
+});
+
+test("the newest turn has no Full response when its reply was only its Headline", () => {
+  const session = sessionOf({ id: "f2", turns: [ended(1, { id: "y1" }), ended(2, { id: "y2", message: "Done." })], transcript: { ...sessionOf().transcript, responses: ["Done."] } });
+  draw(session);
+  assert.equal(responseOf(feed().childNodes[0]), null);
+});
+
+test("an older turn's Full response, fetched on opening, leaves out the Headline's line, or says the reply was only that", async () => {
+  const fetched = { 0: "Renamed the flag.\nIt reads wake_up now.", 1: "Only this." };
+  replies.set("turn_reply", ({ index }) => fetched[index]);
+  const turns = [ended(1, { id: "z1", message: "Renamed the flag." }), ended(2, { id: "z2", message: "Only this." }), ended(3, { id: "z3" })];
+  const session = sessionOf({ id: "f3", turns, transcript: { ...sessionOf().transcript, responses: ["Reply 3."] } });
+  draw(session);
+  for (const row of [...feed().childNodes].slice(1)) row.querySelector("button").listeners.click?.({});
+  const open = (row) => {
+    const fold = responseOf(row);
+    assert.ok(fold, "an older turn keeps its fold until its reply is fetched");
+    fold.open = true;
+    fold.listeners.toggle?.({});
+    return fold;
+  };
+  const [, second, first] = feed().childNodes;
+  const [only, renamed] = [open(second), open(first)];
+  await settle();
+  assert.ok(!responseText(renamed).includes("Renamed the flag."), "the Headline's line is left out");
+  assert.ok(responseText(renamed).includes("It reads wake_up now."));
+  assert.equal(only.querySelector("p.response-only")?.textContent, "The reply was only its Headline.");
+  replies.delete("turn_reply");
+});
+
+test("a stored Headline leaves Full response whole", async () => {
+  replies.set("turn_summary", ({ id }) => (id === "h2" ? { summary: { summary: "x", headline: "Parser fixed.", lines: [], quiz: null } } : null));
+  const session = sessionOf({ id: "f4", turns: [ended(1, { id: "h1" }), ended(2, { id: "h2", message: "Fixed the parser." })], transcript: { ...sessionOf().transcript, responses: ["Fixed the parser.\nThe lexer reads tabs."] } });
+  draw(session);
+  await settle();
+  draw(session);
+  const shown = responseText(responseOf(feed().childNodes[0]));
+  assert.ok(shown.includes("Fixed the parser."), "the reply's first line stays");
+  assert.ok(shown.includes("The lexer reads tabs."));
+  replies.delete("turn_summary");
+});
+
+// Spec #661, Q33: Brief and Decisions sit at the panel's foot, so opening one brings it into view, to the nearest edge.
+test("opening Brief or Decisions scrolls it into view, smoothly unless reduced motion is asked for", () => {
+  let reduce = false;
+  globalThis.matchMedia = (query) => /** @type {MediaQueryList} */ (/** @type {unknown} */ ({ matches: query.includes("no-preference") ? !reduce : reduce }));
+  startStory(() => {});
+  for (const id of ["brief-fold", "decisions"]) {
+    /** @type {any} */
+    const fold = document.getElementById(id);
+    for (const [still, behavior] of /** @type {[boolean, string][]} */ ([[false, "smooth"], [true, "auto"]])) {
+      reduce = still;
+      fold.scrolledIntoView = null;
+      fold.open = true;
+      fold.listeners.toggle?.({});
+      assert.deepEqual(fold.scrolledIntoView, { block: "nearest", behavior }, `${id} opened with reduced motion ${still}`);
+      fold.open = false;
+      fold.scrolledIntoView = null;
+      fold.listeners.toggle?.({});
+      assert.equal(fold.scrolledIntoView, null, `${id} closing does not scroll`);
+    }
+  }
+  delete (/** @type {any} */ (globalThis).matchMedia);
 });
