@@ -66,6 +66,8 @@ GitHub stays authoritative.
 - **Escalation**: moving a ticket to the next tier up.
 - **Critic**: the fresh-context reviewer of a draft spec, picked from the `critic` list.
 - **Veto summary**: the at most eight lines Daniel clears before `/to-tickets`.
+- **Risky UI**: a UI change to the redraw model, layout selection, event-handler lifetimes across redraws, or a stored or wire type.
+- **Presentational UI**: every other UI change: copy, CSS, labels, placement, camera tweaks such as #669's zoom, and new controls over existing state, one handler on a new button included.
 
 **The five cheap rules.** A ticket is `cheap` only when all five hold:
 
@@ -75,7 +77,11 @@ GitHub stays authoritative.
 4. It changes no laws or parts of the system map.
 5. It edits about three source files at most. An expand–contract migration batch meets this rule like any other ticket.
 
-A well-specified ticket outside the risk areas of rule 3 that misses another rule is `medium`. A ticket in any risk area, or with any design left open, is `strong`. Effort is `medium` or `high`, never `low`, so every worker reads `AGENTS.md`'s rules.
+A well-specified ticket outside the risk areas of rule 3 that misses another rule is `medium`. Presentational UI is `medium` too when it meets those conditions. A ticket in any other risk area, risky UI, or with any design left open, is `strong`. File count, a new module and hand-checked trials raise the tier, never the effort.
+
+**Effort.** Effort is `medium`, on every tier. It is `high` only when the route's reason names a risk area of rule 3, a risky-UI trigger, or an edge case the stated tests cannot check. A `cheap` ticket is therefore `medium`, since rules 2 and 3 leave it no risk to name. Effort is never `low`, so every worker reads `AGENTS.md`'s rules. `wayfinder-startup --publish` refuses a `cheap` route whose **Files** names UI, and an `effort high` whose reason names none of persistence, stored, queue, concurrency, wire, redraw, layout, handler, trust boundary or untested edge case (`ticket-authoring.md`, Publish); nothing refuses `strong`.
+
+**Re-audit of presentational UI.** After 10 `medium` UI tickets, run the audit of 2026-11-26 (#689) again with the **Route outcome** query below. When `medium` UI tickets get more confirmed review findings per ticket than `strong` UI tickets, UI goes back to `strong`. A run's report to Daniel counts the `medium` UI tickets so far.
 
 **At spawn time.** After refreshing Reading and Touches (**Claim** above), re-check the route by the five rules. When the ticket grew, raise its tier and say why in the run's report to Daniel; only Daniel lowers a tier. Read a route that is missing or malformed as `strong · effort high`.
 
