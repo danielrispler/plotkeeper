@@ -6,6 +6,7 @@ mod cargo;
 #[cfg(test)]
 mod contract;
 mod dart;
+mod dotnet;
 mod folders;
 mod go;
 mod java;

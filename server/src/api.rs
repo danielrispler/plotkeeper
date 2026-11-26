@@ -202,6 +202,7 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arc,
             arg(a, "project")?,
             arg(a, "part")?,
+            arg::<Option<bool>>(a, "older")?.unwrap_or(false),
         )),
         "part_catch_up_done" => res(crate::part_catch_ups::part_catch_up_done(
             app,
