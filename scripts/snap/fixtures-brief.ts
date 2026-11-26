@@ -489,6 +489,41 @@ export const mapBriefMapCheck = (alone: boolean): Fixture => {
     pr_ratify: alone ? [] : ratifyRows,
   };
 };
+// The Map text review in Ratify (#645): `flag` flags the changed law, whose row carries the not-confirmed mark; its popover gives the
+// reviewer's why and cites and the copy icon, and Accept stays. `running`: the review runs with nothing to ratify, so its line alone brings
+// the step, titled "The map at this head".
+const reviewWhy = "Two queues run: the brief writer's and the background runs'.";
+export const mapBriefReview = (at: "flag" | "running"): Fixture => ({
+  ...mapBrief(briefOf(storySteps()), 4, at === "flag" ? `
+      const head = document.querySelector("#map-brief .ratify-head .ratify-review");
+      if (head?.textContent !== "Map text review: 2 checked, 1 flagged") log("snap:fail the review's line says " + head?.textContent);
+      if (document.querySelectorAll("#map-brief .ratify-row .brief-why-mark").length !== 1) log("snap:fail only the flagged row carries the mark");
+      const row = document.querySelector("#map-brief .ratify-row[data-id=window-quiet]");
+      if (row?.querySelector(".ratify-accept")?.disabled !== false) log("snap:fail Accept is not enabled on the flagged row");
+      const mark = row?.querySelector(".brief-why-mark");
+      if (!mark) return log("snap:fail the flagged row has no mark");
+      mark.click();
+      await wait(100);
+      const why = document.getElementById(mark.getAttribute("aria-controls"));
+      if (!why?.matches(":popover-open")) return log("snap:fail the mark did not open its popover");
+      const reasons = [...why.querySelectorAll(".brief-why-list li")].map((li) => li.textContent);
+      if (reasons.join("|") !== ${JSON.stringify(`Text (contradicted): ${reviewWhy} See server/src/runner.rs:83, server/src/pr_briefs/queue.rs:12.`)}) log("snap:fail the popover's reasons: " + reasons.join("|"));
+      if (!why.querySelector(".brief-copy")) log("snap:fail the popover has no copy icon");
+      log("review flag ok");` : `
+      const line = document.querySelector("#map-brief .ratify-head .ratify-review");
+      if (line?.textContent !== "Reviewing map text…") log("snap:fail the review's line says " + line?.textContent);
+      if (line?.querySelector("button")) log("snap:fail a running review offers a button");
+      const title = document.querySelector("#map-brief .brief-title")?.textContent;
+      if (title !== "The map at this head") log("snap:fail the step's title: " + title);
+      log("review running ok");`, false, 100),
+  pr_ratify: at === "flag" ? ratifyRows : [],
+  pr_map_review: at === "flag"
+    ? { head: "cafe", state: "done", checked: 2, flagged: 1, line: null, items: [
+      { id: "law:window-quiet/text", verdict: "contradicted", why: reviewWhy, cites: ["server/src/runner.rs:83", "server/src/pr_briefs/queue.rs:12"], flagged: true },
+      { id: "link:shell-understanding/reason", verdict: "supported", why: "The shell imports it.", cites: [], flagged: false },
+    ] }
+    : { head: "cafe", state: "reviewing", checked: 0, flagged: 0, line: null, items: [] },
+});
 /**
  * The brief's reader explains itself (#524), with Explanations on (the default): the ? beside Leave, pressed; the step's title described by
  * its kind's line, directly under it. On the Ratify step (`ratify`), the title's line, and "Not yet ratified"'s under the first undecided

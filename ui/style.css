@@ -783,6 +783,8 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .ratify-head > * { margin: 0; }
 .ratify-check summary { width: fit-content; color: var(--fg); cursor: pointer; }
 .ratify-check summary:hover { text-decoration: underline; text-underline-offset: .2em; }
+/* The Map text review's line (#645): its state, and "Review map text" or "Run again" beside it. */
+.ratify-review { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--sp-3); row-gap: var(--sp-1); overflow-wrap: anywhere; }
 .ratify-problems { margin: var(--sp-2) 0 0; padding-inline-start: var(--sp-6); font-family: var(--mono); font-size: var(--size-xs); overflow-wrap: anywhere; }
 .ratify-problems li + li { margin-top: var(--sp-2); }
 .brief-ratify { margin: var(--sp-4) 0 0; padding: 0; list-style: none; max-width: 60ch; display: grid; gap: var(--sp-3); }

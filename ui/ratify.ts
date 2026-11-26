@@ -2,7 +2,7 @@
 // and what an overturn copies. `map-sheet.ts` and `map-brief.ts` draw it, the server (`server/src/ratify.rs`) keeps the records.
 
 import type { Drawer } from "./map-model.js";
-import type { BriefStep, ImportSite, LinkSites, PendingItem, RatifyDetail, RatifyRow, SiteSnippet } from "./types.js";
+import type { BriefStep, ImportSite, LinkSites, MapReview, PendingItem, RatifyDetail, RatifyRow, SiteSnippet } from "./types.js";
 
 // The state of an item as the brief says it: nothing to ratify when it landed before the first run.
 export const statusWords: Record<RatifyRow["status"], string> = {
@@ -120,9 +120,10 @@ const stopped = (words: string) => (/[.!?]”?$/.test(words) ? words : `${words}
 const kindWords: Record<string, string> = { part: "part", actor: "outside actor", link: "link", law: "law", flow: "flow", decision: "decision" };
 
 // The prompt an overturn puts on the clipboard: it stands alone for any agent, naming the PR, its branch while it is open, the item's
-// id and its wording, and for an added link the import sites behind it (#499).
+// id and its wording, for an added link the import sites behind it (#499), and for a row the Map text review flagged its why (`flags`,
+// `reviewFlags`, #645).
 export function overturnPrompt(
-  row: Pick<RatifyRow, "pr" | "kind" | "id" | "text" | "change"> & { detail?: RatifyDetail | null; evidence?: LinkSites },
+  row: Pick<RatifyRow, "pr" | "kind" | "id" | "text" | "change"> & { detail?: RatifyDetail | null; evidence?: LinkSites; flags?: string[] },
   branch: string | null,
 ): string {
   const where = branch ? `PR #${row.pr} (branch ${branch})` : `PR #${row.pr}`;
@@ -132,7 +133,8 @@ export function overturnPrompt(
       : `the ${kindWords[row.kind] ?? row.kind} ${row.id}${row.change ? ` (${row.change})` : ""}: “${row.text}”${newText(row.detail)}`;
   const sites = row.evidence?.sites ?? [];
   const imports = sites.length ? ` Its imports at the PR's head: ${sites.map(siteLabel).join(", ")}.` : "";
-  return `In ${where}, I overturn ${stopped(what)}${imports} Undo it and tell me what you changed.`;
+  const flagged = row.flags?.length ? ` The map text review flagged it: ${row.flags.join(" ")}` : "";
+  return `In ${where}, I overturn ${stopped(what)}${imports}${flagged} Undo it and tell me what you changed.`;
 }
 
 // Puts `prompt` on the clipboard through `writeText` (`navigator.clipboard.writeText`): "copied", or "manual" when there is no clipboard or
@@ -196,3 +198,44 @@ export function sheetLinkItem(link: { id: string; from: string; to: string; kind
 // brief; none when the check passed, the head has no map, or the brief was stored before it.
 export const mapCheckLine = (problems: string[] | undefined): string | null =>
   problems?.length ? `The map check fails at this head: ${problems.length} ${problems.length === 1 ? "problem" : "problems"}` : null;
+
+// The Map text review's item ids (#642) by the Ratify row they belong to: a part's own text and its held items are its part row's.
+const reviewPrefixes: Record<string, string[]> = { part: ["part"], link: ["link"], law: ["law"] };
+const fieldWords: Record<string, string> = { name: "Name", purpose: "Purpose", caption: "Caption", reason: "Reason", text: "Text" };
+
+/**
+ * What the Map text review flagged on `row` (#645, spec #634 "Ratify's display"), one line per flagged item, as the not-confirmed popover
+ * lists it: the field, the verdict, the reviewer's why and the lines it cites. A held item is named as the row's detail names it. None for
+ * an unflagged row, a decision, or no review.
+ */
+export function reviewFlags(review: MapReview | null, row: Pick<RatifyRow, "kind" | "id" | "detail">): string[] {
+  const prefixes = row.kind === "part" ? ["part", "held"] : (reviewPrefixes[row.kind] ?? []);
+  const holds = row.detail?.of === "part" ? row.detail.holds : [];
+  return (review?.items ?? []).flatMap((item) => {
+    const at = item.id.indexOf(":");
+    const slash = item.id.lastIndexOf("/");
+    if (!item.flagged || at < 0 || slash < at) return [];
+    const [kind, id, field] = [item.id.slice(0, at), item.id.slice(at + 1, slash), item.id.slice(slash + 1)];
+    if (!prefixes.includes(kind) || id !== row.id) return [];
+    const label = kind === "held" ? `Holds ${holds[Number(field) - 1]?.name ?? `item ${field}`}` : (fieldWords[field] ?? field);
+    const cites = item.cites.length ? ` See ${item.cites.join(", ")}.` : "";
+    return [`${label} (${item.verdict}): ${stopped(item.why)}${cites}`];
+  });
+}
+
+/**
+ * The Map text review's line at Ratify's head (#645): its words, and the button that starts it, "Review map text" before any review of a
+ * PR not by Daniel's login, "Run again" after a failure (both `map_review_start`). None when the head changed no map text.
+ */
+export function reviewLine(review: MapReview | null): { line: string | null; start: "Review map text" | "Run again" | null } | null {
+  if (!review) return null;
+  if (review.state === "idle") return { line: null, start: "Review map text" };
+  if (review.state === "reviewing") return { line: "Reviewing map text…", start: null };
+  if (review.state === "failed") return { line: review.line ? `Map text review failed: ${review.line}` : "Map text review failed", start: "Run again" };
+  return { line: `Map text review: ${review.checked} checked, ${review.flagged} flagged`, start: null };
+}
+
+// Whether Ratify's head alone brings the Ratify step, with nothing to ratify (`ratifyStep`'s `head`): the map check fails at the PR's head
+// (#641), or the Map text review runs or has flagged something (#645).
+export const headBrings = (problems: string[] | undefined, review: MapReview | null): boolean =>
+  !!mapCheckLine(problems) || review?.state === "reviewing" || (review?.flagged ?? 0) > 0;
