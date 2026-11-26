@@ -5,7 +5,9 @@
 mod cargo;
 #[cfg(test)]
 mod contract;
+mod dart;
 mod dotnet;
+mod folders;
 mod go;
 mod java;
 mod names;
@@ -24,6 +26,7 @@ use std::{
 use serde::Serialize;
 
 use crate::PartFiles;
+use folders::folder_of;
 
 /// A reader of one language's code, or of one kind of build manifest.
 pub(crate) trait Extractor {
@@ -165,7 +168,7 @@ pub(crate) struct Pair {
     /// The lines of `from` that make the pair, each an import site (spec #477, "What an import site is"): a `use` line
     /// once however many names it brings in, an inline path once per line. Empty when the extractor finds no line.
     pub(crate) lines: BTreeSet<u32>,
-    /// A crate root's `mod` line: kept for the check, left out of the imports report.
+    /// A crate root's `mod` line or a Dart library's `part` line: kept for the check, left out of the imports report.
     pub(crate) declaration: bool,
     /// The one target an import named that covers several files (a Go package's folder, say): the imports report
     /// counts the pairs of one import of it as one unit per part. None for a pair that is its own unit.
@@ -347,11 +350,6 @@ pub(crate) fn read_parts<'p>(
         })
         .map(|part| part.id.as_str())
         .collect()
-}
-
-/// The folder holding `file`, as a prefix: empty for the root, else ending in `/`.
-fn folder_of(file: &str) -> &str {
-    file.rfind('/').map_or("", |at| &file[..=at])
 }
 
 /// The name a folder's files go by as a pair's group: the folder, or `./` for the root.

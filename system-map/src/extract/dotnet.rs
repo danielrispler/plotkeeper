@@ -5,7 +5,7 @@ use std::borrow::Cow;
 
 use quick_xml::{Reader, XmlVersion, escape::resolve_predefined_entity, events::Event};
 
-use super::{Extractor, Output, Pair, Repo, Unsure};
+use super::{Extractor, Output, Pair, Repo, Unsure, folders::folder_of};
 
 pub(crate) struct DotnetProjects;
 
@@ -326,11 +326,6 @@ fn names_mstest_sdk(value: &str) -> bool {
             .next()
             .is_some_and(|name| name.trim().eq_ignore_ascii_case("MSTest.Sdk"))
     })
-}
-
-/// The folder holding `file`, as a prefix: empty for the root, else ending in `/`.
-fn folder_of(file: &str) -> &str {
-    file.rfind('/').map_or("", |at| &file[..=at])
 }
 
 /// The pieces of an `Include`, in MSBuild's order, which splits the value while it is still escaped: split on `;`,

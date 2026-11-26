@@ -2,6 +2,7 @@
 
 mod binary;
 mod common;
+mod dart;
 mod dotnet;
 mod edges;
 mod go;
