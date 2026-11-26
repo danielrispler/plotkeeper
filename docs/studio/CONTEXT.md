@@ -282,7 +282,7 @@ The import sites (file and line) behind an `import` link a PR adds, shown on its
 _Avoid_: Evidence line (that is a turn's line in the rail, of files and checks)
 
 **Part catch-up**:
-One story, in the **PR brief**'s reader and shape (a single story of three or four steps), of everything that landed in one fogged part since Daniel last caught up: every PR and direct push in its **Fog**, ordered by behaviour. A fogged part's sheet offers it as the main button, before "I know this"; reading it to the end clears that part's fog and completes no PR brief.
+One story, in the **PR brief**'s reader and shape (a single story of three or four steps), of everything that landed in one fogged part since Daniel last caught up: every PR and direct push in its **Fog**, ordered by behaviour. A fogged part's sheet offers it as the main button, before "I know this"; reading it to the end clears that part's fog and completes no PR brief. While a newer one is written after more fog landed, the sheet offers the one stored for the earlier fog list, "Read the one you have", when every entry it covers is still fogged; reading it to the end clears only those entries.
 _Avoid_: Catch-up (alone — the setting that writes briefs at start is the brief backfill), summary
 
 **Refresher**:

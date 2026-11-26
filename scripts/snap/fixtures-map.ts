@@ -127,6 +127,37 @@ export const mapCaughtUp = (): Fixture =>
       if ([...sheet.querySelectorAll(".sheet-heading")].some((h) => h.textContent === "Fog")) log("snap:fail the Fog section is still drawn");
       log("caught up ok");`, { map_state: mapState(), snapDone: "caught up ok" });
 /**
+ * A part whose fog grew since its catch-up was written (#638): while the new one is written, Understanding's catch-up card says so and offers
+ * "Read the one you have", described by the line naming the two of its three changes the stored one covers.
+ */
+export const mapCatchUpOlder = (): Fixture => {
+  const entry = (c: string, pr: number) => ({ commit: c.repeat(40), strength: "thick" as const, pr, why: ["paths"] });
+  const user = mapState().user;
+  const outline = { title: "Briefs are written in the background", steps: [{ k: "Where", h: "Understanding writes each brief" }] };
+  return mapOpened(`
+      document.querySelector("#map .plate[data-id=understanding]").click();
+      await wait(300);
+      const sheet = document.querySelector("#map-sheet .sheet");
+      const card = sheet.querySelector(".catch-up-card");
+      if (!card) return log("snap:fail no catch-up card");
+      const buttons = [...card.querySelectorAll("button")].map((b) => b.textContent);
+      if (buttons.join("|") !== "Catch up|I know this|Read the one you have") log("snap:fail the card's buttons: " + buttons.join("|"));
+      if (card.querySelector(".sheet-catch-up-note")?.textContent !== "Checking claims…") log("snap:fail the stage: " + card.querySelector(".sheet-catch-up-note")?.textContent);
+      if (card.querySelector(".catch-up-steps")) log("snap:fail the older one's outline is on the card");
+      const read = card.querySelector(".sheet-catch-up-older");
+      const line = read && document.getElementById(read.getAttribute("aria-describedby"));
+      if (line?.textContent !== "Covers 2 of 3 changes: #598, #605") log("snap:fail the older line: " + line?.textContent);
+      if (card.getBoundingClientRect().right > sheet.getBoundingClientRect().right + 1) log("snap:fail the card overflows the sheet");
+      log("older catch-up ok");`, {
+    map_state: mapState({
+      fog: { understanding: "thick" },
+      user: { ...user, fog: { first: null, processed: null, reads: {}, parts: { understanding: [entry("e", 598), entry("d", 605), entry("c", 612)] } } },
+      catch_ups: { understanding: { kind: "catch-up", ready: false, writing: true, failed: false, stage: { kind: "checking" }, older: { outline, fog: ["e".repeat(40), "d".repeat(40)] } } },
+    }),
+    snapDone: "older catch-up ok",
+  });
+};
+/**
  * A brief step that lights the second link of a pair (spec #473): the light runs along the pair's one line, from Understanding to Shell,
  * though the line is drawn from Shell, the end of the pair's first link.
  */

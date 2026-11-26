@@ -237,14 +237,15 @@ export async function openBriefOf(project: string, number: number, chapter: numb
 }
 
 /**
- * Opens `part`'s catch-up: the stored one for its current fog, or, while it is written, the panel says which call of the write runs, the map
+ * Opens `part`'s catch-up: the stored one for its current fog (with `older`, "Read the one you have" (#638): the one stored for an earlier list
+ * while all of it is still fogged, which plays under its own list's number and clears only that list), or, while it is written, the panel says which call of the write runs, the map
  * stays usable, and it opens when it lands (`map-landed` draws the map again), unless another open or a close came since.
  */
-export async function openCatchUpOf(project: string, part: string) {
+export async function openCatchUpOf(project: string, part: string, older = false) {
   // The card says which call of the write runs (#450), as the map's last state has it.
   const writing = () => stageOf(currentMap()?.state.catch_ups?.[part]);
   const asked = await ask(
-    () => invoke("part_catch_up", { project, part }),
+    () => invoke("part_catch_up", older ? { project, part, older } : { project, part }),
     // A catch-up has no tray row for the wait to mark.
     () => showWriting(null, writing(), CATCH_UP_WAIT),
     failure("part_catch_up"),
