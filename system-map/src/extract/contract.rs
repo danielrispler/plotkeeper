@@ -33,6 +33,8 @@ pub(crate) enum MissingConfig {
         file: &'static str,
         says: &'static str,
     },
+    /// The extractor has no config file, so there is nothing to leave out.
+    None,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -150,6 +152,7 @@ fn a_missing_config_gives_what_the_kit_declares() {
                 let found = without(file);
                 assert_eq!(found.problems, Vec::<String>::new(), "{}", extractor.name());
             }
+            MissingConfig::None => {}
             MissingConfig::Problem { file, says } => {
                 let found = without(file);
                 assert!(
@@ -167,7 +170,15 @@ fn a_missing_config_gives_what_the_kit_declares() {
 fn a_malformed_config_gives_at_least_one_problem() {
     for (extractor, kit) in kits() {
         let (MissingConfig::Fallback { file: config }
-        | MissingConfig::Problem { file: config, .. }) = kit.missing_config;
+        | MissingConfig::Problem { file: config, .. }) = kit.missing_config
+        else {
+            assert!(
+                skips(&kit, Case::MalformedConfig),
+                "{}: has no config, so skip the case with a reason",
+                extractor.name()
+            );
+            continue;
+        };
         let Some(text) = kit.malformed_config else {
             assert!(
                 skips(&kit, Case::MalformedConfig),
