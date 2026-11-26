@@ -125,10 +125,20 @@ h1 { margin: 0 0 var(--sp-4); }
 .row .failed { font-weight: 600; color: var(--fg); }
 .unattached { margin: var(--sp-1) 0 0; padding-inline-start: calc(var(--sp-4) + var(--indent) * 3); font-size: var(--size-small); color: var(--muted); }
 /* A project's group (#97): its header, always shown, with its most urgent state; a folder outside every project is dimmed. */
-.project-head { display: flex; align-items: center; margin-top: var(--sp-4); }
-/* Its header switches the map (#386): quiet, in the faint tone, the shown project's a step brighter. */
-.project-toggle { display: flex; flex: 1; gap: var(--sp-3); align-items: center; min-width: 0; padding: var(--sp-2) var(--sp-4); border-radius: var(--radius); font-size: var(--size-xs); font-weight: 500; color: var(--faint); text-align: start; background: none; border: 0; font-family: inherit; cursor: pointer; }
+.project-head { position: relative; display: flex; align-items: center; margin-top: var(--sp-4); }
+/* Its header switches the map (#386): quiet, in the faint tone, the shown project's a step brighter. Its name starts at the header's start,
+   with the chevron's slot inside its padding, so every header's name lines up and its hint, at its start, opens left of the list (spec #658). */
+.project-toggle { display: flex; flex: 1; gap: var(--sp-3); align-items: center; min-width: 0; padding-block: var(--sp-2); padding-inline: calc(var(--control) + var(--sp-4)) var(--sp-4); border-radius: var(--radius); font-size: var(--size-xs); font-weight: 500; color: var(--faint); text-align: start; background: none; border: 0; font-family: inherit; cursor: pointer; }
 .project-toggle:hover { background: var(--hover); }
+/* Its chevron (#674) folds the group: a control-sized button over the name's start, before it in the DOM, turned down while the group is
+   open as a row's is; it sits above the name, so a press on it folds rather than shows the map. */
+.project-head .fold { position: absolute; inset-inline-start: 0; inset-block: 0; z-index: 1; margin-block: auto; display: grid; place-items: center; width: var(--control); height: var(--control); padding: 0; border: 0; border-radius: var(--radius-small); background: none; color: var(--muted); cursor: pointer; }
+.project-head .fold:hover { color: var(--fg); background: var(--hover); }
+.project-head .fold svg { width: var(--icon); height: var(--icon); transition: transform var(--motion); }
+.project-head .fold[aria-expanded="true"] svg { transform: rotate(90deg); }
+.project-head .fold:dir(rtl) svg { transform: scaleX(-1); }
+.project-head .fold[aria-expanded="true"]:dir(rtl) svg { transform: scaleX(-1) rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .project-head .fold svg { transition: none; } }
 .project-head.current .project-toggle { color: var(--muted); }
 /* The header's quiet dot (#386): Home's mark, drawn as the map's mist; its hover names what lit it. */
 .project-toggle .project-dot { flex: none; margin-inline: auto 0; background: var(--mist-thick); filter: blur(var(--sp-1)); }

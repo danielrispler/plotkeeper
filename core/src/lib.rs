@@ -46,7 +46,7 @@ pub use session::{
     Prompt, Question, Revive, Sender, Session, SinceSeen, Source, Span, State, Status, Step,
     Stopped, Subagent, Terminal, Turn,
 };
-pub use studio::{Selection, Studio, TaskFacts, TaskQuery};
+pub use studio::{BranchQuery, Selection, Studio, TaskFacts, TaskQuery};
 pub use transcript::{Context, LogEntry, SubagentLog, SubagentLogFile, Transcript};
 pub use turn_files::{
     Numstat, RootDiff, TurnDiff, TurnFile, TurnFiles, TurnFilesSnapshot, TurnTrees,

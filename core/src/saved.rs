@@ -54,6 +54,12 @@ impl Studio {
                 state.roots = std::mem::take(&mut self.roots);
                 state.summaries_on_open = self.summaries_on_open;
                 state.check_lists = std::mem::take(&mut self.check_lists);
+                // A session saved before its project folder (spec #659) belongs to its saved folder's project.
+                for session in state.sessions.values_mut() {
+                    if session.project.is_empty() {
+                        session.project = crate::session::project_of(&session.cwd).into();
+                    }
+                }
                 *self = state;
                 self.log_end
             }

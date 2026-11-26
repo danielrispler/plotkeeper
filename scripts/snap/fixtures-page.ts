@@ -30,7 +30,7 @@ export const logFixture = (status: string): Fixture => {
  * right over it when the button is near the window's bottom edge, where the flipped case pads the list until the header sits there.
  */
 export const projectMenuScript = (nearBottom: boolean) => `
-    const more = named("pokedex").querySelector(".project-more");
+    const more = named("falinks").querySelector(".project-more");
     // The list is padded until the button's bottom is 16 px over the window's, too near for the menu under it. In \`vh\`, as headless
     // Chrome's window takes its full height only at its first frame; in a style sheet, as the list's redraws reset its own style.
     ${nearBottom ? 'document.head.appendChild(document.createElement("style")).textContent = "#groups { padding-top: calc(100vh - 16px - " + more.getBoundingClientRect().bottom + "px); }"; await wait(50);' : ""}
@@ -53,25 +53,26 @@ export const projectMenuScript = (nearBottom: boolean) => `
     log("project menu ok");`;
 
 // The session list holding what Home held (#382): second lines on needs-you (its question), running (its Intention) and unseen (its last
-// Headline) rows only, and "Clear landed" at the list's end while a session has landed.
+// Headline) rows only, and "Clear landed" at the list's end while a session has landed. s2 ran `cd ui`: its folder is plotkeeper's `ui`,
+// its project still plotkeeper (spec #659).
 const listLines = (): Fixture => {
   const now = Date.now();
   const intention = (text: string) => ({ ...session("x", "x", "idle").transcript, intention: text });
   const sessions = [
     session("s1", "Ship PR 286", "needs_you", {
-      cwd: "/w/plotkeeper", line: "Bash gh pr merge 286",
+      cwd: "/w/plotkeeper", project: "/w/plotkeeper", line: "Bash gh pr merge 286",
       questions: [{ tool_use_id: "q1", agent: null, answer: "open", turn: null, questions: [{ question: "Merge PR 286 now, or wait for the snap job?", options: [] }] }],
     }),
-    session("s2", "Correctness pass, #285", "running", { cwd: "/w/plotkeeper", line: "Read ui/list.ts", transcript: intention("Checking each claim in the brief against the code it cites.") }),
-    session("s3", "Snap fails in Chrome, #282", "running", { cwd: "/w/plotkeeper", line: "Bash npm run snap", transcript: intention("Printing Chrome's own error to the snap log so a failure says why.") }),
+    session("s2", "Correctness pass, #285", "running", { cwd: "/w/plotkeeper/ui", project: "/w/plotkeeper", folder_name: "ui", line: "Read ui/list.ts", transcript: intention("Checking each claim in the brief against the code it cites.") }),
+    session("s3", "Snap fails in Chrome, #282", "running", { cwd: "/w/plotkeeper", project: "/w/plotkeeper", line: "Bash npm run snap", transcript: intention("Printing Chrome's own error to the snap log so a failure says why.") }),
     session("s4", "Stored fixtures, #280", "your_turn", {
-      cwd: "/w/plotkeeper", unseen: true,
+      cwd: "/w/plotkeeper", project: "/w/plotkeeper", unseen: true,
       turns: [{ started_at: now - 40 * 60e3, ended_at: now - 22 * 60e3, prompt: "Load the older briefs", id: null, message: "Older stored briefs load again; the reader accepts both shapes.", checks: [], listed: [], files: null }],
     }),
-    session("s5", "Archive the Tauri app, #332", "your_turn", { cwd: "/w/plotkeeper", landed: true }),
-    session("s6", "Strava-style running tracker", "your_turn", { cwd: "/w/timburr", line: "Done." }),
-    session("s7", "Night Out Mode", "running", { cwd: "/w/fluffy", line: "Edit probe.ts", transcript: intention("Building the probe for the venue list.") }),
-    session("s8", "#48 · Agent deadline", "ended", { cwd: "/w/plotkeeper", landed: true }),
+    session("s5", "Archive the Tauri app, #332", "your_turn", { cwd: "/w/plotkeeper", project: "/w/plotkeeper", landed: true }),
+    session("s6", "Strava-style running tracker", "your_turn", { cwd: "/w/timburr", project: "/w/timburr", line: "Done." }),
+    session("s7", "Night Out Mode", "running", { cwd: "/w/fluffy", project: "/w/fluffy", line: "Edit probe.ts", transcript: intention("Building the probe for the venue list.") }),
+    session("s8", "#48 · Agent deadline", "ended", { cwd: "/w/plotkeeper", project: "/w/plotkeeper", landed: true }),
   ];
   return { ...base, sessions, selected: null };
 };
@@ -88,6 +89,11 @@ export const listSecondLines = (): Fixture => ({
   ...listLines(),
   snapScript: `${listChecks}
       if (!clear() || clear().textContent !== "Clear landed") log("snap:fail no Clear landed at the list's end");
+      // A session whose folder changed to a subfolder stays under its project (spec #659).
+      const heads = [...document.querySelectorAll("#groups .project-head .name")].map((name) => name.textContent).join();
+      if (heads !== "plotkeeper,timburr,fluffy") log("snap:fail the project headers: " + heads);
+      const group = document.querySelector('#groups .session-row[data-key="s2 "]')?.closest(".project");
+      if (group?.querySelector(".project-head .name")?.textContent !== "plotkeeper") log("snap:fail the session that ran cd ui left plotkeeper");
       const probe = document.body.appendChild(document.createElement("span"));
       probe.style.color = "var(--faint)";
       const faint = getComputedStyle(probe).color;
@@ -475,22 +481,55 @@ export const alerts = () => {
   return { ...base, sessions, selected: { session: sessions[1], agent: null }, snapScript, contrast: true };
 };
 /**
- * The saved project list (#381): a project with no sessions keeps its header, after the one with sessions; a gone one is
- * struck through; a header's "⋯" offers Remove project.
+ * The saved project list (#381): a project with no sessions keeps its header, after the one with sessions; a gone or temporary one with no
+ * live session has none, so nothing is struck through (spec #659); a header's "⋯" offers Remove project.
  */
 export const projectsSaved = () =>
   withSaved(`
     const order = heads().map((head) => head.querySelector(".name").textContent).join();
-    if (order !== "plotkeeper,falinks,pokedex") log("snap:fail the headers' order: " + order);
+    if (order !== "plotkeeper,falinks") log("snap:fail the headers' order: " + order);
     if (named("falinks")?.closest(".project").querySelector(".row")) log("snap:fail a project with no sessions shows rows");
-    if (!named("pokedex")?.classList.contains("gone")) log("snap:fail the gone project's header is not marked gone");
+    const struck = heads().filter((head) => head.classList.contains("gone") || getComputedStyle(head.querySelector(".name")).textDecorationLine.includes("line-through"));
+    if (struck.length) log("snap:fail a header is struck through: " + struck.map((head) => head.dataset.project).join());
     // Remove project is offered only for a project with no live session: one with sessions would come back with their next event.
     if (named("plotkeeper").querySelector(".project-more")) log("snap:fail a project with live sessions offers Remove project");
-    named("pokedex").querySelector(".project-more").click();
+    named("falinks").querySelector(".project-more").click();
     await wait(100);
     const menu = document.getElementById("project-actions");
     if (!menu.matches(":popover-open") || menu.textContent.trim() !== "Remove project") log("snap:fail the header's menu does not offer Remove project");
     log("headers " + order);`);
+
+/**
+ * A project header's chevron (#674): it folds and unfolds its group and the fold survives a redraw; the name always opens the map, the
+ * shown project's included, and has no `aria-expanded`; the chevron's name and `aria-expanded` are its own; a project with no live
+ * session has no chevron.
+ */
+export const projectChevron = () =>
+  withSaved(`
+    const group = (name) => named(name).closest(".project");
+    const chevron = (name) => named(name).querySelector(".fold");
+    const button = chevron("plotkeeper");
+    if (!button) return log("snap:fail a project with live sessions has no chevron");
+    if (button.getAttribute("aria-label") !== "Sessions of plotkeeper") log("snap:fail the chevron is named " + button.getAttribute("aria-label"));
+    if (window.__snapName(button) !== "Sessions of plotkeeper") log("snap:fail the chevron's accessible name is " + window.__snapName(button));
+    if (button.getAttribute("aria-expanded") !== "true" || !group("plotkeeper").querySelector(".row")) log("snap:fail the group starts folded");
+    if (chevron("falinks")) log("snap:fail a project with no live session has a chevron");
+    const toggle = named("plotkeeper").querySelector(".project-toggle");
+    if (toggle.hasAttribute("aria-expanded")) log("snap:fail the project's name carries aria-expanded");
+    chevron("plotkeeper").click();
+    await wait(100);
+    if (chevron("plotkeeper").getAttribute("aria-expanded") !== "false" || group("plotkeeper").querySelector(".row")) log("snap:fail the chevron did not fold the group");
+    // The fold survives the list being drawn again, by pressing another project's name and back.
+    named("falinks").querySelector(".project-toggle").click();
+    await wait(200);
+    if (chevron("plotkeeper").getAttribute("aria-expanded") !== "false" || group("plotkeeper").querySelector(".row")) log("snap:fail the fold did not survive an update");
+    named("plotkeeper").querySelector(".project-toggle").click();
+    await wait(200);
+    if (!named("plotkeeper").classList.contains("current") || group("plotkeeper").querySelector(".row")) log("snap:fail the name did not open the map without unfolding");
+    chevron("plotkeeper").click();
+    await wait(100);
+    if (chevron("plotkeeper").getAttribute("aria-expanded") !== "true" || !group("plotkeeper").querySelector(".row")) log("snap:fail the chevron did not unfold the group");
+    log("chevron ok");`);
 
 /**
  * The hints (spec #582, ticket 1), with real input: the pointer on the top bar's gear opens its hint after the delay, beside the gear, and
@@ -624,3 +663,82 @@ export const cutTextStill = (): Fixture => ({
       log("cut text still ok");`,
   motion: "reduce", snapDone: "cut text still ok",
 });
+
+/**
+ * The held order (spec #659): while the pointer is in the list, a session that changed state keeps its row, with its new glyph, its group
+ * keeps its place, a new session joins the end of its project's group, and the strip holds the same way; ⌘] and ↓ follow the order on
+ * screen. The strip's flat list reads the sidebar's order, held or not. The pointer on a hint of the list's, which opens outside `.list`,
+ * is still in the list, also once the hint's row is gone; when it leaves the hint for the map, the list and the strip take the real order. The pointer's moves are synthetic
+ * events on `.list` and the hint.
+ */
+export const listHeld = (): Fixture => {
+  const plotkeeper = { cwd: "/w/plotkeeper", project: "/w/plotkeeper" };
+  const timburr = { cwd: "/w/timburr", project: "/w/timburr", folder_name: "timburr" };
+  const sessions = [
+    session("s1", "Fix the hook", "running", plotkeeper),
+    session("s3", "Running tracker", "running", timburr),
+    session("s2", "Write the docs", "your_turn", plotkeeper),
+  ];
+  // s3 and s2 now need you and s4 started: unheld, timburr's group goes first and s2 above s1. In the server's order, which is not the
+  // sidebar's, so the strip shows which one it reads.
+  const later = [
+    session("s3", "Running tracker", "needs_you", timburr),
+    session("s1", "Fix the hook", "running", plotkeeper),
+    session("s4", "Review the PR", "running", plotkeeper),
+    session("s2", "Write the docs", "needs_you", plotkeeper),
+  ];
+  return {
+    ...base,
+    sessions,
+    selected: { session: sessions[0], agent: null },
+    snapScript: `
+      const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+      await wait(300);
+      const rows = () => [...document.querySelectorAll("#groups .session-row")].map((row) => row.dataset.key.trim()).join();
+      const heads = () => [...document.querySelectorAll("#groups .project-head .name")].map((name) => name.textContent).join();
+      const strip = () => [...document.querySelectorAll("#strip button")].map((button) => button.dataset.key).filter((key) => key.startsWith("strip s")).map((key) => key.slice(6)).join();
+      const word = (id) => document.querySelector('#groups .session-row[data-key="' + id + ' "] .glyph')?.getAttribute("aria-label");
+      const selected = () => document.querySelector("#groups .session-row[aria-pressed=true]")?.dataset.key.trim();
+      const expect = (what, got, want) => got !== want && log("snap:fail " + what + ": " + got + ", not " + want);
+      expect("the rows before", rows(), "s1,s2,s3");
+      expect("the strip before", strip(), "s1,s2,s3");
+      const list = document.querySelector(".list");
+      list.dispatchEvent(new PointerEvent("pointerenter"));
+      window.__snapEmit("sessions", ${JSON.stringify(later)});
+      await wait(200);
+      expect("the held rows", rows(), "s1,s2,s4,s3");
+      expect("the held headers", heads(), "plotkeeper,timburr");
+      expect("the held strip", strip(), "s1,s2,s3,s4");
+      expect("s2's glyph while held", word("s2"), "Needs you");
+      expect("s3's glyph while held", word("s3"), "Needs you");
+      // A press shows its row selected at once, before the stub's empty \`select\` reply clears the selection, so it is read at once.
+      document.dispatchEvent(new KeyboardEvent("keydown", { code: "BracketRight", key: "]", metaKey: true, bubbles: true }));
+      expect("the session after s1 by ⌘] while held", selected(), "s2");
+      await wait(200);
+      expect("the rows after ⌘]", rows(), "s1,s2,s4,s3");
+      // ↓ moves in the list from the row that has the focus, so it is pressed there.
+      const fourth = document.querySelector('#groups .session-row[data-key="s4 "]');
+      fourth.focus();
+      fourth.dispatchEvent(new KeyboardEvent("keydown", { code: "ArrowDown", key: "ArrowDown", bubbles: true }));
+      expect("the row after s4 by ↓ while held", document.activeElement?.dataset.key?.trim(), "s3");
+      await wait(200);
+      // A row's hint opens in \`#hints\`, outside \`.list\`: the pointer moving onto it leaves \`.list\` and stays in the list.
+      const owner = document.querySelector('#groups .session-row[data-key="s1 "]');
+      const onHint = document.getElementById(owner.getAttribute("interestfor") ?? owner.getAttribute("data-hint"));
+      if (!onHint) return log("snap:fail s1's row has no hint");
+      list.dispatchEvent(new PointerEvent("pointerleave", { relatedTarget: onHint }));
+      await wait(200);
+      expect("the rows with the pointer on a row's hint", rows(), "s1,s2,s4,s3");
+      // s1 ends while the pointer rests on its hint: its row leaves at once, and leaving the hint still ends the hold.
+      window.__snapEmit("sessions", ${JSON.stringify(later.filter(({ id }) => id !== "s1"))});
+      await wait(200);
+      expect("the rows once s1 ended under its hint", rows(), "s2,s4,s3");
+      onHint.dispatchEvent(new PointerEvent("pointerout", { bubbles: true, relatedTarget: document.querySelector("#map") }));
+      await wait(200);
+      expect("the rows once the pointer left", rows(), "s3,s2,s4");
+      expect("the headers once the pointer left", heads(), "timburr,plotkeeper");
+      expect("the strip once the pointer left", strip(), "s3,s2,s4");
+      log("held ok");`,
+    snapDone: "held ok",
+  };
+};

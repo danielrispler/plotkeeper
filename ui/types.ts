@@ -184,6 +184,9 @@ export type Session = {
   // The folder it works in, from its latest event; `folder_name` is its last segment.
   cwd: string;
   folder_name: string;
+  // Its project folder (spec #659): the root of the first folder it got (git's top level, else that folder), a task's worktree's
+  // main checkout, set once. The list groups by it, and the map, History and the selection read it.
+  project: string;
   // The studio terminal it runs in, its `PLOTKEEPER_TERMINAL_ID`; null when it runs outside the studio.
   terminal: string | null;
   // Another agent than Claude Code, from its terminal's OSC 7501 status only (danielrispler/Falinks#560): no intention,
@@ -681,8 +684,11 @@ export type CommitFiles = { commit: string; short: string; label: string; url: s
  */
 export type PrDiffArgs = { project: string; number: number; head: string; title: string; parts?: string[]; paths?: string[]; base?: string };
 
-/** A project of the saved list (`server/src/projects.rs`): its main checkout, and whether its folder was moved or deleted. */
-export type SavedProject = { path: string; gone: boolean };
+/**
+ * A project of the saved list (`server/src/projects.rs`): its main checkout, whether its folder was moved or deleted, and whether it is
+ * under one of the system's temporary folders (spec #659).
+ */
+export type SavedProject = { path: string; gone: boolean; temporary: boolean };
 
 /** What the page asks at start (#527): plotkeeper's package version, for the toast after an update (`whats-new.ts`). */
 export type About = { version: string };
@@ -769,7 +775,7 @@ export interface Commands {
   micro_world_page: { args: Project & { key: string }; reply: string };
   brief_chapter_done: { args: InPr & { chapter: number; head: string }; reply: void };
   brief_since_done: { args: InPr & { head: string }; reply: void };
-  briefs_waiting: { args: { cwd: string }; reply: WaitingBriefs | null };
+  briefs_waiting: { args: { project: string }; reply: WaitingBriefs | null };
   pr_ratify: { args: InPr; reply: RatifyRow[] };
   pr_map_review: { args: InPr; reply: MapReview | null };
   map_review_start: { args: InPr; reply: MapReview | null };

@@ -29,7 +29,7 @@
       "purpose": "Plain Rust logic that reads the event log's lines in order and knows every session's turns, checks, subagents and whether it needs you.",
       "holds": [
         { "name": "The agent adapters", "text": "Turn each agent's hook line into one neutral event: Claude Code, agy, Codex, Copilot, Cursor and Qwen Code.", "paths": ["core/src/claude.rs", "core/src/agy.rs", "core/src/codex.rs", "core/src/copilot.rs", "core/src/cursor.rs", "core/src/qwen.rs", "core/src/event.rs"] },
-        { "name": "Session state", "text": "The sessions, their turns and subagents, and whether one needs you, from the events one at a time.", "paths": ["core/src/studio.rs", "core/src/studio/take.rs", "core/src/session.rs", "core/src/output.rs", "core/src/saved.rs"] },
+        { "name": "Session state", "text": "The sessions, the project each started in, their turns and subagents, and whether one needs you, from the events one at a time.", "paths": ["core/src/studio.rs", "core/src/studio/take.rs", "core/src/session.rs", "core/src/output.rs", "core/src/saved.rs"] },
         { "name": "The step ledger", "text": "One row for every tool call of a session, its workers' included, and which of them were checks.", "paths": ["core/src/ledger.rs", "core/src/checks.rs"] },
         { "name": "The transcript reader", "text": "A tolerant reader of a session's transcript, for what the session is doing and why.", "paths": ["core/src/transcript.rs"] }
       ],
@@ -106,7 +106,7 @@
       "purpose": "The page: the Map view as its base, beside the session list. It shows state and sends your actions to the server.",
       "holds": [
         { "name": "The Map view", "text": "The parts, links and fog, a part's sheet with history and ratify, the PR brief, panels' explanations, pre-flight and micro-world overlays.", "paths": ["ui/map.ts", "ui/map-model.ts", "ui/map-camera.ts", "ui/map-live.ts", "ui/map-sheet.ts", "ui/map-sheet-folds.ts", "ui/map-brief.ts", "ui/copy-button.ts", "ui/map-brief-player.ts", "ui/map-brief-model.ts", "ui/map-catch-up.ts", "ui/explanations.ts"] },
-        { "name": "The session list", "text": "A header for every saved project, even one with no sessions, whose headers switch the map.", "paths": ["ui/list.ts", "ui/list-model.ts", "ui/projects.ts"] },
+        { "name": "The session list", "text": "A header for every project with a live session and every saved one whose folder is there and not temporary, whose headers switch the map.", "paths": ["ui/list.ts", "ui/list-model.ts", "ui/projects.ts"] },
         { "name": "The left panel", "text": "A session's story, History, a turn's diff, a worker's log or Settings, open over the map.", "paths": ["ui/panel.ts", "ui/story.ts", "ui/diff.ts"] },
         { "name": "The writer's settings", "text": "Pick the program that writes the summaries, or set up an API-key writer, and test it with one tiny call.", "paths": ["ui/settings.ts", "ui/writers.ts"] },
         { "name": "Patch review", "text": "A back a law run's proven test patch, to open as a draft PR or discard.", "paths": ["ui/patch-review.ts"] },

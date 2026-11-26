@@ -1,10 +1,14 @@
 //! The saved project list (spec danielrispler/plotkeeper#380, "Projects"; ticket #381): the repositories plotkeeper keeps, in
-//! `projects.json` in the data folder. A repository joins the first time a session is seen in it, as its main checkout (a
-//! task's worktree `<main>/.claude/worktrees/<task>` belongs to `<main>`, the rule the page's `repositoryOf` uses). It stays
+//! `projects.json` in the data folder. A repository joins the first time a session is seen in it, as the session's project
+//! folder (spec #659: the root of the folder it started in, a task's worktree's main checkout, set once by the core). It stays
 //! after its sessions end or are deleted, and leaves only through Remove project. A removed project comes back only for a
 //! session active after its removal, so the ended sessions still listed never bring it back.
 //!
 //! A saved folder that no longer exists is listed as gone, never as an error, and Remove project works on it.
+//!
+//! A folder under one of the system's temporary folders is temporary (spec #659): it is never saved, and one an earlier build saved is
+//! listed as temporary, as a gone one is listed as gone, and stays in the file, so it too leaves only through Remove project. The page
+//! hides both while they have no live session.
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -17,6 +21,15 @@ use studio_core::Session;
 /// The list's file in the data folder.
 const FILE: &str = "projects.json";
 
+/// The folders under which a folder is temporary: `/tmp` and macOS's per-user temporary folders under `/var/folders`, each also by
+/// the `/private` path macOS resolves it to.
+const TEMPORARY: [&str; 4] = [
+    "/tmp",
+    "/private/tmp",
+    "/var/folders",
+    "/private/var/folders",
+];
+
 /// A saved project, as the page reads it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Project {
@@ -24,6 +37,8 @@ pub struct Project {
     pub path: String,
     /// Its folder was moved or deleted.
     pub gone: bool,
+    /// Its folder is under one of the system's temporary folders.
+    pub temporary: bool,
 }
 
 /// What `projects.json` holds: the projects in the order they joined, and when each removed one was removed, in ms.
@@ -35,36 +50,41 @@ struct Saved {
     removed: BTreeMap<String, u64>,
 }
 
-/// The main checkout a session's folder belongs to: a task's worktree's main checkout, else the folder itself.
-pub fn repository_of(cwd: &str) -> &str {
-    match cwd.rfind("/.claude/worktrees/") {
-        Some(at) if at > 0 && cwd.len() > at + "/.claude/worktrees/".len() => &cwd[..at],
-        _ => cwd,
-    }
-}
-
 /// The saved list, read from its file once and kept in memory.
 pub struct Projects {
     file: PathBuf,
     saved: Mutex<Option<Saved>>,
+    /// The folders under which a folder is temporary.
+    temporary: Vec<PathBuf>,
 }
 
 impl Projects {
-    /// The list kept in `file`.
+    /// The list kept in `file`, with no temporary folders, as the tests' folders are under the system's.
     pub fn at(file: PathBuf) -> Self {
         Projects {
             file,
             saved: Mutex::new(None),
+            temporary: Vec::new(),
         }
     }
 
-    /// The list in the data folder that holds the event log `log`.
+    /// The list in the data folder that holds the event log `log`, with the system's temporary folders.
     pub fn beside(log: &Path) -> Self {
-        Self::at(log.with_file_name(FILE))
+        Projects {
+            temporary: TEMPORARY.iter().map(PathBuf::from).collect(),
+            ..Self::at(log.with_file_name(FILE))
+        }
     }
 
-    /// Adds the repository of each session not yet saved; returns whether the list changed. A removed project is added
-    /// again only for a session whose latest event came after its removal.
+    /// Whether `path` is under one of the temporary folders.
+    fn temporary(&self, path: &str) -> bool {
+        self.temporary
+            .iter()
+            .any(|folder| Path::new(path).starts_with(folder))
+    }
+
+    /// Adds the project folder of each session not yet saved, unless it is temporary; returns whether the list changed. A removed
+    /// project is added again only for a session whose latest event came after its removal.
     #[allow(
         clippy::significant_drop_tightening,
         reason = "the list is changed and written under one lock, so two changes never lose one"
@@ -74,10 +94,10 @@ impl Projects {
         let saved = held.get_or_insert_with(|| read(&self.file));
         let mut changed = false;
         for session in sessions {
-            if session.cwd.is_empty() {
+            let repo = session.project.as_str();
+            if repo.is_empty() || self.temporary(repo) {
                 continue;
             }
-            let repo = repository_of(&session.cwd);
             if saved.projects.iter().any(|p| p == repo) {
                 continue;
             }
@@ -98,7 +118,8 @@ impl Projects {
         Ok(changed)
     }
 
-    /// The saved projects, in the order they joined, each marked gone when its folder is not there.
+    /// The saved projects, in the order they joined, each marked gone when its folder is not there and temporary when it is under a
+    /// temporary folder.
     pub fn list(&self) -> Vec<Project> {
         let mut held = self.saved.lock().unwrap();
         let paths = held
@@ -110,6 +131,7 @@ impl Projects {
             .into_iter()
             .map(|path| Project {
                 gone: !Path::new(&path).is_dir(),
+                temporary: self.temporary(&path),
                 path,
             })
             .collect()
@@ -197,6 +219,7 @@ mod tests {
         let listed = vec![Project {
             path: repo.clone(),
             gone: false,
+            temporary: false,
         }];
         assert_eq!(projects.list(), listed);
 
@@ -250,6 +273,7 @@ mod tests {
             [Project {
                 path: repo.clone(),
                 gone: true,
+                temporary: false,
             }]
         );
         assert_eq!(projects.remove(&repo, T + 1).unwrap(), []);
@@ -274,9 +298,90 @@ mod tests {
     }
 
     #[test]
-    fn a_worktree_belongs_to_its_main_checkout_and_any_other_folder_to_itself() {
-        assert_eq!(repository_of("/r/p/.claude/worktrees/x/ui"), "/r/p");
-        assert_eq!(repository_of("/r/p"), "/r/p");
-        assert_eq!(repository_of("/"), "/");
+    fn a_session_s_project_is_saved_not_the_folders_it_moves_to() {
+        let data = tempfile::tempdir().unwrap();
+        let repo = data.path().display().to_string();
+        let projects = Projects::at(data.path().join(FILE));
+        let studio = Studio::replayed(&[
+            line("s1", "SessionStart", &repo, T),
+            line("s1", "UserPromptSubmit", &format!("{repo}/ui"), T + 1),
+        ]);
+        see(&projects, &studio);
+        let paths: Vec<String> = projects.list().into_iter().map(|p| p.path).collect();
+        assert_eq!(paths, [repo]);
+    }
+
+    #[test]
+    fn a_session_in_a_temporary_folder_is_not_saved() {
+        let data = tempfile::tempdir().unwrap();
+        let scratch = data.path().join("tmp/scratch").display().to_string();
+        let repo = data.path().join("repo").display().to_string();
+        let file = data.path().join(FILE);
+        let projects = Projects {
+            temporary: vec![data.path().join("tmp")],
+            ..Projects::at(file.clone())
+        };
+        let studio = Studio::replayed(&[
+            line("s1", "SessionStart", &scratch, T),
+            line("s2", "SessionStart", &repo, T),
+        ]);
+        see(&projects, &studio);
+        let paths: Vec<String> = Projects::at(file)
+            .list()
+            .into_iter()
+            .map(|p| p.path)
+            .collect();
+        assert_eq!(paths, [repo]);
+    }
+
+    #[test]
+    fn a_saved_temporary_project_is_reported_temporary_and_stays_in_the_file() {
+        let data = tempfile::tempdir().unwrap();
+        let trial = data.path().join("tmp/trial");
+        std::fs::create_dir_all(&trial).unwrap();
+        let trial = trial.display().to_string();
+        let repo = data.path().display().to_string();
+        let file = data.path().join(FILE);
+        let text = serde_json::json!({ "projects": [trial, repo], "removed": {} }).to_string();
+        std::fs::write(&file, &text).unwrap();
+        let projects = Projects {
+            temporary: vec![data.path().join("tmp")],
+            ..Projects::at(file.clone())
+        };
+        let listed = [
+            Project {
+                path: trial.clone(),
+                gone: false,
+                temporary: true,
+            },
+            Project {
+                path: repo.clone(),
+                gone: false,
+                temporary: false,
+            },
+        ];
+        assert_eq!(projects.list(), listed);
+        // A session in it changes nothing: the file is not rewritten, so it leaves only through Remove project.
+        let studio = Studio::replayed(&[line("s1", "SessionStart", &trial, T)]);
+        assert!(!projects.see(&studio.sessions()).unwrap());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), text);
+        assert_eq!(projects.remove(&trial, T + 1).unwrap(), listed[1..]);
+    }
+
+    #[test]
+    fn the_saved_list_in_the_data_folder_marks_the_system_s_temporary_folders() {
+        let data = tempfile::tempdir().unwrap();
+        let log = data.path().join("events.jsonl");
+        std::fs::write(
+            log.with_file_name(FILE),
+            r#"["/private/tmp/tmp.x1", "/tmp/trial", "/var/folders/ab/T/scratch", "/private/var/folders/ab/T/repo", "/tmpfiles", "/w/plotkeeper"]"#,
+        )
+        .unwrap();
+        let temporary: Vec<bool> = Projects::beside(&log)
+            .list()
+            .into_iter()
+            .map(|p| p.temporary)
+            .collect();
+        assert_eq!(temporary, [true, true, true, true, false, false]);
     }
 }

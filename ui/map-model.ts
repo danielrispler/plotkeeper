@@ -443,9 +443,18 @@ export const pressRow = (panel: PanelContent | null, session: string): PanelCont
 /** The session the panel shows (its story, a turn's diff or a worker's log), which is spotlit while it is open, and whose closing selects no session. */
 export const panelSession = (panel: PanelContent | null): string | null =>
   panel?.kind === "story" || panel?.kind === "diff" || panel?.kind === "log" ? panel.session : null;
-/** The project the page opens on (#386): the last viewed, while the list still holds it, else the first; none on a fresh install. */
-export const startProject = (last: string | null, projects: string[]): string | null =>
-  last !== null && projects.includes(last) ? last : (projects[0] ?? null);
+/**
+ * The project the page opens on (#386): the last viewed, while the saved list still holds it, else the first of those the session list
+ * shows (`listed`: not a gone or temporary one, spec #659), else, when it shows none, or the sessions are not read yet, the first saved;
+ * none on a fresh install.
+ */
+export const startProject = (last: string | null, projects: string[], listed: string[]): string | null =>
+  last !== null && projects.includes(last) ? last : (listed[0] ?? projects[0] ?? null);
+/**
+ * Whether the shown project was removed from the saved list (`before` to `now`), so the map gives way: a project never saved, a temporary
+ * one or a live session's, stays shown through another project's change.
+ */
+export const wasRemoved = (shown: string, before: string[], now: string[]): boolean => before.includes(shown) && !now.includes(shown);
 /** What the page shows (#386): a project's map, and what the left panel holds over it. */
 export type PageView = { project: string | null; panel: PanelContent | null };
 /** Selecting a session shows its project's map, with its story, or a worker's log, in the left panel. */
@@ -454,11 +463,10 @@ export const selectedView = (session: string, project: string, agent: string | n
   panel: agent === null ? { kind: "story", session } : { kind: "log", session, agent },
 });
 /**
- * A press on a project header shows that project's map; a session's panel of another project closes with the switch. A press on the shown
- * project's header folds its group, as the header did before it switched projects (#97).
+ * A press on a project's name shows that project's map, the shown one's included; a session's panel of another project closes with the
+ * switch. Folding the group is the header's chevron (#674).
  */
-export function pressHeader(page: PageView, pressed: string, projectOf: (session: string) => string | null): PageView | "fold" {
-  if (pressed === page.project) return "fold";
+export function pressHeader(page: PageView, pressed: string, projectOf: (session: string) => string | null): PageView {
   const session = panelSession(page.panel);
   return { project: pressed, panel: session === null || projectOf(session) === pressed ? page.panel : null };
 }

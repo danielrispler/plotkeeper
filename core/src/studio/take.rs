@@ -316,6 +316,7 @@ impl Take<'_> {
             let last = event.cwd.rsplit('/').next().unwrap_or_default();
             session.folder_name = if last.is_empty() { &event.cwd } else { last }.into();
             let root = self.roots.of(&event.cwd);
+            session.set_project_once(|| root.clone());
             let last = root.rsplit('/').next().unwrap_or_default();
             session.identity.worktree = if last.is_empty() { &root } else { last }.into();
             if let Some(issue) = claimed(command.unwrap_or_default()) {

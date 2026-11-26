@@ -121,6 +121,15 @@ pub struct TaskFacts {
     pub issue_closed: bool,
 }
 
+/// What the shell asks `gh pr view` about: a branch, the folder of a session on it, and that session's project, whose PRs
+/// the answer joins and in whose folder `gh` runs (spec #659).
+#[derive(Clone, Debug, PartialEq)]
+pub struct BranchQuery {
+    pub project: String,
+    pub cwd: String,
+    pub branch: String,
+}
+
 /// What the shell looks up about a task: its worktree folder, its branch, its issue.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TaskQuery {
@@ -1154,6 +1163,7 @@ impl Studio {
                     ..Session::default()
                 });
             row.cwd.clone_from(&t.cwd);
+            row.set_project_once(|| self.roots.of(&t.cwd));
             row.folder_name = folder_name(&t.cwd);
             let program = t.app.as_ref().or(t.foreground.as_ref());
             let program = program.map_or("a program", String::as_str);
@@ -1223,6 +1233,7 @@ impl Studio {
                     ..Session::default()
                 });
             row.cwd.clone_from(&t.cwd);
+            row.set_project_once(|| self.roots.of(&t.cwd));
             row.folder_name = folder_name(&t.cwd);
             row.identity.name = format!("terminal · {}", row.folder_name);
         }
@@ -1312,21 +1323,23 @@ impl Studio {
         Some(turn.reply.clone())
     }
 
-    /// The folder and branch of each session that has not ended, and of the selected one, one per
+    /// The branch, folder and project of each session that has not ended, and of the selected one, one per
     /// branch: what the shell asks `gh pr view` about, off the poll (danielrispler/Falinks#461, decision 19).
-    pub fn branches(&self) -> Vec<(String, String)> {
+    pub fn branches(&self) -> Vec<BranchQuery> {
         let mut seen = BTreeMap::new();
         for session in self.sessions.values() {
             let shown = self.selected.as_ref() == Some(&session.agent.id);
             if let Some(branch) = &session.identity.branch
                 && (session.state != State::Ended || shown)
             {
-                seen.entry(branch.clone()).or_insert(session.cwd.clone());
+                seen.entry(branch.clone()).or_insert_with(|| BranchQuery {
+                    project: session.project.clone(),
+                    cwd: session.cwd.clone(),
+                    branch: branch.clone(),
+                });
             }
         }
-        seen.into_iter()
-            .map(|(branch, cwd)| (cwd, branch))
-            .collect()
+        seen.into_values().collect()
     }
 
     /// The tasks the shell looks up for **Landed**: each worktree of a listed session that is under

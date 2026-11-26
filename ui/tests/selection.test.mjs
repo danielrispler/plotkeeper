@@ -9,12 +9,14 @@ test("selecting a session shows its project's map and opens it in the panel", as
   assert.deepEqual(selectedView("s1", "/w/plotkeeper", "w1"), { project: "/w/plotkeeper", panel: { kind: "log", session: "s1", agent: "w1" } });
 });
 
-test("a project header's click shows its map; on the shown project's header it folds the group (#386)", async () => {
+test("a press on a project's name always shows its map, the shown project's included (#386, #674)", async () => {
   const { pressHeader } = await import("../../dist/map-model.js");
   const projectOf = (id) => ({ s1: "/w/plotkeeper", s2: "/w/falinks" })[id] ?? null;
   const bare = { project: "/w/plotkeeper", panel: null };
   assert.deepEqual(pressHeader(bare, "/w/falinks", projectOf), { project: "/w/falinks", panel: null });
-  assert.equal(pressHeader(bare, "/w/plotkeeper", projectOf), "fold");
+  assert.deepEqual(pressHeader(bare, "/w/plotkeeper", projectOf), { project: "/w/plotkeeper", panel: null });
+  // The shown project's name closes no panel of its own project.
+  assert.deepEqual(pressHeader({ project: "/w/plotkeeper", panel: { kind: "story", session: "s1" } }, "/w/plotkeeper", projectOf), { project: "/w/plotkeeper", panel: { kind: "story", session: "s1" } });
   // A story of another project closes with the switch; History and Settings, which belong to no project, stay.
   assert.deepEqual(pressHeader({ project: "/w/plotkeeper", panel: { kind: "story", session: "s1" } }, "/w/falinks", projectOf), { project: "/w/falinks", panel: null });
   assert.deepEqual(pressHeader({ project: "/w/plotkeeper", panel: { kind: "history" } }, "/w/falinks", projectOf), { project: "/w/falinks", panel: { kind: "history" } });
