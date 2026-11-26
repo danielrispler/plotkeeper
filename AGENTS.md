@@ -64,7 +64,7 @@ Before planning, grilling or explanations, read `docs/agents/learning.md`. Durin
 
 Track issues and specs in GitHub Issues for `danielrispler/plotkeeper`. To read, list or claim issues, read `docs/agents/issue-tracker.md`. To create, edit or resolve issues, read `docs/agents/ticket-authoring.md`.
 
-A ticket or spec lives in GitHub Issues: read it with `gh issue view <n>`. Search for files inside the checkout, your worktree or a named folder, never from `/` or `~` (`find /`, `grep -r /`, a bare `mdfind`): in one session a `find /` for ticket #621 ran over 5 minutes on a machine already at load 31.
+A ticket or spec lives in GitHub Issues: read it with `gh issue view` ("Read and list" in `docs/agents/issue-tracker.md`). Search for files inside the checkout, your worktree or a named folder, never from `/` or `~` (`find /`, `grep -r /`, `mdfind` without `-onlyin`): in one session a `find /` for ticket #621 ran over 5 minutes on a machine already at load 31 on 10 cores (#665).
 
 ### Wayfinder
 
