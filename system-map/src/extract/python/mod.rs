@@ -1,16 +1,18 @@
 //! The `python-imports` extractor: the imports of Python files, read as text with no `python` run (ADR 0002), resolved
 //! against the repository's roots and paired with the files the import runs (spec #589).
 
+mod doubt;
 mod reader;
+mod stdlib;
 
-use std::collections::BTreeSet;
+use std::{cell::RefCell, collections::BTreeMap, collections::BTreeSet};
 
-use reader::{Import, Imported};
+use doubt::Resolution;
 
 use super::{
-    Extractor, Output, Pair, Repo,
+    Extractor, Output, Pair, Repo, Unsure,
     go::{folder_of, group},
-    names::{Lookup, Names},
+    names::Names,
 };
 
 pub(crate) struct PythonImports;
@@ -142,6 +144,8 @@ struct Index<'r, 'a> {
     repo: &'r Repo<'a>,
     /// Each top-level name, with every root that holds something of that name.
     first: Names<String>,
+    /// Whether each `__init__.py` read so far only extends its `__path__` (see `doubt::extends_path_only`).
+    namespace_inits: RefCell<BTreeMap<String, bool>>,
 }
 
 impl<'r, 'a> Index<'r, 'a> {
@@ -164,7 +168,11 @@ impl<'r, 'a> Index<'r, 'a> {
                 first.register(name, root.clone());
             }
         }
-        Index { repo, first }
+        Index {
+            repo,
+            first,
+            namespace_inits: RefCell::default(),
+        }
     }
 
     fn step(&self, dir: &str, name: &str) -> Option<Step> {
@@ -173,6 +181,10 @@ impl<'r, 'a> Index<'r, 'a> {
         for ext in ["py", "pyi"] {
             let init = format!("{folder}__init__.{ext}");
             if has(&init) {
+                // A namespace `__init__.py` is a regular package to Python but merges here like a bare folder.
+                if ext == "py" && self.extends_path_only(&init) {
+                    return Some(Step::Bare { folder });
+                }
                 return Some(Step::Package { folder, init });
             }
             let file = format!("{dir}{name}.{ext}");
@@ -184,74 +196,24 @@ impl<'r, 'a> Index<'r, 'a> {
     }
 }
 
-/// Where a module's name lands: the files the import runs on the way, and the folder a name may be a submodule in.
-struct Landing {
-    files: Vec<String>,
-    /// The folder of the last segment when it is a package or a bare folder; none for a module.
-    folder: Option<String>,
-}
-
 impl Index<'_, '_> {
+    /// Whether the tracked `init` file only extends its `__path__`.
+    fn extends_path_only(&self, init: &str) -> bool {
+        *self
+            .namespace_inits
+            .borrow_mut()
+            .entry(init.to_string())
+            .or_insert_with(|| {
+                self.repo
+                    .read(init)
+                    .is_some_and(|t| doubt::extends_path_only(&t))
+            })
+    }
+
     /// The init file of the package at `folder`, unless the package holds `importer`: it ran before the importer, so
     /// the import never depends on it (spec #589, "The walk").
     fn init(importer: &str, folder: &str, init: String) -> Option<String> {
         (!importer.starts_with(folder)).then_some(init)
-    }
-
-    /// Walks the dotted name `module` down from `root`: the first segment is found in `root`, and every later one in the
-    /// folder before it. None when a segment names nothing, or follows a module.
-    fn walk(&self, importer: &str, root: &str, module: &[String]) -> Option<Landing> {
-        let mut dir = root.to_string();
-        let mut files = Vec::new();
-        for (i, name) in module.iter().enumerate() {
-            match self.step(&dir, name)? {
-                Step::Package { folder, init } => {
-                    files.extend(Self::init(importer, &folder, init));
-                    dir = folder;
-                }
-                Step::Module { file } if i + 1 == module.len() => {
-                    files.push(file);
-                    return Some(Landing {
-                        files,
-                        folder: None,
-                    });
-                }
-                Step::Module { .. } => return None,
-                Step::Bare { folder } => dir = folder,
-            }
-        }
-        Some(Landing {
-            files,
-            folder: Some(dir),
-        })
-    }
-
-    /// The files an absolute import in `importer` runs: the init file of each package on the way and the module's file;
-    /// for `from M import n`, also `n`'s file when it is a submodule of `M`. Nothing for a relative import, or when the
-    /// first segment is provided by no root, or by two or more.
-    fn resolve(&self, importer: &str, import: &Import) -> Vec<String> {
-        let Some(first) = import.module.first().filter(|_| import.dots == 0) else {
-            return Vec::new();
-        };
-        let Lookup::One(root) = self.first.lookup(first) else {
-            return Vec::new();
-        };
-        let Some(landing) = self.walk(importer, root, &import.module) else {
-            return Vec::new();
-        };
-        let mut files = landing.files;
-        if let (Imported::Names(names), Some(folder)) = (&import.imported, &landing.folder) {
-            for name in names {
-                match self.step(folder, name) {
-                    Some(Step::Package { folder, init }) => {
-                        files.extend(Self::init(importer, &folder, init));
-                    }
-                    Some(Step::Module { file }) => files.push(file),
-                    Some(Step::Bare { .. }) | None => {}
-                }
-            }
-        }
-        files
     }
 }
 
@@ -273,12 +235,27 @@ fn python_imports(repo: &Repo) -> Output {
             continue;
         };
         for import in reader::imports(&text) {
-            for to in index.resolve(file, &import) {
-                found.pairs.push(Pair {
-                    group: Some(group(folder_of(&to))),
-                    from_group: Some(from_group.clone()),
-                    ..Pair::at(file, &to, import.line)
-                });
+            match index.absolute(file, &import) {
+                Resolution::Nothing => {}
+                Resolution::Pairs(files) => {
+                    for to in files {
+                        found.pairs.push(Pair {
+                            group: Some(group(folder_of(&to))),
+                            from_group: Some(from_group.clone()),
+                            ..Pair::at(file, &to, import.line)
+                        });
+                    }
+                }
+                Resolution::Unsure {
+                    name,
+                    reason,
+                    candidates,
+                } => found.unsure.push(Unsure {
+                    file: file.to_string(),
+                    name,
+                    reason: reason.into(),
+                    candidates,
+                }),
             }
         }
     }

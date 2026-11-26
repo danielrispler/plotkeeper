@@ -353,12 +353,6 @@ fn a_relative_import_gives_no_pair_for_now() {
     assert_eq!(found, Vec::<String>::new());
 }
 
-#[test]
-fn an_import_pairs_to_a_file_named_like_a_standard_library_module_as_a_local_one() {
-    let found = py_pairs(&[("app.py", "import logging\n"), ("logging.py", "")]);
-    assert_eq!(found, ["app.py>logging.py"]);
-}
-
 const IMPORTS_LIB: &str = "import lib\n";
 
 #[test]
@@ -649,8 +643,13 @@ fn from_future_gives_nothing_and_import_future_is_an_ordinary_import() {
     let (_dir, root) = repo(&each_file_a_part(&files), &files);
     assert_eq!(pairs(&report(&root)), Vec::<String>::new());
     let files = [("app.py", "import __future__\n"), ("__future__.py", "")];
-    let (_dir, root) = repo(&each_file_a_part(&files), &files);
-    assert_eq!(pairs(&report(&root)), ["app.py>__future__.py"]);
+    // An ordinary import of the standard-library module: a tracked file of its name is a shadow, so the importer is
+    // Unsure.
+    assert_eq!(py_pairs(&files), Vec::<String>::new());
+    assert_eq!(
+        doubts(&files),
+        ["app.py | __future__ | shadows the standard library | __future__.py"]
+    );
 }
 
 #[test]
@@ -876,4 +875,319 @@ fn commit_mode_gives_the_edges_of_the_working_tree() {
         String::from_utf8_lossy(&run(&root, "check", &["--json", "--commit", "HEAD"]).stdout),
         String::from_utf8_lossy(&tree.stdout)
     );
+}
+
+/// The Unsure findings of a repository of `files`, as `file | name | reason | candidates`, read from `check --json`;
+/// each also prints its note on stderr.
+fn doubts(files: &[(&str, &str)]) -> Vec<String> {
+    let (_dir, root) = repo(&each_file_a_part(files), files);
+    let out = run(&root, "check", &["--json"]);
+    let value: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    value["unsure"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|u| {
+            let (file, name) = (u["file"].as_str().unwrap(), u["name"].as_str().unwrap());
+            assert!(
+                stderr.contains(&format!("note: {file} is unsure of {name};")),
+                "{stderr}"
+            );
+            let candidates: Vec<&str> = u["candidates"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| c.as_str().unwrap())
+                .collect();
+            format!(
+                "{file} | {name} | {} | {}",
+                u["reason"].as_str().unwrap(),
+                candidates.join(", ")
+            )
+        })
+        .collect()
+}
+
+const P_AND_Q: [(&str, &str); 2] = [
+    ("p/pyproject.toml", "[project]\nname = \"p\"\n"),
+    ("q/pyproject.toml", "[project]\nname = \"q\"\n"),
+];
+
+fn with_roots<'a>(files: &[(&'a str, &'a str)]) -> Vec<(&'a str, &'a str)> {
+    P_AND_Q.iter().chain(files).copied().collect()
+}
+
+#[test]
+fn two_roots_providing_a_first_segment_make_the_importer_unsure_even_when_only_one_holds_the_final_file()
+ {
+    let files = with_roots(&[
+        ("app.py", "import m.sub\n"),
+        ("p/m/__init__.py", ""),
+        ("p/m/sub.py", ""),
+        ("q/m/__init__.py", ""),
+    ]);
+    assert_eq!(py_pairs(&files), Vec::<String>::new());
+    assert_eq!(
+        doubts(&files),
+        ["app.py | m.sub | two roots provide it | p/m/__init__.py, p/m/sub.py"]
+    );
+}
+
+#[test]
+fn an_unsure_import_relaxes_only_the_links_to_its_candidates_parts() {
+    let files = with_roots(&[
+        ("app/main.py", "import m.sub\n"),
+        ("p/m/__init__.py", ""),
+        ("p/m/sub.py", ""),
+        ("q/m/__init__.py", ""),
+        ("z/z.py", ""),
+    ]);
+    let map = map(
+        &[
+            ("app", &["app/"]),
+            ("pp", &["p/"]),
+            ("qq", &["q/"]),
+            ("zz", &["z/"]),
+            ("other", &["p/pyproject.toml", "q/pyproject.toml"]),
+        ],
+        &[("app", "pp"), ("app", "zz")],
+    );
+    let (_dir, root) = repo(&map, &files);
+    let out = run(&root, "check", &[]);
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        "note: app/main.py is unsure of m.sub; its links to pp pass as unproven\n"
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(stdout.lines().count(), 1, "{stdout}");
+    assert!(
+        stdout.starts_with(
+            "import link \"app-zz\" runs from \"app\" to \"zz\", but the code shows no dependency"
+        ),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn a_root_whose_walk_fails_leaves_no_candidates_and_so_no_finding() {
+    let files = with_roots(&[
+        ("app.py", "import m.nothing\n"),
+        ("p/m/__init__.py", ""),
+        ("q/m/__init__.py", ""),
+    ]);
+    assert_eq!(py_pairs(&files).len(), 0);
+    // Each root still gets to run `m/__init__.py`, which makes `m.nothing` a failing import under both.
+    assert_eq!(doubts(&files), Vec::<String>::new());
+}
+
+#[test]
+fn bare_folders_under_two_roots_merge_and_give_no_doubt_by_themselves() {
+    let files = with_roots(&[
+        (
+            "app.py",
+            "import ns.a\nimport ns.b\nfrom ns import a, b\nimport ns\n",
+        ),
+        ("p/ns/a.py", ""),
+        ("q/ns/b.py", ""),
+    ]);
+    assert_eq!(py_pairs(&files), ["app.py>p/ns/a.py", "app.py>q/ns/b.py"]);
+    assert_eq!(doubts(&files), Vec::<String>::new());
+}
+
+#[test]
+fn a_final_file_found_below_merged_folders_more_than_once_makes_the_importer_unsure() {
+    let files = with_roots(&[
+        ("app.py", "import ns.c\n"),
+        ("p/ns/c.py", ""),
+        ("q/ns/c.py", ""),
+    ]);
+    assert_eq!(py_pairs(&files), Vec::<String>::new());
+    assert_eq!(
+        doubts(&files),
+        ["app.py | ns.c | two roots provide it | p/ns/c.py, q/ns/c.py"]
+    );
+}
+
+#[test]
+fn a_name_imported_from_merged_folders_that_both_hold_it_makes_the_importer_unsure() {
+    let files = with_roots(&[
+        ("app.py", "from ns import c\n"),
+        ("p/ns/c.py", ""),
+        ("q/ns/c.py", ""),
+    ]);
+    assert_eq!(py_pairs(&files), Vec::<String>::new());
+    assert_eq!(
+        doubts(&files),
+        ["app.py | ns.c | two roots provide it | p/ns/c.py, q/ns/c.py"]
+    );
+}
+
+#[test]
+fn the_rule_applies_again_at_each_segment_below_merged_folders() {
+    // `ns/sub` is a regular package under p and a bare folder under q: the package beats it, and the walk goes on only
+    // in p. Under `ns/two`, both roots hold a package, so the walk goes on in both and finds the file once.
+    let files = with_roots(&[
+        (
+            "app.py",
+            "import ns.sub.a\nimport ns.sub.b\nimport ns.two.x\n",
+        ),
+        ("p/ns/sub/__init__.py", ""),
+        ("p/ns/sub/a.py", ""),
+        ("q/ns/sub/b.py", ""),
+        ("p/ns/two/__init__.py", ""),
+        ("q/ns/two/__init__.py", ""),
+        ("q/ns/two/x.py", ""),
+    ]);
+    assert_eq!(
+        py_pairs(&files),
+        [
+            "app.py>p/ns/sub/__init__.py",
+            "app.py>p/ns/sub/a.py",
+            "app.py>q/ns/two/__init__.py",
+            "app.py>q/ns/two/x.py"
+        ]
+    );
+    assert_eq!(doubts(&files), Vec::<String>::new());
+}
+
+#[test]
+fn a_regular_package_under_one_root_beats_a_bare_folder_under_another() {
+    let files = with_roots(&[
+        ("app.py", "import m\nimport m.y\nimport m.z\n"),
+        ("p/m/__init__.py", ""),
+        ("p/m/y.py", ""),
+        ("q/m/z.py", ""),
+    ]);
+    // `m.z` exists only in the bare folder, which the package hides: the import fails.
+    assert_eq!(
+        py_pairs(&files),
+        ["app.py>p/m/__init__.py", "app.py>p/m/y.py"]
+    );
+    assert_eq!(doubts(&files), Vec::<String>::new());
+}
+
+#[test]
+fn a_module_under_one_root_beats_a_bare_folder_of_its_name_under_another() {
+    let files = with_roots(&[("app.py", "import m\n"), ("p/m.py", ""), ("q/m/x.py", "")]);
+    assert_eq!(py_pairs(&files), ["app.py>p/m.py"]);
+    assert_eq!(doubts(&files), Vec::<String>::new());
+}
+
+#[test]
+fn a_bare_folder_named_like_a_standard_library_module_gives_no_doubt() {
+    let files = [
+        ("app.py", "import html\nimport html.x\n"),
+        ("html/x.py", ""),
+    ];
+    assert_eq!(py_pairs(&files), Vec::<String>::new());
+    assert_eq!(doubts(&files), Vec::<String>::new());
+}
+
+#[test]
+fn a_pkgutil_or_pkg_resources_init_file_merges_like_a_bare_folder_and_gets_no_pair() {
+    let forms = [
+        "__path__ = __import__('pkgutil').extend_path(__path__, __name__)\n",
+        "__path__ = __import__(\"pkgutil\").extend_path(__path__, __name__)  # type: ignore\n",
+        "import pkgutil\n\n__path__ = pkgutil.extend_path(__path__, __name__)\n",
+        "from pkgutil import extend_path\n__path__ = extend_path(__path__, __name__)\n",
+        "__import__('pkg_resources').declare_namespace(__name__)\n",
+        "import pkg_resources\npkg_resources.declare_namespace(__name__)\n",
+        "try:\n    import pkg_resources\n    pkg_resources.declare_namespace(__name__)\nexcept ImportError:\n    import pkgutil\n    __path__ = pkgutil.extend_path(__path__, __name__)\n",
+    ];
+    for init in forms {
+        let files = with_roots(&[
+            (
+                "app.py",
+                "import azure\nimport azure.a\nimport azure.b\nfrom azure import a\n",
+            ),
+            ("p/azure/__init__.py", init),
+            ("p/azure/a.py", ""),
+            ("q/azure/__init__.py", init),
+            ("q/azure/b.py", ""),
+        ]);
+        assert_eq!(
+            py_pairs(&files),
+            ["app.py>p/azure/a.py", "app.py>q/azure/b.py"],
+            "{init}"
+        );
+        assert_eq!(doubts(&files), Vec::<String>::new(), "{init}");
+    }
+}
+
+#[test]
+fn an_init_file_with_any_other_statement_is_a_regular_package_even_beside_extend_path() {
+    let files = with_roots(&[
+        ("app.py", "import azure.a\n"),
+        (
+            "p/azure/__init__.py",
+            "__path__ = __import__('pkgutil').extend_path(__path__, __name__)\nVERSION = 1\n",
+        ),
+        ("p/azure/a.py", ""),
+        ("q/azure/__init__.py", ""),
+        ("q/azure/a.py", ""),
+    ]);
+    assert_eq!(py_pairs(&files), Vec::<String>::new());
+    assert_eq!(
+        doubts(&files),
+        [
+            "app.py | azure.a | two roots provide it | p/azure/__init__.py, p/azure/a.py, q/azure/__init__.py, q/azure/a.py"
+        ]
+    );
+}
+
+#[test]
+fn a_tracked_file_named_like_a_standard_library_module_makes_the_importer_unsure() {
+    let files = [("app.py", "import logging\n"), ("logging.py", "")];
+    assert_eq!(py_pairs(&files), Vec::<String>::new());
+    assert_eq!(
+        doubts(&files),
+        ["app.py | logging | shadows the standard library | logging.py"]
+    );
+    // A package shadowing a standard-library package: the candidates are the files the import would pair to.
+    let files = [
+        ("app.py", "import logging.handlers\n"),
+        ("logging/__init__.py", ""),
+        ("logging/handlers.py", ""),
+    ];
+    assert_eq!(py_pairs(&files), Vec::<String>::new());
+    assert_eq!(
+        doubts(&files),
+        [
+            "app.py | logging.handlers | shadows the standard library | logging/__init__.py, logging/handlers.py"
+        ]
+    );
+}
+
+#[test]
+fn the_standard_library_list_spans_versions_and_includes_built_in_names() {
+    // `distutils` left the standard library in 3.12, `sys` is built in: both are in the union of 3.10 to 3.15.
+    for name in ["distutils", "imp", "sys", "os", "tomllib", "__future__"] {
+        let files = [
+            ("app.py", &*format!("import {name}\n")),
+            (&*format!("{name}.py"), ""),
+        ]
+        .map(|(f, t)| (f.to_string(), t.to_string()));
+        let borrowed: Vec<(&str, &str)> = files
+            .iter()
+            .map(|(f, t)| (f.as_str(), t.as_str()))
+            .collect();
+        assert_eq!(
+            doubts(&borrowed),
+            [format!(
+                "app.py | {name} | shadows the standard library | {name}.py"
+            )],
+            "{name}"
+        );
+    }
+    let files = [("app.py", "import pandas\n"), ("pandas.py", "")];
+    assert_eq!(py_pairs(&files), ["app.py>pandas.py"]);
+    assert_eq!(doubts(&files), Vec::<String>::new());
+}
+
+#[test]
+fn a_standard_library_shadow_that_names_no_file_the_import_reaches_is_no_finding() {
+    let files = [("app.py", "import os.path\n"), ("os.py", "")];
+    assert_eq!(doubts(&files), Vec::<String>::new());
 }
