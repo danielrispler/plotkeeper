@@ -1,5 +1,5 @@
 //! `dart-imports`: Dart repositories in temporary folders, read through `check` and `imports` (spec #621, "Testing
-//! Decisions"). `package:` URIs are the next ticket's (#628), so only relative imports and parts are tried here.
+//! Decisions").
 
 use std::{path::Path, process::Command};
 
@@ -51,9 +51,15 @@ fn pairs(report: &system_map::Report) -> Vec<String> {
 /// The report of a repository of `files`, each Dart file a part of its own and the rest one more, with no link, so that
 /// only the pairs matter.
 fn dart_report(files: &[(&str, &str)]) -> system_map::Report {
+    dart_report_ignoring(files, &[])
+}
+
+/// [`dart_report`] with the map also ignoring each of `ignored`, a file or a folder ending in `/`.
+fn dart_report_ignoring(files: &[(&str, &str)], ignored: &[&str]) -> system_map::Report {
+    let is_ignored = |file: &str| ignored.iter().any(|i| file.starts_with(i));
     let mut parts: Vec<(String, Vec<&str>)> = vec![("rest".into(), vec!["**"])];
     for (i, (file, _)) in files.iter().enumerate() {
-        if file.ends_with(".dart") {
+        if file.ends_with(".dart") && !is_ignored(file) {
             parts.push((format!("f{i}"), vec![file]));
         }
     }
@@ -61,7 +67,17 @@ fn dart_report(files: &[(&str, &str)]) -> system_map::Report {
         .iter()
         .map(|(id, paths)| (id.as_str(), paths.as_slice()))
         .collect();
-    let (_dir, root) = repo(&map(&parts, &[]), files);
+    let mut map = map(&parts, &[]);
+    // The map ignores a root `pubspec.yaml` only when the repository has one, or the pattern matches nothing.
+    let root_pubspec = files.iter().any(|(file, _)| *file == "pubspec.yaml");
+    map["ignored"] = json!(
+        ["system-map.json"]
+            .iter()
+            .chain(root_pubspec.then_some(&"pubspec.yaml").iter().copied())
+            .chain(ignored)
+            .collect::<Vec<_>>()
+    );
+    let (_dir, root) = repo(&map, files);
     report(&root)
 }
 
@@ -319,6 +335,330 @@ fn test_folders_are_judged_below_the_packages_own_root() {
             "a/pkgs/test/lib/test.dart>a/pkgs/test/lib/src/x.dart",
         ]
     );
+}
+
+#[test]
+fn a_package_uri_pairs_with_lib_of_the_package_the_index_names() {
+    let found = dart_pairs(&[
+        ("a/pubspec.yaml", "name: a\n"),
+        ("b/pubspec.yaml", "name: b\n"),
+        (
+            "a/lib/x.dart",
+            "import 'package:b/y.dart';\nexport 'package:b/src/z.dart';\nimport 'package:a/own.dart';\n\
+             import 'package:flutter/material.dart';\nimport 'package:http/http.dart';\n\
+             import 'package:b/gone.dart';\nimport 'package:b';\n",
+        ),
+        ("a/lib/own.dart", ""),
+        ("b/lib/y.dart", ""),
+        ("b/lib/src/z.dart", ""),
+    ]);
+    assert_eq!(
+        found,
+        [
+            "a/lib/x.dart>a/lib/own.dart",
+            "a/lib/x.dart>b/lib/src/z.dart",
+            "a/lib/x.dart>b/lib/y.dart",
+        ]
+    );
+}
+
+/// `a/` imports `package:b/y.dart`, and `b/` holds `lib/y.dart` with `b_pubspec` as its pubspec.
+fn imports_b(b_pubspec: &str) -> Vec<(&str, &str)> {
+    vec![
+        ("a/pubspec.yaml", "name: a\n"),
+        ("a/lib/x.dart", "import 'package:b/y.dart';\n"),
+        ("b/pubspec.yaml", b_pubspec),
+        ("b/lib/y.dart", ""),
+    ]
+}
+
+const A_TO_B: [&str; 1] = ["a/lib/x.dart>b/lib/y.dart"];
+
+#[test]
+fn a_pubspecs_name_is_read_bare_or_quoted_with_a_trailing_comment_cut() {
+    for pubspec in [
+        "name: b\n",
+        "name: 'b'\n",
+        "name: \"b\"\n",
+        "name:   b   # the package\n",
+        "name: 'b' # the package\n",
+        "description: x\nname: b\nname: c\n",
+        "# name: c\n  name: c\nname: b\r\nversion: 1.0.0\r\n",
+    ] {
+        assert_eq!(dart_pairs(&imports_b(pubspec)), A_TO_B, "{pubspec:?}");
+    }
+    for pubspec in ["name: 'b\n", "name: c\n", "name:\n", "name: # b\n"] {
+        assert_eq!(
+            dart_pairs(&imports_b(pubspec)),
+            Vec::<String>::new(),
+            "{pubspec:?}"
+        );
+    }
+}
+
+#[test]
+fn a_pubspec_with_no_readable_name_is_a_problem_naming_the_file_and_declares_no_package() {
+    let report = dart_report(&imports_b("version: 1.0.0\n"));
+    assert_eq!(pairs(&report), Vec::<String>::new());
+    assert!(
+        has(&report.problems, &["b/pubspec.yaml", "name"]),
+        "{:?}",
+        report.problems
+    );
+    assert_eq!(report.problems.len(), 1, "{:?}", report.problems);
+}
+
+#[test]
+fn a_nameless_pubspec_in_a_test_folder_or_an_ignored_package_is_no_problem() {
+    // Under the enclosing package's test folders, at any depth.
+    for folder in [
+        "a/test/fixture/",
+        "a/integration_test/",
+        "a/test_driver/x/y/",
+    ] {
+        let pubspec = format!("{folder}pubspec.yaml");
+        let report = dart_report(&[
+            ("a/pubspec.yaml", "name: a\n"),
+            ("a/lib/x.dart", ""),
+            (&pubspec, "version: 1.0.0\n"),
+        ]);
+        assert_eq!(report.problems, Vec::<String>::new(), "{folder}");
+    }
+    // The map ignores the package, its `lib/`, or its pubspec alone.
+    for ignored in ["b/", "b/lib/", "b/pubspec.yaml"] {
+        let report = dart_report_ignoring(&imports_b("version: 1.0.0\n"), &[ignored]);
+        assert_eq!(report.problems, Vec::<String>::new(), "{ignored}");
+    }
+}
+
+#[test]
+fn a_package_whose_lib_the_map_ignores_declares_nothing_but_one_whose_pubspec_alone_is_ignored_resolves()
+ {
+    let files = imports_b("name: b\n");
+    for ignored in ["b/lib/", "b/lib/y.dart"] {
+        let report = dart_report_ignoring(&files, &[ignored]);
+        assert_eq!(pairs(&report), Vec::<String>::new(), "{ignored}");
+        assert_eq!(report.problems, Vec::<String>::new(), "{ignored}");
+    }
+    let report = dart_report_ignoring(&files, &["b/pubspec.yaml"]);
+    assert_eq!(pairs(&report), A_TO_B);
+    assert!(
+        !has(&report.problems, &["pubspec"]),
+        "{:?}",
+        report.problems
+    );
+}
+
+#[test]
+fn a_package_with_no_tracked_lib_file_and_a_pubspec_under_test_declare_nothing() {
+    let mut files = imports_b("name: b\n");
+    files.retain(|(f, _)| *f != "b/lib/y.dart");
+    files.push(("b/bin/z.dart", ""));
+    assert_eq!(dart_pairs(&files), Vec::<String>::new());
+    // A pubspec under the enclosing package's `test/` is a fixture, not a package.
+    let found = dart_pairs(&[
+        ("a/pubspec.yaml", "name: a\n"),
+        ("a/lib/x.dart", "import 'package:b/y.dart';\n"),
+        ("a/test/b/pubspec.yaml", "name: b\n"),
+        ("a/test/b/lib/y.dart", ""),
+    ]);
+    assert_eq!(found, Vec::<String>::new());
+    // With no enclosing package, a folder named `test` is the package itself: it still declares its name.
+    let found = dart_pairs(&[
+        ("a/pubspec.yaml", "name: a\n"),
+        ("a/lib/x.dart", "import 'package:test/t.dart';\n"),
+        ("pkgs/test/pubspec.yaml", "name: test\n"),
+        ("pkgs/test/lib/t.dart", ""),
+    ]);
+    assert_eq!(found, ["a/lib/x.dart>pkgs/test/lib/t.dart"]);
+}
+
+/// `xa/` and `xb/` both declare `x` and hold `lib/s.dart`; `app/` imports `package:x/s.dart`, and `xc/` holds an
+/// unrelated package. The map has `links` and ignores `ignored`, and has no root pubspec to ignore.
+fn declared_twice(links: &[(&str, &str)], ignored: &[&str]) -> (tempfile::TempDir, String) {
+    let mut map = map(
+        &[
+            ("app", &["app/"]),
+            ("xa", &["xa/"]),
+            ("xb", &["xb/"]),
+            ("xc", &["xc/"]),
+        ],
+        links,
+    );
+    map["ignored"] = json!(
+        ["system-map.json"]
+            .iter()
+            .chain(ignored)
+            .collect::<Vec<_>>()
+    );
+    repo(
+        &map,
+        &[
+            ("app/pubspec.yaml", "name: app\n"),
+            ("app/lib/main.dart", "import 'package:x/s.dart';\n"),
+            ("xa/pubspec.yaml", "name: x\n"),
+            ("xa/lib/s.dart", ""),
+            ("xb/pubspec.yaml", "name: x\n"),
+            ("xb/lib/s.dart", ""),
+            ("xc/pubspec.yaml", "name: c\n"),
+            ("xc/lib/c.dart", ""),
+        ],
+    )
+}
+
+#[test]
+fn a_name_two_packages_declare_makes_the_importer_unsure_and_relaxes_only_the_link_to_the_candidates()
+ {
+    let (_dir, root) = declared_twice(&[("app", "xa"), ("app", "xb"), ("app", "xc")], &[]);
+    let out = run(&root, "check", &[]);
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        "note: app/lib/main.dart is unsure of package:x; its links to xa, xb pass as unproven\n"
+    );
+    // The link to the part that holds no candidate still fails.
+    let problems = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(problems.lines().count(), 1, "{problems}");
+    assert!(
+        problems.starts_with(
+            "import link \"app-xc\" runs from \"app\" to \"xc\", but the code shows no dependency"
+        ),
+        "{problems}"
+    );
+    let out = run(&root, "check", &["--json"]);
+    let value: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        value["unsure"],
+        json!([{
+            "file": "app/lib/main.dart",
+            "name": "package:x",
+            "reason": "declared twice",
+            "candidates": ["xa/lib/s.dart", "xb/lib/s.dart"]
+        }])
+    );
+    // The doubtful import makes no edge.
+    assert_eq!(value["edges"], json!([]));
+}
+
+#[test]
+fn an_import_from_inside_a_declarer_resolves_to_its_own_copy() {
+    // Each Dart file is a part of its own, so a pair inside one package still shows as an edge.
+    let found = dart_report(&[
+        ("app/pubspec.yaml", "name: app\n"),
+        ("app/lib/main.dart", "import 'package:x/s.dart';\n"),
+        ("xa/pubspec.yaml", "name: x\n"),
+        ("xa/lib/s.dart", ""),
+        ("xa/lib/u.dart", "import 'package:x/s.dart';\n"),
+        ("xb/pubspec.yaml", "name: x\n"),
+        ("xb/lib/s.dart", ""),
+        ("xb/lib/u.dart", "import 'package:x/s.dart';\n"),
+    ]);
+    assert_eq!(
+        sorted(pairs(&found)),
+        ["xa/lib/u.dart>xa/lib/s.dart", "xb/lib/u.dart>xb/lib/s.dart"]
+    );
+    // Only the importer from outside is in doubt.
+    assert_eq!(
+        found
+            .unsure
+            .iter()
+            .map(|u| u.file.as_str())
+            .collect::<Vec<_>>(),
+        ["app/lib/main.dart"]
+    );
+}
+
+fn sorted(mut found: Vec<String>) -> Vec<String> {
+    found.sort();
+    found
+}
+
+#[test]
+fn imports_json_lists_the_unsure_files_and_the_pass_line_counts_the_relaxed_link_unproven() {
+    let (_dir, root) = declared_twice(&[("app", "xa")], &[]);
+    let value = imports_json(&root);
+    assert_eq!(value["unsure"][0]["file"], "app/lib/main.dart");
+    assert_eq!(value["unsure"][0]["reason"], "declared twice");
+    let out = run(&root, "check", &[]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("1 import (0 proven, 1 unproven)"),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+#[test]
+fn a_doubled_name_whose_declarers_hold_no_tracked_target_gives_no_finding() {
+    let found = dart_report(&[
+        ("app/pubspec.yaml", "name: app\n"),
+        ("app/lib/main.dart", "import 'package:x/gone.dart';\n"),
+        ("xa/pubspec.yaml", "name: x\n"),
+        ("xa/lib/s.dart", ""),
+        ("xb/pubspec.yaml", "name: x\n"),
+        ("xb/lib/s.dart", ""),
+    ]);
+    assert_eq!(found.unsure, Vec::new());
+    assert_eq!(pairs(&found), Vec::<String>::new());
+    assert_eq!(found.problems, Vec::<String>::new());
+}
+
+#[test]
+fn ignoring_one_declarers_package_settles_the_doubt() {
+    for ignored in ["xb/", "xb/lib/"] {
+        let (_dir, root) = declared_twice(&[("app", "xa")], &[ignored]);
+        let found = report(&root);
+        assert_eq!(found.unsure, Vec::new(), "{ignored}");
+        assert_eq!(found.problems, Vec::<String>::new(), "{ignored}");
+        assert_eq!(found.counts.links.proven, 1, "{ignored}");
+    }
+}
+
+#[test]
+fn a_file_under_an_unindexed_pubspec_never_takes_an_outer_package_as_its_own() {
+    // `a/` and `c/` both declare `a`, so `a/`'s own files would resolve their import there. A file under a nested
+    // pubspec that is no package of the index has no own package: it is Unsure, as for any importer from outside.
+    for (inner, ignored) in [
+        ("version: 1.0.0\n", &[][..]),
+        ("name: inner\n", &["a/inner/lib/"][..]),
+        ("name: inner\n", &[][..]),
+    ] {
+        let inner_pubspec = if inner.contains("name") && ignored.is_empty() {
+            // Under `test/`: a fixture, not a package.
+            "a/test/inner/pubspec.yaml"
+        } else {
+            "a/inner/pubspec.yaml"
+        };
+        let importer = format!("{}bin/x.dart", &inner_pubspec[..inner_pubspec.len() - 12]);
+        let lib_file = format!("{}lib/z.dart", &inner_pubspec[..inner_pubspec.len() - 12]);
+        let files = [
+            ("a/pubspec.yaml", "name: a\n"),
+            ("a/lib/own.dart", ""),
+            ("c/pubspec.yaml", "name: a\n"),
+            ("c/lib/own.dart", ""),
+            (inner_pubspec, inner),
+            (lib_file.as_str(), ""),
+            (importer.as_str(), "import 'package:a/own.dart';\n"),
+        ];
+        let found = dart_report_ignoring(&files, ignored);
+        assert_eq!(
+            pairs(&found),
+            Vec::<String>::new(),
+            "{inner_pubspec} {ignored:?}"
+        );
+        assert_eq!(
+            found
+                .unsure
+                .iter()
+                .map(|u| u.file.as_str())
+                .collect::<Vec<_>>(),
+            [importer.as_str()],
+            "{inner_pubspec} {ignored:?}"
+        );
+    }
 }
 
 #[test]
