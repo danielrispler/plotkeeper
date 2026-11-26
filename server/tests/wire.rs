@@ -1021,6 +1021,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
             json(Project {
                 path: "/repo".into(),
                 gone: true,
+                temporary: false,
             }),
         ),
         (

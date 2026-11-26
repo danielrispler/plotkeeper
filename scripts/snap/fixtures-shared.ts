@@ -36,9 +36,14 @@ export const list = () => {
   return { ...base, sessions, selected: { session: sessions[0], agent: null } } satisfies Fixture;
 };
 
-// The saved project list (#381): plotkeeper with its sessions, falinks with none (its header only, after it) and pokedex, whose
-// folder is gone.
-const savedProjects = [{ path: "/w/falinks", gone: false }, { path: "/w/plotkeeper", gone: false }, { path: "/w/pokedex", gone: true }];
+// The saved project list (#381): plotkeeper with its sessions, falinks with none (its header only, after it), pokedex, whose folder is
+// gone, and a scratchpad an earlier build saved, temporary; neither of the last two has a live session, so the list hides both (spec #659).
+const savedProjects = [
+  { path: "/w/falinks", gone: false, temporary: false },
+  { path: "/w/plotkeeper", gone: false, temporary: false },
+  { path: "/w/pokedex", gone: true, temporary: false },
+  { path: "/private/tmp/tmp.Xr4k2", gone: false, temporary: true },
+];
 export const withSaved = (snapScript: string, extra: Fixture = {}): Fixture => ({
   ...list(),
   projects: savedProjects,

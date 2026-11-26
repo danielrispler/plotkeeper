@@ -72,7 +72,7 @@ const mapPanel = (check: string, extra: Fixture = {}): Fixture => {
     map_state: mapState({ fog: { understanding: "thin" }, ready: [{ number: 334, title: "PR briefs on the map", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["PR briefs on the map"], quiet: false } }] }),
     map_place: busyPlace(),
     select: { __by: "id", values: selected },
-    projects: [{ path: "/w/plotkeeper", gone: false }],
+    projects: [{ path: "/w/plotkeeper", gone: false, temporary: false }],
     turn_file_hunk: { text: "@@ -261,7 +261,9 @@ function drawMap(\n   const saved = positions;\n-  const added = autoPlace(items, links);\n+  // Placed once and saved, so a part never moves on its own.\n+  const added = autoPlace(items, links, saved);\n", binary: false, left_out: 0, first_line: 261 },
     ...extra,
   });
