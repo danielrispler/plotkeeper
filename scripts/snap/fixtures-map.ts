@@ -63,6 +63,15 @@ export const mapMarks = (kind: "thick" | "thin" | "stale" | "broken"): Fixture =
       const text = marks.textContent;
       for (const want of ${JSON.stringify(want)}) if (!text.includes(want)) log("snap:fail the marks lack " + want + ": " + text);
       if (text.includes("wire-types-agree")) log("snap:fail a broken law is named");
+      // Under the card (#637): the chips, then the folds, all folded but CI on main, which leads, open, when a run broke a law here.
+      const card = marks.nextElementSibling;
+      const after = [];
+      for (let node = card.nextElementSibling; node; node = node.nextElementSibling) after.push(node.className);
+      const shape = after.filter((name) => !name.startsWith("sheet-purpose") && !name.includes("sheet-more")).slice(0, 2).join("|");
+      if (shape !== "sheet-chips|sheet-folds") log("snap:fail the card is not followed by the purpose, the chips and the folds: " + after.join("|"));
+      const folds = [...document.querySelectorAll("#map-sheet .sheet-fold:not([hidden])")];
+      const open = folds.filter((f) => f.open).map((f) => f.dataset.fold).join();
+      if (open !== ${JSON.stringify(kind === "broken" ? "ci" : "")} || (${kind === "broken"} && folds[0].dataset.fold !== "ci")) log("snap:fail the folds: " + folds.map((f) => f.dataset.fold + (f.open ? "+" : "")).join());
       log("marks ${kind} ok");`, { map_state: mapState(states[kind]) });
 };
 /**
@@ -173,11 +182,23 @@ export const mapTalksTo = (): Fixture =>
       document.querySelector("#map .plate[data-id=shell]").click();
       await wait(300);
       const sheet = document.getElementById("map-sheet");
-      const headings = [...sheet.querySelectorAll(".sheet-heading")].map((h) => h.textContent);
+      // The sections are folds (#637): a summary's title is its heading.
+      const headings = [...sheet.querySelectorAll(".sheet-fold-title")].map((h) => h.textContent);
       if (!headings.includes("Talks to") || headings.includes("Links") || headings.includes("Linked with")) log("snap:fail headings: " + headings.join("|"));
       if (sheet.querySelectorAll("ul.sheet-links").length !== 1) log("snap:fail not one list of links");
       const rows = [...sheet.querySelectorAll(".sheet-links .sheet-link")];
       if (rows.length !== 7) return log("snap:fail Talks to rows: " + rows.length);
+      // Folded at first (#637); its chip opens it and brings it into view.
+      const talks = sheet.querySelector(".sheet-fold-talks");
+      if (talks.open) log("snap:fail Talks to is open before its chip is pressed");
+      const chip = [...sheet.querySelectorAll(".sheet-chip")].find((b) => b.textContent === "7 links");
+      if (!chip) return log("snap:fail no links chip: " + [...sheet.querySelectorAll(".sheet-chip")].map((b) => b.textContent).join("|"));
+      chip.click();
+      await wait(600);
+      const side = document.getElementById("map-side").getBoundingClientRect(), at = talks.getBoundingClientRect();
+      if (!talks.open) log("snap:fail the chip did not open Talks to");
+      if (at.top < side.top || at.top > side.bottom) log("snap:fail Talks to is not in view: " + at.top + " in " + side.top + "–" + side.bottom);
+      if (document.activeElement !== talks.querySelector("summary")) log("snap:fail the focus is not on Talks to's summary");
       const row = (id) => rows.find((r) => r.dataset.link === id);
       const back = row("understanding-shell"), out = row("shell-understanding"), spawn = row("shell-daemon");
       if (back.querySelector(".sheet-link-dir").getAttribute("aria-label") !== "from" || out.querySelector(".sheet-link-dir").getAttribute("aria-label") !== "to") log("snap:fail the arrows' directions");
@@ -500,10 +521,25 @@ const brokenCi: Ci = {
   parts: ["shell"], laws: ["wire-types-agree"], note: null, at: null,
   tail: "        FAIL [   0.013s] (4/4) studio-workbench::wire wire_types_match\n  stderr ───\n\n    thread 'wire_types_match' panicked at workbench/tests/wire.rs:11:25:\n    assertion `left == right` failed: wire drifted\n      left: 1\n     right: 2\n\n────────────\n     Summary [   0.014s] 4 tests run: 3 passed, 1 failed, 0 skipped",
 };
-export const mapBroken = (open: "none" | "proof" | "log"): Fixture => {
+export const mapBroken = (open: "none" | "sheet" | "proof" | "log"): Fixture => {
   const sessions = busySessions();
   const opened = {
     none: "",
+    // The shell's sheet (#637): CI on main leads its folds, open, its value and its chip in the broken tone; the others stay folded.
+    sheet: `document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(400);
+      const folds = [...document.querySelectorAll("#map-sheet .sheet-fold:not([hidden])")];
+      const order = folds.map((f) => f.querySelector(".sheet-fold-title").textContent + (f.open ? "+" : "")).join("|");
+      if (order !== "CI on main+|Laws|Talks to|Tier|History") log("snap:fail the folds: " + order);
+      const ci = folds[0];
+      if (ci.querySelector(".sheet-fold-value").textContent !== "failing" || !ci.querySelector(".sheet-fold-value").classList.contains("bad")) log("snap:fail CI on main's value");
+      if (!ci.querySelector(".sheet-ci.broken .sheet-ci-line")?.textContent.includes("A test that backs laws here failed on main")) log("snap:fail CI on main's line");
+      if (![...ci.querySelectorAll("button")].some((b) => b.textContent === "See the CI log")) log("snap:fail no See the CI log");
+      const chip = [...document.querySelectorAll("#map-sheet .sheet-chip")].find((b) => b.textContent === "CI failing");
+      if (!chip?.classList.contains("bad")) log("snap:fail no CI failing chip in the broken tone");
+      if (getComputedStyle(ci.querySelector(".sheet-fold-value")).color === getComputedStyle(folds[1].querySelector(".sheet-fold-value")).color) log("snap:fail the failing value reads as the others");
+      // The glass's rise ends before the picture is taken.
+      await wait(400);`,
     proof: `document.querySelector("#map .plate[data-id=shell]").click();
       await wait(300);
       const see = [...document.querySelectorAll("#map-sheet .sheet-law button")].find((b) => b.textContent === "See the proof");
@@ -599,6 +635,8 @@ export const mapScrubbed = (): Fixture => {
     map_place: busyPlace(),
     map_history: [strip(1, "#101 Map first drawn", false), strip(2, "#150 Plates and links", false), strip(3, "#210 Fog engine", true), strip(4, "#306 Live agents on the map", true, 306)],
     map_at: { commit: "2".repeat(40), short: "2222222", label: "#150 Plates and links", source: JSON.stringify(past) },
+    // History was left open in this browser (#637), so the strip shows.
+    storage: { "map-sheet-folds": JSON.stringify(["history"]) },
     map_commit: { commit: "2".repeat(40), short: "2222222", label: "#150 Plates and links", url: "https://github.com/danielrispler/plotkeeper/commit/" + "2".repeat(40), files: [{ path: "src-tauri/src/map.rs", diff: "@@ -1,2 +1,2 @@\n-one\n+two" }, { path: "ui/map.ts", diff: "@@ -1 +1,2 @@\n+three" }] },
   });
   return { ...f, sessions: busySessions(), selected: { session: busySessions()[6], agent: null } };

@@ -195,6 +195,7 @@ const covered = {
   ".spot-chip-name": "map-agents.ts: the spotlit session's chip's title holds its name, state and line",
   ".spot-chip-line": "map-agents.ts: the spotlit session's chip's title holds its name, state and line",
   ".sheet-here-headline": "map-sheet.ts: a This session here row's Headline holds its full text as its title",
+  ".sheet-purpose.clamped": "map-sheet-folds.ts: the purpose's More shows it whole in place, and the plate's hint holds it (#637)",
   ".ask::backdrop": "style.css: a dialog's backdrop holds no text; overflow hidden only makes it a scroll container that keeps its scroll",
   code: "a check's command has its own title (story.ts); any other code span wraps or sits in a text that wraps",
 };

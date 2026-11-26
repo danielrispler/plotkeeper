@@ -175,6 +175,11 @@ class StandIn {
   }
   offsetWidth = 0;
   offsetHeight = 0;
+  // How the node was last brought into view, null while it never was.
+  scrolledIntoView = null;
+  scrollIntoView(options) {
+    this.scrolledIntoView = options ?? {};
+  }
   focus() {}
   // Compound selectors only (`fits`), as the views under test ask for.
   querySelectorAll(selector) {

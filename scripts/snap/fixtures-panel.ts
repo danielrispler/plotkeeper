@@ -12,12 +12,15 @@ export const mapSheetUnratified = (): Fixture =>
       const open = laws.filter((l) => l.textContent.includes("Not yet ratified"));
       if (laws.length !== 2 || open.length !== 1 || !open[0].textContent.includes("Notices wait for focus.")) return log("snap:fail laws: " + laws.map((l) => l.textContent).join("|"));
       if (!open[0].querySelector(".ratify-accept") || !open[0].querySelector(".ratify-overturn")) log("snap:fail no Accept and Overturn");
+      if (!open[0].closest(".sheet-fold-laws")?.open) log("snap:fail the Laws fold kept open in this browser is folded");
       log("sheet ok");`, {
     map_state: mapState({ ratify: [{ pr: 306, kind: "law", id: "shell-notice" }] }),
+    // Laws was left open in this browser (#637).
+    storage: { "map-sheet-folds": JSON.stringify(["laws"]) },
   });
 /**
  * The part sheet explains itself (#522): Shell's sheet, with links of three kinds and two not yet ratified, with Explanations on (the
- * default) and off. On, each heading and the selected tier are described by their line, a kind's line follows its first link only and
+ * default) and off, every fold left open in this browser (#637). On, each fold's summary is described by the line first in its body, the selected tier by its line, a kind's line follows its first link only and
  * "Not yet ratified"'s the first unratified link only, and the ? is pressed; off, no line is drawn and nothing points at one.
  */
 export const mapSheetExplained = (on: boolean): Fixture =>
@@ -34,10 +37,13 @@ export const mapSheetExplained = (on: boolean): Fixture =>
         if (lines.length || described.length) log("snap:fail explanations drawn while off: " + lines.length + " lines, " + described.length + " described");
         return log("explained ok");
       }
-      for (const heading of sheet.querySelectorAll(".sheet-heading")) {
-        const line = document.getElementById(heading.getAttribute("aria-describedby"));
-        if (!line?.classList.contains("explain") || heading.nextElementSibling !== line) log("snap:fail the heading's line: " + heading.textContent);
+      const summaries = [...sheet.querySelectorAll(".sheet-fold:not([hidden]) > .sheet-fold-summary")];
+      if (summaries.length < 5) log("snap:fail the sheet shows " + summaries.length + " folds");
+      for (const summary of summaries) {
+        const line = document.getElementById(summary.getAttribute("aria-describedby"));
+        if (!line?.classList.contains("explain") || summary.nextElementSibling?.firstElementChild !== line) log("snap:fail the fold's line: " + summary.textContent);
       }
+      if (sheet.querySelector(".sheet-fold:not([open])")) log("snap:fail a fold left open in this browser is folded");
       // The Fog heading's line is the catch-up card's (#636), under its eyebrow.
       const eyebrow = sheet.querySelector(".catch-up-card .catch-up-eyebrow");
       const fogLine = eyebrow && document.getElementById(eyebrow.getAttribute("aria-describedby"));
@@ -53,6 +59,7 @@ export const mapSheetExplained = (on: boolean): Fixture =>
       log("explained ok");`, {
     map_state: mapState({ source: pairFile, ratify: [{ pr: 334, kind: "link", id: "understanding-shell" }, { pr: 334, kind: "link", id: "shell-daemon" }] }),
     ...(on ? {} : { settings_files: { settings: '{ "explanations": false }', keymap: null } }),
+    storage: { "map-sheet-folds": JSON.stringify(["laws", "talks", "here", "holds", "tier", "ci", "history"]) },
     snapDone: "explained ok",
   });
 const mapPanel = (check: string, extra: Fixture = {}): Fixture => {
@@ -135,7 +142,8 @@ export const mapSheetHere = (older: boolean): Fixture => {
   const [newest, second] = older ? [4, 2] : [3, 1];
   const selected = Object.fromEntries(sessions.map((s) => [s.id, { session: s, agent: null }]));
   return mapPanel(`
-      const here = () => document.querySelector("#map-sheet .sheet-here");
+      // The section is a fold (#637), its summary its heading.
+      const here = () => document.querySelector("#map-sheet .sheet-fold-here");
       const rows = () => [...here().querySelectorAll(".sheet-here-turn")].map((b) => [...b.children].map((c) => c.textContent).join(" "));
       await plate("core");
       if (!sheetOpen()) return log("snap:fail the plate's click did not open its sheet");
@@ -143,8 +151,8 @@ export const mapSheetHere = (older: boolean): Fixture => {
       await press(row("s1"));
       if (!panelOpen() || !sheetOpen()) return log("snap:fail the story and the sheet are not both open");
       if (here().hidden) return log("snap:fail This session here is not shown beside the open story");
-      if (here().querySelector("h3")?.textContent !== "This session here") log("snap:fail the section's heading");
-      if (here().querySelector(".explain")?.textContent !== "The open session's turns that changed this part, newest first.") log("snap:fail the section carries no explanation line");
+      if (here().querySelector(".sheet-fold-title")?.textContent !== "This session here" || here().querySelector("h3")) log("snap:fail the section's heading");
+      if (here().querySelector(".sheet-fold-body > .explain")?.textContent !== "The open session's turns that changed this part, newest first.") log("snap:fail the section carries no explanation line");
       const want = ["${newest} Chips on the parts a turn touches 10m", "${second} Per-path placement in core 2d"];
       if (JSON.stringify(rows()) !== JSON.stringify(want)) log("snap:fail the section's rows: " + JSON.stringify(rows()));
       const footer = here().querySelector(".sheet-here-older")?.textContent;
@@ -159,8 +167,10 @@ export const mapSheetHere = (older: boolean): Fixture => {
       if (!target.classList.contains("flash") || feed.querySelectorAll(".turn.flash").length !== 1) log("snap:fail turn ${second} did not flash, alone");
       if (target.querySelector(".turn-line")?.getAttribute("aria-expanded") !== "true") log("snap:fail turn ${second} did not unfold");
       if (document.activeElement !== target.querySelector(".turn-line")) log("snap:fail the focus did not move to turn ${second}");
-      // The section in view for the screenshot, at the sheet's foot.
-      here().querySelector(".sheet-heading").scrollIntoView({ block: "start" });
+      // The section open and in view for the screenshot.
+      here().open = true;
+      await wait(50);
+      here().scrollIntoView({ block: "start" });
       log("panel ok");`, {
     sessions,
     select: { __by: "id", values: selected },
@@ -175,7 +185,8 @@ export const mapLatePlace = (): Fixture => {
   const s1 = sessions[0];
   const late = { ...s1, turns: [...s1.turns, { started_at: Date.now() - 120e3, ended_at: Date.now() - 60e3, prompt: "Read the hook late", id: null, message: null, checks: [], listed: [], files: { files: [{ root: "/w/plotkeeper", path: "hook/late.rs", from: null, added: 3, removed: 1, agent: null }], merged: 0 } }] };
   return mapPanel(`
-      const here = () => document.querySelector("#map-sheet .sheet-here");
+      // The section is a fold (#637), its summary its heading.
+      const here = () => document.querySelector("#map-sheet .sheet-fold-here");
       const rows = () => [...here().querySelectorAll(".sheet-here-turn")].map((b) => b.querySelector(".sheet-here-number").textContent);
       const showOnMap = () => document.querySelector("#feed > li.turn .show-on-map");
       await plate("hook");
@@ -598,9 +609,10 @@ export const mapSheetHolds = (): Fixture =>
       const notes = rows.map((row) => row.classList.contains("sheet-held-note"));
       if (notes.join() !== "false,false,true") log("snap:fail only the item without paths is a note: " + notes.join());
       if (rows[2].querySelector(".sheet-held-head")?.textContent !== "The quiet log · note") log("snap:fail the note's head is " + rows[2].querySelector(".sheet-held-head")?.textContent);
+      if (list.closest(".sheet-fold")?.querySelector(".sheet-fold-value")?.textContent !== "3 things") log("snap:fail the Holds fold's value");
       // The glass's rise ends before the picture is taken.
       await wait(400);
-      log("sheet holds ok");`, { map_state: mapState({ source: heldSheet }) });
+      log("sheet holds ok");`, { map_state: mapState({ source: heldSheet }), storage: { "map-sheet-folds": JSON.stringify(["holds"]) } });
 const longProof = [{ file: "workbench/tests/wire.rs", line: 11, test: "wire_types_match", first: 11, snippet: ["// @law: wire-types-agree", "#[test]", "fn wire_types_match() {", ...Array.from({ length: 40 }, (_, i) => `    let sample_${i} = studio_test_support::sample(${i});`), "}"].join("\n") }];
 const sheetHelpers = `
       const esc = async () => { document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", key: "Escape", bubbles: true })); await wait(100); };
@@ -637,7 +649,7 @@ export const mapSheetScrollShort = (): Fixture =>
       if (code.scrollHeight <= code.clientHeight) log("snap:fail the drawer's code block does not scroll on its own");
       // The glass's rise ends before the picture is taken.
       await wait(400);
-      log("sheet scroll ok");`, { map_state: mapState({ source: longSheet }), map_proof: longProof });
+      log("sheet scroll ok");`, { map_state: mapState({ source: longSheet }), map_proof: longProof, storage: { "map-sheet-folds": JSON.stringify(["laws", "talks", "here", "holds", "tier", "ci", "history"]) } });
 /**
  * The sheet's width (#445): a real drag of its left edge, within 300 px and half the map, arrow keys on the focused handle, a double-click
  * back to 360, and the width kept in this browser.

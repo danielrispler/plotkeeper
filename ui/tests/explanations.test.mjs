@@ -8,7 +8,7 @@ import { El, fakeDocument, tauri } from "./dom.mjs";
 const calls = [];
 tauri(calls, (command) => (command === "set_explanations" ? '{ "explanations": false }' : null));
 globalThis.document = fakeDocument({ body: new El("body") });
-const { BRIEF, BRIEF_HEADINGS, RATIFY, RATIFY_HEADINGS, SHEET, SHEET_HEADINGS, explained: explainedNodes, stepLine, explainedChoice, explainToggle: toggleNode, explainedLinks, explanationsApplied, onExplanations, startExplanations } = await import("../../dist/explanations.js");
+const { BRIEF, BRIEF_HEADINGS, RATIFY, RATIFY_HEADINGS, SHEET, SHEET_FOLDS, explained: explainedNodes, stepLine, explainedChoice, explainToggle: toggleNode, explainedLinks, explanationsApplied, onExplanations, startExplanations } = await import("../../dist/explanations.js");
 // The page's nodes here are the stand-in DOM's, which the tests read as such.
 /** @param {Parameters<typeof explainedNodes>} args @returns {any[]} */
 const explained = (...args) => explainedNodes(...args);
@@ -22,11 +22,10 @@ const words = (line) => line.split(/\s+/).filter((word) => /\p{L}/u.test(word)).
 const every = (value) => (typeof value === "string" ? [value] : Object.values(value).flatMap(every));
 const later = () => new Promise((done) => setTimeout(done, 10));
 
-test("every heading the sheet draws has a line, and every text is at most 12 words, to you", () => {
-  const ui = new URL("../", import.meta.url);
-  const drawn = ["map-sheet.ts", "map-history.ts"].flatMap((name) => [...readFileSync(new URL(name, ui), "utf8").matchAll(/text\("h3", "([^"]+)", "sheet-heading"\)|\bheading\("([^"]+)"\)/g)].map((m) => m[1] ?? m[2]));
-  assert.ok(drawn.length >= 7, `found the sheet's headings: ${drawn}`);
-  for (const heading of drawn) assert.ok(SHEET_HEADINGS[heading], `"${heading}" has no line`);
+test("every fold the sheet draws has a line, and every text is at most 12 words, to you", () => {
+  // The folds, by `foldOrder`'s keys (#637).
+  assert.deepEqual(Object.keys(SHEET_FOLDS).sort(), ["ci", "here", "history", "holds", "laws", "talks", "tier"]);
+  for (const [fold, line] of Object.entries(SHEET_FOLDS)) assert.ok(line, `the fold "${fold}" has no line`);
   for (const line of every(SHEET)) {
     assert.ok(words(line) <= 12, `over 12 words: ${line}`);
     assert.doesNotMatch(line, /Daniel/);

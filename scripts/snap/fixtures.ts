@@ -191,7 +191,9 @@ export const fixtures = {
   // CI on the default branch broke a law (#312): the red mark on the shell next to a Needs you chip; then with "See the proof" open, and
   // with the broken-law drill-down open.
   mapBroken: () => mapBroken("none"),
-  mapProof: () => mapBroken("proof"),
+  mapBrokenSheet: () => mapBroken("sheet"),
+  // Laws left open in this browser (#637), so the law with its proof shows.
+  mapProof: (): Fixture => ({ ...mapBroken("proof"), storage: { "map-sheet-folds": JSON.stringify(["laws"]) } }),
   mapBrokenLog: () => mapBroken("log"),
   // A part's history strip scrubbed to an older commit, with the sheet open (#313).
   // The contrast pass (#455) runs here too.

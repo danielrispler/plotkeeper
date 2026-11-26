@@ -737,6 +737,29 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .ratify-row > .explain-link { grid-column: 1 / -1; margin: var(--sp-1) 0 0; }
 .sheet-caption { margin: 0; font-size: var(--size-small); color: var(--muted); }
 .sheet-purpose { margin: var(--sp-3) 0 0; font-size: var(--size-read); line-height: 1.5; text-wrap: pretty; }
+/* Under the catch-up card (#637): the purpose in two lines until More shows it whole, then the chips, the part's shape at a glance, each
+   opening its fold, then the folds. */
+.sheet-purpose.clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+.btn.sheet-more { align-self: flex-start; margin-top: calc(-1 * var(--sp-2)); padding: 0 var(--sp-2); min-block-size: var(--control); font-size: var(--size-small); color: var(--muted); }
+.sheet-chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2); }
+.btn.sheet-chip { min-block-size: var(--control); padding: 0 var(--sp-4); border-radius: var(--radius-pane); background: var(--hover); font-size: var(--size-xs); color: var(--muted); }
+.btn.sheet-chip:hover:not(:disabled, [aria-disabled="true"]) { background: var(--pressed); color: var(--fg); }
+.btn.sheet-chip.bad { color: var(--conflict); }
+/* Each fold opens on its own: its marker before its title, which turns open, and a short value at the line's end. */
+.sheet-folds { display: flex; flex-direction: column; margin-top: var(--sp-4); border-top: var(--hair) solid var(--edge); }
+.sheet-fold { border-bottom: var(--hair) solid var(--edge); scroll-margin-block: var(--sp-6); }
+.sheet-fold-summary { list-style: none; display: flex; align-items: baseline; gap: var(--sp-3); padding: var(--sp-4) var(--sp-2); border-radius: var(--radius-small); cursor: pointer; }
+.sheet-fold-summary::-webkit-details-marker { display: none; }
+.sheet-fold-summary:hover { background: var(--hover); }
+.sheet-fold-summary::before { content: "›" / ""; flex: none; inline-size: var(--glyph); color: var(--faint); transition: rotate var(--motion); }
+.sheet-fold[open] > .sheet-fold-summary::before { rotate: 90deg; }
+.sheet-fold-summary:dir(rtl)::before { scale: -1 1; }
+.sheet-fold-title { font-size: var(--size-xs); letter-spacing: .12em; text-transform: uppercase; color: var(--faint); font-weight: 500; }
+.sheet-fold-value { margin-inline-start: auto; min-width: 0; font-size: var(--size-small); color: var(--muted); text-align: end; font-variant-numeric: tabular-nums; }
+.sheet-fold-value.bad { color: var(--conflict); }
+.sheet-fold-body { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-2) var(--sp-2) var(--sp-5) calc(var(--glyph) + var(--sp-2) + var(--sp-3)); }
+.sheet-fold-body > .explain { margin: 0; }
+@media (prefers-reduced-motion: reduce) { .sheet-fold-summary::before { transition: none; } }
 .sheet-holds { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-4); }
 .sheet-held { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--size-small); line-height: 1.45; }
 .sheet-held-name { font-weight: 600; }

@@ -26,10 +26,11 @@ import { studio } from "./state.js";
 import type { CatchUpOutline, Session } from "./types.js";
 import { enterRefresher, refresherNode, staleWhy } from "./map-stale.js";
 import { changesLine, fogActions, olderLine } from "./map-catch-up.js";
-import { ciDrawer, effectiveTier, type PanelContent, type Part, proofDrawer, type Sheet, sheetCi, sheetMarks, sheetOf, talksTo, type Tier } from "./map-model.js";
+import { chip, type Fold, fitPurpose, fold, purposeNodes } from "./map-sheet-folds.js";
+import { ciDrawer, effectiveTier, type FoldKey, foldOrder, type PanelContent, type Part, proofDrawer, type Sheet, sheetCi, sheetGlances, sheetMarks, sheetOf, talksTo, type Tier } from "./map-model.js";
 import { openBriefOf, openCatchUpOf } from "./map-brief.js";
 import { lawAction, lawActionNodes, patchActs } from "./patch-review.js";
-import { explained, explainedChoice, explainedLinks, explainLine, explanationsOn, explainToggle, onExplanations, SHEET, SHEET_HEADINGS } from "./explanations.js";
+import { explained, explainedChoice, explainedLinks, explainLine, explanationsOn, explainToggle, onExplanations, SHEET } from "./explanations.js";
 
 // The part whose sheet is open, and the project it is in; a sheet never carries over to another project's map.
 let open: { project: string; part: string } | null = null;
@@ -76,6 +77,7 @@ function resize(px: number | null) {
   const most = Math.max(leastWidth, (side.parentElement?.clientWidth ?? 0) / 2);
   const width = px === null ? firstWidth : Math.round(Math.min(most, Math.max(leastWidth, px)));
   showWidth(width);
+  fitPurpose(element("map-sheet"));
   // A browser that keeps nothing still resizes.
   if (px === null) kept.remove();
   else kept.set(String(width));
@@ -152,44 +154,121 @@ function drawSheet(view: MapView) {
   if (bar.parentElement === slot) [...slot.children].forEach((child) => child !== bar && child.remove());
   else slot.replaceChildren(bar);
   slot.append(card);
+  fitPurpose(slot);
   if (keepFocus) toggle.focus();
   drawStrip(view, part.id, extra);
   syncSide(view.slots);
 }
 
-// The sheet's card for `part` on `view`, its `.sheet-extra` foot (the history strip's, drawn once the card is in the page) and its `?`.
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: ratcheted at #554; split it rather than grow it
+// The sheet's card for `part` on `view`, its History fold's body (the history strip's, drawn once the card is in the page) and its `?`.
 export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra: HTMLElement; toggle: HTMLElement } {
   const tier = effectiveTier(part, view.state.user.tiers);
   const sheet = sheetOf(part, view.doc.laws, tier, view.scrub ? undefined : view.state.fog?.[part.id]);
-
   const closer = pressable(text("button", "×", "btn quiet sheet-close"), null);
   closer.setAttribute("aria-label", "Close");
   hint(closer, "Close the sheet (Esc)");
   closer.addEventListener("click", closeSheet);
-  // Explanations (#522): a line under each heading, the selected tier's meaning under the tiers, a link kind's and "not yet ratified"'s
-  // at their first link, and the fog actions' under them. The `?` beside the × shows or hides them all.
+  // Explanations (#522): a line inside each fold, the selected tier's meaning under the tiers, a link kind's and "not yet ratified"'s
+  // at their first link, and the fog's and the fog actions' in the catch-up card. The `?` beside the × shows or hides them all.
   const explain = explanationsOn();
-  const heading = (words: string) => explained(text("h3", words, "sheet-heading"), SHEET_HEADINGS[words] ?? "", explain);
   const header = text("div", "", "sheet-header");
   const toggle = explainToggle(explain);
   header.append(toggle, closer);
+  // CI is of now: a past commit shows none.
+  const ci = view.scrub ? null : sheetCi(view.state.ci, part.id, sheet.laws.some((law) => law.backing === "check"));
+  const { folds, extra, chips } = sheetFolds(view, part, sheet, ci, explain);
+  const card = text("div", "", "sheet");
+  card.dataset.part = part.id;
+  card.append(
+    header,
+    text("h2", sheet.name, "sheet-name"),
+    text("p", sheet.caption, "sheet-caption"),
+    ...(view.scrub ? [] : marksList(view, part.id)),
+    ...(view.scrub ? [] : [catchUpCard(view, part.id, sheet, explain)]),
+    // A converted version 1 map may have had an empty description: no empty paragraph for it.
+    ...(sheet.purpose ? purposeNodes(sheet.purpose, purposeOpen === part.id, (whole) => {
+      purposeOpen = whole ? part.id : null;
+    }) : []),
+    chips,
+    folds,
+  );
+  const overturned = overturnNote(view.project, (item) =>
+    item.kind === "law" ? sheet.laws.some((law) => law.id === item.id) : item.kind === "link" && view.doc.links.some((link) => link.id === item.id && (link.from === part.id || link.to === part.id)),
+  );
+  if (overturned) card.append(overturned);
+  return { card, extra, toggle };
+}
+
+type Unratified = ReturnType<typeof sheetPending>;
+
+// The part whose purpose shows whole (#637), kept across the sheet's draws; another part's sheet starts clamped.
+let purposeOpen: string | null = null;
+
+// The folds in their order (`foldOrder`), each with its glance and, with the explanations on, its line; the chips that open them; and the
+// History fold's body, which the strip fills.
+function sheetFolds(view: MapView, part: Part, sheet: Sheet, ci: ReturnType<typeof sheetCi>, explain: boolean) {
+  // The laws and links at this part that landed without Daniel's say: marked "not yet ratified", with accept and overturn. Of now only.
+  const unratified = view.scrub ? sheetPending([], part.id, []) : sheetPending(view.state.ratify ?? [], part.id, view.doc.links);
+  const talks = talksRows(view, part.id, unratified, explain);
+  const glances = sheetGlances(sheet, talks.length, view.state.ci);
+  const here = text("div", "", "sheet-here");
+  const extra = text("div", "", "sheet-extra");
+  const make: Record<FoldKey, () => Fold> = {
+    laws: () => fold("laws", glances.folds.laws, explain, lawsBody(view, part.id, sheet, unratified)),
+    talks: () => fold("talks", glances.folds.talks, explain, talks.length ? [listOf("sheet-links", talks)] : [text("p", "No link at this part", "empty")]),
+    here: () => fold("here", "", explain, [here]),
+    holds: () => fold("holds", glances.folds.holds, explain, [heldList(sheet.holds)]),
+    tier: () => fold("tier", glances.folds.tier, explain, tierChoice(view, part.id, sheet, explain)),
+    ci: () => fold("ci", glances.folds.ci, explain, ci ? [ciBody(view, ci)] : [], { forced: ci?.broken ?? false, bad: ci?.broken ?? false }),
+    history: () => fold("history", "", explain, [extra]),
+  };
+  const drawn = new Map(foldOrder(ci, sheet.holds.length > 0).map((key) => [key, make[key]()]));
+  const herefold = drawn.get("here");
+  if (herefold) fillHere(herefold.node, part.id, !view.scrub, explain);
+  const folds = text("div", "", "sheet-folds");
+  folds.append(...[...drawn.values()].map((each) => each.node));
+  const chips = text("div", "", "sheet-chips");
+  const chipOf = (key: FoldKey, words: string, bad = false) => {
+    const target = drawn.get(key);
+    if (target) chips.append(chip(words, target, bad));
+  };
+  chipOf("tier", glances.chips.tier);
+  chipOf("laws", glances.chips.laws);
+  chipOf("talks", glances.chips.talks);
+  if (ci) chipOf("ci", glances.chips.ci, ci.broken);
+  return { folds, extra, chips };
+}
+
+// A list of `rows` with `className`. Safari drops a list's semantics under `list-style: none`; the role brings them back.
+function listOf(className: string, rows: HTMLElement[]): HTMLElement {
+  const list = text("ul", "", className);
+  list.setAttribute("role", "list");
+  list.append(...rows);
+  return list;
+}
+
+// The tier buttons, the selected one's meaning under them with the explanations on. Of now only: a past commit's are disabled.
+function tierChoice(view: MapView, part: string, sheet: Sheet, explain: boolean): HTMLElement[] {
   const tiers = text("div", "", "sheet-tiers");
   let selected: HTMLElement | undefined;
   for (const each of sheet.tiers) {
-    const button = pressable(text("button", each.label, "btn"), each.pressed, () => setTier(view, part.id, each.tier).catch(failure("map_set_tier")));
+    const button = pressable(text("button", each.label, "btn"), each.pressed, () => setTier(view, part, each.tier).catch(failure("map_set_tier")));
     // Each tier's meaning on hover, so the ones not picked compare without a change.
     hint(button, SHEET.tiers[each.tier]);
     if (view.scrub) button.disabled = true;
     if (each.pressed) selected = button;
     tiers.append(button);
   }
-  // The laws and links at this part that landed without Daniel's say: marked "not yet ratified", with accept and overturn. Of now only.
-  const unratified = view.scrub ? sheetPending([], part.id, []) : sheetPending(view.state.ratify ?? [], part.id, view.doc.links);
+  return explainedChoice(tiers, selected, SHEET.tiers[sheet.tier], explain);
+}
+
+// The part's laws, each its mark, text and backing, "See the proof" for one a check backs and Back a law for one on trust, and accept and
+// overturn for one not yet ratified.
+function lawsBody(view: MapView, part: string, sheet: Sheet, unratified: Unratified): HTMLElement[] {
   const ratified = () => void reloadMap().catch(failure("map_state"));
-  const laws = sheet.laws.map((law) => {
+  const rows = sheet.laws.map((law) => {
     // The law's mark says its backing and text on the pointer, as the row's title did; keyed apart from the plate's own mark of it.
-    const mark = lawMark({ id: law.id, on: part.id, backing: law.backing, text: law.text }, `sheet-${part.id}-${law.id}`);
+    const mark = lawMark({ id: law.id, on: part, backing: law.backing, text: law.text }, `sheet-${part}-${law.id}`);
     const row = text("li", "", "sheet-law");
     row.dataset.law = law.id;
     const acts = text("span", "", "sheet-law-actions");
@@ -213,10 +292,15 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
     }
     return row;
   });
+  return rows.length ? [listOf("sheet-laws", rows)] : [text("p", "No laws on this part", "empty")];
+}
+
+// "Talks to" (spec #473): every link at either end, its arrow, other end, kind and reason; an unratified one carries its accept and overturn.
+function talksRows(view: MapView, part: string, unratified: Unratified, explain: boolean): HTMLElement[] {
+  const ratified = () => void reloadMap().catch(failure("map_state"));
   const nameOf = (id: string) => view.doc.parts.find((p) => p.id === id)?.name ?? view.doc.actors.find((a) => a.id === id)?.name ?? id;
-  // "Talks to" (spec #473): every link at either end, its arrow, other end, kind and reason; an unratified one carries its accept and overturn.
   const pending = new Map(unratified.links.map((link) => [link.id, sheetLinkItem(link, link.pr)]));
-  const talks = talksTo(part.id, view.doc.links, nameOf);
+  const talks = talksTo(part, view.doc.links, nameOf);
   const rows = talks.map((talk) => {
     const row = text("li", "", "sheet-link");
     row.dataset.link = talk.link;
@@ -234,54 +318,21 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
     }
     return row;
   });
-  const links = explainedLinks(rows, talks.map((talk) => ({ kind: talk.kind, unratified: pending.has(talk.link) })), explain);
-  const state = view.scrub ? null : sheetCi(view.state.ci, part.id, sheet.laws.some((law) => law.backing === "check"));
-  const ci = text("div", "", `sheet-ci${state?.broken ? " broken" : ""}`);
-  if (state) {
-    ci.append(text("p", state.line, "sheet-ci-line"));
-    if (state.drill && view.state.ci) {
-      const found = view.state.ci;
-      const drill = pressable(text("button", "See the CI log", "btn quiet"), null);
-      hint(drill, "Show the run's status and the end of its failed log, with a link to the run on GitHub");
-      drill.addEventListener("click", () => openDrawer(ciDrawer(found)));
-      ci.append(drill);
-    }
+  return explainedLinks(rows, talks.map((talk) => ({ kind: talk.kind, unratified: pending.has(talk.link) })), explain);
+}
+
+// CI on main's line and, for a run there is something to show of, "See the CI log", which opens the drawer.
+function ciBody(view: MapView, state: NonNullable<ReturnType<typeof sheetCi>>): HTMLElement {
+  const ci = text("div", "", `sheet-ci${state.broken ? " broken" : ""}`);
+  ci.append(text("p", state.line, "sheet-ci-line"));
+  const found = view.state.ci;
+  if (state.drill && found) {
+    const drill = pressable(text("button", "See the CI log", "btn quiet"), null);
+    hint(drill, "Show the run's status and the end of its failed log, with a link to the run on GitHub");
+    drill.addEventListener("click", () => openDrawer(ciDrawer(found)));
+    ci.append(drill);
   }
-  const lawList = text("ul", "", "sheet-laws");
-  const linkList = text("ul", "", "sheet-links");
-  // Safari drops a list's semantics under `list-style: none`; the role brings them back.
-  for (const list of [lawList, linkList]) list.setAttribute("role", "list");
-  lawList.append(...laws);
-  linkList.append(...links);
-  const card = text("div", "", "sheet");
-  card.dataset.part = part.id;
-  card.append(
-    header,
-    text("h2", sheet.name, "sheet-name"),
-    text("p", sheet.caption, "sheet-caption"),
-    ...(view.scrub ? [] : marksList(view, part.id)),
-    ...(view.scrub ? [] : [catchUpCard(view, part.id, sheet, explain)]),
-    // A converted version 1 map may have had an empty description: no empty paragraph for it.
-    ...(sheet.purpose ? [text("p", sheet.purpose, "sheet-purpose")] : []),
-    ...(sheet.holds.length ? [...heading("Holds"), heldList(sheet.holds)] : []),
-    ...heading("Tier"),
-    ...explainedChoice(tiers, selected, SHEET.tiers[tier], explain),
-    ...heading("Laws"),
-    ...(laws.length ? [lawList] : [text("p", "No laws on this part", "empty")]),
-    ...heading("Talks to"),
-    ...(links.length ? [linkList] : [text("p", "No link at this part", "empty")]),
-    // CI is of now: a past commit shows none.
-    ...(state ? [...heading("CI on main"), ci] : []),
-  );
-  const here = text("div", "", "sheet-here");
-  fillHere(here, part.id, !view.scrub, explain);
-  const extra = text("div", "", "sheet-extra");
-  card.append(here, extra);
-  const overturned = overturnNote(view.project, (item) =>
-    item.kind === "law" ? sheet.laws.some((law) => law.id === item.id) : item.kind === "link" && view.doc.links.some((link) => link.id === item.id && (link.from === part.id || link.to === part.id)),
-  );
-  if (overturned) card.append(overturned);
-  return { card, extra, toggle };
+  return ci;
 }
 
 // The catch-up card (spec #633, ticket #636), of now only. A fogged part's says how many changes landed since Daniel last caught up and, once
@@ -424,8 +475,12 @@ function storyBeside() {
   return selected.session;
 }
 
-// Fills `box` for `part`, drawn again only when what it shows changed, so a focused row keeps the focus.
-function fillHere(box: HTMLElement, part: string, live: boolean, explain: boolean) {
+// Fills the "This session here" fold for `part`: hidden with no session's story beside the sheet, else its turns in its body and how
+// many beside its title; drawn again only when what it shows changed, so a focused row keeps the focus. The fold's summary is its heading.
+function fillHere(fold: HTMLElement, part: string, live: boolean, explain: boolean) {
+  const box = fold.querySelector<HTMLElement>(".sheet-here");
+  const value = fold.querySelector<HTMLElement>(".sheet-fold-value");
+  if (!box || !value) return;
   const given = deps;
   const session = live && given ? storyBeside() : null;
   const now = Date.now();
@@ -440,11 +495,12 @@ function fillHere(box: HTMLElement, part: string, live: boolean, explain: boolea
   if (box.dataset.drawn === drawn) return;
   box.dataset.drawn = drawn;
   const focused = box.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.turn : undefined;
-  box.hidden = found === null;
+  fold.hidden = found === null;
   if (found === null) {
     box.replaceChildren();
     return;
   }
+  value.textContent = rows.length ? `${rows.length} ${rows.length === 1 ? "turn" : "turns"}` : found.pending ? "" : "None";
   const list = text("ul", "", "sheet-here-turns");
   // Safari drops a list's semantics under `list-style: none`; the role brings them back.
   list.setAttribute("role", "list");
@@ -458,7 +514,6 @@ function fillHere(box: HTMLElement, part: string, live: boolean, explain: boolea
     list.append(item);
   }
   box.replaceChildren(
-    ...explained(text("h3", "This session here", "sheet-heading"), SHEET.here, explain),
     // While `map_place` has not answered for one of the turns' files, an empty list says nothing yet.
     ...(rows.length ? [list] : found.pending ? [] : [text("p", hereEmpty, "empty")]),
     ...(found.older ? [text("p", hereOlder, "sheet-here-older")] : []),
@@ -469,9 +524,9 @@ function fillHere(box: HTMLElement, part: string, live: boolean, explain: boolea
 // The story or its panel changed: the open sheet's "This session here" follows.
 export function refreshHere() {
   const view = currentMap();
-  const box = view?.slots.sheet.querySelector<HTMLElement>(".sheet-here");
-  const part = box?.closest<HTMLElement>(".sheet")?.dataset.part;
-  if (view && box && part) fillHere(box, part, !view.scrub, explanationsOn());
+  const fold = view?.slots.sheet.querySelector<HTMLElement>(".sheet-fold-here");
+  const part = fold?.closest<HTMLElement>(".sheet")?.dataset.part;
+  if (view && fold && part) fillHere(fold, part, !view.scrub, explanationsOn());
 }
 
 // Why the part's plate carries its marks (#495), first on its sheet: its fog, its staleness band and a broken law, each from this case's
