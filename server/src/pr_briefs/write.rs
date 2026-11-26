@@ -3,7 +3,7 @@
 use super::{Did, Push, Reading, Seen, carried, push_at};
 use std::sync::Mutex;
 use studio_understanding::pr_brief::{
-    BriefStore, BriefWriter, PrSource, StoredBrief, build_facts, write_pr_brief,
+    BriefStore, BriefWriter, PrSource, StoredBrief, build_facts, short_brief, write_pr_brief,
 };
 
 /// What writes and keeps the briefs: the writer, the model of the "PR briefs" setting and the store.
@@ -94,7 +94,21 @@ pub(super) fn fogs_nothing(source: &PrSource) -> Result<bool, String> {
     Ok(build_facts(source)?.shape.required.is_empty())
 }
 
-/// Builds the source and writes; the failure of either is told to `log` and returned. `Ok(None)`: the PR would fog nothing.
+/// Stores the short brief of a PR that fogs nothing (#644), made by code from its Map diff, with no writer call. `Ok(None)`: its
+/// Map diff is empty, so it gets no brief.
+fn store_short(with: &Writing, source: &PrSource) -> Result<Option<StoredBrief>, String> {
+    let Some(short) = short_brief(source) else {
+        return Ok(None);
+    };
+    with.store
+        .put(&short)
+        .map_err(|e| format!("keep the short brief of #{}: {e}", short.pr))?;
+    Ok(Some(short))
+}
+
+/// Builds the source and writes; the failure of either is told to `log` and returned. Every brief of a PR's head is stored here: the
+/// writer's, or, for a PR that fogs nothing but changes the map, the short brief. `Ok(None)`: the PR would fog nothing and its map did
+/// not change.
 fn write_now(
     with: &Writing,
     source: impl FnOnce() -> Result<PrSource, String>,
@@ -102,7 +116,7 @@ fn write_now(
 ) -> Result<Option<StoredBrief>, String> {
     let written = source().and_then(|source| {
         if fogs_nothing(&source)? {
-            return Ok(None);
+            return store_short(with, &source);
         }
         write_brief(with, &source, &mut log).map(Some)
     });

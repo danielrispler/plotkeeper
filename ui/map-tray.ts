@@ -16,7 +16,8 @@ export type TrayRow = { number: number; chapter: number | null; title: string; n
 /**
  * The tray's rows; none when nothing is ready, so the tray is not drawn. Without `claude` (`briefs` false) no brief is written,
  * so a PR with none stored says briefs need Claude (spec #320). A brief at the PR's head says, in place of "brief ready", why it is
- * what it is after a push (`note`, #477 part B): the read carried over, or the brief was rewritten.
+ * what it is after a push (`note`, #477 part B): the read carried over, or the brief was rewritten. A short brief, made by code for a PR
+ * that changes the map but fogs nothing (#644), says "map changed" there.
  */
 export const trayRows = (ready: ReadyPr[], briefs = true): TrayRow[] =>
   ready.flatMap((pr): TrayRow[] => {
@@ -30,7 +31,7 @@ export const trayRows = (ready: ReadyPr[], briefs = true): TrayRow[] =>
       if (brief?.failed) return [{ number: pr.number, chapter: 0, title, note: `#${pr.number} · the brief could not be written; open it to try again`, openable: true }];
       return [{ number: pr.number, chapter: 0, title, note: `#${pr.number} · the brief is written when you open it`, openable: true }];
     }
-    const state = brief.writing ? "writing it again…" : brief.failed ? "it could not be rewritten; open it to try again" : brief.stale ? "a newer push; rewritten when opened" : (brief.note ?? "brief ready");
+    const state = brief.writing ? "writing it again…" : brief.failed ? "it could not be rewritten; open it to try again" : brief.stale ? "a newer push; rewritten when opened" : (brief.note ?? (brief.short ? "map changed" : "brief ready"));
     // A head with a "Since you read" story (#497): its rows come first, one per chapter of a chaptered story as for the full brief, so
     // each can be read to its end, and the full brief's rows open past them.
     const since = brief.since;

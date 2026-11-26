@@ -1,0 +1,60 @@
+{
+ "version": 1,
+ "pr": 644,
+ "head": "cafe644",
+ "written_at": 1795600000000,
+ "stale": false,
+ "model": "",
+ "shape": {
+  "chapters": false,
+  "required": [],
+  "also": [],
+  "overview": false,
+  "flows_changed": []
+ },
+ "brief": {
+  "title": "Add beta",
+  "overview": [],
+  "chapters": [
+   {
+    "behaviour": "story",
+    "parts": [
+     "alpha",
+     "beta"
+    ],
+    "title": "The map in this PR",
+    "steps": [
+     {
+      "k": "Where",
+      "h": "The map in this PR",
+      "b": "1 part added, 1 link added.",
+      "on": [
+       "alpha",
+       "beta"
+      ],
+      "hops": [],
+      "law": null,
+      "covered_by": null,
+      "list": [],
+      "risks": [],
+      "fig": null,
+      "check": null,
+      "cites": [],
+      "flags": []
+     }
+    ],
+    "flags": [],
+    "gist": "",
+    "gist_flags": []
+   }
+  ],
+  "also": [],
+  "unseen": [],
+  "decisions": [],
+  "flags": []
+ },
+ "map_problems": [
+  "stray/s.rs is tracked but no part owns it; add it to a part's paths or to ignored"
+ ],
+ "short": true
+}

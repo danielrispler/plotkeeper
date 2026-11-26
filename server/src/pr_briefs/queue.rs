@@ -165,6 +165,7 @@ impl PrBriefs {
                         note: None,
                         since: None,
                         since_chapters: vec![],
+                        short: false,
                     });
                 }
                 continue;
@@ -190,6 +191,7 @@ impl PrBriefs {
                     .filter(|story| story.brief.chapters.len() > 1)
                     .map(|story| chapter_titles(&story.brief))
                     .unwrap_or_default(),
+                short: latest.as_ref().is_some_and(|b| b.short),
             });
         }
     }

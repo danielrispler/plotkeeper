@@ -131,6 +131,7 @@ fn ready() -> Vec<Ready> {
         note: Some("Rebased onto main, nothing new in the PR".into()),
         since: Some("What changed since you read".into()),
         since_chapters: vec!["The read".into(), "The fog".into()],
+        short: true,
     };
     vec![
         Ready {
@@ -591,6 +592,8 @@ fn brief() -> studio_understanding::pr_brief::StoredBrief {
         }],
         // Ratify's head lists them (#641).
         map_problems: vec!["stray/s.ts: no part owns it".into()],
+        // The tray says "map changed" (#644).
+        short: true,
     }
 }
 

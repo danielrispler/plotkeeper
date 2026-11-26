@@ -20,6 +20,7 @@ mod facts;
 mod gather;
 mod prompt;
 mod reply;
+mod short;
 mod source;
 mod store;
 
@@ -30,6 +31,7 @@ pub use facts::*;
 pub use gather::*;
 pub use prompt::*;
 pub use reply::*;
+pub use short::*;
 pub use source::*;
 pub use store::*;
 
@@ -169,6 +171,7 @@ pub fn write_pr_brief(
         },
         link_evidence: source.link_evidence.clone(),
         map_problems: source.map_problems.clone(),
+        short: false,
     };
     match &source.since {
         Some(from) => store.put_since(from, &stored),

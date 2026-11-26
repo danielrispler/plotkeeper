@@ -7,7 +7,7 @@ use std::{
     path::Path,
     sync::Mutex,
 };
-use studio_understanding::pr_brief::{PrSource, StoredBrief, gather};
+use studio_understanding::pr_brief::{MapCounts, PrSource, StoredBrief, gather, recount};
 
 /// The heads the lookups saw last, per PR, for "the same head at two lookups in a row".
 #[derive(Default)]
@@ -86,6 +86,9 @@ pub trait Reading {
     /// What PR `pr`'s head `head` says of its map (`ratify::head_check`, from its merge base with the default branch), for a brief
     /// carried to `head`; nothing when the base is unknown.
     fn head_check(&self, pr: u64, head: &str) -> HeadCheck;
+    /// What `head`'s Map diff marks, from its merge base with the default branch (`map_diff::counts`), for a short brief carried to
+    /// it (#644); none when its map did not change.
+    fn map_counts(&self, head: &str) -> Option<MapCounts>;
 }
 
 /// The server's `Reading`: Daniel's state in `file`, `git` in `project`, and its default branch `reference`.
@@ -145,6 +148,12 @@ impl Reading for GitReading {
         };
         let trusted = crate::prs::by_own_login(repo, pr);
         crate::ratify::head_check(repo, base.trim(), head, trusted)
+    }
+
+    fn map_counts(&self, head: &str) -> Option<MapCounts> {
+        let repo = Path::new(&self.project);
+        let base = crate::map::git(repo, &["merge-base", self.reference.as_deref()?, head]).ok()?;
+        crate::map_diff::counts(repo, base.trim(), head)
     }
 }
 
@@ -308,7 +317,7 @@ pub(super) fn carried(
     // The read moves first: a copy whose read did not move would be a brief to read again. Its link evidence and map check are
     // read again at `head`, since a rebase or a quiet push can move an import site, remove its file or break the map (#499, #641).
     let check = reading.head_check(pr, head);
-    let copy = StoredBrief {
+    let mut copy = StoredBrief {
         head: head.to_string(),
         stale: false,
         written_at: studio_understanding::millis().max(old.written_at + 1),
@@ -316,6 +325,10 @@ pub(super) fn carried(
         map_problems: check.map_problems,
         ..old.clone()
     };
+    // A short brief counts the new head's Map diff (#644); one whose map no longer changes is no brief, so it is not carried.
+    if copy.short {
+        recount(&mut copy, &reading.map_counts(head)?);
+    }
     match reading.carry(pr, &old.head, head).and_then(|()| {
         with.store
             .put(&copy)
