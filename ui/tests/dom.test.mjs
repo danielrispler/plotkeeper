@@ -125,3 +125,19 @@ test("a hint leaves the author's own aria-describedby, and is drawn again for th
   assert.equal(second, first);
   assert.equal(second?.textContent, "Two");
 });
+
+test("cut given no words leaves its node empty, so the header's :empty rule hides it; words or children are wrapped as before (spec #658)", async () => {
+  const { cut } = await import("../../dist/dom.js");
+  const empty = cut(document.createElement("span"), "");
+  assert.equal(empty.childNodes.length, 0);
+  assert.ok(empty.className.split(" ").includes("cut"));
+  assert.equal(cut(document.createElement("span")).childNodes.length, 0);
+  const worded = cut(document.createElement("span"), "Implementing");
+  assert.equal(worded.childNodes.length, 1);
+  assert.equal(worded.textContent, "Implementing");
+  const parent = document.createElement("span");
+  parent.textContent = "Edit a file";
+  cut(parent);
+  assert.equal(parent.childNodes.length, 1);
+  assert.equal(parent.childNodes[0].textContent, "Edit a file");
+});
