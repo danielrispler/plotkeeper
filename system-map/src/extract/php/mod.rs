@@ -25,11 +25,7 @@ impl Extractor for PhpImports {
     /// A file under a folder named `tests` or `test`, one only a `classmap` reaches, or one the reader cannot lex. The
     /// paths are judged first, so a file they skip is never read.
     fn skips(&self, repo: &Repo, file: &str) -> bool {
-        in_test_folder(file)
-            || repo.autoload().classmap_only(file)
-            || repo
-                .read(file)
-                .is_none_or(|text| Reading::read(file, &text).is_none())
+        skips_path(repo, file) || reading(repo, file).is_none()
     }
 
     fn extract(&self, repo: &Repo) -> Output {
@@ -38,10 +34,11 @@ impl Extractor for PhpImports {
             ..Output::default()
         };
         for &file in repo.files() {
-            if !self.reads(file) || repo.is_ignored(file) || self.skips(repo, file) {
+            if !self.reads(file) || repo.is_ignored(file) || skips_path(repo, file) {
                 continue;
             }
-            let Some(reading) = repo.read(file).and_then(|text| Reading::read(file, &text)) else {
+            // A file the reader cannot lex is skipped.
+            let Some(reading) = reading(repo, file) else {
                 continue;
             };
             for class in reading.uses {
@@ -93,6 +90,16 @@ impl Extractor for PhpImports {
     }
 }
 
+/// Whether `file` is skipped for its path alone: under a test folder, or reached only by a `classmap`.
+fn skips_path(repo: &Repo, file: &str) -> bool {
+    in_test_folder(file) || repo.autoload().classmap_only(file)
+}
+
+/// What the reader takes from `file`; none when it cannot be read or lexed.
+fn reading(repo: &Repo, file: &str) -> Option<Reading> {
+    repo.read(file).and_then(|text| Reading::read(file, &text))
+}
+
 /// Whether a folder in the path of `file` is named `tests` or `test`, in any case and at any depth: Symfony keeps its
 /// tests in `src/**/Tests/`. A file named like a test, `CreatesMatchingTest.php`, is production.
 fn in_test_folder(file: &str) -> bool {
@@ -100,4 +107,23 @@ fn in_test_folder(file: &str) -> bool {
     folders
         .split('/')
         .any(|folder| folder.eq_ignore_ascii_case("tests") || folder.eq_ignore_ascii_case("test"))
+}
+
+/// `text`, a path under the repository root that starts with `/` (or is empty), as a path from the root with no `.`,
+/// `..` or empty segment. None when it does not start there, or climbs above the root.
+fn clean(text: &str) -> Option<String> {
+    let rest = text
+        .strip_prefix('/')
+        .or_else(|| text.is_empty().then_some(text))?;
+    let mut kept: Vec<&str> = Vec::new();
+    for segment in rest.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                kept.pop()?;
+            }
+            s => kept.push(s),
+        }
+    }
+    Some(kept.join("/"))
 }

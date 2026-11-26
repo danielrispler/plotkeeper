@@ -101,7 +101,7 @@ impl Composer {
                     paths
                         .iter()
                         .filter_map(Value::as_str)
-                        .map(|p| join(folder, p)),
+                        .filter_map(|p| join(folder, p)),
                 );
             }
             let Some(Value::Object(psr4)) = root.get(section).and_then(|s| s.get("psr-4")) else {
@@ -126,7 +126,7 @@ impl Composer {
                     ));
                     continue;
                 };
-                let folders = paths.into_iter().map(|path| join(folder, path));
+                let folders = paths.into_iter().filter_map(|path| join(folder, path));
                 if prefix.is_empty() {
                     composer.fallback.extend(folders);
                 } else {
@@ -148,23 +148,33 @@ impl Composer {
     /// The first tracked file Composer would load for `class`: each prefix of the name the table holds, from the longest
     /// down, each of its folders in order.
     fn walk(&self, repo: &Repo, class: &str) -> Option<String> {
-        let rest = class.replace('\\', "/");
-        let mut sub = class;
+        // The class name as a path, `App/Lib/X`; each try is a folder and the part of that path under it.
+        let class_path = class.replace('\\', "/");
+        let mut prefix = class;
         let mut tries: Vec<(&String, &str)> = Vec::new();
-        while let Some(at) = sub.rfind('\\') {
-            sub = &sub[..at];
-            for folder in self.prefixes.get(&format!("{sub}\\")).into_iter().flatten() {
-                tries.push((folder, &rest[at + 1..]));
+        while let Some(at) = prefix.rfind('\\') {
+            prefix = &prefix[..at];
+            for folder in self
+                .prefixes
+                .get(&format!("{prefix}\\"))
+                .into_iter()
+                .flatten()
+            {
+                tries.push((folder, &class_path[at + 1..]));
             }
         }
-        tries.extend(self.fallback.iter().map(|folder| (folder, rest.as_str())));
+        tries.extend(
+            self.fallback
+                .iter()
+                .map(|folder| (folder, class_path.as_str())),
+        );
         tries
             .into_iter()
-            .find_map(|(folder, rest)| {
+            .find_map(|(folder, under)| {
                 let path = if folder.is_empty() {
-                    format!("{rest}.php")
+                    format!("{under}.php")
                 } else {
-                    format!("{folder}/{rest}.php")
+                    format!("{folder}/{under}.php")
                 };
                 repo.files().contains(path.as_str()).then_some(path)
             })
@@ -180,23 +190,15 @@ fn composer_folder(file: &str) -> Option<&str> {
         None if file == "composer.json" => "",
         _ => return None,
     };
-    let barred = folder.split('/').any(|name| {
-        name.eq_ignore_ascii_case("tests") || name.eq_ignore_ascii_case("test") || name == "vendor"
-    });
+    let barred = super::in_test_folder(file) || folder.split('/').any(|name| name == "vendor");
     (!barred).then_some(folder)
 }
 
-/// `path` joined to `folder` and cleaned: no `.`, `..` or empty segment, `""` for the root.
-fn join(folder: &str, path: &str) -> String {
-    let mut kept: Vec<&str> = Vec::new();
-    for segment in folder.split('/').chain(path.split('/')) {
-        match segment {
-            "" | "." => {}
-            ".." => {
-                kept.pop();
-            }
-            s => kept.push(s),
-        }
+/// `path` joined to `folder` and cleaned, `""` for the root. None when `path` is absolute or climbs out of the
+/// repository: such a folder names nothing.
+fn join(folder: &str, path: &str) -> Option<String> {
+    if path.starts_with('/') {
+        return None;
     }
-    kept.join("/")
+    super::clean(&format!("/{folder}/{path}"))
 }

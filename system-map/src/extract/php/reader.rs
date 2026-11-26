@@ -41,7 +41,13 @@ struct Lexer<'t> {
     at: usize,
     /// The offsets of the `\n` bytes, to turn an offset into a line.
     newlines: Vec<usize>,
+    /// How many strings' nested code the lexer is inside.
+    nesting: usize,
 }
+
+/// The deepest nesting of string code the reader lexes: a file nested deeper is one it cannot lex, so a crafted file
+/// cannot exhaust the stack.
+const MAX_NESTING: usize = 256;
 
 fn label_start(b: u8) -> bool {
     b.is_ascii_alphabetic() || b == b'_' || b >= 0x80
@@ -52,7 +58,7 @@ fn label_char(b: u8) -> bool {
 }
 
 /// The tokens of the PHP code in `text`, or none when the reader cannot lex it: a string, heredoc or `/* */` comment
-/// that is never closed.
+/// that is never closed, or string code nested deeper than [`MAX_NESTING`].
 fn tokens(text: &str) -> Option<Vec<(Tok, u32)>> {
     let bytes = text.as_bytes();
     let mut lexer = Lexer {
@@ -64,6 +70,7 @@ fn tokens(text: &str) -> Option<Vec<(Tok, u32)>> {
             .filter(|(_, b)| **b == b'\n')
             .map(|(at, _)| at)
             .collect(),
+        nesting: 0,
     };
     let mut out = Vec::new();
     while lexer.open_tag() {
@@ -215,11 +222,12 @@ impl Lexer<'_> {
         if nested { None } else { Some(End::Eof) }
     }
 
-    /// Skips a `//` or `#` comment, which ends at the end of the line or at `?>`, whichever comes first.
+    /// Skips a `//` or `#` comment, which ends at the end of the line, a `\n` or a `\r`, or at `?>`, whichever comes
+    /// first (`scanner.l:2489-2511`).
     fn line_comment(&mut self) {
         while self.at < self.bytes.len() {
             match self.bytes[self.at] {
-                b'\n' => return,
+                b'\n' | b'\r' => return,
                 b'?' if self.byte(self.at + 1) == b'>' => return,
                 _ => self.at += 1,
             }
@@ -309,10 +317,17 @@ impl Lexer<'_> {
         })
     }
 
-    /// Reads the code that starts at `from` to its closing `}`, and gives the offset after it.
+    /// Reads the code that starts at `from` to its closing `}`, and gives the offset after it. None past
+    /// [`MAX_NESTING`].
     fn nested(&mut self, from: usize) -> Option<usize> {
+        if self.nesting == MAX_NESTING {
+            return None;
+        }
+        self.nesting += 1;
         self.at = from;
-        self.code(true, &mut Vec::new())?;
+        let end = self.code(true, &mut Vec::new());
+        self.nesting -= 1;
+        end?;
         Some(self.at)
     }
 
@@ -581,7 +596,7 @@ fn static_path(tokens: &Tokens, at: usize, file: &str) -> Option<String> {
     if !ends || !term.based {
         return None;
     }
-    clean(&term.text).filter(|path| !path.is_empty())
+    super::clean(&term.text).filter(|path| !path.is_empty())
 }
 
 /// `term { . term }`: the first term may be a base, the rest are string literals.
@@ -613,18 +628,16 @@ fn term(tokens: &Tokens, at: usize, file: &str) -> Option<(Term, usize)> {
         }
         Tok::Name(word) if is_function(word, "realpath") && is_punct(tokens, at + 1, b'(') => {
             let (mut inner, end) = path(tokens, at + 2, file)?;
-            if !is_punct(tokens, end, b')') {
+            // `realpath` goes around a base only, and resolves `.` and `..` in it.
+            if !is_punct(tokens, end, b')') || !inner.based {
                 return None;
             }
-            // `realpath` resolves `.` and `..` in a path that starts from a base.
-            if inner.based {
-                let cleaned = clean(&inner.text)?;
-                inner.text = if cleaned.is_empty() {
-                    String::new()
-                } else {
-                    format!("/{cleaned}")
-                };
-            }
+            let cleaned = super::clean(&inner.text)?;
+            inner.text = if cleaned.is_empty() {
+                String::new()
+            } else {
+                format!("/{cleaned}")
+            };
             Some((inner, end + 1))
         }
         Tok::Name(_) => {
@@ -682,141 +695,4 @@ fn is_function(word: &str, name: &str) -> bool {
     word.strip_prefix('\\')
         .unwrap_or(word)
         .eq_ignore_ascii_case(name)
-}
-
-/// `text`, a path under the repository root that starts with `/` (or is empty), as a path from the root with no `.`,
-/// `..` or empty segment. None when it does not start there, or climbs above the root.
-fn clean(text: &str) -> Option<String> {
-    let rest = text
-        .strip_prefix('/')
-        .or_else(|| text.is_empty().then_some(text))?;
-    let mut kept: Vec<&str> = Vec::new();
-    for segment in rest.split('/') {
-        match segment {
-            "" | "." => {}
-            ".." => {
-                kept.pop()?;
-            }
-            s => kept.push(s),
-        }
-    }
-    Some(kept.join("/"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Reading;
-
-    /// The class names and lines of the top-level `use` items of `code`, after an opening tag.
-    fn uses(code: &str) -> Vec<(String, u32)> {
-        let text = format!("<?php\n{code}");
-        Reading::read("a.php", &text)
-            .expect("lexes")
-            .uses
-            .into_iter()
-            .map(|u| (u.name, u.line))
-            .collect()
-    }
-
-    fn names(code: &str) -> Vec<String> {
-        uses(code).into_iter().map(|(name, _)| name).collect()
-    }
-
-    #[test]
-    fn a_use_gives_each_class_item_fully_qualified_with_the_line_of_its_name() {
-        assert_eq!(
-            uses("use A\\B;\nuse C\\D as E, \\F\\G,\n    H;\n"),
-            [
-                ("A\\B".into(), 2),
-                ("C\\D".into(), 3),
-                ("F\\G".into(), 3),
-                ("H".into(), 4)
-            ]
-        );
-    }
-
-    #[test]
-    fn a_group_use_joins_its_prefix_to_each_item_and_allows_a_trailing_comma() {
-        assert_eq!(
-            uses("use A\\{B, C\\D as E,};\nuse \\P\\{\n    Q,\n    R,\n};\n"),
-            [
-                ("A\\B".into(), 2),
-                ("A\\C\\D".into(), 2),
-                ("P\\Q".into(), 4),
-                ("P\\R".into(), 5)
-            ]
-        );
-    }
-
-    #[test]
-    fn use_function_and_use_const_give_nothing_and_a_mixed_group_gives_only_its_class_items() {
-        assert_eq!(
-            names("use function A\\f, B\\g;\nuse const A\\C;\n"),
-            Vec::<String>::new()
-        );
-        assert_eq!(
-            names("use function A\\{f, g};\nuse const A\\{C};\n"),
-            Vec::<String>::new()
-        );
-        assert_eq!(
-            names("use A\\{B, function f, const C, D};\n"),
-            ["A\\B", "A\\D"]
-        );
-        assert_eq!(names("USE FUNCTION A\\f;\nUse A\\B;\n"), ["A\\B"]);
-    }
-
-    #[test]
-    fn a_closure_use_and_a_trait_use_are_no_import() {
-        assert_eq!(
-            names(
-                "$f = function () use ($x) { return 1; };\nclass K {\n    use T;\n    function f() { use2(); }\n}\nuse A\\B;\n"
-            ),
-            ["A\\B"]
-        );
-        // A trait use in a class body split by inline HTML keeps its depth.
-        assert_eq!(
-            names(
-                "class K {\n    function f() { ?>\n<p>use X\\Y;</p>\n<?php }\n    use T;\n}\nuse A\\B;\n"
-            ),
-            ["A\\B"]
-        );
-    }
-
-    #[test]
-    fn use_lines_are_read_at_the_top_level_and_in_a_braced_namespace_only() {
-        assert_eq!(
-            names(
-                "namespace A { use B\\C; class K { use T; } }\nnamespace D { use E\\F; }\nnamespace { use G\\H; }\n"
-            ),
-            ["B\\C", "E\\F", "G\\H"]
-        );
-        assert_eq!(
-            names("namespace A;\nuse B\\C;\nnamespace D;\nuse E\\F;\n"),
-            ["B\\C", "E\\F"]
-        );
-        // A `use` in a function body, or after a member access, is no import.
-        assert_eq!(
-            names("function f() { use A\\B; }\n$o->use A\\C;\nA::use;\n"),
-            Vec::<String>::new()
-        );
-    }
-
-    #[test]
-    fn use_text_in_html_comments_and_strings_gives_nothing() {
-        assert_eq!(
-            names(
-                "// use A\\B;\n# use A\\C;\n/* use A\\D; */\n$a = 'use A\\E;';\n$b = <<<'X'\nuse A\\F;\nX;\n?>\nuse A\\G;\n<?php\nuse A\\H;\n"
-            ),
-            ["A\\H"]
-        );
-        let bare = Reading::read("a.php", "<? use A\\B; ?>").expect("lexes");
-        assert!(bare.uses.is_empty());
-    }
-
-    #[test]
-    fn a_file_with_a_string_never_closed_cannot_be_lexed() {
-        assert!(Reading::read("a.php", "<?php\nuse A\\B;\n$a = 'open;\n").is_none());
-        assert!(Reading::read("a.php", "<?php\n/* open\n").is_none());
-        assert!(Reading::read("a.php", "<html>'not code").is_some());
-    }
 }

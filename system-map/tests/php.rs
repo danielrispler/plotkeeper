@@ -237,6 +237,8 @@ fn every_form_of_a_class_use_gives_its_pairs() {
         "use App\\{A, function f, const C, B};",
         "USE App\\A, App\\B;",
         "namespace N;\nuse App\\A;\nuse App\\B;",
+        "USE FUNCTION App\\f;\nUse App\\A, App\\B;",
+        "$f = function () use ($x) { return 1; };\nclass K { use T; }\nuse App\\A, App\\B;",
     ] {
         assert_eq!(
             use_pairs(COMPOSER, code, &files),
@@ -256,8 +258,17 @@ fn use_function_and_use_const_and_trait_and_closure_use_pair_nothing() {
         "use function App\\A;",
         "use const App\\A;",
         "use function App\\{A, B};",
+        "use function App\\A, App\\B;",
+        "use const App\\{A, B};",
+        "USE FUNCTION App\\A;",
         "class K { use App\\A; }",
+        "namespace N { class K { use App\\A; } }",
+        // A trait use in a class body split by inline HTML keeps its depth.
+        "class K {\n    function f() { ?>\n<p>x</p>\n<?php }\n    use App\\A;\n}",
         "$f = function () use ($x) {};",
+        // A `use` in a function body, or after a member access, is no import.
+        "function f() { use App\\A; }",
+        "$o->use App\\A;",
     ] {
         assert_eq!(
             use_pairs(COMPOSER, code, &["src/A.php", "src/B.php"]),
@@ -265,6 +276,19 @@ fn use_function_and_use_const_and_trait_and_closure_use_pair_nothing() {
             "{code}"
         );
     }
+}
+
+#[test]
+fn a_use_in_html_a_comment_or_a_string_pairs_nothing() {
+    let files = [("src/A.php", "<?php\n"), ("src/B.php", "<?php\n")];
+    let text = "<?php\n// use App\\A;\n# use App\\A;\n/* use App\\A; */\n$a = 'use App\\A;';\n$b = \"use App\\A;\";\n\
+                $c = <<<'X'\nuse App\\A;\nX;\n?>\nuse App\\A;\n<?php\nuse App\\B;\n";
+    let mut all = vec![(MAIN, text)];
+    all.extend(files);
+    assert_eq!(class_pairs(COMPOSER, &all), from_main(&["src/B.php"]));
+    let mut all = vec![(MAIN, "<? use App\\A; ?>")];
+    all.extend(files);
+    assert_eq!(class_pairs(COMPOSER, &all), Vec::<String>::new());
 }
 
 #[test]
@@ -305,6 +329,35 @@ fn a_composer_json_in_a_subfolder_maps_relative_to_its_folder() {
         ("pkgs/shared/src/X.php", "<?php\n"),
     ];
     assert_eq!(php_pairs(&files), from_main(&["pkgs/shared/src/X.php"]));
+}
+
+#[test]
+fn a_folder_out_of_the_repository_or_absolute_names_nothing() {
+    for (config, folder) in [
+        ("pkg/composer.json", "../../src/"),
+        ("composer.json", "../src/"),
+        ("composer.json", "/src/"),
+        ("pkg/composer.json", "/src/"),
+    ] {
+        let composer = format!(r#"{{"autoload":{{"psr-4":{{"App\\":"{folder}"}}}}}}"#);
+        let files = [
+            (MAIN, "<?php\nuse App\\X;\n"),
+            (config, composer.as_str()),
+            ("src/X.php", "<?php\n"),
+        ];
+        assert_eq!(
+            php_pairs(&files),
+            Vec::<String>::new(),
+            "{config}: {folder}"
+        );
+    }
+    // A classmap path out of the repository skips no file: `a/main.php` is read, so the link to `c` is dead.
+    for classmap in ["../a/", "/a/"] {
+        let composer =
+            format!(r#"{{"autoload":{{"psr-4":{{"App\\":"src/"}},"classmap":["{classmap}"]}}}}"#);
+        let (ok, out) = link_check(&composer, MAIN);
+        assert!(!ok && out.contains("no dependency"), "{classmap}: {out}");
+    }
 }
 
 #[test]
@@ -788,6 +841,9 @@ fn a_path_the_reader_cannot_fix_statically_gives_nothing() {
         "require __DIR__ . \"/../lib/\\x78.php\";",
         "require __FILE__ . '/../lib/x.php';",
         "require __DIR__ . '/../lib/' . PHP_VERSION . '.php';",
+        // `realpath()` around a literal after the base, not around a base.
+        "require __DIR__ . realpath('/../lib/x.php');",
+        "require __DIR__ . (realpath('/../lib/x.php'));",
         "require sprintf('%s/../lib/x.php', __DIR__);",
         "require getcwd() . '/lib/x.php';",
         // A path out of the repository.
@@ -919,6 +975,9 @@ fn comments_hide_the_code_they_hold() {
     for text in [
         "<?php\n# {HIDDEN}\n{WANTED}\n",
         "<?php\n// {HIDDEN}\n{WANTED}\n",
+        // A bare carriage return ends a line comment too.
+        "<?php\n// {HIDDEN}\r{WANTED}\n",
+        "<?php\n# {HIDDEN}\r{WANTED}\n",
         "<?php\n/* {HIDDEN} */ {WANTED}\n",
         "<?php\n/* \n{HIDDEN}\n */\n{WANTED}\n",
         "<?php\n/** @see {HIDDEN} */\n{WANTED}\n",
@@ -1101,6 +1160,19 @@ fn a_file_the_reader_cannot_lex_gives_no_detection_note() {
         let out = run(&root, "check", &[]);
         assert_eq!(String::from_utf8_lossy(&out.stderr), "", "{what}");
     }
+}
+
+#[test]
+fn a_file_nesting_strings_too_deep_is_skipped_and_check_does_not_crash() {
+    let text = format!("<?php\n{WANTED}\n$a = {}", "\"{$a[".repeat(5_000));
+    let (_dir, root) = repo(
+        &map(&[("lib", &["lib/"]), ("a", &["a/"])], &[("a", "lib")], &[]),
+        &[(MAIN, &text), (X, "<?php\n")],
+    );
+    let out = run(&root, "check", &[]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{:?}: {stdout}", out.status);
+    assert!(stdout.contains("1 unproven"), "{stdout}");
 }
 
 // Files PHP leaves out.
