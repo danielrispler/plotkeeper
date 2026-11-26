@@ -193,8 +193,8 @@ h1 { margin: 0 0 var(--sp-4); }
 /* A split's divider (danielrispler/Falinks#529), in the gap between its two panes. */
 /* The terminal panel (danielrispler/Falinks#542): a band under the panes, its height set by `panel.ts`; its divider on its top edge. */
 /* The toasts (#457): manual popovers in the top layer, so no z-index; the region spans the map's box less a margin, and
-   `toast.ts` places each open toast in it: the needs-you, the note, the copy and the what's-new toasts down its top-right corner, the Clear toast at its
-   bottom-left. The needs-you toast (danielrispler/Falinks#573) takes none of the map's space. */
+   `toast.ts` places each open toast in it: the needs-you, the note, the copy and the what's-new toasts down its top-right corner (against the side
+   area's left edge while it shows, #666), the Clear toast at its bottom-left. The needs-you toast (danielrispler/Falinks#573) takes none of the map's space. */
 .toasts { position: absolute; inset: var(--sp-5); pointer-events: none; }
 .toast { position: fixed; inset: auto; margin: 0; border: 0; padding: 0; overflow: visible; pointer-events: auto; max-width: var(--toast); display: grid;
          grid-template-columns: minmax(0, 1fr) auto; align-items: start; border-radius: var(--radius); background: var(--needs-you-bg);
@@ -516,8 +516,8 @@ h1 { margin: 0 0 var(--sp-4); }
 body[data-panel="diff"] .map-stage { --panel-w: min(var(--panel-wide), calc(100% - 2 * var(--inset))); }
 .map-body { position: relative; min-width: 0; min-height: 0; }
 /* One glass recipe (#385) for every card over the map, Treatment C's part sheet: a near-opaque surface, a backdrop blur, a top highlight, a
-   faint edge, a deep shadow and a round corner. It never darkens the map under it. */
-.glass { background: var(--glass); backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur)); border-radius: var(--glass-radius);
+   faint edge, a deep shadow and a round corner. It never darkens the map under it. The not placed list takes it while open only (#666). */
+.glass, #map-not-placed:has(> details[open]) { background: var(--glass); backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur)); border-radius: var(--glass-radius);
          box-shadow: var(--glass-shadow); }
 /* The side area, over the map's right: the agents no part holds (first, so a sheet never pushes them down over a part, #466), the part's sheet,
    the drawer under it, then the background runs, on the sheet's glass too, since the map pans under them (#472).
@@ -609,14 +609,12 @@ body.resizing { -webkit-user-select: none; user-select: none; cursor: col-resize
 body.brief-open .map-panel > *, body.brief-open .map-side > * > * { opacity: var(--brief-dim); transition: opacity var(--motion); }
 /* The gear (#385): quiet, in the top bar, pressed while Settings shows. */
 .gear svg { display: block; width: var(--icon); height: var(--icon); fill: none; stroke: currentColor; stroke-width: 1.3; }
-/* Ready for review (#336): the way into a PR brief, over the map's foot on the left; right of the left panel while that is open (#385). */
+/* Ready for review (#336): the way into a PR brief, over the map's foot on the left. */
 /* On the sheet's glass, as the runs (#567), since the map pans under it (#571). */
-.map-tray { position: absolute; left: var(--map-gutter); bottom: var(--sp-7); z-index: 3; width: var(--tray); box-sizing: border-box; padding: var(--sp-5);
-            transition: left var(--glass-in) var(--glass-ease); }
-body.panel-open .map-tray { left: calc(var(--inset) + var(--panel-w) + var(--map-gutter)); }
-/* Below 1007 px (`narrow`, main.ts) an open panel leaves the map too little room for the tray and the legend, in every layout mode (focus
-   too): they show again when it closes. */
-body.narrow.panel-open #map-tray, body.narrow.panel-open .map-legend { display: none; }
+.map-tray { position: absolute; left: var(--map-gutter); bottom: var(--sp-7); z-index: 3; width: var(--tray); box-sizing: border-box; padding: var(--sp-5); }
+/* An open left panel hides the tray at every width (#666), so it never lands in the middle of the map; below 1007 px (`narrow`, main.ts)
+   it hides the legend too, in every layout mode (focus too). They show again when it closes. */
+body.panel-open #map-tray, body.narrow.panel-open .map-legend { display: none; }
 #map-tray:not(:empty) { display: flex; flex-direction: column; gap: var(--sp-2); }
 #map-tray .side-title { margin: 0; font-size: var(--size-xs); font-weight: 400; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
 .tray-row { padding: var(--sp-3); border-radius: var(--radius); }
@@ -957,6 +955,8 @@ mark.drawer-line .drawer-n::before { content: "→ " / ""; color: var(--fg); }
 #map-not-placed details[open] > .side-title::before { content: "\25BE" / ""; }
 #map-not-placed .not-placed-asking { margin-inline-start: .5ch; font-weight: 600; color: var(--needs-you); }
 #map-not-placed .not-placed-rows { padding-block-start: var(--sp-3); }
+/* Open, on the glass, its rows read over a busy map; closed, the bare line keeps its height, so the sheet under it never moves (#666). */
+#map-not-placed:has(> details[open]) { padding: 0 var(--sp-4) var(--sp-4); }
 
 /* The PR brief (spec #334, ticket #339): treatment C. One focus per step in a panel at the foot of the map, which the camera leaves room for; the
    parts a step lights stand out and the rest of the map dims; a light runs the step's links. Never a colour of its own: the warm light of a brief.
@@ -1168,7 +1168,7 @@ mark.drawer-line .drawer-n::before { content: "→ " / ""; color: var(--fg); }
 .light-spark { fill: var(--brief-light); filter: drop-shadow(0 0 var(--sp-3) var(--brief-light)); }
 .brief-open .map-canvas { overflow: clip; }
 @media (prefers-reduced-motion: reduce) {
-  .map-panel, #map-sheet, #map-drawer, #map-runs, .map-tray { animation: none; transition: none; }
+  .map-panel, #map-sheet, #map-drawer, #map-runs { animation: none; transition: none; }
   .map-brief, .brief-cols, .map-world.glide, .brief-dots i { transition: none; }
   .plate.arrive, .plate.picked, .plate.wrong { animation: none; }
 }
@@ -1202,6 +1202,9 @@ mark.drawer-line .drawer-n::before { content: "→ " / ""; color: var(--fg); }
 .hint { position-area: block-start; position-try-fallbacks: flip-block; inset: auto; margin-block: var(--hint-gap); margin-inline: 0; width: max-content; max-width: var(--hint);
         padding: var(--sp-2) var(--sp-4); border: var(--hair) solid var(--line); border-radius: var(--radius-small); background: var(--raised); color: var(--fg);
         box-shadow: var(--shadow); font-size: var(--size-small); line-height: 1.4; white-space: pre-line; overflow-wrap: anywhere; }
+/* A hint given the start placement (`hint(…, "start")`, spec #658), as the session list's are: at its trigger's inline start, level with it,
+   flipping to its end when the window leaves no room, so it covers none of the rows above and below. */
+.hint[data-place="start"] { position-area: inline-start; position-try-fallbacks: flip-inline; margin-block: 0; margin-inline: var(--hint-gap); }
 
 /* Cut text scrolls in place (spec #582): a `.cut` element, made by `cut()` in dom.ts, is one line the layout ends in an ellipsis (its own rule
    above does that, with `overflow: hidden`) and keeps its text whole in an inner span. Its own inline scroll timeline sets --truncated only

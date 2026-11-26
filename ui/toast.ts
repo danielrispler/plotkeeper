@@ -99,18 +99,24 @@ export function stackToasts() {
 }
 
 // Top-layer popovers leave the region's layout, so each open toast is placed in the region's box by hand: the first four down its
-// top-right corner, one under the other, and the Clear toast in its bottom-left corner.
+// top-right corner, one under the other, and the Clear toast in its bottom-left corner. While the map's side area shows, the four stack
+// down from the region's top against the side area's left edge, less the region's margin, so they cover neither the not placed line nor
+// the sheet (#666).
 // With none open, nothing is measured, so a resize or an update with no toast forces no layout; every size is read before any is set.
 function placeToasts(toasts: HTMLElement[]) {
-  const [needs, note, copy, whatsNew, clear] = toasts.map((toast) => (toast.matches(":popover-open") ? { toast, w: toast.offsetWidth, h: toast.offsetHeight } : null));
+  const [needs, note, copy, whatsNew, clear] = toasts.map((toast) => (toast.matches(":popover-open") ? { toast, h: toast.offsetHeight } : null));
   if (!needs && !note && !copy && !whatsNew && !clear) return;
   const box = element("toasts").getBoundingClientRect();
+  const side = element("map-side").getBoundingClientRect();
+  // Placed by their right edge, so a toast's width never depends on where it was before.
+  const page = document.documentElement.clientWidth;
+  const right = side.width > 0 ? `calc(${page - side.left}px + var(--sp-5))` : `${page - box.right}px`;
   let top = 0;
   let above = 0;
   for (const open of [needs, note, copy, whatsNew]) {
     if (!open) continue;
     open.toast.style.top = `calc(${box.top + top}px + ${above} * var(--sp-3))`;
-    open.toast.style.left = `${box.right - open.w}px`;
+    open.toast.style.right = right;
     top += open.h;
     above++;
   }
@@ -135,6 +141,9 @@ export function watchToasts(selectSession: (id: string) => unknown) {
   });
   // A modal dialog opening or closing holds the toasts back or lets them out.
   document.addEventListener("toggle", (event) => event.target instanceof HTMLDialogElement && stackToasts(), true);
+  // The side area shown or hidden (`hidden`) or resized (its `--sheet-w`) moves the open toasts out of its way (#666); a window resize
+  // moves them through `showToast`. A mutation observer runs before the next frame, where a resize observer would wait for it.
+  new MutationObserver(() => placeToasts(TOASTS.map((id) => element(id)))).observe(element("map-side"), { attributes: true, attributeFilter: ["hidden", "style"] });
 }
 
 /** Draws the toast from the list, the selection and the layout. */

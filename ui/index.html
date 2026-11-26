@@ -124,7 +124,7 @@
         <section id="map-micro-world" class="map-micro-world glass" role="dialog" aria-label="Micro-world" hidden></section>
         <!-- The patch review of back a law (#398): an overlay over the map in the glass, closed by Esc after the pre-flight; `patch-review.ts` fills it. -->
         <section id="map-patch-review" class="map-patch-review glass" role="dialog" aria-label="Patch review" hidden></section>
-        <!-- Ready for review (#336), over the map's foot on the left; it moves right of the left panel while that is open (#385). -->
+        <!-- Ready for review (#336), over the map's foot on the left; hidden while the left panel is open (#666). -->
         <section id="map-tray" class="map-tray glass"></section>
         <!-- The left panel (#385): a session's story (the rail, moved in), History, a turn's diff (widened) or Settings, floating over the map
              in the part sheet's glass; `panel.ts` fills it. It never darkens the map. -->
@@ -148,7 +148,8 @@
       <footer id="map-legend" class="map-legend"></footer>
       <!-- The toasts (#457), manual popovers in one region (a named section): the needs-you toast (danielrispler/Falinks#573) over the map's top-right
            corner, under it the note toast, for a turn that ended off screen, under that the copy toast (#493), for a prompt copied for the agent,
-           under that the what's-new toast (#527), after an update, and the Clear toast in the bottom-left corner. -->
+           under that the what's-new toast (#527), after an update, and the Clear toast in the bottom-left corner. While the side area shows, the
+           first four stand against its left edge instead (#666). -->
       <section id="toasts" class="toasts" aria-label="Notifications">
         <div id="toast" class="toast" popover="manual" hidden></div>
         <div id="note-toast" class="toast note" popover="manual" hidden></div>

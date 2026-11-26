@@ -22,7 +22,7 @@ import { startMapRuns } from "./map-runs.js";
 import { startMicroWorld } from "./micro-world.js";
 import { openBriefOf } from "./map-brief.js";
 import { briefOpen } from "./map-brief-player.js";
-import { openPreFlight } from "./map-pre-flight.js";
+import { openPreFlight, startPreFlight } from "./map-pre-flight.js";
 import { startMapAgents } from "./map-agents.js";
 import { drawSidebar, showSessions, staleDots, startList } from "./list.js";
 import { listSpace, secondLine, sessionName } from "./list-model.js";
@@ -263,7 +263,7 @@ startList({
 });
 startRailBriefs(drawFeed);
 startMap({ selectedProject, removeProject, shown: drawSidebar });
-element("pre-flight-button").addEventListener("click", () => openPreFlight());
+startPreFlight();
 // The map head's Fit (#669) runs `studio::FitMap`; its hint names the keys the keymap binds that to now.
 element("fit-map-button").addEventListener("click", () => fitMap());
 const hintFit = () => hint(element("fit-map-button"), titled(studio.files.keymap, "Fit the whole map in view", "studio::FitMap"));
