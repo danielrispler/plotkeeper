@@ -1,0 +1,402 @@
+<!doctype html>
+<!--
+  PROTOTYPE — throwaway, not part of the build. Delete me once a variant is picked.
+  Question: what should the top of the part sheet look like once the catch-up leads it and the sections fold?
+  Round 2: variants of 4 (catch-up card at the top), with the sections reordered (History last) and folding on their own.
+  Switch with the bottom bar or keys 1–5; the state bar above it switches fogged / writing / clear, a session open, CI broken.
+  Tokens and .sheet* rules are copied from ui/tokens.css and ui/style.css; the content is fake.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sheet Folds Prototype</title>
+<style>
+:root {
+  --chrome: #0e0f11; --bg: #161719; --surface: #1d1e21; --raised: #24262a;
+  --fg: #e7e5df; --muted: #a09d95; --faint: #8f8d88;
+  --hover: #ffffff0e; --selected: #ffffff17; --pressed: #ffffff21; --edge: #ffffff17; --line: #31343a; --focus: #8b887f;
+  --conflict: #ff6b6b; --ok: #8fbf8f;
+  --font: -apple-system, system-ui, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --size-xs: 11.5px; --size-small: 12.5px; --size: 14px; --size-read: 15.5px; --size-large: 16.5px;
+  --sp-1: 2px; --sp-2: 4px; --sp-3: 6px; --sp-4: 8px; --sp-5: 12px; --sp-6: 16px; --sp-7: 24px;
+  --hair: 1px; --mark: 2px; --radius-small: 4px; --radius: 6px; --motion: 120ms ease-out;
+  --mist: #c4ccd6; --mist-thin: #c4ccd652; --mist-faint: #c4ccd61f; --mist-thick: #c4ccd680;
+  --map-bg: #131416; --map-dot: #ffffff0a; --plate: #202226; --plate-core: #25272b; --plate-edge: #ffffff1a;
+  --law-check: var(--fg); --law-trust: var(--muted); --law-mark: 7px; --map-sheet: 360px;
+  --glass: #1c1d20f2; --glass-blur: 18px; --glass-radius: 14px; --glass-shadow: inset 0 1px 0 #ffffff14, 0 0 0 1px #ffffff10, 0 24px 60px #000b;
+  --inset: 22px; color-scheme: dark; accent-color: var(--muted); scrollbar-color: #ffffff60 transparent;
+}
+* { box-sizing: border-box; scrollbar-width: thin; }
+html, body { margin: 0; height: 100%; background: var(--chrome); color: var(--fg); font: var(--size)/1.55 var(--font); overflow: hidden; }
+code { font-family: var(--mono); font-size: var(--size-small); background: var(--raised); border-radius: var(--radius-small); padding: 0 var(--sp-2); }
+:focus { outline: none; } :focus-visible { outline: var(--mark) solid var(--focus); outline-offset: var(--sp-1); }
+.btn { font: inherit; color: inherit; background: var(--raised); border: 0; border-radius: var(--radius); padding: var(--sp-2) var(--sp-4); cursor: pointer; text-align: start; transition: background-color var(--motion); }
+.btn:hover { background: var(--pressed); } .btn[aria-pressed="true"] { background: var(--selected); }
+.btn.quiet { background: none; } .btn.quiet:hover { background: var(--hover); }
+
+/* The fake map. */
+.map { position: absolute; inset: 0; background: var(--map-bg) radial-gradient(var(--map-dot) 1px, transparent 1px) 0 0 / 28px 28px; }
+.plate { position: absolute; width: 264px; height: 76px; padding: var(--sp-4) var(--sp-5); background: var(--plate); border-radius: var(--radius); box-shadow: 0 0 0 var(--hair) var(--plate-edge); font-size: var(--size-small); color: var(--muted); }
+.plate b { display: block; color: var(--fg); font-size: var(--size); }
+.plate.open { box-shadow: 0 0 0 var(--mark) var(--fg); background: var(--plate-core); }
+.plate.fog::after { content: ""; position: absolute; inset: -10px; border-radius: 14px; background: var(--mist-thin); filter: blur(8px); z-index: -1; }
+
+/* The sheet, as in style.css. */
+.side { position: absolute; top: var(--inset); right: var(--inset); bottom: calc(var(--inset) + 92px); width: var(--map-sheet); overflow: auto;
+        background: var(--glass); backdrop-filter: blur(var(--glass-blur)); border-radius: var(--glass-radius); box-shadow: var(--glass-shadow); padding: var(--sp-6) var(--sp-6) var(--sp-5); }
+.sheet { position: relative; display: flex; flex-direction: column; gap: var(--sp-3); }
+.sheet-header { position: absolute; top: 0; right: 0; display: flex; align-items: center; gap: var(--sp-2); z-index: 3; }
+.explain-toggle { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border-radius: 50%; font-size: var(--size-xs); font-weight: 600; color: var(--muted); box-shadow: inset 0 0 0 var(--hair) var(--muted); background: none; }
+.explain-toggle[aria-pressed="true"] { background: var(--fg); color: var(--bg); box-shadow: none; }
+.sheet-name { margin: 0; font-size: var(--size-large); font-weight: 600; padding-right: 56px; }
+.sheet-caption { margin: 0; font-size: var(--size-small); color: var(--muted); }
+.sheet-purpose { margin: var(--sp-3) 0 0; font-size: var(--size-read); line-height: 1.5; text-wrap: pretty; }
+.sheet-purpose.clamped { display: -webkit-box; -webkit-line-clamp: var(--lines, 3); -webkit-box-orient: vertical; overflow: hidden; }
+.more { align-self: flex-start; font-size: var(--size-small); color: var(--muted); padding: 0 var(--sp-2); }
+.explain { margin: calc(-1 * var(--sp-2)) 0 0; font-size: var(--size-xs); line-height: 1.45; color: var(--muted); }
+.sheet-heading { margin: var(--sp-5) 0 0; font-size: var(--size-xs); letter-spacing: .12em; text-transform: uppercase; color: var(--faint); font-weight: 500; }
+.sheet-marks { list-style: none; margin: var(--sp-3) 0 0; padding: 0; font-size: var(--size-small); color: var(--mist); }
+.sheet-holds, .sheet-laws, .sheet-links, .here { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-4); }
+.sheet-held { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--size-small); line-height: 1.45; }
+.sheet-held-name { font-weight: 600; }
+.sheet-held-files { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); font-size: var(--size-xs); color: var(--muted); }
+.sheet-tiers { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+.sheet-law { display: grid; grid-template-columns: auto 1fr; column-gap: var(--sp-4); align-items: baseline; font-size: var(--size-small); }
+.sheet-law-backing { grid-column: 2; font-size: var(--size-xs); color: var(--faint); }
+.law-mark { display: inline-block; width: var(--law-mark); height: var(--law-mark); transform: rotate(45deg); }
+.law-mark.check { background: var(--law-check); } .law-mark.trust { box-shadow: inset 0 0 0 var(--hair) var(--law-trust); }
+.sheet-link { display: grid; grid-template-columns: auto 1fr; column-gap: var(--sp-3); row-gap: var(--sp-1); font-size: var(--size-small); line-height: 1.45; }
+.sheet-link > :not(.dir) { grid-column: 2; } .dir { color: var(--muted); }
+.kind { font-size: var(--size-xs); color: var(--faint); } .reason { color: var(--muted); }
+.sheet-fog { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
+.sheet-fog-line { margin: 0; font-size: var(--size-small); color: var(--mist); }
+.sheet-catch-up { align-self: stretch; text-align: center; background: var(--pressed); font-weight: 600; }
+.ci-line { margin: 0; font-size: var(--size-small); color: var(--muted); } .ci-line.bad { color: var(--conflict); }
+.strip { display: flex; gap: var(--sp-1); align-items: flex-end; height: 28px; }
+.strip i { flex: 1; background: var(--selected); border-radius: 2px; } .strip i.fog { background: var(--mist-thick); }
+.here li { display: flex; gap: var(--sp-4); font-size: var(--size-small); } .here .n { color: var(--muted); } .here .h { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .here .a { color: var(--faint); }
+
+/* Folds: each opens on its own and stays as you left it. */
+.folds { display: flex; flex-direction: column; margin-top: var(--sp-5); border-top: var(--hair) solid var(--edge); }
+details.fold { border-bottom: var(--hair) solid var(--edge); scroll-margin-top: 64px; }
+details.fold > summary { list-style: none; display: flex; align-items: baseline; gap: var(--sp-4); padding: var(--sp-4) var(--sp-2); cursor: pointer; border-radius: var(--radius-small); }
+details.fold > summary::-webkit-details-marker { display: none; }
+details.fold > summary:hover { background: var(--hover); }
+details.fold > summary::before { content: "›"; display: inline-block; width: 10px; color: var(--faint); transition: rotate var(--motion); }
+details.fold[open] > summary::before { rotate: 90deg; }
+details.fold.quiet .fold-title { opacity: .75; }
+.fold-title { font-size: var(--size-xs); letter-spacing: .12em; text-transform: uppercase; color: var(--faint); font-weight: 500; }
+.fold-value { margin-left: auto; font-size: var(--size-small); color: var(--muted); }
+.fold-value.bad { color: var(--conflict); }
+.fold-body { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-2) var(--sp-2) var(--sp-5) 22px; }
+
+/* The catch-up's top, shared by the 4s. */
+.card { margin-top: var(--sp-4); padding: var(--sp-5); border-radius: 10px; display: flex; flex-direction: column; gap: var(--sp-4);
+        background: linear-gradient(var(--mist-faint), transparent 70%), var(--raised); box-shadow: inset 0 0 0 var(--hair) var(--mist-thin); }
+.card.clear { background: var(--raised); box-shadow: inset 0 0 0 var(--hair) var(--edge); }
+.card.old { background: linear-gradient(var(--mist-thin), #c4ccd61a); }
+.eyebrow { display: flex; align-items: center; gap: var(--sp-3); margin: 0; font-size: var(--size-xs); letter-spacing: .1em; text-transform: uppercase; color: var(--mist); }
+.eyebrow.clear { color: var(--faint); }
+.fog-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--mist); box-shadow: 0 0 6px var(--mist); }
+.eyebrow.clear .fog-dot { background: var(--ok); box-shadow: none; }
+.gist { margin: 0; font-size: var(--size-read); line-height: 1.45; text-wrap: pretty; }
+.steps { display: flex; flex-wrap: wrap; gap: var(--sp-2); list-style: none; margin: 0; padding: 0; font-size: var(--size-xs); color: var(--muted); }
+.steps li { padding: var(--sp-1) var(--sp-3); background: var(--hover); border-radius: 999px; }
+.outline-title { margin: 0; font-size: var(--size-read); font-weight: 600; line-height: 1.35; }
+.outline { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--sp-2); font-size: var(--size-small); line-height: 1.4; }
+.outline li { display: grid; grid-template-columns: 52px 1fr; gap: var(--sp-3); align-items: baseline; }
+.outline .k { font-size: var(--size-xs); color: var(--faint); }
+.count { margin: 0; font-size: var(--size); font-weight: 600; }
+.landed { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--sp-2); font-size: var(--size-small); }
+.landed li { display: grid; grid-template-columns: 40px 1fr auto; gap: var(--sp-3); align-items: baseline; }
+.landed .num { font-family: var(--mono); font-size: var(--size-xs); color: var(--faint); } .landed .age { font-size: var(--size-xs); color: var(--faint); }
+.row { display: flex; gap: var(--sp-3); align-items: center; }
+.primary { flex: 1; text-align: center; font-weight: 600; background: var(--fg); color: var(--bg); padding: var(--sp-3) var(--sp-4); }
+.primary:hover { background: var(--muted); }
+.primary.busy { background: var(--selected); color: var(--muted); cursor: progress; }
+.progress { height: 2px; background: var(--edge); border-radius: 2px; overflow: hidden; }
+.progress i { display: block; height: 100%; width: 35%; background: var(--mist); animation: slide 1.4s ease-in-out infinite; }
+@keyframes slide { from { translate: -100%; } to { translate: 300%; } }
+.meta { margin: 0; font-size: var(--size-xs); color: var(--faint); }
+.link-btn { padding: 0; background: none; color: var(--mist); text-decoration: underline; text-underline-offset: 3px; font-size: var(--size-small); }
+.link-btn:hover { background: none; color: var(--fg); }
+
+/* Facts at a glance. */
+.chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-3); }
+.chip { font-size: var(--size-xs); padding: var(--sp-1) var(--sp-4); border-radius: 999px; background: var(--hover); color: var(--muted); display: inline-flex; gap: var(--sp-2); align-items: center; }
+.chip:hover { background: var(--pressed); color: var(--fg); }
+.chip.bad { color: var(--conflict); }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); } .bad .dot { background: var(--conflict); }
+.facts { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); margin-top: var(--sp-4); }
+.fact { display: flex; flex-direction: column; align-items: flex-start; padding: var(--sp-3) var(--sp-4); background: var(--hover); }
+.fact .k { font-size: var(--size-xs); color: var(--faint); letter-spacing: .1em; text-transform: uppercase; }
+.fact .val { font-size: var(--size-small); display: inline-flex; gap: var(--sp-3); align-items: center; } .fact.bad .val { color: var(--conflict); }
+
+/* 4b's pinned bar. */
+.pinned { position: sticky; top: calc(-1 * var(--sp-6)); z-index: 2; margin: var(--sp-4) calc(-1 * var(--sp-6)) 0; padding: var(--sp-4) var(--sp-6);
+          background: #1f2024f5; backdrop-filter: blur(12px); border-block: var(--hair) solid var(--mist-thin); display: flex; flex-direction: column; gap: var(--sp-3); }
+.pinned.clear { border-color: var(--edge); }
+.pinned .row .primary { flex: 0 0 auto; padding-inline: var(--sp-5); }
+.pinned .eyebrow { flex: 1; }
+
+/* The prototype's own bars and readout. */
+.bars { position: fixed; left: 50%; bottom: 12px; translate: -50% 0; display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); z-index: 5; }
+.bar { display: flex; gap: var(--sp-2); padding: var(--sp-2); background: #000c; border-radius: 999px; box-shadow: 0 0 0 1px #ffffff20; }
+.bar .btn { border-radius: 999px; font-size: var(--size-small); background: none; } .bar .btn[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+.bar.state .btn { font-size: var(--size-xs); }
+.readout { position: fixed; left: 16px; bottom: 14px; max-width: 340px; font: var(--size-xs)/1.5 var(--mono); color: var(--faint); background: #000a; padding: var(--sp-3) var(--sp-4); border-radius: var(--radius); z-index: 5; white-space: pre-wrap; }
+.note { position: absolute; left: 24px; top: 24px; max-width: 440px; font-size: var(--size-small); color: var(--muted); }
+.note b { color: var(--fg); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } .progress i { animation: none; width: 100%; opacity: .5; } }
+@media (max-width: 760px) { .side { left: var(--inset); width: auto; } .plate, .readout { display: none; } }
+</style>
+</head>
+<body>
+<div class="map" aria-hidden="true">
+  <p class="note"><b>PROTOTYPE</b> · part sheet, round 2: variants of 4. Keys 1–5 switch the variant; the upper bar switches the part's state. Fake content.</p>
+  <div class="plate" style="left:60px;top:150px"><b>Shell</b>The window and its panes</div>
+  <div class="plate fog open" style="left:120px;top:290px"><b>Store</b>Keeps the map's state on disk</div>
+  <div class="plate" style="left:420px;top:430px"><b>Fog</b>What changed since you looked</div>
+  <div class="plate fog" style="left:60px;top:520px"><b>Brief writer</b>Writes PR briefs and catch-ups</div>
+</div>
+<aside class="side" id="side" aria-label="Part sheet"></aside>
+<div class="bars">
+  <nav class="bar state" id="state" aria-label="Prototype state"></nav>
+  <nav class="bar" id="bar" aria-label="Prototype variants"></nav>
+</div>
+<output class="readout" id="readout"></output>
+
+<script>
+// PROTOTYPE data: one Core part.
+const P = {
+  name: "Store", caption: "Keeps the map's state on disk",
+  purpose: "The store holds everything plotkeeper remembers about a project between runs: each part's tier, its fog list, the catch-ups already written and which laws you ratified. It writes one JSON file per project under the app's data folder and never touches the repository. Every write goes through a temp file and a rename, so a crash leaves the old state whole. It reads lazily, on the first map shown for a project.",
+  holds: [
+    { name: "State file", text: "The per-project JSON, read and written whole.", files: ["server/src/map.rs", "server/src/store.rs"] },
+    { name: "Fog lists", text: "The commits each part has not been caught up on.", files: ["server/src/fog.rs"] },
+    { name: "Catch-up store", text: "Written part catch-ups, keyed by their fog list.", files: ["understanding/src/part_catch_up.rs"] },
+    { name: "Ratify marks", text: "Which agent-made links and laws you accepted.", files: ["server/src/ratify.rs"] },
+  ],
+  tiers: [["core", "Core"], ["interface", "Interface-only"], ["black-box", "Black box"]],
+  laws: [
+    { b: "check", text: "A crash mid-write leaves the previous state readable.", label: "Backed by a test" },
+    { b: "check", text: "The repository is never written by the store.", label: "Backed by a test" },
+    { b: "trust", text: "One window's write is seen by the other on its next draw.", label: "On trust" },
+  ],
+  links: [
+    { out: true, other: "Fog", kind: "import", reason: "Reads the commits behind each part." },
+    { out: true, other: "Git", kind: "spawn", reason: "Runs git rev-list for fog depth." },
+    { out: false, other: "Shell", kind: "http", reason: "Asks for the map's state on every draw." },
+    { out: false, other: "Brief writer", kind: "import", reason: "Saves finished catch-ups." },
+    { out: false, other: "Ratify", kind: "import", reason: "Records accept and overturn." },
+  ],
+  // The catch-up: the gist is the story's own one-sentence point, written with it.
+  gist: "Writes are now atomic, the state loads on first show, and fog lists are keyed by commit, so a catch-up never mixes two lists.",
+  steps: ["Where", "Before", "Now", "Your turn"],
+  // Round 3: the card shows the catch-up's title and step headlines (here a real stored one's shape), not its gist.
+  outline: { title: "Store writes go atomic", steps: [["Where", "The store keeps each project's map state"], ["Before", "Writes went straight to the state file"], ["Now", "Each write goes to a temp file, then a rename"], ["Must stay true", "A crash leaves the old state whole"]] },
+  landed: [["#612", "Fog lists keyed by commit", "2 h"], ["#605", "Atomic writes for the state file", "1 d"], ["#598", "Lazy load on first show", "3 d"]],
+  history: [1,0,0,1,0,1,1,0,1,0,0,1,1], fogFrom: 10,
+  here: [["T14", "Moved the fog list into the store", "2 d"], ["T9", "Made writes atomic", "4 d"], ["T3", "First read of the state file", "6 d"]],
+};
+const EXPLAIN = {
+  Holds: "What this part owns: its files, and notes on them.", Tier: "How much of this part you keep in your head.",
+  Laws: "What must stay true here; a test can stand behind each.", "Talks to": "Its links to other parts: → it uses them, ← they use it.",
+  "CI on main": "The last CI run on main, for this part's laws.",
+  History: "Commits on main that changed this part, newest last.", "This session here": "The open session's turns that changed this part, newest first.",
+};
+const TIER_LINE = "Core: any change here fogs it, so you catch up.";
+const FOG_ACTIONS = "Part catch-up reads what changed; I know this just clears it.";
+
+// What the state bar sets.
+const S = { part: "fogged", session: true, ciBroken: false, tier: "core" };
+let explainOn = false, purposeOpen = false;
+const openFolds = new Set();
+
+const h = (tag, cls, html) => { const n = document.createElement(tag); if (cls) n.className = cls; if (html !== undefined) n.innerHTML = html; return n; };
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const tierLabel = () => P.tiers.find(([id]) => id === S.tier)[1];
+const ciLine = () => (S.ciBroken ? "Failing on main · run 4512, 20 min ago" : "Passing on main · 2 h ago");
+
+// Section bodies.
+const body = {
+  Holds: () => { const ul = h("ul", "sheet-holds"); for (const x of P.holds) ul.append(h("li", "sheet-held", `<span class="sheet-held-name">${x.name}</span><span>${esc(x.text)}</span><span class="sheet-held-files">${x.files.map((f) => `<code>${f}</code>`).join("")}</span>`)); return [ul]; },
+  Tier: () => { const d = h("div", "sheet-tiers"); for (const [id, label] of P.tiers) { const b = h("button", "btn", label); b.setAttribute("aria-pressed", id === S.tier); b.onclick = () => { S.tier = id; draw(); }; d.append(b); } return explainOn ? [d, h("p", "explain", TIER_LINE)] : [d]; },
+  Laws: () => { const ul = h("ul", "sheet-laws"); for (const l of P.laws) ul.append(h("li", "sheet-law", `<span class="law-mark ${l.b}"></span><span>${esc(l.text)}</span><span class="sheet-law-backing">${l.label}</span>`)); return [ul]; },
+  "Talks to": () => { const ul = h("ul", "sheet-links"); for (const l of P.links) ul.append(h("li", "sheet-link", `<span class="dir">${l.out ? "→" : "←"}</span><span>${l.other}</span><span class="kind">${l.kind}</span><span class="reason">${esc(l.reason)}</span>`)); return [ul]; },
+  "CI on main": () => [h("p", `ci-line${S.ciBroken ? " bad" : ""}`, ciLine()), ...(S.ciBroken ? [h("button", "btn quiet", "See the CI log")] : [])],
+  History: () => { const s = h("div", "strip"); P.history.forEach((v, i) => { const bar = h("i", i >= P.fogFrom && S.part !== "clear" ? "fog" : ""); bar.style.height = `${v ? 100 : 35}%`; s.append(bar); }); return [s]; },
+  "This session here": () => { const ul = h("ul", "here"); for (const [n, t, a] of P.here) ul.append(h("li", "", `<span class="n">${n}</span><span class="h">${esc(t)}</span><span class="a">${a}</span>`)); return [ul]; },
+};
+const glance = {
+  Holds: () => `${P.holds.length} things`, Tier: () => tierLabel(), Laws: () => `${P.laws.length} · 2 tested`, "Talks to": () => `${P.links.length} links`,
+  "CI on main": () => (S.ciBroken ? "failing" : "passing"), History: () => `${P.history.length} commits`, "This session here": () => `${P.here.length} turns`,
+};
+// Most to least used: what must stay true, then who it talks to, the session you're in, what it owns, its tier (a setting), and History last.
+// CI folds in only when it fails (else it is a chip), and then it leads, open.
+function order() {
+  const o = ["Laws", "Talks to"];
+  if (S.session) o.push("This session here");
+  o.push("Holds", "Tier", "History");
+  return S.ciBroken ? ["CI on main", ...o] : o;
+}
+
+function header() {
+  const hd = h("div", "sheet-header");
+  const q = h("button", "btn explain-toggle", "?"); q.setAttribute("aria-pressed", explainOn); q.setAttribute("aria-label", "Explanations");
+  q.onclick = () => { explainOn = !explainOn; draw(); };
+  const x = h("button", "btn quiet", "×"); x.setAttribute("aria-label", "Close");
+  hd.append(q, x); return hd;
+}
+function heading(words) { const out = [h("h3", "sheet-heading", words)]; if (explainOn && EXPLAIN[words]) out.push(h("p", "explain", EXPLAIN[words])); return out; }
+function purpose(lines) {
+  const p = h("p", `sheet-purpose${purposeOpen ? "" : " clamped"}`, esc(P.purpose));
+  p.style.setProperty("--lines", lines);
+  const more = h("button", "btn quiet more", purposeOpen ? "Less" : "More");
+  more.onclick = () => { purposeOpen = !purposeOpen; draw(); };
+  return [p, more];
+}
+function fold(title) {
+  const d = h("details", `fold${title === "History" ? " quiet" : ""}`);
+  d.id = `fold-${title.replace(/\W/g, "")}`;
+  d.open = openFolds.has(title) || (title === "CI on main" && S.ciBroken);
+  const s = h("summary", "", `<span class="fold-title">${title}</span><span class="fold-value${title === "CI on main" && S.ciBroken ? " bad" : ""}">${glance[title]()}</span>`);
+  const b = h("div", "fold-body");
+  if (explainOn && EXPLAIN[title]) b.append(h("p", "explain", EXPLAIN[title]));
+  b.append(...body[title]());
+  d.append(s, b);
+  d.addEventListener("toggle", () => { d.open ? openFolds.add(title) : openFolds.delete(title); readout(); });
+  return d;
+}
+function folds() { const f = h("div", "folds"); order().forEach((t) => f.append(fold(t))); return f; }
+// A fact's press opens its fold and brings it into view.
+function opens(node, title) { node.onclick = () => { openFolds.add(title); draw(); document.getElementById(`fold-${title.replace(/\W/g, "")}`)?.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); }; return node; }
+function chips() {
+  const c = h("div", "chips");
+  c.append(
+    opens(h("button", "btn chip", tierLabel()), "Tier"),
+    opens(h("button", "btn chip", `${P.laws.length} laws`), "Laws"),
+    opens(h("button", "btn chip", `${P.links.length} links`), "Talks to"),
+    opens(h("button", `btn chip${S.ciBroken ? " bad" : ""}`, `<span class="dot"></span>CI ${S.ciBroken ? "failing" : "passing"}`), S.ciBroken ? "CI on main" : "Laws"),
+  );
+  return c;
+}
+
+// The catch-up's actions, by the part's state. `size` picks the button's words.
+function action(size) {
+  const row = h("div", "row");
+  if (S.part === "clear") { row.append(h("button", "btn primary", "Refresher"), h("span", "meta", "its flows, hop by hop")); return [row]; }
+  if (S.part === "writing") {
+    const busy = h("button", "btn primary busy", "Writing · checking claims…"); busy.setAttribute("aria-busy", "true");
+    row.append(busy, h("button", "btn quiet", "I know this"));
+    const old = h("p", "meta"); const read = h("button", "btn link-btn", "Read the one you have");
+    old.append(read, " · covers #605 and #598, not #612");
+    return [row, h("div", "progress", "<i></i>"), old];
+  }
+  row.append(h("button", "btn primary", size === "short" ? "Catch up" : `Catch up · ${P.steps.length} steps`), h("button", "btn quiet", "I know this"));
+  return explainOn ? [row, h("p", "explain", FOG_ACTIONS)] : [row];
+}
+function eyebrow(words) {
+  const clear = S.part === "clear";
+  const e = h("p", `eyebrow${clear ? " clear" : ""}`);
+  e.append(h("span", "fog-dot"), clear ? "Caught up · 3 days ago" : words);
+  return e;
+}
+
+// ---- The variants.
+function now(card) {
+  const fog = h("div", "sheet-fog");
+  if (S.part !== "clear") fog.append(h("p", "sheet-fog-line", "3 changes on main since you last caught up: #612, #605, #598."), h("button", "btn sheet-catch-up", S.part === "writing" ? "Part catch-up · Writing…" : "Part catch-up"), h("button", "btn quiet", "I know this"));
+  else fog.append(h("button", "btn quiet", "Refresher"));
+  if (explainOn) fog.append(h("p", "explain", FOG_ACTIONS));
+  card.append(
+    h("h2", "sheet-name", P.name), h("p", "sheet-caption", P.caption), ...(S.part !== "clear" ? [h("p", "sheet-marks", "3 PRs since you last caught up")] : []),
+    h("p", "sheet-purpose", esc(P.purpose)),
+    ...heading("Holds"), ...body.Holds(), ...heading("Tier"), ...body.Tier(), ...heading("Laws"), ...body.Laws(),
+    ...heading("Talks to"), ...body["Talks to"](), ...heading("Fog"), fog, ...heading("CI on main"), ...body["CI on main"](),
+    ...(S.session ? [...heading("This session here"), ...body["This session here"]()] : []), ...heading("History"), ...body.History(),
+  );
+}
+// 4: round 1's card, with the new order and folds.
+function four(card) {
+  card.append(h("h2", "sheet-name", P.name), h("p", "sheet-caption", P.caption));
+  const c = h("section", `card old${S.part === "clear" ? " clear" : ""}`); c.setAttribute("aria-label", "Catch up");
+  if (S.part !== "clear") { const ul = h("ul", "landed"); P.landed.forEach(([n, t]) => ul.append(h("li", "", `<span class="num">${n}</span><span>${esc(t)}</span><span></span>`))); c.append(h("p", "count", "3 PRs since you last caught up"), ul); }
+  else c.append(h("p", "count", "Caught up"));
+  c.append(...action("long"));
+  card.append(c, ...purpose(3), chips(), folds());
+}
+// 4a · Story: the card leads with the catch-up's own gist, so the 2–3 lines you read first are what changed; the purpose drops to 2 lines.
+function story(card) {
+  card.append(h("h2", "sheet-name", P.name), h("p", "sheet-caption", P.caption));
+  const c = h("section", `card${S.part === "clear" ? " clear" : ""}`); c.setAttribute("aria-label", "Catch up");
+  c.append(eyebrow("3 changes since you last caught up"));
+  // The outline, never the gist: the gist shows only after Explain-back (docs/studio/CONTEXT.md, "Gist").
+  if (S.part === "fogged") { c.append(h("p", "outline-title", esc(P.outline.title))); const ol = h("ol", "outline"); P.outline.steps.forEach(([k, t]) => ol.append(h("li", "", `<span class="k">${k}</span><span>${esc(t)}</span>`))); c.append(ol); }
+  if (S.part === "writing") c.append(h("p", "gist", "A new story is being written with #612 in it."));
+  if (S.part === "clear") c.append(h("p", "gist", esc(P.purpose.split(". ")[0] + ".")));
+  c.append(...action("long"));
+  card.append(c);
+  if (S.part !== "clear") card.append(...purpose(2));
+  card.append(chips(), folds());
+}
+// 4b · Pinned: no box; the catch-up is a bar that sticks to the sheet's top while you scroll the folds. Facts are a 2×2 you press into.
+function pinned(card) {
+  card.append(h("h2", "sheet-name", P.name), h("p", "sheet-caption", P.caption));
+  const bar = h("section", `pinned${S.part === "clear" ? " clear" : ""}`); bar.setAttribute("aria-label", "Catch up");
+  const top = h("div", "row"); top.append(eyebrow("3 changes · #612 #605 #598"));
+  bar.append(top, ...action("short"));
+  card.append(bar, ...purpose(3));
+  const f = h("div", "facts");
+  const fact = (k, val, title, bad) => opens(h("button", `btn fact${bad ? " bad" : ""}`, `<span class="k">${k}</span><span class="val">${val}</span>`), title);
+  f.append(fact("Tier", tierLabel(), "Tier"), fact("Laws", "3 · 2 tested", "Laws"), fact("Talks to", "5 links", "Talks to"),
+    fact("CI on main", `<span class="dot" style="background:${S.ciBroken ? "var(--conflict)" : "var(--ok)"}"></span>${S.ciBroken ? "failing" : "passing"}`, S.ciBroken ? "CI on main" : "Laws", S.ciBroken));
+  card.append(f, folds());
+}
+// 4c · Landed: the card lists what landed, newest first with its age, so the History you'd scroll for is up here; History folds last.
+function landed(card) {
+  card.append(h("h2", "sheet-name", P.name), h("p", "sheet-caption", P.caption), ...purpose(2), chips());
+  const c = h("section", `card${S.part === "clear" ? " clear" : ""}`); c.setAttribute("aria-label", "Catch up");
+  c.append(eyebrow("What landed since you last caught up"));
+  if (S.part !== "clear") {
+    const ul = h("ul", "landed");
+    P.landed.forEach(([n, t, a], i) => ul.append(h("li", "", `<span class="num">${n}</span><span>${esc(t)}</span><span class="age">${a}</span>`)));
+    c.append(ul);
+  } else c.append(h("p", "meta", "Nothing new on main for this part."));
+  c.append(...action("long"));
+  card.append(c, folds());
+}
+
+const VARIANTS = { now: ["1 · Now", now], four: ["2 · 4 (round 1)", four], story: ["3 · 4a Story", story], pinned: ["4 · 4b Pinned", pinned], landed: ["5 · 4c Landed", landed] };
+const KEYS = Object.keys(VARIANTS);
+let v = new URLSearchParams(location.search).get("v"); if (!VARIANTS[v]) v = "story";
+
+function readout() {
+  const open = v === "now" ? "all (nothing folds)" : [...document.querySelectorAll("details.fold[open]")].map((d) => d.querySelector(".fold-title").textContent).join(", ") || "none";
+  const side = document.getElementById("side");
+  document.getElementById("readout").textContent = `variant=${v}  part=${S.part}  session=${S.session ? "open" : "none"}  ci=${S.ciBroken ? "failing" : "passing"}\nopen: ${open}\nsheet ${side.scrollHeight}px of ${side.clientHeight}px visible`;
+}
+function draw() {
+  const side = document.getElementById("side"); const card = h("div", "sheet");
+  card.append(header()); VARIANTS[v][1](card); side.replaceChildren(card); readout(); stateBar();
+}
+function pick(next) {
+  v = next; const u = new URL(location.href); u.searchParams.set("v", v); history.replaceState(null, "", u);
+  document.querySelectorAll("#bar .btn").forEach((b) => b.setAttribute("aria-pressed", b.dataset.v === v));
+  draw();
+}
+function stateBar() {
+  const bar = document.getElementById("state"); bar.replaceChildren();
+  const btn = (label, on, fn) => { const b = h("button", "btn", label); b.setAttribute("aria-pressed", on); b.onclick = fn; bar.append(b); };
+  for (const [id, label] of [["fogged", "Fogged, ready"], ["writing", "Fogged, writing"], ["clear", "No fog"]]) btn(label, S.part === id, () => { S.part = id; draw(); });
+  btn("Session open", S.session, () => { S.session = !S.session; draw(); });
+  btn("CI failing", S.ciBroken, () => { S.ciBroken = !S.ciBroken; draw(); });
+}
+for (const k of KEYS) { const b = h("button", "btn", VARIANTS[k][0]); b.dataset.v = k; b.onclick = () => pick(k); document.getElementById("bar").append(b); }
+addEventListener("keydown", (e) => { const i = Number(e.key) - 1; if (KEYS[i] && !e.metaKey && !e.ctrlKey && !e.altKey) pick(KEYS[i]); });
+pick(v);
+</script>
+</body>
+</html>
