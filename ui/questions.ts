@@ -4,7 +4,7 @@
 // permission the hook waits on gets the same card with allow and deny (danielrispler/Falinks#478).
 
 import { askFor, sendAnswer } from "./answer.js";
-import { code, pressable, prose, text } from "./dom.js";
+import { availability, code, hint, pressable, prose, text } from "./dom.js";
 import { type Ask, askKind, type Question } from "./types.js";
 
 // Whether a question is open, answered in the terminal, or not answered: its call failed, or its turn
@@ -70,7 +70,7 @@ export function questionElement(question: Question): HTMLElement {
             if (!sendButton) send();
           });
           button.append(...content);
-          button.title = asked.multiSelect ? "Tick or untick this choice" : "Choose this answer";
+          hint(button, asked.multiSelect ? "Tick or untick this choice" : "Choose this answer");
           item.append(button);
         } else item.append(...content);
         // A label may hold a comma, so only a multi-select answer is split (danielrispler/Falinks#434, decision 41).
@@ -115,11 +115,15 @@ export function decisionElement(ask: Ask): HTMLElement {
   return block;
 }
 
+/** The card's "Send", in `dock`, takes focus for Enter once it is available, every question having a choice. */
+export function focusSend(dock: HTMLElement) {
+  dock.querySelector<HTMLButtonElement>('.send:not([aria-disabled="true"])')?.focus();
+}
+
 // "Send" is enabled once every question has a choice; disabled, its hover says so.
 function readySend(block: HTMLElement, ready: boolean) {
   const send = block.querySelector<HTMLButtonElement>(".send");
-  send?.toggleAttribute("disabled", !ready);
-  if (send) send.title = ready ? answerHovers.Send : "Choose an answer to every question first";
+  if (send) availability(send, answerHovers.Send, ready ? null : "Choose an answer to every question first");
 }
 
 // What each of the card's buttons does, on its hover: a label without one does not compile.
@@ -139,7 +143,8 @@ function answerButtons(ask: Ask, buttons: [AnswerButton, () => void, string?][])
   row.className = "answer-buttons";
   const button = (label: string, hover: string, click: () => void, className = "") => {
     const node = pressable(text("button", label, `btn ${className}`.trim()), null);
-    node.title = hover;
+    // Send is aria-disabled until every question has a choice and says why (`readySend`, #586).
+    hint(node, hover);
     node.addEventListener("click", click);
     return node;
   };

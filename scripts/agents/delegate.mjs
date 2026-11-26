@@ -1,24 +1,65 @@
 #!/usr/bin/env node
 // `node scripts/agents/delegate.mjs pick critic --spec <draft> [--routing <file>]`: names the critic of a draft
 // spec from `routing.json`'s `critic` list (spec #592, "The cold critic and the veto gate"). When it is Gemini, it runs
-// it and prints its answer, which the orchestrator writes to `reports/critic.md`; when it is Claude, it prints the
-// prompt that critic gets, the one Gemini gets. This script is where the critic's brief is written.
+// it and prints its findings, which the orchestrator writes to `reports/critic.md`; when it is Claude, it prints the
+// prompt that critic gets: the brief Gemini gets, then the draft. This script is where the critic's brief is written.
+// Gemini runs as the outside review runs it (#618): in a throwaway folder with a worktree of HEAD, where the deny hook
+// allows only reads, answering in a schema. Plan mode ended the run at its first denied shell command.
 //
 // `node scripts/agents/delegate.mjs run --ticket <n> --integration <branch> --effort <medium|high> [--routing <file>]`:
 // takes a cheap ticket through an OpenCode worker in its own worktree and prints the verdict (spec #592,
 // "`delegate.mjs run`, a cheap ticket").
-import { spawn, spawnSync } from "node:child_process";
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { appendFileSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { agyCall, options, quotaLeft } from "../review/outside-review.mjs";
+import { tmpdir } from "node:os";
+import { agyCall, allowedReads, hookDecisions, quotaLeft, readOnly } from "../review/outside-review.mjs";
 
 const MINUTES = 15;
 
-const BRIEF = `You are the critic of a draft spec for this repository. Check every claim of the draft against the repository. Mark each claim verified, with its file:line or a command and its output, or unverified. Flag contradictions with AGENTS.md, system-map.json and existing code. Rate each finding high, medium or low. You can change nothing: answer with your findings only.
+const CRITIC = `You are the critic of a draft spec for this repository. Check every claim of the draft against the repository. Mark each claim verified, with its file:line or a command and its output, or unverified. Flag contradictions with AGENTS.md, system-map.json and existing code. Rate each finding high, medium or low. You can change nothing: answer with your findings only.`;
+
+/** The Claude critic's prompt: the brief, then the draft. */
+const BRIEF = `${CRITIC}
 
 The draft:
 
 `;
+
+// Gemini's prompt. Like the outside review's, it names files by absolute path, the only form its read tool takes, and
+// holds no at-sign, so the draft is a file it reads rather than text in the prompt.
+const geminiBrief = (folder) => `${CRITIC}
+
+Your only working tool is read_file, and it takes absolute paths only. Do not try to write a file or run a command: those calls are denied, and so is a read outside ${folder}. Where you would run a command, read the files instead, and cite what you read as file:line.
+
+- The draft: ${folder}/review/draft.md
+- Every file of the repository, one absolute path a line: ${folder}/review/tree.txt
+- The repository: ${folder}/repo
+
+Give each finding its severity (high, medium or low), the claim it is about, its status (verified, unverified or contradiction), the evidence as file:line, and one sentence saying what is wrong.
+`;
+
+/** The findings' shape, enforced by `agy --json-schema`. */
+const SCHEMA = {
+  type: "object",
+  properties: {
+    findings: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          severity: { type: "string" },
+          claim: { type: "string" },
+          status: { type: "string" },
+          evidence: { type: "string" },
+          summary: { type: "string" },
+        },
+        required: ["severity", "claim", "status", "evidence", "summary"],
+      },
+    },
+  },
+  required: ["findings"],
+};
 
 class Usage extends Error {}
 
@@ -51,21 +92,60 @@ const parse = (argv) => {
   throw new Usage(`unknown command ${[verb, role].filter(Boolean).join(" ")}`);
 };
 
-/** One headless, read-only Gemini run: its answer, or why it gave none. */
-const runAgy = (model, prompt) => {
-  const env = agyCall(options([]), { env: process.env }).env;
-  const args = ["--mode", "plan", "--model", model, "--print-timeout", `${MINUTES}m`, "--output-format", "json", "-p", prompt];
-  const ran = spawnSync("agy", args, { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: (MINUTES + 1) * 60_000, maxBuffer: 64 * 1024 * 1024 });
+/** The verdict of a finished Gemini critic run: its findings as text, or why it gave none. */
+const criticOutcome = ({ status, signal, error, stdout, stderr, reads }) => {
   // agy exits 3 when `--print-timeout` cuts it; the spawn's own timeout is the backstop.
-  if (ran.status === 3 || ran.signal) return { failed: `was cut at ${MINUTES} minutes` };
-  if (ran.error) return { failed: `failed: ${ran.error.message}` };
-  if (ran.status !== 0) return { failed: `failed: exit ${ran.status}${ran.stderr.trim() ? `: ${ran.stderr.trim().split("\n").at(-1).slice(0, 200)}` : ""}` };
+  if (status === 3 || signal) return { failed: `was cut at ${MINUTES} minutes` };
+  if (error) return { failed: `failed: ${error.message}` };
+  if (status !== 0) return { failed: `failed: exit ${status}${stderr.trim() ? `: ${stderr.trim().split("\n").at(-1).slice(0, 200)}` : ""}` };
   let result = null;
   try {
-    result = JSON.parse(ran.stdout);
+    result = JSON.parse(stdout);
   } catch {}
-  if (result?.status !== "SUCCESS" || !result.response) return { failed: `failed: status ${result?.status ?? "unreadable"}` };
-  return { answer: result.response };
+  if (!result) return { failed: "failed: its answer is not JSON" };
+  // The conversation id finds the run's transcript, under ~/.gemini/antigravity-cli/brain/<id>/.
+  const conversation = `conversation ${result.conversation_id ?? "unknown"}`;
+  if (result.status !== "SUCCESS") return { failed: `failed: status ${result.status} (${conversation})` };
+  const findings = result.structured_output?.findings;
+  if (!Array.isArray(findings)) {
+    // agy may put its answer in a file and reply with a link to it, as it did in plan mode (#618).
+    const pointer = result.response?.match(/\[([^\]]+)\]\(file:/)?.[1];
+    if (pointer) return { failed: `answered only with a pointer to ${pointer} (${conversation})` };
+    return { failed: `answered nothing (status SUCCESS, ${conversation})` };
+  }
+  if (!reads) return { failed: `read no file, so it saw no draft (${conversation})` };
+  if (!findings.length) return { answer: "No findings." };
+  return { answer: findings.map((f, i) => `${i + 1}. ${f.severity}, ${f.status}: ${f.claim}\n   Evidence: ${f.evidence}\n   ${f.summary}`).join("\n") };
+};
+
+/** One headless, read-only Gemini critic run of `draft`, in a throwaway folder holding a worktree of HEAD. */
+const runAgy = (model, draft) => {
+  const git = (...args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  const folder = realpathSync(mkdtempSync(join(tmpdir(), "critic-")));
+  const repo = join(folder, "repo");
+  const log = join(folder, "hook.log");
+  try {
+    git("worktree", "add", "--quiet", "--detach", repo, "HEAD");
+    mkdirSync(join(folder, "review"));
+    writeFileSync(join(folder, "review/draft.md"), draft);
+    const tree = git("-C", repo, "ls-tree", "-r", "--name-only", "HEAD").split("\n").filter(Boolean);
+    writeFileSync(join(folder, "review/tree.txt"), tree.map((path) => join(repo, path)).join("\n") + "\n");
+    writeFileSync(join(folder, "review/schema.json"), JSON.stringify(SCHEMA));
+    readOnly(folder, log);
+    const call = agyCall({ model }, { schema: join(folder, "review/schema.json"), prompt: geminiBrief(folder), env: process.env });
+    const ran = spawnSync("agy", call.args, { cwd: folder, env: call.env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: (MINUTES + 1) * 60_000, maxBuffer: 64 * 1024 * 1024 });
+    return criticOutcome({ ...ran, reads: allowedReads(hookDecisions(log)) });
+  } catch (error) {
+    return { failed: `failed: ${error.message.split("\n")[0]}` };
+  } finally {
+    try {
+      git("worktree", "remove", "--force", repo);
+    } catch {}
+    rmSync(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    try {
+      git("worktree", "prune");
+    } catch {}
+  }
 };
 
 // The quota a candidate must have left, by window, to be picked (spec #592, "`routing.json`"): Gemini leaves room for
@@ -91,7 +171,8 @@ const named = (candidate) => [`critic: ${candidate.cli} ${candidate.model}`, can
 
 const pickCritic = ({ spec, routing }) => {
   let why = null;
-  const prompt = BRIEF + readFileSync(spec, "utf8");
+  const draft = readFileSync(spec, "utf8");
+  const prompt = BRIEF + draft;
   for (const candidate of JSON.parse(readFileSync(routing, "utf8")).critic) {
     const short = shortOf(candidate);
     if (short) {
@@ -99,9 +180,9 @@ const pickCritic = ({ spec, routing }) => {
       continue;
     }
     if (candidate.cli !== "agy") return `${[named(candidate), why && `why: ${why}`].filter(Boolean).join("\n")}\n\n${prompt.trimEnd()}`;
-    const { answer, failed } = runAgy(candidate.model, prompt);
+    const { answer, failed } = runAgy(candidate.model, draft);
     if (answer) return `${named(candidate)}\n\n${answer.trimEnd()}`;
-    why = `${candidate.cli} ${candidate.model} ${failed}; Sonnet is the fallback`;
+    why = `${candidate.cli} ${candidate.model} ${failed}`;
   }
   throw new Error(`no critic candidate is eligible: ${why}`);
 };

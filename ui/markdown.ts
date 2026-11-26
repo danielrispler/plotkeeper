@@ -2,13 +2,15 @@
 // untrusted and the page can call the server, so raw HTML stays text, only `http(s)` links
 // become links, and an image shows its alt text. marked loads as a plain script from `vendor/`.
 
+import { hint } from "./dom.js";
+
 declare const marked: typeof import("marked");
 
 const entities: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const escapeHtml = (text: string) => text.replace(/[&<>"']/g, (c) => entities[c] ?? c);
 
-// A link's hover names its target (#220): the page has no status bar to show it.
-const opens = (target: string) => escapeHtml(`Open ${target} in a new tab`);
+// A link's hover names its target (#220): the page has no status bar to show it. `rendered` gives each link its hint.
+const opens = (target: string) => `Open ${target} in a new tab`;
 
 // Built at first use, so modules that import this one load where marked is not (the UI tests).
 const create = () =>
@@ -20,7 +22,7 @@ const create = () =>
       // An `http(s)` link opens in a new tab; any other link, a file's included, is its text: the page has no editor to open it in.
       link({ href, tokens }) {
         const inner = this.parser.parseInline(tokens);
-        return /^https?:\/\//i.test(href) ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" title="${opens(href)}">${inner}</a>` : inner;
+        return /^https?:\/\//i.test(href) ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${inner}</a>` : inner;
       },
     },
   });
@@ -38,5 +40,6 @@ export function rendered(tag: string, text: string, className = ""): HTMLElement
   node.className = `markdown ${className}`.trim();
   node.dir = "auto";
   node.innerHTML = markdown(text);
+  for (const link of node.querySelectorAll("a[href]")) hint(link as HTMLElement, opens(link.getAttribute("href") ?? ""));
   return node;
 }

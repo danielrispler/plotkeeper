@@ -15,6 +15,7 @@ const explained = (...args) => explainedNodes(...args);
 /** @param {Parameters<typeof toggleNode>} args @returns {any} */
 const explainToggle = (...args) => toggleNode(...args);
 const { studio } = await import("../../dist/state.js");
+const { hintOf } = await import("../../dist/dom.js");
 
 // A word has a letter: the arrows → and ← are marks, not words.
 const words = (line) => line.split(/\s+/).filter((word) => /\p{L}/u.test(word)).length;
@@ -107,11 +108,12 @@ test("with Explanations off, no line is drawn and nothing points at one", () => 
 test("the ? beside the × is a toggle: pressed when on, its hover says what a click does, and a click writes the flipped setting", async () => {
   const on = explainToggle(true);
   assert.equal(on.getAttribute("aria-pressed"), "true");
-  assert.equal(on.title, "Hide explanations");
+  assert.equal(hintOf(on)?.textContent, "Hide explanations");
+  assert.equal(on.getAttribute("title"), null);
   assert.equal(on.getAttribute("aria-label"), "Explanations");
   const off = explainToggle(false);
   assert.equal(off.getAttribute("aria-pressed"), "false");
-  assert.equal(off.title, "Show explanations");
+  assert.equal(hintOf(off)?.textContent, "Show explanations");
 
   const saved = [];
   startExplanations((text) => saved.push(text));

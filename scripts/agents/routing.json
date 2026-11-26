@@ -7,6 +7,6 @@
   ],
   "critic": [
     { "cli": "agy", "model": "gemini-4-neon-medium" },
-    { "cli": "claude", "model": "sonnet", "effort": "high" }
+    { "cli": "claude", "model": "opus", "effort": "high" }
   ]
 }

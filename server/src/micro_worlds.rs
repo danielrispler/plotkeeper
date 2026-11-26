@@ -25,8 +25,9 @@ use std::{
     process::{Command, Stdio},
     sync::{Arc, Mutex, OnceLock, Weak},
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
+use studio_workbench::run::RunError;
 
 /// The policy put first in every page before it is checked and stored: no network, no other origin, only the page's own inline
 /// script, style and `data:` images.
@@ -824,34 +825,23 @@ fn changed(repo: &Path, built: &str, current: &str, paths: &[String]) -> bool {
     studio_workbench::run::run_until(&mut diff, crate::map::GIT_READ_LIMIT).is_err()
 }
 
-/// Runs `command` with its output in `log`, killed past `limit`: whether it exited 0, and what it printed.
-fn run_logged(mut command: Command, log: &Path, limit: Duration) -> Result<(bool, String), String> {
+/// Runs `command` through the one process runner with its output in `log`, its process group killed past `limit`:
+/// whether it exited 0, and what it printed.
+fn run_to_log(mut command: Command, log: &Path, limit: Duration) -> Result<(bool, String), String> {
     let out = File::create(log).map_err(|e| e.to_string())?;
     let err = out.try_clone().map_err(|e| e.to_string())?;
-    let mut child = command
-        .stdin(Stdio::null())
-        .stdout(out)
-        .stderr(err)
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    let deadline = Instant::now() + limit;
-    let status = loop {
-        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
-            break Some(status);
+    command.stdout(out).stderr(err);
+    match studio_workbench::run::run_logged(&mut command, limit, &|| false) {
+        Ok(status) => Ok((
+            status.success(),
+            fs::read_to_string(log).unwrap_or_default(),
+        )),
+        Err(RunError::TimedOut(_)) => {
+            Err(format!("it took longer than {} seconds", limit.as_secs()))
         }
-        if Instant::now() >= deadline {
-            // The child may have exited already.
-            child.kill().ok();
-            // Only reaps the child; its exit status is not used.
-            child.wait().ok();
-            break None;
-        }
-        thread::sleep(Duration::from_millis(50));
-    };
-    let printed = fs::read_to_string(log).unwrap_or_default();
-    match status {
-        Some(status) => Ok((status.success(), printed)),
-        None => Err(format!("it took longer than {} seconds", limit.as_secs())),
+        Err(RunError::Start(e)) => Err(e.to_string()),
+        // A logged run gives any exit as its status.
+        Err(error @ RunError::Failed(_)) => Err(error.to_string()),
     }
 }
 
@@ -894,7 +884,7 @@ pub fn host_check(
         .arg(repo)
         .args(["--rev", commit])
         .current_dir(&out);
-    match run_logged(build, &logs.join("build.log"), BUILD_LIMIT) {
+    match run_to_log(build, &logs.join("build.log"), BUILD_LIMIT) {
         Ok((true, _)) => {}
         Ok((false, printed)) => {
             return Err(format!("build.py failed:\n{}", last_lines(&printed, 10)));
@@ -915,7 +905,7 @@ pub fn host_check(
         .arg(scripts.join("verify.mjs"))
         .arg(&world)
         .current_dir(&out);
-    match run_logged(verify, &logs.join("verify.log"), VERIFY_LIMIT) {
+    match run_to_log(verify, &logs.join("verify.log"), VERIFY_LIMIT) {
         Ok((true, _)) => Ok(page),
         Ok((false, printed)) => {
             let fails: Vec<&str> = printed

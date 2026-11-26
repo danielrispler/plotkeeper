@@ -5,6 +5,7 @@ mod common;
 mod edges;
 mod go;
 mod imports;
+mod java;
 mod laws;
 mod map_file;
 mod ownership;

@@ -12,7 +12,7 @@
 // fog list, `catchUpIds`) so the player keeps its step apart from the PR briefs and from an older story of the part; read to its end it
 // clears the part's fog (`part_catch_up_done`) and completes no brief.
 
-import { failure, invoke, messageOf, pressable, svg, text } from "./dom.js";
+import { failure, hint, invoke, keyed, messageOf, pressable, svg, text } from "./dom.js";
 import { currentMap, onDraw, registerLayer, type MapView } from "./map.js";
 import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { paint as paintBadges } from "./map-agents.js";
@@ -98,7 +98,7 @@ function reanchorPopover() {
 function unconfirmedMark(view: MapView, pr: number, flags: string[], key: string, copy: Prompt | null): HTMLElement {
   const wrap = text("p", "", "brief-quiet brief-unconfirmed");
   const mark = pressable(text("button", "not confirmed from the facts", "btn quiet brief-why-mark"), null);
-  mark.title = "Show why the checks could not confirm this";
+  hint(mark, "Show why the checks could not confirm this");
   mark.dataset.why = key;
   mark.setAttribute("aria-controls", "brief-why");
   mark.setAttribute("aria-expanded", String(whyOf === key && popoverOpen()));
@@ -117,7 +117,7 @@ const COPY_ICON = '<svg viewBox="0 0 14 14" aria-hidden="true" fill="none" strok
 function copyButton(label: string, hover: string, prompt: Prompt): HTMLElement {
   const button = pressable(text("button", "", "btn quiet brief-copy"), null);
   button.setAttribute("aria-label", label);
-  button.title = hover;
+  hint(button, hover);
   button.innerHTML = COPY_ICON;
   button.addEventListener("click", () => {
     const write = navigator.clipboard?.writeText?.bind(navigator.clipboard);
@@ -460,7 +460,7 @@ export function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBri
   if (step.cites.length) {
     const cites = text("details", "", "brief-cites");
     const summary = text("summary", `What this rests on (${step.cites.length})`);
-    summary.title = "Show what the writer quoted for this step";
+    hint(summary, "Show what the writer quoted for this step");
     cites.append(summary);
     for (const cite of step.cites) cites.append(text("p", `${cite.from}: “${cite.quote}”`, "brief-cite"));
     words.append(cites);
@@ -504,7 +504,7 @@ function codeInto(view: MapView, node: HTMLElement, list: BriefStep[], index: nu
     return { ...drawer, note: `This step lights no changed files · ${drawer.note}` };
   };
   const button = pressable(text("button", "See the code", "btn quiet brief-code"), null);
-  button.title = want === "all" ? "Open every file the PR changed, above the brief" : "Open the changed files of the parts this step lights, above the brief";
+  hint(button, want === "all" ? "Open every file the PR changed, above the brief" : "Open the changed files of the parts this step lights, above the brief");
   button.addEventListener("click", () => {
     // The PR's diff (the files the writer read); when git cannot give it, what the step quoted.
     const drawer = want === "all" ? diff().then(commitDrawer) : want === "none" ? diff().then(unlit) : diff(want).then((found) => (found.files.length ? commitDrawer(found) : diff().then(unlit)));
@@ -536,7 +536,7 @@ function alsoInto(view: MapView, node: HTMLElement, groups: AlsoRow[]) {
     const head = text("div", "", "brief-also-head");
     head.append(text("h5", group.name, "brief-also-name"), text("span", group.counts, "brief-quiet brief-also-counts"));
     const button = pressable(text("button", "See the code", "btn quiet brief-code"), null);
-    button.title = `Open the ${group.name} files, above the brief`;
+    hint(button, `Open the ${group.name} files, above the brief`);
     button.setAttribute("aria-label", `See the code: ${group.name}`);
     button.addEventListener("click", () => {
       invoke("pr_diff", { ...ask, paths: group.paths }).then((found) => openDrawer(commitDrawer(found))).catch(failure("pr_diff"));
@@ -568,7 +568,7 @@ function summaryInto(node: HTMLElement) {
   if (!summary || !words) return;
   const list = text("details", "", "brief-cites brief-fog-list");
   const open = text("summary", `The full fog list (${summary.entries.length})`);
-  open.title = "Show every PR and push this catch-up covers";
+  hint(keyed(open, "fog-list"), "Show every PR and push this catch-up covers");
   list.append(open);
   for (const line of fogListLines(summary.entries)) list.append(text("p", line, "brief-cite"));
   words.append(text("p", summary.line, "brief-quiet brief-summarises"), list);
@@ -720,7 +720,7 @@ function buildPanel(view: MapView, list: BriefStep[]) {
   const playing = playingBrief();
   const box = panel();
   const leave = pressable(text("button", "Leave", "btn quiet brief-leave"), null);
-  leave.title = "Close the brief; it opens again at this step";
+  hint(leave, "Close the brief; it opens again at this step");
   leave.addEventListener("click", closeBrief);
   // The explanations' `?` beside Leave (#524), as beside the sheet's ×; kept for the brief, its state set again when they switch.
   const header = text("div", "", "brief-header");
@@ -733,11 +733,11 @@ function buildPanel(view: MapView, list: BriefStep[]) {
   const live = text("p", "", "visually-hidden brief-live");
   live.setAttribute("aria-live", "polite");
   const back = pressable(text("button", "Back", "btn brief-back"), null);
-  back.title = "The step before";
+  hint(back, "The step before");
   back.addEventListener("click", () => move(-1));
   const next = pressable(text("button", "Next", "btn primary brief-next"), null);
   next.id = "brief-next";
-  next.title = "The next step";
+  hint(next, "The next step");
   next.addEventListener("click", () => advance());
   const foot = text("div", "", "brief-foot");
   foot.append(dots, back, next);
@@ -760,7 +760,7 @@ function sinceLine(): HTMLElement | null {
   line.append(from, ": only what this push changed. ");
   const full = pressable(text("button", "Full brief", "btn quiet brief-since-full"), null);
   full.setAttribute("aria-label", `Full brief of PR #${now.pr}`);
-  full.title = "Open the whole PR's brief at this head";
+  hint(full, "Open the whole PR's brief at this head");
   const { project, pr } = now;
   full.addEventListener("click", () => void openBriefOf(project, pr, 0, true));
   line.append(full);
@@ -790,8 +790,8 @@ function staleBaseLine(stale: StaleBase | undefined): HTMLElement | null {
     line.append(list);
     if (names.length > 3) line.append(` +${names.length - 3} more`);
   });
-  line.title = "The brief compares against the merge base; check these against main";
-  return line;
+  line.setAttribute("data-key", "brief-stale");
+  return hint(line, "The brief compares against the merge base; check these against main");
 }
 
 // "Partial facts · N" (#491): what the brief was written without, one line per input, opening below the panel's head. Built with the
@@ -802,7 +802,7 @@ function factsChip(): HTMLElement | null {
   if (!lines.length) return null;
   const chip = text("details", "", "brief-facts");
   const summary = text("summary", `Partial facts · ${lines.length}`);
-  summary.title = "What this brief was written without";
+  hint(keyed(summary, "partial-facts"), "What this brief was written without");
   const list = text("ul", "", "brief-facts-list");
   for (const { line, files } of lines) {
     const item = text("li", line);

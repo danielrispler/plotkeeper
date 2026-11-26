@@ -215,7 +215,12 @@ export const toastKeys = (): Fixture => {
       const apart = (a, b) => a.bottom <= b.top || b.bottom <= a.top || a.right <= b.left || b.right <= a.left;
       if (!apart(boxes[0], boxes[1]) || !apart(boxes[0], boxes[2]) || !apart(boxes[1], boxes[2])) log("snap:fail two toasts overlap: " + boxes.map((b) => [b.left, b.top, b.right, b.bottom].map(Math.round)).join(" | "));
       if (boxes[1].top < boxes[0].bottom) log("snap:fail the note is not under the needs-you toast");
-      const before = Object.assign(document.createElement("button"), { type: "button", textContent: "Before", title: "Where the focus was" });
+      const before = Object.assign(document.createElement("button"), { type: "button", textContent: "Before" });
+      // The probe's own hint, as the hover rule asks of every control (spec #582).
+      const beforeHint = Object.assign(document.createElement("div"), { id: "before-hint", textContent: "Where the focus was" });
+      beforeHint.setAttribute("popover", "hint");
+      document.body.append(beforeHint);
+      before.setAttribute("interestfor", "before-hint");
       region.before(before);
       // A real press on Undo acts and leaves the focus where it was; Clear landed again brings the toast back.
       before.focus();
@@ -486,3 +491,101 @@ export const projectsSaved = () =>
     const menu = document.getElementById("project-actions");
     if (!menu.matches(":popover-open") || menu.textContent.trim() !== "Remove project") log("snap:fail the header's menu does not offer Remove project");
     log("headers " + order);`);
+
+/**
+ * The hints (spec #582, ticket 1), with real input: the pointer on the top bar's gear opens its hint after the delay, beside the gear, and
+ * on the hint it stays open; Esc closes it; Tab to the gear opens it too; and sliding from one session row to the next opens the next
+ * row's hint at once, closing the first.
+ */
+export const hints = (): Fixture => ({
+  ...list(),
+  snapScript: `
+      const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+      const open = (hint) => hint.matches(":popover-open");
+      const hintOf = (node) => document.getElementById(node.getAttribute("interestfor"));
+      // The hint sits beside its trigger: clear of it, within a few lines of it, on the side the window leaves room for.
+      const beside = (hint, trigger) => {
+        const [h, t] = [hint.getBoundingClientRect(), trigger.getBoundingClientRect()];
+        const apart = Math.max(h.top - t.bottom, t.top - h.bottom);
+        return apart >= 0 && apart <= 24 && h.right > t.left && h.left < t.right;
+      };
+      const gear = document.getElementById("settings-button");
+      const gearHint = hintOf(gear);
+      if (!gearHint?.matches('[popover="hint"]')) return log("snap:fail the gear has no hint");
+      await __snapMove(gear);
+      await wait(100);
+      if (open(gearHint)) log("snap:fail the gear's hint was open before its delay");
+      await wait(450);
+      if (!open(gearHint)) return log("snap:fail the gear's hint did not open after hovering");
+      if (!beside(gearHint, gear)) log("snap:fail the gear's hint is not beside the gear " + JSON.stringify([gearHint.getBoundingClientRect(), gear.getBoundingClientRect()]));
+      await __snapMove(gearHint);
+      await wait(300);
+      if (!open(gearHint)) log("snap:fail the gear's hint closed with the pointer on it");
+      await __snapKey("Escape");
+      await wait(50);
+      if (open(gearHint)) log("snap:fail Esc left the gear's hint open");
+      // Tab: the skip link first, then the gear (the Needs you chip is a button too, so the Tab may take two more).
+      const rows = [...document.querySelectorAll(".list .row")].slice(0, 2);
+      await __snapMove(document.body);
+      for (let tab = 0; tab < 4 && document.activeElement !== gear; tab++) await __snapKey("Tab");
+      if (document.activeElement !== gear) return log("snap:fail Tab did not reach the gear");
+      await wait(600);
+      if (!open(gearHint)) log("snap:fail Tab to the gear did not open its hint");
+      await __snapKey("Escape");
+      document.activeElement.blur();
+      // Sliding from one row to the next: the second shows at once, the first closes.
+      const [first, second] = rows;
+      await __snapMove(first);
+      await wait(600);
+      if (!open(hintOf(first))) return log("snap:fail the first row's hint did not open");
+      await __snapMove(second);
+      await wait(120);
+      if (!open(hintOf(second))) log("snap:fail the neighbouring row's hint did not open at once");
+      if (open(hintOf(first))) log("snap:fail the first row's hint stayed open beside the second's");
+      log("hints ok");`,
+  realKeys: true, realPointer: true, snapDone: "hints ok",
+});
+
+/**
+ * Cut text scrolls in place (spec #582, ticket 3), with real input: the pointer on a second line the row cuts moves its text inside its
+ * own box, and on one that fits it moves nothing. The text stays the element's own, whole.
+ */
+export const cutText = (): Fixture => ({
+  ...listLines(),
+  sessions: (listLines().sessions as Session[]).map((s) => (s.id === "s7" ? { ...s, transcript: { ...s.transcript, intention: "Probing." } } : s)),
+  snapScript: `
+      const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+      const steps = [...document.querySelectorAll(".list .row-step.cut")];
+      const cuts = steps.filter((node) => node.scrollWidth > node.clientWidth);
+      const fits = steps.filter((node) => node.scrollWidth <= node.clientWidth);
+      if (!cuts.length || !fits.length) return log("snap:fail the list shows no cut second line or no fitting one: " + cuts.length + ", " + fits.length);
+      const moved = (node) => getComputedStyle(node.firstElementChild).translate !== "none";
+      if (steps.some((node) => node.hasAttribute("title") || node.textContent !== node.firstElementChild.textContent)) log("snap:fail a second line holds its text outside its box or has a title");
+      await __snapMove(cuts[0]);
+      await wait(600);
+      // Said with what this Chrome sees, so a run elsewhere (CI's runner) shows why: its version, reduced motion, and the overflow flag.
+      if (!moved(cuts[0])) log("snap:fail a cut second line did not scroll on hover " + JSON.stringify({
+        chrome: navigator.userAgent.split(" ").find((part) => part.startsWith("Chrome/")), reduce: matchMedia("(prefers-reduced-motion: reduce)").matches,
+        truncated: getComputedStyle(cuts[0]).getPropertyValue("--truncated"), timeline: CSS.supports("animation-timeline: scroll(self inline)"),
+        hovered: cuts[0].matches(":hover"), widths: [cuts[0].scrollWidth, cuts[0].clientWidth] }));
+      await __snapMove(fits[0]);
+      await wait(600);
+      if (moved(fits[0])) log("snap:fail a second line that fits scrolled on hover");
+      if (moved(cuts[0])) log("snap:fail a cut second line stayed scrolled after the pointer left");
+      log("cut text ok");`,
+  realPointer: true, motion: "full", snapDone: "cut text ok",
+});
+/** With reduced motion asked for, a cut second line stays still on hover (#587). */
+export const cutTextStill = (): Fixture => ({
+  ...cutText(),
+  snapScript: `
+      const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+      if (!matchMedia("(prefers-reduced-motion: reduce)").matches) return log("snap:fail the page does not ask for reduced motion");
+      const cut = [...document.querySelectorAll(".list .row-step.cut")].find((node) => node.scrollWidth > node.clientWidth);
+      if (!cut) return log("snap:fail the list shows no cut second line");
+      await __snapMove(cut);
+      await wait(600);
+      if (getComputedStyle(cut.firstElementChild).translate !== "none") log("snap:fail a cut second line scrolled with reduced motion asked for");
+      log("cut text still ok");`,
+  motion: "reduce", snapDone: "cut text still ok",
+});

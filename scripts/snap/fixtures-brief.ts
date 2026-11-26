@@ -472,7 +472,7 @@ export const mapBriefExplained = (at: "where" | "ratify" | "off"): Fixture => ({
       const box = document.getElementById("map-brief");
       const toggle = box.querySelector(".brief-header .explain-toggle");
       if (!toggle || toggle.nextElementSibling !== box.querySelector(".brief-header .brief-leave")) return log("snap:fail the ? is not beside Leave");
-      if (toggle.getAttribute("aria-pressed") !== "true" || toggle.title !== "Hide explanations") log("snap:fail the ?: " + toggle.getAttribute("aria-pressed") + " " + toggle.title);
+      if (toggle.getAttribute("aria-pressed") !== "true" || document.getElementById(toggle.getAttribute("interestfor"))?.textContent !== "Hide explanations") log("snap:fail the ?: " + toggle.getAttribute("aria-pressed") + " " + document.getElementById(toggle.getAttribute("interestfor"))?.textContent);
       const title = box.querySelector(".brief-title");
       const line = document.getElementById(title.getAttribute("aria-describedby"));
       if (!line?.classList.contains("explain") || title.nextElementSibling !== line) log("snap:fail the title's line");
@@ -488,9 +488,9 @@ export const mapBriefExplained = (at: "where" | "ratify" | "off"): Fixture => ({
         await wait(300);
         const kept = box.querySelector(".brief-header .explain-toggle");
         if (kept !== toggle || document.activeElement !== toggle) log("snap:fail the ? did not keep the focus");
-        if (toggle.getAttribute("aria-pressed") !== "false" || toggle.title !== "Show explanations") log("snap:fail the ? after a press: " + toggle.getAttribute("aria-pressed") + " " + toggle.title);
+        if (toggle.getAttribute("aria-pressed") !== "false" || document.getElementById(toggle.getAttribute("interestfor"))?.textContent !== "Show explanations") log("snap:fail the ? after a press: " + toggle.getAttribute("aria-pressed") + " " + document.getElementById(toggle.getAttribute("interestfor"))?.textContent);
         const lines = box.querySelectorAll(".explain").length;
-        const described = box.querySelectorAll("[aria-describedby]").length;
+        const described = [...box.querySelectorAll("[aria-describedby]")].filter((node) => document.getElementById(node.getAttribute("aria-describedby"))?.classList.contains("explain")).length;
         if (lines || described) log("snap:fail explanations drawn while off: " + lines + " lines, " + described + " described");
       }`, false, 100),
   ...(at === "ratify" ? { pr_ratify: ratifyRows } : {}),

@@ -97,7 +97,8 @@
         { "name": "The writer's settings", "text": "Pick the program that writes the summaries, or set up an API-key writer, and test it with one tiny call.", "paths": ["ui/settings.ts", "ui/writers.ts"] },
         { "name": "Patch review", "text": "A back a law run's proven test patch, to open as a draft PR or discard.", "paths": ["ui/patch-review.ts"] },
         { "name": "Wait tips", "text": "While a session runs, one line in its Intention box teaches one feature, chosen with a cooldown; settings can turn them off.", "paths": ["ui/tips.ts"] },
-        { "name": "What's new", "text": "After an update to a new version, one toast with a link to that version's GitHub Release.", "paths": ["ui/whats-new.ts"] }
+        { "name": "What's new", "text": "After an update to a new version, one toast with a link to that version's GitHub Release.", "paths": ["ui/whats-new.ts"] },
+        { "name": "Hints", "text": "`hint()` gives a control or a mark its own hover; the snap hover rule fails a control without one and any `title`.", "paths": ["ui/dom.ts"] }
       ],
       "tier": "core", "paths": ["ui/"]
     },
@@ -105,7 +106,7 @@
       "id": "workbench", "name": "Workbench", "caption": "Worktrees and PRs",
       "purpose": "The one runner of `git` and `gh`, git worktrees and fetches, other agents' resume commands, and agy's plugin. A black box: it never fogs.",
       "holds": [
-        { "name": "The runner", "text": "Builds every `git` and `gh` with prompts off and no input, and runs a command to a deadline that kills its process group.", "paths": ["workbench/src/run.rs"] },
+        { "name": "The runner", "text": "Builds every `git` and `gh` with prompts off and no input, and runs commands to a deadline that kills their process group.", "paths": ["workbench/src/run.rs"] },
         { "name": "Git", "text": "A folder's main checkout, `origin`'s fetch and what removing a worktree would lose, never with force.", "paths": ["workbench/src/lib.rs"] }
       ],
       "tier": "black-box", "paths": ["workbench/"]

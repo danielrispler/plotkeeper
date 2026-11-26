@@ -25,13 +25,13 @@ use std::{
     process::{Child, Command, Stdio},
     sync::{
         Arc, Mutex, OnceLock, Weak,
-        atomic::{AtomicU64, Ordering},
-        mpsc,
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread,
     time::{Duration, Instant},
 };
 use studio_understanding::{FailureKind, login_or_quota, millis};
+use studio_workbench::run::RunError;
 
 const RUN: &str = "run.json";
 const LOCK: &str = "lock";
@@ -43,6 +43,8 @@ const STDOUT: &str = "stdout";
 const STDERR: &str = "stderr";
 const SETUP_LOG: &str = "setup.log";
 const PAUSED: &str = "paused.json";
+/// How long a Stop waits for a launcher to end its child before it kills the launcher outright.
+const STOP_GRACE: Duration = Duration::from_secs(5);
 /// The record of every run, one line each, in the data folder.
 const RECORDS: &str = "background-runs.jsonl";
 
@@ -539,6 +541,20 @@ fn lock_free(dir: &Path) -> bool {
     !matches!(lock.try_lock(), Err(TryLockError::WouldBlock))
 }
 
+/// Whether the lock of the run in `dir` is free within `grace`.
+fn free_within(dir: &Path, grace: Duration) -> bool {
+    let end = Instant::now() + grace;
+    loop {
+        if lock_free(dir) {
+            return true;
+        }
+        if Instant::now() >= end {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
 /// Waits until the lock of the run in `dir` is free.
 fn wait_free(dir: &Path) {
     if let Ok(lock) = File::open(dir.join(LOCK)) {
@@ -569,6 +585,7 @@ fn process_start(pid: u32) -> Option<String> {
 /// last act is to kill that group, itself included, so nothing a run started outlives it: not at the limit, and not a
 /// stray child of a run that finished.
 pub fn launch(dir: &Path) -> Result<(), String> {
+    listen_for_stop();
     let stored: Launched = read_json(&dir.join(RUN)).ok_or("the folder holds no run")?;
     let started_ms = millis();
     let deadline = Instant::now() + Duration::from_secs(stored.timeout_secs);
@@ -608,26 +625,35 @@ fn output(dir: &Path, name: &str) -> Result<File, Status> {
     })
 }
 
-/// What ended a wait on a child.
-enum Waited {
-    Exited(Option<i32>),
-    TimedOut,
+/// Runs `command` until `deadline`, through the one process runner: its exit code, none when a signal ended it. The
+/// run's time limit passing, or a Stop ([`stopped`]), ends it as timed out, with nothing it started left running.
+fn run_step(command: &mut Command, deadline: Instant) -> Result<Option<i32>, RunOutcome> {
+    let left = deadline.saturating_duration_since(Instant::now());
+    match studio_workbench::run::run_logged(command, left, &stopped) {
+        Ok(status) => Ok(status.code()),
+        Err(RunError::TimedOut(_)) => Err(RunOutcome::TimedOut),
+        Err(RunError::Start(e)) => Err(RunOutcome::NotStarted(e.to_string())),
+        // A logged run gives any exit as its status.
+        Err(error @ RunError::Failed(_)) => Err(RunOutcome::NotStarted(error.to_string())),
+    }
 }
 
-/// Waits for `child` until `deadline`, on a thread of its own so the wait needs no polling.
-fn wait_until(mut child: Child, deadline: Instant) -> Waited {
-    let (done, waited) = mpsc::channel();
-    thread::spawn(move || drop(done.send(child.wait())));
-    match waited.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-        Ok(status) => Waited::Exited(status.ok().and_then(|status| status.code())),
-        Err(_) => Waited::TimedOut,
+/// Why [`run_step`] gave no exit code.
+enum RunOutcome {
+    TimedOut,
+    NotStarted(String),
+}
+
+fn timed_out() -> Status {
+    Status {
+        timed_out: true,
+        ..Status::default()
     }
 }
 
 /// Runs the command's sandbox check within the run's time limit: a failure is [`SANDBOX_DOWN`], with what the check
 /// printed, or its exit code when it printed nothing.
 fn run_check(stored: &Launched, deadline: Instant) -> Result<(), Status> {
-    use std::io::Read;
     let Some((program, args)) = stored.command.check.split_first() else {
         return Ok(());
     };
@@ -635,33 +661,22 @@ fn run_check(stored: &Launched, deadline: Instant) -> Result<(), Status> {
         error: Some(format!("{SANDBOX_DOWN}: {why}")),
         ..Status::default()
     };
-    let mut child = Command::new(program)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| down(e.to_string()))?;
-    let stderr = child.stderr.take();
-    let code = match wait_until(child, deadline) {
-        Waited::Exited(Some(0)) => return Ok(()),
-        Waited::Exited(code) => code,
-        Waited::TimedOut => {
-            return Err(Status {
-                timed_out: true,
-                ..Status::default()
-            });
-        }
+    let mut check = Command::new(program);
+    check.args(args);
+    let left = deadline.saturating_duration_since(Instant::now());
+    let output = match studio_workbench::run::run_until_unless(&mut check, left, &stopped) {
+        Ok(_) => return Ok(()),
+        Err(RunError::TimedOut(_)) => return Err(timed_out()),
+        Err(RunError::Start(e)) => return Err(down(e.to_string())),
+        Err(RunError::Failed(output)) => output,
     };
-    let mut said = String::new();
-    if let Some(mut stderr) = stderr {
-        // A stderr that does not read leaves what was read before the error.
-        stderr.read_to_string(&mut said).ok();
-    }
-    Err(down(match said.trim() {
-        "" => code.map_or("the check was stopped by a signal".into(), |code| {
-            format!("the check exited {code}")
-        }),
+    Err(down(match String::from_utf8_lossy(&output.stderr).trim() {
+        "" => output
+            .status
+            .code()
+            .map_or("the check was stopped by a signal".into(), |code| {
+                format!("the check exited {code}")
+            }),
         said => said.to_string(),
     }))
 }
@@ -687,29 +702,25 @@ fn run_setup(dir: &Path, stored: &Launched, deadline: Instant) -> Result<(), Sta
         return Ok(());
     };
     let log = output(dir, SETUP_LOG)?;
-    let child = Command::new("/bin/sh")
+    let mut command = Command::new("/bin/sh");
+    command
         .args(["-c", setup])
         .current_dir(&stored.folder)
         .envs(&stored.command.env)
-        .stdin(Stdio::null())
         .stderr(log.try_clone().map_err(|e| Status {
             error: Some(e.to_string()),
             ..Status::default()
         })?)
-        .stdout(log)
-        .spawn();
+        .stdout(log);
     let failed = |setup_exit| Status {
         setup_exit: Some(setup_exit),
         ..Status::default()
     };
-    match child.map(|child| wait_until(child, deadline)) {
-        Ok(Waited::Exited(Some(0))) => Ok(()),
-        Ok(Waited::Exited(code)) => Err(failed(code.unwrap_or(-1))),
-        Ok(Waited::TimedOut) => Err(Status {
-            timed_out: true,
-            ..Status::default()
-        }),
-        Err(_) => Err(failed(-1)),
+    match run_step(&mut command, deadline) {
+        Ok(Some(0)) => Ok(()),
+        Ok(code) => Err(failed(code.unwrap_or(-1))),
+        Err(RunOutcome::TimedOut) => Err(timed_out()),
+        Err(RunOutcome::NotStarted(_)) => Err(failed(-1)),
     }
 }
 
@@ -721,25 +732,46 @@ fn run_harness(dir: &Path, stored: &Launched, deadline: Instant) -> Result<Optio
         .args(&command.args)
         .current_dir(&stored.folder)
         .envs(&command.env)
-        .stdin(Stdio::null())
         .stdout(output(dir, STDOUT)?)
         .stderr(output(dir, STDERR)?);
     for name in &command.env_remove {
         harness.env_remove(name);
     }
-    let child = harness.spawn().map_err(|e| Status {
-        error: Some(format!(
-            "`{}` did not start: {e}",
-            command.program.display()
-        )),
-        ..Status::default()
-    })?;
-    match wait_until(child, deadline) {
-        Waited::Exited(exit) => Ok(exit),
-        Waited::TimedOut => Err(Status {
-            timed_out: true,
+    run_step(&mut harness, deadline).map_err(|outcome| match outcome {
+        RunOutcome::TimedOut => timed_out(),
+        RunOutcome::NotStarted(e) => Status {
+            error: Some(format!(
+                "`{}` did not start: {e}",
+                command.program.display()
+            )),
             ..Status::default()
-        }),
+        },
+    })
+}
+
+/// Set once plotkeeper's Stop has asked this launcher to end ([`Runner::stop`]).
+static STOP: AtomicBool = AtomicBool::new(false);
+
+/// Whether a Stop has asked this launcher to end. Its child runs in a process group of its own, which a kill of the
+/// launcher's group would miss, so the runner kills that group when this turns true.
+fn stopped() -> bool {
+    STOP.load(Ordering::Relaxed)
+}
+
+extern "C" fn on_stop(_: libc::c_int) {
+    STOP.store(true, Ordering::Relaxed);
+}
+
+/// Has a `SIGTERM`, the Stop's ask, set [`STOP`] rather than end the launcher at once.
+fn listen_for_stop() {
+    // SAFETY: `action` is a zeroed `sigaction` that outlives the call; the handler only stores to an atomic, which is
+    // safe in a signal handler.
+    unsafe {
+        let mut action: libc::sigaction = std::mem::zeroed();
+        action.sa_sigaction = on_stop as *const () as libc::sighandler_t;
+        action.sa_flags = libc::SA_RESTART;
+        libc::sigemptyset(&mut action.sa_mask);
+        libc::sigaction(libc::SIGTERM, &action, std::ptr::null_mut());
     }
 }
 
@@ -1389,7 +1421,7 @@ impl Runner {
         })
     }
 
-    /// Cancel: a queued run is dropped, a running one has its process group killed, and either way the run's folder is
+    /// Cancel: a queued run is dropped, a running one is stopped ([`Runner::stop`]), and either way the run's folder is
     /// removed and the next run of its project starts. An ended run is only removed, and so is a run that ended on its own
     /// at that moment, which is recorded as it ended. A running run is killed only when its lock is held and the process
     /// its folder names still has the start time written down, so a process id that was reused is never signalled;
@@ -1441,7 +1473,8 @@ impl Runner {
         Ok(())
     }
 
-    /// Stops the running run in `dir` by killing its launcher's process group, and waits until its lock is free: true when
+    /// Stops the running run in `dir`, a `SIGTERM` to its launcher's process group and a `SIGKILL` past [`STOP_GRACE`],
+    /// and waits until its lock is free: true when
     /// it was killed here, false when its launcher had already gone, or was going at this very moment, so there was
     /// nothing to stop. Refuses, with the lock still held, when the process the folder names is not the one that was
     /// started.
@@ -1459,9 +1492,16 @@ impl Runner {
             Some(now) if now == start => {
                 let group = i32::try_from(pid)
                     .map_err(|e| format!("the run's process id is out of range: {e}"))?;
-                // SAFETY: a signal to the process group the launcher leads, which the lock and the start time just named.
-                if unsafe { libc::killpg(group, libc::SIGKILL) } == 0 {
-                    wait_free(dir);
+                // Asked first: the launcher then kills its child's process group, which is not its own, and ends. One that
+                // does not end within the grace is killed with its group.
+                // SAFETY: signals to the process group the launcher leads, which the lock and the start time just named;
+                // the lock still held says the launcher is there to be signalled again.
+                if unsafe { libc::killpg(group, libc::SIGTERM) } == 0 {
+                    if !free_within(dir, STOP_GRACE) {
+                        // SAFETY: as above.
+                        unsafe { libc::killpg(group, libc::SIGKILL) };
+                        wait_free(dir);
+                    }
                     return Ok(true);
                 }
                 let why = io::Error::last_os_error();
@@ -1472,11 +1512,8 @@ impl Runner {
             None => not_ours.to_string(),
         };
         // A launcher that is exiting answers to neither `ps` nor a signal, and frees its lock a moment later.
-        for _ in 0..100 {
-            if lock_free(dir) {
-                return Ok(false);
-            }
-            thread::sleep(Duration::from_millis(10));
+        if free_within(dir, Duration::from_secs(1)) {
+            return Ok(false);
         }
         Err(refused)
     }

@@ -10,7 +10,7 @@ import { startWatching } from "./answer.js";
 import { forgetAsks, openAsk } from "./ask.js";
 import { recheckSeen } from "./seen.js";
 import { diffRequest, newestDiff } from "./diff.js";
-import { element, failure, invoke, listen, logUncaught } from "./dom.js";
+import { element, failure, hint, invoke, listen, logUncaught } from "./dom.js";
 import { type Actions, newestUnseen, nextNeedsYou, paletteEntries, run, stepLine, stepSession, windowBinding } from "./keys.js";
 import { hover, realClock, shownGate } from "./hover.js";
 import { arrange } from "./layout.js";
@@ -32,6 +32,7 @@ import { besideSheet, closePanel, panelShown, showHistory, showPanel, startPanel
 import { showPalette } from "./palette.js";
 import { projectOfCwd, selectedProject, sidebarOrder } from "./projects.js";
 import { narrowBelow, selectedView } from "./map-model.js";
+import { focusSend } from "./questions.js";
 import { reload } from "./settings.js";
 import { setFocus, setMissed, setProjects, setSettings, studio } from "./state.js";
 import { askDelete, drawFeed, forgetStories, lastHeadline, showCards, showTurn, showView, startStory, turnHeadline } from "./story.js";
@@ -43,7 +44,6 @@ import { askOnce, notifyIfAway, type Alert } from "./alerts.js";
 import { type Copied, finishedNote, showCopyToast, showNote, watchNotes } from "./notes.js";
 import { startWhatsNew } from "./whats-new.js";
 import type { SavedProject, Selection, Session, SessionCards, SettingsFiles } from "./types.js";
-import { HOVERS } from "./hovers.js";
 import { explanationsApplied, startExplanations, toggleExplanations } from "./explanations.js";
 
 // The list's width by the window's (`layout.ts`): in full from 1007 px, else its strip; focus mode folds it. The body is `narrow` below
@@ -119,7 +119,7 @@ function answer(n: number) {
   const open = [...dock.querySelectorAll("ul.choices")].find((list) => list.querySelector("button") && !list.querySelector('[aria-pressed="true"]'));
   const buttons = (open ?? dock.querySelector(".decision .answer-buttons"))?.querySelectorAll<HTMLButtonElement>("button");
   buttons?.[n - 1]?.click();
-  dock.querySelector<HTMLButtonElement>(".send:not([disabled])")?.focus();
+  focusSend(dock);
 }
 
 const named: Record<string, (arg?: string) => void> = {
@@ -141,7 +141,9 @@ const named: Record<string, (arg?: string) => void> = {
   },
   "studio::Dismiss": () => {
     // Esc peels the map's layers (`map.ts`) and on the bare map does nothing (#386); the list open over it closes first. The palette, a
-    // popover, and a modal dialog close on Esc themselves (#458).
+    // popover, and a modal dialog close on Esc themselves (#458). An open hint is among them, and Esc closes it alone: the layers under
+    // it stay (spec #582, user story 5).
+    if (document.querySelector("#hints :popover-open")) return;
     const overlaid = ["list-open", "list-peek"].some((name) => document.body.classList.contains(name));
     if (!overlaid) return mapEscape();
     document.body.classList.remove("list-open", "list-peek");
@@ -259,14 +261,35 @@ startMapAgents({
   briefOpen,
   name: sessionName,
   line: (session) => secondLine(session, lastHeadline),
-  placed: drawFeed,
+  placed: () => {
+    drawFeed();
+    drawSidebar();
+  },
 });
 // The left panel over the map (#385): History, a turn's diff and a worker's log; closing a story or a log selects none and leaves the bare map.
 startPanel({ history: historyIn, diff: diffIn, log: logIn, deselect: () => void deselect() });
 const openSettings = () => showPanel({ kind: "settings" });
+hint(element("skip-link"), "Jump past the session list into the map");
+hint(element("settings-button"), "Settings");
+// The buttons the page's HTML holds, with the words their titles had.
+for (const [id, words] of [
+  ["remove-project", "Take this project off the list; its sessions stay in History"],
+  ["rail-more", "Rename, mark unseen or delete this session"],
+  ["rename", "Give this session a name of your own"],
+  ["mark-unseen", "Mark this session unseen, to come back to it"],
+  ["delete", "Remove this session from the list; its cards are kept"],
+  ["notice-dismiss", "Hide this notice"],
+  ["pre-flight-button", "Before you start: the parts this work will likely cross"],
+  ["panel-close", "Close the panel (Esc)"],
+  ["rename-dialog-save", "Save this name (↩)"],
+  ["rename-dialog-cancel", "Keep the old name (Esc)"],
+  ["delete-dialog-delete", "Remove it from the list"],
+  ["delete-dialog-cancel", "Keep it (Esc)"],
+  ["confirm-yes", "Go ahead; this cannot be undone"],
+  ["confirm-dialog-cancel", "Keep it (Esc)"],
+] as const)
+  hint(element(id), words);
 element("settings-button").addEventListener("click", () => (panelShown()?.kind === "settings" ? showPanel(null) : void openSettings()));
-// The page's own elements whose hover another place shows too (#220); the needs-you toast's adds its key when it shows.
-element("toast").title = element("note-toast").title = HOVERS.goToSession;
 // A click on the session list's empty space goes back to the bare map, as `studio::ShowMap` does.
 list.addEventListener("click", (event) => listSpace(event.target as HTMLElement) && closePanel());
 // The needs-you chip (danielrispler/Falinks#572) selects the first session that needs Daniel.

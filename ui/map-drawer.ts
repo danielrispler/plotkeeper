@@ -7,7 +7,7 @@
 // different project's map closes it.
 
 import { logStop } from "./stop-rules.js";
-import { pressable, scrollingPre, text } from "./dom.js";
+import { hint, pressable, scrollingPre, text } from "./dom.js";
 import { currentMap, onDraw, registerLayer, syncSide, type MapView } from "./map.js";
 import type { Drawer, Jump } from "./map-model.js";
 
@@ -40,7 +40,7 @@ export function jumpLink(jump: Jump) {
   if (jump.to.url.startsWith("https://")) link.setAttribute("href", jump.to.url);
   link.setAttribute("target", "_blank");
   link.setAttribute("rel", "noopener");
-  link.title = jump.title;
+  hint(link, jump.title);
   return link;
 }
 
@@ -69,7 +69,7 @@ function drawDrawer(view: MapView) {
   }
   const { drawer } = open;
   const closer = pressable(text("button", "×", "btn quiet sheet-close"), null);
-  closer.title = "Close the drawer";
+  hint(closer, "Close the drawer");
   closer.setAttribute("aria-label", "Close");
   closer.addEventListener("click", closeDrawer);
   const card = text("div", "", "drawer");
@@ -91,7 +91,7 @@ function drawDrawer(view: MapView) {
       const button = text("button", pick.label, "btn quiet drawer-pick");
       button.setAttribute("type", "button");
       button.translate = false;
-      button.title = pick.title;
+      hint(button, pick.title);
       button.addEventListener("click", pick.open);
       const item = text("li", "");
       item.append(button);

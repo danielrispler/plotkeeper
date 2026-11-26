@@ -164,7 +164,7 @@ export const mapBusy = (): Fixture => {
       const rest = [...document.querySelectorAll("#map-not-placed .session-pick:not(.worker) .session-pick-name")].map((c) => c.textContent);
       if (rest.join("|") !== "#313 · Docs|#312 · CI marks|agy · Name from the prompt|codex · plotkeeper") log("snap:fail not placed: " + rest.join("|"));
       if (document.querySelector("#map-not-placed .session-pick.worker")) log("snap:fail the not placed list shows a Worker row");
-      if (document.querySelector("#map [title*='Read the log'], #map-not-placed [title*='Read the log']")) log("snap:fail a Helper is on the map");
+      if ([...document.querySelectorAll("#map [interestfor], #map-not-placed [interestfor]")].some((node) => document.getElementById(node.getAttribute("interestfor"))?.textContent.includes("Read the log"))) log("snap:fail a Helper is on the map");
       log("badges ok, not placed " + rest.length);`, {
       map_state: mapState(),
       map_place: busyPlace(),
@@ -214,7 +214,7 @@ export const mapBadgeList = (): Fixture =>
         return fetched(url, init);
       };
       if (badge("core")?.textContent !== "3" || !badge("core").matches(".needs-you")) return log("snap:fail Core's badge: " + badge("core")?.outerHTML);
-      if (!badge("core").title.includes("Ship PR 286") || badge("core").getAttribute("aria-label") !== "3 sessions on this part, 1 needs you") log("snap:fail Core's badge names: " + badge("core").title + " / " + badge("core").getAttribute("aria-label"));
+      if (!document.getElementById(badge("core").getAttribute("interestfor"))?.textContent.includes("Ship PR 286") || badge("core").getAttribute("aria-label") !== "3 sessions on this part, 1 needs you") log("snap:fail Core's badge names: " + document.getElementById(badge("core").getAttribute("interestfor"))?.textContent + " / " + badge("core").getAttribute("aria-label"));
       await __snapClick(badge("core"));
       await wait(60);
       if (!listOpen()) return log("snap:fail the badge's press did not open its list");
@@ -677,7 +677,8 @@ export const mapHeaderDot = (): Fixture =>
       const dot = head.querySelector(".project-dot");
       if (!narrow) {
         if (!dot) return log("snap:fail falinks's header has no dot");
-        if (dot.title !== "A Core part you track has changed\\nA PR brief is waiting") log("snap:fail the dot's hover says " + JSON.stringify(dot.title));
+        const words = document.getElementById(dot.getAttribute("data-hint"))?.textContent;
+        if (words !== "A Core part you track has changed\\nA PR brief is waiting" || dot.getAttribute("aria-label") !== words || dot.hasAttribute("title")) log("snap:fail the dot's hint says " + JSON.stringify(words));
         if (dot.textContent !== "") log("snap:fail the dot carries text, a count?");
         if (document.querySelector('#groups .project-head[data-project="/w/plotkeeper"] .project-dot')) log("snap:fail an unmarked project has a dot");
       }
@@ -1012,3 +1013,41 @@ export const mapEmpty = () =>
     if (!draft.textContent.includes("system-map.json") || !draft.textContent.includes("system-map check")) log("snap:fail the drafting prompt lacks the file or the check: " + draft.textContent);
     if (document.querySelector("#map .map-empty .btn")) log("snap:fail a button starts a session from the page");
     log("drafting prompt: " + draft.textContent.slice(0, 40));`, { map_state: mapState({ status: "none", source: null }) });
+
+/**
+ * The map's marks show their hint to the real pointer (spec #582, ticket 4): a plate's law mark, a broken-law mark and a link's mark on
+ * its line (an SVG shape) each open a hint beside them after the delay, and none is in the Tab order, or has a title.
+ */
+export const mapMarkHints = (): Fixture => {
+  // A law on a link, which draws the mark on its line.
+  const file = JSON.parse(mapFile);
+  file.laws.push({ id: "shell-core-fed", on: "shell-core", backing: "check", text: "The shell tells the core only what the log says." });
+  return {
+  ...mapOpened(
+    `
+      const hintOf = (node) => document.getElementById(node.getAttribute("data-hint"));
+      const beside = (hint, trigger) => {
+        const [h, t] = [hint.getBoundingClientRect(), trigger.getBoundingClientRect()];
+        const apart = Math.max(h.top - t.bottom, t.top - h.bottom);
+        return apart >= -1 && apart <= 24 && h.right > t.left && h.left < t.right;
+      };
+      for (const [name, selector] of [["a law mark", "#map .plate .law-mark"], ["the broken-law mark", "#map .plate .law-broken"], ["a link's mark", "#map .map-links .link-mark"]]) {
+        const mark = document.querySelector(selector);
+        if (!mark) return log("snap:fail the map has no " + name);
+        if (mark.getAttribute("role") !== "img" || !mark.getAttribute("aria-label")) log("snap:fail " + name + " is no role img with an aria-label");
+        if (mark.hasAttribute("tabindex") || mark.hasAttribute("title")) log("snap:fail " + name + " takes the Tab order or has a title");
+        const hint = hintOf(mark);
+        if (!hint) return log("snap:fail " + name + " has no hint");
+        await __snapMove(mark);
+        await wait(570);
+        if (!hint.matches(":popover-open")) return log("snap:fail " + name + "'s hint did not open on the pointer");
+        if (hint.textContent !== mark.getAttribute("aria-label")) log("snap:fail " + name + "'s hint says " + JSON.stringify(hint.textContent));
+        if (!beside(hint, mark)) log("snap:fail " + name + "'s hint is not beside it " + JSON.stringify([hint.getBoundingClientRect(), mark.getBoundingClientRect()]));
+      }
+      log("mark hints ok");`,
+    { map_state: mapState({ source: JSON.stringify(file), ci: { ...brokenCi, at: "2026-11-24T10:00:00Z" } }) },
+  ),
+  realPointer: true,
+  snapDone: "mark hints ok",
+  };
+};
