@@ -1,11 +1,9 @@
 //! The `dotnet-projects` extractor: the `ProjectReference`s of .NET project files, read as XML text with no `dotnet`,
 //! MSBuild or NuGet run (ADR 0002), each paired with the tracked project file its path names (spec #617).
 
-use quick_xml::{
-    Reader, XmlVersion,
-    escape::resolve_predefined_entity,
-    events::{BytesText, Event},
-};
+use std::borrow::Cow;
+
+use quick_xml::{Reader, XmlVersion, escape::resolve_predefined_entity, events::Event};
 
 use super::{Extractor, Output, Pair, Repo, Unsure};
 
@@ -53,10 +51,11 @@ impl Extractor for DotnetProjects {
                 }
             };
             for reference in project.references {
-                for piece in pieces(&reference.include) {
+                for written in pieces(&reference.include) {
+                    let piece = in_own_folder(written);
                     // A piece built from a property, an item list or a wildcard cannot be resolved without evaluation.
-                    if let Some(reason) = computed_reason(&piece) {
-                        let tail = literal_tail(&piece);
+                    if let Some(reason) = computed_reason(piece) {
+                        let tail = literal_tail(piece);
                         let candidates: Vec<String> = repo
                             .files()
                             .iter()
@@ -73,14 +72,14 @@ impl Extractor for DotnetProjects {
                         if !candidates.is_empty() {
                             output.unsure.push(Unsure {
                                 file: file.to_string(),
-                                name: piece,
+                                name: written.to_string(),
                                 reason: reason.into(),
                                 candidates,
                             });
                         }
                         continue;
                     }
-                    if let Some(to) = resolve(folder_of(file), &piece)
+                    if let Some(to) = resolve(folder_of(file), piece)
                         && repo.files().contains(to.as_str())
                     {
                         output.pairs.push(Pair::at(file, &to, reference.line));
@@ -158,8 +157,22 @@ fn parse(text: &str) -> Result<Project, String> {
         // The position after the last event is where this one starts, so a start tag gives its own first line.
         let at = reader.buffer_position() as usize;
         let event = reader.read_event().map_err(|e| e.to_string())?;
-        if let (Event::Text(t), Some((depth, buffer))) = (&event, reading.as_mut()) {
-            collect(buffer, *depth == stack.len() - 1, t);
+        if let Some(content) = content(&event)? {
+            // Only whitespace text may sit outside the root.
+            if stack.is_empty()
+                && !(matches!(event, Event::Text(_))
+                    && content
+                        .chars()
+                        .all(|c| matches!(c, ' ' | '\t' | '\r' | '\n')))
+            {
+                return Err("it holds text outside its root element".into());
+            }
+            // An `IsTestProject` value is the text directly in it, not in a child.
+            if let Some((depth, buffer)) = reading.as_mut()
+                && *depth == stack.len() - 1
+            {
+                buffer.push_str(&content);
+            }
         }
         match &event {
             Event::Start(tag) | Event::Empty(tag) => {
@@ -168,8 +181,11 @@ fn parse(text: &str) -> Result<Project, String> {
                     if seen_root {
                         return Err("it holds a second root element".into());
                     }
-                    if name != "Project" {
-                        return Err(format!("its root element is {name}, not Project"));
+                    // MSBuild rejects a prefixed root (`m:Project`), so the root's whole name is matched.
+                    let whole = tag.name();
+                    let whole = whole.as_ref();
+                    if whole != "Project" {
+                        return Err(format!("its root element is {whole}, not Project"));
                     }
                     seen_root = true;
                 }
@@ -212,28 +228,6 @@ fn parse(text: &str) -> Result<Project, String> {
                     not_test |= !on;
                 }
             }
-            Event::Text(t)
-                if stack.is_empty()
-                    && !t.bytes().all(|b| matches!(b, b' ' | b'\t' | b'\r' | b'\n')) =>
-            {
-                return Err("it holds text outside its root element".into());
-            }
-            Event::CData(_) if stack.is_empty() => {
-                return Err("it holds text outside its root element".into());
-            }
-            Event::GeneralRef(entity) => {
-                if stack.is_empty() {
-                    return Err("it holds text outside its root element".into());
-                }
-                let known = entity
-                    .resolve_char_ref()
-                    .map_err(|e| e.to_string())?
-                    .is_some()
-                    || resolve_predefined_entity(entity).is_some();
-                if !known {
-                    return Err(format!("it holds an unknown entity &{};", &**entity));
-                }
-            }
             Event::Eof => break,
             _ => {}
         }
@@ -251,6 +245,24 @@ fn parse(text: &str) -> Result<Project, String> {
     })
 }
 
+/// The text `event` adds to the element it sits in: text, CDATA as written, or a character or predefined entity
+/// reference decoded. An unknown entity makes the file not a project.
+fn content<'a>(event: &Event<'a>) -> Result<Option<Cow<'a, str>>, String> {
+    Ok(match event {
+        Event::Text(t) => Some(t.xml10_content()),
+        Event::CData(c) => Some(c.xml10_content()),
+        Event::GeneralRef(entity) => Some(Cow::Owned(
+            match entity.resolve_char_ref().map_err(|e| e.to_string())? {
+                Some(c) => c.to_string(),
+                None => resolve_predefined_entity(entity)
+                    .ok_or_else(|| format!("it holds an unknown entity &{};", &**entity))?
+                    .to_string(),
+            },
+        )),
+        _ => None,
+    })
+}
+
 /// Whether `stack`, the names of the open elements, ends in a `group` (an `ItemGroup` or a `PropertyGroup`) that MSBuild
 /// evaluates: a child of `Project`, or of a `When` or `Otherwise` of a `Choose` at any depth. One in a `Target` runs at
 /// build time and is left out.
@@ -263,13 +275,6 @@ fn in_group(stack: &[String], group: &str) -> bool {
         && branches.chunks(2).all(|pair| {
             matches!(pair, [choose, branch] if choose == "Choose" && (branch == "When" || branch == "Otherwise"))
         })
-}
-
-/// Adds the text `t` to the `buffer` of an `IsTestProject` value when it is directly in the element, not in a child.
-fn collect(buffer: &mut String, direct: bool, t: &BytesText) {
-    if direct {
-        buffer.push_str(&t.xml10_content());
-    }
 }
 
 /// The value of an `IsTestProject`: `true` or `false`, trimmed and in any case, as MSBuild conditions compare.
@@ -285,9 +290,7 @@ fn flag(value: &str) -> Option<bool> {
 /// `Microsoft.NET.Test.Sdk`, or an SDK named `MSTest.Sdk` by the root's `Sdk`, an `Import`'s `Sdk` or an `<Sdk Name>`.
 fn marks_test(name: &str, key: &str, value: &str, is_package: bool, is_root: bool) -> bool {
     if is_package && key == "Include" {
-        return pieces(value)
-            .iter()
-            .any(|piece| piece.eq_ignore_ascii_case("Microsoft.NET.Test.Sdk"));
+        return pieces(value).any(|piece| piece.eq_ignore_ascii_case("Microsoft.NET.Test.Sdk"));
     }
     let sdk = (name == "Project" && key == "Sdk" && is_root)
         || (name == "Import" && key == "Sdk")
@@ -331,25 +334,23 @@ fn folder_of(file: &str) -> &str {
 }
 
 /// The pieces of an `Include`, in MSBuild's order, which splits the value while it is still escaped: split on `;`,
-/// trimmed, empty ones dropped, and a leading `$(MSBuildThisFileDirectory)`, or `$(MSBuildProjectDirectory)` with the
-/// separator after it, taken off, since both name the project file's own folder.
-fn pieces(include: &str) -> Vec<String> {
+/// trimmed, empty ones dropped.
+fn pieces(include: &str) -> impl Iterator<Item = &str> {
     include
         .split(';')
         .map(str::trim)
         .filter(|piece| !piece.is_empty())
-        .map(|piece| {
-            if let Some(rest) = strip_property(piece, "$(MSBuildThisFileDirectory)") {
-                return rest.to_string();
-            }
-            if let Some(rest) = strip_property(piece, "$(MSBuildProjectDirectory)")
-                && let Some(rest) = rest.strip_prefix(['\\', '/'])
-            {
-                return rest.to_string();
-            }
-            piece.to_string()
-        })
-        .collect()
+}
+
+/// `piece` without a leading `$(MSBuildThisFileDirectory)`, or `$(MSBuildProjectDirectory)` with a separator after it,
+/// and the separators that follow, since both name the project file's own folder and MSBuild reads `a/` joined to
+/// `\..\b` as `a//../b`.
+fn in_own_folder(piece: &str) -> &str {
+    let rest = strip_property(piece, "$(MSBuildThisFileDirectory)").or_else(|| {
+        strip_property(piece, "$(MSBuildProjectDirectory)")
+            .filter(|rest| rest.starts_with(['\\', '/']))
+    });
+    rest.map_or(piece, |rest| rest.trim_start_matches(['\\', '/']))
 }
 
 /// `piece` without its leading `property`, whose name MSBuild matches in any case.
@@ -380,18 +381,27 @@ fn literal_tail(piece: &str) -> String {
     let after = piece
         .rfind([')', '*', '?'])
         .map_or(piece, |at| &piece[at + 1..]);
+    collapse(&slashed(after)).0
+}
+
+/// `piece` with its `%XX` escapes decoded and every `\` read as `/`.
+fn slashed(piece: &str) -> String {
+    unescape(piece).replace('\\', "/")
+}
+
+/// The `/` path `path` collapsed: empty and `.` segments dropped and `x/..` folded, and whether a `..` climbed above
+/// its start, which drops it.
+fn collapse(path: &str) -> (String, bool) {
     let mut parts: Vec<&str> = Vec::new();
-    let path = unescape(after).replace('\\', "/");
+    let mut climbed = false;
     for part in path.split('/') {
         match part {
             "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
+            ".." => climbed |= parts.pop().is_none(),
             part => parts.push(part),
         }
     }
-    parts.join("/")
+    (parts.join("/"), climbed)
 }
 
 /// `%XX` escapes decoded, as MSBuild does after it has split the value; one that is not two hex digits stays as written.
@@ -428,20 +438,10 @@ fn is_absolute(path: &str) -> bool {
 /// The path a literal piece names from the project file's `folder`: escapes decoded, `\` read as `/`, joined to the
 /// folder and collapsed. None for an absolute path, and for one that climbs out of the repository.
 fn resolve(folder: &str, piece: &str) -> Option<String> {
-    let path = unescape(piece);
+    let path = slashed(piece);
     if is_absolute(&path) {
         return None;
     }
-    let joined = format!("{folder}{}", path.replace('\\', "/"));
-    let mut parts: Vec<&str> = Vec::new();
-    for part in joined.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                parts.pop()?;
-            }
-            part => parts.push(part),
-        }
-    }
-    Some(parts.join("/"))
+    let (path, climbed) = collapse(&format!("{folder}{path}"));
+    (!climbed).then_some(path)
 }

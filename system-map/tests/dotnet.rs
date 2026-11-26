@@ -188,6 +188,33 @@ fn the_project_folder_properties_read_as_the_project_files_own_folder() {
 }
 
 #[test]
+fn separators_left_after_a_project_folder_property_still_read_from_the_project_folder() {
+    // MSBuild joins `a/` and `\..\core` as `a//../core`, which is `core`.
+    let targets = ["a/Core/Core.csproj", "core/Core.csproj"];
+    for (include, want) in [
+        (
+            "$(MSBuildThisFileDirectory)\\..\\core\\Core.csproj",
+            "core/Core.csproj",
+        ),
+        (
+            "$(MSBuildThisFileDirectory)/Core/Core.csproj",
+            "a/Core/Core.csproj",
+        ),
+        (
+            "$(MSBuildProjectDirectory)\\\\..\\core\\Core.csproj",
+            "core/Core.csproj",
+        ),
+        (
+            "$(MSBuildProjectDirectory)/\\Core\\Core.csproj",
+            "a/Core/Core.csproj",
+        ),
+    ] {
+        let found = from_app(include, &targets);
+        assert_eq!(found, [format!("a/App.csproj>{want}")], "{include}");
+    }
+}
+
+#[test]
 fn a_stale_a_climbing_and_a_wrongly_cased_reference_give_nothing() {
     let found = from_app("..\\gone\\Gone.csproj", &["core/Core.csproj"]);
     assert_eq!(found, Vec::<String>::new());
@@ -389,6 +416,19 @@ fn glued_to_a_name_the_project_directory_property_is_unsure_and_no_pair() {
 }
 
 #[test]
+fn an_unsure_piece_after_a_project_folder_property_is_named_as_written() {
+    // `one_unsure` holds the name to the include, the folder property kept.
+    for include in [
+        "$(MSBuildThisFileDirectory)$(X)Core.csproj",
+        "$(MSBuildProjectDirectory)\\$(X)Core.csproj",
+    ] {
+        let (reason, candidates) = one_unsure(include, &["src/Core.csproj"]);
+        assert_eq!(reason, "built from a property", "{include}");
+        assert_eq!(candidates, ["src/Core.csproj"], "{include}");
+    }
+}
+
+#[test]
 fn a_tail_matching_no_file_gives_no_finding() {
     assert_eq!(unsure_of("$(P)Gone.csproj", &["core/Core.csproj"]), []);
     assert_eq!(unsure_of("@(Refs)", &[]), []);
@@ -531,6 +571,35 @@ fn a_file_that_is_not_a_project_gives_one_problem_naming_it_and_no_pair() {
             found.problems
         );
     }
+}
+
+#[test]
+fn a_prefixed_root_is_not_a_project_and_a_prefixed_inner_element_is_read() {
+    let ns = "xmlns:m=\"http://schemas.microsoft.com/developer/msbuild/2003\"";
+    let prefixed = format!(
+        "<m:Project {ns}>\n  <m:ItemGroup>\n    <m:ProjectReference Include=\"..\\core\\Core.csproj\" />\n  \
+         </m:ItemGroup>\n</m:Project>\n"
+    );
+    let (_dir, root) = repo(
+        &map(&[("b", &["**"]), ("a", &["a/App.*"])], &[]),
+        &[("a/App.csproj", &prefixed), ("core/Core.csproj", EMPTY)],
+    );
+    let found = report(&root);
+    assert_eq!(pairs(&found), Vec::<String>::new());
+    assert_eq!(found.problems.len(), 1, "{:?}", found.problems);
+    assert!(
+        has(
+            &found.problems,
+            &["a/App.csproj", "not a project file", "m:Project"]
+        ),
+        "{:?}",
+        found.problems
+    );
+    let inner = format!(
+        "<Project {ns}>\n  <m:ItemGroup>\n    <m:ProjectReference Include=\"..\\core\\Core.csproj\" />\n  \
+         </m:ItemGroup>\n</Project>\n"
+    );
+    assert_eq!(pairs_of(&inner), [PAIR]);
 }
 
 #[test]
@@ -924,6 +993,29 @@ fn an_explicit_false_beats_every_other_rule_but_not_from_inside_a_target() {
         "<Target Name=\"T\"><PropertyGroup><IsTestProject>false</IsTestProject></PropertyGroup></Target>\n",
     );
     assert!(is_skipped("src/Foo.Tests.csproj", &in_target));
+}
+
+#[test]
+fn an_is_test_project_value_is_read_with_its_references_and_cdata_decoded() {
+    let value = |v: &str| {
+        project(&format!(
+            "<PropertyGroup><IsTestProject>{v}</IsTestProject></PropertyGroup>\n"
+        ))
+    };
+    for v in [
+        "&#116;rue",
+        "&#x74;rue",
+        "<![CDATA[true]]>",
+        "t<![CDATA[ru]]>e",
+    ] {
+        assert!(is_skipped("src/App.csproj", &value(v)), "{v}");
+    }
+    for v in ["f&#97;lse", "<![CDATA[false]]>"] {
+        assert!(!is_skipped("tests/App.csproj", &value(v)), "{v}");
+    }
+    // A predefined entity is decoded too, so `&amp;` leaves a value that is neither.
+    assert!(!is_skipped("src/App.csproj", &value("tr&amp;ue")));
+    assert!(is_skipped("tests/App.csproj", &value("f&amp;lse")));
 }
 
 #[test]
