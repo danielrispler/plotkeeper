@@ -6,7 +6,7 @@ mod lexer;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lexer::{Lexer, Tok};
+use lexer::{Tok, tokens};
 
 use super::{
     Extractor, Output, Pair, Repo, Unsure,
@@ -26,8 +26,11 @@ impl Extractor for JavaImports {
 
     /// A file outside production code: judged on its source root, from its path and its package line (`outside_production`).
     fn skips(&self, repo: &Repo, file: &str) -> bool {
-        let unit = repo.read(file).map(|text| Unit::read(&text));
-        outside_production(file, unit.as_ref().and_then(|u| u.package.as_deref()))
+        let Some(text) = repo.read(file) else {
+            return outside_production(file, None);
+        };
+        // A file the reader cannot lex is left out whole (spec #590, "A file it cannot lex").
+        Unit::read(&text).is_none_or(|unit| outside_production(file, unit.package.as_deref()))
     }
 
     fn extract(&self, repo: &Repo) -> Output {
@@ -134,12 +137,13 @@ fn is_punct(tokens: &Tokens, at: usize, byte: u8) -> bool {
 }
 
 impl Unit {
-    fn read(text: &str) -> Unit {
-        let tokens: Vec<(Tok, u32)> = Lexer::new(text).collect();
+    /// The unit of `text`, or none when the reader cannot lex it.
+    fn read(text: &str) -> Option<Unit> {
+        let tokens = tokens(text)?;
         let mut unit = Unit::default();
         unit.read_header(&tokens);
         unit.types = declarations(&tokens);
-        unit
+        Some(unit)
     }
 
     /// The header as JLS §7.3 has it: leading annotations, an optional `package` line, then `import` declarations and
@@ -331,7 +335,9 @@ fn java_imports(repo: &Repo) -> Output {
         let Some(text) = repo.read(file) else {
             continue;
         };
-        let unit = Unit::read(&text);
+        let Some(unit) = Unit::read(&text) else {
+            continue;
+        };
         if !outside_production(file, unit.package.as_deref()) {
             units.insert(file, unit);
         }

@@ -502,6 +502,136 @@ fn import_sites_count_lines_on_the_raw_text_whichever_line_terminator_it_uses() 
     );
 }
 
+// Unicode escapes (JLS §3.3) and files the reader cannot lex.
+
+const LIB_UTIL: &str = "lib/src/main/java/lib/Util.java";
+const LIB_OTHER: &str = "lib/src/main/java/lib/Other.java";
+
+/// `Util` and `Other`, the two types the escape tests import.
+fn util_and_other() -> Vec<(String, String)> {
+    vec![
+        lib("Util", "public class Util {}"),
+        lib("Other", "public class Other {}"),
+    ]
+}
+
+#[test]
+fn an_escaped_import_keyword_and_a_name_spelled_with_several_us_are_read_as_javac_reads_them() {
+    // `\u0069` is `i`; `\uuu0055` is `U`, and any number of `u`s may follow the backslash.
+    for import in ["\\u0069mport lib.Util;", "import lib.\\uuu0055til;"] {
+        let found = pairs_of_imports(&[import], &util_and_other());
+        assert_eq!(found, [format!("{MAIN}>{LIB_UTIL}")], "{import}");
+    }
+}
+
+#[test]
+fn a_translated_line_break_ends_a_comment_and_the_import_site_stays_on_the_raw_line() {
+    // Line 3 ends its `//` comment at `\u000a`, so `import lib.Util;` is code on raw line 3; the next import is on raw
+    // line 4, not 5.
+    let main = "package app;\n\n// note \\u000aimport lib.Util;\nimport lib.Other;\n\npublic class Main {}\n";
+    let (_dir, root) = repo(
+        &map(&[("b", &["**"]), ("a", &["a/"])], &[], &[]),
+        &[
+            (MAIN, main),
+            (&util_and_other()[0].0, &util_and_other()[0].1),
+            (&util_and_other()[1].0, &util_and_other()[1].1),
+        ],
+    );
+    assert_eq!(
+        sites(&root),
+        [
+            format!("{MAIN}>{LIB_OTHER} {MAIN}:4"),
+            format!("{MAIN}>{LIB_UTIL} {MAIN}:3"),
+        ]
+    );
+}
+
+#[test]
+fn a_backslash_after_an_odd_number_of_backslashes_is_no_escape_and_a_translated_one_starts_none() {
+    // Line 3: `\\u000a` has an even run before its `u`'s backslash? No: the second backslash has one before it, so
+    // nothing is translated and the comment runs on. Line 4: `\\\u000a` has two before the third, so it is translated
+    // and the comment ends, leaving `import lib.Other;` as code. Line 5: `\u005c` translates to a backslash that starts
+    // no further escape, so `\u0055til` stays text and names no type.
+    let main = "package app;\n\n// \\\\u000aimport lib.Util;\n// \\\\\\u000aimport lib.Other;\n\
+                import lib.\\u005cu0055til;\n\npublic class Main {}\n";
+    let (_dir, root) = repo(
+        &map(&[("b", &["**"]), ("a", &["a/"])], &[], &[]),
+        &[
+            (MAIN, main),
+            (&util_and_other()[0].0, &util_and_other()[0].1),
+            (&util_and_other()[1].0, &util_and_other()[1].1),
+        ],
+    );
+    assert_eq!(sites(&root), [format!("{MAIN}>{LIB_OTHER} {MAIN}:4")]);
+}
+
+/// Files the reader cannot lex, each with its text: a malformed escape, and a comment, a string, a char literal and a
+/// text block never closed.
+const UNLEXABLE: [(&str, &str); 6] = [
+    ("malformed escape", "class T { String s = \"\\u00zz\"; }\n"),
+    ("short escape", "class T {}\n// \\u12\n"),
+    (
+        "unclosed text block",
+        "class T { String s = \"\"\"\n  text\n}\n",
+    ),
+    ("unclosed block comment", "class T {}\n/* never closed\n"),
+    ("unclosed string", "class T { String s = \"abc;\n}\n"),
+    ("unclosed char literal", "class T { char c = 'a;\n}\n"),
+];
+
+#[test]
+fn a_file_the_reader_cannot_lex_gives_no_pair_no_problem_and_no_unsure_and_leaves_its_part_unread()
+{
+    for (what, tail) in UNLEXABLE {
+        let file = "s/src/main/java/app/T.java";
+        let text = format!("package app;\n\nimport lib.Util;\n\n{tail}");
+        let (_dir, root) = repo(
+            &map(&[("lib", &["lib/"]), ("s", &["s/"])], &[("s", "lib")], &[]),
+            &[
+                (LIB_UTIL, "package lib;\n\npublic class Util {}\n"),
+                (file, &text),
+            ],
+        );
+        let found = report(&root);
+        assert_eq!(pairs(&found), Vec::<String>::new(), "{what}");
+        assert_eq!(found.problems, Vec::<String>::new(), "{what}");
+        assert!(found.unsure.is_empty(), "{what}");
+        assert_eq!(found.counts.links.unproven, 1, "{what}");
+        assert_eq!(found.counts.links.proven, 0, "{what}");
+    }
+}
+
+#[test]
+fn a_file_the_reader_cannot_lex_gives_no_detection_note() {
+    for (what, tail) in UNLEXABLE {
+        let text = format!("package a;\n\n{tail}");
+        let mut map = map(&[("a", &["**"])], &[], &[]);
+        map["extractors"] = json!([]);
+        let (_dir, root) = repo(&map, &[("a/src/main/java/a/T.java", &text)]);
+        let out = run(&root, "check", &[]);
+        assert_eq!(String::from_utf8_lossy(&out.stderr), "", "{what}");
+    }
+}
+
+#[test]
+fn the_types_of_a_file_the_reader_cannot_lex_leave_the_index() {
+    // `Bad` declares `lib.Gone` and `lib.Twice` but never closes a text block; `Good` declares `lib.Twice` too.
+    let bad = "package lib;\n\npublic class Gone {}\nclass Twice { String s = \"\"\"\n  open\n}\n";
+    let good = lib("Twice", "public class Twice {}");
+    let main = main_importing(&["import lib.Gone;", "import lib.Twice;"]);
+    let (_dir, root) = repo(
+        &map(&[("b", &["**"]), ("a", &["a/"])], &[], &[]),
+        &[
+            (MAIN, &main),
+            ("lib/src/main/java/lib/Bad.java", bad),
+            (&good.0, &good.1),
+        ],
+    );
+    let found = report(&root);
+    assert_eq!(pairs(&found), [format!("{MAIN}>{}", good.0)]);
+    assert!(found.unsure.is_empty());
+}
+
 // Files Java leaves out.
 
 const IMPORTS_UTIL: &str = "import lib.Util;\n";
