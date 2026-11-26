@@ -76,12 +76,13 @@ pub fn counts(repo: &Path, base: &str, head: &str) -> Option<MapCounts> {
     between(repo, 0, base.to_string(), head.to_string()).map(|(_, counts)| counts)
 }
 
-/// Counts each of Ratify's map `items` under the mark `diff` gives it: an added or removed part, actor or law by its id's tag, an
-/// added or removed link by its line's, a changed part by `edited`. Any other (a held item, a changed link or law, a flow) is
-/// `unmarked`.
+/// Counts each of Ratify's map `items` under the mark `diff` gives it: an added or removed part, actor or law by its id's tag, a
+/// changed part by `edited`, and links per line, as the canvas draws one line per pair of ends: the links added or removed on a
+/// tagged line count once. Any other (a held item, a changed link or law, a flow) is `unmarked`.
 fn count(diff: &MapDiff, items: &[crate::ratify::MapItem], old: &Value, new: &Value) -> MapCounts {
     let mut counts = MapCounts::default();
     let mut lit: Vec<String> = Vec::new();
+    let mut counted: Vec<&LineTag> = Vec::new();
     for item in items {
         let tag = match (item.kind.as_str(), item.change.as_str()) {
             ("part", _) => diff.parts.get(&item.id).copied(),
@@ -89,11 +90,18 @@ fn count(diff: &MapDiff, items: &[crate::ratify::MapItem], old: &Value, new: &Va
             ("law", _) => diff.laws.get(&item.id).copied(),
             ("link", change @ ("added" | "removed")) => {
                 let side = if change == "added" { new } else { old };
-                by_id(side, "links")
+                let line = by_id(side, "links")
                     .get(item.id.as_str())
                     .and_then(|link| ends(link))
-                    .and_then(|pair| diff.lines.iter().find(|l| l.ends == pair))
-                    .map(|line| line.change)
+                    .and_then(|pair| diff.lines.iter().find(|l| l.ends == pair));
+                // A line counts once, however many of its links the PR added or removed.
+                if let Some(line) = line {
+                    if counted.contains(&line) {
+                        continue;
+                    }
+                    counted.push(line);
+                }
+                line.map(|line| line.change)
             }
             _ => None,
         };
@@ -523,6 +531,35 @@ mod tests {
         git(root, &["checkout", "-q", "main"]);
         let reformatted = commit(root, &pretty, "Pretty (#2)");
         assert_eq!(counts(Path::new(&main), &base, &reformatted), None);
+    }
+
+    #[test]
+    fn links_are_counted_per_line_drawn_so_two_links_on_one_new_pair_are_one_link_added() {
+        let (dir, main) = repo();
+        let root = dir.path();
+        let base = commit(
+            root,
+            &small(
+                "h",
+                r#"[{"id":"a-b","from":"a","to":"b"},{"id":"b-a","from":"b","to":"a"}]"#,
+                "[]",
+            ),
+            "Map (#1)",
+        );
+        git(root, &["checkout", "-q", "-b", "work"]);
+        // Two links come on the pair a and c, and both of a and b's go: one line drawn new, one gone.
+        let head = commit(
+            root,
+            &small(
+                "h",
+                r#"[{"id":"a-c","from":"a","to":"c"},{"id":"c-a","from":"c","to":"a"}]"#,
+                "[]",
+            ),
+            "work",
+        );
+        let found = counts(Path::new(&main), &base, &head).expect("the PR changed the map");
+        assert_eq!(found.sentence(), "1 link added, 1 removed.");
+        assert_eq!(found.lit, ["a", "b", "c"]);
     }
 
     #[test]
