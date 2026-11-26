@@ -269,10 +269,10 @@ pub fn ask_later(app: &Arc<App>, trigger: Trigger, also: Option<&str>) {
     let (app, also) = (app.clone(), also.map(str::to_string));
     std::thread::spawn(move || {
         let mut projects = BTreeMap::<String, Vec<(String, String)>>::new();
-        let branches = app.core().branches();
-        for (cwd, branch) in branches {
-            if let Ok(project) = studio_workbench::main_checkout(Path::new(&cwd)) {
-                projects.entry(project).or_default().push((cwd, branch));
+        // Each branch is asked about under its session's project (spec #659), the project its row is listed under.
+        for query in app.core().branches() {
+            if !query.project.is_empty() {
+                (projects.entry(query.project).or_default()).push((query.cwd, query.branch));
             }
         }
         // The project the Map view shows is asked about even with no session in it, so its hand-made PRs are found.

@@ -12,12 +12,11 @@ import { sidebarOrder } from "./projects.js";
 import { type Badge, type BadgeRow, footprint, footprintNote, spotlightView, latestParts, notPlacedLine, placeGroups, type Placement, sessionBadges, spotlit, turnLight } from "./map-live.js";
 import { stateLabels, type Session, type Subagent, type Turn } from "./types.js";
 
-// What the drawing needs of the window, given by `main.ts`: the sessions, a folder's project, the jump to a session or a Worker's log,
+// What the drawing needs of the window, given by `main.ts`: the sessions, the jump to a session or a Worker's log,
 // whether a PR brief plays (no spotlight then), a session's name and second line as the session list shows them, and what follows a new
 // placement (the story, whose feed redraw also refreshes the sheet's "This session here").
 export type AgentDeps = {
   sessions: () => Session[];
-  projectOf: (cwd: string) => string | null;
   select: (session: string, agent: string | null) => void;
   briefOpen: () => boolean;
   name: (session: Session) => string;
@@ -65,7 +64,7 @@ export function hideAgents(hide: boolean) {
 }
 
 // The shown project's sessions, whose turns are placed: none on a past commit's map.
-const shownSessions = (project: string) => (hidden ? [] : deps.sessions().filter((session) => !session.shell && deps.projectOf(session.cwd) === project));
+const shownSessions = (project: string) => (hidden ? [] : deps.sessions().filter((session) => !session.shell && session.project === project));
 
 // The added hover text of a session's row (#559): "Touched no part in the last 7 days" once the placement says so; null otherwise, and for
 // a session the map does not show.
@@ -282,7 +281,7 @@ export function paint() {
   if (!view) return;
   const sessions = shownSessions(view.project);
   const now = Date.now();
-  const { byPart, notPlaced } = sessionBadges(sidebarOrder(sessions), placed, now, (cwd) => deps.projectOf(cwd) === view.project);
+  const { byPart, notPlaced } = sessionBadges(sidebarOrder(sessions), placed, now, (project) => project === view.project);
   const spot = spotOf(view, sessions);
   const plates = [...view.slots.canvas.querySelectorAll<HTMLElement>(".plate[data-id]")];
   // The plates are drawn in the map's reading order.

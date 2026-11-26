@@ -1,19 +1,23 @@
-// The projects the page groups its sessions by (#97, #326): a repository some session ran in, a task's worktree in its main
-// checkout's project. Run: `npm test`.
+// The projects the page groups its sessions by (#97, #326): a session's project folder, the core's (spec #659), never derived from its
+// folder on the page. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { knownProjects, projectGroups, projectOfCwd, repositoryOf, selectedProject, sessionProjectName, sidebarOrder } from "../../dist/projects.js";
+import { knownProjects, projectGroups, selectedProject, sessionProjectName, sidebarOrder } from "../../dist/projects.js";
 import { studio } from "../../dist/state.js";
 
-// A session with only the fields the projects read.
-const at = (id, state, cwd) => /** @type {import("../../dist/types.js").Session} */ ({ id, state, cwd });
+// A session with only the fields the projects read: its project, the core's, and its folder, which a `cd` moves. The project of a
+// task's worktree is its main checkout, as the core sets it.
+const at = (id, state, cwd, project = cwd.replace(/\/\.claude\/worktrees\/.*/, "")) => /** @type {import("../../dist/types.js").Session} */ ({ id, state, cwd, project });
 
-test("a task's worktree belongs to its main checkout's project, any other folder to its own", () => {
-  assert.equal(repositoryOf("/r/plotkeeper/.claude/worktrees/issue-1/ui"), "/r/plotkeeper");
-  assert.equal(repositoryOf("/r/plotkeeper"), "/r/plotkeeper");
-  assert.equal(projectOfCwd("/r/other"), "/r/other");
+test("a session's project name is its project's last segment, else ~", () => {
   assert.equal(sessionProjectName(at("a", "idle", "/r/plotkeeper/.claude/worktrees/x")), "plotkeeper");
   assert.equal(sessionProjectName(at("a", "idle", "/")), "~");
+});
+
+test("a session whose folder changed stays in the project it started in", () => {
+  const groups = projectGroups([at("a", "running", "/r/plotkeeper/ui", "/r/plotkeeper"), at("b", "idle", "/r/other", "/r/plotkeeper"), at("c", "idle", "/r/plotkeeper")]);
+  assert.deepEqual(groups.map((g) => [g.key, g.states.flatMap((s) => s.sessions.map((x) => x.id))]), [["/r/plotkeeper", ["a", "b", "c"]]]);
+  assert.equal(sessionProjectName(at("a", "idle", "/r/plotkeeper/ui", "/r/plotkeeper")), "plotkeeper");
 });
 
 test("one group per repository in listing order, its sessions by state, ended ones left out", () => {
@@ -65,5 +69,8 @@ test("the Map view's projects are the saved ones, and the selected session's is 
   studio.selection = null;
   assert.equal(selectedProject(), null);
   studio.selection = { session: studio.listed[0], agent: null };
+  assert.equal(selectedProject(), "/r/p");
+  // A selected session that moved to another folder still opens its project's map.
+  studio.selection = { session: at("c", "idle", "/r/q/ui", "/r/p"), agent: null };
   assert.equal(selectedProject(), "/r/p");
 });

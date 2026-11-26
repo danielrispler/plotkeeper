@@ -9,7 +9,6 @@ import { pressRow, selectedView } from "./map-model.js";
 import { closePanel, followSelection, panelShown, showPanel } from "./panel.js";
 import { showSessions } from "./list.js";
 import { showSession } from "./panes.js";
-import { projectOfCwd } from "./projects.js";
 import { setListed, setMissed, setPending, setSelection, studio } from "./state.js";
 import { showCards, showView } from "./story.js";
 import { showToast } from "./toast.js";
@@ -25,7 +24,7 @@ export async function select(id: string, agent: string | null = null) {
   // log opens there once the server has opened it.
   const session = studio.listed.find((s) => s.id === id);
   if (session) {
-    const page = selectedView(id, projectOfCwd(session.cwd), agent);
+    const page = selectedView(id, session.project, agent);
     if (page.project !== shownProject()) openMap(page.project);
     if (agent === null) showPanel(page.panel);
   }
@@ -46,7 +45,7 @@ export async function select(id: string, agent: string | null = null) {
       show(selected);
       showCards(cards);
       showSession(selected?.session ?? null, true, selected?.agent ?? null);
-      if (agent !== null && selected?.agent === agent) showPanel(selectedView(id, projectOfCwd(selected.session.cwd), agent).panel);
+      if (agent !== null && selected?.agent === agent) showPanel(selectedView(id, selected.session.project, agent).panel);
     }
   } catch (e) {
     if (studio.pending === pressed) {

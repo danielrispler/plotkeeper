@@ -8,7 +8,7 @@ import { studio } from "./state.js";
 import { sessionProjectName } from "./projects.js";
 import type { Session } from "./types.js";
 
-type Searched = Pick<Session, "name" | "identity" | "folder_name" | "cwd" | "transcript"> & { prompt_name?: string | null };
+type Searched = Pick<Session, "name" | "identity" | "folder_name" | "project" | "transcript"> & { prompt_name?: string | null };
 
 /** The ended sessions, newest `last_event_at` first. */
 export function endedSessions<T extends Pick<Session, "state" | "last_event_at">>(sessions: T[]): T[] {
@@ -16,7 +16,7 @@ export function endedSessions<T extends Pick<Session, "state" | "last_event_at">
 }
 
 /** The project a session belongs to (#97). */
-export const projectName = (session: Pick<Session, "cwd">): string => sessionProjectName(session);
+export const projectName = (session: Pick<Session, "project">): string => sessionProjectName(session);
 
 /** A session's branch: the transcript's, else the identity's; "" when unknown. */
 export const branchOf = (session: Pick<Session, "identity" | "transcript">) => session.transcript?.branch ?? session.identity?.branch ?? "";

@@ -53,25 +53,26 @@ export const projectMenuScript = (nearBottom: boolean) => `
     log("project menu ok");`;
 
 // The session list holding what Home held (#382): second lines on needs-you (its question), running (its Intention) and unseen (its last
-// Headline) rows only, and "Clear landed" at the list's end while a session has landed.
+// Headline) rows only, and "Clear landed" at the list's end while a session has landed. s2 ran `cd ui`: its folder is plotkeeper's `ui`,
+// its project still plotkeeper (spec #659).
 const listLines = (): Fixture => {
   const now = Date.now();
   const intention = (text: string) => ({ ...session("x", "x", "idle").transcript, intention: text });
   const sessions = [
     session("s1", "Ship PR 286", "needs_you", {
-      cwd: "/w/plotkeeper", line: "Bash gh pr merge 286",
+      cwd: "/w/plotkeeper", project: "/w/plotkeeper", line: "Bash gh pr merge 286",
       questions: [{ tool_use_id: "q1", agent: null, answer: "open", turn: null, questions: [{ question: "Merge PR 286 now, or wait for the snap job?", options: [] }] }],
     }),
-    session("s2", "Correctness pass, #285", "running", { cwd: "/w/plotkeeper", line: "Read ui/list.ts", transcript: intention("Checking each claim in the brief against the code it cites.") }),
-    session("s3", "Snap fails in Chrome, #282", "running", { cwd: "/w/plotkeeper", line: "Bash npm run snap", transcript: intention("Printing Chrome's own error to the snap log so a failure says why.") }),
+    session("s2", "Correctness pass, #285", "running", { cwd: "/w/plotkeeper/ui", project: "/w/plotkeeper", folder_name: "ui", line: "Read ui/list.ts", transcript: intention("Checking each claim in the brief against the code it cites.") }),
+    session("s3", "Snap fails in Chrome, #282", "running", { cwd: "/w/plotkeeper", project: "/w/plotkeeper", line: "Bash npm run snap", transcript: intention("Printing Chrome's own error to the snap log so a failure says why.") }),
     session("s4", "Stored fixtures, #280", "your_turn", {
-      cwd: "/w/plotkeeper", unseen: true,
+      cwd: "/w/plotkeeper", project: "/w/plotkeeper", unseen: true,
       turns: [{ started_at: now - 40 * 60e3, ended_at: now - 22 * 60e3, prompt: "Load the older briefs", id: null, message: "Older stored briefs load again; the reader accepts both shapes.", checks: [], listed: [], files: null }],
     }),
-    session("s5", "Archive the Tauri app, #332", "your_turn", { cwd: "/w/plotkeeper", landed: true }),
-    session("s6", "Strava-style running tracker", "your_turn", { cwd: "/w/timburr", line: "Done." }),
-    session("s7", "Night Out Mode", "running", { cwd: "/w/fluffy", line: "Edit probe.ts", transcript: intention("Building the probe for the venue list.") }),
-    session("s8", "#48 · Agent deadline", "ended", { cwd: "/w/plotkeeper", landed: true }),
+    session("s5", "Archive the Tauri app, #332", "your_turn", { cwd: "/w/plotkeeper", project: "/w/plotkeeper", landed: true }),
+    session("s6", "Strava-style running tracker", "your_turn", { cwd: "/w/timburr", project: "/w/timburr", line: "Done." }),
+    session("s7", "Night Out Mode", "running", { cwd: "/w/fluffy", project: "/w/fluffy", line: "Edit probe.ts", transcript: intention("Building the probe for the venue list.") }),
+    session("s8", "#48 · Agent deadline", "ended", { cwd: "/w/plotkeeper", project: "/w/plotkeeper", landed: true }),
   ];
   return { ...base, sessions, selected: null };
 };
@@ -88,6 +89,11 @@ export const listSecondLines = (): Fixture => ({
   ...listLines(),
   snapScript: `${listChecks}
       if (!clear() || clear().textContent !== "Clear landed") log("snap:fail no Clear landed at the list's end");
+      // A session whose folder changed to a subfolder stays under its project (spec #659).
+      const heads = [...document.querySelectorAll("#groups .project-head .name")].map((name) => name.textContent).join();
+      if (heads !== "plotkeeper,timburr,fluffy") log("snap:fail the project headers: " + heads);
+      const group = document.querySelector('#groups .session-row[data-key="s2 "]')?.closest(".project");
+      if (group?.querySelector(".project-head .name")?.textContent !== "plotkeeper") log("snap:fail the session that ran cd ui left plotkeeper");
       const probe = document.body.appendChild(document.createElement("span"));
       probe.style.color = "var(--faint)";
       const faint = getComputedStyle(probe).color;

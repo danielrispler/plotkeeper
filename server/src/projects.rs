@@ -1,6 +1,6 @@
 //! The saved project list (spec danielrispler/plotkeeper#380, "Projects"; ticket #381): the repositories plotkeeper keeps, in
-//! `projects.json` in the data folder. A repository joins the first time a session is seen in it, as its main checkout (a
-//! task's worktree `<main>/.claude/worktrees/<task>` belongs to `<main>`, the rule the page's `repositoryOf` uses). It stays
+//! `projects.json` in the data folder. A repository joins the first time a session is seen in it, as the session's project
+//! folder (spec #659: the root of the folder it started in, a task's worktree's main checkout, set once by the core). It stays
 //! after its sessions end or are deleted, and leaves only through Remove project. A removed project comes back only for a
 //! session active after its removal, so the ended sessions still listed never bring it back.
 //!
@@ -35,14 +35,6 @@ struct Saved {
     removed: BTreeMap<String, u64>,
 }
 
-/// The main checkout a session's folder belongs to: a task's worktree's main checkout, else the folder itself.
-pub fn repository_of(cwd: &str) -> &str {
-    match cwd.rfind("/.claude/worktrees/") {
-        Some(at) if at > 0 && cwd.len() > at + "/.claude/worktrees/".len() => &cwd[..at],
-        _ => cwd,
-    }
-}
-
 /// The saved list, read from its file once and kept in memory.
 pub struct Projects {
     file: PathBuf,
@@ -63,7 +55,7 @@ impl Projects {
         Self::at(log.with_file_name(FILE))
     }
 
-    /// Adds the repository of each session not yet saved; returns whether the list changed. A removed project is added
+    /// Adds the project folder of each session not yet saved; returns whether the list changed. A removed project is added
     /// again only for a session whose latest event came after its removal.
     #[allow(
         clippy::significant_drop_tightening,
@@ -74,10 +66,10 @@ impl Projects {
         let saved = held.get_or_insert_with(|| read(&self.file));
         let mut changed = false;
         for session in sessions {
-            if session.cwd.is_empty() {
+            let repo = session.project.as_str();
+            if repo.is_empty() {
                 continue;
             }
-            let repo = repository_of(&session.cwd);
             if saved.projects.iter().any(|p| p == repo) {
                 continue;
             }
@@ -274,9 +266,16 @@ mod tests {
     }
 
     #[test]
-    fn a_worktree_belongs_to_its_main_checkout_and_any_other_folder_to_itself() {
-        assert_eq!(repository_of("/r/p/.claude/worktrees/x/ui"), "/r/p");
-        assert_eq!(repository_of("/r/p"), "/r/p");
-        assert_eq!(repository_of("/"), "/");
+    fn a_session_s_project_is_saved_not_the_folders_it_moves_to() {
+        let data = tempfile::tempdir().unwrap();
+        let repo = data.path().display().to_string();
+        let projects = Projects::at(data.path().join(FILE));
+        let studio = Studio::replayed(&[
+            line("s1", "SessionStart", &repo, T),
+            line("s1", "UserPromptSubmit", &format!("{repo}/ui"), T + 1),
+        ]);
+        see(&projects, &studio);
+        let paths: Vec<String> = projects.list().into_iter().map(|p| p.path).collect();
+        assert_eq!(paths, [repo]);
     }
 }

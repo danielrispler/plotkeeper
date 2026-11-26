@@ -15,7 +15,7 @@ const turn = (paths, ago = 0, open = false) => ({
 const worker = (id, extra = {}) => ({ id, parent: "session", kind: "worker", name: `worker ${id}`, status: "running", ...extra });
 // A session with the fields the live link reads.
 const session = (id, state, extra = {}) => /** @type {import("../../dist/types.js").Session} */ ({
-  id, state, name: `session ${id}`, cwd: "/w/p", shell: false, status_only: false, asker: null, agents: [], turns: [], last_step: null,
+  id, state, name: `session ${id}`, cwd: "/w/p", project: "/w/p", shell: false, status_only: false, asker: null, agents: [], turns: [], last_step: null,
   capabilities: { turn_trees: true }, identity: { name: `identity ${id}` }, unseen: false, ...extra,
 });
 
@@ -62,14 +62,16 @@ test("a Running session's in-flight edit is on its latest turn before the turn's
 });
 
 test("Running and Needs you sessions are marked, and Your turn or Idle ones while unseen; shells, Ended and other projects' never", () => {
-  const here = (cwd) => cwd === "/w/p";
+  const here = (project) => project === "/w/p";
   /** @type {[import("../../dist/types.js").Session, boolean][]} */
   const cases = [
     [session("r", "running"), true], [session("n", "needs_you"), true],
     [session("y", "your_turn"), false], [session("yu", "your_turn", { unseen: true }), true],
     [session("i", "idle"), false], [session("iu", "idle", { unseen: true }), true],
     [session("e", "ended", { unseen: true }), false], [session("sh", "running", { shell: true }), false],
-    [session("away", "running", { cwd: "/elsewhere" }), false],
+    [session("away", "running", { project: "/elsewhere" }), false],
+    // Its project, not its folder, decides (spec #659).
+    [session("moved", "running", { cwd: "/elsewhere/ui" }), true], [session("visiting", "running", { cwd: "/w/p", project: "/elsewhere" }), false],
   ];
   assert.deepEqual(cases.map(([s]) => [s.id, marked(s, here)]), cases.map(([s, want]) => [s.id, want]));
 });
@@ -178,9 +180,9 @@ test("Running, Needs you and Unseen sessions are counted; a seen Your turn or Id
     session("calm", "idle", { turns: [on()] }),
     session("shell", "running", { shell: true, turns: [on()] }),
     session("done", "ended", { unseen: true, turns: [on()] }),
-    session("away", "running", { cwd: "/elsewhere", turns: [on()] }),
+    session("away", "running", { cwd: "/w/p", project: "/elsewhere", turns: [on()] }),
   ];
-  const { byPart } = sessionBadges(sessions, placed, now, (cwd) => cwd === "/w/p");
+  const { byPart } = sessionBadges(sessions, placed, now, (project) => project === "/w/p");
   // Needs you first, then the order given (the session list's).
   assert.deepEqual(counts(byPart), { core: ["ask", "run", "new", "rest"] });
 });

@@ -223,7 +223,7 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "parts")?,
         )),
         "pre_flight_clear" => res(crate::pre_flight::pre_flight_clear(app, arg(a, "project")?)),
-        "briefs_waiting" => out(crate::pr_briefs::briefs_waiting(app, arg(a, "cwd")?)),
+        "briefs_waiting" => out(crate::pr_briefs::briefs_waiting(app, arg(a, "project")?)),
         "pr_ratify" => res(crate::ratify::pr_ratify(
             app,
             arg(a, "project")?,

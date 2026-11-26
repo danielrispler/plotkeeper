@@ -62,9 +62,10 @@ const partsOf = (paths: string[], placed: Placement): string[] => [...new Set(pa
 const turnParts = (turn: Pick<Turn, "files">, placed: Placement): string[] => partsOf((turn.files?.files ?? []).map((file) => file.path), placed);
 
 // Whether a session is marked, wants Daniel's attention on the map: Running or Needs you, or Your turn or Idle while unseen. Never a plain
-// shell or an Ended session; `inProject` keeps another project's out. (A Helper is an agent of a session, never a session.)
-export function marked(session: Session, inProject: (cwd: string) => boolean): boolean {
-  if (session.shell || !inProject(session.cwd)) return false;
+// shell or an Ended session; `inProject`, asked of its project folder, keeps another project's out. (A Helper is an agent of a session,
+// never a session.)
+export function marked(session: Session, inProject: (project: string) => boolean): boolean {
+  if (session.shell || !inProject(session.project)) return false;
   if (session.state === "running" || session.state === "needs_you") return true;
   return (session.state === "your_turn" || session.state === "idle") && session.unseen === true;
 }
@@ -147,7 +148,7 @@ export function latestParts(session: Session, placed: Placement, now: number): s
 
 // The badges of the parts, from the sessions in the session list's order: each marked session (`marked`) counted once on every part of its
 // latest turn, with its running Workers whose files are there; the marked sessions whose latest turn touches no part are `notPlaced`.
-export function sessionBadges(sessions: Session[], placed: Placement, now: number, inProject: (cwd: string) => boolean): { byPart: Record<string, Badge>; notPlaced: Session[] } {
+export function sessionBadges(sessions: Session[], placed: Placement, now: number, inProject: (project: string) => boolean): { byPart: Record<string, Badge>; notPlaced: Session[] } {
   const byPart: Record<string, Badge> = {};
   const notPlaced: Session[] = [];
   const first = [...sessions.filter((one) => one.state === "needs_you"), ...sessions.filter((one) => one.state !== "needs_you")];

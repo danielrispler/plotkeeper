@@ -29,7 +29,7 @@
       "purpose": "Plain Rust logic that reads the event log's lines in order and knows every session's turns, checks, subagents and whether it needs you.",
       "holds": [
         { "name": "The agent adapters", "text": "Turn each agent's hook line into one neutral event: Claude Code, agy, Codex, Copilot, Cursor and Qwen Code.", "paths": ["core/src/claude.rs", "core/src/agy.rs", "core/src/codex.rs", "core/src/copilot.rs", "core/src/cursor.rs", "core/src/qwen.rs", "core/src/event.rs"] },
-        { "name": "Session state", "text": "The sessions, their turns and subagents, and whether one needs you, from the events one at a time.", "paths": ["core/src/studio.rs", "core/src/studio/take.rs", "core/src/session.rs", "core/src/output.rs", "core/src/saved.rs"] },
+        { "name": "Session state", "text": "The sessions, the project each started in, their turns and subagents, and whether one needs you, from the events one at a time.", "paths": ["core/src/studio.rs", "core/src/studio/take.rs", "core/src/session.rs", "core/src/output.rs", "core/src/saved.rs"] },
         { "name": "The step ledger", "text": "One row for every tool call of a session, its workers' included, and which of them were checks.", "paths": ["core/src/ledger.rs", "core/src/checks.rs"] },
         { "name": "The transcript reader", "text": "A tolerant reader of a session's transcript, for what the session is doing and why.", "paths": ["core/src/transcript.rs"] }
       ],

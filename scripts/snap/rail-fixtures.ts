@@ -123,7 +123,7 @@ const session = (state: SessionState, { running = false, question = false } = {}
     effort: "high",
   };
   return {
-    id: "s1", capabilities, model: null, cwd, folder_name: "issue-56-row-controls", terminal: null, status_only: false, shell: false, name: null,
+    id: "s1", capabilities, model: null, cwd, project: "/Users/danielrispler/work/plotkeeper", folder_name: "issue-56-row-controls", terminal: null, status_only: false, shell: false, name: null,
     prompt_name: "Row controls", resume_id: "s1", permission_mode: "auto", started_mode: "auto", cleared: [], asks_before_closing: state !== "idle",
     landed: false, last_step: ended ? { tool: "Bash", detail: "Run the full check", command: "npm run check" } : stepTools,
     started_at: now - 5 * 60 * MIN, last_event_at: now - 30e3, turn_span: running ? { start: now - 14 * MIN, end: null } : null,

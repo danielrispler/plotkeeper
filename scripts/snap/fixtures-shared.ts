@@ -8,7 +8,7 @@ export const session = (id: string, name: string, state: SessionState, extra: Pa
   const now = Date.now();
   return {
     id, capabilities: { agent: "claude", asks: true, background_tasks: true, replies: true, permission_mode: true, durations: true, transcript_version: true, transcript_model: true, context: true, turn_trees: true },
-    model: null, shell: false, cwd: `/w/plotkeeper/.claude/worktrees/${id}`, folder_name: id, terminal: null, status_only: false, name, prompt_name: null,
+    model: null, shell: false, cwd: `/w/plotkeeper/.claude/worktrees/${id}`, project: "/w/plotkeeper", folder_name: id, terminal: null, status_only: false, name, prompt_name: null,
     resume_id: id, permission_mode: null, started_mode: null, cleared: [], asks_before_closing: false, landed: false, last_step: null,
     started_at: now - 3600e3, last_event_at: now - 60e3, turn_span: null, step_span: null, state, agents: [], asker: null,
     prompts: [], turns: [], since_looked: { turns: 0, files: 0, passed: 0, failed: 0, ran: 0 }, questions: [], blocked_commands: [], returned: null,

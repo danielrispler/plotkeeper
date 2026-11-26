@@ -7,7 +7,7 @@ import { age, cut, element, failure, glyphOnly, hint, invoke, keepOnly, keyed, m
 import { hideClearToast, showClearToast } from "./toast.js";
 import { counts } from "./times.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
-import { knownProjects, projectGroups, projectOfCwd, type ProjectGroup } from "./projects.js";
+import { knownProjects, projectGroups, type ProjectGroup } from "./projects.js";
 import { openMap, shownProject } from "./map.js";
 import { pressHeader } from "./map-model.js";
 import { closePanel, panelShown, redrawPanel, showHistory } from "./panel.js";
@@ -93,10 +93,7 @@ async function readDots() {
 // A press on a project's header (#386): another project's map shows, and a session's panel of another project closes; on the shown project's
 // header it folds the group.
 function pressHead(path: string) {
-  const projectOf = (id: string) => {
-    const session = studio.listed.find((s) => s.id === id);
-    return session ? projectOfCwd(session.cwd) : null;
-  };
+  const projectOf = (id: string) => studio.listed.find((s) => s.id === id)?.project ?? null;
   const next = pressHeader({ project: shownProject(), panel: panelShown() }, path, projectOf);
   if (next === "fold") {
     if (!shut.delete(path)) shut.add(path);

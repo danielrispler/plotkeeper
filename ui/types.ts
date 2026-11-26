@@ -182,6 +182,9 @@ export type Session = {
   // The folder it works in, from its latest event; `folder_name` is its last segment.
   cwd: string;
   folder_name: string;
+  // Its project folder (spec #659): the root of the first folder it got (git's top level, else that folder), a task's worktree's
+  // main checkout, set once. The list groups by it, and the map, History and the selection read it.
+  project: string;
   // The studio terminal it runs in, its `PLOTKEEPER_TERMINAL_ID`; null when it runs outside the studio.
   terminal: string | null;
   // Another agent than Claude Code, from its terminal's OSC 7501 status only (danielrispler/Falinks#560): no intention,
@@ -767,7 +770,7 @@ export interface Commands {
   micro_world_page: { args: Project & { key: string }; reply: string };
   brief_chapter_done: { args: InPr & { chapter: number; head: string }; reply: void };
   brief_since_done: { args: InPr & { head: string }; reply: void };
-  briefs_waiting: { args: { cwd: string }; reply: WaitingBriefs | null };
+  briefs_waiting: { args: { project: string }; reply: WaitingBriefs | null };
   pr_ratify: { args: InPr; reply: RatifyRow[] };
   pr_map_review: { args: InPr; reply: MapReview | null };
   map_review_start: { args: InPr; reply: MapReview | null };

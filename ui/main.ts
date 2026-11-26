@@ -30,7 +30,7 @@ import { deselect, pressSession, select, show } from "./selection.js";
 import { diffIn, historyIn, logIn, startPanes } from "./panes.js";
 import { besideSheet, closePanel, panelShown, showHistory, showPanel, startPanel } from "./panel.js";
 import { showPalette } from "./palette.js";
-import { projectOfCwd, selectedProject, sidebarOrder } from "./projects.js";
+import { selectedProject, sidebarOrder } from "./projects.js";
 import { narrowBelow, selectedView } from "./map-model.js";
 import { focusSend } from "./questions.js";
 import { reload } from "./settings.js";
@@ -272,7 +272,6 @@ hintFit();
 window.addEventListener("settings", hintFit);
 startMapAgents({
   sessions: () => studio.listed,
-  projectOf: projectOfCwd,
   select: (id, agent) => void pressSession(id, agent),
   briefOpen,
   name: sessionName,
@@ -367,8 +366,8 @@ listen<Selection | null>("selected", (selected) => {
 invoke("selected")
   .then((selected) => {
     show(selected);
-    if (selected) openMap(projectOfCwd(selected.session.cwd));
-    if (selected) showPanel(selectedView(selected.session.id, projectOfCwd(selected.session.cwd), selected.agent).panel);
+    if (selected) openMap(selected.session.project);
+    if (selected) showPanel(selectedView(selected.session.id, selected.session.project, selected.agent).panel);
   })
   .catch(failure("selected"));
 listen<SessionCards>("cards", (cards) => {
