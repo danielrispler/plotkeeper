@@ -10,8 +10,6 @@
 npx plotkeeper
 ```
 
-> **macOS only** (Apple Silicon & Intel) · requires Node.js · Linux and Windows are not supported yet.
-
 ![plotkeeper: the system map of a project, with the session list on the right](docs/studio/assets/readme/hero.png)
 
 plotkeeper sits beside the sessions you run in your own terminals and editors. It hooks into your coding agents, tracks unseen changes as [Fog](docs/studio/behaviour/map.md) on your system map, and keeps your understanding in step turn by turn and PR by PR.
@@ -37,7 +35,7 @@ plotkeeper sits beside the sessions you run in your own terminals and editors. I
 | **Claude Code** | Full | Yes | Yes | Yes |
 | **Codex** | Hooks | Yes | — | — |
 | **Cursor** (IDE & CLI) | Finished calls | Yes | — | — |
-| **agy** | Hooks + transcript | — | — | — |
+| **Antigravity CLI** (agy) | Hooks + transcript | — | — | — |
 
 Copilot and Qwen Code are experimental (wired, untrialled); OpenCode and Cline are planned for v2.
 
