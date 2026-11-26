@@ -27,8 +27,11 @@ pub(crate) fn touched_files(body: &str) -> Vec<String> {
         .map(|(_, span)| span.to_owned())
         .collect()
 }
-/// The Touches paths of `body` that `exists` does not find. A span is a path when it has a `/` or a
-/// `.`, and no space and no `<placeholder>`. A path the line introduces with the word "new" right
+/// Whether a Touches span is a path: it has a `/` or a `.`, and no space and no `<placeholder>`.
+pub(crate) fn is_path(span: &str) -> bool {
+    span.contains(['/', '.']) && !span.contains(|c: char| c.is_whitespace() || c == '<')
+}
+/// The Touches paths of `body` that `exists` does not find (`is_path`). A path the line introduces with the word "new" right
 /// before it is one the ticket creates, so it is skipped, and so is one under `local-evidence/`,
 /// which only the main checkout holds. A glob is looked up by the folder before its first `*`.
 fn missing_paths(body: &str, exists: impl Fn(&str) -> bool) -> Vec<String> {
@@ -39,9 +42,7 @@ fn missing_paths(body: &str, exists: impl Fn(&str) -> bool) -> Vec<String> {
                 .split(|c: char| !c.is_alphanumeric())
                 .rfind(|word| !word.is_empty())
                 .is_some_and(|word| word.eq_ignore_ascii_case("new"));
-            let path = span.contains(['/', '.'])
-                && !span.contains(|c: char| c.is_whitespace() || c == '<')
-                && !span.starts_with("local-evidence/");
+            let path = is_path(span) && !span.starts_with("local-evidence/");
             let looked = match span.find('*') {
                 Some(star) => span[..star].rfind('/').map_or("", |slash| &span[..=slash]),
                 None => span,
@@ -72,7 +73,7 @@ impl Overlap {
 }
 
 /// The paths both lists name; a directory (ending in `/`) shares every path under it.
-fn shared_files(a: &[String], b: &[String]) -> Vec<String> {
+pub(crate) fn shared_files(a: &[String], b: &[String]) -> Vec<String> {
     let mut shared = std::collections::BTreeSet::new();
     for (x, y) in a.iter().flat_map(|x| b.iter().map(move |y| (x, y))) {
         if x == y || (x.ends_with('/') && y.starts_with(x.as_str())) {
