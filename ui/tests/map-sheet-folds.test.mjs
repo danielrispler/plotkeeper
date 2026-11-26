@@ -205,7 +205,11 @@ test("with explanations on, each fold's line is the first thing in its body, the
   explanations(false);
   const off = sheetCard(view({ ci: ciOf("passed") }), store).card;
   assert.ok(folds(off).every((each) => classed(each, "explain").length === 0));
-  assert.ok(folds(off).every((each) => classed(each, "sheet-fold-summary")[0].getAttribute("aria-describedby") === null));
+  // Off, a summary is described only by its own hint.
+  assert.ok(folds(off).every((each) => {
+    const summary = classed(each, "sheet-fold-summary")[0];
+    return summary.getAttribute("aria-describedby") === summary.getAttribute("data-hint");
+  }));
 });
 
 test("the purpose sits under the card clamped to two lines with More, which shows it whole and turns to Less, and the next draw keeps it", () => {

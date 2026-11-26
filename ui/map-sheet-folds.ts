@@ -42,6 +42,8 @@ export function fold(key: FoldKey, glance: string, explain: boolean, content: (H
   const summary = text("summary", "", "sheet-fold-summary");
   const value = text("span", glance, `sheet-fold-value${bad ? " bad" : ""}`);
   summary.append(text("span", foldTitles[key], "sheet-fold-title"), value);
+  // Its hover says what the fold holds, the words its explanation line shows.
+  hint(summary, SHEET_FOLDS[key]);
   const body = text("div", "", "sheet-fold-body");
   if (explain) {
     const line = explainLine(SHEET_FOLDS[key]);

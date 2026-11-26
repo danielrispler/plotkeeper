@@ -18,7 +18,10 @@ const classed = (node, name) => all(node).filter((each) => each.className.split(
 const lines = (node) => classed(node, "explain");
 const byId = (node, id) => all(node).find((each) => each.id === id);
 // What a node is described by besides its own hint (spec #582): the explanation lines.
-const explainedBy = (each) => each.getAttribute("aria-describedby") !== null && each.getAttribute("aria-describedby") !== each.getAttribute("interestfor");
+const explainedBy = (each) => {
+  const described = each.getAttribute("aria-describedby");
+  return described !== null && described !== each.getAttribute("interestfor") && described !== each.getAttribute("data-hint");
+};
 const described = (node) => all(node).filter(explainedBy);
 
 /** @type {import("../../dist/map-model.js").Part} */
