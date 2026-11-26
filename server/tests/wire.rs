@@ -606,6 +606,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
         back_a_law::{NewLaw, Opened as LawOpened, Started},
         ci_laws::Proof as TaggedTest,
         history::{At, Commit, Entry as HistoryEntry, File},
+        map_diff::Tag as MapTag,
         micro_worlds::Explored,
         part_catch_ups::Opened as CatchUpOpened,
         pr_briefs::{BriefView, Opened as BriefOpened, StaleBase, Waiting},
@@ -854,6 +855,27 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
         ("RatifyRow", json(row(Ratified::Overturned, "removed"))),
         ("RatifyRow", json(row(Ratified::NotYet, ""))),
         ("RatifyRow", json(part_row)),
+        (
+            "MapDiff",
+            // A PR's Map diff (#640): an added part, a removed line, an added law.
+            json(studio_server::map_diff::MapDiff {
+                pr: 334,
+                base: COMMIT.into(),
+                head: COMMIT.into(),
+                source: "{ \"parts\": [] }".into(),
+                parts: [
+                    ("install".to_string(), MapTag::Added),
+                    ("server".to_string(), MapTag::Edited),
+                ]
+                .into(),
+                actors: Default::default(),
+                lines: vec![studio_server::map_diff::LineTag {
+                    ends: ["plugins".into(), "server".into()],
+                    change: MapTag::Removed,
+                }],
+                laws: [("wire-types-agree".to_string(), MapTag::Added)].into(),
+            }),
+        ),
         ("RatifyRow", json(link_row)),
         (
             "RatifyRow",

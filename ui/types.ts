@@ -556,6 +556,10 @@ export type Runs = { paused: string | null; runs: RunView[] };
 export type PendingItem = { pr: number; kind: string; id: string };
 // `evidence` (#499): on a link the PR adds, the import sites behind it, stored on its brief when it was written, read at `head`.
 export type RatifyRow = { pr: number; kind: string; id: string; text: string; change: string; status: "ratified" | "accepted" | "overturned" | "not-yet"; detail: RatifyDetail | null; evidence?: LinkSites };
+// The Map diff (`map_diff.rs`, #640): today's map with a PR's added and removed items in it (`source`, version 2 JSON), and each one's tag.
+// A line is keyed by its two ends in sorted order. `pr_map_diff` answers null when the PR changed nothing on the map.
+export type MapTag = "added" | "removed" | "edited";
+export type MapDiff = { pr: number; base: string; head: string; source: string; parts: Record<string, MapTag>; actors: Record<string, MapTag>; lines: { ends: [string, string]; change: MapTag }[]; laws: Record<string, MapTag> };
 // Where an import stands (`pr_brief.rs`, `ImportSite`): in the importing file, at its 1-based line when one is known.
 export type ImportSite = { file: string; line?: number };
 export type LinkSites = { head: string; sites: ImportSite[] };
@@ -755,6 +759,7 @@ export interface Commands {
   pr_ratify: { args: InPr; reply: RatifyRow[] };
   pr_map_review: { args: InPr; reply: MapReview | null };
   map_review_start: { args: InPr; reply: MapReview | null };
+  pr_map_diff: { args: InPr; reply: MapDiff | null };
   ratify_site: { args: Project & { head: string; file: string; line?: number | null }; reply: SiteSnippet };
   projects: { args: None; reply: SavedProject[] };
   remove_project: { args: { path: string }; reply: SavedProject[] };

@@ -238,6 +238,11 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "project")?,
             arg(a, "number")?,
         )),
+        "pr_map_diff" => res(crate::ratify::pr_map_diff(
+            app,
+            arg(a, "project")?,
+            arg(a, "number")?,
+        )),
         "ratify_set" => res(crate::ratify::ratify_set(
             arg(a, "project")?,
             arg(a, "pr")?,

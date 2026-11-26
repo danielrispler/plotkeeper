@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { actorSize, autoPlace, draftPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, plateTitle, rimPoint, scrubTickets, sheetOf, sheetMarks, narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject, talksTo, linkLines, readingOrder, markPoints } from "../../dist/map-model.js";
+import { actorSize, autoPlace, draftPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, plateTitle, rimPoint, scrubTickets, sheetOf, sheetMarks, narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject, talksTo, linkLines, readingOrder, markPoints, placement, lineTag, tagWord } from "../../dist/map-model.js";
 import { cameraRig, revealPan } from "../../dist/map-camera.js";
 
 /** @returns {import("../../dist/map-model.js").Part} */
@@ -358,4 +358,32 @@ test("the law marks on one line sit apart along it, 10px from one another, centr
   assert.deepEqual(markPoints({ x: 0, y: 0 }, { x: 100, y: 0 }, 3), [{ x: 40, y: 0 }, { x: 50, y: 0 }, { x: 60, y: 0 }]);
   assert.deepEqual(markPoints({ x: 0, y: 100 }, { x: 0, y: 0 }, 2), [{ x: 0, y: 55 }, { x: 0, y: 45 }], "along the line's own direction");
   assert.deepEqual(markPoints({ x: 5, y: 5 }, { x: 5, y: 5 }, 2), [{ x: 5, y: 5 }, { x: 5, y: 5 }], "a line of no length keeps them at its point");
+});
+
+// The Map diff (#640): an added part is placed once and its spot saved, so it does not move after the merge; a ghost keeps the spot it had, and one
+// that never had a spot is placed beside its links without saving it.
+test("in a Map diff an added part's spot is saved on first draw, and a ghost uses its kept spot or an unsaved one", () => {
+  const items = [{ id: "core" }, { id: "new" }, { id: "gone" }, { id: "never" }];
+  const links = [{ from: "new", to: "core" }, { from: "never", to: "core" }];
+  const saved = { core: { x: 500, y: 400 }, gone: { x: 900, y: 400 } };
+  const { at, save } = placement(items, links, saved, ["gone", "never"]);
+  assert.deepEqual(Object.keys(at).sort(), ["core", "gone", "never", "new"]);
+  assert.deepEqual(at.gone, { x: 900, y: 400 }, "the ghost's kept spot");
+  assert.deepEqual(Object.keys(save), ["new"], "only the added part is saved");
+  assert.deepEqual(save.new, at.new);
+  assert.ok(!overlaps(at.new, at.never) && !overlaps(at.never, at.core));
+  // Drawn again with the added spot saved, nothing more is saved and the ghost lands where it did.
+  const again = placement(items, links, { ...saved, ...save }, ["gone", "never"]);
+  assert.deepEqual(again.save, {});
+  assert.deepEqual(again.at.never, at.never);
+});
+
+test("a Map diff's line is found by its two ends either way round, and its parts' tags read as New, Gone and Edited", () => {
+  /** @type {Pick<import("../../dist/types.js").MapDiff, "lines">} */
+  const diff = { lines: [{ ends: ["core", "server"], change: "removed" }, { ends: ["a", "b"], change: "added" }] };
+  assert.equal(lineTag(diff, "server", "core"), "removed");
+  assert.equal(lineTag(diff, "a", "b"), "added");
+  assert.equal(lineTag(diff, "a", "core"), undefined);
+  assert.equal(lineTag(null, "a", "b"), undefined);
+  assert.deepEqual(/** @type {const} */ (["added", "removed", "edited"]).map(tagWord), ["New", "Gone", "Edited"]);
 });

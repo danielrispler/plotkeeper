@@ -573,14 +573,14 @@ fn pr_of(subject: &str) -> Option<u64> {
     number.parse().ok()
 }
 
-struct Landed {
-    commit: String,
+pub(crate) struct Landed {
+    pub(crate) commit: String,
     at: u64,
-    pr: Option<u64>,
+    pub(crate) pr: Option<u64>,
 }
 
 /// The first-parent commits of `reference`, newest first.
-fn first_parents(repo: &Path, reference: &str, max: usize) -> Vec<Landed> {
+pub(crate) fn first_parents(repo: &Path, reference: &str, max: usize) -> Vec<Landed> {
     let max_count = format!("--max-count={max}");
     let Ok(log) = git(
         repo,
@@ -607,7 +607,7 @@ fn first_parents(repo: &Path, reference: &str, max: usize) -> Vec<Landed> {
 }
 
 /// What git said of the map at a commit.
-enum MapRead {
+pub(crate) enum MapRead {
     /// The map's text.
     Read(String),
     /// Git answered that the commit has no map: its tree does not list the file.
@@ -617,7 +617,7 @@ enum MapRead {
 }
 
 impl MapRead {
-    fn text(&self) -> Option<&str> {
+    pub(crate) fn text(&self) -> Option<&str> {
         match self {
             MapRead::Read(text) => Some(text),
             MapRead::Absent | MapRead::Unanswered => None,
@@ -627,7 +627,7 @@ impl MapRead {
 
 /// The map at `commit`. A `git show` that exits non-zero is either an answer (the commit has no map) or a failed read (an
 /// object out of reach), so the tree is asked which.
-fn map_at(repo: &Path, commit: &str) -> MapRead {
+pub(crate) fn map_at(repo: &Path, commit: &str) -> MapRead {
     let show = |args: &[&str]| run_until(run::git(repo).args(args), GIT_READ_LIMIT);
     match show(&["show", &format!("{commit}:{}", system_map::MAP_FILE)]) {
         Ok(out) => MapRead::Read(String::from_utf8_lossy(&out.stdout).trim_end().to_string()),
@@ -672,7 +672,7 @@ pub(crate) fn pr_changes(
 }
 
 /// How many first-parent commits of the default branch are read for what landed.
-const WALK: usize = 500;
+pub(crate) const WALK: usize = 500;
 
 fn pr_changes_in(
     cache: &ChangesCache,
@@ -873,6 +873,25 @@ pub fn pr_ratify(app: &crate::App, project: String, number: u64) -> Result<Vec<R
         );
     }
     Ok(found)
+}
+
+/// The Map diff of PR `number` (`map_diff.rs`, #640), compared as `pr_ratify` compares: none when the PR changed nothing on the map.
+pub fn pr_map_diff(
+    app: &crate::App,
+    project: String,
+    number: u64,
+) -> Result<Option<crate::map_diff::MapDiff>, String> {
+    let open = app
+        .prs
+        .ready(&project)
+        .into_iter()
+        .find(|r| r.number == number)
+        .map(|r| r.head);
+    Ok(crate::map_diff::of(
+        Path::new(&project),
+        number,
+        open.as_deref(),
+    ))
 }
 
 /// Daniel's decision on one item: `accepted` or `overturned`, with what the item said.

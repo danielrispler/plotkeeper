@@ -1,0 +1,119 @@
+{
+ "diff": {
+  "actors": {},
+  "base": "87666d62868b2ae6733dd08d7de381bb1debdca6",
+  "head": "fafdee5b75fd23316208f82275a3c813c0944b7c",
+  "laws": {
+   "no-notices-lock-on-main-thread": "removed",
+   "terminals-outlive-app": "removed"
+  },
+  "lines": [
+   {
+    "change": "removed",
+    "ends": [
+     "core",
+     "shell"
+    ]
+   },
+   {
+    "change": "removed",
+    "ends": [
+     "hook",
+     "shell"
+    ]
+   },
+   {
+    "change": "removed",
+    "ends": [
+     "server",
+     "shell"
+    ]
+   },
+   {
+    "change": "removed",
+    "ends": [
+     "shell",
+     "terminal-daemon"
+    ]
+   },
+   {
+    "change": "removed",
+    "ends": [
+     "shell",
+     "understanding"
+    ]
+   },
+   {
+    "change": "removed",
+    "ends": [
+     "shell",
+     "window"
+    ]
+   },
+   {
+    "change": "removed",
+    "ends": [
+     "shell",
+     "workbench"
+    ]
+   }
+  ],
+  "parts": {
+   "shell": "removed",
+   "terminal-daemon": "removed"
+  },
+  "pr": 351,
+  "source": "{\"actors\":[{\"id\":\"agents\",\"name\":\"Agents\"},{\"id\":\"writer\",\"name\":\"Writer\"},{\"id\":\"github\",\"name\":\"GitHub\"}],\"extractors\":[\"cargo\",\"rust-modules\",\"typescript-imports\"],\"flows\":[{\"hops\":[{\"link\":\"core-server\",\"text\":\"Core sees the turn end and the server asks for its summary.\"},{\"link\":\"server-understanding\",\"text\":\"The server passes the request on; understanding queues it for the session.\"},{\"link\":\"understanding-writer\",\"text\":\"Understanding asks the writer for the summary, and for the session's Goal and Design so far.\"},{\"link\":\"understanding-writer\",\"text\":\"The writer's reply comes back and understanding stores it.\"},{\"link\":\"server-understanding\",\"text\":\"Understanding tells the server the brief changed.\"},{\"link\":\"server-window\",\"text\":\"The server updates the list.\"}],\"id\":\"turn-writing\",\"name\":\"Turn writing\"}],\"ignored\":[\".agents/\",\".claude/\",\".github/\",\".gitignore\",\"AGENTS.md\",\"CLAUDE.md\",\"Cargo.lock\",\"Cargo.toml\",\"LICENSE\",\"README.md\",\"package-lock.json\",\"package.json\",\"real-calls.sh\",\"rust-toolchain.toml\",\"tsconfig.json\",\"system-map.json\",\"docs/\",\"scripts/\",\"terminal-spike/\",\"v0-spike/\",\"src-tauri/\",\"terminal-daemon/\",\"wayfinder/\",\"test-support/\",\"system-map/\"],\"laws\":[{\"backing\":\"trust\",\"id\":\"hook-never-makes-agent-wait\",\"on\":\"hook\",\"text\":\"The hook never makes the agent wait, except for your answer.\"},{\"backing\":\"trust\",\"id\":\"core-reads-only-transcripts\",\"on\":\"core\",\"text\":\"The core does no I/O except reading transcripts.\"},{\"backing\":\"trust\",\"id\":\"check-result-is-last-run\",\"on\":\"core\",\"text\":\"A check's result is its last run's.\"},{\"backing\":\"check\",\"id\":\"wire-types-agree\",\"on\":\"server-window\",\"text\":\"The window's types and the Rust wire types agree.\"},{\"backing\":\"check\",\"id\":\"session-pieces-in-order\",\"on\":\"understanding\",\"text\":\"A session's pieces are written one at a time, in order.\"},{\"backing\":\"check\",\"id\":\"old-stored-files-load\",\"on\":\"understanding\",\"text\":\"A stored file of an older format still loads.\"},{\"backing\":\"check\",\"id\":\"replay-never-rewrites\",\"on\":\"understanding\",\"text\":\"Replaying the log never rewrites, replaces or deletes a stored card, summary or answer.\"},{\"backing\":\"check\",\"id\":\"writer-has-no-tools\",\"on\":\"understanding\",\"text\":\"A change is untrusted text: the writer has no tools.\"},{\"backing\":\"trust\",\"id\":\"colour-only-for-needs-you\",\"on\":\"window\",\"text\":\"Loud colour is only for what needs you and for a broken law.\"},{\"backing\":\"trust\",\"id\":\"no-notices-lock-on-main-thread\",\"on\":\"shell\",\"text\":\"Nothing on the main thread takes the notices' lock.\"},{\"backing\":\"trust\",\"id\":\"terminals-outlive-app\",\"on\":\"terminal-daemon\",\"text\":\"Terminals outlive the app.\"}],\"links\":[{\"from\":\"agents\",\"id\":\"agents-plugins\",\"to\":\"plugins\"},{\"from\":\"plugins\",\"id\":\"plugins-hook\",\"to\":\"hook\"},{\"from\":\"hook\",\"id\":\"hook-server\",\"to\":\"server\"},{\"from\":\"core\",\"id\":\"core-server\",\"to\":\"server\"},{\"from\":\"server\",\"id\":\"server-understanding\",\"to\":\"understanding\"},{\"from\":\"server\",\"id\":\"server-workbench\",\"to\":\"workbench\"},{\"from\":\"understanding\",\"id\":\"understanding-writer\",\"to\":\"writer\"},{\"from\":\"server\",\"id\":\"server-window\",\"to\":\"window\"},{\"from\":\"workbench\",\"id\":\"workbench-github\",\"to\":\"github\"},{\"from\":\"core\",\"id\":\"core-shell\",\"to\":\"shell\"},{\"from\":\"hook\",\"id\":\"hook-shell\",\"to\":\"shell\"},{\"from\":\"shell\",\"id\":\"shell-server\",\"to\":\"server\"},{\"from\":\"shell\",\"id\":\"shell-terminal-daemon\",\"to\":\"terminal-daemon\"},{\"from\":\"shell\",\"id\":\"shell-understanding\",\"to\":\"understanding\"},{\"from\":\"shell\",\"id\":\"shell-window\",\"to\":\"window\"},{\"from\":\"shell\",\"id\":\"shell-workbench\",\"to\":\"workbench\"}],\"parts\":[{\"caption\":\"Which hooks each agent runs\",\"holds\":[],\"id\":\"plugins\",\"name\":\"Agent plugins\",\"paths\":[\"plugin/\",\"plugin-agy/\"],\"purpose\":\"Small config folders for Claude Code and agy. They decide which of the agent's events reach the studio.\",\"tier\":\"interface\"},{\"caption\":\"Records every agent event\",\"holds\":[],\"id\":\"hook\",\"name\":\"Hook\",\"paths\":[\"hook/\"],\"purpose\":\"Runs on each agent event and appends it to the event log. It also holds a question or a blocked command until you answer.\",\"tier\":\"core\"},{\"caption\":\"Turns events into session state\",\"holds\":[],\"id\":\"core\",\"name\":\"Core\",\"paths\":[\"core/\"],\"purpose\":\"Plain Rust logic. It reads the event log's lines in order and knows every session's turns, checks, subagents and whether it needs you.\",\"tier\":\"core\"},{\"caption\":\"Holds the state, answers the commands\",\"holds\":[],\"id\":\"server\",\"name\":\"Server\",\"paths\":[\"server/\"],\"purpose\":\"A library, and the `plotkeeper` program that serves it, with no window in it. It holds the core state, the card store (which keeps the session briefs, the turn summaries and the cards written before cards were retired), the risk notes, the writer and the settings, tells the page why when the writer fails, runs the read loop that follows the event log and sends what changed (the list, the selection, the brief, notices) to a sink the web server sets, serves the learning layer as a local page on 127.0.0.1 (the built page, one POST route for each command and one server-sent event stream, behind a random token, a cookie and a Host check, one server per data folder), and has one function for each learning-layer and session-view command: the PR lookups on a turn's end, the page's focus and the Map view's opening (never on a timer), the PR briefs written for ready PRs and kept per head, the map, the fog a PR's reading clears, the CI result it reads from the default branch, which map changes and agent decisions of a PR you accepted or overturned, and the quiet log of what you use of it.\",\"tier\":\"core\"},{\"caption\":\"Writes what you read, and keeps it\",\"holds\":[],\"id\":\"understanding\",\"name\":\"Understanding\",\"paths\":[\"understanding/\"],\"purpose\":\"Decides what a change is worth telling you, asks the writer for it, and stores it: turn summaries, session briefs, PR briefs (the facts, the writer's reply and the code checks on it) and the risk notes of blocked commands. Cards, as a turn's or a worker's explanation, are retired; the cards stored before stay readable.\",\"tier\":\"core\"},{\"caption\":\"Everything you see and press\",\"holds\":[],\"id\":\"window\",\"name\":\"Window\",\"paths\":[\"ui/\"],\"purpose\":\"The page: the list, the rail, Home, History and the Map view. It shows state and sends your actions to the server; it has no terminals, projects, branches, skills, usage or settings page.\",\"tier\":\"core\"},{\"caption\":\"Worktrees, PRs and plan usage\",\"holds\":[],\"id\":\"workbench\",\"name\":\"Workbench\",\"paths\":[\"workbench/\"],\"purpose\":\"Git worktrees, tasks, PR lookups and plan usage. A black box: it never fogs and never asks for your time.\",\"tier\":\"black-box\"},{\"caption\":\"Reads the log, feeds the core, acts\",\"holds\":[],\"id\":\"shell\",\"name\":\"Shell\",\"paths\":[\"src-tauri/\"],\"purpose\":\"The app's Rust side. It reads the event log, feeds the core, and carries out what needs the window: notices, sounds, the Dock badge, the terminals, and each command handler, which only forwards to the server.\",\"tier\":\"core\"},{\"caption\":\"Owns the terminals\",\"holds\":[],\"id\":\"terminal-daemon\",\"name\":\"Terminal daemon\",\"paths\":[\"terminal-daemon/\"],\"purpose\":\"A background process that keeps every terminal alive, so they outlive the app.\",\"tier\":\"interface\"}],\"version\":2}"
+ },
+ "today": "{\"actors\":[{\"id\":\"agents\",\"name\":\"Agents\"},{\"id\":\"writer\",\"name\":\"Writer\"},{\"id\":\"github\",\"name\":\"GitHub\"}],\"extractors\":[\"cargo\",\"rust-modules\",\"typescript-imports\"],\"flows\":[{\"hops\":[{\"link\":\"core-server\",\"text\":\"Core sees the turn end and the server asks for its summary.\"},{\"link\":\"server-understanding\",\"text\":\"The server passes the request on; understanding queues it for the session.\"},{\"link\":\"understanding-writer\",\"text\":\"Understanding asks the writer for the summary, and for the session's Goal and Design so far.\"},{\"link\":\"understanding-writer\",\"text\":\"The writer's reply comes back and understanding stores it.\"},{\"link\":\"server-understanding\",\"text\":\"Understanding tells the server the brief changed.\"},{\"link\":\"server-window\",\"text\":\"The server updates the list.\"}],\"id\":\"turn-writing\",\"name\":\"Turn writing\"}],\"ignored\":[\".agents/\",\".claude/\",\".github/\",\".gitignore\",\"AGENTS.md\",\"CLAUDE.md\",\"Cargo.lock\",\"Cargo.toml\",\"LICENSE\",\"README.md\",\"package-lock.json\",\"package.json\",\"real-calls.sh\",\"rust-toolchain.toml\",\"tsconfig.json\",\"system-map.json\",\"docs/\",\"scripts/\",\"terminal-spike/\",\"v0-spike/\",\"src-tauri/\",\"terminal-daemon/\",\"wayfinder/\",\"test-support/\",\"system-map/\"],\"laws\":[{\"backing\":\"trust\",\"id\":\"hook-never-makes-agent-wait\",\"on\":\"hook\",\"text\":\"The hook never makes the agent wait, except for your answer.\"},{\"backing\":\"trust\",\"id\":\"core-reads-only-transcripts\",\"on\":\"core\",\"text\":\"The core does no I/O except reading transcripts.\"},{\"backing\":\"trust\",\"id\":\"check-result-is-last-run\",\"on\":\"core\",\"text\":\"A check's result is its last run's.\"},{\"backing\":\"check\",\"id\":\"wire-types-agree\",\"on\":\"server-window\",\"text\":\"The window's types and the Rust wire types agree.\"},{\"backing\":\"check\",\"id\":\"session-pieces-in-order\",\"on\":\"understanding\",\"text\":\"A session's pieces are written one at a time, in order.\"},{\"backing\":\"check\",\"id\":\"old-stored-files-load\",\"on\":\"understanding\",\"text\":\"A stored file of an older format still loads.\"},{\"backing\":\"check\",\"id\":\"replay-never-rewrites\",\"on\":\"understanding\",\"text\":\"Replaying the log never rewrites, replaces or deletes a stored card, summary or answer.\"},{\"backing\":\"check\",\"id\":\"writer-has-no-tools\",\"on\":\"understanding\",\"text\":\"A change is untrusted text: the writer has no tools.\"},{\"backing\":\"trust\",\"id\":\"colour-only-for-needs-you\",\"on\":\"window\",\"text\":\"Loud colour is only for what needs you and for a broken law.\"}],\"links\":[{\"from\":\"agents\",\"id\":\"agents-plugins\",\"to\":\"plugins\"},{\"from\":\"plugins\",\"id\":\"plugins-hook\",\"to\":\"hook\"},{\"from\":\"hook\",\"id\":\"hook-server\",\"to\":\"server\"},{\"from\":\"core\",\"id\":\"core-server\",\"to\":\"server\"},{\"from\":\"server\",\"id\":\"server-understanding\",\"to\":\"understanding\"},{\"from\":\"server\",\"id\":\"server-workbench\",\"to\":\"workbench\"},{\"from\":\"understanding\",\"id\":\"understanding-writer\",\"to\":\"writer\"},{\"from\":\"server\",\"id\":\"server-window\",\"to\":\"window\"},{\"from\":\"workbench\",\"id\":\"workbench-github\",\"to\":\"github\"}],\"parts\":[{\"caption\":\"Which hooks each agent runs\",\"holds\":[],\"id\":\"plugins\",\"name\":\"Agent plugins\",\"paths\":[\"plugin/\",\"plugin-agy/\"],\"purpose\":\"Small config folders for Claude Code and agy. They decide which of the agent's events reach the studio.\",\"tier\":\"interface\"},{\"caption\":\"Records every agent event\",\"holds\":[],\"id\":\"hook\",\"name\":\"Hook\",\"paths\":[\"hook/\"],\"purpose\":\"Runs on each agent event and appends it to the event log. It also holds a question or a blocked command until you answer.\",\"tier\":\"core\"},{\"caption\":\"Turns events into session state\",\"holds\":[],\"id\":\"core\",\"name\":\"Core\",\"paths\":[\"core/\"],\"purpose\":\"Plain Rust logic. It reads the event log's lines in order and knows every session's turns, checks, subagents and whether it needs you.\",\"tier\":\"core\"},{\"caption\":\"Holds the state, answers the commands\",\"holds\":[],\"id\":\"server\",\"name\":\"Server\",\"paths\":[\"server/\"],\"purpose\":\"A library, and the `plotkeeper` program that serves it, with no window in it. It holds the core state, the card store (which keeps the session briefs, the turn summaries and the cards written before cards were retired), the risk notes, the writer and the settings, tells the page why when the writer fails, runs the read loop that follows the event log and sends what changed (the list, the selection, the brief, notices) to a sink the web server sets, serves the learning layer as a local page on 127.0.0.1 (the built page, one POST route for each command and one server-sent event stream, behind a random token, a cookie and a Host check, one server per data folder), and has one function for each learning-layer and session-view command: the PR lookups on a turn's end, the page's focus and the Map view's opening (never on a timer), the PR briefs written for ready PRs and kept per head, the map, the fog a PR's reading clears, the CI result it reads from the default branch, which map changes and agent decisions of a PR you accepted or overturned, and the quiet log of what you use of it.\",\"tier\":\"core\"},{\"caption\":\"Writes what you read, and keeps it\",\"holds\":[],\"id\":\"understanding\",\"name\":\"Understanding\",\"paths\":[\"understanding/\"],\"purpose\":\"Decides what a change is worth telling you, asks the writer for it, and stores it: turn summaries, session briefs, PR briefs (the facts, the writer's reply and the code checks on it) and the risk notes of blocked commands. Cards, as a turn's or a worker's explanation, are retired; the cards stored before stay readable.\",\"tier\":\"core\"},{\"caption\":\"Everything you see and press\",\"holds\":[],\"id\":\"window\",\"name\":\"Window\",\"paths\":[\"ui/\"],\"purpose\":\"The page: the list, the rail, Home, History and the Map view. It shows state and sends your actions to the server; it has no terminals, projects, branches, skills, usage or settings page.\",\"tier\":\"core\"},{\"caption\":\"Worktrees, PRs and plan usage\",\"holds\":[],\"id\":\"workbench\",\"name\":\"Workbench\",\"paths\":[\"workbench/\"],\"purpose\":\"Git worktrees, tasks, PR lookups and plan usage. A black box: it never fogs and never asks for your time.\",\"tier\":\"black-box\"}],\"version\":2}",
+ "positions": {
+  "plugins": [
+   475,
+   303
+  ],
+  "hook": [
+   734,
+   97
+  ],
+  "core": [
+   1708,
+   195
+  ],
+  "server": [
+   1055,
+   441
+  ],
+  "understanding": [
+   932,
+   824
+  ],
+  "window": [
+   1234,
+   38
+  ],
+  "workbench": [
+   1600,
+   645
+  ],
+  "shell": [
+   1264,
+   360
+  ],
+  "terminal-daemon": [
+   823,
+   185
+  ],
+  "agents": [
+   694,
+   488
+  ],
+  "writer": [
+   1135,
+   887
+  ],
+  "github": [
+   1939,
+   597
+  ]
+ }
+}
