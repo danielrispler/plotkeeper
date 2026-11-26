@@ -110,6 +110,25 @@ export const mapRefresher = (): Fixture => {
   });
 };
 /**
+ * A purpose longer than two lines, its sheet opened while the side column is hidden (#633's outside review): the purpose is measured
+ * once the column shows, so it is clamped and its More shows.
+ */
+export const mapPurposeMore = (): Fixture => {
+  const file = JSON.parse(mapFile);
+  file.parts.find((part: { id: string }) => part.id === "shell").purpose =
+    "Reads the hook's log line by line, feeds each line to the core, writes the turn summaries through Understanding, keeps the sessions' state on disk and serves the Window the page and its events.";
+  return mapOpened(`
+      if (!document.getElementById("map-side").hidden) return log("snap:fail the side column shows before the sheet opens: " + [...document.getElementById("map-side").children].map((c) => c.id + ":" + c.childElementCount + ":" + c.textContent.slice(0, 80)).join(" / "));
+      document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(300);
+      const words = document.querySelector("#map-sheet .sheet-purpose");
+      const more = document.querySelector("#map-sheet .sheet-more");
+      if (!words || !more) return log("snap:fail the sheet has no purpose or no More");
+      if (!words.classList.contains("clamped") || words.scrollHeight <= words.clientHeight) log("snap:fail the purpose is not clamped");
+      if (more.hidden) log("snap:fail the clamped purpose's More is hidden");
+      log("purpose more ok");`, { sessions: [], selected: null, projects: [{ path: "/w/plotkeeper", gone: false }], map_state: mapState({ source: JSON.stringify(file) }) });
+};
+/**
  * A part with no fog (#636): Shell's catch-up card, right under its caption, says "Caught up" and holds the Refresher; no Fog section.
  */
 export const mapCaughtUp = (): Fixture =>
