@@ -34,7 +34,7 @@ fn translate(text: &str) -> Option<(Vec<u8>, Vec<usize>)> {
     let mut i = 0;
     while i < raw.len() {
         let byte = raw[i];
-        if byte == b'\\' && backslashes % 2 == 0 && raw.get(i + 1) == Some(&b'u') {
+        if byte == b'\\' && backslashes.is_multiple_of(2) && raw.get(i + 1) == Some(&b'u') {
             let mut digits = i + 1;
             while raw.get(digits) == Some(&b'u') {
                 digits += 1;
