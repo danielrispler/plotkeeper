@@ -914,3 +914,35 @@ export const mapPanelHead = (): Fixture =>
   // An ended session, so the list has its History link; #311's turn has its id, as in mapPanel, for its diff.
   sessions: [...busySessions().map((s) => (s.id === "s1" ? { ...s, turns: s.turns.map((t) => ({ ...t, id: "t1", message: "Chips on the parts a turn touches" })) } : s)), session("e1", "Map view drawer, #312", "ended", { last_event_at: Date.now() - 2 * 86400e3 })],
 });
+/**
+ * The story header's line 2 (spec #658): only the items a session has, one "·" between them. A running session with no phase, one that needs
+ * you with no block kind, and one with neither nor a mode show no empty item, so never "Running ·" or "Running · · auto mode"; a session whose
+ * estimate's lower bound has passed reads "est. up to 12m left", and the header's hover starts with that phase and estimate.
+ */
+export const mapPanelLine2 = (): Fixture => {
+  const min = 60e3;
+  const implementing = { kind: null, phases: [{ phase: "implementing" as const, at: Date.now() - 5 * min, agent_ms: 0 }], agent_ms: 0, estimate: { range: [0, 12 * min] as [number, number], depends_on_you: false } };
+  const sessions = [
+    session("s1", "#320 · Mode only", "running", { permission_mode: "auto" }),
+    session("s2", "#321 · Needs you, no block", "needs_you", { permission_mode: "auto" }),
+    session("s3", "#322 · Nothing else", "running"),
+    session("s4", "#323 · Estimate passed", "running", { permission_mode: "auto", work: implementing }),
+  ];
+  return mapPanel(`
+      const line = () => {
+        const items = [...document.querySelectorAll("#headline .line-2 > *")];
+        const stray = items.filter((node) => node.getClientRects().length && !node.textContent.trim()).map((node) => node.id);
+        if (stray.length) log("snap:fail line 2 shows empty " + stray.join());
+        return items.filter((node) => node.getClientRects().length).map((node) => node.textContent).join(" · ");
+      };
+      const want = { s1: "Running · auto mode", s2: "Needs you · auto mode", s3: "Running", s4: "Running · auto mode · Implementing · est. up to 12m left" };
+      for (const [key, words] of Object.entries(want)) {
+        await press(row(key));
+        if (!panelOpen()) return log("snap:fail " + key + "'s press did not open its story");
+        if (line() !== words) log("snap:fail " + key + "'s line 2 reads " + JSON.stringify(line()) + ", not " + JSON.stringify(words));
+        const hover = document.getElementById(document.getElementById("headline").getAttribute("data-hint"))?.textContent ?? "";
+        if (key === "s4" && !hover.startsWith("Implementing · est. up to 12m left · Session ")) log("snap:fail the header's hover reads " + JSON.stringify(hover));
+        if (key !== "s4" && !hover.startsWith("Session ")) log("snap:fail " + key + "'s header hover reads " + JSON.stringify(hover));
+      }
+      log("panel ok");`, { sessions, select: { __by: "id", values: Object.fromEntries(sessions.map((s) => [s.id, { session: s, agent: null }])) } });
+};
