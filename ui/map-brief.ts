@@ -23,7 +23,7 @@ import { logStop } from "./stop-rules.js";
 import { expectedLine } from "./map-pre-flight.js";
 import { exploreRow } from "./micro-world.js";
 import { guardRow } from "./patch-review.js";
-import { branchOf, lightsMark, mapCheckNode, mapReviewNode, overturnNote, ratifyActions, ratifyDetail, ratifyEvidence, ratifyHead } from "./map-ratify.js";
+import { branchOf, lightsMark, mapCheckNode, mapReviewNode, overturnNote, ratifyActions, ratifyDetail, ratifyEvidence, ratifyHead, unlightMarks } from "./map-ratify.js";
 import { copyOverturn, reviewFlags, reviewLine, statusWords } from "./ratify.js";
 import type { Copied } from "./notes.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
@@ -370,6 +370,7 @@ function closeBrief() {
   stopWatching();
   stopMarks();
   closePopover();
+  unlightMarks();
   litFiles.clear();
   player.close();
   clearPlaying();
@@ -658,8 +659,11 @@ let swap = 0;
 // Shows the current step: the map lit and framed, the panel's words crossfaded in.
 function show(view: MapView, same: boolean) {
   const playing = playingBrief();
-  const now = player.current();
   const list = steps();
+  // The list can shrink under the step played: a Ratify step that only the review's state brought goes when the review ends with
+  // nothing to say. The brief stays open, on its new last step.
+  player.clamp(list.length);
+  const now = player.current();
   const step = list[now?.step ?? 0];
   const box = panel();
   if (!now || !step || !playing) return closeBrief();
@@ -684,6 +688,8 @@ function show(view: MapView, same: boolean) {
     alsoInto(view, node, also.groups);
     if (now.step === 0) summaryInto(node);
     const bar = endBar(node, now.step, list.length);
+    // The rows replaced see no leave, so a mark one of them lit is cleared here (#643).
+    unlightMarks();
     cols.replaceChildren(node);
     // A new step opens at its top, and the camera frames once the step's words set the card's height (#443 review).
     if (!same) cols.scrollTop = 0;
@@ -702,6 +708,9 @@ function show(view: MapView, same: boolean) {
       cols.classList.remove("swap");
     }, 130);
   }
+  // One dot per step, again when the list grew or shrank since the panel was built.
+  const dots = box.querySelector(".brief-dots");
+  if (dots && dots.childElementCount !== list.length) dots.replaceChildren(...list.map(() => document.createElement("i")));
   box.querySelectorAll(".brief-dots i").forEach((dot, i) => dot.classList.toggle("at", i === now.step));
   box.querySelector(".brief-dots")?.setAttribute("aria-label", `Step ${now.step + 1} of ${list.length}`);
   (box.querySelector(".brief-back") as HTMLButtonElement).disabled = now.step === 0;

@@ -1194,7 +1194,17 @@ export const mapDiffRatifyLit = (): Fixture => mapDiff(351, ["server", "window"]
       const style = getComputedStyle(ghost);
       if (style.opacity !== "1") log("snap:fail the pointed ghost is still dimmed: " + style.opacity);
       if (style.outlineStyle !== "dashed" || style.outlineOffset !== "5px") log("snap:fail the pointed ghost's outline: " + style.outlineStyle + " at " + style.outlineOffset);
-      if (!style.boxShadow.includes("rgba(224, 192, 140")) log("snap:fail the pointed ghost has no warm ring: " + style.boxShadow);`, "on", removalRows);
+      if (!style.boxShadow.includes("rgba(224, 192, 140")) log("snap:fail the pointed ghost has no warm ring: " + style.boxShadow);
+      // Accept draws the step again with no leave seen, and Back leaves it: neither keeps a mark lit.
+      row("shell").querySelector(".ratify-accept").click();
+      await wait(30);
+      if (lit().length) log("snap:fail Accept's redraw left " + lit().length + " marks lit");
+      row("shell-server").dispatchEvent(new PointerEvent("pointerenter"));
+      await wait(30);
+      if (lit().length !== 1) log("snap:fail pointing a row after Accept lit " + lit().length);
+      document.querySelector("#map-brief .brief-back").click();
+      await wait(30);
+      if (lit().length) log("snap:fail Back left " + lit().length + " marks lit");`, "on", removalRows);
 
 // The short brief (#644): #351's PR, had it fogged nothing at Daniel's tiers, gets a brief made by code: one step, "The map in this PR",
 // whose sentence counts its Map diff (as `map_diff::counts` counts #351's real maps) and which lights the parts the marks are on, then the

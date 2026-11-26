@@ -344,6 +344,19 @@ test("opening another chapter over an open one leaves the open one's step where 
   assert.equal(player.current().step, 1, "the first chapter continues where it was left");
 });
 
+test("a step list that shrinks under the played step keeps the brief open on its new last step", () => {
+  const player = briefPlayer({ scrubbed: () => false, backToNow: () => {} });
+  player.open("/p", 7, 0);
+  player.go(3, 5);
+  player.clamp(5);
+  assert.equal(player.current()?.step, 3, "a list as long leaves the step where it is");
+  // The Ratify step, brought only by the review, goes once the review is done with nothing to say.
+  player.clamp(3);
+  assert.equal(player.current()?.step, 2);
+  player.clamp(0);
+  assert.equal(player.current()?.step, 2, "an empty list is no list to clamp to");
+});
+
 test("only the latest request is wanted: a later one, or a cancel, drops the earlier", () => {
   const request = latestRequest();
   const first = request.begin();

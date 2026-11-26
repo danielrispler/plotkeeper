@@ -173,7 +173,8 @@ export function mapCheckNode(key: string, problems: string[]): HTMLElement | nul
 // The marks the pointed Ratify row lit (#643), and which row lit them: one row at a time, so a row drawn again before its leave was seen
 // leaves nothing lit once another is pointed.
 let lit: { row: HTMLElement; marks: Element[] } | null = null;
-const unlightMarks = () => {
+/** Clears the pointed row's light: the brief calls it whenever it draws a step or closes, since a row replaced sees no leave. */
+export const unlightMarks = () => {
   for (const node of lit?.marks ?? []) node.classList.remove("ratify-lit");
   lit = null;
 };

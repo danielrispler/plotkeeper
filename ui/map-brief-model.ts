@@ -87,6 +87,9 @@ export type Player = {
   go: (by: number, length: number) => "moved" | "done";
   // Leaves the brief where it is; the next `open` of it continues from there.
   close: () => void;
+  // The list of steps shrank to `length` (a step that only the Map text review's state brought went): a step past its end becomes its
+  // last, so the brief stays open where Daniel is.
+  clamp: (length: number) => void;
 };
 /** What plays and where each brief was left. Opening one while the map shows a past commit returns the map to now first. */
 export function briefPlayer(deps: { scrubbed: () => boolean; backToNow: () => void }): Player {
@@ -126,6 +129,9 @@ export function briefPlayer(deps: { scrubbed: () => boolean; backToNow: () => vo
     close() {
       if (now) left.set(key(now), now.step);
       now = null;
+    },
+    clamp(length) {
+      if (now && length > 0 && now.step >= length) now = { ...now, step: length - 1 };
     },
   };
 }
