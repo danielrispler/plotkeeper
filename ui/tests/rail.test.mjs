@@ -2,7 +2,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { blockKind, cardTime, feedTurns, foldedLine, headlineOf, nowOf, oneAtATime, turnAt } from "../../dist/story.js";
+import { fakeDocument } from "./dom.mjs";
+import { askedLabel, blockKind, cardTime, feedTurns, foldedLine, foldedTurn, headlineOf, nowOf, oneAtATime, turnAt } from "../../dist/story.js";
+import { studio } from "../../dist/state.js";
 
 test("summaries on open are written one at a time, in the order asked, newest first", async () => {
   const started = [];
@@ -141,4 +143,27 @@ test("a folded turn's line holds the prompt and Headline, and a mark for a faile
   assert.equal(line([{ ...run("passed"), retries: 1 }]).failed, false);
   assert.deepEqual(line([run("ran")], null), { prompt: "Fix the parser", headline: null, failed: false });
   assert.equal(foldedLine({ prompt: "", checks: [] }, null).prompt, "No prompt");
+});
+
+// #675: a turn a wake-up opened is the returning task's, never Daniel's prompt; a turn stored before the flag reads as his.
+test("a woken turn reads \"Woken by\" with the returning task; Daniel's turn reads \"You asked\"", () => {
+  assert.equal(askedLabel({ wake_up: true }), "Woken by");
+  assert.equal(askedLabel({ wake_up: false }), "You asked");
+  assert.equal(askedLabel({}), "You asked");
+
+  const page = new Map();
+  globalThis.document = fakeDocument({
+    getElementById: (id) => page.get(id) ?? page.set(id, document.createElement("div")).get(id),
+    body: { dataset: { layout: "focus" } },
+  });
+  studio.selection = null;
+  const past = (turn) =>
+    foldedTurn(
+      /** @type {import("../../dist/types.js").Session} */ ({ id: "s" }),
+      /** @type {import("../../dist/story.js").FeedTurn} */ (/** @type {unknown} */ ({ index: 0, turn: { id: null, message: null, checks: [], ...turn }, cards: [] })),
+    );
+  // A past row's prompt column: the returning task, marked as a wake-up; Daniel's prompt as it is.
+  const promptOf = (node) => node.querySelector(".prompt").textContent;
+  assert.equal(promptOf(past({ prompt: "worker bqv59 returned", wake_up: true })), "Woken by worker bqv59 returned");
+  assert.equal(promptOf(past({ prompt: "Fix the parser" })), "Fix the parser");
 });
