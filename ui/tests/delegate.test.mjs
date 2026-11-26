@@ -88,7 +88,7 @@ const claudeCritic = (stdout) => {
 };
 
 // The prompt a Claude critic gets: the critic's brief, then the draft.
-const BRIEFED = /^You are the critic of a draft spec[^]*Check every claim[^]*\n\nThe draft:\n\n# A draft\n\nThe store reads `src\/store\.rs:7`\.\n$/;
+const BRIEFED = /^You are the critic of a draft spec[\s\S]*Check every claim[\s\S]*\n\nThe draft:\n\n# A draft\n\nThe store reads `src\/store\.rs:7`\.\n$/;
 
 test("with the 5-hour window below its floor, pick critic names Sonnet at high and prints its prompt, without running Gemini", () => {
   const ran = pickCritic({ FAKE_AGY_5H: "0.49", FAKE_AGY_WEEKLY: "0.9", FAKE_AGY_RUN: "ok" });
