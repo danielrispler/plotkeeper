@@ -660,9 +660,7 @@ let swap = 0;
 function show(view: MapView, same: boolean) {
   const playing = playingBrief();
   const list = steps();
-  // The list can shrink under the step played: a Ratify step that only the review's state brought goes when the review ends with
-  // nothing to say. The brief stays open, on its new last step.
-  player.clamp(list.length);
+  player.clamp(list.length); // A list that shrank under the played step (the review's Ratify step went) keeps the brief open.
   const now = player.current();
   const step = list[now?.step ?? 0];
   const box = panel();
@@ -688,8 +686,7 @@ function show(view: MapView, same: boolean) {
     alsoInto(view, node, also.groups);
     if (now.step === 0) summaryInto(node);
     const bar = endBar(node, now.step, list.length);
-    // The rows replaced see no leave, so a mark one of them lit is cleared here (#643).
-    unlightMarks();
+    unlightMarks(); // The rows replaced see no leave, so a mark one of them lit is cleared here (#643).
     cols.replaceChildren(node);
     // A new step opens at its top, and the camera frames once the step's words set the card's height (#443 review).
     if (!same) cols.scrollTop = 0;
@@ -708,17 +705,22 @@ function show(view: MapView, same: boolean) {
       cols.classList.remove("swap");
     }, 130);
   }
-  // One dot per step, again when the list grew or shrank since the panel was built.
-  const dots = box.querySelector(".brief-dots");
-  if (dots && dots.childElementCount !== list.length) dots.replaceChildren(...list.map(() => document.createElement("i")));
-  box.querySelectorAll(".brief-dots i").forEach((dot, i) => dot.classList.toggle("at", i === now.step));
-  box.querySelector(".brief-dots")?.setAttribute("aria-label", `Step ${now.step + 1} of ${list.length}`);
+  markDots(box, now.step, list.length);
   (box.querySelector(".brief-back") as HTMLButtonElement).disabled = now.step === 0;
   if (step.check) runOf(view, step.check);
   syncNext(step);
   wireTaps(view);
   light(view, step);
   paintOrder(view, step);
+}
+
+// The panel's dots: one per step, made again when the list grew or shrank since the panel was built, the played one marked.
+function markDots(box: HTMLElement, at: number, count: number) {
+  const dots = box.querySelector(".brief-dots");
+  if (!dots) return;
+  if (dots.childElementCount !== count) dots.replaceChildren(...Array.from({ length: count }, () => document.createElement("i")));
+  dots.querySelectorAll("i").forEach((dot, i) => dot.classList.toggle("at", i === at));
+  dots.setAttribute("aria-label", `Step ${at + 1} of ${count}`);
 }
 
 // The end-of-story bar ends the played list's last step: a single story's end, or a chapter's (#393). It goes under the step's words and figure.
