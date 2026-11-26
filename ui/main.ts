@@ -262,7 +262,7 @@ startList({
     forgetAsks(new Set(sessions.map((session) => session.id)));
   },
 });
-startRailBriefs(drawFeed);
+startRailBriefs();
 startMap({ selectedProject, removeProject, shown: drawSidebar });
 startPreFlight();
 // The map head's Fit (#669) runs `studio::FitMap`; its hint names the keys the keymap binds that to now.

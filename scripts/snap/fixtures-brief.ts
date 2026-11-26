@@ -1125,6 +1125,33 @@ export const railBriefReady = (press: boolean): Fixture => ({
     log("rail brief row ok");`,
 });
 
+// The session row's PR brief mark (#630): the live session whose PR a brief waits for carries one quiet mark in the map's mist, beside its row
+// and not in it; its hint names the PR, and pressing it opens the brief on the Map view without selecting the row.
+export const listBriefMark = (): Fixture => ({
+  ...railBriefReady(false),
+  snapScript: `
+    const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+    await wait(300);
+    const marks = [...document.querySelectorAll(".list .item > .brief-mark")];
+    if (marks.length !== 1) return log("snap:fail expected one brief mark in the list, saw " + marks.length);
+    const mark = marks[0];
+    const hint = document.getElementById(mark.getAttribute("interestfor"));
+    if (hint?.textContent !== "PR #61 · brief waiting") log("snap:fail the mark's hint says: " + hint?.textContent);
+    if (mark.getAttribute("aria-label") !== "Open the brief of PR #61") log("snap:fail the mark is named: " + mark.getAttribute("aria-label"));
+    const row = mark.parentElement.querySelector(":scope > .row").getBoundingClientRect();
+    const box = mark.getBoundingClientRect();
+    if (box.top < row.top || box.bottom > row.bottom || box.right > row.right) log("snap:fail the mark is not on its row " + JSON.stringify([box, row]));
+    if (box.width < 24 || box.height < 24) log("snap:fail the mark's target is under 24px " + JSON.stringify(box));
+    const selected = () => document.querySelector(".list .row[aria-pressed='true']")?.dataset.key ?? null;
+    const before = selected();
+    mark.click();
+    await wait(900);
+    if (!document.getElementById("map-brief").classList.contains("open")) return log("snap:fail the mark did not open the brief");
+    if (selected() !== before) log("snap:fail pressing the mark changed the selected row: " + before + " to " + selected());
+    log("list brief mark ok");`,
+  snapDone: "list brief mark ok",
+});
+
 // The Map diff (#640): a brief whose PR changed the map plays on today's map with the PR's changes on it, in treatment B of spec #634's
 // prototype. `map-diff/pr<N>.json` holds the real PRs' documents as `map_diff::of` builds them (both landed, so today's map is the squash
 // commit's), and the prototype's plate positions. #500 split Server in three, #351 removed the Tauri shell and its terminal daemon.
