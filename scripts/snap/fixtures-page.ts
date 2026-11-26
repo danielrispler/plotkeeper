@@ -573,5 +573,19 @@ export const cutText = (): Fixture => ({
       if (moved(fits[0])) log("snap:fail a second line that fits scrolled on hover");
       if (moved(cuts[0])) log("snap:fail a cut second line stayed scrolled after the pointer left");
       log("cut text ok");`,
-  realPointer: true, snapDone: "cut text ok",
+  realPointer: true, motion: "full", snapDone: "cut text ok",
+});
+/** With reduced motion asked for, a cut second line stays still on hover (#587). */
+export const cutTextStill = (): Fixture => ({
+  ...cutText(),
+  snapScript: `
+      const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+      if (!matchMedia("(prefers-reduced-motion: reduce)").matches) return log("snap:fail the page does not ask for reduced motion");
+      const cut = [...document.querySelectorAll(".list .row-step.cut")].find((node) => node.scrollWidth > node.clientWidth);
+      if (!cut) return log("snap:fail the list shows no cut second line");
+      await __snapMove(cut);
+      await wait(600);
+      if (getComputedStyle(cut.firstElementChild).translate !== "none") log("snap:fail a cut second line scrolled with reduced motion asked for");
+      log("cut text still ok");`,
+  motion: "reduce", snapDone: "cut text still ok",
 });

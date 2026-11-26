@@ -233,6 +233,7 @@ const budget = fixture.contrast ? 6000 : 5000;
 const chromeArgs = [
   "--headless=new", "--enable-logging=stderr", "--v=0", "--disable-gpu", `--force-device-scale-factor=${scale}`, `--user-data-dir=${profile}`, `--window-size=${width},${height}`,
   `--virtual-time-budget=${budget}`, `--screenshot=${resolve(out)}`, ...(fixture.realPointer || fixture.realKeys || fixture.contrast ? ["--remote-debugging-port=0"] : []),
+  ...(fixture.motion ? [fixture.motion === "reduce" ? "--force-prefers-reduced-motion" : "--force-prefers-no-reduced-motion"] : []),
   `http://127.0.0.1:${server.address().port}/index.html`,
 ];
 // A screenshot left from an earlier run must not pass for this one's.
