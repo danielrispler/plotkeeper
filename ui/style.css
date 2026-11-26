@@ -136,6 +136,9 @@ h1 { margin: 0 0 var(--sp-4); }
 .project-head .fold[aria-expanded="true"] svg { transform: rotate(90deg); }
 .project-head .fold:dir(rtl) svg { transform: scaleX(-1); }
 .project-head .fold[aria-expanded="true"]:dir(rtl) svg { transform: scaleX(-1) rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .project-head .fold svg { transition: none; } }
+/* A header with no chevron keeps its name in line with those that have one: the chevron's slot stays, with no control in it. */
+.project-head:not(:has(> .fold)) { padding-inline-start: var(--control); }
 .project-head.current .project-toggle { color: var(--muted); }
 /* The header's quiet dot (#386): Home's mark, drawn as the map's mist; its hover names what lit it. */
 .project-toggle .project-dot { flex: none; margin-inline: auto 0; background: var(--mist-thick); filter: blur(var(--sp-1)); }
