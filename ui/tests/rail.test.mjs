@@ -1,8 +1,24 @@
 // The rail opens on "now", as a feed of turns (danielrispler/Falinks#574). Run: `npm test`.
-import { test } from "node:test";
+import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { blockKind, cardTime, feedTurns, foldedLine, headlineOf, nowOf, oneAtATime, turnAt } from "../../dist/story.js";
+import { createRequire } from "node:module";
+import { connect, fakeDocument, Live, tauri } from "./dom.mjs";
+
+// The page the story draws into (spec #661): live stand-ins by id, so a test reads which nodes a draw kept in the page. The clock is
+// the test's, set before the story loads, as times.ts starts its once-a-second count at load when there is a document.
+mock.timers.enable({ apis: ["setInterval", "Date"], now: 1_800_000_000_000 });
+const page = new Map();
+globalThis.document = fakeDocument(
+  { getElementById: (id) => page.get(id) ?? page.set(id, connect(document.createElement("div"))).get(id), body: { dataset: {} } },
+  Live,
+);
+globalThis.marked = createRequire(import.meta.url)("marked");
+const replies = new Map();
+tauri([], (command, args) => replies.get(command)?.(args) ?? null);
+const { blockKind, cardTime, feedTurns, foldedLine, headlineOf, nowOf, oneAtATime, showView, turnAt } = await import("../../dist/story.js");
+const state = await import("../../dist/state.js");
+const { setSelection } = state;
 
 test("summaries on open are written one at a time, in the order asked, newest first", async () => {
   const started = [];
@@ -141,4 +157,112 @@ test("a folded turn's line holds the prompt and Headline, and a mark for a faile
   assert.equal(line([{ ...run("passed"), retries: 1 }]).failed, false);
   assert.deepEqual(line([run("ran")], null), { prompt: "Fix the parser", headline: null, failed: false });
   assert.equal(foldedLine({ prompt: "", checks: [] }, null).prompt, "No prompt");
+});
+
+// A session as the server sends it, with two turns: an older one, folded, and the newest, at your turn.
+const NOW = 1_800_000_000_000;
+const ended = (n, fields = {}) => ({ started_at: NOW - (10 - n) * 60e3, ended_at: NOW - (9 - n) * 60e3, prompt: `Prompt ${n}`, id: `t${n}`, message: `Reply ${n}.\nMore of reply ${n}.`, checks: [], listed: [], files: { files: [], merged: 0 }, ...fields });
+/** @returns {any} */
+const sessionOf = (fields = {}) => ({
+  id: "s1", capabilities: { agent: "claude", asks: true, replies: true, turn_trees: true, permission_mode: true }, model: null, cwd: "/w/p", folder_name: "p",
+  terminal: null, status_only: false, shell: false, name: "Story", prompt_name: null, resume_id: "r", permission_mode: null, started_mode: null, cleared: [],
+  asks_before_closing: false, landed: false, last_step: null, started_at: NOW - 3600e3, last_event_at: NOW, turn_span: null, step_span: null, state: "your_turn",
+  agents: [], asker: null, prompts: [], turns: [ended(1), ended(2)], questions: [], blocked_commands: [], returned: null,
+  transcript: { intention: null, steps_ago: 0, unavailable: null, responses: ["Reply 2.\nMore of reply 2."], effort: null, context: null },
+  identity: { issue: null, pr: null, name: "p" }, work: { kind: null, phases: [], agent_ms: 0, estimate: { range: null, depends_on_you: false } }, seen: 2, since_looked: { turns: 0 },
+  ...fields,
+});
+const draw = (session) => {
+  const selected = { session, agent: null };
+  setSelection(selected);
+  showView(selected);
+};
+/** @returns {any} */
+const feed = () => document.getElementById("feed");
+const every = (node, out = []) => {
+  out.push(node);
+  for (const child of node.childNodes ?? []) if (child.nodeType === 1) every(child, out);
+  return out;
+};
+const kept = (before, after) => before.filter((node, i) => node === after[i]).length;
+
+test("two draws of the same payload leave the feed's turns, folds and buttons the same nodes", () => {
+  draw(sessionOf());
+  const before = every(feed());
+  const turns = [...feed().childNodes];
+  assert.equal(turns.length, 2, "the newest turn and one folded turn");
+  draw(sessionOf());
+  const after = every(feed());
+  assert.deepEqual([...feed().childNodes], turns);
+  for (const tag of ["details", "button", "li"]) {
+    const was = before.filter((node) => node.tag === tag);
+    assert.ok(was.length > 0, `the feed draws a ${tag}`);
+    assert.deepEqual(after.filter((node) => node.tag === tag), was, `each ${tag} is the node it was`);
+  }
+  assert.equal(kept(before, after), before.length);
+});
+
+const settle = async () => {
+  for (let n = 0; n < 5; n++) await new Promise((resolve) => setImmediate(resolve));
+};
+
+test("a draw after a turn's summary arrives swaps only that turn's node", async () => {
+  /** @type {(value: unknown) => void} */
+  let arrive = () => {};
+  replies.set("turn_summary", ({ id }) => (id === "u2" ? new Promise((resolve) => (arrive = resolve)) : null));
+  const session = sessionOf({ id: "s2", turns: [ended(1, { id: "u1" }), ended(2, { id: "u2" })] });
+  draw(session);
+  const [newest, past] = feed().childNodes;
+  const pastButton = past.querySelector("button");
+  await settle();
+  arrive({ summary: { summary: "x", headline: "Fixed the parser.", lines: [], quiz: null } });
+  await settle();
+  draw(session);
+  assert.notEqual(feed().childNodes[0], newest, "the turn whose summary arrived is drawn anew");
+  assert.equal(feed().childNodes[0].querySelector("p.headline-text")?.innerHTML.includes("Fixed the parser."), true);
+  assert.equal(feed().childNodes[1], past, "the other turn is the node it was");
+  assert.equal(past.querySelector("button"), pastButton);
+  replies.delete("turn_summary");
+});
+
+test("a counting time is the same node across draws, and keeps counting", () => {
+  const running = (at) => ({ statement: "cargo test", status: "running", started_at: at, ended_at: null, typical_ms: null });
+  const start = Date.now() - 30e3;
+  const session = sessionOf({ id: "s3", state: "running", turns: [ended(1, { id: "v1" }), ended(2, { id: "v2", ended_at: null, listed: [running(start)] })] });
+  draw(session);
+  const time = feed().querySelector("span.check-time");
+  assert.equal(time?.textContent, "30s");
+  draw(session);
+  assert.equal(feed().querySelector("span.check-time"), time, "the draw keeps the counting node");
+  mock.timers.tick(1000);
+  assert.equal(time.textContent, "31s", "the kept node counts on");
+});
+
+test("the focus in an Ask box, an open fold and the banner's open Brief survive a draw", () => {
+  const { setCards } = /** @type {any} */ (state);
+  setCards({ brief: null, goal: "Ship the story panel", answers: [], open: [], design: [], decisions: [], risk_notes: [], decision_notes: [] });
+  const session = sessionOf({ id: "s4", state: "idle", turns: [ended(1, { id: "w1" }), ended(2, { id: "w2" })] });
+  draw(session);
+  const box = feed().querySelector("details.ask-about");
+  assert.ok(box, "the newest turn's Headline has its Ask box");
+  box.open = true;
+  const field = box.querySelector("textarea");
+  field.focus();
+  assert.equal(document.activeElement, field);
+  const response = feed().querySelector("details.fold");
+  response.open = true;
+  response.listeners.toggle?.({});
+  /** @type {any} */
+  const slot = document.getElementById("banner-slot");
+  const brief = slot.querySelector("details.banner-brief");
+  assert.ok(brief, "the banner holds the Brief");
+  brief.open = true;
+  brief.listeners.toggle?.({});
+  draw({ ...session, last_event_at: session.last_event_at + 1 });
+  assert.equal(document.activeElement, field, "the focus stays in the question box");
+  assert.ok(box.isConnected && box.open);
+  assert.equal(feed().querySelector("details.fold"), response);
+  assert.ok(response.open, "the open fold stays open");
+  assert.equal(slot.querySelector("details.banner-brief"), brief);
+  assert.ok(brief.open, "the banner's Brief stays open");
 });

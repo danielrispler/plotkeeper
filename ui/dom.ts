@@ -511,9 +511,14 @@ export function pressable<T extends HTMLElement>(button: T, pressed: boolean | n
  * the text selection survive an update (danielrispler/Falinks#570). A node stays when its tag and `data-key` match, and
  * takes the new one's attributes and text. A keyed node is found by its key wherever it was, so rows added or dropped before it
  * do not replace it; an unkeyed one is matched by its place. Give a node with a listener a key that pins what the
- * listener does, such as its session's id.
+ * listener does, such as its session's id. A node `next` names by `held` is put in as it is, never patched.
  */
 export function patch(parent: Node, next: Node[]) {
+  patchInto(parent, next);
+  standing.clear();
+}
+function patchInto(parent: Node, given: Node[]) {
+  const next = given.map((node) => heldBy.get(node) ?? node);
   const old = [...parent.childNodes];
   const byKey = new Map<string, Node>();
   for (const node of old) {
@@ -522,6 +527,10 @@ export function patch(parent: Node, next: Node[]) {
   }
   const claimed = new Set<Node>();
   const targets = next.map((node, i) => {
+    if (heldNodes.has(node)) {
+      if (node.parentNode === parent) claimed.add(node);
+      return { node, was: null };
+    }
     const k = key(node);
     const was = k === null ? old[i] : byKey.get(k);
     if (!was || claimed.has(was) || was.nodeName !== node.nodeName || key(was) !== k) return { node, was: null };
@@ -531,12 +540,10 @@ export function patch(parent: Node, next: Node[]) {
   for (const node of old) if (!claimed.has(node)) parent.removeChild(node);
   targets.forEach(({ node }, i) => {
     const at = parent.childNodes[i];
-    if (at === node) return;
-    if (at) parent.insertBefore(node, at);
-    else parent.appendChild(node);
+    if (at !== node) place(parent, node, at ?? null);
   });
-  targets.forEach(({ was }, i) => {
-    if (!was) return;
+  targets.forEach(({ node, was }, i) => {
+    if (!was) return settle(node);
     const to = next[i];
     if (!to) return;
     if (was.nodeType !== 1) {
@@ -546,8 +553,45 @@ export function patch(parent: Node, next: Node[]) {
     const [from, goal] = [was as Element, to as Element];
     for (const { name, value } of [...goal.attributes]) if (from.getAttribute(name) !== value) from.setAttribute(name, value);
     for (const { name } of [...from.attributes]) if (!goal.hasAttribute(name)) from.removeAttribute(name);
-    patch(from, [...goal.childNodes]);
+    patchInto(from, [...goal.childNodes]);
   });
+}
+
+// The nodes a draw keeps in the page as they are (spec #661), such as an Ask box with a question being typed: building the next draw
+// around the node itself would take it out of the page, which drops the focus in it. While it is in the page, the draw holds a
+// stand-in in its place, and `patch` puts the node there instead, untouched, leaving it where it is when it already was.
+const heldBy = new WeakMap<Node, Node>();
+const heldNodes = new WeakSet<Node>();
+// The stand-ins of the draw being built, which a node `patch` puts in whole may hold.
+const standing = new Set<Element>();
+/** `node`, kept by each draw as it is: `node` itself while it is out of the page, else a stand-in for `patch` alone to put in. */
+export function held<T extends Element>(node: T): T {
+  heldNodes.add(node);
+  if (!node.isConnected) return node;
+  const stand = node.cloneNode(false) as T;
+  heldBy.set(stand, node);
+  standing.add(stand);
+  return stand;
+}
+// The held nodes in `node`, a node `patch` put in whole, in place of their stand-ins.
+function settle(node: Node) {
+  if (node.nodeType !== 1) return;
+  for (const stand of standing) {
+    const real = heldBy.get(stand);
+    if (real && stand.parentNode && node.contains(stand)) {
+      place(stand.parentNode, real, stand);
+      stand.parentNode?.removeChild(stand);
+      standing.delete(stand);
+    }
+  }
+}
+
+// Puts `node` before `at` in `parent`, at its end for null: by `moveBefore` when both are in the page and the browser has it (Chrome
+// 133+), so a moved node keeps its focus and state; else by `insertBefore`, which takes it out of the page first.
+function place(parent: Node, node: Node, at: Node | null) {
+  const into = parent as Node & { moveBefore?: (node: Node, at: Node | null) => void };
+  if (into.moveBefore && node.isConnected && parent.isConnected) into.moveBefore(node, at);
+  else parent.insertBefore(node, at);
 }
 const key = (node: Node) => (node.nodeType === 1 ? (node as Element).getAttribute("data-key") : null);
 
