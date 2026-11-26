@@ -297,6 +297,9 @@ pub struct MapReviews {
     reading: Mutex<HashSet<String>>,
     /// Serialises the read, change and write of a PR's file.
     writing: Mutex<()>,
+    /// Each PR's head as the lookups last saw it ([`MapReviews::head_now`]), by project and number: only that head's review may
+    /// start or cancel another's.
+    current: Mutex<BTreeMap<(String, u64), String>>,
     me: Weak<MapReviews>,
 }
 
@@ -309,6 +312,7 @@ impl MapReviews {
             changed: OnceLock::new(),
             reading: Mutex::default(),
             writing: Mutex::default(),
+            current: Mutex::default(),
             me: me.clone(),
         })
     }
@@ -368,10 +372,21 @@ impl MapReviews {
             .collect()
     }
 
+    /// Whether `head` is PR `pr`'s head as the lookups last saw it; a PR no lookup has seen yet takes the head it is given.
+    fn is_current(&self, project: &str, pr: u64, head: &str) -> bool {
+        let current = self.current.lock().unwrap_or_else(PoisonError::into_inner);
+        current
+            .get(&(project.to_string(), pr))
+            .is_none_or(|now| now == head)
+    }
+
     /// A brief of PR `pr` was stored at `head`: a head with changed text is reviewed when the PR is by Daniel's own login, unless
-    /// it is reviewed already or every item was judged at an earlier head. Any older head's review is cancelled.
+    /// it is reviewed already or every item was judged at an earlier head. Any older head's review is cancelled. A head the PR
+    /// has moved on from (a brief whose write ended after a newer head was seen) starts and cancels nothing.
     pub fn brief_stored(&self, project: &str, pr: u64, head: &str) {
-        self.head_now(project, pr, head);
+        if !self.is_current(project, pr, head) {
+            return;
+        }
         let items = review_items(Path::new(project), head);
         let record = self.read(project, pr);
         if items.is_empty()
@@ -398,6 +413,9 @@ impl MapReviews {
 
     /// PR `pr` is at `head` now: the review of any older head, queued or running, is cancelled.
     pub fn head_now(&self, project: &str, pr: u64, head: &str) {
+        let mut current = self.current.lock().unwrap_or_else(PoisonError::into_inner);
+        current.insert((project.to_string(), pr), head.to_string());
+        drop(current);
         if !self.file(project, pr).exists() {
             return;
         }
@@ -438,6 +456,9 @@ impl MapReviews {
     /// head is done at once. A head being reviewed or done is left alone.
     fn start(&self, project: &str, pr: u64, head: &str, items: Vec<ReviewItem>) {
         let guard = self.lock();
+        if !self.is_current(project, pr, head) {
+            return;
+        }
         let mut record = self.read(project, pr);
         self.cancel_others(&mut record, head);
         let now = record.heads.get(head).map(|head| head.state);

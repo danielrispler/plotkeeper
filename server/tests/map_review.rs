@@ -553,3 +553,28 @@ fn a_review_that_gives_no_verdict_fails_and_runs_again_on_request() {
         "{view:?}"
     );
 }
+
+#[test]
+fn a_late_brief_of_an_older_head_neither_cancels_the_current_heads_review_nor_starts_one() {
+    let bench = bench();
+    bench.author("daniel");
+    bench.all_supported();
+    fs::write(bench.root().join("slow"), "").unwrap();
+    let first = bench.first_head();
+    let second = bench.push(
+        Some(&first),
+        &[("cache/lib.rs", "pub fn get() -> u8 { 1 }\n")],
+    );
+    // The lookup sees the second head, and its brief starts its review.
+    bench.reviews.head_now(&bench.project(), 7, &second);
+    bench.reviews.brief_stored(&bench.project(), 7, &second);
+    // The first head's brief, whose write was slow, is stored only now.
+    bench.reviews.brief_stored(&bench.project(), 7, &first);
+    let view = bench.reviews.view(&bench.project(), 7, &second).unwrap();
+    assert_eq!(view.state, ReviewState::Reviewing, "{view:?}");
+    let stale = bench.reviews.view(&bench.project(), 7, &first).unwrap();
+    assert_eq!(stale.state, ReviewState::Idle, "{stale:?}");
+    assert_eq!(bench.runner.runs(&bench.project()).runs.len(), 1);
+    fs::remove_file(bench.root().join("slow")).unwrap();
+    assert_eq!(bench.settled(&second).state, ReviewState::Done);
+}
