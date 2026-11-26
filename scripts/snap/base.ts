@@ -77,6 +77,6 @@ export const base = {
   wired: true,
   about: { version: "0.2.0" },
   writer_notice: null,
-  writers: { writers: [{ kind: "claude", name: "Claude", found: true, models: ["haiku", "sonnet", "opus", "fable"], efforts: ["", "low", "medium", "high"] }, { kind: "agy", name: "agy", found: false, models: ["gemini-4-neon-low"], efforts: [] }], summaries_on: true, briefs: true, keys: [], base_url: null },
+  writers: { writers: [{ kind: "claude", name: "Claude", found: true, models: ["haiku", "sonnet", "opus", "fable"], efforts: ["", "low", "medium", "high"] }, { kind: "agy", name: "agy", found: false, models: ["gemini-4-neon-low"], efforts: [] }], summaries_on: true, briefs: true, keys: [], base_url: null, key_store: "the macOS Keychain" },
   test_writer: { outcome: "passed", line: "Passed: `claude` answered. Summaries are written with it.", settings: null },
 } satisfies { [C in ReadCommand]: Reply<C> };
