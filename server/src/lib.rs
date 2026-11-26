@@ -287,7 +287,7 @@ impl App {
         effects: Arc<dyn Effects>,
     ) -> io::Result<App> {
         // The PR briefs' writer is Claude whatever `summaries.writer` says, and never the fake of the checks. Without
-        // `claude` there is none, so no brief is attempted and the page says briefs need Claude (spec #320).
+        // `claude` there is none, so only a short brief, made by code, is stored, and the page says briefs need Claude (spec #320, #634).
         let briefs =
             pr_briefs::PrBriefs::new(match std::env::var("PLOTKEEPER_CARD_WRITER").as_deref() {
                 Ok("fake") => None,

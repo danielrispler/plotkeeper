@@ -252,7 +252,7 @@ impl BriefWriter for Fake {
 
 fn lookup(store: &BriefStore, seen: &Mutex<Seen>, fake: &Fake, head: &str) -> Did {
     let with = Writing {
-        writer: fake,
+        writer: Some(fake),
         model: "opus",
         store,
         reading: None,
@@ -299,7 +299,7 @@ fn opening_a_stale_brief_rewrites_it_and_a_fresh_one_is_read_as_it_is() {
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     lookup(&store, &seen, &fake, "aaa");
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: None,
@@ -331,7 +331,7 @@ fn a_pr_whose_touched_parts_would_not_fog_at_the_tiers_gets_no_brief() {
     let store = BriefStore::open(dir.path()).unwrap();
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: None,
@@ -369,7 +369,7 @@ fn a_quiet_pr_is_not_gathered_again_at_the_same_head() {
     let store = BriefStore::open(dir.path()).unwrap();
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: None,
@@ -403,7 +403,7 @@ fn opening_a_pr_that_fogs_nothing_tells_the_tray_it_is_quiet() {
     let store = BriefStore::open(dir.path()).unwrap();
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: None,
@@ -440,7 +440,7 @@ fn a_brief_is_waiting_for_a_ready_pr_that_has_one_stored() {
     let store = BriefStore::open(dir.path()).unwrap();
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: None,
@@ -469,7 +469,7 @@ fn a_stale_mark_that_fails_is_told_and_not_reported_as_staled() {
     std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).unwrap();
     let told = RefCell::new(vec![]);
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: None,
@@ -500,7 +500,7 @@ fn a_failed_write_is_told_and_stores_nothing() {
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let told = RefCell::new(vec![]);
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: None,
@@ -591,7 +591,7 @@ fn the_tray_is_annotated_while_a_brief_is_being_written() {
         scope.spawn(|| {
             assert!(briefs.busy("/p", 7, true));
             let with = Writing {
-                writer: &blocking,
+                writer: Some(&blocking),
                 model: "opus",
                 store: &store,
                 reading: None,
@@ -664,7 +664,7 @@ fn the_tray_says_when_the_write_at_the_head_failed() {
     let seen = briefs.seen_of("/p");
     let fake = Fake::new();
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: None,
@@ -692,7 +692,7 @@ fn a_failed_write_is_not_retried_at_the_same_head_until_the_brief_is_opened() {
     let store = BriefStore::open(dir.path()).unwrap();
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: None,
@@ -1186,7 +1186,7 @@ fn after_a_carry_over_the_pr_stops_waiting_and_the_next_lookup_keeps_the_copied_
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let reading = rig.reading();
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: Some(&reading),
@@ -1229,7 +1229,7 @@ fn a_carried_brief_holds_the_link_evidence_and_map_problems_of_the_new_head() {
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let reading = rig.reading();
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: Some(&reading),
@@ -1306,7 +1306,7 @@ fn a_push_that_does_not_carry_stales_the_brief_as_before_and_the_tray_says_why()
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let reading = rig.reading();
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: Some(&reading),
@@ -1347,7 +1347,7 @@ fn a_read_finished_at_the_old_head_after_a_push_was_judged_still_carries_over() 
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let reading = rig.reading();
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: Some(&reading),
@@ -1392,7 +1392,7 @@ fn a_push_that_fogs_something_after_a_full_read_writes_a_since_story_apart_and_t
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let reading = rig.reading();
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: Some(&reading),
@@ -1453,7 +1453,7 @@ fn opening_the_since_case_writes_the_story_first_and_reading_it_to_the_end_carri
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let reading = rig.reading();
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: Some(&reading),
@@ -1574,7 +1574,7 @@ fn a_pr_that_changes_the_map_but_fogs_nothing_stores_a_short_brief_with_no_write
     let store = BriefStore::open(dir.path()).unwrap();
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: None,
@@ -1621,6 +1621,59 @@ fn a_pr_that_changes_the_map_but_fogs_nothing_stores_a_short_brief_with_no_write
 }
 
 #[test]
+fn without_claude_a_pr_that_changes_the_map_but_fogs_nothing_still_gets_its_short_brief_and_map_check()
+ {
+    let (_repo, short) = map_only_pr(
+        |m| {
+            m["parts"].as_array_mut().unwrap().push(serde_json::json!(
+                { "id": "beta", "name": "Beta", "caption": "c", "purpose": "p", "holds": [], "tier": "black-box", "paths": ["beta/"] }
+            ));
+        },
+        &[("beta/b.rs", "1\n"), ("stray/s.rs", "1\n")],
+    );
+    let head = short.meta.head.clone();
+    let dir = tempfile::tempdir().unwrap();
+    let store = BriefStore::open(dir.path()).unwrap();
+    let seen = Mutex::new(Seen::default());
+    let with = Writing {
+        writer: None,
+        model: "opus",
+        store: &store,
+        reading: None,
+    };
+    assert_eq!(
+        on_lookup(&with, &seen, 7, &head, || Ok(short), |_| {}),
+        Did::Wrote
+    );
+    let stored = store.get(7, &head).expect("the short brief is stored");
+    assert!(stored.short);
+    assert!(
+        stored.map_problems.iter().any(|p| p.contains("stray/s.rs")),
+        "{:?}",
+        stored.map_problems
+    );
+    // A PR that fogs something needs the writer: it fails at its head, and nothing is stored.
+    let full = source(&head);
+    let mut logged = Vec::new();
+    assert_eq!(
+        on_lookup(
+            &with,
+            &seen,
+            8,
+            &head,
+            || Ok(full),
+            |line| logged.push(line)
+        ),
+        Did::Failed
+    );
+    assert!(store.get(8, &head).is_none());
+    assert!(
+        logged.iter().any(|line| line.contains("no writer")),
+        "{logged:?}"
+    );
+}
+
+#[test]
 fn a_pr_that_only_reformats_the_map_and_fogs_nothing_stores_no_brief() {
     let (_repo, source) = map_only_pr(|_| {}, &[("alpha/a.rs", "2\n")]);
     // The same map, laid out anew.
@@ -1638,7 +1691,7 @@ fn a_pr_that_only_reformats_the_map_and_fogs_nothing_stores_no_brief() {
     let store = BriefStore::open(dir.path()).unwrap();
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: None,
@@ -1670,7 +1723,7 @@ fn a_short_brief_read_in_full_is_carried_over_a_quiet_push_and_counts_the_new_he
     let store = BriefStore::open(dir.path()).unwrap();
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: Some(&reading),

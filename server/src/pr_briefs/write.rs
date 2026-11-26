@@ -8,7 +8,8 @@ use studio_understanding::pr_brief::{
 
 /// What writes and keeps the briefs: the writer, the model of the "PR briefs" setting and the store.
 pub struct Writing<'a> {
-    pub writer: &'a dyn BriefWriter,
+    /// None without `claude`: a short brief, made by code, is still stored, and a brief that needs the writer fails.
+    pub writer: Option<&'a dyn BriefWriter>,
     pub model: &'a str,
     pub store: &'a BriefStore,
     /// What a new head does to Daniel's read, and carrying it over (spec #477, part B); `None` treats every new head as today.
@@ -86,7 +87,10 @@ pub fn write_brief(
     source: &PrSource,
     log: impl FnMut(String),
 ) -> Result<StoredBrief, String> {
-    write_pr_brief(with.writer, with.model, source, with.store, log)
+    let writer = with
+        .writer
+        .ok_or("no writer: plotkeeper found no `claude` to ask")?;
+    write_pr_brief(writer, with.model, source, with.store, log)
 }
 
 /// Whether a PR touches no part whose fog would show at Daniel's tiers (the facts' required parts): such a PR gets no brief.
@@ -163,7 +167,9 @@ pub fn on_lookup(
     // The first brief of a ready PR is written at once; a stale one when the same head is seen twice. The write takes minutes and
     // holds no lock. In the since case the story is written first, since the tray opens it first (#497).
     let built = source();
+    // The since story needs the writer; without one only the brief's own write is tried, which a short brief needs none for.
     if let Ok(full) = &built
+        && with.writer.is_some()
         && with.store.since(pr, head).is_none()
         && let Some(Push::Since(from)) = push_at(with, seen, pr, head)
     {

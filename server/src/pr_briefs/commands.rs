@@ -8,7 +8,9 @@ use crate::App;
 use crate::prs::Ready;
 use serde::Serialize;
 use std::{path::Path, sync::Arc};
-use studio_understanding::pr_brief::{BriefStore, PrMeta, PrSource, fetch_meta, gather};
+use studio_understanding::pr_brief::{
+    BriefStore, BriefWriter, PrMeta, PrSource, fetch_meta, gather,
+};
 
 /// The numbers of the ready PRs a brief is waiting for: the brief is stored and Daniel has not read all of it at the PR's current
 /// head. A brief read to its end stops counting for the project header's dot and the rail's row (its tray row stays, to read again), and a push
@@ -148,9 +150,8 @@ pub fn lookup_later(app: &Arc<App>, project: &str, ready: Vec<Ready>) {
         let (app, project) = (app.clone(), project.to_string());
         std::thread::spawn(move || {
             let briefs = &app.briefs;
-            let Some(writer) = briefs.writer.clone() else {
-                return;
-            };
+            // Without `claude` a PR that changes the map but fogs nothing still gets its short brief and its head's map check.
+            let writer = briefs.writer.clone();
             let Some(store) = store_of(&project) else {
                 return;
             };
@@ -161,7 +162,7 @@ pub fn lookup_later(app: &Arc<App>, project: &str, ready: Vec<Ready>) {
             let seen = briefs.seen_of(&project);
             let reading = reading_of(&project);
             let with = Writing {
-                writer: writer.as_ref(),
+                writer: writer.as_deref().map(|w| w as &dyn BriefWriter),
                 model: &model,
                 store: &store,
                 reading: reading.as_ref().map(|r| r as &dyn Reading),
@@ -222,11 +223,15 @@ pub fn pr_brief(
             &project, &store, stored, true,
         )))));
     }
-    let Some(writer) = briefs.writer.clone() else {
-        return Ok(store
-            .latest(number)
-            .map(|b| Opened::Brief(Box::new(view_of(&project, &store, b, true)))));
-    };
+    let writer = briefs.writer.clone();
+    // Without `claude` a full brief cannot be rewritten, so the latest one opens; a short brief, made by code, is written as ever.
+    if writer.is_none()
+        && let Some(latest) = store.latest(number).filter(|b| !b.short)
+    {
+        return Ok(Some(Opened::Brief(Box::new(view_of(
+            &project, &store, latest, true,
+        )))));
+    }
     let write = {
         let (app, project) = (app.clone(), project.clone());
         move |claim: BusyGuard| {
@@ -235,7 +240,7 @@ pub fn pr_brief(
             let seen = briefs.seen_of(&project);
             let reading = reading_of(&project);
             let with = Writing {
-                writer: writer.as_ref(),
+                writer: writer.as_deref().map(|w| w as &dyn BriefWriter),
                 model: &model,
                 store: &store,
                 reading: reading.as_ref().map(|r| r as &dyn Reading),
