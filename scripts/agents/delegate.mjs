@@ -404,8 +404,9 @@ const changedSince = (checkout, before) => {
 
 /** Why a worker run that ended this way stops or escalates, or null when its work goes to the check. */
 const failure = (exit) => {
-  if (exit.pushed) return { result: "stop", stop: exit.pushed };
-  if (exit.escaped) return { result: "stop", stop: `worker wrote outside its worktree (${exit.escaped})` };
+  // Both guards' findings are said, so that the paths outside the worktree are named even when the worker also pushed.
+  const stop = [exit.pushed, exit.escaped && `worker wrote outside its worktree (${exit.escaped})`].filter(Boolean).join("; ");
+  if (stop) return { result: "stop", stop };
   if (exit.killed === "silent") return { result: "silent", escalate: "silent" };
   if (exit.killed === "timeout") return { result: "error", escalate: "timeout" };
   if (exit.code !== 0) return { result: "error", escalate: `exit ${exit.code ?? exit.signal}` };

@@ -188,7 +188,7 @@ for (const [run, said] of [
 // edits), "pullmoved" (as "pull", then someone else changes the pulled file again), "linger" (edits and exits 0, leaving a \`sleep\` that holds its stdout and writes its pid to sleeper.pid), "pushint" (edits, commits and pushes its commit to the integration branch), "lost" (edits, and origin goes away), "empty" (exits 0 with no change), "fail" (exits 1), "chatty" (prints an event
 // every 50 ms and never ends), "push" (edits, commits and pushes its commit to a branch of its own), "branch" (edits and
 // pushes the integration tip as \`issue-7-cheap\`, no commit of its own), "escape" (edits, and also writes escaped.txt into
-// the main checkout \`repo\`) or "silent" (prints nothing and waits). FAKE_SILENT_MODELS, a comma-separated list, makes those models "silent" whatever FAKE_OPENCODE says;
+// the main checkout \`repo\`), "pushescape" (as "push", and also writes escaped.txt into \`repo\`) or "silent" (prints nothing and waits). FAKE_SILENT_MODELS, a comma-separated list, makes those models "silent" whatever FAKE_OPENCODE says;
 // a silent worker leaves a stray file first. Every worker call is logged with the environment it got. \`models opencode\`
 // lists FAKE_MODELS, a comma-separated list, or the test models by default, and is not logged. Like \`opencode run\`
 // without \`--dir\` (1.19.6: \`process.env.PWD??process.cwd()\`), it works in PWD's folder, not in the cwd it was given.
@@ -227,7 +227,7 @@ else {
     other("other.txt", "someone else's file\\n");
     execFileSync("git", ["pull", "--quiet", "--no-rebase", "--no-edit", "origin", "int"]);
   }
-  if (["edit", "commit", "moved", "conflict", "lost", "push", "pushint", "branch", "pull", "pullmoved", "linger", "escape"].includes(mode)) {
+  if (["edit", "commit", "moved", "conflict", "lost", "push", "pushint", "branch", "pull", "pullmoved", "linger", "escape", "pushescape"].includes(mode)) {
     writeFileSync("shared.txt", "the worker's line\\n");
     event("tool_use", { type: "tool", tool: "edit", state: { status: "completed", input: { filePath: "shared.txt" }, output: "ok" } });
   }
@@ -237,7 +237,7 @@ else {
     execFileSync("git", ["add", "added.txt"]);
     execFileSync("git", ["commit", "--quiet", "-m", "worker two"]);
   }
-  if (mode === "push") {
+  if (mode === "push" || mode === "pushescape") {
     execFileSync("git", ["commit", "--quiet", "-am", "worker"]);
     execFileSync("git", ["push", "--quiet", "origin", "HEAD:refs/heads/sneaky"]);
   }
@@ -250,7 +250,7 @@ else {
     writeFileSync(join(env.FAKE_DIR, "sleeper.pid"), String(sleeper.pid));
     sleeper.unref();
   }
-  if (mode === "escape") writeFileSync(join(env.FAKE_DIR, "repo", "escaped.txt"), "written outside the worktree\\n");
+  if (mode === "escape" || mode === "pushescape") writeFileSync(join(env.FAKE_DIR, "repo", "escaped.txt"), "written outside the worktree\\n");
   if (mode === "branch") execFileSync("git", ["push", "--quiet", "origin", "origin/int:refs/heads/issue-7-cheap"]);
   if (mode === "pullmoved") other("other.txt", "someone else's file, changed again\\n");
   if (mode === "moved") other("other.txt", "someone else's file\\n");
@@ -539,6 +539,7 @@ for (const [what, fake, said] of /** @type {[string, Record<string, string>, Reg
   ["a worker that pushed its commit", { FAKE_OPENCODE: "push" }, /^stop: origin\/sneaky has the worker's commit [0-9a-f]{12}$/],
   ["a worker that pushed its commit to the integration branch", { FAKE_OPENCODE: "pushint" }, /^stop: origin\/int has the worker's commit [0-9a-f]{12}$/],
   ["an issue-<n>-cheap branch on origin", { FAKE_OPENCODE: "branch" }, /^stop: origin has the branch issue-7-cheap$/],
+  ["a worker that pushed and wrote outside its worktree", { FAKE_OPENCODE: "pushescape" }, /^stop: origin\/sneaky has the worker's commit [0-9a-f]{12}; worker wrote outside its worktree \(escaped\.txt\)$/],
   ["an open PR from issue-<n>-cheap", { FAKE_OPENCODE: "edit", FAKE_GH_PRS: JSON.stringify([{ url: "https://github.com/o/r/pull/9" }]) }, /^stop: a PR from issue-7-cheap is open: https:\/\/github\.com\/o\/r\/pull\/9$/],
 ])) {
   test(`run: ${what} gives stop, exit 0, and leaves the worktree for Daniel`, () => {
