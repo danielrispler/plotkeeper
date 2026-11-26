@@ -77,7 +77,7 @@ GitHub stays authoritative.
 4. It changes no laws or parts of the system map.
 5. It edits about three source files at most. An expand–contract migration batch meets this rule like any other ticket.
 
-A well-specified ticket outside the risk areas of rule 3 that misses another rule is `medium`. Presentational UI is `medium` too when it meets those conditions. A ticket in any other risk area, risky UI, or with any design left open, is `strong`. File count, a new module and hand-checked trials raise the tier, never the effort.
+A well-specified ticket outside the risk areas of rule 3 that misses another rule is `medium`. Presentational UI is `medium` when it meets the other conditions of a `medium` ticket; rule 3 still keeps it out of `cheap`. A ticket in any other risk area, risky UI, or with any design left open, is `strong`. File count, a new module and hand-checked trials raise the tier, never the effort.
 
 **Effort.** Effort is `medium`, on every tier. It is `high` only when the route's reason names a risk area of rule 3, a risky-UI trigger, or an edge case the stated tests cannot check. A `cheap` ticket is therefore `medium`, since rules 2 and 3 leave it no risk to name. Effort is never `low`, so every worker reads `AGENTS.md`'s rules. `wayfinder-startup --publish` refuses a `cheap` route whose **Files** names UI, and an `effort high` whose reason names none of persistence, stored, queue, concurrency, wire, redraw, layout, handler, trust boundary or untested edge case (`ticket-authoring.md`, Publish); nothing refuses `strong`.
 
