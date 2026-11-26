@@ -786,8 +786,8 @@ export const mapCatchUp = (): Fixture => ({
       document.head.append(calm);
       document.querySelector("#map .plate[data-id=understanding]").click();
       await wait(150);
-      const buttons = [...document.querySelectorAll(".sheet .sheet-fog button")].map((b) => b.textContent);
-      if (buttons.join("|") !== "Part catch-up|I know this") return log("snap:fail the sheet's fog buttons: " + buttons.join("|"));
+      const buttons = [...document.querySelectorAll(".sheet .catch-up-card button")].map((b) => b.textContent);
+      if (buttons.join("|") !== "Catch up|I know this") return log("snap:fail the catch-up card's buttons: " + buttons.join("|"));
       if (!document.querySelector(".sheet .sheet-catch-up").classList.contains("primary")) log("snap:fail the part catch-up is not the main button");
       document.querySelector(".sheet .sheet-catch-up").click();
       await wait(350);
@@ -811,6 +811,43 @@ export const mapCatchUp = (): Fixture => ({
   }),
   snapDone: "catch-up ok",
 });
+/**
+ * The catch-up card (#636) leads Understanding's sheet, fogged by three changes, under its name, caption and marks: how many changes landed,
+ * the stored catch-up's outline (its title and each step's kind and headline, never its gist) and "Catch up · 4 steps" beside "I know
+ * this". The Fog section is gone.
+ */
+export const mapCatchUpCard = (): Fixture => {
+  const stored = storedCatchUp();
+  const outline = { title: stored.brief.title, steps: catchUpSteps().map((s) => ({ k: s.k, h: s.h })) };
+  const entry = (c: string, pr: number) => ({ commit: c.repeat(40), strength: "thick" as const, pr, why: ["paths"] });
+  const user = mapState().user;
+  return {
+    ...mapOpened(`
+      document.querySelector("#map .plate[data-id=understanding]").click();
+      await wait(300);
+      const sheet = document.querySelector("#map-sheet .sheet");
+      const card = sheet.querySelector(".catch-up-card");
+      if (!card) return log("snap:fail no catch-up card");
+      if (card.previousElementSibling?.className !== "sheet-marks") log("snap:fail the card does not follow the marks: " + card.previousElementSibling?.className);
+      if (card.tagName !== "ARTICLE") log("snap:fail the card is not an article");
+      if (card.querySelector(".catch-up-eyebrow")?.textContent !== "3 changes since you last caught up") log("snap:fail the eyebrow: " + card.querySelector(".catch-up-eyebrow")?.textContent);
+      if (card.querySelector(".catch-up-title")?.textContent !== ${JSON.stringify(outline.title)}) log("snap:fail the outline's title");
+      const rows = [...card.querySelectorAll(".catch-up-steps .catch-up-step")].map((row) => row.querySelector(".catch-up-kind").textContent + ": " + row.querySelector(".catch-up-headline").textContent);
+      if (rows.join("|") !== ${JSON.stringify(outline.steps.map((s) => `${s.k}: ${s.h}`).join("|"))}) log("snap:fail the outline's steps: " + rows.join("|"));
+      const buttons = [...card.querySelectorAll("button")].map((b) => b.textContent);
+      if (buttons.join("|") !== "Catch up · 4 steps|I know this") log("snap:fail the card's buttons: " + buttons.join("|"));
+      if ([...sheet.querySelectorAll(".sheet-heading")].some((h) => h.textContent === "Fog") || sheet.querySelector(".sheet-fog")) log("snap:fail the Fog section is still drawn");
+      if (card.getBoundingClientRect().right > sheet.getBoundingClientRect().right + 1) log("snap:fail the card overflows the sheet");
+      log("catch-up card ok");`, {
+      map_state: mapState({
+        fog: { understanding: "thick" },
+        user: { ...user, fog: { first: null, processed: null, reads: {}, parts: { understanding: [entry("c", 612), entry("d", 605), entry("e", 598)] } } },
+        catch_ups: { understanding: { kind: "catch-up", ready: true, writing: false, failed: false, outline } },
+      }),
+    }),
+    snapDone: "catch-up card ok",
+  };
+};
 /** A part catch-up over a long fog list (#396): its first step says it summarises the main shifts, with the full fog list behind it. */
 export const mapCatchUpSummarising = (): Fixture => ({
   ...mapOpened(`

@@ -38,6 +38,10 @@ export const mapSheetExplained = (on: boolean): Fixture =>
         const line = document.getElementById(heading.getAttribute("aria-describedby"));
         if (!line?.classList.contains("explain") || heading.nextElementSibling !== line) log("snap:fail the heading's line: " + heading.textContent);
       }
+      // The Fog heading's line is the catch-up card's (#636), under its eyebrow.
+      const eyebrow = sheet.querySelector(".catch-up-card .catch-up-eyebrow");
+      const fogLine = eyebrow && document.getElementById(eyebrow.getAttribute("aria-describedby"));
+      if (!fogLine?.classList.contains("explain") || eyebrow.nextElementSibling !== fogLine) log("snap:fail the catch-up card's line");
       const tier = sheet.querySelector('.sheet-tiers [aria-pressed="true"]');
       if (document.getElementById(tier.getAttribute("aria-describedby"))?.textContent.startsWith(tier.textContent + ":") !== true) log("snap:fail the selected tier's meaning");
       const notes = [...sheet.querySelectorAll(".sheet-link .explain-link")].map((note) => note.closest(".sheet-link").dataset.link + "=" + note.textContent.split(":")[0]);

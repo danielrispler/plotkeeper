@@ -59,6 +59,7 @@ export const mapMarks = (kind: "thick" | "thin" | "stale" | "broken"): Fixture =
       const marks = document.querySelector("#map-sheet .sheet-marks");
       if (!marks) return log("snap:fail the sheet has no marks list");
       if (marks.previousElementSibling?.className !== "sheet-caption") log("snap:fail the marks are not at the sheet's top");
+      if (!marks.nextElementSibling?.classList.contains("catch-up-card")) log("snap:fail the catch-up card does not follow the marks");
       const text = marks.textContent;
       for (const want of ${JSON.stringify(want)}) if (!text.includes(want)) log("snap:fail the marks lack " + want + ": " + text);
       if (text.includes("wire-types-agree")) log("snap:fail a broken law is named");
@@ -86,7 +87,7 @@ export const mapRefresher = (): Fixture => {
       await wait(400);
       const node = document.querySelector("#map-sheet .refresher");
       if (!node) return log("snap:fail the refresher did not show");
-      if (node.previousElementSibling?.classList.contains("sheet-links") !== true) log("snap:fail the refresher is not under Talks to");
+      if (!node.parentElement?.classList.contains("catch-up-card")) log("snap:fail the refresher is not in the catch-up card");
       const words = node.textContent;
       for (const want of ["Flows through it", "Turn writing", "The Shell asks Understanding"]) {
         if (!words.includes(want)) log("snap:fail the refresher lacks " + want);
@@ -99,6 +100,23 @@ export const mapRefresher = (): Fixture => {
     map_state: mapState({ source: JSON.stringify(file), stale: { shell: 2 } }),
   });
 };
+/**
+ * A part with no fog (#636): Shell's catch-up card, right under its caption, says "Caught up" and holds the Refresher; no Fog section.
+ */
+export const mapCaughtUp = (): Fixture =>
+  mapOpened(`
+      document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(300);
+      const sheet = document.querySelector("#map-sheet .sheet");
+      const card = sheet.querySelector(".catch-up-card");
+      if (!card) return log("snap:fail no catch-up card");
+      if (card.previousElementSibling?.className !== "sheet-caption") log("snap:fail the card is not under the caption: " + card.previousElementSibling?.className);
+      if (!card.classList.contains("clear")) log("snap:fail the card is not the clear one");
+      if (card.querySelector(".catch-up-eyebrow")?.textContent !== "Caught up") log("snap:fail the eyebrow: " + card.querySelector(".catch-up-eyebrow")?.textContent);
+      if ([...card.querySelectorAll("button")].map((b) => b.textContent).join("|") !== "Refresher") log("snap:fail the card's buttons");
+      if (card.querySelector(".catch-up-steps, .sheet-know")) log("snap:fail a clear part offers a catch-up");
+      if ([...sheet.querySelectorAll(".sheet-heading")].some((h) => h.textContent === "Fog")) log("snap:fail the Fog section is still drawn");
+      log("caught up ok");`, { map_state: mapState(), snapDone: "caught up ok" });
 /**
  * A brief step that lights the second link of a pair (spec #473): the light runs along the pair's one line, from Understanding to Shell,
  * though the line is drawn from Shell, the end of the pair's first link.
@@ -514,6 +532,7 @@ export const mapScrubbed = (): Fixture => {
       if (!document.querySelector("#map .plate .law-broken") || !document.querySelector("#map .session-badge")) return log("snap:fail the live map lacks its mark or badges");
       document.querySelector("#map .plate[data-id=shell]").click();
       await wait(200);
+      if (!document.querySelector("#map-sheet .catch-up-card")) return log("snap:fail the live sheet has no catch-up card");
       const rows = [...document.querySelectorAll("#map-sheet .hist-row")];
       if (rows.length !== 4) return log("snap:fail expected 4 strip rows, saw " + rows.length);
       if (rows.filter((r) => r.classList.contains("fogged")).length !== 2 || !rows[3].classList.contains("fogged") || rows[0].classList.contains("fogged")) log("snap:fail fogged rows");
@@ -528,6 +547,7 @@ export const mapScrubbed = (): Fixture => {
       if (document.querySelector("#map .plate.fog-thin, #map .plate.fog-thick")) log("snap:fail fog shows in the past");
       if (document.querySelector("#map .plate[data-id=workbench]")) log("snap:fail the workbench was not yet there");
       if (!document.querySelector("#map-sheet .sheet")) log("snap:fail the sheet closed on a scrub");
+      if (document.querySelector("#map-sheet .catch-up-card")) log("snap:fail a past commit's sheet has a catch-up card");
       if (!document.querySelector("#map-sheet .hist-row.current")) log("snap:fail no current row");
       rows[1].querySelector(".hist-files").click();
       await wait(150);

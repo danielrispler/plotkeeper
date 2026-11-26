@@ -514,9 +514,14 @@ export type LawPatchOpened = { kind: "pr"; number: number; url: string } | { kin
 export type BackLawStarted = { kind: "run"; id: string } | { kind: "refused"; line: string; prompt: string };
 /**
  * A fogged part's offer (#391): a part catch-up, `ready` when one is stored for its current fog list, `writing` while one is written, `failed`
- * when the last write for it failed; or the chapter of the one PR's brief that lights the part.
+ * when the last write for it failed; or the chapter of the one PR's brief that lights the part. `outline`, with `ready`: what the sheet's
+ * catch-up card shows of the stored one (#636), never its gist.
  */
-export type CatchUpOffer = { kind: "catch-up"; ready: boolean; writing: boolean; failed: boolean; stage?: CatchUpStage } | { kind: "chapter"; pr: number; chapter: number };
+export type CatchUpOffer =
+  | { kind: "catch-up"; ready: boolean; writing: boolean; failed: boolean; stage?: CatchUpStage; outline?: CatchUpOutline }
+  | { kind: "chapter"; pr: number; chapter: number };
+/** A stored part catch-up's title and, per step of its one chapter, the step's kind (`k`) and headline (`h`), as `part_catch_ups::Outline`. */
+export type CatchUpOutline = { title: string; steps: { k: string; h: string }[] };
 /** Which call of a part catch-up's write runs now (#450): the writer, the claim check, or the retry rewriting `claims` flagged items. */
 export type CatchUpStage = { kind: "writing" } | { kind: "checking" } | { kind: "fixing"; claims: number };
 /**
