@@ -32,7 +32,8 @@ export type DetailLine = { label: string; before: string | null; after: string |
 
 const list = (patterns: string[]) => (patterns.length ? patterns.join(", ") : null);
 
-// The lines of a part's or a link's detail that changed, old beside new; an added item's every line, with nothing before. A part's own
+// The lines of a part's or a link's detail that changed, old beside new; an added item's every line, with nothing before. A link whose ends
+// swapped says its Direction. A part's own
 // paths and each held item's show the patterns removed beside those added.
 export function detailLines(detail: RatifyDetail | null | undefined): DetailLine[] {
   if (!detail) return [];
@@ -45,11 +46,15 @@ export function detailLines(detail: RatifyDetail | null | undefined): DetailLine
     if (added.length || removed.length) lines.push({ label, before: list(removed), after: list(added), code: true });
   };
   if (detail.of === "link") {
+    // Only a link whose ends swapped has a direction to tell (#643).
+    if (detail.direction) words("Direction", detail.direction);
     words("Kind", detail.kind, true);
     words("Reason", detail.reason);
     return lines;
   }
   words("Name", detail.name);
+  // After the name, as the plate reads (#643): an Edited part whose caption alone changed still says what changed.
+  words("Caption", detail.caption);
   words("Purpose", detail.purpose);
   paths("Paths", detail.paths_added, detail.paths_removed);
   for (const held of detail.holds) {
