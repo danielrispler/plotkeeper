@@ -1102,10 +1102,43 @@ fn codex_daemon(command: &str) -> bool {
     command.contains("/packages/app-server-daemon/") && command.ends_with("/codex")
 }
 
-/// Whether `command`, a process's executable path, lies inside a macOS app bundle, as an IDE's
-/// processes do; an agent's CLI is a program of its own.
+/// Whether `command`, a process's executable path, belongs to an IDE, as its processes do; an agent's
+/// CLI is a program of its own. On macOS that is a path inside an app bundle. On Linux it is a VS Code
+/// or Cursor install: a system package (`/usr/share/code/`, `/usr/share/cursor/`), `/opt`, a snap, or
+/// an AppImage's mount (`/tmp/.mount_<name><random>/`), where the executable is the editor's own.
 fn in_app(command: &str) -> bool {
-    command.contains(".app/Contents/")
+    if command.contains(".app/Contents/") {
+        return true;
+    }
+    let path = command.to_ascii_lowercase();
+    const INSTALLS: [&str; 10] = [
+        "/usr/share/code/",
+        "/usr/share/code-insiders/",
+        "/usr/share/cursor/",
+        "/opt/visual-studio-code/",
+        "/opt/vscode",
+        "/opt/cursor/",
+        "/snap/code/",
+        "/snap/code-insiders/",
+        "/snap/cursor/",
+        "/usr/lib/code/",
+    ];
+    if INSTALLS.iter().any(|install| path.contains(install)) {
+        return true;
+    }
+    // An AppImage's mount directory names the image, cut to its first characters.
+    let editor = matches!(
+        path.rsplit('/').next(),
+        Some("code" | "code-insiders" | "cursor")
+    );
+    editor
+        && path.split('/').any(|dir| {
+            dir.strip_prefix(".mount_").is_some_and(|name| {
+                ["cursor", "vscode", "code"]
+                    .iter()
+                    .any(|n| name.starts_with(n))
+            })
+        })
 }
 
 fn is_shell(command: &str) -> bool {
@@ -1143,6 +1176,9 @@ fn copilot_payload(payload: &serde_json::Map<String, serde_json::Value>) -> bool
 }
 
 /// The command and parent pid of process `pid`, from `ps`; `None` when it has gone or `ps` fails.
+/// `ps -o comm=` is the executable's full path on macOS, which `in_app` and `codex_daemon` read; on
+/// Linux it is the bare name, so the lookup reads `/proc` instead (#702).
+#[cfg(not(target_os = "linux"))]
 pub fn inspect(pid: u32) -> Option<(String, u32)> {
     let out = Command::new("ps")
         .args(["-o", "ppid=", "-o", "comm=", "-p", &pid.to_string()])
@@ -1154,11 +1190,52 @@ pub fn inspect(pid: u32) -> Option<(String, u32)> {
     Some((command.trim().to_string(), parent.parse().ok()?))
 }
 
+/// The executable's full path (`/proc/<pid>/exe`) and parent pid (`/proc/<pid>/stat`) of process
+/// `pid`; `None` when it has gone. When the link cannot be read (a process of another user, say),
+/// the name in `stat` stands in, enough to tell a shell.
+#[cfg(target_os = "linux")]
+pub fn inspect(pid: u32) -> Option<(String, u32)> {
+    let (name, parent) = parse_stat(&fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)?;
+    let command = match fs::read_link(format!("/proc/{pid}/exe")) {
+        // A binary replaced while it runs reads as "<path> (deleted)".
+        Ok(exe) => {
+            let exe = exe.to_string_lossy();
+            exe.strip_suffix(" (deleted)").unwrap_or(&exe).to_owned()
+        }
+        Err(_) => name,
+    };
+    Some((command, parent))
+}
+
+/// The process name and parent pid of a `/proc/<pid>/stat` line, `pid (name) state ppid ...`. The
+/// name may hold spaces and parentheses, so it ends at the line's last `)`.
+#[cfg(target_os = "linux")]
+fn parse_stat(stat: &str) -> Option<(String, u32)> {
+    let open = stat.find('(')?;
+    let close = stat.rfind(')')?;
+    let name = stat.get(open + 1..close)?;
+    let parent = stat.get(close + 1..)?.split_whitespace().nth(1)?;
+    Some((name.to_owned(), parent.parse().ok()?))
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
     use super::{INTERRUPTED, Turn, command};
+
+    /// A name with spaces and parentheses, as Cursor's renamed hosts have, still ends at the last `)`.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_parent_is_read_after_the_names_last_parenthesis() {
+        use super::parse_stat;
+        assert_eq!(
+            parse_stat("4242 (Helper (Plugin) x) S 77 4242 4242 0 -1"),
+            Some(("Helper (Plugin) x".to_owned(), 77))
+        );
+        assert_eq!(parse_stat("4242 (sh) S 1 4242"), Some(("sh".to_owned(), 1)));
+        assert_eq!(parse_stat("garbage"), None);
+    }
 
     /// The hook's view of one session's turns, after `events`, each a name and a prompt id.
     fn after(turn: &mut Turn, name: &str, prompt: &str) -> (Vec<String>, bool) {
