@@ -34,7 +34,12 @@ export PATH="$prefix/bin:$node_bin:$work/agents:/usr/bin:/bin:/usr/sbin:/sbin"
 export PLOTKEEPER_NO_BROWSER=1
 ! command -v cargo >/dev/null && ! command -v rustc >/dev/null || fail "a Rust toolchain is on the PATH"
 
-data="$HOME/Library/Application Support/plotkeeper"
+# The data folder by OS (#700): macOS keeps it in Library, Linux in XDG's data folder, here with no XDG_DATA_HOME.
+unset XDG_DATA_HOME XDG_CACHE_HOME
+case "$(uname -s)" in
+  Darwin) data="$HOME/Library/Application Support/plotkeeper" ;;
+  *) data="$HOME/.local/share/plotkeeper" ;;
+esac
 # Waits for the start running as $server to print its address into the file $1, and checks the page is served there.
 serves() {
   tries=0
