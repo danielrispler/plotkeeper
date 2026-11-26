@@ -144,12 +144,12 @@ Stated counts:
 
 The grill of 2026-11-26 (`local-evidence/2026-11-26-dart-extractor-grilling/reports/decisions.md`, on Daniel's machine) settled the open questions above:
 
-1. **Test folders:** a folder named `test`, `integration_test` or `test_driver` at any depth, as rule 6 says. `example/`, `benchmark/` and `tool/` are production unless the map ignores them.
-2. **Doubled names:** rule 2 gains *own package first*. When the importer's own package (its nearest tracked pubspec) is one of the declarers, the name resolves there, as Go's own module does. Otherwise it is Unsure. There is no `path:` tie-break, since the dependency lists stay unread.
+1. **Test folders:** a folder named `test`, `integration_test` or `test_driver` at any depth *below the file's package root* (its nearest tracked pubspec's folder, else the repository's root). This refines rule 6, so that dart-lang/test's `pkgs/test/lib/`, where `package:test` lives, stays production. `example/`, `benchmark/` and `tool/` are production unless the map ignores them.
+2. **Doubled names:** rule 2 gains *own package first*. When the importer's own package (its nearest tracked pubspec) is one of the declarers, the name resolves there, as Go's own module does. Otherwise it is Unsure. There is no `path:` tie-break, since the dependency lists stay unread. There is no nearest-declarer tie-break either, since a wrong guess would prove a false edge.
 3. **Hosted dependencies on local packages:** paired by name with the local copy, the stated over-count.
 4. **`part`:** rule 4 as written. A part file's own use of its library's imports is a stated under-count.
 5. **Unshipped syntax:** not supported. Rule 5's readiness stays: `part of` does not end the header, and `import`/`export` followed by an identifier gives no pair and reading goes on.
 6. **Generated files:** no special rule. A map author ignores them.
 7. **Trials:** riverpod first, bloc second, both required.
 
-Also settled: rule 1's index follows the map's `ignored`, as Java's type index does and Go's module index does not. No tracked pubspec means the extractor falls back cleanly: relative URIs still resolve. A file the reader cannot lex gives no pairs and is skipped, as in Java.
+Also settled: rule 1's index follows the map's `ignored` by a package's `lib/` files. A package drops out only when every tracked file of its `lib/` is ignored, never because its `pubspec.yaml` alone is. Go's module index does not follow `ignored`. Every tracked pubspec is a package boundary, as every `go.mod` is in Go. A nameless pubspec is a problem only outside test folders and ignored paths. No tracked pubspec means the extractor falls back cleanly: relative URIs still resolve. A file the reader cannot lex gives no pairs and is skipped, as in Java.
