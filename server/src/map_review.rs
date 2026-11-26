@@ -45,16 +45,31 @@ pub struct ReviewItem {
 /// The map text PR head `head` of `repo` changed, against where it left the default branch: the same join as Ratify's rows
 /// (`ratify::pr_changes`), so a reformatted map changes nothing.
 pub fn review_items(repo: &Path, head: &str) -> Vec<ReviewItem> {
+    review_of(repo, head).0
+}
+
+/// [`review_items`], and how many changed map items were left out for their id ([`takes`]).
+fn review_of(repo: &Path, head: &str) -> (Vec<ReviewItem>, usize) {
     let cache = crate::ratify::ChangesCache::default();
     let (changes, _) = crate::ratify::pr_changes(&cache, repo, 0, Some(head));
     items_of(&changes)
 }
 
+/// The longest id the review takes. The map's own ids are names of a few words (plotkeeper's longest is 35 characters); a longer
+/// one could carry a sentence into the prompt.
+const MAX_ID: usize = 40;
+
+/// Whether the review takes `id` into its prompt: an id the map takes (`system_map::is_id`, lowercase words of letters and digits
+/// joined by hyphens) of at most [`MAX_ID`] characters.
+fn takes(id: &str) -> bool {
+    id.len() <= MAX_ID && system_map::is_id(id)
+}
+
 /// The text `changes` added or changed: an added or edited part's name, purpose and caption (each only when it changed), its added
 /// or changed held items' text, an added or changed link's reason and an added or changed law's text. Nothing removed is reviewed.
 /// An item is named by its kind and the map's ids, and a held item by its place in its part, so the PR's text never names one.
-/// An id the map does not take (`system_map::is_id`) could carry text, so its item is left out; the head's map check names it.
-fn items_of(changes: &[MapItem]) -> Vec<ReviewItem> {
+/// An id the review does not take ([`takes`]) could carry text, so its item is left out and counted.
+fn items_of(changes: &[MapItem]) -> (Vec<ReviewItem>, usize) {
     let mut items = Vec::new();
     let mut add = |id: String, before: Option<&str>, after: Option<&str>| {
         if let Some(after) =
@@ -66,10 +81,16 @@ fn items_of(changes: &[MapItem]) -> Vec<ReviewItem> {
             });
         }
     };
-    let kept = changes
+    let kept: Vec<&MapItem> = changes
         .iter()
-        .filter(|change| change.change != "removed" && system_map::is_id(&change.id));
-    for change in kept {
+        .filter(|change| change.change != "removed")
+        .collect();
+    let left_out = kept
+        .iter()
+        .filter(|change| matches!(change.kind.as_str(), "part" | "link" | "law"))
+        .filter(|change| !takes(&change.id))
+        .count();
+    for change in kept.into_iter().filter(|change| takes(&change.id)) {
         let id = &change.id;
         match (change.kind.as_str(), &change.detail) {
             ("part", Some(Detail::Part(part))) => {
@@ -110,7 +131,7 @@ fn items_of(changes: &[MapItem]) -> Vec<ReviewItem> {
             _ => {}
         }
     }
-    items
+    (items, left_out)
 }
 
 /// FNV-1a of `text`, in hex: the same in every build, as a hash kept across builds must be.
@@ -163,6 +184,8 @@ pub struct ReviewView {
     pub flagged: usize,
     /// Why it failed.
     pub line: Option<String>,
+    /// How many of the head's changed map items the review left out, for an id it does not take.
+    pub left_out: usize,
 }
 
 /// A verdict as kept: for the item `id` whose text hashed to `hash`.
@@ -562,8 +585,8 @@ impl MapReviews {
     /// PR `pr`'s review at `head`; none when the head changed no map text. A head never started whose items were all judged at an
     /// earlier head is done.
     pub fn view(&self, project: &str, pr: u64, head: &str) -> Option<ReviewView> {
-        let items = review_items(Path::new(project), head);
-        if items.is_empty() {
+        let (items, left_out) = review_of(Path::new(project), head);
+        if items.is_empty() && left_out == 0 {
             return None;
         }
         let record = self.read(project, pr);
@@ -591,6 +614,7 @@ impl MapReviews {
             flagged: judged.iter().filter(|judged| judged.flagged).count(),
             items: judged,
             line: kept.and_then(|kept| kept.why.clone()),
+            left_out,
         })
     }
 
