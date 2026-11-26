@@ -551,10 +551,10 @@ fn a_file_that_is_not_a_project_gives_one_problem_naming_it_and_no_pair() {
         // Text outside the root, a bare ampersand, an unknown entity, an attribute without quotes or twice.
         format!("junk\n{good}</Project>\n"),
         format!("{good}</Project>\njunk\n"),
-        format!("{good}<A Include=\"x&unknown;y\" /></ItemGroup></Project>\n"),
-        format!("{good}<A>&unknown;</A></ItemGroup></Project>\n"),
-        format!("{good}<A b=c /></ItemGroup></Project>\n"),
-        format!("{good}<A b=\"1\" b=\"2\" /></ItemGroup></Project>\n"),
+        format!("{good}<A Include=\"x&unknown;y\" /></Project>\n"),
+        format!("{good}<A>&unknown;</A></Project>\n"),
+        format!("{good}<A b=c /></Project>\n"),
+        format!("{good}<A b=\"1\" b=\"2\" /></Project>\n"),
         // A file that is not UTF-8 reads as garbage before the root.
         "\u{fffd}\u{fffd}<Project />\n".to_string(),
     ] {
