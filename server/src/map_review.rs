@@ -71,8 +71,24 @@ fn takes(id: &str) -> bool {
 /// The text `changes` added or changed: an added or edited part's name, purpose and caption (each only when it changed), its added
 /// or changed held items' text, an added or changed link's reason and an added or changed law's text. Nothing removed is reviewed.
 /// An item is named by its kind and the map's ids, and a held item by its place in its part, so the PR's text never names one.
-/// An id the review does not take ([`takes`]) could carry text, so its item is left out and counted.
+/// An id the review does not take ([`takes`]) could carry text, so its item is left out, and counted when it had text to review.
 fn items_of(changes: &[MapItem]) -> (Vec<ReviewItem>, usize) {
+    let mut items = Vec::new();
+    let mut left_out = 0;
+    for change in changes.iter().filter(|change| change.change != "removed") {
+        let found = text_of(change);
+        // Only a change with text to review is left out for its id: one whose paths alone changed had nothing to send.
+        if takes(&change.id) {
+            items.extend(found);
+        } else if !found.is_empty() {
+            left_out += 1;
+        }
+    }
+    (items, left_out)
+}
+
+/// The text `change` added or changed, as [`items_of`] names it.
+fn text_of(change: &MapItem) -> Vec<ReviewItem> {
     let mut items = Vec::new();
     let mut add = |id: String, before: Option<&str>, after: Option<&str>| {
         if let Some(after) =
@@ -84,57 +100,46 @@ fn items_of(changes: &[MapItem]) -> (Vec<ReviewItem>, usize) {
             });
         }
     };
-    let kept: Vec<&MapItem> = changes
-        .iter()
-        .filter(|change| change.change != "removed")
-        .collect();
-    let left_out = kept
-        .iter()
-        .filter(|change| matches!(change.kind.as_str(), "part" | "link" | "law"))
-        .filter(|change| !takes(&change.id))
-        .count();
-    for change in kept.into_iter().filter(|change| takes(&change.id)) {
-        let id = &change.id;
-        match (change.kind.as_str(), &change.detail) {
-            ("part", Some(Detail::Part(part))) => {
-                for (field, words) in [
-                    ("name", &part.name),
-                    ("purpose", &part.purpose),
-                    ("caption", &part.caption),
-                ] {
-                    add(
-                        format!("part:{id}/{field}"),
-                        words.before.as_deref(),
-                        words.after.as_deref(),
-                    );
-                }
-                // The new side's held items come first, in its order; the removed ones after them.
-                let held = part
-                    .holds
-                    .iter()
-                    .take_while(|held| held.text.after.is_some());
-                for (n, held) in held.enumerate() {
-                    add(
-                        format!("held:{id}/{}", n + 1),
-                        held.text.before.as_deref(),
-                        held.text.after.as_deref(),
-                    );
-                }
+    let id = &change.id;
+    match (change.kind.as_str(), &change.detail) {
+        ("part", Some(Detail::Part(part))) => {
+            for (field, words) in [
+                ("name", &part.name),
+                ("purpose", &part.purpose),
+                ("caption", &part.caption),
+            ] {
+                add(
+                    format!("part:{id}/{field}"),
+                    words.before.as_deref(),
+                    words.after.as_deref(),
+                );
             }
-            ("link", Some(Detail::Link(link))) => add(
-                format!("link:{id}/reason"),
-                link.reason.before.as_deref(),
-                link.reason.after.as_deref(),
-            ),
-            ("law", _) => add(
-                format!("law:{id}/text"),
-                change.was.as_deref(),
-                Some(&change.text),
-            ),
-            _ => {}
+            // The new side's held items come first, in its order; the removed ones after them.
+            let held = part
+                .holds
+                .iter()
+                .take_while(|held| held.text.after.is_some());
+            for (n, held) in held.enumerate() {
+                add(
+                    format!("held:{id}/{}", n + 1),
+                    held.text.before.as_deref(),
+                    held.text.after.as_deref(),
+                );
+            }
         }
+        ("link", Some(Detail::Link(link))) => add(
+            format!("link:{id}/reason"),
+            link.reason.before.as_deref(),
+            link.reason.after.as_deref(),
+        ),
+        ("law", _) => add(
+            format!("law:{id}/text"),
+            change.was.as_deref(),
+            Some(&change.text),
+        ),
+        _ => {}
     }
-    (items, left_out)
+    items
 }
 
 /// FNV-1a of `text`, in hex (`micro_worlds::fnv1a`).

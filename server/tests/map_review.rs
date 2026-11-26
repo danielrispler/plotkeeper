@@ -751,3 +751,18 @@ fn an_item_whose_id_is_too_long_to_be_only_a_name_is_left_out_and_the_review_say
     let view = bench.reviews.view(&bench.project(), 7, &head).unwrap();
     assert_eq!(view.left_out, 1, "{view:?}");
 }
+
+#[test]
+fn a_long_id_whose_text_did_not_change_is_not_counted_as_left_out() {
+    let bench = bench();
+    let long = "a-part-whose-id-is-longer-than-forty-characters";
+    let base = BASE.replace(r#""id":"server""#, &format!(r#""id":"{long}""#));
+    git(&bench.origin, &["checkout", "-q", "main"]);
+    write(&bench.origin, "system-map.json", &base);
+    git(&bench.origin, &["commit", "-qam", "long id"]);
+    git(&bench.project, &["pull", "-q"]);
+    // The PR changes only that part's paths: no text to review, so nothing is left out of a review.
+    let map = base.replace(r#""paths":["server/"]"#, r#""paths":["server/","web/"]"#);
+    let head = bench.push(None, &[("system-map.json", &map)]);
+    assert_eq!(bench.reviews.view(&bench.project(), 7, &head), None);
+}
