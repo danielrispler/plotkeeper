@@ -403,8 +403,10 @@ const markOut = (file, model) => {
   midnight.setUTCHours(24, 0, 0, 0);
   const marks = Object.fromEntries(Object.entries(readMarks(file)).filter(([, until]) => Date.parse(until) > Date.now()));
   // Written whole and renamed into place, so that a run reading it at the same time never sees half a file.
-  writeFileSync(`${file}.tmp`, `${JSON.stringify({ ...marks, [model]: midnight.toISOString() })}\n`);
-  renameSync(`${file}.tmp`, file);
+  // The temporary file is this process's own, so that two runs marking at once do not rename each other's.
+  const temporary = `${file}.${process.pid}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify({ ...marks, [model]: midnight.toISOString() })}\n`);
+  renameSync(temporary, file);
 };
 
 /**
