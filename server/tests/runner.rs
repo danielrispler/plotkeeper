@@ -428,7 +428,12 @@ fn a_runs_private_temp_folder_is_made_new_and_private_and_removed_after() {
         tmp: Some(tmp.clone()),
     };
     let (runner, changes) = open(dir.path(), Arc::new(harness));
-    let id = submit(&runner, PROJECT, "stat -f %Lp \"$PK_TMP\"");
+    // The folder's mode, by GNU `stat` on Linux or BSD `stat` on macOS.
+    let id = submit(
+        &runner,
+        PROJECT,
+        "stat -c %a \"$PK_TMP\" 2>/dev/null || stat -f %Lp \"$PK_TMP\"",
+    );
     until(&runner, &changes, ended(&id));
     assert_eq!(runner.outcome(&id).unwrap().result, "700");
     assert!(!tmp.exists(), "the temp folder outlived the run");
@@ -863,13 +868,7 @@ fn a_dead_run_is_failed_and_frees_the_queue() {
     bench.until(|_| bench.state(&dead) == Some(RunState::Running));
     let pid = launch(&bench.folder(&dead))["pid"].as_u64().unwrap();
     // The launcher and its child die with no final status.
-    assert!(
-        Command::new("kill")
-            .args(["-9", &format!("-{pid}")])
-            .status()
-            .unwrap()
-            .success()
-    );
+    kill_group(pid);
     bench.until(ended(&next));
     let outcome = bench.runner.outcome(&dead).unwrap();
     assert_eq!((outcome.end, outcome.exit), (End::Died, None));
@@ -904,13 +903,7 @@ fn a_run_found_dead_at_start_is_failed_and_frees_the_queue() {
         .as_u64()
         .unwrap();
     drop((runner, changes));
-    assert!(
-        Command::new("kill")
-            .args(["-9", &format!("-{pid}")])
-            .status()
-            .unwrap()
-            .success()
-    );
+    kill_group(pid);
     assert!(gone(pid));
 
     let (runner, changes) = open(dir.path(), Arc::new(Script));
@@ -1340,14 +1333,13 @@ fn submit(runner: &Runner, project: &str, script: &str) -> String {
         .unwrap()
 }
 
+/// Kills the process group `pid` leads with SIGKILL. By `killpg`, not `kill -9 -<pid>`: Linux's procps `kill` reads
+/// `-<pid>` there as an option, where macOS's takes it as the group.
 fn kill_group(pid: u64) {
-    assert!(
-        Command::new("kill")
-            .args(["-9", &format!("-{pid}")])
-            .status()
-            .unwrap()
-            .success()
-    );
+    let group = libc::pid_t::try_from(pid).unwrap();
+    // SAFETY: killpg takes plain integers and touches no memory of this process.
+    let killed = unsafe { libc::killpg(group, libc::SIGKILL) };
+    assert_eq!(killed, 0, "{}", std::io::Error::last_os_error());
 }
 
 #[test]

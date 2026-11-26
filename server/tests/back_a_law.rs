@@ -77,7 +77,7 @@ import { add } from "../src/add.mjs";
     "// @law: adds\n",
     r#"test("add sums its two numbers", () => assert.equal(add(2, 3), 5));
 EOF
-sed -i '' 's/"backing": "trust"/"backing": "check"/' system-map.json
+sed 's/"backing": "trust"/"backing": "check"/' system-map.json > map.new && mv map.new system-map.json
 git add tests/add.test.mjs system-map.json
 "#
 );
@@ -428,7 +428,7 @@ fn a_test_patch_that_touches_production_code_is_rejected() {
 #[test]
 fn a_plant_that_edits_the_test_is_rejected() {
     let bench = bench(&format!(
-        "set -e\n{TEST}sed -i '' 's/5)/6)/' tests/add.test.mjs\n{DONE}"
+        "set -e\n{TEST}sed 's/5)/6)/' tests/add.test.mjs > add.new && mv add.new tests/add.test.mjs\n{DONE}"
     ));
     let id = bench.start();
     let line = bench.rejected(&id);
@@ -470,7 +470,7 @@ fn a_test_that_fails_without_the_plant_is_rejected() {
 fn a_law_left_on_trust_fails_the_map_check_and_is_rejected() {
     let bench = bench(&format!(
         "set -e\n{}{PLANT}{DONE}",
-        TEST.replace("sed -i ''", "true")
+        TEST.replace(r#"/"backing": "check"/"#, r#"/"backing": "trust"/"#)
     ));
     let id = bench.start();
     let line = bench.rejected(&id);
