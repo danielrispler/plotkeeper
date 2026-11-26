@@ -1485,13 +1485,17 @@ fn a_renamed_package_without_an_init_file_is_a_bare_folder() {
 fn a_renamed_package_in_one_project_and_a_folder_of_that_name_in_another_are_a_first_segment_two_roots_provide()
  {
     let config = pyproject("[tool.setuptools]\npackage-dir = {mypkg = \"lib\"}\n");
-    let found = py_pairs(&[
-        ("pyproject.toml", &config),
+    let files = [
+        ("pyproject.toml", config.as_str()),
         ("lib/__init__.py", "x = 1\n"),
         ("mypkg/__init__.py", "x = 1\n"),
         ("app.py", "import mypkg\n"),
-    ]);
-    assert_eq!(found, Vec::<String>::new());
+    ];
+    assert_eq!(py_pairs(&files), Vec::<String>::new());
+    assert_eq!(
+        doubts(&files),
+        ["app.py | mypkg | two roots provide it | lib/__init__.py, mypkg/__init__.py"]
+    );
 }
 
 #[test]
@@ -1517,6 +1521,41 @@ fn a_renamed_package_at_the_folder_a_root_already_gives_its_name_is_one_provider
     assert_eq!(
         py_pairs(&files),
         ["app.py>mypkg/__init__.py", "app.py>mypkg/core.py"]
+    );
+    assert_eq!(doubts(&files), Vec::<String>::new());
+}
+
+#[test]
+fn a_poetry_entry_with_no_from_declares_the_project_folder_and_replaces_src() {
+    let config = pyproject("[tool.poetry]\npackages = [{ include = \"a\" }]\n");
+    let found = py_pairs(&[
+        ("pyproject.toml", &config),
+        ("a/__init__.py", "x = 1\n"),
+        ("src/b/__init__.py", "x = 1\n"),
+        ("app.py", "import a\nimport b\n"),
+    ]);
+    assert_eq!(found, ["app.py>a/__init__.py"]);
+}
+
+#[test]
+fn two_names_package_dir_renames_to_one_folder_both_resolve_to_it() {
+    let config = pyproject("[tool.setuptools]\npackage-dir = {alpha = \"lib\", beta = \"lib\"}\n");
+    let files = [
+        ("pyproject.toml", config.as_str()),
+        ("lib/__init__.py", "x = 1\n"),
+        ("lib/m.py", "from . import n\n"),
+        ("lib/n.py", "x = 1\n"),
+        ("one.py", "import alpha\n"),
+        ("two.py", "import beta\n"),
+    ];
+    assert_eq!(
+        py_pairs(&files),
+        [
+            "lib/m.py>lib/__init__.py",
+            "lib/m.py>lib/n.py",
+            "one.py>lib/__init__.py",
+            "two.py>lib/__init__.py"
+        ]
     );
     assert_eq!(doubts(&files), Vec::<String>::new());
 }
@@ -1779,6 +1818,22 @@ fn a_duplicate_key_in_a_section_the_extractor_does_not_read_is_ignored_and_one_i
             )]
         );
     }
+}
+
+#[test]
+fn a_repeated_section_is_read_in_none_of_its_copies() {
+    let config = "[options]\npackage_dir =\n    = lib\n\n[options]\npackage_dir =\n    = other\n";
+    let files = [
+        ("setup.cfg", config),
+        ("lib/a/__init__.py", "x = 1\n"),
+        ("src/b/__init__.py", "x = 1\n"),
+        ("app.py", "import a\nimport b\n"),
+    ];
+    assert_eq!(py_pairs(&files), ["app.py>src/b/__init__.py"]);
+    assert_eq!(
+        notes(&files),
+        ["python-imports did not read [options] in setup.cfg; failing links into . may be false"]
+    );
 }
 
 #[test]

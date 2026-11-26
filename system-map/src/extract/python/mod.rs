@@ -178,10 +178,11 @@ struct Index<'r, 'a> {
 
 impl<'r, 'a> Index<'r, 'a> {
     /// `renamed` holds the packages a project renames to a folder of its own, `package-dir = {mypkg = "lib"}` as
-    /// (`mypkg`, `lib/`). Each registers its name under a root of its own, `\0` and the folder, which no real root is
-    /// and which `step` knows: that root holds the name, and only it, as the package at the folder. So the first-segment
-    /// lookup, the doubt rules and the walk see a renamed package as any other. A renamed package at the folder a real
-    /// root already gives its name, `mypkg = "src/mypkg"` beside the root `src/`, registers nothing more.
+    /// (`mypkg`, `lib/`). Each registers its name under a root of its own, `\0`, the name, `\0` and the folder, which no
+    /// real root is and which `step` knows: that root holds the name, and only it, as the package at the folder, so two
+    /// names renamed to one folder each keep theirs. So the first-segment lookup, the doubt rules and the walk see a
+    /// renamed package as any other. A renamed package at the folder a real root already gives its name,
+    /// `mypkg = "src/mypkg"` beside the root `src/`, registers nothing more.
     fn new(
         repo: &'r Repo<'a>,
         roots: &BTreeSet<String>,
@@ -210,7 +211,7 @@ impl<'r, 'a> Index<'r, 'a> {
             // A root that already holds the name at that folder provides the same package: one provider, not two.
             let same = roots.iter().any(|root| format!("{root}{name}/") == *folder);
             if !same && has_folder(repo, folder) {
-                let root = format!("\0{folder}");
+                let root = format!("\0{name}\0{folder}");
                 first.register(name, root.clone());
                 renamed.insert(root, (name.clone(), folder.clone()));
             }

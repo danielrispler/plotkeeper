@@ -167,8 +167,8 @@ impl<'a> Reading<'a> {
         }
     }
 
-    /// Poetry's `packages = [{ include, from }]`: each entry with a `from` gives that folder; one without is read as the
-    /// project's own folder, which is a root already.
+    /// Poetry's `packages = [{ include, from }]`: each entry with a `from` gives that folder, and one without gives the
+    /// project's own folder; either replaces the default `src/`.
     fn poetry(&mut self, packages: &toml::Value) {
         let key = "tool.poetry.packages";
         let Some(entries) = packages.as_array() else {
@@ -176,7 +176,7 @@ impl<'a> Reading<'a> {
         };
         for entry in entries {
             match entry.as_table().map(|t| t.get("from")) {
-                Some(None) => {}
+                Some(None) => self.declare(key, ""),
                 Some(Some(from)) => match from.as_str() {
                     Some(from) => self.declare(key, from),
                     None => self.unread(key),
@@ -248,11 +248,10 @@ fn parse_ini(text: &str) -> Result<Vec<Section>, usize> {
             && end > 0
         {
             let name = rest[..end].to_string();
-            let duplicate = sections.iter().any(|s| s.name == name);
             sections.push(Section {
                 name,
                 options: Vec::new(),
-                duplicate,
+                duplicate: false,
             });
             continue;
         }
@@ -274,6 +273,13 @@ fn parse_ini(text: &str) -> Result<Vec<Section>, usize> {
         };
         section.options.push((key, lines));
         continuable = true;
+    }
+    // A section that comes twice is a duplicate in every copy: `configparser` raises on the file, so none of it is read.
+    let names: Vec<String> = sections.iter().map(|s| s.name.clone()).collect();
+    for section in &mut sections {
+        if names.iter().filter(|n| **n == section.name).count() > 1 {
+            section.duplicate = true;
+        }
     }
     Ok(sections)
 }
