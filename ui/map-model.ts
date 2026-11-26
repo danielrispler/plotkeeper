@@ -4,7 +4,7 @@
 
 import { messageOf } from "./dom.js";
 import { isObject } from "./settings.js";
-import type { Ci, CommitFiles, Fog, FogEntry, HistoricalMap, HistoryEntry, Proof } from "./types.js";
+import type { Ci, CommitFiles, Fog, FogEntry, HistoricalMap, HistoryEntry, MapDiff, MapTag, Proof } from "./types.js";
 
 export type Tier = "core" | "interface" | "black-box";
 export type Point = { x: number; y: number };
@@ -441,3 +441,20 @@ export function markPoints(a: Point, b: Point, count: number): Point[] {
     return { x: (a.x + b.x) / 2 + (along * dx) / length, y: (a.y + b.y) / 2 + (along * dy) / length };
   });
 }
+
+/**
+ * Where each item is drawn (#640): its saved spot, else one placed once by `autoPlace`, saved (`save`) so it never moves on its own. The
+ * `unsaved` ids are placed but never saved: a Map diff's ghosts, and every item of a past commit's map.
+ */
+export function placement(items: { id: string; zone?: string }[], links: { from: string; to: string }[], saved: Record<string, Point>, unsaved: string[]): { at: Record<string, Point>; save: Record<string, Point> } {
+  const added = autoPlace(items, links, saved);
+  const save = Object.fromEntries(Object.entries(added).filter(([id]) => !unsaved.includes(id)));
+  return { at: { ...saved, ...added }, save };
+}
+/** A Map diff's tag of the line between `from` and `to`, either way round; none for an untagged line or with no diff. */
+export const lineTag = (diff: Pick<MapDiff, "lines"> | null, from: string, to: string): MapTag | undefined => {
+  const [a, b] = [from, to].sort();
+  return diff?.lines.find((line) => line.ends[0] === a && line.ends[1] === b)?.change;
+};
+/** The word a Map diff's tag writes on a plate's edge. */
+export const tagWord = (tag: MapTag): string => ({ added: "New", removed: "Gone", edited: "Edited" })[tag];

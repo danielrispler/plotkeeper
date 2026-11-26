@@ -1071,6 +1071,27 @@ mark.drawer-line .drawer-n::before { content: "→ " / ""; color: var(--fg); }
    its red edge inside the ring. */
 .plate.turn-lit { box-shadow: inset 0 0 0 var(--hair) var(--ring-warm), 0 0 0 var(--sp-2) color-mix(in srgb, var(--ring-warm) 35%, transparent), var(--shadow); }
 .plate.broken.turn-lit { box-shadow: inset 0 0 0 var(--hair) var(--conflict), 0 0 0 var(--sp-2) color-mix(in srgb, var(--ring-warm) 35%, transparent), var(--shadow); }
+/* The Map diff (#640), drawn on today's map while a PR brief plays: outlines and words, never a box-shadow, so they survive forced colours, and
+   no hue, so colour still means "needs you". A new part: lighter fill, firm edge and "New"; a removed one: a hollow dashed ghost, its name
+   and caption struck, and "Gone"; an edited one: "Edited". A new line is bright and thick, a removed one dashed; an added law has a ring
+   around its diamond, a removed one is a faint hollow diamond. */
+.plate.d-added { background: var(--diff-new-fill); outline: var(--mark) solid var(--diff-new-edge); }
+.plate.d-removed { background: transparent; box-shadow: none; outline: var(--hair) dashed var(--muted); }
+.plate.d-removed .plate-name, .plate.d-removed .plate-caption { text-decoration: line-through; color: var(--faint); }
+.plate-tag { position: absolute; top: calc(-1 * var(--diff-tag-line) / 2); left: var(--sp-5); padding: 0 var(--sp-3); border: var(--hair) solid var(--diff-tag-edge);
+             border-radius: var(--radius-small); background: var(--map-bg); font-size: var(--diff-tag-size); font-weight: 600; letter-spacing: .1em;
+             text-transform: uppercase; line-height: var(--diff-tag-line); color: var(--fg); }
+.plate.d-removed .plate-tag { color: var(--muted); }
+.map-links .link.d-added { stroke: var(--diff-link-new); stroke-width: var(--diff-link-width); }
+.map-links .link.d-removed { stroke: var(--diff-link-gone); stroke-dasharray: var(--diff-dash); }
+.law-mark.d-added { outline: var(--hair) solid var(--fg); outline-offset: var(--diff-ring); }
+.law-mark.d-removed { background: none; box-shadow: none; outline: var(--hair) solid var(--faint); outline-offset: calc(-1 * var(--hair)); opacity: var(--diff-gone-mark); }
+.link-ring { fill: none; stroke: var(--fg); stroke-width: var(--hair); }
+.link-mark.d-removed { fill: var(--map-bg); stroke: var(--faint); stroke-width: var(--hair); opacity: var(--diff-gone-mark); }
+.actor.d-added { color: var(--fg); }
+.actor.d-removed { text-decoration: line-through; }
+/* A ghost the brief lights keeps its dashed outline outside the warm ring, so "gone" survives exactly when the brief points at it. */
+.map-world.briefing .plate.d-removed.lit { outline-offset: var(--diff-ghost-gap); }
 .plate.arrive { animation: brief-arrive var(--brief-arrive); }
 .plate.pick { cursor: pointer; }
 .plate.picked { box-shadow: inset 0 0 0 var(--mark) var(--brief-light), var(--shadow); animation: brief-arrive var(--brief-arrive); }

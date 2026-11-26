@@ -20,10 +20,10 @@
 import { logStop, reviewNode, reviewOf } from "./stop-rules.js";
 import { element, failure, hint, invoke, keyed, listen, mark, newest, pageStore, pressable, svg, text } from "./dom.js";
 import { cameraRig, type CameraRig, fitCamera, panTo, revealPan, zoomAt } from "./map-camera.js";
-import { autoPlace, brokenParts, brokenText, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Drag, type Law, type Layer, type LayerName, type MapDoc, startProject, switchProject, parseMap, type Part, type Point, plateSize, plateTitle, sizeOf, linkLines, markPoints, readingOrder, rimPoint, type Scrub, type Tier } from "./map-model.js";
+import { brokenParts, brokenText, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Drag, type Law, type Layer, type LayerName, type MapDoc, startProject, switchProject, parseMap, type Part, type Point, placement, plateSize, plateTitle, sizeOf, lineTag, linkLines, markPoints, readingOrder, rimPoint, type Scrub, tagWord, type Tier } from "./map-model.js";
 import { recheckSeen } from "./seen.js";
 import { knownProjects, projectGone } from "./projects.js";
-import type { Camera, MapState } from "./types.js";
+import type { Camera, MapDiff, MapState } from "./types.js";
 
 export type LoadedMap = Extract<MapDoc, { ok: true }>;
 /** What the view holds once a map loaded: its payload, the map as parsed, and every id's centre in the world. */
@@ -34,6 +34,8 @@ export type MapView = {
   positions: Record<string, Point>;
   // The past commit this view shows read-only (no fog, no live agents, no CI), null when it shows now (ticket #313).
   scrub: Scrub | null;
+  // The Map diff drawn on today's map while a PR brief plays (#640), null when the map shows only now.
+  diff: MapDiff | null;
   slots: { canvas: HTMLElement; side: HTMLElement; notPlaced: HTMLElement; tray: HTMLElement; runs: HTMLElement; sheet: HTMLElement; drawer: HTMLElement; banner: HTMLElement };
 };
 export type PlateContext = { view: MapView; part: Part; tier: Tier; plate: HTMLElement; fog: HTMLElement; marks: HTMLElement; chips: HTMLElement };
@@ -74,6 +76,8 @@ let scrub: Scrub | null = null;
 let rig: CameraRig | null = null;
 // The sheet's part the camera last revealed, so a later draw does not pan Daniel's view back to it.
 let revealed: string | null = null;
+// The Map diff drawn on today's map (#640): set by a PR brief whose PR changed the map, for the whole brief; a scrub's past map draws without it.
+let diff: MapDiff | null = null;
 
 /** The map is the page's base (#386): the body carries `map-open` from the start and never loses it. */
 export const mapShown = () => document.body?.classList.contains("map-open") === true;
@@ -85,6 +89,13 @@ export const currentScrub = (): Scrub | null => scrub;
 /** Shows the map as of `to` read-only, or now again with null (the one setter of a scrub: `scrubTo` in `map-history.ts` calls it). */
 export function setScrub(to: Scrub | null) {
   scrub = to;
+  draw();
+}
+
+/** Draws a PR's Map diff on today's map, or now alone again with null (the PR brief, `map-brief.ts`, sets it while it plays). */
+export function setDiff(to: MapDiff | null) {
+  if (to === diff) return;
+  diff = to;
   draw();
 }
 
@@ -110,7 +121,7 @@ export function openMap(path: string | null) {
   if (path !== project) {
     // A PR brief and the pre-flight belong to the project they opened on; the next may have no map to draw, so they close here, not by a draw.
     switchProject(layers);
-    [scrub, rig, revealed] = [null, null, null];
+    [scrub, rig, revealed, diff] = [null, null, null, null];
   }
   project = path;
   loaded = null;
@@ -348,13 +359,20 @@ function drawLinks(layer: Element, view: MapView) {
     if (!from || !to) continue;
     const a = rimPoint(from, sizeOf(view.doc, line.from), to);
     const b = rimPoint(to, sizeOf(view.doc, line.to), from);
-    nodes.push(svg("line", { class: "link", "data-link": line.ids.join(" "), "data-from": line.from, x1: String(a.x), y1: String(a.y), x2: String(b.x), y2: String(b.y) }));
+    // A Map diff's new line is bright and thick, its removed one dashed (#640); a line on both sides keeps the plain stroke.
+    const tag = lineTag(view.diff, line.from, line.to);
+    nodes.push(svg("line", { class: `link${tag ? ` d-${tag}` : ""}`, "data-link": line.ids.join(" "), "data-from": line.from, x1: String(a.x), y1: String(a.y), x2: String(b.x), y2: String(b.y) }));
     const laws = view.doc.laws.filter((law) => line.ids.includes(law.on));
     const points = markPoints(a, b, laws.length);
     laws.forEach((law, i) => {
       const at = points[i];
       if (!at) return;
-      nodes.push(linkMark(line.ids, law, at));
+      const lawTag = view.diff?.laws[law.id];
+      // An added law's ring around its diamond, drawn under it.
+      if (lawTag === "added") nodes.push(svg("rect", { class: "link-ring", width: "13", height: "13", x: "-6.5", y: "-6.5", transform: `translate(${at.x} ${at.y}) rotate(45)` }));
+      const diamond = linkMark(line.ids, law, at);
+      if (lawTag) diamond.classList.add(`d-${lawTag}`);
+      nodes.push(diamond);
     });
   }
   layer.replaceChildren(...nodes);
@@ -366,18 +384,20 @@ const place = (node: HTMLElement, at: Point) => {
 };
 
 // The positions of the parts and actors: the saved ones, and the rest placed once. A past commit's map is read-only: what it places is
-// not saved.
-function placeAll(state: MapState, doc: LoadedMap, past: Scrub | null) {
+// not saved. In a Map diff (#640) an added part's spot is saved too, so it stays put once the PR lands; a ghost keeps the spot it had, or
+// gets one that is not saved.
+function placeAll(state: MapState, doc: LoadedMap, past: Scrub | null, shown: MapDiff | null) {
   const saved = Object.fromEntries(Object.entries(state.user.positions).map(([id, [x, y]]) => [id, { x, y }]));
   const items = [...doc.parts, ...doc.actors];
-  const added = autoPlace(items, doc.links, saved);
-  if (Object.keys(added).length && !past) {
+  const ghosts = shown ? [...Object.entries(shown.parts), ...Object.entries(shown.actors)].flatMap(([id, tag]) => (tag === "removed" ? [id] : [])) : [];
+  const { at, save } = placement(items, doc.links, saved, past ? items.map((item) => item.id) : ghosts);
+  if (Object.keys(save).length) {
     // Saved the first time they are placed, so they never move again on their own.
-    const stored = Object.fromEntries(Object.entries(added).map(([id, at]) => [id, [at.x, at.y] as [number, number]]));
+    const stored = Object.fromEntries(Object.entries(save).map(([id, spot]) => [id, [spot.x, spot.y] as [number, number]]));
     state.user.positions = { ...state.user.positions, ...stored };
     invoke("map_save_positions", { project: state.project, positions: stored }).catch(failure("map_save_positions"));
   }
-  return { ...saved, ...added };
+  return at;
 }
 
 // A part's plate: its tier and fog, its laws' marks and a broken law's, and its button. A past commit's parts get no fog or broken-law
@@ -387,10 +407,17 @@ function plateNode(part: Part, current: MapView, links: SVGElement, fit: () => v
   const tier = effectiveTier(part, state.user.tiers);
   // Fog under Daniel's effective tier, as the server worked it out (`fog.rs`); a part not listed is clear.
   const mist = past ? undefined : state.fog?.[part.id];
-  const plate = text("div", "", `plate tier-${tier}${mist ? ` fog-${mist}` : ""}`);
+  // A Map diff's tag (#640): a class for the plate's outline and a word over its top edge.
+  const tag = current.diff?.parts[part.id];
+  const plate = text("div", "", `plate tier-${tier}${mist ? ` fog-${mist}` : ""}${tag ? ` d-${tag}` : ""}`);
   plate.dataset.id = part.id;
   const [fog, marks, chips] = [text("div", "", "plate-fog"), text("div", "", "plate-marks"), text("div", "", "plate-chips")];
-  marks.append(...doc.laws.filter((law) => law.on === part.id).map((law) => lawMark(law, `plate-${part.id}-${law.id}`)));
+  marks.append(...doc.laws.filter((law) => law.on === part.id).map((law) => {
+    const node = lawMark(law, `plate-${part.id}-${law.id}`);
+    const lawTag = current.diff?.laws[law.id];
+    if (lawTag) node.classList.add(`d-${lawTag}`);
+    return node;
+  }));
   // A test that backs a law failed on main: one coarse mark, never naming the law. Red, beside Needs you the only loud colour.
   if (!past && brokenParts(state.ci).has(part.id)) {
     marks.append(brokenMark(part.id));
@@ -399,6 +426,8 @@ function plateNode(part: Part, current: MapView, links: SVGElement, fit: () => v
   // The keyboard's way in (#460): a real button over the text area, named by the name and caption, beside the chips rather than around
   // them. Its click reaches the plate's own, so Enter and Space open the sheet, or answer a brief's order question, as a tap does.
   const open = pressable(text("button", "", "btn plate-open"), null);
+  // The tag's word is the button's first, so the part's name reads after it ("New Install").
+  if (tag) open.append(text("span", tagWord(tag), "plate-tag"));
   open.append(text("span", part.name, "plate-name"), text("span", part.caption, "plate-caption"));
   plate.append(fog, open, marks, chips);
   open.dataset.key = `plate ${part.id}`;
@@ -410,14 +439,14 @@ function plateNode(part: Part, current: MapView, links: SVGElement, fit: () => v
 }
 
 // Draws the parts as plates, the actors as labels and the links between them, placing what has no saved position once.
-function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub | null) {
-  const positions = placeAll(state, doc, past);
+function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub | null, shown: MapDiff | null) {
+  const positions = placeAll(state, doc, past, shown);
   const canvas = text("div", "", "map-canvas");
   const world = text("div", "", "map-world");
   const links = svg("svg", { class: "map-links", "aria-hidden": "true" });
   world.append(links);
   const slots = { canvas, side: element("map-side"), notPlaced: element("map-not-placed"), tray: element("map-tray"), runs: element("map-runs"), sheet: element("map-sheet"), drawer: element("map-drawer"), banner: element("map-banner") };
-  const current: MapView = { project: state.project, state, doc, positions, scrub: past, slots };
+  const current: MapView = { project: state.project, state, doc, positions, scrub: past, diff: shown, slots };
 
   const fit = () => {
     const reach = Object.entries(positions).map(([id, at]) => ({ x: at.x + sizeOf(current.doc, id).w / 2, y: at.y + sizeOf(current.doc, id).h / 2 }));
@@ -441,7 +470,8 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub
     elements.push(plate);
   }
   for (const actor of doc.actors) {
-    const label = text("div", actor.name, "actor");
+    const actorTag = shown?.actors[actor.id];
+    const label = text("div", actor.name, `actor${actorTag ? ` d-${actorTag}` : ""}`);
     label.dataset.id = actor.id;
     grab(label, actor.id, current, links, fit, () => {});
     nodes.set(actor.id, label);
@@ -584,8 +614,10 @@ function draw() {
   element("map-legend").hidden = loaded?.status !== "loaded";
   const body = element("map-body");
   const past = loaded?.status === "loaded" ? scrub : null;
-  const doc = loaded?.status === "loaded" && loaded.source !== null ? parseMap(past?.source ?? loaded.source) : null;
-  if (loaded && doc?.ok) return drawMap(body, loaded, doc, past);
+  // A Map diff draws its own copy of today's map, with the PR's added and removed items in it; a past commit draws without it.
+  const shown = loaded?.status === "loaded" && !past && diff?.source ? diff : null;
+  const doc = loaded?.status === "loaded" && loaded.source !== null ? parseMap(past?.source ?? shown?.source ?? loaded.source) : null;
+  if (loaded && doc?.ok) return drawMap(body, loaded, doc, past, shown);
   view = null;
   const unreadable = loaded && doc && !doc.ok ? { ...loaded, status: "unreadable" as const, note: doc.why } : loaded;
   drawEmpty(body, unreadable);

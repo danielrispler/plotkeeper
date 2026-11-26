@@ -67,4 +67,9 @@
   --foot-firm: #e7e5dfb0; --foot-faint: #e7e5df40; --foot-arm: 14px; --foot-gap: 7px;
   /* Session badges (#562): a count at a plate's foot, dimmed to about a third while another session is spotlit; its list's width. */
   --badge: 20px; --badge-dim: .33; --badge-list: 320px;
+  /* The Map diff (#640, treatment B of spec #634's prototype): no hue, only brightness, line style and words. A new part's lighter fill and firm
+     edge in the text tone; a new line bright and thick, a removed one faint and dashed; the word over a plate's top edge, on the map's ground.
+     A lit ghost's dashed outline sits outside the brief's warm halo (--sp-2) by --diff-ghost-gap. */
+  --diff-new-fill: #303237; --diff-new-edge: var(--fg); --diff-link-new: #ffffffb3; --diff-link-gone: #ffffff45; --diff-link-width: 2.5px; --diff-dash: 5 5;
+  --diff-tag-size: 10.5px; --diff-tag-line: 17px; --diff-tag-edge: #ffffff40; --diff-ring: 3px; --diff-ghost-gap: 5px; --diff-gone-mark: .6;
 }

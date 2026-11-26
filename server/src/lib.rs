@@ -37,6 +37,7 @@ pub mod install;
 mod json_file;
 pub mod lock;
 pub mod map;
+pub mod map_diff;
 pub mod micro_worlds;
 pub mod part_catch_ups;
 pub mod pr_briefs;
