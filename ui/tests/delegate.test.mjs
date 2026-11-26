@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -485,6 +485,23 @@ test("run: a worker that pulls the moved integration branch gives pass, not stop
   const ran = scratchRun().run({ FAKE_OPENCODE: "pull" });
   assert.equal(ran.status, 0, ran.stderr);
   assert.match(ran.stdout, /^pass\n/);
+});
+
+/** A PATH with the stand-ins and node only, so that a stand-in removed from `bin` is missing, never the real one. */
+const bare = (dir) => {
+  mkdirSync(join(dir, "node-bin"));
+  symlinkSync(process.execPath, join(dir, "node-bin/node"));
+  return `${join(dir, "bin")}:${join(dir, "node-bin")}:/usr/bin:/bin`;
+};
+
+test("run: with opencode missing, the run could not start: exit 1, and no worktree or branch left", () => {
+  const scratch = scratchRun();
+  rmSync(join(scratch.dir, "bin/opencode"));
+  const ran = scratch.run({ FAKE_OPENCODE: "edit", PATH: bare(scratch.dir) });
+  assert.equal(ran.status, 1, ran.stderr);
+  assert.match(ran.stderr, /^could not start: opencode .*ENOENT/);
+  assert.equal(ran.stdout, "");
+  gone(scratch);
 });
 
 test("run: a leftover issue-<n>-cheap worktree and branch are removed first", () => {

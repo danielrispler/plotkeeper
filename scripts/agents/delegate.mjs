@@ -382,8 +382,9 @@ const attempt = async (worktree, { candidate, effort, base, integration, title, 
     }
     return last({ result: "pass", stat: git(worktree, "diff", "--stat", `origin/${integration}`, "HEAD") });
   } catch (error) {
-    // The worker ran, so the run started: a failure now is an error attempt, and escalates.
-    if (!(error instanceof CouldNotStart)) throw error;
+    // Once a worker ran, the run started: a failure then is an error attempt, and escalates. One that never ran, such
+    // as an `opencode` that is missing, means the run could not start.
+    if (!(error instanceof CouldNotStart) || !runs.length) throw error;
     return last({ result: "error", escalate: `error: ${error.message}` });
   }
 };
