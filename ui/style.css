@@ -1200,6 +1200,9 @@ mark.drawer-line .drawer-n::before { content: "→ " / ""; color: var(--fg); }
 .hint { position-area: block-start; position-try-fallbacks: flip-block; inset: auto; margin-block: var(--hint-gap); margin-inline: 0; width: max-content; max-width: var(--hint);
         padding: var(--sp-2) var(--sp-4); border: var(--hair) solid var(--line); border-radius: var(--radius-small); background: var(--raised); color: var(--fg);
         box-shadow: var(--shadow); font-size: var(--size-small); line-height: 1.4; white-space: pre-line; overflow-wrap: anywhere; }
+/* A hint given the start placement (`hint(…, "start")`, spec #658), as the session list's are: at its trigger's inline start, level with it,
+   flipping to its end when the window leaves no room, so it covers none of the rows above and below. */
+.hint[data-place="start"] { position-area: inline-start; position-try-fallbacks: flip-inline; margin-block: 0; margin-inline: var(--hint-gap); }
 
 /* Cut text scrolls in place (spec #582): a `.cut` element, made by `cut()` in dom.ts, is one line the layout ends in an ellipsis (its own rule
    above does that, with `overflow: hidden`) and keeps its text whole in an inner span. Its own inline scroll timeline sets --truncated only
