@@ -1,7 +1,7 @@
 // The page's key mapping (danielrispler/Falinks#461, decision 7; #326): pure functions from a key event to the action it
 // triggers. The shortcuts come from `keymap.json` (danielrispler/Falinks#524).
 
-import { type Binding, initial, type Keymap, MODIFIERS } from "./settings.js";
+import { type Binding, defaultsFor, type Keymap, MODIFIERS, type Platform, platform } from "./settings.js";
 
 // The fields of a `KeyboardEvent` the mapping reads.
 export interface Key {
@@ -32,15 +32,26 @@ export function keystroke({ code, metaKey, ctrlKey, altKey, shiftKey }: Key): st
 // The action `key` triggers in `context` of `keymap`.
 export const bound = (keymap: Keymap, context: string, key: Key): Binding | undefined => keymap.get(context)?.get(keystroke(key));
 
+// The platform's shortcut modifier held: Cmd on macOS, Ctrl elsewhere (#705).
+export const primary = (key: Pick<Key, "metaKey" | "ctrlKey">, on: Platform = platform): boolean => (on === "mac" ? key.metaKey : key.ctrlKey);
+
+// Ctrl's text meanings in a field on Linux: select all, copy, paste, cut, undo, redo, and moving or deleting by word or to the
+// ends, with Shift too. A binding on one of them never takes the key from the field (#705).
+const editing = new Set(["a", "c", "v", "x", "z", "y", "left", "right", "up", "down", "home", "end", "backspace", "delete"]);
+const edits = (key: Key) => key.ctrlKey && !key.altKey && !key.metaKey && editing.has(keystroke(key).replace(/^ctrl-(shift-)?/, ""));
+
 // The window's action for `key`; `inList`: the session list has focus, so its own keys come first.
-// While typing in a field, a binding without Cmd leaves the key to it; only Dismiss runs, since it does not take the key.
+// While typing in a field, a binding without the platform's modifier (Cmd, or Ctrl off macOS) leaves the key to it; only Dismiss
+// runs, since it does not take the key. Off macOS the text-editing Ctrl keys stay the field's too.
 // The answer keys answer only while `answerable`: focus is outside text fields, and the docked card is on screen
-// (danielrispler/Falinks#575, decision 7). A held key without Cmd runs once, but the arrows step on while held (spec #658).
-export function windowBinding(keymap: Keymap, key: Key, typing: boolean, inList = false, answerable = false): Binding | undefined {
-  if (key.repeat && !key.metaKey && !key.code.startsWith("Arrow")) return undefined;
+// (danielrispler/Falinks#575, decision 7). A held key without the modifier runs once, but the arrows step on while held (spec #658).
+export function windowBinding(keymap: Keymap, key: Key, typing: boolean, inList = false, answerable = false, on: Platform = platform): Binding | undefined {
+  const held = primary(key, on);
+  if (key.repeat && !held && !key.code.startsWith("Arrow")) return undefined;
   const action = (inList ? bound(keymap, "List", key) : undefined) ?? bound(keymap, "Workspace", key);
   if (Array.isArray(action) && action[0] === "studio::Answer" && !answerable) return undefined;
-  return typing && !key.metaKey && action !== "studio::Dismiss" ? undefined : action;
+  if (typing && on !== "mac" && edits(key)) return undefined;
+  return typing && !held && action !== "studio::Dismiss" ? undefined : action;
 }
 
 // The window's actions by name (danielrispler/Falinks#575); an action with an argument, such as `["studio::Answer", "1"]`,
@@ -86,22 +97,25 @@ export function newestUnseen(sessions: { id: string; unseen?: boolean; last_even
 }
 
 const symbols: Record<string, string> = { ctrl: "⌃", alt: "⌥", shift: "⇧", cmd: "⌘", up: "↑", down: "↓", left: "←", right: "→", escape: "Esc", enter: "↩", backspace: "⌫", tab: "⇥", space: "Space" };
+// Off macOS, keys are named as Linux desktops write them, "Ctrl+Shift+P"; Cmd is the Super key there.
+const linuxNames: Record<string, string> = { ctrl: "Ctrl", alt: "Alt", shift: "Shift", cmd: "Super", up: "↑", down: "↓", left: "←", right: "→", escape: "Esc", enter: "Enter", backspace: "Backspace", tab: "Tab", space: "Space" };
 
-// A keystroke as macOS menus show it: "cmd-shift-p" is "⇧⌘P".
-export function keyLabel(stroke: string): string {
+// A keystroke as `on`'s menus show it: "cmd-shift-p" is "⇧⌘P" on macOS, "ctrl-shift-p" is "Ctrl+Shift+P" on Linux.
+export function keyLabel(stroke: string, on: Platform = platform): string {
   const [, mods = "", name = stroke] = new RegExp(`^((?:(?:${MODIFIERS.join("|")})-)*)(.+)$`).exec(stroke) ?? [];
-  return [...MODIFIERS.filter((m) => mods.includes(`${m}-`)), name].map((part) => symbols[part] ?? part.toUpperCase()).join("");
+  const words = on === "mac" ? symbols : linuxNames;
+  return [...MODIFIERS.filter((m) => mods.includes(`${m}-`)), name].map((part) => words[part] ?? part.toUpperCase()).join(on === "mac" ? "" : "+");
 }
 
-// The keys `keymap` binds `name` to now, as macOS menus show them, each once.
-export const keysOf = (keymap: Keymap, name: string): string[] => [
+// The keys `keymap` binds `name` to now, as `on`'s menus show them, each once.
+export const keysOf = (keymap: Keymap, name: string, on: Platform = platform): string[] => [
   ...new Set([...keymap.values()].flatMap((bindings) =>
-    [...bindings].filter(([, binding]) => (typeof binding === "string" ? binding : binding[0]) === name).map(([stroke]) => keyLabel(stroke)))),
+    [...bindings].filter(([, binding]) => (typeof binding === "string" ? binding : binding[0]) === name).map(([stroke]) => keyLabel(stroke, on)))),
 ];
 
 // `label` with the keys `keymap` binds `name` to now, as "Settings (⌘,)"; the bare label when none.
-export function titled(keymap: Keymap, label: string, name: string): string {
-  const keys = keysOf(keymap, name);
+export function titled(keymap: Keymap, label: string, name: string, on: Platform = platform): string {
+  const keys = keysOf(keymap, name, on);
   return keys.length ? `${label} (${keys.join(", ")})` : label;
 }
 
@@ -117,7 +131,7 @@ export type Entry = { binding: Binding; title: string; keys: string[]; note?: st
 
 // The palette (danielrispler/Falinks#575): every action in `actions` that the window runs, in the keymap's order, each with
 // the keys `keymap` binds it to now. An action unbound since, or never bound, is listed with none.
-export function paletteEntries(keymap: Keymap, actions: string[]): Entry[] {
+export function paletteEntries(keymap: Keymap, actions: string[], on: Platform = platform): Entry[] {
   const entries = new Map<string, Entry>();
   const add = (binding: Binding) => {
     const id = JSON.stringify(binding);
@@ -125,8 +139,8 @@ export function paletteEntries(keymap: Keymap, actions: string[]): Entry[] {
     if (actions.includes(name) && !entries.has(id)) entries.set(id, { binding, title: title(binding), keys: [] });
     return entries.get(id);
   };
-  for (const map of [initial.keymap, keymap]) for (const bindings of map.values()) for (const binding of bindings.values()) add(binding);
-  for (const bindings of keymap.values()) for (const [stroke, binding] of bindings) add(binding)?.keys.push(keyLabel(stroke));
+  for (const map of [defaultsFor(on).keymap, keymap]) for (const bindings of map.values()) for (const binding of bindings.values()) add(binding);
+  for (const bindings of keymap.values()) for (const [stroke, binding] of bindings) add(binding)?.keys.push(keyLabel(stroke, on));
   const named = new Set([...entries.values()].map((entry) => (typeof entry.binding === "string" ? entry.binding : entry.binding[0])));
   for (const name of actions) if (!named.has(name)) add(name);
   return [...entries.values()];

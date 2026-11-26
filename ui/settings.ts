@@ -59,10 +59,28 @@ const defaultSettings: Settings = {
   tips: true,
 };
 
+/** The page's platform: "mac" takes Cmd shortcuts, shown as macOS glyphs; "linux", any other, takes Ctrl (spec #510, #705). */
+export type Platform = "mac" | "linux";
+/** The platform `name` names, as `navigator.platform` ("MacIntel", "Linux x86_64") or `navigator.userAgentData.platform` ("macOS") writes it. */
+export const platformOf = (name: string): Platform => (/^mac/i.test(name) ? "mac" : "linux");
+const browser = (globalThis as { navigator?: { platform?: string; userAgentData?: { platform?: string } } }).navigator;
+/** The platform this page runs on. */
+export const platform: Platform = platformOf(browser?.userAgentData?.platform || browser?.platform || "mac");
+
 // Today's shortcuts. "List" holds the keys of the session list while it has focus, over the page's (danielrispler/Falinks#575).
 const keymapOf = (contexts: Record<string, Record<string, Binding>>): Keymap =>
   new Map(Object.entries(contexts).map(([context, bindings]) => [context, new Map(Object.entries(bindings))]));
-const defaultKeymap: Keymap = keymapOf({
+const answers: Record<string, Binding> = {
+  "1": ["studio::Answer", "1"],
+  "2": ["studio::Answer", "2"],
+  "3": ["studio::Answer", "3"],
+  "4": ["studio::Answer", "4"],
+};
+const list: Record<string, Binding> = {
+  down: "studio::SelectNext",
+  up: "studio::SelectPrevious",
+};
+const macKeymap: Keymap = keymapOf({
   Workspace: {
     // Single keys, off Chrome's ⌘1, ⌘2 and ⌘0 (spec #658); like every binding without Cmd, they leave the key to a text field.
     "[": "studio::ToggleList",
@@ -75,10 +93,7 @@ const defaultKeymap: Keymap = keymapOf({
     "cmd-[": "studio::PreviousSession",
     "cmd-j": "studio::NextNeedsYou",
     "shift-cmd-u": "studio::JumpToUnseen",
-    "1": ["studio::Answer", "1"],
-    "2": ["studio::Answer", "2"],
-    "3": ["studio::Answer", "3"],
-    "4": ["studio::Answer", "4"],
+    ...answers,
     // Back to the map (#386): closes the left panel. The old Home key and the old Map key are both this one action.
     "shift-cmd-h": "studio::ShowMap",
     "shift-cmd-m": "studio::ShowMap",
@@ -87,13 +102,35 @@ const defaultKeymap: Keymap = keymapOf({
     // Modifiers in `MODIFIERS` order, as a keystroke reads.
     "shift-cmd-p": "studio::Palette",
   },
-  List: {
-    down: "studio::SelectNext",
-    up: "studio::SelectPrevious",
+  List: list,
+});
+// Linux's: the macOS keys on Ctrl, Super being the desktop's, and new keys where Ctrl's would be the browser's or the desktop's
+// (#705; `ui/tests/keys.test.mjs` lists those keys).
+const linuxKeymap: Keymap = keymapOf({
+  Workspace: {
+    "[": "studio::ToggleList",
+    "]": "studio::ToggleRail",
+    escape: "studio::Dismiss",
+    // Chrome's Ctrl+Shift+Enter opens the address bar's site in a new window.
+    "ctrl-shift-f": "studio::ToggleFocus",
+    "ctrl-]": "studio::NextSession",
+    "ctrl-[": "studio::PreviousSession",
+    // Chrome's Ctrl+J opens Downloads; IBus's Ctrl+Shift+U types a Unicode character. The key beside ].
+    "ctrl-\\": "studio::NextNeedsYou",
+    "ctrl-shift-\\": "studio::JumpToUnseen",
+    ...answers,
+    // Chrome's Ctrl+Shift+M switches profiles; Firefox's Ctrl+Shift+H opens its history.
+    "ctrl-shift-l": "studio::ShowMap",
+    "0": "studio::FitMap",
+    // Firefox's Ctrl+Shift+P opens a private window.
+    "ctrl-shift-space": "studio::Palette",
   },
+  List: list,
 });
 
-export const initial: Files = { settings: defaultSettings, keymap: defaultKeymap, errors: [], broken: false };
+/** The settings and keymap a fresh install has on `on`. */
+export const defaultsFor = (on: Platform): Files => ({ settings: defaultSettings, keymap: on === "mac" ? macKeymap : linuxKeymap, errors: [], broken: false });
+export const initial: Files = defaultsFor(platform);
 
 // Drops comments and trailing commas outside strings, so `JSON.parse` reads Zed's format.
 function parseJsonc(text: string): unknown {
@@ -162,7 +199,7 @@ const isBinding = (v: unknown): v is Binding =>
 
 // Zed's keymap: an array of `{ "context", "bindings" }`, over the defaults. Unlike Zed, binding an
 // action to a new key unbinds its default keys, so a rebound shortcut moves; `null` unbinds a key.
-function readKeymap(json: unknown, report: Report): Keymap {
+function readKeymap(json: unknown, report: Report, defaultKeymap: Keymap): Keymap {
   if (!Array.isArray(json)) throw new Error("expected an array");
   const keymap = new Map([...defaultKeymap].map(([context, bindings]) => [context, new Map(bindings)]));
   for (const entry of json) {
@@ -193,8 +230,8 @@ function readKeymap(json: unknown, report: Report): Keymap {
 }
 
 
-/** The settings files from their text, each falling back to `previous` when it does not parse. */
-export function reload(previous: Files, files: SettingsFiles): Files {
+/** The settings files from their text, over `on`'s defaults, each falling back to `previous` when it does not parse. */
+export function reload(previous: Files, files: SettingsFiles, on: Platform = platform): Files {
   const errors: string[] = [];
   let broken = false;
   const read = <T>(name: string, text: string | null, parse: (json: unknown, report: Report) => T, fallback: T, last: T): T => {
@@ -208,6 +245,7 @@ export function reload(previous: Files, files: SettingsFiles): Files {
     }
   };
   const settings = read("settings.json", files.settings, readSettings, defaultSettings, previous.settings);
-  const keymap = read("keymap.json", files.keymap, readKeymap, defaultKeymap, previous.keymap);
+  const defaultKeymap = defaultsFor(on).keymap;
+  const keymap = read("keymap.json", files.keymap, (json, report) => readKeymap(json, report, defaultKeymap), defaultKeymap, previous.keymap);
   return { settings, keymap, errors, broken };
 }
