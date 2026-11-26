@@ -2,6 +2,7 @@
 
 mod binary;
 mod common;
+mod dart;
 mod dotnet;
 mod edges;
 mod go;
@@ -11,5 +12,6 @@ mod laws;
 mod map_file;
 mod ownership;
 mod parts;
+mod php;
 mod python;
 mod touched;

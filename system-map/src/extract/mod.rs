@@ -5,10 +5,13 @@
 mod cargo;
 #[cfg(test)]
 mod contract;
+mod dart;
 mod dotnet;
+mod folders;
 mod go;
 mod java;
 mod names;
+mod php;
 mod python;
 pub(crate) mod registry;
 mod rust_modules;
@@ -23,6 +26,7 @@ use std::{
 use serde::Serialize;
 
 use crate::PartFiles;
+use folders::folder_of;
 
 /// A reader of one language's code, or of one kind of build manifest.
 pub(crate) trait Extractor {
@@ -65,6 +69,8 @@ pub(crate) struct Repo<'a> {
     cargo_dir: OnceCell<Result<tempfile::TempDir, String>>,
     /// In commit mode, whether the commit's toolchain file goes in that folder: only for a commit plotkeeper trusts.
     trusted: bool,
+    /// `php-imports`' index of the tracked `composer.json` files, built on first use.
+    autoload: OnceCell<php::Autoload>,
 }
 
 impl<'a> Repo<'a> {
@@ -84,6 +90,7 @@ impl<'a> Repo<'a> {
             texts: None,
             cargo_dir: OnceCell::new(),
             trusted: true,
+            autoload: OnceCell::new(),
         }
     }
 
@@ -132,6 +139,12 @@ impl<'a> Repo<'a> {
             .map_err(Clone::clone)
     }
 
+    /// What the tracked `composer.json` files map, read from the same texts as everything else, so in commit mode from
+    /// the commit's; built on first use and kept, since `skips` asks for it once per file.
+    pub(crate) fn autoload(&self) -> &php::Autoload {
+        self.autoload.get_or_init(|| php::Autoload::build(self))
+    }
+
     /// Every tracked file, sorted.
     pub(crate) fn files(&self) -> &BTreeSet<&'a str> {
         &self.files
@@ -162,7 +175,7 @@ pub(crate) struct Pair {
     /// The lines of `from` that make the pair, each an import site (spec #477, "What an import site is"): a `use` line
     /// once however many names it brings in, an inline path once per line. Empty when the extractor finds no line.
     pub(crate) lines: BTreeSet<u32>,
-    /// A crate root's `mod` line: kept for the check, left out of the imports report.
+    /// A crate root's `mod` line or a Dart library's `part` line: kept for the check, left out of the imports report.
     pub(crate) declaration: bool,
     /// The one target an import named that covers several files (a Go package's folder, say): the imports report
     /// counts the pairs of one import of it as one unit per part. None for a pair that is its own unit.
@@ -344,11 +357,6 @@ pub(crate) fn read_parts<'p>(
         })
         .map(|part| part.id.as_str())
         .collect()
-}
-
-/// The folder holding `file`, as a prefix: empty for the root, else ending in `/`.
-fn folder_of(file: &str) -> &str {
-    file.rfind('/').map_or("", |at| &file[..=at])
 }
 
 /// The name a folder's files go by as a pair's group: the folder, or `./` for the root.

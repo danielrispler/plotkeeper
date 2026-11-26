@@ -8,7 +8,9 @@ mod work;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    Extractor, Output, Pair, Repo, Unsure, folder_of, group,
+    Extractor, Output, Pair, Repo, Unsure,
+    folders::{folder_of, parent},
+    group,
     names::{Lookup, Names},
 };
 
@@ -85,14 +87,6 @@ fn excluded(path: &str) -> bool {
 /// build constraint can never hold with `ignore` off, as `go mod tidy` judges it (`build_tags`).
 fn skipped(text: &str, head: &Head) -> bool {
     head.package.as_deref() == Some("documentation") || build_tags::never_builds(text)
-}
-
-/// The folder above `folder`, or none for the root.
-fn parent(folder: &str) -> Option<&str> {
-    if folder.is_empty() {
-        return None;
-    }
-    Some(folder_of(&folder[..folder.len() - 1]))
 }
 
 /// The repository's modules: every folder holding a tracked `go.mod`, each one a module boundary, and the indexed ones'
