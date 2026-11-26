@@ -15,7 +15,7 @@
     "test": "npm run test:node",
     "test:node": "npm run build && npm run test:types && node --import ./ui/tests/on-mac.mjs --test ui/tests/*.test.mjs",
     "test:types": "tsc -p ui/tests",
-    "check": "cargo fmt --all --check && cargo machete && npm run lint && npm run build && knip --no-progress && cargo clippy --locked --workspace --all-targets -- -D warnings && rm -f scripts/wire/*.ts && cargo nextest run --locked --workspace --no-fail-fast && cargo run --locked -q -p studio-system-map -- check && tsc -p scripts/wire && npm run test:node"
+    "check": "cargo fmt --all --check && cargo machete && npm run lint && npm run build && knip --no-progress && cargo clippy --locked --workspace --all-targets -- -D warnings && rm -f scripts/wire/*.ts && cargo nextest run --locked --workspace && cargo run --locked -q -p studio-system-map -- check && tsc -p scripts/wire && npm run test:node"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.8",
