@@ -270,7 +270,8 @@ pub fn ask_later(app: &Arc<App>, trigger: Trigger, also: Option<&str>) {
     std::thread::spawn(move || {
         let mut projects = BTreeMap::<String, Vec<(String, String)>>::new();
         // Each branch is asked about under its session's project (spec #659), the project its row is listed under.
-        for query in app.core().branches() {
+        let branches = app.core().branches();
+        for query in branches {
             if !query.project.is_empty() {
                 (projects.entry(query.project).or_default()).push((query.cwd, query.branch));
             }
