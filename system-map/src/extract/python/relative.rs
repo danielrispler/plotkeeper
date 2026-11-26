@@ -66,10 +66,19 @@ impl Index<'_, '_> {
         if files.is_empty() {
             return Resolution::Nothing;
         }
+        // A renamed package is a root of its own whose top-level folder is the package's name, so a file under its folder
+        // sits one level deeper than the folders between it and the folder.
+        let renamed = self
+            .renamed
+            .values()
+            .filter_map(|(_, folder)| importer.strip_prefix(folder.as_str()))
+            .map(|rest| rest.matches('/').count() + 1);
         let depths: Vec<bool> = roots
             .iter()
             .filter_map(|root| importer.strip_prefix(root.as_str()))
-            .map(|rest| rest.matches('/').count() >= import.dots as usize)
+            .map(|rest| rest.matches('/').count())
+            .chain(renamed)
+            .map(|depth| depth >= import.dots as usize)
             .collect();
         if depths.iter().all(|&legal| legal) {
             Resolution::Pairs(files)

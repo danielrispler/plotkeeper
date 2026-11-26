@@ -2,6 +2,7 @@
 //! against the repository's roots and paired with the files the import runs (spec #589).
 
 mod doubt;
+mod layouts;
 mod reader;
 mod relative;
 mod stdlib;
@@ -9,6 +10,7 @@ mod stdlib;
 use std::{cell::RefCell, collections::BTreeMap, collections::BTreeSet};
 
 use doubt::Resolution;
+use layouts::{Layout, Reading};
 
 use super::{
     Extractor, Output, Pair, Repo, Unsure,
@@ -78,45 +80,72 @@ fn excluded(folder: &str) -> bool {
 /// The roots of the repository: the folders a top-level name resolves from, each a prefix, empty for the repository
 /// root, else ending in `/` (spec #589, "Roots").
 struct Roots {
-    /// The folders holding a tracked config outside the excluded folders and ignored paths, with the repository root.
-    projects: BTreeSet<String>,
+    /// The folders holding a tracked config outside the excluded folders and ignored paths, with the repository root,
+    /// each with the layout its configs declare.
+    projects: BTreeMap<String, Layout>,
 }
 
 impl Roots {
-    /// The roots of `repo`, and the problems of its configs: a `pyproject.toml` that does not parse.
-    fn read(repo: &Repo) -> (Roots, Vec<String>) {
-        let mut projects = BTreeSet::from([String::new()]);
-        let mut problems = Vec::new();
+    /// The roots of `repo`, the problems of its configs (a `pyproject.toml` that does not parse) and the notes on the
+    /// layout keys it did not read.
+    fn read(repo: &Repo) -> (Roots, Vec<String>, Vec<String>) {
+        let mut projects = BTreeMap::from([(String::new(), Layout::default())]);
+        let (mut problems, mut notes) = (Vec::new(), Vec::new());
         for file in repo.files() {
             let (folder, name) = (folder_of(file), file.rsplit('/').next().unwrap_or(file));
             if !CONFIGS.contains(&name) || excluded(folder) || repo.is_ignored(file) {
                 continue;
             }
-            projects.insert(folder.to_string());
-            if name == "pyproject.toml"
-                && let Some(text) = repo.read(file)
-                && let Err(e) = text.parse::<toml::Table>()
-            {
-                problems.push(format!(
-                    "{file}: not valid TOML; fix it or remove it: {}",
-                    e.message()
-                ));
+            let layout = projects.entry(folder.to_string()).or_default();
+            let Some(text) = repo.read(file) else {
+                continue;
+            };
+            let mut reading = Reading::new(folder, file);
+            match name {
+                "pyproject.toml" => match text.parse::<toml::Table>() {
+                    Ok(table) => reading.pyproject(&table),
+                    Err(e) => problems.push(format!(
+                        "{file}: not valid TOML; fix it or remove it: {}",
+                        e.message()
+                    )),
+                },
+                "setup.cfg" => {
+                    if let Err(line) = reading.setup_cfg(&text) {
+                        problems.push(format!(
+                            "{file}: line {line} comes before the first section header; fix it or remove the file"
+                        ));
+                    }
+                }
+                _ => reading.setup_py(&text),
             }
+            layout.merge(reading.layout);
+            notes.extend(reading.notes);
         }
-        (Roots { projects }, problems)
+        (Roots { projects }, problems, notes)
     }
 
-    /// Every root: each project folder and its `src/` when the repository tracks a file in it.
+    /// Every root: each project folder, and for each its declared folders, or else its `src/` when the repository tracks
+    /// a file in it.
     fn folders(&self, repo: &Repo) -> BTreeSet<String> {
         let mut roots = BTreeSet::new();
-        for project in &self.projects {
-            let src = format!("{project}src/");
-            if has_folder(repo, &src) {
-                roots.insert(src);
+        for (project, layout) in &self.projects {
+            match &layout.roots {
+                Some(declared) => roots.extend(declared.iter().cloned()),
+                None => {
+                    let src = format!("{project}src/");
+                    if has_folder(repo, &src) {
+                        roots.insert(src);
+                    }
+                }
             }
             roots.insert(project.clone());
         }
         roots
+    }
+
+    /// Each top-level name a project renames to a folder of its own, with the folder.
+    fn packages(&self) -> impl Iterator<Item = &(String, String)> {
+        self.projects.values().flat_map(|l| &l.packages)
     }
 }
 
@@ -145,13 +174,24 @@ struct Index<'r, 'a> {
     repo: &'r Repo<'a>,
     /// Each top-level name, with every root that holds something of that name.
     first: Names<String>,
+    /// Each renamed package's own root (see `Index::new`), with the name and folder it stands for.
+    renamed: BTreeMap<String, (String, String)>,
     /// Whether each `__init__.py` read so far only extends its `__path__` (see `doubt::extends_path_only`).
     namespace_inits: RefCell<BTreeMap<String, bool>>,
 }
 
 impl<'r, 'a> Index<'r, 'a> {
-    fn new(repo: &'r Repo<'a>, roots: &BTreeSet<String>) -> Index<'r, 'a> {
+    /// `renamed` holds the packages a project renames to a folder of its own, `package-dir = {mypkg = "lib"}` as
+    /// (`mypkg`, `lib/`). Each registers its name under a root of its own, `\0` and the folder, which no real root is
+    /// and which `step` knows: that root holds the name, and only it, as the package at the folder. So the first-segment
+    /// lookup, the doubt rules and the walk see a renamed package as any other.
+    fn new(
+        repo: &'r Repo<'a>,
+        roots: &BTreeSet<String>,
+        packages: &[(String, String)],
+    ) -> Index<'r, 'a> {
         let mut first = Names::new();
+        let mut renamed = BTreeMap::new();
         for root in roots {
             for file in repo
                 .files()
@@ -169,16 +209,29 @@ impl<'r, 'a> Index<'r, 'a> {
                 first.register(name, root.clone());
             }
         }
+        for (name, folder) in packages {
+            if has_folder(repo, folder) {
+                let root = format!("\0{folder}");
+                first.register(name, root.clone());
+                renamed.insert(root, (name.clone(), folder.clone()));
+            }
+        }
         Index {
             repo,
             first,
+            renamed,
             namespace_inits: RefCell::default(),
         }
     }
 
     fn step(&self, dir: &str, name: &str) -> Option<Step> {
-        let folder = format!("{dir}{name}/");
         let has = |file: &str| self.repo.files().contains(file);
+        if let Some((renamed, folder)) = self.renamed.get(dir) {
+            return (renamed == name)
+                .then(|| self.folder_step(folder))
+                .flatten();
+        }
+        let folder = format!("{dir}{name}/");
         for ext in ["py", "pyi"] {
             let init = format!("{folder}__init__.{ext}");
             if has(&init) {
@@ -198,6 +251,25 @@ impl<'r, 'a> Index<'r, 'a> {
 }
 
 impl Index<'_, '_> {
+    /// What the folder `folder` is as a package of its own: a regular package or a bare folder.
+    fn folder_step(&self, folder: &str) -> Option<Step> {
+        for ext in ["py", "pyi"] {
+            let init = format!("{folder}__init__.{ext}");
+            if self.repo.files().contains(init.as_str()) {
+                if ext == "py" && self.extends_path_only(&init) {
+                    break;
+                }
+                return Some(Step::Package {
+                    folder: folder.to_string(),
+                    init,
+                });
+            }
+        }
+        has_folder(self.repo, folder).then(|| Step::Bare {
+            folder: folder.to_string(),
+        })
+    }
+
     /// Whether the tracked `init` file only extends its `__path__`.
     fn extends_path_only(&self, init: &str) -> bool {
         *self
@@ -220,11 +292,13 @@ impl Index<'_, '_> {
 
 /// Each Python file paired with the files each local module it imports runs.
 fn python_imports(repo: &Repo) -> Output {
-    let (roots, problems) = Roots::read(repo);
+    let (roots, problems, notes) = Roots::read(repo);
+    let packages: Vec<(String, String)> = roots.packages().cloned().collect();
     let folders = roots.folders(repo);
-    let index = Index::new(repo, &folders);
+    let index = Index::new(repo, &folders, &packages);
     let mut found = Output {
         problems,
+        notes,
         ..Output::default()
     };
     for &file in repo.files() {
