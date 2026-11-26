@@ -1206,7 +1206,7 @@ fn after_a_carry_over_the_pr_stops_waiting_and_the_next_lookup_keeps_the_copied_
 }
 
 #[test]
-fn a_carried_brief_holds_the_link_evidence_of_the_new_head() {
+fn a_carried_brief_holds_the_link_evidence_and_map_problems_of_the_new_head() {
     let rig = Rig::new();
     let store = BriefStore::open(rig.store_dir.path()).unwrap();
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
@@ -1237,7 +1237,9 @@ fn a_carried_brief_holds_the_link_evidence_of_the_new_head() {
     let repo = Path::new(&rig.repo.path);
     let at = |head: &str| {
         let mut s = source(head);
-        s.link_evidence = crate::ratify::link_evidence(repo, "main", head);
+        let check = crate::ratify::head_check(repo, "main", head, true);
+        s.link_evidence = check.link_evidence;
+        s.map_problems = check.map_problems;
         s
     };
     assert_eq!(
@@ -1248,8 +1250,11 @@ fn a_carried_brief_holds_the_link_evidence_of_the_new_head() {
     crate::fog::mark_read(&reading.file, &rig.repo.path, 7, 0, &h1, lit, 1).unwrap();
     // Main gains a second import of beta, and the PR is rebased onto it: the read carries over.
     rig.repo.git(&["checkout", "-q", "main"]);
-    rig.repo
-        .commit(&[("alpha/z.ts", "// z\nimport { b } from \"../beta/b\";\n")]);
+    rig.repo.commit(&[
+        ("alpha/z.ts", "// z\nimport { b } from \"../beta/b\";\n"),
+        // A file no part owns: the map check fails at the new head (#641).
+        ("stray/s.ts", "export const s = 1;\n"),
+    ]);
     rig.repo.git(&["checkout", "-q", "pr"]);
     rig.repo.git(&["rebase", "-q", "main"]);
     let h2 = rig.repo.head();
@@ -1261,13 +1266,17 @@ fn a_carried_brief_holds_the_link_evidence_of_the_new_head() {
         file: file.into(),
         line: Some(line),
     };
+    let carried = store.get(7, &h2).unwrap();
     assert_eq!(
-        store.get(7, &h2).unwrap().link_evidence,
+        carried.link_evidence,
         [LinkEvidence {
             link: "alpha-beta".into(),
             sites: vec![site("alpha/a.ts", 1), site("alpha/z.ts", 2)],
         }]
     );
+    assert!(store.get(7, &h1).unwrap().map_problems.is_empty());
+    assert_eq!(carried.map_problems.len(), 1, "{:?}", carried.map_problems);
+    assert!(carried.map_problems[0].contains("stray/s.ts"));
 }
 
 #[test]

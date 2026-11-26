@@ -55,7 +55,8 @@ fn run() -> Result<ExitCode, String> {
         return run_imports(&root, json);
     }
     let report = match &commit {
-        Some(commit) => system_map::check_at(&root, commit),
+        // The command is run by hand in your own repository, so its commit is trusted.
+        Some(commit) => system_map::check_at(&root, commit, true),
         None => system_map::check(&root),
     };
     print_check(

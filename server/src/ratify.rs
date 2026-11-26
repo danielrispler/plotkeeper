@@ -737,35 +737,38 @@ pub(crate) fn pending(cache: &ChangesCache, repo: &Path, project: &Project) -> V
     found
 }
 
-/// The import sites behind each link that `head` adds to the map at `base` (#499, spec #477 "When it is computed"), read from
-/// `head` in commit mode (`system_map::check_at`), so an import the PR did not edit counts and the working tree is never read. Only
-/// an `import` link has evidence: a run-time link has none, even beside an import edge between the same parts, and neither has a
-/// removed link in v1.
-pub fn link_evidence(repo: &Path, base: &str, head: &str) -> Vec<LinkEvidence> {
+/// What a PR's head says of its map, stored with its brief.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct HeadCheck {
+    pub link_evidence: Vec<LinkEvidence>,
+    pub map_problems: Vec<String>,
+}
+
+/// What `head` says of its map, from one `system_map::check_at` (#641): the import sites behind each link it adds to the map at
+/// `base` (#499, spec #477 "When it is computed"), and the check's problems, kept for every PR, not only one that adds a link. It
+/// reads `head` in commit mode, so an import the PR did not edit counts and the working tree is never read. Only an `import` link has
+/// evidence: a run-time link has none, even beside an import edge between the same parts, and neither has a removed link in v1. A
+/// head with no map has nothing. An untrusted head (a PR not by Daniel's login) is checked without its toolchain file.
+pub fn head_check(repo: &Path, base: &str, head: &str, trusted: bool) -> HeadCheck {
     let (old, new) = (map_at(repo, base), map_at(repo, head));
-    let added: Vec<String> = map_items(old.text(), new.text())
-        .into_iter()
-        .filter(|item| item.kind == "link" && item.change == "added")
-        .map(|item| item.id)
-        .collect();
     let Some(map) = new
         .text()
         .and_then(|text| system_map::convert_value(text).ok())
     else {
-        return Vec::new();
+        return HeadCheck::default();
     };
-    if added.is_empty() {
-        return Vec::new();
-    }
-    let edges = system_map::check_at(repo, head).edges;
+    let report = system_map::check_at(repo, head, trusted);
     let links = map["links"].as_array().cloned().unwrap_or_default();
-    added
+    let link_evidence = map_items(old.text(), new.text())
         .into_iter()
-        .filter_map(|id| {
+        .filter(|item| item.kind == "link" && item.change == "added")
+        .filter_map(|item| {
+            let id = item.id;
             let link = links
                 .iter()
                 .find(|link| field(link, "id") == id && field(link, "kind") == "import")?;
-            let edge = edges
+            let edge = report
+                .edges
                 .iter()
                 .find(|e| e.from == field(link, "from") && e.to == field(link, "to"))?;
             let mut sites: Vec<ImportSite> = Vec::new();
@@ -780,7 +783,11 @@ pub fn link_evidence(repo: &Path, base: &str, head: &str) -> Vec<LinkEvidence> {
             }
             Some(LinkEvidence { link: id, sites })
         })
-        .collect()
+        .collect();
+    HeadCheck {
+        link_evidence,
+        map_problems: report.problems,
+    }
 }
 
 /// The lines of an import site's snippet on each side of its line.
@@ -1733,7 +1740,7 @@ mod tests {
                 line: Some(line),
             };
             assert_eq!(
-                link_evidence(Path::new(&main), base.trim(), head.trim()),
+                head_check(Path::new(&main), base.trim(), head.trim(), true).link_evidence,
                 [LinkEvidence {
                     link: "alpha-gamma".into(),
                     sites: vec![
@@ -1743,6 +1750,66 @@ mod tests {
                         site("alpha/old.ts", 2),
                     ],
                 }]
+            );
+        }
+
+        #[test]
+        fn the_head_s_map_check_keeps_its_problems_when_the_pr_adds_no_link() {
+            let (dir, main) = repo();
+            let root = dir.path();
+            let put = |path: &str, text: &str| {
+                std::fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
+                std::fs::write(root.join(path), text).unwrap();
+            };
+            for part in ["alpha", "beta", "gamma"] {
+                put(&format!("{part}/a.ts"), "export const a = 1;\n");
+            }
+            commit(
+                root,
+                &evidence_map(serde_json::json!([])),
+                "Map (#1)",
+                "1000000000",
+            );
+            let base = run(root, &["rev-parse", "HEAD"]);
+            let repo = Path::new(&main);
+            let at = |head: &str, trusted| head_check(repo, base.trim(), head.trim(), trusted);
+            assert_eq!(
+                at(&base, true),
+                HeadCheck::default(),
+                "the map holds at its base"
+            );
+            // A file no part owns, and no link added: the check still runs at the head.
+            put("stray/s.ts", "export const s = 1;\n");
+            commit(
+                root,
+                &evidence_map(serde_json::json!([])),
+                "Stray (#2)",
+                "1100000000",
+            );
+            let head = run(root, &["rev-parse", "HEAD"]);
+            for trusted in [true, false] {
+                let check = at(&head, trusted);
+                assert!(check.link_evidence.is_empty());
+                assert_eq!(check.map_problems.len(), 1, "{:?}", check.map_problems);
+                assert!(
+                    check.map_problems[0].contains("stray/s.ts"),
+                    "{:?}",
+                    check.map_problems
+                );
+            }
+        }
+
+        #[test]
+        fn a_head_with_no_map_has_no_map_check() {
+            let (dir, main) = repo();
+            let root = dir.path();
+            std::fs::write(root.join("a.ts"), "export const a = 1;\n").unwrap();
+            run(root, &["add", "-A"]);
+            run(root, &["commit", "-q", "-m", "Code (#1)"]);
+            let head = run(root, &["rev-parse", "HEAD"]);
+            assert_eq!(
+                head_check(Path::new(&main), head.trim(), head.trim(), false),
+                HeadCheck::default()
             );
         }
     }

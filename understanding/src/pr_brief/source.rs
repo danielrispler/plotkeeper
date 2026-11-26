@@ -71,4 +71,6 @@ pub struct PrSource {
     pub since: Option<String>,
     /// The import sites behind each link the PR adds (#499), read from its head by the server; stored on the brief as they are.
     pub link_evidence: Vec<LinkEvidence>,
+    /// The map check's problems at its head (#641), read by the server; stored on the brief as they are.
+    pub map_problems: Vec<String>,
 }
