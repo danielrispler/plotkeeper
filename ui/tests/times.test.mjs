@@ -52,7 +52,9 @@ test("the estimate line names the phase, then a range marked as an estimate, not
 });
 
 test("an estimate whose lower bound has passed reads up to its upper bound; one past its upper bound says so in words (spec #658)", () => {
-  const work = (range) => ({ phases: [{ phase: "implementing", at: 0, agent_ms: 0 }], estimate: { range, depends_on_you: false } });
+  /** @type {import("../../dist/types.js").Phase} */
+  const phase = "implementing";
+  const work = (range) => ({ phases: [{ phase, at: 0, agent_ms: 0 }], estimate: { range, depends_on_you: false } });
   assert.equal(estimateText(work([0, 12 * MIN])), "Implementing · est. up to 12m left");
   assert.equal(estimateText(work([30_000, 12 * MIN])), "Implementing · est. up to 12m left");
   assert.equal(estimateText(work([0, 30_000])), "Implementing · past its estimate");
