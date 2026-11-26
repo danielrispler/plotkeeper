@@ -303,12 +303,7 @@ fn field(text: &[u8], mut i: usize) -> Result<usize, usize> {
         };
         match b {
             b'\'' | b'"' => i = skip_string(text, i, false, false)?,
-            b'#' => {
-                i = text[i..]
-                    .iter()
-                    .position(|&c| c == b'\n')
-                    .map_or(text.len(), |at| i + at)
-            }
+            b'#' => i += text[i..].iter().take_while(|&&c| c != b'\n').count(),
             b'(' | b'[' | b'{' => {
                 depth += 1;
                 i += 1;
