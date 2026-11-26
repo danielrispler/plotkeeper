@@ -55,6 +55,10 @@ function recorder(ctx) {
     turns: new Map(),
     // The sessions prompted since their last turn started.
     prompted: new Set(),
+    // Each running call's tool and input, by call id, for the permission it asks.
+    calls: new Map(),
+    // A permission ask whose call has not started yet, by its call id.
+    asks: new Map(),
     line: (name, session, fields) => ({ hook_event_name: name, session_id: session, cwd, ...fields }),
   };
 }
@@ -70,6 +74,10 @@ function recordPrompts(ctx, r) {
   });
 }
 
+/** A permission ask's line, with its call's tool and input, by which the studio finds the call it waits on. */
+const askLine = (r, top, data, call) =>
+  r.line("permission.asked", top, { tool_name: call.tool, tool_use_id: data.source?.id, tool_input: call.input, permission: data });
+
 /** Each tool call's start and end, a subagent's under the session it was spawned from. */
 function recordTools(ctx, r) {
   const tool = async (name, event, fields) => {
@@ -77,14 +85,21 @@ function recordTools(ctx, r) {
     const subagent = top === event.sessionID ? {} : { subagent_session_id: event.sessionID };
     send(r.line(name, top, { tool_name: event.tool, tool_use_id: event.id, tool_input: event.input ?? {}, ...subagent, ...fields }));
   };
-  ctx.tool.hook("execute.before", (event) => tool("tool.execute.before", event, {}));
-  ctx.tool.hook("execute.after", (event) =>
-    tool("tool.execute.after", event, {
+  ctx.tool.hook("execute.before", async (event) => {
+    r.calls.set(event.id, { tool: event.tool, input: event.input ?? {} });
+    await tool("tool.execute.before", event, {});
+    const ask = r.asks.get(event.id);
+    r.asks.delete(event.id);
+    if (ask) send(ask(r.calls.get(event.id)));
+  });
+  ctx.tool.hook("execute.after", (event) => {
+    r.calls.delete(event.id);
+    return tool("tool.execute.after", event, {
       status: event.status,
       error: event.error?.message ?? null,
       exit: event.result?.metadata?.exit ?? null,
-    }),
-  );
+    });
+  });
 }
 
 /** The event stream's permission asks and turn starts and ends, of the sessions this instance's hooks saw. */
@@ -95,7 +110,11 @@ async function recordEvents(ctx, r, signal) {
     if (!r.seen(data.sessionID)) continue;
     const top = await r.root(data.sessionID);
     if (event.type === "permission.asked") {
-      send(r.line(event.type, top, { permission: data }));
+      // An ask can come before its call's start; it is sent once the call starts.
+      const id = data.source?.type === "tool" ? data.source.id : undefined;
+      const call = r.calls.get(id);
+      if (id && !call) r.asks.set(id, (started) => askLine(r, top, data, started));
+      else send(askLine(r, top, data, call ?? {}));
       continue;
     }
     if (top !== data.sessionID) continue;

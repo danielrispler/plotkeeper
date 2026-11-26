@@ -152,8 +152,10 @@ fn adapt(raw: Raw) -> Event {
             }
         }
         "permission.asked" => {
-            // An ask names an action and its resources: a shell's command, an edit's path, or a URL, a query, an
-            // agent's or a skill's id (https://opencode.ai/docs/permissions, at v2.4.2).
+            // An ask of a tool call carries that call's tool and input, so the studio finds the call
+            // it waits on. Any other names an action and its resources: a shell's command, an
+            // edit's path, or a URL, a query, an agent's or a skill's id
+            // (https://opencode.ai/docs/permissions, at v2.4.2).
             let action = raw.permission["action"].as_str().unwrap_or_default();
             let resources = &raw.permission["resources"];
             let input = match action {
@@ -162,7 +164,11 @@ fn adapt(raw: Raw) -> Event {
                 _ => serde_json::json!({ "resources": resources }),
             };
             happened.push(Happened::PermissionAsked {
-                tool: tool(action, &input, &raw.cwd),
+                tool: if raw.tool_name.is_empty() {
+                    tool(action, &input, &raw.cwd)
+                } else {
+                    call()
+                },
             });
         }
         _ => {}

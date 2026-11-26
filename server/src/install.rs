@@ -977,7 +977,9 @@ const OPENCODE_BACKUP: &str = "opencode-plotkeeper.js";
 /// Whether `file` is plotkeeper's OpenCode plugin for the binaries in `bin`, of this template or an older one: it runs
 /// their hook.
 fn opencode_ours(file: &Path, bin: &Path) -> bool {
-    let hook = format!("const HOOK = \"{}/plotkeeper-hook\";", bin.display());
+    let Ok(hook) = render("const HOOK = \"__PLOTKEEPER_BIN__/plotkeeper-hook\";", bin) else {
+        return false;
+    };
     fs::read_to_string(file).is_ok_and(|text| text.contains(&hook))
 }
 
@@ -999,15 +1001,22 @@ fn install_opencode(
             .map(Path::to_path_buf)
             .collect();
         made.reverse();
-        let backed_up = file.exists() && !opencode_ours(&file, bin);
-        if backed_up {
-            let backups = record_dir(home).join("backups");
-            fs::create_dir_all(&backups)
-                .map_err(|e| format!("could not make {}: {e}", backups.display()))?;
-            fs::copy(&file, backups.join(OPENCODE_BACKUP))
-                .map_err(|e| format!("could not back up {}: {e}", file.display()))?;
-        }
-        state.opencode = Some(OpencodeRecord { made, backed_up });
+        state.opencode = Some(OpencodeRecord {
+            made,
+            backed_up: false,
+        });
+        save(home, state)?;
+    }
+    // A file of the user's own, there before the first install or written over plotkeeper's since, is kept; one
+    // backup only, so a second such file in a later install is replaced.
+    let record = state.opencode.as_mut().ok_or("no OpenCode record")?;
+    if !record.backed_up && file.exists() && !opencode_ours(&file, bin) {
+        let backups = record_dir(home).join("backups");
+        fs::create_dir_all(&backups)
+            .map_err(|e| format!("could not make {}: {e}", backups.display()))?;
+        fs::copy(&file, backups.join(OPENCODE_BACKUP))
+            .map_err(|e| format!("could not back up {}: {e}", file.display()))?;
+        record.backed_up = true;
         save(home, state)?;
     }
     fs::create_dir_all(dir).map_err(|e| format!("could not make {}: {e}", dir.display()))?;
@@ -1537,13 +1546,16 @@ impl Undo<'_> {
 
     /// OpenCode's plugin file, and the folders install made for it, when nothing else is in them.
     fn opencode(&mut self) {
-        let Some(record) = &self.state.opencode else {
+        let Some((made, backed_up)) =
+            (self.state.opencode.as_ref()).map(|r| (r.made.clone(), r.backed_up))
+        else {
             return;
         };
         let file = opencode_plugin(self.home);
         let backup = self.backups.join(OPENCODE_BACKUP);
+        let restore = backed_up && backup.exists();
         if opencode_ours(&file, &self.bin) {
-            let done = if record.backed_up {
+            let done = if restore {
                 fs::copy(&backup, &file).map(|_| ())
             } else {
                 fs::remove_file(&file)
@@ -1555,6 +1567,13 @@ impl Undo<'_> {
                 self.out,
                 format!("OpenCode: removed plotkeeper's {}", file.display()),
             );
+        } else if restore && file.exists() {
+            // Both are the user's: the one there now, and the one install backed up, which is not dropped.
+            return self.fail(format!(
+                "OpenCode: {} is not plotkeeper's now, and install kept your earlier one at {}; move one of them and run uninstall again",
+                file.display(),
+                backup.display()
+            ));
         } else if file.exists() {
             say(
                 self.out,
@@ -1563,9 +1582,11 @@ impl Undo<'_> {
                     file.display()
                 ),
             );
+        } else if restore && let Err(e) = fs::copy(&backup, &file) {
+            return self.fail(format!("could not put back {}: {e}", file.display()));
         }
         fs::remove_file(&backup).ok();
-        for dir in record.made.iter().rev() {
+        for dir in made.iter().rev() {
             // A folder that holds something else stays.
             fs::remove_dir(dir).ok();
         }

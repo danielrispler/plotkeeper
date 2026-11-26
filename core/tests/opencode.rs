@@ -112,6 +112,28 @@ fn a_permission_ask_needs_you_until_its_call_ends() {
     assert_eq!(state_after(7), State::Running);
 }
 
+/// `fixtures/opencode/asks.jsonl`, a second real run (2026-11-27, OpenCode 2.4.1), where rules asked
+/// before every edit and shell command: OpenCode asks a `write` call's permission as action `edit`,
+/// so the plugin sends the ask with its call's own tool and input, by which it is the call's.
+#[test]
+fn each_ask_of_a_write_or_a_command_needs_you_until_its_own_call_ends() {
+    let lines: Vec<_> = include_str!("fixtures/opencode/asks.jsonl")
+        .lines()
+        .collect();
+    let state_after = |n: usize| {
+        let studio = Studio::replayed(&lines[..n]);
+        let session = studio.session("ses_de5e2b218ffezl2tnMweO2Le0q").unwrap();
+        session.state
+    };
+    let states: Vec<_> = (4..=9).map(state_after).collect();
+    use State::{NeedsYou, Running};
+    assert_eq!(
+        states,
+        [Running, NeedsYou, Running, Running, NeedsYou, Running]
+    );
+    assert_eq!(state_after(lines.len()), State::YourTurn);
+}
+
 #[test]
 fn an_opencode_session_records_no_turn_trees() {
     let studio = Studio::replayed(fixture());

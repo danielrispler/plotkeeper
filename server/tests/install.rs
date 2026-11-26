@@ -1066,6 +1066,15 @@ fn opencode_keeps_a_plotkeeper_js_that_is_not_plotkeepers() {
         String::from_utf8_lossy(&out.stdout).contains("left as it is"),
         "{out:?}"
     );
+
+    // One written over plotkeeper's before a second install is backed up by it, and put back at uninstall.
+    let machine = Machine::new(false, false).with_opencode();
+    machine.run("install");
+    machine.write(".config/opencode/plugins/plotkeeper.js", own);
+    machine.run("install");
+    machine.run("uninstall");
+    let plugin = machine.home.join(".config/opencode/plugins/plotkeeper.js");
+    assert_eq!(fs::read_to_string(&plugin).unwrap(), own);
 }
 
 /// Adds the user's own hook `command` under `event` to the hook file at `rel`, as an entry of `entry`'s shape.
