@@ -1057,3 +1057,104 @@ fn a_mixed_java_and_typescript_repository_reads_each_languages_parts_side_by_sid
         (2, 0)
     );
 }
+
+// `import module`.
+
+/// A class of package `lib` in `folder`'s source root.
+fn module_class(folder: &str, name: &str) -> (String, String) {
+    (
+        format!("{folder}/lib/{name}.java"),
+        format!("package lib;\n\npublic class {name} {{}}\n"),
+    )
+}
+
+/// The Unsure findings, as `name reason [candidates]`, of `MAIN` importing `import_line`, among `files`, with the
+/// paths in `ignored` ignored.
+fn module_unsure(import_line: &str, files: &[(String, String)], ignored: &[&str]) -> Vec<String> {
+    let main = main_importing(&[import_line]);
+    let mut all: Vec<(&str, &str)> = vec![(MAIN, &main)];
+    all.extend(files.iter().map(|(f, t)| (f.as_str(), t.as_str())));
+    let (_dir, root) = repo(&map(&[("b", &["**"]), ("a", &["a/"])], &[], ignored), &all);
+    let found = report(&root);
+    assert_eq!(found.problems, Vec::<String>::new());
+    assert_eq!(pairs(&found), Vec::<String>::new());
+    found
+        .unsure
+        .iter()
+        .map(|u| {
+            assert_eq!(u.file, MAIN);
+            format!("{} {} {:?}", u.name, u.reason, u.candidates)
+        })
+        .collect()
+}
+
+fn module_info(folder: &str, text: &str) -> (String, String) {
+    (format!("{folder}/module-info.java"), text.to_string())
+}
+
+#[test]
+fn a_module_import_of_a_declared_module_makes_the_importer_unsure_of_every_file_under_its_root() {
+    let files = [
+        module_info("m/src/main/java", "module m.core {\n  exports lib;\n}\n"),
+        module_class("m/src/main/java", "A"),
+        module_class("m/src/main/java", "B"),
+        module_class("other/src/main/java", "C"),
+    ];
+    assert_eq!(
+        module_unsure("import module m.core;", &files, &[]),
+        [r#"m.core module import ["m/src/main/java/lib/A.java", "m/src/main/java/lib/B.java"]"#]
+    );
+}
+
+#[test]
+fn a_module_the_repository_does_not_declare_or_whose_root_holds_no_indexed_file_gives_no_finding() {
+    let files = [
+        module_info("m/src/main/java", "module m.core {}\n"),
+        module_info("empty/src/main/java", "module m.empty {}\n"),
+        module_class("m/src/main/java", "A"),
+    ];
+    assert_eq!(
+        module_unsure("import module java.base;", &files, &[]),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        module_unsure("import module m.empty;", &files, &[]),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_skipped_or_ignored_module_info_declares_no_module() {
+    let files = [
+        module_info("m/src/test/java", "module m.core {}\n"),
+        module_info("n/src/main/java", "module m.hidden {}\n"),
+        module_class("m/src/test/java", "T"),
+        module_class("n/src/main/java", "N"),
+    ];
+    let ignored = ["n/src/main/java/module-info.java"];
+    assert_eq!(
+        module_unsure("import module m.core;", &files, &ignored),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        module_unsure("import module m.hidden;", &files, &ignored),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn two_declarers_of_one_module_name_give_candidates_from_both_roots() {
+    let files = [
+        module_info("m/src/main/java", "open module m.core {}\n"),
+        module_info(
+            "copy/src/main/java",
+            "import java.util.List;\nmodule m.core {}\n",
+        ),
+        module_class("m/src/main/java", "A"),
+        module_class("copy/src/main/java", "A"),
+    ];
+    assert_eq!(
+        module_unsure("import module m.core;", &files, &[]),
+        [r#"m.core module import ["copy/src/main/java/lib/A.java", "m/src/main/java/lib/A.java"]"#]
+    );
+}

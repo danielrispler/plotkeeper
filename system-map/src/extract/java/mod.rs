@@ -123,6 +123,10 @@ struct Import {
 struct Unit {
     package: Option<String>,
     imports: Vec<Import>,
+    /// The modules its `import module M;` declarations name.
+    module_imports: Vec<String>,
+    /// The name of the module a `module-info.java` declares.
+    module: Option<String>,
     types: Vec<String>,
 }
 
@@ -143,6 +147,7 @@ impl Unit {
         let mut unit = Unit::default();
         unit.read_header(&tokens);
         unit.types = declarations(&tokens);
+        unit.module = module_declared(&tokens);
         Some(unit)
     }
 
@@ -187,6 +192,17 @@ impl Unit {
         let is_static = is_ident(tokens, next, "static");
         if is_static {
             next += 1;
+        }
+        // `module` and then an identifier is a module import; `module` and then `.` is a package segment (JLS §3.9).
+        let module_import = !is_static
+            && is_ident(tokens, next, "module")
+            && matches!(tokens.get(next + 1), Some((Tok::Ident(_), _)));
+        if module_import {
+            let (name, end, on_demand) = dotted(tokens, next + 1);
+            if is_punct(tokens, end, b';') && !on_demand {
+                self.module_imports.push(name.join("."));
+                return Some(end + 1);
+            }
         }
         let (name, end, on_demand) = dotted(tokens, next);
         if is_punct(tokens, end, b';') {
@@ -271,10 +287,31 @@ fn declarations(tokens: &Tokens) -> Vec<String> {
     types
 }
 
+/// The name a module declaration gives, `[open] module M {` at brace depth 0.
+fn module_declared(tokens: &Tokens) -> Option<String> {
+    let mut depth = 0usize;
+    for (at, (tok, _)) in tokens.iter().enumerate() {
+        match tok {
+            Tok::Punct(b'{') => depth += 1,
+            Tok::Punct(b'}') => depth = depth.saturating_sub(1),
+            Tok::Ident(word) if depth == 0 && word == "module" => {
+                let (name, end, _) = dotted(tokens, at + 1);
+                if !name.is_empty() && is_punct(tokens, end, b'{') {
+                    return Some(name.join("."));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 /// The types the repository's production files declare, by `package.Name`, and each package with its type names.
 struct Index {
     names: Names<String>,
     packages: BTreeMap<String, BTreeSet<String>>,
+    /// The files that declare a type.
+    files: BTreeSet<String>,
 }
 
 /// What a name stands for: its `package.Type` name, and the files that declare it.
@@ -287,6 +324,7 @@ impl Index {
         let mut index = Index {
             names: Names::new(),
             packages: BTreeMap::new(),
+            files: BTreeSet::new(),
         };
         for (&file, unit) in units {
             let name = file.rsplit('/').next().unwrap_or(file);
@@ -297,6 +335,7 @@ impl Index {
                 continue;
             }
             for ty in &unit.types {
+                index.files.insert(file.to_string());
                 index
                     .names
                     .register(&format!("{package}.{ty}"), file.to_string());
@@ -343,8 +382,41 @@ fn java_imports(repo: &Repo) -> Output {
         }
     }
     let index = Index::new(&units);
+    // Each module a `module-info.java` declares, with its roots: the folders of its declarers.
+    let mut modules: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for (&file, unit) in &units {
+        if let (Some(module), Some(root)) = (&unit.module, file.strip_suffix("module-info.java")) {
+            modules
+                .entry(module)
+                .or_default()
+                .push(root.trim_end_matches('/'));
+        }
+    }
     let mut found = Output::default();
     for (&file, unit) in &units {
+        for module in &unit.module_imports {
+            let candidates: BTreeSet<String> = index
+                .files
+                .iter()
+                .filter(|f| {
+                    modules.get(module.as_str()).is_some_and(|roots| {
+                        roots.iter().any(|r| {
+                            r.is_empty()
+                                || f.strip_prefix(r).is_some_and(|rest| rest.starts_with('/'))
+                        })
+                    })
+                })
+                .cloned()
+                .collect();
+            if !candidates.is_empty() {
+                found.unsure.push(Unsure {
+                    file: file.to_string(),
+                    name: module.clone(),
+                    reason: "module import".into(),
+                    candidates: candidates.into_iter().collect(),
+                });
+            }
+        }
         for import in &unit.imports {
             let line = import.line;
             let mut hit = |(name, lookup): Found| match lookup {
