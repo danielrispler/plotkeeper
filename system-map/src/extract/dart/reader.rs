@@ -27,6 +27,31 @@ struct Literal {
     interpolated: bool,
 }
 
+/// The URI of adjacent string literals.
+enum Uri {
+    Text(String),
+    /// One of the literals holds an interpolation, a compile error in a directive: it names nothing.
+    Interpolated,
+}
+
+impl Uri {
+    /// The text of a URI that names a file.
+    fn text(self) -> Option<String> {
+        match self {
+            Uri::Text(text) => Some(text),
+            Uri::Interpolated => None,
+        }
+    }
+}
+
+/// The rest of an `import` or `export` after its first URI.
+enum Configurable {
+    /// It ends at its `;`, naming these URIs.
+    Uris(Vec<String>),
+    /// The text ends before its `;`.
+    Unended,
+}
+
 enum Token<'a> {
     Ident(&'a str),
     Str(Literal),
@@ -245,8 +270,8 @@ impl<'a> Lexer<'a> {
         Some(true)
     }
 
-    /// The URI of adjacent string literals, `first` read: their texts joined, or none when one holds an interpolation.
-    fn uri(&mut self, first: Literal) -> Option<Option<String>> {
+    /// The URI of adjacent string literals, `first` read: their texts joined.
+    fn uri(&mut self, first: Literal) -> Option<Uri> {
         let Literal {
             mut value,
             mut interpolated,
@@ -256,23 +281,26 @@ impl<'a> Lexer<'a> {
             value.push_str(&next.value);
             interpolated |= next.interpolated;
         }
-        Some((!interpolated).then_some(value))
+        Some(if interpolated {
+            Uri::Interpolated
+        } else {
+            Uri::Text(value)
+        })
     }
 
     /// The rest of an `import` or `export`, its keyword and first token read, up to its `;`: the URIs it names.
-    /// None when the text ends first.
-    fn configurable(&mut self, first: Literal) -> Option<Option<Vec<String>>> {
-        let mut uris: Vec<String> = self.uri(first)?.into_iter().collect();
+    fn configurable(&mut self, first: Literal) -> Option<Configurable> {
+        let mut uris: Vec<String> = self.uri(first)?.text().into_iter().collect();
         loop {
             match self.next()? {
-                Token::Punct(';') => return Some(Some(uris)),
-                Token::Eof => return Some(None),
+                Token::Punct(';') => return Some(Configurable::Uris(uris)),
+                Token::Eof => return Some(Configurable::Unended),
                 Token::Ident("if") => {
                     if matches!(self.next()?, Token::Punct('(')) {
                         self.skip_group('(')?;
                         if let Token::Str(literal) = self.peek()? {
                             self.next()?;
-                            uris.extend(self.uri(literal)?);
+                            uris.extend(self.uri(literal)?.text());
                         }
                     }
                 }
@@ -281,12 +309,15 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// The 1-based line of the last token's start.
+    /// The 1-based line of the last token's start. A line ends at `\n`, `\r\n` or a lone `\r`, as in Dart.
     fn line(&self) -> u32 {
-        1 + self.text.as_bytes()[..self.start]
+        let bytes = &self.text.as_bytes()[..self.start];
+        let breaks = bytes
             .iter()
-            .filter(|b| **b == b'\n')
-            .count() as u32
+            .enumerate()
+            .filter(|&(at, &b)| b == b'\n' || (b == b'\r' && bytes.get(at + 1) != Some(&b'\n')))
+            .count();
+        1 + breaks as u32
     }
 }
 
@@ -334,7 +365,7 @@ pub(super) fn read(text: &str) -> Option<Vec<Directive>> {
             (Kind::Part, Token::Str(literal)) => {
                 let uri = lexer.uri(literal)?;
                 lexer.skip_to_semicolon()?;
-                uri.into_iter().collect()
+                uri.text().into_iter().collect()
             }
             // An unquoted import, not yet shipped: no pair.
             (Kind::Import | Kind::Export, Token::Ident(_)) => {
@@ -343,8 +374,8 @@ pub(super) fn read(text: &str) -> Option<Vec<Directive>> {
             }
             (Kind::Import | Kind::Export, Token::Str(literal)) => {
                 match lexer.configurable(literal)? {
-                    Some(uris) => uris,
-                    None => return Some(found),
+                    Configurable::Uris(uris) => uris,
+                    Configurable::Unended => return Some(found),
                 }
             }
             _ => return Some(found),

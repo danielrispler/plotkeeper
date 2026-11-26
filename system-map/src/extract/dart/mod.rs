@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 
 use super::{
     Extractor, Output, Pair, Repo, Unsure,
+    folders::{folder_of, parent},
     names::{Lookup, Names},
 };
 use reader::{Directive, Kind};
@@ -23,8 +24,8 @@ impl Extractor for DartImports {
         file.ends_with(".dart")
     }
 
-    /// A file under a folder named `test`, `integration_test` or `test_driver` below its package's root, or one whose
-    /// header cannot be lexed.
+    /// A test file (`is_test_file`: one of a fixture's package, or under a folder named `test`, `integration_test` or
+    /// `test_driver` below its package's root), one that cannot be read, or one whose header cannot be lexed.
     fn skips(&self, repo: &Repo, file: &str) -> bool {
         directives(repo, file).is_none()
     }
@@ -87,19 +88,6 @@ impl Extractor for DartImports {
     }
 }
 
-/// The folder holding `file`, as a prefix: empty for the root, else ending in `/`.
-fn folder_of(file: &str) -> &str {
-    file.rfind('/').map_or("", |at| &file[..=at])
-}
-
-/// The folder above `folder`, or none for the root.
-fn parent(folder: &str) -> Option<&str> {
-    if folder.is_empty() {
-        return None;
-    }
-    Some(folder_of(&folder[..folder.len() - 1]))
-}
-
 /// The folder of the nearest tracked `pubspec.yaml` at or above `folder`, any pubspec; none when there is none.
 fn nearest_package<'f>(repo: &Repo, mut folder: &'f str) -> Option<&'f str> {
     loop {
@@ -113,28 +101,27 @@ fn nearest_package<'f>(repo: &Repo, mut folder: &'f str) -> Option<&'f str> {
     }
 }
 
-/// The folder of `file`'s package: the nearest tracked `pubspec.yaml` at or above it, any pubspec, else the root.
-fn package_root<'f>(repo: &Repo, file: &'f str) -> &'f str {
-    nearest_package(repo, folder_of(file)).unwrap_or("")
-}
-
 /// Whether `name` is a folder name Dart keeps its tests in.
 fn is_test_folder(name: &str) -> bool {
     matches!(name, "test" | "integration_test" | "test_driver")
 }
 
-/// Whether a folder of `file` below its package's root is one Dart keeps its tests in.
-fn in_test_folder(repo: &Repo, file: &str) -> bool {
-    let below = &file[package_root(repo, file).len()..];
-    let mut folders: Vec<&str> = below.split('/').collect();
+/// Whether `file` is a test file: its own package, the nearest tracked `pubspec.yaml` at or above it, is a fixture, or
+/// a folder of its path below that package's root (else the repository's root) is a test folder.
+fn is_test_file(repo: &Repo, file: &str) -> bool {
+    let root = nearest_package(repo, folder_of(file));
+    if root.is_some_and(|folder| is_fixture(repo, folder)) {
+        return true;
+    }
+    let mut folders: Vec<&str> = file[root.unwrap_or("").len()..].split('/').collect();
     folders.pop();
     folders.into_iter().any(is_test_folder)
 }
 
-/// The directives of `file`'s header, or none for a file the extractor skips: one in a test folder, one the repository
+/// The directives of `file`'s header, or none for a file the extractor skips: a test file, one the repository
 /// cannot read, or one whose header cannot be lexed.
 fn directives(repo: &Repo, file: &str) -> Option<Vec<Directive>> {
-    if in_test_folder(repo, file) {
+    if is_test_file(repo, file) {
         return None;
     }
     reader::read(&repo.read(file)?)
@@ -153,11 +140,13 @@ fn relative(file: &str, uri: &str) -> Option<String> {
     if scheme || uri.is_empty() || uri.starts_with('/') {
         return None;
     }
-    let mut segments: Vec<&str> = folder_of(file)
-        .split('/')
-        .filter(|s| !s.is_empty())
-        .collect();
-    for segment in uri.split('/') {
+    joined(folder_of(file), uri)
+}
+
+/// `path` joined to `folder`, with `.` and `..` removed; none when it climbs above the root.
+fn joined(folder: &str, path: &str) -> Option<String> {
+    let mut segments: Vec<&str> = folder.split('/').filter(|s| !s.is_empty()).collect();
+    for segment in path.split('/') {
         match segment {
             "" | "." => {}
             ".." => {
@@ -172,16 +161,16 @@ fn relative(file: &str, uri: &str) -> Option<String> {
 /// The packages `package:` URIs can name: each indexed `pubspec.yaml`'s package (spec #621, "The package index").
 struct Packages {
     /// Each indexed package's name, with its folder.
-    index: Names<String>,
+    names: Names<String>,
     /// Each indexed package's folder, with its name.
-    names: BTreeMap<String, String>,
+    by_folder: BTreeMap<String, String>,
 }
 
 impl Packages {
     fn read(repo: &Repo) -> (Packages, Vec<String>) {
         let mut packages = Packages {
-            index: Names::new(),
-            names: BTreeMap::new(),
+            names: Names::new(),
+            by_folder: BTreeMap::new(),
         };
         let mut problems = Vec::new();
         for &file in repo.files() {
@@ -189,8 +178,8 @@ impl Packages {
                 continue;
             }
             let folder = folder_of(file);
-            // A pubspec in a test folder is a fixture, not a package, and never a problem.
-            if pubspec_in_test_folder(repo, folder) {
+            // A fixture is not a package, and never a problem.
+            if is_fixture(repo, folder) {
                 continue;
             }
             // The package's `lib/` files, and whether the map leaves one unignored. A package is ignored by these, never
@@ -207,8 +196,8 @@ impl Packages {
             }
             match repo.read(file).as_deref().and_then(package_name) {
                 Some(name) if live => {
-                    packages.index.register(&name, folder.to_string());
-                    packages.names.insert(folder.to_string(), name);
+                    packages.names.register(&name, folder.to_string());
+                    packages.by_folder.insert(folder.to_string(), name);
                 }
                 Some(_) => {}
                 None if repo.is_ignored(file) || (tracked && !live) => {}
@@ -222,18 +211,22 @@ impl Packages {
     }
 }
 
-/// Whether `folder`, a folder holding a `pubspec.yaml`, is a test folder or lies in one below an enclosing package's
-/// root: the nearest tracked pubspec above it. With no enclosing package, a folder named `test` is the package itself.
-fn pubspec_in_test_folder(repo: &Repo, folder: &str) -> bool {
-    let Some(enclosing) = parent(folder).and_then(|above| nearest_package(repo, above)) else {
+/// Whether the `pubspec.yaml` in `folder` is a fixture, not a package: a folder strictly between its enclosing package's
+/// root (the nearest tracked pubspec above it, else the repository's root) and its own folder is a test folder. Its own
+/// folder's name never counts, so `pkgs/test/pubspec.yaml` is the `test` package.
+fn is_fixture(repo: &Repo, folder: &str) -> bool {
+    let Some(above) = parent(folder) else {
         return false;
     };
-    folder[enclosing.len()..].split('/').any(is_test_folder)
+    let enclosing = nearest_package(repo, above).unwrap_or("");
+    above[enclosing.len()..].split('/').any(is_test_folder)
 }
 
 /// The package a `pubspec.yaml` declares: the value of its first line that starts at column 0 with `name:`, bare or in
-/// matching quotes, a trailing ` #` comment and blanks cut. No YAML library reads it: pub requires a plain identifier.
+/// matching quotes, a trailing ` #` comment and blanks cut, after a byte-order mark. No YAML library reads it: pub
+/// requires a plain identifier.
 fn package_name(text: &str) -> Option<String> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let value = text.lines().find_map(|line| line.strip_prefix("name:"))?;
     let comment = value
         .char_indices()
@@ -273,16 +266,20 @@ fn resolve(repo: &Repo, packages: &Packages, file: &str, uri: &str) -> Resolved 
     let Some((name, path)) = package.split_once('/') else {
         return Resolved::Nothing;
     };
+    // The path within `lib/`, with `.` and `..` removed as in a relative URI; one climbing above `lib/` names nothing.
+    let Some(path) = joined("", path) else {
+        return Resolved::Nothing;
+    };
     let lib = |folder: &str| format!("{folder}lib/{path}");
     // Own package first: a file's own package is its nearest pubspec's, when that one is indexed.
     let own = nearest_package(repo, folder_of(file))
-        .and_then(|folder| packages.names.get(folder).map(|name| (folder, name)));
+        .and_then(|folder| packages.by_folder.get(folder).map(|name| (folder, name)));
     if let Some((folder, own_name)) = own
         && own_name == name
     {
         return Resolved::File(lib(folder));
     }
-    match packages.index.lookup(name) {
+    match packages.names.lookup(name) {
         Lookup::Unknown => Resolved::Nothing,
         Lookup::One(folder) => Resolved::File(lib(folder)),
         Lookup::Ambiguous(folders) => {

@@ -6,6 +6,7 @@ mod cargo;
 #[cfg(test)]
 mod contract;
 mod dart;
+mod folders;
 mod go;
 mod names;
 pub(crate) mod registry;
