@@ -1,6 +1,6 @@
 //! `php-imports`: PHP repositories in temporary folders, read through `check` and `imports` (spec #647, "Testing
-//! Decisions"). This ticket reads `require` and `include`; a case that needs a class `use` checks the `use` line through
-//! a `require` after it instead, since the class resolution comes in the next ticket.
+//! Decisions"): requires, the reader's traps and test folders (#652), then class `use` items resolved through Composer's
+//! autoload rules (#653).
 
 use serde_json::{Value, json};
 
@@ -73,6 +73,648 @@ fn sites(root: &str) -> Vec<String> {
     }
     found.sort();
     found
+}
+
+// Class `use`.
+
+/// A root `composer.json` mapping `App\` to `src/`.
+const COMPOSER: &str = r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#;
+
+/// The importing file of the class cases is `MAIN`, part `a`; every other file is part `b`.
+fn class_pairs(composer: &str, files: &[(&str, &str)]) -> Vec<String> {
+    let mut all = vec![("composer.json", composer)];
+    all.extend_from_slice(files);
+    php_pairs(&all)
+}
+
+/// The pairs `MAIN` holding `code` gives, with `files` beside the root `composer.json`.
+fn use_pairs(composer: &str, code: &str, files: &[&str]) -> Vec<String> {
+    let text = format!("<?php\n{code}\n");
+    let mut all = vec![(MAIN, text.as_str())];
+    all.extend(files.iter().map(|f| (*f, "<?php\n")));
+    class_pairs(composer, &all)
+}
+
+#[test]
+fn a_class_use_pairs_with_the_file_the_psr4_table_maps_it_to() {
+    assert_eq!(
+        use_pairs(COMPOSER, "use App\\Lib\\X;", &["src/Lib/X.php"]),
+        from_main(&["src/Lib/X.php"])
+    );
+}
+
+/// A `composer.json` text with the `psr-4` table `table` (a JSON object) under `autoload`.
+fn psr4(table: &str) -> String {
+    format!(r#"{{"autoload":{{"psr-4":{table}}}}}"#)
+}
+
+#[test]
+fn a_prefix_whose_folders_lack_the_file_falls_through_to_a_shorter_prefix() {
+    let composer = psr4(r#"{"App\\":"src/","App\\Lib\\":"lib/"}"#);
+    // `lib/` lacks `Deep/X.php`, so the walk goes on to `App\` and `src/Lib/Deep/X.php`.
+    assert_eq!(
+        use_pairs(&composer, "use App\\Lib\\Deep\\X;", &["src/Lib/Deep/X.php"]),
+        from_main(&["src/Lib/Deep/X.php"])
+    );
+    // The longer prefix wins when its folder holds the file.
+    assert_eq!(
+        use_pairs(
+            &composer,
+            "use App\\Lib\\Deep\\X;",
+            &["src/Lib/Deep/X.php", "lib/Deep/X.php"]
+        ),
+        from_main(&["lib/Deep/X.php"])
+    );
+}
+
+#[test]
+fn a_prefix_mapped_to_an_array_tries_its_folders_in_order() {
+    let composer = psr4(r#"{"App\\":["src/", "more/"]}"#);
+    assert_eq!(
+        use_pairs(&composer, "use App\\X;", &["more/X.php"]),
+        from_main(&["more/X.php"])
+    );
+    // The first folder that holds the file is the one, and a later one gets no pair.
+    assert_eq!(
+        use_pairs(&composer, "use App\\X;", &["src/X.php", "more/X.php"]),
+        from_main(&["src/X.php"])
+    );
+}
+
+#[test]
+fn the_empty_prefix_is_the_fallback_after_every_prefix() {
+    let composer = psr4(r#"{"":"fallback/","App\\":"src/"}"#);
+    assert_eq!(
+        use_pairs(&composer, "use App\\X;", &["fallback/App/X.php"]),
+        from_main(&["fallback/App/X.php"])
+    );
+    assert_eq!(
+        use_pairs(
+            &composer,
+            "use App\\X;",
+            &["fallback/App/X.php", "src/X.php"]
+        ),
+        from_main(&["src/X.php"])
+    );
+    assert_eq!(
+        use_pairs(&composer, "use Other\\X;", &["fallback/Other/X.php"]),
+        from_main(&["fallback/Other/X.php"])
+    );
+}
+
+#[test]
+fn autoload_dev_is_read_like_autoload() {
+    let composer = r#"{"autoload-dev":{"psr-4":{"Dev\\":"dev/"}}}"#;
+    assert_eq!(
+        use_pairs(composer, "use Dev\\X;", &["dev/X.php"]),
+        from_main(&["dev/X.php"])
+    );
+}
+
+#[test]
+fn a_leading_backslash_of_a_prefix_is_stripped() {
+    let composer = psr4(r#"{"\\App\\":"src/"}"#);
+    assert_eq!(
+        use_pairs(&composer, "use App\\X;", &["src/X.php"]),
+        from_main(&["src/X.php"])
+    );
+}
+
+#[test]
+fn class_names_match_paths_with_exact_case() {
+    for code in ["use App\\x;", "use app\\X;", "use App\\Lib\\X;"] {
+        assert_eq!(
+            use_pairs(COMPOSER, code, &["src/X.php"]),
+            Vec::<String>::new(),
+            "{code}"
+        );
+    }
+    // A namespace import never pairs with a file of the same letters in another case.
+    assert_eq!(
+        use_pairs(
+            &psr4(r#"{"Up\\":"src/"}"#),
+            "use Up\\Rector;",
+            &["src/rector.php"]
+        ),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_namespace_a_built_in_an_external_class_and_an_untracked_target_give_nothing() {
+    for code in [
+        "use App\\Lib;",
+        "use ArrayObject;",
+        "use Vendor\\Pkg\\Thing;",
+        "use App\\Missing;",
+        "use App;",
+    ] {
+        assert_eq!(
+            use_pairs(COMPOSER, code, &["src/Lib/X.php"]),
+            Vec::<String>::new(),
+            "{code}"
+        );
+    }
+}
+
+#[test]
+fn every_form_of_a_class_use_gives_its_pairs() {
+    let files = [
+        "src/A.php",
+        "src/B.php",
+        "src/C/D.php",
+        "src/E.php",
+        "src/F.php",
+    ];
+    for code in [
+        "use App\\A, App\\B;",
+        "use \\App\\A, \\App\\B;",
+        "use App\\A as Alias, App\\B as Other;",
+        "use App\\{A, B};",
+        "use \\App\\{A, B,};",
+        "use App\\{A as X, B as Y};",
+        "use App\\A;\nuse App\\B;",
+        "use App\\{A, function f, const C, B};",
+        "USE App\\A, App\\B;",
+        "namespace N;\nuse App\\A;\nuse App\\B;",
+    ] {
+        assert_eq!(
+            use_pairs(COMPOSER, code, &files),
+            from_main(&["src/A.php", "src/B.php"]),
+            "{code}"
+        );
+    }
+    assert_eq!(
+        use_pairs(COMPOSER, "use App\\{A, C\\D as E};", &files),
+        from_main(&["src/A.php", "src/C/D.php"])
+    );
+}
+
+#[test]
+fn use_function_and_use_const_and_trait_and_closure_use_pair_nothing() {
+    for code in [
+        "use function App\\A;",
+        "use const App\\A;",
+        "use function App\\{A, B};",
+        "class K { use App\\A; }",
+        "$f = function () use ($x) {};",
+    ] {
+        assert_eq!(
+            use_pairs(COMPOSER, code, &["src/A.php", "src/B.php"]),
+            Vec::<String>::new(),
+            "{code}"
+        );
+    }
+}
+
+#[test]
+fn two_namespaces_in_one_file_each_read_their_use_lines() {
+    for code in [
+        "namespace N1;\nuse App\\A;\nnamespace N2;\nuse App\\B;",
+        "namespace N1 { use App\\A; }\nnamespace N2 { use App\\B; }",
+        "namespace N1 { use App\\A; }\nnamespace { use App\\B; }",
+    ] {
+        assert_eq!(
+            use_pairs(COMPOSER, code, &["src/A.php", "src/B.php"]),
+            from_main(&["src/A.php", "src/B.php"]),
+            "{code}"
+        );
+    }
+}
+
+#[test]
+fn a_composer_json_in_a_subfolder_maps_relative_to_its_folder() {
+    let files = [
+        (MAIN, "<?php\nuse Pkg\\X;\nuse Pkg\\Y;\n"),
+        (
+            "pkgs/one/composer.json",
+            r#"{"autoload":{"psr-4":{"Pkg\\":"src/"}}}"#,
+        ),
+        ("pkgs/one/src/X.php", "<?php\n"),
+        ("src/Y.php", "<?php\n"),
+        ("pkgs/one/Y.php", "<?php\n"),
+    ];
+    assert_eq!(php_pairs(&files), from_main(&["pkgs/one/src/X.php"]));
+    // `..` leaves the folder, and the path is cleaned.
+    let files = [
+        (MAIN, "<?php\nuse Pkg\\X;\n"),
+        (
+            "pkgs/one/composer.json",
+            r#"{"autoload":{"psr-4":{"Pkg\\":"../shared/./src/"}}}"#,
+        ),
+        ("pkgs/shared/src/X.php", "<?php\n"),
+    ];
+    assert_eq!(php_pairs(&files), from_main(&["pkgs/shared/src/X.php"]));
+}
+
+#[test]
+fn a_class_uses_site_is_the_line_of_its_name() {
+    let text = "<?php\n\nuse App\\A,\n    App\\B;\nuse App\\{\n    A as X,\n    C,\n};\n";
+    let (_dir, root) = repo(
+        &map(&[("b", &["**"]), ("a", &["a/"])], &[], &[]),
+        &[
+            ("composer.json", COMPOSER),
+            (MAIN, text),
+            ("src/A.php", "<?php\n"),
+            ("src/B.php", "<?php\n"),
+            ("src/C.php", "<?php\n"),
+        ],
+    );
+    assert_eq!(
+        sites(&root),
+        [
+            format!("{MAIN}>src/A.php {MAIN}:3"),
+            format!("{MAIN}>src/A.php {MAIN}:6"),
+            format!("{MAIN}>src/B.php {MAIN}:4"),
+            format!("{MAIN}>src/C.php {MAIN}:7"),
+        ]
+    );
+}
+
+#[test]
+fn a_link_between_parts_is_proved_by_a_class_use_and_failed_without_one() {
+    let files = [
+        (MAIN, "<?php\nuse App\\A;\n"),
+        ("composer.json", COMPOSER),
+        ("src/A.php", "<?php\n"),
+    ];
+    let parts: &[(&str, &[&str])] = &[("b", &["**"]), ("a", &["a/"])];
+    let (_dir, root) = repo(&map(parts, &[("a", "b")], &[]), &files);
+    let out = run(&root, "check", &[]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("1 import (1 proven, 0 unproven)"),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let (_dir, root) = repo(&map(parts, &[("b", "a")], &[]), &files);
+    let out = run(&root, "check", &[]);
+    assert!(!out.status.success());
+}
+
+// Ignored files.
+
+/// The pairs `MAIN` holding `code` gives with `files` beside `composer.json`, under a map that ignores `ignored`.
+fn ignoring_pairs(composer: &str, code: &str, files: &[&str], ignored: &[&str]) -> Vec<String> {
+    let text = format!("<?php\n{code}\n");
+    let mut all = vec![(MAIN, text.as_str()), ("composer.json", composer)];
+    all.extend(files.iter().map(|f| (*f, "<?php\n")));
+    let (_dir, root) = repo(&map(&[("b", &["**"]), ("a", &["a/"])], &[], ignored), &all);
+    pairs(&report(&root))
+}
+
+#[test]
+fn an_ignored_composer_json_is_still_read() {
+    assert_eq!(
+        ignoring_pairs(COMPOSER, "use App\\X;", &["src/X.php"], &["composer.json"]),
+        from_main(&["src/X.php"])
+    );
+}
+
+#[test]
+fn an_ignored_first_hit_gives_its_composer_json_no_answer_and_no_pair_past_it() {
+    let composer = psr4(r#"{"App\\":["src/", "more/"], "App\\Lib\\":"lib/"}"#);
+    // The first folder's file is ignored: no pair to the second folder's.
+    assert_eq!(
+        ignoring_pairs(
+            &composer,
+            "use App\\X;",
+            &["src/X.php", "more/X.php"],
+            &["src/"]
+        ),
+        Vec::<String>::new()
+    );
+    // The longer prefix's file is ignored: no fall-through to the shorter prefix's.
+    assert_eq!(
+        ignoring_pairs(
+            &composer,
+            "use App\\Lib\\X;",
+            &["lib/X.php", "src/Lib/X.php"],
+            &["lib/"]
+        ),
+        Vec::<String>::new()
+    );
+}
+
+// Unsure.
+
+/// A repository where `App\X` is `src/X.php` through the root `composer.json` and `copy/src/X.php` through the copy's,
+/// whose parts are `a` (the importer), `x` (`src/`), `y` (`copy/`), `other` (`other/`) and `rest`.
+fn doubled(links: &[(&str, &str)], ignored: &[&str]) -> (tempfile::TempDir, String) {
+    let parts: &[(&str, &[&str])] = &[
+        ("rest", &["**"]),
+        ("a", &["a/"]),
+        ("x", &["src/"]),
+        ("y", &["copy/"]),
+        ("other", &["other/"]),
+    ];
+    repo(
+        &map(parts, links, ignored),
+        &[
+            ("composer.json", COMPOSER),
+            ("copy/composer.json", COMPOSER),
+            (MAIN, "<?php\nuse App\\X;\n"),
+            ("src/X.php", "<?php\n"),
+            ("copy/src/X.php", "<?php\n"),
+            ("other/o.php", "<?php\n"),
+        ],
+    )
+}
+
+#[test]
+fn two_composer_files_mapping_a_class_to_two_files_make_the_importer_unsure() {
+    let (_dir, root) = doubled(&[("a", "x"), ("a", "other")], &[]);
+    let out = run(&root, "check", &[]);
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        "note: a/main.php is unsure of App\\X; its links to x, y pass as unproven\n"
+    );
+    // Only the link to a candidate's part is relaxed; the link to `other` still fails.
+    let problems = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(problems.lines().count(), 1, "{problems}");
+    assert!(
+        problems.starts_with(
+            "import link \"a-other\" runs from \"a\" to \"other\", but the code shows no dependency"
+        ),
+        "{problems}"
+    );
+    let out = run(&root, "check", &["--json"]);
+    let value: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        value["unsure"],
+        json!([{
+            "file": MAIN,
+            "name": "App\\X",
+            "reason": "two composer files map it",
+            "candidates": ["copy/src/X.php", "src/X.php"]
+        }])
+    );
+    assert_eq!(value["edges"], json!([]));
+}
+
+#[test]
+fn two_composer_files_mapping_a_class_to_one_file_are_not_unsure() {
+    let files = [
+        ("composer.json", COMPOSER),
+        (
+            "copy/composer.json",
+            r#"{"autoload":{"psr-4":{"App\\":"../src/"}}}"#,
+        ),
+        (MAIN, "<?php\nuse App\\X;\n"),
+        ("src/X.php", "<?php\n"),
+    ];
+    let (_dir, root) = repo(&map(&[("b", &["**"]), ("a", &["a/"])], &[], &[]), &files);
+    let out = run(&root, "check", &["--json"]);
+    let value: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(value.get("unsure"), None);
+    assert_eq!(pairs(&report(&root)), from_main(&["src/X.php"]));
+}
+
+#[test]
+fn ignoring_one_copy_settles_a_doubled_class() {
+    let (_dir, root) = doubled(&[("a", "x")], &["copy/src/"]);
+    let out = run(&root, "check", &["--json"]);
+    let value: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(value.get("unsure"), None);
+    assert_eq!(pairs(&report(&root)), from_main(&["src/X.php"]));
+}
+
+// Problems.
+
+/// The `composer.json` problems and the pairs of a repository holding `MAIN` with `use App\X;`, `src/X.php` and the `composer.json` files `configs`.
+fn config_problems(configs: &[(&str, &str)]) -> (Vec<String>, Vec<String>) {
+    let mut files = vec![(MAIN, "<?php\nuse App\\X;\n"), ("src/X.php", "<?php\n")];
+    files.extend_from_slice(configs);
+    let (_dir, root) = repo(&map(&[("b", &["**"]), ("a", &["a/"])], &[], &[]), &files);
+    let found = report(&root);
+    // The map holds no link, so the problems about the imports it lacks are left out.
+    let problems = found
+        .problems
+        .iter()
+        .filter(|p| p.contains("composer.json"))
+        .cloned()
+        .collect();
+    (problems, pairs(&found))
+}
+
+#[test]
+fn a_composer_json_that_is_not_json_is_a_problem_naming_it_and_adds_nothing() {
+    let (problems, pairs) = config_problems(&[
+        ("composer.json", COMPOSER),
+        ("pkgs/composer.json", r#"{"autoload": {"psr-4": "#),
+    ]);
+    assert_eq!(problems.len(), 1, "{problems:?}");
+    assert!(
+        problems[0].starts_with("pkgs/composer.json: "),
+        "{problems:?}"
+    );
+    // The other file still resolves.
+    assert_eq!(pairs, from_main(&["src/X.php"]));
+    // The broken one is the only file mapping `App\`: nothing resolves.
+    let (problems, pairs) = config_problems(&[("composer.json", "{ nope")]);
+    assert_eq!(problems.len(), 1, "{problems:?}");
+    assert!(problems[0].starts_with("composer.json: "), "{problems:?}");
+    assert_eq!(pairs, Vec::<String>::new());
+}
+
+#[test]
+fn a_prefix_without_its_trailing_backslash_is_a_problem_naming_the_file_and_the_prefix() {
+    let (problems, pairs) = config_problems(&[(
+        "composer.json",
+        r#"{"autoload":{"psr-4":{"App\\":"src/","Bad":"src/"}}}"#,
+    )]);
+    assert_eq!(problems.len(), 1, "{problems:?}");
+    assert!(
+        problems[0].starts_with("composer.json: ") && problems[0].contains("\"Bad\""),
+        "{problems:?}"
+    );
+    // The file adds nothing, its good prefix too.
+    assert_eq!(pairs, Vec::<String>::new());
+    // A stripped leading backslash and the empty prefix are fine.
+    let (problems, _) = config_problems(&[(
+        "composer.json",
+        r#"{"autoload-dev":{"psr-4":{"\\App\\":"src/","":"src/"}}}"#,
+    )]);
+    assert_eq!(problems, Vec::<String>::new());
+}
+
+#[test]
+fn a_psr4_value_that_is_not_a_folder_or_a_list_of_folders_is_a_problem() {
+    for table in [
+        r#"{"App\\": 7}"#,
+        r#"{"App\\": null}"#,
+        r#"{"App\\": {"a": "src/"}}"#,
+        r#"{"App\\": ["src/", 7]}"#,
+    ] {
+        let (problems, pairs) = config_problems(&[("composer.json", &psr4(table))]);
+        assert_eq!(problems.len(), 1, "{table}: {problems:?}");
+        assert!(
+            problems[0].starts_with("composer.json: ") && problems[0].contains("App\\"),
+            "{table}: {problems:?}"
+        );
+        assert_eq!(pairs, Vec::<String>::new(), "{table}");
+    }
+}
+
+#[test]
+fn keys_of_other_types_elsewhere_give_nothing_and_no_problem() {
+    for text in [
+        "[]",
+        "7",
+        r#"{"autoload": 7}"#,
+        r#"{"autoload": {"psr-4": []}}"#,
+        r#"{"autoload": {"psr-4": "src/"}, "autoload-dev": null}"#,
+        r#"{"autoload": {"classmap": 7}}"#,
+    ] {
+        let (problems, pairs) = config_problems(&[("composer.json", text)]);
+        assert_eq!(problems, Vec::<String>::new(), "{text}");
+        assert_eq!(pairs, Vec::<String>::new(), "{text}");
+    }
+}
+
+#[test]
+fn a_composer_json_under_a_test_or_vendor_folder_is_never_read() {
+    for config in [
+        "tests/composer.json",
+        "pkgs/Tests/fixture/composer.json",
+        "test/composer.json",
+        "vendor/pkg/composer.json",
+        "pkgs/vendor/composer.json",
+    ] {
+        // Broken: no problem.
+        let (problems, _) = config_problems(&[("composer.json", COMPOSER), (config, "{ nope")]);
+        assert_eq!(problems, Vec::<String>::new(), "{config}");
+        // Valid and the only one: it resolves nothing.
+        let (problems, pairs) =
+            config_problems(&[(config, r#"{"autoload":{"psr-4":{"App\\":"../src/"}}}"#)]);
+        assert_eq!(problems, Vec::<String>::new(), "{config}");
+        assert_eq!(pairs, Vec::<String>::new(), "{config}");
+    }
+}
+
+// Skipped files.
+
+/// `check` on a repository whose part `a` owns `a/main.php` (importing `App\X`, which `src/X.php` holds), with a link from
+/// `a` to `c`, a part no import reaches, and the `composer.json` text `composer`.
+fn link_check(composer: &str, importer: &str) -> (bool, String) {
+    let parts: &[(&str, &[&str])] = &[("b", &["**"]), ("a", &["a/"]), ("c", &["c/"])];
+    let (_dir, root) = repo(
+        &map(parts, &[("a", "c")], &[]),
+        &[
+            ("composer.json", composer),
+            (importer, "<?php\nuse App\\X;\n"),
+            ("src/X.php", "<?php\n"),
+            ("c/c.php", "<?php\n"),
+        ],
+    );
+    let out = run(&root, "check", &[]);
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+    )
+}
+
+#[test]
+fn a_file_under_a_classmap_path_and_no_psr4_folder_is_skipped_and_its_part_passes_unproven() {
+    let plain = r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#;
+    // Read, the part's link to `c` has no import behind it: a dead link.
+    let (ok, out) = link_check(plain, MAIN);
+    assert!(!ok && out.contains("no dependency"), "{out}");
+    for composer in [
+        r#"{"autoload":{"psr-4":{"App\\":"src/"},"classmap":["a/"]}}"#,
+        r#"{"autoload":{"psr-4":{"App\\":"src/"},"classmap":["a"]}}"#,
+        r#"{"autoload":{"psr-4":{"App\\":"src/"},"classmap":["./a/main.php"]}}"#,
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}},"autoload-dev":{"classmap":["a/"]}}"#,
+        r#"{"autoload":{"psr-4":{"App\\":"src/"},"classmap":["x/", "a/"]}}"#,
+    ] {
+        let (ok, out) = link_check(composer, MAIN);
+        assert!(ok, "{composer}: {out}");
+        assert!(out.contains("1 unproven"), "{composer}: {out}");
+    }
+}
+
+#[test]
+fn a_classmap_path_names_a_folder_or_a_file_not_a_name_prefix() {
+    for composer in [
+        r#"{"autoload":{"psr-4":{"App\\":"src/"},"classmap":["a/ma"]}}"#,
+        r#"{"autoload":{"psr-4":{"App\\":"src/"},"classmap":["a/other.php"]}}"#,
+        r#"{"autoload":{"psr-4":{"App\\":"src/"},"classmap":["b/"]}}"#,
+    ] {
+        let (ok, out) = link_check(composer, MAIN);
+        assert!(!ok && out.contains("no dependency"), "{composer}: {out}");
+    }
+}
+
+#[test]
+fn a_file_under_a_classmap_path_and_a_psr4_folder_is_read() {
+    // `a/` is both a classmap path and a PSR-4 folder, of this or of another `composer.json`.
+    let psr = r#"{"autoload":{"psr-4":{"App\\":"src/", "Other\\":"a/"},"classmap":["a/"]}}"#;
+    let (ok, out) = link_check(psr, MAIN);
+    assert!(!ok && out.contains("no dependency"), "{out}");
+    let parts: &[(&str, &[&str])] = &[("b", &["**"]), ("a", &["a/"]), ("c", &["c/"])];
+    let (_dir, root) = repo(
+        &map(parts, &[("a", "c")], &[]),
+        &[
+            (
+                "composer.json",
+                r#"{"autoload":{"psr-4":{"App\\":"src/"},"classmap":["a/"]}}"#,
+            ),
+            (
+                "c/composer.json",
+                r#"{"autoload":{"psr-4":{"Other\\":"../a/"}}}"#,
+            ),
+            (MAIN, "<?php\nuse App\\X;\n"),
+            ("src/X.php", "<?php\n"),
+            ("c/c.php", "<?php\n"),
+        ],
+    );
+    let out = run(&root, "check", &[]);
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("no dependency"),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+#[test]
+fn the_empty_prefix_folder_covers_the_files_under_it_too() {
+    let composer = r#"{"autoload":{"psr-4":{"App\\":"src/","":"a/"},"classmap":["a/"]}}"#;
+    let (ok, out) = link_check(composer, MAIN);
+    assert!(!ok && out.contains("no dependency"), "{out}");
+}
+
+// Commit mode.
+
+#[test]
+fn a_commit_resolves_a_class_use_through_its_own_composer_json() {
+    let (dir, root) = repo(
+        &map(&[("b", &["**"]), ("a", &["a/"])], &[("a", "b")], &[]),
+        &[
+            ("composer.json", COMPOSER),
+            (MAIN, "<?php\nuse App\\X;\n"),
+            ("src/X.php", "<?php\n"),
+        ],
+    );
+    let edges = |extra: &[&str]| -> Value {
+        let args = [&["--json"], extra].concat();
+        let out = run(&root, "check", &args);
+        serde_json::from_slice::<Value>(&out.stdout).unwrap()["edges"].clone()
+    };
+    let at_commit = edges(&["--commit", "HEAD"]);
+    assert_eq!(at_commit[0]["pairs"][0]["to"], "src/X.php", "{at_commit}");
+    assert_eq!(edges(&[]), at_commit);
+    // An edited working-tree copy changes nothing at the commit, and everything in the tree.
+    write(
+        dir.path(),
+        "composer.json",
+        r#"{"autoload":{"psr-4":{"App\\":"elsewhere/"}}}"#,
+    );
+    assert_eq!(edges(&["--commit", "HEAD"]), at_commit);
+    assert_eq!(edges(&[]), json!([]));
 }
 
 // Requires.

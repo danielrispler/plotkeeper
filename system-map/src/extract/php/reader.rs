@@ -390,7 +390,7 @@ impl Lexer<'_> {
     }
 }
 
-/// A class named by a top-level `use`, fully qualified with no leading `\`. The next ticket (#653) resolves it.
+/// A class named by a top-level `use`, fully qualified with no leading `\`.
 #[derive(Debug, PartialEq)]
 pub(super) struct ClassUse {
     pub(super) name: String,

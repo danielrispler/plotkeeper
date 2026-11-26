@@ -63,6 +63,8 @@ pub(crate) struct Repo<'a> {
     texts: Option<&'a BTreeMap<String, String>>,
     /// In commit mode, a folder holding the commit's manifests and Rust files for `cargo metadata`, written once.
     cargo_dir: OnceCell<Result<tempfile::TempDir, String>>,
+    /// `php-imports`' index of the tracked `composer.json` files, built on first use.
+    autoload: OnceCell<php::Autoload>,
 }
 
 impl<'a> Repo<'a> {
@@ -81,6 +83,7 @@ impl<'a> Repo<'a> {
                 .collect(),
             texts: None,
             cargo_dir: OnceCell::new(),
+            autoload: OnceCell::new(),
         }
     }
 
@@ -123,6 +126,12 @@ impl<'a> Repo<'a> {
         dir.as_ref()
             .map(tempfile::TempDir::path)
             .map_err(Clone::clone)
+    }
+
+    /// What the tracked `composer.json` files map, read from the same texts as everything else, so in commit mode from
+    /// the commit's; built on first use and kept, since `skips` asks for it once per file.
+    pub(crate) fn autoload(&self) -> &php::Autoload {
+        self.autoload.get_or_init(|| php::Autoload::build(self))
     }
 
     /// Every tracked file, sorted.
