@@ -11,7 +11,6 @@ import { failure, hint, invoke, pressable, text } from "./dom.js";
 import { currentMap, currentScrub, onDraw, onUnread, registerLayer, setScrub, type MapView } from "./map.js";
 import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { hideAgents } from "./map-agents.js";
-import { explained, explanationsOn, SHEET } from "./explanations.js";
 import { type Scrub, briefOffer, commitDrawer, scrubBanner, scrubTickets, stripOf } from "./map-model.js";
 import type { HistoryEntry } from "./types.js";
 
@@ -76,11 +75,11 @@ function rows(view: MapView, list: HTMLElement, entries: HistoryEntry[]) {
   );
 }
 
-/** Fills `slot` (the sheet's foot) with the strip of `part`. */
+/** Fills `slot` (the body of the sheet's History fold, whose summary is its heading, #637) with the strip of `part`. */
 export function drawStrip(view: MapView, part: string, slot: HTMLElement) {
   const key = `${view.project}|${part}|${view.state.commit}|${view.state.fog?.[part] ?? ""}`;
   const list = text("ul", "", "hist");
-  slot.replaceChildren(...explained(text("h3", "History", "sheet-heading"), SHEET.history, explanationsOn()), list);
+  slot.replaceChildren(list);
   const found = known.get(key);
   if (found) {
     rows(view, list, found);

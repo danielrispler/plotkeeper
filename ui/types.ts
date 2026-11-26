@@ -514,9 +514,15 @@ export type LawPatchOpened = { kind: "pr"; number: number; url: string } | { kin
 export type BackLawStarted = { kind: "run"; id: string } | { kind: "refused"; line: string; prompt: string };
 /**
  * A fogged part's offer (#391): a part catch-up, `ready` when one is stored for its current fog list, `writing` while one is written, `failed`
- * when the last write for it failed; or the chapter of the one PR's brief that lights the part.
+ * when the last write for it failed; or the chapter of the one PR's brief that lights the part. `outline`, with `ready`: what the sheet's
+ * catch-up card shows of the stored one (#636), never its gist. `older`, while none is stored for the current list: the stored one written
+ * for an earlier list whose every entry is still fogged (#638), its outline and the fog entries it covers (`fog`, their commits).
  */
-export type CatchUpOffer = { kind: "catch-up"; ready: boolean; writing: boolean; failed: boolean; stage?: CatchUpStage } | { kind: "chapter"; pr: number; chapter: number };
+export type CatchUpOffer =
+  | { kind: "catch-up"; ready: boolean; writing: boolean; failed: boolean; stage?: CatchUpStage; outline?: CatchUpOutline; older?: { outline: CatchUpOutline; fog: string[] } }
+  | { kind: "chapter"; pr: number; chapter: number };
+/** A stored part catch-up's title and, per step of its one chapter, the step's kind (`k`) and headline (`h`), as `part_catch_ups::Outline`. */
+export type CatchUpOutline = { title: string; steps: { k: string; h: string }[] };
 /** Which call of a part catch-up's write runs now (#450): the writer, the claim check, or the retry rewriting `claims` flagged items. */
 export type CatchUpStage = { kind: "writing" } | { kind: "checking" } | { kind: "fixing"; claims: number };
 /**
@@ -733,7 +739,8 @@ export interface Commands {
   map_proof: { args: Project & { law: string }; reply: Proof[] };
   map_state: { args: Project & { fetch: boolean }; reply: MapState };
   pr_brief: { args: InPr & { full?: boolean | null }; reply: BriefOpened | null };
-  part_catch_up: { args: InPart; reply: CatchUpOpened | null };
+  // `older` (#638): "Read the one you have", the stored catch-up of an earlier fog list while it still holds.
+  part_catch_up: { args: InPart & { older?: boolean | null }; reply: CatchUpOpened | null };
   part_catch_up_done: { args: InPart & { fog: string[] }; reply: void };
   pr_diff: { args: PrDiffArgs; reply: CommitFiles };
   pre_flight_issues: { args: Project; reply: OpenIssue[] };

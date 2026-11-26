@@ -1,13 +1,19 @@
 // The part sheet of the Map view (spec danielrispler/plotkeeper#306, ticket #310): a click on a plate opens it over the map's right, in the
-// side area's `sheet` slot, in the glass the left panel shares (#385). It starts with why its plate carries its marks (#495: fog, staleness,
-// a broken law; `sheetMarks`), then holds the part's purpose, then the named things it holds, each with its key files (spec #473), its tier (changed in place), its laws, what it talks to (its links) and its fog, with a quiet
-// "I know this" that lifts the mist. `map-model.ts`'s `sheetOf` is what it shows; Esc closes it (the `sheet` layer). A fogged part's main
-// button is its part catch-up (#391), or the one PR brief chapter that lights it (`fogActions`); "I know this" is the quiet second.
+// side area's `sheet` slot, in the glass the left panel shares (#385). `map-model.ts`'s `sheetOf` is what it shows; Esc closes it (the
+// `sheet` layer). Under its name it starts with why its plate carries its marks (#495: fog, staleness, a broken law; `sheetMarks`), then
+// the catch-up card (#636), then the part's purpose, clamped to two lines until More shows it whole (#637), then the chips that open the
+// folds, then the folds (#637, `foldOrder`): Laws, Talks to (its links), This session here, Holds (the named things it holds, each with
+// its key files, spec #473), Tier (changed in place), CI on main and History (the history strip, `map-history.ts`, #313). CI on main
+// leads, open, when a run breaks one of the part's laws.
+//
+// A fogged part's catch-up card says how many changes landed and shows the waiting catch-up's outline; its main button is its part
+// catch-up (#391), or the one PR brief chapter that lights it (`fogActions`), and "I know this", which lifts the mist, is the quiet
+// second. While a newer one is written, "Read the one you have" opens the older one (#638). A part with no fog's card says "Caught up"
+// and holds the Refresher (#392).
 //
 // "See the proof" (`.sheet-law-actions` of a law a check backs) and the CI line with its drill-down open the drawer (`map-drawer.ts`).
-// A law on trust has Back a law there instead, or its run's patch (`patch-review.ts`, #398).
-// `.sheet-extra` at the foot holds the history strip (`map-history.ts`, #313). While a past commit is shown the sheet is read-only:
-// no tier change, no proof, no CI section, no fog section.
+// A law on trust has Back a law there instead, or its run's patch (`patch-review.ts`, #398). While a past commit is shown the sheet is
+// read-only: no tier change, no proof, no CI fold, no catch-up card.
 //
 // The sheet's left edge resizes it (#445), and a click on the empty map closes it and its drawer (`map.ts`'s `pan`).
 
@@ -21,13 +27,14 @@ import { sheetLinkItem, sheetPending, statusWords } from "./ratify.js";
 import { currentPlacement } from "./map-agents.js";
 import { sessionHere } from "./map-live.js";
 import { studio } from "./state.js";
-import type { Session } from "./types.js";
+import type { CatchUpOutline, Session } from "./types.js";
 import { enterRefresher, refresherNode, staleWhy } from "./map-stale.js";
-import { fogActions } from "./map-catch-up.js";
-import { ciDrawer, effectiveTier, type PanelContent, type Part, proofDrawer, type Sheet, sheetCi, sheetMarks, sheetOf, talksTo, type Tier } from "./map-model.js";
+import { changesLine, fogActions, olderLine } from "./map-catch-up.js";
+import { chip, type Fold, fitPurpose, fold, purposeNodes } from "./map-sheet-folds.js";
+import { ciDrawer, effectiveTier, type FoldKey, foldOrder, type PanelContent, type Part, proofDrawer, type Sheet, sheetCi, sheetGlances, sheetMarks, sheetOf, talksTo, type Tier } from "./map-model.js";
 import { openBriefOf, openCatchUpOf } from "./map-brief.js";
 import { lawAction, lawActionNodes, patchActs } from "./patch-review.js";
-import { explained, explainedChoice, explainedLinks, explainLine, explanationsOn, explainToggle, onExplanations, SHEET, SHEET_HEADINGS } from "./explanations.js";
+import { explained, explainedChoice, explainedLinks, explainLine, explanationsOn, explainToggle, onExplanations, SHEET } from "./explanations.js";
 
 // The part whose sheet is open, and the project it is in; a sheet never carries over to another project's map.
 let open: { project: string; part: string } | null = null;
@@ -74,6 +81,7 @@ function resize(px: number | null) {
   const most = Math.max(leastWidth, (side.parentElement?.clientWidth ?? 0) / 2);
   const width = px === null ? firstWidth : Math.round(Math.min(most, Math.max(leastWidth, px)));
   showWidth(width);
+  fitPurpose(element("map-sheet"));
   // A browser that keeps nothing still resizes.
   if (px === null) kept.remove();
   else kept.set(String(width));
@@ -153,41 +161,120 @@ function drawSheet(view: MapView) {
   if (keepFocus) toggle.focus();
   drawStrip(view, part.id, extra);
   syncSide(view.slots);
+  // Measured once the side column shows: in a hidden one the purpose has no size.
+  fitPurpose(slot);
 }
 
-// The sheet's card for `part` on `view`, its `.sheet-extra` foot (the history strip's, drawn once the card is in the page) and its `?`.
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: ratcheted at #554; split it rather than grow it
+// The sheet's card for `part` on `view`, its History fold's body (the history strip's, drawn once the card is in the page) and its `?`.
 export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra: HTMLElement; toggle: HTMLElement } {
   const tier = effectiveTier(part, view.state.user.tiers);
   const sheet = sheetOf(part, view.doc.laws, tier, view.scrub ? undefined : view.state.fog?.[part.id]);
-
   const closer = pressable(text("button", "×", "btn quiet sheet-close"), null);
   closer.setAttribute("aria-label", "Close");
   hint(closer, "Close the sheet (Esc)");
   closer.addEventListener("click", closeSheet);
-  // Explanations (#522): a line under each heading, the selected tier's meaning under the tiers, a link kind's and "not yet ratified"'s
-  // at their first link, and the fog actions' under them. The `?` beside the × shows or hides them all.
+  // Explanations (#522): a line inside each fold, the selected tier's meaning under the tiers, a link kind's and "not yet ratified"'s
+  // at their first link, and the fog's and the fog actions' in the catch-up card. The `?` beside the × shows or hides them all.
   const explain = explanationsOn();
-  const heading = (words: string) => explained(text("h3", words, "sheet-heading"), SHEET_HEADINGS[words] ?? "", explain);
   const header = text("div", "", "sheet-header");
   const toggle = explainToggle(explain);
   header.append(toggle, closer);
+  // CI is of now: a past commit shows none.
+  const ci = view.scrub ? null : sheetCi(view.state.ci, part.id, sheet.laws.some((law) => law.backing === "check"));
+  const { folds, extra, chips } = sheetFolds(view, part, sheet, ci, explain);
+  const card = text("div", "", "sheet");
+  card.dataset.part = part.id;
+  card.append(
+    header,
+    text("h2", sheet.name, "sheet-name"),
+    text("p", sheet.caption, "sheet-caption"),
+    ...(view.scrub ? [] : marksList(view, part.id)),
+    ...(view.scrub ? [] : [catchUpCard(view, part.id, sheet, explain)]),
+    // A converted version 1 map may have had an empty description: no empty paragraph for it.
+    ...(sheet.purpose ? purposeNodes(sheet.purpose, purposeOpen === part.id, (whole) => {
+      purposeOpen = whole ? part.id : null;
+    }) : []),
+    chips,
+    folds,
+  );
+  const overturned = overturnNote(view.project, (item) =>
+    item.kind === "law" ? sheet.laws.some((law) => law.id === item.id) : item.kind === "link" && view.doc.links.some((link) => link.id === item.id && (link.from === part.id || link.to === part.id)),
+  );
+  if (overturned) card.append(overturned);
+  return { card, extra, toggle };
+}
+
+type Unratified = ReturnType<typeof sheetPending>;
+
+// The part whose purpose shows whole (#637), kept across the sheet's draws; another part's sheet starts clamped.
+let purposeOpen: string | null = null;
+
+// The folds in their order (`foldOrder`), each with its glance and, with the explanations on, its line; the chips that open them; and the
+// History fold's body, which the strip fills.
+function sheetFolds(view: MapView, part: Part, sheet: Sheet, ci: ReturnType<typeof sheetCi>, explain: boolean) {
+  // The laws and links at this part that landed without Daniel's say: marked "not yet ratified", with accept and overturn. Of now only.
+  const unratified = view.scrub ? sheetPending([], part.id, []) : sheetPending(view.state.ratify ?? [], part.id, view.doc.links);
+  const talks = talksRows(view, part.id, unratified, explain);
+  const glances = sheetGlances(sheet, talks.length, view.state.ci);
+  const here = text("div", "", "sheet-here");
+  const extra = text("div", "", "sheet-extra");
+  const make: Record<FoldKey, () => Fold> = {
+    laws: () => fold("laws", glances.folds.laws, explain, lawsBody(view, part.id, sheet, unratified)),
+    talks: () => fold("talks", glances.folds.talks, explain, talks.length ? [listOf("sheet-links", talks)] : [text("p", "No link at this part", "empty")]),
+    here: () => fold("here", "", explain, [here]),
+    holds: () => fold("holds", glances.folds.holds, explain, [heldList(sheet.holds)]),
+    tier: () => fold("tier", glances.folds.tier, explain, tierChoice(view, part.id, sheet, explain)),
+    ci: () => fold("ci", glances.folds.ci, explain, ci ? [ciBody(view, ci)] : [], { forced: ci?.broken ?? false, bad: ci?.broken ?? false }),
+    history: () => fold("history", "", explain, [extra]),
+  };
+  const drawn = new Map(foldOrder(ci, sheet.holds.length > 0).map((key) => [key, make[key]()]));
+  const herefold = drawn.get("here");
+  if (herefold) fillHere(herefold.node, part.id, !view.scrub, explain);
+  const folds = text("div", "", "sheet-folds");
+  folds.append(...[...drawn.values()].map((each) => each.node));
+  const chips = text("div", "", "sheet-chips");
+  const chipOf = (key: FoldKey, words: string, bad = false) => {
+    const target = drawn.get(key);
+    if (target) chips.append(chip(words, target, bad));
+  };
+  chipOf("tier", glances.chips.tier);
+  chipOf("laws", glances.chips.laws);
+  chipOf("talks", glances.chips.talks);
+  if (ci) chipOf("ci", glances.chips.ci, ci.broken);
+  return { folds, extra, chips };
+}
+
+// A list (`ul`, or `ol` when its order counts) of `rows` with `className`. Safari drops a list's semantics under `list-style: none`; the
+// role brings them back.
+function listOf(className: string, rows: HTMLElement[], tag: "ul" | "ol" = "ul"): HTMLElement {
+  const list = text(tag, "", className);
+  list.setAttribute("role", "list");
+  list.append(...rows);
+  return list;
+}
+
+// The tier buttons, the selected one's meaning under them with the explanations on. Of now only: a past commit's are disabled.
+function tierChoice(view: MapView, part: string, sheet: Sheet, explain: boolean): HTMLElement[] {
   const tiers = text("div", "", "sheet-tiers");
   let selected: HTMLElement | undefined;
   for (const each of sheet.tiers) {
-    const button = pressable(text("button", each.label, "btn"), each.pressed, () => setTier(view, part.id, each.tier).catch(failure("map_set_tier")));
+    const button = pressable(text("button", each.label, "btn"), each.pressed, () => setTier(view, part, each.tier).catch(failure("map_set_tier")));
     // Each tier's meaning on hover, so the ones not picked compare without a change.
     hint(button, SHEET.tiers[each.tier]);
     if (view.scrub) button.disabled = true;
     if (each.pressed) selected = button;
     tiers.append(button);
   }
-  // The laws and links at this part that landed without Daniel's say: marked "not yet ratified", with accept and overturn. Of now only.
-  const unratified = view.scrub ? sheetPending([], part.id, []) : sheetPending(view.state.ratify ?? [], part.id, view.doc.links);
+  return explainedChoice(tiers, selected, SHEET.tiers[sheet.tier], explain);
+}
+
+// The part's laws, each its mark, text and backing, "See the proof" for one a check backs and Back a law for one on trust, and accept and
+// overturn for one not yet ratified.
+function lawsBody(view: MapView, part: string, sheet: Sheet, unratified: Unratified): HTMLElement[] {
   const ratified = () => void reloadMap().catch(failure("map_state"));
-  const laws = sheet.laws.map((law) => {
+  const rows = sheet.laws.map((law) => {
     // The law's mark says its backing and text on the pointer, as the row's title did; keyed apart from the plate's own mark of it.
-    const mark = lawMark({ id: law.id, on: part.id, backing: law.backing, text: law.text }, `sheet-${part.id}-${law.id}`);
+    const mark = lawMark({ id: law.id, on: part, backing: law.backing, text: law.text }, `sheet-${part}-${law.id}`);
     const row = text("li", "", "sheet-law");
     row.dataset.law = law.id;
     const acts = text("span", "", "sheet-law-actions");
@@ -211,10 +298,15 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
     }
     return row;
   });
+  return rows.length ? [listOf("sheet-laws", rows)] : [text("p", "No laws on this part", "empty")];
+}
+
+// "Talks to" (spec #473): every link at either end, its arrow, other end, kind and reason; an unratified one carries its accept and overturn.
+function talksRows(view: MapView, part: string, unratified: Unratified, explain: boolean): HTMLElement[] {
+  const ratified = () => void reloadMap().catch(failure("map_state"));
   const nameOf = (id: string) => view.doc.parts.find((p) => p.id === id)?.name ?? view.doc.actors.find((a) => a.id === id)?.name ?? id;
-  // "Talks to" (spec #473): every link at either end, its arrow, other end, kind and reason; an unratified one carries its accept and overturn.
   const pending = new Map(unratified.links.map((link) => [link.id, sheetLinkItem(link, link.pr)]));
-  const talks = talksTo(part.id, view.doc.links, nameOf);
+  const talks = talksTo(part, view.doc.links, nameOf);
   const rows = talks.map((talk) => {
     const row = text("li", "", "sheet-link");
     row.dataset.link = talk.link;
@@ -232,108 +324,129 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
     }
     return row;
   });
-  const links = explainedLinks(rows, talks.map((talk) => ({ kind: talk.kind, unratified: pending.has(talk.link) })), explain);
-  const fog = text("div", "", `sheet-fog${!view.scrub && view.state.fog?.[part.id] ? ` ${view.state.fog[part.id]}` : ""}`);
-  fog.append(text("p", sheet.fogLine, "sheet-fog-line"));
-  const actions = fogActions(view.scrub ? undefined : view.state.fog?.[part.id], view.state.catch_ups?.[part.id]);
-  const fogButtons: HTMLElement[] = [];
+  return explainedLinks(rows, talks.map((talk) => ({ kind: talk.kind, unratified: pending.has(talk.link) })), explain);
+}
+
+// CI on main's line and, for a run there is something to show of, "See the CI log", which opens the drawer.
+function ciBody(view: MapView, state: NonNullable<ReturnType<typeof sheetCi>>): HTMLElement {
+  const ci = text("div", "", `sheet-ci${state.broken ? " broken" : ""}`);
+  ci.append(text("p", state.line, "sheet-ci-line"));
+  const found = view.state.ci;
+  if (state.drill && found) {
+    const drill = pressable(text("button", "See the CI log", "btn quiet"), null);
+    hint(drill, "Show the run's status and the end of its failed log, with a link to the run on GitHub");
+    drill.addEventListener("click", () => openDrawer(ciDrawer(found)));
+    ci.append(drill);
+  }
+  return ci;
+}
+
+// The catch-up card (spec #633, ticket #636), of now only. A fogged part's says how many changes landed since Daniel last caught up and, once
+// the catch-up is stored, its outline: its title and each step's kind and headline, never its gist, which stays behind Explain-back. Under
+// them the main button and "I know this", with the write's stage or failure, and, while none is stored for the current fog list, "Read the one
+// you have" (#638) with what the one stored for an earlier list covers. A part with no fog's says "Caught up" and holds the Refresher, which
+// opens inside it.
+function catchUpCard(view: MapView, part: string, sheet: Sheet, explain: boolean): HTMLElement {
+  const shown = view.state.fog?.[part];
+  const card = text("article", "", `catch-up-card ${shown ?? "clear"}`);
+  const changes = view.state.user.fog?.parts[part]?.length ?? 0;
+  const eyebrow = text("p", shown ? changesLine(Math.max(1, changes)) : "Caught up", "catch-up-eyebrow");
+  card.append(...explained(eyebrow, SHEET.fog, explain));
+  if (!shown) {
+    caughtUp(view, part, sheet, card);
+    return card;
+  }
+  const offer = view.state.catch_ups?.[part];
+  const outline = offer?.kind === "catch-up" ? offer.outline : undefined;
+  if (outline) card.append(...outlineNodes(outline));
+  card.append(...catchUpActions(view, part, fogActions(shown, offer), explain));
+  const older = offer?.kind === "catch-up" && !offer.ready ? offer.older : undefined;
+  if (older) card.append(olderNodes(view, part, older));
+  return card;
+}
+
+// A part with no fog's card: a part that never fogs, or fogs only on its laws, links or flows, says so; then the Refresher, or the
+// refresher once entered.
+function caughtUp(view: MapView, part: string, sheet: Sheet, card: HTMLElement) {
+  if (sheet.tier !== "core") card.append(text("p", sheet.fogLine, "catch-up-line"));
+  const refresher = refreshing === part ? refresherNode(view, part) : null;
+  if (refresher) return void card.append(refresher);
+  const enter = pressable(text("button", "Refresher", "btn quiet sheet-refresher"), null);
+  hint(enter, "The flows through this part, hop by hop");
+  // It shows at once in the button's place, drawn from the map; the server records the activity behind it, and the reload, which draws
+  // the sheet again with it open, drops the band.
+  enter.addEventListener("click", () => {
+    refreshing = part;
+    const opened = refresherNode(view, part);
+    if (opened) card.replaceChild(opened, enter);
+    enterRefresher(view, part).catch(failure("map_refresher"));
+  });
+  card.append(enter);
+}
+
+// A stored catch-up's outline: its title, then one row per step, its kind and headline.
+function outlineNodes(outline: CatchUpOutline): HTMLElement[] {
+  const rows = outline.steps.map((step) => {
+    const row = text("li", "", "catch-up-step");
+    row.append(text("span", step.k, "catch-up-kind"), text("span", step.h, "catch-up-headline"));
+    return row;
+  });
+  return [text("h3", outline.title, "catch-up-title"), listOf("catch-up-steps", rows, "ol")];
+}
+
+// The card's buttons in a row, the write's stage or failure under them, and, with the explanations on, the fog actions' line, which each
+// button is described by.
+function catchUpActions(view: MapView, part: string, actions: ReturnType<typeof fogActions>, explain: boolean): HTMLElement[] {
+  const buttons: HTMLElement[] = [];
   if (actions.main) {
-    const { open: opens, label, title, note } = actions.main;
+    const { open: opens, label, title } = actions.main;
     const main = pressable(text("button", label, "btn primary sheet-catch-up"), null);
     hint(main, title);
     main.addEventListener("click", () => {
       if (opens.kind === "chapter") return void openBriefOf(view.project, opens.pr, opens.chapter, true);
-      void openCatchUpOf(view.project, part.id);
+      void openCatchUpOf(view.project, part);
     });
-    fog.append(main);
-    fogButtons.push(main);
-    if (note) fog.append(text("span", note, "sheet-catch-up-note"));
-    if (opens.kind === "catch-up") {
-      const key = `${view.project}|${part.id}`;
-      if (!offered.has(key)) {
-        offered.add(key);
-        logStop("catch-up-offered", view.project);
-      }
+    buttons.push(main);
+    const key = `${view.project}|${part}`;
+    if (opens.kind === "catch-up" && !offered.has(key)) {
+      offered.add(key);
+      logStop("catch-up-offered", view.project);
     }
   }
-  if (sheet.canClear && actions.second) {
+  if (actions.second) {
     const clear = pressable(text("button", actions.second, "btn quiet sheet-know"), null);
     hint(clear, "Clear this part's fog: you have caught up with what changed");
     clear.addEventListener("click", () => {
       clear.disabled = true;
-      know(view, part.id).catch(failure("map_know"));
+      know(view, part).catch(failure("map_know"));
     });
-    fog.append(clear);
-    fogButtons.push(clear);
-    // The fog actions' line under the buttons shown, each button described by it.
-    if (explain) {
-      const kind = actions.main ? (actions.main.open.kind === "chapter" ? "chapter" : "catchUp") : "know";
-      const note = explainLine(SHEET.fogActions[kind], "explain-choice");
-      for (const button of fogButtons) button.setAttribute("aria-describedby", note.id);
-      fog.append(note);
-    }
+    buttons.push(clear);
   }
-  // A part with no fog offers the refresher (#392).
-  const refresher = !view.scrub && refreshing === part.id ? refresherNode(view, part.id) : null;
-  if (!view.scrub && !sheet.canClear && !refresher) {
-    const enter = pressable(text("button", "Refresher", "btn quiet sheet-refresher"), null);
-    hint(enter, "The flows through this part, hop by hop");
-    // It shows at once, drawn from the map; the server records the activity behind it, and the reload drops the band.
-    enter.addEventListener("click", () => {
-      refreshing = part.id;
-      drawSheet(view);
-      enterRefresher(view, part.id).catch(failure("map_refresher"));
-    });
-    fog.append(enter);
+  const row = text("div", "", "catch-up-actions");
+  row.append(...buttons);
+  const nodes: HTMLElement[] = [row, ...(actions.main?.note ? [text("p", actions.main.note, "sheet-catch-up-note")] : [])];
+  if (explain) {
+    const kind = actions.main ? (actions.main.open.kind === "chapter" ? "chapter" : "catchUp") : "know";
+    const line = explainLine(SHEET.fogActions[kind], "explain-choice");
+    for (const button of buttons) button.setAttribute("aria-describedby", line.id);
+    nodes.push(line);
   }
-  const state = view.scrub ? null : sheetCi(view.state.ci, part.id, sheet.laws.some((law) => law.backing === "check"));
-  const ci = text("div", "", `sheet-ci${state?.broken ? " broken" : ""}`);
-  if (state) {
-    ci.append(text("p", state.line, "sheet-ci-line"));
-    if (state.drill && view.state.ci) {
-      const found = view.state.ci;
-      const drill = pressable(text("button", "See the CI log", "btn quiet"), null);
-      hint(drill, "Show the run's status and the end of its failed log, with a link to the run on GitHub");
-      drill.addEventListener("click", () => openDrawer(ciDrawer(found)));
-      ci.append(drill);
-    }
-  }
-  const lawList = text("ul", "", "sheet-laws");
-  const linkList = text("ul", "", "sheet-links");
-  // Safari drops a list's semantics under `list-style: none`; the role brings them back.
-  for (const list of [lawList, linkList]) list.setAttribute("role", "list");
-  lawList.append(...laws);
-  linkList.append(...links);
-  const card = text("div", "", "sheet");
-  card.dataset.part = part.id;
-  card.append(
-    header,
-    text("h2", sheet.name, "sheet-name"),
-    text("p", sheet.caption, "sheet-caption"),
-    ...(view.scrub ? [] : marksList(view, part.id)),
-    // A converted version 1 map may have had an empty description: no empty paragraph for it.
-    ...(sheet.purpose ? [text("p", sheet.purpose, "sheet-purpose")] : []),
-    ...(sheet.holds.length ? [...heading("Holds"), heldList(sheet.holds)] : []),
-    ...heading("Tier"),
-    ...explainedChoice(tiers, selected, SHEET.tiers[tier], explain),
-    ...heading("Laws"),
-    ...(laws.length ? [lawList] : [text("p", "No laws on this part", "empty")]),
-    ...heading("Talks to"),
-    ...(links.length ? [linkList] : [text("p", "No link at this part", "empty")]),
-    // Fog and CI are of now: a past commit shows neither.
-    ...(refresher ? [refresher] : []),
-    ...(view.scrub ? [] : [...heading("Fog"), fog]),
-    ...(state ? [...heading("CI on main"), ci] : []),
-  );
-  const here = text("div", "", "sheet-here");
-  fillHere(here, part.id, !view.scrub, explain);
-  const extra = text("div", "", "sheet-extra");
-  card.append(here, extra);
-  const overturned = overturnNote(view.project, (item) =>
-    item.kind === "law" ? sheet.laws.some((law) => law.id === item.id) : item.kind === "link" && view.doc.links.some((link) => link.id === item.id && (link.from === part.id || link.to === part.id)),
-  );
-  if (overturned) card.append(overturned);
-  return { card, extra, toggle };
+  return nodes;
+}
+
+// "Read the one you have" (#638): the stored catch-up of an earlier fog list, played under its own list, so reading it to the end clears only
+// the entries it covers, which the line under it names; the button is described by that line.
+let olderLines = 0;
+function olderNodes(view: MapView, part: string, older: { fog: string[] }): HTMLElement {
+  const box = text("div", "", "catch-up-older");
+  const read = pressable(text("button", "Read the one you have", "btn quiet sheet-catch-up-older"), null);
+  hint(read, "Play the catch-up written before the newest change; reading it to the end clears only what it covers");
+  read.addEventListener("click", () => void openCatchUpOf(view.project, part, true));
+  const line = text("p", olderLine(older, view.state.user.fog?.parts[part] ?? []), "catch-up-older-line");
+  line.id = `catch-up-older-${++olderLines}`;
+  read.setAttribute("aria-describedby", line.id);
+  box.append(read, line);
+  return box;
 }
 
 // "This session here" (#561): while a session's story is open in the left panel beside the sheet, its turns of the last 7 days that changed
@@ -365,8 +478,12 @@ function storyBeside() {
   return selected.session;
 }
 
-// Fills `box` for `part`, drawn again only when what it shows changed, so a focused row keeps the focus.
-function fillHere(box: HTMLElement, part: string, live: boolean, explain: boolean) {
+// Fills the "This session here" fold for `part`: hidden with no session's story beside the sheet, else its turns in its body and how
+// many beside its title; drawn again only when what it shows changed, so a focused row keeps the focus. The fold's summary is its heading.
+function fillHere(fold: HTMLElement, part: string, live: boolean, explain: boolean) {
+  const box = fold.querySelector<HTMLElement>(".sheet-here");
+  const value = fold.querySelector<HTMLElement>(".sheet-fold-value");
+  if (!box || !value) return;
   const given = deps;
   const session = live && given ? storyBeside() : null;
   const now = Date.now();
@@ -381,11 +498,12 @@ function fillHere(box: HTMLElement, part: string, live: boolean, explain: boolea
   if (box.dataset.drawn === drawn) return;
   box.dataset.drawn = drawn;
   const focused = box.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.turn : undefined;
-  box.hidden = found === null;
+  fold.hidden = found === null;
   if (found === null) {
     box.replaceChildren();
     return;
   }
+  value.textContent = rows.length ? `${rows.length} ${rows.length === 1 ? "turn" : "turns"}` : found.pending ? "" : "None";
   const list = text("ul", "", "sheet-here-turns");
   // Safari drops a list's semantics under `list-style: none`; the role brings them back.
   list.setAttribute("role", "list");
@@ -399,7 +517,6 @@ function fillHere(box: HTMLElement, part: string, live: boolean, explain: boolea
     list.append(item);
   }
   box.replaceChildren(
-    ...explained(text("h3", "This session here", "sheet-heading"), SHEET.here, explain),
     // While `map_place` has not answered for one of the turns' files, an empty list says nothing yet.
     ...(rows.length ? [list] : found.pending ? [] : [text("p", hereEmpty, "empty")]),
     ...(found.older ? [text("p", hereOlder, "sheet-here-older")] : []),
@@ -410,9 +527,9 @@ function fillHere(box: HTMLElement, part: string, live: boolean, explain: boolea
 // The story or its panel changed: the open sheet's "This session here" follows.
 export function refreshHere() {
   const view = currentMap();
-  const box = view?.slots.sheet.querySelector<HTMLElement>(".sheet-here");
-  const part = box?.closest<HTMLElement>(".sheet")?.dataset.part;
-  if (view && box && part) fillHere(box, part, !view.scrub, explanationsOn());
+  const fold = view?.slots.sheet.querySelector<HTMLElement>(".sheet-fold-here");
+  const part = fold?.closest<HTMLElement>(".sheet")?.dataset.part;
+  if (view && fold && part) fillHere(fold, part, !view.scrub, explanationsOn());
 }
 
 // Why the part's plate carries its marks (#495), first on its sheet: its fog, its staleness band and a broken law, each from this case's
