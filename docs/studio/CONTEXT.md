@@ -277,6 +277,10 @@ _Avoid_: Open PR (a draft is open too), review requested
 To accept or overturn a change the agent made to the system map or a law, or a decision it declared, offered in the **PR brief**. A map change nobody has decided on is **not yet ratified**; it is in effect all the same, since ratifying never blocks. Overturning copies a prompt that quotes the item to the clipboard, for Daniel to paste into his agent.
 _Avoid_: Approve (that is the PR review), sign off
 
+**Map diff**:
+The merged before/after picture of the system map in a **PR brief**: today's map of the default branch with what the PR added on it (a part says "New") and what it removed kept as a hollow, dashed ghost ("Gone"), a part whose own name, purpose or caption changed saying "Edited", new links bright and removed ones dashed. The brief plays on it from open to close; a PR that changed nothing on the map has none.
+_Avoid_: Before/after (two pictures), history (the scrub)
+
 **Link evidence**:
 The import sites (file and line) behind an `import` link a PR adds, shown on its **Ratify** item: read from the PR's head when the brief is written and stored with the brief, never extracted live. Each site opens its code at that head.
 _Avoid_: Evidence line (that is a turn's line in the rail, of files and checks)

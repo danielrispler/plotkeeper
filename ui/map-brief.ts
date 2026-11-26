@@ -3,7 +3,9 @@
 // parts the brief lights; the panel is one narrow width, as tall as the step it shows (its CSS scrolls a taller step inside it, #449), and
 // crossfades between steps; a figure for a change inside one part is drawn under the step's words by `figureShapes` from the writer's labels;
 // citations sit in quiet type, a "Partial facts · N" chip lists what the brief was written without (#491), and an item not confirmed
-// from the facts carries a mark whose popover lists why. A step's "See the code" opens its parts' files in the drawer (`map-drawer.ts`) above it. Opening a brief returns the map to now.
+// from the facts carries a mark whose popover lists why. A step's "See the code" opens its parts' files in the drawer (`map-drawer.ts`) above it. Opening a brief returns the map to now;
+// a PR that changed the map plays on its Map diff (#640, `setDiff`), today's map with the PR's new parts and its removed ones as ghosts, which
+// its steps may light, until the brief closes.
 // A quiet copy icon (#493) on a Could break step, in the not-confirmed popover and on the No part group copies a prompt for the agent.
 // A step's check (#340) is answered in place: a pick in the panel, an order by tapping parts on the map into numbered slots (`pickRun`, `orderRun`);
 // Check grades it, a wrong answer shows the correction, and an order check replays the right path along the links.
@@ -13,7 +15,7 @@
 // clears the part's fog (`part_catch_up_done`) and completes no brief.
 
 import { failure, hint, invoke, keyed, messageOf, pressable, svg, text } from "./dom.js";
-import { currentMap, onDraw, registerLayer, type MapView } from "./map.js";
+import { currentMap, onDraw, registerLayer, setDiff, type MapView } from "./map.js";
 import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { paint as paintBadges } from "./map-agents.js";
 import { watchSeen } from "./seen.js";
@@ -28,7 +30,7 @@ import { type Bar, explainsBack, storyBar } from "./story-bar.js";
 import { agentPrompt, alsoAt, diffArgs, type AlsoRow, awaitedWrite, citeDrawer, figureMax, figureShapes, figureSize, latestRequest, partialFactsLines, storySteps, type Shape, stepCode, unconfirmed, unconfirmedReasons } from "./map-brief-model.js";
 import { awaitedCatchUp, fogListLines, stageLabel } from "./map-catch-up.js";
 import { effectiveTier, commitDrawer } from "./map-model.js";
-import type { BriefFigure, BriefStep, CatchUpOffer, CommitFiles, PrBrief, RatifyRow, ReadyPr, StaleBase } from "./types.js";
+import type { BriefFigure, BriefStep, CatchUpOffer, CommitFiles, MapDiff, PrBrief, RatifyRow, ReadyPr, StaleBase } from "./types.js";
 import { BRIEF, explained, explainLine, explanationsOn, explainToggle, onExplanations, pressToggle, RATIFY, stepLine } from "./explanations.js";
 import { briefOpen, catchUpId, clearPlaying, panel, player, playingBrief, playingCatchUp, prOf, ratifyRows, setPlaying, steps, stopWatching, watchLast } from "./map-brief-player.js";
 import { aim, light, reduced, stopLight, unlight } from "./map-brief-light.js";
@@ -182,8 +184,8 @@ async function ask<T>(request: () => Promise<T>, slowly: () => void, failed: (e:
 }
 
 // Plays `brief` from its step `at`, its panel built afresh: another brief or chapter open is left first (it keeps its step), and the map
-// returns to now. `opened` tells the stop rules.
-function play(view: MapView, story: Parameters<typeof setPlaying>, opened: () => void, at: { project: string; pr: number; chapter: number; since?: string }) {
+// returns to now, with the PR's Map diff on it when it has one (#640). `opened` tells the stop rules.
+function play(view: MapView, story: Parameters<typeof setPlaying>, opened: () => void, at: { project: string; pr: number; chapter: number; since?: string }, diff: MapDiff | null = null) {
   if (briefOpen()) closeBrief();
   setPlaying(...story);
   opened();
@@ -193,7 +195,9 @@ function play(view: MapView, story: Parameters<typeof setPlaying>, opened: () =>
   }
   closeDrawer();
   player.open(at.project, at.pr, at.chapter, at.since);
-  show(view, false);
+  // Both draw the map again, so the step is shown on the view they leave.
+  setDiff(diff);
+  show(currentMap() ?? view, false);
 }
 
 /** `full` opens the full brief past the head's "Since you read" story (#497), which opens first otherwise. */
@@ -228,12 +232,19 @@ export async function openBriefOf(project: string, number: number, chapter: numb
     if (note && problem) note.textContent = problem;
     return;
   }
-  const rows = await invoke("pr_ratify", { project, number }).catch((e: unknown): RatifyRow[] => {
-    failure("pr_ratify")(e);
-    return [];
-  });
+  // The PR's Map diff (#640): the brief plays on it for its whole length; none when the PR changed nothing on the map, or it cannot be read.
+  const [rows, diff] = await Promise.all([
+    invoke("pr_ratify", { project, number }).catch((e: unknown): RatifyRow[] => {
+      failure("pr_ratify")(e);
+      return [];
+    }),
+    invoke("pr_map_diff", { project, number }).catch((e: unknown): MapDiff | null => {
+      failure("pr_map_diff")(e);
+      return null;
+    }),
+  ]);
   if (!wanted()) return;
-  play(view, [got, null, rows], () => logStop("brief-opened", project, number), { project, pr: number, chapter, since: got.since ?? "" });
+  play(view, [got, null, rows], () => logStop("brief-opened", project, number), { project, pr: number, chapter, since: got.since ?? "" }, diff);
 }
 
 /**
@@ -360,6 +371,8 @@ function closeBrief() {
   clearPlaying();
   bars.clear();
   stopLight();
+  // Closing returns the map to now: the Map diff goes, and the map is drawn without it.
+  setDiff(null);
   const view = currentMap();
   panel().hidden = true;
   panel().classList.remove("open");

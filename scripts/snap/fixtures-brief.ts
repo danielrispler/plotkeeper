@@ -1,6 +1,7 @@
 // PR briefs and part catch-ups, played on the map, and the rail's brief row.
 
-import type { BriefChapter, BriefFigure, BriefStep, BriefView, CatchUpStage, PrBrief, RatifyRow, StoredCatchUp } from "../../ui/types.ts";
+import { readFileSync } from "node:fs";
+import type { BriefChapter, BriefFigure, BriefStep, BriefView, CatchUpStage, MapDiff, PrBrief, RatifyRow, StoredCatchUp } from "../../ui/types.ts";
 import type { Fixture } from "./base.ts";
 import { railFixtures } from "./rail-fixtures.ts";
 import { brief, briefOf, figure, mapBrief, mapOpened, mapState, runAt, step, storySteps } from "./fixtures-shared.ts";
@@ -1023,3 +1024,79 @@ export const railBriefReady = (press: boolean): Fixture => ({
     }
     log("rail brief row ok");`,
 });
+
+// The Map diff (#640): a brief whose PR changed the map plays on today's map with the PR's changes on it, in treatment B of spec #634's
+// prototype. `map-diff/pr<N>.json` holds the real PRs' documents as `map_diff::of` builds them (both landed, so today's map is the squash
+// commit's), and the prototype's plate positions. #500 split Server in three, #351 removed the Tauri shell and its terminal daemon.
+type DiffData = { today: string; diff: MapDiff; positions: Record<string, [number, number]> };
+const diffData = (pr: 500 | 351): DiffData => JSON.parse(readFileSync(new URL(`./map-diff/pr${pr}.json`, import.meta.url), "utf8"));
+const diffStep: Record<500 | 351, (lit: string[]) => BriefStep> = {
+  500: (lit) => step("Now", "Server is three parts now", "Install wires the agents to the hook, and <b>Map, briefs and runs</b> holds the map's data and the agent runs.", lit),
+  351: (lit) => step("Where", "The Tauri shell is gone", "Server now reads the log and feeds the core on its own.", lit),
+};
+/**
+ * PR `pr`'s brief, one step lighting `lit`, on its Map diff. `off` takes the step's dim and ring off after the checks, so the shot shows the
+ * marks alone, as the prototype's "brief step off"; `close` leaves the brief and checks the map is back to now.
+ */
+const mapDiff = (pr: 500 | 351, lit: string[], check: string, how: "off" | "on" | "close"): Fixture => {
+  const data = diffData(pr);
+  const parts = JSON.parse(data.diff.source).parts.map((part: { id: string }) => part.id);
+  // One chapter framing every part, so the camera shows the whole map.
+  const chapters: BriefChapter[] = [{ behaviour: "story", parts, title: "The change", steps: [diffStep[pr](lit)], flags: [] }];
+  const after = {
+    // A style, not a class taken off, since the brief lights its step again whenever the map redraws.
+    off: `
+      const off = document.createElement("style");
+      off.textContent = ".map-world.briefing .plate, .map-world.briefing .actor { opacity: 1 !important; } " +
+        ".map-world.briefing .plate.lit { box-shadow: inset 0 0 0 var(--hair) var(--plate-edge), var(--shadow) !important; } " +
+        "#map-brief { display: none !important; } body.brief-open .map-panel > *, body.brief-open .map-side > * > * { opacity: 1 !important; }";
+      document.head.append(off);`,
+    on: "",
+    close: `
+      document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", key: "Escape", bubbles: true }));
+      await wait(300);
+      if (!document.getElementById("map-brief").hidden) return log("snap:fail Esc did not close the brief");
+      const left = document.querySelectorAll(".map-world .d-added, .map-world .d-removed, .map-world .d-edited, .plate-tag").length;
+      if (left) log("snap:fail closing left " + left + " marks of the Map diff");
+      if (document.querySelector('.plate[data-id="shell"]')) log("snap:fail the ghost stays after the brief closed");`,
+  }[how];
+  const fixture = mapBrief(briefOf([], false, { chapters }), 0, `
+      const plates = (tag) => [...document.querySelectorAll(".plate.d-" + tag)];
+      const words = (tag) => plates(tag).map((p) => p.querySelector(".plate-tag")?.textContent);
+      ${check}
+      ${after}`, false, 300);
+  return {
+    ...fixture,
+    map_state: mapState({ source: data.today, user: { tiers: {}, positions: data.positions }, ready: [{ number: 334, title: "The change", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["The change"], quiet: false } }] }),
+    pr_map_diff: { ...data.diff, pr: 334 },
+  };
+};
+const split = `
+      if (words("added").join("|") !== "New|New") log("snap:fail the new parts say " + words("added").join("|"));
+      if (plates("added").map((p) => p.dataset.id).sort().join("|") !== "install|map-briefs-runs") log("snap:fail the new parts are " + plates("added").map((p) => p.dataset.id));
+      if (plates("edited").length !== 7 || words("edited").some((w) => w !== "Edited")) log("snap:fail " + plates("edited").length + " parts say Edited");
+      if (plates("removed").length) log("snap:fail #500 removed no part");
+      const added = plates("added")[0];
+      if (getComputedStyle(added).outlineStyle !== "solid") log("snap:fail a new part's edge is not a solid outline");
+      if (!__snapName(added.querySelector(".plate-open")).startsWith("New")) log("snap:fail a new part's button does not say New: " + __snapName(added.querySelector(".plate-open")));
+      if (document.querySelectorAll(".link.d-added").length !== 14 || document.querySelectorAll(".link.d-removed").length !== 2) log("snap:fail lines: " + document.querySelectorAll(".link.d-added").length + " new, " + document.querySelectorAll(".link.d-removed").length + " gone");
+      if (getComputedStyle(document.querySelector(".link.d-removed")).strokeDasharray === "none") log("snap:fail a removed line is not dashed");`;
+const removal = `
+      if (plates("removed").map((p) => p.dataset.id).sort().join("|") !== "shell|terminal-daemon") log("snap:fail the ghosts are " + plates("removed").map((p) => p.dataset.id));
+      if (words("removed").join("|") !== "Gone|Gone") log("snap:fail the ghosts say " + words("removed").join("|"));
+      const ghost = document.querySelector('.plate.d-removed[data-id="shell"]');
+      if (getComputedStyle(ghost).outlineStyle !== "dashed") log("snap:fail a ghost's edge is not dashed");
+      if (!getComputedStyle(ghost.querySelector(".plate-name")).textDecorationLine.includes("line-through")) log("snap:fail a ghost's name is not struck");
+      if (document.querySelectorAll(".link.d-removed").length !== 7) log("snap:fail " + document.querySelectorAll(".link.d-removed").length + " removed lines, not 7");
+      if (document.querySelectorAll(".law-mark.d-removed").length !== 2) log("snap:fail " + document.querySelectorAll(".law-mark.d-removed").length + " removed laws on plates, not 2");`;
+export const mapDiffSplit = (): Fixture => mapDiff(500, ["server", "install", "map-briefs-runs"], split, "off");
+export const mapDiffSplitBrief = (): Fixture => mapDiff(500, ["server", "install", "map-briefs-runs"], split, "on");
+export const mapDiffRemoval = (): Fixture => mapDiff(351, ["server", "window"], removal, "off");
+export const mapDiffRemovalBrief = (): Fixture => mapDiff(351, ["server", "window"], `${removal}
+      if (getComputedStyle(document.querySelector('.plate[data-id="shell"]')).opacity === "1") log("snap:fail an unlit ghost is not dimmed with the rest");`, "on");
+// A step that lights a ghost: it keeps its dashed outline outside the warm ring.
+export const mapDiffLitGhost = (): Fixture => mapDiff(351, ["shell", "server"], `${removal}
+      const lit = document.querySelector('.plate.d-removed.lit[data-id="shell"]');
+      if (!lit) log("snap:fail the step did not light the ghost");
+      else if (getComputedStyle(lit).outlineStyle !== "dashed" || getComputedStyle(lit).outlineOffset !== "5px") log("snap:fail the lit ghost's outline: " + getComputedStyle(lit).outlineStyle + " at " + getComputedStyle(lit).outlineOffset);`, "on");
+export const mapDiffClosed = (): Fixture => mapDiff(351, ["shell", "server"], removal, "close");
