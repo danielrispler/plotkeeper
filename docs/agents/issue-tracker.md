@@ -66,7 +66,7 @@ GitHub stays authoritative.
 - **Escalation**: moving a ticket to the next tier up.
 - **Critic**: the fresh-context reviewer of a draft spec, picked from the `critic` list.
 - **Veto summary**: the at most eight lines Daniel clears before `/to-tickets`.
-- **Risky UI**: a UI change to the redraw model, layout selection, event-handler lifetimes across redraws, or a stored or wire type.
+- **Risky UI**: a UI change to the redraw model (how the page redraws, a full redraw or a keyed patch, and what survives one), layout selection (which layout, steps or panes are shown, and how the page moves between them while one is open), event-handler lifetimes across redraws, or a stored or wire type. A new condition for showing an element, fed to a mechanism that already exists, is presentational when the ticket tests the condition changing while the element is open.
 - **Presentational UI**: every other UI change: copy, CSS, labels, placement, camera tweaks such as #669's zoom, and new controls over existing state, one handler on a new button included.
 
 **The five cheap rules.** A ticket is `cheap` only when all five hold:
