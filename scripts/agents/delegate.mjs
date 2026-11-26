@@ -384,7 +384,10 @@ const closePane = (worktree, pane) => {
 const stage = (worktree, integration) => {
   const onto = git(worktree, "merge-base", "HEAD", `origin/${integration}`);
   git(worktree, "reset", "--quiet", "--mixed", onto);
-  git(worktree, "add", "--all", "--", ".", ":(exclude).delegate");
+  // Not an exclude pathspec: one naming the gitignored `.delegate/` makes `git add` exit 1. The unstage keeps it out
+  // when the worker un-ignored it (#662).
+  git(worktree, "add", "--all", "--", ".");
+  git(worktree, "rm", "-r", "--cached", "--quiet", "--ignore-unmatch", "--", ".delegate");
   return exec(worktree, "git", ["diff", "--cached", "--quiet", "HEAD"]).status !== 0;
 };
 

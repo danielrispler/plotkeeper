@@ -227,7 +227,7 @@ else {
     other("other.txt", "someone else's file\\n");
     execFileSync("git", ["pull", "--quiet", "--no-rebase", "--no-edit", "origin", "int"]);
   }
-  if (["edit", "commit", "moved", "conflict", "lost", "push", "pushint", "branch", "pull", "pullmoved", "linger", "escape", "pushescape"].includes(mode)) {
+  if (["edit", "unignore", "commit", "moved", "conflict", "lost", "push", "pushint", "branch", "pull", "pullmoved", "linger", "escape", "pushescape"].includes(mode)) {
     writeFileSync("shared.txt", "the worker's line\\n");
     event("tool_use", { type: "tool", tool: "edit", state: { status: "completed", input: { filePath: "shared.txt" }, output: "ok" } });
   }
@@ -255,6 +255,7 @@ else {
   if (mode === "pullmoved") other("other.txt", "someone else's file, changed again\\n");
   if (mode === "moved") other("other.txt", "someone else's file\\n");
   if (mode === "conflict") other("shared.txt", "someone else's line\\n");
+  if (mode === "unignore") writeFileSync(".gitignore", "");
   if (mode === "lost") require("node:fs").renameSync(join(env.FAKE_DIR, "origin.git"), join(env.FAKE_DIR, "origin-gone.git"));
   event("text", { type: "text", text: "Done: the ticket is implemented." });
   event("step_finish", { type: "step-finish", reason: "stop" });
@@ -346,6 +347,8 @@ const scratchRun = ({ cheap } = {}) => {
   const git = (...args) => execFileSync("git", args, { cwd: repo, env, encoding: "utf8" }).trim();
   git("init", "--quiet", "--initial-branch=main");
   writeFileSync(join(repo, "shared.txt"), "the first line\n");
+  // As the repository's own `.gitignore` does (#662).
+  writeFileSync(join(repo, ".gitignore"), ".delegate/\n");
   git("add", "-A");
   git("commit", "--quiet", "-m", "base");
   git("clone", "--quiet", "--bare", ".", join(dir, "origin.git"));
@@ -375,7 +378,16 @@ test("run: a worker that edits and exits 0 with a green check gives pass and one
   assert.match(rest.at(-1), /^Route outcome: cheap·medium opencode\/test-free → pass \| \d+m$/);
   const commits = git("log", "--format=%B%x00", "origin/int..issue-7-cheap").split("\0").map((body) => body.trim()).filter(Boolean);
   assert.deepEqual(commits, ["Workflow: the thing\n\nWorker: opencode/test-free"]);
+  assert.equal(git("diff", "--name-only", "origin/int", "issue-7-cheap"), "shared.txt", "the gitignored .delegate/ is not committed");
   assert.equal(readFileSync(join(worktree, "shared.txt"), "utf8"), "the worker's line\n");
+});
+
+test("run: a worker that drops .delegate/ from .gitignore still gets no .delegate/ committed", () => {
+  const { git, run } = scratchRun();
+  const ran = run({ FAKE_OPENCODE: "unignore" });
+  assert.equal(ran.status, 0, ran.stderr);
+  assert.match(ran.stdout, /^pass\n/);
+  assert.equal(git("diff", "--name-only", "origin/int", "issue-7-cheap"), ".gitignore\nshared.txt");
 });
 
 /** The commit bodies on `branch` that are not on the integration branch, merges left out. */
