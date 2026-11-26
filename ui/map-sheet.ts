@@ -23,7 +23,7 @@ import { sheetLinkItem, sheetPending, statusWords } from "./ratify.js";
 import { currentPlacement } from "./map-agents.js";
 import { sessionHere } from "./map-live.js";
 import { studio } from "./state.js";
-import type { Session } from "./types.js";
+import type { CatchUpOutline, Session } from "./types.js";
 import { enterRefresher, refresherNode, staleWhy } from "./map-stale.js";
 import { changesLine, fogActions } from "./map-catch-up.js";
 import { ciDrawer, effectiveTier, type PanelContent, type Part, proofDrawer, type Sheet, sheetCi, sheetMarks, sheetOf, talksTo, type Tier } from "./map-model.js";
@@ -295,42 +295,52 @@ function catchUpCard(view: MapView, part: string, sheet: Sheet, explain: boolean
   const eyebrow = text("p", shown ? changesLine(Math.max(1, changes)) : "Caught up", "catch-up-eyebrow");
   card.append(...explained(eyebrow, SHEET.fog, explain));
   if (!shown) {
-    // A part that never fogs, or fogs only on its laws, links or flows, says so.
-    if (sheet.tier !== "core") card.append(text("p", sheet.fogLine, "catch-up-line"));
-    const refresher = refreshing === part ? refresherNode(view, part) : null;
-    if (refresher) card.append(refresher);
-    else {
-      const enter = pressable(text("button", "Refresher", "btn quiet sheet-refresher"), null);
-      hint(enter, "The flows through this part, hop by hop");
-      // It shows at once in the button's place, drawn from the map; the server records the activity behind it, and the reload, which
-      // draws the sheet again with it open, drops the band.
-      enter.addEventListener("click", () => {
-        refreshing = part;
-        const opened = refresherNode(view, part);
-        if (opened) card.replaceChild(opened, enter);
-        enterRefresher(view, part).catch(failure("map_refresher"));
-      });
-      card.append(enter);
-    }
+    caughtUp(view, part, sheet, card);
     return card;
   }
   const offer = view.state.catch_ups?.[part];
   const outline = offer?.kind === "catch-up" ? offer.outline : undefined;
-  if (outline) {
-    const steps = text("ol", "", "catch-up-steps");
-    // Safari drops a list's semantics under `list-style: none`; the role brings them back.
-    steps.setAttribute("role", "list");
-    for (const step of outline.steps) {
-      const row = text("li", "", "catch-up-step");
-      row.append(text("span", step.k, "catch-up-kind"), text("span", step.h, "catch-up-headline"));
-      steps.append(row);
-    }
-    card.append(text("h3", outline.title, "catch-up-title"), steps);
+  if (outline) card.append(...outlineNodes(outline));
+  card.append(...catchUpActions(view, part, fogActions(shown, offer), explain));
+  return card;
+}
+
+// A part with no fog's card: a part that never fogs, or fogs only on its laws, links or flows, says so; then the Refresher, or the
+// refresher once entered.
+function caughtUp(view: MapView, part: string, sheet: Sheet, card: HTMLElement) {
+  if (sheet.tier !== "core") card.append(text("p", sheet.fogLine, "catch-up-line"));
+  const refresher = refreshing === part ? refresherNode(view, part) : null;
+  if (refresher) return void card.append(refresher);
+  const enter = pressable(text("button", "Refresher", "btn quiet sheet-refresher"), null);
+  hint(enter, "The flows through this part, hop by hop");
+  // It shows at once in the button's place, drawn from the map; the server records the activity behind it, and the reload, which draws
+  // the sheet again with it open, drops the band.
+  enter.addEventListener("click", () => {
+    refreshing = part;
+    const opened = refresherNode(view, part);
+    if (opened) card.replaceChild(opened, enter);
+    enterRefresher(view, part).catch(failure("map_refresher"));
+  });
+  card.append(enter);
+}
+
+// A stored catch-up's outline: its title, then one row per step, its kind and headline.
+function outlineNodes(outline: CatchUpOutline): HTMLElement[] {
+  const steps = text("ol", "", "catch-up-steps");
+  // Safari drops a list's semantics under `list-style: none`; the role brings them back.
+  steps.setAttribute("role", "list");
+  for (const step of outline.steps) {
+    const row = text("li", "", "catch-up-step");
+    row.append(text("span", step.k, "catch-up-kind"), text("span", step.h, "catch-up-headline"));
+    steps.append(row);
   }
-  const actions = fogActions(shown, offer);
-  const row = text("div", "", "catch-up-actions");
+  return [text("h3", outline.title, "catch-up-title"), steps];
+}
+
+// The card's buttons in a row, the write's stage or failure under them, and, with the explanations on, the fog actions' line, which each
+// button is described by.
+function catchUpActions(view: MapView, part: string, actions: ReturnType<typeof fogActions>, explain: boolean): HTMLElement[] {
   const buttons: HTMLElement[] = [];
-  let note: HTMLElement | null = null;
   if (actions.main) {
     const { open: opens, label, title } = actions.main;
     const main = pressable(text("button", label, "btn primary sheet-catch-up"), null);
@@ -340,13 +350,10 @@ function catchUpCard(view: MapView, part: string, sheet: Sheet, explain: boolean
       void openCatchUpOf(view.project, part);
     });
     buttons.push(main);
-    if (actions.main.note) note = text("p", actions.main.note, "sheet-catch-up-note");
-    if (opens.kind === "catch-up") {
-      const key = `${view.project}|${part}`;
-      if (!offered.has(key)) {
-        offered.add(key);
-        logStop("catch-up-offered", view.project);
-      }
+    const key = `${view.project}|${part}`;
+    if (opens.kind === "catch-up" && !offered.has(key)) {
+      offered.add(key);
+      logStop("catch-up-offered", view.project);
     }
   }
   if (actions.second) {
@@ -358,16 +365,16 @@ function catchUpCard(view: MapView, part: string, sheet: Sheet, explain: boolean
     });
     buttons.push(clear);
   }
+  const row = text("div", "", "catch-up-actions");
   row.append(...buttons);
-  card.append(row, ...(note ? [note] : []));
-  // The fog actions' line under the buttons, each button described by it.
+  const nodes: HTMLElement[] = [row, ...(actions.main?.note ? [text("p", actions.main.note, "sheet-catch-up-note")] : [])];
   if (explain) {
     const kind = actions.main ? (actions.main.open.kind === "chapter" ? "chapter" : "catchUp") : "know";
     const line = explainLine(SHEET.fogActions[kind], "explain-choice");
     for (const button of buttons) button.setAttribute("aria-describedby", line.id);
-    card.append(line);
+    nodes.push(line);
   }
-  return card;
+  return nodes;
 }
 
 // "This session here" (#561): while a session's story is open in the left panel beside the sheet, its turns of the last 7 days that changed

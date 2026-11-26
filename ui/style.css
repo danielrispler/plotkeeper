@@ -806,7 +806,7 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .catch-up-card { margin-top: var(--sp-4); padding: var(--sp-5); border-radius: var(--radius-pane); display: flex; flex-direction: column; gap: var(--sp-4); background: var(--raised); box-shadow: inset 0 0 0 var(--hair) var(--mist-thin); }
 .catch-up-card.clear { box-shadow: inset 0 0 0 var(--hair) var(--edge); }
 .catch-up-eyebrow { display: flex; align-items: center; gap: var(--sp-3); margin: 0; font-size: var(--size-xs); letter-spacing: .1em; text-transform: uppercase; color: var(--mist); }
-.catch-up-eyebrow::before { content: ""; flex: none; inline-size: 7px; block-size: 7px; border-radius: 50%; background: currentColor; }
+.catch-up-eyebrow::before { content: ""; flex: none; inline-size: var(--catch-up-dot); block-size: var(--catch-up-dot); border-radius: 50%; background: currentColor; }
 .catch-up-card.clear .catch-up-eyebrow { color: var(--faint); }
 .catch-up-card > .explain { margin-top: calc(-1 * var(--sp-3)); }
 .catch-up-title { margin: 0; font-size: var(--size-read); font-weight: 600; line-height: 1.35; text-wrap: balance; overflow-wrap: anywhere; }
