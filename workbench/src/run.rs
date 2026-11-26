@@ -1,7 +1,9 @@
 //! The one process runner (#548, "One process runner in `studio-workbench`"): every `git` and `gh` the workspace
-//! starts is built here, so none waits on a prompt nobody sees, and their waits with a deadline go through `run_until`,
-//! which leaves no helper of a stopped command behind. The launcher's waits do not yet: `server/src/runner.rs`'s
-//! `wait_until` and `server/src/micro_worlds.rs`'s `run_logged` keep their own, a follow-up to #548.
+//! starts is built here, so none waits on a prompt nobody sees. Every wait on a child with a deadline goes through it:
+//! [`run_until`] for a command whose output is read whole, [`run_logged`] for one whose output goes to a file (the
+//! background runs' launcher and the micro-world checks, #568). Both leave no helper of a stopped command behind. The
+//! one exception is a command whose output is read as it comes and cut short: the hook's untracked-file listing
+//! (`hook/src/lib.rs`, `untracked_within`) is built here and waited on by its caller.
 
 use std::{
     ffi::OsStr,
@@ -9,7 +11,7 @@ use std::{
     io::{self, Read, Write},
     os::unix::process::CommandExt,
     path::Path,
-    process::{Command, Output, Stdio},
+    process::{Command, ExitStatus, Output, Stdio},
     sync::mpsc,
     thread,
     time::{Duration, Instant},
@@ -192,5 +194,64 @@ fn run(
         Ok(output)
     } else {
         Err(RunError::Failed(output))
+    }
+}
+
+/// Runs `command`, with no input and its output wherever the caller set it (a file), until it exits within `deadline`:
+/// its exit status, zero or not. It runs in a process group of its own. Past the deadline, or once `given_up` is true,
+/// the whole group is killed and the run ends as [`RunError::TimedOut`]; when it exits, whatever it left running in its
+/// group is killed too.
+pub fn run_logged(
+    command: &mut Command,
+    deadline: Duration,
+    given_up: &dyn Fn() -> bool,
+) -> Result<ExitStatus, RunError> {
+    let end = Instant::now() + deadline;
+    let mut child = command
+        .stdin(Stdio::null())
+        .process_group(0)
+        .spawn()
+        .map_err(RunError::Start)?;
+    let group =
+        libc::pid_t::try_from(child.id()).map_err(|e| RunError::Start(io::Error::other(e)))?;
+    // SAFETY: `kill` takes no pointers. The group is the one made for this child above, and it is signalled only while
+    // the child is unreaped, so its id names no one else.
+    let kill_group = || unsafe { libc::kill(-group, libc::SIGKILL) };
+    let mut nap = Duration::from_millis(1);
+    loop {
+        // SAFETY: an all-zero `siginfo_t` is a valid value of it: plain integers and a null pointer.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        // Asked without reaping, so the group's id stays taken while what the child left behind is killed.
+        // SAFETY: `info` is a `siginfo_t` that `waitid` writes into and that outlives the call.
+        let asked = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                child.id(),
+                &mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        if asked != 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            kill_group();
+            child.wait().ok();
+            return Err(RunError::Start(error));
+        }
+        // SAFETY: `waitid` filled `info`, or left it zeroed when the child is still running.
+        let exited = unsafe { info.si_pid() } != 0;
+        if exited || Instant::now() >= end || given_up() {
+            kill_group();
+            let status = child.wait().map_err(RunError::Start)?;
+            return if exited {
+                Ok(status)
+            } else {
+                Err(RunError::TimedOut(deadline))
+            };
+        }
+        thread::sleep(nap);
+        nap = (nap * 2).min(Duration::from_millis(5));
     }
 }

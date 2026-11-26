@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 use studio_workbench::run::{
-    RunError, gh_at, git, run_until, run_until_unless, run_until_with_input,
+    RunError, gh_at, git, run_logged, run_until, run_until_unless, run_until_with_input,
 };
 
 /// Long enough for a loaded machine to start a script; far short of the scripts' own sleeps.
@@ -212,6 +212,106 @@ fn a_zero_exit_gives_both_streams_however_much_they_hold() {
     let out = run_until(&mut sh(script), AMPLE).unwrap();
 
     assert_eq!((out.stdout.len(), out.stderr.len()), (300_000, 300_000));
+}
+
+/// `sh -c script` with both streams in `log`.
+fn logged(script: &str, log: &Path) -> Command {
+    let out = std::fs::File::create(log).unwrap();
+    let mut command = sh(script);
+    command.stderr(out.try_clone().unwrap()).stdout(out);
+    command
+}
+
+/// Whether process `pid` is gone within two seconds: a killed process is gone once its parent reaps it.
+fn goes(pid: &str) -> bool {
+    (0..200).any(|_| {
+        std::thread::sleep(Duration::from_millis(10));
+        !alive(pid)
+    })
+}
+
+#[test]
+fn a_logged_run_gives_its_exit_status_and_leaves_its_output_in_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("out.log");
+
+    let status = run_logged(
+        &mut logged("echo said; echo why >&2; exit 3", &log),
+        AMPLE,
+        &|| false,
+    );
+
+    assert_eq!(status.unwrap().code(), Some(3));
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), "said\nwhy\n");
+}
+
+#[test]
+fn a_logged_run_past_its_deadline_leaves_no_process_behind() {
+    let dir = tempfile::tempdir().unwrap();
+    let pid_file = dir.path().join("helper.pid");
+    let script = format!("sleep 20 & echo $! > {}; sleep 20", pid_file.display());
+    let started = Instant::now();
+
+    let ended = run_logged(&mut logged(&script, &dir.path().join("log")), SOON, &|| {
+        false
+    });
+
+    assert!(
+        matches!(ended, Err(RunError::TimedOut(limit)) if limit == SOON),
+        "{ended:?}"
+    );
+    assert!(started.elapsed() < Duration::from_secs(10));
+    let helper = std::fs::read_to_string(&pid_file).unwrap();
+    assert!(
+        goes(helper.trim()),
+        "the helper {helper} outlived the deadline"
+    );
+}
+
+#[test]
+fn a_logged_run_given_up_ends_at_once_and_leaves_no_process_behind() {
+    let dir = tempfile::tempdir().unwrap();
+    let pid_file = dir.path().join("helper.pid");
+    let script = format!("sleep 20 & echo $! > {}; sleep 20", pid_file.display());
+    let started = Instant::now();
+    let given_up = || pid_file.exists() && started.elapsed() > Duration::from_millis(300);
+
+    let ended = run_logged(
+        &mut logged(&script, &dir.path().join("log")),
+        AMPLE,
+        &given_up,
+    );
+
+    assert!(matches!(ended, Err(RunError::TimedOut(_))), "{ended:?}");
+    assert!(started.elapsed() < Duration::from_secs(10));
+    let helper = std::fs::read_to_string(&pid_file).unwrap();
+    assert!(goes(helper.trim()), "the helper {helper} outlived the run");
+}
+
+#[test]
+fn a_helper_a_logged_run_left_behind_is_killed_when_it_exits() {
+    let dir = tempfile::tempdir().unwrap();
+    let pid_file = dir.path().join("helper.pid");
+    let script = format!("sleep 20 & echo $! > {}; exit 0", pid_file.display());
+    let started = Instant::now();
+
+    let status = run_logged(
+        &mut logged(&script, &dir.path().join("log")),
+        AMPLE,
+        &|| false,
+    );
+
+    assert!(status.unwrap().success());
+    assert!(started.elapsed() < Duration::from_secs(10));
+    let helper = std::fs::read_to_string(&pid_file).unwrap();
+    assert!(goes(helper.trim()), "the helper {helper} outlived the run");
+}
+
+#[test]
+fn a_logged_program_that_is_not_there_failed_to_start() {
+    let ended = run_logged(&mut Command::new("/no/such/program"), AMPLE, &|| false);
+
+    assert!(matches!(ended, Err(RunError::Start(_))), "{ended:?}");
 }
 
 /// Every `git` and `gh` is built by the runner: outside it, `archive/` and the tests' own helpers, no source file
