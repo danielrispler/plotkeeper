@@ -121,8 +121,10 @@ for (const [run, said] of [
 
 // The stand-in worker. FAKE_OPENCODE says what it does: "edit" (changes a file and exits 0), "commit" (also commits
 // it, twice), "moved" (edits, and someone else moves the integration branch), "conflict" (edits a line someone else
-// also changes on the integration branch), "lost" (edits, and origin goes away), "empty" (exits 0 with no change), "fail" (exits 1) or "silent" (prints
-// nothing and waits). Every call is logged with the environment it got.
+// also changes on the integration branch), "lost" (edits, and origin goes away), "empty" (exits 0 with no change), "fail" (exits 1), "chatty" (prints an event
+// every 50 ms and never ends), "push" (edits, commits and pushes its commit to a branch of its own), "branch" (edits and
+// pushes the integration tip as \`issue-7-cheap\`, no commit of its own) or "silent" (prints nothing and waits). FAKE_SILENT_MODELS, a comma-separated list, makes those models "silent" whatever FAKE_OPENCODE says;
+// a silent worker leaves a stray file first. Every call is logged with the environment it got.
 const fakeOpencode = `#!/usr/bin/env node
 const { execFileSync } = require("node:child_process");
 const { appendFileSync, writeFileSync } = require("node:fs");
@@ -130,7 +132,8 @@ const { join } = require("node:path");
 const env = process.env;
 const seen = Object.fromEntries(Object.entries(env).filter(([key]) => key.startsWith("OPENCODE_") || key === "PLOTKEEPER_INTERNAL"));
 appendFileSync(join(env.FAKE_DIR, "opencode-calls.jsonl"), JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), env: seen }) + "\\n");
-const mode = env.FAKE_OPENCODE;
+const model = process.argv[process.argv.indexOf("-m") + 1];
+const mode = (env.FAKE_SILENT_MODELS ?? "").split(",").includes(model) ? "silent" : env.FAKE_OPENCODE;
 const event = (type, part) => console.log(JSON.stringify({ type, timestamp: 1, sessionID: "ses_test", part: { sessionID: "ses_test", ...part } }));
 const other = (file, text) => {
   const git = (...args) => execFileSync("git", args, { cwd: join(env.FAKE_DIR, "other"), stdio: "ignore" });
@@ -140,11 +143,15 @@ const other = (file, text) => {
   git("commit", "--quiet", "-m", "someone else");
   git("push", "--quiet", "origin", "HEAD:int");
 };
-if (mode === "silent") setTimeout(() => {}, 60000);
+if (mode === "chatty") setInterval(() => event("text", { type: "text", text: "still going" }), 50);
+else if (mode === "silent") {
+  writeFileSync("stray.txt", "left by a silent worker\\n");
+  setTimeout(() => {}, 60000);
+}
 else {
   event("step_start", { type: "step-start" });
   event("tool_use", { type: "tool", tool: "read", state: { status: "completed", input: { filePath: join(process.cwd(), "AGENTS.md") }, output: "long" } });
-  if (["edit", "commit", "moved", "conflict", "lost"].includes(mode)) {
+  if (["edit", "commit", "moved", "conflict", "lost", "push", "branch"].includes(mode)) {
     writeFileSync("shared.txt", "the worker's line\\n");
     event("tool_use", { type: "tool", tool: "edit", state: { status: "completed", input: { filePath: "shared.txt" }, output: "ok" } });
   }
@@ -154,6 +161,11 @@ else {
     execFileSync("git", ["add", "added.txt"]);
     execFileSync("git", ["commit", "--quiet", "-m", "worker two"]);
   }
+  if (mode === "push") {
+    execFileSync("git", ["commit", "--quiet", "-am", "worker"]);
+    execFileSync("git", ["push", "--quiet", "origin", "HEAD:refs/heads/sneaky"]);
+  }
+  if (mode === "branch") execFileSync("git", ["push", "--quiet", "origin", "origin/int:refs/heads/issue-7-cheap"]);
   if (mode === "moved") other("other.txt", "someone else's file\\n");
   if (mode === "conflict") other("shared.txt", "someone else's line\\n");
   if (mode === "lost") require("node:fs").renameSync(join(env.FAKE_DIR, "origin.git"), join(env.FAKE_DIR, "origin-gone.git"));
@@ -163,23 +175,34 @@ else {
 }
 `;
 
-// The stand-in npm: \`ci\` does nothing, \`run check\` passes unless FAKE_NPM_CHECK is "red". Every call is logged.
+// The stand-in npm: \`ci\` does nothing, \`run check\` passes unless FAKE_NPM_CHECK is "red", or "red-once" and this
+// is the first check. Every call is logged.
 const fakeNpm = `#!/usr/bin/env node
-const { appendFileSync } = require("node:fs");
+const { appendFileSync, existsSync, readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const env = process.env;
-appendFileSync(join(env.FAKE_DIR, "npm-calls.jsonl"), JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), internal: env.PLOTKEEPER_INTERNAL }) + "\\n");
-if (process.argv[2] === "run" && process.argv[3] === "check" && env.FAKE_NPM_CHECK === "red") {
+const log = join(env.FAKE_DIR, "npm-calls.jsonl");
+const checks = existsSync(log) ? readFileSync(log, "utf8").split("\\n").filter((line) => line.includes('"check"')).length : 0;
+appendFileSync(log, JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), internal: env.PLOTKEEPER_INTERNAL }) + "\\n");
+const red = env.FAKE_NPM_CHECK === "red" || (env.FAKE_NPM_CHECK === "red-once" && checks === 0);
+if (process.argv[2] === "run" && process.argv[3] === "check" && red) {
   console.log("test agents::reads ... FAILED");
   process.exit(1);
 }
 `;
 
-// The stand-in gh: \`issue view <n> --json title,body\` prints \`issues/<n>.json\`.
+// The stand-in gh: \`issue view <n> --json title,body\` prints \`issues/<n>.json\`; \`pr list\` prints FAKE_GH_PRS, no PR
+// by default. Every call is logged.
 const fakeGh = `#!/usr/bin/env node
-const { readFileSync } = require("node:fs");
+const { appendFileSync, readFileSync } = require("node:fs");
 const { join } = require("node:path");
-const [noun, verb, number] = process.argv.slice(2);
+const argv = process.argv.slice(2);
+appendFileSync(join(process.env.FAKE_DIR, "gh-calls.jsonl"), JSON.stringify({ argv }) + "\\n");
+const [noun, verb, number] = argv;
+if (noun === "pr" && verb === "list") {
+  console.log(process.env.FAKE_GH_PRS || "[]");
+  process.exit(0);
+}
 if (noun !== "issue" || verb !== "view") process.exit(1);
 process.stdout.write(readFileSync(join(process.env.FAKE_DIR, "issues", number + ".json"), "utf8"));
 `;
@@ -330,11 +353,12 @@ const gone = ({ git, worktree }) => {
 };
 
 for (const [what, fake, reason, result] of [
-  ["an empty change", { FAKE_OPENCODE: "empty" }, "red: no change", "red"],
+  ["an empty change, twice", { FAKE_OPENCODE: "empty" }, "red: no change", "red,red"],
   ["an error exit", { FAKE_OPENCODE: "fail" }, "exit 1", "error"],
-  ["a red check", { FAKE_OPENCODE: "edit", FAKE_NPM_CHECK: "red" }, "red check", "red"],
+  ["a red check, twice", { FAKE_OPENCODE: "edit", FAKE_NPM_CHECK: "red" }, "red check", "red,red"],
   ["a merge conflict", { FAKE_OPENCODE: "conflict" }, "conflict", "conflict"],
   ["a worker silent past the limit", { FAKE_OPENCODE: "silent", DELEGATE_SILENCE_MS: "300" }, "silent", "silent"],
+  ["a worker past the attempt limit", { FAKE_OPENCODE: "chatty", DELEGATE_ATTEMPT_MS: "600" }, "timeout", "error"],
 ]) {
   test(`run: ${what} gives escalate medium (${reason}) and removes the worktree and branch`, () => {
     const scratch = scratchRun();
@@ -342,10 +366,110 @@ for (const [what, fake, reason, result] of [
     assert.equal(ran.status, 0, ran.stderr);
     const lines = ran.stdout.trimEnd().split("\n");
     assert.equal(lines[0], `escalate medium (${reason})`);
-    assert.match(lines.at(-1), new RegExp(`^Route outcome: cheap·medium opencode/test-free → ${result} \\| \\d+m$`));
+    assert.match(lines.at(-1), new RegExp(`^Route outcome: cheap·medium opencode/test-free → ${result} \\| \\d+m(, \\d+m)*$`));
     gone(scratch);
   });
 }
+
+test("run: a red check, then green after one retry on the same session with the check's tail, gives pass", () => {
+  const { git, run, worktree } = scratchRun();
+  const ran = run({ FAKE_OPENCODE: "edit", FAKE_NPM_CHECK: "red-once" });
+  assert.equal(ran.status, 0, ran.stderr);
+  const lines = ran.stdout.trimEnd().split("\n");
+  assert.equal(lines[0], "pass");
+  assert.match(lines.at(-1), /^Route outcome: cheap·medium opencode\/test-free → red,pass \| \d+m, \d+m$/);
+  const [first, retry, ...more] = ran.calls("opencode");
+  assert.equal(more.length, 0, "one retry only");
+  assert.equal(first.argv.includes("--session"), false);
+  assert.equal(retry.cwd, worktree);
+  assert.deepEqual(retry.argv.slice(0, 8), ["run", "--auto", "--format", "json", "-m", "opencode/test-free", "--session", "ses_test"]);
+  assert.match(retry.argv.at(-1), /test agents::reads \.\.\. FAILED/);
+  assert.equal(retry.env.OPENCODE_DISABLE_CLAUDE_CODE_PROMPT, "1");
+  assert.deepEqual(ran.calls("npm").map((call) => call.argv.join(" ")), ["ci", "run check", "run check"]);
+  assert.deepEqual(commitsOn(git, "issue-7-cheap"), ["Workflow: the thing\n\nWorker: opencode/test-free"]);
+});
+
+test("run: an empty change is retried with the message that no change was made", () => {
+  const ran = scratchRun().run({ FAKE_OPENCODE: "empty" });
+  const [, retry] = ran.calls("opencode");
+  assert.ok(retry, "the empty change is retried");
+  assert.match(retry.argv.at(-1), /no change was made/i);
+});
+
+const two = [
+  { cli: "opencode", model: "opencode/a-free", variant: { medium: null, high: "high" } },
+  { cli: "opencode", model: "opencode/b-free", variant: { medium: "medium", high: "high" } },
+];
+
+// A silence limit long enough that a worker that does answer is never killed while Node starts it, even on a loaded
+// machine: at 300 ms the healthy candidate was once killed as silent too.
+const HEALTHY_SILENCE_MS = "2000";
+
+const models = (calls) => calls.map((call) => call.argv[call.argv.indexOf("-m") + 1]);
+
+test("run: a silent worker is killed and marked out, and the next candidate runs in the reset worktree", () => {
+  const { repo, run, worktree } = scratchRun({ cheap: two });
+  const ran = run({ FAKE_OPENCODE: "edit", FAKE_SILENT_MODELS: "opencode/a-free", DELEGATE_SILENCE_MS: HEALTHY_SILENCE_MS });
+  assert.equal(ran.status, 0, ran.stderr);
+  const lines = ran.stdout.trimEnd().split("\n");
+  assert.equal(lines[0], "pass");
+  assert.match(lines.at(-1), /^Route outcome: cheap·medium opencode\/a-free → silent → opencode\/b-free → pass \| \d+m; \d+m$/);
+  assert.deepEqual(models(ran.calls("opencode")), ["opencode/a-free", "opencode/b-free"]);
+  assert.equal(existsSync(join(worktree, "stray.txt")), false, "the silent worker's file is cleaned away");
+  assert.equal(readFileSync(join(worktree, "shared.txt"), "utf8"), "the worker's line\n");
+  const out = JSON.parse(readFileSync(join(repo, ".git/delegate-silent.json"), "utf8"));
+  const midnight = new Date();
+  midnight.setUTCHours(24, 0, 0, 0);
+  assert.deepEqual(out, { "opencode/a-free": midnight.toISOString() });
+});
+
+test("run: a model marked out today is skipped by the next run, and with none left the run escalates as silent", () => {
+  const scratch = scratchRun({ cheap: two });
+  scratch.run({ FAKE_OPENCODE: "edit", FAKE_SILENT_MODELS: "opencode/a-free", DELEGATE_SILENCE_MS: HEALTHY_SILENCE_MS });
+  const second = scratch.run({ FAKE_OPENCODE: "edit", FAKE_SILENT_MODELS: "opencode/b-free", DELEGATE_SILENCE_MS: "300" });
+  assert.equal(second.status, 0, second.stderr);
+  assert.deepEqual(models(second.calls("opencode")), ["opencode/a-free", "opencode/b-free", "opencode/b-free"], "the second run skips a-free");
+  const lines = second.stdout.trimEnd().split("\n");
+  assert.equal(lines[0], "escalate medium (silent)");
+  assert.match(lines.at(-1), /^Route outcome: cheap·medium opencode\/b-free → silent \| \d+m$/);
+  gone(scratch);
+  const third = scratch.run({ FAKE_OPENCODE: "edit" });
+  assert.equal(third.stdout, "escalate medium (silent)\n");
+  assert.equal(third.calls("opencode").length, 3, "no worker starts when every model is marked out");
+  assert.equal(third.calls("npm").filter((call) => call.argv[0] === "ci").length, 2, "nor npm ci");
+});
+
+test("run: a mark from an earlier UTC day has expired", () => {
+  const scratch = scratchRun({ cheap: two });
+  writeFileSync(join(scratch.repo, ".git/delegate-silent.json"), JSON.stringify({ "opencode/a-free": "2020-01-02T00:00:00.000Z" }));
+  const ran = scratch.run({ FAKE_OPENCODE: "edit" });
+  assert.deepEqual(models(ran.calls("opencode")), ["opencode/a-free"]);
+});
+
+for (const [what, fake, said] of /** @type {[string, Record<string, string>, RegExp][]} */ ([
+  ["a worker that pushed its commit", { FAKE_OPENCODE: "push" }, /^stop: origin\/sneaky has the worker's commit [0-9a-f]{12}$/],
+  ["an issue-<n>-cheap branch on origin", { FAKE_OPENCODE: "branch" }, /^stop: origin has the branch issue-7-cheap$/],
+  ["an open PR from issue-<n>-cheap", { FAKE_OPENCODE: "edit", FAKE_GH_PRS: JSON.stringify([{ url: "https://github.com/o/r/pull/9" }]) }, /^stop: a PR from issue-7-cheap is open: https:\/\/github\.com\/o\/r\/pull\/9$/],
+])) {
+  test(`run: ${what} gives stop, exit 0, and leaves the worktree for Daniel`, () => {
+    const { run, worktree } = scratchRun();
+    const ran = run(fake);
+    assert.equal(ran.status, 0, ran.stderr);
+    const lines = ran.stdout.trimEnd().split("\n");
+    assert.match(lines[0], said);
+    assert.match(lines.at(-1), /^Route outcome: cheap·medium opencode\/test-free → stop \| \d+m$/);
+    assert.ok(existsSync(worktree), "the worktree is kept as evidence");
+    assert.deepEqual(ran.calls("npm").map((call) => call.argv.join(" ")), ["ci"], "no check runs once the worker pushed");
+  });
+}
+
+test("run: the guard asks gh for a PR from the ticket's branch, and a ref someone else moved gives no stop", () => {
+  const ran = scratchRun().run({ FAKE_OPENCODE: "moved" });
+  assert.match(ran.stdout, /^pass\n/);
+  const pr = ran.calls("gh").find((call) => call.argv[0] === "pr");
+  assert.ok(pr, "gh pr list was called");
+  assert.deepEqual(pr.argv.slice(0, 4), ["pr", "list", "--head", "issue-7-cheap"]);
+});
 
 test("run: a leftover issue-<n>-cheap worktree and branch are removed first", () => {
   const scratch = scratchRun();
@@ -406,10 +530,16 @@ test("run: with no cheap candidate, it escalates as silent without starting a wo
   assert.deepEqual(ran.calls("opencode"), []);
 });
 
-test("outcomeSegment writes one attempt's tier, effort, worker, result and minutes", async () => {
+test("outcomeSegment writes each attempt's worker and results, and one time per worker run", async () => {
   const { outcomeSegment } = await import(script);
-  assert.equal(outcomeSegment({ tier: "cheap", effort: "high", worker: "opencode/beam-free", result: "red", ms: 9.6 * 60_000 }), "cheap·high opencode/beam-free → red | 10m");
-  assert.equal(outcomeSegment({ tier: "cheap", effort: "medium", worker: "opencode/beam-free", result: "pass", ms: 5_000 }), "cheap·medium opencode/beam-free → pass | 1m");
+  const run = (result, minutes) => ({ result, ms: minutes * 60_000 });
+  assert.equal(outcomeSegment({ tier: "cheap", effort: "high", attempts: [{ worker: "opencode/beam-free", runs: [run("red", 9.6)] }] }), "cheap·high opencode/beam-free → red | 10m");
+  assert.equal(outcomeSegment({ tier: "cheap", effort: "medium", attempts: [{ worker: "opencode/beam-free", runs: [{ result: "pass", ms: 5_000 }] }] }), "cheap·medium opencode/beam-free → pass | 1m");
+  const attempts = [
+    { worker: "opencode/deepseek-v4.1-flash-free", runs: [run("silent", 10)] },
+    { worker: "opencode/beam-free", runs: [run("red", 14), run("red", 6)] },
+  ];
+  assert.equal(outcomeSegment({ tier: "cheap", effort: "medium", attempts }), "cheap·medium opencode/deepseek-v4.1-flash-free → silent → opencode/beam-free → red,red | 10m; 14m, 6m");
 });
 
 test("run: a failure after the worker ran escalates with exit 0, not as a run that could not start", () => {

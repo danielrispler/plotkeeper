@@ -7,7 +7,7 @@
 // takes a cheap ticket through an OpenCode worker in its own worktree and prints the verdict (spec #592,
 // "`delegate.mjs run`, a cheap ticket").
 import { spawn, spawnSync } from "node:child_process";
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { agyCall, options, quotaLeft } from "../review/outside-review.mjs";
 
@@ -106,9 +106,11 @@ const pickCritic = ({ spec, routing }) => {
 };
 
 // The cheap worker's limits (spec #592, step 4): killed after this long with no output (a silent stop: OpenCode waits
-// silently when the free limit is hit), or at this long in all. Tests shorten them through these variables, their only use.
+// silently when the free limit is hit), or at this long in all; a retry (step 6) at its own, shorter limit. Tests shorten
+// them through these variables, their only use.
 const SILENCE_MS = Number(process.env.DELEGATE_SILENCE_MS) || 10 * 60_000;
 const ATTEMPT_MS = Number(process.env.DELEGATE_ATTEMPT_MS) || 20 * 60_000;
+const RETRY_MS = Number(process.env.DELEGATE_RETRY_MS) || 10 * 60_000;
 
 // The fixed brief, the spike's (#599), which both free models followed.
 const WORKER_BRIEF = `Read .delegate/ticket.md (a ticket and its parent spec) and AGENTS.md, then implement the ticket in this worktree. This brief overrides the Workflow section of AGENTS.md: do not commit, do not push, do not open a PR, do not run the outside review. Build test-first: run each new test red, an assertion failure, before writing its fix. Finish with \`npm run check\` green.`;
@@ -191,12 +193,25 @@ const render = (line) => {
   return null;
 };
 
-/** Runs the worker in the worktree until it exits or is killed; `killed` says why it was. */
-const runWorker = (worktree, candidate, effort) =>
+/** The session id an OpenCode JSON event names at its top level, as the spike's `run.jsonl` samples do. */
+const sessionOf = (line) => {
+  try {
+    return JSON.parse(line).sessionID || null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Runs the worker in the worktree with `message`, continuing `session` when one is given, until it exits or is killed
+ * at `limit`; `killed` says why it was, `session` is the OpenCode session its events name. The command is the one the
+ * spike verified (#599): `--session` goes with `--format json` and `-m`.
+ */
+const runWorker = (worktree, { candidate, effort, message, session = null, limit }) =>
   new Promise((resolve, reject) => {
     const variant = candidate.variant?.[effort] ?? null;
-    const args = ["run", "--auto", "--format", "json", "-m", candidate.model, ...(variant ? ["--variant", variant] : []), WORKER_BRIEF];
-    const jsonl = openSync(join(worktree, ".delegate/run.jsonl"), "w");
+    const args = ["run", "--auto", "--format", "json", "-m", candidate.model, ...(session ? ["--session", session] : []), ...(variant ? ["--variant", variant] : []), message];
+    const jsonl = openSync(join(worktree, ".delegate/run.jsonl"), "a");
     const stderr = openSync(join(worktree, ".delegate/stderr.txt"), "w");
     const log = join(worktree, ".delegate/run.log");
     // Its own process group, so that a kill also ends the commands it started, such as `npm run check`.
@@ -209,7 +224,7 @@ const runWorker = (worktree, candidate, effort) =>
       } catch {}
     };
     let silence = setTimeout(() => kill("silent"), SILENCE_MS);
-    const attempt = setTimeout(() => kill("timeout"), ATTEMPT_MS);
+    const attempt = setTimeout(() => kill("timeout"), limit);
     // A spawn that fails emits `error` and then `close`: the files are closed once.
     let closed = false;
     const done = () => {
@@ -221,12 +236,14 @@ const runWorker = (worktree, candidate, effort) =>
       closeSync(stderr);
     };
     let partial = "";
+    let named = null;
     child.stdout.on("data", (chunk) => {
       clearTimeout(silence);
       silence = setTimeout(() => kill("silent"), SILENCE_MS);
       appendFileSync(jsonl, chunk);
       const lines = (partial + chunk).split("\n");
       partial = lines.pop();
+      named ??= lines.map(sessionOf).find(Boolean) ?? null;
       const shown = lines.map(render).filter(Boolean);
       if (shown.length) appendFileSync(log, `${shown.join("\n")}\n`);
     });
@@ -236,7 +253,7 @@ const runWorker = (worktree, candidate, effort) =>
     });
     child.on("close", (code, signal) => {
       done();
-      resolve({ code, signal, killed });
+      resolve({ code, signal, killed, session: named });
     });
   });
 
@@ -270,37 +287,168 @@ const stage = (worktree, base) => {
   return exec(worktree, "git", ["diff", "--cached", "--quiet", base]).status !== 0;
 };
 
-/** What the worker's exit leaves: `result` is the outcome line's word, `escalate` the verdict's reason. */
-const judge = (worktree, { base, integration, exit, title, worker }) => {
+/** Why a worker run that ended this way stops or escalates, or null when its work goes to the check. */
+const failed = (exit) => {
+  if (exit.pushed) return { result: "stop", stop: exit.pushed };
   if (exit.killed === "silent") return { result: "silent", escalate: "silent" };
   if (exit.killed === "timeout") return { result: "error", escalate: "timeout" };
   if (exit.code !== 0) return { result: "error", escalate: `exit ${exit.code ?? exit.signal}` };
-  if (!stage(worktree, base)) return { result: "red", escalate: "red: no change" };
-  const stat = git(worktree, "diff", "--cached", "--stat", base);
-  if (exec(worktree, "npm", ["run", "check"], { out: join(worktree, ".delegate/check.txt") }).status !== 0) return { result: "red", escalate: "red check", stat };
-  git(worktree, "commit", "--quiet", "-m", `${title}\n\nWorker: ${worker}`);
-  git(worktree, "fetch", "--quiet", "origin");
-  if (exec(worktree, "git", ["merge", "--quiet", "--no-edit", `origin/${integration}`]).status !== 0) {
-    exec(worktree, "git", ["merge", "--abort"]);
-    return { result: "conflict", escalate: "conflict", stat };
-  }
-  return { result: "pass", stat: git(worktree, "diff", "--stat", `origin/${integration}`, "HEAD") };
+  return null;
 };
 
-/** This run's segment of the `Route outcome:` line: its tier, effort and worker, its result and its time. */
-export const outcomeSegment = ({ tier, effort, worker, result, ms }) => `${tier}·${effort} ${worker} → ${result} | ${Math.max(1, Math.round(ms / 60_000))}m`;
+// How much of a red check's output the retry gets.
+const TAIL_LINES = 60;
+
+/** Checks the staged work: null when green, otherwise why it is red and what the retry is told. */
+const check = (worktree, base) => {
+  if (!stage(worktree, base)) return { escalate: "red: no change", tell: "No change was made: nothing differs from the integration branch. Implement the ticket in .delegate/ticket.md, then run `npm run check` until it is green. Do not commit or push." };
+  const out = join(worktree, ".delegate/check.txt");
+  if (exec(worktree, "npm", ["run", "check"], { out }).status === 0) return null;
+  const tail = readFileSync(out, "utf8").trimEnd().split("\n").slice(-TAIL_LINES).join("\n");
+  return { escalate: "red check", tell: `\`npm run check\` is red. The last lines of its output:\n\n${tail}\n\nFix the cause, then run \`npm run check\` until it is green. Do not commit or push.` };
+};
+
+/**
+ * What the worker left on GitHub, or null (spec #592, step 7): an `origin` ref that holds one of its `commits`, the
+ * ticket's branch on `origin`, or a PR from it. Only the worker's own traces count: others move refs during a run.
+ */
+const pushed = (worktree, branch, commits) => {
+  // `--prune`, so that a tracking ref an earlier run left behind is not read as this worker's branch.
+  git(worktree, "fetch", "--quiet", "--prune", "origin");
+  for (const commit of commits) {
+    const refs = git(worktree, "for-each-ref", "--contains", commit, "--format=%(refname:short)", "refs/remotes/origin");
+    if (refs) return `${refs.split("\n")[0]} has the worker's commit ${commit.slice(0, 12)}`;
+  }
+  if (exec(worktree, "git", ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${branch}`]).status === 0) return `origin has the branch ${branch}`;
+  const prs = JSON.parse(must(worktree, "gh", ["pr", "list", "--head", branch, "--json", "url"]) || "[]");
+  if (prs.length) return `a PR from ${branch} is open: ${prs[0].url}`;
+  return null;
+};
+
+/**
+ * One candidate's attempt in the worktree: its first run, and on the first red check one retry on the same session.
+ * `runs` holds each worker run's result and time; `escalate` is the verdict's reason, absent on pass.
+ */
+const attempt = async (worktree, { candidate, effort, base, integration, title, branch }) => {
+  const runs = [];
+  // Every worker run is followed by the push guard, whatever its end, before anything resets the worker's commits away.
+  const timed = async (options) => {
+    const started = Date.now();
+    const exit = await runWorker(worktree, { candidate, effort, ...options });
+    runs.push({ ms: Date.now() - started });
+    const commits = git(worktree, "rev-list", `${base}..HEAD`).split("\n").filter(Boolean);
+    const what = pushed(worktree, branch, commits);
+    return what ? { ...exit, pushed: what } : exit;
+  };
+  const last = (verdict) => {
+    runs.at(-1).result = verdict.result;
+    return { runs, ...verdict };
+  };
+  try {
+    let exit = await timed({ message: WORKER_BRIEF, limit: ATTEMPT_MS });
+    let stop = failed(exit);
+    if (stop) return last(stop);
+    let red = check(worktree, base);
+    if (red && exit.session) {
+      runs.at(-1).result = "red";
+      exit = await timed({ message: red.tell, session: exit.session, limit: RETRY_MS });
+      stop = failed(exit);
+      if (stop) return last(stop);
+      red = check(worktree, base);
+    }
+    const stat = git(worktree, "diff", "--cached", "--stat", base) || undefined;
+    if (red) return last({ result: "red", escalate: red.escalate, stat });
+    git(worktree, "commit", "--quiet", "-m", `${title}\n\nWorker: ${candidate.model}`);
+    git(worktree, "fetch", "--quiet", "origin");
+    if (exec(worktree, "git", ["merge", "--quiet", "--no-edit", `origin/${integration}`]).status !== 0) {
+      exec(worktree, "git", ["merge", "--abort"]);
+      return last({ result: "conflict", escalate: "conflict", stat });
+    }
+    return last({ result: "pass", stat: git(worktree, "diff", "--stat", `origin/${integration}`, "HEAD") });
+  } catch (error) {
+    // The worker ran, so the run started: a failure now is an error attempt, and escalates.
+    if (!(error instanceof CouldNotStart)) throw error;
+    return last({ result: "error", escalate: `error: ${error.message}` });
+  }
+};
+
+const minutes = (ms) => `${Math.max(1, Math.round(ms / 60_000))}m`;
+
+/**
+ * This run's segment of the `Route outcome:` line: its tier and effort, then each attempt's worker and the results of
+ * its runs (a retry is a second run), and after `|` one time per run, attempts split by `;`.
+ */
+export const outcomeSegment = ({ tier, effort, attempts }) => {
+  const results = attempts.map(({ worker, runs }) => `${worker} → ${runs.map((run) => run.result).join(",")}`).join(" → ");
+  const times = attempts.map(({ runs }) => runs.map((run) => minutes(run.ms)).join(", ")).join("; ");
+  return `${tier}·${effort} ${results} | ${times}`;
+};
+
+// The models a silent stop marked out, each until the next UTC midnight (spec #592, step 4), in a file in the git common
+// dir, so that every run of every worktree of this checkout reads the same marks.
+const MARKS = "delegate-silent.json";
+
+const readMarks = (file) => {
+  try {
+    return JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    return {};
+  }
+};
+
+const isOut = (file, model) => Date.parse(readMarks(file)[model] ?? "") > Date.now();
+
+const markOut = (file, model) => {
+  const midnight = new Date();
+  midnight.setUTCHours(24, 0, 0, 0);
+  const marks = Object.fromEntries(Object.entries(readMarks(file)).filter(([, until]) => Date.parse(until) > Date.now()));
+  // Written whole and renamed into place, so that a run reading it at the same time never sees half a file.
+  writeFileSync(`${file}.tmp`, `${JSON.stringify({ ...marks, [model]: midnight.toISOString() })}\n`);
+  renameSync(`${file}.tmp`, file);
+};
+
+/**
+ * Runs each candidate not marked out in turn, from `first`, until one ends other than silent; each attempt goes into
+ * `attempts`. A silent stop marks its model out and starts the next candidate from the integration branch again.
+ */
+const candidates = async (worktree, { first, next, marks, attempts, base, integration, ...rest }) => {
+  let candidate = first;
+  let from = base;
+  for (;;) {
+    const verdict = await attempt(worktree, { candidate, base: from, integration, ...rest });
+    attempts.push({ worker: candidate.model, runs: verdict.runs });
+    if (verdict.result !== "silent") return verdict;
+    markOut(marks, candidate.model);
+    candidate = next();
+    if (!candidate) return verdict;
+    try {
+      // `.delegate/` holds this run's files and stays.
+      git(worktree, "reset", "--quiet", "--hard", `origin/${integration}`);
+      git(worktree, "clean", "--quiet", "-fd", "-e", ".delegate");
+      from = git(worktree, "rev-parse", "HEAD");
+    } catch (error) {
+      if (!(error instanceof CouldNotStart)) throw error;
+      return { result: "error", escalate: `error: ${error.message}` };
+    }
+  }
+};
 
 const runTicket = async ({ ticket, integration, effort, routing }) => {
-  const candidate = JSON.parse(readFileSync(routing, "utf8")).cheap?.[0];
+  const cheap = JSON.parse(readFileSync(routing, "utf8")).cheap ?? [];
   const branch = `issue-${ticket}-cheap`;
   let root;
   let worktree;
   let pane = null;
-  let verdict;
+  const attempts = [];
+  let verdict = { result: "silent", escalate: "silent" };
   try {
-    root = dirname(git(process.cwd(), "rev-parse", "--path-format=absolute", "--git-common-dir"));
+    const common = git(process.cwd(), "rev-parse", "--path-format=absolute", "--git-common-dir");
+    const marks = join(common, MARKS);
+    root = dirname(common);
     worktree = join(root, ".claude/worktrees", branch);
     removeWorktree(root, worktree, branch);
+    const next = () => cheap.find((candidate) => !isOut(marks, candidate.model));
+    const candidate = next();
     if (!candidate) {
       console.log("escalate medium (silent)");
       return 0;
@@ -315,26 +463,19 @@ const runTicket = async ({ ticket, integration, effort, routing }) => {
     writeFileSync(join(worktree, ".delegate/run.log"), "");
     must(worktree, "npm", ["ci"], { out: join(worktree, ".delegate/npm-ci.txt") });
     pane = openPane(worktree);
-    const started = Date.now();
-    const exit = await runWorker(worktree, candidate, effort);
-    const ms = Date.now() - started;
-    try {
-      verdict = { ...judge(worktree, { base, integration, exit, title, worker: candidate.model }), ms };
-    } catch (error) {
-      // The worker ran, so the run started: a failure now is an error attempt, and escalates.
-      if (!(error instanceof CouldNotStart)) throw error;
-      verdict = { result: "error", escalate: `error: ${error.message}`, ms };
-    }
+    verdict = await candidates(worktree, { first: candidate, next, marks, attempts, effort, base, integration, title, branch });
   } catch (error) {
     if (!(error instanceof CouldNotStart)) throw error;
     console.error(`could not start: ${error.message}`);
     return 1;
   } finally {
     closePane(worktree, pane);
-    if (worktree && verdict?.result !== "pass" && existsSync(worktree)) removeWorktree(root, worktree, branch);
+    // On pass the orchestrator removes it after the merge; on stop it is Daniel's evidence of what the worker did.
+    if (worktree && !["pass", "stop"].includes(verdict.result) && existsSync(worktree)) removeWorktree(root, worktree, branch);
   }
-  const segment = outcomeSegment({ tier: "cheap", effort, worker: candidate.model, ...verdict });
-  console.log([verdict.escalate ? `escalate medium (${verdict.escalate})` : "pass", verdict.stat, `Route outcome: ${segment}`].filter(Boolean).join("\n"));
+  const segment = outcomeSegment({ tier: "cheap", effort, attempts });
+  const said = verdict.stop ? `stop: ${verdict.stop}` : verdict.escalate ? `escalate medium (${verdict.escalate})` : "pass";
+  console.log([said, verdict.stat, `Route outcome: ${segment}`].filter(Boolean).join("\n"));
   return 0;
 };
 
