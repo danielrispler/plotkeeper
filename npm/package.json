@@ -1,7 +1,7 @@
 {
   "name": "plotkeeper",
   "version": "0.4.0",
-  "description": "Local macOS control room for coding agents (Claude Code, Codex, Cursor, Antigravity CLI) that explains what your prompts changed on a live system map",
+  "description": "Local control room for coding agents (Claude Code, Codex, Cursor, Antigravity CLI) on macOS and Linux that explains what your prompts changed on a live system map",
   "license": "MIT",
   "author": "Daniel Rispler",
   "homepage": "https://github.com/danielrispler/plotkeeper#readme",
@@ -30,19 +30,22 @@
     "diff",
     "devtools",
     "cli",
-    "macos"
+    "macos",
+    "linux"
   ],
-  "os": ["darwin"],
+  "os": ["darwin", "linux"],
   "cpu": ["arm64", "x64"],
   "bin": {
-    "plotkeeper": "bin/plotkeeper"
+    "plotkeeper": "launcher.js"
   },
   "files": [
     "README.md",
     "LICENSE",
-    "bin/plotkeeper",
-    "bin/plotkeeper-hook",
-    "bin/plotkeeper-answer",
-    "bin/plotkeeper-run"
-  ]
+    "launcher.js"
+  ],
+  "optionalDependencies": {
+    "plotkeeper-darwin": "0.4.0",
+    "plotkeeper-linux-x64": "0.4.0",
+    "plotkeeper-linux-arm64": "0.4.0"
+  }
 }

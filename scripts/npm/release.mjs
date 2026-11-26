@@ -2,6 +2,9 @@
 //   node scripts/npm/release.mjs bump <patch|minor>   rewrites npm/package.json, server/Cargo.toml and Cargo.lock
 //   node scripts/npm/release.mjs notes <X.Y.Z> [file] prints (or writes) that version's CHANGELOG.md section
 //   node scripts/npm/release.mjs guard                fails unless HEAD's commit changed npm/package.json's version
+//   node scripts/npm/release.mjs platform <platform> <dir>
+//                                                     writes the platform package's package.json and README.md into
+//                                                     <dir>: darwin, linux-x64 or linux-arm64 (#706)
 //   node scripts/npm/release.mjs tag <X.Y.Z> <commit> [--dry-run]
 //                                                     tags vX.Y.Z at the commit on origin and creates its GitHub
 //                                                     Release from CHANGELOG.md; --dry-run prints the changes instead
@@ -29,14 +32,22 @@ function swap(text, pattern, old, version, what) {
 }
 
 // Takes the three files' texts and `patch` or `minor`; returns their texts at the next version. The version is the npm
-// package's; the crate's manifest and the lockfile's `studio-server` entry must hold the same one.
+// package's; the crate's manifest, the lockfile's `studio-server` entry and each platform package the npm package asks
+// for (its `optionalDependencies`, #706) must hold the same one.
 export function bump(texts, level) {
-  const old = JSON.parse(texts.npmManifest).version;
+  const manifest = JSON.parse(texts.npmManifest);
+  const old = manifest.version;
   if (!/^\d+\.\d+\.\d+$/.test(old)) throw new Error(`npm/package.json's version ${old} is not X.Y.Z`);
   const version = next(old, level);
   const v = escapeRegExp(old);
+  let npmManifest = swap(texts.npmManifest, new RegExp(`^(  "version": ")${v}(?=",?$)`, "m"), old, version, FILES.npmManifest);
+  for (const [name, wanted] of Object.entries(manifest.optionalDependencies ?? {})) {
+    if (wanted !== old) throw new Error(`${FILES.npmManifest} asks for ${name} ${wanted}, not its version ${old}`);
+    const line = new RegExp(`^(    "${escapeRegExp(name)}": ")${v}(?=",?$)`, "m");
+    npmManifest = swap(npmManifest, line, old, version, `${FILES.npmManifest}'s ${name}`);
+  }
   return {
-    npmManifest: swap(texts.npmManifest, new RegExp(`^(  "version": ")${v}(?=",?$)`, "m"), old, version, FILES.npmManifest),
+    npmManifest,
     crateManifest: swap(
       texts.crateManifest,
       new RegExp(`^(\\[package\\]\\n(?:(?!\\[)[^\\n]*\\n)*?version = ")${v}(?="$)`, "m"),
@@ -52,6 +63,36 @@ export function bump(texts, level) {
       FILES.lockfile,
     ),
   };
+}
+
+// The platform packages, one optional dependency of the npm package each, marked with the `os` and `cpu` npm installs
+// it on; `platform` is `process.platform` and, for Linux, `process.arch`, as the launcher (`npm/launcher.js`) names them.
+const PLATFORMS = {
+  darwin: { label: "macOS (Apple silicon and Intel)", os: ["darwin"], cpu: ["arm64", "x64"] },
+  "linux-x64": { label: "Linux on x64", os: ["linux"], cpu: ["x64"] },
+  "linux-arm64": { label: "Linux on arm64", os: ["linux"], cpu: ["arm64"] },
+};
+
+// The package.json of `platform`'s package, from the npm package's: its version and links, the binaries in `bin/`, and
+// no command, since the npm package's launcher is the one on the PATH.
+export function platformManifest(launcherManifest, platform) {
+  const marks = PLATFORMS[platform];
+  if (marks === undefined) throw new Error(`no platform package for ${platform}`);
+  const { version, license, author, homepage, bugs, repository } = JSON.parse(launcherManifest);
+  const manifest = {
+    name: `plotkeeper-${platform}`,
+    description: `plotkeeper's binaries for ${marks.label}. Install plotkeeper, which uses this.`,
+    version,
+    license,
+    author,
+    homepage,
+    bugs,
+    repository,
+    files: ["bin/"],
+    os: marks.os,
+    cpu: marks.cpu,
+  };
+  return `${JSON.stringify(manifest, null, 2)}\n`;
 }
 
 // The body of the changelog's `## X.Y.Z` section, up to the next `## ` heading, without its blank edges.
@@ -135,12 +176,18 @@ function main([command, arg, out, ...flags]) {
   } else if (command === "guard") {
     // A checkout at depth 1 has no HEAD^, so this fails there rather than pass.
     checkReleaseCommit(git(["show", "HEAD^:npm/package.json"]), git(["show", "HEAD:npm/package.json"]));
+  } else if (command === "platform" && arg && out) {
+    const text = platformManifest(read(FILES.npmManifest), arg);
+    const manifest = JSON.parse(text);
+    writeFileSync(resolve(out, "package.json"), text);
+    writeFileSync(resolve(out, "README.md"), `# ${manifest.name}\n\n${manifest.description}\n\n    npx plotkeeper\n`);
   } else if (command === "tag" && arg && out && flags.every((flag) => flag === "--dry-run")) {
     const commit = git(["rev-parse", "--verify", `${out}^{commit}`]).trim();
     tagAndRelease({ version: arg, commit, changelog: read("CHANGELOG.md"), run: runner(flags.length > 0) });
   } else {
     throw new Error(
-      "usage: release.mjs bump <patch|minor> | notes <X.Y.Z> [file] | guard | tag <X.Y.Z> <commit> [--dry-run]",
+      "usage: release.mjs bump <patch|minor> | notes <X.Y.Z> [file] | guard | platform <platform> <dir> |" +
+        " tag <X.Y.Z> <commit> [--dry-run]",
     );
   }
 }
