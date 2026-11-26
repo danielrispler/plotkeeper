@@ -159,7 +159,7 @@ MiMo stays a later candidate, behind its own check. The spike's findings (#599) 
 
 **`quota()`:**
 
-- **Free Zen models:** no reader is possible (§4). Under the spec they are always eligible (user story 15). `delegate.mjs` must spot the free-limit wait itself and treat it as a **quota stop**, handing the ticket on to the next candidate, not as a failure. In a Herdr pane, look for "Free usage exceeded, subscribe to Go". Through `opencode serve` and its event stream, look for `session.status` `retry` with `action.reason: "free_tier_limit"`.
+- **Free Zen models:** no reader is possible (§4). Under the spec they are always eligible (#592, "`routing.json`"). `delegate.mjs` must spot the free-limit wait itself and treat it as a **quota stop**, handing the ticket on to the next candidate, not as a failure. In a Herdr pane, look for "Free usage exceeded, subscribe to Go". Through `opencode serve` and its event stream, look for `session.status` `retry` with `action.reason: "free_tier_limit"`.
 - **Go:** a real reader is possible: `1 - max(percent)/100` across `rolling`, `weekly` and `monthly` (§3). It needs the Go key, which `delegate.mjs` may not take from opencode's `auth.json` (AGENTS.md, Hard rules). The key would need its own plotkeeper Keychain account. That's a new exception to the hard rules, and Daniel's call.
 
 **What the spike should check:**
@@ -170,7 +170,7 @@ MiMo stays a later candidate, behind its own check. The spike's findings (#599) 
 4. How to map route effort to `--variant` when a model has no `medium` (DeepSeek).
 5. What a `permission` deny set for credential paths blocks, since there's no sandbox.
 6. Whether Daniel's global `~/.claude/CLAUDE.md` should be kept out (`OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1`).
-7. That `PLOTKEEPER_INTERNAL=1` and the missing opencode hook keep the worker out of the Studio.
+7. That the missing opencode hook keeps the worker out of the Studio. `PLOTKEEPER_INTERNAL=1` can't be the way: it must not reach the worker's `npm run check` (§7).
 
 ## 7. The spike (#599, 26 November 2026)
 
