@@ -128,7 +128,7 @@ pub fn fresh(store: &CatchUpStore, part: &str, fog: &[String]) -> Option<StoredC
 /// The catch-up stored for `part` when it covers an earlier fog list than `fog`, its current one, whose every entry is still in
 /// `fog`: Daniel can read it while the new one is written, and reading it clears only what it covers. None that holds an entry
 /// cleared since, which would tell him again of a change he caught up on.
-pub fn older(store: &CatchUpStore, part: &str, fog: &[String]) -> Option<StoredCatchUp> {
+pub fn earlier(store: &CatchUpStore, part: &str, fog: &[String]) -> Option<StoredCatchUp> {
     store.get(part).filter(|stored| {
         !stored.fog.is_empty()
             && stored.fog != fog
@@ -327,7 +327,7 @@ fn catch_up_offer(
     list: &[String],
 ) -> Offer {
     let stored = store.and_then(|s| fresh(s, part, list));
-    let older = store.and_then(|s| older(s, part, list));
+    let older = store.and_then(|s| earlier(s, part, list));
     Offer::CatchUp {
         ready: stored.is_some(),
         writing: catch_ups.writing(project, part),
@@ -419,7 +419,7 @@ fn start(
 
 /// What a click on `part`'s catch-up over `fog` answers: the stored one when it covers `fog`, else a write starts (a failed one is
 /// tried again) and the answer says it is being written. `older`: "Read the one you have" asks for the stored one even though it
-/// covers an earlier list, answered with it only while `older` (the function) holds, else as any click.
+/// covers an earlier list, answered with it only while `earlier` holds, else as any click.
 #[allow(
     clippy::too_many_arguments,
     reason = "no type groups these inputs, and one made only for this call would be a new abstraction (#555)"
@@ -435,8 +435,8 @@ pub fn ask(
     store: CatchUpStore,
     done: impl FnOnce() + Send + 'static,
 ) -> Result<Opened, String> {
-    let stored = fresh(&store, part, &fog)
-        .or_else(|| older.then(|| self::older(&store, part, &fog)).flatten());
+    let stored =
+        fresh(&store, part, &fog).or_else(|| older.then(|| earlier(&store, part, &fog)).flatten());
     if let Some(stored) = stored {
         return Ok(Opened::CatchUp(Box::new(stored)));
     }
@@ -533,10 +533,11 @@ fn write_ahead(
         .collect()
 }
 
-/// `project`'s session ended its turn: `origin` is fetched through the cooldown of `fetches` (`fetch`), the fog is refreshed
-/// without starting it, and the catch-ups of at most `ON_SHOW` fogged Core and Interface-only parts start writing as `show` does.
-/// `None` when the project's fog never started (its map was never opened): nothing is fetched or written. Else the parts whose
-/// write started; `done` runs as each ends.
+/// `project`'s session ended its turn: `origin` is fetched through the cooldown of `fetches` (`fetch`), and `read_ci` runs when
+/// that fetch was not skipped; the fog is refreshed without starting it, and the catch-ups of at most `ON_SHOW` fogged Core and
+/// Interface-only parts start writing as `show` does, into the store that `store` opens. `None` when the project's fog never
+/// started (its map was never opened): nothing is fetched, read, opened or written. Else the parts whose write started; `done`
+/// runs as each ends.
 #[allow(
     clippy::too_many_arguments,
     reason = "no type groups these inputs, and one made only for this call would be a new abstraction (#555)"
@@ -547,10 +548,11 @@ pub fn turn_end(
     model: &str,
     fetches: &crate::map::Fetches,
     fetch: impl FnOnce() -> Result<(), String>,
+    read_ci: impl FnOnce(),
     project: &str,
     file: &Path,
     lit_of: &dyn Fn(u64) -> Option<Vec<Vec<String>>>,
-    store: &CatchUpStore,
+    store: impl FnOnce() -> Option<CatchUpStore>,
     done: impl Fn() + Clone + Send + 'static,
 ) -> Option<Vec<String>> {
     let repo = Path::new(project);
@@ -559,34 +561,42 @@ pub fn turn_end(
         .fog
         .processed
         .as_ref()?;
-    if let crate::map::Fetched::Failed(why) = fetches.run(project, std::time::Instant::now(), fetch)
-    {
-        log::warn!("turn end: fetch of {project} failed: {why}");
+    match fetches.run(project, std::time::Instant::now(), fetch) {
+        crate::map::Fetched::Skipped => {}
+        fetched => {
+            if let crate::map::Fetched::Failed(why) = fetched {
+                log::warn!("turn end: fetch of {project} failed: {why}");
+            }
+            // The map's own fetch now waits out this one's cooldown, so CI is read here, as the map's open would.
+            read_ci();
+        }
     }
     if let Err(why) = crate::fog::refresh(repo, file, project, false) {
         log::warn!("turn end: fog of {project} failed: {why}");
     }
-    let (Some(writer), Some(source)) = (writer, crate::map::read_map(repo).source) else {
+    let (Some(writer), Some(source), Some(store)) =
+        (writer, crate::map::read_map(repo).source, store())
+    else {
         return Some(Vec::new());
     };
     let user = crate::map::read_user(file, project);
     // The fogged parts the map shows: Core and Interface-only, since a black box never shows fog (`fog::effective`).
     let parts = crate::fog::effective(&user, &source).into_keys().collect();
     Some(write_ahead(
-        catch_ups, writer, model, project, &user, parts, lit_of, store, done,
+        catch_ups, writer, model, project, &user, parts, lit_of, &store, done,
     ))
 }
 
-/// A session in `folder` ended its turn: in the background, `turn_end` on its main checkout with `origin`'s fetch, the PR brief's
-/// writer and model, and the page hears `map-landed` once the fog is refreshed and as each write ends. Nothing for a project
-/// whose map was never opened.
+/// A session in `folder` ended its turn: in the background, `turn_end` on its main checkout with `origin`'s fetch, CI's read
+/// (`ci_laws::refresh_later`), the PR brief's writer and model, and the page hears `map-landed` once the fog is refreshed and as
+/// each write ends. Nothing for a project whose map was never opened, which gets no data folder either.
 pub fn turn_ended(app: &Arc<App>, folder: String) {
     let app = app.clone();
     std::thread::spawn(move || {
         let Ok(project) = studio_workbench::main_checkout(Path::new(&folder)) else {
             return;
         };
-        let (Ok(file), Some(store)) = (crate::map::state_file(), store_of(&project)) else {
+        let Ok(file) = crate::map::state_file() else {
             return;
         };
         let events = app.events.clone();
@@ -597,10 +607,11 @@ pub fn turn_ended(app: &Arc<App>, folder: String) {
             &app.briefs.model(),
             &app.fetches,
             || studio_workbench::fetch(Path::new(&project)),
+            || crate::ci_laws::refresh_later(&app.ci, &app.events, &project),
             &project,
             &file,
             &lit_of(&project),
-            &store,
+            || store_of(&project),
             move || events.emit("map-landed", serde_json::json!(landed)),
         );
         // The map redraws its fog, and the sheets their writes.
@@ -1134,6 +1145,9 @@ mod tests {
         catch_ups: CatchUps,
         ended: std::sync::mpsc::Sender<()>,
         ends: std::sync::mpsc::Receiver<()>,
+        /// How many times a turn's end read CI again, and opened the catch-up store.
+        ci_reads: std::cell::Cell<usize>,
+        stores_opened: std::cell::Cell<usize>,
     }
 
     impl Shows {
@@ -1158,6 +1172,8 @@ mod tests {
                 catch_ups: CatchUps::default(),
                 ended,
                 ends,
+                ci_reads: std::cell::Cell::new(0),
+                stores_opened: std::cell::Cell::new(0),
             }
         }
         fn push(&self, part: &str, text: &str) {
@@ -1500,10 +1516,14 @@ mod tests {
                     fetched.set(fetched.get() + 1);
                     Ok(())
                 },
+                || self.ci_reads.set(self.ci_reads.get() + 1),
                 &self.rig.main,
                 &self.rig.file(),
                 lit_of,
-                &self.store(),
+                || {
+                    self.stores_opened.set(self.stores_opened.get() + 1);
+                    Some(self.store())
+                },
                 move || ended.send(()).unwrap(),
             )
         }
@@ -1539,6 +1559,9 @@ mod tests {
         let user = read_user(&shows.rig.file(), &shows.rig.main);
         assert_eq!(user.fog.processed, None, "the fog stays unstarted");
         assert!(writer.wrote().is_empty());
+        // No data folder is made for it, and CI is not read.
+        assert_eq!(shows.stores_opened.get(), 0);
+        assert_eq!(shows.ci_reads.get(), 0);
     }
 
     #[test]
@@ -1604,5 +1627,7 @@ mod tests {
             assert!(shows.turn(&writer, &fetches, &fetched).is_some());
         }
         assert_eq!(fetched.get(), 1);
+        // The fetch that ran reads CI again, as the map's open does, since its cooldown now skips the map's own fetch.
+        assert_eq!(shows.ci_reads.get(), 1);
     }
 }
