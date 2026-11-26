@@ -139,7 +139,7 @@ Every claim is marked **verified** (with its source) or **unverified**. No crede
 
 ## 6. Fit for plotkeeper routing
 
-**What was chosen.** Spec #592 puts two entries in `cheap`, DeepSeek first, then Beam, and keeps Gemini (agy) out of the workers: it stays for the outside review and the critic. The list stays empty until `delegate.mjs run` ships.
+**What was chosen.** Spec #592 puts two entries in `cheap`, DeepSeek first, then Beam, and keeps Gemini (agy) out of the workers: it stays for the outside review and the critic. The list is filled since #601, when `delegate.mjs run` shipped.
 
 ```json
 "cheap": [
