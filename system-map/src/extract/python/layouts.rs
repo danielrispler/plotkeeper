@@ -107,7 +107,7 @@ impl<'a> Reading<'a> {
         }
         match self.folder(dir) {
             Some(folder) if !name.contains('.') => {
-                self.layout.packages.push((name.to_string(), folder))
+                self.layout.packages.push((name.to_string(), folder));
             }
             _ => self.unread(key),
         }
