@@ -7,7 +7,7 @@
 
 import { modelLine, reports } from "./capabilities.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
-import { age, code, cut, element, failure, glyphOnly, hint, invoke, keepOnly, keyed, patch, pressable, prose, text, unhint, unseenWords } from "./dom.js";
+import { age, code, cut, element, failure, glyphOnly, hint, invoke, keepOnly, keyed, patch, pressable, prose, revealsOnOpen, text, unhint, unseenWords } from "./dom.js";
 import { askAnchor, asked } from "./ask.js";
 import { askFor, openDecision } from "./answer.js";
 import { rendered } from "./markdown.js";
@@ -49,6 +49,8 @@ let select: (id: string, agent: string | null) => unknown = () => {};
 /** Wires the story to the selection, which it may not import. */
 export function startStory(selectSession: (id: string, agent: string | null) => unknown) {
   select = selectSession;
+  // Brief and Decisions sit at the panel's foot, so each opens into view (spec #661, Q33).
+  for (const id of ["brief-fold", "decisions"]) revealsOnOpen(element(id));
 }
 
 // The rail with no session selected: its header empty, its dock and its cleared decisions too.
@@ -523,23 +525,47 @@ function checksOf(turn: Turn | null): HTMLElement[] {
   return [list];
 }
 
+/**
+ * The reply as Full response shows it (spec #661, Q32): when the turn's Headline is its message, the reply's first line, that line is
+ * left out, so the fold never opens on the sentence the Headline already shows. A stored Headline leaves the reply whole.
+ */
+function belowHeadline(reply: string, summary: TurnSummary | null, message: string | null): string {
+  const stored = summary?.summary;
+  const own = stored?.headline != null ? stored.headline.trim() : (stored?.summary ?? "").trim();
+  const headline = message?.trim();
+  if (own || !headline) return reply;
+  const lines = reply.split("\n");
+  const first = lines.findIndex((line) => line.trim() !== "");
+  if (first < 0 || lines[first]?.trim() !== headline) return reply;
+  return lines.slice(first + 1).join("\n").trim();
+}
+
 // The full response, folded: the latest turn's from the transcript, an older one's fetched at its first opening. None for a turn with
-// neither.
+// neither, nor for the latest turn when its reply was only its Headline; an older turn's fold says so once its reply is fetched.
 function responseFold(session: Session, turn: Turn, index: number | null, key: string): HTMLElement | null {
   const latest = index !== null && index === session.turns.length - 1;
-  const responses = latest ? session.transcript.responses : [];
+  const summary = turn.id ? summaryOf(turn.id) : null;
+  const below = (reply: string) => belowHeadline(reply, summary, turn.message);
+  // The Headline is the final reply's first line, so only the last of the newest turn's texts can hold it.
+  const all = latest ? session.transcript.responses : [];
+  const responses = all.map((t, i) => (i === all.length - 1 ? below(t) : t)).filter((t) => t.trim() !== "");
   if (!(latest ? responses.length : turn.id)) return null;
   const body = document.createElement("div");
   const fill = (texts: string[]) => body.replaceChildren(...texts.map((t) => rendered("div", t, "response")));
+  const fillReply = (reply: string) => {
+    const left = below(reply);
+    if (left || !reply.trim()) fill([left]);
+    else body.replaceChildren(text("p", "The reply was only its Headline.", "response-only"));
+  };
   const fetched = replies.get(key);
   if (latest) fill(responses);
-  else if (fetched !== undefined) fill([fetched]);
+  else if (fetched !== undefined) fillReply(fetched);
   const fetchReply = () => {
     if (latest || index === null || replies.has(key)) return;
     invoke("turn_reply", { id: session.id, index })
       .then((reply) => {
         replies.set(key, reply ?? "");
-        fill([reply ?? ""]);
+        fillReply(reply ?? "");
       })
       .catch(failure("turn_reply"));
   };

@@ -793,6 +793,55 @@ export const mapPanelBrief = (): Fixture =>
   pr_brief: briefOf(storySteps()),
 });
 
+/**
+ * Brief at the panel's foot (spec #661, Q33): with #311's story long enough to scroll and its session's Brief folded under the feed, the
+ * story scrolled so only the Brief's line shows at the panel's foot, opening it scrolls the panel until the opened Brief is in view, to the
+ * nearest edge. Reduced motion, so the scroll is at once; Decisions opens the same way.
+ */
+export const mapPanelBriefFoot = (): Fixture => {
+  const ago = (ms: number) => Date.now() - ms;
+  const long = "The rail draws each turn's Headline over its Body lines, and the reply below it, folded, so a long turn wraps over several lines here.";
+  const count = 30;
+  const turn = (n: number) => ({ started_at: ago((count + 1 - n) * 120e3 + 60e3), ended_at: ago((count + 1 - n) * 120e3), prompt: "Prompt " + n + ": " + long, id: "f" + n, message: "Reply " + n + ". " + long, checks: [], listed: [], files: { files: [], merged: 0 } });
+  const turns = Array.from({ length: count }, (_, k) => turn(k + 1));
+  const sessions = busySessions().map((s) => (s.id === "s1" ? { ...s, state: "your_turn" as const, turns, transcript: { ...s.transcript, responses: [turns[count - 1].message] } } : s));
+  const design = Array.from({ length: 4 }, (_, i) => ({ text: "Design line " + (i + 1) + ": " + long, cite: "f1" }));
+  const decisions = [1, 2, 3].map((n) => ({ call: "c" + n, agent: null, tool: "Bash", input: { command: "git push" }, answer: "allow" as const, at: ago(n * 600e3), source: "terminal" as const }));
+  return mapPanel(`
+      await press(row("s1"));
+      if (!panelOpen()) return log("snap:fail #311's story did not open");
+      await wait(200);
+      const scroller = (node) => { for (let n = node.parentElement; n; n = n.parentElement) if (n.scrollHeight > n.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(n).overflowY)) return n; return null; };
+      for (const id of ["brief-fold", "decisions"]) {
+        const fold = document.getElementById(id);
+        if (fold.hidden) return log("snap:fail " + id + " is not shown under the feed");
+        const view = scroller(fold);
+        if (!view) return log("snap:fail the story does not scroll");
+        // Only the fold's line shows, at the panel's foot.
+        const line = fold.querySelector("summary");
+        view.scrollTop += line.getBoundingClientRect().bottom - view.getBoundingClientRect().bottom;
+        await wait(50);
+        const top = view.scrollTop;
+        line.click();
+        await wait(200);
+        if (!fold.open) return log("snap:fail the press did not open " + id);
+        const [f, v] = [fold.getBoundingClientRect(), view.getBoundingClientRect()];
+        if (view.scrollTop <= top) log("snap:fail opening " + id + " did not scroll the panel: " + top + " to " + view.scrollTop);
+        const inView = f.height <= v.height ? f.top >= v.top - 1 && f.bottom <= v.bottom + 1 : Math.abs(f.top - v.top) <= 1;
+        if (!inView) log("snap:fail the opened " + id + " is not in view: " + [f.top, f.bottom].map(Math.round) + " in " + [v.top, v.bottom].map(Math.round));
+        line.click();
+        await wait(100);
+      }
+      document.getElementById("brief-summary").click();
+      await wait(200);
+      log("panel ok");`, {
+    sessions,
+    select: { __by: "id", values: Object.fromEntries(sessions.map((s) => [s.id, { session: s, agent: null }])) },
+    cards: { brief: null, goal: "Keep the story panel still while a session runs.", answers: [], open: [], design, decisions, risk_notes: [], decision_notes: [] },
+    motion: "reduce",
+  });
+};
+
 // The part sheet in the map (#445). The shell holds eight items, the most a part may, so its sheet is long; its check-backed law opens
 // a long proof in the drawer.
 const longSheet = (() => {

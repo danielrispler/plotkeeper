@@ -621,3 +621,12 @@ export function prose(tag: string, text: string): HTMLElement {
   node.append(...text.split("`").map((part, i) => (i % 2 ? code(part) : part)));
   return node;
 }
+
+/** Brings `fold` into its scroller's view when it opens, to the nearest edge: smoothly, or at once when reduced motion is asked for. */
+export function revealsOnOpen(fold: HTMLElement) {
+  fold.addEventListener("toggle", () => {
+    if (!(fold as HTMLDetailsElement).open) return;
+    const moves = matchMedia("(prefers-reduced-motion: no-preference)").matches;
+    fold.scrollIntoView({ block: "nearest", behavior: moves ? "smooth" : "auto" });
+  });
+}
