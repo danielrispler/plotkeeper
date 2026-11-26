@@ -197,3 +197,22 @@ fn a_queued_wake_up_marks_the_turn_it_starts_and_daniels_queued_prompt_does_not(
     assert!(wakes[2].1, "{wakes:?}");
     assert!(wakes[2].0.starts_with("worker "), "{wakes:?}");
 }
+
+/// danielrispler/plotkeeper#675: a queued wake-up's turn names the worker that returned even when the running turn's own step
+/// came between, which clears the row's "returned" before the turn the wake-up starts.
+#[test]
+fn a_queued_wake_up_names_its_worker_after_a_step_of_the_turn_it_was_queued_in() {
+    let wake_up = r#"<agent-message from=\"aaf57a4236e21f65b\">…</agent-message>"#;
+    let queued = r#"<pasted_content id=\"8720\">…</pasted_content id=\"8720\">"#;
+    let woken = QUEUED.replacen(queued, wake_up, 1);
+    let mut lines: Vec<&str> = woken.lines().collect();
+    // The running turn's own step (line 7's), after the wake-up was queued and before that turn's `Stop`.
+    let own_step = lines[6].replace("1793387634301", "1793387650000");
+    lines.insert(9, &own_step);
+
+    let wakes = opened(&lines.join("\n"));
+
+    assert_eq!(wakes.len(), 3);
+    assert!(wakes[2].1, "{wakes:?}");
+    assert!(wakes[2].0.starts_with("worker "), "{wakes:?}");
+}

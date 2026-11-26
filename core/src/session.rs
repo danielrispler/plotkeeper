@@ -1357,7 +1357,8 @@ impl Session {
     pub(crate) fn take_prompt(&mut self, prompt: Prompt, opens: bool) {
         self.woken = !prompt.sender.is_daniels() && (self.woken || opens);
         let line = match &prompt.sender {
-            Sender::WakeUp(_) => self.returned.clone().unwrap_or_default(),
+            // From the wake-up's own task: a queued one's turn starts after the row's `returned` may be cleared.
+            Sender::WakeUp(task_id) => format!("worker {} returned", self.agent_name(task_id)),
             _ => prompt
                 .text
                 .lines()

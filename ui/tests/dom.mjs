@@ -58,11 +58,29 @@ const hold = (parent, item) => {
   return item;
 };
 
+// A `dataset` name's attribute: `briefTaps` is `data-brief-taps`.
+const dataName = (name) => `data-${name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`;
+
 class StandIn {
   nodeType = 1;
   attrs = new Map();
   listeners = {};
-  dataset = {};
+  // Its `data-*` attributes, as a browser's `dataset` is, so `patch` reads a key set through it.
+  dataset = new Proxy(/** @type {Record<string, string>} */ ({}), {
+    get: (_, name) => (typeof name === "string" ? (this.getAttribute(dataName(name)) ?? undefined) : undefined),
+    set: (_, name, value) => {
+      this.setAttribute(dataName(/** @type {string} */ (name)), String(value));
+      return true;
+    },
+    deleteProperty: (_, name) => {
+      this.removeAttribute(dataName(/** @type {string} */ (name)));
+      return true;
+    },
+    has: (_, name) => typeof name === "string" && this.hasAttribute(dataName(name)),
+    ownKeys: () => this.attributes.filter(({ name }) => name.startsWith("data-")).map(({ name }) => name.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase())),
+    getOwnPropertyDescriptor: (_, name) =>
+      typeof name === "string" && this.hasAttribute(dataName(name)) ? { value: this.getAttribute(dataName(name)), enumerable: true, configurable: true, writable: true } : undefined,
+  });
   style = {};
   classList = { add() {}, remove() {}, toggle() {}, contains: () => false };
   className = "";
