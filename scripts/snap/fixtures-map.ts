@@ -59,9 +59,19 @@ export const mapMarks = (kind: "thick" | "thin" | "stale" | "broken"): Fixture =
       const marks = document.querySelector("#map-sheet .sheet-marks");
       if (!marks) return log("snap:fail the sheet has no marks list");
       if (marks.previousElementSibling?.className !== "sheet-caption") log("snap:fail the marks are not at the sheet's top");
+      if (!marks.nextElementSibling?.classList.contains("catch-up-card")) log("snap:fail the catch-up card does not follow the marks");
       const text = marks.textContent;
       for (const want of ${JSON.stringify(want)}) if (!text.includes(want)) log("snap:fail the marks lack " + want + ": " + text);
       if (text.includes("wire-types-agree")) log("snap:fail a broken law is named");
+      // Under the card (#637): the chips, then the folds, all folded but CI on main, which leads, open, when a run broke a law here.
+      const card = marks.nextElementSibling;
+      const after = [];
+      for (let node = card.nextElementSibling; node; node = node.nextElementSibling) after.push(node.className);
+      const shape = after.filter((name) => !name.startsWith("sheet-purpose") && !name.includes("sheet-more")).slice(0, 2).join("|");
+      if (shape !== "sheet-chips|sheet-folds") log("snap:fail the card is not followed by the purpose, the chips and the folds: " + after.join("|"));
+      const folds = [...document.querySelectorAll("#map-sheet .sheet-fold:not([hidden])")];
+      const open = folds.filter((f) => f.open).map((f) => f.dataset.fold).join();
+      if (open !== ${JSON.stringify(kind === "broken" ? "ci" : "")} || (${kind === "broken"} && folds[0].dataset.fold !== "ci")) log("snap:fail the folds: " + folds.map((f) => f.dataset.fold + (f.open ? "+" : "")).join());
       log("marks ${kind} ok");`, { map_state: mapState(states[kind]) });
 };
 /**
@@ -86,7 +96,7 @@ export const mapRefresher = (): Fixture => {
       await wait(400);
       const node = document.querySelector("#map-sheet .refresher");
       if (!node) return log("snap:fail the refresher did not show");
-      if (node.previousElementSibling?.classList.contains("sheet-links") !== true) log("snap:fail the refresher is not under Talks to");
+      if (!node.parentElement?.classList.contains("catch-up-card")) log("snap:fail the refresher is not in the catch-up card");
       const words = node.textContent;
       for (const want of ["Flows through it", "Turn writing", "The Shell asks Understanding"]) {
         if (!words.includes(want)) log("snap:fail the refresher lacks " + want);
@@ -97,6 +107,73 @@ export const mapRefresher = (): Fixture => {
       if (document.body.textContent.includes("Writing")) log("snap:fail the refresher waits on a writer");
       log("refresher ok");`, {
     map_state: mapState({ source: JSON.stringify(file), stale: { shell: 2 } }),
+  });
+};
+/**
+ * A purpose longer than two lines, its sheet opened while the side column is hidden (#633's outside review): the purpose is measured
+ * once the column shows, so it is clamped and its More shows.
+ */
+export const mapPurposeMore = (): Fixture => {
+  const file = JSON.parse(mapFile);
+  file.parts.find((part: { id: string }) => part.id === "shell").purpose =
+    "Reads the hook's log line by line, feeds each line to the core, writes the turn summaries through Understanding, keeps the sessions' state on disk and serves the Window the page and its events.";
+  return mapOpened(`
+      if (!document.getElementById("map-side").hidden) return log("snap:fail the side column shows before the sheet opens: " + [...document.getElementById("map-side").children].map((c) => c.id + ":" + c.childElementCount + ":" + c.textContent.slice(0, 80)).join(" / "));
+      document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(300);
+      const words = document.querySelector("#map-sheet .sheet-purpose");
+      const more = document.querySelector("#map-sheet .sheet-more");
+      if (!words || !more) return log("snap:fail the sheet has no purpose or no More");
+      if (!words.classList.contains("clamped") || words.scrollHeight <= words.clientHeight) log("snap:fail the purpose is not clamped");
+      if (more.hidden) log("snap:fail the clamped purpose's More is hidden");
+      log("purpose more ok");`, { sessions: [], selected: null, projects: [{ path: "/w/plotkeeper", gone: false }], map_state: mapState({ source: JSON.stringify(file) }) });
+};
+/**
+ * A part with no fog (#636): Shell's catch-up card, right under its caption, says "Caught up" and holds the Refresher; no Fog section.
+ */
+export const mapCaughtUp = (): Fixture =>
+  mapOpened(`
+      document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(300);
+      const sheet = document.querySelector("#map-sheet .sheet");
+      const card = sheet.querySelector(".catch-up-card");
+      if (!card) return log("snap:fail no catch-up card");
+      if (card.previousElementSibling?.className !== "sheet-caption") log("snap:fail the card is not under the caption: " + card.previousElementSibling?.className);
+      if (!card.classList.contains("clear")) log("snap:fail the card is not the clear one");
+      if (card.querySelector(".catch-up-eyebrow")?.textContent !== "Caught up") log("snap:fail the eyebrow: " + card.querySelector(".catch-up-eyebrow")?.textContent);
+      if ([...card.querySelectorAll("button")].map((b) => b.textContent).join("|") !== "Refresher") log("snap:fail the card's buttons");
+      if (card.querySelector(".catch-up-steps, .sheet-know")) log("snap:fail a clear part offers a catch-up");
+      if ([...sheet.querySelectorAll(".sheet-heading")].some((h) => h.textContent === "Fog")) log("snap:fail the Fog section is still drawn");
+      log("caught up ok");`, { map_state: mapState(), snapDone: "caught up ok" });
+/**
+ * A part whose fog grew since its catch-up was written (#638): while the new one is written, Understanding's catch-up card says so and offers
+ * "Read the one you have", described by the line naming the two of its three changes the stored one covers.
+ */
+export const mapCatchUpOlder = (): Fixture => {
+  const entry = (c: string, pr: number) => ({ commit: c.repeat(40), strength: "thick" as const, pr, why: ["paths"] });
+  const user = mapState().user;
+  const outline = { title: "Briefs are written in the background", steps: [{ k: "Where", h: "Understanding writes each brief" }] };
+  return mapOpened(`
+      document.querySelector("#map .plate[data-id=understanding]").click();
+      await wait(300);
+      const sheet = document.querySelector("#map-sheet .sheet");
+      const card = sheet.querySelector(".catch-up-card");
+      if (!card) return log("snap:fail no catch-up card");
+      const buttons = [...card.querySelectorAll("button")].map((b) => b.textContent);
+      if (buttons.join("|") !== "Catch up|I know this|Read the one you have") log("snap:fail the card's buttons: " + buttons.join("|"));
+      if (card.querySelector(".sheet-catch-up-note")?.textContent !== "Checking claims…") log("snap:fail the stage: " + card.querySelector(".sheet-catch-up-note")?.textContent);
+      if (card.querySelector(".catch-up-steps")) log("snap:fail the older one's outline is on the card");
+      const read = card.querySelector(".sheet-catch-up-older");
+      const line = read && document.getElementById(read.getAttribute("aria-describedby"));
+      if (line?.textContent !== "Covers 2 of 3 changes: #598, #605") log("snap:fail the older line: " + line?.textContent);
+      if (card.getBoundingClientRect().right > sheet.getBoundingClientRect().right + 1) log("snap:fail the card overflows the sheet");
+      log("older catch-up ok");`, {
+    map_state: mapState({
+      fog: { understanding: "thick" },
+      user: { ...user, fog: { first: null, processed: null, reads: {}, parts: { understanding: [entry("e", 598), entry("d", 605), entry("c", 612)] } } },
+      catch_ups: { understanding: { kind: "catch-up", ready: false, writing: true, failed: false, stage: { kind: "checking" }, older: { outline, fog: ["e".repeat(40), "d".repeat(40)] } } },
+    }),
+    snapDone: "older catch-up ok",
   });
 };
 /**
@@ -124,11 +201,23 @@ export const mapTalksTo = (): Fixture =>
       document.querySelector("#map .plate[data-id=shell]").click();
       await wait(300);
       const sheet = document.getElementById("map-sheet");
-      const headings = [...sheet.querySelectorAll(".sheet-heading")].map((h) => h.textContent);
+      // The sections are folds (#637): a summary's title is its heading.
+      const headings = [...sheet.querySelectorAll(".sheet-fold-title")].map((h) => h.textContent);
       if (!headings.includes("Talks to") || headings.includes("Links") || headings.includes("Linked with")) log("snap:fail headings: " + headings.join("|"));
       if (sheet.querySelectorAll("ul.sheet-links").length !== 1) log("snap:fail not one list of links");
       const rows = [...sheet.querySelectorAll(".sheet-links .sheet-link")];
       if (rows.length !== 7) return log("snap:fail Talks to rows: " + rows.length);
+      // Folded at first (#637); its chip opens it and brings it into view.
+      const talks = sheet.querySelector(".sheet-fold-talks");
+      if (talks.open) log("snap:fail Talks to is open before its chip is pressed");
+      const chip = [...sheet.querySelectorAll(".sheet-chip")].find((b) => b.textContent === "7 links");
+      if (!chip) return log("snap:fail no links chip: " + [...sheet.querySelectorAll(".sheet-chip")].map((b) => b.textContent).join("|"));
+      chip.click();
+      await wait(600);
+      const side = document.getElementById("map-side").getBoundingClientRect(), at = talks.getBoundingClientRect();
+      if (!talks.open) log("snap:fail the chip did not open Talks to");
+      if (at.top < side.top || at.top > side.bottom) log("snap:fail Talks to is not in view: " + at.top + " in " + side.top + "–" + side.bottom);
+      if (document.activeElement !== talks.querySelector("summary")) log("snap:fail the focus is not on Talks to's summary");
       const row = (id) => rows.find((r) => r.dataset.link === id);
       const back = row("understanding-shell"), out = row("shell-understanding"), spawn = row("shell-daemon");
       if (back.querySelector(".sheet-link-dir").getAttribute("aria-label") !== "from" || out.querySelector(".sheet-link-dir").getAttribute("aria-label") !== "to") log("snap:fail the arrows' directions");
@@ -451,10 +540,25 @@ const brokenCi: Ci = {
   parts: ["shell"], laws: ["wire-types-agree"], note: null, at: null,
   tail: "        FAIL [   0.013s] (4/4) studio-workbench::wire wire_types_match\n  stderr ───\n\n    thread 'wire_types_match' panicked at workbench/tests/wire.rs:11:25:\n    assertion `left == right` failed: wire drifted\n      left: 1\n     right: 2\n\n────────────\n     Summary [   0.014s] 4 tests run: 3 passed, 1 failed, 0 skipped",
 };
-export const mapBroken = (open: "none" | "proof" | "log"): Fixture => {
+export const mapBroken = (open: "none" | "sheet" | "proof" | "log"): Fixture => {
   const sessions = busySessions();
   const opened = {
     none: "",
+    // The shell's sheet (#637): CI on main leads its folds, open, its value and its chip in the broken tone; the others stay folded.
+    sheet: `document.querySelector("#map .plate[data-id=shell]").click();
+      await wait(400);
+      const folds = [...document.querySelectorAll("#map-sheet .sheet-fold:not([hidden])")];
+      const order = folds.map((f) => f.querySelector(".sheet-fold-title").textContent + (f.open ? "+" : "")).join("|");
+      if (order !== "CI on main+|Laws|Talks to|Tier|History") log("snap:fail the folds: " + order);
+      const ci = folds[0];
+      if (ci.querySelector(".sheet-fold-value").textContent !== "failing" || !ci.querySelector(".sheet-fold-value").classList.contains("bad")) log("snap:fail CI on main's value");
+      if (!ci.querySelector(".sheet-ci.broken .sheet-ci-line")?.textContent.includes("A test that backs laws here failed on main")) log("snap:fail CI on main's line");
+      if (![...ci.querySelectorAll("button")].some((b) => b.textContent === "See the CI log")) log("snap:fail no See the CI log");
+      const chip = [...document.querySelectorAll("#map-sheet .sheet-chip")].find((b) => b.textContent === "CI failing");
+      if (!chip?.classList.contains("bad")) log("snap:fail no CI failing chip in the broken tone");
+      if (getComputedStyle(ci.querySelector(".sheet-fold-value")).color === getComputedStyle(folds[1].querySelector(".sheet-fold-value")).color) log("snap:fail the failing value reads as the others");
+      // The glass's rise ends before the picture is taken.
+      await wait(400);`,
     proof: `document.querySelector("#map .plate[data-id=shell]").click();
       await wait(300);
       const see = [...document.querySelectorAll("#map-sheet .sheet-law button")].find((b) => b.textContent === "See the proof");
@@ -514,6 +618,7 @@ export const mapScrubbed = (): Fixture => {
       if (!document.querySelector("#map .plate .law-broken") || !document.querySelector("#map .session-badge")) return log("snap:fail the live map lacks its mark or badges");
       document.querySelector("#map .plate[data-id=shell]").click();
       await wait(200);
+      if (!document.querySelector("#map-sheet .catch-up-card")) return log("snap:fail the live sheet has no catch-up card");
       const rows = [...document.querySelectorAll("#map-sheet .hist-row")];
       if (rows.length !== 4) return log("snap:fail expected 4 strip rows, saw " + rows.length);
       if (rows.filter((r) => r.classList.contains("fogged")).length !== 2 || !rows[3].classList.contains("fogged") || rows[0].classList.contains("fogged")) log("snap:fail fogged rows");
@@ -528,6 +633,7 @@ export const mapScrubbed = (): Fixture => {
       if (document.querySelector("#map .plate.fog-thin, #map .plate.fog-thick")) log("snap:fail fog shows in the past");
       if (document.querySelector("#map .plate[data-id=workbench]")) log("snap:fail the workbench was not yet there");
       if (!document.querySelector("#map-sheet .sheet")) log("snap:fail the sheet closed on a scrub");
+      if (document.querySelector("#map-sheet .catch-up-card")) log("snap:fail a past commit's sheet has a catch-up card");
       if (!document.querySelector("#map-sheet .hist-row.current")) log("snap:fail no current row");
       rows[1].querySelector(".hist-files").click();
       await wait(150);
@@ -548,6 +654,8 @@ export const mapScrubbed = (): Fixture => {
     map_place: busyPlace(),
     map_history: [strip(1, "#101 Map first drawn", false), strip(2, "#150 Plates and links", false), strip(3, "#210 Fog engine", true), strip(4, "#306 Live agents on the map", true, 306)],
     map_at: { commit: "2".repeat(40), short: "2222222", label: "#150 Plates and links", source: JSON.stringify(past) },
+    // History was left open in this browser (#637), so the strip shows.
+    storage: { "map-sheet-folds": JSON.stringify(["history"]) },
     map_commit: { commit: "2".repeat(40), short: "2222222", label: "#150 Plates and links", url: "https://github.com/danielrispler/plotkeeper/commit/" + "2".repeat(40), files: [{ path: "src-tauri/src/map.rs", diff: "@@ -1,2 +1,2 @@\n-one\n+two" }, { path: "ui/map.ts", diff: "@@ -1 +1,2 @@\n+three" }] },
   });
   return { ...f, sessions: busySessions(), selected: { session: busySessions()[6], agent: null } };

@@ -3,7 +3,7 @@
 // worded to "you" from `docs/studio/CONTEXT.md`, at most 12 words. One page-wide setting, `explanations`, shows or hides them all.
 
 import { failure, hint, invoke, pressable, text } from "./dom.js";
-import type { LinkKind, Tier } from "./map-model.js";
+import type { FoldKey, LinkKind, Tier } from "./map-model.js";
 import { studio } from "./state.js";
 
 export const SHEET = {
@@ -24,11 +24,12 @@ export const SHEET = {
   } satisfies Record<LinkKind, string>,
   // The spec's wording was 13 words; one "it" went to keep the 12-word rule.
   notYet: "Not yet ratified: the agent added it; Accept keeps, Overturn undoes it.",
+  // The catch-up card's line (#636), under its eyebrow; it was the Fog section's.
   fog: "Changes on main you haven't caught up on yet.",
-  // Under the fog buttons, by which are shown: the part catch-up (the spec's wording), the PR brief chapter that lights the part, or
-  // "I know this" alone.
+  // Under the catch-up card's buttons (#636), by which are shown: the part catch-up (the spec's wording, with the button's "Catch up"), the
+  // PR brief chapter that lights the part, or "I know this" alone.
   fogActions: {
-    catchUp: "Part catch-up reads what changed; I know this just clears it.",
+    catchUp: "Catch up reads what changed; I know this just clears it.",
     chapter: "The brief shows what changed; I know this just clears it.",
     know: "I know this clears the fog without reading what changed.",
   },
@@ -38,17 +39,16 @@ export const SHEET = {
   here: "The open session's turns that changed this part, newest first.",
 } as const;
 
-// The line under each heading the part sheet draws, by the heading's words.
-export const SHEET_HEADINGS: Record<string, string> = {
-  Holds: SHEET.holds,
-  Tier: SHEET.tier,
-  Laws: SHEET.laws,
-  "Talks to": SHEET.talksTo,
-  Fog: SHEET.fog,
-  "CI on main": SHEET.ci,
-  History: SHEET.history,
-  "This session here": SHEET.here,
-};
+// The line inside each of the part sheet's folds (#637), by the fold; the Fog section's is the catch-up card's (#636).
+export const SHEET_FOLDS = {
+  laws: SHEET.laws,
+  talks: SHEET.talksTo,
+  here: SHEET.here,
+  holds: SHEET.holds,
+  tier: SHEET.tier,
+  ci: SHEET.ci,
+  history: SHEET.history,
+} satisfies Record<FoldKey, string>;
 
 // The PR brief's reader (#524): a line under each step's title, by the step's kind, and under Also touched. A part catch-up plays in
 // the same reader, so a kind's line holds for a PR and a catch-up alike.

@@ -49,6 +49,8 @@
   --plate: #202226; --plate-core: #25272b; --plate-edge: #ffffff1a; --plate-black: #121315; --plate-black-edge: #ffffff0d;
   --link: #ffffff26; --law-check: var(--fg); --law-trust: var(--muted);
   --plate-w: 264px; --plate-h: 76px; --actor-w: 120px; --actor-h: 28px; --map-grid: 28px; --law-mark: 7px; --link-width: 1.5px;
+  /* The dot before the catch-up card's eyebrow (#636), a law mark's size. */
+  --catch-up-dot: var(--law-mark);
   --map-gutter: 32px; --map-sheet: 360px; --map-sheet-min: 300px; --sheet-handle: 6px; --drawer-code: 280px; --tray: 300px;
   /* The glass of every card over the map (#385), Treatment C's part sheet: the left panel and the sheet share it. They are inset from the map's
      edges, the diff widens the panel, and a card slides in 12 px with a fade on Treatment C's ease. */

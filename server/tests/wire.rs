@@ -23,6 +23,55 @@ use studio_server::{
 
 const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 
+fn outline() -> studio_server::part_catch_ups::Outline {
+    studio_server::part_catch_ups::Outline {
+        title: "Store writes go atomic".into(),
+        steps: vec![studio_server::part_catch_ups::OutlineStep {
+            k: "Where".into(),
+            h: "The store keeps each project's map state".into(),
+        }],
+    }
+}
+
+/// A part catch-up ready with its outline, one being written at its stage with the older one stored to read meanwhile, and a part
+/// whose one PR's chapter opens.
+fn catch_ups() -> BTreeMap<String, studio_server::part_catch_ups::Offer> {
+    BTreeMap::from([
+        (
+            "server".into(),
+            studio_server::part_catch_ups::Offer::CatchUp {
+                ready: true,
+                writing: false,
+                failed: false,
+                stage: None,
+                outline: Some(outline()),
+                older: None,
+            },
+        ),
+        (
+            "hook".into(),
+            studio_server::part_catch_ups::Offer::CatchUp {
+                ready: false,
+                writing: true,
+                failed: false,
+                stage: Some(studio_understanding::pr_brief_check::Stage::Fixing { claims: 2 }),
+                outline: None,
+                older: Some(studio_server::part_catch_ups::Older {
+                    outline: outline(),
+                    fog: vec![COMMIT.into()],
+                }),
+            },
+        ),
+        (
+            "core".into(),
+            studio_server::part_catch_ups::Offer::Chapter {
+                pr: 334,
+                chapter: 1,
+            },
+        ),
+    ])
+}
+
 /// Daniel's state with every field filled: positions, tiers, fog with a brief partly read, and a saved view.
 fn user() -> UserState {
     let reads = BTreeMap::from([(
@@ -319,35 +368,7 @@ fn the_wire_samples_of_the_map_view_are_written_for_tsc() {
                     id: "shell-notice".into(),
                 }],
                 runs: runs(),
-                catch_ups: BTreeMap::from([
-                    (
-                        "server".into(),
-                        studio_server::part_catch_ups::Offer::CatchUp {
-                            ready: true,
-                            writing: false,
-                            failed: false,
-                            stage: None,
-                        },
-                    ),
-                    (
-                        "hook".into(),
-                        studio_server::part_catch_ups::Offer::CatchUp {
-                            ready: false,
-                            writing: true,
-                            failed: false,
-                            stage: Some(studio_understanding::pr_brief_check::Stage::Fixing {
-                                claims: 2,
-                            }),
-                        },
-                    ),
-                    (
-                        "core".into(),
-                        studio_server::part_catch_ups::Offer::Chapter {
-                            pr: 334,
-                            chapter: 1,
-                        },
-                    ),
-                ]),
+                catch_ups: catch_ups(),
                 stale: BTreeMap::from([("core".into(), 2)]),
                 stale_why: BTreeMap::from([(
                     "core".into(),
