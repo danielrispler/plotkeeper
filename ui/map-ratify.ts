@@ -168,3 +168,34 @@ export function mapCheckNode(key: string, problems: string[]): HTMLElement | nul
   node.append(summary, list);
   return node;
 }
+
+// The marks the pointed Ratify row lit (#643), and which row lit them: one row at a time, so a row drawn again before its leave was seen
+// leaves nothing lit once another is pointed.
+let lit: { row: HTMLElement; marks: Element[] } | null = null;
+const unlightMarks = () => {
+  for (const node of lit?.marks ?? []) node.classList.remove("ratify-lit");
+  lit = null;
+};
+
+/**
+ * A Ratify row's light (#643, spec #634 "The canvas"): the row carries the id of the mark it lights on the Map diff (`mark`, from
+ * `pr_ratify`), and hovering or focusing it lights that plate, line or law mark in `canvas` with `ratify-lit`, a class of its own: the
+ * brief adds and strips `.lit` itself, and story-to-map clears `.turn-lit` from every plate whenever the map repaints. Leave and blur
+ * clear it.
+ */
+export function lightsMark(row: HTMLElement, mark: string, canvas: () => ParentNode | null) {
+  row.dataset.mark = mark;
+  const on = () => {
+    unlightMarks();
+    const marks = [...(canvas()?.querySelectorAll(`[data-mark="${mark.replaceAll('"', '\\"')}"]`) ?? [])];
+    for (const node of marks) node.classList.add("ratify-lit");
+    lit = { row, marks };
+  };
+  const off = () => {
+    if (lit?.row === row) unlightMarks();
+  };
+  row.addEventListener("pointerenter", on);
+  row.addEventListener("focusin", on);
+  row.addEventListener("pointerleave", off);
+  row.addEventListener("focusout", off);
+}

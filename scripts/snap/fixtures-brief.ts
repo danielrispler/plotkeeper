@@ -532,6 +532,7 @@ const ratifyDetailRows: RatifyRow[] = [
       of: "part",
       name: { before: "Server", after: "Server" },
       purpose: { before: "Serves the page, keeps the state, installs the hook and runs the agents.", after: "Serves the page and keeps the state it shows." },
+      caption: { before: "The page's backend", after: "The page's backend" },
       holds: [
         { name: "Fog", text: { before: "Greys a part.", after: "Greys a part a PR changed until its brief is read." }, paths_added: ["server/src/fog.rs"], paths_removed: [] },
         { name: "Settings", text: { before: "Kept per user.", after: "Kept per user." }, paths_added: [], paths_removed: [] },
@@ -548,6 +549,7 @@ const ratifyDetailRows: RatifyRow[] = [
       of: "part",
       name: { before: null, after: "Install" },
       purpose: { before: null, after: "Puts plotkeeper's hook into each agent's settings, and takes it out again." },
+      caption: { before: null, after: "Wires the agents to the hook" },
       holds: [{ name: "Hook copies", text: { before: null, after: "The hook file each agent runs." }, paths_added: ["server/src/hook_copies.rs"], paths_removed: [] }],
       paths_added: ["server/src/install.rs", "server/src/hook_copies.rs"],
       paths_removed: [],
@@ -1062,9 +1064,10 @@ const diffStep: Record<500 | 351, (lit: string[]) => BriefStep> = {
 };
 /**
  * PR `pr`'s brief, one step lighting `lit`, on its Map diff. `off` takes the step's dim and ring off after the checks, so the shot shows the
- * marks alone, as the prototype's "brief step off"; `close` leaves the brief and checks the map is back to now.
+ * marks alone, as the prototype's "brief step off"; `close` leaves the brief and checks the map is back to now. With `ratify` rows the brief
+ * goes on to its Ratify step, where `check` runs.
  */
-const mapDiff = (pr: 500 | 351, lit: string[], check: string, how: "off" | "on" | "close"): Fixture => {
+const mapDiff = (pr: 500 | 351, lit: string[], check: string, how: "off" | "on" | "close", ratify: RatifyRow[] = []): Fixture => {
   const data = diffData(pr);
   const parts = JSON.parse(data.diff.source).parts.map((part: { id: string }) => part.id);
   // One chapter framing every part, so the camera shows the whole map.
@@ -1086,7 +1089,7 @@ const mapDiff = (pr: 500 | 351, lit: string[], check: string, how: "off" | "on" 
       if (left) log("snap:fail closing left " + left + " marks of the Map diff");
       if (document.querySelector('.plate[data-id="shell"]')) log("snap:fail the ghost stays after the brief closed");`,
   }[how];
-  const fixture = mapBrief(briefOf([], false, { chapters }), 0, `
+  const fixture = mapBrief(briefOf([], false, { chapters }), ratify.length ? 1 : 0, `
       const plates = (tag) => [...document.querySelectorAll(".plate.d-" + tag)];
       const words = (tag) => plates(tag).map((p) => p.querySelector(".plate-tag")?.textContent);
       ${check}
@@ -1095,6 +1098,7 @@ const mapDiff = (pr: 500 | 351, lit: string[], check: string, how: "off" | "on" 
     ...fixture,
     map_state: mapState({ source: data.today, user: { tiers: {}, positions: data.positions }, ready: [{ number: 334, title: "The change", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["The change"], quiet: false } }] }),
     pr_map_diff: { ...data.diff, pr: 334 },
+    ...(ratify.length ? { pr_ratify: ratify } : {}),
   };
 };
 const split = `
@@ -1126,3 +1130,33 @@ export const mapDiffLitGhost = (): Fixture => mapDiff(351, ["shell", "server"], 
       if (!lit) log("snap:fail the step did not light the ghost");
       else if (getComputedStyle(lit).outlineStyle !== "dashed" || getComputedStyle(lit).outlineOffset !== "5px") log("snap:fail the lit ghost's outline: " + getComputedStyle(lit).outlineStyle + " at " + getComputedStyle(lit).outlineOffset);`, "on");
 export const mapDiffClosed = (): Fixture => mapDiff(351, ["shell", "server"], removal, "close");
+// Ratify's rows light their marks (#643): on #351's Map diff, focusing the removed link's row lights its line and its law's row the law's
+// diamond, each cleared on blur; the shot points at the ghost Shell's row, which lights the ghost (undimmed, its dashed outline outside
+// the warm ring), with neither the brief's .lit nor .turn-lit.
+const removalRows: RatifyRow[] = [
+  { pr: 334, kind: "part", id: "shell", text: "Shell", change: "removed", status: "not-yet", detail: null, mark: "part:shell" },
+  { pr: 334, kind: "link", id: "shell-server", text: "shell to server", change: "removed", status: "not-yet", detail: null, mark: "line:server|shell" },
+  { pr: 334, kind: "law", id: "terminals-outlive-app", text: "Terminals outlive the app", change: "removed", status: "not-yet", detail: null, mark: "law:terminals-outlive-app" },
+];
+export const mapDiffRatifyLit = (): Fixture => mapDiff(351, ["server", "window"], `
+      if (document.querySelector("#map-brief .brief-title")?.textContent !== "Accept or overturn") return log("snap:fail not on the Ratify step");
+      const row = (id) => document.querySelector('#map-brief .ratify-row[data-id="' + id + '"]');
+      if (row("shell")?.dataset.mark !== "part:shell") return log("snap:fail the ghost's row carries no mark: " + row("shell")?.dataset.mark);
+      const lit = () => [...document.querySelectorAll(".map-world .ratify-lit")];
+      const focusOn = async (id) => { row(id).querySelector(".ratify-accept").focus(); await wait(50); };
+      await focusOn("shell-server");
+      if (lit().length !== 1 || !lit()[0].matches('.link[data-mark="line:server|shell"]')) log("snap:fail the link's row lit " + lit().map((n) => n.getAttribute("class")));
+      await focusOn("terminals-outlive-app");
+      if (lit().length !== 1 || !lit()[0].matches(".law-mark.d-removed")) log("snap:fail the law's row lit " + lit().map((n) => n.getAttribute("class")));
+      document.activeElement.blur();
+      await wait(50);
+      if (lit().length) log("snap:fail blur left " + lit().length + " marks lit");
+      row("shell").dispatchEvent(new PointerEvent("pointerenter"));
+      await wait(50);
+      const ghost = document.querySelector('.plate[data-id="shell"]');
+      if (!ghost.classList.contains("ratify-lit") || lit().length !== 1) return log("snap:fail pointing the ghost's row lit " + lit().map((n) => n.getAttribute("class")));
+      if (ghost.classList.contains("lit") || ghost.classList.contains("turn-lit")) log("snap:fail the row reused .lit or .turn-lit");
+      const style = getComputedStyle(ghost);
+      if (style.opacity !== "1") log("snap:fail the pointed ghost is still dimmed: " + style.opacity);
+      if (style.outlineStyle !== "dashed" || style.outlineOffset !== "5px") log("snap:fail the pointed ghost's outline: " + style.outlineStyle + " at " + style.outlineOffset);
+      if (!style.boxShadow.includes("rgba(224, 192, 140")) log("snap:fail the pointed ghost has no warm ring: " + style.boxShadow);`, "on", removalRows);

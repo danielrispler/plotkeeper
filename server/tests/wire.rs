@@ -651,6 +651,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
         status,
         detail: None,
         evidence: None,
+        mark: Some("law:wire-types-agree".into()),
     };
     let words = |before: Option<&str>, after: &str| Words {
         before: before.map(String::from),
@@ -666,6 +667,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
                 Some("Serves the page."),
                 "Serves the page and keeps its state.",
             ),
+            caption: words(Some("Serves the page"), "Serves the page, keeps state"),
             holds: vec![HeldDetail {
                 name: "Fog".into(),
                 text: words(None, "Greys a part a PR changed."),
@@ -684,6 +686,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
         detail: Some(Detail::Link(LinkDetail {
             kind: words(Some("import"), "http"),
             reason: words(Some(""), "The page calls the server over HTTP."),
+            direction: Some(words(Some("server to ui"), "ui to server")),
         })),
         ..row(Ratified::NotYet, "changed")
     };

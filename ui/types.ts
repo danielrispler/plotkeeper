@@ -555,7 +555,8 @@ export type Runs = { paused: string | null; runs: RunView[] };
 /** Ratifying (`ratify.rs`): an item of a PR is a map change (kind part, actor, link, law or flow) or a decision the agent declared. */
 export type PendingItem = { pr: number; kind: string; id: string };
 // `evidence` (#499): on a link the PR adds, the import sites behind it, stored on its brief when it was written, read at `head`.
-export type RatifyRow = { pr: number; kind: string; id: string; text: string; change: string; status: "ratified" | "accepted" | "overturned" | "not-yet"; detail: RatifyDetail | null; evidence?: LinkSites };
+// `mark` (#643): the id of the mark the row lights on the Map diff (`part:<id>`, `actor:<id>`, `law:<id>`, `line:<end>|<end>`); none for a decision or a flow.
+export type RatifyRow = { pr: number; kind: string; id: string; text: string; change: string; status: "ratified" | "accepted" | "overturned" | "not-yet"; detail: RatifyDetail | null; evidence?: LinkSites; mark?: string };
 // The Map diff (`map_diff.rs`, #640): today's map with a PR's added and removed items in it (`source`, version 2 JSON), and each one's tag.
 // A line is keyed by its two ends in sorted order. `pr_map_diff` answers null when the PR changed nothing on the map.
 export type MapTag = "added" | "removed" | "edited";
@@ -569,8 +570,8 @@ export type SiteSnippet = { file: string; line?: number; first: number; lines: s
 type RatifyWords = { before: string | null; after: string | null };
 type RatifyHeld = { name: string; text: RatifyWords; paths_added: string[]; paths_removed: string[] };
 export type RatifyDetail =
-  | { of: "part"; name: RatifyWords; purpose: RatifyWords; holds: RatifyHeld[]; paths_added: string[]; paths_removed: string[] }
-  | { of: "link"; kind: RatifyWords; reason: RatifyWords };
+  | { of: "part"; name: RatifyWords; purpose: RatifyWords; caption: RatifyWords; holds: RatifyHeld[]; paths_added: string[]; paths_removed: string[] }
+  | { of: "link"; kind: RatifyWords; reason: RatifyWords; direction?: RatifyWords };
 // What a ready PR's brief is doing (`pr_briefs.rs`): a newer head was pushed (stale), being written now, and the chapters' titles, or the one story's.
 // `note` (#477, part B): why the brief at this head is what it is after a push: the read carried over, or it was rewritten.
 // `since` (#497): the title of the "Since you read" story stored for this head, which the tray opens first; `since_chapters`, its chapters' titles when it has more than one, one tray row each.
