@@ -577,7 +577,8 @@ export type RatifyDetail =
 // the head's items that have a verdict, by id: `part:<id>/name|purpose|caption`, `held:<part>/<n>` (n from 1, its place in `holds`),
 // `link:<id>/reason`, `law:<id>/text`. Any verdict but `supported` is `flagged`.
 export type MapReviewItem = { id: string; verdict: "supported" | "overreach" | "contradicted" | "unreadable"; why: string; cites: string[]; flagged: boolean };
-export type MapReview = { head: string; state: "idle" | "reviewing" | "done" | "failed"; items: MapReviewItem[]; checked: number; flagged: number; line: string | null };
+// `left_out`: how many of the head's changed map items the review left out of its prompt, for an id it does not take (over 40 characters).
+export type MapReview = { head: string; state: "idle" | "reviewing" | "done" | "failed"; items: MapReviewItem[]; checked: number; flagged: number; line: string | null; left_out: number };
 // What a ready PR's brief is doing (`pr_briefs.rs`): a newer head was pushed (stale), being written now, and the chapters' titles, or the one story's.
 // `note` (#477, part B): why the brief at this head is what it is after a push: the read carried over, or it was rewritten.
 // `since` (#497): the title of the "Since you read" story stored for this head, which the tray opens first; `since_chapters`, its chapters' titles when it has more than one, one tray row each.

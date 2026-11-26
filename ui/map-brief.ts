@@ -27,7 +27,7 @@ import { branchOf, lightsMark, mapCheckNode, mapReviewNode, overturnNote, ratify
 import { copyOverturn, reviewFlags, reviewLine, statusWords } from "./ratify.js";
 import type { Copied } from "./notes.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
-import { agentPrompt, alsoAt, diffArgs, type AlsoRow, awaitedWrite, citeDrawer, figureMax, figureShapes, figureSize, latestRequest, partialFactsLines, storySteps, type Shape, stepCode, unconfirmed, unconfirmedReasons } from "./map-brief-model.js";
+import { agentPrompt, alsoAt, diffArgs, type AlsoRow, awaitedWrite, citeDrawer, figureMax, figureShapes, figureSize, latestReplies, latestRequest, partialFactsLines, storySteps, type Shape, stepCode, unconfirmed, unconfirmedReasons } from "./map-brief-model.js";
 import { awaitedCatchUp, fogListLines, stageLabel } from "./map-catch-up.js";
 import { effectiveTier, commitDrawer } from "./map-model.js";
 import type { BriefFigure, BriefStep, CatchUpOffer, CommitFiles, MapDiff, MapReview, PrBrief, RatifyRow, ReadyPr, StaleBase } from "./types.js";
@@ -461,7 +461,7 @@ export function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBri
   if (step.check) words.append(checkNode(view, step, step.check));
   if (step.k === "Ratify") {
     // Ratify's head (#641): how the PR's head stands, above the items: the Map text review's line (#645), then the map check's.
-    const review = pr > 0 && !view.scrub ? mapReviewNode(view.project, pr, mapReview(), (got) => reviewed(view.project, pr, got)) : null;
+    const review = pr > 0 && !view.scrub ? mapReviewNode(mapReview(), () => startReview(view.project, pr)) : null;
     const check = playing && pr > 0 ? mapCheckNode(`${view.project}|${pr}|${playing.brief.head}`, playing.brief.map_problems ?? []) : null;
     const head = ratifyHead([review, check].filter((line): line is HTMLElement => line !== null));
     if (head) words.append(head);
@@ -871,6 +871,12 @@ const readReview = (project: string, number: number) =>
     failure("pr_map_review")(e);
     return null;
   });
+// Each map-landed reads the review again and "Review map text" starts it: only the latest request's reply applies, so a `reviewing`
+// that comes after a later `done` does not undo it.
+const reviewReply = latestReplies();
+// "Review map text" or "Run again": the review starts, and its answer draws the step again unless a later read came since.
+const startReview = (project: string, pr: number) =>
+  reviewReply(invoke("map_review_start", { project, number: pr }), (got) => reviewed(project, pr, got));
 // A review read again for the brief played: its step draws again, and a review that ended while Daniel waited says its line once.
 function reviewed(project: string, pr: number, got: MapReview | null) {
   const now = player.current();
@@ -890,7 +896,7 @@ function hearReviews() {
     const now = player.current();
     if (!now || now.pr <= 0 || now.project !== landed) return;
     const { project, pr } = now;
-    void readReview(project, pr).then((got) => reviewed(project, pr, got));
+    void reviewReply(readReview(project, pr), (got) => reviewed(project, pr, got));
   });
 }
 

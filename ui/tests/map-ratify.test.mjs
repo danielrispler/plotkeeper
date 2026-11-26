@@ -116,28 +116,32 @@ test("a Ratify row carries its mark's id and lights it on hover and focus with a
 });
 
 // The Map text review's line at Ratify's head (#645), in each state `pr_map_review` gives.
-const review = (state, extra = {}) => ({ head: "cafe", state, items: [], checked: 0, flagged: 0, line: null, ...extra });
+const review = (state, extra = {}) => ({ head: "cafe", state, items: [], checked: 0, flagged: 0, line: null, left_out: 0, ...extra });
 
 test("the review's line says each state at Ratify's head, and its button starts the review once (#645)", async () => {
-  assert.equal(mapReviewNode("/w/app", 12, null, () => {}), null, "a head that changed no map text has no line");
-  const running = /** @type {any} */ (mapReviewNode("/w/app", 12, review("reviewing"), () => {}));
+  assert.equal(mapReviewNode(null, async () => {}), null, "a head that changed no map text has no line");
+  const running = /** @type {any} */ (mapReviewNode(review("reviewing"), async () => {}));
   assert.equal(running.className, "ratify-review");
   assert.equal(running.text, "Reviewing map text…");
   assert.deepEqual(running.find("button"), [], "nothing to press while it runs");
-  const done = /** @type {any} */ (mapReviewNode("/w/app", 12, review("done", { checked: 5, flagged: 2 }), () => {}));
+  const done = /** @type {any} */ (mapReviewNode(review("done", { checked: 5, flagged: 2 }), async () => {}));
   assert.equal(done.text, "Map text review: 5 checked, 2 flagged");
-  const failed = /** @type {any} */ (mapReviewNode("/w/app", 12, review("failed", { line: "the run timed out" }), () => {}));
+  const failed = /** @type {any} */ (mapReviewNode(review("failed", { line: "the run timed out" }), async () => {}));
   assert.equal(failed.find("span")[0]?.text, "Map text review failed: the run timed out");
   const [again] = failed.find("button");
   assert.equal(again.text, "Run again");
-  const started = [];
-  const idle = /** @type {any} */ (mapReviewNode("/w/app", 12, review("idle"), (got) => started.push(got)));
+  let started = 0;
+  const idle = /** @type {any} */ (mapReviewNode(review("idle"), async () => void started++));
   const [button] = idle.find("button");
   assert.equal(button.text, "Review map text");
-  const before = calls.length;
   button.listeners.click();
   assert.equal(button.disabled, true, "pressed once, it waits for the answer");
   await later(10);
-  assert.deepEqual(calls.slice(before), [["map_review_start", { project: "/w/app", number: 12 }]]);
-  assert.deepEqual(started, [null], "the answer goes to the step, which draws it again");
+  assert.equal(started, 1, "the press starts the review once");
+  // A start that fails can be pressed again.
+  const refused = /** @type {any} */ (mapReviewNode(review("idle"), async () => Promise.reject(new Error("no"))));
+  const [retry] = refused.find("button");
+  retry.listeners.click();
+  await later(10);
+  assert.equal(retry.disabled, false);
 });

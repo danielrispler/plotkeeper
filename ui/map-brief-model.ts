@@ -145,6 +145,17 @@ export function latestRequest() {
   };
 }
 
+/** Replies where only the latest request's applies: `apply` gets a reply only when no later request was made since. */
+export function latestReplies() {
+  const latest = latestRequest();
+  return <T>(request: Promise<T>, apply: (got: T) => void): Promise<void> => {
+    const wanted = latest.begin();
+    return request.then((got) => {
+      if (wanted()) apply(got);
+    });
+  };
+}
+
 export type { Camera };
 /**
  * Where the world sits so `box` fills the visible area `area` at the largest scale up to `max`, centred in the room the panel leaves above it

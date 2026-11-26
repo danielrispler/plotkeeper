@@ -241,7 +241,7 @@ test("the count opens every site in the drawer, each opening its snippet", () =>
 
 // The Map text review (#645, spec #634 "Ratify's display"): its verdicts by item id, as `pr_map_review` gives them.
 const verdict = (id, flagged, why = `${id} why`, cites = []) => ({ id, verdict: flagged ? "overreach" : "supported", why, cites, flagged });
-const review = (state, items = [], line = null) => ({ head: "cafe", state, items, checked: items.length, flagged: items.filter((each) => each.flagged).length, line });
+const review = (state, items = [], line = null, left_out = 0) => ({ head: "cafe", state, items, checked: items.length, flagged: items.filter((each) => each.flagged).length, line, left_out });
 
 test("a row's review flags are its part's, held items', link's or law's flagged verdicts, each with its field, why and cites (#645)", () => {
   const part = row("part", "server", "not-yet", {
@@ -273,6 +273,9 @@ test("the review's line at Ratify's head says each state, and offers the button 
   assert.deepEqual(reviewLine(review("done", [verdict("a", true), verdict("b", false), verdict("c", false)])), { line: "Map text review: 3 checked, 1 flagged", start: null });
   assert.deepEqual(reviewLine(review("failed", [], "the run timed out")), { line: "Map text review failed: the run timed out", start: "Run again" });
   assert.deepEqual(reviewLine(review("failed")), { line: "Map text review failed", start: "Run again" });
+  // An item whose id the review does not take is left out of its prompt, and the line says so (#634's review).
+  assert.deepEqual(reviewLine(review("done", [verdict("a", false)], null, 1)), { line: "Map text review: 1 checked, 0 flagged, 1 left out for an id it does not take", start: null });
+  assert.deepEqual(reviewLine(review("idle", [], null, 2)), { line: "2 left out for an id the review does not take", start: "Review map text" });
 });
 
 test("an overturn of a flagged row quotes the review's why, and an unflagged one says nothing of the review (#645)", () => {
@@ -284,11 +287,14 @@ test("an overturn of a flagged row quotes the review's why, and an unflagged one
   assert.doesNotMatch(overturnPrompt({ ...part, flags: [] }, null), /review/);
 });
 
-test("the Ratify step shows with nothing to ratify while the review runs or has flags, or the map check fails (#645, #641)", () => {
+test("the Ratify step shows with nothing to ratify while the review runs, has flags, waits for its button or failed, or the map check fails (#645, #641)", () => {
   assert.equal(headBrings(undefined, review("reviewing")), true);
   assert.equal(headBrings([], review("done", [verdict("a", true)])), true);
   assert.equal(headBrings(["a problem"], null), true);
+  // "Review map text" and "Run again" are on Ratify's head, so the step shows for them (#634's review).
+  assert.equal(headBrings([], review("idle")), true, "a PR not by Daniel's login keeps its button reachable");
+  assert.equal(headBrings([], review("failed")), true, "a failed review keeps Run again reachable");
+  assert.equal(headBrings([], review("done", [verdict("a", false)], null, 1)), true, "an item left out is said");
   assert.equal(headBrings([], review("done", [verdict("a", false)])), false, "a review with no flags brings nothing");
-  assert.equal(headBrings([], review("idle")), false);
   assert.equal(headBrings(undefined, null), false);
 });

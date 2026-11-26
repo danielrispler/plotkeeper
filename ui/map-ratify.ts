@@ -203,27 +203,25 @@ export function lightsMark(row: HTMLElement, mark: string, canvas: () => ParentN
 
 /**
  * The Map text review's line at Ratify's head (#645, spec #634 "Ratify's display"): "Map text review: N checked, M flagged", "Reviewing
- * map text…", the failure with "Run again", or "Review map text" for a PR not by Daniel's login. The button starts the review
- * (`map_review_start`) and hands its answer to `done`, which draws the step again. Null when the head changed no map text.
+ * map text…", the failure with "Run again", or "Review map text" for a PR not by Daniel's login. The button calls `start`, which starts the
+ * review (`map_review_start`) and draws the step again with its answer. Null when the head changed no map text.
  */
-export function mapReviewNode(project: string, pr: number, review: MapReview | null, done: (review: MapReview | null) => void): HTMLElement | null {
+export function mapReviewNode(review: MapReview | null, start: () => Promise<unknown>): HTMLElement | null {
   const said = reviewLine(review);
   if (!said) return null;
   const node = text("p", "", "ratify-review");
   if (said.line) node.append(text("span", said.line));
   if (said.start) {
-    const start = pressable(text("button", said.start, "btn quiet ratify-review-start"), null);
-    hint(start, "Check this PR's changed map text against its code, reading only; nothing waits on it");
-    start.addEventListener("click", () => {
-      start.disabled = true;
-      invoke("map_review_start", { project, number: pr })
-        .then(done)
-        .catch((e) => {
-          start.disabled = false;
-          failure("map_review_start")(e);
-        });
+    const button = pressable(text("button", said.start, "btn quiet ratify-review-start"), null);
+    hint(button, "Check this PR's changed map text against its code, reading only; nothing waits on it");
+    button.addEventListener("click", () => {
+      button.disabled = true;
+      start().catch((e) => {
+        button.disabled = false;
+        failure("map_review_start")(e);
+      });
     });
-    node.append(start);
+    node.append(button);
   }
   return node;
 }

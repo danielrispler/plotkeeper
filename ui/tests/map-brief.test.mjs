@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { escapeMap } from "../../dist/map-model.js";
-import { alsoAt, alsoRows, awaitedWrite, chapterGate, storySteps, briefCamera, briefPlayer, latestRequest, figureShapes, figureSize, playlist, partialFactsLines, unconfirmed, unconfirmedReasons, agentPrompt, diffArgs } from "../../dist/map-brief-model.js";
+import { alsoAt, alsoRows, awaitedWrite, chapterGate, storySteps, briefCamera, briefPlayer, latestReplies, latestRequest, figureShapes, figureSize, playlist, partialFactsLines, unconfirmed, unconfirmedReasons, agentPrompt, diffArgs } from "../../dist/map-brief-model.js";
 import { trayRows } from "../../dist/map-tray.js";
 
 const step = (k, extra = {}) => ({ k, h: k, b: "", on: [], hops: [], law: null, covered_by: null, list: [], risks: [], fig: null, check: null, cites: [], flags: [], ...extra });
@@ -355,6 +355,24 @@ test("only the latest request is wanted: a later one, or a cancel, drops the ear
   assert.equal(second(), false, "a close drops the one in flight");
 });
 
+test("only the latest request's reply applies: an earlier one that comes after it is dropped", async () => {
+  const reply = latestReplies();
+  const applied = [];
+  /** @type {(got: string) => void} */
+  let first = () => {};
+  /** @type {(got: string) => void} */
+  let second = () => {};
+  const asked = (/** @type {(resolve: (got: string) => void) => void} */ keep) => new Promise(keep);
+  const done = [
+    reply(asked((resolve) => (first = resolve)), (got) => applied.push(got)),
+    reply(asked((resolve) => (second = resolve)), (got) => applied.push(got)),
+  ];
+  second("done");
+  first("reviewing");
+  await Promise.all(done);
+  assert.deepEqual(applied, ["done"], "the stale reply does not overwrite the newer one");
+});
+
 test("an open waiting on its write opens the brief once it is stored, stops on a failure, a quiet PR or one gone, and waits otherwise", () => {
   const pr = (brief) => ({ number: 7, title: "Fog", head: "aaa", brief });
   const info = (extra) => ({ stale: false, writing: false, chapters: [], quiet: false, ...extra });
@@ -504,7 +522,7 @@ test("a flagged Ratify row carries the not-confirmed mark beside Accept, and Rat
     { pr: 7, kind: "link", id: "server-ui", text: "Server to UI", change: "added", status: "not-yet", detail: null },
   ];
   setPlaying(/** @type {any} */ ({ brief: stored, partial: false }), null, /** @type {any} */ (rows));
-  setReview({ head: "bbb", state: "done", checked: 2, flagged: 1, line: null, items: [
+  setReview({ head: "bbb", state: "done", checked: 2, flagged: 1, line: null, left_out: 0, items: [
     { id: "part:server/purpose", verdict: "overreach", why: "It also writes the page.", cites: ["server/src/lib.rs:41"], flagged: true },
     { id: "link:server-ui/reason", verdict: "supported", why: "", cites: [], flagged: false },
   ] });
@@ -533,7 +551,7 @@ test("the Ratify step shows while the review runs, with nothing to ratify (#645)
   player.open("/p", 7, 0);
   setReview(null);
   assert.deepEqual(steps().map((s) => s.k), ["Now"]);
-  setReview({ head: "bbb", state: "reviewing", checked: 0, flagged: 0, line: null, items: [] });
+  setReview({ head: "bbb", state: "reviewing", checked: 0, flagged: 0, line: null, left_out: 0, items: [] });
   assert.deepEqual(steps().map((s) => s.k), ["Now", "Ratify"]);
   player.close();
 });

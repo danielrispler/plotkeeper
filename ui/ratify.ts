@@ -229,13 +229,17 @@ export function reviewFlags(review: MapReview | null, row: Pick<RatifyRow, "kind
  */
 export function reviewLine(review: MapReview | null): { line: string | null; start: "Review map text" | "Run again" | null } | null {
   if (!review) return null;
-  if (review.state === "idle") return { line: null, start: "Review map text" };
+  // Items whose id the review does not take are left out of its prompt (`map_review.rs`, `takes`), and the line says so.
+  const left = review.left_out ?? 0;
+  if (review.state === "idle") return { line: left ? `${left} left out for an id the review does not take` : null, start: "Review map text" };
   if (review.state === "reviewing") return { line: "Reviewing map text…", start: null };
   if (review.state === "failed") return { line: review.line ? `Map text review failed: ${review.line}` : "Map text review failed", start: "Run again" };
-  return { line: `Map text review: ${review.checked} checked, ${review.flagged} flagged`, start: null };
+  const out = left ? `, ${left} left out for an id it does not take` : "";
+  return { line: `Map text review: ${review.checked} checked, ${review.flagged} flagged${out}`, start: null };
 }
 
 // Whether Ratify's head alone brings the Ratify step, with nothing to ratify (`ratifyStep`'s `head`): the map check fails at the PR's head
-// (#641), or the Map text review runs or has flagged something (#645).
+// (#641), or the Map text review runs, has flagged something or left an item out (#645), or offers its button: "Review map text" before
+// it ran, for a PR not by Daniel's login, and "Run again" after it failed, which would be unreachable otherwise.
 export const headBrings = (problems: string[] | undefined, review: MapReview | null): boolean =>
-  !!mapCheckLine(problems) || review?.state === "reviewing" || (review?.flagged ?? 0) > 0;
+  !!mapCheckLine(problems) || ["reviewing", "idle", "failed"].includes(review?.state ?? "") || (review?.flagged ?? 0) > 0 || (review?.left_out ?? 0) > 0;
