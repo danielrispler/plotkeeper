@@ -228,6 +228,16 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "project")?,
             arg(a, "number")?,
         )),
+        "pr_map_review" => res(crate::map_review::pr_map_review(
+            app,
+            arg(a, "project")?,
+            arg(a, "number")?,
+        )),
+        "map_review_start" => res(crate::map_review::map_review_start(
+            app,
+            arg(a, "project")?,
+            arg(a, "number")?,
+        )),
         "ratify_set" => res(crate::ratify::ratify_set(
             arg(a, "project")?,
             arg(a, "pr")?,

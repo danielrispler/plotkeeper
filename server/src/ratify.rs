@@ -297,11 +297,12 @@ pub enum Detail {
     Link(LinkDetail),
 }
 
-/// A part's name and purpose, its held items matched by name, and the patterns its own `paths` gained and lost.
+/// A part's name, purpose and caption, its held items matched by name, and the patterns its own `paths` gained and lost.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PartDetail {
     pub name: Words,
     pub purpose: Words,
+    pub caption: Words,
     pub holds: Vec<HeldDetail>,
     pub paths_added: Vec<String>,
     pub paths_removed: Vec<String>,
@@ -426,6 +427,7 @@ fn detail(kind: &str, before: Option<&Value>, after: Option<&Value>) -> Option<D
         "part" => Some(Detail::Part(PartDetail {
             name: words_of(before, after, "name"),
             purpose: words_of(before, after, "purpose"),
+            caption: words_of(before, after, "caption"),
             holds: holds_change(before, after),
             paths_added,
             paths_removed,
