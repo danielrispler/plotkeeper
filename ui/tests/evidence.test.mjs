@@ -307,3 +307,47 @@ test("a failed check's output and a file's hunk scroll on their own, so each tak
   assert.match(pres.find((pre) => pre.className === "evidence-hunk").getAttribute("aria-label") ?? "", /a\.rs/);
   assert.match(pres.find((pre) => pre.className === "evidence-output").getAttribute("aria-label") ?? "", /cargo test|Core tests/);
 });
+
+// Spec #661: the rail patches a redrawn line onto the one in the page, which keeps the row's nodes and drops the redraw's. A read that
+// failed is not read again by a redraw, which would land in the dropped nodes; opening the row again reads it, into the row in the page.
+const { patch } = await import("../../dist/dom.js");
+/** @param {() => any} make @param {(line: any) => any} rowOf @param {string} command @param {RegExp} read */
+const failedThenRead = async (make, rowOf, command, read, answer) => {
+  let fail = true;
+  tauri([], (asked) => {
+    if (asked !== command) return null;
+    if (fail) throw new Error("gone");
+    return answer;
+  });
+  const rail = new El("ul");
+  patch(rail, [make()]);
+  const line = rail.childNodes[0];
+  line.find("button")[0].listeners.click();
+  const row = rowOf(line);
+  row.find("button")[0].listeners.click();
+  await new Promise((resolve) => setTimeout(resolve));
+  const pre = row.find("pre")[0];
+  assert.match(pre.text, /could not be read: gone/);
+  fail = false;
+  patch(rail, [make()]);
+  await new Promise((resolve) => setTimeout(resolve));
+  assert.equal(rail.childNodes[0], line, "the redraw keeps the line");
+  assert.match(pre.text, /could not be read: gone/, "the row in the page still says why, not \"Reading\"");
+  // Opening the row again reads it again, into the row in the page.
+  row.find("button")[0].listeners.click();
+  row.find("button")[0].listeners.click();
+  await new Promise((resolve) => setTimeout(resolve));
+  assert.match(pre.text, read);
+};
+
+test("a failed check's output that could not be read says so across a redraw, and opening it again reads it into the row shown", async () => {
+  const turn = { ended_at: 1, files: null, checks: [check("cargo nextest", "failed", 0, [run("failed", "c-redraw", 101)])] };
+  const rowOf = (line) => line.find("li").find((li) => li.getAttribute("data-key")?.startsWith("check-row"));
+  await failedThenRead(() => evidenceElement("s9", 2, turn, { only: "all" }), rowOf, "check_output", /mismatched types/, { exit_code: 101, tail: "mismatched types" });
+});
+
+test("a file's hunk that could not be read says so across a redraw, and opening it again reads it into the row shown", async () => {
+  const turn = { ended_at: 1, files: files([file("redraw.rs", 2, 1)]), checks: [] };
+  const rowOf = (line) => line.find("li").find((li) => li.getAttribute("data-key")?.startsWith("file-row"));
+  await failedThenRead(() => evidenceElement("s9", 3, turn, { only: "all" }), rowOf, "turn_file_hunk", /\+fixed/, { text: "+fixed", left_out: 0, binary: false, first_line: 1 });
+});

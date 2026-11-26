@@ -58,11 +58,29 @@ const hold = (parent, item) => {
   return item;
 };
 
+// A `dataset` name's attribute: `briefTaps` is `data-brief-taps`.
+const dataName = (name) => `data-${name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`;
+
 class StandIn {
   nodeType = 1;
   attrs = new Map();
   listeners = {};
-  dataset = {};
+  // Its `data-*` attributes, as a browser's `dataset` is, so `patch` reads a key set through it.
+  dataset = new Proxy(/** @type {Record<string, string>} */ ({}), {
+    get: (_, name) => (typeof name === "string" ? (this.getAttribute(dataName(name)) ?? undefined) : undefined),
+    set: (_, name, value) => {
+      this.setAttribute(dataName(/** @type {string} */ (name)), String(value));
+      return true;
+    },
+    deleteProperty: (_, name) => {
+      this.removeAttribute(dataName(/** @type {string} */ (name)));
+      return true;
+    },
+    has: (_, name) => typeof name === "string" && this.hasAttribute(dataName(name)),
+    ownKeys: () => this.attributes.filter(({ name }) => name.startsWith("data-")).map(({ name }) => name.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase())),
+    getOwnPropertyDescriptor: (_, name) =>
+      typeof name === "string" && this.hasAttribute(dataName(name)) ? { value: this.getAttribute(dataName(name)), enumerable: true, configurable: true, writable: true } : undefined,
+  });
   style = {};
   classList = { add() {}, remove() {}, toggle() {}, contains: () => false };
   className = "";
@@ -211,12 +229,99 @@ class FieldStandIn extends StandIn {
   dir = "";
 }
 
+// A stand-in that is in a page, as a browser's node is (spec #661): putting it somewhere takes it out of where it was, it is connected
+// while a root (`connect`) holds it, and taking the focused node out of the page drops the focus (`document.activeElement`), as a
+// browser does. A `<details>`'s `open` is its attribute. Opt-in, for the tests that read what a draw keeps in the page.
+const roots = new WeakSet();
+/** @returns {any} */
+const page = () => globalThis.document;
+class LiveStandIn extends FieldStandIn {
+  // Its inline style writes its `style` attribute, as a browser's does, so `patch` copies a new draw's style onto a kept node.
+  style = new Proxy(/** @type {Record<string, string>} */ ({}), {
+    set: (props, name, value) => {
+      props[/** @type {string} */ (name)] = value;
+      this.setAttribute("style", Object.entries(props).map(([k, v]) => `${k}: ${v}`).join("; "));
+      return true;
+    },
+  });
+  get parentNode() {
+    const from = held.get(this);
+    return from?.childNodes.includes(this) ? from : null;
+  }
+  get isConnected() {
+    if (roots.has(this)) return true;
+    return this.parentNode?.isConnected ?? false;
+  }
+  get open() {
+    return this.hasAttribute("open");
+  }
+  set open(value) {
+    if (value) this.setAttribute("open", "");
+    else this.removeAttribute("open");
+  }
+  focus() {
+    if (this.isConnected) page().activeElement = this;
+  }
+  cloneNode() {
+    const copy = new LiveStandIn(this.tag);
+    for (const [k, v] of this.attrs) copy.attrs.set(k, v);
+    copy.className = this.className;
+    return copy;
+  }
+  #take(items) {
+    for (const item of items) if (item instanceof LiveStandIn && item.parentNode) item.parentNode.removeChild(item);
+  }
+  append(...items) {
+    this.#take(items);
+    super.append(...items);
+  }
+  prepend(...items) {
+    this.#take(items);
+    super.prepend(...items);
+  }
+  appendChild(item) {
+    this.#take([item]);
+    super.appendChild(item);
+  }
+  insertBefore(item, ref) {
+    if (item.parentNode !== this) this.#take([item]);
+    super.insertBefore(item, ref);
+  }
+  replaceChild(item, old) {
+    this.#take([item]);
+    super.replaceChild(hold(this, item), old);
+  }
+  replaceChildren(...items) {
+    for (const child of [...this.childNodes]) this.removeChild(child);
+    this.append(...items);
+  }
+  removeChild(item) {
+    const focused = page()?.activeElement;
+    if (focused && item instanceof StandIn && item.contains(focused)) page().activeElement = null;
+    super.removeChild(item);
+  }
+  set textContent(value) {
+    for (const child of [...this.childNodes]) this.removeChild(child);
+    super.textContent = value;
+  }
+  get textContent() {
+    return super.textContent;
+  }
+}
+/** `node`, a live stand-in, as the page's own: it and what it holds are connected. */
+export const connect = (node) => {
+  roots.add(node);
+  return node;
+};
+
 // The stand-ins as the tests see them: any, at this one boundary, since they stand in for the DOM's types without being them, so a
 // test may hand one to the page's code typed with the real ones (#554).
 /** @type {any} */
 export const El = StandIn;
 /** @type {any} */
 export const Field = FieldStandIn;
+/** @type {any} */
+export const Live = LiveStandIn;
 
 // A document whose elements are `Element`s, for `globalThis.document`; `extra` adds or replaces members.
 /** @returns {any} */

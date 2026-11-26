@@ -360,6 +360,10 @@ pub struct Turn {
     /// The first line of the prompt that opened it, or "worker <name> returned" for a wake-up; empty
     /// until a prompt arrives, as a queued prompt's turn may start on a step.
     pub prompt: String,
+    /// Whether `prompt` is a wake-up's (danielrispler/plotkeeper#675), which the rail labels "Woken
+    /// by", never as Daniel's. A turn stored before it reads as his.
+    #[serde(default)]
+    pub wake_up: bool,
     /// The id its `Stop` gives a card or a summary on it (`Stopped::card`); `None` until it stopped.
     pub id: Option<String>,
     /// The first line of its final reply, from its `Stop`.
@@ -1353,7 +1357,8 @@ impl Session {
     pub(crate) fn take_prompt(&mut self, prompt: Prompt, opens: bool) {
         self.woken = !prompt.sender.is_daniels() && (self.woken || opens);
         let line = match &prompt.sender {
-            Sender::WakeUp(_) => self.returned.clone().unwrap_or_default(),
+            // From the wake-up's own task: a queued one's turn starts after the row's `returned` may be cleared.
+            Sender::WakeUp(task_id) => format!("worker {} returned", self.agent_name(task_id)),
             _ => prompt
                 .text
                 .lines()
@@ -1364,6 +1369,7 @@ impl Session {
         };
         if let Some(turn) = self.turns.last_mut().filter(|t| t.prompt.is_empty()) {
             turn.prompt = line;
+            turn.wake_up = matches!(prompt.sender, Sender::WakeUp(_));
         }
         self.prompts.push(prompt);
     }

@@ -23,7 +23,7 @@ export function briefRowFor(
 ): HTMLElement | null {
   const pr = waitingPr(session, waiting);
   if (pr === null || !waiting) return null;
-  const row = pressable(text("button", "PR brief ready", "btn quiet brief-ready"), null);
+  const row = keyed(pressable(text("button", "PR brief ready", "btn quiet brief-ready"), null), `brief-ready ${waiting.project} ${pr}`);
   hint(row, `Open the brief of #${pr} on the map`);
   row.addEventListener("click", () => open(waiting.project, pr));
   return row;

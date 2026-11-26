@@ -166,3 +166,53 @@ fn an_idle_prompt_with_no_agent_ends_an_interrupted_turn() {
     assert_eq!(looks.last(), Some(&(21, Purpose::TurnEnd)));
     assert_eq!(cards.len(), 1);
 }
+
+/// The session's turns after `log`, as each one's prompt and whether a wake-up opened it.
+fn opened(log: &str) -> Vec<(String, bool)> {
+    let lines: Vec<&str> = log.lines().collect();
+    let studio = Studio::replayed(&lines);
+    let session = studio.session(QUEUED_SESSION).unwrap();
+    (session.turns.iter())
+        .map(|t| (t.prompt.clone(), t.wake_up))
+        .collect()
+}
+
+/// danielrispler/plotkeeper#675: a queued prompt's turn is marked by who sent it, a wake-up's or
+/// Daniel's, as a prompt that opens its turn is.
+#[test]
+fn a_queued_wake_up_marks_the_turn_it_starts_and_daniels_queued_prompt_does_not() {
+    let wake_up = r#"<agent-message from=\"aaf57a4236e21f65b\">…</agent-message>"#;
+    let queued = r#"<pasted_content id=\"8720\">…</pasted_content id=\"8720\">"#;
+    let woken = QUEUED.replacen(queued, wake_up, 1);
+    assert_ne!(woken, QUEUED);
+
+    let daniels = opened(QUEUED);
+    let wakes = opened(&woken);
+
+    // The turn before has no prompt in the cut; the wake-up turn is marked either way.
+    assert_eq!(daniels.len(), 3);
+    assert_eq!((daniels[1].1, wakes[1].1), (true, true));
+    // The turn the queued prompt starts, which its text names.
+    assert_eq!(daniels[2], (queued.replace('\\', ""), false));
+    assert!(wakes[2].1, "{wakes:?}");
+    assert!(wakes[2].0.starts_with("worker "), "{wakes:?}");
+}
+
+/// danielrispler/plotkeeper#675: a queued wake-up's turn names the worker that returned even when the running turn's own step
+/// came between, which clears the row's "returned" before the turn the wake-up starts.
+#[test]
+fn a_queued_wake_up_names_its_worker_after_a_step_of_the_turn_it_was_queued_in() {
+    let wake_up = r#"<agent-message from=\"aaf57a4236e21f65b\">…</agent-message>"#;
+    let queued = r#"<pasted_content id=\"8720\">…</pasted_content id=\"8720\">"#;
+    let woken = QUEUED.replacen(queued, wake_up, 1);
+    let mut lines: Vec<&str> = woken.lines().collect();
+    // The running turn's own step (line 7's), after the wake-up was queued and before that turn's `Stop`.
+    let own_step = lines[6].replace("1793387634301", "1793387650000");
+    lines.insert(9, &own_step);
+
+    let wakes = opened(&lines.join("\n"));
+
+    assert_eq!(wakes.len(), 3);
+    assert!(wakes[2].1, "{wakes:?}");
+    assert!(wakes[2].0.starts_with("worker "), "{wakes:?}");
+}

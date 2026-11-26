@@ -4,7 +4,7 @@
 // and the tail of its output. Opening changes only the nodes it opens: the open state is kept by key, so a redraw of the rail
 // draws the line open again.
 
-import { code, failure, glyphOnly, hint, invoke, messageOf, pressable, scrollingPre, statusRegion, text } from "./dom.js";
+import { code, failure, glyphOnly, hint, invoke, keyed, messageOf, pressable, scrollingPre, statusRegion, text } from "./dom.js";
 import { askAnchor, hunkText } from "./ask.js";
 import { diffRequest } from "./diff.js";
 import type { Capabilities, Check, CheckOutput, Hunk, Turn, TurnFile } from "./types.js";
@@ -83,9 +83,35 @@ const wordsKey = (session: string, c: Check) => {
   return last ? `${session} ${last.agent ?? ""} ${last.call}` : null;
 };
 
+// A row's read in flight or failed, by its key: what the row says meanwhile, and each draw of the row since the read began, which takes
+// its end. The rail's `patch` keeps the row the page has and drops a redraw's nodes, so the end reaches every draw, the one in the page
+// among them (spec #661). A redraw does not read again; opening the row again reads a failed read again.
+type Read = { words: string; failed: boolean; draws: (() => void)[] };
+const reads = new Map<string, Read>();
+function readRow(key: string, reading: string, start: () => Promise<unknown>, failed: string, draw: () => void, again: boolean) {
+  const was = reads.get(key);
+  if (was && !(again && was.failed)) {
+    if (!was.failed) was.draws.push(draw);
+    return;
+  }
+  const read: Read = { words: reading, failed: false, draws: [draw] };
+  reads.set(key, read);
+  draw();
+  start()
+    .then(() => reads.delete(key))
+    .catch((e) => {
+      read.words = `${failed}${messageOf(e)}`;
+      read.failed = true;
+    })
+    .finally(() => {
+      for (const each of read.draws.splice(0)) each();
+    });
+}
+
 const outputText = (output: CheckOutput) => `${output.exit_code === null ? "No exit code" : `exit code ${output.exit_code}`}\n${output.tail}`;
 
-// A failed check's row: its label, which opens its exit code and the output's tail under it. Only this row changes.
+// A failed check's row: its label, which opens its exit code and the output's tail under it. Only this row changes. It is keyed by its
+// run, which its listeners read, so the rail's `patch` keeps it only for the same run (spec #661).
 function checkRow(session: string, row: EvidenceRow): HTMLElement {
   const item = document.createElement("li");
   item.className = "evidence-check";
@@ -95,30 +121,30 @@ function checkRow(session: string, row: EvidenceRow): HTMLElement {
   }
   const call = row.call;
   const key = `${session} ${row.agent ?? ""} ${call}`;
-  const pre = scrollingPre(outputs.get(key) ?? "", "evidence-output", `Output of ${row.label}`);
+  keyed(item, `check-row ${key}`);
+  const readKey = `output ${key}`;
+  const pre = scrollingPre(outputs.get(key) ?? reads.get(readKey)?.words ?? "", "evidence-output", `Output of ${row.label}`);
   // Why the output could not be read is said aloud, in a region the row holds before the read (#456); the output itself is not.
   const live = statusRegion();
+  const draw = () => {
+    const read = reads.get(readKey);
+    pre.textContent = outputs.get(key) ?? read?.words ?? "";
+    live.textContent = read?.failed ? read.words : "";
+  };
+  if (reads.get(readKey)?.failed) live.textContent = reads.get(readKey)?.words ?? "";
   const show = () => (openOutputs.has(key) ? pre.removeAttribute("hidden") : pre.setAttribute("hidden", ""));
-  const fetch = () => {
+  const fetch = (again = false) => {
     if (outputs.has(key)) return;
-    pre.textContent = "Reading the output…";
-    live.textContent = "";
-    invoke("check_output", { session, agent: row.agent ?? null, call })
-      .then((output) => {
-        const words = output ? outputText(output) : "No output was recorded.";
-        outputs.set(key, words);
-        pre.textContent = words;
-      })
-      .catch((e) => {
-        pre.textContent = live.textContent = `The output could not be read: ${messageOf(e)}`;
-      });
+    const start = () =>
+      invoke("check_output", { session, agent: row.agent ?? null, call }).then((output) => outputs.set(key, output ? outputText(output) : "No output was recorded."));
+    readRow(readKey, "Reading the output…", start, "The output could not be read: ", draw, again);
   };
   const button = pressable(document.createElement("button"), null, () => {
     if (openOutputs.has(key)) openOutputs.delete(key);
     else openOutputs.add(key);
     button.setAttribute("aria-expanded", String(openOutputs.has(key)));
     show();
-    if (openOutputs.has(key)) fetch();
+    if (openOutputs.has(key)) fetch(true);
   });
   button.classList.add("evidence-fail");
   hint(button, `Show or hide the output of ${row.label}`);
@@ -144,7 +170,8 @@ export function fileRow(session: string, index: number, row: EvidenceRow & { fil
   const key = `${session} ${index} ${file.root} ${file.path}`;
   // Whether it is open is its own to each place that draws it; the hunk read is shared.
   const openKey = `${scope}${key}`;
-  const item = document.createElement("li");
+  // Keyed by what its listeners read, so the rail's `patch` keeps it only while that holds (spec #661).
+  const item = keyed(document.createElement("li"), `file-row ${openKey} ${file.from ?? ""} ${file.added} ${file.removed} ${ended}`);
   item.className = "evidence-file";
   // What is kept of its hunk: final, or the read of an open turn while the turn is still open.
   const kept = () => {
@@ -153,9 +180,18 @@ export function fileRow(session: string, index: number, row: EvidenceRow & { fil
     return entry && (entry.ended || (!ended && same)) ? entry : undefined;
   };
   const was = kept();
-  const pre = scrollingPre(was ? hunkText(was.hunk, false) : "", "evidence-hunk", `Changes to ${file.path}`);
+  // A read is of the file's counts and the turn's end as they are, so a redraw with new ones reads again.
+  const readKey = `hunk ${key} ${file.added} ${file.removed} ${ended}`;
+  const pre = scrollingPre(was ? hunkText(was.hunk, false) : (reads.get(readKey)?.words ?? ""), "evidence-hunk", `Changes to ${file.path}`);
   // As a check's output: only why the hunk could not be read is said aloud.
   const live = statusRegion();
+  const draw = () => {
+    const read = reads.get(readKey);
+    const now = kept();
+    pre.textContent = read?.words ?? (now ? hunkText(now.hunk, false) : "");
+    live.textContent = read?.failed ? read.words : "";
+    left(now?.hunk ?? null);
+  };
   const left = (h: Hunk | null) => {
     more.textContent = `${h?.left_out ?? 0} more lines`;
     if (openHunks.has(openKey) && h?.left_out) more.removeAttribute("hidden");
@@ -164,24 +200,19 @@ export function fileRow(session: string, index: number, row: EvidenceRow & { fil
   const more = pressable(document.createElement("button"), null, () => diffRequest.open(session, index));
   more.classList.add("evidence-more");
   hint(more, HOVERS.wholeDiff);
+  if (reads.get(readKey)?.failed) live.textContent = reads.get(readKey)?.words ?? "";
   const show = () => {
     const open = openHunks.has(openKey);
     for (const node of [pre]) open ? node.removeAttribute("hidden") : node.setAttribute("hidden", "");
     left(kept()?.hunk ?? null);
   };
-  const fetch = () => {
+  const fetch = (again = false) => {
     if (kept()) return;
-    pre.textContent = "Reading the hunk…";
-    live.textContent = "";
-    invoke("turn_file_hunk", { session, turn: index, root: file.root, path: file.path, from: file.from })
-      .then((h) => {
-        hunks.set(key, { hunk: h, ended, added: file.added, removed: file.removed });
-        pre.textContent = hunkText(h, false);
-        left(h);
-      })
-      .catch((e) => {
-        pre.textContent = live.textContent = `The hunk could not be read: ${messageOf(e)}`;
-      });
+    const start = () =>
+      invoke("turn_file_hunk", { session, turn: index, root: file.root, path: file.path, from: file.from }).then((h) =>
+        hunks.set(key, { hunk: h, ended, added: file.added, removed: file.removed }),
+      );
+    readRow(readKey, "Reading the hunk…", start, "The hunk could not be read: ", draw, again);
   };
   const button = pressable(document.createElement("button"), null, () => {
     if (openHunks.has(openKey)) openHunks.delete(openKey);
@@ -190,7 +221,7 @@ export function fileRow(session: string, index: number, row: EvidenceRow & { fil
     // An open turn's hunk is read again at each opening.
     if (!ended) hunks.delete(key);
     show();
-    if (openHunks.has(openKey)) fetch();
+    if (openHunks.has(openKey)) fetch(true);
   });
   button.classList.add("evidence-fail");
   hint(button, `Show or hide this file's change: ${file.path}`);
@@ -232,7 +263,8 @@ export function evidenceElement(session: string, index: number, turn: Facts & En
   const line = evidenceLine(facts, words);
   if (!line) return null;
   const key = `${session} ${index} evidence`;
-  const node = document.createElement("div");
+  // Its listeners read its rows, so a line whose rows changed is a new node (spec #661).
+  const node = keyed(document.createElement("div"), `${key} ${only} ${evidenceRows(facts).map((row) => row.label).join("\n")}`);
   node.className = "evidence";
   const list = document.createElement("ul");
   list.className = "evidence-rows";

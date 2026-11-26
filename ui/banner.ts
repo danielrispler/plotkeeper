@@ -1,7 +1,7 @@
 // "Where we were" (danielrispler/plotkeeper#124): the banner the rail opens on when Daniel returns to a session. Three lines
 // built from facts: the last Headline with its age, what happened since he looked, and what is open. The Brief folds inside.
 
-import { age, hint, prose, text } from "./dom.js";
+import { age, hint, keyed, prose, text } from "./dom.js";
 import type { OpenItem, Session, Since } from "./types.js";
 
 // A session whose last turn ended this long ago, with unseen turns, shows the banner.
@@ -32,9 +32,13 @@ export const bannerFor = (session: Pick<Session, "id" | "state" | "unseen" | "tu
 export const bannerLives = (banner: Banner | null, session: Pick<Session, "id" | "state" | "turns">): boolean =>
   banner !== null && banner.session === session.id && session.turns.length === banner.turns && session.state !== "running" && session.state !== "needs_you";
 
-export type BannerFacts = { headline: string | null; endedAt: number | null; since: Since; open: OpenItem[]; brief: Node[] };
-export function bannerElement({ headline, endedAt, since, open, brief }: BannerFacts, now = Date.now()): HTMLElement {
-  const node = document.createElement("section");
+// The sessions whose banner's Brief Daniel left open, so each draw of the rail draws it open again (spec #661).
+const briefOpen = new Set<string>();
+
+/** The banner of `session`, keyed by it, so the rail's `patch` keeps it, and its Brief's fold, across draws. */
+export type BannerFacts = { session: string; headline: string | null; endedAt: number | null; since: Since; open: OpenItem[]; brief: Node[] };
+export function bannerElement({ session, headline, endedAt, since, open, brief }: BannerFacts, now = Date.now()): HTMLElement {
+  const node = keyed(document.createElement("section"), `banner ${session}`);
   node.id = "banner";
   node.className = "banner";
   const row = (label: string, ...content: (HTMLElement | string)[]) => {
@@ -49,8 +53,10 @@ export function bannerElement({ headline, endedAt, since, open, brief }: BannerF
     row("Open", open.length ? open.map((item) => item.text).join(" · ") : "Nothing open"),
   );
   if (brief.length) {
-    const fold = document.createElement("details");
+    const fold = keyed(document.createElement("details"), `banner-brief ${session}`);
     fold.className = "banner-brief";
+    fold.open = briefOpen.has(session);
+    fold.addEventListener("toggle", () => (fold.open ? briefOpen.add(session) : briefOpen.delete(session)));
     const body = document.createElement("section");
     body.append(...brief);
     fold.append(hint(text("summary", "Brief"), "Show or hide the Brief: where the session stands"), body);

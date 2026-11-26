@@ -222,3 +222,34 @@ fn a_wake_up_leaves_the_session_needing_daniel_until_the_step_that_asks_resolves
     studio.apply(&event("PostToolUse", push));
     assert_eq!(state(&studio), State::Running);
 }
+
+/// danielrispler/plotkeeper#675: a turn a wake-up opened says so, so the rail labels it "Woken by";
+/// the turns Daniel's prompts opened do not. Its prompt stays "worker <name> returned".
+#[test]
+fn a_turn_a_wake_up_opened_is_marked_and_daniels_are_not() {
+    let studio = replay(DAY);
+
+    let session = studio.session(IMPLEMENT_SPEC).unwrap();
+    let marked: Vec<(bool, bool)> = session
+        .turns
+        .iter()
+        .map(|t| (t.wake_up, t.prompt.starts_with("worker ")))
+        .collect();
+    assert!(marked.iter().any(|&(wake_up, _)| wake_up));
+    assert!(marked.iter().any(|&(wake_up, _)| !wake_up));
+    // Each turn a wake-up opened reads "worker <name> returned", and only those are marked.
+    for (wake_up, worker) in marked {
+        assert_eq!(wake_up, worker);
+    }
+}
+
+/// A turn stored before the flag existed reads as Daniel's.
+#[test]
+fn a_turn_stored_without_the_flag_reads_as_daniels() {
+    let stored = json!({
+        "started_at": 1, "ended_at": 2, "prompt": "worker a1191 returned", "id": null,
+        "message": null, "files": null, "checks": [],
+    });
+    let turn: studio_core::Turn = serde_json::from_value(stored).unwrap();
+    assert!(!turn.wake_up);
+}
