@@ -3,6 +3,7 @@
 
 mod doubt;
 mod reader;
+mod relative;
 mod stdlib;
 
 use std::{cell::RefCell, collections::BTreeMap, collections::BTreeSet};
@@ -220,7 +221,8 @@ impl Index<'_, '_> {
 /// Each Python file paired with the files each local module it imports runs.
 fn python_imports(repo: &Repo) -> Output {
     let (roots, problems) = Roots::read(repo);
-    let index = Index::new(repo, &roots.folders(repo));
+    let folders = roots.folders(repo);
+    let index = Index::new(repo, &folders);
     let mut found = Output {
         problems,
         ..Output::default()
@@ -235,7 +237,12 @@ fn python_imports(repo: &Repo) -> Output {
             continue;
         };
         for import in reader::imports(&text) {
-            match index.absolute(file, &import) {
+            let resolution = if import.dots == 0 {
+                index.absolute(file, &import)
+            } else {
+                index.relative(file, &import, &folders)
+            };
+            match resolution {
                 Resolution::Nothing => {}
                 Resolution::Pairs(files) => {
                     for to in files {

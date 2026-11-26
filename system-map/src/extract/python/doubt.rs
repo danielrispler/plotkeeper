@@ -26,13 +26,13 @@ pub(super) enum Resolution {
 
 /// One place a dotted name lands: the files the import runs on the way, whether the last segment is a module or a
 /// regular package, and the folder a name may be a submodule in.
-struct Landing {
-    files: Vec<String>,
+pub(super) struct Landing {
+    pub(super) files: Vec<String>,
     /// The last segment is a module or a regular package, so the import has a final file of its own (it may be the
     /// init file a package holding the importer leaves out), and not only a bare folder.
-    found: bool,
+    pub(super) found: bool,
     /// The folder of the last segment when it is a package or a bare folder; none for a module.
-    folder: Option<String>,
+    pub(super) folder: Option<String>,
 }
 
 /// A walk in progress: the folder the next segment is looked up in, and the files met so far.
@@ -45,7 +45,12 @@ impl Index<'_, '_> {
     /// Walks the dotted name `module` down from each of `dirs` at once. At every segment, a module or regular package
     /// in any folder beats a bare folder in another, as in PEP 420; the bare folders merge, and the walk goes on in all
     /// of them. A folder that holds the name as a module, or lacks it, ends its walk.
-    fn walk_all(&self, importer: &str, dirs: &[&str], module: &[String]) -> Vec<Landing> {
+    pub(super) fn walk_all(
+        &self,
+        importer: &str,
+        dirs: &[&str],
+        module: &[String],
+    ) -> Vec<Landing> {
         let mut live: Vec<Walk> = dirs
             .iter()
             .map(|dir| Walk {
@@ -104,7 +109,12 @@ impl Index<'_, '_> {
 
     /// The files of `name` as a submodule of any of `folders`: one list for each folder that holds it as a module or a
     /// regular package, none when it is only a bare folder or missing.
-    fn submodules(&self, importer: &str, folders: &[&str], name: &str) -> Vec<Vec<String>> {
+    pub(super) fn submodules(
+        &self,
+        importer: &str,
+        folders: &[&str],
+        name: &str,
+    ) -> Vec<Vec<String>> {
         folders
             .iter()
             .filter_map(|folder| match self.step(folder, name) {

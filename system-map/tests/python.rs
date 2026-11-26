@@ -341,16 +341,187 @@ fn a_first_segment_two_roots_provide_gives_no_pair_and_no_problem() {
 }
 
 #[test]
-fn a_relative_import_gives_no_pair_for_now() {
+fn from_dot_import_pairs_with_the_packages_own_init_file_and_with_a_submodule() {
     let found = py_pairs(&[
+        ("a/__init__.py", ""),
+        ("a/m.py", "from . import x, y\n"),
+        ("a/x.py", ""),
+        // An `__init__.py` is its own package's anchor, and never pairs with itself.
+        ("b/__init__.py", "from . import z\n"),
+        ("b/z.py", ""),
+    ]);
+    assert_eq!(
+        found,
+        [
+            "a/m.py>a/__init__.py",
+            "a/m.py>a/x.py",
+            "b/__init__.py>b/z.py"
+        ]
+    );
+}
+
+#[test]
+fn from_dot_x_import_y_pairs_with_the_module_and_with_y_when_it_is_a_submodule() {
+    let found = py_pairs(&[
+        ("a/__init__.py", ""),
+        ("a/m.py", "from .x import y, v\nfrom .w import u\n"),
+        ("a/x/__init__.py", ""),
+        ("a/x/y.py", ""),
+        ("a/w.py", ""),
+    ]);
+    assert_eq!(
+        found,
+        ["a/m.py>a/w.py", "a/m.py>a/x/__init__.py", "a/m.py>a/x/y.py"]
+    );
+}
+
+#[test]
+fn the_dots_of_a_relative_import_add_up_and_each_one_past_the_first_climbs_a_folder() {
+    let inits: Vec<(String, &str)> = ["a", "a/b", "a/b/c", "a/b/c/d"]
+        .iter()
+        .map(|f| (format!("{f}/__init__.py"), ""))
+        .collect();
+    let mut files: Vec<(&str, &str)> = inits.iter().map(|(f, t)| (f.as_str(), *t)).collect();
+    files.extend([
+        ("a/b/c/d/three.py", "from ...x import y\n"),
+        ("a/b/c/d/two.py", "from . . import y\n"),
+        ("a/b/c/d/four.py", "from .... import y\n"),
+        ("a/b/c/d/mixed.py", "from .. . import y\n"),
+        ("a/b/x.py", ""),
+        ("a/b/c/y.py", ""),
+        ("a/y.py", ""),
+        ("a/b/y.py", ""),
+    ]);
+    assert_eq!(
+        py_pairs(&files),
+        [
+            "a/b/c/d/four.py>a/__init__.py",
+            "a/b/c/d/four.py>a/y.py",
+            "a/b/c/d/mixed.py>a/b/__init__.py",
+            "a/b/c/d/mixed.py>a/b/y.py",
+            "a/b/c/d/three.py>a/b/x.py",
+            "a/b/c/d/two.py>a/b/c/__init__.py",
+            "a/b/c/d/two.py>a/b/c/y.py",
+        ]
+    );
+}
+
+#[test]
+fn a_relative_and_an_absolute_import_inside_one_package_give_the_same_pairs() {
+    let found = py_pairs(&[
+        ("mypkg/__init__.py", ""),
+        ("mypkg/m.py", "from .x import y\n"),
+        ("mypkg/n.py", "from mypkg.x import y\n"),
+        ("mypkg/x/__init__.py", ""),
+        ("mypkg/x/y.py", ""),
+    ]);
+    assert_eq!(
+        found,
+        [
+            "mypkg/m.py>mypkg/x/__init__.py",
+            "mypkg/m.py>mypkg/x/y.py",
+            "mypkg/n.py>mypkg/x/__init__.py",
+            "mypkg/n.py>mypkg/x/y.py",
+        ]
+    );
+}
+
+const CLIMBS: &str = "climbs past the top package under some roots";
+
+#[test]
+fn a_climb_that_works_under_every_root_pairs() {
+    // `p/pkg/m.py` is two folders below the repository root and one below `p/`: one dot works under both.
+    let files = [
+        ("p/pyproject.toml", "[project]\nname = \"p\"\n"),
+        ("p/pkg/m.py", "from .x import y\n"),
+        ("p/pkg/x.py", ""),
+    ];
+    assert_eq!(py_pairs(&files), ["p/pkg/m.py>p/pkg/x.py"]);
+    assert_eq!(doubts(&files), Vec::<String>::new());
+}
+
+#[test]
+fn a_climb_that_works_under_some_roots_only_makes_the_importer_unsure() {
+    // Two dots work under the repository root (depth 2) but not under `p/` (depth 1).
+    let files = [
+        ("p/pyproject.toml", "[project]\nname = \"p\"\n"),
+        ("p/__init__.py", ""),
+        ("p/pkg/m.py", "from ..x import y\nfrom .. import w\n"),
+        ("p/x.py", ""),
+        ("p/w.py", ""),
+    ];
+    assert_eq!(py_pairs(&files), Vec::<String>::new());
+    assert_eq!(
+        doubts(&files),
+        [
+            format!("p/pkg/m.py | .. | {CLIMBS} | p/__init__.py, p/w.py"),
+            format!("p/pkg/m.py | ..x | {CLIMBS} | p/x.py"),
+        ]
+    );
+}
+
+#[test]
+fn a_relative_unsure_import_relaxes_only_the_links_to_its_candidates_parts() {
+    let files = [
+        ("p/pyproject.toml", "[project]\nname = \"p\"\n"),
+        ("p/pkg/m.py", "from ..x import y\n"),
+        ("p/x.py", ""),
+        ("z/z.py", ""),
+    ];
+    let map = map(
+        &[
+            ("pk", &["p/pkg/"]),
+            ("px", &["p/x.py"]),
+            ("zz", &["z/"]),
+            ("other", &["p/pyproject.toml"]),
+        ],
+        &[("pk", "px"), ("pk", "zz")],
+    );
+    let (_dir, root) = repo(&map, &files);
+    let out = run(&root, "check", &[]);
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        "note: p/pkg/m.py is unsure of ..x; its links to px pass as unproven\n"
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(stdout.lines().count(), 1, "{stdout}");
+    assert!(
+        stdout.starts_with(
+            "import link \"pk-zz\" runs from \"pk\" to \"zz\", but the code shows no dependency"
+        ),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn a_climb_that_works_under_no_root_leaves_the_repository_or_names_nothing_gives_nothing() {
+    let files = [
+        ("p/pyproject.toml", "[project]\nname = \"p\"\n"),
+        ("top.py", "from . import y\n"),
+        ("p/pkg/m.py", "from ...x import y\nfrom .... import y\n"),
+        ("x.py", ""),
+        ("y.py", ""),
+        // Two dots work under the repository root only, but nothing is named `nothing`.
+        (
+            "p/pkg/n.py",
+            "from ..nothing import y\nfrom .nothing import y\n",
+        ),
+    ];
+    assert_eq!(py_pairs(&files), Vec::<String>::new());
+    assert_eq!(doubts(&files), Vec::<String>::new());
+}
+
+#[test]
+fn a_relative_import_whose_target_does_not_exist_gives_nothing() {
+    let files = [
         ("a/__init__.py", ""),
         (
             "a/m.py",
-            "from . import x\nfrom .x import y\nfrom .. import z\n",
+            "from .nothing import y\nfrom .nothing.deeper import z\n",
         ),
-        ("a/x.py", ""),
-    ]);
-    assert_eq!(found, Vec::<String>::new());
+    ];
+    assert_eq!(py_pairs(&files), Vec::<String>::new());
+    assert_eq!(doubts(&files), Vec::<String>::new());
 }
 
 const IMPORTS_LIB: &str = "import lib\n";
