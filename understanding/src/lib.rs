@@ -663,7 +663,7 @@ impl ClaudeWriter {
         std::fs::create_dir_all(&codex_folder)?;
         std::fs::create_dir_all(&copilot_folder)?;
         std::fs::create_dir_all(&cursor_folder)?;
-        let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
+        let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
         let agy = find_program(shell.as_ref(), WriterKind::Agy.program());
         let codex = find_program(shell.as_ref(), WriterKind::Codex.program());
         let copilot = find_program(shell.as_ref(), WriterKind::Copilot.program());

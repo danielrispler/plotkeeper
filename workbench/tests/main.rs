@@ -4,4 +4,5 @@ mod agy_plugin;
 mod fetch;
 mod revival;
 mod run;
+mod shell_fallback;
 mod tasks;
