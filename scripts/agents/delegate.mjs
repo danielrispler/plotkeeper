@@ -148,8 +148,8 @@ const exec = (cwd, command, args, { out } = {}) => {
 };
 
 /** Runs a command that must succeed, and returns its trimmed output. */
-const must = (cwd, command, args, options) => {
-  const ran = exec(cwd, command, args, options);
+const must = (cwd, command, args, settings) => {
+  const ran = exec(cwd, command, args, settings);
   if (ran.error || ran.status !== 0) {
     const why = ran.error?.message ?? (ran.stderr?.trim().split("\n").at(-1) || `exit ${ran.status}`);
     throw new CouldNotStart(`${command} ${args[0]} failed: ${why}`);
@@ -225,26 +225,26 @@ const runWorker = (worktree, { candidate, effort, message, session = null, limit
       } catch {}
     };
     let silence = setTimeout(() => kill("silent"), SILENCE_MS);
-    const attempt = setTimeout(() => kill("timeout"), limit);
+    const cutoff = setTimeout(() => kill("timeout"), limit);
     // A spawn that fails emits `error` and then `close`: the files are closed once.
     let closed = false;
     const done = () => {
       if (closed) return;
       closed = true;
       clearTimeout(silence);
-      clearTimeout(attempt);
+      clearTimeout(cutoff);
       closeSync(jsonl);
       closeSync(stderr);
     };
     let partial = "";
-    let named = null;
+    let sessionId = null;
     // On its exit the timers stop, and what it started is killed: a command it left running would hold its output
     // open, so that `close` never comes and the silence limit kills a worker that is done.
     let exited = false;
     child.on("exit", () => {
       exited = true;
       clearTimeout(silence);
-      clearTimeout(attempt);
+      clearTimeout(cutoff);
       try {
         process.kill(-child.pid, "SIGKILL");
       } catch {}
@@ -255,7 +255,7 @@ const runWorker = (worktree, { candidate, effort, message, session = null, limit
       appendFileSync(jsonl, chunk);
       const lines = (partial + chunk).split("\n");
       partial = lines.pop();
-      named ??= lines.map(sessionOf).find(Boolean) ?? null;
+      sessionId ??= lines.map(sessionOf).find(Boolean) ?? null;
       const shown = lines.map(render).filter(Boolean);
       if (shown.length) appendFileSync(log, `${shown.join("\n")}\n`);
     });
@@ -265,7 +265,7 @@ const runWorker = (worktree, { candidate, effort, message, session = null, limit
     });
     child.on("close", (code, signal) => {
       done();
-      resolve({ code, signal, killed, session: named });
+      resolve({ code, signal, killed, session: sessionId });
     });
   });
 
@@ -300,7 +300,7 @@ const stage = (worktree, base) => {
 };
 
 /** Why a worker run that ended this way stops or escalates, or null when its work goes to the check. */
-const failed = (exit) => {
+const failure = (exit) => {
   if (exit.pushed) return { result: "stop", stop: exit.pushed };
   if (exit.killed === "silent") return { result: "silent", escalate: "silent" };
   if (exit.killed === "timeout") return { result: "error", escalate: "timeout" };
@@ -361,9 +361,9 @@ const pushed = (worktree, branch, commits) => {
 const attempt = async (worktree, { candidate, effort, base, integration, title, branch }) => {
   const runs = [];
   // Every worker run is followed by the push guard, whatever its end, before anything resets the worker's commits away.
-  const timed = async (options) => {
+  const timed = async (given) => {
     const started = Date.now();
-    const exit = await runWorker(worktree, { candidate, effort, ...options });
+    const exit = await runWorker(worktree, { candidate, effort, ...given });
     runs.push({ ms: Date.now() - started });
     const what = pushed(worktree, branch, madeBy(worktree, base));
     return what ? { ...exit, pushed: what } : exit;
@@ -374,13 +374,13 @@ const attempt = async (worktree, { candidate, effort, base, integration, title, 
   };
   try {
     let exit = await timed({ message: WORKER_BRIEF, limit: ATTEMPT_MS });
-    let stop = failed(exit);
+    let stop = failure(exit);
     if (stop) return last(stop);
     let red = check(worktree, base);
     if (red && exit.session) {
       runs.at(-1).result = "red";
       exit = await timed({ message: red.tell, session: exit.session, limit: RETRY_MS });
-      stop = failed(exit);
+      stop = failure(exit);
       if (stop) return last(stop);
       red = check(worktree, base);
     }

@@ -523,7 +523,7 @@ mod publish_tests {
         );
     }
     /// The problems of one ticket `a.md` whose body is `BODY` with its Route line replaced by `route`.
-    fn route_problems(route: &str) -> Vec<String> {
+    fn problems_with_route(route: &str) -> Vec<String> {
         let manifest = Manifest {
             parent: 9,
             tickets: vec![ticket("a.md", &[])],
@@ -538,22 +538,22 @@ mod publish_tests {
     #[test]
     fn a_body_without_a_route_is_refused() {
         assert_eq!(
-            route_problems(""),
+            problems_with_route(""),
             ["a.md: lacks a **Route:** line in ## Touches"]
         );
     }
     #[test]
     fn a_route_with_an_unknown_tier_or_effort_is_refused() {
         assert_eq!(
-            route_problems("- **Route:** sonnet · effort medium — a reason\n"),
+            problems_with_route("- **Route:** sonnet · effort medium — a reason\n"),
             ["a.md: **Route:** tier sonnet is not strong, medium or cheap"]
         );
         assert_eq!(
-            route_problems("- **Route:** cheap · effort low — a reason\n"),
+            problems_with_route("- **Route:** cheap · effort low — a reason\n"),
             ["a.md: **Route:** effort low is not medium or high"]
         );
         assert_eq!(
-            route_problems("- **Route:** cheap, medium\n"),
+            problems_with_route("- **Route:** cheap, medium\n"),
             ["a.md: **Route:** reads `cheap, medium`, not `<tier> · effort <effort> — <reason>`"]
         );
     }
