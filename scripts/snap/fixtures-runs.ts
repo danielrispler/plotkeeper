@@ -83,6 +83,11 @@ export const mapPreFlight = (): Fixture =>
       const predicted = [...document.querySelectorAll(".plate.predicted")].map((plate) => plate.dataset.id);
       if (predicted.join(",") !== "core,understanding") return log("snap:fail the predicted plates: " + predicted.join(","));
       if (!document.querySelector('.plate[data-id="core"] .plate-predicted')?.textContent.includes("predicted")) log("snap:fail the plate has no predicted chip");
+      // Plate text a size larger (#669): the caption at the body size, the predicted word at the small size; the plate keeps its size.
+      const core = document.querySelector('.plate[data-id="core"]');
+      const sizeOf = (selector) => getComputedStyle(core.querySelector(selector)).fontSize;
+      if (sizeOf(".plate-caption") !== "14px" || sizeOf(".plate-predicted") !== "12.5px") log("snap:fail the plate's caption is " + sizeOf(".plate-caption") + " and its predicted word " + sizeOf(".plate-predicted"));
+      if (core.offsetWidth !== 264 || core.offsetHeight !== 76) log("snap:fail the plate is " + core.offsetWidth + "x" + core.offsetHeight + ", not 264x76");
       document.getElementById("pre-flight-button").click();
       // Past the glass's rise, so the overlay is drawn whole.
       await wait(600);

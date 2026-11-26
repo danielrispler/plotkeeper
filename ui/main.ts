@@ -11,7 +11,7 @@ import { forgetAsks, openAsk } from "./ask.js";
 import { recheckSeen } from "./seen.js";
 import { diffRequest, newestDiff } from "./diff.js";
 import { element, failure, hint, invoke, listen, logUncaught } from "./dom.js";
-import { type Actions, newestUnseen, nextNeedsYou, paletteEntries, run, stepLine, stepSession, windowBinding } from "./keys.js";
+import { type Actions, newestUnseen, nextNeedsYou, paletteEntries, run, stepLine, stepSession, titled, windowBinding } from "./keys.js";
 import { hover, realClock, shownGate } from "./hover.js";
 import { arrange } from "./layout.js";
 import { fitMap, mapEscape, openMap, projectsChanged, startMap } from "./map.js";
@@ -264,6 +264,11 @@ startList({
 startRailBriefs(drawFeed);
 startMap({ selectedProject, removeProject, shown: drawSidebar });
 element("pre-flight-button").addEventListener("click", () => openPreFlight());
+// The map head's Fit (#669) runs `studio::FitMap`; its hint names the keys the keymap binds that to now.
+element("fit-map-button").addEventListener("click", () => fitMap());
+const hintFit = () => hint(element("fit-map-button"), titled(studio.files.keymap, "Fit the whole map in view", "studio::FitMap"));
+hintFit();
+window.addEventListener("settings", hintFit);
 startMapAgents({
   sessions: () => studio.listed,
   projectOf: projectOfCwd,

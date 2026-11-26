@@ -21,6 +21,7 @@ import { logStop, reviewNode, reviewOf } from "./stop-rules.js";
 import { element, failure, hint, invoke, keyed, listen, mark, newest, pageStore, pressable, svg, text } from "./dom.js";
 import { cameraRig, type CameraRig, fitCamera, panTo, revealPan, zoomAt } from "./map-camera.js";
 import { brokenParts, brokenText, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Drag, type Law, type Layer, type LayerName, type MapDoc, startProject, switchProject, parseMap, type Part, type Point, placement, plateSize, plateTitle, sizeOf, lineTag, linkLines, markPoints, readingOrder, rimPoint, type Scrub, tagWord, type Tier } from "./map-model.js";
+import { copyButton } from "./copy-button.js";
 import { recheckSeen } from "./seen.js";
 import { knownProjects, projectGone } from "./projects.js";
 import type { Camera, MapDiff, MapState } from "./types.js";
@@ -343,8 +344,10 @@ function drawEmpty(body: HTMLElement, state: MapState | null) {
       text("p", `${name(state.project)} has no system-map.json on ${where}.`, "empty"),
       text("p", "A map names your parts and their rules; changes light them up.", "empty"),
     );
-    // The page starts no session: the prompt is shown to give to one in the project.
-    box.append(text("p", "To draft one, give this to a session in the project:", "empty"), text("pre", draftPrompt, "map-draft"));
+    // The page starts no session: the prompt is shown to give to one in the project, with the brief's copy icon beside it (#669).
+    const draft = text("div", "", "map-draft-row");
+    draft.append(text("pre", draftPrompt, "map-draft"), copyButton("Copy the prompt", "Copy this prompt, to paste into a session in the project", () => draftPrompt));
+    box.append(text("p", "To draft one, give this to a session in the project:", "empty"), draft);
   }
   body.replaceChildren(box);
 }
@@ -559,8 +562,10 @@ function pan(canvas: HTMLElement) {
     event.preventDefault();
     if (!rig || rig.lent()) return;
     const box = canvas.getBoundingClientRect();
-    // A pinch sends small steps, a mouse wheel large ones: the prototype's rates.
-    const factor = Math.exp(-event.deltaY * (event.ctrlKey ? 0.012 : 0.004));
+    // The delta in pixels, whether the wheel reports pixels, lines (16 px) or pages (the map area's height). A pinch sends small steps
+    // and keeps the prototype's rate; a mouse wheel zooms about ×1.16 per 100 px tick, each event held between ×0.8 and ×1.25 (#669).
+    const pixels = event.deltaY * (event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? box.height : 1);
+    const factor = event.ctrlKey ? Math.exp(-pixels * 0.012) : Math.min(1.25, Math.max(0.8, Math.exp(-pixels * 0.0015)));
     moveCamera(zoomAt(rig.user(), factor, event.clientX - box.left, event.clientY - box.top), false);
   }, { passive: false });
 }
