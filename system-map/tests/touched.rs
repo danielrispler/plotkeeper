@@ -246,3 +246,37 @@ fn a_map_over_a_cap_still_answers() {
     let got = touched(&map, &["alpha/a.rs"]);
     assert_eq!(parts(&got), vec![("alpha", vec!["alpha/a.rs"])]);
 }
+
+#[test]
+fn the_held_items_a_list_of_files_reaches_are_those_whose_paths_match_one() {
+    let mut map = base();
+    map["parts"][0]["holds"] = json!([
+        { "name": "File", "text": "One file.", "paths": ["alpha/a.rs"] },
+        { "name": "Folder", "text": "A folder.", "paths": ["alpha/deep/"] },
+        { "name": "Star", "text": "Any test.", "paths": ["alpha/**/*_test.rs"] },
+        { "name": "Anywhere", "text": "No paths." },
+        { "name": "Empty", "text": "No paths either.", "paths": [] }
+    ]);
+    let map = system_map::parse(&map.to_string()).unwrap();
+    let cases: [(&str, &[&str], &[usize]); 6] = [
+        ("an exact path", &["alpha/a.rs"], &[0]),
+        ("a file in a folder", &["alpha/deep/x.rs"], &[1]),
+        (
+            "a double star",
+            &["alpha/x/y/z_test.rs", "alpha/deep/x.rs"],
+            &[1, 2],
+        ),
+        ("a file no held item names", &["alpha/b.rs"], &[]),
+        ("another part's file", &["beta/b.rs"], &[]),
+        ("no files", &[], &[]),
+    ];
+    for (case, files, reached) in cases {
+        let files: Vec<String> = files.iter().map(ToString::to_string).collect();
+        assert_eq!(
+            system_map::held_reached(&map, "alpha", &files),
+            reached,
+            "{case}"
+        );
+    }
+    assert!(system_map::held_reached(&map, "nothing", &["alpha/a.rs".into()]).is_empty());
+}

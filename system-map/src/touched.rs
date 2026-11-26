@@ -1,10 +1,10 @@
-//! Which parts a list of paths touches, by pattern alone.
+//! Which parts a list of paths touches, and which of a part's held items it reaches, by pattern alone.
 
 use std::{collections::BTreeSet, path::Path};
 
 use serde::Serialize;
 
-use crate::{Map, Owners, PartFiles, Placement};
+use crate::{Map, Owners, PartFiles, Placement, pattern::Pattern};
 
 /// What `touched` found.
 #[derive(Debug, Default, Serialize)]
@@ -47,4 +47,28 @@ pub fn touched_for_map(map: &Map, paths: &[String]) -> Touched {
         })
         .collect();
     found
+}
+
+/// The places, counting from 0, of part `part`'s held items in `map` whose `paths` match one of `files`, by the map's own path
+/// patterns; a held item with no paths is reached by none. Empty for a part the map does not hold.
+pub fn held_reached(map: &Map, part: &str, files: &[String]) -> Vec<usize> {
+    let Some(part) = map.parts.iter().find(|p| p.id == part) else {
+        return Vec::new();
+    };
+    part.holds
+        .iter()
+        .enumerate()
+        .filter(|(_, held)| {
+            let patterns: Vec<Pattern> = held
+                .paths
+                .iter()
+                .flatten()
+                .map(|p| Pattern::new(p))
+                .collect();
+            files
+                .iter()
+                .any(|file| patterns.iter().any(|p| p.matches(file)))
+        })
+        .map(|(n, _)| n)
+        .collect()
 }

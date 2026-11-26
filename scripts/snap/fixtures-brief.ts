@@ -518,11 +518,11 @@ export const mapBriefReview = (at: "flag" | "running"): Fixture => ({
       log("review running ok");`, false, 100),
   pr_ratify: at === "flag" ? ratifyRows : [],
   pr_map_review: at === "flag"
-    ? { head: "cafe", state: "done", checked: 2, flagged: 1, line: null, left_out: 0, items: [
+    ? { head: "cafe", state: "done", checked: 2, flagged: 1, line: null, left_out: 0, still_true: [], items: [
       { id: "law:window-quiet/text", verdict: "contradicted", why: reviewWhy, cites: ["server/src/runner.rs:83", "server/src/pr_briefs/queue.rs:12"], flagged: true },
       { id: "link:shell-understanding/reason", verdict: "supported", why: "The shell imports it.", cites: [], flagged: false },
     ] }
-    : { head: "cafe", state: "reviewing", checked: 0, flagged: 0, line: null, left_out: 0, items: [] },
+    : { head: "cafe", state: "reviewing", checked: 0, flagged: 0, line: null, left_out: 0, still_true: [], items: [] },
 });
 /**
  * The brief's reader explains itself (#524), with Explanations on (the default): the ? beside Leave, pressed; the step's title described by

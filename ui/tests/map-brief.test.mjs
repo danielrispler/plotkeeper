@@ -535,7 +535,7 @@ test("a flagged Ratify row carries the not-confirmed mark beside Accept, and Rat
     { pr: 7, kind: "link", id: "server-ui", text: "Server to UI", change: "added", status: "not-yet", detail: null },
   ];
   setPlaying(/** @type {any} */ ({ brief: stored, partial: false }), null, /** @type {any} */ (rows));
-  setReview({ head: "bbb", state: "done", checked: 2, flagged: 1, line: null, left_out: 0, items: [
+  setReview({ head: "bbb", state: "done", checked: 2, flagged: 1, line: null, left_out: 0, still_true: [], items: [
     { id: "part:server/purpose", verdict: "overreach", why: "It also writes the page.", cites: ["server/src/lib.rs:41"], flagged: true },
     { id: "link:server-ui/reason", verdict: "supported", why: "", cites: [], flagged: false },
   ] });
@@ -564,7 +564,7 @@ test("the Ratify step shows while the review runs, with nothing to ratify (#645)
   player.open("/p", 7, 0);
   setReview(null);
   assert.deepEqual(steps().map((s) => s.k), ["Now"]);
-  setReview({ head: "bbb", state: "reviewing", checked: 0, flagged: 0, line: null, left_out: 0, items: [] });
+  setReview({ head: "bbb", state: "reviewing", checked: 0, flagged: 0, line: null, left_out: 0, still_true: [], items: [] });
   assert.deepEqual(steps().map((s) => s.k), ["Now", "Ratify"]);
   player.close();
 });

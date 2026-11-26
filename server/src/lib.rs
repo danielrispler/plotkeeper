@@ -318,6 +318,7 @@ impl App {
             map_review::Config {
                 store: data.join("map-reviews"),
                 gh: None,
+                ratify: data.join(ratify::FILE),
             },
             &runner,
         );

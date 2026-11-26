@@ -583,13 +583,19 @@ type RatifyHeld = { name: string; text: RatifyWords; paths_added: string[]; path
 export type RatifyDetail =
   | { of: "part"; name: RatifyWords; purpose: RatifyWords; caption: RatifyWords; holds: RatifyHeld[]; paths_added: string[]; paths_removed: string[] }
   | { of: "link"; kind: RatifyWords; reason: RatifyWords; direction?: RatifyWords };
-// A PR head's Map text review (`map_review.rs`, #642), null when the head changed no map text. `idle`: not started (a PR not by Daniel's
+// A PR head's Map text review (`map_review.rs`, #642), null when the head has no item to review. `idle`: not started (a PR not by Daniel's
 // login waits for "Review map text", `map_review_start`); `failed` has `line` and offers "Run again", the same command. `items` holds
 // the head's items that have a verdict, by id: `part:<id>/name|purpose|caption`, `held:<part>/<n>` (n from 1, its place in `holds`),
 // `link:<id>/reason`, `law:<id>/text`. Any verdict but `supported` is `flagged`.
 export type MapReviewItem = { id: string; verdict: "supported" | "overreach" | "contradicted" | "unreadable"; why: string; cites: string[]; flagged: boolean };
+// A flagged still-true item (#687): unchanged text of a part whose files the PR changed, judged false at the head. `name` and `text` are
+// the head's map's (the part's name and "purpose" or "caption", the held item's name, the link's ends, the law's id), read by the
+// server. Ratify decides it as an item of kind "still-true" whose id is `ratify_id`; `decided`: Daniel accepted or overturned it.
+export type MapReviewFlag = { id: string; verdict: "overreach" | "contradicted" | "unreadable"; why: string; cites: string[]; name: string; text: string; ratify_id: string; decided: boolean };
 // `left_out`: how many of the head's changed map items the review left out of its prompt, for an id it does not take (over 40 characters).
-export type MapReview = { head: string; state: "idle" | "reviewing" | "done" | "failed"; items: MapReviewItem[]; checked: number; flagged: number; line: string | null; left_out: number };
+// `items`, `checked` and `flagged` are of changed items only; `still_true` holds the flagged still-true items, never a supported one. A
+// head whose only items are still-true ones is null but when its review failed or has a flag.
+export type MapReview = { head: string; state: "idle" | "reviewing" | "done" | "failed"; items: MapReviewItem[]; checked: number; flagged: number; line: string | null; left_out: number; still_true: MapReviewFlag[] };
 // What a ready PR's brief is doing (`pr_briefs.rs`): a newer head was pushed (stale), being written now, and the chapters' titles, or the one story's.
 // `note` (#477, part B): why the brief at this head is what it is after a push: the read carried over, or it was rewritten.
 // `since` (#497): the title of the "Since you read" story stored for this head, which the tray opens first; `since_chapters`, its chapters' titles when it has more than one, one tray row each.
