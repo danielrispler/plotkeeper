@@ -2,7 +2,7 @@
 // and what an overturn copies. `map-sheet.ts` and `map-brief.ts` draw it, the server (`server/src/ratify.rs`) keeps the records.
 
 import type { Drawer } from "./map-model.js";
-import type { BriefStep, ImportSite, LinkSites, MapReview, PendingItem, RatifyDetail, RatifyRow, SiteSnippet } from "./types.js";
+import type { BriefStep, ImportSite, LinkSites, MapReview, MapReviewFlag, PendingItem, RatifyDetail, RatifyRow, SiteSnippet } from "./types.js";
 
 // The state of an item as the brief says it: nothing to ratify when it landed before the first run.
 export const statusWords: Record<RatifyRow["status"], string> = {
@@ -127,6 +127,12 @@ export function overturnPrompt(
   branch: string | null,
 ): string {
   const where = branch ? `PR #${row.pr} (branch ${branch})` : `PR #${row.pr}`;
+  if (row.kind === "still-true") {
+    // The id is the review item's, then `@` and the verdict key (`map_review.rs`).
+    const item = row.id.slice(0, row.id.lastIndexOf("@"));
+    const why = row.flags?.length ? ` The map text review flagged it: ${row.flags.join(" ")}` : "";
+    return `In ${where}, I overturn the map text ${item}: “${row.text}”, which the PR left unchanged.${why} Correct the map text to what the code does, or the code when the text states the intent, and tell me what you changed.`;
+  }
   const what =
     row.kind === "decision"
       ? `the decision ${row.id}: “${row.text}”`
@@ -224,11 +230,23 @@ export function reviewFlags(review: MapReview | null, row: Pick<RatifyRow, "kind
 }
 
 /**
+ * The flagged still-true items not yet decided (#698, spec #687 "Still true? rows"), as Ratify rows of kind `still-true`: the id is the
+ * flag's `ratify_id`, which `ratify_set` keeps the decision under, and the text the head's. `map-brief.ts` draws them as "Still true?" rows.
+ */
+export const stillTrueRows = (review: MapReview | null, pr: number): RatifyRow[] =>
+  (review?.still_true ?? []).filter((flag) => !flag.decided).map((flag) => ({ pr, kind: "still-true", id: flag.ratify_id, text: flag.text, change: "", status: "not-yet", detail: null }));
+
+/** What the not-confirmed popover lists for a flagged still-true item: the verdict, the reviewer's why and the lines it cites. */
+export const stillTrueFlags = (flag: MapReviewFlag): string[] => [`Unchanged text (${flag.verdict}): ${stopped(flag.why)}${flag.cites.length ? ` See ${flag.cites.join(", ")}.` : ""}`];
+
+/**
  * The Map text review's line at Ratify's head (#645): its words, and the button that starts it, "Review map text" before any review of a
  * PR not by Daniel's login, "Run again" after a failure (both `map_review_start`). None when the head changed no map text.
  */
 export function reviewLine(review: MapReview | null): { line: string | null; start: "Review map text" | "Run again" | null } | null {
   if (!review) return null;
+  // A head whose only items are still-true ones has no changed item to count: its finished review says nothing (#698).
+  if (review.state === "done" && review.checked === 0 && !review.left_out) return null;
   // Items whose id the review does not take are left out of its prompt (`map_review.rs`, `takes`), and the line says so.
   const left = review.left_out ?? 0;
   if (review.state === "idle") return { line: left ? `${left} left out for an id the review does not take` : null, start: "Review map text" };

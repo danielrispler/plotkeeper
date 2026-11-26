@@ -569,6 +569,36 @@ test("the Ratify step shows while the review runs, with nothing to ratify (#645)
   player.close();
 });
 
+// #698: a review whose only items are still-true ones brings the Ratify step by a flag or a failure, and loses it when it runs again.
+test("on a still-true-only PR the Ratify step follows the review's state while the brief is open, and the dots follow the step list (#698)", async () => {
+  const { setPlaying, setReview, steps, player } = await import("../../dist/map-brief-player.js");
+  const stored = { version: 1, pr: 7, head: "bbb", written_at: 1, stale: false, model: "opus", brief: brief({ chapters: [chapter("Fog", "Now")] }) };
+  setPlaying(/** @type {any} */ ({ brief: stored, partial: false }), null, []);
+  const only = (state, still_true = [], line = null) => ({ head: "bbb", state, checked: 0, flagged: 0, line, left_out: 0, still_true, items: [] });
+  const flag = { id: "part:server/purpose", verdict: "overreach", why: "It writes.", cites: [], name: "Server purpose", text: "Serves.", ratify_id: "part:server/purpose@abc", decided: false };
+  player.open("/p", 7, 0);
+  // A failed review's Ratify step is the last step, and the brief is on it.
+  setReview(only("failed", [], "the run timed out"));
+  assert.deepEqual(steps().map((s) => s.k), ["Now", "Ratify"]);
+  player.go(1, steps().length);
+  assert.equal(player.current()?.step, 1);
+  // Run again: the server returns nothing for a running still-true-only review, so the step goes and the brief stays on its new last step.
+  setReview(null);
+  assert.deepEqual(steps().map((s) => s.k), ["Now"]);
+  player.clamp(steps().length);
+  assert.equal(player.current()?.step, 0);
+  // It ends with a flag: the step comes back with the flag as its row, and the dots (one per step) count it.
+  setReview(only("done", [flag]));
+  assert.deepEqual(steps().map((s) => s.k), ["Now", "Ratify"]);
+  assert.equal(steps().length, 2);
+  // Done with no flag, or only a decided one, brings nothing.
+  setReview(only("done"));
+  assert.deepEqual(steps().map((s) => s.k), ["Now"]);
+  setReview(only("done", [{ ...flag, decided: true }]));
+  assert.deepEqual(steps().map((s) => s.k), ["Now"]);
+  player.close();
+});
+
 test("a flagged map text's copy for the agent names the item in system-map.json and gives the review's why (#645)", () => {
   const flags = ["Purpose (overreach): It also writes the page. See server/src/lib.rs:41."];
   const prompt = agentPrompt(7, "map-text", { of: "map-text", kind: "part", id: "server", flags });

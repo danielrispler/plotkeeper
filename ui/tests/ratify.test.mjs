@@ -1,7 +1,7 @@
 // Ratifying's pure part (ticket #343), run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { copyOverturn, decideWith, detailLines, evidenceLine, mapCheckLine, noteFor, openRows, overturnPrompt, overturnReport, ratifyStep, headBrings, reviewFlags, reviewLine, sheetLinkItem, sheetPending, siteDrawer, sitesDrawer, statusWords } from "../../dist/ratify.js";
+import { copyOverturn, decideWith, detailLines, evidenceLine, mapCheckLine, noteFor, openRows, overturnPrompt, overturnReport, ratifyStep, headBrings, reviewFlags, reviewLine, stillTrueFlags, stillTrueRows, sheetLinkItem, sheetPending, siteDrawer, sitesDrawer, statusWords } from "../../dist/ratify.js";
 
 // A row with no detail of its own, as the page reads one whose kind has none.
 const row = (kind, id, status = "not-yet", extra = {}) => /** @type {import("../../dist/types.js").RatifyRow} */ ({ pr: 7, kind, id, text: `${id} text`, change: "", status, ...extra });
@@ -266,6 +266,20 @@ test("a row's review flags are its part's, held items', link's or law's flagged 
   assert.deepEqual(reviewFlags(null, part), []);
 });
 
+const flag = (id, verdict, decided, extra = {}) => ({ id, verdict, why: "It writes the page.", cites: ["server/src/lib.rs:41"], name: "Server purpose", text: "Serves it.", ratify_id: `${id}@abc`, decided, ...extra });
+
+test("a flagged still-true item is a Still true? row unless decided, with its verdict, why and cites for the popover, and its overturn asks for a correction (#698)", () => {
+  const got = { ...review("done"), still_true: [flag("part:server/purpose", "overreach", false), flag("law:one/text", "contradicted", true)] };
+  const rows = stillTrueRows(got, 7);
+  assert.deepEqual(rows, [{ pr: 7, kind: "still-true", id: "part:server/purpose@abc", text: "Serves it.", change: "", status: "not-yet", detail: null }], "a decided flag is not shown");
+  assert.deepEqual(stillTrueRows(null, 7), []);
+  assert.deepEqual(stillTrueFlags(got.still_true[0]), ["Unchanged text (overreach): It writes the page. See server/src/lib.rs:41."]);
+  const prompt = overturnPrompt({ ...rows[0], flags: stillTrueFlags(got.still_true[0]) }, "fog");
+  assert.match(prompt, /^In PR #7 \(branch fog\), I overturn the map text part:server\/purpose: “Serves it\.”/);
+  assert.match(prompt, /Unchanged text \(overreach\): It writes the page\. See server\/src\/lib\.rs:41\./);
+  assert.match(prompt, /Correct the map text to what the code does, or the code when the text states the intent/);
+});
+
 test("the review's line at Ratify's head says each state, and offers the button before a review and Run again after a failure (#645)", () => {
   assert.equal(reviewLine(null), null, "a head that changed no map text has none");
   assert.deepEqual(reviewLine(review("idle")), { line: null, start: "Review map text" });
@@ -276,6 +290,10 @@ test("the review's line at Ratify's head says each state, and offers the button 
   // An item whose id the review does not take is left out of its prompt, and the line says so (#634's review).
   assert.deepEqual(reviewLine(review("done", [verdict("a", false)], null, 1)), { line: "Map text review: 1 checked, 0 flagged, 1 left out for an id it does not take", start: null });
   assert.deepEqual(reviewLine(review("idle", [], null, 2)), { line: "2 left out for an id the review does not take", start: "Review map text" });
+  // A head whose only items are still-true ones (#698): a finished review says nothing, a failed one its line and Run again.
+  const stillOnly = (state, line = null) => ({ ...review(state, [], line), still_true: [flag("part:a/purpose", "overreach", false)] });
+  assert.equal(reviewLine(stillOnly("done")), null, "no '0 checked, 0 flagged' line for a still-true-only head");
+  assert.deepEqual(reviewLine(stillOnly("failed", "the run timed out")), { line: "Map text review failed: the run timed out", start: "Run again" });
 });
 
 test("an overturn of a flagged row quotes the review's why, and an unflagged one says nothing of the review (#645)", () => {
