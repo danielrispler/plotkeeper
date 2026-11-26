@@ -62,7 +62,7 @@ function clearView() {
 
 // The header's two lines. Line 1: the agent's mark and the session's name, whole: CSS ends it in "…" when it is too long, and the full
 // name is its hover text (#444). Line 2: the verdict, the kind of block when the session needs Daniel, the permission mode and, only
-// while it runs, the estimate. The times and the model show on hover, counted at the hover.
+// while it runs, the estimate. The hover gives the estimate in full, then the times and the model, counted at the hover.
 function showHeader(session: Session, agent: Subagent | null) {
   const [label, state] = agent === null ? [stateLabels[session.state], session.state] : agentState(session, agent);
   const stepSpan = (agent ?? session).step_span;
@@ -80,13 +80,15 @@ function showHeader(session: Session, agent: Subagent | null) {
   const name = sessionName(session);
   // The name, the block's kind and the estimate may be cut at a narrow rail: each scrolls in place on hover.
   cut(element("session-name"), name);
-  cut(element("phase"), agent === null && state === "running" ? estimateText(session.work) : "");
+  const estimate = agent === null && state === "running" ? estimateText(session.work) : "";
+  cut(element("phase"), estimate);
   // The model and effort the session runs at (danielrispler/Falinks#517, decision 8); none for a subagent, whose transcript the studio does not read.
   const effort = session.transcript.effort;
   const runsAt = agent === null ? [modelLine(session), effort && `effort ${effort}`].filter(Boolean).join(" · ") : "";
-  // The times and the model, counted when the header is drawn (spec #582); #headline is no button, so its hint opens once #586's pointer path is in.
+  // The phase and estimate in full, which a narrow rail may cut (spec #658), then the times and the model, counted when the header is drawn
+  // (spec #582); #headline is no button, so its hint opens once #586's pointer path is in.
   const now = Date.now();
-  hint(element("headline"), [...times(session, stepSpan).map(([, draw]) => draw(now)), runsAt].filter(Boolean).join(" · "));
+  hint(element("headline"), [estimate, ...times(session, stepSpan).map(([, draw]) => draw(now)), runsAt].filter(Boolean).join(" · "));
 }
 
 // The "⋯" menu's actions. Another agent's row (danielrispler/Falinks#560) has no name of its own to keep, nor turns to mark, and comes

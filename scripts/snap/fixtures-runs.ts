@@ -83,6 +83,11 @@ export const mapPreFlight = (): Fixture =>
       const predicted = [...document.querySelectorAll(".plate.predicted")].map((plate) => plate.dataset.id);
       if (predicted.join(",") !== "core,understanding") return log("snap:fail the predicted plates: " + predicted.join(","));
       if (!document.querySelector('.plate[data-id="core"] .plate-predicted')?.textContent.includes("predicted")) log("snap:fail the plate has no predicted chip");
+      // Plate text a size larger (#669): the caption at the body size, the predicted word at the small size; the plate keeps its size.
+      const core = document.querySelector('.plate[data-id="core"]');
+      const sizeOf = (selector) => getComputedStyle(core.querySelector(selector)).fontSize;
+      if (sizeOf(".plate-caption") !== "14px" || sizeOf(".plate-predicted") !== "12.5px") log("snap:fail the plate's caption is " + sizeOf(".plate-caption") + " and its predicted word " + sizeOf(".plate-predicted"));
+      if (core.offsetWidth !== 264 || core.offsetHeight !== 76) log("snap:fail the plate is " + core.offsetWidth + "x" + core.offsetHeight + ", not 264x76");
       document.getElementById("pre-flight-button").click();
       // Past the glass's rise, so the overlay is drawn whole.
       await wait(600);
@@ -134,6 +139,111 @@ export const mapPreFlightStatus = (): Fixture =>
     pre_flight_predict: { __delay: 200, value: { __throw: "the writer is not set" } } as never,
     snapDone: "pre-flight status ok",
   });
+// Pre-flight's outside press (#666), with a real pointer: the overlay opened on the framed pre-flight, its result, `check` then run.
+const preFlightPressed = (check: string, done: string): Fixture => ({
+  ...mapOpened(`
+      const box = document.getElementById("map-pre-flight");
+      const button = document.getElementById("pre-flight-button");
+      const shown = () => !box.hidden;
+      const click = async (node) => { await __snapClick(node); await wait(60); };
+      const pressNamed = async (words) => { [...box.querySelectorAll("button")].find((b) => b.textContent === words)?.click(); await wait(100); };
+      const open = async () => { if (!shown()) button.click(); await wait(150); return box.querySelector(".pre-flight-row") !== null; };
+      // A point of the empty map, clear of the plates, the overlay, the tray and the side area.
+      const empty = () => {
+        for (let y = 120; y < innerHeight - 160; y += 40) for (let x = 80; x < innerWidth / 2; x += 40) {
+          const hit = document.elementFromPoint(x, y);
+          if (hit && (hit.classList.contains("map-world") || hit.classList.contains("map-canvas"))) return { getBoundingClientRect: () => ({ left: x - 1, top: y - 1, width: 2, height: 2 }) };
+        }
+        return null;
+      };
+      if (!(await open())) return log("snap:fail the Pre-flight button did not open the result");
+      ${check}
+      log("${done}");`, {
+    map_state: mapState({
+      pre_flight: { issue: 378, title: "Studio: Spec: the modules", parts: ["core", "understanding"], predicted: true, at: runAt },
+      ready: [{ number: 336, title: "Ready for review tray", head: "a".repeat(40), brief: null }],
+    }),
+    pre_flight_predict: { __delay: 300, value: base.pre_flight_predict } as never,
+  }),
+  realPointer: true,
+  snapDone: done,
+});
+/**
+ * A press outside Pre-flight closes it (#666): on a plate or the tray its result, on the empty map its start. A press in it leaves it open,
+ * and a click on its button closes it once.
+ */
+export const mapPreFlightOutside = (): Fixture =>
+  preFlightPressed(`
+      await click(box.querySelector(".pre-flight-row"));
+      if (!shown()) log("snap:fail a press in the overlay closed it");
+      await click(button);
+      if (shown()) log("snap:fail a click on the Pre-flight button did not close it");
+      await open();
+      await click(document.querySelector("#map .plate[data-id=hook]"));
+      if (shown()) log("snap:fail a press on a plate left the result open");
+      await open();
+      await click(document.querySelector("#map-tray .side-title"));
+      if (shown()) log("snap:fail a press on the tray left the result open");
+      // Its start, after Clear: a press on the empty map closes it.
+      await open();
+      await pressNamed("Clear");
+      if (!box.querySelector(".pre-flight-text")) return log("snap:fail Clear did not show the start");
+      const spot = empty();
+      if (!spot) return log("snap:fail no empty spot of the map found");
+      await click(spot);
+      if (shown()) log("snap:fail a press on the map left the start open");`, "pre-flight outside ok");
+/**
+ * While Daniel picks parts by hand, or waits on the writer, a press on the map leaves Pre-flight open (#666), with what he ticked; its
+ * button still closes it, and Esc closes it.
+ */
+export const mapPreFlightOutsideKept = (): Fixture =>
+  preFlightPressed(`
+      await pressNamed("Clear");
+      await pressNamed("Pick parts by hand");
+      const tick = box.querySelector("input[type=checkbox]");
+      if (!tick) return log("snap:fail the hand picker did not show");
+      tick.checked = true;
+      const spot = empty();
+      if (!spot) return log("snap:fail no empty spot of the map found");
+      await click(spot);
+      if (!shown() || !box.querySelector("input[type=checkbox]")?.checked) log("snap:fail a press on the map closed the hand picker");
+      await click(button);
+      if (shown()) log("snap:fail the Pre-flight button did not close the hand picker");
+      await open();
+      await pressNamed("Clear");
+      box.querySelector(".pre-flight-issue")?.click();
+      await wait(50);
+      if (!box.textContent.includes("Asking the writer")) return log("snap:fail the prediction's wait did not show: " + box.textContent);
+      await click(spot);
+      if (!shown()) log("snap:fail a press on the map closed the prediction's wait");
+      await wait(300);
+      document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", key: "Escape", bubbles: true }));
+      await wait(100);
+      if (shown()) log("snap:fail Esc did not close the overlay");`, "pre-flight kept ok");
+/**
+ * The palette's Pre flight, with a real pointer, toggles the overlay as its button does: a press in the palette is not a press outside
+ * Pre-flight (spec #658's review), so the open result closes, and the next press opens it again.
+ */
+export const mapPreFlightPalette = (): Fixture =>
+  preFlightPressed(`
+      const palette = document.getElementById("palette");
+      const row = async () => {
+        document.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyP", key: "P", metaKey: true, shiftKey: true, bubbles: true }));
+        await wait(150);
+        const found = [...palette.querySelectorAll("button.row")].find((b) => b.querySelector(".name")?.textContent === "Pre flight");
+        found?.scrollIntoView({ block: "nearest" });
+        await wait(50);
+        return found;
+      };
+      const closing = await row();
+      if (!closing) return log("snap:fail the palette has no Pre flight row: " + palette.textContent.slice(0, 200));
+      await click(closing);
+      await wait(150);
+      if (shown()) log("snap:fail the palette's Pre flight left the open overlay open");
+      const opening = await row();
+      await click(opening);
+      await wait(150);
+      if (!shown()) log("snap:fail the palette's Pre flight did not open the closed overlay");`, "pre-flight palette ok");
 // Back a law (#398): Hook's law on trust offers Back a law; Core's law on trust has a proven patch, and Review opens the patch review over
 // the map with the test patch, the output with the test alone and with the plant, and Discard.
 const lawPatchDiff = [

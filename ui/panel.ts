@@ -93,7 +93,7 @@ function reveal() {
 /**
  * Opens `content` in the panel, or closes it with null; the sheet closes too when the window is narrow or the content is the widened diff.
  * Closing a panel that shows a session (`panelSession`: its story, a turn's diff or a worker's log) leaves the bare map with no session
- * selected, unless `keepSelection` (⌘2, which opens the story again).
+ * selected, unless `keepSelection` (Toggle rail, `]`, which opens the story again).
  */
 export function showPanel(content: PanelContent | null, keepSelection = false) {
   const before = shown;

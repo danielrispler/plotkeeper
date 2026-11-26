@@ -52,14 +52,19 @@ const phaseNames: Record<Phase, string> = {
 
 // The phase and the estimate (danielrispler/Falinks#475), such as "Implementing · est. 16m–29m left", or
 // "Implementing · depends on you" in place of a time while the session waits on Daniel; the phase
-// alone with no estimate yet (danielrispler/Falinks#571); empty before the first phase.
+// alone with no estimate yet (danielrispler/Falinks#571); empty before the first phase. A passed lower bound reads
+// "est. up to 12m left" and a passed upper bound "past its estimate" (spec #658).
 export function estimateText(work: Pick<Work, "phases" | "estimate">): string {
   const phase = work.phases.at(-1)?.phase;
   if (phase === undefined) return "";
   if (phase === "merged") return phaseNames.merged;
   const range = work.estimate.range;
   if (work.estimate.depends_on_you) return `${phaseNames[phase]} · depends on you`;
-  return range === null ? phaseNames[phase] : `${phaseNames[phase]} · est. ${duration(range[0])}–${duration(range[1])} left`;
+  if (range === null) return phaseNames[phase];
+  // A lower bound under a minute reads "up to" the upper; an upper bound under a minute is said in words (spec #658).
+  if (range[1] < 60_000) return `${phaseNames[phase]} · past its estimate`;
+  if (range[0] < 60_000) return `${phaseNames[phase]} · est. up to ${duration(range[1])} left`;
+  return `${phaseNames[phase]} · est. ${duration(range[0])}–${duration(range[1])} left`;
 }
 
 // The elements whose text counts up, each with how to draw it at a time.

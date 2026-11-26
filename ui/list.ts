@@ -1,6 +1,6 @@
 // The session list, on the window's right: one line per session, sorted by state, its status shown
-// by shape (danielrispler/Falinks#572), each session's subagents nested under it. When the window is narrow it collapses to
-// a strip of glyphs and labels, which opens the full list on hover, on click or on ⌘1. Its pure parts are `list-model.ts`.
+// by shape (danielrispler/Falinks#572), each session's subagents nested under it. When the window is narrow, or `[` folds it,
+// it collapses to a strip of glyphs and labels, which opens the full list on hover, on click or on `[`. Its pure parts are `list-model.ts`.
 
 import { logStop } from "./stop-rules.js";
 import { age, cut, element, failure, glyphOnly, hint, invoke, keepOnly, keyed, mark, newest, patch, pressable, prose, stepText, text } from "./dom.js";
@@ -125,7 +125,7 @@ function nameTitle(session: Session): string {
 function nameNode(session: Session): HTMLElement {
   const node = keyed(cut(text("span", sessionName(session), "name")), `name-${session.id}`);
   const full = nameTitle(session);
-  return full ? hint(node, full) : node;
+  return full ? hint(node, full, "start") : node;
 }
 
 // The mark's node: a mark named by what it says in full, the context's tokens among them; an empty one, with no context, is none.
@@ -133,10 +133,10 @@ function markNode(session: Session): HTMLElement {
   const node = text("span", rowMark(session), "id");
   node.setAttribute("data-key", `mark-${session.id}`);
   // A span is no button: its hint opens once the helper's pointer path reaches it (#586).
-  if (session.shell) return mark(node, "A plain terminal");
-  if (session.status_only) return mark(node, "Another agent, followed by its reported status only");
+  if (session.shell) return mark(node, "A plain terminal", "start");
+  if (session.status_only) return mark(node, "Another agent, followed by its reported status only", "start");
   const context = contextTitle(session.transcript.context);
-  return context ? mark(node, context) : node;
+  return context ? mark(node, context, "start") : node;
 }
 
 
@@ -149,7 +149,7 @@ function glyph(where: string, state: string, unseen = false, landed = false, unw
   node.setAttribute("aria-label", word);
   if (shape === "check") {
     node.setAttribute("data-key", `glyph ${where}`);
-    return mark(node, word);
+    return mark(node, word, "start");
   }
   return node;
 }
@@ -176,7 +176,7 @@ function rowLines(button: HTMLElement, state: string, name: HTMLElement[], below
     second.append(...below);
     button.append(second);
   }
-  hint(button, withNote(`${name[0]?.textContent ?? ""} · ${status(state, unseen, landed, unwatched)[1]}`, note));
+  hint(button, withNote(`${name[0]?.textContent ?? ""} · ${status(state, unseen, landed, unwatched)[1]}`, note), "start");
   return first;
 }
 
@@ -207,7 +207,7 @@ export function row(session: Session, children: Children, token: string | null =
     [nameNode(session), markNode(session), ...(token ? [cut(text("span", token, "id token"))] : [])],
     line === null
       ? null
-      : [...done(children, children.get("session")), rowLine(line, session.id), ...(turn ? [hint(counts(clock, turn[1]), turn[0])] : [])],
+      : [...done(children, children.get("session")), rowLine(line, session.id), ...(turn ? [hint(counts(clock, turn[1]), turn[0], "start")] : [])],
     session.unseen,
     session.landed,
     !session.pid,
@@ -218,7 +218,7 @@ export function row(session: Session, children: Children, token: string | null =
   button.addEventListener("pointerenter", () => hoverAgents(session.id, button));
   button.addEventListener("pointerleave", () => hoverAgents(null));
   // The agent's logo leads the row, apart from its state glyph (#158).
-  first.prepend(logo(logoKey(session), noContextNote(session) || undefined, `row-${session.id}`));
+  first.prepend(logo(logoKey(session), noContextNote(session) || undefined, `row-${session.id}`, "start"));
   return button;
 }
 
@@ -232,7 +232,7 @@ function rowLine(line: string, key: string): HTMLElement {
   cut(node);
   if (!full) return node;
   node.setAttribute("data-key", `step-${key}`);
-  return hint(node, full);
+  return hint(node, full, "start");
 }
 
 
@@ -283,11 +283,12 @@ export function item(key: string, depth: number, toggle: { open: boolean; hiding
       if (!folded.delete(key)) folded.add(key);
       drawSidebar();
     });
-    // A fixed name and hint; whether it is open is said by `aria-expanded` alone (#456).
+    // Named for its row's session or worker (spec #658), a worker with no name as its log's title names it (`log.ts`), with a fixed
+    // hint; whether it is open is said by `aria-expanded` alone (#456).
     fold.dataset.key = `${key} fold`;
-    fold.setAttribute("aria-label", "Subagents");
+    fold.setAttribute("aria-label", `Subagents of ${row.querySelector(".name")?.textContent || "Subagent"}`);
     fold.setAttribute("aria-expanded", String(toggle.open));
-    hint(fold, "Show or hide its subagents");
+    hint(fold, "Show or hide its subagents", "start");
     // The count goes after the name, as the toggle's column has room only for its chevron.
     if (toggle.hiding) row.querySelector(".name")?.after(text("span", `${toggle.hiding} hidden`, "id"));
     fold.style.insetInlineStart = `calc(var(--indent) * ${depth})`;
@@ -305,7 +306,7 @@ export function deleting(session: Session): HTMLElement | null {
   const button = icon("delete", CROSS, () => void deps.askDelete(now()).catch(failure("delete", "error")));
   button.dataset.key = `${session.id} delete`;
   button.setAttribute("aria-label", `Delete ${sessionName(session)}…`);
-  hint(button, "Delete this session from the list…");
+  hint(button, "Delete this session from the list…", "start");
   return button;
 }
 
@@ -332,7 +333,7 @@ function tree(session: Session, token: string | null): HTMLElement[] {
 function idle(count: number, toggle: () => void): HTMLElement {
   const button = pressable(text("button", `${count} idle`), null, toggle);
   button.dataset.key = "strip idle";
-  return hint(button, titled(studio.files.keymap, "Open the session list, idle sessions among it", "studio::ToggleList"));
+  return hint(button, titled(studio.files.keymap, "Open the session list, idle sessions among it", "studio::ToggleList"), "start");
 }
 
 /**
@@ -346,7 +347,7 @@ export function strip(sessions: Session[]): HTMLElement[] {
   open.setAttribute("aria-label", "Session list");
   open.append(glyphOnly("☰"));
   open.dataset.key = "strip open";
-  hint(open, titled(studio.files.keymap, "Open the session list", "studio::ToggleList"));
+  hint(open, titled(studio.files.keymap, "Open the session list", "studio::ToggleList"), "start");
   const shown = sessions.filter((session) => !collapsed.includes(session.state));
   const labels = stripLabels(shown);
   const rest = sessions.length - shown.length;
@@ -356,7 +357,7 @@ export function strip(sessions: Session[]): HTMLElement[] {
       const button = selecting(session.id, null, `strip ${session.id}`);
       button.setAttribute("aria-pressed", String(isSelected(session.id)));
       button.append(glyph(`strip ${session.id}`, session.state, session.unseen, session.landed), labels[i] ?? "");
-      return hint(button, `${sessionName(session)} · ${status(session.state, session.unseen, session.landed)[1]}`);
+      return hint(button, `${sessionName(session)} · ${status(session.state, session.unseen, session.landed)[1]}`, "start");
     }),
     ...(rest ? [idle(rest, toggle)] : []),
   ];
@@ -403,7 +404,7 @@ function projectMore(group: ProjectGroup<Session>): HTMLElement {
   more.addEventListener("pointerdown", () => (wasOpen = openHere()));
   more.dataset.key = `more ${group.key}`;
   more.setAttribute("aria-label", `More actions for ${group.name}`);
-  return hint(more, "Project");
+  return hint(more, "Project", "start");
 }
 
 /**
@@ -422,9 +423,9 @@ export function projectHead(group: ProjectGroup<Session>): HTMLElement {
   if (group.rollup) toggle.append(glyph(`head ${group.key}`, group.rollup));
   const why = marks.get(group.key);
   if (why?.length) {
-    toggle.append(mark(keyed(text("span", "", "project-dot mist-swatch"), `dot ${group.key}`), dotTitle(why)));
+    toggle.append(mark(keyed(text("span", "", "project-dot mist-swatch"), `dot ${group.key}`), dotTitle(why), "start"));
   }
-  hint(toggle, `${group.gone ? `${group.key} is gone` : group.key || group.name}\n${group.key === shownProject() ? "Fold or unfold its sessions" : "Show its map"}`);
+  hint(toggle, `${group.gone ? `${group.key} is gone` : group.key || group.name}\n${group.key === shownProject() ? "Fold or unfold its sessions" : "Show its map"}`, "start");
   head.append(toggle, ...(group.live ? [] : [projectMore(group)]));
   return head;
 }
@@ -453,7 +454,7 @@ function projectNode(group: ProjectGroup<Session>): HTMLElement {
     const id = `${group.key} ${state}`;
     folded.open = opened.has(id);
     folded.addEventListener("toggle", () => (folded.open ? opened.add(id) : opened.delete(id)));
-    folded.append(hint(text("summary", `${stateLabels[state]} · ${sessions.length}`), `Show or hide the ${stateLabels[state].toLowerCase()} sessions`), ...rows);
+    folded.append(hint(text("summary", `${stateLabels[state]} · ${sessions.length}`), `Show or hide the ${stateLabels[state].toLowerCase()} sessions`, "start"), ...rows);
     body.append(folded);
   }
   node.append(body);
@@ -476,7 +477,7 @@ function historyLink(sessions: Pick<Session, "state">[]): HTMLElement[] {
   if (!count) return [];
   const link = pressable(text("button", `History · ${count}`, "history-link"), null, showHistory);
   link.dataset.key = "history";
-  return [hint(link, "Show the ended sessions")];
+  return [hint(link, "Show the ended sessions", "start")];
 }
 
 // "Clear landed" at the list's end (#382), quiet, only while a landed session shows: Home's Clear (#244), with its Undo.
@@ -484,7 +485,7 @@ function clearLanded(landed: Session[]): HTMLElement[] {
   if (!landed.length) return [];
   const button = pressable(text("button", "Clear landed", "clear-landed quiet"), null, () => landedClear.clear(landedToClear(studio.listed, landedClear.hidden)));
   button.dataset.key = "clear";
-  return [hint(button, "Clear every landed session; Undo for a few seconds")];
+  return [hint(button, "Clear every landed session; Undo for a few seconds", "start")];
 }
 
 /**

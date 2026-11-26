@@ -991,7 +991,7 @@ export const mapCalm = () =>
     log("plates " + plates + ", marks " + checks + "/" + trusts);`, { map_state: mapState() });
 /**
  * The map's camera (#383): an empty point of the map is the map itself (no layer over it), a drag there pans, a wheel and a pinch
- * zoom up to 200 % and never scroll the page, and ⌘0 fits the whole map; no part's place changes. Shown fitted.
+ * zoom up to 200 % and never scroll the page, and `0` fits the whole map; no part's place changes. Shown fitted.
  */
 export const mapCamera = () =>
   mapOpened(`
@@ -1021,23 +1021,53 @@ export const mapCamera = () =>
     const plain = wheel({ deltaY: 100 });
     canvas.dispatchEvent(plain);
     const out = camera();
-    if (!(out.scale < panned.scale)) log("snap:fail a plain wheel did not zoom out: " + JSON.stringify(out));
+    // One 100 px mouse-wheel tick zooms about ×1.16 (rate 0.0015 a pixel, #669).
+    const tick = panned.scale / out.scale;
+    if (!(tick > 1.15 && tick < 1.17)) log("snap:fail one 100 px wheel tick zoomed by ×" + tick.toFixed(3) + ", not about ×1.16");
     if (!plain.defaultPrevented || document.scrollingElement.scrollTop !== scrolled) log("snap:fail a plain wheel was not swallowed");
+    // A wheel that reports lines zooms by the same feel: 6.25 lines of 16 px are 100 px.
+    canvas.dispatchEvent(wheel({ deltaY: -6.25, deltaMode: 1 }));
+    const lines = camera().scale / out.scale;
+    if (!(lines > 1.15 && lines < 1.17)) log("snap:fail a 6.25-line wheel event zoomed by ×" + lines.toFixed(3) + ", not about ×1.16");
+    canvas.dispatchEvent(wheel({ deltaY: 6.25, deltaMode: 1 }));
+    // A large plain wheel event is held to ×1.25.
+    const prior = camera().scale;
+    canvas.dispatchEvent(wheel({ deltaY: -300 }));
+    const held = camera().scale / prior;
+    if (Math.abs(held - 1.25) > 0.001) log("snap:fail a 300 px wheel event zoomed by ×" + held.toFixed(3) + ", not ×1.25");
+    canvas.dispatchEvent(wheel({ deltaY: 300 }));
+    // A pinch (Ctrl held) keeps its rate: 100 px is ×e^1.2.
+    const unpinched = camera().scale;
     canvas.dispatchEvent(wheel({ ctrlKey: true }));
-    if (!(camera().scale > out.scale)) log("snap:fail a pinch did not zoom in");
+    const pinched = camera().scale;
+    if (Math.abs(pinched - Math.min(2, unpinched * Math.exp(1.2))) > 0.001) log("snap:fail a pinch zoomed from " + unpinched + " to " + pinched + ", not by ×e^1.2");
+    // Its delta is read as it comes, as before #669: Firefox's Ctrl+wheel notch of 3 lines zooms ×e^-0.036, not ×0.56.
+    canvas.dispatchEvent(wheel({ ctrlKey: true, deltaY: 3, deltaMode: 1 }));
+    const notch = camera().scale / pinched;
+    if (Math.abs(notch - Math.exp(-0.036)) > 0.001) log("snap:fail a 3-line Ctrl+wheel notch zoomed by ×" + notch.toFixed(3) + ", not ×e^-0.036");
     for (let i = 0; i < 40; i++) canvas.dispatchEvent(wheel({ deltaY: -300 }));
     if (camera().scale !== 2) log("snap:fail zoom is not held at 200 %: " + camera().scale);
     for (let i = 0; i < 40; i++) canvas.dispatchEvent(wheel({ deltaY: 300 }));
     if (camera().scale !== 0.4) log("snap:fail zoom is not held at 40 %: " + camera().scale);
-    document.dispatchEvent(new KeyboardEvent("keydown", { code: "Digit0", key: "0", metaKey: true, bubbles: true }));
+    document.dispatchEvent(new KeyboardEvent("keydown", { code: "Digit0", key: "0", bubbles: true }));
     const fitted = camera();
-    if (fitted.scale === 0.4) log("snap:fail ⌘0 did not fit the map");
+    if (fitted.scale === 0.4) log("snap:fail 0 did not fit the map");
     // Headless Chrome's virtual time does not run the fit's glide: skip to where it ends.
     world().classList.remove("glide");
     await wait(100);
     const shown = [...document.querySelectorAll("#map .plate, #map .actor")].map((n) => n.getBoundingClientRect());
-    if (shown.some((r) => r.left < box.left || r.right > box.right || r.top < box.top || r.bottom > box.bottom)) log("snap:fail ⌘0 left a part outside the map");
+    if (shown.some((r) => r.left < box.left || r.right > box.right || r.top < box.top || r.bottom > box.bottom)) log("snap:fail 0 left a part outside the map");
     if (places() !== before) log("snap:fail a part's saved position changed");
+    // The Fit button in the map head (#669) fits the map as 0 does, and its hint names 0.
+    const fit = document.querySelector("#map .map-head #fit-map-button");
+    if (!fit) return log("snap:fail the map head has no Fit button");
+    for (let i = 0; i < 40; i++) canvas.dispatchEvent(wheel({ deltaY: 300 }));
+    fit.click();
+    if (camera().scale !== fitted.scale) log("snap:fail the Fit button fitted at " + camera().scale + ", 0 at " + fitted.scale);
+    const fitHint = document.getElementById(fit.getAttribute("interestfor") ?? fit.getAttribute("data-hint"));
+    if (!fitHint || !/\\(0\\)/.test(fitHint.textContent)) log("snap:fail the Fit button's hint does not name 0: " + (fitHint ? fitHint.textContent : "none"));
+    world().classList.remove("glide");
+    await wait(100);
     log("camera ok: fitted at " + Math.round(fitted.scale * 100) + "% over " + shown.length + " items");`, { map_state: mapState() });
 /** The Map view with fog (#310): thin and thick fog on Core and interface parts, and the part sheet of a thick one open. */
 export const mapFog = () =>
@@ -1119,7 +1149,17 @@ export const mapEmpty = () =>
     const draft = document.querySelector("#map .map-empty .map-draft");
     if (!draft) return log("snap:fail no drafting prompt");
     if (!draft.textContent.includes("system-map.json") || !draft.textContent.includes("system-map check")) log("snap:fail the drafting prompt lacks the file or the check: " + draft.textContent);
-    if (document.querySelector("#map .map-empty .btn")) log("snap:fail a button starts a session from the page");
+    // The only button is the prompt's copy icon (#669); none starts a session from the page.
+    if ([...document.querySelectorAll("#map .map-empty .btn")].some((b) => !b.matches(".copy-icon"))) log("snap:fail a button starts a session from the page");
+    const copy = document.querySelector("#map .map-empty .copy-icon");
+    if (!copy) return log("snap:fail the drafting prompt has no copy icon");
+    if (copy.getAttribute("aria-label") !== "Copy the prompt") log("snap:fail the copy icon's name: " + copy.getAttribute("aria-label"));
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (words) => void (window.__copied = words) } });
+    copy.click();
+    await wait(150);
+    const toast = document.getElementById("copy-toast");
+    if (!toast.matches(":popover-open") || !toast.textContent.includes("Prompt copied")) log("snap:fail the copy toast does not say the prompt was copied: " + toast.textContent);
+    if (window.__copied !== draft.textContent) log("snap:fail the clipboard holds " + JSON.stringify(window.__copied) + ", not the prompt");
     log("drafting prompt: " + draft.textContent.slice(0, 40));`, { map_state: mapState({ status: "none", source: null }) });
 
 /**

@@ -235,6 +235,11 @@ export function sayAction(words: string) {
  */
 export function cut<T extends HTMLElement>(node: T, words?: string): T {
   if (!/(^| )cut( |$)/.test(node.className)) node.className = `${node.className} cut`.trim();
+  // No words leave the node empty, so a rule such as the header's `:empty` hides it (spec #658).
+  if (words === "" || (words === undefined && !node.hasChildNodes())) {
+    node.replaceChildren();
+    return node;
+  }
   const inner = document.createElement("span");
   if (words === undefined) inner.append(...node.childNodes);
   else inner.textContent = words;
@@ -398,15 +403,20 @@ function listenForHint(trigger: Element, keyboard: boolean) {
   });
 }
 
+/** Where a hint opens beside its trigger, given to `hint`: "start", at its inline start. */
+export type Place = "start";
+
 /**
  * `trigger`, an enabled `<button>` or `<a>`, or a `<summary>`, `<input>` or `<select>` (the listener path), with its own hint of `words`, the one hover of the page: it shows on hover and on focus,
  * closes on Esc and sits beside its trigger (`interestfor`, `popover="hint"`; `style.css`). The words are plain text, known when the
  * trigger is drawn. A hint that adds to the trigger's name (its `aria-label`, else its text) is its description: `role="tooltip"` on the
  * hint and `aria-describedby` on the trigger, unless the author set one; a hint that only repeats the name adds nothing, as it would be
  * read twice. Any `title` goes. The trigger's `data-key` or `id` pins its hint across draws; give a trigger one. A trigger this has
- * already wired keeps its hint when drawn again.
+ * already wired keeps its hint when drawn again. `place` "start" sets the hint at the trigger's inline start, flipping to its end when
+ * there is no room, as the session list's hints are, so they leave the rows above and below in view (spec #658); without it the hint
+ * sits above the trigger and flips below. A placement, not a check for the list, as a trigger is often hinted before it is attached.
  */
-export function hint<T extends Element>(trigger: T, words: string): T {
+export function hint<T extends Element>(trigger: T, words: string, place?: Place): T {
   const id = named(trigger) ?? hintId(trigger.getAttribute("data-key") ?? trigger.getAttribute("id") ?? `n${++loose}`);
   let node = hints.get(id);
   if (!node) {
@@ -419,6 +429,8 @@ export function hint<T extends Element>(trigger: T, words: string): T {
     element("hints").append(node);
   }
   node.textContent = words;
+  if (place) node.setAttribute("data-place", place);
+  else node.removeAttribute("data-place");
   owners.set(id, new WeakRef(trigger));
   const adds = squeezed(words) !== squeezed(trigger.getAttribute("aria-label") ?? trigger.textContent);
   if (adds) node.setAttribute("role", "tooltip");
@@ -452,10 +464,10 @@ export function unhint<T extends Element>(trigger: T): T {
  * `words` as its hint on the pointer alone (#582). It stays out of the Tab order, so what it says must also reach the keyboard some
  * other way, in the part sheet's law list or the row's own words. Give it a `data-key` or an `id`, so its hint is the same on every draw.
  */
-export function mark<T extends Element>(node: T, words: string): T {
+export function mark<T extends Element>(node: T, words: string, place?: Place): T {
   node.setAttribute("role", "img");
   node.setAttribute("aria-label", words);
-  return hint(node, words);
+  return hint(node, words, place);
 }
 
 /**

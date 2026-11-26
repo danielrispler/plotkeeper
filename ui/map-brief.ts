@@ -6,7 +6,7 @@
 // from the facts carries a mark whose popover lists why. A step's "See the code" opens its parts' files in the drawer (`map-drawer.ts`) above it. Opening a brief returns the map to now;
 // a PR that changed the map plays on its Map diff (#640, `setDiff`), today's map with the PR's new parts and its removed ones as ghosts, which
 // its steps may light, until the brief closes.
-// A quiet copy icon (#493) on a Could break step, in the not-confirmed popover and on the No part group copies a prompt for the agent.
+// A quiet copy icon (#493) on a Could break step, in the not-confirmed popover and on the No part group copies a prompt for the agent (`copy-button.ts`).
 // A step's check (#340) is answered in place: a pick in the panel, an order by tapping parts on the map into numbered slots (`pickRun`, `orderRun`);
 // Check grades it, a wrong answer shows the correction, and an order check replays the right path along the links.
 // Esc (`brief` layer) closes it and keeps its step; an open not-confirmed popover (`popover` layer) closes first, and a new step closes it. `map-brief-model.ts` holds the logic: `briefPlayer`, `briefCamera`, `figureShapes`.
@@ -24,8 +24,8 @@ import { expectedLine } from "./map-pre-flight.js";
 import { exploreRow } from "./micro-world.js";
 import { guardRow } from "./patch-review.js";
 import { branchOf, lightsMark, mapCheckNode, mapReviewNode, overturnNote, ratifyActions, ratifyDetail, ratifyEvidence, ratifyHead, unlightMarks } from "./map-ratify.js";
-import { copyOverturn, reviewFlags, reviewLine, statusWords } from "./ratify.js";
-import type { Copied } from "./notes.js";
+import { reviewFlags, reviewLine, statusWords } from "./ratify.js";
+import { copyButton, type Prompt } from "./copy-button.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
 import { agentPrompt, alsoAt, diffArgs, type AlsoRow, awaitedWrite, citeDrawer, figureMax, figureShapes, figureSize, latestReplies, latestRequest, partialFactsLines, storySteps, type Shape, stepCode, unconfirmed, unconfirmedReasons } from "./map-brief-model.js";
 import { awaitedCatchUp, fogListLines, stageLabel } from "./map-catch-up.js";
@@ -108,28 +108,6 @@ function unconfirmedMark(view: MapView, pr: number, flags: string[], key: string
   marks.push(watchSeen(mark, { active: () => mark.isConnected && panel().classList.contains("open"), onSeen: () => logStop("unconfirmed-seen", view.project, prOf(pr)) }));
   wrap.append(mark);
   return wrap;
-}
-// Copy for the agent (#493): a quiet copy icon puts a prompt that stands alone for any agent on the clipboard (`agentPrompt`), through
-// Overturn's path (`copyOverturn`), and the copy toast shows it, or holds it to copy by hand when the clipboard refuses: the reader says so
-// with a `copy-for-agent` event, which `main.ts` hands to the toast, so the reader loads none of the page's own modules. A prompt is a
-// string, or waits for the changed files of a step's lit parts; those are asked for when the step is drawn, so a click usually has them
-// and the clipboard is written inside it.
-type Prompt = () => string | Promise<string>;
-const COPY_ICON = '<svg viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="4.5" width="7" height="7" rx="1.5"/><path d="M9.5 2.5h-6a1 1 0 0 0-1 1v6"/></svg>';
-function copyButton(label: string, hover: string, prompt: Prompt): HTMLElement {
-  const button = pressable(text("button", "", "btn quiet brief-copy"), null);
-  button.setAttribute("aria-label", label);
-  hint(button, hover);
-  button.innerHTML = COPY_ICON;
-  button.addEventListener("click", () => {
-    const write = navigator.clipboard?.writeText?.bind(navigator.clipboard);
-    const copy = (made: string) =>
-      void copyOverturn(made, write).then((outcome) => window.dispatchEvent(new CustomEvent<Copied>("copy-for-agent", { detail: { outcome, prompt: made } })));
-    const made = prompt();
-    if (typeof made === "string") copy(made);
-    else void made.then(copy);
-  });
-  return button;
 }
 // The changed files of the parts `step` lights (actors left out), asked of `pr_diff` once per brief and parts; none when git cannot give them.
 type Files = { done: string[] | null; wait: Promise<string[]> };

@@ -26,8 +26,8 @@ test("a rebound shortcut triggers its action, and the old key no longer does", (
     ]`,
   });
   assert.equal(bound(keymap, "Workspace", key("KeyL", { metaKey: true }, "l")), "studio::ToggleList");
-  assert.equal(bound(keymap, "Workspace", key("Digit1", { metaKey: true }, "1")), undefined);
-  assert.equal(bound(keymap, "Workspace", key("Digit2", { metaKey: true }, "2")), "studio::ToggleRail");
+  assert.equal(bound(keymap, "Workspace", key("BracketLeft", {}, "[")), undefined);
+  assert.equal(bound(keymap, "Workspace", key("BracketRight", {}, "]")), "studio::ToggleRail");
   assert.equal(windowBinding(keymap, key("ArrowDown"), false, true), undefined);
   assert.equal(windowBinding(keymap, key("ArrowUp"), false, true), "studio::SelectPrevious");
 });
@@ -42,6 +42,29 @@ test("while typing, a window shortcut without Cmd leaves the key to the field, e
   assert.equal(windowBinding(keymap, key("KeyL", { ctrlKey: true }, "l"), false), "studio::ToggleList");
   assert.equal(windowBinding(keymap, key("Escape", {}, "Escape"), true), "studio::Dismiss");
   assert.equal(windowBinding(keymap, key("KeyL", { metaKey: true }, "l"), true), undefined);
+});
+
+// The list, story and fit keys are single keys off Chrome's ⌘1, ⌘2 and ⌘0 (spec #658, user story 28): a field takes them while typing.
+test("[, ] and 0 run their actions, and do nothing while typing in a field", () => {
+  const keys = [["BracketLeft", "[", "studio::ToggleList"], ["BracketRight", "]", "studio::ToggleRail"], ["Digit0", "0", "studio::FitMap"]];
+  for (const [code, char, action] of keys) {
+    assert.equal(windowBinding(initial.keymap, key(code, {}, char), false), action, char);
+    assert.equal(windowBinding(initial.keymap, key(code, {}, char), true), undefined, `${char} while typing`);
+    // From the focused list too, whose own context does not bind them.
+    assert.equal(windowBinding(initial.keymap, key(code, {}, char), false, true), action, `${char} in the list`);
+  }
+  for (const code of ["Digit1", "Digit2", "Digit0"]) assert.equal(windowBinding(initial.keymap, key(code, { metaKey: true }), false), undefined, `⌘${code}`);
+});
+
+// A held key without Cmd runs its action once (spec #658's review): `[` and `]` would flicker, and a held digit answer the next question
+// too. The arrows still step down the list while held, and a held Cmd key repeats.
+test("a held key without Cmd runs once, except the list's arrows", () => {
+  const held = (code, char, mods = {}) => ({ ...key(code, mods, char), repeat: true });
+  for (const [code, char] of [["BracketLeft", "["], ["BracketRight", "]"], ["Digit0", "0"], ["Digit1", "1"], ["Escape", "Escape"]]) {
+    assert.equal(windowBinding(initial.keymap, held(code, char), false, false, true), undefined, `${char} held`);
+  }
+  assert.equal(windowBinding(initial.keymap, held("ArrowDown", ""), false, true), "studio::SelectNext");
+  assert.equal(windowBinding(initial.keymap, held("BracketRight", "]", { metaKey: true }), false), "studio::NextSession");
 });
 
 // The keyboard spine and the palette (danielrispler/Falinks#575).
@@ -156,7 +179,7 @@ test("keys read as macOS menus show them", () => {
 test("the palette lists every action the window runs, each with its current key, and runs one", () => {
   const { keymap } = reload(initial, {
     settings: null,
-    keymap: `[{ "bindings": { "cmd-l": "studio::ToggleList", "cmd-2": null } }]`,
+    keymap: `[{ "bindings": { "cmd-l": "studio::ToggleList", "]": null } }]`,
   });
   const ran = [];
   const actions = new Map(Object.entries({
@@ -189,6 +212,9 @@ test("every default window action has a title and a key in the palette", () => {
   assert.deepEqual(entries.find((entry) => entry.title === "Next session").keys, ["⌘]"]);
   assert.deepEqual(entries.find((entry) => entry.title === "Select next").keys, ["↓"]);
   assert.deepEqual(entries.find((entry) => entry.title === "Toggle focus").keys, ["⇧⌘↩"]);
+  assert.deepEqual(entries.find((entry) => entry.title === "Toggle list").keys, ["["]);
+  assert.deepEqual(entries.find((entry) => entry.title === "Toggle rail").keys, ["]"]);
+  assert.deepEqual(entries.find((entry) => entry.title === "Fit map").keys, ["0"]);
 });
 
 test("↑ and ↓ move the palette's highlighted row, and the window's keys leave them to its field (#24)", () => {

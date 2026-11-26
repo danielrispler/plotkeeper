@@ -64,8 +64,9 @@ const keymapOf = (contexts: Record<string, Record<string, Binding>>): Keymap =>
   new Map(Object.entries(contexts).map(([context, bindings]) => [context, new Map(Object.entries(bindings))]));
 const defaultKeymap: Keymap = keymapOf({
   Workspace: {
-    "cmd-1": "studio::ToggleList",
-    "cmd-2": "studio::ToggleRail",
+    // Single keys, off Chrome's ⌘1, ⌘2 and ⌘0 (spec #658); like every binding without Cmd, they leave the key to a text field.
+    "[": "studio::ToggleList",
+    "]": "studio::ToggleRail",
     escape: "studio::Dismiss",
     // Focus mode (danielrispler/Falinks#573), in `MODIFIERS` order, as the lookup reads it.
     "shift-cmd-enter": "studio::ToggleFocus",
@@ -82,7 +83,7 @@ const defaultKeymap: Keymap = keymapOf({
     "shift-cmd-h": "studio::ShowMap",
     "shift-cmd-m": "studio::ShowMap",
     // The map's camera (#383): the whole map in view.
-    "cmd-0": "studio::FitMap",
+    "0": "studio::FitMap",
     // Modifiers in `MODIFIERS` order, as a keystroke reads.
     "shift-cmd-p": "studio::Palette",
   },
