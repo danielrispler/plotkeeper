@@ -245,6 +245,10 @@ pub struct MapItem {
     pub change: String,
     /// What the item says, in words.
     pub text: String,
+    /// What a changed item said before, in the same words; none for an added or removed one. The Map text review reads it, so
+    /// a law whose text stayed is not reviewed again.
+    #[serde(skip)]
+    pub was: Option<String>,
     /// Old beside new, for a part or a link.
     pub detail: Option<Detail>,
     /// The id of the mark the item's Ratify row lights on the Map diff (#643): `part:<id>`, `actor:<id>`, `law:<id>`, or for a link
@@ -508,6 +512,7 @@ pub fn map_items(old: Option<&str>, new: Option<&str>) -> Vec<MapItem> {
                 id: id.clone(),
                 change: change.into(),
                 text: words(kind, item),
+                was: before.get(id).map(|was| words(kind, was)),
                 detail: detail(kind, before.get(id), Some(item)),
                 mark: mark_of(kind, item),
             });
@@ -519,6 +524,7 @@ pub fn map_items(old: Option<&str>, new: Option<&str>) -> Vec<MapItem> {
                     id: id.clone(),
                     change: "removed".into(),
                     text: words(kind, item),
+                    was: None,
                     detail: detail(kind, Some(item), None),
                     mark: mark_of(kind, item),
                 });
@@ -1504,6 +1510,7 @@ mod tests {
             id: id.into(),
             change: change.into(),
             text: String::new(),
+            was: None,
             detail: None,
             mark: None,
         };
@@ -1557,6 +1564,7 @@ mod tests {
             id: "a-b".into(),
             change: "added".into(),
             text: String::new(),
+            was: None,
             detail: None,
             mark: None,
         }];

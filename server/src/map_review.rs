@@ -102,7 +102,11 @@ fn items_of(changes: &[MapItem]) -> Vec<ReviewItem> {
                 link.reason.before.as_deref(),
                 link.reason.after.as_deref(),
             ),
-            ("law", _) => add(format!("law:{id}/text"), None, Some(&change.text)),
+            ("law", _) => add(
+                format!("law:{id}/text"),
+                change.was.as_deref(),
+                Some(&change.text),
+            ),
             _ => {}
         }
     }

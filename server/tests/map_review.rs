@@ -721,3 +721,16 @@ fn a_review_stopped_by_a_usage_limit_waits_and_runs_again_on_resume() {
     );
     assert_eq!(bench.commands().len(), 2);
 }
+
+#[test]
+fn an_item_whose_other_fields_alone_changed_has_no_text_to_review() {
+    let bench = bench();
+    // The law moves to another part, the part's paths grow and the link changes kind: no text changed.
+    let map = BASE
+        .replace(r#""on":"core""#, r#""on":"server""#)
+        .replace(r#""paths":["core/"]"#, r#""paths":["core/","fold/"]"#)
+        .replace(r#""kind":"import""#, r#""kind":"call""#);
+    let head = bench.push(None, &[("system-map.json", &map)]);
+    let items = review_items(&bench.project, &head);
+    assert_eq!(ids(&items), Vec::<&str>::new());
+}
