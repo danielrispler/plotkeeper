@@ -737,6 +737,29 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .ratify-row > .explain-link { grid-column: 1 / -1; margin: var(--sp-1) 0 0; }
 .sheet-caption { margin: 0; font-size: var(--size-small); color: var(--muted); }
 .sheet-purpose { margin: var(--sp-3) 0 0; font-size: var(--size-read); line-height: 1.5; text-wrap: pretty; }
+/* Under the catch-up card (#637): the purpose in two lines until More shows it whole, then the chips, the part's shape at a glance, each
+   opening its fold, then the folds. */
+.sheet-purpose.clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+.btn.sheet-more { align-self: flex-start; margin-top: calc(-1 * var(--sp-2)); padding: 0 var(--sp-2); min-block-size: var(--control); font-size: var(--size-small); color: var(--muted); }
+.sheet-chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2); }
+.btn.sheet-chip { min-block-size: var(--control); padding: 0 var(--sp-4); border-radius: var(--radius-pane); background: var(--hover); font-size: var(--size-xs); color: var(--muted); }
+.btn.sheet-chip:hover:not(:disabled, [aria-disabled="true"]) { background: var(--pressed); color: var(--fg); }
+.btn.sheet-chip.bad { color: var(--conflict); }
+/* Each fold opens on its own: its marker before its title, which turns open, and a short value at the line's end. */
+.sheet-folds { display: flex; flex-direction: column; margin-top: var(--sp-4); border-top: var(--hair) solid var(--edge); }
+.sheet-fold { border-bottom: var(--hair) solid var(--edge); scroll-margin-block: var(--sp-6); }
+.sheet-fold-summary { list-style: none; display: flex; align-items: baseline; gap: var(--sp-3); padding: var(--sp-4) var(--sp-2); border-radius: var(--radius-small); cursor: pointer; }
+.sheet-fold-summary::-webkit-details-marker { display: none; }
+.sheet-fold-summary:hover { background: var(--hover); }
+.sheet-fold-summary::before { content: "›" / ""; flex: none; inline-size: var(--glyph); color: var(--faint); transition: rotate var(--motion); }
+.sheet-fold[open] > .sheet-fold-summary::before { rotate: 90deg; }
+.sheet-fold-summary:dir(rtl)::before { scale: -1 1; }
+.sheet-fold-title { font-size: var(--size-xs); letter-spacing: .12em; text-transform: uppercase; color: var(--faint); font-weight: 500; }
+.sheet-fold-value { margin-inline-start: auto; min-width: 0; font-size: var(--size-small); color: var(--muted); text-align: end; font-variant-numeric: tabular-nums; }
+.sheet-fold-value.bad { color: var(--conflict); }
+.sheet-fold-body { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-2) var(--sp-2) var(--sp-5) calc(var(--glyph) + var(--sp-2) + var(--sp-3)); }
+.sheet-fold-body > .explain { margin: 0; }
+@media (prefers-reduced-motion: reduce) { .sheet-fold-summary::before { transition: none; } }
 .sheet-holds { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-4); }
 .sheet-held { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--size-small); line-height: 1.45; }
 .sheet-held-name { font-weight: 600; }
@@ -801,11 +824,29 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .guard-part, .guard-id, .guard-sentence { font: inherit; font-size: var(--size); padding: var(--sp-2) var(--sp-3); background: var(--chrome); color: var(--fg); border: 0; border-radius: var(--radius); }
 .guard-sentence { resize: vertical; }
 .guard-foot { display: flex; gap: var(--sp-2); }
-.sheet-fog { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
-.sheet-fog-line { margin: 0; font-size: var(--size-small); color: var(--muted); }
-.sheet-fog.thin .sheet-fog-line, .sheet-fog.thick .sheet-fog-line { color: var(--mist); }
-.sheet-fog .sheet-catch-up { align-self: stretch; text-align: center; background: var(--pressed); font-weight: 600; }
-.sheet-catch-up-note { margin-top: calc(-1 * var(--sp-2)); font-size: var(--size-small); color: var(--muted); }
+/* The catch-up card (#636), first under the plate's marks: a fogged part's in the mist's tone, with the waiting catch-up's outline (its
+   title and each step's kind and headline) and its buttons; a part with no fog's says "Caught up" and holds the Refresher. */
+.catch-up-card { margin-top: var(--sp-4); padding: var(--sp-5); border-radius: var(--radius-pane); display: flex; flex-direction: column; gap: var(--sp-4); background: var(--raised); box-shadow: inset 0 0 0 var(--hair) var(--mist-thin); }
+.catch-up-card.clear { box-shadow: inset 0 0 0 var(--hair) var(--edge); }
+.catch-up-eyebrow { display: flex; align-items: center; gap: var(--sp-3); margin: 0; font-size: var(--size-xs); letter-spacing: .1em; text-transform: uppercase; color: var(--mist); }
+.catch-up-eyebrow::before { content: ""; flex: none; inline-size: var(--catch-up-dot); block-size: var(--catch-up-dot); border-radius: 50%; background: currentColor; }
+.catch-up-card.clear .catch-up-eyebrow { color: var(--faint); }
+.catch-up-card > .explain { margin-top: calc(-1 * var(--sp-3)); }
+.catch-up-title { margin: 0; font-size: var(--size-read); font-weight: 600; line-height: 1.35; text-wrap: balance; overflow-wrap: anywhere; }
+/* One kind column for every step, as wide as the longest kind: each row takes the list's columns. */
+.catch-up-steps { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: max-content 1fr; gap: var(--sp-2) var(--sp-4); font-size: var(--size-small); line-height: 1.4; }
+.catch-up-step { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: baseline; }
+.catch-up-kind { font-size: var(--size-xs); color: var(--faint); }
+.catch-up-headline { min-width: 0; overflow-wrap: anywhere; text-wrap: pretty; }
+.catch-up-line { margin: 0; font-size: var(--size-small); color: var(--muted); }
+.catch-up-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+/* At rest a step under `.btn:hover`'s `--pressed`, so a hover still shows. */
+.catch-up-actions .sheet-catch-up { flex: 1 1 auto; text-align: center; background: var(--selected); font-weight: 600; }
+.catch-up-card .sheet-refresher { align-self: flex-start; }
+.sheet-catch-up-note { margin: calc(-1 * var(--sp-2)) 0 0; font-size: var(--size-small); color: var(--muted); }
+/* "Read the one you have" (#638), while a newer catch-up is written: the older one's button and the changes it covers. */
+.catch-up-older { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); padding-top: var(--sp-4); border-top: var(--hair) solid var(--edge); }
+.catch-up-older-line { margin: 0; font-size: var(--size-small); color: var(--muted); overflow-wrap: anywhere; }
 .sheet-ci { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
 .sheet-ci-line { margin: 0; font-size: var(--size-small); color: var(--muted); }
 .sheet-ci.broken .sheet-ci-line { color: var(--conflict); }
@@ -1088,7 +1129,7 @@ mark.drawer-line .drawer-n::before { content: "→ " / ""; color: var(--fg); }
 .plate.stale-2 .plate-stale { opacity: .55; }
 .plate.stale-3 .plate-stale { opacity: .85; }
 .sheet-stale { margin: 0; font-size: var(--size-small); color: var(--muted); }
-/* The refresher (#392): what the map says around the part, in its sheet under the laws. */
+/* The refresher (#392): what the map says around the part, in its sheet's catch-up card (#636). */
 .refresher { display: flex; flex-direction: column; gap: var(--sp-3); }
 .refresher-flows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); font-size: var(--size-small); }
 .refresher-flow-name { font-weight: 600; }

@@ -415,6 +415,11 @@ impl Follower {
             Output::YourTurn { session_id } => {
                 refresh_landed(&shared, Some(session_id.clone()));
                 crate::prs::ask_later(&shared, crate::prs::Trigger::TurnEnd, None);
+                // A merge that landed in the turn gets its part catch-ups written before the map is next shown.
+                let folder = app.core().session(&session_id).map(|s| s.cwd.clone());
+                if let Some(folder) = folder.filter(|f| !f.is_empty()) {
+                    crate::part_catch_ups::turn_ended(&shared, folder);
+                }
                 tell(app, Notice::YourTurn, &session_id, None);
             }
             Output::CommandBlocked { session_id, agent } => {

@@ -18,7 +18,10 @@ const classed = (node, name) => all(node).filter((each) => each.className.split(
 const lines = (node) => classed(node, "explain");
 const byId = (node, id) => all(node).find((each) => each.id === id);
 // What a node is described by besides its own hint (spec #582): the explanation lines.
-const explainedBy = (each) => each.getAttribute("aria-describedby") !== null && each.getAttribute("aria-describedby") !== each.getAttribute("interestfor");
+const explainedBy = (each) => {
+  const described = each.getAttribute("aria-describedby");
+  return described !== null && described !== each.getAttribute("interestfor") && described !== each.getAttribute("data-hint");
+};
 const described = (node) => all(node).filter(explainedBy);
 
 /** @type {import("../../dist/map-model.js").Part} */
@@ -71,18 +74,20 @@ const explanations = (on) => {
   studio.files = { ...studio.files, settings: { ...studio.files.settings, explanations: on } };
 };
 
-test("on: each heading, the selected tier and the links carry their lines, kinds and not yet ratified at their first link only", () => {
+test("on: each fold, the selected tier and the links carry their lines, kinds and not yet ratified at their first link only", () => {
   explanations(true);
   const { card, toggle } = sheetCard(view(), plugins);
   assert.equal(toggle.getAttribute("aria-pressed"), "true");
   assert.equal(hintOf(toggle)?.textContent, "Hide explanations");
-  const headings = classed(card, "sheet-heading");
-  assert.deepEqual(headings.map((h) => h.text), ["Holds", "Tier", "Laws", "Talks to", "Fog", "CI on main"]);
-  for (const heading of headings) {
-    const line = byId(card, heading.getAttribute("aria-describedby"));
-    assert.ok(line, `"${heading.text}" points at its line`);
+  // Each fold's summary is its heading (#637); the Fog section's line is the catch-up card's (#636).
+  const folds = classed(card, "sheet-fold").filter((fold) => !fold.hidden);
+  const summaries = folds.map((fold) => classed(fold, "sheet-fold-summary")[0]);
+  assert.deepEqual(summaries.map((s) => classed(s, "sheet-fold-title")[0].text), ["Laws", "Talks to", "Holds", "Tier", "CI on main", "History"]);
+  for (const summary of summaries) {
+    const line = byId(card, summary.getAttribute("aria-describedby"));
+    assert.ok(line, `"${summary.text}" points at its line`);
   }
-  assert.equal(byId(card, headings[1].getAttribute("aria-describedby")).text, SHEET.tier);
+  assert.equal(byId(card, summaries[3].getAttribute("aria-describedby")).text, SHEET.tier);
   // The selected tier, Core, is described by its meaning; the others are not.
   const tiers = classed(card, "sheet-tiers")[0].childNodes.filter((child) => child instanceof El);
   const pressed = tiers.find((button) => button.getAttribute("aria-pressed") === "true");
@@ -108,20 +113,20 @@ test("off: no line is drawn, nothing points at one, and the ? is not pressed", (
   assert.equal(classed(card, "sheet-held-note").length, 1, "a note is a note either way");
 });
 
-// The line under the fog buttons and the buttons it sits under, for a fogged part with `offer`.
+// The line under the fog buttons, in the catch-up card (#636), and the buttons it sits under, for a fogged part with `offer`.
 const fogLine = (offer) => {
   explanations(true);
   const { card } = sheetCard(view({ fog: { plugins: "thick" }, catch_ups: offer ? { plugins: offer } : {} }), plugins);
-  const fog = classed(card, "sheet-fog")[0];
-  const buttons = fog.childNodes.filter((child) => child instanceof El && child.tag === "button");
-  const last = buttons.at(-1);
-  const line = fog.childNodes[fog.childNodes.indexOf(last) + 1];
+  const fog = classed(card, "catch-up-card")[0];
+  const row = classed(fog, "catch-up-actions")[0];
+  const buttons = row.childNodes.filter((child) => child instanceof El && child.tag === "button");
+  const line = fog.childNodes[fog.childNodes.indexOf(row) + 1];
   return { line, buttons, card };
 };
 
 test("on: a line sits under the fog buttons whatever they are, saying what the buttons shown do, and the buttons point at it", () => {
   const catchUp = fogLine({ kind: "catch-up", ready: false, writing: false, failed: false });
-  assert.deepEqual(catchUp.buttons.map((b) => b.text), ["Part catch-up", "I know this"]);
+  assert.deepEqual(catchUp.buttons.map((b) => b.text), ["Catch up", "I know this"]);
   assert.equal(catchUp.line?.text, SHEET.fogActions.catchUp);
 
   const chapter = fogLine({ kind: "chapter", pr: 12, chapter: 1 });
