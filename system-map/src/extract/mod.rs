@@ -61,6 +61,8 @@ pub(crate) struct Repo<'a> {
     texts: Option<&'a BTreeMap<String, String>>,
     /// In commit mode, a folder holding the commit's manifests and Rust files for `cargo metadata`, written once.
     cargo_dir: OnceCell<Result<tempfile::TempDir, String>>,
+    /// In commit mode, whether the commit's toolchain file goes in that folder: only for a commit plotkeeper trusts.
+    trusted: bool,
 }
 
 impl<'a> Repo<'a> {
@@ -79,13 +81,16 @@ impl<'a> Repo<'a> {
                 .collect(),
             texts: None,
             cargo_dir: OnceCell::new(),
+            trusted: true,
         }
     }
 
-    /// The repository in commit mode: `texts` are the commit's.
-    pub(crate) fn at_commit(self, texts: &'a BTreeMap<String, String>) -> Repo<'a> {
+    /// The repository in commit mode: `texts` are the commit's. An untrusted commit's toolchain file is left out of the
+    /// folder `cargo metadata` runs in, so the commit cannot choose the toolchain rustup resolves for `cargo` (#641).
+    pub(crate) fn at_commit(self, texts: &'a BTreeMap<String, String>, trusted: bool) -> Repo<'a> {
         Repo {
             texts: Some(texts),
+            trusted,
             ..self
         }
     }
@@ -99,7 +104,8 @@ impl<'a> Repo<'a> {
     }
 
     /// The folder to run `cargo metadata` in: the root, or in commit mode a temporary folder holding the commit's
-    /// `Cargo.toml` files, Rust files and toolchain file at their paths, which are all `cargo metadata --no-deps` reads.
+    /// `Cargo.toml` files, Rust files and, for a trusted commit, toolchain file at their paths, which are all `cargo metadata
+    /// --no-deps` reads.
     pub(crate) fn cargo_dir(&self) -> Result<&Path, String> {
         let Some(texts) = self.texts else {
             return Ok(self.root);
@@ -108,7 +114,8 @@ impl<'a> Repo<'a> {
             let dir = tempfile::tempdir().map_err(|e| format!("cannot make a folder: {e}"))?;
             for (file, text) in texts {
                 let name = file.rsplit('/').next().unwrap_or(file);
-                let toolchain = matches!(file.as_str(), "rust-toolchain" | "rust-toolchain.toml");
+                let toolchain = self.trusted
+                    && matches!(file.as_str(), "rust-toolchain" | "rust-toolchain.toml");
                 if name == "Cargo.toml" || name.ends_with(".rs") || toolchain {
                     let path = dir.path().join(file);
                     std::fs::create_dir_all(path.parent().unwrap_or(dir.path()))

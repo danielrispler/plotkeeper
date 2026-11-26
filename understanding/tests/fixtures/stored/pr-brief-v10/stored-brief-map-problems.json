@@ -1,0 +1,28 @@
+{
+ "version": 1,
+ "pr": 641,
+ "head": "cafe641",
+ "written_at": 1795500000000,
+ "stale": false,
+ "model": "opus",
+ "shape": {
+  "chapters": false,
+  "required": [
+   "alpha"
+  ],
+  "also": [],
+  "overview": false,
+  "flows_changed": []
+ },
+ "brief": {
+  "title": "Alpha gains a stray file",
+  "overview": [],
+  "chapters": [],
+  "also": [],
+  "decisions": []
+ },
+ "map_problems": [
+  "stray/s.rs is tracked but no part owns it; add it to a part's paths or to ignored",
+  "import link \"alpha-beta\" runs from \"alpha\" to \"beta\", but no import runs that way"
+ ]
+}

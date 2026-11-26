@@ -302,10 +302,15 @@ pub fn check_files(root: &Path, files: Vec<String>) -> Report {
 
 /// `check` of the commit `commit` of the repository at `root`, read from git with nothing checked out (spec #477, "Reading
 /// a commit without checking it out"): its map, its tracked files and their texts are the commit's, and the working tree
-/// is never read. A name that is no commit is the one problem.
-pub fn check_at(root: &Path, commit: &str) -> Report {
+/// is never read. A name that is no commit is the one problem. An untrusted commit, such as the head of a PR by someone else, has
+/// its toolchain file left out of the folder `cargo metadata` runs in, so it cannot choose the toolchain `cargo` resolves (#641).
+pub fn check_at(root: &Path, commit: &str, trusted: bool) -> Report {
     match commit::read(root, commit) {
-        Ok(snapshot) => check_with(root, Ok(snapshot.files.clone()), Some(&snapshot.texts)),
+        Ok(snapshot) => check_with(
+            root,
+            Ok(snapshot.files.clone()),
+            Some((&snapshot.texts, trusted)),
+        ),
         Err(problem) => Report {
             problems: vec![problem],
             ..Report::default()
@@ -328,12 +333,14 @@ pub fn law_reports(
     Ok(laws::check(&|file| read_tracked(root, file), &map, &files))
 }
 
-/// `check` of the tracked `files`, their texts read from the working tree at `root`, or from `texts` in commit mode.
+/// `check` of the tracked `files`, their texts read from the working tree at `root`, or in commit mode from the commit's
+/// texts, with whether the commit is trusted.
 fn check_with(
     root: &Path,
     files: Result<Vec<String>, String>,
-    texts: Option<&BTreeMap<String, String>>,
+    commit: Option<(&BTreeMap<String, String>, bool)>,
 ) -> Report {
+    let texts = commit.map(|(texts, _)| texts);
     let mut report = Report::default();
     let loaded = match texts {
         Some(texts) => texts
@@ -371,8 +378,8 @@ fn check_with(
             report.problems.extend(problems);
             let names = map.extractors.as_deref().unwrap_or_default();
             let repo = repo(root, &map, &files);
-            let repo = match texts {
-                Some(texts) => repo.at_commit(texts),
+            let repo = match commit {
+                Some((texts, trusted)) => repo.at_commit(texts, trusted),
                 None => repo,
             };
             let found = edges::check_links(

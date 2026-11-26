@@ -1,12 +1,13 @@
 //! What a new head does to Daniel's read of a brief: the push since, by patch-ids, and its note.
 
 use super::{Writing, fogs_nothing};
+use crate::ratify::HeadCheck;
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
     sync::Mutex,
 };
-use studio_understanding::pr_brief::{LinkEvidence, PrSource, StoredBrief, gather};
+use studio_understanding::pr_brief::{PrSource, StoredBrief, gather};
 
 /// The heads the lookups saw last, per PR, for "the same head at two lookups in a row".
 #[derive(Default)]
@@ -82,9 +83,9 @@ pub trait Reading {
     fn carry(&self, pr: u64, from: &str, to: &str) -> Result<(), String>;
     /// What the since story of the push from `from` reads (#497): `full`'s PR, with the diff, map diff and tags from `from` to its head.
     fn since_source(&self, full: &PrSource, from: &str) -> Result<PrSource, String>;
-    /// The link evidence of the PR at `head` (`ratify::link_evidence`, from its merge base with the default branch), for a brief
-    /// carried to `head`; none when the base is unknown.
-    fn link_evidence(&self, head: &str) -> Vec<LinkEvidence>;
+    /// What PR `pr`'s head `head` says of its map (`ratify::head_check`, from its merge base with the default branch), for a brief
+    /// carried to `head`; nothing when the base is unknown.
+    fn head_check(&self, pr: u64, head: &str) -> HeadCheck;
 }
 
 /// The server's `Reading`: Daniel's state in `file`, `git` in `project`, and its default branch `reference`.
@@ -127,20 +128,23 @@ impl Reading for GitReading {
         )?;
         source.tier_overrides = full.tier_overrides.clone();
         source.earlier_decisions = full.earlier_decisions.clone();
+        // The same head as the full brief's, so the same map check (#641).
+        source.map_problems = full.map_problems.clone();
         source.since = Some(from.to_string());
         Ok(source)
     }
 
-    fn link_evidence(&self, head: &str) -> Vec<LinkEvidence> {
+    fn head_check(&self, pr: u64, head: &str) -> HeadCheck {
         let repo = Path::new(&self.project);
         let Some(base) = self
             .reference
             .as_deref()
             .and_then(|r| crate::map::git(repo, &["merge-base", r, head]).ok())
         else {
-            return Vec::new();
+            return HeadCheck::default();
         };
-        crate::ratify::link_evidence(repo, base.trim(), head)
+        let trusted = crate::prs::by_own_login(repo, pr);
+        crate::ratify::head_check(repo, base.trim(), head, trusted)
     }
 }
 
@@ -301,13 +305,15 @@ pub(super) fn carried(
         return None;
     }
     let old = with.store.latest(pr).filter(|old| old.head != head)?;
-    // The read moves first: a copy whose read did not move would be a brief to read again. Its link evidence is read again at
-    // `head`, since a rebase or a quiet push can move an import site or remove its file (#499).
+    // The read moves first: a copy whose read did not move would be a brief to read again. Its link evidence and map check are
+    // read again at `head`, since a rebase or a quiet push can move an import site, remove its file or break the map (#499, #641).
+    let check = reading.head_check(pr, head);
     let copy = StoredBrief {
         head: head.to_string(),
         stale: false,
         written_at: studio_understanding::millis().max(old.written_at + 1),
-        link_evidence: reading.link_evidence(head),
+        link_evidence: check.link_evidence,
+        map_problems: check.map_problems,
         ..old.clone()
     };
     match reading.carry(pr, &old.head, head).and_then(|()| {

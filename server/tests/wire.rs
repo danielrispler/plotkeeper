@@ -589,6 +589,8 @@ fn brief() -> studio_understanding::pr_brief::StoredBrief {
                 },
             ],
         }],
+        // Ratify's head lists them (#641).
+        map_problems: vec!["stray/s.ts: no part owns it".into()],
     }
 }
 

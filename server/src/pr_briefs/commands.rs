@@ -93,8 +93,11 @@ fn source_of(project: &str, number: u64) -> Result<PrSource, String> {
     let base = crate::map::git(repo, &["merge-base", &reference, &meta.head])?;
     let head = meta.head.clone();
     let mut source = gather(repo, &base, &head, meta)?;
-    // Read from the head when the brief is written, never live in Ratify (#499).
-    source.link_evidence = crate::ratify::link_evidence(repo, &base, &head);
+    // Read from the head when the brief is written, never live in Ratify (#499, #641).
+    let trusted = crate::prs::by_own_login(repo, number);
+    let check = crate::ratify::head_check(repo, &base, &head, trusted);
+    source.link_evidence = check.link_evidence;
+    source.map_problems = check.map_problems;
     if let Ok(file) = crate::map::state_file() {
         source.tier_overrides = crate::map::read_user(&file, project).tiers;
     }

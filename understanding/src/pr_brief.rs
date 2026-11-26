@@ -168,6 +168,7 @@ pub fn write_pr_brief(
             ..facts.partial_facts.clone()
         },
         link_evidence: source.link_evidence.clone(),
+        map_problems: source.map_problems.clone(),
     };
     match &source.since {
         Some(from) => store.put_since(from, &stored),

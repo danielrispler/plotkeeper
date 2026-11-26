@@ -1249,6 +1249,25 @@ fn the_entry_stores_the_link_evidence_it_was_given_beside_the_brief() {
 }
 
 #[test]
+fn the_entry_stores_the_head_s_map_problems_it_was_given_beside_the_brief() {
+    let data = tempfile::tempdir().unwrap();
+    let store = BriefStore::open(data.path()).unwrap();
+    let problems = vec!["stray/s.rs: no part owns it".to_string()];
+    let given = PrSource {
+        map_problems: problems.clone(),
+        ..source(&["alpha/a.rs"])
+    };
+    let writer = Canned::new(vec![
+        Ok(single_story().to_string()),
+        Ok(none_unsupported()),
+        Ok(no_rewrites()),
+    ]);
+    let stored = write_pr_brief(&writer, "opus", &given, &store, |_| {}).unwrap();
+    assert_eq!(stored.map_problems, problems);
+    assert_eq!(store.get(7, "abc123").unwrap().map_problems, problems);
+}
+
+#[test]
 fn the_record_logs_the_wall_time_of_the_writer_the_claim_check_and_the_retry() {
     let data = tempfile::tempdir().unwrap();
     let store = BriefStore::open(data.path()).unwrap();
@@ -1701,6 +1720,34 @@ fn a_stored_brief_reads_with_its_link_evidence_and_older_ones_with_none() {
     ] {
         let older: StoredBrief = serde_json::from_str(&read(older)).unwrap();
         assert!(older.link_evidence.is_empty(), "{older:?}");
+    }
+}
+
+// @law: old-stored-files-load
+#[test]
+fn a_stored_brief_reads_with_its_head_s_map_problems_and_older_ones_with_none() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/stored");
+    let read = |name: &str| std::fs::read_to_string(dir.join(name)).unwrap();
+    let stored: StoredBrief =
+        serde_json::from_str(&read("pr-brief-v10/stored-brief-map-problems.json")).unwrap();
+    assert_eq!(
+        stored.map_problems,
+        [
+            "stray/s.rs is tracked but no part owns it; add it to a part's paths or to ignored",
+            "import link \"alpha-beta\" runs from \"alpha\" to \"beta\", but no import runs that way"
+        ]
+    );
+    for older in [
+        "pr-brief-v3/stored-brief-full.json",
+        "pr-brief-v3/stored-brief-minimal.json",
+        "pr-brief-v4/stored-brief-full.json",
+        "pr-brief-v5/stored-brief-guard.json",
+        "pr-brief-v7/stored-brief-partial.json",
+        "pr-brief-v8/stored-brief-also.json",
+        "pr-brief-v9/stored-brief-evidence.json",
+    ] {
+        let older: StoredBrief = serde_json::from_str(&read(older)).unwrap();
+        assert!(older.map_problems.is_empty(), "{older:?}");
     }
 }
 

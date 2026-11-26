@@ -285,6 +285,34 @@ pub fn ask_later(app: &Arc<App>, trigger: Trigger, also: Option<&str>) {
     });
 }
 
+/// Whether PR `number` of the repository in `repo` was opened by Daniel's own GitHub login (spec #634, Q17): `gh pr view --json
+/// author` against `gh api user`, run as his normal `gh`, which reads no credential file of ours. Anything `gh` cannot answer counts
+/// as not his, so an unknown author is never trusted.
+pub fn by_own_login(repo: &Path, number: u64) -> bool {
+    by_own_login_with(studio_workbench::gh_path(), repo, number)
+}
+
+/// `by_own_login` with the `gh` at `program`.
+fn by_own_login_with(program: &str, repo: &Path, number: u64) -> bool {
+    let n = number.to_string();
+    let login = |args: &[&str]| {
+        let output = run_until(run::gh_at(program, repo).args(args), GH_LIMIT).ok()?;
+        let login = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        (!login.is_empty()).then_some(login)
+    };
+    let author = login(&[
+        "pr",
+        "view",
+        &n,
+        "--json",
+        "author",
+        "--jq",
+        ".author.login",
+    ]);
+    let me = login(&["api", "user", "--jq", ".login"]);
+    author.is_some() && author == me
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -581,5 +609,30 @@ mod tests {
     #[test]
     fn output_that_is_not_a_pr_is_none() {
         assert_eq!(parse("no pull requests found"), None);
+    }
+
+    /// A `gh` that prints `author` for `pr view` and `me` for `api user`, and fails when either is empty.
+    fn fake_gh(dir: &Path, author: &str, me: &str) -> String {
+        let path = dir.join("gh");
+        let script = format!(
+            "#!/bin/sh\ncase \"$1 $2\" in\n  \"pr view\") out='{author}' ;;\n  \"api user\") out='{me}' ;;\nesac\n\
+             [ -n \"$out\" ] || exit 1\necho \"$out\"\n"
+        );
+        std::fs::write(&path, script).unwrap();
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+        std::fs::set_permissions(&path, perms).unwrap();
+        path.display().to_string()
+    }
+
+    #[test]
+    fn a_pr_is_by_daniel_s_own_login_only_when_gh_says_both_logins_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = |author, me| by_own_login_with(&fake_gh(dir.path(), author, me), dir.path(), 7);
+        assert!(at("danielrispler", "danielrispler"));
+        assert!(!at("someone-else", "danielrispler"));
+        // `gh` cannot say who wrote it, or who is signed in: not trusted.
+        assert!(!at("", "danielrispler"));
+        assert!(!at("danielrispler", ""));
     }
 }
