@@ -211,8 +211,6 @@ impl Record {
 
 /// How long the fetch of a PR's head may take.
 const FETCH_LIMIT: Duration = Duration::from_secs(120);
-/// How long a `gh` call may take.
-const GH_LIMIT: Duration = Duration::from_secs(30);
 
 /// plotkeeper's instructions to the review; the items follow, by kind and id.
 const INSTRUCTIONS: &str = "\
@@ -299,8 +297,6 @@ pub struct MapReviews {
     reading: Mutex<HashSet<String>>,
     /// Serialises the read, change and write of a PR's file.
     writing: Mutex<()>,
-    /// Daniel's login, as `gh api user` last said it.
-    login: Mutex<Option<String>>,
     me: Weak<MapReviews>,
 }
 
@@ -313,7 +309,6 @@ impl MapReviews {
             changed: OnceLock::new(),
             reading: Mutex::default(),
             writing: Mutex::default(),
-            login: Mutex::default(),
             me: me.clone(),
         })
     }
@@ -509,53 +504,13 @@ impl MapReviews {
             .map_err(|refusal| refusal.line)
     }
 
-    /// Whether PR `pr` of `project` is by Daniel's own login: `gh pr view --json author` against `gh api user`, run as his normal
-    /// `gh`, reading no credential file. A `gh` that does not answer says no.
+    /// Whether PR `pr` of `project` is by Daniel's own login (`prs::by_own_login`), with the `gh` of the config.
     fn own(&self, project: &str, pr: u64) -> bool {
-        let login = self
-            .login
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
-        let login = login.or_else(|| {
-            let login = self.gh(project, &["api", "user", "--jq", ".login"])?;
-            *self.login.lock().unwrap_or_else(PoisonError::into_inner) = Some(login.clone());
-            Some(login)
-        });
-        let n = pr.to_string();
-        let author = self.gh(
-            project,
-            &[
-                "pr",
-                "view",
-                &n,
-                "--json",
-                "author",
-                "--jq",
-                ".author.login",
-            ],
+        let program = self.config.gh.as_ref().map_or_else(
+            || studio_workbench::gh_path().to_string(),
+            |gh| gh.to_string_lossy().into_owned(),
         );
-        login.is_some() && author == login
-    }
-
-    /// What `gh args` printed in `project`, trimmed; none when it failed or printed nothing.
-    fn gh(&self, project: &str, args: &[&str]) -> Option<String> {
-        let program = self
-            .config
-            .gh
-            .clone()
-            .unwrap_or_else(|| studio_workbench::gh_path().into());
-        let mut gh = run::gh_at(program, Path::new(project));
-        match run_until(gh.args(args), GH_LIMIT) {
-            Ok(out) => {
-                let said = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                (!said.is_empty()).then_some(said)
-            }
-            Err(e) => {
-                log::warn!("map text review: gh {}: {e}", args.join(" "));
-                None
-            }
-        }
+        crate::prs::by_own_login_with(&program, Path::new(project), pr)
     }
 
     /// PR `pr`'s review at `head`; none when the head changed no map text. A head never started whose items were all judged at an
