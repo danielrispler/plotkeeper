@@ -444,7 +444,7 @@ impl LawRuns {
         match &self.config.sandbox {
             Some(path) => Some(path.clone()).filter(|path| path.is_file()),
             None => {
-                let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
+                let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
                 studio_understanding::find(shell.as_ref(), "srt")
             }
         }

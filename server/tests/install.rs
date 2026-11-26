@@ -468,16 +468,19 @@ fn with_the_legacy_setup_present_exactly_one_hook_records_each_event() {
         legacy(&machine, line);
         machine.run("install");
 
-        let zshrc = fs::read_to_string(machine.home.join(".zshrc")).unwrap();
-        assert!(!zshrc.contains("checkout/plugin"), "{zshrc}");
-        assert!(!zshrc.contains("for every claude session"), "{zshrc}");
-        assert!(zshrc.contains("alias g=git\n") && zshrc.contains("export EDITOR=vim\n"));
-        if line == FALINKS_LINE {
-            // The entries that are not plotkeeper's stay.
-            assert!(
-                zshrc.contains("export CLAUDE_CODE_PLUGIN_DIRS=\"/Users/me/own-plugin\""),
-                "{zshrc}"
-            );
+        // The archived app's `~/.zshrc` cleanup is macOS only (#701).
+        if cfg!(target_os = "macos") {
+            let zshrc = fs::read_to_string(machine.home.join(".zshrc")).unwrap();
+            assert!(!zshrc.contains("checkout/plugin"), "{zshrc}");
+            assert!(!zshrc.contains("for every claude session"), "{zshrc}");
+            assert!(zshrc.contains("alias g=git\n") && zshrc.contains("export EDITOR=vim\n"));
+            if line == FALINKS_LINE {
+                // The entries that are not plotkeeper's stay.
+                assert!(
+                    zshrc.contains("export CLAUDE_CODE_PLUGIN_DIRS=\"/Users/me/own-plugin\""),
+                    "{zshrc}"
+                );
+            }
         }
         let plugins = machine.home.join(".gemini/config/plugins");
         assert!(!plugins.join("studio").exists());
@@ -1078,9 +1081,33 @@ fn no_line_of_zshrc_but_the_removed_ones_is_kept_in_the_data_folder() {
     assert_eq!(files(&machine.home), before);
 }
 
+/// Off macOS the archived app cannot have left a `~/.zshrc` line: install and uninstall neither read nor rewrite the
+/// file, and keep no backup of it (#701).
+#[test]
+#[cfg(not(target_os = "macos"))]
+fn off_macos_install_and_uninstall_leave_zshrc_alone_and_back_nothing_up() {
+    let machine = Machine::new(true, true);
+    legacy(&machine, FALINKS_LINE);
+    let zshrc = machine.home.join(".zshrc");
+    let before = fs::read(&zshrc).unwrap();
+    machine.run("install");
+    assert_eq!(fs::read(&zshrc).unwrap(), before);
+    for (path, bytes) in files(&machine.data()) {
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(!path.contains("zshrc"), "a backup of ~/.zshrc: {path}");
+        assert!(
+            !text.contains("zshrc_edits\":{"),
+            "{path} records zshrc edits:\n{text}"
+        );
+    }
+    machine.run("uninstall");
+    assert_eq!(fs::read(&zshrc).unwrap(), before);
+}
+
 /// A dotfile manager links `~/.zshrc` to its own copy. Install replaces the copy whole, by a rename, so the link stays
 /// a link, and a reader that opened the old file still reads all of it: nothing is ever cut short in place.
 #[test]
+#[cfg(target_os = "macos")]
 fn a_symlinked_zshrc_stays_a_symlink_and_is_replaced_whole() {
     let machine = Machine::new(true, true);
     legacy(&machine, FALINKS_LINE);
@@ -1119,6 +1146,7 @@ fn a_symlinked_zshrc_stays_a_symlink_and_is_replaced_whole() {
 /// A record written before install kept only the removed lines held the whole old `~/.zshrc` in `backups/zshrc` and
 /// the text install wrote in `state.json`'s `zshrc`.
 #[test]
+#[cfg(target_os = "macos")]
 fn uninstall_from_a_record_with_a_whole_zshrc_backup_puts_it_back_and_deletes_the_backup() {
     let machine = Machine::new(false, false);
     let old = "alias g=git\nexport CLAUDE_CODE_PLUGIN_DIRS=\"/x/plotkeeper/checkout/plugin\"\n";

@@ -536,7 +536,7 @@ pub struct Writers {
 }
 
 pub fn writers(app: &App) -> Writers {
-    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
+    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
     let mut writers = studio_understanding::found_writers(shell.as_ref());
     let keys = app.key_set().clone();
     let base_url = settings::openai_base_url();

@@ -179,7 +179,7 @@ pub struct Claude;
 
 impl Harness for Claude {
     fn command(&self, plan: &Plan) -> Result<HarnessCommand, String> {
-        let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
+        let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
         let program = studio_understanding::find(shell.as_ref(), "claude")
             .ok_or("`claude` was not found, so the run cannot start")?;
         Ok(claude_command(&program, plan))
