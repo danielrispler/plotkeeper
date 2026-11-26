@@ -56,6 +56,13 @@ A change that adds, moves or removes files, changes what a part does or how part
 
 Every UI change (HTML, CSS or client-side JS, in `ui/` or elsewhere) uses two skills: run `$modern-web-guidance` before writing the code, and `$web-design-guidelines` on the result before handing it off.
 
+### Tests
+
+`$tdd`, which `$implement` and `$implement-spec` call, adds two rules to its loop here:
+
+- **Extend before adding.** Another case of a behaviour that already has a test is a new row in that test's table (turn the test into a table if it is not one yet). A new test function is for a new behaviour.
+- **Replace narrower tests in the slice.** When the slice's test covers what older, narrower tests check, merge or delete those in the same slice, provided each one passes before and after the change and is not protected. Protected: a test tagged `@law:`, a test of the frozen samples in `understanding/tests/fixtures/stored/`, and a bug-regression case unless its exact input survives as a case of the test that replaces it. List every removed or merged test in the PR body, with the test that now covers it.
+
 ### Learning
 
 Before planning, grilling or explanations, read `docs/agents/learning.md`. During session openings, planning, grilling, decision questions and explanations, it overrides any terse or brevity output mode. Follow its state/goal brief and explanation guidance during grilling, Wayfinder, and ordinary planning. After a meaningful ticket that merges a diff, suggest `$dsh-explain-diff` in the final message. Explanations are optional and never block ticket resolution or progress; run the skill only when explicitly invoked.
