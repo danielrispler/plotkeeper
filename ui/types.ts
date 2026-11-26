@@ -682,8 +682,11 @@ export type CommitFiles = { commit: string; short: string; label: string; url: s
  */
 export type PrDiffArgs = { project: string; number: number; head: string; title: string; parts?: string[]; paths?: string[]; base?: string };
 
-/** A project of the saved list (`server/src/projects.rs`): its main checkout, and whether its folder was moved or deleted. */
-export type SavedProject = { path: string; gone: boolean };
+/**
+ * A project of the saved list (`server/src/projects.rs`): its main checkout, whether its folder was moved or deleted, and whether it is
+ * under one of the system's temporary folders (spec #659).
+ */
+export type SavedProject = { path: string; gone: boolean; temporary: boolean };
 
 /** What the page asks at start (#527): plotkeeper's package version, for the toast after an update (`whats-new.ts`). */
 export type About = { version: string };

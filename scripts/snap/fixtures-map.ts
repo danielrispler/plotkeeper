@@ -4,9 +4,10 @@ import type { Ci, MapState } from "../../ui/types.ts";
 import { base, type Fixture } from "./base.ts";
 import { at, briefOf, busyPlace, busySessions, mapBrief, mapFile, mapOpened, mapState, pairFile, panelChecks, session, step, storySteps, withSaved } from "./fixtures-shared.ts";
 
+// The page opens on pokedex, the last viewed project, whose folder is gone: its header is hidden, as it has no live session (spec #659).
+const goneOpened: Fixture = { selected: null, storage: { project: "/w/pokedex" } };
 const openGone = `
-    named("pokedex").querySelector(".project-toggle").click();
-    await wait(300);
+    if (named("pokedex")) log("snap:fail the gone project with no live session has a header");
     const gone = document.querySelector("#map .map-empty.map-gone");
     if (!gone) return log("snap:fail the gone project shows no gone state: " + document.getElementById("map-body").textContent);
     if (!gone.textContent.includes("This folder is gone") || !gone.textContent.includes("/w/pokedex")) log("snap:fail the gone state lacks its words or its path: " + gone.textContent);
@@ -126,7 +127,7 @@ export const mapPurposeMore = (): Fixture => {
       if (!words || !more) return log("snap:fail the sheet has no purpose or no More");
       if (!words.classList.contains("clamped") || words.scrollHeight <= words.clientHeight) log("snap:fail the purpose is not clamped");
       if (more.hidden) log("snap:fail the clamped purpose's More is hidden");
-      log("purpose more ok");`, { sessions: [], selected: null, projects: [{ path: "/w/plotkeeper", gone: false }], map_state: mapState({ source: JSON.stringify(file) }) });
+      log("purpose more ok");`, { sessions: [], selected: null, projects: [{ path: "/w/plotkeeper", gone: false, temporary: false }], map_state: mapState({ source: JSON.stringify(file) }) });
 };
 /**
  * A part with no fog (#636): Shell's catch-up card, right under its caption, says "Caught up" and holds the Refresher; no Fog section.
@@ -666,7 +667,7 @@ export const mapScrubbed = (): Fixture => {
 // `zero`, `nomap`, `fresh` and `narrow`. Each script fails when a colour other than Needs you orange or broken-law red shows, or when a layer
 // covers a map that is present (`panelChecks`), and checks Treatment C's frame: a 34 px top bar, the list at 252 px (its strip below 1007 px)
 // on the darkest tone, the map on `--bg` with a rounded corner, no border line between them, and no Home, centre column or unseen chip.
-const baseProjects = [{ path: "/w/plotkeeper", gone: false }, { path: "/w/falinks", gone: false }, { path: "/w/timburr", gone: false }];
+const baseProjects = [{ path: "/w/plotkeeper", gone: false, temporary: false }, { path: "/w/falinks", gone: false, temporary: false }, { path: "/w/timburr", gone: false, temporary: false }];
 const baseChecks = `${panelChecks}
       const frame = (when) => {
         const bar = document.querySelector(".top").getBoundingClientRect();
@@ -831,8 +832,9 @@ export const mapNoMap = (): Fixture =>
       checkColours("without a map");
       log("base ok");`, { map_state: mapState({ status: "none", source: null }) });
 // Switching projects (#386's review): what one project's map started is not lost or left over on the next. `calls` are the commands the
-// page sends from here on; `open(path)` presses a project's header.
-const switchProjects = [...baseProjects, { path: "/w/pokedex", gone: true }];
+// page sends from here on; `open(path)` presses a project's header. Pokedex's folder is gone, and it has a live session, so its header
+// shows (spec #659).
+const switchProjects = [...baseProjects, { path: "/w/pokedex", gone: true, temporary: false }];
 const switching = (check: string, extra: Fixture = {}): Fixture =>
   mapBaseOf(`
       const calls = [];
@@ -845,6 +847,7 @@ const switching = (check: string, extra: Fixture = {}): Fixture =>
       ${check}
       log("base ok");`, {
     projects: switchProjects,
+    sessions: [...busySessions(), session("p1", "Pokedex trial", "idle", { cwd: "/w/pokedex", project: "/w/pokedex", folder_name: "pokedex" })],
     map_state: { __by: "project", values: { "/w/plotkeeper": mapState(), "/w/falinks": mapState({ project: "/w/falinks" }) } },
     ...extra,
   });
@@ -966,14 +969,14 @@ export const mapSmallGaps = (): Fixture => ({
 
 /** A saved project whose folder is gone, in the map's place: its words, its path and Remove project, never an error (#381). */
 export const mapProjectGone = () => withSaved(openGone + `
-  log("gone: " + gone.textContent);`);
-/** Remove project on the gone state: its header leaves the list and the map gives way to another project. */
+  log("gone: " + gone.textContent);`, goneOpened);
+/** Remove project on the gone state: the map gives way to another project, and no header comes back for it. */
 export const mapProjectRemoved = () => withSaved(openGone + `
   remove.click();
   await wait(300);
   if (named("pokedex")) log("snap:fail the removed project keeps its header");
   if (document.querySelector("#map .map-gone")) log("snap:fail the map still shows the removed project");
-  log("removed; headers " + heads().map((head) => head.querySelector(".name").textContent).join());`);
+  log("removed; headers " + heads().map((head) => head.querySelector(".name").textContent).join());`, goneOpened);
 /** The calm Map view: plates, law marks of both kinds, a black box part, actors, and the session list live beside it. */
 export const mapCalm = () =>
   mapOpened(`

@@ -30,7 +30,7 @@ export const logFixture = (status: string): Fixture => {
  * right over it when the button is near the window's bottom edge, where the flipped case pads the list until the header sits there.
  */
 export const projectMenuScript = (nearBottom: boolean) => `
-    const more = named("pokedex").querySelector(".project-more");
+    const more = named("falinks").querySelector(".project-more");
     // The list is padded until the button's bottom is 16 px over the window's, too near for the menu under it. In \`vh\`, as headless
     // Chrome's window takes its full height only at its first frame; in a style sheet, as the list's redraws reset its own style.
     ${nearBottom ? 'document.head.appendChild(document.createElement("style")).textContent = "#groups { padding-top: calc(100vh - 16px - " + more.getBoundingClientRect().bottom + "px); }"; await wait(50);' : ""}
@@ -481,18 +481,19 @@ export const alerts = () => {
   return { ...base, sessions, selected: { session: sessions[1], agent: null }, snapScript, contrast: true };
 };
 /**
- * The saved project list (#381): a project with no sessions keeps its header, after the one with sessions; a gone one is
- * struck through; a header's "⋯" offers Remove project.
+ * The saved project list (#381): a project with no sessions keeps its header, after the one with sessions; a gone or temporary one with no
+ * live session has none, so nothing is struck through (spec #659); a header's "⋯" offers Remove project.
  */
 export const projectsSaved = () =>
   withSaved(`
     const order = heads().map((head) => head.querySelector(".name").textContent).join();
-    if (order !== "plotkeeper,falinks,pokedex") log("snap:fail the headers' order: " + order);
+    if (order !== "plotkeeper,falinks") log("snap:fail the headers' order: " + order);
     if (named("falinks")?.closest(".project").querySelector(".row")) log("snap:fail a project with no sessions shows rows");
-    if (!named("pokedex")?.classList.contains("gone")) log("snap:fail the gone project's header is not marked gone");
+    const struck = heads().filter((head) => head.classList.contains("gone") || getComputedStyle(head.querySelector(".name")).textDecorationLine.includes("line-through"));
+    if (struck.length) log("snap:fail a header is struck through: " + struck.map((head) => head.dataset.project).join());
     // Remove project is offered only for a project with no live session: one with sessions would come back with their next event.
     if (named("plotkeeper").querySelector(".project-more")) log("snap:fail a project with live sessions offers Remove project");
-    named("pokedex").querySelector(".project-more").click();
+    named("falinks").querySelector(".project-more").click();
     await wait(100);
     const menu = document.getElementById("project-actions");
     if (!menu.matches(":popover-open") || menu.textContent.trim() !== "Remove project") log("snap:fail the header's menu does not offer Remove project");
@@ -512,7 +513,7 @@ export const projectChevron = () =>
     if (button.getAttribute("aria-label") !== "Sessions of plotkeeper") log("snap:fail the chevron is named " + button.getAttribute("aria-label"));
     if (window.__snapName(button) !== "Sessions of plotkeeper") log("snap:fail the chevron's accessible name is " + window.__snapName(button));
     if (button.getAttribute("aria-expanded") !== "true" || !group("plotkeeper").querySelector(".row")) log("snap:fail the group starts folded");
-    if (chevron("falinks") || chevron("pokedex")) log("snap:fail a project with no live session has a chevron");
+    if (chevron("falinks")) log("snap:fail a project with no live session has a chevron");
     const toggle = named("plotkeeper").querySelector(".project-toggle");
     if (toggle.hasAttribute("aria-expanded")) log("snap:fail the project's name carries aria-expanded");
     chevron("plotkeeper").click();

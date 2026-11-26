@@ -33,9 +33,9 @@ const urgency = (sessions: Pick<Session, "state">[]): Rollup =>
   sessions.some(({ state }) => state === "needs_you") ? "needs_you" : sessions.some(({ state }) => state === "running") ? "running" : null;
 
 // The sidebar's groups: one per repository, in the order its first live session is listed, then each saved project with no
-// live session, as a header only, in the saved order. Inside a group the sessions are by state, and the header's rollup is
-// its most urgent state. Ended sessions are in History. The sessions in `hidden` (Clear landed's, #382) are left out of the groups, but
-// still make their project live.
+// live session, as a header only, in the saved order, but for one that is gone or temporary (spec #659), which the server still lists so a
+// gone one comes back with its folder. Inside a group the sessions are by state, and the header's rollup is its most urgent state. Ended
+// sessions are in History. The sessions in `hidden` (Clear landed's, #382) are left out of the groups, but still make their project live.
 export function projectGroups<S extends Pick<Session, "project" | "state" | "id">>(sessions: S[], saved: SavedProject[] = [], hidden: ReadonlySet<string> = new Set()): ProjectGroup<S>[] {
   const by = new Map<string, S[]>();
   const live = new Set<string>();
@@ -45,7 +45,7 @@ export function projectGroups<S extends Pick<Session, "project" | "state" | "id"
     if (!hidden.has(session.id)) by.set(key, [...(by.get(key) ?? []), session]);
   }
   const gone = new Set(saved.filter((project) => project.gone).map((project) => project.path));
-  for (const { path } of saved) if (!by.has(path)) by.set(path, []);
+  for (const project of saved) if (!by.has(project.path) && (live.has(project.path) || !(project.gone || project.temporary))) by.set(project.path, []);
   return [...by].map(([key, members]) => ({
     key,
     name: projectName(key),

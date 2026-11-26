@@ -37,23 +37,43 @@ test("the sidebar's order is project by project, by state", () => {
   assert.deepEqual(sidebarOrder(sessions).map((s) => s.id), ["c", "a", "b"]);
 });
 
-test("a saved project with no live session keeps its header, after the projects with sessions, and a gone one says so", () => {
+test("a saved project with no live session keeps its header, after the projects with sessions", () => {
   const saved = [
-    { path: "/r/quiet", gone: false },
-    { path: "/r/p", gone: false },
-    { path: "/r/moved", gone: true },
+    { path: "/r/quiet", gone: false, temporary: false },
+    { path: "/r/p", gone: false, temporary: false },
   ];
   const groups = projectGroups([at("a", "running", "/r/p"), at("b", "ended", "/r/quiet"), at("c", "idle", "/r/q")], saved);
   assert.deepEqual(
     groups.map((g) => [g.key, g.states.length, g.gone]),
-    [["/r/p", 1, false], ["/r/q", 1, false], ["/r/quiet", 0, false], ["/r/moved", 0, true]],
+    [["/r/p", 1, false], ["/r/q", 1, false], ["/r/quiet", 0, false]],
   );
+});
+
+// Spec #659: a gone or temporary saved project shows only while it has a live session, and the server still lists it, so a gone one
+// comes back with its folder.
+test("a gone or temporary saved project is left out unless it has a live session, and a gone one with one says so", () => {
+  const saved = [
+    { path: "/r/moved", gone: true, temporary: false },
+    { path: "/private/tmp/tmp.x1", gone: false, temporary: true },
+    { path: "/r/gone-live", gone: true, temporary: false },
+    { path: "/tmp/trial", gone: false, temporary: true },
+    { path: "/r/quiet", gone: false, temporary: false },
+  ];
+  const sessions = [at("a", "running", "/r/gone-live"), at("b", "idle", "/tmp/trial"), at("c", "ended", "/r/moved"), at("d", "ended", "/private/tmp/tmp.x1")];
+  assert.deepEqual(
+    projectGroups(sessions, saved).map((g) => [g.key, g.gone]),
+    [["/r/gone-live", true], ["/tmp/trial", false], ["/r/quiet", false]],
+  );
+  // A session Clear landed hid still makes its project live, so a gone one keeps its header.
+  assert.deepEqual(projectGroups([at("a", "idle", "/r/moved")], saved, new Set(["a"])).map((g) => g.key), ["/r/moved", "/r/quiet"]);
+  // Its folder back, the gone project shows again.
+  assert.deepEqual(projectGroups([], [{ path: "/r/moved", gone: false, temporary: false }]).map((g) => g.key), ["/r/moved"]);
 });
 
 // #380's review: Clear landed hides a project's last live sessions from the list, but they are still live, and the server saves the project
 // again on their next event, so the project still counts as live: its header offers no Remove project.
 test("a project whose only live sessions Clear landed hid shows no sessions and is still live; a saved one with none is not", () => {
-  const saved = [{ path: "/r/p", gone: false }, { path: "/r/quiet", gone: false }];
+  const saved = [{ path: "/r/p", gone: false, temporary: false }, { path: "/r/quiet", gone: false, temporary: false }];
   const groups = projectGroups([at("a", "idle", "/r/p"), at("b", "running", "/r/p/.claude/worktrees/x"), at("c", "ended", "/r/quiet")], saved, new Set(["a", "b"]));
   assert.deepEqual(
     groups.map((g) => [g.key, g.states.length, g.live]),
@@ -63,7 +83,7 @@ test("a project whose only live sessions Clear landed hid shows no sessions and 
 });
 
 test("the Map view's projects are the saved ones, and the selected session's is its own", () => {
-  studio.projects = [{ path: "/r/p", gone: false }, { path: "/r/gone", gone: true }];
+  studio.projects = [{ path: "/r/p", gone: false, temporary: false }, { path: "/r/gone", gone: true, temporary: false }];
   studio.listed = [at("a", "idle", "/r/p/.claude/worktrees/x"), at("b", "ended", "/r/q")];
   assert.deepEqual(knownProjects(), ["/r/p", "/r/gone"]);
   studio.selection = null;
