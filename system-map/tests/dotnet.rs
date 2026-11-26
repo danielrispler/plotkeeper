@@ -619,3 +619,237 @@ fn commit_mode_gives_the_edges_of_the_working_tree() {
     );
     assert_eq!(sites(&root, &[]), Vec::<String>::new());
 }
+
+/// `text` with a reference to `dep/Dep.csproj` added in a new `ItemGroup` at its end, written from the root so that the
+/// project file at `path` reaches it.
+fn with_dep(path: &str, text: &str) -> String {
+    let up = "..\\".repeat(path.matches('/').count());
+    let item = format!(
+        "<ItemGroup><ProjectReference Include=\"{up}dep\\Dep.csproj\" /></ItemGroup>\n</Project>"
+    );
+    let end = text.rfind("</Project>").unwrap();
+    format!(
+        "{}{item}{}",
+        &text[..end],
+        &text[end + "</Project>".len()..]
+    )
+}
+
+/// Whether the project file `text` at `path` is skipped: part `a` owns only it, and it refers to a tracked file of part
+/// `b`, so a skip is the one reason its pair is missing.
+fn is_skipped(path: &str, text: &str) -> bool {
+    let (_dir, root) = repo(
+        &map(&[("b", &["**"]), ("a", &[path])], &[]),
+        &[(path, &with_dep(path, text)), ("dep/Dep.csproj", EMPTY)],
+    );
+    let found = pairs(&report(&root));
+    if found.is_empty() {
+        return true;
+    }
+    assert_eq!(found, [format!("{path}>dep/Dep.csproj")], "{path}: {text}");
+    false
+}
+
+#[test]
+fn a_project_file_under_a_test_folder_is_skipped_whatever_the_case_or_depth() {
+    for path in [
+        "tests/App.csproj",
+        "Tests/App.csproj",
+        "src/test/deep/App.csproj",
+        "src/TEST/App.fsproj",
+        "src/Foo.Tests/Fixtures/App.csproj",
+        "Foo.UnitTests/App.csproj",
+        "x/Foo.IntegrationTests/App.vbproj",
+        "x/Foo.PerformanceTests/y/App.csproj",
+    ] {
+        assert!(is_skipped(path, EMPTY), "{path}");
+    }
+    for path in [
+        "src/App.csproj",
+        "src/testing/App.csproj",
+        "src/contest/App.csproj",
+        "src/Foo.Test/App.csproj",
+        "src/Foo.tests/App.csproj",
+        "src/Tests.Shared/App.csproj",
+    ] {
+        assert!(!is_skipped(path, EMPTY), "{path}");
+    }
+}
+
+#[test]
+fn a_project_file_named_for_tests_is_skipped_by_the_case_sensitive_suffix_alone() {
+    for path in [
+        "src/Foo.Tests.csproj",
+        "src/Foo.UnitTests.fsproj",
+        "src/Foo.IntegrationTests.vbproj",
+        "Foo.PerformanceTests.csproj",
+        "src/Foo.Tests.CSPROJ",
+    ] {
+        assert!(is_skipped(path, EMPTY), "{path}");
+    }
+    for path in [
+        "src/Foo.Test.csproj",
+        "src/Foo.tests.csproj",
+        "src/Tests.csproj",
+        "src/FooTests.csproj",
+        "src/Foo.Tests.Utils.csproj",
+    ] {
+        assert!(!is_skipped(path, EMPTY), "{path}");
+    }
+}
+
+#[test]
+fn a_test_marker_in_the_project_file_skips_it() {
+    let sdk = |sdk: &str| format!("<Project Sdk=\"{sdk}\">\n</Project>\n");
+    let skipped = [
+        project("<PropertyGroup><IsTestProject>true</IsTestProject></PropertyGroup>\n"),
+        project(
+            "<PropertyGroup Condition=\"'$(X)'=='1'\"><IsTestProject> TRUE </IsTestProject></PropertyGroup>\n",
+        ),
+        project("<PropertyGroup><istestproject>true</istestproject></PropertyGroup>\n"),
+        project(
+            "<Choose><When Condition=\"a\"><PropertyGroup><IsTestProject>true</IsTestProject></PropertyGroup>\
+             </When></Choose>\n",
+        ),
+        project(
+            "<ItemGroup><PackageReference Include=\"Microsoft.NET.Test.Sdk\" Version=\"17\" /></ItemGroup>\n",
+        ),
+        project("<ItemGroup><packagereference Include=\"microsoft.net.test.sdk\" /></ItemGroup>\n"),
+        project(
+            "<ItemGroup><PackageReference Include=\"xunit; Microsoft.NET.Test.Sdk\" /></ItemGroup>\n",
+        ),
+        project(
+            "<Choose><Otherwise><ItemGroup><PackageReference Include=\"Microsoft.NET.Test.Sdk\" />\
+             </ItemGroup></Otherwise></Choose>\n",
+        ),
+        sdk("MSTest.Sdk"),
+        sdk("MSTest.Sdk/3.6.0"),
+        sdk("Microsoft.NET.Sdk; MSTest.Sdk/3.6.0"),
+        project("<Sdk Name=\"MSTest.Sdk\" Version=\"3.6.0\" />\n"),
+        project("<Import Project=\"Sdk.props\" Sdk=\"MSTest.Sdk\" />\n"),
+        project("<Import Sdk=\"MSTest.Sdk\" Project=\"Sdk.targets\" />\n"),
+    ];
+    for text in &skipped {
+        assert!(is_skipped("src/App.csproj", text), "{text}");
+    }
+    let read = [
+        EMPTY.to_string(),
+        project("<PropertyGroup><IsTestProject>false</IsTestProject></PropertyGroup>\n"),
+        project("<PropertyGroup><IsTestProject /></PropertyGroup>\n"),
+        project(
+            "<Target Name=\"T\"><PropertyGroup><IsTestProject>true</IsTestProject></PropertyGroup></Target>\n",
+        ),
+        project(
+            "<ItemGroup><PackageReference Update=\"Microsoft.NET.Test.Sdk\" Version=\"17\" /></ItemGroup>\n",
+        ),
+        project(
+            "<ItemGroup><PackageReference Include=\"Microsoft.NET.Test.Sdk.Extra\" /></ItemGroup>\n",
+        ),
+        project(
+            "<Target Name=\"T\"><ItemGroup><PackageReference Include=\"Microsoft.NET.Test.Sdk\" />\
+             </ItemGroup></Target>\n",
+        ),
+        sdk("Microsoft.NET.Sdk"),
+        sdk("MSTest.Sdk.Extra"),
+        project("<Import Project=\"MSTest.Sdk.props\" />\n"),
+    ];
+    for text in &read {
+        assert!(!is_skipped("src/App.csproj", text), "{text}");
+    }
+}
+
+#[test]
+fn an_explicit_false_beats_every_other_rule_but_not_from_inside_a_target() {
+    let off = "<PropertyGroup><IsTestProject>false</IsTestProject></PropertyGroup>\n";
+    let on = "<PropertyGroup><IsTestProject>true</IsTestProject></PropertyGroup>\n";
+    let sdk = "<ItemGroup><PackageReference Include=\"Microsoft.NET.Test.Sdk\" /></ItemGroup>\n";
+    for path in [
+        "tests/Kit/Akka.TestKit.csproj",
+        "src/Akka.Foo.Tests/Kit.Tests.csproj",
+        "Tests/Foo.UnitTests.csproj",
+    ] {
+        for body in [off.to_string(), format!("{sdk}{off}"), format!("{on}{off}")] {
+            assert!(!is_skipped(path, &project(&body)), "{path}: {body}");
+        }
+        let text = "<Project Sdk=\"MSTest.Sdk\">\n<PropertyGroup Condition=\"a\"><IsTestProject> False </IsTestProject>\
+                    </PropertyGroup>\n</Project>\n";
+        assert!(!is_skipped(path, text), "{path}");
+    }
+    let in_target = project(
+        "<Target Name=\"T\"><PropertyGroup><IsTestProject>false</IsTestProject></PropertyGroup></Target>\n",
+    );
+    assert!(is_skipped("src/Foo.Tests.csproj", &in_target));
+}
+
+#[test]
+fn a_reference_into_a_skipped_project_still_pairs() {
+    let files = [
+        ("a/App.csproj", &refers("..\\tests\\Kit.Tests.csproj")[..]),
+        ("tests/Kit.Tests.csproj", EMPTY),
+    ];
+    assert_eq!(net_pairs(&files), ["a/App.csproj>tests/Kit.Tests.csproj"]);
+}
+
+#[test]
+fn a_part_owning_only_skipped_project_files_is_not_read_and_its_links_pass_unproven() {
+    let parts: &[(&str, &[&str])] = &[("tests", &["tests/"]), ("core", &["core/"])];
+    let (_dir, root) = repo(
+        &map(parts, &[("tests", "core")]),
+        &[
+            ("tests/Core.Tests.csproj", &refers("..\\core\\Core.csproj")),
+            ("core/Core.csproj", EMPTY),
+        ],
+    );
+    let found = report(&root);
+    assert_eq!(found.problems, Vec::<String>::new());
+    assert_eq!(pairs(&found), Vec::<String>::new());
+    assert_eq!(
+        (found.counts.links.proven, found.counts.links.unproven),
+        (0, 1)
+    );
+}
+
+#[test]
+fn a_broken_project_file_in_a_test_place_still_gives_its_problem() {
+    for path in [
+        "tests/App.csproj",
+        "src/Foo.Tests.csproj",
+        "Tests/Foo.Tests/App.csproj",
+    ] {
+        let (_dir, root) = repo(&map(&[("b", &["**"])], &[]), &[(path, "<Project>")]);
+        let problems = report(&root).problems;
+        assert_eq!(problems.len(), 1, "{path}: {problems:?}");
+        assert!(
+            has(&problems, &[path, "not a project file"]),
+            "{problems:?}"
+        );
+    }
+}
+
+#[test]
+fn check_suggests_dotnet_projects_only_for_a_project_file_that_is_not_a_test_project() {
+    let note = "note: dotnet-projects could read this repository; add it to extractors\n";
+    let marked = project("<PropertyGroup><IsTestProject>true</IsTestProject></PropertyGroup>\n");
+    let kit = project("<PropertyGroup><IsTestProject>false</IsTestProject></PropertyGroup>\n");
+    for (files, expected) in [
+        (
+            vec![
+                ("tests/A.csproj", EMPTY),
+                ("src/B.Tests.csproj", EMPTY),
+                ("src/C.csproj", &marked[..]),
+            ],
+            "",
+        ),
+        (vec![("tests/A.csproj", &kit[..])], note),
+        (
+            vec![("tests/A.csproj", EMPTY), ("src/B.csproj", EMPTY)],
+            note,
+        ),
+    ] {
+        let mut map = map(&[("a", &["**"])], &[]);
+        map["extractors"] = json!([]);
+        let (_dir, root) = repo(&map, &files);
+        let out = run(&root, "check", &[]);
+        assert_eq!(String::from_utf8_lossy(&out.stderr), expected, "{files:?}");
+    }
+}
