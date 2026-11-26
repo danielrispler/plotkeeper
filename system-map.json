@@ -57,6 +57,17 @@
       "paths": ["server/src/install.rs", "server/src/hook_copies.rs", "server/tests/install.rs", "server/tests/hook_copies.rs"]
     },
     {
+      "id": "map-engine", "name": "Map engine", "caption": "Reads code into parts and links",
+      "purpose": "The `system-map` crate and command: reads a repository's `system-map.json`, says which part owns each file, proves its links with the language extractors, and finds the tests behind its laws.",
+      "holds": [
+        { "name": "Ownership", "text": "Which part owns each tracked file, by the last pattern that matches, and which paths a change touched.", "paths": ["system-map/src/parts.rs", "system-map/src/pattern.rs", "system-map/src/touched.rs"] },
+        { "name": "Extractors", "text": "One module per language behind one contract, each turning files into the import edges that prove a link.", "paths": ["system-map/src/extract/"] },
+        { "name": "Laws", "text": "Finds the `@law:` tags that tie tests to laws.", "paths": ["system-map/src/laws.rs"] }
+      ],
+      "tier": "core",
+      "paths": ["system-map/"]
+    },
+    {
       "id": "map-briefs-runs", "name": "Map, briefs and runs", "caption": "Map data, briefs, agent runs",
       "purpose": "What the Map view and the briefs show, and the runs started from them: the map with its fog, history and ratify, PR briefs and catch-ups, and the headless agent runs.",
       "holds": [
@@ -137,6 +148,10 @@
     { "id": "map-briefs-runs-hook", "from": "map-briefs-runs", "to": "hook", "kind": "import" },
     { "id": "map-briefs-runs-understanding", "from": "map-briefs-runs", "to": "understanding", "kind": "import" },
     { "id": "map-briefs-runs-workbench", "from": "map-briefs-runs", "to": "workbench", "kind": "import" },
+    { "id": "server-map-engine", "from": "server", "to": "map-engine", "kind": "import" },
+    { "id": "map-briefs-runs-map-engine", "from": "map-briefs-runs", "to": "map-engine", "kind": "import" },
+    { "id": "understanding-map-engine", "from": "understanding", "to": "map-engine", "kind": "import" },
+    { "id": "map-engine-workbench", "from": "map-engine", "to": "workbench", "kind": "import" },
     { "id": "install-hook", "from": "install", "to": "hook", "kind": "import" },
     { "id": "install-workbench", "from": "install", "to": "workbench", "kind": "import" },
     { "id": "core-workbench", "from": "core", "to": "workbench", "kind": "import" },
@@ -164,7 +179,7 @@
     "README.md", "package-lock.json", "package.json", "npm/", "rust-toolchain.toml", "tsconfig.json", "biome.json", "knip.jsonc",
     "skills-lock.json",
     "docs/", "scripts/", "archive/",
-    "wayfinder/", "test-support/", "system-map/"
+    "wayfinder/", "test-support/"
   ],
   "laws": [
     { "id": "git-and-gh-go-through-the-runner", "on": "workbench", "backing": "check",
