@@ -35,10 +35,11 @@ test("the card's eyebrow says how many changes landed since the last catch-up", 
 
 // The older catch-up (#638): what "Read the one you have" says it covers, of the part's fog entries, oldest first.
 test("the older catch-up's line says how many of the part's changes it covers and names each, a PR by its number, a push by its commit", () => {
-  const fogged = (commit, pr) => ({ commit, strength: "thin", pr, why: ["paths"] });
+  /** @returns {import("../../dist/types.js").FogEntry} */
+  const fogged = (/** @type {string} */ commit, /** @type {number | null} */ pr) => ({ commit, strength: "thin", pr, why: ["paths"] });
   const entries = [fogged("a".repeat(40), 612), fogged("b".repeat(40), null), fogged("c".repeat(40), 630)];
-  assert.equal(olderLine({ outline: outline(3), fog: ["a".repeat(40), "b".repeat(40)] }, entries), "Covers 2 of 3 changes: #612, bbbbbbb");
-  assert.equal(olderLine({ outline: outline(3), fog: ["a".repeat(40)] }, entries.slice(0, 2)), "Covers 1 of 2 changes: #612");
+  assert.equal(olderLine({ fog: ["a".repeat(40), "b".repeat(40)] }, entries), "Covers 2 of 3 changes: #612, bbbbbbb");
+  assert.equal(olderLine({ fog: ["a".repeat(40)] }, entries.slice(0, 2)), "Covers 1 of 2 changes: #612");
 });
 
 test("a part fogged by one PR whose brief lights it offers that chapter instead, with \"I know this\" second", () => {
