@@ -8,7 +8,7 @@ import { railFixtures } from "./rail-fixtures.ts";
 import { list, withSaved } from "./fixtures-shared.ts";
 import { alerts, cutText, cutTextStill, hints, listClearLanded, listNarrow, listSecondLines, logDone, logFixture, logos, noticeErrors, notRecording, paletteFocus, paletteOpen, projectMenuScript, projectsSaved, recording, skipLink, snapRealKeys, toastKeys, whatsNewToast } from "./fixtures-page.ts";
 import { mapBadgeList, mapBase, mapBriefPairLight, mapBriefSwitch, mapBroken, mapBusy, mapCalm, mapCamera, mapDotsOrder, mapDotsRetry, mapEmpty, mapFog, mapFogPlates, mapFresh, mapGlassMotion, mapGoneFocus, mapHeaderDot, mapMarkHints, mapMarks, mapNoMap, mapPartKeys, mapPartRedraw, mapProjectGone, mapProjectRemoved, mapRefresher, mapPurposeMore, mapCaughtUp, mapCatchUpOlder, mapReview, mapScrubbed, mapSmallGaps, mapSpotlight, mapStale, mapSwitchSavesViews, mapTalksTo, readmeHero } from "./fixtures-map.ts";
-import { mapFootprint, mapLatePlace, mapPanelBrief, mapPanelDiff, mapNotPlacedHint, mapPanelFieldHints, mapPanelFocus, mapPanelHead, mapPanelHistory, mapPanelNoSession, mapPanelPeel, mapPanelSettings, mapPanelStory, mapPanelToggle, mapSheetClose, mapSheetExplained, mapSheetHere, mapSheetHolds, mapSheetKeptWidth, mapSheetResizeRedraw, mapSheetScrollShort, mapSheetStill, mapSheetUnratified, mapSheetWidth, mapTurnLight } from "./fixtures-panel.ts";
+import { mapFootprint, mapLatePlace, mapPanelBrief, mapPanelDiff, mapNotPlacedHint, mapPanelFieldHints, mapPanelFocus, mapPanelHead, mapPanelHistory, mapPanelNoSession, mapPanelPeel, mapListFold, mapPanelSettings, mapPanelStory, mapPanelToggle, mapSheetClose, mapSheetExplained, mapSheetHere, mapSheetHolds, mapSheetKeptWidth, mapSheetResizeRedraw, mapSheetScrollShort, mapSheetStill, mapSheetUnratified, mapSheetWidth, mapTurnLight } from "./fixtures-panel.ts";
 import { mapBackLaw, mapMicroWorld, mapMicroWorldBuilding, mapPreFlight, mapPreFlightPick, mapPreFlightStatus, mapRuns, mapRunsAnnounced, mapRunsBesideSheet, mapRunsPaused, mapTray, mapTrayAfterPush } from "./fixtures-runs.ts";
 import { mapBriefAlsoGroups, mapBriefAnnounce, mapBriefBar, mapBriefBold, mapBriefBoldUnpaired, mapBriefChapterLast, mapBriefChapterMid, mapBriefChapters, mapBriefCopied, mapBriefCopyByHand, mapBriefExplainBack, mapBriefExplained, mapBriefFigure, mapBriefGuard, mapBriefHeights, mapBriefMapCheck, mapBriefNoFacts, mapBriefReview, mapBriefNoStaleBase, mapBriefOrderRight, mapBriefOrderSlots, mapBriefOrderWrong, mapBriefOverturn, mapBriefPartialFacts, mapBriefPick, mapBriefRatify, mapBriefRatifyDetail, mapBriefRatifyEvidence, mapBriefShort, mapBriefSince, mapBriefStaleBase, mapBriefStart, mapBriefStepCode, mapBriefStory, mapBriefTall, mapBriefTaller, mapBriefTallScroll, mapBriefUnconfirmed, mapBriefWhy, mapBriefWhyDecision, mapBriefWriting, mapCatchUp, mapCatchUpBold, mapCatchUpCard, mapCatchUpStage, mapCatchUpSummarising, mapCatchUpWriting, mapDiffClosed, mapDiffLitGhost, mapDiffRatifyLit, mapDiffRemoval, mapDiffRemovalBrief, mapDiffSplit, mapDiffSplitBrief, railBriefReady } from "./fixtures-brief.ts";
 import { writersBriefsNeedClaude, writersFailed, writersKeyError, writersKeyNotSet, writersKeySet, writersList, writersOpenAI, writersPassed } from "./fixtures-writers.ts";
@@ -187,12 +187,15 @@ export const fixtures = {
   mapPartRedraw,
   mapGlassMotion,
   // The left panel over the map (#385): the story with a part's sheet, Esc's peel and a second press, the widened diff, History, Settings,
-  // ⌘2's toggle, and a brief over both panels. `mapPanelNarrow` is the story at 1000x800 (snap:all's size for it), where only one overlay opens.
+  // `]`'s toggle, and a brief over both panels. `mapPanelNarrow` is the story at 1000x800 (snap:all's size for it), where only one overlay opens.
   mapPanelStory,
   mapPanelHead,
   mapPanelNoSession,
   mapPanelPeel,
   mapPanelToggle,
+  // `[` in a wide window: the full list swaps for its strip and back (spec #658).
+  mapListFold,
+  mapListFoldNarrow: mapListFold,
   mapPanelDiff,
   mapPanelHistory,
   mapPanelSettings,

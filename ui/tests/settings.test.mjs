@@ -6,8 +6,27 @@ import { initial, reload } from "../../dist/settings.js";
 test("missing files give the defaults", () => {
   const loaded = reload(initial, { settings: null, keymap: null });
   assert.deepEqual(loaded.settings.summaries, { model: "haiku", effort: "", on_open: false, writer: "claude" });
-  assert.equal(loaded.keymap.get("Workspace").get("cmd-1"), "studio::ToggleList");
+  assert.equal(loaded.keymap.get("Workspace").get("["), "studio::ToggleList");
   assert.deepEqual(loaded.errors, []);
+});
+
+// Chrome takes ⌘1 and ⌘2 to switch tabs and ⌘0 to reset its zoom (spec #658, user stories 25–27, 34).
+test("the defaults leave Chrome's keys: [ toggles the list, ] the story, 0 fits the map", () => {
+  const Workspace = reload(initial, { settings: null, keymap: null }).keymap.get("Workspace");
+  assert.equal(Workspace.get("["), "studio::ToggleList");
+  assert.equal(Workspace.get("]"), "studio::ToggleRail");
+  assert.equal(Workspace.get("0"), "studio::FitMap");
+  for (const old of ["cmd-1", "cmd-2", "cmd-0"]) assert.equal(Workspace.get(old), undefined, `${old} is still bound`);
+});
+
+test("a keymap.json that binds the old keys keeps them", () => {
+  const keymap = `[{ "bindings": { "cmd-1": "studio::ToggleList", "cmd-2": "studio::ToggleRail", "cmd-0": "studio::FitMap" } }]`;
+  const Workspace = reload(initial, { settings: null, keymap }).keymap.get("Workspace");
+  assert.equal(Workspace.get("cmd-1"), "studio::ToggleList");
+  assert.equal(Workspace.get("cmd-2"), "studio::ToggleRail");
+  assert.equal(Workspace.get("cmd-0"), "studio::FitMap");
+  // A rebound shortcut moves (`settings.ts`, readKeymap): the new defaults go.
+  for (const moved of ["[", "]", "0"]) assert.equal(Workspace.get(moved), undefined, `${moved} is still bound`);
 });
 
 test("a Zed-style file, with comments and trailing commas, sets its keys and leaves the rest default", () => {
@@ -62,7 +81,7 @@ test("a later entry's rebind keeps the keys an earlier entry bound", () => {
   const Workspace = reload(initial, { settings: null, keymap }).keymap.get("Workspace");
   assert.equal(Workspace.get("cmd-1"), "studio::ToggleRail");
   assert.equal(Workspace.get("cmd-l"), "studio::ToggleList");
-  assert.equal(Workspace.get("cmd-2"), undefined);
+  assert.equal(Workspace.get("]"), undefined);
 });
 
 test("a key that is not a keystroke is reported and the rest of the keymap stays", () => {
@@ -148,5 +167,5 @@ test("__proto__, constructor and toString in a keymap are ordinary names and lea
   assert.equal(bound(loaded.keymap, "__proto__", cmd("9")), "studio::ToggleList");
   assert.equal(bound(loaded.keymap, "constructor", cmd("9")), "studio::ToggleRail");
   assert.equal(bound(loaded.keymap, "toString", cmd("9")), undefined);
-  assert.equal(bound(loaded.keymap, "Workspace", cmd("1")), "studio::ToggleList", "the defaults stay");
+  assert.equal(loaded.keymap.get("Workspace").get("["), "studio::ToggleList", "the defaults stay");
 });
