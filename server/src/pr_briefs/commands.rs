@@ -8,7 +8,9 @@ use crate::App;
 use crate::prs::Ready;
 use serde::Serialize;
 use std::{path::Path, sync::Arc};
-use studio_understanding::pr_brief::{BriefStore, PrSource, fetch_meta, gather};
+use studio_understanding::pr_brief::{
+    BriefStore, BriefWriter, PrMeta, PrSource, fetch_meta, gather,
+};
 
 /// The numbers of the ready PRs a brief is waiting for: the brief is stored and Daniel has not read all of it at the PR's current
 /// head. A brief read to its end stops counting for the project header's dot and the rail's row (its tray row stays, to read again), and a push
@@ -32,6 +34,7 @@ fn reading_of(project: &str) -> Option<GitReading> {
         project: project.to_string(),
         file: crate::map::state_file().ok()?,
         reference: crate::map::default_ref(Path::new(project)).map(|(r, _)| r),
+        gh: studio_workbench::gh_path().to_string(),
     })
 }
 
@@ -88,13 +91,8 @@ fn source_of(project: &str, number: u64) -> Result<PrSource, String> {
     let repo = Path::new(project);
     let meta = fetch_meta(repo, number)?;
     crate::pre_flight::note_closing(project, &meta);
-    let (reference, _) =
-        crate::map::default_ref(repo).ok_or("the repository has no default branch")?;
-    let base = crate::map::git(repo, &["merge-base", &reference, &meta.head])?;
-    let head = meta.head.clone();
-    let mut source = gather(repo, &base, &head, meta)?;
-    // Read from the head when the brief is written, never live in Ratify (#499).
-    source.link_evidence = crate::ratify::link_evidence(repo, &base, &head);
+    let trusted = crate::prs::by_own_login(repo, number);
+    let mut source = gathered(project, meta, trusted)?;
     if let Ok(file) = crate::map::state_file() {
         source.tier_overrides = crate::map::read_user(&file, project).tiers;
     }
@@ -102,6 +100,24 @@ fn source_of(project: &str, number: u64) -> Result<PrSource, String> {
         .and_then(|s| s.latest(number))
         .map(|b| b.brief.decisions)
         .unwrap_or_default();
+    Ok(source)
+}
+
+/// What `git` gives of `meta`'s PR in `project`, from its merge base with the default branch to its head: the diff and map facts
+/// (`gather`), what the head says of its map (`ratify::head_check`, `trusted` when the PR is by Daniel's own login), and what its Map
+/// diff marks (`map_diff::counts`), which a PR that fogs nothing gets a short brief from (#644).
+pub(super) fn gathered(project: &str, meta: PrMeta, trusted: bool) -> Result<PrSource, String> {
+    let repo = Path::new(project);
+    let (reference, _) =
+        crate::map::default_ref(repo).ok_or("the repository has no default branch")?;
+    let base = crate::map::git(repo, &["merge-base", &reference, &meta.head])?;
+    let head = meta.head.clone();
+    let mut source = gather(repo, &base, &head, meta)?;
+    // Read from the head when the brief is written, never live in Ratify (#499, #641).
+    let check = crate::ratify::head_check(repo, &base, &head, trusted);
+    source.link_evidence = check.link_evidence;
+    source.map_problems = check.map_problems;
+    source.map_counts = crate::map_diff::counts(repo, &base, &head);
     Ok(source)
 }
 
@@ -113,7 +129,7 @@ pub(super) fn has_fresh_brief(store: &BriefStore, pr: &Ready) -> bool {
 /// Looks at each ready PR of `project` after a lookup of `prs.rs`: the first brief is written at once, a new head stales it. Each
 /// PR goes on a thread of its own, since a write takes minutes; the Map view is told (`map-landed`) when a brief changed. At the
 /// first lookup after start only the PRs `Startup` picks are written; the rest are written when opened.
-pub fn lookup_later(app: &Arc<App>, project: &str, ready: Vec<Ready>) {
+pub fn lookup_later(app: &Arc<App>, project: &str, ready: Vec<Ready>, seq: u64) {
     let Some(store) = store_of(project) else {
         return;
     };
@@ -126,13 +142,16 @@ pub fn lookup_later(app: &Arc<App>, project: &str, ready: Vec<Ready>) {
         crate::settings::brief_backfill().window_ms,
         &|pr| has_fresh_brief(&store, pr),
     );
+    // A new head cancels the map text review of an older one; `seq`, the lookup's order, keeps a late older lookup from moving it back.
+    for pr in &ready {
+        app.reviews.head_now(project, pr.number, &pr.head, seq);
+    }
     for pr in ready.into_iter().filter(|pr| allowed.contains(&pr.number)) {
         let (app, project) = (app.clone(), project.to_string());
         std::thread::spawn(move || {
             let briefs = &app.briefs;
-            let Some(writer) = briefs.writer.clone() else {
-                return;
-            };
+            // Without `claude` a PR that changes the map but fogs nothing still gets its short brief and its head's map check.
+            let writer = briefs.writer.clone();
             let Some(store) = store_of(&project) else {
                 return;
             };
@@ -143,7 +162,7 @@ pub fn lookup_later(app: &Arc<App>, project: &str, ready: Vec<Ready>) {
             let seen = briefs.seen_of(&project);
             let reading = reading_of(&project);
             let with = Writing {
-                writer: writer.as_ref(),
+                writer: writer.as_deref().map(|w| w as &dyn BriefWriter),
                 model: &model,
                 store: &store,
                 reading: reading.as_ref().map(|r| r as &dyn Reading),
@@ -163,7 +182,12 @@ pub fn lookup_later(app: &Arc<App>, project: &str, ready: Vec<Ready>) {
             );
             drop(claim);
             if did != Did::Kept {
-                app.events.emit("map-landed", serde_json::json!(project));
+                app.events
+                    .emit("map-landed", serde_json::json!(project.clone()));
+            }
+            // A brief stored at this head may start its map text review.
+            if matches!(did, Did::Wrote | Did::Carried) {
+                app.reviews.brief_stored(&project, pr.number, &pr.head);
             }
         });
     }
@@ -199,11 +223,15 @@ pub fn pr_brief(
             &project, &store, stored, true,
         )))));
     }
-    let Some(writer) = briefs.writer.clone() else {
-        return Ok(store
-            .latest(number)
-            .map(|b| Opened::Brief(Box::new(view_of(&project, &store, b, true)))));
-    };
+    let writer = briefs.writer.clone();
+    // Without `claude` a full brief cannot be rewritten, so the latest one opens; a short brief, made by code, is written as ever.
+    if writer.is_none()
+        && let Some(latest) = store.latest(number).filter(|b| !b.short)
+    {
+        return Ok(Some(Opened::Brief(Box::new(view_of(
+            &project, &store, latest, true,
+        )))));
+    }
     let write = {
         let (app, project) = (app.clone(), project.clone());
         move |claim: BusyGuard| {
@@ -212,7 +240,7 @@ pub fn pr_brief(
             let seen = briefs.seen_of(&project);
             let reading = reading_of(&project);
             let with = Writing {
-                writer: writer.as_ref(),
+                writer: writer.as_deref().map(|w| w as &dyn BriefWriter),
                 model: &model,
                 store: &store,
                 reading: reading.as_ref().map(|r| r as &dyn Reading),
@@ -253,7 +281,12 @@ pub fn pr_brief(
                 .ok();
             }
             drop(claim);
-            app.events.emit("map-landed", serde_json::json!(project));
+            app.events
+                .emit("map-landed", serde_json::json!(project.clone()));
+            // A brief stored at this head may start its map text review.
+            if store.get(number, &head).is_some() {
+                app.reviews.brief_stored(&project, number, &head);
+            }
         }
     };
     let opened = briefs.open_in_background(&project, number, write);

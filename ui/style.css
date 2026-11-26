@@ -800,6 +800,16 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 @keyframes turn-flash { to { outline-color: transparent; } }
 .ratify-mark { grid-column: 2; font-size: var(--size-xs); color: var(--faint); }
 .ratify-actions { grid-column: 2; display: inline-flex; gap: var(--sp-2); }
+/* Ratify's head (#641): how the PR's head stands, one line each above the items; the map check's opens to its problems. No colour: the words
+   say it fails, and colour keeps meaning "needs you" and a broken law. */
+.ratify-head { margin: var(--sp-4) 0 0; max-width: 60ch; display: grid; gap: var(--sp-2); font-size: var(--size-small); color: var(--muted); }
+.ratify-head > * { margin: 0; }
+.ratify-check summary { width: fit-content; color: var(--fg); cursor: pointer; }
+.ratify-check summary:hover { text-decoration: underline; text-underline-offset: .2em; }
+/* The Map text review's line (#645): its state, and "Review map text" or "Run again" beside it. */
+.ratify-review { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--sp-3); row-gap: var(--sp-1); overflow-wrap: anywhere; }
+.ratify-problems { margin: var(--sp-2) 0 0; padding-inline-start: var(--sp-6); font-family: var(--mono); font-size: var(--size-xs); overflow-wrap: anywhere; }
+.ratify-problems li + li { margin-top: var(--sp-2); }
 .brief-ratify { margin: var(--sp-4) 0 0; padding: 0; list-style: none; max-width: 60ch; display: grid; gap: var(--sp-3); }
 .ratify-row { display: grid; grid-template-columns: auto 1fr auto; column-gap: var(--sp-4); align-items: baseline; font-size: var(--size); line-height: 1.45; color: var(--muted); }
 .ratify-kind { font-size: var(--size-xs); color: var(--faint); text-transform: uppercase; letter-spacing: .04em; }
@@ -1104,6 +1114,45 @@ mark.drawer-line .drawer-n::before { content: "→ " / ""; color: var(--fg); }
    its red edge inside the ring. */
 .plate.turn-lit { box-shadow: inset 0 0 0 var(--hair) var(--ring-warm), 0 0 0 var(--sp-2) color-mix(in srgb, var(--ring-warm) 35%, transparent), var(--shadow); }
 .plate.broken.turn-lit { box-shadow: inset 0 0 0 var(--hair) var(--conflict), 0 0 0 var(--sp-2) color-mix(in srgb, var(--ring-warm) 35%, transparent), var(--shadow); }
+/* The Map diff (#640), drawn on today's map while a PR brief plays: outlines and words, never a box-shadow, so they survive forced colours, and
+   no hue, so colour still means "needs you". A new part: lighter fill, firm edge and "New"; a removed one: a hollow dashed ghost, its name
+   and caption struck, and "Gone"; an edited one: "Edited". A new line is bright and thick, a removed one dashed; an added law has a ring
+   around its diamond, a removed one is a faint hollow diamond. */
+.plate.d-added { background: var(--diff-new-fill); outline: var(--mark) solid var(--diff-new-edge); }
+.plate.d-removed { background: transparent; box-shadow: none; outline: var(--hair) dashed var(--muted); }
+.plate.d-removed .plate-name, .plate.d-removed .plate-caption { text-decoration: line-through; color: var(--faint); }
+.plate-tag { position: absolute; top: calc(-1 * var(--diff-tag-line) / 2); left: var(--sp-5); padding: 0 var(--sp-3); border: var(--hair) solid var(--diff-tag-edge);
+             border-radius: var(--radius-small); background: var(--map-bg); font-size: var(--diff-tag-size); font-weight: 600; letter-spacing: .1em;
+             text-transform: uppercase; line-height: var(--diff-tag-line); color: var(--fg); }
+.plate.d-removed .plate-tag { color: var(--muted); }
+.map-links .link.d-added { stroke: var(--diff-link-new); stroke-width: var(--diff-link-width); }
+.map-links .link.d-removed { stroke: var(--diff-link-gone); stroke-dasharray: var(--diff-dash); }
+.law-mark.d-added { outline: var(--hair) solid var(--fg); outline-offset: var(--diff-ring); }
+.law-mark.d-removed { background: none; box-shadow: none; outline: var(--hair) solid var(--faint); outline-offset: calc(-1 * var(--hair)); opacity: var(--diff-gone-mark); }
+.link-ring { fill: none; stroke: var(--fg); stroke-width: var(--hair); }
+.link-mark.d-removed { fill: var(--map-bg); stroke: var(--faint); stroke-width: var(--hair); opacity: var(--diff-gone-mark); }
+.actor.d-added { color: var(--fg); }
+.actor.d-removed { text-decoration: line-through; }
+/* A ghost the brief lights keeps its dashed outline outside the warm ring, so "gone" survives exactly when the brief points at it. */
+.map-world.briefing .plate.d-removed.lit { outline-offset: var(--diff-ghost-gap); }
+/* Ratify's pointed row (#643) lights its mark with a class of its own, in the brief's ring tokens: the brief adds and strips `.lit`, and
+   story-to-map clears `.turn-lit`. A plate or a law's diamond gets the warm ring, an actor a warm outline, a line and a line's diamond a warm
+   stroke; a mark the brief dims shows full while pointed. The ring sits on box-shadows and strokes, so the Map diff's outlines stay: a lit
+   ghost keeps its dashed one outside the ring, as under the brief's light. */
+.plate.ratify-lit { box-shadow: inset 0 0 0 var(--hair) var(--ring-warm), 0 0 0 var(--sp-2) color-mix(in srgb, var(--ring-warm) 35%, transparent), var(--shadow); }
+.plate.d-removed.ratify-lit { outline-offset: var(--diff-ghost-gap); }
+.actor.ratify-lit { color: var(--fg); outline: var(--hair) solid var(--ring-warm); outline-offset: var(--sp-2); border-radius: var(--radius-small); }
+.map-world.briefing .plate.ratify-lit, .map-world.briefing .actor.ratify-lit { opacity: 1; }
+.law-mark.ratify-lit { box-shadow: 0 0 0 var(--sp-2) color-mix(in srgb, var(--ring-warm) 60%, transparent); }
+.law-mark.trust.ratify-lit { box-shadow: inset 0 0 0 var(--hair) var(--law-trust), 0 0 0 var(--sp-2) color-mix(in srgb, var(--ring-warm) 60%, transparent); }
+.map-links .link.ratify-lit { stroke: var(--ring-warm); stroke-width: calc(var(--diff-link-width) + var(--mark)); }
+.link-mark.ratify-lit { stroke: var(--ring-warm); stroke-width: var(--sp-2); paint-order: stroke; opacity: 1; }
+/* Forced colours drop box-shadows: the pointed plate or diamond gets an outline in the system's highlight instead; one the Map diff already
+   outlines keeps its outline's style (solid new, dashed gone) in that colour. */
+@media (forced-colors: active) {
+  :is(.plate, .law-mark).ratify-lit:not(.d-added, .d-removed) { outline: var(--mark) solid Highlight; outline-offset: var(--sp-2); }
+  :is(.plate, .law-mark).ratify-lit:is(.d-added, .d-removed) { outline-color: Highlight; }
+}
 .plate.arrive { animation: brief-arrive var(--brief-arrive); }
 .plate.pick { cursor: pointer; }
 .plate.picked { box-shadow: inset 0 0 0 var(--mark) var(--brief-light), var(--shadow); animation: brief-arrive var(--brief-arrive); }

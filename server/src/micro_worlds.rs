@@ -358,7 +358,7 @@ fn hex(text: &str) -> String {
 }
 
 /// The words of a run's end.
-fn end_words(end: crate::runner::End) -> String {
+pub(crate) fn end_words(end: crate::runner::End) -> String {
     serde_json::to_value(end)
         .ok()
         .and_then(|v| v.as_str().map(|s| s.replace('-', " ")))
@@ -398,19 +398,8 @@ impl MicroWorlds {
         crate::settings::micro_worlds_dsh_visual_in(&text, &home)
     }
 
-    /// `project`'s folder: its path, readable, and a hash of it, so two paths that read alike never share one.
     fn folder(&self, project: &str) -> PathBuf {
-        let name: String = project
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-            .collect();
-        // FNV-1a: the same in every build, as a folder name kept across builds must be.
-        let hash = project
-            .bytes()
-            .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-                (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
-            });
-        self.store.join(format!("{name}-{hash:016x}"))
+        project_folder(&self.store, project)
     }
 
     fn file(&self, project: &str, key: &str) -> PathBuf {
@@ -787,9 +776,31 @@ pub fn micro_world_page(app: &crate::App, project: String, key: String) -> Resul
     app.worlds.page(&project, &key)
 }
 
-/// Fills a run's working `folder` with `repo`'s files at `commit` (`git archive`, so no git data and nothing untracked) and makes
-/// the output folder in it.
+/// `project`'s folder in `store`: its path, readable, and a hash of it, so two paths that read alike never share one.
+pub(crate) fn project_folder(store: &Path, project: &str) -> PathBuf {
+    let name: String = project
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    store.join(format!("{name}-{:016x}", fnv1a(project)))
+}
+
+/// FNV-1a of `text`: the same in every build, as a name or hash kept across builds must be.
+pub(crate) fn fnv1a(text: &str) -> u64 {
+    text.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
+/// Fills a run's working `folder` with `repo`'s files at `commit` and makes the output folder in it.
 fn fill(repo: &Path, commit: &str, folder: &Path) -> Result<(), String> {
+    archive(repo, commit, folder)?;
+    fs::create_dir(folder.join(MICRO_WORLD_OUT))
+        .map_err(|e| format!("the output folder {MICRO_WORLD_OUT}: {e}"))
+}
+
+/// Fills `folder` with `repo`'s files at `commit`: `git archive`, so no git data and nothing untracked.
+pub(crate) fn archive(repo: &Path, commit: &str, folder: &Path) -> Result<(), String> {
     // Streamed into `tar`, so it is waited on by hand; it reads this machine's repository only.
     let mut archive = studio_workbench::run::git(repo)
         .args(["archive", "--format=tar", commit])
@@ -810,8 +821,7 @@ fn fill(repo: &Path, commit: &str, folder: &Path) -> Result<(), String> {
             "the project's files at {commit} could not be copied for the run"
         ));
     }
-    fs::create_dir(folder.join(MICRO_WORLD_OUT))
-        .map_err(|e| format!("the output folder {MICRO_WORLD_OUT}: {e}"))
+    Ok(())
 }
 
 /// Whether a path of `paths` differs between `built` and `current` in `repo`; a commit git no longer has counts as changed.

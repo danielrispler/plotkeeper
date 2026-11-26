@@ -556,12 +556,17 @@ export type Expected = { expected: string[]; touched: string[] };
 // it was asked for, started or ended, by its state. An ended run says how it ended in `line`, lists the tool calls it was denied, and
 // carries its `prompt` to copy on every end but a clean one. `paused` is why every queue waits, null while they run.
 type RunEnd = "done" | "denied" | "failed" | "timed-out" | "died" | "setup-failed" | "not-logged-in" | "rate-limited";
-export type RunView = { id: string; kind: "back-law" | "micro-world"; state: "queued" | "running" | "ended"; at: number; outcome: RunEnd | null; line: string | null; denials: string[]; prompt: string | null };
+export type RunView = { id: string; kind: "back-law" | "micro-world" | "map-review"; state: "queued" | "running" | "ended"; at: number; outcome: RunEnd | null; line: string | null; denials: string[]; prompt: string | null };
 export type Runs = { paused: string | null; runs: RunView[] };
 /** Ratifying (`ratify.rs`): an item of a PR is a map change (kind part, actor, link, law or flow) or a decision the agent declared. */
 export type PendingItem = { pr: number; kind: string; id: string };
 // `evidence` (#499): on a link the PR adds, the import sites behind it, stored on its brief when it was written, read at `head`.
-export type RatifyRow = { pr: number; kind: string; id: string; text: string; change: string; status: "ratified" | "accepted" | "overturned" | "not-yet"; detail: RatifyDetail | null; evidence?: LinkSites };
+// `mark` (#643): the id of the mark the row lights on the Map diff (`part:<id>`, `actor:<id>`, `law:<id>`, `line:<end>|<end>`); none for a decision or a flow.
+export type RatifyRow = { pr: number; kind: string; id: string; text: string; change: string; status: "ratified" | "accepted" | "overturned" | "not-yet"; detail: RatifyDetail | null; evidence?: LinkSites; mark?: string };
+// The Map diff (`map_diff.rs`, #640): today's map with a PR's added and removed items in it (`source`, version 2 JSON), and each one's tag.
+// A line is keyed by its two ends in sorted order. `pr_map_diff` answers null when the PR changed nothing on the map.
+export type MapTag = "added" | "removed" | "edited";
+export type MapDiff = { pr: number; base: string; head: string; source: string; parts: Record<string, MapTag>; actors: Record<string, MapTag>; lines: { ends: [string, string]; change: MapTag }[]; laws: Record<string, MapTag> };
 // Where an import stands (`pr_brief.rs`, `ImportSite`): in the importing file, at its 1-based line when one is known.
 export type ImportSite = { file: string; line?: number };
 export type LinkSites = { head: string; sites: ImportSite[] };
@@ -571,12 +576,20 @@ export type SiteSnippet = { file: string; line?: number; first: number; lines: s
 type RatifyWords = { before: string | null; after: string | null };
 type RatifyHeld = { name: string; text: RatifyWords; paths_added: string[]; paths_removed: string[] };
 export type RatifyDetail =
-  | { of: "part"; name: RatifyWords; purpose: RatifyWords; holds: RatifyHeld[]; paths_added: string[]; paths_removed: string[] }
-  | { of: "link"; kind: RatifyWords; reason: RatifyWords };
+  | { of: "part"; name: RatifyWords; purpose: RatifyWords; caption: RatifyWords; holds: RatifyHeld[]; paths_added: string[]; paths_removed: string[] }
+  | { of: "link"; kind: RatifyWords; reason: RatifyWords; direction?: RatifyWords };
+// A PR head's Map text review (`map_review.rs`, #642), null when the head changed no map text. `idle`: not started (a PR not by Daniel's
+// login waits for "Review map text", `map_review_start`); `failed` has `line` and offers "Run again", the same command. `items` holds
+// the head's items that have a verdict, by id: `part:<id>/name|purpose|caption`, `held:<part>/<n>` (n from 1, its place in `holds`),
+// `link:<id>/reason`, `law:<id>/text`. Any verdict but `supported` is `flagged`.
+export type MapReviewItem = { id: string; verdict: "supported" | "overreach" | "contradicted" | "unreadable"; why: string; cites: string[]; flagged: boolean };
+// `left_out`: how many of the head's changed map items the review left out of its prompt, for an id it does not take (over 40 characters).
+export type MapReview = { head: string; state: "idle" | "reviewing" | "done" | "failed"; items: MapReviewItem[]; checked: number; flagged: number; line: string | null; left_out: number };
 // What a ready PR's brief is doing (`pr_briefs.rs`): a newer head was pushed (stale), being written now, and the chapters' titles, or the one story's.
 // `note` (#477, part B): why the brief at this head is what it is after a push: the read carried over, or it was rewritten.
 // `since` (#497): the title of the "Since you read" story stored for this head, which the tray opens first; `since_chapters`, its chapters' titles when it has more than one, one tray row each.
-type BriefInfo = { stale: boolean; writing: boolean; chapters: string[]; quiet: boolean; read?: boolean; failed?: boolean; note?: string; since?: string; since_chapters?: string[] };
+// `short`: the stored brief is a short one (#644), made by code from the Map diff of a PR that fogs nothing.
+type BriefInfo = { stale: boolean; writing: boolean; chapters: string[]; quiet: boolean; read?: boolean; failed?: boolean; note?: string; since?: string; since_chapters?: string[]; short?: boolean };
 export type ReadyPr = { number: number; title: string; head: string; branch?: string; brief: BriefInfo | null };
 // A PR brief as the writer made it and `pr_brief` returns it (`understanding/src/pr_brief.rs`). A step's `flags` are what the checks found wrong with it
 // that the one rewrite did not mend: it shows "not confirmed from the facts".
@@ -605,9 +618,12 @@ export type AlsoGroup = { kind: AlsoKind; files: TouchedFile[]; lines: number };
 type BriefShape = { chapters: boolean; required: string[]; also: string[]; overview: boolean; flows_changed: string[] };
 // `partial_facts` (#477, #491): what the brief was written without, absent when nothing was missing or in a brief from before it.
 // `link_evidence` (#499): the import sites behind each link the PR adds, read from its head; Ratify reads it through `pr_ratify`.
+// `map_problems` (#641): the map check's problems at its head, which Ratify's head lists; absent when the check passed.
 type StoredBrief = {
   version: number; pr: number; head: string; written_at: number; stale: boolean; model: string; shape?: BriefShape; brief: PrBrief; guard?: Guard | null;
-  partial_facts?: PartialFacts; link_evidence?: { link: string; sites: ImportSite[] }[];
+  partial_facts?: PartialFacts; link_evidence?: { link: string; sites: ImportSite[] }[]; map_problems?: string[];
+  // A short brief (#644): one step made by code, "The map in this PR", then Ratify.
+  short?: boolean;
 };
 // The cut diff's files none of whose hunks were sent and those sent in part, with its bytes sent and not sent; the claim check's error; the
 // extensions of the diff's source languages no extractor of the map reads (`understanding/src/pr_brief.rs`, `PartialFacts`).
@@ -753,6 +769,9 @@ export interface Commands {
   brief_since_done: { args: InPr & { head: string }; reply: void };
   briefs_waiting: { args: { cwd: string }; reply: WaitingBriefs | null };
   pr_ratify: { args: InPr; reply: RatifyRow[] };
+  pr_map_review: { args: InPr; reply: MapReview | null };
+  map_review_start: { args: InPr; reply: MapReview | null };
+  pr_map_diff: { args: InPr; reply: MapDiff | null };
   ratify_site: { args: Project & { head: string; file: string; line?: number | null }; reply: SiteSnippet };
   projects: { args: None; reply: SavedProject[] };
   remove_project: { args: { path: string }; reply: SavedProject[] };

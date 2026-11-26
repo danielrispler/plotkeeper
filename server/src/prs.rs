@@ -103,6 +103,11 @@ pub struct Prs {
     found: Mutex<HashMap<String, BTreeMap<String, Pr>>>,
     /// The projects whose `gh pr list` has answered at least once.
     listed: Mutex<HashSet<String>>,
+    /// The order of the lookup whose answers `found` holds, per project: a lookup that ends after a later one keeps none of its
+    /// own, so what is found never moves back.
+    seqs: Mutex<HashMap<String, u64>>,
+    /// The lookups started, in order.
+    started: std::sync::atomic::AtomicU64,
 }
 
 impl Prs {
@@ -124,9 +129,15 @@ impl Prs {
         };
         let mut asked = Vec::new();
         let mut listed = None;
+        let mut seq = 0;
         let outcome = self
             .guard
             .run_after(&format!("prs:{project}"), now, cooldown, || {
+                // The guard runs one lookup of a project at a time, so the order they start in is the order of what they saw.
+                seq = self
+                    .started
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                    + 1;
                 for branch in branches {
                     asked.push((branch.clone(), view(branch)));
                 }
@@ -137,6 +148,15 @@ impl Prs {
             return None;
         }
         let mut found = self.found.lock().unwrap();
+        let mut seqs = self.seqs.lock().unwrap();
+        if seqs.get(project).is_some_and(|seen| *seen > seq) {
+            // A later lookup's answers are kept already: this one's are older.
+            asked.clear();
+            listed = None;
+        } else {
+            seqs.insert(project.to_string(), seq);
+        }
+        drop(seqs);
         let of_project = found.entry(project.to_string()).or_default();
         let mut numbers = Vec::new();
         for (branch, looked) in asked {
@@ -180,26 +200,37 @@ impl Prs {
         self.listed.lock().unwrap().contains(project)
     }
 
+    /// The ready PRs of `project`, by number, with the order of the lookup they are from (`MapReviews::head_now`).
+    pub fn ready_seq(&self, project: &str) -> (u64, Vec<Ready>) {
+        let found = self.found.lock().unwrap();
+        // Read under `found`'s lock, which every change of `seqs` holds: the order is the one of the answers read.
+        let seq = self.seqs.lock().unwrap().get(project).copied().unwrap_or(0);
+        (seq, ready_of(&found, project))
+    }
+
     /// The ready PRs of `project`, by number.
     pub fn ready(&self, project: &str) -> Vec<Ready> {
-        let found = self.found.lock().unwrap();
-        let mut ready: Vec<Ready> = found
-            .get(project)
-            .into_iter()
-            .flat_map(|branches| branches.values())
-            .filter(|pr| pr.ready())
-            .map(|pr| Ready {
-                number: pr.number,
-                title: pr.title.clone(),
-                head: pr.head.clone(),
-                branch: pr.branch.clone(),
-                brief: None,
-            })
-            .collect();
-        drop(found);
-        ready.sort_by_key(|r| r.number);
-        ready
+        ready_of(&self.found.lock().unwrap(), project)
     }
+}
+
+/// The ready PRs of `project` in `found`, by number.
+fn ready_of(found: &HashMap<String, BTreeMap<String, Pr>>, project: &str) -> Vec<Ready> {
+    let mut ready: Vec<Ready> = found
+        .get(project)
+        .into_iter()
+        .flat_map(|branches| branches.values())
+        .filter(|pr| pr.ready())
+        .map(|pr| Ready {
+            number: pr.number,
+            title: pr.title.clone(),
+            head: pr.head.clone(),
+            branch: pr.branch.clone(),
+            brief: None,
+        })
+        .collect();
+    ready.sort_by_key(|r| r.number);
+    ready
 }
 
 /// Runs `gh pr view <branch>` in `cwd`, as Daniel with its own login; no credential file is read.
@@ -275,19 +306,63 @@ pub fn ask_later(app: &Arc<App>, trigger: Trigger, also: Option<&str>) {
                     app.list_changed();
                 }
             }
-            let ready = prs.ready(&project);
+            let (seq, ready) = prs.ready_seq(&project);
             if ready != before {
                 app.events
                     .emit("map-landed", serde_json::json!(project.clone()));
             }
-            crate::pr_briefs::lookup_later(&app, &project, ready);
+            crate::pr_briefs::lookup_later(&app, &project, ready, seq);
         }
     });
+}
+
+/// Whether PR `number` of the repository in `repo` was opened by Daniel's own GitHub login (spec #634, Q17): `gh pr view --json
+/// author` against `gh api user`, run as his normal `gh`, which reads no credential file of ours. Anything `gh` cannot answer counts
+/// as not his, so an unknown author is never trusted.
+pub fn by_own_login(repo: &Path, number: u64) -> bool {
+    by_own_login_with(studio_workbench::gh_path(), repo, number)
+}
+
+/// `by_own_login` with the `gh` at `program`.
+pub(crate) fn by_own_login_with(program: &str, repo: &Path, number: u64) -> bool {
+    let n = number.to_string();
+    let login = |args: &[&str]| {
+        let output = run_until(run::gh_at(program, repo).args(args), GH_LIMIT).ok()?;
+        let login = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        (!login.is_empty()).then_some(login)
+    };
+    let author = login(&[
+        "pr",
+        "view",
+        &n,
+        "--json",
+        "author",
+        "--jq",
+        ".author.login",
+    ]);
+    // With no author there is nothing to compare, so Daniel's own login is not asked.
+    author.is_some_and(|author| login(&["api", "user", "--jq", ".login"]) == Some(author))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_author_gh_cannot_tell_is_not_daniels_and_his_own_login_is_not_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let (gh, calls) = (dir.path().join("gh"), dir.path().join("calls"));
+        std::fs::write(
+            &gh,
+            format!("#!/bin/sh\necho \"$@\" >> '{}'\ncase \"$1 $2\" in\n  'api user') echo daniel ;;\n  *) exit 1 ;;\nesac\n", calls.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&gh, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        assert!(!by_own_login_with(&gh.to_string_lossy(), dir.path(), 7));
+        let asked = std::fs::read_to_string(&calls).unwrap();
+        assert!(asked.contains("pr view 7"), "{asked}");
+        assert!(!asked.contains("api user"), "{asked}");
+    }
 
     const OPEN: &str = r#"{"number":7,"title":"Fog on the map","isDraft":false,"state":"OPEN","headRefOid":"aaa111","body":"Closes #5","closingIssuesReferences":[{"number":5}]}"#;
     const PUSHED: &str = r#"{"number":7,"title":"Fog on the map","isDraft":false,"state":"OPEN","headRefOid":"bbb222","body":"Closes #5","closingIssuesReferences":[{"number":5}]}"#;
@@ -581,5 +656,30 @@ mod tests {
     #[test]
     fn output_that_is_not_a_pr_is_none() {
         assert_eq!(parse("no pull requests found"), None);
+    }
+
+    /// A `gh` that prints `author` for `pr view` and `me` for `api user`, and fails when either is empty.
+    fn fake_gh(dir: &Path, author: &str, me: &str) -> String {
+        let path = dir.join("gh");
+        let script = format!(
+            "#!/bin/sh\ncase \"$1 $2\" in\n  \"pr view\") out='{author}' ;;\n  \"api user\") out='{me}' ;;\nesac\n\
+             [ -n \"$out\" ] || exit 1\necho \"$out\"\n"
+        );
+        std::fs::write(&path, script).unwrap();
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+        std::fs::set_permissions(&path, perms).unwrap();
+        path.display().to_string()
+    }
+
+    #[test]
+    fn a_pr_is_by_daniel_s_own_login_only_when_gh_says_both_logins_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = |author, me| by_own_login_with(&fake_gh(dir.path(), author, me), dir.path(), 7);
+        assert!(at("danielrispler", "danielrispler"));
+        assert!(!at("someone-else", "danielrispler"));
+        // `gh` cannot say who wrote it, or who is signed in: not trusted.
+        assert!(!at("", "danielrispler"));
+        assert!(!at("danielrispler", ""));
     }
 }

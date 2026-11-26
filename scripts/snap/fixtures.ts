@@ -10,7 +10,7 @@ import { alerts, cutText, cutTextStill, hints, listClearLanded, listNarrow, list
 import { mapBadgeList, mapBase, mapBriefPairLight, mapBriefSwitch, mapBroken, mapBusy, mapCalm, mapCamera, mapDotsOrder, mapDotsRetry, mapEmpty, mapFog, mapFogPlates, mapFresh, mapGlassMotion, mapGoneFocus, mapHeaderDot, mapMarkHints, mapMarks, mapNoMap, mapPartKeys, mapPartRedraw, mapProjectGone, mapProjectRemoved, mapRefresher, mapPurposeMore, mapCaughtUp, mapCatchUpOlder, mapReview, mapScrubbed, mapSmallGaps, mapSpotlight, mapStale, mapSwitchSavesViews, mapTalksTo, readmeHero } from "./fixtures-map.ts";
 import { mapFootprint, mapLatePlace, mapPanelBrief, mapPanelDiff, mapNotPlacedHint, mapPanelFieldHints, mapPanelFocus, mapPanelHead, mapPanelHistory, mapPanelNoSession, mapPanelPeel, mapPanelSettings, mapPanelStory, mapPanelToggle, mapSheetClose, mapSheetExplained, mapSheetHere, mapSheetHolds, mapSheetKeptWidth, mapSheetResizeRedraw, mapSheetScrollShort, mapSheetStill, mapSheetUnratified, mapSheetWidth, mapTurnLight } from "./fixtures-panel.ts";
 import { mapBackLaw, mapMicroWorld, mapMicroWorldBuilding, mapPreFlight, mapPreFlightPick, mapPreFlightStatus, mapRuns, mapRunsAnnounced, mapRunsBesideSheet, mapRunsPaused, mapTray, mapTrayAfterPush } from "./fixtures-runs.ts";
-import { mapBriefAlsoGroups, mapBriefAnnounce, mapBriefBar, mapBriefBold, mapBriefBoldUnpaired, mapBriefChapterLast, mapBriefChapterMid, mapBriefChapters, mapBriefCopied, mapBriefCopyByHand, mapBriefExplainBack, mapBriefExplained, mapBriefFigure, mapBriefGuard, mapBriefHeights, mapBriefNoFacts, mapBriefNoStaleBase, mapBriefOrderRight, mapBriefOrderSlots, mapBriefOrderWrong, mapBriefOverturn, mapBriefPartialFacts, mapBriefPick, mapBriefRatify, mapBriefRatifyDetail, mapBriefRatifyEvidence, mapBriefSince, mapBriefStaleBase, mapBriefStart, mapBriefStepCode, mapBriefStory, mapBriefTall, mapBriefTaller, mapBriefTallScroll, mapBriefUnconfirmed, mapBriefWhy, mapBriefWhyDecision, mapBriefWriting, mapCatchUp, mapCatchUpBold, mapCatchUpCard, mapCatchUpStage, mapCatchUpSummarising, mapCatchUpWriting, railBriefReady } from "./fixtures-brief.ts";
+import { mapBriefAlsoGroups, mapBriefAnnounce, mapBriefBar, mapBriefBold, mapBriefBoldUnpaired, mapBriefChapterLast, mapBriefChapterMid, mapBriefChapters, mapBriefCopied, mapBriefCopyByHand, mapBriefExplainBack, mapBriefExplained, mapBriefFigure, mapBriefGuard, mapBriefHeights, mapBriefMapCheck, mapBriefNoFacts, mapBriefReview, mapBriefNoStaleBase, mapBriefOrderRight, mapBriefOrderSlots, mapBriefOrderWrong, mapBriefOverturn, mapBriefPartialFacts, mapBriefPick, mapBriefRatify, mapBriefRatifyDetail, mapBriefRatifyEvidence, mapBriefShort, mapBriefSince, mapBriefStaleBase, mapBriefStart, mapBriefStepCode, mapBriefStory, mapBriefTall, mapBriefTaller, mapBriefTallScroll, mapBriefUnconfirmed, mapBriefWhy, mapBriefWhyDecision, mapBriefWriting, mapCatchUp, mapCatchUpBold, mapCatchUpCard, mapCatchUpStage, mapCatchUpSummarising, mapCatchUpWriting, mapDiffClosed, mapDiffLitGhost, mapDiffRatifyLit, mapDiffRemoval, mapDiffRemovalBrief, mapDiffSplit, mapDiffSplitBrief, railBriefReady } from "./fixtures-brief.ts";
 import { writersBriefsNeedClaude, writersFailed, writersKeyError, writersKeyNotSet, writersKeySet, writersList, writersOpenAI, writersPassed } from "./fixtures-writers.ts";
 
 export const fixtures = {
@@ -98,6 +98,10 @@ export const fixtures = {
   mapBriefRatifyEvidence: () => mapBriefRatifyEvidence("line"),
   mapBriefRatifyEvidenceList: () => mapBriefRatifyEvidence("list"),
   mapBriefRatifyEvidenceSite: () => mapBriefRatifyEvidence("site"),
+  mapBriefMapCheck: () => mapBriefMapCheck(false),
+  mapBriefMapCheckAlone: () => mapBriefMapCheck(true),
+  mapBriefReviewFlag: () => mapBriefReview("flag"),
+  mapBriefReviewRunning: () => mapBriefReview("running"),
   mapBriefGuard: () => mapBriefGuard(false),
   mapBriefGuardConfirm: () => mapBriefGuard(true),
   mapBriefBar,
@@ -106,6 +110,14 @@ export const fixtures = {
   mapBriefOverturnCopied: () => mapBriefOverturn("copies"),
   mapBriefOverturnFallback: () => mapBriefOverturn("refuses"),
   mapBriefWriting,
+  mapDiffSplit,
+  mapDiffSplitBrief,
+  mapDiffRemoval,
+  mapDiffRemovalBrief,
+  mapDiffLitGhost,
+  mapDiffRatifyLit,
+  mapDiffClosed,
+  mapBriefShort,
   mapCatchUp,
   mapCatchUpWriting,
   mapCatchUpWritingStage: () => mapCatchUpStage({ kind: "writing" }, "Writing…"),

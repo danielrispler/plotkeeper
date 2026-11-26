@@ -87,6 +87,9 @@ export type Player = {
   go: (by: number, length: number) => "moved" | "done";
   // Leaves the brief where it is; the next `open` of it continues from there.
   close: () => void;
+  // The list of steps shrank to `length` (a step that only the Map text review's state brought went): a step past its end becomes its
+  // last, so the brief stays open where Daniel is.
+  clamp: (length: number) => void;
 };
 /** What plays and where each brief was left. Opening one while the map shows a past commit returns the map to now first. */
 export function briefPlayer(deps: { scrubbed: () => boolean; backToNow: () => void }): Player {
@@ -127,6 +130,9 @@ export function briefPlayer(deps: { scrubbed: () => boolean; backToNow: () => vo
       if (now) left.set(key(now), now.step);
       now = null;
     },
+    clamp(length) {
+      if (now && length > 0 && now.step >= length) now = { ...now, step: length - 1 };
+    },
   };
 }
 
@@ -142,6 +148,17 @@ export function latestRequest() {
       return () => mine === n;
     },
     cancel: () => void n++,
+  };
+}
+
+/** Replies where only the latest request's applies: `apply` gets a reply only when no later request was made since. */
+export function latestReplies() {
+  const latest = latestRequest();
+  return <T>(request: Promise<T>, apply: (got: T) => void): Promise<void> => {
+    const wanted = latest.begin();
+    return request.then((got) => {
+      if (wanted()) apply(got);
+    });
   };
 }
 
@@ -343,7 +360,9 @@ export function awaitedWrite(pr: ReadyPr | undefined, full = false): "open" | "s
 export type AgentItem =
   | { of: "step"; step: Pick<BriefStep, "k" | "h" | "b" | "risks" | "cites" | "flags">; files: string[] }
   | { of: "decision"; text: string; flags: string[] }
-  | { of: "no-part"; files: string[] };
+  | { of: "no-part"; files: string[] }
+  // A Ratify row the Map text review flagged (#645): its kind and id in the map, and the review's reasons (`reviewFlags`).
+  | { of: "map-text"; kind: string; id: string; flags: string[] };
 
 /**
  * The prompt for `item` of PR `pr`, naming its branch while it is open: a line that says what to do, the item's words, its risks, why
@@ -356,6 +375,9 @@ export function agentPrompt(pr: number, branch: string | null, item: AgentItem):
   const reasons = (flags: string[]) => list("Why it is not confirmed:", unconfirmedReasons(flags));
   if (item.of === "no-part") {
     return [`${where}, these changed files belong to no part of the map (system-map.json). Assign these files to a part, or ignore them, and tell me what you changed.`, ...list(null, item.files)].join("\n");
+  }
+  if (item.of === "map-text") {
+    return [`${where}, the map text review flagged the ${item.kind} ${item.id}'s text in system-map.json as not confirmed by the code. Check it against the code, correct the map or say why it holds, and tell me what you changed.`, ...reasons(item.flags)].join("\n");
   }
   if (item.of === "decision") {
     return [`${where}, you declared a decision the checks could not confirm from the facts. Check it against the code, correct it or say why it holds, and tell me what you changed.`, `Decided: ${item.text}`, ...reasons(item.flags)].join("\n");

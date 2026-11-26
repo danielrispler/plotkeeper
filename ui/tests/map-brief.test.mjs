@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { escapeMap } from "../../dist/map-model.js";
-import { alsoAt, alsoRows, awaitedWrite, chapterGate, storySteps, briefCamera, briefPlayer, latestRequest, figureShapes, figureSize, playlist, partialFactsLines, unconfirmed, unconfirmedReasons, agentPrompt, diffArgs } from "../../dist/map-brief-model.js";
+import { alsoAt, alsoRows, awaitedWrite, chapterGate, storySteps, briefCamera, briefPlayer, latestReplies, latestRequest, figureShapes, figureSize, playlist, partialFactsLines, unconfirmed, unconfirmedReasons, agentPrompt, diffArgs } from "../../dist/map-brief-model.js";
 import { trayRows } from "../../dist/map-tray.js";
 
 const step = (k, extra = {}) => ({ k, h: k, b: "", on: [], hops: [], law: null, covered_by: null, list: [], risks: [], fig: null, check: null, cites: [], flags: [], ...extra });
@@ -344,6 +344,19 @@ test("opening another chapter over an open one leaves the open one's step where 
   assert.equal(player.current().step, 1, "the first chapter continues where it was left");
 });
 
+test("a step list that shrinks under the played step keeps the brief open on its new last step", () => {
+  const player = briefPlayer({ scrubbed: () => false, backToNow: () => {} });
+  player.open("/p", 7, 0);
+  player.go(3, 5);
+  player.clamp(5);
+  assert.equal(player.current()?.step, 3, "a list as long leaves the step where it is");
+  // The Ratify step, brought only by the review, goes once the review is done with nothing to say.
+  player.clamp(3);
+  assert.equal(player.current()?.step, 2);
+  player.clamp(0);
+  assert.equal(player.current()?.step, 2, "an empty list is no list to clamp to");
+});
+
 test("only the latest request is wanted: a later one, or a cancel, drops the earlier", () => {
   const request = latestRequest();
   const first = request.begin();
@@ -353,6 +366,24 @@ test("only the latest request is wanted: a later one, or a cancel, drops the ear
   assert.equal(second(), true);
   request.cancel();
   assert.equal(second(), false, "a close drops the one in flight");
+});
+
+test("only the latest request's reply applies: an earlier one that comes after it is dropped", async () => {
+  const reply = latestReplies();
+  const applied = [];
+  /** @type {(got: string) => void} */
+  let first = () => {};
+  /** @type {(got: string) => void} */
+  let second = () => {};
+  const asked = (/** @type {(resolve: (got: string) => void) => void} */ keep) => new Promise(keep);
+  const done = [
+    reply(asked((resolve) => (first = resolve)), (got) => applied.push(got)),
+    reply(asked((resolve) => (second = resolve)), (got) => applied.push(got)),
+  ];
+  second("done");
+  first("reviewing");
+  await Promise.all(done);
+  assert.deepEqual(applied, ["done"], "the stale reply does not overwrite the newer one");
 });
 
 test("an open waiting on its write opens the brief once it is stored, stops on a failure, a quiet PR or one gone, and waits otherwise", () => {
@@ -487,4 +518,83 @@ test("drawing a step again, as a resize does, keeps one seen-watcher per not-con
   // The next step has no mark: the one before is not watched on.
   stepNode(view, step("Before"), 7);
   assert.equal(live(), 0);
+});
+
+// The Map text review in Ratify (#645, spec #634 "Ratify's display"): a flagged row carries the not-confirmed mark, an unflagged one shows
+// nothing, Accept stays, and Ratify's head holds the review's line beside the map check's.
+test("a flagged Ratify row carries the not-confirmed mark beside Accept, and Ratify's head says the review beside the map check (#645)", async () => {
+  const { fakeDocument } = await import("./dom.mjs");
+  globalThis.IntersectionObserver = /** @type {any} */ (class { observe() {} disconnect() {} });
+  globalThis.document = fakeDocument();
+  const { stepNode } = await import("../../dist/map-brief.js");
+  const { setPlaying, setReview, steps, player } = await import("../../dist/map-brief-player.js");
+  const view = /** @type {import("../../dist/map.js").MapView} */ (/** @type {unknown} */ ({ project: "/p", doc: { parts: [], laws: [] }, scrub: null }));
+  const stored = { version: 1, pr: 7, head: "bbb", written_at: 1, stale: false, model: "opus", map_problems: ["stray.ts is tracked but no part owns it"], brief: brief({ chapters: [chapter("Fog", "Now")] }) };
+  const rows = [
+    { pr: 7, kind: "part", id: "server", text: "Server", change: "edited", status: "not-yet", detail: null },
+    { pr: 7, kind: "link", id: "server-ui", text: "Server to UI", change: "added", status: "not-yet", detail: null },
+  ];
+  setPlaying(/** @type {any} */ ({ brief: stored, partial: false }), null, /** @type {any} */ (rows));
+  setReview({ head: "bbb", state: "done", checked: 2, flagged: 1, line: null, left_out: 0, items: [
+    { id: "part:server/purpose", verdict: "overreach", why: "It also writes the page.", cites: ["server/src/lib.rs:41"], flagged: true },
+    { id: "link:server-ui/reason", verdict: "supported", why: "", cites: [], flagged: false },
+  ] });
+  player.open("/p", 7, 0);
+  const ratify = steps().at(-1);
+  assert.equal(ratify?.k, "Ratify");
+  const node = /** @type {any} */ (stepNode(view, /** @type {any} */ (ratify), 7));
+  const [head] = node.find("div").filter((each) => each.className === "ratify-head");
+  assert.ok(head, "Ratify has a head");
+  const lines = head.childNodes.filter((line) => line.tag);
+  assert.deepEqual(lines.map((line) => line.className), ["ratify-review", "ratify-check"], "the review's line, then the map check's");
+  assert.equal(lines[0].text, "Map text review: 2 checked, 1 flagged");
+  const [part, link] = node.find("li").filter((each) => each.className === "ratify-row");
+  const marks = (row) => row.find("button").filter((button) => button.className.includes("brief-why-mark"));
+  assert.equal(marks(part).length, 1, "the flagged row carries the mark");
+  assert.equal(marks(link).length, 0, "an unflagged row shows nothing");
+  const accept = part.find("button").find((button) => button.text === "Accept");
+  assert.equal(accept?.disabled ?? false, false, "Accept stays enabled on a flagged row");
+  player.close();
+});
+
+test("the Ratify step shows while the review runs, with nothing to ratify (#645)", async () => {
+  const { setPlaying, setReview, steps, player } = await import("../../dist/map-brief-player.js");
+  const stored = { version: 1, pr: 7, head: "bbb", written_at: 1, stale: false, model: "opus", brief: brief({ chapters: [chapter("Fog", "Now")] }) };
+  setPlaying(/** @type {any} */ ({ brief: stored, partial: false }), null, []);
+  player.open("/p", 7, 0);
+  setReview(null);
+  assert.deepEqual(steps().map((s) => s.k), ["Now"]);
+  setReview({ head: "bbb", state: "reviewing", checked: 0, flagged: 0, line: null, left_out: 0, items: [] });
+  assert.deepEqual(steps().map((s) => s.k), ["Now", "Ratify"]);
+  player.close();
+});
+
+test("a flagged map text's copy for the agent names the item in system-map.json and gives the review's why (#645)", () => {
+  const flags = ["Purpose (overreach): It also writes the page. See server/src/lib.rs:41."];
+  const prompt = agentPrompt(7, "map-text", { of: "map-text", kind: "part", id: "server", flags });
+  assert.match(prompt, /^In PR #7 \(branch map-text\), the map text review flagged the part server's text in system-map\.json/);
+  assert.match(prompt, /Check it against the code, correct the map or say why it holds, and tell me what you changed\./);
+  assert.match(prompt, /\nWhy it is not confirmed:\n- Purpose \(overreach\): It also writes the page\. See server\/src\/lib\.rs:41\.$/);
+});
+
+test("a short brief plays its one step, the map in this PR with its counts, then Ratify, and is read to its end on that step", async () => {
+  const { ratifyStep } = await import("../../dist/ratify.js");
+  const { stepLine } = await import("../../dist/explanations.js");
+  // The short brief as the server stores it (#644), its frozen sample.
+  const stored = JSON.parse(readFileSync("understanding/tests/fixtures/stored/pr-brief-v11/stored-brief-short.json", "utf8"));
+  const own = playlist(stored.brief, 0, false);
+  /** @type {import("../../dist/types.js").RatifyRow} */
+  const row = { pr: 644, kind: "part", id: "beta", text: "Beta", change: "added", status: "not-yet", detail: null };
+  const ratify = ratifyStep([row], [...new Set(own.flatMap((s) => s.on))], false, true);
+  const list = [...own, ratify];
+  assert.deepEqual(list.map((s) => [s.k, s.h]), [["Where", "The map in this PR"], ["Ratify", "Accept or overturn"]]);
+  assert.equal(list[0].b, "1 part added, 1 link added.");
+  assert.deepEqual(list[0].on, ["alpha", "beta"], "it lights the parts the Map diff marks");
+  assert.deepEqual(ratify.on, ["alpha", "beta"], "and Ratify keeps them lit");
+  assert.equal(stepLine(list[0]), "Where this change sits on your map.");
+  // Its story is the one step: seeing it reads the chapter, as for any brief with no check.
+  let read = 0;
+  const gate = chapterGate(storySteps(list), () => read++);
+  gate.sawLast();
+  assert.equal(read, 1);
 });

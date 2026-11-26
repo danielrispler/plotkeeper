@@ -1,7 +1,7 @@
 // Ratifying's pure part (ticket #343), run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { copyOverturn, decideWith, detailLines, evidenceLine, noteFor, openRows, overturnPrompt, overturnReport, ratifyStep, sheetLinkItem, sheetPending, siteDrawer, sitesDrawer, statusWords } from "../../dist/ratify.js";
+import { copyOverturn, decideWith, detailLines, evidenceLine, mapCheckLine, noteFor, openRows, overturnPrompt, overturnReport, ratifyStep, headBrings, reviewFlags, reviewLine, sheetLinkItem, sheetPending, siteDrawer, sitesDrawer, statusWords } from "../../dist/ratify.js";
 
 // A row with no detail of its own, as the page reads one whose kind has none.
 const row = (kind, id, status = "not-yet", extra = {}) => /** @type {import("../../dist/types.js").RatifyRow} */ ({ pr: 7, kind, id, text: `${id} text`, change: "", status, ...extra });
@@ -36,6 +36,7 @@ const partDetail = {
   of: "part",
   name: words("Server", "Server"),
   purpose: words("Serves the page.", "Serves the page and keeps its state."),
+  caption: words("Serves the page", "Serves the page"),
   holds: [
     { name: "Fog", text: words("Greys a part.", "Greys a part a PR changed."), paths_added: ["server/src/fog/"], paths_removed: [] },
     { name: "Same", text: words("Unchanged.", "Unchanged."), paths_added: [], paths_removed: [] },
@@ -93,9 +94,10 @@ test("a detail shows only what changed, old beside new, and an added part shows 
     { label: "Holds Locks", before: "One writer.", after: null },
   ]);
   /** @type {import("../../dist/types.js").RatifyDetail} */
-  const added = { of: "part", name: words(null, "Install"), purpose: words(null, "Installs the hook."), holds: [{ name: "Copies", text: words(null, "The hook's copies."), paths_added: [], paths_removed: [] }], paths_added: ["server/src/install.rs"], paths_removed: [] };
+  const added = { of: "part", name: words(null, "Install"), purpose: words(null, "Installs the hook."), caption: words(null, "Wires the hook"), holds: [{ name: "Copies", text: words(null, "The hook's copies."), paths_added: [], paths_removed: [] }], paths_added: ["server/src/install.rs"], paths_removed: [] };
   assert.deepEqual(detailLines(added), [
     { label: "Name", before: null, after: "Install" },
+    { label: "Caption", before: null, after: "Wires the hook" },
     { label: "Purpose", before: null, after: "Installs the hook." },
     { label: "Paths", before: null, after: "server/src/install.rs", code: true },
     { label: "Holds Copies", before: null, after: "The hook's copies." },
@@ -105,6 +107,15 @@ test("a detail shows only what changed, old beside new, and an added part shows 
     { label: "Reason", before: "", after: "The page calls the server over HTTP." },
   ]);
   assert.deepEqual(detailLines(null), []);
+});
+
+test("a changed caption shows as Caption, and a link whose ends swapped as Direction, old beside new (#643)", () => {
+  const captioned = { ...partDetail, name: words("Server", "Server"), caption: words("The page", "The page and its state"), holds: [], paths_added: [], paths_removed: [], purpose: words("p", "p") };
+  assert.deepEqual(detailLines(captioned), [{ label: "Caption", before: "The page", after: "The page and its state" }]);
+  const added = { ...captioned, name: words(null, "Install"), caption: words(null, "Wires the agents"), purpose: words(null, "Installs the hook.") };
+  assert.deepEqual(detailLines(added).map((line) => line.label), ["Name", "Caption", "Purpose"], "the caption reads after the name, as on the plate");
+  const flipped = { ...linkDetail, kind: words("import", "import"), reason: words("", ""), direction: words("server to ui", "ui to server") };
+  assert.deepEqual(detailLines(flipped), [{ label: "Direction", before: "server to ui", after: "ui to server" }]);
 });
 
 test("an import link added or removed without a reason shows no Reason line", () => {
@@ -145,6 +156,23 @@ test("a brief with Guard with a law ends with the step even with nothing to rati
   assert.equal(step.h, "Guard with a law");
   assert.equal(ratifyStep([row("law", "l1")], [], true).h, "Accept or overturn", "beside Ratify's items");
   assert.equal(ratifyStep([], [], false), null);
+});
+
+test("the head's map check line counts its problems, and there is none when the check passes (#641)", () => {
+  assert.equal(mapCheckLine([]), null);
+  assert.equal(mapCheckLine(undefined), null, "a brief stored before the check");
+  assert.equal(mapCheckLine(["stray/s.ts is tracked but no part owns it"]), "The map check fails at this head: 1 problem");
+  assert.equal(mapCheckLine(["a", "b", "c"]), "The map check fails at this head: 3 problems");
+});
+
+test("a line at Ratify's head brings the step with nothing to ratify; rows and Guard with a law keep their titles (#641)", () => {
+  const step = ratifyStep([], ["core"], false, true);
+  assert.equal(step?.k, "Ratify");
+  assert.equal(step?.h, "The map at this head");
+  assert.deepEqual(step?.on, ["core"]);
+  assert.equal(ratifyStep([row("law", "l1")], [], false, true)?.h, "Accept or overturn");
+  assert.equal(ratifyStep([], [], true, true)?.h, "Guard with a law");
+  assert.equal(ratifyStep([], [], false, false), null);
 });
 
 test("an overturn's note shows only where its item is drawn: its project, and the item's PR, kind and id", () => {
@@ -209,4 +237,64 @@ test("the count opens every site in the drawer, each opening its snippet", () =>
   assert.deepEqual(drawer.picks.map((pick) => pick.label), ["alpha/a.ts:3", "alpha/c.ts:1", "alpha/c.ts:2", "beta/Cargo.toml"]);
   drawer.picks[1].open();
   assert.deepEqual(opened, [{ file: "alpha/c.ts", line: 1 }]);
+});
+
+// The Map text review (#645, spec #634 "Ratify's display"): its verdicts by item id, as `pr_map_review` gives them.
+const verdict = (id, flagged, why = `${id} why`, cites = []) => ({ id, verdict: flagged ? "overreach" : "supported", why, cites, flagged });
+const review = (state, items = [], line = null, left_out = 0) => ({ head: "cafe", state, items, checked: items.length, flagged: items.filter((each) => each.flagged).length, line, left_out });
+
+test("a row's review flags are its part's, held items', link's or law's flagged verdicts, each with its field, why and cites (#645)", () => {
+  const part = row("part", "server", "not-yet", {
+    detail: { of: "part", name: { before: null, after: "Server" }, purpose: { before: null, after: "Serves." }, caption: { before: null, after: null }, holds: [{ name: "Queue", text: { before: null, after: "Every failure is requeued." }, paths_added: [], paths_removed: [] }], paths_added: [], paths_removed: [] },
+  });
+  const got = review("done", [
+    verdict("part:server/purpose", true, "It also writes the page.", ["server/src/lib.rs:41", "server/src/api.rs:9"]),
+    verdict("part:server/name", false),
+    verdict("held:server/1", true, "Only a timeout is requeued."),
+    verdict("part:serverless/purpose", true, "another part's"),
+    verdict("link:server-ui/reason", true, "The page never calls it.", ["ui/map.ts:3"]),
+    verdict("law:one-queue/text", true, "Two queues run."),
+  ]);
+  assert.deepEqual(reviewFlags(got, part), [
+    "Purpose (overreach): It also writes the page. See server/src/lib.rs:41, server/src/api.rs:9.",
+    "Holds Queue (overreach): Only a timeout is requeued.",
+  ]);
+  assert.deepEqual(reviewFlags(got, row("link", "server-ui")), ["Reason (overreach): The page never calls it. See ui/map.ts:3."]);
+  assert.deepEqual(reviewFlags(got, row("law", "one-queue")), ["Text (overreach): Two queues run."]);
+  assert.deepEqual(reviewFlags(got, row("decision", "server")), [], "a decision is not map text");
+  assert.deepEqual(reviewFlags(review("done", [verdict("part:server/name", false)]), part), [], "an unflagged row shows nothing");
+  assert.deepEqual(reviewFlags(null, part), []);
+});
+
+test("the review's line at Ratify's head says each state, and offers the button before a review and Run again after a failure (#645)", () => {
+  assert.equal(reviewLine(null), null, "a head that changed no map text has none");
+  assert.deepEqual(reviewLine(review("idle")), { line: null, start: "Review map text" });
+  assert.deepEqual(reviewLine(review("reviewing")), { line: "Reviewing map text…", start: null });
+  assert.deepEqual(reviewLine(review("done", [verdict("a", true), verdict("b", false), verdict("c", false)])), { line: "Map text review: 3 checked, 1 flagged", start: null });
+  assert.deepEqual(reviewLine(review("failed", [], "the run timed out")), { line: "Map text review failed: the run timed out", start: "Run again" });
+  assert.deepEqual(reviewLine(review("failed")), { line: "Map text review failed", start: "Run again" });
+  // An item whose id the review does not take is left out of its prompt, and the line says so (#634's review).
+  assert.deepEqual(reviewLine(review("done", [verdict("a", false)], null, 1)), { line: "Map text review: 1 checked, 0 flagged, 1 left out for an id it does not take", start: null });
+  assert.deepEqual(reviewLine(review("idle", [], null, 2)), { line: "2 left out for an id the review does not take", start: "Review map text" });
+});
+
+test("an overturn of a flagged row quotes the review's why, and an unflagged one says nothing of the review (#645)", () => {
+  const part = row("part", "server", "not-yet", { text: "Server", change: "edited" });
+  const flags = reviewFlags(review("done", [verdict("part:server/purpose", true, "It also writes the page.", ["server/src/lib.rs:41"])]), part);
+  const prompt = overturnPrompt({ ...part, flags }, "map-text");
+  assert.match(prompt, /The map text review flagged it: Purpose \(overreach\): It also writes the page\. See server\/src\/lib\.rs:41\./);
+  assert.match(prompt, /Undo it and tell me what you changed\.$/);
+  assert.doesNotMatch(overturnPrompt({ ...part, flags: [] }, null), /review/);
+});
+
+test("the Ratify step shows with nothing to ratify while the review runs, has flags, waits for its button or failed, or the map check fails (#645, #641)", () => {
+  assert.equal(headBrings(undefined, review("reviewing")), true);
+  assert.equal(headBrings([], review("done", [verdict("a", true)])), true);
+  assert.equal(headBrings(["a problem"], null), true);
+  // "Review map text" and "Run again" are on Ratify's head, so the step shows for them (#634's review).
+  assert.equal(headBrings([], review("idle")), true, "a PR not by Daniel's login keeps its button reachable");
+  assert.equal(headBrings([], review("failed")), true, "a failed review keeps Run again reachable");
+  assert.equal(headBrings([], review("done", [verdict("a", false)], null, 1)), true, "an item left out is said");
+  assert.equal(headBrings([], review("done", [verdict("a", false)])), false, "a review with no flags brings nothing");
+  assert.equal(headBrings(undefined, null), false);
 });

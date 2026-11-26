@@ -74,19 +74,19 @@
       "id": "map-briefs-runs", "name": "Map, briefs and runs", "caption": "Map data, briefs, agent runs",
       "purpose": "What the Map view and the briefs show, and the runs started from them: the map with its fog, history and ratify, PR briefs and catch-ups, and the headless agent runs.",
       "holds": [
-        { "name": "The map", "text": "Reads the map from the default branch, with its fog, history, staleness, CI laws and what you ratified.", "paths": ["server/src/map.rs", "server/src/fog.rs", "server/src/history.rs", "server/src/staleness.rs", "server/src/ci_laws.rs", "server/src/ratify.rs"] },
+        { "name": "The map", "text": "Reads the map from the default branch, with its fog, history, staleness, CI laws, what you ratified and a PR's Map diff.", "paths": ["server/src/map.rs", "server/src/fog.rs", "server/src/history.rs", "server/src/staleness.rs", "server/src/ci_laws.rs", "server/src/ratify.rs", "server/src/map_diff.rs"] },
         { "name": "Briefs", "text": "PR lookups, the PR briefs of ready PRs, part catch-ups, the pre-flight and the end-of-story bar.", "paths": ["server/src/prs.rs", "server/src/pr_briefs.rs", "server/src/pr_briefs/write.rs", "server/src/part_catch_ups.rs", "server/src/pre_flight.rs", "server/src/story_bar.rs"] },
-        { "name": "Background runs", "text": "Headless agent runs on your click, one at a time per project, in a sandbox: back a law and micro-worlds.", "paths": ["server/src/runner.rs", "server/src/back_a_law.rs", "server/src/micro_worlds.rs", "server/src/micro_world_guard.mjs"] },
+        { "name": "Background runs", "text": "Sandboxed runs on your click, one per project; the map text review starts itself on your PRs and reads a PR's head, its prompt no PR text.", "paths": ["server/src/runner.rs", "server/src/back_a_law.rs", "server/src/micro_worlds.rs", "server/src/micro_world_guard.mjs", "server/src/map_review.rs"] },
         { "name": "The quiet log", "text": "One line per thing you use, kept for the stop rules, with nothing shown.", "paths": ["server/src/stop_rules.rs"] }
       ],
       "tier": "core",
       "paths": [
         "server/src/map.rs", "server/src/fog.rs", "server/src/staleness.rs", "server/src/history.rs", "server/src/ci_laws.rs",
-        "server/src/ratify.rs", "server/src/stop_rules.rs", "server/src/pre_flight.rs", "server/src/pr_briefs.rs", "server/src/pr_briefs/",
+        "server/src/ratify.rs", "server/src/map_diff.rs", "server/src/stop_rules.rs", "server/src/pre_flight.rs", "server/src/pr_briefs.rs", "server/src/pr_briefs/",
         "server/src/part_catch_ups.rs", "server/src/prs.rs", "server/src/story_bar.rs", "server/src/runner.rs",
-        "server/src/back_a_law.rs", "server/src/micro_worlds.rs", "server/src/micro_world_guard.mjs",
-        "server/tests/back_a_law.rs", "server/tests/micro_worlds.rs", "server/tests/runner.rs",
-        "server/tests/fake-dsh-visual/", "server/tests/ci-logs/"
+        "server/src/back_a_law.rs", "server/src/micro_worlds.rs", "server/src/micro_world_guard.mjs", "server/src/map_review.rs",
+        "server/tests/back_a_law.rs", "server/tests/micro_worlds.rs", "server/tests/map_review.rs", "server/tests/runner.rs",
+        "server/tests/fake-dsh-visual/", "server/tests/ci-logs/", "server/tests/map-diff/"
       ]
     },
     {

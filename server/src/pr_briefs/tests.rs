@@ -252,7 +252,7 @@ impl BriefWriter for Fake {
 
 fn lookup(store: &BriefStore, seen: &Mutex<Seen>, fake: &Fake, head: &str) -> Did {
     let with = Writing {
-        writer: fake,
+        writer: Some(fake),
         model: "opus",
         store,
         reading: None,
@@ -299,7 +299,7 @@ fn opening_a_stale_brief_rewrites_it_and_a_fresh_one_is_read_as_it_is() {
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     lookup(&store, &seen, &fake, "aaa");
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: None,
@@ -331,7 +331,7 @@ fn a_pr_whose_touched_parts_would_not_fog_at_the_tiers_gets_no_brief() {
     let store = BriefStore::open(dir.path()).unwrap();
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: None,
@@ -369,7 +369,7 @@ fn a_quiet_pr_is_not_gathered_again_at_the_same_head() {
     let store = BriefStore::open(dir.path()).unwrap();
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: None,
@@ -403,7 +403,7 @@ fn opening_a_pr_that_fogs_nothing_tells_the_tray_it_is_quiet() {
     let store = BriefStore::open(dir.path()).unwrap();
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: None,
@@ -440,7 +440,7 @@ fn a_brief_is_waiting_for_a_ready_pr_that_has_one_stored() {
     let store = BriefStore::open(dir.path()).unwrap();
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: None,
@@ -469,7 +469,7 @@ fn a_stale_mark_that_fails_is_told_and_not_reported_as_staled() {
     std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).unwrap();
     let told = RefCell::new(vec![]);
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: None,
@@ -500,7 +500,7 @@ fn a_failed_write_is_told_and_stores_nothing() {
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let told = RefCell::new(vec![]);
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: None,
@@ -591,7 +591,7 @@ fn the_tray_is_annotated_while_a_brief_is_being_written() {
         scope.spawn(|| {
             assert!(briefs.busy("/p", 7, true));
             let with = Writing {
-                writer: &blocking,
+                writer: Some(&blocking),
                 model: "opus",
                 store: &store,
                 reading: None,
@@ -664,7 +664,7 @@ fn the_tray_says_when_the_write_at_the_head_failed() {
     let seen = briefs.seen_of("/p");
     let fake = Fake::new();
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: None,
@@ -692,7 +692,7 @@ fn a_failed_write_is_not_retried_at_the_same_head_until_the_brief_is_opened() {
     let store = BriefStore::open(dir.path()).unwrap();
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: None,
@@ -1136,6 +1136,22 @@ fn a_partial_read_rewrites_the_brief_and_says_how_much_was_read() {
     assert_eq!(repo.push(None, &h1, &h2), Push::Rewrite(None));
 }
 
+/// A fake `gh` in `dir`, which says the PR is by someone other than Daniel and writes each call to `dir/gh.calls`: no test runs
+/// the real one.
+fn fake_gh(dir: &Path) -> String {
+    let gh = dir.join("gh");
+    std::fs::write(
+        &gh,
+        format!(
+            "#!/bin/sh\necho \"$@\" >> '{}'\ncase \"$1 $2\" in\n  'api user') echo daniel ;;\n  'pr view') echo someone ;;\n  *) exit 1 ;;\nesac\n",
+            dir.join("gh.calls").display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&gh, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    gh.to_string_lossy().into_owned()
+}
+
 /// Daniel's read kept in a state file, as the server's `Reading`.
 struct Rig {
     repo: Repo,
@@ -1155,6 +1171,7 @@ impl Rig {
             project: self.repo.path.clone(),
             file: self.state.path().join("map-state.json"),
             reference: Some("main".into()),
+            gh: fake_gh(self.state.path()),
         }
     }
     fn user(&self) -> crate::map::UserState {
@@ -1169,7 +1186,7 @@ fn after_a_carry_over_the_pr_stops_waiting_and_the_next_lookup_keeps_the_copied_
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let reading = rig.reading();
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: Some(&reading),
@@ -1206,13 +1223,13 @@ fn after_a_carry_over_the_pr_stops_waiting_and_the_next_lookup_keeps_the_copied_
 }
 
 #[test]
-fn a_carried_brief_holds_the_link_evidence_of_the_new_head() {
+fn a_carried_brief_holds_the_link_evidence_and_map_problems_of_the_new_head() {
     let rig = Rig::new();
     let store = BriefStore::open(rig.store_dir.path()).unwrap();
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let reading = rig.reading();
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: Some(&reading),
@@ -1237,7 +1254,9 @@ fn a_carried_brief_holds_the_link_evidence_of_the_new_head() {
     let repo = Path::new(&rig.repo.path);
     let at = |head: &str| {
         let mut s = source(head);
-        s.link_evidence = crate::ratify::link_evidence(repo, "main", head);
+        let check = crate::ratify::head_check(repo, "main", head, true);
+        s.link_evidence = check.link_evidence;
+        s.map_problems = check.map_problems;
         s
     };
     assert_eq!(
@@ -1248,8 +1267,11 @@ fn a_carried_brief_holds_the_link_evidence_of_the_new_head() {
     crate::fog::mark_read(&reading.file, &rig.repo.path, 7, 0, &h1, lit, 1).unwrap();
     // Main gains a second import of beta, and the PR is rebased onto it: the read carries over.
     rig.repo.git(&["checkout", "-q", "main"]);
-    rig.repo
-        .commit(&[("alpha/z.ts", "// z\nimport { b } from \"../beta/b\";\n")]);
+    rig.repo.commit(&[
+        ("alpha/z.ts", "// z\nimport { b } from \"../beta/b\";\n"),
+        // A file no part owns: the map check fails at the new head (#641).
+        ("stray/s.ts", "export const s = 1;\n"),
+    ]);
     rig.repo.git(&["checkout", "-q", "pr"]);
     rig.repo.git(&["rebase", "-q", "main"]);
     let h2 = rig.repo.head();
@@ -1261,13 +1283,20 @@ fn a_carried_brief_holds_the_link_evidence_of_the_new_head() {
         file: file.into(),
         line: Some(line),
     };
+    let carried = store.get(7, &h2).unwrap();
     assert_eq!(
-        store.get(7, &h2).unwrap().link_evidence,
+        carried.link_evidence,
         [LinkEvidence {
             link: "alpha-beta".into(),
             sites: vec![site("alpha/a.ts", 1), site("alpha/z.ts", 2)],
         }]
     );
+    assert!(store.get(7, &h1).unwrap().map_problems.is_empty());
+    assert_eq!(carried.map_problems.len(), 1, "{:?}", carried.map_problems);
+    assert!(carried.map_problems[0].contains("stray/s.ts"));
+    // Whether the head is Daniel's was asked of the reading's own `gh`, never the real one.
+    let calls = std::fs::read_to_string(rig.state.path().join("gh.calls")).unwrap_or_default();
+    assert!(calls.contains("pr view 7"), "{calls}");
 }
 
 #[test]
@@ -1277,7 +1306,7 @@ fn a_push_that_does_not_carry_stales_the_brief_as_before_and_the_tray_says_why()
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let reading = rig.reading();
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: Some(&reading),
@@ -1318,7 +1347,7 @@ fn a_read_finished_at_the_old_head_after_a_push_was_judged_still_carries_over() 
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let reading = rig.reading();
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: Some(&reading),
@@ -1363,7 +1392,7 @@ fn a_push_that_fogs_something_after_a_full_read_writes_a_since_story_apart_and_t
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let reading = rig.reading();
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: Some(&reading),
@@ -1424,7 +1453,7 @@ fn opening_the_since_case_writes_the_story_first_and_reading_it_to_the_end_carri
     let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
     let reading = rig.reading();
     let with = Writing {
-        writer: &fake,
+        writer: Some(&fake),
         model: "opus",
         store: &store,
         reading: Some(&reading),
@@ -1489,4 +1518,282 @@ fn opening_the_since_case_writes_the_story_first_and_reading_it_to_the_end_carri
     );
     // A head with no story carries nothing.
     assert!(since_read(&store, &reading, 7, &h1).is_err());
+}
+
+/// A repository whose `main` holds a black-box part alpha, and a PR branch whose head `map` makes the map, with `files`: its folder,
+/// and the PR's source as the server gathers it (`gathered`), trusted.
+fn map_only_pr(
+    map: impl FnOnce(&mut serde_json::Value),
+    files: &[(&str, &str)],
+) -> (tempfile::TempDir, PrSource) {
+    use studio_test_support::{git, repo};
+    let (dir, path) = repo();
+    let at = dir.path();
+    let part = |id: &str| {
+        serde_json::json!({ "id": id, "name": id, "caption": "c", "purpose": "p", "holds": [], "tier": "black-box",
+                            "paths": [format!("{id}/")] })
+    };
+    let mut base = serde_json::json!({ "version": 2, "parts": [part("alpha")], "actors": [], "links": [],
+        "ignored": ["system-map.json"], "laws": [], "flows": [] });
+    put(at, "system-map.json", &base.to_string());
+    put(at, "alpha/a.rs", "1\n");
+    git(at, &["add", "-A"]);
+    git(at, &["commit", "-q", "-m", "base"]);
+    git(at, &["checkout", "-q", "-b", "pr"]);
+    map(&mut base);
+    put(at, "system-map.json", &base.to_string());
+    for (name, text) in files {
+        put(at, name, text);
+    }
+    git(at, &["add", "-A"]);
+    git(at, &["commit", "-q", "-m", "the PR"]);
+    let meta = PrMeta {
+        number: 7,
+        title: "Add beta".into(),
+        head: git(at, &["rev-parse", "HEAD"]),
+        ..PrMeta::default()
+    };
+    let source = commands::gathered(&path, meta, true).unwrap();
+    (dir, source)
+}
+
+#[test]
+fn a_pr_that_changes_the_map_but_fogs_nothing_stores_a_short_brief_with_no_writer_call() {
+    let (_repo, source) = map_only_pr(
+        |m| {
+            m["parts"].as_array_mut().unwrap().push(serde_json::json!(
+                { "id": "beta", "name": "Beta", "caption": "c", "purpose": "p", "holds": [], "tier": "black-box", "paths": ["beta/"] }
+            ));
+            m["links"] = serde_json::json!([{ "id": "alpha-beta", "from": "alpha", "to": "beta", "kind": "spawn", "reason": "Alpha asks beta." }]);
+        },
+        // A file no part owns: the map check fails at the head (#641).
+        &[("beta/b.rs", "1\n"), ("stray/s.rs", "1\n")],
+    );
+    let head = source.meta.head.clone();
+    let dir = tempfile::tempdir().unwrap();
+    let store = BriefStore::open(dir.path()).unwrap();
+    let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+    let with = Writing {
+        writer: Some(&fake),
+        model: "opus",
+        store: &store,
+        reading: None,
+    };
+    assert_eq!(
+        on_lookup(
+            &with,
+            &seen,
+            7,
+            &head,
+            || Ok(source),
+            |l| eprintln!("LOG {l}")
+        ),
+        Did::Wrote
+    );
+    assert_eq!(fake.0.get(), 0, "no writer call, and no claim check");
+    let stored = store
+        .get(7, &head)
+        .expect("the short brief is stored at the head");
+    assert!(stored.short);
+    assert_eq!(stored.brief.title, "Add beta");
+    let steps: Vec<_> = stored
+        .brief
+        .steps()
+        .map(|s| (s.h.as_str(), s.b.as_str()))
+        .collect();
+    assert_eq!(
+        steps,
+        [("The map in this PR", "1 part added, 1 link added.")]
+    );
+    // It lights what the Map diff marks: the new part and the new line's ends. The PR fogs nothing, so reading it clears no fog.
+    assert_eq!(lit_parts(&stored.brief), [names(&["alpha", "beta"])]);
+    assert!(
+        stored.map_problems.iter().any(|p| p.contains("stray/s.rs")),
+        "the head's map check is stored with it: {:?}",
+        stored.map_problems
+    );
+    assert!(store.records().is_empty(), "no writer, so no record line");
+    // The tray says the map changed.
+    let briefs = PrBriefs::new(None);
+    let mut tray = [ready_pr(7, &head)];
+    briefs.annotate_with("/p", &store, None, &mut tray);
+    assert!(tray[0].brief.as_ref().unwrap().short);
+}
+
+#[test]
+fn without_claude_a_pr_that_changes_the_map_but_fogs_nothing_still_gets_its_short_brief_and_map_check()
+ {
+    let (_repo, short) = map_only_pr(
+        |m| {
+            m["parts"].as_array_mut().unwrap().push(serde_json::json!(
+                { "id": "beta", "name": "Beta", "caption": "c", "purpose": "p", "holds": [], "tier": "black-box", "paths": ["beta/"] }
+            ));
+        },
+        &[("beta/b.rs", "1\n"), ("stray/s.rs", "1\n")],
+    );
+    let head = short.meta.head.clone();
+    let dir = tempfile::tempdir().unwrap();
+    let store = BriefStore::open(dir.path()).unwrap();
+    let seen = Mutex::new(Seen::default());
+    let with = Writing {
+        writer: None,
+        model: "opus",
+        store: &store,
+        reading: None,
+    };
+    assert_eq!(
+        on_lookup(&with, &seen, 7, &head, || Ok(short), |_| {}),
+        Did::Wrote
+    );
+    let stored = store.get(7, &head).expect("the short brief is stored");
+    assert!(stored.short);
+    assert!(
+        stored.map_problems.iter().any(|p| p.contains("stray/s.rs")),
+        "{:?}",
+        stored.map_problems
+    );
+    // A PR that fogs something needs the writer: nothing is stored, no failure is kept for the tray to offer again, and the head
+    // is not gathered again.
+    let full = source(&head);
+    assert_eq!(
+        on_lookup(&with, &seen, 8, &head, || Ok(full), |_| {}),
+        Did::Kept
+    );
+    assert!(store.get(8, &head).is_none());
+    let again = || -> Result<PrSource, String> { panic!("gathered again") };
+    assert_eq!(on_lookup(&with, &seen, 8, &head, again, |_| {}), Did::Kept);
+    let briefs = PrBriefs::new(None);
+    *briefs.seen_of("/p").lock().unwrap() = std::mem::take(&mut *seen.lock().unwrap());
+    let mut tray = [ready_pr(8, &head)];
+    briefs.annotate_with("/p", &store, None, &mut tray);
+    assert!(
+        !tray[0].brief.as_ref().is_some_and(|info| info.failed),
+        "{:?}",
+        tray[0].brief
+    );
+}
+
+#[test]
+fn without_claude_a_new_head_leaves_a_full_brief_as_it_is_and_gathers_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = BriefStore::open(dir.path()).unwrap();
+    let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+    assert_eq!(lookup(&store, &seen, &fake, "h1"), Did::Wrote);
+    let with = Writing {
+        writer: None,
+        model: "opus",
+        store: &store,
+        reading: None,
+    };
+    let unread = || -> Result<PrSource, String> {
+        panic!("a full brief's head is not gathered without a writer")
+    };
+    assert_eq!(on_lookup(&with, &seen, 7, "h2", unread, |_| {}), Did::Kept);
+    assert!(
+        !store.get(7, "h1").unwrap().stale,
+        "the full brief is not marked stale"
+    );
+}
+
+#[test]
+fn a_pr_that_only_reformats_the_map_and_fogs_nothing_stores_no_brief() {
+    let (_repo, source) = map_only_pr(|_| {}, &[("alpha/a.rs", "2\n")]);
+    // The same map, laid out anew.
+    let pretty = serde_json::to_string_pretty(
+        &serde_json::from_str::<serde_json::Value>(&source.map_text).unwrap(),
+    )
+    .unwrap();
+    assert_ne!(pretty, source.map_text);
+    let (_repo, source) = map_only_pr(
+        |_| {},
+        &[("system-map.json", &pretty), ("alpha/a.rs", "2\n")],
+    );
+    let head = source.meta.head.clone();
+    let dir = tempfile::tempdir().unwrap();
+    let store = BriefStore::open(dir.path()).unwrap();
+    let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+    let with = Writing {
+        writer: Some(&fake),
+        model: "opus",
+        store: &store,
+        reading: None,
+    };
+    assert_eq!(
+        on_lookup(&with, &seen, 7, &head, || Ok(source), |_| {}),
+        Did::Quiet
+    );
+    assert!(store.latest(7).is_none());
+}
+
+#[test]
+fn a_short_brief_read_in_full_is_carried_over_a_quiet_push_and_counts_the_new_heads_map() {
+    let beta = |m: &mut serde_json::Value| {
+        m["parts"].as_array_mut().unwrap().push(serde_json::json!(
+            { "id": "beta", "name": "Beta", "caption": "c", "purpose": "p", "holds": [], "tier": "black-box", "paths": ["beta/"] }
+        ));
+    };
+    let (repo, source) = map_only_pr(beta, &[("beta/b.rs", "1\n")]);
+    let state = tempfile::tempdir().unwrap();
+    let reading = GitReading {
+        project: repo.path().canonicalize().unwrap().display().to_string(),
+        file: state.path().join("map-state.json"),
+        reference: Some("main".into()),
+        gh: fake_gh(state.path()),
+    };
+    let h1 = source.meta.head.clone();
+    let dir = tempfile::tempdir().unwrap();
+    let store = BriefStore::open(dir.path()).unwrap();
+    let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+    let with = Writing {
+        writer: Some(&fake),
+        model: "opus",
+        store: &store,
+        reading: Some(&reading),
+    };
+    assert_eq!(
+        on_lookup(&with, &seen, 7, &h1, || Ok(source), |_| {}),
+        Did::Wrote
+    );
+    let lit = lit_parts(&store.get(7, &h1).unwrap().brief);
+    crate::fog::mark_read(&reading.file, &reading.project, 7, 0, &h1, lit, 1).unwrap();
+    // A quiet push adds a second black-box part.
+    let mut map: serde_json::Value = serde_json::from_str(&store_map(repo.path())).unwrap();
+    map["parts"].as_array_mut().unwrap().push(serde_json::json!(
+        { "id": "gamma", "name": "Gamma", "caption": "c", "purpose": "p", "holds": [], "tier": "black-box", "paths": ["gamma/"] }
+    ));
+    put(repo.path(), "system-map.json", &map.to_string());
+    put(repo.path(), "gamma/g.rs", "1\n");
+    studio_test_support::git(repo.path(), &["add", "-A"]);
+    studio_test_support::git(repo.path(), &["commit", "-q", "-m", "gamma"]);
+    let h2 = studio_test_support::git(repo.path(), &["rev-parse", "HEAD"]);
+    let unread = || -> Result<PrSource, String> { Err("the carry reads no source".into()) };
+    assert_eq!(
+        on_lookup(&with, &seen, 7, &h2, unread, |_| {}),
+        Did::Carried
+    );
+    let copy = store
+        .get(7, &h2)
+        .expect("the short brief is carried to the new head");
+    assert!(copy.short);
+    assert_eq!(
+        copy.brief.steps().map(|s| s.b.as_str()).collect::<Vec<_>>(),
+        ["2 parts added."],
+        "its sentence counts the new head's Map diff"
+    );
+    assert_eq!(
+        lit_parts(&copy.brief),
+        [names(&["beta", "gamma"])],
+        "and lights what it marks"
+    );
+    let user = crate::map::read_user(&reading.file, &reading.project);
+    assert!(
+        waiting_numbers(&store, &[ready_pr(7, &h2)], Some(&user)).is_empty(),
+        "the read carried over"
+    );
+    assert_eq!(fake.0.get(), 0);
+}
+
+/// The map in `repo`'s working tree.
+fn store_map(repo: &Path) -> String {
+    std::fs::read_to_string(repo.join("system-map.json")).unwrap()
 }

@@ -44,3 +44,12 @@ a Tests, an Ignored and an Other group, a file with its part, an ignored one and
 `pr-brief-v9/` holds a stored PR brief as written once a brief stores the import sites behind each link its PR adds (#499, spec #477
 "Link evidence"): `link_evidence` with an import link whose sites sit on three lines of two files, and a cargo link whose one site has no
 line. `understanding/tests/pr_brief.rs` loads it; the older samples, with no `link_evidence`, read with none.
+
+`pr-brief-v10/` holds a stored PR brief as written once a brief stores the map check's problems at its PR's head (#641, spec #634 "The
+head's map check"): `map_problems` with two problems. `understanding/tests/pr_brief.rs` loads it; the older samples, with no
+`map_problems`, read with none.
+
+`pr-brief-v11/` holds a short brief (#644, spec #634 "Short brief"), made by code for a PR that changes the map but fogs nothing:
+`short` set, one chapter of one step, "The map in this PR", whose body counts the Map diff and which lights the parts its marks are on,
+no model, and the head's `map_problems`.
+`understanding/tests/pr_brief.rs` loads it; the older samples, with no `short`, read as written by the writer.

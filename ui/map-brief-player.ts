@@ -7,10 +7,10 @@ import { currentScrub } from "./map.js";
 import { scrubTo } from "./map-history.js";
 import { watchSeen } from "./seen.js";
 import { logStop } from "./stop-rules.js";
-import { ratifyStep } from "./ratify.js";
+import { headBrings, ratifyStep } from "./ratify.js";
 import { briefPlayer, chapterGate, type Gate, playlist, storySteps } from "./map-brief-model.js";
 import { catchUpIds } from "./map-catch-up.js";
-import type { BriefStep, BriefView, RatifyRow, StoredCatchUp } from "./types.js";
+import type { BriefStep, BriefView, MapReview, RatifyRow, StoredCatchUp } from "./types.js";
 
 export const player = briefPlayer({ scrubbed: () => currentScrub() !== null, backToNow: () => void scrubTo(null).catch(failure("map_at")) });
 // The brief being played, as `pr_brief` returned it.
@@ -20,6 +20,8 @@ type CatchUp = { part: string; fog: string[]; summary?: StoredCatchUp["summary"]
 let catchUp: CatchUp | null = null;
 // What the brief offers for accept or overturn (`ratify.rs`), read when it opens; a decision updates its row at once.
 let ratifying: RatifyRow[] = [];
+// The PR head's Map text review (`pr_map_review`, #645), read when the brief opens and again when the server says it changed.
+let review: MapReview | null = null;
 
 /** The brief being played, null with none. */
 export const playingBrief = () => playing;
@@ -27,6 +29,12 @@ export const playingBrief = () => playing;
 export const playingCatchUp = () => catchUp;
 /** The rows the brief offers to ratify. */
 export const ratifyRows = () => ratifying;
+/** The brief's Map text review, null when its head changed no map text. */
+export const mapReview = () => review;
+/** The Map text review read for the brief played. */
+export function setReview(got: MapReview | null) {
+  review = got;
+}
 /** What is played from now: a brief, or a part catch-up with its brief, and what it offers to ratify. */
 export function setPlaying(brief: BriefView, caught: CatchUp | null, rows: RatifyRow[]) {
   playing = brief;
@@ -38,6 +46,7 @@ export function clearPlaying() {
   playing = null;
   catchUp = null;
   ratifying = [];
+  review = null;
 }
 
 /** Each part's catch-up plays under a negative number of its own, which no PR has. */
@@ -53,8 +62,10 @@ export const steps = (): BriefStep[] => {
   const now = player.current();
   if (!playing || !now) return [];
   const list = playlist(playing.brief.brief, now.chapter, now.overview);
-  // The ratify step ends the last chapter (the only one of a single story), and holds Guard with a law's row when the brief offers it (#401).
-  const ratify = now.chapter >= Math.max(0, playing.brief.brief.chapters.length - 1) ? ratifyStep(ratifying.filter((row) => row.status !== "ratified"), [...new Set(list.flatMap((step) => step.on))], !!playing.brief.guard) : null;
+  // The ratify step ends the last chapter (the only one of a single story), and holds Guard with a law's row when the brief offers it (#401)
+  // and its head's lines when they bring it: the map check failing (#641), the Map text review running or flagging (#645).
+  const head = headBrings(playing.brief.map_problems, review);
+  const ratify = now.chapter >= Math.max(0, playing.brief.brief.chapters.length - 1) ? ratifyStep(ratifying.filter((row) => row.status !== "ratified"), [...new Set(list.flatMap((step) => step.on))], !!playing.brief.guard, head) : null;
   return ratify ? [...list, ratify] : list;
 };
 

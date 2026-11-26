@@ -395,3 +395,59 @@ fn a_merged_pair_keeps_the_lowest_group_with_none_lowest() {
         ]
     );
 }
+
+/// The files under `dir`, by their paths from it, sorted.
+fn files_under(dir: &std::path::Path) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut todo = vec![dir.to_path_buf()];
+    while let Some(at) = todo.pop() {
+        for entry in std::fs::read_dir(&at).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                todo.push(path);
+            } else {
+                let name = path.strip_prefix(dir).unwrap().display().to_string();
+                found.push(name);
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
+#[test]
+fn an_untrusted_commit_s_cargo_folder_holds_no_toolchain_file() {
+    let (dir, _) = studio_test_support::repo();
+    for (file, text) in [
+        ("Cargo.toml", "[package]\nname = \"a\"\n"),
+        ("src/lib.rs", "pub fn a() {}\n"),
+        ("rust-toolchain", "nightly-2020-01-01\n"),
+        (
+            "rust-toolchain.toml",
+            "[toolchain]\nchannel = \"nightly-2020-01-01\"\n",
+        ),
+        ("README.md", "A.\n"),
+    ] {
+        let path = dir.path().join(file);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+    studio_test_support::git(dir.path(), &["add", "-A"]);
+    studio_test_support::git(dir.path(), &["commit", "-q", "-m", "Code"]);
+    let commit = crate::commit::read(dir.path(), "HEAD").unwrap();
+    let folder = |trusted| {
+        let repo =
+            Repo::new(dir.path(), &commit.files, |_| false).at_commit(&commit.texts, trusted);
+        files_under(repo.cargo_dir().unwrap())
+    };
+    assert_eq!(
+        folder(true),
+        [
+            "Cargo.toml",
+            "rust-toolchain",
+            "rust-toolchain.toml",
+            "src/lib.rs"
+        ]
+    );
+    assert_eq!(folder(false), ["Cargo.toml", "src/lib.rs"]);
+}

@@ -245,8 +245,15 @@ pub struct MapItem {
     pub change: String,
     /// What the item says, in words.
     pub text: String,
+    /// What a changed item said before, in the same words; none for an added or removed one. The Map text review reads it, so
+    /// a law whose text stayed is not reviewed again.
+    #[serde(skip)]
+    pub was: Option<String>,
     /// Old beside new, for a part or a link.
     pub detail: Option<Detail>,
+    /// The id of the mark the item's Ratify row lights on the Map diff (#643): `part:<id>`, `actor:<id>`, `law:<id>`, or for a link
+    /// the line it is drawn on, `line:<end>|<end>` in sorted order; none for a flow, which the map does not draw.
+    pub mark: Option<String>,
 }
 
 /// The import sites behind an added link, and the head they were read at, where each site's snippet is read.
@@ -297,11 +304,12 @@ pub enum Detail {
     Link(LinkDetail),
 }
 
-/// A part's name and purpose, its held items matched by name, and the patterns its own `paths` gained and lost.
+/// A part's name, purpose and caption, its held items matched by name, and the patterns its own `paths` gained and lost.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PartDetail {
     pub name: Words,
     pub purpose: Words,
+    pub caption: Words,
     pub holds: Vec<HeldDetail>,
     pub paths_added: Vec<String>,
     pub paths_removed: Vec<String>,
@@ -321,6 +329,9 @@ pub struct HeldDetail {
 pub struct LinkDetail {
     pub kind: Words,
     pub reason: Words,
+    /// `from to to` before and after, only when the link's ends swapped (spec #634, Q6).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direction: Option<Words>,
 }
 
 fn field<'a>(item: &'a Value, name: &str) -> &'a str {
@@ -419,6 +430,31 @@ fn holds_change(before: Option<&Value>, after: Option<&Value>) -> Vec<HeldDetail
         .collect()
 }
 
+/// A link's `from to to` on each side, when its ends swapped; none otherwise.
+fn swapped(before: Option<&Value>, after: Option<&Value>) -> Option<Words> {
+    let (was, now) = (before?, after?);
+    let ends = |link: &Value| {
+        (
+            field(link, "from").to_string(),
+            field(link, "to").to_string(),
+        )
+    };
+    let ((a, b), (c, d)) = (ends(was), ends(now));
+    (a != c && a == d && b == c).then(|| Words {
+        before: Some(format!("{a} to {b}")),
+        after: Some(format!("{c} to {d}")),
+    })
+}
+
+/// The id of the mark `item` of `kind` lights on the Map diff (`MapItem::mark`).
+fn mark_of(kind: &str, item: &Value) -> Option<String> {
+    match kind {
+        "part" | "actor" | "law" => Some(format!("{kind}:{}", field(item, "id"))),
+        "link" => crate::map_diff::ends(item).map(|[a, b]| format!("line:{a}|{b}")),
+        _ => None,
+    }
+}
+
 /// Old beside new for a part or a link; none for another kind.
 fn detail(kind: &str, before: Option<&Value>, after: Option<&Value>) -> Option<Detail> {
     let (paths_added, paths_removed) = paths_change(before, after);
@@ -426,6 +462,7 @@ fn detail(kind: &str, before: Option<&Value>, after: Option<&Value>) -> Option<D
         "part" => Some(Detail::Part(PartDetail {
             name: words_of(before, after, "name"),
             purpose: words_of(before, after, "purpose"),
+            caption: words_of(before, after, "caption"),
             holds: holds_change(before, after),
             paths_added,
             paths_removed,
@@ -433,6 +470,7 @@ fn detail(kind: &str, before: Option<&Value>, after: Option<&Value>) -> Option<D
         "link" => Some(Detail::Link(LinkDetail {
             kind: words_of(before, after, "kind"),
             reason: words_of(before, after, "reason"),
+            direction: swapped(before, after),
         })),
         _ => None,
     }
@@ -470,7 +508,9 @@ pub fn map_items(old: Option<&str>, new: Option<&str>) -> Vec<MapItem> {
                 id: id.clone(),
                 change: change.into(),
                 text: words(kind, item),
+                was: before.get(id).map(|was| words(kind, was)),
                 detail: detail(kind, before.get(id), Some(item)),
+                mark: mark_of(kind, item),
             });
         }
         for (id, item) in &before {
@@ -480,7 +520,9 @@ pub fn map_items(old: Option<&str>, new: Option<&str>) -> Vec<MapItem> {
                     id: id.clone(),
                     change: "removed".into(),
                     text: words(kind, item),
+                    was: None,
                     detail: detail(kind, Some(item), None),
+                    mark: mark_of(kind, item),
                 });
             }
         }
@@ -506,6 +548,9 @@ pub struct Row {
     /// For a link the PR adds, the import sites behind it, stored on its brief when it was written (#499).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence: Option<Evidence>,
+    /// The id of the mark the row lights on the Map diff (`MapItem::mark`); none for a decision or a flow.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mark: Option<String>,
 }
 
 /// The items of PR `pr`: its map changes, then its decisions (`(id, text)` from its brief), then the decisions Daniel decided that a
@@ -517,7 +562,12 @@ pub fn rows(
     decisions: &[(String, String)],
     landed: Option<u64>,
 ) -> Vec<Row> {
-    let row = |kind: &str, id: &str, text: &str, change: &str, detail: Option<Detail>| {
+    let row = |kind: &str,
+               id: &str,
+               text: &str,
+               change: &str,
+               detail: Option<Detail>,
+               mark: Option<String>| {
         let item = Item::new(pr, kind, id);
         Row {
             pr,
@@ -528,16 +578,26 @@ pub fn rows(
             status: project.status(&item, landed),
             detail,
             evidence: None,
+            mark,
         }
     };
     let mut rows: Vec<Row> = map
         .iter()
-        .map(|m| row(&m.kind, &m.id, &m.text, &m.change, m.detail.clone()))
+        .map(|m| {
+            row(
+                &m.kind,
+                &m.id,
+                &m.text,
+                &m.change,
+                m.detail.clone(),
+                m.mark.clone(),
+            )
+        })
         .collect();
     rows.extend(
         decisions
             .iter()
-            .map(|(id, text)| row(DECISION, id, text, "", None)),
+            .map(|(id, text)| row(DECISION, id, text, "", None, None)),
     );
     for record in &project.records {
         let missing = record.pr == pr
@@ -545,7 +605,7 @@ pub fn rows(
             && !record.state.is_unknown()
             && !decisions.iter().any(|(id, _)| *id == record.id);
         if missing && !rows.iter().any(|r| r.kind == DECISION && r.id == record.id) {
-            rows.push(row(DECISION, &record.id, &record.text, "", None));
+            rows.push(row(DECISION, &record.id, &record.text, "", None, None));
         }
     }
     rows
@@ -571,14 +631,14 @@ fn pr_of(subject: &str) -> Option<u64> {
     number.parse().ok()
 }
 
-struct Landed {
-    commit: String,
+pub(crate) struct Landed {
+    pub(crate) commit: String,
     at: u64,
-    pr: Option<u64>,
+    pub(crate) pr: Option<u64>,
 }
 
 /// The first-parent commits of `reference`, newest first.
-fn first_parents(repo: &Path, reference: &str, max: usize) -> Vec<Landed> {
+pub(crate) fn first_parents(repo: &Path, reference: &str, max: usize) -> Vec<Landed> {
     let max_count = format!("--max-count={max}");
     let Ok(log) = git(
         repo,
@@ -605,7 +665,7 @@ fn first_parents(repo: &Path, reference: &str, max: usize) -> Vec<Landed> {
 }
 
 /// What git said of the map at a commit.
-enum MapRead {
+pub(crate) enum MapRead {
     /// The map's text.
     Read(String),
     /// Git answered that the commit has no map: its tree does not list the file.
@@ -615,7 +675,7 @@ enum MapRead {
 }
 
 impl MapRead {
-    fn text(&self) -> Option<&str> {
+    pub(crate) fn text(&self) -> Option<&str> {
         match self {
             MapRead::Read(text) => Some(text),
             MapRead::Absent | MapRead::Unanswered => None,
@@ -625,7 +685,7 @@ impl MapRead {
 
 /// The map at `commit`. A `git show` that exits non-zero is either an answer (the commit has no map) or a failed read (an
 /// object out of reach), so the tree is asked which.
-fn map_at(repo: &Path, commit: &str) -> MapRead {
+pub(crate) fn map_at(repo: &Path, commit: &str) -> MapRead {
     let show = |args: &[&str]| run_until(run::git(repo).args(args), GIT_READ_LIMIT);
     match show(&["show", &format!("{commit}:{}", system_map::MAP_FILE)]) {
         Ok(out) => MapRead::Read(String::from_utf8_lossy(&out.stdout).trim_end().to_string()),
@@ -670,7 +730,7 @@ pub(crate) fn pr_changes(
 }
 
 /// How many first-parent commits of the default branch are read for what landed.
-const WALK: usize = 500;
+pub(crate) const WALK: usize = 500;
 
 fn pr_changes_in(
     cache: &ChangesCache,
@@ -737,35 +797,38 @@ pub(crate) fn pending(cache: &ChangesCache, repo: &Path, project: &Project) -> V
     found
 }
 
-/// The import sites behind each link that `head` adds to the map at `base` (#499, spec #477 "When it is computed"), read from
-/// `head` in commit mode (`system_map::check_at`), so an import the PR did not edit counts and the working tree is never read. Only
-/// an `import` link has evidence: a run-time link has none, even beside an import edge between the same parts, and neither has a
-/// removed link in v1.
-pub fn link_evidence(repo: &Path, base: &str, head: &str) -> Vec<LinkEvidence> {
+/// What a PR's head says of its map, stored with its brief.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct HeadCheck {
+    pub link_evidence: Vec<LinkEvidence>,
+    pub map_problems: Vec<String>,
+}
+
+/// What `head` says of its map, from one `system_map::check_at` (#641): the import sites behind each link it adds to the map at
+/// `base` (#499, spec #477 "When it is computed"), and the check's problems, kept for every PR, not only one that adds a link. It
+/// reads `head` in commit mode, so an import the PR did not edit counts and the working tree is never read. Only an `import` link has
+/// evidence: a run-time link has none, even beside an import edge between the same parts, and neither has a removed link in v1. A
+/// head with no map has nothing. An untrusted head (a PR not by Daniel's login) is checked without its toolchain file.
+pub fn head_check(repo: &Path, base: &str, head: &str, trusted: bool) -> HeadCheck {
     let (old, new) = (map_at(repo, base), map_at(repo, head));
-    let added: Vec<String> = map_items(old.text(), new.text())
-        .into_iter()
-        .filter(|item| item.kind == "link" && item.change == "added")
-        .map(|item| item.id)
-        .collect();
     let Some(map) = new
         .text()
         .and_then(|text| system_map::convert_value(text).ok())
     else {
-        return Vec::new();
+        return HeadCheck::default();
     };
-    if added.is_empty() {
-        return Vec::new();
-    }
-    let edges = system_map::check_at(repo, head).edges;
+    let report = system_map::check_at(repo, head, trusted);
     let links = map["links"].as_array().cloned().unwrap_or_default();
-    added
+    let link_evidence = map_items(old.text(), new.text())
         .into_iter()
-        .filter_map(|id| {
+        .filter(|item| item.kind == "link" && item.change == "added")
+        .filter_map(|item| {
+            let id = item.id;
             let link = links
                 .iter()
                 .find(|link| field(link, "id") == id && field(link, "kind") == "import")?;
-            let edge = edges
+            let edge = report
+                .edges
                 .iter()
                 .find(|e| e.from == field(link, "from") && e.to == field(link, "to"))?;
             let mut sites: Vec<ImportSite> = Vec::new();
@@ -780,7 +843,11 @@ pub fn link_evidence(repo: &Path, base: &str, head: &str) -> Vec<LinkEvidence> {
             }
             Some(LinkEvidence { link: id, sites })
         })
-        .collect()
+        .collect();
+    HeadCheck {
+        link_evidence,
+        map_problems: report.problems,
+    }
 }
 
 /// The lines of an import site's snippet on each side of its line.
@@ -864,6 +931,25 @@ pub fn pr_ratify(app: &crate::App, project: String, number: u64) -> Result<Vec<R
         );
     }
     Ok(found)
+}
+
+/// The Map diff of PR `number` (`map_diff.rs`, #640), compared as `pr_ratify` compares: none when the PR changed nothing on the map.
+pub fn pr_map_diff(
+    app: &crate::App,
+    project: String,
+    number: u64,
+) -> Result<Option<crate::map_diff::MapDiff>, String> {
+    let open = app
+        .prs
+        .ready(&project)
+        .into_iter()
+        .find(|r| r.number == number)
+        .map(|r| r.head);
+    Ok(crate::map_diff::of(
+        Path::new(&project),
+        number,
+        open.as_deref(),
+    ))
 }
 
 /// Daniel's decision on one item: `accepted` or `overturned`, with what the item said.
@@ -1110,6 +1196,7 @@ mod tests {
             Some(Detail::Link(LinkDetail {
                 kind: words(Some("import"), Some("http")),
                 reason: words(Some(""), Some("The page calls the server over HTTP.")),
+                direction: None,
             }))
         );
     }
@@ -1137,6 +1224,75 @@ mod tests {
         let detail = part_detail(&items, "a");
         assert_eq!(detail.purpose, words(Some("d"), Some("Keeps the state.")));
         assert_eq!(detail.holds[0].text, words(None, Some("Greys a part.")));
+    }
+
+    #[test]
+    fn a_changed_caption_shows_old_beside_new() {
+        let old = v2("p", r#"["a/"]"#, "[]", "");
+        let new = old.replacen(r#""caption":"c""#, r#""caption":"Keeps it""#, 1);
+        let detail = part_detail(&map_items(Some(&old), Some(&new)), "a");
+        assert_eq!(detail.caption, words(Some("c"), Some("Keeps it")));
+    }
+
+    #[test]
+    fn a_link_whose_ends_swapped_shows_its_direction_old_beside_new() {
+        let old = v2("p", r#"["a/"]"#, "[]", "");
+        let new = old.replace(r#""from":"a","to":"b""#, r#""from":"b","to":"a""#);
+        let items = map_items(Some(&old), Some(&new));
+        let Some(Detail::Link(link)) = items
+            .iter()
+            .find(|i| i.kind == "link")
+            .and_then(|i| i.detail.clone())
+        else {
+            panic!("the link changed: {items:?}");
+        };
+        assert_eq!(link.direction, Some(words(Some("a to b"), Some("b to a"))));
+        // A link whose ends did not swap has no direction to tell.
+        let reasoned = v2("p", r#"["a/"]"#, "[]", r#","reason":"Calls it.""#);
+        let items = map_items(Some(&old), Some(&reasoned));
+        let Some(Detail::Link(link)) = items.iter().find_map(|i| i.detail.clone()) else {
+            panic!("the link changed: {items:?}");
+        };
+        assert_eq!(link.direction, None);
+    }
+
+    #[test]
+    fn each_map_item_names_the_mark_it_lights_on_the_map_diff() {
+        let old = v2("p", r#"["a/"]"#, "[]", "")
+            .replace(
+                r#""laws":[]"#,
+                r#""laws":[{"id":"l1","on":"a","backing":"trust","text":"First."}]"#,
+            )
+            .replace(r#""actors":[]"#, r#""actors":[{"id":"x","name":"X"}]"#)
+            .replace(
+                r#""flows":[]"#,
+                r#""flows":[{"id":"f","name":"F","steps":[]}]"#,
+            );
+        // Every item changes: a's purpose, the link flips (the line keeps its sorted ends), the law, the actor and the flow.
+        let new = old
+            .replace(
+                r#""purpose":"p","tier":"core","paths":["a/"]"#,
+                r#""purpose":"q","tier":"core","paths":["a/"]"#,
+            )
+            .replace(r#""from":"a","to":"b""#, r#""from":"b","to":"a""#)
+            .replace("First.", "First, reworded.")
+            .replace(r#""name":"X""#, r#""name":"Y""#)
+            .replace(r#""name":"F""#, r#""name":"G""#);
+        let marks: Vec<(String, Option<String>)> = map_items(Some(&old), Some(&new))
+            .into_iter()
+            .map(|i| (i.kind, i.mark))
+            .collect();
+        let s = |kind: &str, mark: Option<&str>| (kind.to_string(), mark.map(String::from));
+        assert_eq!(
+            marks,
+            [
+                s("part", Some("part:a")),
+                s("actor", Some("actor:x")),
+                s("link", Some("line:a|b")),
+                s("law", Some("law:l1")),
+                s("flow", None),
+            ]
+        );
     }
 
     #[test]
@@ -1350,7 +1506,9 @@ mod tests {
             id: id.into(),
             change: change.into(),
             text: String::new(),
+            was: None,
             detail: None,
+            mark: None,
         };
         let map = [
             item("link", "a-b", "added"),
@@ -1402,7 +1560,9 @@ mod tests {
             id: "a-b".into(),
             change: "added".into(),
             text: String::new(),
+            was: None,
             detail: None,
+            mark: None,
         }];
         let stored = [LinkEvidence {
             link: "a-b".into(),
@@ -1733,7 +1893,7 @@ mod tests {
                 line: Some(line),
             };
             assert_eq!(
-                link_evidence(Path::new(&main), base.trim(), head.trim()),
+                head_check(Path::new(&main), base.trim(), head.trim(), true).link_evidence,
                 [LinkEvidence {
                     link: "alpha-gamma".into(),
                     sites: vec![
@@ -1743,6 +1903,66 @@ mod tests {
                         site("alpha/old.ts", 2),
                     ],
                 }]
+            );
+        }
+
+        #[test]
+        fn the_head_s_map_check_keeps_its_problems_when_the_pr_adds_no_link() {
+            let (dir, main) = repo();
+            let root = dir.path();
+            let put = |path: &str, text: &str| {
+                std::fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
+                std::fs::write(root.join(path), text).unwrap();
+            };
+            for part in ["alpha", "beta", "gamma"] {
+                put(&format!("{part}/a.ts"), "export const a = 1;\n");
+            }
+            commit(
+                root,
+                &evidence_map(serde_json::json!([])),
+                "Map (#1)",
+                "1000000000",
+            );
+            let base = run(root, &["rev-parse", "HEAD"]);
+            let repo = Path::new(&main);
+            let at = |head: &str, trusted| head_check(repo, base.trim(), head.trim(), trusted);
+            assert_eq!(
+                at(&base, true),
+                HeadCheck::default(),
+                "the map holds at its base"
+            );
+            // A file no part owns, and no link added: the check still runs at the head.
+            put("stray/s.ts", "export const s = 1;\n");
+            commit(
+                root,
+                &evidence_map(serde_json::json!([])),
+                "Stray (#2)",
+                "1100000000",
+            );
+            let head = run(root, &["rev-parse", "HEAD"]);
+            for trusted in [true, false] {
+                let check = at(&head, trusted);
+                assert!(check.link_evidence.is_empty());
+                assert_eq!(check.map_problems.len(), 1, "{:?}", check.map_problems);
+                assert!(
+                    check.map_problems[0].contains("stray/s.ts"),
+                    "{:?}",
+                    check.map_problems
+                );
+            }
+        }
+
+        #[test]
+        fn a_head_with_no_map_has_no_map_check() {
+            let (dir, main) = repo();
+            let root = dir.path();
+            std::fs::write(root.join("a.ts"), "export const a = 1;\n").unwrap();
+            run(root, &["add", "-A"]);
+            run(root, &["commit", "-q", "-m", "Code (#1)"]);
+            let head = run(root, &["rev-parse", "HEAD"]);
+            assert_eq!(
+                head_check(Path::new(&main), head.trim(), head.trim(), false),
+                HeadCheck::default()
             );
         }
     }

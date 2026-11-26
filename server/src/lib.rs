@@ -37,6 +37,8 @@ pub mod install;
 mod json_file;
 pub mod lock;
 pub mod map;
+pub mod map_diff;
+pub mod map_review;
 pub mod micro_worlds;
 pub mod part_catch_ups;
 pub mod pr_briefs;
@@ -163,6 +165,8 @@ pub struct App {
     pub worlds: Arc<micro_worlds::MicroWorlds>,
     /// Back a law (`back_a_law.rs`): its runs' proofs and the patches kept.
     pub laws: Arc<back_a_law::LawRuns>,
+    /// The map text reviews (`map_review.rs`): their runs and the verdicts kept per PR.
+    pub reviews: Arc<map_review::MapReviews>,
     /// The map items each landed commit changed (`ratify::changes_of`).
     changes: ratify::ChangesCache,
     /// Each project's part births (`staleness::births`).
@@ -283,7 +287,7 @@ impl App {
         effects: Arc<dyn Effects>,
     ) -> io::Result<App> {
         // The PR briefs' writer is Claude whatever `summaries.writer` says, and never the fake of the checks. Without
-        // `claude` there is none, so no brief is attempted and the page says briefs need Claude (spec #320).
+        // `claude` there is none, so only a short brief, made by code, is stored, and the page says briefs need Claude (spec #320, #634).
         let briefs =
             pr_briefs::PrBriefs::new(match std::env::var("PLOTKEEPER_CARD_WRITER").as_deref() {
                 Ok("fake") => None,
@@ -310,13 +314,26 @@ impl App {
         );
         let told = events.clone();
         worlds.on_change(move |project| told.emit("map-landed", project.into()));
+        let reviews = map_review::MapReviews::new(
+            map_review::Config {
+                store: data.join("map-reviews"),
+                gh: None,
+            },
+            &runner,
+        );
         let told = events.clone();
-        // A run that ends may be a micro-world's, which is checked then.
+        reviews.on_change(move |project| told.emit("map-landed", project.into()));
+        let told = events.clone();
+        // A run that ends may be a micro-world's, which is checked then, or a map text review's, whose answer is read then.
         let building = Arc::downgrade(&worlds);
+        let reviewing = Arc::downgrade(&reviews);
         runner.on_change(move |project| {
             told.emit("map-landed", project.into());
             if let Some(worlds) = building.upgrade() {
                 worlds.runs_changed(project);
+            }
+            if let Some(reviews) = reviewing.upgrade() {
+                reviews.runs_changed(project);
             }
         });
         let laws = back_a_law::LawRuns::new(runner.clone(), back_a_law::Config::beside(log));
@@ -353,6 +370,7 @@ impl App {
             runner,
             worlds,
             laws,
+            reviews,
             changes: Mutex::default(),
             births: Mutex::default(),
         })

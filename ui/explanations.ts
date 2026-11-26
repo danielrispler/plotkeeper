@@ -70,13 +70,14 @@ export const BRIEF = {
 export const RATIFY = {
   accept: "Changes this PR made to your map; say whether each stands.",
   guard: "A law with a test keeps this bug from coming back.",
+  head: "How the map stands at this PR's head.",
   notYet: SHEET.notYet,
 } as const;
 
 // The line under each heading the brief's reader draws, by its words: a step's kind, and Also touched.
 export const BRIEF_HEADINGS: Record<string, string> = { ...BRIEF.steps, "Also touched": BRIEF.also };
 // The line under the Ratify step's title, by the title `ratifyStep` gives it.
-export const RATIFY_HEADINGS: Record<string, string> = { "Accept or overturn": RATIFY.accept, "Guard with a law": RATIFY.guard };
+export const RATIFY_HEADINGS: Record<string, string> = { "Accept or overturn": RATIFY.accept, "Guard with a law": RATIFY.guard, "The map at this head": RATIFY.head };
 
 // A step's line: the Ratify step's by its title, any other by its kind; none for a kind the reader has no line for.
 export const stepLine = (step: { k: string; h: string }): string | undefined => (step.k === "Ratify" ? RATIFY_HEADINGS[step.h] : BRIEF.steps[step.k]);

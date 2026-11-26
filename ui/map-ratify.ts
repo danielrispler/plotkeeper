@@ -6,11 +6,12 @@
 import { failure, hint, invoke, pressable, promptBox, sayAction, text } from "./dom.js";
 import { currentMap } from "./map.js";
 import { openDrawer } from "./map-drawer.js";
-import { copyOverturn, decideWith, detailLines, evidenceLine, noteFor, overturnPrompt, overturnReport, siteDrawer, sitesDrawer, type Overturned } from "./ratify.js";
+import { copyOverturn, decideWith, detailLines, evidenceLine, mapCheckLine, noteFor, overturnPrompt, overturnReport, reviewLine, siteDrawer, sitesDrawer, type Overturned } from "./ratify.js";
 import { logStop } from "./stop-rules.js";
-import type { ImportSite, LinkSites, RatifyRow } from "./types.js";
+import type { ImportSite, LinkSites, MapReview, RatifyRow } from "./types.js";
 
-export type Ratifiable = Pick<RatifyRow, "pr" | "kind" | "id" | "text" | "change"> & { detail?: RatifyRow["detail"]; evidence?: LinkSites };
+// `flags`: what the Map text review flagged on it (`reviewFlags`, #645), which an overturn quotes.
+export type Ratifiable = Pick<RatifyRow, "pr" | "kind" | "id" | "text" | "change"> & { detail?: RatifyRow["detail"]; evidence?: LinkSites; flags?: string[] };
 
 /** The branch of PR `pr` while it is open: the Map view's ready PRs name it. */
 export const branchOf = (pr: number): string | null => currentMap()?.state.ready?.find((ready) => ready.number === pr)?.branch || null;
@@ -130,4 +131,98 @@ export function ratifyActions(project: string, item: Ratifiable, done: (state: "
   overturn.addEventListener("click", () => decide("overturned"));
   box.append(accept, overturn);
   return box;
+}
+
+/**
+ * Ratify's head (#641): the lines above the step's items that say how the PR's head stands, the map check's and, later, the Map text
+ * review's (spec #634), in the order given. Null with none.
+ */
+export function ratifyHead(lines: HTMLElement[]): HTMLElement | null {
+  if (!lines.length) return null;
+  const head = text("div", "", "ratify-head");
+  head.append(...lines);
+  return head;
+}
+
+// The map check lines left open, by project, PR and head: the step is drawn again on every map draw, and an open list stays open.
+const openChecks = new Set<string>();
+
+/**
+ * The head's map check line (#641): "The map check fails at this head: N problems", a disclosure that opens to the problems, each as the
+ * check words it. `key` names the brief (project, PR and head). Null when the check passed.
+ */
+export function mapCheckNode(key: string, problems: string[]): HTMLElement | null {
+  const line = mapCheckLine(problems);
+  if (!line) return null;
+  const node = text("details", "", "ratify-check");
+  node.open = openChecks.has(key);
+  node.addEventListener("toggle", () => (node.open ? openChecks.add(key) : openChecks.delete(key)));
+  const list = text("ul", "", "ratify-problems");
+  for (const problem of problems) {
+    const each = text("li", problem);
+    // The check's words name files and ids, which a translator must leave alone.
+    each.translate = false;
+    list.append(each);
+  }
+  const summary = text("summary", line);
+  hint(summary, "List what system-map check finds wrong at this PR's head");
+  node.append(summary, list);
+  return node;
+}
+
+// The marks the pointed Ratify row lit (#643), and which row lit them: one row at a time, so a row drawn again before its leave was seen
+// leaves nothing lit once another is pointed.
+let lit: { row: HTMLElement; marks: Element[] } | null = null;
+/** Clears the pointed row's light: the brief calls it whenever it draws a step or closes, since a row replaced sees no leave. */
+export const unlightMarks = () => {
+  for (const node of lit?.marks ?? []) node.classList.remove("ratify-lit");
+  lit = null;
+};
+
+/**
+ * A Ratify row's light (#643, spec #634 "The canvas"): the row carries the id of the mark it lights on the Map diff (`mark`, from
+ * `pr_ratify`), and hovering or focusing it lights that plate, line or law mark in `canvas` with `ratify-lit`, a class of its own: the
+ * brief adds and strips `.lit` itself, and story-to-map clears `.turn-lit` from every plate whenever the map repaints. Leave and blur
+ * clear it.
+ */
+export function lightsMark(row: HTMLElement, mark: string, canvas: () => ParentNode | null) {
+  row.dataset.mark = mark;
+  const on = () => {
+    unlightMarks();
+    const marks = [...(canvas()?.querySelectorAll(`[data-mark="${mark.replaceAll('"', '\\"')}"]`) ?? [])];
+    for (const node of marks) node.classList.add("ratify-lit");
+    lit = { row, marks };
+  };
+  const off = () => {
+    if (lit?.row === row) unlightMarks();
+  };
+  row.addEventListener("pointerenter", on);
+  row.addEventListener("focusin", on);
+  row.addEventListener("pointerleave", off);
+  row.addEventListener("focusout", off);
+}
+
+/**
+ * The Map text review's line at Ratify's head (#645, spec #634 "Ratify's display"): "Map text review: N checked, M flagged", "Reviewing
+ * map text…", the failure with "Run again", or "Review map text" for a PR not by Daniel's login. The button calls `start`, which starts the
+ * review (`map_review_start`) and draws the step again with its answer. Null when the head changed no map text.
+ */
+export function mapReviewNode(review: MapReview | null, start: () => Promise<unknown>): HTMLElement | null {
+  const said = reviewLine(review);
+  if (!said) return null;
+  const node = text("p", "", "ratify-review");
+  if (said.line) node.append(text("span", said.line));
+  if (said.start) {
+    const button = pressable(text("button", said.start, "btn quiet ratify-review-start"), null);
+    hint(button, "Check this PR's changed map text against its code, reading only; nothing waits on it");
+    button.addEventListener("click", () => {
+      button.disabled = true;
+      start().catch((e) => {
+        button.disabled = false;
+        failure("map_review_start")(e);
+      });
+    });
+    node.append(button);
+  }
+  return node;
 }

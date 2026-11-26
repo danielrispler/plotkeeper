@@ -180,6 +180,7 @@ fn ready() -> Vec<Ready> {
         note: Some("Rebased onto main, nothing new in the PR".into()),
         since: Some("What changed since you read".into()),
         since_chapters: vec!["The read".into(), "The fog".into()],
+        short: true,
     };
     vec![
         Ready {
@@ -322,6 +323,7 @@ fn runs() -> Runs {
     let mut list = vec![
         run(RunState::Running, Kind::BackLaw, None),
         run(RunState::Queued, Kind::MicroWorld, None),
+        run(RunState::Queued, Kind::MapReview, None),
     ];
     list.extend(ends.map(|end| run(RunState::Ended, Kind::BackLaw, Some(end))));
     Runs {
@@ -610,6 +612,10 @@ fn brief() -> studio_understanding::pr_brief::StoredBrief {
                 },
             ],
         }],
+        // Ratify's head lists them (#641).
+        map_problems: vec!["stray/s.ts: no part owns it".into()],
+        // The tray says "map changed" (#644).
+        short: true,
     }
 }
 
@@ -624,6 +630,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
         back_a_law::{NewLaw, Opened as LawOpened, Started},
         ci_laws::Proof as TaggedTest,
         history::{At, Commit, Entry as HistoryEntry, File},
+        map_diff::Tag as MapTag,
         micro_worlds::Explored,
         part_catch_ups::Opened as CatchUpOpened,
         pr_briefs::{BriefView, Opened as BriefOpened, StaleBase, Waiting},
@@ -669,6 +676,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
         status,
         detail: None,
         evidence: None,
+        mark: Some("law:wire-types-agree".into()),
     };
     let words = |before: Option<&str>, after: &str| Words {
         before: before.map(String::from),
@@ -684,6 +692,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
                 Some("Serves the page."),
                 "Serves the page and keeps its state.",
             ),
+            caption: words(Some("Serves the page"), "Serves the page"),
             holds: vec![HeldDetail {
                 name: "Fog".into(),
                 text: words(None, "Greys a part a PR changed."),
@@ -702,6 +711,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
         detail: Some(Detail::Link(LinkDetail {
             kind: words(Some("import"), "http"),
             reason: words(Some(""), "The page calls the server over HTTP."),
+            direction: Some(words(Some("server to ui"), "ui to server")),
         })),
         ..row(Ratified::NotYet, "changed")
     };
@@ -871,6 +881,27 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
         ("RatifyRow", json(row(Ratified::Overturned, "removed"))),
         ("RatifyRow", json(row(Ratified::NotYet, ""))),
         ("RatifyRow", json(part_row)),
+        (
+            "MapDiff",
+            // A PR's Map diff (#640): an added part, a removed line, an added law.
+            json(studio_server::map_diff::MapDiff {
+                pr: 334,
+                base: COMMIT.into(),
+                head: COMMIT.into(),
+                source: "{ \"parts\": [] }".into(),
+                parts: [
+                    ("install".to_string(), MapTag::Added),
+                    ("server".to_string(), MapTag::Edited),
+                ]
+                .into(),
+                actors: Default::default(),
+                lines: vec![studio_server::map_diff::LineTag {
+                    ends: ["plugins".into(), "server".into()],
+                    change: MapTag::Removed,
+                }],
+                laws: [("wire-types-agree".to_string(), MapTag::Added)].into(),
+            }),
+        ),
         ("RatifyRow", json(link_row)),
         (
             "RatifyRow",

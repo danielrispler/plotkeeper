@@ -1,6 +1,7 @@
 // PR briefs and part catch-ups, played on the map, and the rail's brief row.
 
-import type { BriefChapter, BriefFigure, BriefStep, BriefView, CatchUpStage, PrBrief, RatifyRow, StoredCatchUp } from "../../ui/types.ts";
+import { readFileSync } from "node:fs";
+import type { BriefChapter, BriefFigure, BriefStep, BriefView, CatchUpStage, MapDiff, PrBrief, RatifyRow, StoredCatchUp } from "../../ui/types.ts";
 import type { Fixture } from "./base.ts";
 import { railFixtures } from "./rail-fixtures.ts";
 import { brief, briefOf, figure, mapBrief, mapOpened, mapState, runAt, step, storySteps } from "./fixtures-shared.ts";
@@ -462,6 +463,67 @@ export const mapBriefRatify = (): Fixture => ({
       log("ratify ok");`, false, 100),
   pr_ratify: ratifyRows,
 });
+// The head's map check (#641): the PR's head fails `system-map check`, so Ratify's head says so above the items and opens to the problems.
+// `alone`: nothing to ratify, so the line alone brings the step, titled "The map at this head".
+const mapProblems = [
+  "ui/map-diff.ts is tracked but no part owns it; add it to a part's paths or to ignored",
+  "import link \"shell-understanding\" runs from \"shell\" to \"understanding\", but no import runs that way",
+];
+export const mapBriefMapCheck = (alone: boolean): Fixture => {
+  const view = briefOf(storySteps());
+  return {
+    ...mapBrief({ ...view, brief: { ...view.brief, map_problems: mapProblems } }, 4, `
+      const head = document.querySelector("#map-brief .ratify-head");
+      if (!head) return log("snap:fail Ratify has no head");
+      if (head.nextElementSibling !== document.querySelector("#map-brief .brief-ratify")) log("snap:fail the head is not above the items");
+      const check = head.querySelector("details.ratify-check");
+      if (check?.querySelector("summary")?.textContent !== "The map check fails at this head: 2 problems") return log("snap:fail the line says " + check?.textContent);
+      if (check.open) log("snap:fail the list opens closed");
+      check.querySelector("summary").click();
+      await wait(100);
+      const problems = [...check.querySelectorAll("li")].map((li) => li.textContent);
+      if (problems.join("|") !== ${JSON.stringify(mapProblems.join("|"))}) log("snap:fail the problems: " + problems.join("|"));
+      const title = document.querySelector("#map-brief .brief-title")?.textContent;
+      if (title !== (${alone} ? "The map at this head" : "Accept or overturn")) log("snap:fail the step's title: " + title);
+      log("map check ok");`, false, 100),
+    pr_ratify: alone ? [] : ratifyRows,
+  };
+};
+// The Map text review in Ratify (#645): `flag` flags the changed law, whose row carries the not-confirmed mark; its popover gives the
+// reviewer's why and cites and the copy icon, and Accept stays. `running`: the review runs with nothing to ratify, so its line alone brings
+// the step, titled "The map at this head".
+const reviewWhy = "Two queues run: the brief writer's and the background runs'.";
+export const mapBriefReview = (at: "flag" | "running"): Fixture => ({
+  ...mapBrief(briefOf(storySteps()), 4, at === "flag" ? `
+      const head = document.querySelector("#map-brief .ratify-head .ratify-review");
+      if (head?.textContent !== "Map text review: 2 checked, 1 flagged") log("snap:fail the review's line says " + head?.textContent);
+      if (document.querySelectorAll("#map-brief .ratify-row .brief-why-mark").length !== 1) log("snap:fail only the flagged row carries the mark");
+      const row = document.querySelector("#map-brief .ratify-row[data-id=window-quiet]");
+      if (row?.querySelector(".ratify-accept")?.disabled !== false) log("snap:fail Accept is not enabled on the flagged row");
+      const mark = row?.querySelector(".brief-why-mark");
+      if (!mark) return log("snap:fail the flagged row has no mark");
+      mark.click();
+      await wait(100);
+      const why = document.getElementById(mark.getAttribute("aria-controls"));
+      if (!why?.matches(":popover-open")) return log("snap:fail the mark did not open its popover");
+      const reasons = [...why.querySelectorAll(".brief-why-list li")].map((li) => li.textContent);
+      if (reasons.join("|") !== ${JSON.stringify(`Text (contradicted): ${reviewWhy} See server/src/runner.rs:83, server/src/pr_briefs/queue.rs:12.`)}) log("snap:fail the popover's reasons: " + reasons.join("|"));
+      if (!why.querySelector(".brief-copy")) log("snap:fail the popover has no copy icon");
+      log("review flag ok");` : `
+      const line = document.querySelector("#map-brief .ratify-head .ratify-review");
+      if (line?.textContent !== "Reviewing map text…") log("snap:fail the review's line says " + line?.textContent);
+      if (line?.querySelector("button")) log("snap:fail a running review offers a button");
+      const title = document.querySelector("#map-brief .brief-title")?.textContent;
+      if (title !== "The map at this head") log("snap:fail the step's title: " + title);
+      log("review running ok");`, false, 100),
+  pr_ratify: at === "flag" ? ratifyRows : [],
+  pr_map_review: at === "flag"
+    ? { head: "cafe", state: "done", checked: 2, flagged: 1, line: null, left_out: 0, items: [
+      { id: "law:window-quiet/text", verdict: "contradicted", why: reviewWhy, cites: ["server/src/runner.rs:83", "server/src/pr_briefs/queue.rs:12"], flagged: true },
+      { id: "link:shell-understanding/reason", verdict: "supported", why: "The shell imports it.", cites: [], flagged: false },
+    ] }
+    : { head: "cafe", state: "reviewing", checked: 0, flagged: 0, line: null, left_out: 0, items: [] },
+});
 /**
  * The brief's reader explains itself (#524), with Explanations on (the default): the ? beside Leave, pressed; the step's title described by
  * its kind's line, directly under it. On the Ratify step (`ratify`), the title's line, and "Not yet ratified"'s under the first undecided
@@ -505,6 +567,7 @@ const ratifyDetailRows: RatifyRow[] = [
       of: "part",
       name: { before: "Server", after: "Server" },
       purpose: { before: "Serves the page, keeps the state, installs the hook and runs the agents.", after: "Serves the page and keeps the state it shows." },
+      caption: { before: "Serves the page", after: "Serves the page" },
       holds: [
         { name: "Fog", text: { before: "Greys a part.", after: "Greys a part a PR changed until its brief is read." }, paths_added: ["server/src/fog.rs"], paths_removed: [] },
         { name: "Settings", text: { before: "Kept per user.", after: "Kept per user." }, paths_added: [], paths_removed: [] },
@@ -521,6 +584,7 @@ const ratifyDetailRows: RatifyRow[] = [
       of: "part",
       name: { before: null, after: "Install" },
       purpose: { before: null, after: "Puts plotkeeper's hook into each agent's settings, and takes it out again." },
+      caption: { before: null, after: "Wires the hook" },
       holds: [{ name: "Hook copies", text: { before: null, after: "The hook file each agent runs." }, paths_added: ["server/src/hook_copies.rs"], paths_removed: [] }],
       paths_added: ["server/src/install.rs", "server/src/hook_copies.rs"],
       paths_removed: [],
@@ -1060,3 +1124,157 @@ export const railBriefReady = (press: boolean): Fixture => ({
     }
     log("rail brief row ok");`,
 });
+
+// The Map diff (#640): a brief whose PR changed the map plays on today's map with the PR's changes on it, in treatment B of spec #634's
+// prototype. `map-diff/pr<N>.json` holds the real PRs' documents as `map_diff::of` builds them (both landed, so today's map is the squash
+// commit's), and the prototype's plate positions. #500 split Server in three, #351 removed the Tauri shell and its terminal daemon.
+type DiffData = { today: string; diff: MapDiff; positions: Record<string, [number, number]> };
+const diffData = (pr: 500 | 351): DiffData => JSON.parse(readFileSync(new URL(`./map-diff/pr${pr}.json`, import.meta.url), "utf8"));
+const diffStep: Record<500 | 351, (lit: string[]) => BriefStep> = {
+  500: (lit) => step("Now", "Server is three parts now", "Install wires the agents to the hook, and <b>Map, briefs and runs</b> holds the map's data and the agent runs.", lit),
+  351: (lit) => step("Where", "The Tauri shell is gone", "Server now reads the log and feeds the core on its own.", lit),
+};
+/**
+ * PR `pr`'s brief, one step lighting `lit`, on its Map diff. `off` takes the step's dim and ring off after the checks, so the shot shows the
+ * marks alone, as the prototype's "brief step off"; `close` leaves the brief and checks the map is back to now. With `ratify` rows the brief
+ * goes on to its Ratify step, where `check` runs.
+ */
+const mapDiff = (pr: 500 | 351, lit: string[], check: string, how: "off" | "on" | "close", ratify: RatifyRow[] = []): Fixture => {
+  const data = diffData(pr);
+  const parts = JSON.parse(data.diff.source).parts.map((part: { id: string }) => part.id);
+  // One chapter framing every part, so the camera shows the whole map.
+  const chapters: BriefChapter[] = [{ behaviour: "story", parts, title: "The change", steps: [diffStep[pr](lit)], flags: [] }];
+  const after = {
+    // A style, not a class taken off, since the brief lights its step again whenever the map redraws.
+    off: `
+      const off = document.createElement("style");
+      off.textContent = ".map-world.briefing .plate, .map-world.briefing .actor { opacity: 1 !important; } " +
+        ".map-world.briefing .plate.lit { box-shadow: inset 0 0 0 var(--hair) var(--plate-edge), var(--shadow) !important; } " +
+        "#map-brief { display: none !important; } body.brief-open .map-panel > *, body.brief-open .map-side > * > * { opacity: 1 !important; }";
+      document.head.append(off);`,
+    on: "",
+    close: `
+      document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", key: "Escape", bubbles: true }));
+      await wait(300);
+      if (!document.getElementById("map-brief").hidden) return log("snap:fail Esc did not close the brief");
+      const left = document.querySelectorAll(".map-world .d-added, .map-world .d-removed, .map-world .d-edited, .plate-tag").length;
+      if (left) log("snap:fail closing left " + left + " marks of the Map diff");
+      if (document.querySelector('.plate[data-id="shell"]')) log("snap:fail the ghost stays after the brief closed");`,
+  }[how];
+  const fixture = mapBrief(briefOf([], false, { chapters }), ratify.length ? 1 : 0, `
+      const plates = (tag) => [...document.querySelectorAll(".plate.d-" + tag)];
+      const words = (tag) => plates(tag).map((p) => p.querySelector(".plate-tag")?.textContent);
+      ${check}
+      ${after}`, false, 300);
+  return {
+    ...fixture,
+    map_state: mapState({ source: data.today, user: { tiers: {}, positions: data.positions }, ready: [{ number: 334, title: "The change", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["The change"], quiet: false } }] }),
+    pr_map_diff: { ...data.diff, pr: 334 },
+    ...(ratify.length ? { pr_ratify: ratify } : {}),
+  };
+};
+const split = `
+      if (words("added").join("|") !== "New|New") log("snap:fail the new parts say " + words("added").join("|"));
+      if (plates("added").map((p) => p.dataset.id).sort().join("|") !== "install|map-briefs-runs") log("snap:fail the new parts are " + plates("added").map((p) => p.dataset.id));
+      if (plates("edited").length !== 7 || words("edited").some((w) => w !== "Edited")) log("snap:fail " + plates("edited").length + " parts say Edited");
+      if (plates("removed").length) log("snap:fail #500 removed no part");
+      const added = plates("added")[0];
+      if (getComputedStyle(added).outlineStyle !== "solid") log("snap:fail a new part's edge is not a solid outline");
+      if (!__snapName(added.querySelector(".plate-open")).startsWith("New")) log("snap:fail a new part's button does not say New: " + __snapName(added.querySelector(".plate-open")));
+      if (document.querySelectorAll(".link.d-added").length !== 14 || document.querySelectorAll(".link.d-removed").length !== 2) log("snap:fail lines: " + document.querySelectorAll(".link.d-added").length + " new, " + document.querySelectorAll(".link.d-removed").length + " gone");
+      if (getComputedStyle(document.querySelector(".link.d-removed")).strokeDasharray === "none") log("snap:fail a removed line is not dashed");`;
+const removal = `
+      if (plates("removed").map((p) => p.dataset.id).sort().join("|") !== "shell|terminal-daemon") log("snap:fail the ghosts are " + plates("removed").map((p) => p.dataset.id));
+      if (words("removed").join("|") !== "Gone|Gone") log("snap:fail the ghosts say " + words("removed").join("|"));
+      const ghost = document.querySelector('.plate.d-removed[data-id="shell"]');
+      if (getComputedStyle(ghost).outlineStyle !== "dashed") log("snap:fail a ghost's edge is not dashed");
+      if (!getComputedStyle(ghost.querySelector(".plate-name")).textDecorationLine.includes("line-through")) log("snap:fail a ghost's name is not struck");
+      if (document.querySelectorAll(".link.d-removed").length !== 7) log("snap:fail " + document.querySelectorAll(".link.d-removed").length + " removed lines, not 7");
+      if (document.querySelectorAll(".law-mark.d-removed").length !== 2) log("snap:fail " + document.querySelectorAll(".law-mark.d-removed").length + " removed laws on plates, not 2");`;
+export const mapDiffSplit = (): Fixture => mapDiff(500, ["server", "install", "map-briefs-runs"], split, "off");
+export const mapDiffSplitBrief = (): Fixture => mapDiff(500, ["server", "install", "map-briefs-runs"], split, "on");
+export const mapDiffRemoval = (): Fixture => mapDiff(351, ["server", "window"], removal, "off");
+export const mapDiffRemovalBrief = (): Fixture => mapDiff(351, ["server", "window"], `${removal}
+      if (getComputedStyle(document.querySelector('.plate[data-id="shell"]')).opacity === "1") log("snap:fail an unlit ghost is not dimmed with the rest");`, "on");
+// A step that lights a ghost: it keeps its dashed outline outside the warm ring.
+export const mapDiffLitGhost = (): Fixture => mapDiff(351, ["shell", "server"], `${removal}
+      const lit = document.querySelector('.plate.d-removed.lit[data-id="shell"]');
+      if (!lit) log("snap:fail the step did not light the ghost");
+      else if (getComputedStyle(lit).outlineStyle !== "dashed" || getComputedStyle(lit).outlineOffset !== "5px") log("snap:fail the lit ghost's outline: " + getComputedStyle(lit).outlineStyle + " at " + getComputedStyle(lit).outlineOffset);`, "on");
+export const mapDiffClosed = (): Fixture => mapDiff(351, ["shell", "server"], removal, "close");
+// Ratify's rows light their marks (#643): on #351's Map diff, focusing the removed link's row lights its line and its law's row the law's
+// diamond, each cleared on blur; the shot points at the ghost Shell's row, which lights the ghost (undimmed, its dashed outline outside
+// the warm ring), with neither the brief's .lit nor .turn-lit.
+const removalRows: RatifyRow[] = [
+  { pr: 334, kind: "part", id: "shell", text: "Shell", change: "removed", status: "not-yet", detail: null, mark: "part:shell" },
+  { pr: 334, kind: "link", id: "shell-server", text: "shell to server", change: "removed", status: "not-yet", detail: null, mark: "line:server|shell" },
+  { pr: 334, kind: "law", id: "terminals-outlive-app", text: "Terminals outlive the app", change: "removed", status: "not-yet", detail: null, mark: "law:terminals-outlive-app" },
+];
+export const mapDiffRatifyLit = (): Fixture => mapDiff(351, ["server", "window"], `
+      if (document.querySelector("#map-brief .brief-title")?.textContent !== "Accept or overturn") return log("snap:fail not on the Ratify step");
+      const row = (id) => document.querySelector('#map-brief .ratify-row[data-id="' + id + '"]');
+      if (row("shell")?.dataset.mark !== "part:shell") return log("snap:fail the ghost's row carries no mark: " + row("shell")?.dataset.mark);
+      const lit = () => [...document.querySelectorAll(".map-world .ratify-lit")];
+      const focusOn = async (id) => { row(id).querySelector(".ratify-accept").focus(); await wait(50); };
+      await focusOn("shell-server");
+      if (lit().length !== 1 || !lit()[0].matches('.link[data-mark="line:server|shell"]')) log("snap:fail the link's row lit " + lit().map((n) => n.getAttribute("class")));
+      await focusOn("terminals-outlive-app");
+      if (lit().length !== 1 || !lit()[0].matches(".law-mark.d-removed")) log("snap:fail the law's row lit " + lit().map((n) => n.getAttribute("class")));
+      document.activeElement.blur();
+      await wait(50);
+      if (lit().length) log("snap:fail blur left " + lit().length + " marks lit");
+      row("shell").dispatchEvent(new PointerEvent("pointerenter"));
+      await wait(50);
+      const ghost = document.querySelector('.plate[data-id="shell"]');
+      if (!ghost.classList.contains("ratify-lit") || lit().length !== 1) return log("snap:fail pointing the ghost's row lit " + lit().map((n) => n.getAttribute("class")));
+      if (ghost.classList.contains("lit") || ghost.classList.contains("turn-lit")) log("snap:fail the row reused .lit or .turn-lit");
+      const style = getComputedStyle(ghost);
+      if (style.opacity !== "1") log("snap:fail the pointed ghost is still dimmed: " + style.opacity);
+      if (style.outlineStyle !== "dashed" || style.outlineOffset !== "5px") log("snap:fail the pointed ghost's outline: " + style.outlineStyle + " at " + style.outlineOffset);
+      if (!style.boxShadow.includes("rgba(224, 192, 140")) log("snap:fail the pointed ghost has no warm ring: " + style.boxShadow);
+      // Accept draws the step again with no leave seen, and Back leaves it: neither keeps a mark lit.
+      row("shell").querySelector(".ratify-accept").click();
+      await wait(30);
+      if (lit().length) log("snap:fail Accept's redraw left " + lit().length + " marks lit");
+      row("shell-server").dispatchEvent(new PointerEvent("pointerenter"));
+      await wait(30);
+      if (lit().length !== 1) log("snap:fail pointing a row after Accept lit " + lit().length);
+      document.querySelector("#map-brief .brief-back").click();
+      await wait(30);
+      if (lit().length) log("snap:fail Back left " + lit().length + " marks lit");`, "on", removalRows);
+
+// The short brief (#644): #351's PR, had it fogged nothing at Daniel's tiers, gets a brief made by code: one step, "The map in this PR",
+// whose sentence counts its Map diff (as `map_diff::counts` counts #351's real maps) and which lights the parts the marks are on, then the
+// Ratify step. Its tray row says "map changed". The shot is the step, on the Map diff.
+const shortLit = ["core", "hook", "server", "shell", "terminal-daemon", "understanding", "window", "workbench"];
+const shortSentence = "2 parts removed, 7 links removed, 2 laws removed, and 2 changes with no mark on the map.";
+export const mapBriefShort = (): Fixture => {
+  const data = diffData(351);
+  const chapters: BriefChapter[] = [{ behaviour: "story", parts: shortLit, title: "The map in this PR", steps: [step("Where", "The map in this PR", shortSentence, shortLit)], flags: [] }];
+  const view = briefOf([], false, { title: "Retire the Tauri shell", chapters });
+  const short = { ...view, brief: { ...view.brief, model: "", short: true } };
+  const fixture = mapBrief(short, 0, `
+      const box = document.getElementById("map-brief");
+      const note = document.querySelector('#map-tray .tray-row[data-pr="334"] .tray-note')?.textContent;
+      if (note !== "#334 · map changed") log("snap:fail the tray row says " + JSON.stringify(note));
+      if (box.querySelector(".brief-title")?.textContent !== "The map in this PR") log("snap:fail the step's title: " + box.querySelector(".brief-title")?.textContent);
+      if (box.querySelector(".brief-body")?.textContent !== ${JSON.stringify(shortSentence)}) log("snap:fail the step's counts: " + box.querySelector(".brief-body")?.textContent);
+      if (box.querySelectorAll(".brief-dots i").length !== 2) log("snap:fail the short brief is its step and Ratify, saw " + box.querySelectorAll(".brief-dots i").length + " dots");
+      if (document.querySelectorAll(".plate.d-removed").length !== 2) log("snap:fail the Map diff's ghosts are not drawn");
+      if (!document.querySelector('.plate.d-removed.lit[data-id="shell"]')) log("snap:fail the step does not light the ghost its marks are on");
+      document.getElementById("brief-next").click();
+      await wait(200);
+      if (box.querySelector(".brief-title")?.textContent !== "Accept or overturn") log("snap:fail the second step is " + box.querySelector(".brief-title")?.textContent);
+      if (box.querySelectorAll(".ratify-row").length !== 2) log("snap:fail Ratify lists " + box.querySelectorAll(".ratify-row").length + " rows");
+      box.querySelector(".brief-back").click();
+      await wait(200);`, false, 300);
+  return {
+    ...fixture,
+    map_state: mapState({ source: data.today, user: { tiers: {}, positions: data.positions }, ready: [{ number: 334, title: "Retire the Tauri shell", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["Retire the Tauri shell"], quiet: false, short: true } }] }),
+    pr_map_diff: { ...data.diff, pr: 334 },
+    pr_ratify: [
+      { pr: 334, kind: "part", id: "shell", text: "Shell", change: "removed", status: "not-yet", detail: null },
+      { pr: 334, kind: "law", id: "terminals-outlive-app", text: "Terminals outlive the app.", change: "removed", status: "not-yet", detail: null },
+    ],
+  };
+};

@@ -277,6 +277,10 @@ _Avoid_: Open PR (a draft is open too), review requested
 To accept or overturn a change the agent made to the system map or a law, or a decision it declared, offered in the **PR brief**. A map change nobody has decided on is **not yet ratified**; it is in effect all the same, since ratifying never blocks. Overturning copies a prompt that quotes the item to the clipboard, for Daniel to paste into his agent.
 _Avoid_: Approve (that is the PR review), sign off
 
+**Map diff**:
+The merged before/after picture of the system map in a **PR brief**: today's map of the default branch with what the PR added on it (a part says "New") and what it removed kept as a hollow, dashed ghost ("Gone"), a part whose own name, purpose or caption changed saying "Edited", new links bright and removed ones dashed. The brief plays on it from open to close; a PR that changed nothing on the map has none.
+_Avoid_: Before/after (two pictures), history (the scrub)
+
 **Link evidence**:
 The import sites (file and line) behind an `import` link a PR adds, shown on its **Ratify** item: read from the PR's head when the brief is written and stored with the brief, never extracted live. Each site opens its code at that head.
 _Avoid_: Evidence line (that is a turn's line in the rail, of files and checks)
@@ -322,8 +326,12 @@ What the default branch changed, since an open PR's merge base, that bears on th
 _Avoid_: Out of date, behind main (a PR's branch count), stale brief (a brief of an older head)
 
 **Background run**:
-A headless agent run with scoped tools that plotkeeper starts on Daniel's click, inside Claude Code's OS sandbox, queued one at a time per project and cancellable from the map. It is not a session and has no terminal. [Background runs](behaviour/background-runs.md) has the rules.
+A headless agent run with scoped tools that plotkeeper starts on Daniel's click, inside Claude Code's OS sandbox, queued one at a time per project and cancellable from the map. It is not a session and has no terminal. One kind bends two rules: the **Map text review** starts without a click for a PR by Daniel's own login, and its folder holds a PR's head, though its prompt holds none of the PR's text. [Background runs](behaviour/background-runs.md) has the rules.
 _Avoid_: Session, job, a check sent to the background (a check an agent backgrounds inside its own session)
+
+**Map text review**:
+The read-only **Background run** that checks the map text a PR added or changed (parts' names, purposes and captions, held items, link reasons and law texts) against the PR's code, and keeps a verdict per item. Its flags show on Ratify's rows and never block. Distinct from the **Claim check**, which checks a **PR brief** against its facts.
+_Avoid_: Map lint, map check (the check of ownership, imports and laws), fact check
 
 **Micro-world**:
 A small interactive page, built by a **Background run** from the project's real code, that lets Daniel play with one mechanism: a flow of a part's **Refresher**, or the parts a step of a **PR brief** lights. plotkeeper checks the page before keeping it and shows it walled off from everything else it serves.
