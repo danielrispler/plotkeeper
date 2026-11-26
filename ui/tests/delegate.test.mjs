@@ -377,15 +377,8 @@ test("run: a worker that edits and exits 0 with a green check gives pass and one
   assert.match(rest.at(-1), /^Route outcome: cheap·medium opencode\/test-free → pass \| \d+m$/);
   const commits = git("log", "--format=%B%x00", "origin/int..issue-7-cheap").split("\0").map((body) => body.trim()).filter(Boolean);
   assert.deepEqual(commits, ["Workflow: the thing\n\nWorker: opencode/test-free"]);
+  assert.equal(git("diff", "--name-only", "origin/int", "issue-7-cheap"), "shared.txt", "the gitignored .delegate/ is not committed");
   assert.equal(readFileSync(join(worktree, "shared.txt"), "utf8"), "the worker's line\n");
-});
-
-test("run: with .delegate/ gitignored as in the repository, the worker's change is staged and checked, and .delegate/ is not committed", () => {
-  const { git, run } = scratchRun();
-  const ran = run({ FAKE_OPENCODE: "edit" });
-  assert.equal(ran.status, 0, ran.stderr);
-  assert.match(ran.stdout, /^pass\n/);
-  assert.equal(git("diff", "--name-only", "origin/int", "issue-7-cheap"), "shared.txt");
 });
 
 /** The commit bodies on `branch` that are not on the integration branch, merges left out. */
