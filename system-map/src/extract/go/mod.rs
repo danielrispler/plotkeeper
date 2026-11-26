@@ -88,7 +88,7 @@ fn skipped(text: &str, head: &Head) -> bool {
 }
 
 /// The folder holding `file`, as a prefix: empty for the root, else ending in `/`.
-fn folder_of(file: &str) -> &str {
+pub(super) fn folder_of(file: &str) -> &str {
     file.rfind('/').map_or("", |at| &file[..=at])
 }
 
@@ -568,6 +568,6 @@ fn go_imports(repo: &Repo) -> Output {
 }
 
 /// The name a folder's package goes by as a pair's group: the folder, or `./` for the root.
-fn group(folder: &str) -> String {
+pub(super) fn group(folder: &str) -> String {
     if folder.is_empty() { "./" } else { folder }.to_string()
 }

@@ -7,6 +7,7 @@ mod cargo;
 mod contract;
 mod go;
 mod names;
+mod python;
 pub(crate) mod registry;
 mod rust_modules;
 mod typescript;
