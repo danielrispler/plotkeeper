@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::{
     Extractor, Output, Pair, Repo, Unsure,
     folders::{folder_of, parent},
+    group,
     names::{Lookup, Names},
 };
 
@@ -553,9 +554,4 @@ fn go_imports(repo: &Repo) -> Output {
         }
     }
     found
-}
-
-/// The name a folder's package goes by as a pair's group: the folder, or `./` for the root.
-fn group(folder: &str) -> String {
-    if folder.is_empty() { "./" } else { folder }.to_string()
 }

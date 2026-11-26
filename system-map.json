@@ -57,6 +57,20 @@
       "paths": ["server/src/install.rs", "server/src/hook_copies.rs", "server/tests/install.rs", "server/tests/hook_copies.rs"]
     },
     {
+      "id": "map-engine", "name": "Map engine", "caption": "Reads code into parts and links",
+      "purpose": "The `system-map` crate and command: checks a repository's `system-map.json` against its files, says which part owns each path, proves its links with the language extractors and counts how parts follow imports.",
+      "holds": [
+        { "name": "Ownership", "text": "Which part owns each tracked file, by the last pattern that matches, and which parts a list of paths touches.", "paths": ["system-map/src/lib.rs", "system-map/src/pattern.rs", "system-map/src/touched.rs"] },
+        { "name": "Part text", "text": "A part's purpose and held items with their caps, and the conversion of a version 1 map.", "paths": ["system-map/src/parts.rs"] },
+        { "name": "Extractors and links", "text": "One module per language behind one contract, turning files into edges that prove or fail each import link.", "paths": ["system-map/src/extract/", "system-map/src/edges.rs"] },
+        { "name": "Imports", "text": "`system-map imports`: how well the parts follow the code's imports, counted per importing file.", "paths": ["system-map/src/imports.rs"] },
+        { "name": "Laws", "text": "Finds the `@law:` tags that tie tests to laws.", "paths": ["system-map/src/laws.rs"] },
+        { "name": "Commit mode", "text": "Reads a commit's files and their text without checking it out, for `--commit`.", "paths": ["system-map/src/commit.rs"] }
+      ],
+      "tier": "core",
+      "paths": ["system-map/"]
+    },
+    {
       "id": "map-briefs-runs", "name": "Map, briefs and runs", "caption": "Map data, briefs, agent runs",
       "purpose": "What the Map view and the briefs show, and the runs started from them: the map with its fog, history and ratify, PR briefs and catch-ups, and the headless agent runs.",
       "holds": [
@@ -137,6 +151,10 @@
     { "id": "map-briefs-runs-hook", "from": "map-briefs-runs", "to": "hook", "kind": "import" },
     { "id": "map-briefs-runs-understanding", "from": "map-briefs-runs", "to": "understanding", "kind": "import" },
     { "id": "map-briefs-runs-workbench", "from": "map-briefs-runs", "to": "workbench", "kind": "import" },
+    { "id": "server-map-engine", "from": "server", "to": "map-engine", "kind": "import" },
+    { "id": "map-briefs-runs-map-engine", "from": "map-briefs-runs", "to": "map-engine", "kind": "import" },
+    { "id": "understanding-map-engine", "from": "understanding", "to": "map-engine", "kind": "import" },
+    { "id": "map-engine-workbench", "from": "map-engine", "to": "workbench", "kind": "import" },
     { "id": "install-hook", "from": "install", "to": "hook", "kind": "import" },
     { "id": "install-workbench", "from": "install", "to": "workbench", "kind": "import" },
     { "id": "core-workbench", "from": "core", "to": "workbench", "kind": "import" },
@@ -164,7 +182,7 @@
     "README.md", "package-lock.json", "package.json", "npm/", "rust-toolchain.toml", "tsconfig.json", "biome.json", "knip.jsonc",
     "skills-lock.json",
     "docs/", "scripts/", "archive/",
-    "wayfinder/", "test-support/", "system-map/"
+    "wayfinder/", "test-support/"
   ],
   "laws": [
     { "id": "git-and-gh-go-through-the-runner", "on": "workbench", "backing": "check",

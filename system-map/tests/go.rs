@@ -1,51 +1,13 @@
 //! `go-imports`: Go repositories in temporary folders, read through `check` and `imports` (spec #569, "Testing
 //! Decisions").
 
-use std::{path::Path, process::Command};
-
 use serde_json::{Value, json};
 
-use crate::common::{has, project_text, write};
+use crate::common::{extractor_map, has, pairs, repo, report, run, write};
 
 /// A map naming `go-imports` whose parts are `parts`, each an id with its paths, and whose import links are `links`.
 fn map(parts: &[(&str, &[&str])], links: &[(&str, &str)]) -> Value {
-    json!({
-        "version": 2,
-        "extractors": ["go-imports"],
-        "parts": parts.iter().map(|(id, paths)| json!({
-            "id": id, "name": id, "caption": id, "purpose": "A part.", "holds": [], "tier": "core", "paths": paths
-        })).collect::<Vec<_>>(),
-        "actors": [],
-        "links": links.iter().map(|(from, to)| json!({
-            "id": format!("{from}-{to}"), "from": from, "to": to, "kind": "import"
-        })).collect::<Vec<_>>(),
-        "ignored": ["system-map.json"],
-        "laws": []
-    })
-}
-
-/// A repository holding `map` and `files` with their texts, committed.
-fn repo(map: &Value, files: &[(&str, &str)]) -> (tempfile::TempDir, String) {
-    let (dir, root) = project_text(&map.to_string(), &[]);
-    for (file, text) in files {
-        write(dir.path(), file, text);
-    }
-    studio_test_support::git(dir.path(), &["add", "-A"]);
-    studio_test_support::git(dir.path(), &["commit", "-q", "-m", "Code"]);
-    (dir, root)
-}
-
-fn report(root: &str) -> system_map::Report {
-    system_map::check(Path::new(root))
-}
-
-/// Every file pair of the computed edges, as `from>to`.
-fn pairs(report: &system_map::Report) -> Vec<String> {
-    report
-        .edges
-        .iter()
-        .flat_map(|e| e.pairs.iter().map(|p| format!("{}>{}", p.from, p.to)))
-        .collect()
+    extractor_map("go-imports", parts, links, &[])
 }
 
 /// The file pairs a repository of `files` gives, its parts `a` owning everything under `a/` and `b` the rest, with no
@@ -53,15 +15,6 @@ fn pairs(report: &system_map::Report) -> Vec<String> {
 fn go_pairs(files: &[(&str, &str)]) -> Vec<String> {
     let (_dir, root) = repo(&map(&[("b", &["**"]), ("a", &["a/"])], &[]), files);
     pairs(&report(&root))
-}
-
-fn run(root: &str, command: &str, args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_system-map"))
-        .arg(command)
-        .args(args)
-        .args(["--root", root])
-        .output()
-        .unwrap()
 }
 
 const MOD: (&str, &str) = ("go.mod", "module example.com/m\n\ngo 1.22\n");
