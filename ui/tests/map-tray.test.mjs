@@ -93,3 +93,15 @@ test("a head with a Since you read story opens it first, and the full brief's ro
   // With no story, a row opens as before: the server writes the story first when the push calls for one.
   assert.deepEqual(trayRows([pr(7, "Fog", { stale: true, writing: false, chapters: ["Fog"], quiet: false })]).map((r) => r.full ?? false), [false]);
 });
+
+test("a short brief, made by code for a PR that changes the map but fogs nothing, is a row that says the map changed and opens", () => {
+  const row = trayRows([pr(7, "Add beta", { stale: false, writing: false, chapters: ["Add beta"], quiet: false, short: true })])[0];
+  assert.equal(row.openable, true);
+  assert.equal(row.title, "Add beta");
+  assert.equal(row.note, "#7 · map changed");
+  // A push that carried the read over says so, as for any brief; a stale one says it is rewritten.
+  const carried = trayRows([pr(7, "Add beta", { stale: false, writing: false, chapters: ["Add beta"], quiet: false, short: true, note: "New push touched nothing on your map" })])[0];
+  assert.equal(carried.note, "#7 · New push touched nothing on your map");
+  const stale = trayRows([pr(7, "Add beta", { stale: true, writing: false, chapters: ["Add beta"], quiet: false, short: true })])[0];
+  assert.match(stale.note, /newer push/);
+});

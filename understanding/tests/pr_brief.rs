@@ -1753,6 +1753,37 @@ fn a_stored_brief_reads_with_its_head_s_map_problems_and_older_ones_with_none() 
 
 // @law: old-stored-files-load
 #[test]
+fn a_short_brief_reads_as_short_and_older_briefs_as_written() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/stored");
+    let read = |name: &str| std::fs::read_to_string(dir.join(name)).unwrap();
+    let stored: StoredBrief =
+        serde_json::from_str(&read("pr-brief-v11/stored-brief-short.json")).unwrap();
+    assert!(stored.short);
+    assert_eq!(
+        stored
+            .brief
+            .steps()
+            .map(|s| (s.h.as_str(), s.b.as_str()))
+            .collect::<Vec<_>>(),
+        [("The map in this PR", "1 part added, 1 link added.")]
+    );
+    for older in [
+        "pr-brief-v3/stored-brief-full.json",
+        "pr-brief-v3/stored-brief-minimal.json",
+        "pr-brief-v4/stored-brief-full.json",
+        "pr-brief-v5/stored-brief-guard.json",
+        "pr-brief-v7/stored-brief-partial.json",
+        "pr-brief-v8/stored-brief-also.json",
+        "pr-brief-v9/stored-brief-evidence.json",
+        "pr-brief-v10/stored-brief-map-problems.json",
+    ] {
+        let older: StoredBrief = serde_json::from_str(&read(older)).unwrap();
+        assert!(!older.short, "{older:?}");
+    }
+}
+
+// @law: old-stored-files-load
+#[test]
 fn stored_records_read_with_their_calls_cache_tokens_and_older_ones_with_none() {
     let sample = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/stored/pr-brief-v6/pr-brief-records.jsonl");

@@ -1,6 +1,6 @@
 //! The source: what git and gh give, as plain data.
 
-use super::{Decision, LinkEvidence};
+use super::{Decision, LinkEvidence, MapCounts};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 /// A spec or ticket the PR closes.
@@ -73,4 +73,7 @@ pub struct PrSource {
     pub link_evidence: Vec<LinkEvidence>,
     /// The map check's problems at its head (#641), read by the server; stored on the brief as they are.
     pub map_problems: Vec<String>,
+    /// What its Map diff marks (#644), counted by the server; none when the map did not change, or only its layout. A PR that fogs
+    /// nothing gets a short brief from it (`short_brief`).
+    pub map_counts: Option<MapCounts>,
 }

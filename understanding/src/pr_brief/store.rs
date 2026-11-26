@@ -38,6 +38,10 @@ pub struct StoredBrief {
     /// when the head has no map, or in a brief stored before it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub map_problems: Vec<String>,
+    /// A short brief (#644): made by code from the Map diff of a PR that fogs nothing, with no writer call; its tray row says "map
+    /// changed". False in every brief the writer wrote, and in one stored before it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub short: bool,
 }
 
 /// One line per brief written, for tuning prompts, caps and models from real data.

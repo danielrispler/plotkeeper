@@ -1499,3 +1499,205 @@ fn opening_the_since_case_writes_the_story_first_and_reading_it_to_the_end_carri
     // A head with no story carries nothing.
     assert!(since_read(&store, &reading, 7, &h1).is_err());
 }
+
+/// A repository whose `main` holds a black-box part alpha, and a PR branch whose head `map` makes the map, with `files`: its folder,
+/// and the PR's source as the server gathers it (`gathered`), trusted.
+fn map_only_pr(
+    map: impl FnOnce(&mut serde_json::Value),
+    files: &[(&str, &str)],
+) -> (tempfile::TempDir, PrSource) {
+    use studio_test_support::{git, repo};
+    let (dir, path) = repo();
+    let at = dir.path();
+    let part = |id: &str| {
+        serde_json::json!({ "id": id, "name": id, "caption": "c", "purpose": "p", "holds": [], "tier": "black-box",
+                            "paths": [format!("{id}/")] })
+    };
+    let mut base = serde_json::json!({ "version": 2, "parts": [part("alpha")], "actors": [], "links": [],
+        "ignored": ["system-map.json"], "laws": [], "flows": [] });
+    put(at, "system-map.json", &base.to_string());
+    put(at, "alpha/a.rs", "1\n");
+    git(at, &["add", "-A"]);
+    git(at, &["commit", "-q", "-m", "base"]);
+    git(at, &["checkout", "-q", "-b", "pr"]);
+    map(&mut base);
+    put(at, "system-map.json", &base.to_string());
+    for (name, text) in files {
+        put(at, name, text);
+    }
+    git(at, &["add", "-A"]);
+    git(at, &["commit", "-q", "-m", "the PR"]);
+    let meta = PrMeta {
+        number: 7,
+        title: "Add beta".into(),
+        head: git(at, &["rev-parse", "HEAD"]),
+        ..PrMeta::default()
+    };
+    let source = commands::gathered(&path, meta, true).unwrap();
+    (dir, source)
+}
+
+#[test]
+fn a_pr_that_changes_the_map_but_fogs_nothing_stores_a_short_brief_with_no_writer_call() {
+    let (_repo, source) = map_only_pr(
+        |m| {
+            m["parts"].as_array_mut().unwrap().push(serde_json::json!(
+                { "id": "beta", "name": "Beta", "caption": "c", "purpose": "p", "holds": [], "tier": "black-box", "paths": ["beta/"] }
+            ));
+            m["links"] = serde_json::json!([{ "id": "alpha-beta", "from": "alpha", "to": "beta", "kind": "spawn", "reason": "Alpha asks beta." }]);
+        },
+        // A file no part owns: the map check fails at the head (#641).
+        &[("beta/b.rs", "1\n"), ("stray/s.rs", "1\n")],
+    );
+    let head = source.meta.head.clone();
+    let dir = tempfile::tempdir().unwrap();
+    let store = BriefStore::open(dir.path()).unwrap();
+    let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+    let with = Writing {
+        writer: &fake,
+        model: "opus",
+        store: &store,
+        reading: None,
+    };
+    assert_eq!(
+        on_lookup(
+            &with,
+            &seen,
+            7,
+            &head,
+            || Ok(source),
+            |l| eprintln!("LOG {l}")
+        ),
+        Did::Wrote
+    );
+    assert_eq!(fake.0.get(), 0, "no writer call, and no claim check");
+    let stored = store
+        .get(7, &head)
+        .expect("the short brief is stored at the head");
+    assert!(stored.short);
+    assert_eq!(stored.brief.title, "Add beta");
+    let steps: Vec<_> = stored
+        .brief
+        .steps()
+        .map(|s| (s.h.as_str(), s.b.as_str()))
+        .collect();
+    assert_eq!(
+        steps,
+        [("The map in this PR", "1 part added, 1 link added.")]
+    );
+    // It lights what the Map diff marks: the new part and the new line's ends. The PR fogs nothing, so reading it clears no fog.
+    assert_eq!(lit_parts(&stored.brief), [names(&["alpha", "beta"])]);
+    assert!(
+        stored.map_problems.iter().any(|p| p.contains("stray/s.rs")),
+        "the head's map check is stored with it: {:?}",
+        stored.map_problems
+    );
+    assert!(store.records().is_empty(), "no writer, so no record line");
+    // The tray says the map changed.
+    let briefs = PrBriefs::new(None);
+    let mut tray = [ready_pr(7, &head)];
+    briefs.annotate_with("/p", &store, None, &mut tray);
+    assert!(tray[0].brief.as_ref().unwrap().short);
+}
+
+#[test]
+fn a_pr_that_only_reformats_the_map_and_fogs_nothing_stores_no_brief() {
+    let (_repo, source) = map_only_pr(|_| {}, &[("alpha/a.rs", "2\n")]);
+    // The same map, laid out anew.
+    let pretty = serde_json::to_string_pretty(
+        &serde_json::from_str::<serde_json::Value>(&source.map_text).unwrap(),
+    )
+    .unwrap();
+    assert_ne!(pretty, source.map_text);
+    let (_repo, source) = map_only_pr(
+        |_| {},
+        &[("system-map.json", &pretty), ("alpha/a.rs", "2\n")],
+    );
+    let head = source.meta.head.clone();
+    let dir = tempfile::tempdir().unwrap();
+    let store = BriefStore::open(dir.path()).unwrap();
+    let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+    let with = Writing {
+        writer: &fake,
+        model: "opus",
+        store: &store,
+        reading: None,
+    };
+    assert_eq!(
+        on_lookup(&with, &seen, 7, &head, || Ok(source), |_| {}),
+        Did::Quiet
+    );
+    assert!(store.latest(7).is_none());
+}
+
+#[test]
+fn a_short_brief_read_in_full_is_carried_over_a_quiet_push_and_counts_the_new_heads_map() {
+    let beta = |m: &mut serde_json::Value| {
+        m["parts"].as_array_mut().unwrap().push(serde_json::json!(
+            { "id": "beta", "name": "Beta", "caption": "c", "purpose": "p", "holds": [], "tier": "black-box", "paths": ["beta/"] }
+        ));
+    };
+    let (repo, source) = map_only_pr(beta, &[("beta/b.rs", "1\n")]);
+    let state = tempfile::tempdir().unwrap();
+    let reading = GitReading {
+        project: repo.path().canonicalize().unwrap().display().to_string(),
+        file: state.path().join("map-state.json"),
+        reference: Some("main".into()),
+    };
+    let h1 = source.meta.head.clone();
+    let dir = tempfile::tempdir().unwrap();
+    let store = BriefStore::open(dir.path()).unwrap();
+    let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+    let with = Writing {
+        writer: &fake,
+        model: "opus",
+        store: &store,
+        reading: Some(&reading),
+    };
+    assert_eq!(
+        on_lookup(&with, &seen, 7, &h1, || Ok(source), |_| {}),
+        Did::Wrote
+    );
+    let lit = lit_parts(&store.get(7, &h1).unwrap().brief);
+    crate::fog::mark_read(&reading.file, &reading.project, 7, 0, &h1, lit, 1).unwrap();
+    // A quiet push adds a second black-box part.
+    let mut map: serde_json::Value = serde_json::from_str(&store_map(repo.path())).unwrap();
+    map["parts"].as_array_mut().unwrap().push(serde_json::json!(
+        { "id": "gamma", "name": "Gamma", "caption": "c", "purpose": "p", "holds": [], "tier": "black-box", "paths": ["gamma/"] }
+    ));
+    put(repo.path(), "system-map.json", &map.to_string());
+    put(repo.path(), "gamma/g.rs", "1\n");
+    studio_test_support::git(repo.path(), &["add", "-A"]);
+    studio_test_support::git(repo.path(), &["commit", "-q", "-m", "gamma"]);
+    let h2 = studio_test_support::git(repo.path(), &["rev-parse", "HEAD"]);
+    let unread = || -> Result<PrSource, String> { Err("the carry reads no source".into()) };
+    assert_eq!(
+        on_lookup(&with, &seen, 7, &h2, unread, |_| {}),
+        Did::Carried
+    );
+    let copy = store
+        .get(7, &h2)
+        .expect("the short brief is carried to the new head");
+    assert!(copy.short);
+    assert_eq!(
+        copy.brief.steps().map(|s| s.b.as_str()).collect::<Vec<_>>(),
+        ["2 parts added."],
+        "its sentence counts the new head's Map diff"
+    );
+    assert_eq!(
+        lit_parts(&copy.brief),
+        [names(&["beta", "gamma"])],
+        "and lights what it marks"
+    );
+    let user = crate::map::read_user(&reading.file, &reading.project);
+    assert!(
+        waiting_numbers(&store, &[ready_pr(7, &h2)], Some(&user)).is_empty(),
+        "the read carried over"
+    );
+    assert_eq!(fake.0.get(), 0);
+}
+
+/// The map in `repo`'s working tree.
+fn store_map(repo: &Path) -> String {
+    std::fs::read_to_string(repo.join("system-map.json")).unwrap()
+}

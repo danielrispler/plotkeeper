@@ -545,3 +545,25 @@ test("a flagged map text's copy for the agent names the item in system-map.json 
   assert.match(prompt, /Check it against the code, correct the map or say why it holds, and tell me what you changed\./);
   assert.match(prompt, /\nWhy it is not confirmed:\n- Purpose \(overreach\): It also writes the page\. See server\/src\/lib\.rs:41\.$/);
 });
+
+test("a short brief plays its one step, the map in this PR with its counts, then Ratify, and is read to its end on that step", async () => {
+  const { ratifyStep } = await import("../../dist/ratify.js");
+  const { stepLine } = await import("../../dist/explanations.js");
+  // The short brief as the server stores it (#644), its frozen sample.
+  const stored = JSON.parse(readFileSync("understanding/tests/fixtures/stored/pr-brief-v11/stored-brief-short.json", "utf8"));
+  const own = playlist(stored.brief, 0, false);
+  /** @type {import("../../dist/types.js").RatifyRow} */
+  const row = { pr: 644, kind: "part", id: "beta", text: "Beta", change: "added", status: "not-yet", detail: null };
+  const ratify = ratifyStep([row], [...new Set(own.flatMap((s) => s.on))], false, true);
+  const list = [...own, ratify];
+  assert.deepEqual(list.map((s) => [s.k, s.h]), [["Where", "The map in this PR"], ["Ratify", "Accept or overturn"]]);
+  assert.equal(list[0].b, "1 part added, 1 link added.");
+  assert.deepEqual(list[0].on, ["alpha", "beta"], "it lights the parts the Map diff marks");
+  assert.deepEqual(ratify.on, ["alpha", "beta"], "and Ratify keeps them lit");
+  assert.equal(stepLine(list[0]), "Where this change sits on your map.");
+  // Its story is the one step: seeing it reads the chapter, as for any brief with no check.
+  let read = 0;
+  const gate = chapterGate(storySteps(list), () => read++);
+  gate.sawLast();
+  assert.equal(read, 1);
+});

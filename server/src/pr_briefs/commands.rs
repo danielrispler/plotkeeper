@@ -8,7 +8,7 @@ use crate::App;
 use crate::prs::Ready;
 use serde::Serialize;
 use std::{path::Path, sync::Arc};
-use studio_understanding::pr_brief::{BriefStore, PrSource, fetch_meta, gather};
+use studio_understanding::pr_brief::{BriefStore, PrMeta, PrSource, fetch_meta, gather};
 
 /// The numbers of the ready PRs a brief is waiting for: the brief is stored and Daniel has not read all of it at the PR's current
 /// head. A brief read to its end stops counting for the project header's dot and the rail's row (its tray row stays, to read again), and a push
@@ -88,16 +88,8 @@ fn source_of(project: &str, number: u64) -> Result<PrSource, String> {
     let repo = Path::new(project);
     let meta = fetch_meta(repo, number)?;
     crate::pre_flight::note_closing(project, &meta);
-    let (reference, _) =
-        crate::map::default_ref(repo).ok_or("the repository has no default branch")?;
-    let base = crate::map::git(repo, &["merge-base", &reference, &meta.head])?;
-    let head = meta.head.clone();
-    let mut source = gather(repo, &base, &head, meta)?;
-    // Read from the head when the brief is written, never live in Ratify (#499, #641).
     let trusted = crate::prs::by_own_login(repo, number);
-    let check = crate::ratify::head_check(repo, &base, &head, trusted);
-    source.link_evidence = check.link_evidence;
-    source.map_problems = check.map_problems;
+    let mut source = gathered(project, meta, trusted)?;
     if let Ok(file) = crate::map::state_file() {
         source.tier_overrides = crate::map::read_user(&file, project).tiers;
     }
@@ -105,6 +97,24 @@ fn source_of(project: &str, number: u64) -> Result<PrSource, String> {
         .and_then(|s| s.latest(number))
         .map(|b| b.brief.decisions)
         .unwrap_or_default();
+    Ok(source)
+}
+
+/// What `git` gives of `meta`'s PR in `project`, from its merge base with the default branch to its head: the diff and map facts
+/// (`gather`), what the head says of its map (`ratify::head_check`, `trusted` when the PR is by Daniel's own login), and what its Map
+/// diff marks (`map_diff::counts`), which a PR that fogs nothing gets a short brief from (#644).
+pub(super) fn gathered(project: &str, meta: PrMeta, trusted: bool) -> Result<PrSource, String> {
+    let repo = Path::new(project);
+    let (reference, _) =
+        crate::map::default_ref(repo).ok_or("the repository has no default branch")?;
+    let base = crate::map::git(repo, &["merge-base", &reference, &meta.head])?;
+    let head = meta.head.clone();
+    let mut source = gather(repo, &base, &head, meta)?;
+    // Read from the head when the brief is written, never live in Ratify (#499, #641).
+    let check = crate::ratify::head_check(repo, &base, &head, trusted);
+    source.link_evidence = check.link_evidence;
+    source.map_problems = check.map_problems;
+    source.map_counts = crate::map_diff::counts(repo, &base, &head);
     Ok(source)
 }
 

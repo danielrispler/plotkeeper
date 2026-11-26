@@ -1195,3 +1195,39 @@ export const mapDiffRatifyLit = (): Fixture => mapDiff(351, ["server", "window"]
       if (style.opacity !== "1") log("snap:fail the pointed ghost is still dimmed: " + style.opacity);
       if (style.outlineStyle !== "dashed" || style.outlineOffset !== "5px") log("snap:fail the pointed ghost's outline: " + style.outlineStyle + " at " + style.outlineOffset);
       if (!style.boxShadow.includes("rgba(224, 192, 140")) log("snap:fail the pointed ghost has no warm ring: " + style.boxShadow);`, "on", removalRows);
+
+// The short brief (#644): #351's PR, had it fogged nothing at Daniel's tiers, gets a brief made by code: one step, "The map in this PR",
+// whose sentence counts its Map diff (as `map_diff::counts` counts #351's real maps) and which lights the parts the marks are on, then the
+// Ratify step. Its tray row says "map changed". The shot is the step, on the Map diff.
+const shortLit = ["core", "hook", "server", "shell", "terminal-daemon", "understanding", "window", "workbench"];
+const shortSentence = "2 parts removed, 7 links removed, 2 laws removed, and 2 changes with no mark on the map.";
+export const mapBriefShort = (): Fixture => {
+  const data = diffData(351);
+  const chapters: BriefChapter[] = [{ behaviour: "story", parts: shortLit, title: "The map in this PR", steps: [step("Where", "The map in this PR", shortSentence, shortLit)], flags: [] }];
+  const view = briefOf([], false, { title: "Retire the Tauri shell", chapters });
+  const short = { ...view, brief: { ...view.brief, model: "", short: true } };
+  const fixture = mapBrief(short, 0, `
+      const box = document.getElementById("map-brief");
+      const note = document.querySelector('#map-tray .tray-row[data-pr="334"] .tray-note')?.textContent;
+      if (note !== "#334 · map changed") log("snap:fail the tray row says " + JSON.stringify(note));
+      if (box.querySelector(".brief-title")?.textContent !== "The map in this PR") log("snap:fail the step's title: " + box.querySelector(".brief-title")?.textContent);
+      if (box.querySelector(".brief-body")?.textContent !== ${JSON.stringify(shortSentence)}) log("snap:fail the step's counts: " + box.querySelector(".brief-body")?.textContent);
+      if (box.querySelectorAll(".brief-dots i").length !== 2) log("snap:fail the short brief is its step and Ratify, saw " + box.querySelectorAll(".brief-dots i").length + " dots");
+      if (document.querySelectorAll(".plate.d-removed").length !== 2) log("snap:fail the Map diff's ghosts are not drawn");
+      if (!document.querySelector('.plate.d-removed.lit[data-id="shell"]')) log("snap:fail the step does not light the ghost its marks are on");
+      document.getElementById("brief-next").click();
+      await wait(200);
+      if (box.querySelector(".brief-title")?.textContent !== "Accept or overturn") log("snap:fail the second step is " + box.querySelector(".brief-title")?.textContent);
+      if (box.querySelectorAll(".ratify-row").length !== 2) log("snap:fail Ratify lists " + box.querySelectorAll(".ratify-row").length + " rows");
+      box.querySelector(".brief-back").click();
+      await wait(200);`, false, 300);
+  return {
+    ...fixture,
+    map_state: mapState({ source: data.today, user: { tiers: {}, positions: data.positions }, ready: [{ number: 334, title: "Retire the Tauri shell", head: "b".repeat(40), brief: { stale: false, writing: false, chapters: ["Retire the Tauri shell"], quiet: false, short: true } }] }),
+    pr_map_diff: { ...data.diff, pr: 334 },
+    pr_ratify: [
+      { pr: 334, kind: "part", id: "shell", text: "Shell", change: "removed", status: "not-yet", detail: null },
+      { pr: 334, kind: "law", id: "terminals-outlive-app", text: "Terminals outlive the app.", change: "removed", status: "not-yet", detail: null },
+    ],
+  };
+};

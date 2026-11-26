@@ -29,6 +29,9 @@ pub struct BriefInfo {
     /// The story's chapters' titles when it has more than one: one tray row each, so each chapter can be read to its end.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub since_chapters: Vec<String>,
+    /// The stored brief is a short one (#644), made by code from the Map diff: the row says "map changed".
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub short: bool,
 }
 
 /// What a lookup of a ready PR did.

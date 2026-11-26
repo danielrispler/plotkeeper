@@ -15,6 +15,7 @@ use std::{collections::BTreeMap, path::Path};
 
 use crate::map::{default_ref, git};
 use crate::ratify::{WALK, first_parents, map_at};
+use studio_understanding::pr_brief::MapCounts;
 
 /// What a PR did to one item on the map.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -50,15 +51,104 @@ pub struct MapDiff {
 /// cannot give the maps.
 pub fn of(repo: &Path, number: u64, open_head: Option<&str>) -> Option<MapDiff> {
     let (base, head) = compared(repo, number, open_head)?;
+    between(repo, number, base, head).map(|(diff, _)| diff)
+}
+
+/// The Map diff of PR `number` from `base` to `head`, with its counts.
+fn between(repo: &Path, number: u64, base: String, head: String) -> Option<(MapDiff, MapCounts)> {
     let (old, new) = (map_at(repo, &base), map_at(repo, &head));
     let (old, new) = (old.text()?, new.text()?);
-    if crate::ratify::map_items(Some(old), Some(new)).is_empty() {
+    let items = crate::ratify::map_items(Some(old), Some(new));
+    if items.is_empty() {
         return None;
     }
     let today = crate::map::read_map(repo).source?;
     let read = |text: &str| system_map::convert_value(text).ok();
     let (today, old, new) = (read(&today)?, read(old)?, read(new)?);
-    Some(merge(today, &old, &new, number, base, head))
+    let diff = merge(today, &old, &new, number, base, head);
+    let counts = count(&diff, &items, &old, &new);
+    Some((diff, counts))
+}
+
+/// What the Map diff from `base` to `head` marks, counted per Ratify map item for the short brief's sentence (#644): none when the PR
+/// changed nothing on the map, or only its layout.
+pub fn counts(repo: &Path, base: &str, head: &str) -> Option<MapCounts> {
+    between(repo, 0, base.to_string(), head.to_string()).map(|(_, counts)| counts)
+}
+
+/// Counts each of Ratify's map `items` under the mark `diff` gives it: an added or removed part, actor or law by its id's tag, an
+/// added or removed link by its line's, a changed part by `edited`. Any other (a held item, a changed link or law, a flow) is
+/// `unmarked`.
+fn count(diff: &MapDiff, items: &[crate::ratify::MapItem], old: &Value, new: &Value) -> MapCounts {
+    let mut counts = MapCounts::default();
+    let mut lit: Vec<String> = Vec::new();
+    for item in items {
+        let tag = match (item.kind.as_str(), item.change.as_str()) {
+            ("part", _) => diff.parts.get(&item.id).copied(),
+            ("actor", _) => diff.actors.get(&item.id).copied(),
+            ("law", _) => diff.laws.get(&item.id).copied(),
+            ("link", change @ ("added" | "removed")) => {
+                let side = if change == "added" { new } else { old };
+                by_id(side, "links")
+                    .get(item.id.as_str())
+                    .and_then(|link| ends(link))
+                    .and_then(|pair| diff.lines.iter().find(|l| l.ends == pair))
+                    .map(|line| line.change)
+            }
+            _ => None,
+        };
+        let slot = match (item.kind.as_str(), item.change.as_str(), tag) {
+            ("part", "added", Some(Tag::Added)) => &mut counts.parts_added,
+            ("part", "removed", Some(Tag::Removed)) => &mut counts.parts_removed,
+            ("part", "changed", Some(Tag::Edited)) => &mut counts.parts_edited,
+            ("actor", "added", Some(Tag::Added)) => &mut counts.actors_added,
+            ("actor", "removed", Some(Tag::Removed)) => &mut counts.actors_removed,
+            ("link", "added", Some(Tag::Added)) => &mut counts.links_added,
+            ("link", "removed", Some(Tag::Removed)) => &mut counts.links_removed,
+            ("law", "added", Some(Tag::Added)) => &mut counts.laws_added,
+            ("law", "removed", Some(Tag::Removed)) => &mut counts.laws_removed,
+            _ => {
+                counts.unmarked += 1;
+                continue;
+            }
+        };
+        *slot += 1;
+        let side = if item.change == "removed" { old } else { new };
+        lit.extend(on_map(side, &item.kind, &item.id));
+    }
+    lit.sort();
+    lit.dedup();
+    counts.lit = lit;
+    counts
+}
+
+/// The parts and actors a marked item of `kind` and `id` sits on in `map`: a part or actor itself, a link's ends, a law's part, or
+/// its link's ends.
+fn on_map(map: &Value, kind: &str, id: &str) -> Vec<String> {
+    let link_ends = |id: &str| -> Vec<String> {
+        by_id(map, "links")
+            .get(id)
+            .and_then(|link| ends(link))
+            .map(Vec::from)
+            .unwrap_or_default()
+    };
+    match kind {
+        "part" | "actor" => vec![id.to_string()],
+        "link" => link_ends(id),
+        "law" => by_id(map, "laws")
+            .get(id)
+            .and_then(|law| law["on"].as_str())
+            .map(|on| {
+                let ends = link_ends(on);
+                if ends.is_empty() {
+                    vec![on.to_string()]
+                } else {
+                    ends
+                }
+            })
+            .unwrap_or_default(),
+        _ => vec![],
+    }
 }
 
 /// The two commits `ratify::pr_changes` compares for PR `number`: the merge base and the head while it is open, else its squash
@@ -393,6 +483,46 @@ mod tests {
         let (_dir, main) = landed(&before, &after, 7);
         let diff = of(Path::new(&main), 7, None).expect("the link changed");
         assert!(diff.lines.is_empty(), "{:?}", diff.lines);
+    }
+
+    #[test]
+    fn an_open_prs_counts_say_what_its_map_diff_marks_per_kind_and_what_it_marks_nothing_for() {
+        let (dir, main) = repo();
+        let root = dir.path();
+        let before = small(
+            "Old.",
+            r#"[{"id":"a-b","from":"a","to":"b","reason":"A asks b."}]"#,
+            "[]",
+        );
+        let base = commit(root, &before, "Map (#1)");
+        git(root, &["checkout", "-q", "-b", "work"]);
+        let mut after: Value = serde_json::from_str(&small(
+            "New.",
+            r#"[{"id":"a-b","from":"a","to":"b","reason":"A tells b."},{"id":"a-d","from":"a","to":"d"}]"#,
+            r#"[{"id":"l1","on":"a","backing":"trust","text":"First."}]"#,
+        ))
+        .unwrap();
+        let parts = after["parts"].as_array_mut().unwrap();
+        // Part c goes, d comes, and b's own purpose changes; a's held item and a-b's reason change too, which draw no mark.
+        parts.retain(|p| p["id"] != "c");
+        parts[1]["purpose"] = "B, now plainer.".into();
+        parts.push(serde_json::json!(
+            {"id":"d","name":"D","caption":"c","purpose":"p","tier":"core","paths":["d/"],"holds":[]}
+        ));
+        let head = commit(root, &after.to_string(), "work");
+        let found = counts(Path::new(&main), &base, &head).expect("the PR changed the map");
+        assert_eq!(
+            found.sentence(),
+            "1 part added, 1 removed, 1 edited, 1 link added, 1 law added, and 2 changes with no mark on the map."
+        );
+        // What the short brief's step lights: each marked part, a marked line's ends and a marked law's part.
+        assert_eq!(found.lit, ["a", "b", "c", "d"]);
+        // A reformatted map counts nothing.
+        let pretty =
+            serde_json::to_string_pretty(&serde_json::from_str::<Value>(&before).unwrap()).unwrap();
+        git(root, &["checkout", "-q", "main"]);
+        let reformatted = commit(root, &pretty, "Pretty (#2)");
+        assert_eq!(counts(Path::new(&main), &base, &reformatted), None);
     }
 
     #[test]
