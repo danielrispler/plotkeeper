@@ -877,3 +877,375 @@ fn commit_mode_gives_the_edges_of_the_working_tree() {
         String::from_utf8_lossy(&tree.stdout)
     );
 }
+
+// Declared layouts (spec #589, "Declared layouts").
+
+/// A `pyproject.toml` text holding `body` under a `[project]` table.
+fn pyproject(body: &str) -> String {
+    format!("[project]\nname = \"m\"\n{body}")
+}
+
+/// The notes `check` gives a repository of `files`.
+fn notes(files: &[(&str, &str)]) -> Vec<String> {
+    let (_dir, root) = repo(&each_file_a_part(files), files);
+    report(&root).notes
+}
+
+#[test]
+fn a_declared_where_replaces_the_default_src_and_where_lib_and_src_gives_both() {
+    let layout = |where_: &str| {
+        let config = pyproject(&format!(
+            "[tool.setuptools.packages.find]\nwhere = {where_}\n"
+        ));
+        py_pairs(&[
+            ("pyproject.toml", &config),
+            ("lib/a/__init__.py", "x = 1\n"),
+            ("src/b/__init__.py", "x = 1\n"),
+            ("app.py", "import a\nimport b\n"),
+        ])
+    };
+    assert_eq!(layout("[\"lib\"]"), ["app.py>lib/a/__init__.py"]);
+    assert_eq!(
+        layout("[\"lib\", \"src\"]"),
+        ["app.py>lib/a/__init__.py", "app.py>src/b/__init__.py"]
+    );
+    // The project folder, written as a dot, is no second root, and `src/` is not one.
+    assert_eq!(layout("[\".\"]"), Vec::<String>::new());
+}
+
+#[test]
+fn where_dot_is_the_project_folder_deduplicated() {
+    let config = pyproject("[tool.setuptools.packages.find]\nwhere = [\".\", \"./\"]\n");
+    let found = py_pairs(&[
+        ("p/pyproject.toml", &config),
+        ("p/app.py", "import a\n"),
+        ("p/a.py", "x = 1\n"),
+    ]);
+    assert_eq!(found, ["p/app.py>p/a.py"]);
+}
+
+#[test]
+fn a_declared_folder_is_read_from_its_project_folder() {
+    let config = pyproject("[tool.setuptools.packages.find]\nwhere = [\"lib\"]\n");
+    let found = py_pairs(&[
+        ("p/pyproject.toml", &config),
+        ("p/lib/a.py", "x = 1\n"),
+        ("p/app.py", "import a\n"),
+    ]);
+    assert_eq!(found, ["p/app.py>p/lib/a.py"]);
+}
+
+#[test]
+fn package_dir_with_an_empty_name_gives_a_root_and_a_named_one_registers_the_name_at_its_folder() {
+    let config = pyproject("[tool.setuptools]\npackage-dir = {\"\" = \"lib\"}\n");
+    let found = py_pairs(&[
+        ("pyproject.toml", &config),
+        ("lib/a/__init__.py", "x = 1\n"),
+        ("src/b/__init__.py", "x = 1\n"),
+        ("app.py", "import a\nimport b\n"),
+    ]);
+    assert_eq!(found, ["app.py>lib/a/__init__.py"]);
+
+    let config = pyproject("[tool.setuptools]\npackage-dir = {mypkg = \"lib\"}\n");
+    let found = py_pairs(&[
+        ("pyproject.toml", &config),
+        ("lib/__init__.py", "x = 1\n"),
+        ("lib/sub.py", "x = 1\n"),
+        ("app.py", "import mypkg.sub\nfrom mypkg import sub as s\n"),
+    ]);
+    assert_eq!(found, ["app.py>lib/__init__.py", "app.py>lib/sub.py"]);
+}
+
+#[test]
+fn a_renamed_package_without_an_init_file_is_a_bare_folder() {
+    let config = pyproject("[tool.setuptools]\npackage-dir = {mypkg = \"lib\"}\n");
+    let found = py_pairs(&[
+        ("pyproject.toml", &config),
+        ("lib/sub.py", "x = 1\n"),
+        ("app.py", "import mypkg.sub\n"),
+    ]);
+    assert_eq!(found, ["app.py>lib/sub.py"]);
+}
+
+#[test]
+fn a_renamed_package_in_one_project_and_a_folder_of_that_name_in_another_are_a_first_segment_two_roots_provide()
+ {
+    let config = pyproject("[tool.setuptools]\npackage-dir = {mypkg = \"lib\"}\n");
+    let found = py_pairs(&[
+        ("pyproject.toml", &config),
+        ("lib/__init__.py", "x = 1\n"),
+        ("mypkg/__init__.py", "x = 1\n"),
+        ("app.py", "import mypkg\n"),
+    ]);
+    assert_eq!(found, Vec::<String>::new());
+}
+
+#[test]
+fn poetry_from_and_hatch_sources_and_packages_give_a_root() {
+    let poetry = pyproject(
+        "[tool.poetry]\npackages = [{ include = \"a\", from = \"lib\" }, { include = \"c\" }]\n",
+    );
+    let hatch_sources = pyproject("[tool.hatch.build]\nsources = [\"lib\"]\n");
+    let hatch_target = pyproject("[tool.hatch.build.targets.wheel]\nsources = [\"lib\"]\n");
+    let hatch_packages = pyproject("[tool.hatch.build.targets.wheel]\npackages = [\"lib/a\"]\n");
+    for (name, config) in [
+        ("poetry", poetry),
+        ("hatch sources", hatch_sources),
+        ("hatch target sources", hatch_target),
+        ("hatch packages", hatch_packages),
+    ] {
+        let found = py_pairs(&[
+            ("pyproject.toml", &config),
+            ("lib/a/__init__.py", "x = 1\n"),
+            ("src/b/__init__.py", "x = 1\n"),
+            ("app.py", "import a\nimport b\n"),
+        ]);
+        assert_eq!(found, ["app.py>lib/a/__init__.py"], "{name}");
+    }
+}
+
+/// The pairs of a repository with `config` as its `setup.cfg`, a package in `lib/` and one in `src/`, and `app.py`
+/// importing both.
+fn cfg_pairs(config: &str) -> Vec<String> {
+    py_pairs(&[
+        ("setup.cfg", config),
+        ("lib/a/__init__.py", "x = 1\n"),
+        ("src/b/__init__.py", "x = 1\n"),
+        ("app.py", "import a\nimport b\n"),
+    ])
+}
+
+#[test]
+fn a_setup_cfg_package_dir_and_find_where_give_roots() {
+    let lib = ["app.py>lib/a/__init__.py"];
+    assert_eq!(
+        cfg_pairs("[options]\npackage_dir =\n    =lib\n"),
+        lib,
+        "continuation line"
+    );
+    assert_eq!(
+        cfg_pairs("[options]\npackage_dir = =lib\n"),
+        lib,
+        "same line"
+    );
+    assert_eq!(
+        cfg_pairs("[options.packages.find]\nwhere = lib\n"),
+        lib,
+        "where"
+    );
+    assert_eq!(
+        cfg_pairs("[options]\nPackage_Dir:\n\t= lib\n"),
+        lib,
+        "mixed case, a colon and a tab"
+    );
+    assert_eq!(
+        cfg_pairs("[options.packages.find]\nWHERE : lib\n"),
+        lib,
+        "upper case and a colon"
+    );
+}
+
+#[test]
+fn a_setup_cfg_reads_comments_and_blank_lines_as_configparser_does() {
+    let config = "# a comment\n[metadata]\nname = m\n\n[options]\n; another\npackage_dir =\n    # indented comment\n\n    = lib\n    ; more\n";
+    assert_eq!(cfg_pairs(config), ["app.py>lib/a/__init__.py"]);
+}
+
+#[test]
+fn a_setup_cfg_package_dir_line_with_a_name_registers_it_at_its_folder() {
+    let config = "[options]\npackage_dir =\n    mypkg = lib\n";
+    let found = py_pairs(&[
+        ("setup.cfg", config),
+        ("lib/__init__.py", "x = 1\n"),
+        ("app.py", "import mypkg\n"),
+    ]);
+    assert_eq!(found, ["app.py>lib/__init__.py"]);
+    let config = "[options]\npackage_dir =\n    =src\n    mypkg = lib\n";
+    let found = py_pairs(&[
+        ("setup.cfg", config),
+        ("lib/__init__.py", "x = 1\n"),
+        ("src/b/__init__.py", "x = 1\n"),
+        ("app.py", "import mypkg\nimport b\n"),
+    ]);
+    assert_eq!(
+        found,
+        ["app.py>lib/__init__.py", "app.py>src/b/__init__.py"]
+    );
+}
+
+#[test]
+fn a_setup_cfg_key_in_another_section_is_not_a_layout() {
+    let config = "[tool:other]\npackage_dir = lib\nwhere = lib\n[options]\nname = m\n";
+    assert_eq!(cfg_pairs(config), ["app.py>src/b/__init__.py"]);
+}
+
+#[test]
+fn a_literal_setup_py_package_dir_gives_a_root() {
+    let lib = ["app.py>lib/a/__init__.py"];
+    for text in [
+        "from setuptools import setup\nsetup(name='m', package_dir={'': 'lib'})\n",
+        "setup(\n    package_dir = {\n        \"\": \"lib\",\n    },\n)\n",
+    ] {
+        let found = py_pairs(&[
+            ("setup.py", text),
+            ("lib/a/__init__.py", "x = 1\n"),
+            ("src/b/__init__.py", "x = 1\n"),
+            ("app.py", "import a\nimport b\n"),
+        ]);
+        assert_eq!(found, lib, "{text}");
+    }
+}
+
+#[test]
+fn a_layout_form_that_is_not_read_leaves_the_default_roots_and_gives_the_note() {
+    let cases: [(&str, &str, &str); 5] = [
+        (
+            "p/pyproject.toml",
+            "[tool.hatch.build.targets.wheel]\nsources = { \"lib\" = \"\" }\n",
+            "tool.hatch.build.targets.wheel.sources",
+        ),
+        (
+            "p/pyproject.toml",
+            "[tool.setuptools.packages.find]\nwhere = \"lib\"\n",
+            "tool.setuptools.packages.find.where",
+        ),
+        (
+            "p/pyproject.toml",
+            "[tool.setuptools]\npackage-dir = \"lib\"\n",
+            "tool.setuptools.package-dir",
+        ),
+        (
+            "p/setup.py",
+            "setup(package_dir=PACKAGE_DIR)\n",
+            "package_dir",
+        ),
+        (
+            "p/setup.py",
+            "setup(package_dir={'': 'lib', 'x': 'y'})\n",
+            "package_dir",
+        ),
+    ];
+    for (file, body, key) in cases {
+        let text = if file.ends_with(".toml") {
+            pyproject(body)
+        } else {
+            body.to_string()
+        };
+        let files = [
+            (file, text.as_str()),
+            ("p/lib/a/__init__.py", "x = 1\n"),
+            ("p/src/b/__init__.py", "x = 1\n"),
+            ("p/app.py", "import a\nimport b\n"),
+        ];
+        // The default roots stay: `src/` is read, `lib/` is not.
+        assert_eq!(py_pairs(&files), ["p/app.py>p/src/b/__init__.py"], "{key}");
+        assert_eq!(
+            notes(&files),
+            [format!(
+                "python-imports did not read {key} in {file}; failing links into p may be false"
+            )]
+        );
+    }
+}
+
+#[test]
+fn a_note_goes_to_standard_error_and_leaves_the_exit_code_and_standard_output_as_they_were() {
+    let config = pyproject("[tool.setuptools.packages.find]\nwhere = \"lib\"\n");
+    let files = [("pyproject.toml", config.as_str()), ("app.py", "x = 1\n")];
+    let (_dir, root) = repo(&each_file_a_part(&files), &files);
+    let out = run(&root, "check", &[]);
+    assert!(out.status.success());
+    let (stdout, stderr) = (
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
+    assert!(stdout.starts_with("ok: "), "{stdout}");
+    assert!(!stdout.contains("note:"), "{stdout}");
+    assert_eq!(
+        stderr,
+        "note: python-imports did not read tool.setuptools.packages.find.where in pyproject.toml; failing links into . may be false\n"
+    );
+    let json = run(&root, "check", &["--json"]);
+    let value: Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(
+        value["notes"],
+        json!([
+            "python-imports did not read tool.setuptools.packages.find.where in pyproject.toml; failing links into . may be false"
+        ])
+    );
+}
+
+#[test]
+fn a_repository_whose_layouts_are_all_read_gives_no_note() {
+    let config = pyproject("[tool.setuptools.packages.find]\nwhere = [\"lib\"]\n");
+    let files = [
+        ("pyproject.toml", config.as_str()),
+        ("setup.cfg", "[options]\npackage_dir =\n    =lib\n"),
+        (
+            "setup.py",
+            "# package_dir is read from setup.cfg\nsetup(my_package_dir=1)\n",
+        ),
+        ("lib/a.py", "x = 1\n"),
+    ];
+    assert_eq!(notes(&files), Vec::<String>::new());
+}
+
+#[test]
+fn a_setup_cfg_with_a_line_before_its_first_section_is_a_problem_naming_the_file() {
+    for text in [
+        "name = m\n[options]\n",
+        "# a comment\n\n  \nstray\n[metadata]\n",
+    ] {
+        let files = [("p/setup.cfg", text), ("p/a.py", "x = 1\n")];
+        let (_dir, root) = repo(&each_file_a_part(&files), &files);
+        let problems = problems(&root);
+        assert!(
+            has(&problems, &["p/setup.cfg", "section header"]),
+            "{problems:?}"
+        );
+    }
+    // A comment or blank lines before the first section are fine.
+    let files = [("setup.cfg", "# a comment\n\n; another\n[options]\n")];
+    let (_dir, root) = repo(&each_file_a_part(&files), &files);
+    assert_eq!(problems(&root), Vec::<String>::new());
+}
+
+#[test]
+fn a_duplicate_key_in_a_section_the_extractor_does_not_read_is_ignored_and_one_in_a_read_section_gives_the_note()
+ {
+    let files = [
+        (
+            "setup.cfg",
+            "[flake8]\nignore = E1\nignore = E2\n[options]\nname = m\n",
+        ),
+        ("a.py", "x = 1\n"),
+    ];
+    let (_dir, root) = repo(&each_file_a_part(&files), &files);
+    let found = report(&root);
+    assert_eq!(found.problems, Vec::<String>::new());
+    assert_eq!(found.notes, Vec::<String>::new());
+
+    for section in ["options", "options.packages.find"] {
+        let config = format!("[{section}]\nwhere = lib\nWhere = src\n");
+        let files = [("setup.cfg", config.as_str()), ("a.py", "x = 1\n")];
+        let (_dir, root) = repo(&each_file_a_part(&files), &files);
+        let found = report(&root);
+        assert_eq!(found.problems, Vec::<String>::new(), "{section}");
+        assert_eq!(
+            found.notes,
+            [format!(
+                "python-imports did not read [{section}] in setup.cfg; failing links into . may be false"
+            )]
+        );
+    }
+}
+
+#[test]
+fn a_config_under_an_excluded_folder_gives_no_note() {
+    let config = pyproject("[tool.setuptools.packages.find]\nwhere = \"lib\"\n");
+    let files = [
+        ("tests/d/pyproject.toml", config.as_str()),
+        ("a.py", "x = 1\n"),
+    ];
+    assert_eq!(notes(&files), Vec::<String>::new());
+}

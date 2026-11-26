@@ -206,6 +206,8 @@ pub(crate) struct Output {
     pub(crate) problems: Vec<String>,
     pub(crate) pairs: Vec<Pair>,
     pub(crate) unsure: Vec<Unsure>,
+    /// What it did not read and says so, one line each: `check` prints them as notes and never fails over them.
+    pub(crate) notes: Vec<String>,
     /// Each file it puts in a group (its Go package's folder, say), with that group, whether or not the file makes or
     /// ends a pair: the imports report names a group's slice by its part when the group's files sit in more than one.
     pub(crate) members: BTreeSet<(String, String)>,
@@ -218,9 +220,10 @@ pub(crate) struct Output {
 /// groups, none counting as lowest.
 /// An Unsure finding with no candidates is a problem, one in an untracked, ignored or skipped file is dropped, and
 /// findings of one file, name and reason are kept once, sorted, with the union of their candidates. A name the registry
-/// lacks is a problem. A group's member that is untracked or skipped is dropped.
+/// lacks is a problem. Every extractor's notes are kept, in the order of `names`. A group's member that is untracked or skipped is dropped.
 pub(crate) fn run(registry: &[&dyn Extractor], names: &[String], repo: &Repo) -> Output {
     let mut problems = Vec::new();
+    let mut notes = Vec::new();
     // Each Unsure finding's file, name and reason, with the candidates of every finding of them.
     let mut unsure: BTreeMap<(String, String, String), BTreeSet<String>> = BTreeMap::new();
     // Each pair by its ends, merged from its findings.
@@ -240,6 +243,7 @@ pub(crate) fn run(registry: &[&dyn Extractor], names: &[String], repo: &Repo) ->
         };
         let found = extractor.extract(repo);
         problems.extend(found.problems);
+        notes.extend(found.notes);
         // Whether each file it reads is skipped, asked once per file, since `skips` may read the file.
         let mut skipped: HashMap<String, bool> = HashMap::new();
         let mut skips = |file: &str| {
@@ -295,6 +299,7 @@ pub(crate) fn run(registry: &[&dyn Extractor], names: &[String], repo: &Repo) ->
     }
     Output {
         problems,
+        notes,
         pairs: pairs.into_values().collect(),
         unsure: unsure
             .into_iter()
