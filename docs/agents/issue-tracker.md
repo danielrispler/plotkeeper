@@ -2,7 +2,7 @@
 
 Issues and specs for `danielrispler/plotkeeper` live as GitHub issues. Use the `gh` CLI for all operations. `gh` infers the repo from `git remote -v` when run inside a clone.
 
-This file covers lookups, claims and Wayfinder startup. To create, edit or resolve tickets, read `docs/agents/ticket-authoring.md`; it covers `wayfinder-startup --publish`, which creates a spec's tickets from a folder.
+This file covers lookups, claims, Wayfinder startup and the routing of tickets to workers. To create, edit or resolve tickets, read `docs/agents/ticket-authoring.md`; it covers `wayfinder-startup --publish`, which creates a spec's tickets from a folder.
 
 ## Read and list
 
@@ -49,9 +49,55 @@ Used by `/wayfinder`. The **map** is one issue. Its **child** issues are the tic
 - It prints the worktree path.
 - After the PR merges, `--done <n>` run from the main checkout removes that worktree and branch; `--help` lists what it refuses.
 
-Daniel picks how parallel tickets run: separate sessions he starts (one `--claim <n>` command and one prompt per terminal), or `/implement-spec` over a spec's tickets. Every ticket runs in auto mode, whatever its Touches `Session:` line says, and `/implement-spec` takes every ticket of the spec. When auto mode blocks a command the work needs (a nested `claude -p`, a sandbox run, a push), the agent stops at that command and guides Daniel: what the command is, why the work needs it, and how to run it (`AGENTS.md`, "Blocked commands go to Daniel"). Once he has allowed or run it, the agent carries on in auto mode. An implementer subagent that hits a block reports the command and stops; the orchestrator passes it to Daniel and resumes the implementer after. On an integration branch, implementers do not run `freeze`; it runs once after the last merge. Merge `origin/main` into the integration branch at the start of each pass, so it carries `main`'s fixes. Name it `issue-<spec>-<slug>`. Its PR stays a draft while tickets merge, and CI skips drafts, so each implementer's and merger's own `npm run check` is the only check until the PR is marked ready. Never spawn background implementers unasked. Each implementer builds in its own worktree's `target/` (`AGENTS.md`, "Checks"). Spawn a ticket's implementer once its blockers are merged into the integration branch, as the branch's `git log` shows (in #102's run, #126 started before #125 landed). Before spawning a ticket's implementer, refresh its Reading and Touches against `origin/main` (`ticket-authoring.md`, Ticket context): in #53's run the tickets cited `ui/places.ts` after #41 renamed it. Run integration merges one at a time: four parallel mergers had pushes rejected up to three times, each costing a full re-check. Put this sentence in every implementer and fix brief: "Run each new test red, an assertion failure, not an import failure, before writing its fix." When a criterion of a ticket stays unmet, move it to a follow-up ticket that says how often the case happens in the real event log (`domain.md`) before the PR closes the ticket (#111's worktree edits, 55% of Edit/Write calls, became #142). Run a correctness pass on every PR that changes Rust or TypeScript (docs-only PRs skip it); in a spec's final review it covers the whole branch beside the standards and spec axes: `/code-review high`, or a reviewer told to trace state, ordering and concurrency across components. Its brief asks the reviewer to run the tests it reasons about; to check stored data both ways, the new build reading what the previous build wrote and the previous build reading what the new build writes (#273's `"status":"running"`, #253's `Tap::NotNow`); to follow the work queued behind a job that crashes or is skipped (#274's dropped queue); and to review again the commits made to fix review findings (#274's queue bug came from one). Reviewers that read code only let through 21, 10 and 5 defects on #253, #273 and #274. Check each finding against the code before fixing it (in #102's run, outside reviews found cross-component bugs both axes passed, PR #140).
+Daniel picks how parallel tickets run: separate sessions he starts (one `--claim <n>` command and one prompt per terminal), or `/implement-spec` over a spec's tickets. Every ticket runs in auto mode, whatever its Touches `Session:` line says, and `/implement-spec` takes every ticket of the spec. When auto mode blocks a command the work needs (a nested `claude -p`, a sandbox run, a push), the agent stops at that command and guides Daniel: what the command is, why the work needs it, and how to run it (`AGENTS.md`, "Blocked commands go to Daniel"). Once he has allowed or run it, the agent carries on in auto mode. An implementer subagent that hits a block reports the command and stops; the orchestrator passes it to Daniel and resumes the implementer after. On an integration branch, implementers do not run `freeze`; it runs once after the last merge. Merge `origin/main` into the integration branch at the start of each pass, so it carries `main`'s fixes. Name it `issue-<spec>-<slug>`. Its PR stays a draft while tickets merge, and CI skips drafts, so each implementer's and merger's own `npm run check` is the only check until the PR is marked ready. Never spawn background implementers unasked. Each implementer builds in its own worktree's `target/` (`AGENTS.md`, "Checks"). Spawn a ticket's implementer once its blockers are merged into the integration branch, as the branch's `git log` shows (in #102's run, #126 started before #125 landed). Before spawning a ticket's implementer, refresh its Reading and Touches against `origin/main` (`ticket-authoring.md`, Ticket context): in #53's run the tickets cited `ui/places.ts` after #41 renamed it. Then re-check its route and spawn its worker by **Routing** below. Run integration merges one at a time: four parallel mergers had pushes rejected up to three times, each costing a full re-check. Put this sentence in every implementer and fix brief: "Run each new test red, an assertion failure, not an import failure, before writing its fix." When a criterion of a ticket stays unmet, move it to a follow-up ticket that says how often the case happens in the real event log (`domain.md`) before the PR closes the ticket (#111's worktree edits, 55% of Edit/Write calls, became #142). Run a correctness pass on every PR that changes Rust or TypeScript (docs-only PRs skip it); in a spec's final review it covers the whole branch beside the standards and spec axes: `/code-review high`, or a reviewer told to trace state, ordering and concurrency across components. Its brief asks the reviewer to run the tests it reasons about; to check stored data both ways, the new build reading what the previous build wrote and the previous build reading what the new build writes (#273's `"status":"running"`, #253's `Tap::NotNow`); to follow the work queued behind a job that crashes or is skipped (#274's dropped queue); and to review again the commits made to fix review findings (#274's queue bug came from one). Reviewers that read code only let through 21, 10 and 5 defects on #253, #273 and #274. Check each finding against the code before fixing it (in #102's run, outside reviews found cross-component bugs both axes passed, PR #140).
 
 GitHub stays authoritative.
+
+## Routing
+
+`/implement-spec` gives each ticket a worker by its route. Where the installed skill and this section differ, follow this section.
+
+**Terms.**
+
+- **Route**: a ticket's tier, its worker's effort and a one-line reason, on the **Route:** line of its `## Touches` (`ticket-authoring.md`, Ticket context): `- **Route:** medium · effort high — <reason>`.
+- **Tier**: `strong`, `medium` or `cheap`, named for the ticket's difficulty, never for a model.
+- **Candidate**: a CLI and model on a tier's or role's list in `scripts/agents/routing.json`, the single source for every list. Read the lists there.
+- **Worker**: whoever implements a ticket.
+- **Escalation**: moving a ticket to the next tier up.
+- **Critic**: the fresh-context reviewer of a draft spec, picked from the `critic` list.
+- **Veto summary**: the at most eight lines Daniel clears before `/to-tickets`.
+
+**The five cheap rules.** A ticket is `cheap` only when all five hold:
+
+1. The spec or ticket settles every choice.
+2. Its acceptance criteria are checkable by existing tests, or by new tests whose shape the ticket states.
+3. It touches no persistence, stored types, queues, concurrency or UI.
+4. It changes no laws or parts of the system map.
+5. It edits about three source files at most. An expand–contract migration batch meets this rule like any other ticket.
+
+A well-specified ticket outside the risk areas of rule 3 that misses another rule is `medium`. A ticket in any risk area, or with any design left open, is `strong`. Effort is `medium` or `high`, never `low`, so every worker reads `AGENTS.md`'s rules.
+
+**At spawn time.** After refreshing Reading and Touches (**Claim** above), re-check the route by the five rules. When the ticket grew, raise its tier and say why in the run's report to Daniel; only Daniel lowers a tier. Read a route that is missing or malformed as `strong · effort high`.
+
+**Start of a run.** Before the first ticket, run `printenv CLAUDE_CODE_EFFORT_LEVEL CLAUDE_CODE_SUBAGENT_MODEL_FORCE`. When it prints anything, stop and ask Daniel to unset it: the first beats every per-call effort, the second every per-call model.
+
+**Spawning.** Every `strong` or `medium` implementer is a fresh subagent: an Agent call with no `subagent_type: "fork"`, since a fork ignores a per-call model and effort. Pass `model` from the tier's first candidate in `routing.json` and `effort` from the route on every implementer call, retries and escalations included. A `cheap` route runs `node scripts/agents/delegate.mjs run --ticket <n> --integration <branch> --effort <effort>` as a background task. On `escalate medium (<reason>)` the ticket runs as `medium` at the same effort; on `stop: <what>` tell Daniel and don't merge the ticket. A cheap run that could not start (OpenCode missing or logged out, the free models withdrawn) also runs as `medium`; tell Daniel why.
+
+**Escalation.** On a red check, resume the same implementer once with the check's failing tail. A second red check, or an implementer that ends with an error, escalates the ticket one tier up at the same effort: remove its worktree and branch, and spawn the next tier's implementer in a fresh worktree from the integration branch's tip. A `strong` ticket has no tier above it: report it to Daniel and move its unmet criteria to a follow-up (**Claim** above). The implementer that fixes the final review's findings runs on `strong`, as before.
+
+**Route outcome.** Each routed ticket's resolution comment carries one line of its own, starting exactly `Route outcome:`, with no bullet or bold. It lists each attempt's tier·effort and candidate, then its result (`pass`, `red`, `silent`, `error`, `conflict` or `stop`), joined by `→`, and after `|` one time per worker run:
+
+```
+Route outcome: cheap·medium opencode/deepseek-v4.1-flash-free → silent → opencode/beam-free → red,red → medium·medium claude/sonnet → pass | 10m; 14m, 6m; 9m
+```
+
+List every such line, with its issue number:
+
+```
+gh api --paginate 'repos/danielrispler/plotkeeper/issues/comments?per_page=100' --jq '.[] | (.issue_url | split("/") | last) as $n | .body | split("\n")[] | select(startswith("Route outcome:")) | "#\($n) \(.)"'
+```
+
+**Models.** An unfamiliar model joins `cheap`. Daniel may place a model he knows is stronger, such as Codex, straight into `medium`. Only Daniel moves a model between tiers.
 
 ## Merge procedure
 

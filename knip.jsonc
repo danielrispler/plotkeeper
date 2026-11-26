@@ -2,7 +2,7 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   // Unused exports and files (spec #548, Group 3), in `npm run check`. The page's entry is `ui/main.ts`; the node tests
   // reach `ui/` through the `dist/` that `tsc` builds from it.
-  "entry": ["ui/main.ts", "ui/tests/*.test.mjs", "scripts/snap/*.mjs", "scripts/review/*.mjs", "scripts/npm/*.mjs"],
+  "entry": ["ui/main.ts", "ui/tests/*.test.mjs", "scripts/snap/*.mjs", "scripts/review/*.mjs", "scripts/npm/*.mjs", "scripts/agents/*.mjs"],
   "project": ["ui/**/*.{ts,mjs}", "scripts/**/*.{ts,mjs}"],
   // `archive/` is retired code, never built (#332, #415).
   "ignore": ["archive/**"],
@@ -11,6 +11,6 @@
     // write and `tsc -p scripts/wire` checks (#246), which are not there when knip reads the tree.
     "ui/types.ts": ["types"]
   },
-  // Commands on Daniel's machine, not npm packages: the installed `plotkeeper`, agy's CLI, and macOS's `sips`.
-  "ignoreBinaries": ["plotkeeper", "agy", "sips"]
+  // Commands on Daniel's machine, not npm packages: the installed `plotkeeper`, agy's and OpenCode's CLIs, and macOS's `sips`.
+  "ignoreBinaries": ["plotkeeper", "agy", "opencode", "sips"]
 }
