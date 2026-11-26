@@ -121,8 +121,8 @@ pub fn imports(root: &Path) -> Result<Imports, Vec<String>> {
     })
 }
 
-/// The pairs the report counts, each with its groups: a crate root's `mod` lines declare the module tree, so their
-/// pairs are left out.
+/// The pairs the report counts, each with its groups: a crate root's `mod` lines declare the module tree and a Dart
+/// library's `part` lines its own files, so their pairs are left out.
 fn counted(pairs: &[Pair]) -> BTreeSet<Counted> {
     pairs
         .iter()

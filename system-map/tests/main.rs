@@ -2,6 +2,7 @@
 
 mod binary;
 mod common;
+mod dart;
 mod edges;
 mod go;
 mod imports;

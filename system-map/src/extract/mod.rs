@@ -5,6 +5,7 @@
 mod cargo;
 #[cfg(test)]
 mod contract;
+mod dart;
 mod go;
 mod names;
 pub(crate) mod registry;
@@ -152,7 +153,7 @@ pub(crate) struct Pair {
     /// The lines of `from` that make the pair, each an import site (spec #477, "What an import site is"): a `use` line
     /// once however many names it brings in, an inline path once per line. Empty when the extractor finds no line.
     pub(crate) lines: BTreeSet<u32>,
-    /// A crate root's `mod` line: kept for the check, left out of the imports report.
+    /// A crate root's `mod` line or a Dart library's `part` line: kept for the check, left out of the imports report.
     pub(crate) declaration: bool,
     /// The one target an import named that covers several files (a Go package's folder, say): the imports report
     /// counts the pairs of one import of it as one unit per part. None for a pair that is its own unit.
