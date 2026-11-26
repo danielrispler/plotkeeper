@@ -51,6 +51,10 @@ pub struct Report {
     /// The Unsure files the parts own, each with its owned candidates; never a failure. Left out of the JSON when empty.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub unsure: Vec<Unsure>,
+    /// What the extractors did not read and say so, such as a layout key of a build config; never a failure. Left out of
+    /// the JSON when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
     /// What the check covered, for the line a pass prints.
     pub counts: Counts,
     /// The registered extractors the map does not name that could read the repository, which `check` notes.
@@ -385,6 +389,7 @@ fn check_with(
             report.problems.extend(found.problems);
             report.edges = found.edges;
             report.unsure = found.unsure;
+            report.notes = found.notes;
             report.suggested = extract::registry::EXTRACTORS
                 .iter()
                 .filter(|e| !names.iter().any(|n| n == e.name()) && e.detect(&repo))

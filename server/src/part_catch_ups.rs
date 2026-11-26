@@ -1,6 +1,7 @@
 //! Part catch-ups (spec danielrispler/plotkeeper#378, tickets #391 and #396): a fogged part offers one story of everything that
 //! landed in it since Daniel last caught up. When a project's map is shown, the catch-ups of up to eight fogged Core parts are
-//! written, oldest fog first (#450); any other is written when he clicks it. A part fogged by exactly one PR whose brief lights it opens
+//! written, oldest fog first (#450); at a session's turn end, those of up to eight fogged Core and Interface-only parts, once
+//! `origin` is fetched (#635); any other is written when he clicks it. A part fogged by exactly one PR whose brief lights it opens
 //! that chapter instead.
 
 use crate::App;
@@ -438,6 +439,28 @@ pub fn show(
     store: &CatchUpStore,
     done: impl Fn() + Clone + Send + 'static,
 ) -> Vec<String> {
+    let parts = crate::fog::core_fogged_parts(user, source);
+    write_ahead(
+        catch_ups, writer, model, project, user, parts, lit_of, store, done,
+    )
+}
+
+/// Starts the catch-ups of at most `ON_SHOW` of `parts` (fogged ones), oldest fog first, as `show` says.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "no type groups these inputs, and one made only for this call would be a new abstraction (#555)"
+)]
+fn write_ahead(
+    catch_ups: &CatchUps,
+    writer: &SharedWriter,
+    model: &str,
+    project: &str,
+    user: &UserState,
+    parts: Vec<String>,
+    lit_of: &dyn Fn(u64) -> Option<Vec<Vec<String>>>,
+    store: &CatchUpStore,
+    done: impl Fn() + Clone + Send + 'static,
+) -> Vec<String> {
     let repo = Path::new(project);
     // How far down the history a commit sits: an older one has fewer commits behind it.
     let depth = |commit: &str| {
@@ -446,7 +469,7 @@ pub fn show(
             .and_then(|out| out.trim().parse::<u64>().ok())
             .unwrap_or(u64::MAX)
     };
-    let mut fogged: Vec<(u64, String, Vec<String>)> = crate::fog::core_fogged_parts(user, source)
+    let mut fogged: Vec<(u64, String, Vec<String>)> = parts
         .into_iter()
         .filter_map(|part| {
             let fog = fog_of(user, &part);
@@ -476,6 +499,83 @@ pub fn show(
             .then_some(part)
         })
         .collect()
+}
+
+/// `project`'s session ended its turn: `origin` is fetched through the cooldown of `fetches` (`fetch`), the fog is refreshed
+/// without starting it, and the catch-ups of at most `ON_SHOW` fogged Core and Interface-only parts start writing as `show` does.
+/// `None` when the project's fog never started (its map was never opened): nothing is fetched or written. Else the parts whose
+/// write started; `done` runs as each ends.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "no type groups these inputs, and one made only for this call would be a new abstraction (#555)"
+)]
+pub fn turn_end(
+    catch_ups: &CatchUps,
+    writer: Option<&SharedWriter>,
+    model: &str,
+    fetches: &crate::map::Fetches,
+    fetch: impl FnOnce() -> Result<(), String>,
+    project: &str,
+    file: &Path,
+    lit_of: &dyn Fn(u64) -> Option<Vec<Vec<String>>>,
+    store: &CatchUpStore,
+    done: impl Fn() + Clone + Send + 'static,
+) -> Option<Vec<String>> {
+    let repo = Path::new(project);
+    // A map never opened has no fog to refresh, so nothing is fetched for it either.
+    crate::map::read_user(file, project)
+        .fog
+        .processed
+        .as_ref()?;
+    if let crate::map::Fetched::Failed(why) = fetches.run(project, std::time::Instant::now(), fetch)
+    {
+        log::warn!("turn end: fetch of {project} failed: {why}");
+    }
+    if let Err(why) = crate::fog::refresh(repo, file, project, false) {
+        log::warn!("turn end: fog of {project} failed: {why}");
+    }
+    let (Some(writer), Some(source)) = (writer, crate::map::read_map(repo).source) else {
+        return Some(Vec::new());
+    };
+    let user = crate::map::read_user(file, project);
+    // The fogged parts the map shows: Core and Interface-only, since a black box never shows fog (`fog::effective`).
+    let parts = crate::fog::effective(&user, &source).into_keys().collect();
+    Some(write_ahead(
+        catch_ups, writer, model, project, &user, parts, lit_of, store, done,
+    ))
+}
+
+/// A session in `folder` ended its turn: in the background, `turn_end` on its main checkout with `origin`'s fetch, the PR brief's
+/// writer and model, and the page hears `map-landed` once the fog is refreshed and as each write ends. Nothing for a project
+/// whose map was never opened.
+pub fn turn_ended(app: &Arc<App>, folder: String) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let Ok(project) = studio_workbench::main_checkout(Path::new(&folder)) else {
+            return;
+        };
+        let (Ok(file), Some(store)) = (crate::map::state_file(), store_of(&project)) else {
+            return;
+        };
+        let events = app.events.clone();
+        let landed = project.clone();
+        let started = turn_end(
+            &app.catch_ups,
+            app.briefs.writer().as_ref(),
+            &app.briefs.model(),
+            &app.fetches,
+            || studio_workbench::fetch(Path::new(&project)),
+            &project,
+            &file,
+            &lit_of(&project),
+            &store,
+            move || events.emit("map-landed", serde_json::json!(landed)),
+        );
+        // The map redraws its fog, and the sheets their writes.
+        if started.is_some() {
+            app.events.emit("map-landed", serde_json::json!(project));
+        }
+    });
 }
 
 /// `project`'s map was shown (`map_state` with `fetch`, after the fog's refresh): `show` with the PR brief's writer and model; the
@@ -1185,5 +1285,154 @@ mod tests {
         shows.wait(1);
         assert!(!shows.catch_ups.writing(&shows.rig.main, "a"));
         assert!(shows.catch_ups.failed(&shows.rig.main, "a", &list));
+    }
+
+    // ---- written at a turn's end ----
+
+    impl Shows {
+        /// Gives `part` a thick change: its paths in the map gain a folder.
+        fn thicken(&self, part: &str) {
+            let path = self.rig.dir.path().join("system-map.json");
+            let map = std::fs::read_to_string(&path).unwrap();
+            let from = format!(r#""paths":["{part}/"]"#);
+            assert!(map.contains(&from), "{part} has one folder");
+            let to = format!(r#""paths":["{part}/","{part}-more/"]"#);
+            self.rig.commit(
+                &format!("widen {part}"),
+                &[("system-map.json", &map.replace(&from, &to))],
+            );
+        }
+        /// A session's turn ended: the fetch runs through `fetches`, counted in `fetched`.
+        fn turn(
+            &self,
+            writer: &Arc<Fake>,
+            fetches: &crate::map::Fetches,
+            fetched: &std::cell::Cell<usize>,
+        ) -> Option<Vec<String>> {
+            self.turn_lit(writer, fetches, fetched, &|_| None)
+        }
+        /// As `turn`, with what each PR's stored brief lights.
+        fn turn_lit(
+            &self,
+            writer: &Arc<Fake>,
+            fetches: &crate::map::Fetches,
+            fetched: &std::cell::Cell<usize>,
+            lit_of: &dyn Fn(u64) -> Option<Vec<Vec<String>>>,
+        ) -> Option<Vec<String>> {
+            let ended = self.ended.clone();
+            let writer: SharedWriter = writer.clone();
+            turn_end(
+                &self.catch_ups,
+                Some(&writer),
+                "opus",
+                fetches,
+                || {
+                    fetched.set(fetched.get() + 1);
+                    Ok(())
+                },
+                &self.rig.main,
+                &self.rig.file(),
+                lit_of,
+                &self.store(),
+                move || ended.send(()).unwrap(),
+            )
+        }
+    }
+
+    #[test]
+    fn a_turns_end_writes_the_fogged_core_and_interface_parts_with_no_map_shown() {
+        let shows = Shows::new();
+        shows.push("a", "2");
+        shows.thicken("f");
+        let writer = Arc::new(Fake::default());
+        let fetched = std::cell::Cell::new(0);
+        let started = shows.turn(&writer, &crate::map::Fetches::default(), &fetched);
+        assert_eq!(started, Some(vec!["a".to_string(), "f".to_string()]));
+        shows.wait(2);
+        assert!(fresh(&shows.store(), "a", &shows.fog("a")).is_some());
+        assert!(fresh(&shows.store(), "f", &shows.fog("f")).is_some());
+        assert_eq!(fetched.get(), 1);
+    }
+
+    #[test]
+    fn a_turns_end_in_a_project_whose_map_was_never_opened_fetches_and_writes_nothing() {
+        let shows = Shows::new();
+        // The map was never opened: no fog started.
+        std::fs::remove_file(shows.rig.file()).unwrap();
+        shows.push("a", "2");
+        shows.thicken("f");
+        let writer = Arc::new(Fake::default());
+        let fetched = std::cell::Cell::new(0);
+        let started = shows.turn(&writer, &crate::map::Fetches::default(), &fetched);
+        assert_eq!(started, None);
+        assert_eq!(fetched.get(), 0);
+        let user = read_user(&shows.rig.file(), &shows.rig.main);
+        assert_eq!(user.fog.processed, None, "the fog stays unstarted");
+        assert!(writer.wrote().is_empty());
+    }
+
+    #[test]
+    fn a_turns_end_writes_eight_fogged_core_and_interface_parts_oldest_fog_first_and_none_again() {
+        let shows = Shows::over(TWELVE);
+        let fogged = [
+            "c7", "i0", "c2", "i1", "c9", "c0", "c5", "c1", "c8", "c3", "c6", "c4",
+        ];
+        for part in fogged {
+            match part {
+                "i0" | "i1" => shows.thicken(part),
+                _ => shows.push(part, "2"),
+            }
+        }
+        let writer = Fake::shut();
+        let (fetches, fetched) = (crate::map::Fetches::default(), std::cell::Cell::new(0));
+        let started = shows.turn(&writer, &fetches, &fetched).unwrap();
+        assert_eq!(started, ["c7", "i0", "c2", "i1", "c9", "c0", "c5", "c1"]);
+        // The project header's dot still counts Core parts only.
+        let user = read_user(&shows.rig.file(), &shows.rig.main);
+        let core = crate::fog::core_fogged_parts(&user, TWELVE);
+        assert!(core.iter().all(|p| p.starts_with('c')), "{core:?}");
+        // Another turn's end while they are written starts none.
+        assert_eq!(shows.turn(&writer, &fetches, &fetched), Some(vec![]));
+        writer.open();
+        shows.wait(8);
+        assert_eq!(writer.wrote().len(), 8);
+        // Nor once they are stored.
+        assert_eq!(shows.turn(&writer, &fetches, &fetched), Some(vec![]));
+        assert_eq!(writer.wrote().len(), 8);
+    }
+
+    #[test]
+    fn a_turns_end_skips_a_part_that_opens_its_one_prs_chapter_and_one_whose_write_failed() {
+        let shows = Shows::new();
+        shows.rig.commit("Thing (#7)", &[("a/x", "2")]);
+        shows.thicken("f");
+        let writer = Arc::new(Fake {
+            panics: true,
+            ..Default::default()
+        });
+        let (fetches, fetched) = (crate::map::Fetches::default(), std::cell::Cell::new(0));
+        let lights_a = |pr: u64| (pr == 7).then(|| vec![vec!["a".to_string()]]);
+        let started = shows.turn_lit(&writer, &fetches, &fetched, &lights_a);
+        assert_eq!(started, Some(vec!["f".to_string()]));
+        shows.wait(1);
+        assert!(
+            shows
+                .catch_ups
+                .failed(&shows.rig.main, "f", &shows.fog("f"))
+        );
+        // The failed write waits for a click.
+        let started = shows.turn_lit(&writer, &fetches, &fetched, &lights_a);
+        assert_eq!(started, Some(vec![]));
+    }
+
+    #[test]
+    fn many_turn_ends_within_the_cooldown_fetch_once() {
+        let shows = Shows::new();
+        let writer = Arc::new(Fake::default());
+        let (fetches, fetched) = (crate::map::Fetches::default(), std::cell::Cell::new(0));
+        for _ in 0..5 {
+            assert!(shows.turn(&writer, &fetches, &fetched).is_some());
+        }
+        assert_eq!(fetched.get(), 1);
     }
 }
