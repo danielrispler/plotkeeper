@@ -53,6 +53,8 @@ pub(crate) struct LinkCheck {
     pub(crate) unproven: usize,
     /// The Unsure files the parts own, each with only its owned candidates.
     pub(crate) unsure: Vec<Unsure>,
+    /// What the extractors did not read and say so; never a failure.
+    pub(crate) notes: Vec<String>,
 }
 
 /// Holds the map's import links to the edges the named extractors compute (spec #473, "The link check"). Between two read
@@ -69,6 +71,7 @@ pub(crate) fn check_links(
 ) -> LinkCheck {
     let found = extract::run(registry, names, repo);
     let mut problems = found.problems;
+    let notes = found.notes;
     // An extractor that could not run leaves pairs unread, so a missing edge proves nothing.
     let incomplete = !problems.is_empty();
     let edges = edges_between_parts(&found.pairs, parts);
@@ -137,6 +140,7 @@ pub(crate) fn check_links(
         proven,
         unproven,
         unsure,
+        notes,
     }
 }
 

@@ -26,6 +26,9 @@ pub(crate) struct Fixture {
 
 /// What a repository without an extractor's config gives.
 pub(crate) enum MissingConfig {
+    /// The extractor has no config file: nothing is removed, and there is no problem. The malformed-config case is
+    /// skipped with its reason.
+    None,
     /// Without the support file `file`, the extractor falls back cleanly: no problem.
     Fallback { file: &'static str },
     /// Without the support file `file`, the extractor gives a problem that says `says`.
@@ -33,8 +36,6 @@ pub(crate) enum MissingConfig {
         file: &'static str,
         says: &'static str,
     },
-    /// The extractor has no config file, so there is nothing to leave out.
-    None,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -148,11 +149,14 @@ fn a_missing_config_gives_what_the_kit_declares() {
             run_on(extractor, &files)
         };
         match &kit.missing_config {
+            MissingConfig::None => {
+                let found = run_on(extractor, &anchor_files(&kit));
+                assert_eq!(found.problems, Vec::<String>::new(), "{}", extractor.name());
+            }
             MissingConfig::Fallback { file } => {
                 let found = without(file);
                 assert_eq!(found.problems, Vec::<String>::new(), "{}", extractor.name());
             }
-            MissingConfig::None => {}
             MissingConfig::Problem { file, says } => {
                 let found = without(file);
                 assert!(
@@ -174,7 +178,7 @@ fn a_malformed_config_gives_at_least_one_problem() {
         else {
             assert!(
                 skips(&kit, Case::MalformedConfig),
-                "{}: has no config, so skip the case with a reason",
+                "{}: has no config file, so skip the case with a reason",
                 extractor.name()
             );
             continue;
