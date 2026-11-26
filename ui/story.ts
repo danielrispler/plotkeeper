@@ -8,7 +8,7 @@
 import { modelLine, reports } from "./capabilities.js";
 import { logo, logoKey, noContextNote } from "./logos.js";
 import { age, code, cut, element, failure, glyphOnly, hint, invoke, keepOnly, keyed, patch, pressable, prose, text, unhint, unseenWords } from "./dom.js";
-import { askAnchor } from "./ask.js";
+import { askAnchor, asked } from "./ask.js";
 import { askFor, openDecision } from "./answer.js";
 import { rendered } from "./markdown.js";
 import { drawSidebar } from "./list.js";
@@ -444,6 +444,8 @@ function forgetMissingSummaries() {
 // The folded blocks Daniel opened, by key, which outlast the feed's redraws, and the older turns'
 // replies, fetched at their first opening.
 const opened = new Set<string>();
+// The past rows drawn so far, by key: the first draw of one unfolds it when its Headline's Ask box is open or answered (spec #661, Q29).
+const drawnPast = new Set<string>();
 const replies = new Map<string, string>();
 
 /**
@@ -456,7 +458,7 @@ export function forgetStories(sessions: Session[]) {
   const listed = (key: string) => sessions.some((session) => key.startsWith(`${session.id} `));
   for (const cache of [summaries, failedTurns]) keepOnly(cache, (id) => turns.has(id));
   for (const cache of [agentSummaries, failed]) keepOnly(cache, (id) => agents.has(id));
-  for (const cache of [opened, replies]) keepOnly(cache, listed);
+  for (const cache of [opened, drawnPast, replies]) keepOnly(cache, listed);
 }
 
 // A folded block keyed `key`, open while Daniel keeps it open; `onOpen` runs at each opening. `hover` says what it holds.
@@ -572,6 +574,9 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
       node.append(rendered("p", now.headline, "headline-text"));
       if (index !== null) node.append(askAnchor(session.id, { kind: "headline", turn: index }, "this turn's Headline"));
     }
+  } else if (turn && index !== null) {
+    // A past row's Headline is on its line; its Ask box is the one made while the turn was newest, answer and all (spec #661, Q7).
+    node.append(askAnchor(session.id, { kind: "headline", turn: index }, "this turn's Headline"));
   }
   // The evidence line, under the Headline: a running turn shows only a check that ended failed.
   if (turn && index !== null && hasEvidence(turn, session.capabilities)) {
@@ -611,6 +616,8 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
   if (!turn) return node;
   const summary = turn.id ? summaryOf(turn.id) : null;
   const { headline } = headlineOf(summary, turn.message);
+  if (!drawnPast.has(key) && block.index !== null && asked(session.id, { kind: "headline", turn: block.index })) opened.add(key);
+  drawnPast.add(key);
   const open = opened.has(key);
   const line = foldedLine(turn, headline);
   const button = pressable(keyed(document.createElement("button"), `turn-line ${key}`), null, () => {

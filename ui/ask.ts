@@ -50,6 +50,12 @@ export function askAnchor(session: string, anchor: Anchor, what: string, scope =
   return held(box);
 }
 
+/** Whether the box of `anchor` is open, or holds an answer or a question being asked (spec #661, Q29). */
+export function asked(session: string, anchor: Anchor): boolean {
+  const box = asks.get(keyOf(session, anchor, ""));
+  return !!box && (box.open || !!box.querySelector("div.ask-reply")?.hasChildNodes());
+}
+
 /** Opens the box of `anchor` and puts the cursor in it, when it is drawn; false when it is not. */
 export function openAsk(session: string, anchor: Anchor): boolean {
   const node = asks.get(keyOf(session, anchor, ""));

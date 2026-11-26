@@ -349,6 +349,45 @@ export const mapPanelPatched = (): Fixture => {
   });
 };
 /**
+ * A side question stays with its turn (spec #661, Q7): with #311's story at your turn, a press on the newest Headline's "What did this
+ * turn change?", then a new turn starts; the turn asked about is a past row, unfolded, and the answer is on screen under it.
+ */
+export const mapPanelAskStays = (): Fixture => {
+  const ago = (ms: number) => Date.now() - ms;
+  const turn = (n: number, at: number) => ({ started_at: ago(at + 60e3), ended_at: ago(at), prompt: "Prompt " + n, id: "q" + n, message: "Reply " + n + ".\nMore of reply " + n + ".", checks: [], listed: [], files: { files: [{ root: "/w/plotkeeper", path: "core/lib.rs", from: null, added: 3, removed: 1, agent: null }], merged: 0 } });
+  const sessions = busySessions().map((s) => (s.id === "s1" ? { ...s, state: "your_turn" as const, turns: [turn(1, 900e3), turn(2, 600e3)], transcript: { ...s.transcript, responses: ["Reply 2.\nMore of reply 2."] } } : s));
+  const [s1] = sessions;
+  const next = { ...s1, state: "running" as const, last_event_at: Date.now(), turns: [...s1.turns, { ...turn(3, 0), ended_at: null, message: null }] };
+  return mapPanel(`
+      await press(row("s1"));
+      if (!panelOpen()) return log("snap:fail #311's story did not open");
+      const box = document.querySelector("#feed .now-turn .ask-about");
+      if (!box) return log("snap:fail the newest turn's Headline has no Ask box");
+      box.open = true;
+      await wait(200);
+      const pick = [...box.querySelectorAll(".ask-suggestions button")].find((b) => b.textContent === "What did this turn change?");
+      if (!pick) return log("snap:fail the Ask box offers no 'What did this turn change?'");
+      await __snapClick(pick);
+      await wait(300);
+      __snapEmit("selected", { session: ${JSON.stringify(next)}, agent: null });
+      await wait(200);
+      const past = document.querySelector("#feed").children[1];
+      if (!past?.classList.contains("past")) return log("snap:fail the turn asked about is not a past row");
+      if (past.querySelector(".turn-line")?.getAttribute("aria-expanded") !== "true") log("snap:fail the past row asked about is folded");
+      const reply = past.querySelector(".ask-about .ask-reply");
+      if (!reply?.textContent.includes("It changed core/lib.rs.")) return log("snap:fail the past row shows no answer: " + JSON.stringify(reply?.textContent));
+      reply.scrollIntoView({ block: "nearest" });
+      await wait(100);
+      const [r, view] = [reply.getBoundingClientRect(), document.getElementById("story").getBoundingClientRect()];
+      if (!r.height || r.top < view.top || r.bottom > view.bottom) log("snap:fail the answer is not on screen");
+      log("panel ok");`, {
+    sessions,
+    select: { __by: "id", values: Object.fromEntries(sessions.map((s) => [s.id, { session: s, agent: null }])) },
+    ask_anchor: "It changed core/lib.rs.",
+    realPointer: true,
+  });
+};
+/**
  * The rail with no session picked (#526): the story's session is picked no more while its panel shows, as when it is deleted elsewhere. The
  * rail's empty screen says what will show there, under "Pick a session in the list."; the panel closes with the selection (`followSelection`),
  * so since #385 that screen is not drawn and this checks its words, not its pixels.
