@@ -187,9 +187,11 @@ for (const [run, said] of [
 // also changes on the integration branch), "pull" (someone else moves the integration branch, the worker pulls it, then
 // edits), "pullmoved" (as "pull", then someone else changes the pulled file again), "linger" (edits and exits 0, leaving a \`sleep\` that holds its stdout and writes its pid to sleeper.pid), "pushint" (edits, commits and pushes its commit to the integration branch), "lost" (edits, and origin goes away), "empty" (exits 0 with no change), "fail" (exits 1), "chatty" (prints an event
 // every 50 ms and never ends), "push" (edits, commits and pushes its commit to a branch of its own), "branch" (edits and
-// pushes the integration tip as \`issue-7-cheap\`, no commit of its own) or "silent" (prints nothing and waits). FAKE_SILENT_MODELS, a comma-separated list, makes those models "silent" whatever FAKE_OPENCODE says;
+// pushes the integration tip as \`issue-7-cheap\`, no commit of its own), "escape" (edits, and also writes escaped.txt into
+// the main checkout \`repo\`) or "silent" (prints nothing and waits). FAKE_SILENT_MODELS, a comma-separated list, makes those models "silent" whatever FAKE_OPENCODE says;
 // a silent worker leaves a stray file first. Every worker call is logged with the environment it got. \`models opencode\`
-// lists FAKE_MODELS, a comma-separated list, or the test models by default, and is not logged.
+// lists FAKE_MODELS, a comma-separated list, or the test models by default, and is not logged. Like \`opencode run\`
+// without \`--dir\` (1.19.6: \`process.env.PWD??process.cwd()\`), it works in PWD's folder, not in the cwd it was given.
 const fakeOpencode = `#!/usr/bin/env node
 const { execFileSync, spawn } = require("node:child_process");
 const { appendFileSync, writeFileSync } = require("node:fs");
@@ -199,6 +201,7 @@ if (process.argv[2] === "models") {
   if (process.argv[3] === "opencode") console.log((env.FAKE_MODELS ?? "opencode/test-free,opencode/a-free,opencode/b-free").split(",").join("\\n"));
   process.exit(0);
 }
+process.chdir(env.PWD ?? process.cwd());
 const seen = Object.fromEntries(Object.entries(env).filter(([key]) => key.startsWith("OPENCODE_") || key === "PLOTKEEPER_INTERNAL"));
 appendFileSync(join(env.FAKE_DIR, "opencode-calls.jsonl"), JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), env: seen }) + "\\n");
 const model = process.argv[process.argv.indexOf("-m") + 1];
@@ -224,7 +227,7 @@ else {
     other("other.txt", "someone else's file\\n");
     execFileSync("git", ["pull", "--quiet", "--no-rebase", "--no-edit", "origin", "int"]);
   }
-  if (["edit", "commit", "moved", "conflict", "lost", "push", "pushint", "branch", "pull", "pullmoved", "linger"].includes(mode)) {
+  if (["edit", "commit", "moved", "conflict", "lost", "push", "pushint", "branch", "pull", "pullmoved", "linger", "escape"].includes(mode)) {
     writeFileSync("shared.txt", "the worker's line\\n");
     event("tool_use", { type: "tool", tool: "edit", state: { status: "completed", input: { filePath: "shared.txt" }, output: "ok" } });
   }
@@ -247,6 +250,7 @@ else {
     writeFileSync(join(env.FAKE_DIR, "sleeper.pid"), String(sleeper.pid));
     sleeper.unref();
   }
+  if (mode === "escape") writeFileSync(join(env.FAKE_DIR, "repo", "escaped.txt"), "written outside the worktree\\n");
   if (mode === "branch") execFileSync("git", ["push", "--quiet", "origin", "origin/int:refs/heads/issue-7-cheap"]);
   if (mode === "pullmoved") other("other.txt", "someone else's file, changed again\\n");
   if (mode === "moved") other("other.txt", "someone else's file\\n");
@@ -335,6 +339,8 @@ const scratchRun = ({ cheap } = {}) => {
     GIT_CONFIG_NOSYSTEM: "1",
     PLOTKEEPER_INTERNAL: "1",
     FAKE_DIR: dir,
+    // The run is launched from \`repo\` by a shell, which sets PWD to it.
+    PWD: repo,
   };
   for (const key of ["HERDR_ENV", "HERDR_WORKSPACE_ID", "HERDR_TAB_ID", "HERDR_PANE_ID"]) delete env[key];
   const git = (...args) => execFileSync("git", args, { cwd: repo, env, encoding: "utf8" }).trim();
@@ -546,6 +552,31 @@ for (const [what, fake, said] of /** @type {[string, Record<string, string>, Reg
     assert.deepEqual(ran.calls("npm").map((call) => call.argv.join(" ")), ["ci"], "no check runs once the worker pushed");
   });
 }
+
+test("run: a worker launched from the main checkout works in its own worktree and leaves the launching checkout untouched", () => {
+  const { git, run, worktree } = scratchRun();
+  const ran = run({ FAKE_OPENCODE: "edit" });
+  assert.equal(ran.status, 0, ran.stderr);
+  const [worker] = ran.calls("opencode");
+  assert.equal(worker.cwd, worktree, "the worker works in its worktree, not in the folder delegate.mjs was launched from");
+  assert.equal(git("status", "--porcelain", "--untracked-files=no"), "", "the launching checkout has no change");
+  assert.equal(readFileSync(join(worktree, "shared.txt"), "utf8"), "the worker's line\n");
+  assert.match(ran.stdout, /^pass\n/);
+});
+
+test("run: a worker that changes the launching checkout gives stop naming the paths, and stages nothing", () => {
+  const { git, run, worktree } = scratchRun();
+  const ran = run({ FAKE_OPENCODE: "escape" });
+  assert.equal(ran.status, 0, ran.stderr);
+  const lines = ran.stdout.trimEnd().split("\n");
+  assert.equal(lines[0], "stop: worker wrote outside its worktree (escaped.txt)");
+  assert.match(lines.at(-1), /^Route outcome: cheap·medium opencode\/test-free → stop \| \d+m$/);
+  assert.ok(existsSync(worktree), "the worktree is kept as evidence");
+  assert.deepEqual(ran.calls("npm").map((call) => call.argv.join(" ")), ["ci"], "no check runs once the worker wrote outside");
+  const wt = (...args) => execFileSync("git", args, { cwd: worktree, encoding: "utf8" }).trim();
+  assert.equal(wt("diff", "--cached", "--name-only"), "", "nothing is staged");
+  assert.equal(git("rev-parse", "issue-7-cheap"), git("rev-parse", "origin/int"), "nothing is committed");
+});
 
 test("run: the guard asks gh for a PR from the ticket's branch, and a ref someone else moved gives no stop", () => {
   const ran = scratchRun().run({ FAKE_OPENCODE: "moved" });

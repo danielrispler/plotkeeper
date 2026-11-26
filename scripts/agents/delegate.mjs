@@ -210,9 +210,11 @@ const WORKER_ENV = {
 class CouldNotStart extends Error {}
 
 // No child gets PLOTKEEPER_INTERNAL, even when this script inherits it: the hook drops every event while it is set
-// (hook/src/main.rs:45), so `npm run check`'s hook tests go red on correct work (#599's finding).
-const childEnv = () => {
-  const env = { ...process.env };
+// (hook/src/main.rs:45), so `npm run check`'s hook tests go red on correct work (#599's finding). Each child's PWD names
+// its own folder, not the one this script was launched from: `opencode run` without `--dir` works in
+// `process.env.PWD ?? process.cwd()` (1.19.6), so in #589's run the worker edited the launching checkout (#655).
+const childEnv = (cwd) => {
+  const env = { ...process.env, PWD: cwd };
   delete env.PLOTKEEPER_INTERNAL;
   return env;
 };
@@ -222,7 +224,7 @@ const exec = (cwd, command, args, { out } = {}) => {
   const fd = out && openSync(out, "w");
   try {
     const stdio = fd ? ["ignore", fd, fd] : ["ignore", "pipe", "pipe"];
-    return spawnSync(command, args, { cwd, env: childEnv(), encoding: "utf8", stdio, maxBuffer: 64 * 1024 * 1024 });
+    return spawnSync(command, args, { cwd, env: childEnv(cwd), encoding: "utf8", stdio, maxBuffer: 64 * 1024 * 1024 });
   } finally {
     if (fd) closeSync(fd);
   }
@@ -297,7 +299,7 @@ const runWorker = (worktree, { candidate, effort, message, session = null, limit
     const stderr = openSync(join(worktree, ".delegate/stderr.txt"), "w");
     const log = join(worktree, ".delegate/run.log");
     // Its own process group, so that a kill also ends the commands it started, such as `npm run check`.
-    const child = spawn("opencode", args, { cwd: worktree, env: { ...childEnv(), ...WORKER_ENV }, stdio: ["ignore", "pipe", stderr], detached: true });
+    const child = spawn("opencode", args, { cwd: worktree, env: { ...childEnv(worktree), ...WORKER_ENV }, stdio: ["ignore", "pipe", stderr], detached: true });
     let killed = null;
     const kill = (why) => {
       killed = why;
@@ -386,9 +388,24 @@ const stage = (worktree, integration) => {
   return exec(worktree, "git", ["diff", "--cached", "--quiet", "HEAD"]).status !== 0;
 };
 
+/** The checkout's `git status --porcelain`, one entry a line, its leading spaces kept. */
+const statusOf = (checkout) => {
+  const ran = exec(checkout, "git", ["status", "--porcelain"]);
+  if (ran.error || ran.status !== 0) throw new CouldNotStart(`git status failed in ${checkout}`);
+  return ran.stdout.split("\n").filter(Boolean);
+};
+
+/** The paths whose status in the checkout differs from `before`, joined; null when none does. */
+const changedSince = (checkout, before) => {
+  const after = statusOf(checkout);
+  const changed = [...after.filter((entry) => !before.includes(entry)), ...before.filter((entry) => !after.includes(entry))];
+  return changed.length ? [...new Set(changed.map((entry) => entry.slice(3)))].join(", ") : null;
+};
+
 /** Why a worker run that ended this way stops or escalates, or null when its work goes to the check. */
 const failure = (exit) => {
   if (exit.pushed) return { result: "stop", stop: exit.pushed };
+  if (exit.escaped) return { result: "stop", stop: `worker wrote outside its worktree (${exit.escaped})` };
   if (exit.killed === "silent") return { result: "silent", escalate: "silent" };
   if (exit.killed === "timeout") return { result: "error", escalate: "timeout" };
   if (exit.code !== 0) return { result: "error", escalate: `exit ${exit.code ?? exit.signal}` };
@@ -445,15 +462,19 @@ const pushed = (worktree, branch, commits) => {
  * One candidate's attempt in the worktree: its first run, and on the first red check one retry on the same session.
  * `runs` holds each worker run's result and time; `escalate` is the verdict's reason, absent on pass.
  */
-const attempt = async (worktree, { candidate, effort, base, integration, title, branch }) => {
+const attempt = async (worktree, { candidate, effort, base, integration, title, branch, launch }) => {
   const runs = [];
-  // Every worker run is followed by the push guard, whatever its end, before anything resets the worker's commits away.
+  // Every worker run is followed by the push guard, whatever its end, before anything resets the worker's commits away,
+  // and by the escape guard: a change to the checkout this script was launched from is the worker's, whatever its
+  // cause (#655), and its attempt is not staged.
   const timed = async (given) => {
+    const before = statusOf(launch);
     const started = Date.now();
     const exit = await runWorker(worktree, { candidate, effort, ...given });
     runs.push({ ms: Date.now() - started });
+    const escaped = changedSince(launch, before);
     const what = pushed(worktree, branch, madeBy(worktree, base));
-    return what ? { ...exit, pushed: what } : exit;
+    return { ...exit, ...(what && { pushed: what }), ...(escaped && { escaped }) };
   };
   const last = (verdict) => {
     runs.at(-1).result = verdict.result;
@@ -561,6 +582,7 @@ const runTicket = async ({ ticket, integration, effort, routing }) => {
   let verdict = { result: "silent", escalate: "silent" };
   try {
     const common = git(process.cwd(), "rev-parse", "--path-format=absolute", "--git-common-dir");
+    const launch = git(process.cwd(), "rev-parse", "--show-toplevel");
     const marks = join(common, MARKS);
     root = dirname(common);
     worktree = join(root, ".claude/worktrees", branch);
@@ -589,7 +611,7 @@ const runTicket = async ({ ticket, integration, effort, routing }) => {
     writeFileSync(join(worktree, ".delegate/run.log"), "");
     must(worktree, "npm", ["ci"], { out: join(worktree, ".delegate/npm-ci.txt") });
     pane = openPane(worktree);
-    verdict = await candidates(worktree, { first: candidate, next, marks, attempts, effort, base, integration, title, branch });
+    verdict = await candidates(worktree, { first: candidate, next, marks, attempts, effort, base, integration, title, branch, launch });
   } catch (error) {
     if (!(error instanceof CouldNotStart)) throw error;
     console.error(`could not start: ${error.message}`);
