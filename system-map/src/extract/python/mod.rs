@@ -76,20 +76,21 @@ fn excluded(folder: &str) -> bool {
 /// The roots of the repository: the folders a top-level name resolves from, each a prefix, empty for the repository
 /// root, else ending in `/` (spec #589, "Roots").
 struct Roots {
-    /// The folders holding a tracked config outside the excluded folders and ignored paths, with the repository root,
-    /// each with the layout its configs declare.
+    /// The folders holding a tracked config outside the excluded folders, ignored or not, with the repository root, each
+    /// with the layout its configs declare.
     projects: BTreeMap<String, Layout>,
 }
 
 impl Roots {
-    /// The roots of `repo`, the problems of its configs (a `pyproject.toml` that does not parse) and the notes on the
-    /// layout keys it did not read.
+    /// The roots of `repo`, the problems of its configs (an owned `pyproject.toml` that does not parse) and the notes on
+    /// the layout keys it did not read. A config the map ignores is read as an owned one is, but one that does not parse
+    /// gives a note, not a problem, so that a deliberately broken config never switches off the whole check (#656).
     fn read(repo: &Repo) -> (Roots, Vec<String>, Vec<String>) {
         let mut projects = BTreeMap::from([(String::new(), Layout::default())]);
         let (mut problems, mut notes) = (Vec::new(), Vec::new());
         for file in repo.files() {
             let (folder, name) = (folder_of(file), file.rsplit('/').next().unwrap_or(file));
-            if !CONFIGS.contains(&name) || excluded(folder) || repo.is_ignored(file) {
+            if !CONFIGS.contains(&name) || excluded(folder) {
                 continue;
             }
             let layout = projects.entry(folder.to_string()).or_default();
@@ -97,22 +98,31 @@ impl Roots {
                 continue;
             };
             let mut reading = Reading::new(folder, file);
-            match name {
+            let broken = match name {
                 "pyproject.toml" => match text.parse::<toml::Table>() {
-                    Ok(table) => reading.pyproject(&table),
-                    Err(e) => problems.push(format!(
+                    Ok(table) => {
+                        reading.pyproject(&table);
+                        None
+                    }
+                    Err(e) => Some(format!(
                         "{file}: not valid TOML; fix it or remove it: {}",
                         e.message()
                     )),
                 },
-                "setup.cfg" => {
-                    if let Err(line) = reading.setup_cfg(&text) {
-                        problems.push(format!(
-                            "{file}: line {line} comes before the first section header; fix it or remove the file"
-                        ));
-                    }
+                "setup.cfg" => reading.setup_cfg(&text).err().map(|line| {
+                    format!(
+                        "{file}: line {line} comes before the first section header; fix it or remove the file"
+                    )
+                }),
+                _ => {
+                    reading.setup_py(&text);
+                    None
                 }
-                _ => reading.setup_py(&text),
+            };
+            match broken {
+                Some(_) if repo.is_ignored(file) => reading.unparsed(),
+                Some(problem) => problems.push(problem),
+                None => {}
             }
             layout.merge(reading.layout);
             notes.extend(reading.notes);
