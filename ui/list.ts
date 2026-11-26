@@ -409,15 +409,15 @@ export function projectHead(group: ProjectGroup<Session>): HTMLElement {
   head.className = ["project-head", ...(group.gone ? ["gone"] : []), ...(group.key === shownProject() ? ["current"] : [])].join(" ");
   head.dataset.key = `head ${group.key}`;
   head.dataset.project = group.key;
-  const toggle = pressable(text("button", "", "project-toggle"), null, () => pressHead(group.key));
-  toggle.dataset.key = `toggle ${group.key}`;
-  toggle.append(text("span", group.name, "name"));
-  if (group.rollup) toggle.append(glyph(`head ${group.key}`, group.rollup));
+  const name = pressable(text("button", "", "project-toggle"), null, () => pressHead(group.key));
+  name.dataset.key = `toggle ${group.key}`;
+  name.append(text("span", group.name, "name"));
+  if (group.rollup) name.append(glyph(`head ${group.key}`, group.rollup));
   const why = marks.get(group.key);
   if (why?.length) {
-    toggle.append(mark(keyed(text("span", "", "project-dot mist-swatch"), `dot ${group.key}`), dotTitle(why), "start"));
+    name.append(mark(keyed(text("span", "", "project-dot mist-swatch"), `dot ${group.key}`), dotTitle(why), "start"));
   }
-  hint(toggle, `${group.gone ? `${group.key} is gone` : group.key || group.name}\nShow its map`, "start");
+  hint(name, `${group.gone ? `${group.key} is gone` : group.key || group.name}\nShow its map`, "start");
   // The chevron folds the group, only while it has live sessions to fold; named as the subagent chevrons are.
   const fold = group.live ? icon("fold", CHEVRON, () => {
     if (!shut.delete(group.key)) shut.add(group.key);
@@ -429,7 +429,7 @@ export function projectHead(group: ProjectGroup<Session>): HTMLElement {
     fold.setAttribute("aria-expanded", String(projectOpen(group.key)));
     hint(fold, "Fold or unfold its sessions", "start");
   }
-  head.append(...(fold ? [fold] : []), toggle, ...(group.live ? [] : [projectMore(group)]));
+  head.append(...(fold ? [fold] : []), name, ...(group.live ? [] : [projectMore(group)]));
   return head;
 }
 
@@ -546,8 +546,9 @@ export function drawChip(sessions: Pick<Session, "state">[]) {
 function drawShown() {
   const live = sidebarSessions(studio.listed, landedClear.hidden);
   drawSidebar();
-  // Held, the strip's buttons keep their places, one whose session went idle among them, and a new one joins the end.
-  const now = live.filter((session) => !collapsed.includes(session.state));
+  // The strip is the sidebar's flat list, in its order (`listOrder`). Held, its buttons keep their places, one whose session went idle among
+  // them, and a new one joins the end.
+  const now = listOrder().filter((session) => !collapsed.includes(session.state));
   const kept = holding ? stripped.flatMap((id) => live.find((session) => session.id === id) ?? []) : [];
   const shown = [...kept, ...now.filter((session) => !kept.includes(session))];
   stripped = shown.map(({ id }) => id);

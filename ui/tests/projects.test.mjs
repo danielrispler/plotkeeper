@@ -2,7 +2,7 @@
 // folder on the page. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { holdGroups, knownProjects, projectGroups, selectedProject, sessionProjectName, sidebarOrder } from "../../dist/projects.js";
+import { holdGroups, knownProjects, listedProjects, projectGroups, selectedProject, sessionProjectName, sidebarOrder } from "../../dist/projects.js";
 import { studio } from "../../dist/state.js";
 
 // A session with only the fields the projects read: its project, the core's, and its folder, which a `cd` moves. The project of a
@@ -93,6 +93,18 @@ test("the Map view's projects are the saved ones, and the selected session's is 
   // A selected session that moved to another folder still opens its project's map.
   studio.selection = { session: at("c", "idle", "/r/q/ui", "/r/p"), agent: null };
   assert.equal(selectedProject(), "/r/p");
+});
+
+test("the projects the list shows leave out a gone or temporary one, but for one with a live session", () => {
+  studio.projects = [
+    { path: "/tmp/a", gone: false, temporary: true },
+    { path: "/r/gone", gone: true, temporary: false },
+    { path: "/r/p", gone: false, temporary: false },
+    { path: "/tmp/b", gone: false, temporary: true },
+    { path: "/tmp/c", gone: false, temporary: true },
+  ];
+  studio.listed = [at("a", "idle", "/tmp/b"), at("b", "ended", "/tmp/c")];
+  assert.deepEqual(listedProjects(), ["/r/p", "/tmp/b"]);
 });
 
 // The held order (spec #659): while the pointer is in the list, the groups and the rows in each keep the last draw's places.

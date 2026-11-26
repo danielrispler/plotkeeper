@@ -93,6 +93,13 @@ export const sidebarOrder = <S extends Pick<Session, "project" | "state" | "id">
 // The saved projects, so the Map view reaches a project whose sessions all ended or were deleted.
 export const knownProjects = (): string[] => studio.projects.map((project) => project.path);
 
+// The saved projects the list shows, in the saved order: not one that is gone or temporary with no live session (spec #659), for the
+// Map view to fall back to.
+export function listedProjects(): string[] {
+  const shown = new Set(projectGroups(studio.listed, studio.projects).map(({ key }) => key));
+  return knownProjects().filter((path) => shown.has(path));
+}
+
 // Whether `path` is a saved project whose folder was moved or deleted.
 export const projectGone = (path: string): boolean => studio.projects.some((project) => project.path === path && project.gone);
 

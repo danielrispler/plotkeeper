@@ -790,6 +790,14 @@ pub struct SinceSeen {
 }
 
 impl Session {
+    /// Sets its project (spec #659) from the folder root `root` finds, the first time only: a session that has one keeps
+    /// it, so a later folder never moves it. `root` runs only then.
+    pub(crate) fn set_project_once(&mut self, root: impl FnOnce() -> String) {
+        if self.project.is_empty() {
+            self.project = project_of(&root()).into();
+        }
+    }
+
     /// How many of its turns Daniel has seen.
     pub fn seen(&self) -> usize {
         self.seen

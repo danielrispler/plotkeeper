@@ -11,7 +11,7 @@ use crate::{
     claude,
     event::{Event, Happened, Origin, Start, Tool, ToolKind},
     output::{Call, is_bare_command},
-    session::{Block, Cause, card_id, claimed, project_of},
+    session::{Block, Cause, card_id, claimed},
     transcript, wants_summary,
 };
 use serde_json::Value;
@@ -316,9 +316,7 @@ impl Take<'_> {
             let last = event.cwd.rsplit('/').next().unwrap_or_default();
             session.folder_name = if last.is_empty() { &event.cwd } else { last }.into();
             let root = self.roots.of(&event.cwd);
-            if session.project.is_empty() {
-                session.project = project_of(&root).into();
-            }
+            session.set_project_once(|| root.clone());
             let last = root.rsplit('/').next().unwrap_or_default();
             session.identity.worktree = if last.is_empty() { &root } else { last }.into();
             if let Some(issue) = claimed(command.unwrap_or_default()) {

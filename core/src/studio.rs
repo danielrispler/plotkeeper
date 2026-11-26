@@ -11,8 +11,8 @@ use crate::{
     event::{Event, Happened, Start, ToolKind},
     qwen, range,
     session::{
-        FALLBACK_MS, IDLE_AFTER_MS, MISMATCH_AFTER_MS, Since, card_time, folder_name, project_of,
-        short, shown_state, task_path,
+        FALLBACK_MS, IDLE_AFTER_MS, MISMATCH_AFTER_MS, Since, card_time, folder_name, short,
+        shown_state, task_path,
     },
     turn_files,
 };
@@ -1163,9 +1163,7 @@ impl Studio {
                     ..Session::default()
                 });
             row.cwd.clone_from(&t.cwd);
-            if row.project.is_empty() {
-                row.project = project_of(&self.roots.of(&t.cwd)).into();
-            }
+            row.set_project_once(|| self.roots.of(&t.cwd));
             row.folder_name = folder_name(&t.cwd);
             let program = t.app.as_ref().or(t.foreground.as_ref());
             let program = program.map_or("a program", String::as_str);
@@ -1235,9 +1233,7 @@ impl Studio {
                     ..Session::default()
                 });
             row.cwd.clone_from(&t.cwd);
-            if row.project.is_empty() {
-                row.project = project_of(&self.roots.of(&t.cwd)).into();
-            }
+            row.set_project_once(|| self.roots.of(&t.cwd));
             row.folder_name = folder_name(&t.cwd);
             row.identity.name = format!("terminal · {}", row.folder_name);
         }

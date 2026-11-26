@@ -667,7 +667,9 @@ export const cutTextStill = (): Fixture => ({
 /**
  * The held order (spec #659): while the pointer is in the list, a session that changed state keeps its row, with its new glyph, its group
  * keeps its place, a new session joins the end of its project's group, and the strip holds the same way; ⌘] and ↓ follow the order on
- * screen. When the pointer leaves, the list and the strip take the real order. The pointer's enter and leave are synthetic events on `.list`.
+ * screen. The strip's flat list reads the sidebar's order, held or not. The pointer on a hint of the list's, which opens outside `.list`,
+ * is still in the list; when it leaves the hint for the map, the list and the strip take the real order. The pointer's moves are synthetic
+ * events on `.list` and the hint.
  */
 export const listHeld = (): Fixture => {
   const plotkeeper = { cwd: "/w/plotkeeper", project: "/w/plotkeeper" };
@@ -677,12 +679,13 @@ export const listHeld = (): Fixture => {
     session("s3", "Running tracker", "running", timburr),
     session("s2", "Write the docs", "your_turn", plotkeeper),
   ];
-  // s3 and s2 now need you and s4 started: unheld, timburr's group goes first and s2 above s1. In the server's order.
+  // s3 and s2 now need you and s4 started: unheld, timburr's group goes first and s2 above s1. In the server's order, which is not the
+  // sidebar's, so the strip shows which one it reads.
   const later = [
     session("s3", "Running tracker", "needs_you", timburr),
-    session("s2", "Write the docs", "needs_you", plotkeeper),
-    session("s4", "Review the PR", "running", plotkeeper),
     session("s1", "Fix the hook", "running", plotkeeper),
+    session("s4", "Review the PR", "running", plotkeeper),
+    session("s2", "Write the docs", "needs_you", plotkeeper),
   ];
   return {
     ...base,
@@ -698,14 +701,14 @@ export const listHeld = (): Fixture => {
       const selected = () => document.querySelector("#groups .session-row[aria-pressed=true]")?.dataset.key.trim();
       const expect = (what, got, want) => got !== want && log("snap:fail " + what + ": " + got + ", not " + want);
       expect("the rows before", rows(), "s1,s2,s3");
-      expect("the strip before", strip(), "s1,s3,s2");
+      expect("the strip before", strip(), "s1,s2,s3");
       const list = document.querySelector(".list");
       list.dispatchEvent(new PointerEvent("pointerenter"));
       window.__snapEmit("sessions", ${JSON.stringify(later)});
       await wait(200);
       expect("the held rows", rows(), "s1,s2,s4,s3");
       expect("the held headers", heads(), "plotkeeper,timburr");
-      expect("the held strip", strip(), "s1,s3,s2,s4");
+      expect("the held strip", strip(), "s1,s2,s3,s4");
       expect("s2's glyph while held", word("s2"), "Needs you");
       expect("s3's glyph while held", word("s3"), "Needs you");
       // A press shows its row selected at once, before the stub's empty \`select\` reply clears the selection, so it is read at once.
@@ -719,11 +722,18 @@ export const listHeld = (): Fixture => {
       fourth.dispatchEvent(new KeyboardEvent("keydown", { code: "ArrowDown", key: "ArrowDown", bubbles: true }));
       expect("the row after s4 by ↓ while held", document.activeElement?.dataset.key?.trim(), "s3");
       await wait(200);
-      list.dispatchEvent(new PointerEvent("pointerleave"));
+      // A row's hint opens in \`#hints\`, outside \`.list\`: the pointer moving onto it leaves \`.list\` and stays in the list.
+      const owner = document.querySelector('#groups .session-row[data-key="s1 "]');
+      const onHint = document.getElementById(owner.getAttribute("interestfor") ?? owner.getAttribute("data-hint"));
+      if (!onHint) return log("snap:fail s1's row has no hint");
+      list.dispatchEvent(new PointerEvent("pointerleave", { relatedTarget: onHint }));
       await wait(200);
-      expect("the rows once the pointer left", rows(), "s3,s2,s4,s1");
+      expect("the rows with the pointer on a row's hint", rows(), "s1,s2,s4,s3");
+      onHint.dispatchEvent(new PointerEvent("pointerout", { bubbles: true, relatedTarget: document.querySelector("#map") }));
+      await wait(200);
+      expect("the rows once the pointer left", rows(), "s3,s2,s1,s4");
       expect("the headers once the pointer left", heads(), "timburr,plotkeeper");
-      expect("the strip once the pointer left", strip(), "s3,s2,s4,s1");
+      expect("the strip once the pointer left", strip(), "s3,s2,s1,s4");
       log("held ok");`,
     snapDone: "held ok",
   };

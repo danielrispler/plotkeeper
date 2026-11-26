@@ -33,10 +33,20 @@ test("a folded list in a wide window is its strip, and unfolded it is the full l
 
 test("the page opens on the last viewed project's map, else the first project's", () => {
   const saved = ["/w/falinks", "/w/plotkeeper", "/w/pokedex"];
-  assert.equal(startProject("/w/plotkeeper", saved), "/w/plotkeeper");
+  assert.equal(startProject("/w/plotkeeper", saved, saved), "/w/plotkeeper");
   // Never viewed, or since removed: the first project.
-  assert.equal(startProject(null, saved), "/w/falinks");
-  assert.equal(startProject("/w/removed", saved), "/w/falinks");
+  assert.equal(startProject(null, saved, saved), "/w/falinks");
+  assert.equal(startProject("/w/removed", saved, saved), "/w/falinks");
   // A fresh install has none.
-  assert.equal(startProject("/w/plotkeeper", []), null);
+  assert.equal(startProject("/w/plotkeeper", [], []), null);
+});
+
+test("the page falls back to the first project the list shows, while a last viewed project the list hides still opens", () => {
+  const saved = ["/tmp/scratch", "/w/gone", "/w/plotkeeper"];
+  const listed = ["/w/plotkeeper"];
+  assert.equal(startProject(null, saved, listed), "/w/plotkeeper");
+  assert.equal(startProject("/w/removed", saved, listed), "/w/plotkeeper");
+  // Its "gone, Remove project" view is unchanged.
+  assert.equal(startProject("/w/gone", saved, listed), "/w/gone");
+  assert.equal(startProject(null, saved, []), null);
 });

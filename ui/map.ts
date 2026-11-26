@@ -23,7 +23,7 @@ import { cameraRig, type CameraRig, fitCamera, panTo, revealPan, zoomAt } from "
 import { brokenParts, brokenText, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Drag, type Law, type Layer, type LayerName, type MapDoc, startProject, switchProject, parseMap, type Part, type Point, placement, plateSize, plateTitle, sizeOf, lineTag, linkLines, markPoints, readingOrder, rimPoint, type Scrub, tagWord, type Tier } from "./map-model.js";
 import { copyButton } from "./copy-button.js";
 import { recheckSeen } from "./seen.js";
-import { knownProjects, projectGone } from "./projects.js";
+import { knownProjects, listedProjects, projectGone } from "./projects.js";
 import type { Camera, MapDiff, MapState } from "./types.js";
 
 export type LoadedMap = Extract<MapDoc, { ok: true }>;
@@ -155,21 +155,20 @@ async function showReview(path: string) {
   box.hidden = false;
 }
 
-// The saved project list changed (#381): its first arrival opens the last viewed project, else the first, unless a selected session's
-// already shows (#386); a fresh install's first
-// project opens when it is added; a shown project that was removed gives way to the first saved one, and one whose folder went or came
-// back is drawn again.
+// The saved project list changed (#381): its first arrival opens the last viewed project, else the first the list shows, unless a selected
+// session's already shows (#386); a fresh install's first project opens when it is added; a shown project that was removed gives way to the
+// first the list shows, and one whose folder went or came back is drawn again.
 let started = false;
 export function projectsChanged() {
   const first = !started;
   started = true;
   // A session selected before the list arrived has already shown its project's map.
   if (project === null) {
-    const opening = startProject(lastViewed.get(), knownProjects());
+    const opening = startProject(lastViewed.get(), knownProjects(), listedProjects());
     if (first || opening !== null) openMap(opening);
     return;
   }
-  if (!first && !knownProjects().includes(project)) return openMap(knownProjects()[0] ?? null);
+  if (!first && !knownProjects().includes(project)) return openMap(listedProjects()[0] ?? null);
   if (projectGone(project) !== (element("map-body").querySelector(".map-gone") !== null)) openMap(project);
 }
 
