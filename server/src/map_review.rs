@@ -5,10 +5,13 @@
 //!   kind and id and kept with a hash of its text.
 //! - **The run** is of kind map review (`runner.rs`): Read, Glob and Grep, no `Edit` rule, no setup, 10 minutes. Its folder is a
 //!   `git archive` of the PR's head, fetched as `pull/<n>/head`, with no git data. Its prompt holds plotkeeper's instructions and
-//!   the items' ids, never their text: the agent reads that from `system-map.json` in its folder.
+//!   the items' kinds and ids, of bounded characters and length ([`takes`]), never their text: the agent reads that from
+//!   `system-map.json` in its folder.
 //! - **When it runs.** On its own when a brief is stored at a head with changed text and the PR is by Daniel's own login
 //!   ([`MapReviews::brief_stored`]); for any other PR on "Review map text" ([`MapReviews::request`]). A new head cancels the
-//!   review of an older one, queued or running. A head whose items were all judged before, by id and hash, runs nothing.
+//!   review of an older one, queued or running, and only the PR's head as the lookups last saw it starts or cancels one. A head
+//!   whose items were all judged before, by id and hash, runs nothing. A run the login or a limit stopped is submitted again and
+//!   waits for Resume; a run whose answer is kept is dismissed.
 //! - **Kept** in the data folder, `map-reviews/<project>-<hash>/<pr>.json`: each verdict by item id and hash, and each head's
 //!   items and state.
 
