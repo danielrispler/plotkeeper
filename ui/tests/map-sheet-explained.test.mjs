@@ -71,19 +71,20 @@ const explanations = (on) => {
   studio.files = { ...studio.files, settings: { ...studio.files.settings, explanations: on } };
 };
 
-test("on: each heading, the selected tier and the links carry their lines, kinds and not yet ratified at their first link only", () => {
+test("on: each fold, the selected tier and the links carry their lines, kinds and not yet ratified at their first link only", () => {
   explanations(true);
   const { card, toggle } = sheetCard(view(), plugins);
   assert.equal(toggle.getAttribute("aria-pressed"), "true");
   assert.equal(hintOf(toggle)?.textContent, "Hide explanations");
-  const headings = classed(card, "sheet-heading");
-  // The Fog section's line is the catch-up card's now (#636).
-  assert.deepEqual(headings.map((h) => h.text), ["Holds", "Tier", "Laws", "Talks to", "CI on main"]);
-  for (const heading of headings) {
-    const line = byId(card, heading.getAttribute("aria-describedby"));
-    assert.ok(line, `"${heading.text}" points at its line`);
+  // Each fold's summary is its heading (#637); the Fog section's line is the catch-up card's (#636).
+  const folds = classed(card, "sheet-fold").filter((fold) => !fold.hidden);
+  const summaries = folds.map((fold) => classed(fold, "sheet-fold-summary")[0]);
+  assert.deepEqual(summaries.map((s) => classed(s, "sheet-fold-title")[0].text), ["Laws", "Talks to", "Holds", "Tier", "CI on main", "History"]);
+  for (const summary of summaries) {
+    const line = byId(card, summary.getAttribute("aria-describedby"));
+    assert.ok(line, `"${summary.text}" points at its line`);
   }
-  assert.equal(byId(card, headings[1].getAttribute("aria-describedby")).text, SHEET.tier);
+  assert.equal(byId(card, summaries[3].getAttribute("aria-describedby")).text, SHEET.tier);
   // The selected tier, Core, is described by its meaning; the others are not.
   const tiers = classed(card, "sheet-tiers")[0].childNodes.filter((child) => child instanceof El);
   const pressed = tiers.find((button) => button.getAttribute("aria-pressed") === "true");

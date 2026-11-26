@@ -297,6 +297,53 @@ export function sheetCi(ci: Ci | null, part: string, backed: boolean): { line: s
   return { line: ciLine(ci), broken, drill: ci !== null && ci.status !== "unknown" };
 }
 
+/**
+ * The part sheet's folds (spec #633, ticket #637), from most to least used: Laws, Talks to, This session here (hidden while no session's
+ * story is open beside the sheet), Holds (none when the part holds nothing), Tier, CI on main (when `ci` is shown at all) and History; CI on
+ * main leads when a run breaks one of the part's laws.
+ */
+export type FoldKey = "laws" | "talks" | "here" | "holds" | "tier" | "ci" | "history";
+export const foldTitles: Record<FoldKey, string> = { laws: "Laws", talks: "Talks to", here: "This session here", holds: "Holds", tier: "Tier", ci: "CI on main", history: "History" };
+export function foldOrder(ci: { broken: boolean } | null, holds: boolean): FoldKey[] {
+  const order: FoldKey[] = ["laws", "talks", "here", ...(holds ? (["holds"] as const) : []), "tier", ...(ci && !ci.broken ? (["ci"] as const) : []), "history"];
+  return ci?.broken ? ["ci", ...order] : order;
+}
+
+const counted = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+// CI on main in a word, beside its fold's title and on its chip.
+const ciWord = (ci: Ci | null): string => {
+  switch (ci?.status) {
+    case "passed": return "passing";
+    case "broken": return "failing";
+    case "not-run":
+    case "unreadable": return "failed";
+    default: return "not read";
+  }
+};
+/**
+ * The short values beside the folds' titles that are known when the sheet is drawn (History's rows load after, so it has none), and the
+ * chips' words.
+ */
+export function sheetGlances(sheet: Sheet, links: number, ci: Ci | null) {
+  const tested = sheet.laws.filter((law) => law.backing === "check").length;
+  const tier = sheet.tiers.find((each) => each.pressed)?.label ?? "";
+  return {
+    folds: {
+      laws: sheet.laws.length ? `${sheet.laws.length} · ${tested} tested` : "None",
+      talks: links ? counted(links, "link", "links") : "None",
+      holds: counted(sheet.holds.length, "thing", "things"),
+      tier,
+      ci: ciWord(ci),
+    },
+    chips: {
+      tier,
+      laws: sheet.laws.length ? counted(sheet.laws.length, "law", "laws") : "No laws",
+      talks: links ? counted(links, "link", "links") : "No links",
+      ci: `CI ${ciWord(ci)}`,
+    },
+  };
+}
+
 /** "See the proof" for a law: each tagged test's code from the tag on. The page has no editor to jump to. */
 export function proofDrawer(law: string, proofs: Proof[]): Drawer {
   const blocks: Block[] = proofs.map((proof) => ({
