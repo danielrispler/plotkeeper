@@ -1,7 +1,7 @@
 // Ratifying's pure part (ticket #343), run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { copyOverturn, decideWith, detailLines, evidenceLine, noteFor, openRows, overturnPrompt, overturnReport, ratifyStep, sheetLinkItem, sheetPending, siteDrawer, sitesDrawer, statusWords } from "../../dist/ratify.js";
+import { copyOverturn, decideWith, detailLines, evidenceLine, mapCheckLine, noteFor, openRows, overturnPrompt, overturnReport, ratifyStep, sheetLinkItem, sheetPending, siteDrawer, sitesDrawer, statusWords } from "../../dist/ratify.js";
 
 // A row with no detail of its own, as the page reads one whose kind has none.
 const row = (kind, id, status = "not-yet", extra = {}) => /** @type {import("../../dist/types.js").RatifyRow} */ ({ pr: 7, kind, id, text: `${id} text`, change: "", status, ...extra });
@@ -145,6 +145,23 @@ test("a brief with Guard with a law ends with the step even with nothing to rati
   assert.equal(step.h, "Guard with a law");
   assert.equal(ratifyStep([row("law", "l1")], [], true).h, "Accept or overturn", "beside Ratify's items");
   assert.equal(ratifyStep([], [], false), null);
+});
+
+test("the head's map check line counts its problems, and there is none when the check passes (#641)", () => {
+  assert.equal(mapCheckLine([]), null);
+  assert.equal(mapCheckLine(undefined), null, "a brief stored before the check");
+  assert.equal(mapCheckLine(["stray/s.ts is tracked but no part owns it"]), "The map check fails at this head: 1 problem");
+  assert.equal(mapCheckLine(["a", "b", "c"]), "The map check fails at this head: 3 problems");
+});
+
+test("a line at Ratify's head brings the step with nothing to ratify; rows and Guard with a law keep their titles (#641)", () => {
+  const step = ratifyStep([], ["core"], false, true);
+  assert.equal(step?.k, "Ratify");
+  assert.equal(step?.h, "The map at this head");
+  assert.deepEqual(step?.on, ["core"]);
+  assert.equal(ratifyStep([row("law", "l1")], [], false, true)?.h, "Accept or overturn");
+  assert.equal(ratifyStep([], [], true, true)?.h, "Guard with a law");
+  assert.equal(ratifyStep([], [], false, false), null);
 });
 
 test("an overturn's note shows only where its item is drawn: its project, and the item's PR, kind and id", () => {

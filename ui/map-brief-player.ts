@@ -7,7 +7,7 @@ import { currentScrub } from "./map.js";
 import { scrubTo } from "./map-history.js";
 import { watchSeen } from "./seen.js";
 import { logStop } from "./stop-rules.js";
-import { ratifyStep } from "./ratify.js";
+import { mapCheckLine, ratifyStep } from "./ratify.js";
 import { briefPlayer, chapterGate, type Gate, playlist, storySteps } from "./map-brief-model.js";
 import { catchUpIds } from "./map-catch-up.js";
 import type { BriefStep, BriefView, RatifyRow, StoredCatchUp } from "./types.js";
@@ -53,8 +53,10 @@ export const steps = (): BriefStep[] => {
   const now = player.current();
   if (!playing || !now) return [];
   const list = playlist(playing.brief.brief, now.chapter, now.overview);
-  // The ratify step ends the last chapter (the only one of a single story), and holds Guard with a law's row when the brief offers it (#401).
-  const ratify = now.chapter >= Math.max(0, playing.brief.brief.chapters.length - 1) ? ratifyStep(ratifying.filter((row) => row.status !== "ratified"), [...new Set(list.flatMap((step) => step.on))], !!playing.brief.guard) : null;
+  // The ratify step ends the last chapter (the only one of a single story), and holds Guard with a law's row when the brief offers it (#401)
+  // and its head's lines when it has any (#641).
+  const head = !!mapCheckLine(playing.brief.map_problems);
+  const ratify = now.chapter >= Math.max(0, playing.brief.brief.chapters.length - 1) ? ratifyStep(ratifying.filter((row) => row.status !== "ratified"), [...new Set(list.flatMap((step) => step.on))], !!playing.brief.guard, head) : null;
   return ratify ? [...list, ratify] : list;
 };
 
