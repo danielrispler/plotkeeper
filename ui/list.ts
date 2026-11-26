@@ -16,6 +16,7 @@ import { titled } from "./keys.js";
 import { stateLabels, type MarkWhy, type ProjectMark, type Session, type SessionState, type Subagent } from "./types.js";
 import { hoverAgents, refreshAgents, rowNote } from "./map-agents.js";
 import { showTitle } from "./alerts.js";
+import { briefMarkFor, openBriefOnMap, waitingOf } from "./rail-brief.js";
 import {
   agentLine,
   agentState,
@@ -271,10 +272,10 @@ function icon(name: string, path: string, click: () => void): HTMLElement {
 }
 
 /**
- * A row in the list: its toggle, when anything is drawn under it, then the row, then its delete. They
+ * A row in the list: its toggle, when anything is drawn under it, then the row, then its PR brief's mark (#630) and its delete. They
  * are the row's siblings, as a button holds no button, so pressing them does not select the row.
  */
-export function item(key: string, depth: number, toggle: { open: boolean; hiding: number } | null, row: HTMLElement, remove: HTMLElement | null) {
+export function item(key: string, depth: number, toggle: { open: boolean; hiding: number } | null, row: HTMLElement, remove: HTMLElement | null, brief: HTMLElement | null = null) {
   const node = document.createElement("div");
   node.className = "item";
   node.dataset.key = key;
@@ -294,7 +295,7 @@ export function item(key: string, depth: number, toggle: { open: boolean; hiding
     fold.style.insetInlineStart = `calc(var(--indent) * ${depth})`;
     node.append(fold);
   }
-  node.append(row, ...(remove ? [remove] : []));
+  node.append(row, ...(brief ? [brief] : []), ...(remove ? [remove] : []));
   return node;
 }
 
@@ -324,7 +325,8 @@ function tree(session: Session, token: string | null): HTMLElement[] {
   const under = shut.has("session");
   const unattached = rows("unattached", 2, under);
   const label = text("p", "Unattached", "unattached");
-  const top = item(`${session.id} session`, 0, folds(session, children, ["session", "unattached"], shut), row(session, children, token), deleting(session));
+  const brief = briefMarkFor(session, waitingOf(session, drawSidebar), openBriefOnMap);
+  const top = item(`${session.id} session`, 0, folds(session, children, ["session", "unattached"], shut), row(session, children, token), deleting(session), brief);
   return [top, ...rows("session", 1, under), ...(unattached.length ? [label, ...unattached] : [])];
 }
 

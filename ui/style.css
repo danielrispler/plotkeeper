@@ -149,7 +149,7 @@ h1 { margin: 0 0 var(--sp-4); }
 .item { position: relative; }
 .item > .row.session-row { padding-inline-start: calc(var(--sp-4) + var(--indent)); }
 .item > .row { padding-inline-end: calc(var(--sp-4) + var(--control)); }
-.item .fold, .item .delete { position: absolute; top: var(--sp-1); display: grid; place-items: center; width: var(--control); height: var(--control);
+.item .fold, .item .delete, .item .brief-mark { position: absolute; top: var(--sp-1); display: grid; place-items: center; width: var(--control); height: var(--control);
                              padding: 0; border-radius: var(--radius-small); background: none; color: var(--muted); }
 .item .fold svg, .item .delete svg { width: var(--icon); height: var(--icon); }
 .item .fold svg { transition: transform var(--motion); }
@@ -158,8 +158,12 @@ h1 { margin: 0 0 var(--sp-4); }
 .item .fold[aria-expanded="true"]:dir(rtl) svg { transform: scaleX(-1) rotate(90deg); }
 /* Hidden by opacity, not visibility, so Shift+Tab still reaches it (#462). */
 .item .delete { inset-inline-end: var(--sp-2); opacity: 0; }
+/* A session row's PR brief mark (#630): the project dot's mist, no colour, in its own control left of the delete's. */
+.item:has(> .brief-mark) > .row { padding-inline-end: calc(var(--sp-4) + var(--control) * 2); }
+.item .brief-mark { inset-inline-end: calc(var(--sp-2) + var(--control)); }
+.item .brief-mark .mist-swatch { margin: 0; background: var(--mist-thick); filter: blur(var(--sp-1)); }
 .item:hover .delete, .item:focus-within .delete, .item:has(> .row[aria-pressed="true"]) .delete { opacity: 1; }
-.item .fold:hover, .item .delete:hover { color: var(--fg); background: var(--hover); }
+.item .fold:hover, .item .delete:hover, .item .brief-mark:hover { color: var(--fg); background: var(--hover); }
 /* A landed task's session: a monochrome check mark, no colour (#53). */
 .glyph[data-glyph="check"]::after { content: "✓"; color: var(--muted); font-size: var(--size-xs); line-height: 1; }
 /* Status by shape (danielrispler/Falinks#572): a spinner while running, a dot at your turn, a filled dot once unseen, a ring
