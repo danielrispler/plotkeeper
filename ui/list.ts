@@ -1,6 +1,6 @@
 // The session list, on the window's right: one line per session, sorted by state, its status shown
-// by shape (danielrispler/Falinks#572), each session's subagents nested under it. When the window is narrow it collapses to
-// a strip of glyphs and labels, which opens the full list on hover, on click or on ⌘1. Its pure parts are `list-model.ts`.
+// by shape (danielrispler/Falinks#572), each session's subagents nested under it. When the window is narrow, or `[` folds it,
+// it collapses to a strip of glyphs and labels, which opens the full list on hover, on click or on `[`. Its pure parts are `list-model.ts`.
 
 import { logStop } from "./stop-rules.js";
 import { age, cut, element, failure, glyphOnly, hint, invoke, keepOnly, keyed, mark, newest, patch, pressable, prose, stepText, text } from "./dom.js";

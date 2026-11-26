@@ -49,7 +49,7 @@ code:empty { display: none; }
 
 /* The window (#386), Treatment C's frame: a 34 px top bar over a grid of the map and the session list, laid right to left so the list is on
    the right; each region lays itself out left to right. The list and the map are told apart by tone and the map's rounded corner, never a line. */
-.app { direction: rtl; display: grid; grid-template-rows: var(--bar) 1fr; grid-template-columns: var(--list) 1fr; height: 100vh; }
+.app { direction: rtl; display: grid; grid-template-rows: var(--bar) 1fr; grid-template-columns: var(--list-column, var(--list)) 1fr; height: 100vh; }
 .app > * { direction: ltr; min-height: 0; min-width: 0; }
 /* Focus mode (danielrispler/Falinks#573): the list folds, still in the grid, and the map takes the window. */
 body[data-layout="focus"] .list { visibility: hidden; }
@@ -78,14 +78,15 @@ body[data-layout="focus"] .list { visibility: hidden; }
 .top .chip { color: var(--needs-you); background: var(--needs-you-bg); font-weight: 600; }
 .top .chip:hover { color: var(--needs-you); background: var(--needs-you-line); }
 
-/* The session list: full, or a strip that opens over the terminal on hover, on click or on ⌘1; the
-   overlay never moves the terminal (danielrispler/Falinks#572). */
+/* The session list: full, or a strip that opens over the map on hover, on click or on `[`; the overlay never moves the map
+   (danielrispler/Falinks#572). In a wide window `[` swaps the full list for the strip (spec #658), so the overlay's classes act only on a
+   strip: the full list is never fixed over the map. */
 .list { overflow-y: auto; position: relative; z-index: 3; }
 .full { padding: var(--sp-4) var(--sp-3); }
 .strip { display: none; flex-direction: column; align-items: center; gap: var(--sp-2); padding: var(--sp-4) 0; }
 body:not([data-layout="full"]) .full { display: none; }
 body:not([data-layout="full"]) .strip { display: flex; }
-body.list-open .full, body.list-peek:not([data-layout="full"]) .full {
+body:is(.list-open, .list-peek):not([data-layout="full"]) .full {
   display: block !important; position: fixed; top: var(--bar); bottom: 0; right: 0; width: var(--list);
   background: var(--surface); box-shadow: var(--shadow-start); overflow-y: auto; z-index: 6; }
 .strip .btn { width: var(--strip-button); padding: var(--sp-2) 0; display: flex; flex-direction: column; align-items: center;

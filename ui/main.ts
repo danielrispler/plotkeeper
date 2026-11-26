@@ -46,11 +46,14 @@ import { startWhatsNew } from "./whats-new.js";
 import type { SavedProject, Selection, Session, SessionCards, SettingsFiles } from "./types.js";
 import { explanationsApplied, startExplanations, toggleExplanations } from "./explanations.js";
 
-// The list's width by the window's (`layout.ts`): in full from 1007 px, else its strip; focus mode folds it. The body is `narrow` below
-// 1007 px in every mode, for what the map hides there.
+// The list's width by the window's (`layout.ts`): in full from 1007 px, else its strip; focus mode folds it, and Toggle list in a wide
+// window folds it to its strip (`folded`, page state like focus mode). The body is `narrow` below 1007 px in every mode, for what the map
+// hides there.
+let folded = false;
 function layout() {
-  const { mode, list } = arrange(window.innerWidth, { focus: studio.focus });
-  document.documentElement.style.setProperty("--list", `${list}px`);
+  const { mode, list } = arrange(window.innerWidth, { focus: studio.focus, folded });
+  // The list's column; `--list` stays the full list's width, which the list open over the map from its strip takes.
+  document.documentElement.style.setProperty("--list-column", `${list}px`);
   document.body.dataset.layout = mode;
   document.body.classList.toggle("narrow", window.innerWidth < narrowBelow);
   showToast();
@@ -59,7 +62,7 @@ logUncaught(window);
 window.addEventListener("resize", layout);
 // The server counts a turn seen only while the story shows its session (danielrispler/Falinks#556): in the left panel over the map (#385, #386).
 const tellShown = shownGate(realClock, (shown) => invoke("rail_shown", { shown }).catch(failure("rail_shown")));
-// The list's strip opens over the map on a rest of the pointer (hover.ts); a click, ⌘1 and Esc keep working. They change the body's classes,
+// The list's strip opens over the map on a rest of the pointer (hover.ts); a click, `[` and Esc keep working. They change the body's classes,
 // which the observer below hands to the machine.
 const listHover = hover(realClock, (open) => document.body.classList.toggle("list-peek", open));
 const syncHover = () => {
@@ -84,7 +87,7 @@ list.addEventListener("pointerleave", () => listHover.leave("list"));
 window.addEventListener("layout", layout);
 layout();
 
-// The page's shortcuts, from `keymap.json` (danielrispler/Falinks#524). By default ⌘1 opens the list from its strip, Esc closes it and
+// The page's shortcuts, from `keymap.json` (danielrispler/Falinks#524). By default `[` toggles the list (`studio::ToggleList`), Esc closes it and
 // peels the map's layers, ⌘⇧↩ toggles focus mode. A needs-you only toasts (danielrispler/Falinks#573).
 const toggle = (name: string) => document.body.classList.toggle(name);
 // The keyboard spine (danielrispler/Falinks#575): ⌘] and ⌘[ step through the sessions, ⌘J goes to the next needs-you, else the next unseen, ↑
@@ -123,9 +126,16 @@ function answer(n: number) {
 }
 
 const named: Record<string, (arg?: string) => void> = {
-  "studio::ToggleList": () => toggle("list-open"),
+  // Wide, the full list and its strip swap, and the overlay's classes go, so the full list never stays fixed over the map (spec #658);
+  // the strip then opens over the map as at narrow widths. Narrow, or in focus mode, the list opens over the map or closes.
+  "studio::ToggleList": () => {
+    if (window.innerWidth < narrowBelow || studio.focus) return void toggle("list-open");
+    folded = !folded;
+    document.body.classList.remove("list-open", "list-peek");
+    layout();
+  },
   // The selected session's story, which lives in the left panel over the map (#386): shown, or closed back to the bare map with the
-  // session still selected, so ⌘2 opens it again.
+  // session still selected, so Toggle rail (`]`) opens it again.
   "studio::ToggleRail": () => {
     const id = selectedId();
     if (panelShown()?.kind === "story") showPanel(null, true);

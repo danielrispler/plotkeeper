@@ -231,7 +231,7 @@ const worldBox = (current: MapView) => {
   };
 };
 
-/** ⌘0 and the palette's Fit map: the whole map in the area. */
+/** `0` and the palette's Fit map: the whole map in the area. */
 export function fitMap() {
   if (!mapShown() || !view || !Object.keys(view.positions).length) return;
   const { canvas } = view.slots;

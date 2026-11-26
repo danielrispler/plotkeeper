@@ -235,6 +235,11 @@ export function sayAction(words: string) {
  */
 export function cut<T extends HTMLElement>(node: T, words?: string): T {
   if (!/(^| )cut( |$)/.test(node.className)) node.className = `${node.className} cut`.trim();
+  // No words leave the node empty, so a rule such as the header's `:empty` hides it (spec #658).
+  if (words === "" || (words === undefined && !node.hasChildNodes())) {
+    node.replaceChildren();
+    return node;
+  }
   const inner = document.createElement("span");
   if (words === undefined) inner.append(...node.childNodes);
   else inner.textContent = words;

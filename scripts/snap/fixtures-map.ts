@@ -991,7 +991,7 @@ export const mapCalm = () =>
     log("plates " + plates + ", marks " + checks + "/" + trusts);`, { map_state: mapState() });
 /**
  * The map's camera (#383): an empty point of the map is the map itself (no layer over it), a drag there pans, a wheel and a pinch
- * zoom up to 200 % and never scroll the page, and ⌘0 fits the whole map; no part's place changes. Shown fitted.
+ * zoom up to 200 % and never scroll the page, and `0` fits the whole map; no part's place changes. Shown fitted.
  */
 export const mapCamera = () =>
   mapOpened(`
@@ -1029,14 +1029,14 @@ export const mapCamera = () =>
     if (camera().scale !== 2) log("snap:fail zoom is not held at 200 %: " + camera().scale);
     for (let i = 0; i < 40; i++) canvas.dispatchEvent(wheel({ deltaY: 300 }));
     if (camera().scale !== 0.4) log("snap:fail zoom is not held at 40 %: " + camera().scale);
-    document.dispatchEvent(new KeyboardEvent("keydown", { code: "Digit0", key: "0", metaKey: true, bubbles: true }));
+    document.dispatchEvent(new KeyboardEvent("keydown", { code: "Digit0", key: "0", bubbles: true }));
     const fitted = camera();
-    if (fitted.scale === 0.4) log("snap:fail ⌘0 did not fit the map");
+    if (fitted.scale === 0.4) log("snap:fail 0 did not fit the map");
     // Headless Chrome's virtual time does not run the fit's glide: skip to where it ends.
     world().classList.remove("glide");
     await wait(100);
     const shown = [...document.querySelectorAll("#map .plate, #map .actor")].map((n) => n.getBoundingClientRect());
-    if (shown.some((r) => r.left < box.left || r.right > box.right || r.top < box.top || r.bottom > box.bottom)) log("snap:fail ⌘0 left a part outside the map");
+    if (shown.some((r) => r.left < box.left || r.right > box.right || r.top < box.top || r.bottom > box.bottom)) log("snap:fail 0 left a part outside the map");
     if (places() !== before) log("snap:fail a part's saved position changed");
     log("camera ok: fitted at " + Math.round(fitted.scale * 100) + "% over " + shown.length + " items");`, { map_state: mapState() });
 /** The Map view with fog (#310): thin and thick fog on Core and interface parts, and the part sheet of a thick one open. */

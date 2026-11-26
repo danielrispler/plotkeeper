@@ -376,17 +376,65 @@ export const mapPanelPeel = (): Fixture =>
       if (document.getElementById("map").hidden) log("snap:fail Esc left the Map view while a layer was open");
       checkAll("after Esc");
       log("panel ok");`);
-/** ⌘2 closes the selected session's story and opens it again: the session stays selected while it is closed. */
+/** `]` closes the selected session's story and opens it again: the session stays selected while it is closed. */
 export const mapPanelToggle = (): Fixture =>
   mapPanel(`
       await press(row("s2"));
-      const cmd2 = async () => { document.dispatchEvent(new KeyboardEvent("keydown", { code: "Digit2", key: "2", metaKey: true, bubbles: true })); await wait(300); };
-      if (!panelOpen()) return log("snap:fail the row's press did not open its story before ⌘2");
-      await cmd2();
-      if (panelOpen()) log("snap:fail ⌘2 did not close the story");
-      if (row("s2").getAttribute("aria-pressed") !== "true") log("snap:fail ⌘2 deselected the session");
-      await cmd2();
-      if (!panelOpen() || document.getElementById("session-name").textContent !== "Ship PR 286") log("snap:fail ⌘2 did not open the story again");
+      const bracket = async () => { document.dispatchEvent(new KeyboardEvent("keydown", { code: "BracketRight", key: "]", bubbles: true })); await wait(300); };
+      if (!panelOpen()) return log("snap:fail the row's press did not open its story before ]");
+      await bracket();
+      if (panelOpen()) log("snap:fail ] did not close the story");
+      if (row("s2").getAttribute("aria-pressed") !== "true") log("snap:fail ] deselected the session");
+      await bracket();
+      if (!panelOpen() || document.getElementById("session-name").textContent !== "Ship PR 286") log("snap:fail ] did not open the story again");
+      log("panel ok");`);
+/**
+ * `[` in a wide window (spec #658, user stories 29–31): the full list gives way to its 56 px strip and the map takes the width; a press on
+ * the strip's ☰ opens the full list over the map; `[` again brings the full list back in its column, with no overlay class left and the
+ * full list never fixed over the map. Shown with the list back. `mapListFoldNarrow`: below 1007 px `[` opens the list over the map and
+ * closes it again, as ⌘1 did.
+ */
+export const mapListFold = (): Fixture =>
+  mapPanel(`
+      const bracket = async () => { document.dispatchEvent(new KeyboardEvent("keydown", { code: "BracketLeft", key: "[", bubbles: true })); await wait(300); };
+      const full = document.querySelector("nav.list .full");
+      const stripNode = document.getElementById("strip");
+      const shows = (node) => node.getClientRects().length > 0;
+      if (narrow) {
+        if (document.body.dataset.layout !== "strip" || shows(full)) return log("snap:fail below 1007 px the list is not its strip");
+        await bracket();
+        if (!document.body.classList.contains("list-open") || !shows(full) || getComputedStyle(full).position !== "fixed") log("snap:fail below 1007 px [ did not open the list over the map");
+        if (document.body.dataset.layout !== "strip") log("snap:fail below 1007 px [ changed the layout: " + document.body.dataset.layout);
+        if (Math.round(full.getBoundingClientRect().width) !== 252) log("snap:fail the list over the map is " + full.getBoundingClientRect().width + " px wide, not 252");
+        await bracket();
+        if (document.body.classList.contains("list-open") || shows(full)) log("snap:fail below 1007 px [ again did not close the list");
+        return log("panel ok");
+      }
+      const mapBox = () => document.getElementById("map").getBoundingClientRect();
+      const wide = mapBox().width;
+      if (document.body.dataset.layout !== "full" || !shows(full) || shows(stripNode)) return log("snap:fail the wide window does not open on the full list");
+      await bracket();
+      if (document.body.dataset.layout !== "strip") log("snap:fail [ did not fold the list to its strip: " + document.body.dataset.layout);
+      if (shows(full) || !shows(stripNode)) log("snap:fail [ left the full list or hid the strip");
+      if (Math.round(document.querySelector("nav.list").getBoundingClientRect().width) !== 56) log("snap:fail the folded list is " + document.querySelector("nav.list").getBoundingClientRect().width + " px wide, not 56");
+      if (!(mapBox().width > wide)) log("snap:fail the map did not take the list's width");
+      const opened = mapBox();
+      stripNode.querySelector(".open").click();
+      await wait(300);
+      if (!shows(full) || getComputedStyle(full).position !== "fixed") log("snap:fail the strip's press did not open the full list over the map");
+      if (mapBox().width !== opened.width) log("snap:fail the list open over the map moved the map");
+      if (Math.round(full.getBoundingClientRect().width) !== 252) log("snap:fail the list over the map is " + full.getBoundingClientRect().width + " px wide, not 252");
+      await bracket();
+      if (document.body.dataset.layout !== "full") log("snap:fail [ again did not bring the full list back: " + document.body.dataset.layout);
+      const left = ["list-open", "list-peek"].filter((name) => document.body.classList.contains(name));
+      if (left.length) log("snap:fail [ again left the overlay's classes: " + left.join());
+      if (!shows(full) || shows(stripNode) || getComputedStyle(full).position === "fixed") log("snap:fail the full list is not back in its column");
+      if (Math.round(mapBox().width) !== Math.round(wide)) log("snap:fail the map is " + mapBox().width + " px wide with the list back, not " + wide);
+      // An overlay class left from a narrow window never fixes the full list over the map.
+      document.body.classList.add("list-open");
+      if (getComputedStyle(full).position === "fixed") log("snap:fail list-open fixes the full list over the map in the full layout");
+      document.body.classList.remove("list-open");
+      checkPlaces("after [");
       log("panel ok");`);
 /** A turn's whole diff, widened, from the palette: it closes the part's sheet; its Back shows the story again. */
 export const mapPanelDiff = (): Fixture =>
@@ -950,3 +998,35 @@ export const mapPanelHead = (): Fixture =>
   // An ended session, so the list has its History link; #311's turn has its id, as in mapPanel, for its diff.
   sessions: [...busySessions().map((s) => (s.id === "s1" ? { ...s, turns: s.turns.map((t) => ({ ...t, id: "t1", message: "Chips on the parts a turn touches" })) } : s)), session("e1", "Map view drawer, #312", "ended", { last_event_at: Date.now() - 2 * 86400e3 })],
 });
+/**
+ * The story header's line 2 (spec #658): only the items a session has, one "·" between them. A running session with no phase, one that needs
+ * you with no block kind, and one with neither nor a mode show no empty item, so never "Running ·" or "Running · · auto mode"; a session whose
+ * estimate's lower bound has passed reads "est. up to 12m left", and the header's hover starts with that phase and estimate.
+ */
+export const mapPanelLine2 = (): Fixture => {
+  const min = 60e3;
+  const implementing = { kind: null, phases: [{ phase: "implementing" as const, at: Date.now() - 5 * min, agent_ms: 0 }], agent_ms: 0, estimate: { range: [0, 12 * min] as [number, number], depends_on_you: false } };
+  const sessions = [
+    session("s1", "#320 · Mode only", "running", { permission_mode: "auto" }),
+    session("s2", "#321 · Needs you, no block", "needs_you", { permission_mode: "auto" }),
+    session("s3", "#322 · Nothing else", "running"),
+    session("s4", "#323 · Estimate passed", "running", { permission_mode: "auto", work: implementing }),
+  ];
+  return mapPanel(`
+      const line = () => {
+        const items = [...document.querySelectorAll("#headline .line-2 > *")];
+        const stray = items.filter((node) => node.getClientRects().length && !node.textContent.trim()).map((node) => node.id);
+        if (stray.length) log("snap:fail line 2 shows empty " + stray.join());
+        return items.filter((node) => node.getClientRects().length).map((node) => node.textContent).join(" · ");
+      };
+      const want = { s1: "Running · auto mode", s2: "Needs you · auto mode", s3: "Running", s4: "Running · auto mode · Implementing · est. up to 12m left" };
+      for (const [key, words] of Object.entries(want)) {
+        await press(row(key));
+        if (!panelOpen()) return log("snap:fail " + key + "'s press did not open its story");
+        if (line() !== words) log("snap:fail " + key + "'s line 2 reads " + JSON.stringify(line()) + ", not " + JSON.stringify(words));
+        const hover = document.getElementById(document.getElementById("headline").getAttribute("data-hint"))?.textContent ?? "";
+        if (key === "s4" && !hover.startsWith("Implementing · est. up to 12m left · Session ")) log("snap:fail the header's hover reads " + JSON.stringify(hover));
+        if (key !== "s4" && !hover.startsWith("Session ")) log("snap:fail " + key + "'s header hover reads " + JSON.stringify(hover));
+      }
+      log("panel ok");`, { sessions, select: { __by: "id", values: Object.fromEntries(sessions.map((s) => [s.id, { session: s, agent: null }])) } });
+};

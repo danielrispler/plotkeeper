@@ -20,6 +20,17 @@ test("focus mode folds the list, and the same key restores it", () => {
   }
 });
 
+// Toggle list in a wide window (spec #658, user stories 29–31): the strip in the full list's place, and the same key restores it.
+test("a folded list in a wide window is its strip, and unfolded it is the full list again", () => {
+  for (const window of [2560, 1512, 1007]) {
+    assert.deepEqual(arrange(window, { folded: true }), { mode: "strip", list: 56 });
+    assert.deepEqual(arrange(window, { folded: false }), { mode: "full", list: 252 });
+  }
+  // Narrow, the list is its strip either way; focus mode still folds it whole.
+  assert.deepEqual(arrange(1000, { folded: true }), { mode: "strip", list: 56 });
+  assert.deepEqual(arrange(1512, { folded: true, focus: true }), { mode: "focus", list: 0 });
+});
+
 test("the page opens on the last viewed project's map, else the first project's", () => {
   const saved = ["/w/falinks", "/w/plotkeeper", "/w/pokedex"];
   assert.equal(startProject("/w/plotkeeper", saved), "/w/plotkeeper");

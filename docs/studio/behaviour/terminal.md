@@ -6,7 +6,9 @@ The page's shortcuts (`ui/keys.ts`, from `keymap.json`, see [Settings files](../
 
 | Shortcut | Does |
 |---|---|
-| Cmd+1, Cmd+2 | opens the session list, the story rail |
+| [ | shows or hides the session list: in a wide window it swaps the full list for its strip and back, below 1007 px it opens the list over the map and closes it |
+| ] | closes the selected session's story and opens it again, the session staying selected |
+| 0 | fits the whole map in view |
 | Cmd+], Cmd+[ | selects the next, the previous session in the list's order |
 | Cmd+J | selects the next session that needs you, else the next unseen one |
 | Up, Down | while the list has focus, selects the row above, below |
@@ -15,4 +17,4 @@ The page's shortcuts (`ui/keys.ts`, from `keymap.json`, see [Settings files](../
 | Cmd+Shift+M, Cmd+Shift+H | back to the map: closes the left panel (`studio::ShowMap`; a `keymap.json` that still names `studio::GoHome` gets the same) |
 | Cmd+Shift+P | the palette: every action with its key; type to filter, Enter runs |
 
-The page has no zoom key: the browser zooms it. A Cmd shortcut the browser owns stays the browser's.
+The page has no zoom key: the browser zooms it. A Cmd shortcut the browser owns stays the browser's: `[`, `]` and `0` took the place of Cmd+1, Cmd+2 and Cmd+0, which Chrome uses to switch tabs and reset its zoom (spec #658). Like every shortcut without Cmd, they leave the key to a text box you are typing in. A `keymap.json` that binds the old keys keeps them.
