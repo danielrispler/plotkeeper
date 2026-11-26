@@ -220,6 +220,30 @@ export const mapPreFlightOutsideKept = (): Fixture =>
       document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", key: "Escape", bubbles: true }));
       await wait(100);
       if (shown()) log("snap:fail Esc did not close the overlay");`, "pre-flight kept ok");
+/**
+ * The palette's Pre flight, with a real pointer, toggles the overlay as its button does: a press in the palette is not a press outside
+ * Pre-flight (spec #658's review), so the open result closes, and the next press opens it again.
+ */
+export const mapPreFlightPalette = (): Fixture =>
+  preFlightPressed(`
+      const palette = document.getElementById("palette");
+      const row = async () => {
+        document.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyP", key: "P", metaKey: true, shiftKey: true, bubbles: true }));
+        await wait(150);
+        const found = [...palette.querySelectorAll("button.row")].find((b) => b.querySelector(".name")?.textContent === "Pre flight");
+        found?.scrollIntoView({ block: "nearest" });
+        await wait(50);
+        return found;
+      };
+      const closing = await row();
+      if (!closing) return log("snap:fail the palette has no Pre flight row: " + palette.textContent.slice(0, 200));
+      await click(closing);
+      await wait(150);
+      if (shown()) log("snap:fail the palette's Pre flight left the open overlay open");
+      const opening = await row();
+      await click(opening);
+      await wait(150);
+      if (!shown()) log("snap:fail the palette's Pre flight did not open the closed overlay");`, "pre-flight palette ok");
 // Back a law (#398): Hook's law on trust offers Back a law; Core's law on trust has a proven patch, and Review opens the patch review over
 // the map with the test patch, the output with the test alone and with the plant, and Discard.
 const lawPatchDiff = [

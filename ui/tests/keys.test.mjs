@@ -56,6 +56,17 @@ test("[, ] and 0 run their actions, and do nothing while typing in a field", () 
   for (const code of ["Digit1", "Digit2", "Digit0"]) assert.equal(windowBinding(initial.keymap, key(code, { metaKey: true }), false), undefined, `⌘${code}`);
 });
 
+// A held key without Cmd runs its action once (spec #658's review): `[` and `]` would flicker, and a held digit answer the next question
+// too. The arrows still step down the list while held, and a held Cmd key repeats.
+test("a held key without Cmd runs once, except the list's arrows", () => {
+  const held = (code, char, mods = {}) => ({ ...key(code, mods, char), repeat: true });
+  for (const [code, char] of [["BracketLeft", "["], ["BracketRight", "]"], ["Digit0", "0"], ["Digit1", "1"], ["Escape", "Escape"]]) {
+    assert.equal(windowBinding(initial.keymap, held(code, char), false, false, true), undefined, `${char} held`);
+  }
+  assert.equal(windowBinding(initial.keymap, held("ArrowDown", ""), false, true), "studio::SelectNext");
+  assert.equal(windowBinding(initial.keymap, held("BracketRight", "]", { metaKey: true }), false), "studio::NextSession");
+});
+
 // The keyboard spine and the palette (danielrispler/Falinks#575).
 const press = (code, mods = {}) => windowBinding(initial.keymap, key(code, mods), false, false, true);
 

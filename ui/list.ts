@@ -283,9 +283,10 @@ export function item(key: string, depth: number, toggle: { open: boolean; hiding
       if (!folded.delete(key)) folded.add(key);
       drawSidebar();
     });
-    // Named for its row's session or worker (spec #658), with a fixed hint; whether it is open is said by `aria-expanded` alone (#456).
+    // Named for its row's session or worker (spec #658), a worker with no name as its log's title names it (`log.ts`), with a fixed
+    // hint; whether it is open is said by `aria-expanded` alone (#456).
     fold.dataset.key = `${key} fold`;
-    fold.setAttribute("aria-label", `Subagents of ${row.querySelector(".name")?.textContent ?? ""}`);
+    fold.setAttribute("aria-label", `Subagents of ${row.querySelector(".name")?.textContent || "Subagent"}`);
     fold.setAttribute("aria-expanded", String(toggle.open));
     hint(fold, "Show or hide its subagents", "start");
     // The count goes after the name, as the toggle's column has room only for its chevron.

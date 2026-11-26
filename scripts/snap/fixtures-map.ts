@@ -1041,6 +1041,10 @@ export const mapCamera = () =>
     canvas.dispatchEvent(wheel({ ctrlKey: true }));
     const pinched = camera().scale;
     if (Math.abs(pinched - Math.min(2, unpinched * Math.exp(1.2))) > 0.001) log("snap:fail a pinch zoomed from " + unpinched + " to " + pinched + ", not by ×e^1.2");
+    // Its delta is read as it comes, as before #669: Firefox's Ctrl+wheel notch of 3 lines zooms ×e^-0.036, not ×0.56.
+    canvas.dispatchEvent(wheel({ ctrlKey: true, deltaY: 3, deltaMode: 1 }));
+    const notch = camera().scale / pinched;
+    if (Math.abs(notch - Math.exp(-0.036)) > 0.001) log("snap:fail a 3-line Ctrl+wheel notch zoomed by ×" + notch.toFixed(3) + ", not ×e^-0.036");
     for (let i = 0; i < 40; i++) canvas.dispatchEvent(wheel({ deltaY: -300 }));
     if (camera().scale !== 2) log("snap:fail zoom is not held at 200 %: " + camera().scale);
     for (let i = 0; i < 40; i++) canvas.dispatchEvent(wheel({ deltaY: 300 }));
@@ -1146,8 +1150,8 @@ export const mapEmpty = () =>
     if (!draft) return log("snap:fail no drafting prompt");
     if (!draft.textContent.includes("system-map.json") || !draft.textContent.includes("system-map check")) log("snap:fail the drafting prompt lacks the file or the check: " + draft.textContent);
     // The only button is the prompt's copy icon (#669); none starts a session from the page.
-    if ([...document.querySelectorAll("#map .map-empty .btn")].some((b) => !b.matches(".brief-copy"))) log("snap:fail a button starts a session from the page");
-    const copy = document.querySelector("#map .map-empty .brief-copy");
+    if ([...document.querySelectorAll("#map .map-empty .btn")].some((b) => !b.matches(".copy-icon"))) log("snap:fail a button starts a session from the page");
+    const copy = document.querySelector("#map .map-empty .copy-icon");
     if (!copy) return log("snap:fail the drafting prompt has no copy icon");
     if (copy.getAttribute("aria-label") !== "Copy the prompt") log("snap:fail the copy icon's name: " + copy.getAttribute("aria-label"));
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (words) => void (window.__copied = words) } });

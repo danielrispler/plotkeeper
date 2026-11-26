@@ -148,7 +148,7 @@ Open the sessions for the day's work: at least two in parallel, one in a task wo
 - [x] **danielrispler/Falinks#575:** Tab into the list; ↑ and ↓ move the selection row by row. The terminal still gets ↑ and ↓ when it has focus. Ctrl+C and Ctrl+R still reach Claude Code.
 - [x] **danielrispler/Falinks#575:** ⌘, opens `settings.json` in the editor, creating it empty if it was missing.
 - [ ] **danielrispler/Falinks#575:** rebind one key in `keymap.json`, such as `[{ "bindings": { "cmd-shift-j": "studio::NextNeedsYou" } }]` (an array, as in Zed). The new key works, ⌘J no longer does, and the palette shows ⇧⌘J. Undo it after.
-- [ ] **danielrispler/Falinks#465:** ⌘1, ⌘2 and Esc work in the real window. Panes and dialogs (the picker, the palette) draw correctly.
+- [ ] **danielrispler/Falinks#465:** `[`, `]` and Esc work in the real window (⌘1 and ⌘2 before spec #658). Panes and dialogs (the picker, the palette) draw correctly.
 
   2026-11-12 (danielrispler/Falinks#598): Esc, the picker and the palette hold. ⌘1 and ⌘2 did nothing in a maximised window, where the list and the rail are already shown; retest at strip width.
 
@@ -295,7 +295,7 @@ Save everything in a new folder: `local-evidence/<date>-ui-ux-recheck/` (for exa
   - Workspaces, open;
   - the palette (⌘⇧P);
   - focus mode with a needs-you toast showing.
-- [ ] One recording (⇧⌘5, with **Options → Show Mouse Clicks** on): switch between 3 sessions, press ⌘2 to open the rail where it is an overlay, open a card, then start a new session and wait until Claude's prompt is ready.
+- [ ] One recording (⇧⌘5, with **Options → Show Mouse Clicks** on): switch between 3 sessions, press `]` to open the story, open a card, then start a new session and wait until Claude's prompt is ready.
 - [ ] If you timed the five tasks in `local-evidence/2026-11-09-ui-ux/ux-expert.md`, section 8, before round 6: repeat them and write the times beside the old ones.
 
 ### The mid-day rebuild (danielrispler/Falinks#599; danielrispler/Falinks#561's check is danielrispler/Falinks#598's)

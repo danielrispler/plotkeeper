@@ -13,7 +13,7 @@ const COPY_ICON = '<svg viewBox="0 0 14 14" aria-hidden="true" fill="none" strok
 
 /** A quiet copy icon named `label`, hinted `hover`, that copies what `prompt` makes. */
 export function copyButton(label: string, hover: string, prompt: Prompt): HTMLElement {
-  const button = pressable(text("button", "", "btn quiet brief-copy"), null);
+  const button = pressable(text("button", "", "btn quiet copy-icon"), null);
   button.setAttribute("aria-label", label);
   hint(button, hover);
   button.innerHTML = COPY_ICON;

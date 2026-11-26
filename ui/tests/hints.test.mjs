@@ -76,4 +76,7 @@ test("a session's chevron and a worker's chevron are named for their row", async
   const worker = /** @type {any} */ ({ id: "w", kind: "worker", name: "Builder", last_step: null, failed: false, opened: false });
   const under = item("s w", 1, { open: true, hiding: 0 }, agentRow(session, new Map(), worker, 1), null);
   assert.equal(fold(under).getAttribute("aria-label"), "Subagents of Builder");
+  // A worker with no name is named as its log's title names it.
+  const unnamed = item("s u", 1, { open: true, hiding: 0 }, agentRow(session, new Map(), { ...worker, id: "u", name: "" }, 1), null);
+  assert.equal(fold(unnamed).getAttribute("aria-label"), "Subagents of Subagent");
 });

@@ -391,7 +391,7 @@ export const mapPanelToggle = (): Fixture =>
 /**
  * `[` in a wide window (spec #658, user stories 29–31): the full list gives way to its 56 px strip and the map takes the width; a press on
  * the strip's ☰ opens the full list over the map; `[` again brings the full list back in its column, with no overlay class left and the
- * full list never fixed over the map. Shown with the list back. `mapListFoldNarrow`: below 1007 px `[` opens the list over the map and
+ * full list never fixed over the map; behind a modal dialog `[` does nothing. Shown with the list back. `mapListFoldNarrow`: below 1007 px `[` opens the list over the map and
  * closes it again, as ⌘1 did.
  */
 export const mapListFold = (): Fixture =>
@@ -413,6 +413,13 @@ export const mapListFold = (): Fixture =>
       const mapBox = () => document.getElementById("map").getBoundingClientRect();
       const wide = mapBox().width;
       if (document.body.dataset.layout !== "full" || !shows(full) || shows(stripNode)) return log("snap:fail the wide window does not open on the full list");
+      // Behind a modal dialog, such as Delete's, a key without Cmd does nothing (spec #658's review).
+      const dialog = document.getElementById("confirm-dialog");
+      dialog.showModal();
+      await bracket();
+      if (document.body.dataset.layout !== "full") log("snap:fail [ behind a modal dialog folded the list");
+      dialog.close();
+      await wait(50);
       await bracket();
       if (document.body.dataset.layout !== "strip") log("snap:fail [ did not fold the list to its strip: " + document.body.dataset.layout);
       if (shows(full) || !shows(stripNode)) log("snap:fail [ left the full list or hid the strip");

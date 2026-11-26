@@ -206,7 +206,8 @@ for (const dialog of document.querySelectorAll("dialog")) {
 }
 window.addEventListener("keydown", (event) => {
   const target = event.target as HTMLElement;
-  const typing = target.isContentEditable || target.matches?.("input, textarea, select") === true;
+  // A modal dialog open (rename, delete, confirm) holds the keys without Cmd as a text field does, so none acts on the page under it.
+  const typing = document.querySelector("dialog:modal") !== null || target.isContentEditable || target.matches?.("input, textarea, select") === true;
   const inList = target.closest?.(".list") != null;
   // The end-of-story bar on screen takes its digits and its skip key (#393), after a docked card's answer keys. A picked
   // explain-back mark (a radio) takes no letters, so S still skips the bar from it (#443 review).
@@ -341,7 +342,8 @@ invoke("sessions").then(showList).catch(failure("sessions"));
 watchToasts(select);
 // A turn that ended off screen in the focused window (the server's notices): the note toast names it.
 watchNotes();
-// Copy for the agent (#493): the brief's copy icons say what they copied, and the copy toast shows it.
+// Copy for the agent (#493): the copy icons (`copy-button.ts`), in the brief and on "No map yet" (#669), say what they copied, and the copy
+// toast shows it.
 window.addEventListener("copy-for-agent", (event) => {
   const { outcome, prompt } = (event as CustomEvent<Copied>).detail;
   showCopyToast(outcome, prompt);

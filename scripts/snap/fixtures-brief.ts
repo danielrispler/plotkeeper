@@ -108,7 +108,7 @@ const copySteps = (): BriefStep[] => [
 const mapBriefCopy = (clipboard: boolean): Fixture => ({
   ...mapBrief(briefOf(copySteps(), false), 1, `
       Object.defineProperty(navigator, "clipboard", { configurable: true, value: ${clipboard ? "{ writeText: async (words) => void (window.__copied = words) }" : "undefined"} });
-      const copy = document.querySelector("#map-brief .brief-step-code .brief-copy");
+      const copy = document.querySelector("#map-brief .brief-step-code .copy-icon");
       if (!copy) return log("snap:fail the Could break step has no copy icon beside its See the code");
       if (!copy.getAttribute("aria-label")) log("snap:fail the copy icon has no name");
       copy.click();
@@ -144,7 +144,7 @@ export const mapBriefSince = (): Fixture => ({
       if (!line.textContent.startsWith("Since you read aaaaaaa: only what this push changed.")) log("snap:fail the since line reads " + JSON.stringify(line.textContent));
       if (line.compareDocumentPosition(panel.querySelector(".brief-facts")) !== Node.DOCUMENT_POSITION_FOLLOWING) log("snap:fail the since line is not first under the head");
       if (panel.querySelector(".brief-facts summary")?.textContent !== "Partial facts · 1") log("snap:fail the story's own Partial facts are not shown");
-      if (!panel.querySelector(".brief-step-code .brief-copy")) log("snap:fail the story's Could break step has no copy icon");
+      if (!panel.querySelector(".brief-step-code .copy-icon")) log("snap:fail the story's Could break step has no copy icon");
       ${openWhy("#map-brief .brief-step")}
       why.hidePopover();
       const rows = [...document.querySelectorAll('#map-tray .tray-row[data-pr="334"]')].map((row) => row.querySelector(".tray-title").textContent);
@@ -508,7 +508,7 @@ export const mapBriefReview = (at: "flag" | "running"): Fixture => ({
       if (!why?.matches(":popover-open")) return log("snap:fail the mark did not open its popover");
       const reasons = [...why.querySelectorAll(".brief-why-list li")].map((li) => li.textContent);
       if (reasons.join("|") !== ${JSON.stringify(`Text (contradicted): ${reviewWhy} See server/src/runner.rs:83, server/src/pr_briefs/queue.rs:12.`)}) log("snap:fail the popover's reasons: " + reasons.join("|"));
-      if (!why.querySelector(".brief-copy")) log("snap:fail the popover has no copy icon");
+      if (!why.querySelector(".copy-icon")) log("snap:fail the popover has no copy icon");
       log("review flag ok");` : `
       const line = document.querySelector("#map-brief .ratify-head .ratify-review");
       if (line?.textContent !== "Reviewing map text…") log("snap:fail the review's line says " + line?.textContent);

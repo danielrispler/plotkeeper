@@ -1027,10 +1027,11 @@ mark.drawer-line .drawer-n::before { content: "→ " / ""; color: var(--fg); }
 .brief-also-law { color: var(--fg); }
 
 .brief-step-code { margin-top: var(--sp-5); display: flex; align-items: center; gap: var(--sp-2); }
-/* Copy for the agent (#493): a quiet icon, a 24px target with a 14px glyph, beside a See the code and in the not-confirmed popover. */
-.btn.brief-copy { display: inline-grid; place-items: center; min-width: var(--control); min-height: var(--control); padding: 0; color: var(--muted); }
-.btn.brief-copy:hover, .btn.brief-copy:focus-visible { color: var(--fg); }
-.btn.brief-copy svg { width: var(--icon); height: var(--icon); }
+/* Copy for the agent (#493): a quiet icon, a 24px target with a 14px glyph, beside a See the code, in the not-confirmed popover and on
+   "No map yet" (#669). */
+.btn.copy-icon { display: inline-grid; place-items: center; min-width: var(--control); min-height: var(--control); padding: 0; color: var(--muted); }
+.btn.copy-icon:hover, .btn.copy-icon:focus-visible { color: var(--fg); }
+.btn.copy-icon svg { width: var(--icon); height: var(--icon); }
 .brief-why-copy { display: flex; justify-content: flex-end; margin-top: var(--sp-3); }
 .brief-cites { margin-top: var(--sp-5); color: var(--faint); font-size: var(--size-xs); }
 .brief-cites summary { cursor: pointer; }

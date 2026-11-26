@@ -11,6 +11,8 @@ export interface Key {
   ctrlKey: boolean;
   altKey: boolean;
   shiftKey: boolean;
+  // Held down: the key's auto-repeat.
+  repeat?: boolean;
 }
 
 // Zed's names for the keys whose `code` is not `Key<letter>` or `Digit<n>`.
@@ -33,8 +35,9 @@ export const bound = (keymap: Keymap, context: string, key: Key): Binding | unde
 // The window's action for `key`; `inList`: the session list has focus, so its own keys come first.
 // While typing in a field, a binding without Cmd leaves the key to it; only Dismiss runs, since it does not take the key.
 // The answer keys answer only while `answerable`: focus is outside text fields, and the docked card is on screen
-// (danielrispler/Falinks#575, decision 7).
+// (danielrispler/Falinks#575, decision 7). A held key without Cmd runs once, but the arrows step on while held (spec #658).
 export function windowBinding(keymap: Keymap, key: Key, typing: boolean, inList = false, answerable = false): Binding | undefined {
+  if (key.repeat && !key.metaKey && !key.code.startsWith("Arrow")) return undefined;
   const action = (inList ? bound(keymap, "List", key) : undefined) ?? bound(keymap, "Workspace", key);
   if (Array.isArray(action) && action[0] === "studio::Answer" && !answerable) return undefined;
   return typing && !key.metaKey && action !== "studio::Dismiss" ? undefined : action;

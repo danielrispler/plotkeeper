@@ -562,10 +562,11 @@ function pan(canvas: HTMLElement) {
     event.preventDefault();
     if (!rig || rig.lent()) return;
     const box = canvas.getBoundingClientRect();
-    // The delta in pixels, whether the wheel reports pixels, lines (16 px) or pages (the map area's height). A pinch sends small steps
-    // and keeps the prototype's rate; a mouse wheel zooms about ×1.16 per 100 px tick, each event held between ×0.8 and ×1.25 (#669).
+    // A pinch (Ctrl held) sends small steps and keeps the prototype's rate on its delta as it comes. A mouse wheel's delta is read in
+    // pixels, whether it reports pixels, lines (16 px) or pages (the map area's height), and zooms about ×1.16 per 100 px tick, each
+    // event held between ×0.8 and ×1.25 (#669).
     const pixels = event.deltaY * (event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? box.height : 1);
-    const factor = event.ctrlKey ? Math.exp(-pixels * 0.012) : Math.min(1.25, Math.max(0.8, Math.exp(-pixels * 0.0015)));
+    const factor = event.ctrlKey ? Math.exp(-event.deltaY * 0.012) : Math.min(1.25, Math.max(0.8, Math.exp(-pixels * 0.0015)));
     moveCamera(zoomAt(rig.user(), factor, event.clientX - box.left, event.clientY - box.top), false);
   }, { passive: false });
 }
