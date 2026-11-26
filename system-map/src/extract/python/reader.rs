@@ -501,3 +501,138 @@ fn name_list(toks: &[Token], mut at: usize, parenthesised: bool) -> Option<(Vec<
         }
     }
 }
+
+/// The reader's text cases, asked of `imports` directly: each would otherwise build a repository and run the check
+/// (#664). `tests/python.rs` keeps one end-to-end case per shape, so the reader → pairs → sites chain stays covered.
+#[cfg(test)]
+mod tests {
+    use super::imports;
+
+    /// The lines at which `text` imports the absolute module `lib`, or a submodule of it.
+    fn lib_at(text: &str) -> Vec<u32> {
+        let mut lines: Vec<u32> = imports(text)
+            .into_iter()
+            .filter(|i| i.dots == 0 && i.module.first().is_some_and(|m| m == "lib"))
+            .map(|i| i.line)
+            .collect();
+        lines.dedup();
+        lines
+    }
+
+    #[test]
+    fn import_like_text_in_a_string_of_any_form_and_prefix_is_no_import() {
+        let prefixes = [
+            "", "r", "u", "b", "f", "t", "R", "U", "B", "F", "T", "br", "rb", "fr", "rf", "tr",
+            "rt", "Br", "rB", "bR", "RB", "Fr", "rF", "TR", "Rt",
+        ];
+        for prefix in prefixes {
+            for quote in ["'", "\"", "'''", "\"\"\""] {
+                let one_line = format!("x = {prefix}{quote}import lib{quote}\n");
+                assert_eq!(lib_at(&one_line), Vec::<u32>::new(), "{one_line:?}");
+                if quote.len() == 3 {
+                    let lines =
+                        format!("x = {prefix}{quote}\nimport lib\nfrom lib import y\n{quote}\n");
+                    assert_eq!(lib_at(&lines), Vec::<u32>::new(), "{lines:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_text_of_a_nested_f_string_field_is_lexed_as_code_and_its_strings_as_strings() {
+        for text in [
+            // The inner string reuses the outer quote (PEP 701).
+            "x = f\"{d[\"import lib\"]}\"\n",
+            // A nested f-string, and a brace in a nested string that is no field end.
+            "x = f\"{f'{y}' + '}'} import lib\"\n",
+            "x = f\"\"\"{f\"{y!r:>{w}}\"}\nimport lib\n\"\"\"\n",
+            "x = t'{x:{'import lib'}}'\n",
+            // A `#` comment in a field of a triple-quoted f-string ends at the line, with a quote and a brace in it.
+            "x = f\"\"\"{y # ' }\n}\nimport lib\n\"\"\"\n",
+            // Doubled braces are text.
+            "x = f'{{import lib}}'\n",
+            "x = rf'\\{y}import lib'\n",
+            "x = f'\\N{BULLET} import lib'\n",
+        ] {
+            assert_eq!(lib_at(text), Vec::<u32>::new(), "{text:?}");
+        }
+        // An import after such a string is read, at its own line.
+        assert_eq!(lib_at("x = f\"{d[\"a\"]} {f'{y}'}\"\nimport lib\n"), [2]);
+    }
+
+    #[test]
+    fn a_comment_or_a_word_that_only_contains_import_is_no_import() {
+        for text in [
+            "# import lib\n",
+            "x = 1  # from lib import y\n",
+            "important = 1\nimport_lib = 2\nreimport = lib\nobj.from_lib(lib)\nlib.import_x()\n",
+            "from_lib = 1\nimport_ = 1\n",
+            "def f():\n    '''Docs.\n    import lib\n    '''\n",
+        ] {
+            assert_eq!(lib_at(text), Vec::<u32>::new(), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn from_in_raise_and_yield_is_never_read_as_an_import() {
+        for text in [
+            "raise E from lib\nimport os\n",
+            "def g():\n    yield from lib\nimport os\n",
+            "def g():\n    x = (yield from lib)\n    import os\n",
+            "raise E from lib; import os\n",
+            "try:\n    pass\nexcept E as e: raise F from lib\nimport os\n",
+            "lazy = 1\nimport os\n",
+            "lazy\nfrom lib\nimport os\n",
+        ] {
+            assert_eq!(lib_at(text), Vec::<u32>::new(), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn an_import_is_read_wherever_a_statement_can_start_and_at_the_line_it_starts() {
+        for (text, line) in [
+            ("import lib\n", 1),
+            ("import os, lib\n", 1),
+            ("import os as o, lib as l\n", 1),
+            ("from lib import y\n", 1),
+            ("from lib import (\n    y,\n    z,\n)\n", 1),
+            ("from lib import (y,\n    z)\n", 1),
+            ("from lib import y as z, w\n", 1),
+            ("from lib import *\n", 1),
+            ("x = 1\nimport \\\n    lib\n", 2),
+            ("from \\\n    lib \\\n    import y\n", 1),
+            ("x = 1; import lib\n", 1),
+            ("x = 1;import lib;y = 2\n", 1),
+            ("if TYPE_CHECKING:\n    import lib\n", 2),
+            (
+                "try:\n    import lib\nexcept ImportError:\n    lib = None\n",
+                2,
+            ),
+            ("try: import lib\nexcept ImportError: pass\n", 1),
+            ("def f():\n    import lib\n", 2),
+            ("class A: import lib\n", 1),
+            ("if x: import os\nelse: from lib import y\n", 2),
+            ("lazy import lib\n", 1),
+            ("lazy from lib import y\n", 1),
+            ("lazy = 1\nimport lib\n", 2),
+            ("x = \"\"\"\n\n\"\"\"\nimport lib\n", 4),
+            ("x = 'a\\\nb'\nimport lib\n", 3),
+            ("x = [\n    1,  # import os\n]\nimport lib\n", 4),
+            ("\u{feff}import lib\n", 1),
+            ("import lib\r\nimport os\r\n", 1),
+            // A lone `\r` ends a line as `\n` and `\r\n` do.
+            ("# h\rimport lib\rx = 1\r", 2),
+            ("x = 1\rimport lib\r", 2),
+            ("x = 1\r\ny = 2\rimport lib\n", 3),
+            ("x = \"\"\"\r\r\"\"\"\rimport lib\r", 4),
+            ("x = 1\rimport \\\r    lib\r", 2),
+            ("s = 'unterminated\rimport lib\r", 2),
+            ("x = f'''{y # c\r}'''\rimport lib\r", 3),
+            ("import lib", 1),
+            ("with a as b: import lib\n", 1),
+            ("import os  # lib\nfrom lib import y  # import os\n", 2),
+        ] {
+            assert_eq!(lib_at(text), [line], "{text:?}");
+        }
+    }
+}
