@@ -52,10 +52,19 @@ impl<'a> Reading<'a> {
 
     /// Notes that `key` of the config was not read.
     fn unread(&mut self, key: &str) {
+        self.note(&format!("{key} in {}", self.file));
+    }
+
+    /// Notes that the config does not parse, for an ignored config, whose failure is no problem.
+    pub(super) fn unparsed(&mut self) {
+        self.note(&format!("{}, which does not parse", self.file));
+    }
+
+    /// Notes that `what` was not read, for the project's folder.
+    fn note(&mut self, what: &str) {
         let folder = self.project.trim_end_matches('/');
         self.notes.push(format!(
-            "python-imports did not read {key} in {}; failing links into {} may be false",
-            self.file,
+            "python-imports did not read {what}; failing links into {} may be false",
             if folder.is_empty() { "." } else { folder }
         ));
     }
