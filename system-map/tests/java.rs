@@ -946,6 +946,62 @@ fn imports_json_lists_the_unsure_files() {
     assert_eq!(value["unsure"][0]["reason"], "declared twice");
 }
 
+#[test]
+fn unsure_notes_group_by_part_and_relaxed_parts_and_name_at_most_three_names() {
+    // `a/` and `b/` both declare `x.A` to `x.D`; `a/` and `c/` both declare `y.E`.
+    let class = |folder: &str, package: &str, name: &str| {
+        (
+            format!("{folder}/src/main/java/{package}/{name}.java"),
+            format!("package {package};\n\npublic class {name} {{}}\n"),
+        )
+    };
+    let mut files: Vec<(String, String)> = ["A", "B", "C", "D"]
+        .iter()
+        .flat_map(|n| [class("a", "x", n), class("b", "x", n)])
+        .collect();
+    files.extend([class("a", "y", "E"), class("c", "y", "E")]);
+    files.push((
+        "app/src/main/java/app/One.java".into(),
+        "package app;\n\nimport x.A;\nimport x.B;\nimport y.E;\npublic class One {}\n".into(),
+    ));
+    files.push((
+        "app/src/main/java/app/Two.java".into(),
+        "package app;\n\nimport x.C;\nimport x.D;\npublic class Two {}\n".into(),
+    ));
+    let files: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(f, t)| (f.as_str(), t.as_str()))
+        .collect();
+    let (_dir, root) = repo(
+        &map(
+            &[
+                ("app", &["app/"]),
+                ("xa", &["a/"]),
+                ("xb", &["b/"]),
+                ("c", &["c/"]),
+            ],
+            &[("app", "xa"), ("app", "xb"), ("app", "c")],
+            &[],
+        ),
+        &files,
+    );
+    let out = run(&root, "check", &[]);
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        "note: app/src/main/java/app/One.java is unsure of y.E; its links to c, xa pass as unproven\n\
+         note: 2 files of app are unsure of 4 names (x.A, x.B, x.C, …); its links to xa, xb pass as unproven; \
+         --json lists them\n"
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("3 import (0 proven, 3 unproven)"),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let out = run(&root, "check", &["--json"]);
+    let value: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(value["unsure"].as_array().unwrap().len(), 5);
+}
+
 // Detection.
 
 #[test]

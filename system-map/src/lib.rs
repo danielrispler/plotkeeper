@@ -62,32 +62,53 @@ pub struct Report {
 }
 
 impl Report {
-    /// One note per Unsure finding whose candidates another part owns, naming the name in doubt and the parts its part's
-    /// links to pass as unproven (spec #569, "Unsure").
+    /// The notes on the Unsure findings whose candidates another part owns, one per pair of the file's part and the parts
+    /// its links to pass as unproven (spec #569, "Unsure"; #631): a group of one finding names its file and name, a larger
+    /// one counts its files and names and names the first three. Sorted by part, then by the relaxed parts.
     pub fn unsure_notes(&self) -> Vec<String> {
         let owner: std::collections::HashMap<&str, &str> = self
             .parts
             .iter()
             .flat_map(|part| part.files.iter().map(|f| (f.as_str(), part.id.as_str())))
             .collect();
-        self.unsure
-            .iter()
-            .filter_map(|u| {
-                let own = owner.get(u.file.as_str());
-                let parts: BTreeSet<&str> = u
-                    .candidates
-                    .iter()
-                    .filter_map(|c| owner.get(c.as_str()).copied())
-                    .filter(|part| Some(part) != own)
-                    .collect();
-                (!parts.is_empty()).then(|| {
-                    format!(
-                        "{} is unsure of {}; its links to {} pass as unproven",
-                        u.file,
-                        u.name,
-                        parts.into_iter().collect::<Vec<_>>().join(", ")
-                    )
-                })
+        let mut groups: BTreeMap<(&str, Vec<&str>), Vec<&Unsure>> = BTreeMap::new();
+        for u in &self.unsure {
+            let own = owner.get(u.file.as_str()).copied();
+            let parts: BTreeSet<&str> = u
+                .candidates
+                .iter()
+                .filter_map(|c| owner.get(c.as_str()).copied())
+                .filter(|part| Some(*part) != own)
+                .collect();
+            if !parts.is_empty() {
+                let key = (own.unwrap_or_default(), parts.into_iter().collect());
+                groups.entry(key).or_default().push(u);
+            }
+        }
+        let plural = |n: usize, noun: &str| format!("{n} {noun}{}", if n == 1 { "" } else { "s" });
+        groups
+            .into_iter()
+            .map(|((part, parts), findings)| {
+                let parts = parts.join(", ");
+                if let [u] = findings[..] {
+                    return format!(
+                        "{} is unsure of {}; its links to {parts} pass as unproven",
+                        u.file, u.name
+                    );
+                }
+                let files: BTreeSet<&str> = findings.iter().map(|u| u.file.as_str()).collect();
+                let names: BTreeSet<&str> = findings.iter().map(|u| u.name.as_str()).collect();
+                let mut shown: Vec<&str> = names.iter().take(3).copied().collect();
+                if names.len() > 3 {
+                    shown.push("…");
+                }
+                format!(
+                    "{} of {part} {} unsure of {} ({}); its links to {parts} pass as unproven; --json lists them",
+                    plural(files.len(), "file"),
+                    if files.len() == 1 { "is" } else { "are" },
+                    plural(names.len(), "name"),
+                    shown.join(", ")
+                )
             })
             .collect()
     }
