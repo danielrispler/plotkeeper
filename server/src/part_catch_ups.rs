@@ -27,7 +27,8 @@ pub enum Offer {
     Chapter { pr: u64, chapter: usize },
     /// A part catch-up: `ready` when one is stored for the part's current fog list, `writing` while one is written, `failed` when
     /// the last write for this fog list failed. `stage`: which call of the write runs now (#450). `outline`, when `ready`: what the
-    /// sheet's catch-up card shows of it (#636).
+    /// sheet's catch-up card shows of it (#636). `older`, while none is stored for the current list: the stored one Daniel can read
+    /// meanwhile (#638).
     CatchUp {
         ready: bool,
         writing: bool,
@@ -36,7 +37,17 @@ pub enum Offer {
         stage: Option<Stage>,
         #[serde(skip_serializing_if = "Option::is_none")]
         outline: Option<Outline>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        older: Option<Older>,
     },
+}
+
+/// A part's stored catch-up written for an earlier fog list whose every entry is still in the part's fog (spec #633, "Opening the
+/// older catch-up"): its outline and the fog entries it covers (`fog`, their commits), which reading it to the end clears.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Older {
+    pub outline: Outline,
+    pub fog: Vec<String>,
 }
 
 /// A stored catch-up as its part's catch-up card shows it (spec #633, "The offer carries what the card shows"): its title and, per
@@ -93,6 +104,7 @@ pub fn offer(
         failed: false,
         stage: None,
         outline: None,
+        older: None,
     })
 }
 
@@ -111,6 +123,17 @@ pub fn complete(
 /// The catch-up stored for `part` when it covers exactly `fog`, its current fog list; a different list makes it stale.
 pub fn fresh(store: &CatchUpStore, part: &str, fog: &[String]) -> Option<StoredCatchUp> {
     store.get(part).filter(|stored| stored.fog == fog)
+}
+
+/// The catch-up stored for `part` when it covers an earlier fog list than `fog`, its current one, whose every entry is still in
+/// `fog`: Daniel can read it while the new one is written, and reading it clears only what it covers. None that holds an entry
+/// cleared since, which would tell him again of a change he caught up on.
+pub fn older(store: &CatchUpStore, part: &str, fog: &[String]) -> Option<StoredCatchUp> {
+    store.get(part).filter(|stored| {
+        !stored.fog.is_empty()
+            && stored.fog != fog
+            && stored.fog.iter().all(|commit| fog.contains(commit))
+    })
 }
 
 /// What is being written and what failed, per project and part. A write's claim ends when its guard drops, a panic included, and
@@ -304,12 +327,17 @@ fn catch_up_offer(
     list: &[String],
 ) -> Offer {
     let stored = store.and_then(|s| fresh(s, part, list));
+    let older = store.and_then(|s| older(s, part, list));
     Offer::CatchUp {
         ready: stored.is_some(),
         writing: catch_ups.writing(project, part),
         failed: catch_ups.failed(project, part, list),
         stage: catch_ups.stage(project, part),
         outline: stored.as_ref().map(outline),
+        older: older.map(|o| Older {
+            outline: outline(&o),
+            fog: o.fog,
+        }),
     }
 }
 
@@ -390,7 +418,8 @@ fn start(
 }
 
 /// What a click on `part`'s catch-up over `fog` answers: the stored one when it covers `fog`, else a write starts (a failed one is
-/// tried again) and the answer says it is being written.
+/// tried again) and the answer says it is being written. `older`: "Read the one you have" asks for the stored one even though it
+/// covers an earlier list, answered with it only while `older` (the function) holds, else as any click.
 #[allow(
     clippy::too_many_arguments,
     reason = "no type groups these inputs, and one made only for this call would be a new abstraction (#555)"
@@ -402,10 +431,13 @@ pub fn ask(
     project: &str,
     part: &str,
     fog: Vec<String>,
+    older: bool,
     store: CatchUpStore,
     done: impl FnOnce() + Send + 'static,
 ) -> Result<Opened, String> {
-    if let Some(stored) = fresh(&store, part, &fog) {
+    let stored = fresh(&store, part, &fog)
+        .or_else(|| older.then(|| self::older(&store, part, &fog)).flatten());
+    if let Some(stored) = stored {
         return Ok(Opened::CatchUp(Box::new(stored)));
     }
     let writer =
@@ -599,12 +631,14 @@ pub fn shown(app: &App, project: &str, user: &UserState, source: &str) {
     );
 }
 
-/// A click on `part`'s catch-up: the stored one when it covers the part's current fog list, else it is written in the background
-/// with the PR brief's writer and model, and the answer says so; the page gets it through `map-landed`. `None`: the part is clear.
+/// A click on `part`'s catch-up: the stored one when it covers the part's current fog list (or, with `older`, an earlier list as
+/// `ask` says), else it is written in the background with the PR brief's writer and model, and the answer says so; the page gets
+/// it through `map-landed`. `None`: the part is clear.
 pub fn part_catch_up(
     app: &Arc<App>,
     project: String,
     part: String,
+    older: bool,
 ) -> Result<Option<Opened>, String> {
     let file = crate::map::state_file()?;
     let fog = commits(&fog_of(&crate::map::read_user(&file, &project), &part));
@@ -621,6 +655,7 @@ pub fn part_catch_up(
         &project,
         &part,
         fog,
+        older,
         store,
         move || events.emit("map-landed", serde_json::json!(landed)),
     )?;
@@ -723,6 +758,7 @@ mod tests {
         failed: false,
         stage: None,
         outline: None,
+        older: None,
     };
     fn lit(chapters: &[&[&str]]) -> Option<Vec<Vec<String>>> {
         Some(
@@ -916,6 +952,97 @@ mod tests {
         );
     }
 
+    /// A stored catch-up of part `a` over `fog`, titled `title`, of one step.
+    fn put_catch_up(store: &CatchUpStore, fog: &[&str], title: &str) {
+        use studio_understanding::pr_brief::{Brief, Chapter, Step};
+        store
+            .put(&StoredCatchUp {
+                part: "a".into(),
+                fog: fog.iter().map(ToString::to_string).collect(),
+                brief: Brief {
+                    title: title.into(),
+                    chapters: vec![Chapter {
+                        gist: "THE GIST".into(),
+                        steps: vec![Step {
+                            k: "Now".into(),
+                            h: "Each write renames a temp file".into(),
+                            ..Step::default()
+                        }],
+                        ..Chapter::default()
+                    }],
+                    ..Brief::default()
+                },
+                ..StoredCatchUp::default()
+            })
+            .unwrap();
+    }
+
+    fn list(c: &[&str]) -> Vec<String> {
+        c.iter().map(ToString::to_string).collect()
+    }
+
+    #[test]
+    fn a_part_whose_stored_catch_up_covers_entries_all_still_fogged_offers_it_as_older_and_one_with_a_cleared_entry_does_not()
+     {
+        let data = tempfile::tempdir().unwrap();
+        let store = CatchUpStore::open(data.path()).unwrap();
+        put_catch_up(&store, &["c1", "c2"], "The older story");
+        let catch_ups = CatchUps::default();
+        let grown = catch_up_offer(
+            Some(&store),
+            &catch_ups,
+            "p",
+            "a",
+            &list(&["c1", "c2", "c3"]),
+        );
+        let Offer::CatchUp {
+            ready,
+            outline,
+            older,
+            ..
+        } = &grown
+        else {
+            panic!("a catch-up: {grown:?}");
+        };
+        assert!(!ready);
+        assert_eq!(outline, &None);
+        assert_eq!(
+            older.as_ref(),
+            Some(&Older {
+                outline: Outline {
+                    title: "The older story".into(),
+                    steps: vec![OutlineStep {
+                        k: "Now".into(),
+                        h: "Each write renames a temp file".into(),
+                    }],
+                },
+                fog: list(&["c1", "c2"]),
+            })
+        );
+        let wire = serde_json::to_string(&grown).unwrap();
+        assert!(!wire.contains("GIST"), "no gist on the wire: {wire}");
+
+        // `c1` was cleared since: the stored one tells of a change Daniel already caught up on.
+        let cleared = catch_up_offer(Some(&store), &catch_ups, "p", "a", &list(&["c2", "c3"]));
+        assert!(
+            matches!(cleared, Offer::CatchUp { older: None, .. }),
+            "{cleared:?}"
+        );
+        // A fresh one is ready, not older.
+        let fresh = catch_up_offer(Some(&store), &catch_ups, "p", "a", &list(&["c1", "c2"]));
+        assert!(
+            matches!(
+                fresh,
+                Offer::CatchUp {
+                    ready: true,
+                    older: None,
+                    ..
+                }
+            ),
+            "{fresh:?}"
+        );
+    }
+
     // ---- written when the map shows ----
 
     const FIVE: &str = r#"{"version":1,
@@ -1096,6 +1223,7 @@ mod tests {
             &shows.rig.main,
             "f",
             shows.fog("f"),
+            false,
             shows.store(),
             move || ended.send(()).unwrap(),
         )
@@ -1104,6 +1232,46 @@ mod tests {
         shows.wait(1);
         assert!(fresh(&shows.store(), "f", &shows.fog("f")).is_some());
         assert_eq!(writer.wrote(), ["a", "f"]);
+    }
+
+    #[test]
+    fn reading_the_older_catch_up_while_the_new_one_is_written_clears_only_what_it_covers() {
+        let shows = Shows::new();
+        shows.push("a", "2");
+        let writer = Arc::new(Fake::default());
+        assert_eq!(shows.show(&writer), ["a"]);
+        shows.wait(1);
+        let first = shows.fog("a");
+        // A new change lands in `a`: its stored catch-up covers the earlier list only.
+        shows.push("a", "3");
+        let grown = shows.fog("a");
+        assert_eq!(grown.len(), 2);
+        let ask_for = |older: bool| {
+            let ended = shows.ended.clone();
+            let writer_: SharedWriter = Fake::shut();
+            ask(
+                &shows.catch_ups,
+                Some(writer_),
+                "opus".into(),
+                &shows.rig.main,
+                "a",
+                shows.fog("a"),
+                older,
+                shows.store(),
+                move || ended.send(()).unwrap(),
+            )
+            .unwrap()
+        };
+        let Opened::CatchUp(opened) = ask_for(true) else {
+            panic!("the older catch-up opens");
+        };
+        assert_eq!(opened.fog, first);
+
+        // Read to its end, it clears what it covers; the newer entry stays fogged.
+        complete(&shows.rig.file(), &shows.rig.main, "a", &opened.fog).unwrap();
+        assert_eq!(shows.fog("a"), grown[1..]);
+        // Its first entry is cleared now: asked for again, it is not handed over, and the new one is written as any click.
+        assert!(matches!(ask_for(true), Opened::Writing { writing: true }));
     }
 
     /// Ten Core parts, `c0` to `c9`, and two interface parts, `i0` and `i1`.
@@ -1188,6 +1356,7 @@ mod tests {
             &shows.rig.main,
             "a",
             list.clone(),
+            false,
             shows.store(),
             move || ended.send(()).unwrap(),
         )
@@ -1276,6 +1445,7 @@ mod tests {
             &shows.rig.main,
             "a",
             list.clone(),
+            false,
             shows.store(),
             move || ended.send(()).unwrap(),
         )

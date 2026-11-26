@@ -1,6 +1,6 @@
 // The part catch-up's pure logic (spec #378, ticket #391; spec #548 Group 4). Split from `map-model.ts` by concern.
 
-import type { CatchUpOffer, CatchUpStage, Fog, FogListEntry } from "./types.js";
+import type { CatchUpOffer, CatchUpStage, Fog, FogEntry, FogListEntry } from "./types.js";
 
 // ---- The part catch-up (spec #378, ticket #391): what a fogged part's sheet offers, from the server's `catch_ups`.
 
@@ -38,6 +38,18 @@ export function awaitedCatchUp(offer: CatchUpOffer | undefined): "open" | "stop"
 
 /** The catch-up card's eyebrow (#636): how many fog entries landed since Daniel last caught up on the part. */
 export const changesLine = (n: number): string => `${n} ${n === 1 ? "change" : "changes"} since you last caught up`;
+
+/**
+ * What "Read the one you have" (#638) says the older catch-up covers, of the part's fog entries (`entries`): how many of them, then each, a PR
+ * by its number and a direct push by its short commit, in the catch-up's order.
+ */
+export function olderLine(older: { fog: string[] }, entries: FogEntry[]): string {
+  const names = older.fog.map((commit) => {
+    const pr = entries.find((e) => e.commit === commit)?.pr;
+    return pr == null ? commit.slice(0, 7) : `#${pr}`;
+  });
+  return `Covers ${older.fog.length} of ${entries.length} ${entries.length === 1 ? "change" : "changes"}: ${names.join(", ")}`;
+}
 
 /**
  * What the waiting card says of a part catch-up's write (#450): the call that runs now, "Writing…" until the server says.

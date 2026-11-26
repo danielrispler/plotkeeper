@@ -25,7 +25,7 @@ import { sessionHere } from "./map-live.js";
 import { studio } from "./state.js";
 import type { CatchUpOutline, Session } from "./types.js";
 import { enterRefresher, refresherNode, staleWhy } from "./map-stale.js";
-import { changesLine, fogActions } from "./map-catch-up.js";
+import { changesLine, fogActions, olderLine } from "./map-catch-up.js";
 import { ciDrawer, effectiveTier, type PanelContent, type Part, proofDrawer, type Sheet, sheetCi, sheetMarks, sheetOf, talksTo, type Tier } from "./map-model.js";
 import { openBriefOf, openCatchUpOf } from "./map-brief.js";
 import { lawAction, lawActionNodes, patchActs } from "./patch-review.js";
@@ -286,8 +286,9 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
 
 // The catch-up card (spec #633, ticket #636), of now only. A fogged part's says how many changes landed since Daniel last caught up and, once
 // the catch-up is stored, its outline: its title and each step's kind and headline, never its gist, which stays behind Explain-back. Under
-// them the main button and "I know this", with the write's stage or failure. A part with no fog's says "Caught up" and holds the Refresher,
-// which opens inside it.
+// them the main button and "I know this", with the write's stage or failure, and, while none is stored for the current fog list, "Read the one
+// you have" (#638) with what the one stored for an earlier list covers. A part with no fog's says "Caught up" and holds the Refresher, which
+// opens inside it.
 function catchUpCard(view: MapView, part: string, sheet: Sheet, explain: boolean): HTMLElement {
   const shown = view.state.fog?.[part];
   const card = text("article", "", `catch-up-card ${shown ?? "clear"}`);
@@ -302,6 +303,8 @@ function catchUpCard(view: MapView, part: string, sheet: Sheet, explain: boolean
   const outline = offer?.kind === "catch-up" ? offer.outline : undefined;
   if (outline) card.append(...outlineNodes(outline));
   card.append(...catchUpActions(view, part, fogActions(shown, offer), explain));
+  const older = offer?.kind === "catch-up" && !offer.ready ? offer.older : undefined;
+  if (older) card.append(olderNodes(view, part, older));
   return card;
 }
 
@@ -375,6 +378,21 @@ function catchUpActions(view: MapView, part: string, actions: ReturnType<typeof 
     nodes.push(line);
   }
   return nodes;
+}
+
+// "Read the one you have" (#638): the stored catch-up of an earlier fog list, played under its own list, so reading it to the end clears only
+// the entries it covers, which the line under it names; the button is described by that line.
+let olderLines = 0;
+function olderNodes(view: MapView, part: string, older: { fog: string[] }): HTMLElement {
+  const box = text("div", "", "catch-up-older");
+  const read = pressable(text("button", "Read the one you have", "btn quiet sheet-catch-up-older"), null);
+  hint(read, "Play the catch-up written before the newest change; reading it to the end clears only what it covers");
+  read.addEventListener("click", () => void openCatchUpOf(view.project, part, true));
+  const line = text("p", olderLine(older, view.state.user.fog?.parts[part] ?? []), "catch-up-older-line");
+  line.id = `catch-up-older-${++olderLines}`;
+  read.setAttribute("aria-describedby", line.id);
+  box.append(read, line);
+  return box;
 }
 
 // "This session here" (#561): while a session's story is open in the left panel beside the sheet, its turns of the last 7 days that changed

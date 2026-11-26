@@ -104,6 +104,30 @@ test("a catch-up being written says the call that runs on its card, with no outl
   assert.deepEqual(buttons(failed), ["Catch up", "I know this"]);
 });
 
+test("while a newer catch-up is written, the card offers the one Daniel has, saying what it covers, and pressing it asks for that one", async () => {
+  explanations(false);
+  const older = { outline, fog: [entry(1).commit, entry(2).commit] };
+  const writing = { kind: "catch-up", ready: false, writing: true, failed: false, older };
+  const { card } = cardOf(view({ offer: writing }));
+  assert.deepEqual(buttons(card), ["Catch up", "I know this", "Read the one you have"]);
+  const read = all(card).find((each) => each.tag === "button" && each.text === "Read the one you have");
+  const line = byId(card, read.getAttribute("aria-describedby"));
+  assert.equal(line?.text, "Covers 2 of 3 changes: #601, #602");
+  // The older one's outline stays off the card: its title and steps are the ready one's place.
+  assert.equal(classed(card, "catch-up-steps").length, 0);
+  const calls = [];
+  tauri(calls);
+  // The open's slow timer; the answer is no catch-up, so nothing plays.
+  globalThis.window.setTimeout = setTimeout;
+  read.listeners.click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(calls[0], ["part_catch_up", { project: "/w/app", part: "store", older: true }]);
+  tauri([]);
+  // No older one stored: no such button.
+  const alone = cardOf(view({ offer: { ...writing, older: undefined } })).card;
+  assert.deepEqual(buttons(alone), ["Catch up", "I know this"]);
+});
+
 test("a part fogged by one PR whose brief lights it opens that chapter from the card", () => {
   explanations(false);
   const { card } = cardOf(view({ offer: { kind: "chapter", pr: 612, chapter: 1 } }));
