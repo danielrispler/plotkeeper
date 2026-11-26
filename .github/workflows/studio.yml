@@ -81,4 +81,5 @@ jobs:
       - run: npm run check
         env:
           NEXTEST_TEST_THREADS: 5
+          NEXTEST_NO_FAIL_FAST: "true"
 
