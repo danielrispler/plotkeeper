@@ -5,10 +5,12 @@ use serde_json::{Value, json};
 
 /// The global installs a worker in auto mode is blocked from running mid-run, so a body must not
 /// ask for them (#720's 6a and 6c would each have installed `cargo-llvm-cov`).
-const INSTALLS: [&str; 5] = [
+const INSTALLS: [&str; 7] = [
     "cargo install",
     "npm install -g",
+    "npm install --global",
     "npm i -g",
+    "npm i --global",
     "brew install",
     "rustup component add",
 ];
@@ -706,26 +708,38 @@ mod publish_tests {
         );
     }
     #[test]
-    fn a_cheap_route_that_edits_ui_is_refused_naming_the_ui_files() {
-        let cheap = "- **Route:** cheap · effort medium — one check in one file\n";
-        assert_eq!(
-            problems_with(
+    fn a_cheap_route_over_ui_or_three_source_files_is_refused() {
+        const CHEAP: &str = "- **Route:** cheap · effort medium — one check in one file\n";
+        const MEDIUM: &str = "- **Route:** medium · effort medium — presentational UI\n";
+        let cases: [(&str, &str, &[&str]); 6] = [
+            (
                 "`server/src/a.rs`, `ui/rail.ts`, new `scripts/snap/b.mjs`, `docs/c.html`, `d.css`",
-                cheap
+                CHEAP,
+                &[
+                    "a.md: **Route:** cheap, but **Files:** names UI (`ui/rail.ts`, `scripts/snap/b.mjs`, `docs/c.html`, `d.css`), and UI is never cheap (issue-tracker.md, Routing, rule 3)",
+                    "a.md: **Route:** cheap, but **Files:** names 5 source files (`server/src/a.rs`, `ui/rail.ts`, `scripts/snap/b.mjs`, `docs/c.html`, `d.css`), over the about three of rule 5 (issue-tracker.md, Routing)",
+                ],
             ),
-            [
-                "a.md: **Route:** cheap, but **Files:** names UI (`ui/rail.ts`, `scripts/snap/b.mjs`, `docs/c.html`, `d.css`), and UI is never cheap (issue-tracker.md, Routing, rule 3)",
-                "a.md: **Route:** cheap, but **Files:** names 5 source files (`server/src/a.rs`, `ui/rail.ts`, `scripts/snap/b.mjs`, `docs/c.html`, `d.css`), over the about three of rule 5 (issue-tracker.md, Routing)"
-            ]
-        );
-        assert!(problems_with("`server/src/a.rs`, `docs/ui.md`", cheap).is_empty());
-        assert!(
-            problems_with(
-                "`ui/rail.ts`",
-                "- **Route:** medium · effort medium — presentational UI\n"
-            )
-            .is_empty()
-        );
+            ("`server/src/a.rs`, `docs/ui.md`", CHEAP, &[]),
+            ("`ui/rail.ts`", MEDIUM, &[]),
+            (
+                "`a.rs`, `b.rs`, `c.mjs`, new `d.rs`, `docs/e.md`",
+                CHEAP,
+                &[
+                    "a.md: **Route:** cheap, but **Files:** names 4 source files (`a.rs`, `b.rs`, `c.mjs`, `d.rs`), over the about three of rule 5 (issue-tracker.md, Routing)",
+                ],
+            ),
+            // Three source files and their tests.
+            (
+                "`a/src/a.rs`, `a/src/b.rs`, `c.mjs`, `a/tests/it.rs`, `a/src/tests.rs`, `scripts/review/c.test.mjs`, `docs/e.md`",
+                CHEAP,
+                &[],
+            ),
+            ("`a.rs`, `b.rs`, `c.rs`, `d.rs`", MEDIUM, &[]),
+        ];
+        for (files, route, expected) in cases {
+            assert_eq!(problems_with(files, route), expected, "{files} {route}");
+        }
     }
     #[test]
     fn a_high_effort_whose_reason_names_no_risk_is_refused() {
@@ -773,14 +787,9 @@ mod publish_tests {
         publish_problems(&manifest, &bodies, &labels())
     }
     #[test]
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one table, one row per case of the three refusals (#722)"
-    )]
-    fn shared_files_cheap_over_three_files_and_global_installs() {
+    fn a_shared_source_file_needs_a_blocker_path_either_way() {
         const MEDIUM: &str = "medium · effort medium — a reason";
-        const CHEAP: &str = "cheap · effort medium — a reason";
-        let cases: [(&str, &[Row], &str, &[&str]); 12] = [
+        let cases: [(&str, &[Row], &str, &[&str]); 5] = [
             (
                 "two tickets naming one source file with no edge",
                 &[
@@ -832,36 +841,15 @@ mod publish_tests {
                 "",
                 &[],
             ),
-            (
-                "a cheap ticket naming four source files",
-                &[(
-                    "a.md",
-                    &[],
-                    "`a.rs`, `b.rs`, `c.mjs`, new `d.rs`, `docs/e.md`",
-                    CHEAP,
-                )],
-                "",
-                &[
-                    "a.md: **Route:** cheap, but **Files:** names 4 source files (`a.rs`, `b.rs`, `c.mjs`, `d.rs`), over the about three of rule 5 (issue-tracker.md, Routing)",
-                ],
-            ),
-            (
-                "a cheap ticket naming three source files and its tests",
-                &[(
-                    "a.md",
-                    &[],
-                    "`a/src/a.rs`, `a/src/b.rs`, `c.mjs`, `a/tests/it.rs`, `a/src/tests.rs`, `scripts/review/c.test.mjs`, `docs/e.md`",
-                    CHEAP,
-                )],
-                "",
-                &[],
-            ),
-            (
-                "a medium ticket naming four source files",
-                &[("a.md", &[], "`a.rs`, `b.rs`, `c.rs`, `d.rs`", MEDIUM)],
-                "",
-                &[],
-            ),
+        ];
+        for (case, rows, extra, expected) in cases {
+            assert_eq!(checked_folder(rows, extra), expected, "{case}");
+        }
+    }
+    #[test]
+    fn a_body_that_says_to_run_a_global_install_is_refused() {
+        const MEDIUM: &str = "medium · effort medium — a reason";
+        let cases: [(&str, &[Row], &str, &[&str]); 5] = [
             (
                 "a body that says to run cargo install",
                 &[("a.md", &[], "`a.rs`", MEDIUM)],
@@ -885,6 +873,14 @@ mod publish_tests {
                 " Run `npm install -g x`.",
                 &[
                     "a.md: says to run `npm install -g`, a global install auto mode blocks: hand Daniel the install before /implement-spec starts",
+                ],
+            ),
+            (
+                "a body that says to run npm install --global",
+                &[("a.md", &[], "`a.rs`", MEDIUM)],
+                " Run `npm install --global x`.",
+                &[
+                    "a.md: says to run `npm install --global`, a global install auto mode blocks: hand Daniel the install before /implement-spec starts",
                 ],
             ),
             (
