@@ -109,7 +109,7 @@ test("while held, a session whose state changed keeps its place, and so does its
 });
 
 test("while held, a session no longer listed leaves, and a group with nothing left goes unless it is a saved header", () => {
-  const saved = [{ path: "/r/s", gone: false }];
+  const saved = [{ path: "/r/s", gone: false, temporary: false }];
   const last = projectGroups([at("a", "running", "/r/p"), at("b", "running", "/r/p"), at("c", "idle", "/r/q")], saved);
   // b was deleted, c ended: q's group has no live session and is not saved, so it goes; the saved header stays.
   const now = projectGroups([at("a", "running", "/r/p"), at("c", "ended", "/r/q")], saved);
