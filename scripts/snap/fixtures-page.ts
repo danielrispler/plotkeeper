@@ -563,7 +563,11 @@ export const cutText = (): Fixture => ({
       if (steps.some((node) => node.hasAttribute("title") || node.textContent !== node.firstElementChild.textContent)) log("snap:fail a second line holds its text outside its box or has a title");
       await __snapMove(cuts[0]);
       await wait(600);
-      if (!moved(cuts[0])) log("snap:fail a cut second line did not scroll on hover");
+      // Said with what this Chrome sees, so a run elsewhere (CI's runner) shows why: its version, reduced motion, and the overflow flag.
+      if (!moved(cuts[0])) log("snap:fail a cut second line did not scroll on hover " + JSON.stringify({
+        chrome: navigator.userAgent.split(" ").find((part) => part.startsWith("Chrome/")), reduce: matchMedia("(prefers-reduced-motion: reduce)").matches,
+        truncated: getComputedStyle(cuts[0]).getPropertyValue("--truncated"), timeline: CSS.supports("animation-timeline: scroll(self inline)"),
+        hovered: cuts[0].matches(":hover"), widths: [cuts[0].scrollWidth, cuts[0].clientWidth] }));
       await __snapMove(fits[0]);
       await wait(600);
       if (moved(fits[0])) log("snap:fail a second line that fits scrolled on hover");
