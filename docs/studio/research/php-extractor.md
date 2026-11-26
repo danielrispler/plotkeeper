@@ -236,3 +236,18 @@ Stated counts:
 6. **Short tags.** Treat a bare `<?` as HTML (the shipped ini files), or as code?
 7. **Test folders.** Is `tests`/`test` in any case enough, or should `Fixtures/`, `_files/` and `stubs/` outside test folders, `types/`, and `phpunit.xml` `<directory>` entries count too?
 8. **The trial repository.** laravel/framework first, and Filament or Symfony second?
+
+## After the grill
+
+The grilling of 2026-11-26 (#540; its log is `local-evidence/2026-11-26-php-extractor-grilling/reports/decisions.md` on Daniel's machine) settled the open questions above. The spec that builds on them is the `php-imports` spec linked from #540.
+
+1. **`classmap`:** not indexed. A file under a `classmap` path and under no PSR-4 folder is skipped, so a classmap-only part's links pass as unproven instead of failing. Indexing declarations stays open if a real repository needs it.
+2. **`use function` and `use const`:** no pair, a stated under-count. `files` entries are not read.
+3. **Qualified names in the body:** no body scan, a stated under-count, as `java-imports` leaves inline fully qualified names. Both trials count the links that rest only on them, and on `use function`.
+4. **Which `composer.json` files:** every tracked one outside folders named `tests`, `test` (any case) or `vendor`, ignored ones too. Within one file, Composer's walk takes the first tracked file; an ignored first hit gives that file no answer. Two files with different answers make the importer Unsure.
+5. **Bare `require 'x.php'`:** no pair. Only the static `__DIR__` / `dirname` forms of §6 pair.
+6. **Short tags:** a bare `<?` is HTML.
+7. **Test folders:** `tests` or `test` in any case, at any depth; `*Test.php` alone never. Other fixture folders, `types/` and stubs are left to the map's `ignored`.
+8. **Trial repositories:** laravel/framework first, filamentphp/filament second, both required.
+
+Also: PSR-0 is not read; `autoload-dev` is read like `autoload`; a prefix without its trailing `\` and malformed JSON are problems; no `composer.json` is a clean fallback; the autoload index is cached on the core's `Repo`, as `cargo_dir` is.
