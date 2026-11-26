@@ -50,15 +50,14 @@ pub fn any_waiting(project: &str, ready: &[Ready]) -> bool {
         .is_some_and(|store| !waiting_numbers(&store, ready, user_of(project).as_ref()).is_empty())
 }
 
-/// The ready PRs of the project holding `cwd` that a brief waits for, for the rail's row in the session of one of them.
+/// The ready PRs of `project`, a session's project folder, that a brief waits for, for the rail's row in the session of one of them.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Waiting {
     pub project: String,
     pub numbers: Vec<u64>,
 }
 
-pub fn briefs_waiting(app: &App, cwd: String) -> Option<Waiting> {
-    let project = studio_workbench::main_checkout(Path::new(&cwd)).ok()?;
+pub fn briefs_waiting(app: &App, project: String) -> Option<Waiting> {
     let ready = app.prs.ready(&project);
     let user = user_of(&project);
     let numbers = store_of(&project).map(|s| waiting_numbers(&s, &ready, user.as_ref()))?;

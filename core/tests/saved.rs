@@ -97,3 +97,49 @@ fn saved_state_of_another_format_or_beside_a_shorter_log_is_ignored() {
     again(&saved[..saved.len() / 2], log.len() as u64);
     again(b"", log.len() as u64);
 }
+
+/// The saved state `saved` as the build before spec #659 wrote it: its sessions have no project folder.
+fn without_projects(saved: &[u8]) -> Vec<u8> {
+    let at = saved.iter().position(|b| *b == b'\n').unwrap() + 1;
+    let mut state: serde_json::Value = serde_json::from_slice(&saved[at..]).unwrap();
+    let sessions = state["sessions"].as_object_mut().unwrap();
+    for session in sessions.values_mut() {
+        session.as_object_mut().unwrap().remove("project").unwrap();
+    }
+    let mut old = saved[..at].to_vec();
+    old.extend(serde_json::to_vec(&state).unwrap());
+    old
+}
+
+/// A saved state of the build before the project folder (spec #659) gives each session the project it showed then: its
+/// saved folder, a task's worktree's main checkout.
+#[test]
+fn saved_state_before_the_project_folder_gives_each_session_the_project_of_its_saved_folder() {
+    let log = crate::common::TWO;
+    let old = without_projects(&replayed(log).save());
+    let mut studio = Studio::default();
+    assert_eq!(
+        studio.resume(&old, log.len() as u64),
+        log.len() as u64,
+        "it reads"
+    );
+
+    let projects: Vec<(&str, &str)> = studio
+        .sessions()
+        .iter()
+        .map(|s| (s.cwd.as_str(), s.project.as_str()))
+        .collect();
+    assert_eq!(
+        projects,
+        [
+            (
+                "/Users/danielrispler/work/Falinks/.claude/worktrees/issue-322-terminals",
+                "/Users/danielrispler/work/Falinks"
+            ),
+            (
+                "/Users/danielrispler/work/Falinks",
+                "/Users/danielrispler/work/Falinks"
+            ),
+        ]
+    );
+}

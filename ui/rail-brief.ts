@@ -53,30 +53,31 @@ export function openBriefOnMap(project: string, pr: number) {
   openBriefWhenDrawn(project, pr);
 }
 
-// What the server last said, by the session's folder, what was asked of it (a folder with its PR number), and the views that read it, the rail's
+// What the server last said, by the session's project folder, what was asked of it (a project with its PR number), and the views that read it, the rail's
 // feed and the session list, each drawn again when an answer changes what shows.
 const known = new Map<string, WaitingBriefs | null>();
 const asked = new Set<string>();
 const readers = new Set<() => void>();
 
-/** What the server last said for `session`'s folder; asks it once per PR number, and `redraw` runs when the answer changes. */
+/** What the server last said for `session`'s project; asks it once per PR number, and `redraw` runs when the answer changes. */
 export function waitingOf(session: Session, redraw: () => void): WaitingBriefs | null {
   readers.add(redraw);
   const pr = session.identity.pr;
   if (pr === null) return null;
-  const key = `${session.cwd}#${pr}`;
+  const { project } = session;
+  const key = `${project}#${pr}`;
   if (!asked.has(key)) {
     asked.add(key);
-    invoke("briefs_waiting", { cwd: session.cwd })
+    invoke("briefs_waiting", { project })
       .then((now) => {
-        if (JSON.stringify(known.get(session.cwd) ?? null) !== JSON.stringify(now)) {
-          known.set(session.cwd, now);
+        if (JSON.stringify(known.get(project) ?? null) !== JSON.stringify(now)) {
+          known.set(project, now);
           for (const draw of readers) draw();
         }
       })
       .catch(failure("briefs_waiting"));
   }
-  return known.get(session.cwd) ?? null;
+  return known.get(project) ?? null;
 }
 
 /** The newest turn's row of `session`. */

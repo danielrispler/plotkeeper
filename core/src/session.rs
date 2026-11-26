@@ -21,6 +21,10 @@ pub struct Session {
     pub cwd: String,
     /// The last segment of `cwd`, or the whole `cwd` when that segment is empty.
     pub folder_name: String,
+    /// Its project folder (spec #659): the root of the first folder it got, set once and never changed by later
+    /// events. A saved session without it takes it from its saved `cwd` (`Studio::resume`).
+    #[serde(default)]
+    pub project: String,
     /// The studio terminal it runs in, its `PLOTKEEPER_TERMINAL_ID` from its latest event, `None` when
     /// it runs outside the studio (danielrispler/Falinks#461, decision 8).
     pub terminal: Option<String>,
@@ -235,6 +239,16 @@ impl Identity {
 pub(crate) fn folder_name(cwd: &str) -> String {
     let last = cwd.rsplit('/').next().unwrap_or_default();
     if last.is_empty() { cwd } else { last }.into()
+}
+
+/// The project a folder whose root is `root` belongs to (spec #659): a task's worktree
+/// `<main>/.claude/worktrees/<task>` belongs to `<main>`, any other root to itself.
+pub(crate) fn project_of(root: &str) -> &str {
+    const MARK: &str = "/.claude/worktrees/";
+    match root.rfind(MARK) {
+        Some(at) if at > 0 && root.len() > at + MARK.len() => &root[..at],
+        _ => root,
+    }
 }
 
 /// The worktree folder of the task that `cwd` is in: the path through the folder under
@@ -780,6 +794,14 @@ pub struct SinceSeen {
 }
 
 impl Session {
+    /// Sets its project (spec #659) from the folder root `root` finds, the first time only: a session that has one keeps
+    /// it, so a later folder never moves it. `root` runs only then.
+    pub(crate) fn set_project_once(&mut self, root: impl FnOnce() -> String) {
+        if self.project.is_empty() {
+            self.project = project_of(&root()).into();
+        }
+    }
+
     /// How many of its turns Daniel has seen.
     pub fn seen(&self) -> usize {
         self.seen

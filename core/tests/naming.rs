@@ -4,7 +4,7 @@
 
 use crate::common;
 use serde_json::{Value, json};
-use studio_core::{Context, Studio};
+use studio_core::{BranchQuery, Context, Studio};
 
 const NAMING: &str = include_str!("fixtures/transcripts/naming.jsonl");
 const SESSION: &str = "7d2c9a4e-1f3b-4c6d-9e8a-5b0f2c7d1a36";
@@ -85,7 +85,11 @@ fn an_issue_branch_names_its_issue_its_pr_and_its_worktree() {
     // The shell looks the branch's PR up off the poll.
     assert_eq!(
         studio.branches(),
-        vec![(TASK.to_string(), "issue-480-naming".to_string())]
+        [BranchQuery {
+            project: MAIN.into(),
+            cwd: TASK.into(),
+            branch: "issue-480-naming".into(),
+        }]
     );
     studio.set_pr("issue-480-naming", Some(490));
     assert_eq!(name(&studio), "#480 · PR #490 · agent-a1b2c3d4");

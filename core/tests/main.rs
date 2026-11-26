@@ -26,6 +26,7 @@ mod needs_you;
 mod notices;
 mod opencode;
 mod phases;
+mod project;
 mod prompt_name;
 mod questions;
 mod qwen;

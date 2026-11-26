@@ -10,7 +10,7 @@ import { initial } from "../../dist/settings.js";
 // A session as the core sends it, less the fields History never reads.
 /** @param {string} id @param {import("../../dist/types.js").SessionState} state @param {number} last_event_at */
 const session = (id, state, last_event_at, extra = {}) => /** @type {import("../../dist/types.js").Session} */ ({
-  id, state, last_event_at, name: null, prompt_name: null, cwd: `/w/plotkeeper`, folder_name: "plotkeeper",
+  id, state, last_event_at, name: null, prompt_name: null, cwd: `/w/plotkeeper`, project: "/w/plotkeeper", folder_name: "plotkeeper",
   identity: { issue: null, branch: null, pr: null, worktree: "", name: id }, transcript: { branch: null }, ...extra,
 });
 const ids = (list) => list.map((s) => s.id);
@@ -29,15 +29,18 @@ test("a session that starts again is no longer ended, so it leaves History", () 
   assert.deepEqual(ids(endedSessions([session("a", "running", 10)])), []);
 });
 
-test("the project is the repository's name, from a task's worktree too, else the folder's", () => {
-  // The core's `folder_name` rides along, unread: the name comes from `cwd` alone.
-  const [task, plain] = [{ cwd: "/w/Falinks/.claude/worktrees/issue-9-x", folder_name: "issue-9-x" }, { cwd: "/w/plotkeeper", folder_name: "plotkeeper" }];
+test("the project is the name of the session's project folder, not of the folder it ended in", () => {
+  // The core's project folder names it (spec #659): a task's worktree's main checkout, and the repository a `cd` left.
+  const task = { cwd: "/w/Falinks/.claude/worktrees/issue-9-x", project: "/w/Falinks", folder_name: "issue-9-x" };
+  const moved = { cwd: "/w/plotkeeper/ui", project: "/w/plotkeeper", folder_name: "ui" };
   assert.equal(projectName(task), "Falinks");
-  assert.equal(projectName(plain), "plotkeeper");
+  assert.equal(projectName(moved), "plotkeeper");
+  assert.ok(matches(session("m", "ended", 1, moved), "plotkeeper"));
+  assert.ok(!matches(session("m", "ended", 1, moved), "ui"));
 });
 
 test("the search matches name, project and branch, as a case-insensitive substring", () => {
-  const a = session("a", "ended", 1, { name: "Fix the Parser", cwd: "/w/Falinks", folder_name: "Falinks", transcript: { branch: "feature/Login" } });
+  const a = session("a", "ended", 1, { name: "Fix the Parser", cwd: "/w/Falinks", project: "/w/Falinks", folder_name: "Falinks", transcript: { branch: "feature/Login" } });
   assert.equal(branchOf(a), "feature/Login");
   for (const q of ["parser", "FALINKS", "login", " fix "]) assert.equal(matches(a, q), true, q);
   for (const q of ["plotkeeper", "nothing"]) assert.equal(matches(a, q), false, q);

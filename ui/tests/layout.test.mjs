@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { arrange } from "../../dist/layout.js";
-import { startProject } from "../../dist/map-model.js";
+import { startProject, wasRemoved } from "../../dist/map-model.js";
 
 test("from 1,007 pixels up the list shows in full, 252 pixels wide, beside the map", () => {
   for (const window of [2560, 1920, 1512, 1007]) assert.deepEqual(arrange(window), { mode: "full", list: 252 });
@@ -33,10 +33,29 @@ test("a folded list in a wide window is its strip, and unfolded it is the full l
 
 test("the page opens on the last viewed project's map, else the first project's", () => {
   const saved = ["/w/falinks", "/w/plotkeeper", "/w/pokedex"];
-  assert.equal(startProject("/w/plotkeeper", saved), "/w/plotkeeper");
+  assert.equal(startProject("/w/plotkeeper", saved, saved), "/w/plotkeeper");
   // Never viewed, or since removed: the first project.
-  assert.equal(startProject(null, saved), "/w/falinks");
-  assert.equal(startProject("/w/removed", saved), "/w/falinks");
+  assert.equal(startProject(null, saved, saved), "/w/falinks");
+  assert.equal(startProject("/w/removed", saved, saved), "/w/falinks");
   // A fresh install has none.
-  assert.equal(startProject("/w/plotkeeper", []), null);
+  assert.equal(startProject("/w/plotkeeper", [], []), null);
+});
+
+test("the page falls back to the first project the list shows, while a last viewed project the list hides still opens", () => {
+  const saved = ["/tmp/scratch", "/w/gone", "/w/plotkeeper"];
+  const listed = ["/w/plotkeeper"];
+  assert.equal(startProject(null, saved, listed), "/w/plotkeeper");
+  assert.equal(startProject("/w/removed", saved, listed), "/w/plotkeeper");
+  // Its "gone, Remove project" view is unchanged.
+  assert.equal(startProject("/w/gone", saved, listed), "/w/gone");
+  // With every saved project hidden (or the sessions not yet read), the first saved one, rather than the fresh install's words.
+  assert.equal(startProject(null, saved, []), "/tmp/scratch");
+});
+
+test("the shown project gives way only when it was saved and is removed, not when it was never saved", () => {
+  assert.equal(wasRemoved("/w/a", ["/w/a", "/w/b"], ["/w/b"]), true);
+  assert.equal(wasRemoved("/w/a", ["/w/a"], ["/w/a", "/w/b"]), false);
+  // A temporary project, never saved, or a live session's unsaved one, stays shown through another project's change.
+  assert.equal(wasRemoved("/tmp/t", ["/w/a"], ["/w/a", "/w/b"]), false);
+  assert.equal(wasRemoved("/tmp/t", [], ["/w/a"]), false);
 });

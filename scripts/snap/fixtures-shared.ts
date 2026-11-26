@@ -8,7 +8,7 @@ export const session = (id: string, name: string, state: SessionState, extra: Pa
   const now = Date.now();
   return {
     id, capabilities: { agent: "claude", asks: true, background_tasks: true, replies: true, permission_mode: true, durations: true, transcript_version: true, transcript_model: true, context: true, turn_trees: true },
-    model: null, shell: false, cwd: `/w/plotkeeper/.claude/worktrees/${id}`, folder_name: id, terminal: null, status_only: false, name, prompt_name: null,
+    model: null, shell: false, cwd: `/w/plotkeeper/.claude/worktrees/${id}`, project: "/w/plotkeeper", folder_name: id, terminal: null, status_only: false, name, prompt_name: null,
     resume_id: id, permission_mode: null, started_mode: null, cleared: [], asks_before_closing: false, landed: false, last_step: null,
     started_at: now - 3600e3, last_event_at: now - 60e3, turn_span: null, step_span: null, state, agents: [], asker: null,
     prompts: [], turns: [], since_looked: { turns: 0, files: 0, passed: 0, failed: 0, ran: 0 }, questions: [], blocked_commands: [], returned: null,
@@ -36,9 +36,14 @@ export const list = () => {
   return { ...base, sessions, selected: { session: sessions[0], agent: null } } satisfies Fixture;
 };
 
-// The saved project list (#381): plotkeeper with its sessions, falinks with none (its header only, after it) and pokedex, whose
-// folder is gone.
-const savedProjects = [{ path: "/w/falinks", gone: false }, { path: "/w/plotkeeper", gone: false }, { path: "/w/pokedex", gone: true }];
+// The saved project list (#381): plotkeeper with its sessions, falinks with none (its header only, after it), pokedex, whose folder is
+// gone, and a scratchpad an earlier build saved, temporary; neither of the last two has a live session, so the list hides both (spec #659).
+const savedProjects = [
+  { path: "/w/falinks", gone: false, temporary: false },
+  { path: "/w/plotkeeper", gone: false, temporary: false },
+  { path: "/w/pokedex", gone: true, temporary: false },
+  { path: "/private/tmp/tmp.Xr4k2", gone: false, temporary: true },
+];
 export const withSaved = (snapScript: string, extra: Fixture = {}): Fixture => ({
   ...list(),
   projects: savedProjects,
