@@ -206,8 +206,9 @@ fn run(log: &std::path::Path, held: lock::Held) -> std::io::Result<()> {
     studio_server::set_summaries_on(&app, summaries_on);
     // The background runs a start before left: the running ones go on, the queued ones take their turn.
     app.runner.pick_up();
-    // The micro-worlds whose run ended meanwhile are checked now.
+    // The micro-worlds whose run ended meanwhile are checked now, and the map text reviews' answers read.
     app.worlds.pick_up();
+    app.reviews.pick_up();
     let token = web::new_token();
     let page = Web::start(
         app.clone(),

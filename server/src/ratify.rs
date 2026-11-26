@@ -300,7 +300,7 @@ pub enum Detail {
     Link(LinkDetail),
 }
 
-/// A part's name and purpose, its held items matched by name, and the patterns its own `paths` gained and lost.
+/// A part's name, purpose and caption, its held items matched by name, and the patterns its own `paths` gained and lost.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PartDetail {
     pub name: Words,

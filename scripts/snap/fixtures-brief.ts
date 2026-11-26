@@ -532,7 +532,7 @@ const ratifyDetailRows: RatifyRow[] = [
       of: "part",
       name: { before: "Server", after: "Server" },
       purpose: { before: "Serves the page, keeps the state, installs the hook and runs the agents.", after: "Serves the page and keeps the state it shows." },
-      caption: { before: "The page's backend", after: "The page's backend" },
+      caption: { before: "Serves the page", after: "Serves the page" },
       holds: [
         { name: "Fog", text: { before: "Greys a part.", after: "Greys a part a PR changed until its brief is read." }, paths_added: ["server/src/fog.rs"], paths_removed: [] },
         { name: "Settings", text: { before: "Kept per user.", after: "Kept per user." }, paths_added: [], paths_removed: [] },
@@ -549,7 +549,7 @@ const ratifyDetailRows: RatifyRow[] = [
       of: "part",
       name: { before: null, after: "Install" },
       purpose: { before: null, after: "Puts plotkeeper's hook into each agent's settings, and takes it out again." },
-      caption: { before: null, after: "Wires the agents to the hook" },
+      caption: { before: null, after: "Wires the hook" },
       holds: [{ name: "Hook copies", text: { before: null, after: "The hook file each agent runs." }, paths_added: ["server/src/hook_copies.rs"], paths_removed: [] }],
       paths_added: ["server/src/install.rs", "server/src/hook_copies.rs"],
       paths_removed: [],
