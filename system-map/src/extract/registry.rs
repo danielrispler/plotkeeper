@@ -2,7 +2,8 @@
 
 use super::{
     Extractor, cargo::Cargo, dotnet::DotnetProjects, go::GoImports, java::JavaImports,
-    python::PythonImports, rust_modules::RustModules, typescript::TypescriptImports,
+    php::PhpImports, python::PythonImports, rust_modules::RustModules,
+    typescript::TypescriptImports,
 };
 
 pub(crate) const EXTRACTORS: &[&dyn Extractor] = &[
@@ -12,5 +13,6 @@ pub(crate) const EXTRACTORS: &[&dyn Extractor] = &[
     &GoImports,
     &JavaImports,
     &PythonImports,
+    &PhpImports,
     &DotnetProjects,
 ];
