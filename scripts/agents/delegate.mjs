@@ -237,9 +237,20 @@ const runWorker = (worktree, { candidate, effort, message, session = null, limit
     };
     let partial = "";
     let named = null;
+    // On its exit the timers stop, and what it started is killed: a command it left running would hold its output
+    // open, so that `close` never comes and the silence limit kills a worker that is done.
+    let exited = false;
+    child.on("exit", () => {
+      exited = true;
+      clearTimeout(silence);
+      clearTimeout(attempt);
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch {}
+    });
     child.stdout.on("data", (chunk) => {
       clearTimeout(silence);
-      silence = setTimeout(() => kill("silent"), SILENCE_MS);
+      if (!exited) silence = setTimeout(() => kill("silent"), SILENCE_MS);
       appendFileSync(jsonl, chunk);
       const lines = (partial + chunk).split("\n");
       partial = lines.pop();

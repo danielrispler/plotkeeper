@@ -122,13 +122,13 @@ for (const [run, said] of [
 // The stand-in worker. FAKE_OPENCODE says what it does: "edit" (changes a file and exits 0), "commit" (also commits
 // it, twice), "moved" (edits, and someone else moves the integration branch), "conflict" (edits a line someone else
 // also changes on the integration branch), "pull" (someone else moves the integration branch, the worker pulls it, then
-// edits), "pushint" (edits, commits and pushes its commit to the integration branch), "lost" (edits, and origin goes away), "empty" (exits 0 with no change), "fail" (exits 1), "chatty" (prints an event
+// edits), "linger" (edits and exits 0, leaving a \`sleep\` that holds its stdout and writes its pid to sleeper.pid), "pushint" (edits, commits and pushes its commit to the integration branch), "lost" (edits, and origin goes away), "empty" (exits 0 with no change), "fail" (exits 1), "chatty" (prints an event
 // every 50 ms and never ends), "push" (edits, commits and pushes its commit to a branch of its own), "branch" (edits and
 // pushes the integration tip as \`issue-7-cheap\`, no commit of its own) or "silent" (prints nothing and waits). FAKE_SILENT_MODELS, a comma-separated list, makes those models "silent" whatever FAKE_OPENCODE says;
 // a silent worker leaves a stray file first. Every worker call is logged with the environment it got. \`models opencode\`
 // lists FAKE_MODELS, a comma-separated list, or the test models by default, and is not logged.
 const fakeOpencode = `#!/usr/bin/env node
-const { execFileSync } = require("node:child_process");
+const { execFileSync, spawn } = require("node:child_process");
 const { appendFileSync, writeFileSync } = require("node:fs");
 const { join } = require("node:path");
 const env = process.env;
@@ -161,7 +161,7 @@ else {
     other("other.txt", "someone else's file\\n");
     execFileSync("git", ["pull", "--quiet", "--no-rebase", "--no-edit", "origin", "int"]);
   }
-  if (["edit", "commit", "moved", "conflict", "lost", "push", "pushint", "branch", "pull"].includes(mode)) {
+  if (["edit", "commit", "moved", "conflict", "lost", "push", "pushint", "branch", "pull", "linger"].includes(mode)) {
     writeFileSync("shared.txt", "the worker's line\\n");
     event("tool_use", { type: "tool", tool: "edit", state: { status: "completed", input: { filePath: "shared.txt" }, output: "ok" } });
   }
@@ -178,6 +178,11 @@ else {
   if (mode === "pushint") {
     execFileSync("git", ["commit", "--quiet", "-am", "worker"]);
     execFileSync("git", ["push", "--quiet", "origin", "HEAD:int"]);
+  }
+  if (mode === "linger") {
+    const sleeper = spawn("sleep", ["30"], { stdio: ["ignore", "inherit", "ignore"] });
+    writeFileSync(join(env.FAKE_DIR, "sleeper.pid"), String(sleeper.pid));
+    sleeper.unref();
   }
   if (mode === "branch") execFileSync("git", ["push", "--quiet", "origin", "origin/int:refs/heads/issue-7-cheap"]);
   if (mode === "moved") other("other.txt", "someone else's file\\n");
@@ -523,6 +528,15 @@ test("run: with one cheap candidate left in opencode's models, the run goes on",
   const ran = scratchRun({ cheap: two }).run({ FAKE_OPENCODE: "edit", FAKE_MODELS: "opencode/b-free" });
   assert.equal(ran.status, 0, ran.stderr);
   assert.match(ran.stdout, /^pass\n/);
+});
+
+test("run: a worker that exits 0 while a process it started holds its output gives pass, and that process is killed", () => {
+  const scratch = scratchRun();
+  const ran = scratch.run({ FAKE_OPENCODE: "linger", DELEGATE_SILENCE_MS: HEALTHY_SILENCE_MS });
+  assert.equal(ran.status, 0, ran.stderr);
+  assert.match(ran.stdout, /^pass\n/);
+  const pid = Number(readFileSync(join(scratch.dir, "sleeper.pid"), "utf8"));
+  assert.throws(() => process.kill(pid, 0), { code: "ESRCH" }, "the sleeper is gone");
 });
 
 test("run: a leftover issue-<n>-cheap worktree and branch are removed first", () => {
