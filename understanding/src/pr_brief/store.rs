@@ -34,6 +34,10 @@ pub struct StoredBrief {
     /// The import sites behind each link the PR adds (#499), from its head; none in a brief stored before it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub link_evidence: Vec<LinkEvidence>,
+    /// The map check's problems at its head (`system_map::check_at`, #641), which Ratify's head lists; none when the check passes,
+    /// when the head has no map, or in a brief stored before it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub map_problems: Vec<String>,
 }
 
 /// One line per brief written, for tuning prompts, caps and models from real data.

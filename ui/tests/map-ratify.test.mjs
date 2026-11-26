@@ -7,7 +7,7 @@ import { El, fakeDocument, tauri } from "./dom.mjs";
 const calls = [];
 tauri(calls);
 globalThis.document = fakeDocument({ body: new El("body") });
-const { overturnNote, ratifyActions } = await import("../../dist/map-ratify.js");
+const { mapCheckNode, overturnNote, ratifyActions, ratifyHead } = await import("../../dist/map-ratify.js");
 
 const all = (node) => [node, ...node.childNodes.filter((child) => child instanceof El).flatMap(all)];
 const statuses = (node) => all(node).filter((each) => each.getAttribute("role") === "status");
@@ -38,4 +38,32 @@ test("an overturn says its line once, in the page's action region; the note draw
   assert.deepEqual(statuses(overturnNote("/w/app", holds)), []);
   assert.deepEqual(statuses(document.body), [live]);
   assert.equal(live.text, "Copy this prompt and paste it into your agent");
+});
+
+const elements = (node) => node.childNodes.filter((child) => child instanceof El);
+
+test("Ratify's head holds its lines in one slot, and is absent with none (#641)", () => {
+  assert.equal(ratifyHead([]), null);
+  const one = /** @type {any} */ (document.createElement("p"));
+  const two = /** @type {any} */ (document.createElement("p"));
+  const head = /** @type {any} */ (ratifyHead([one, two]));
+  assert.equal(head.className, "ratify-head");
+  assert.deepEqual(elements(head), [one, two], "more than one line, in order");
+});
+
+test("the head's map check opens to its problems, stays open when the step is drawn again, and is absent when the check passes (#641)", () => {
+  assert.equal(mapCheckNode("/w/app|12|cafe", []), null);
+  const problems = ["stray/s.ts is tracked but no part owns it", "import link \"a-b\" runs from \"a\" to \"b\", but no import runs that way"];
+  const node = /** @type {any} */ (mapCheckNode("/w/app|12|cafe", problems));
+  assert.equal(node.tag, "details");
+  const [summary, list] = elements(node);
+  assert.equal(summary.tag, "summary", "the summary is the first child");
+  assert.equal(summary.text, "The map check fails at this head: 2 problems");
+  assert.equal(list.tag, "ul");
+  assert.deepEqual(list.find("li").map((li) => li.text), problems);
+  assert.equal(node.open, false, "closed at first");
+  node.open = true;
+  node.listeners.toggle();
+  assert.equal(/** @type {any} */ (mapCheckNode("/w/app|12|cafe", problems)).open, true, "drawn again, it is still open");
+  assert.equal(/** @type {any} */ (mapCheckNode("/w/app|13|beef", problems)).open, false, "another PR's opens closed");
 });

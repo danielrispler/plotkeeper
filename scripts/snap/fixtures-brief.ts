@@ -462,6 +462,32 @@ export const mapBriefRatify = (): Fixture => ({
       log("ratify ok");`, false, 100),
   pr_ratify: ratifyRows,
 });
+// The head's map check (#641): the PR's head fails `system-map check`, so Ratify's head says so above the items and opens to the problems.
+// `alone`: nothing to ratify, so the line alone brings the step, titled "The map at this head".
+const mapProblems = [
+  "ui/map-diff.ts is tracked but no part owns it; add it to a part's paths or to ignored",
+  "import link \"shell-understanding\" runs from \"shell\" to \"understanding\", but no import runs that way",
+];
+export const mapBriefMapCheck = (alone: boolean): Fixture => {
+  const view = briefOf(storySteps());
+  return {
+    ...mapBrief({ ...view, brief: { ...view.brief, map_problems: mapProblems } }, 4, `
+      const head = document.querySelector("#map-brief .ratify-head");
+      if (!head) return log("snap:fail Ratify has no head");
+      if (head.nextElementSibling !== document.querySelector("#map-brief .brief-ratify")) log("snap:fail the head is not above the items");
+      const check = head.querySelector("details.ratify-check");
+      if (check?.querySelector("summary")?.textContent !== "The map check fails at this head: 2 problems") return log("snap:fail the line says " + check?.textContent);
+      if (check.open) log("snap:fail the list opens closed");
+      check.querySelector("summary").click();
+      await wait(100);
+      const problems = [...check.querySelectorAll("li")].map((li) => li.textContent);
+      if (problems.join("|") !== ${JSON.stringify(mapProblems.join("|"))}) log("snap:fail the problems: " + problems.join("|"));
+      const title = document.querySelector("#map-brief .brief-title")?.textContent;
+      if (title !== (${alone} ? "The map at this head" : "Accept or overturn")) log("snap:fail the step's title: " + title);
+      log("map check ok");`, false, 100),
+    pr_ratify: alone ? [] : ratifyRows,
+  };
+};
 /**
  * The brief's reader explains itself (#524), with Explanations on (the default): the ? beside Leave, pressed; the step's title described by
  * its kind's line, directly under it. On the Ratify step (`ratify`), the title's line, and "Not yet ratified"'s under the first undecided

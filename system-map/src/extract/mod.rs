@@ -8,6 +8,7 @@ mod contract;
 mod go;
 mod java;
 mod names;
+mod python;
 pub(crate) mod registry;
 mod rust_modules;
 mod typescript;
@@ -61,6 +62,8 @@ pub(crate) struct Repo<'a> {
     texts: Option<&'a BTreeMap<String, String>>,
     /// In commit mode, a folder holding the commit's manifests and Rust files for `cargo metadata`, written once.
     cargo_dir: OnceCell<Result<tempfile::TempDir, String>>,
+    /// In commit mode, whether the commit's toolchain file goes in that folder: only for a commit plotkeeper trusts.
+    trusted: bool,
 }
 
 impl<'a> Repo<'a> {
@@ -79,13 +82,16 @@ impl<'a> Repo<'a> {
                 .collect(),
             texts: None,
             cargo_dir: OnceCell::new(),
+            trusted: true,
         }
     }
 
-    /// The repository in commit mode: `texts` are the commit's.
-    pub(crate) fn at_commit(self, texts: &'a BTreeMap<String, String>) -> Repo<'a> {
+    /// The repository in commit mode: `texts` are the commit's. An untrusted commit's toolchain file is left out of the
+    /// folder `cargo metadata` runs in, so the commit cannot choose the toolchain rustup resolves for `cargo` (#641).
+    pub(crate) fn at_commit(self, texts: &'a BTreeMap<String, String>, trusted: bool) -> Repo<'a> {
         Repo {
             texts: Some(texts),
+            trusted,
             ..self
         }
     }
@@ -99,7 +105,8 @@ impl<'a> Repo<'a> {
     }
 
     /// The folder to run `cargo metadata` in: the root, or in commit mode a temporary folder holding the commit's
-    /// `Cargo.toml` files, Rust files and toolchain file at their paths, which are all `cargo metadata --no-deps` reads.
+    /// `Cargo.toml` files, Rust files and, for a trusted commit, toolchain file at their paths, which are all `cargo metadata
+    /// --no-deps` reads.
     pub(crate) fn cargo_dir(&self) -> Result<&Path, String> {
         let Some(texts) = self.texts else {
             return Ok(self.root);
@@ -108,7 +115,8 @@ impl<'a> Repo<'a> {
             let dir = tempfile::tempdir().map_err(|e| format!("cannot make a folder: {e}"))?;
             for (file, text) in texts {
                 let name = file.rsplit('/').next().unwrap_or(file);
-                let toolchain = matches!(file.as_str(), "rust-toolchain" | "rust-toolchain.toml");
+                let toolchain = self.trusted
+                    && matches!(file.as_str(), "rust-toolchain" | "rust-toolchain.toml");
                 if name == "Cargo.toml" || name.ends_with(".rs") || toolchain {
                     let path = dir.path().join(file);
                     std::fs::create_dir_all(path.parent().unwrap_or(dir.path()))
@@ -206,6 +214,8 @@ pub(crate) struct Output {
     pub(crate) problems: Vec<String>,
     pub(crate) pairs: Vec<Pair>,
     pub(crate) unsure: Vec<Unsure>,
+    /// What it did not read and says so, one line each: `check` prints them as notes and never fails over them.
+    pub(crate) notes: Vec<String>,
     /// Each file it puts in a group (its Go package's folder, say), with that group, whether or not the file makes or
     /// ends a pair: the imports report names a group's slice by its part when the group's files sit in more than one.
     pub(crate) members: BTreeSet<(String, String)>,
@@ -218,9 +228,11 @@ pub(crate) struct Output {
 /// groups, none counting as lowest.
 /// An Unsure finding with no candidates is a problem, one in an untracked, ignored or skipped file is dropped, and
 /// findings of one file, name and reason are kept once, sorted, with the union of their candidates. A name the registry
-/// lacks is a problem. A group's member that is untracked or skipped is dropped.
+/// lacks is a problem. Every extractor's notes are kept, in the order of `names`. A group's member that is untracked or
+/// skipped is dropped.
 pub(crate) fn run(registry: &[&dyn Extractor], names: &[String], repo: &Repo) -> Output {
     let mut problems = Vec::new();
+    let mut notes = Vec::new();
     // Each Unsure finding's file, name and reason, with the candidates of every finding of them.
     let mut unsure: BTreeMap<(String, String, String), BTreeSet<String>> = BTreeMap::new();
     // Each pair by its ends, merged from its findings.
@@ -240,6 +252,7 @@ pub(crate) fn run(registry: &[&dyn Extractor], names: &[String], repo: &Repo) ->
         };
         let found = extractor.extract(repo);
         problems.extend(found.problems);
+        notes.extend(found.notes);
         // Whether each file it reads is skipped, asked once per file, since `skips` may read the file.
         let mut skipped: HashMap<String, bool> = HashMap::new();
         let mut skips = |file: &str| {
@@ -295,6 +308,7 @@ pub(crate) fn run(registry: &[&dyn Extractor], names: &[String], repo: &Repo) ->
     }
     Output {
         problems,
+        notes,
         pairs: pairs.into_values().collect(),
         unsure: unsure
             .into_iter()
@@ -329,6 +343,16 @@ pub(crate) fn read_parts<'p>(
         })
         .map(|part| part.id.as_str())
         .collect()
+}
+
+/// The folder holding `file`, as a prefix: empty for the root, else ending in `/`.
+fn folder_of(file: &str) -> &str {
+    file.rfind('/').map_or("", |at| &file[..=at])
+}
+
+/// The name a folder's files go by as a pair's group: the folder, or `./` for the root.
+fn group(folder: &str) -> String {
+    if folder.is_empty() { "./" } else { folder }.to_string()
 }
 
 #[cfg(test)]

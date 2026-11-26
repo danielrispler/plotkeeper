@@ -44,7 +44,7 @@ test("every heading the brief's reader and Ratify draw has a line: each step kin
   for (const kind of kinds) assert.ok(BRIEF_HEADINGS[kind], `the step kind "${kind}" has no line`);
   // The Ratify step's titles, from the step `ratify.ts` makes.
   const titles = [...read("ui/ratify.ts").matchAll(/\bh: "([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(titles.sort(), ["Accept or overturn", "Guard with a law"]);
+  assert.deepEqual(titles.sort(), ["Accept or overturn", "Guard with a law", "The map at this head"]);
   for (const title of titles) assert.ok(RATIFY_HEADINGS[title], `Ratify's "${title}" has no line`);
   // The reader's own headings.
   const drawn = [...read("ui/map-brief.ts").matchAll(/text\("h[1-6]", "([^"]+)"/g)].map((m) => m[1]);
@@ -62,6 +62,7 @@ test("a step's line is its kind's, and on the Ratify step its title's; a kind wi
   assert.equal(stepLine({ k: "Could break", h: "The rail may drop a turn" }), BRIEF.steps["Could break"]);
   assert.equal(stepLine({ k: "Ratify", h: "Accept or overturn" }), RATIFY.accept);
   assert.equal(stepLine({ k: "Ratify", h: "Guard with a law" }), RATIFY.guard);
+  assert.equal(stepLine({ k: "Ratify", h: "The map at this head" }), RATIFY.head);
   assert.equal(stepLine({ k: "Something new", h: "A title" }), undefined);
 });
 

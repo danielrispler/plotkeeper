@@ -6,7 +6,7 @@
 import { failure, hint, invoke, pressable, promptBox, sayAction, text } from "./dom.js";
 import { currentMap } from "./map.js";
 import { openDrawer } from "./map-drawer.js";
-import { copyOverturn, decideWith, detailLines, evidenceLine, noteFor, overturnPrompt, overturnReport, siteDrawer, sitesDrawer, type Overturned } from "./ratify.js";
+import { copyOverturn, decideWith, detailLines, evidenceLine, mapCheckLine, noteFor, overturnPrompt, overturnReport, siteDrawer, sitesDrawer, type Overturned } from "./ratify.js";
 import { logStop } from "./stop-rules.js";
 import type { ImportSite, LinkSites, RatifyRow } from "./types.js";
 
@@ -130,4 +130,41 @@ export function ratifyActions(project: string, item: Ratifiable, done: (state: "
   overturn.addEventListener("click", () => decide("overturned"));
   box.append(accept, overturn);
   return box;
+}
+
+/**
+ * Ratify's head (#641): the lines above the step's items that say how the PR's head stands, the map check's and, later, the Map text
+ * review's (spec #634), in the order given. Null with none.
+ */
+export function ratifyHead(lines: HTMLElement[]): HTMLElement | null {
+  if (!lines.length) return null;
+  const head = text("div", "", "ratify-head");
+  head.append(...lines);
+  return head;
+}
+
+// The map check lines left open, by project, PR and head: the step is drawn again on every map draw, and an open list stays open.
+const openChecks = new Set<string>();
+
+/**
+ * The head's map check line (#641): "The map check fails at this head: N problems", a disclosure that opens to the problems, each as the
+ * check words it. `key` names the brief (project, PR and head). Null when the check passed.
+ */
+export function mapCheckNode(key: string, problems: string[]): HTMLElement | null {
+  const line = mapCheckLine(problems);
+  if (!line) return null;
+  const node = text("details", "", "ratify-check");
+  node.open = openChecks.has(key);
+  node.addEventListener("toggle", () => (node.open ? openChecks.add(key) : openChecks.delete(key)));
+  const list = text("ul", "", "ratify-problems");
+  for (const problem of problems) {
+    const each = text("li", problem);
+    // The check's words name files and ids, which a translator must leave alone.
+    each.translate = false;
+    list.append(each);
+  }
+  const summary = text("summary", line);
+  hint(summary, "List what system-map check finds wrong at this PR's head");
+  node.append(summary, list);
+  return node;
 }

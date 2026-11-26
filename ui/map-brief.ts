@@ -21,7 +21,7 @@ import { logStop } from "./stop-rules.js";
 import { expectedLine } from "./map-pre-flight.js";
 import { exploreRow } from "./micro-world.js";
 import { guardRow } from "./patch-review.js";
-import { branchOf, overturnNote, ratifyActions, ratifyDetail, ratifyEvidence } from "./map-ratify.js";
+import { branchOf, mapCheckNode, overturnNote, ratifyActions, ratifyDetail, ratifyEvidence, ratifyHead } from "./map-ratify.js";
 import { copyOverturn, statusWords } from "./ratify.js";
 import type { Copied } from "./notes.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
@@ -443,6 +443,10 @@ export function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBri
   if (step.covered_by) words.append(text("p", `Covered by the test ${step.covered_by}.`, "brief-quiet"));
   if (step.check) words.append(checkNode(view, step, step.check));
   if (step.k === "Ratify") {
+    // Ratify's head (#641): how the PR's head stands, above the items.
+    const check = playing && pr > 0 ? mapCheckNode(`${view.project}|${pr}|${playing.brief.head}`, playing.brief.map_problems ?? []) : null;
+    const head = ratifyHead(check ? [check] : []);
+    if (head) words.append(head);
     words.append(ratifyNode(view, ratifying));
     const guard = playing?.brief.guard;
     if (guard && pr > 0 && !view.scrub) words.append(guardRow(view, pr, guard, () => {

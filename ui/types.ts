@@ -605,9 +605,10 @@ export type AlsoGroup = { kind: AlsoKind; files: TouchedFile[]; lines: number };
 type BriefShape = { chapters: boolean; required: string[]; also: string[]; overview: boolean; flows_changed: string[] };
 // `partial_facts` (#477, #491): what the brief was written without, absent when nothing was missing or in a brief from before it.
 // `link_evidence` (#499): the import sites behind each link the PR adds, read from its head; Ratify reads it through `pr_ratify`.
+// `map_problems` (#641): the map check's problems at its head, which Ratify's head lists; absent when the check passed.
 type StoredBrief = {
   version: number; pr: number; head: string; written_at: number; stale: boolean; model: string; shape?: BriefShape; brief: PrBrief; guard?: Guard | null;
-  partial_facts?: PartialFacts; link_evidence?: { link: string; sites: ImportSite[] }[];
+  partial_facts?: PartialFacts; link_evidence?: { link: string; sites: ImportSite[] }[]; map_problems?: string[];
 };
 // The cut diff's files none of whose hunks were sent and those sent in part, with its bytes sent and not sent; the claim check's error; the
 // extensions of the diff's source languages no extractor of the map reads (`understanding/src/pr_brief.rs`, `PartialFacts`).

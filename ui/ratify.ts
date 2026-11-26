@@ -167,13 +167,14 @@ export function noteFor(last: Overturned | null, project: string, holds: (item: 
   return last && last.project === project && holds(last) ? last : null;
 }
 
-// The brief's last step when there is anything to ratify, or Guard with a law to offer (#401, a bug fix's brief, before and after it
-// merges): it holds the items and the guard's row, drawn by `map-brief.ts`. `on` is the parts the brief lit, so the map stays as the brief
-// left it.
-export const ratifyStep = (rows: RatifyRow[], on: string[] = [], guard = false): BriefStep | null => {
+// The brief's last step when there is anything to ratify, Guard with a law to offer (#401, a bug fix's brief, before and after it
+// merges), or a line at Ratify's head (`head`, #641: the map check failing at the PR's head): it holds the head's lines, the items and the
+// guard's row, drawn by `map-brief.ts`. `on` is the parts the brief lit, so the map stays as the brief left it.
+export const ratifyStep = (rows: RatifyRow[], on: string[] = [], guard = false, head = false): BriefStep | null => {
   const step = { k: "Ratify", on, hops: [], law: null, covered_by: null, list: [], risks: [], fig: null, check: null, cites: [], flags: [] };
   if (rows.length) return { ...step, h: "Accept or overturn", b: "What changed the map, and what the agent decided. Nothing waits on this." };
-  return guard ? { ...step, h: "Guard with a law", b: "This PR fixed a bug and left no law behind it." } : null;
+  if (guard) return { ...step, h: "Guard with a law", b: "This PR fixed a bug and left no law behind it." };
+  return head ? { ...step, h: "The map at this head", b: "Nothing here to accept or overturn." } : null;
 };
 
 // The rows still to ratify.
@@ -185,3 +186,8 @@ export function sheetLinkItem(link: { id: string; from: string; to: string; kind
   const detail: RatifyDetail = { of: "link", kind: { before: null, after: link.kind ?? "" }, reason: { before: null, after: link.reason ?? "" } };
   return { pr, kind: "link", id: link.id, text: `${link.from} to ${link.to}`, change: "", detail };
 }
+
+// Ratify's head line for the map check at the PR's head (#641, spec #634 "The head's map check"), from the problems stored with the
+// brief; none when the check passed, the head has no map, or the brief was stored before it.
+export const mapCheckLine = (problems: string[] | undefined): string | null =>
+  problems?.length ? `The map check fails at this head: ${problems.length} ${problems.length === 1 ? "problem" : "problems"}` : null;

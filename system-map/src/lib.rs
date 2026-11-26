@@ -51,6 +51,10 @@ pub struct Report {
     /// The Unsure files the parts own, each with its owned candidates; never a failure. Left out of the JSON when empty.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub unsure: Vec<Unsure>,
+    /// What the extractors did not read and say so, such as a layout key of a build config; never a failure. Left out of
+    /// the JSON when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
     /// What the check covered, for the line a pass prints.
     pub counts: Counts,
     /// The registered extractors the map does not name that could read the repository, which `check` notes.
@@ -58,32 +62,53 @@ pub struct Report {
 }
 
 impl Report {
-    /// One note per Unsure finding whose candidates another part owns, naming the name in doubt and the parts its part's
-    /// links to pass as unproven (spec #569, "Unsure").
+    /// The notes on the Unsure findings whose candidates another part owns, one per pair of the file's part and the parts
+    /// its links to pass as unproven (spec #569, "Unsure"; #631): a group of one finding names its file and name, a larger
+    /// one counts its files and names and names the first three. Sorted by part, then by the relaxed parts.
     pub fn unsure_notes(&self) -> Vec<String> {
         let owner: std::collections::HashMap<&str, &str> = self
             .parts
             .iter()
             .flat_map(|part| part.files.iter().map(|f| (f.as_str(), part.id.as_str())))
             .collect();
-        self.unsure
-            .iter()
-            .filter_map(|u| {
-                let own = owner.get(u.file.as_str());
-                let parts: BTreeSet<&str> = u
-                    .candidates
-                    .iter()
-                    .filter_map(|c| owner.get(c.as_str()).copied())
-                    .filter(|part| Some(part) != own)
-                    .collect();
-                (!parts.is_empty()).then(|| {
-                    format!(
-                        "{} is unsure of {}; its links to {} pass as unproven",
-                        u.file,
-                        u.name,
-                        parts.into_iter().collect::<Vec<_>>().join(", ")
-                    )
-                })
+        let mut groups: BTreeMap<(&str, Vec<&str>), Vec<&Unsure>> = BTreeMap::new();
+        for u in &self.unsure {
+            let own = owner.get(u.file.as_str()).copied();
+            let parts: BTreeSet<&str> = u
+                .candidates
+                .iter()
+                .filter_map(|c| owner.get(c.as_str()).copied())
+                .filter(|part| Some(*part) != own)
+                .collect();
+            if !parts.is_empty() {
+                let key = (own.unwrap_or_default(), parts.into_iter().collect());
+                groups.entry(key).or_default().push(u);
+            }
+        }
+        let plural = |n: usize, noun: &str| format!("{n} {noun}{}", if n == 1 { "" } else { "s" });
+        groups
+            .into_iter()
+            .map(|((part, parts), findings)| {
+                let parts = parts.join(", ");
+                if let [u] = findings[..] {
+                    return format!(
+                        "{} is unsure of {}; its links to {parts} pass as unproven",
+                        u.file, u.name
+                    );
+                }
+                let files: BTreeSet<&str> = findings.iter().map(|u| u.file.as_str()).collect();
+                let names: BTreeSet<&str> = findings.iter().map(|u| u.name.as_str()).collect();
+                let mut shown: Vec<&str> = names.iter().take(3).copied().collect();
+                if names.len() > 3 {
+                    shown.push("…");
+                }
+                format!(
+                    "{} of {part} {} unsure of {} ({}); its links to {parts} pass as unproven; --json lists them",
+                    plural(files.len(), "file"),
+                    if files.len() == 1 { "is" } else { "are" },
+                    plural(names.len(), "name"),
+                    shown.join(", ")
+                )
             })
             .collect()
     }
@@ -302,10 +327,15 @@ pub fn check_files(root: &Path, files: Vec<String>) -> Report {
 
 /// `check` of the commit `commit` of the repository at `root`, read from git with nothing checked out (spec #477, "Reading
 /// a commit without checking it out"): its map, its tracked files and their texts are the commit's, and the working tree
-/// is never read. A name that is no commit is the one problem.
-pub fn check_at(root: &Path, commit: &str) -> Report {
+/// is never read. A name that is no commit is the one problem. An untrusted commit, such as the head of a PR by someone else, has
+/// its toolchain file left out of the folder `cargo metadata` runs in, so it cannot choose the toolchain `cargo` resolves (#641).
+pub fn check_at(root: &Path, commit: &str, trusted: bool) -> Report {
     match commit::read(root, commit) {
-        Ok(snapshot) => check_with(root, Ok(snapshot.files.clone()), Some(&snapshot.texts)),
+        Ok(snapshot) => check_with(
+            root,
+            Ok(snapshot.files.clone()),
+            Some((&snapshot.texts, trusted)),
+        ),
         Err(problem) => Report {
             problems: vec![problem],
             ..Report::default()
@@ -328,12 +358,14 @@ pub fn law_reports(
     Ok(laws::check(&|file| read_tracked(root, file), &map, &files))
 }
 
-/// `check` of the tracked `files`, their texts read from the working tree at `root`, or from `texts` in commit mode.
+/// `check` of the tracked `files`, their texts read from the working tree at `root`, or in commit mode from the commit's
+/// texts, with whether the commit is trusted.
 fn check_with(
     root: &Path,
     files: Result<Vec<String>, String>,
-    texts: Option<&BTreeMap<String, String>>,
+    commit: Option<(&BTreeMap<String, String>, bool)>,
 ) -> Report {
+    let texts = commit.map(|(texts, _)| texts);
     let mut report = Report::default();
     let loaded = match texts {
         Some(texts) => texts
@@ -371,8 +403,8 @@ fn check_with(
             report.problems.extend(problems);
             let names = map.extractors.as_deref().unwrap_or_default();
             let repo = repo(root, &map, &files);
-            let repo = match texts {
-                Some(texts) => repo.at_commit(texts),
+            let repo = match commit {
+                Some((texts, trusted)) => repo.at_commit(texts, trusted),
                 None => repo,
             };
             let found = edges::check_links(
@@ -385,6 +417,7 @@ fn check_with(
             report.problems.extend(found.problems);
             report.edges = found.edges;
             report.unsure = found.unsure;
+            report.notes = found.notes;
             report.suggested = extract::registry::EXTRACTORS
                 .iter()
                 .filter(|e| !names.iter().any(|n| n == e.name()) && e.detect(&repo))
