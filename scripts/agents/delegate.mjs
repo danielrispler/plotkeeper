@@ -308,6 +308,23 @@ const check = (worktree, base) => {
   return { escalate: "red check", tell: `\`npm run check\` is red. The last lines of its output:\n\n${tail}\n\nFix the cause, then run \`npm run check\` until it is green. Do not commit or push.` };
 };
 
+// The reflog entries that only point HEAD at a commit that is already there, such as one the worker pulled.
+const MOVES = /Fast-forward|^reset:|^checkout:|^switch:|\(start\)/;
+
+/**
+ * The commits the worker made since `base`: the worktree's own HEAD reflog, its moves left out. Not `base..HEAD`, which
+ * also holds the commits of others that the worker pulled or merged; a commit it made and then reset away still counts.
+ */
+const madeBy = (worktree, base) => {
+  const made = new Set();
+  for (const line of git(worktree, "log", "--walk-reflogs", "--format=%H%x09%gs", "HEAD").split("\n").filter(Boolean)) {
+    const [commit, subject] = line.split("\t");
+    if (MOVES.test(subject) || exec(worktree, "git", ["merge-base", "--is-ancestor", commit, base]).status === 0) continue;
+    made.add(commit);
+  }
+  return [...made];
+};
+
 /**
  * What the worker left on GitHub, or null (spec #592, step 7): an `origin` ref that holds one of its `commits`, the
  * ticket's branch on `origin`, or a PR from it. Only the worker's own traces count: others move refs during a run.
@@ -336,8 +353,7 @@ const attempt = async (worktree, { candidate, effort, base, integration, title, 
     const started = Date.now();
     const exit = await runWorker(worktree, { candidate, effort, ...options });
     runs.push({ ms: Date.now() - started });
-    const commits = git(worktree, "rev-list", `${base}..HEAD`).split("\n").filter(Boolean);
-    const what = pushed(worktree, branch, commits);
+    const what = pushed(worktree, branch, madeBy(worktree, base));
     return what ? { ...exit, pushed: what } : exit;
   };
   const last = (verdict) => {

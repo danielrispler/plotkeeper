@@ -121,7 +121,8 @@ for (const [run, said] of [
 
 // The stand-in worker. FAKE_OPENCODE says what it does: "edit" (changes a file and exits 0), "commit" (also commits
 // it, twice), "moved" (edits, and someone else moves the integration branch), "conflict" (edits a line someone else
-// also changes on the integration branch), "lost" (edits, and origin goes away), "empty" (exits 0 with no change), "fail" (exits 1), "chatty" (prints an event
+// also changes on the integration branch), "pull" (someone else moves the integration branch, the worker pulls it, then
+// edits), "pushint" (edits, commits and pushes its commit to the integration branch), "lost" (edits, and origin goes away), "empty" (exits 0 with no change), "fail" (exits 1), "chatty" (prints an event
 // every 50 ms and never ends), "push" (edits, commits and pushes its commit to a branch of its own), "branch" (edits and
 // pushes the integration tip as \`issue-7-cheap\`, no commit of its own) or "silent" (prints nothing and waits). FAKE_SILENT_MODELS, a comma-separated list, makes those models "silent" whatever FAKE_OPENCODE says;
 // a silent worker leaves a stray file first. Every call is logged with the environment it got.
@@ -151,7 +152,11 @@ else if (mode === "silent") {
 else {
   event("step_start", { type: "step-start" });
   event("tool_use", { type: "tool", tool: "read", state: { status: "completed", input: { filePath: join(process.cwd(), "AGENTS.md") }, output: "long" } });
-  if (["edit", "commit", "moved", "conflict", "lost", "push", "branch"].includes(mode)) {
+  if (mode === "pull") {
+    other("other.txt", "someone else's file\\n");
+    execFileSync("git", ["pull", "--quiet", "--no-rebase", "--no-edit", "origin", "int"]);
+  }
+  if (["edit", "commit", "moved", "conflict", "lost", "push", "pushint", "branch", "pull"].includes(mode)) {
     writeFileSync("shared.txt", "the worker's line\\n");
     event("tool_use", { type: "tool", tool: "edit", state: { status: "completed", input: { filePath: "shared.txt" }, output: "ok" } });
   }
@@ -164,6 +169,10 @@ else {
   if (mode === "push") {
     execFileSync("git", ["commit", "--quiet", "-am", "worker"]);
     execFileSync("git", ["push", "--quiet", "origin", "HEAD:refs/heads/sneaky"]);
+  }
+  if (mode === "pushint") {
+    execFileSync("git", ["commit", "--quiet", "-am", "worker"]);
+    execFileSync("git", ["push", "--quiet", "origin", "HEAD:int"]);
   }
   if (mode === "branch") execFileSync("git", ["push", "--quiet", "origin", "origin/int:refs/heads/issue-7-cheap"]);
   if (mode === "moved") other("other.txt", "someone else's file\\n");
@@ -448,6 +457,7 @@ test("run: a mark from an earlier UTC day has expired", () => {
 
 for (const [what, fake, said] of /** @type {[string, Record<string, string>, RegExp][]} */ ([
   ["a worker that pushed its commit", { FAKE_OPENCODE: "push" }, /^stop: origin\/sneaky has the worker's commit [0-9a-f]{12}$/],
+  ["a worker that pushed its commit to the integration branch", { FAKE_OPENCODE: "pushint" }, /^stop: origin\/int has the worker's commit [0-9a-f]{12}$/],
   ["an issue-<n>-cheap branch on origin", { FAKE_OPENCODE: "branch" }, /^stop: origin has the branch issue-7-cheap$/],
   ["an open PR from issue-<n>-cheap", { FAKE_OPENCODE: "edit", FAKE_GH_PRS: JSON.stringify([{ url: "https://github.com/o/r/pull/9" }]) }, /^stop: a PR from issue-7-cheap is open: https:\/\/github\.com\/o\/r\/pull\/9$/],
 ])) {
@@ -469,6 +479,12 @@ test("run: the guard asks gh for a PR from the ticket's branch, and a ref someon
   const pr = ran.calls("gh").find((call) => call.argv[0] === "pr");
   assert.ok(pr, "gh pr list was called");
   assert.deepEqual(pr.argv.slice(0, 4), ["pr", "list", "--head", "issue-7-cheap"]);
+});
+
+test("run: a worker that pulls the moved integration branch gives pass, not stop", () => {
+  const ran = scratchRun().run({ FAKE_OPENCODE: "pull" });
+  assert.equal(ran.status, 0, ran.stderr);
+  assert.match(ran.stdout, /^pass\n/);
 });
 
 test("run: a leftover issue-<n>-cheap worktree and branch are removed first", () => {
