@@ -86,7 +86,7 @@ fn print_check(
             "note: {name} could read this repository; add it to extractors"
         )?;
     }
-    for note in report.unsure_notes() {
+    for note in report.unsure_notes().iter().chain(&report.notes) {
         writeln!(err, "note: {note}")?;
     }
     if json {
