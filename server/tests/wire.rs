@@ -419,6 +419,7 @@ fn the_wire_samples_of_the_writer_section_are_written_for_tsc() {
                 briefs: true,
                 keys: vec![studio_understanding::WriterKind::OpenAI],
                 base_url: Some("http://localhost:11434/v1".into()),
+                key_store: "the Secret Service",
             }),
         ),
         (

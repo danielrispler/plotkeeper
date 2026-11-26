@@ -706,7 +706,8 @@ export type ProjectMark = { project: string; why: MarkWhy[] };
  */
 export type WriterKind = "anthropic" | "openai" | "claude" | "agy" | "codex" | "copilot" | "cursor";
 type FoundWriter = { kind: WriterKind; name: string; found: boolean; models: string[]; efforts: string[] };
-export type Writers = { writers: FoundWriter[]; summaries_on: boolean; briefs: boolean; keys: WriterKind[]; base_url: string | null };
+// `key_store`: where the server keeps the API keys, as the page names it, such as "the macOS Keychain" (#510).
+export type Writers = { writers: FoundWriter[]; summaries_on: boolean; briefs: boolean; keys: WriterKind[]; base_url: string | null; key_store: string };
 type WriterOutcome = "passed" | "not_logged_in" | "quota" | "timeout" | "not_installed" | "empty" | "other";
 export type WriterTest = { outcome: WriterOutcome; line: string; settings: string | null };
 

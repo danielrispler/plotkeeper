@@ -11,7 +11,7 @@ import { mapBadgeList, mapBase, mapBriefPairLight, mapBriefSwitch, mapBroken, ma
 import { mapFootprint, mapLatePlace, mapPanelBrief, mapPanelDiff, mapNotPlacedGlass, mapNotPlacedHint, mapPanelFieldHints, mapPanelFocus, mapPanelHead, mapPanelHistory, mapPanelLine2, mapPanelNoSession, mapPanelPeel, mapListFold, mapPanelSettings, mapPanelStory, mapPanelToggle, mapSheetClose, mapSheetExplained, mapSheetHere, mapSheetHolds, mapSheetKeptWidth, mapSheetResizeRedraw, mapSheetScrollShort, mapSheetStill, mapSheetUnratified, mapSheetWidth, mapToastBeside, mapTurnLight, mapPanelPatched, mapPanelAskStays, mapPanelBriefFoot } from "./fixtures-panel.ts";
 import { mapBackLaw, mapMicroWorld, mapMicroWorldBuilding, mapPreFlight, mapPreFlightOutside, mapPreFlightOutsideKept, mapPreFlightPalette, mapPreFlightPick, mapPreFlightStatus, mapRuns, mapRunsAnnounced, mapRunsBesideSheet, mapRunsPaused, mapTray, mapTrayAfterPush } from "./fixtures-runs.ts";
 import { mapBriefAlsoGroups, mapBriefAnnounce, mapBriefBar, mapBriefBold, mapBriefBoldUnpaired, mapBriefChapterLast, mapBriefChapterMid, mapBriefChapters, mapBriefCopied, mapBriefCopyByHand, mapBriefExplainBack, mapBriefExplained, mapBriefFigure, mapBriefGuard, mapBriefHeights, mapBriefMapCheck, mapBriefNoFacts, mapBriefReview, mapBriefNoStaleBase, mapBriefOrderRight, mapBriefOrderSlots, mapBriefOrderWrong, mapBriefOverturn, mapBriefPartialFacts, mapBriefPick, mapBriefRatify, mapBriefRatifyDetail, mapBriefRatifyEvidence, mapBriefShort, mapBriefSince, mapBriefStaleBase, mapBriefStart, mapBriefStepCode, mapBriefStory, mapBriefTall, mapBriefTaller, mapBriefTallScroll, mapBriefUnconfirmed, mapBriefWhy, mapBriefWhyDecision, mapBriefWriting, mapCatchUp, mapCatchUpBold, mapCatchUpCard, mapCatchUpStage, mapCatchUpSummarising, mapCatchUpWriting, mapDiffClosed, mapDiffLitGhost, mapDiffRatifyLit, mapDiffRemoval, mapDiffRemovalBrief, mapDiffSplit, mapDiffSplitBrief, listBriefMark, railBriefReady } from "./fixtures-brief.ts";
-import { writersBriefsNeedClaude, writersFailed, writersKeyError, writersKeyNotSet, writersKeySet, writersList, writersOpenAI, writersPassed } from "./fixtures-writers.ts";
+import { writersBriefsNeedClaude, writersFailed, writersKeyError, writersKeyNotSet, writersKeySet, writersList, writersOpenAI, writersPassed, writersSecretService } from "./fixtures-writers.ts";
 
 export const fixtures = {
   ...railFixtures,
@@ -43,6 +43,7 @@ export const fixtures = {
   writersOpenAI,
   writersBriefsNeedClaude,
   writersKeyError,
+  writersSecretService,
   writersListNarrow: (): Fixture => fixtures.writersList(),
   writersPassedNarrow: (): Fixture => fixtures.writersPassed(),
   writersFailedNarrow: (): Fixture => fixtures.writersFailed(),

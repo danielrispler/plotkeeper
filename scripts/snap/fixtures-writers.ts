@@ -44,7 +44,7 @@ const writersOpen = (extra: Partial<Fixture>, check: string, press = false): Fix
 
 /** Unconfigured, with both writers found: preset to Claude, summaries off until a Test passes. */
 export const writersList = () =>
-  writersOpen({ writers: { writers: [claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: null } }, `
+  writersOpen({ writers: { writers: [claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: null, key_store: "the macOS Keychain" } }, `
     const picks = [...document.querySelectorAll("#writer-pick option")].map((o) => o.textContent + (o.disabled ? "!" : ""));
     if (picks.join() !== "Claude,agy") log("snap:fail the writers listed: " + picks.join());
     if (document.getElementById("writer-pick").value !== "claude") log("snap:fail the preset is not Claude");
@@ -53,7 +53,7 @@ export const writersList = () =>
 /** A passed Test of agy, the only writer found. */
 export const writersPassed = () =>
   writersOpen({
-    writers: { writers: [{ ...claudeWriter, found: false }, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: null },
+    writers: { writers: [{ ...claudeWriter, found: false }, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: null, key_store: "the macOS Keychain" },
     test_writer: { outcome: "passed", line: "Passed: `agy` answered. Summaries are written with it.", settings: null },
   }, `
     if (document.getElementById("writer-pick").value !== "agy") log("snap:fail the preset is not agy, the first found");
@@ -62,7 +62,7 @@ export const writersPassed = () =>
 /** A failed Test with its reason and the writer's own fix. */
 export const writersFailed = () =>
   writersOpen({
-    writers: { writers: [claudeWriter, agyWriter], summaries_on: true, briefs: true, keys: [], base_url: null },
+    writers: { writers: [claudeWriter, agyWriter], summaries_on: true, briefs: true, keys: [], base_url: null, key_store: "the macOS Keychain" },
     test_writer: { outcome: "not_logged_in", line: "`claude` is not logged in. Run `claude` in a terminal and log in with /login.", settings: null },
   }, `${writerStatusBefore}
     document.getElementById("writer-test").click();
@@ -71,7 +71,7 @@ export const writersFailed = () =>
     if (!outcome?.classList.contains("failed") || !outcome.textContent.includes("/login")) log("snap:fail no failed outcome with its fix: " + outcome?.textContent);${writerStatusAfter("/login")}`);
 /** No API key set (#366): the writer is listed but cannot be picked, and the key row offers to add one. */
 export const writersKeyNotSet = () =>
-  writersOpen({ writers: { writers: [anthropicWriter, claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: null } }, `
+  writersOpen({ writers: { writers: [anthropicWriter, claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: null, key_store: "the macOS Keychain" } }, `
     const first = document.querySelector("#writer-pick option");
     if (first?.textContent !== "Anthropic API key (not set)" || !first.disabled) log("snap:fail the unset key is not listed first and unpickable: " + first?.textContent);
     if (!document.getElementById("writer-key-state")?.textContent.includes("not set")) log("snap:fail the key row does not say not set");
@@ -83,7 +83,7 @@ export const writersKeyNotSet = () =>
 /** An API key set: it comes first in the preset order, and a Test of the Anthropic writer passes. */
 export const writersKeySet = () =>
   writersOpen({
-    writers: { writers: [{ ...anthropicWriter, found: true }, claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: ["anthropic"], base_url: null },
+    writers: { writers: [{ ...anthropicWriter, found: true }, claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: ["anthropic"], base_url: null, key_store: "the macOS Keychain" },
     test_writer: { outcome: "passed", line: "Passed: `anthropic` answered. Summaries are written with it.", settings: null },
   }, `
     if (document.getElementById("writer-pick").value !== "anthropic") log("snap:fail the preset is not the API key");
@@ -100,7 +100,7 @@ export const writersKeySet = () =>
  */
 export const writersOpenAI = (): Fixture => ({
   ...writersOpen({
-    writers: { writers: [anthropicWriter, { ...openaiWriter, found: true }, claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: "http://localhost:11434/v1" },
+    writers: { writers: [anthropicWriter, { ...openaiWriter, found: true }, claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: "http://localhost:11434/v1", key_store: "the macOS Keychain" },
     test_writer: { outcome: "passed", line: "Passed: `openai` answered. Summaries are written with it.", settings: null },
   }, `
     if (document.getElementById("writer-pick").value !== "openai") log("snap:fail the preset is not the OpenAI-compatible API");
@@ -117,7 +117,7 @@ export const writersOpenAI = (): Fixture => ({
 /** No claude: agy writes the summaries, and the section says PR briefs need Claude. */
 export const writersBriefsNeedClaude = () =>
   writersOpen({
-    writers: { writers: [{ ...claudeWriter, found: false }, agyWriter], summaries_on: true, briefs: false, keys: [], base_url: null },
+    writers: { writers: [{ ...claudeWriter, found: false }, agyWriter], summaries_on: true, briefs: false, keys: [], base_url: null, key_store: "the macOS Keychain" },
     settings_files: { settings: '{ "summaries": { "writer": "agy", "model": "gemini-4-neon-high" } }', keymap: null },
   }, `
     if (!document.getElementById("writer-briefs")?.textContent.includes("briefs need Claude")) log("snap:fail no briefs need Claude line");
@@ -125,7 +125,7 @@ export const writersBriefsNeedClaude = () =>
 /** #456: a key the Keychain refuses: its error is said in the section's status region, and tied to the key's field. */
 export const writersKeyError = () =>
   writersOpen({
-    writers: { writers: [anthropicWriter, claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: null },
+    writers: { writers: [anthropicWriter, claudeWriter, agyWriter], summaries_on: false, briefs: true, keys: [], base_url: null, key_store: "the macOS Keychain" },
     set_api_key: { __throw: "the Keychain refused the key" } as never,
   }, `${writerStatusBefore}
     document.getElementById("writer-key").value = "sk-ant-not-a-key";
@@ -136,3 +136,24 @@ export const writersKeyError = () =>
 ${writerStatusAfter("Keychain refused")}
     const field = document.getElementById("writer-key");
     if (field.getAttribute("aria-invalid") !== "true" || !(field.getAttribute("aria-describedby") ?? "").split(" ").includes("writer-key-error")) log("snap:fail the key error is not tied to its field");`);
+/**
+ * #510: on Linux the keys are kept in the Secret Service, which the key row, the hints and Remove's dialog name; a save on a
+ * machine with no secret store shows the server's words as they are, tied to the key's field.
+ */
+export const writersSecretService = () =>
+  writersOpen({
+    writers: { writers: [{ ...anthropicWriter, found: true }, claudeWriter, agyWriter], summaries_on: true, briefs: true, keys: ["anthropic"], base_url: null, key_store: "the Secret Service" },
+    set_api_key: { __throw: "No secret store on this machine; install a keyring and libsecret-tools, or pick a CLI writer." } as never,
+  }, `${writerStatusBefore}
+    if (document.getElementById("writer-key-state")?.textContent !== "Anthropic API key: set, kept in the Secret Service.") log("snap:fail the key row does not name the Secret Service: " + document.getElementById("writer-key-state")?.textContent);
+    const field = document.getElementById("writer-key");
+    const fieldHint = document.getElementById(field.getAttribute("interestfor") ?? field.dataset.hint ?? "");
+    if (!fieldHint?.textContent.includes("kept in the Secret Service")) log("snap:fail the key field's hint does not name the Secret Service: " + fieldHint?.textContent);
+    if (document.body.textContent.includes("Keychain")) log("snap:fail the Keychain is named on Linux");
+    document.getElementById("writer-key").value = "sk-ant-linux-0001";
+    document.getElementById("writer-key-save").click();
+    await wait(300);
+    const error = document.getElementById("writer-key-error");
+    if (error?.textContent !== "No secret store on this machine; install a keyring and libsecret-tools, or pick a CLI writer.") return log("snap:fail no store error: " + error?.textContent);
+${writerStatusAfter("pick a CLI writer")}
+    ${confirmFirst(`document.getElementById("writer-key-remove").click()`, "remove_api_key", "Remove key", ["Secret Service"])}`);
