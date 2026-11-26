@@ -343,7 +343,9 @@ export function awaitedWrite(pr: ReadyPr | undefined, full = false): "open" | "s
 export type AgentItem =
   | { of: "step"; step: Pick<BriefStep, "k" | "h" | "b" | "risks" | "cites" | "flags">; files: string[] }
   | { of: "decision"; text: string; flags: string[] }
-  | { of: "no-part"; files: string[] };
+  | { of: "no-part"; files: string[] }
+  // A Ratify row the Map text review flagged (#645): its kind and id in the map, and the review's reasons (`reviewFlags`).
+  | { of: "map-text"; kind: string; id: string; flags: string[] };
 
 /**
  * The prompt for `item` of PR `pr`, naming its branch while it is open: a line that says what to do, the item's words, its risks, why
@@ -356,6 +358,9 @@ export function agentPrompt(pr: number, branch: string | null, item: AgentItem):
   const reasons = (flags: string[]) => list("Why it is not confirmed:", unconfirmedReasons(flags));
   if (item.of === "no-part") {
     return [`${where}, these changed files belong to no part of the map (system-map.json). Assign these files to a part, or ignore them, and tell me what you changed.`, ...list(null, item.files)].join("\n");
+  }
+  if (item.of === "map-text") {
+    return [`${where}, the map text review flagged the ${item.kind} ${item.id}'s text in system-map.json as not confirmed by the code. Check it against the code, correct the map or say why it holds, and tell me what you changed.`, ...reasons(item.flags)].join("\n");
   }
   if (item.of === "decision") {
     return [`${where}, you declared a decision the checks could not confirm from the facts. Check it against the code, correct it or say why it holds, and tell me what you changed.`, `Decided: ${item.text}`, ...reasons(item.flags)].join("\n");

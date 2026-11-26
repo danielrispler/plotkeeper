@@ -14,7 +14,7 @@
 // fog list, `catchUpIds`) so the player keeps its step apart from the PR briefs and from an older story of the part; read to its end it
 // clears the part's fog (`part_catch_up_done`) and completes no brief.
 
-import { failure, hint, invoke, keyed, messageOf, pressable, svg, text } from "./dom.js";
+import { failure, hint, invoke, keyed, listen, messageOf, pressable, sayAction, svg, text } from "./dom.js";
 import { currentMap, onDraw, registerLayer, setDiff, type MapView } from "./map.js";
 import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { paint as paintBadges } from "./map-agents.js";
@@ -23,16 +23,16 @@ import { logStop } from "./stop-rules.js";
 import { expectedLine } from "./map-pre-flight.js";
 import { exploreRow } from "./micro-world.js";
 import { guardRow } from "./patch-review.js";
-import { branchOf, mapCheckNode, overturnNote, ratifyActions, ratifyDetail, ratifyEvidence, ratifyHead } from "./map-ratify.js";
-import { copyOverturn, statusWords } from "./ratify.js";
+import { branchOf, mapCheckNode, mapReviewNode, overturnNote, ratifyActions, ratifyDetail, ratifyEvidence, ratifyHead } from "./map-ratify.js";
+import { copyOverturn, reviewFlags, reviewLine, statusWords } from "./ratify.js";
 import type { Copied } from "./notes.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
 import { agentPrompt, alsoAt, diffArgs, type AlsoRow, awaitedWrite, citeDrawer, figureMax, figureShapes, figureSize, latestRequest, partialFactsLines, storySteps, type Shape, stepCode, unconfirmed, unconfirmedReasons } from "./map-brief-model.js";
 import { awaitedCatchUp, fogListLines, stageLabel } from "./map-catch-up.js";
 import { effectiveTier, commitDrawer } from "./map-model.js";
-import type { BriefFigure, BriefStep, CatchUpOffer, CommitFiles, MapDiff, PrBrief, RatifyRow, ReadyPr, StaleBase } from "./types.js";
+import type { BriefFigure, BriefStep, CatchUpOffer, CommitFiles, MapDiff, MapReview, PrBrief, RatifyRow, ReadyPr, StaleBase } from "./types.js";
 import { BRIEF, explained, explainLine, explanationsOn, explainToggle, onExplanations, pressToggle, RATIFY, stepLine } from "./explanations.js";
-import { briefOpen, catchUpId, clearPlaying, panel, player, playingBrief, playingCatchUp, prOf, ratifyRows, setPlaying, steps, stopWatching, watchLast } from "./map-brief-player.js";
+import { briefOpen, catchUpId, clearPlaying, mapReview, panel, player, playingBrief, playingCatchUp, prOf, ratifyRows, setPlaying, setReview, steps, stopWatching, watchLast } from "./map-brief-player.js";
 import { aim, light, reduced, stopLight, unlight } from "./map-brief-light.js";
 import { checkNode, checkWaits, grade, paintOrder, runOf, syncNext, wireTaps } from "./map-brief-check.js";
 
@@ -185,9 +185,11 @@ async function ask<T>(request: () => Promise<T>, slowly: () => void, failed: (e:
 
 // Plays `brief` from its step `at`, its panel built afresh: another brief or chapter open is left first (it keeps its step), and the map
 // returns to now, with the PR's Map diff on it when it has one (#640). `opened` tells the stop rules.
-function play(view: MapView, story: Parameters<typeof setPlaying>, opened: () => void, at: { project: string; pr: number; chapter: number; since?: string }, diff: MapDiff | null = null) {
+function play(view: MapView, story: Parameters<typeof setPlaying>, opened: () => void, at: { project: string; pr: number; chapter: number; since?: string }, diff: MapDiff | null = null, review: MapReview | null = null) {
   if (briefOpen()) closeBrief();
   setPlaying(...story);
+  setReview(review);
+  hearReviews();
   opened();
   if (!resizing) {
     resizing = true;
@@ -233,7 +235,8 @@ export async function openBriefOf(project: string, number: number, chapter: numb
     return;
   }
   // The PR's Map diff (#640): the brief plays on it for its whole length; none when the PR changed nothing on the map, or it cannot be read.
-  const [rows, diff] = await Promise.all([
+  // Its Map text review (#645), for Ratify's rows and head; none when its head changed no map text.
+  const [rows, diff, review] = await Promise.all([
     invoke("pr_ratify", { project, number }).catch((e: unknown): RatifyRow[] => {
       failure("pr_ratify")(e);
       return [];
@@ -242,9 +245,10 @@ export async function openBriefOf(project: string, number: number, chapter: numb
       failure("pr_map_diff")(e);
       return null;
     }),
+    readReview(project, number),
   ]);
   if (!wanted()) return;
-  play(view, [got, null, rows], () => logStop("brief-opened", project, number), { project, pr: number, chapter, since: got.since ?? "" }, diff);
+  play(view, [got, null, rows], () => logStop("brief-opened", project, number), { project, pr: number, chapter, since: got.since ?? "" }, diff, review);
 }
 
 /**
@@ -456,9 +460,10 @@ export function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBri
   if (step.covered_by) words.append(text("p", `Covered by the test ${step.covered_by}.`, "brief-quiet"));
   if (step.check) words.append(checkNode(view, step, step.check));
   if (step.k === "Ratify") {
-    // Ratify's head (#641): how the PR's head stands, above the items.
+    // Ratify's head (#641): how the PR's head stands, above the items: the Map text review's line (#645), then the map check's.
+    const review = pr > 0 && !view.scrub ? mapReviewNode(view.project, pr, mapReview(), (got) => reviewed(view.project, pr, got)) : null;
     const check = playing && pr > 0 ? mapCheckNode(`${view.project}|${pr}|${playing.brief.head}`, playing.brief.map_problems ?? []) : null;
-    const head = ratifyHead(check ? [check] : []);
+    const head = ratifyHead([review, check].filter((line): line is HTMLElement => line !== null));
     if (head) words.append(head);
     words.append(ratifyNode(view, ratifying));
     const guard = playing?.brief.guard;
@@ -605,8 +610,10 @@ function ratifyNode(view: MapView, rows: RatifyRow[]) {
     item.dataset.id = row.id;
     const kind = row.kind === "decision" ? "Decided" : `${row.change ? `${row.change.charAt(0).toUpperCase()}${row.change.slice(1)} ` : ""}${row.kind}`;
     item.append(text("span", kind, "ratify-kind"), text("span", row.text || row.id, "ratify-text"));
+    // What the Map text review flagged on the row (#645): the not-confirmed mark below, and Overturn's prompt quotes it.
+    const flags = reviewFlags(mapReview(), row);
     if (row.status === "not-yet") {
-      item.append(ratifyActions(view.project, row, (state) => {
+      item.append(ratifyActions(view.project, { ...row, flags }, (state) => {
         row.status = state;
         const now = currentMap();
         if (now) show(now, true);
@@ -626,6 +633,10 @@ function ratifyNode(view: MapView, rows: RatifyRow[]) {
     if (decided && unconfirmed(decided)) {
       const copy = () => agentPrompt(row.pr, branchOf(row.pr), { of: "decision", text: decided.text, flags: decided.flags });
       item.append(unconfirmedMark(view, row.pr, decided.flags, `decision:${row.id}`, copy));
+    }
+    if (flags.length) {
+      const copy = () => agentPrompt(row.pr, branchOf(row.pr), { of: "map-text", kind: row.kind, id: row.id, flags });
+      item.append(unconfirmedMark(view, row.pr, flags, `review:${row.kind}:${row.id}`, copy));
     }
     list.append(item);
   }
@@ -850,6 +861,35 @@ function advance() {
   const step = steps()[player.current()?.step ?? 0];
   if (view && step && checkWaits(step)) return grade(view, step);
   move(1);
+}
+
+// The Map text review of PR `number` (#645); none when its head changed no map text, or it cannot be read.
+const readReview = (project: string, number: number) =>
+  invoke("pr_map_review", { project, number }).catch((e: unknown): MapReview | null => {
+    failure("pr_map_review")(e);
+    return null;
+  });
+// A review read again for the brief played: its step draws again, and a review that ended while Daniel waited says its line once.
+function reviewed(project: string, pr: number, got: MapReview | null) {
+  const now = player.current();
+  if (!now || now.project !== project || now.pr !== pr) return;
+  const was = mapReview();
+  setReview(got);
+  if (was?.state === "reviewing" && got && got.state !== "reviewing") sayAction(reviewLine(got)?.line ?? "");
+  const view = currentMap();
+  if (view) show(view, true);
+}
+// The server says a review changed (`map-landed`, #642): the open PR brief reads its review again. Heard once the first brief opens.
+let hearing = false;
+function hearReviews() {
+  if (hearing) return;
+  hearing = true;
+  listen<string>("map-landed", (landed) => {
+    const now = player.current();
+    if (!now || now.pr <= 0 || now.project !== landed) return;
+    const { project, pr } = now;
+    void readReview(project, pr).then((got) => reviewed(project, pr, got));
+  });
 }
 
 // A redraw of the map makes new plates: the brief lights them again, where it was. Another project's map closes it.

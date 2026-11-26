@@ -6,11 +6,12 @@
 import { failure, hint, invoke, pressable, promptBox, sayAction, text } from "./dom.js";
 import { currentMap } from "./map.js";
 import { openDrawer } from "./map-drawer.js";
-import { copyOverturn, decideWith, detailLines, evidenceLine, mapCheckLine, noteFor, overturnPrompt, overturnReport, siteDrawer, sitesDrawer, type Overturned } from "./ratify.js";
+import { copyOverturn, decideWith, detailLines, evidenceLine, mapCheckLine, noteFor, overturnPrompt, overturnReport, reviewLine, siteDrawer, sitesDrawer, type Overturned } from "./ratify.js";
 import { logStop } from "./stop-rules.js";
-import type { ImportSite, LinkSites, RatifyRow } from "./types.js";
+import type { ImportSite, LinkSites, MapReview, RatifyRow } from "./types.js";
 
-export type Ratifiable = Pick<RatifyRow, "pr" | "kind" | "id" | "text" | "change"> & { detail?: RatifyRow["detail"]; evidence?: LinkSites };
+// `flags`: what the Map text review flagged on it (`reviewFlags`, #645), which an overturn quotes.
+export type Ratifiable = Pick<RatifyRow, "pr" | "kind" | "id" | "text" | "change"> & { detail?: RatifyRow["detail"]; evidence?: LinkSites; flags?: string[] };
 
 /** The branch of PR `pr` while it is open: the Map view's ready PRs name it. */
 export const branchOf = (pr: number): string | null => currentMap()?.state.ready?.find((ready) => ready.number === pr)?.branch || null;
@@ -166,5 +167,32 @@ export function mapCheckNode(key: string, problems: string[]): HTMLElement | nul
   const summary = text("summary", line);
   hint(summary, "List what system-map check finds wrong at this PR's head");
   node.append(summary, list);
+  return node;
+}
+
+/**
+ * The Map text review's line at Ratify's head (#645, spec #634 "Ratify's display"): "Map text review: N checked, M flagged", "Reviewing
+ * map text…", the failure with "Run again", or "Review map text" for a PR not by Daniel's login. The button starts the review
+ * (`map_review_start`) and hands its answer to `done`, which draws the step again. Null when the head changed no map text.
+ */
+export function mapReviewNode(project: string, pr: number, review: MapReview | null, done: (review: MapReview | null) => void): HTMLElement | null {
+  const said = reviewLine(review);
+  if (!said) return null;
+  const node = text("p", "", "ratify-review");
+  if (said.line) node.append(text("span", said.line));
+  if (said.start) {
+    const start = pressable(text("button", said.start, "btn quiet ratify-review-start"), null);
+    hint(start, "Check this PR's changed map text against its code, reading only; nothing waits on it");
+    start.addEventListener("click", () => {
+      start.disabled = true;
+      invoke("map_review_start", { project, number: pr })
+        .then(done)
+        .catch((e) => {
+          start.disabled = false;
+          failure("map_review_start")(e);
+        });
+    });
+    node.append(start);
+  }
   return node;
 }

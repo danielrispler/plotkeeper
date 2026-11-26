@@ -488,3 +488,60 @@ test("drawing a step again, as a resize does, keeps one seen-watcher per not-con
   stepNode(view, step("Before"), 7);
   assert.equal(live(), 0);
 });
+
+// The Map text review in Ratify (#645, spec #634 "Ratify's display"): a flagged row carries the not-confirmed mark, an unflagged one shows
+// nothing, Accept stays, and Ratify's head holds the review's line beside the map check's.
+test("a flagged Ratify row carries the not-confirmed mark beside Accept, and Ratify's head says the review beside the map check (#645)", async () => {
+  const { fakeDocument } = await import("./dom.mjs");
+  globalThis.IntersectionObserver = /** @type {any} */ (class { observe() {} disconnect() {} });
+  globalThis.document = fakeDocument();
+  const { stepNode } = await import("../../dist/map-brief.js");
+  const { setPlaying, setReview, steps, player } = await import("../../dist/map-brief-player.js");
+  const view = /** @type {import("../../dist/map.js").MapView} */ (/** @type {unknown} */ ({ project: "/p", doc: { parts: [], laws: [] }, scrub: null }));
+  const stored = { version: 1, pr: 7, head: "bbb", written_at: 1, stale: false, model: "opus", map_problems: ["stray.ts is tracked but no part owns it"], brief: brief({ chapters: [chapter("Fog", "Now")] }) };
+  const rows = [
+    { pr: 7, kind: "part", id: "server", text: "Server", change: "edited", status: "not-yet", detail: null },
+    { pr: 7, kind: "link", id: "server-ui", text: "Server to UI", change: "added", status: "not-yet", detail: null },
+  ];
+  setPlaying(/** @type {any} */ ({ brief: stored, partial: false }), null, /** @type {any} */ (rows));
+  setReview({ head: "bbb", state: "done", checked: 2, flagged: 1, line: null, items: [
+    { id: "part:server/purpose", verdict: "overreach", why: "It also writes the page.", cites: ["server/src/lib.rs:41"], flagged: true },
+    { id: "link:server-ui/reason", verdict: "supported", why: "", cites: [], flagged: false },
+  ] });
+  player.open("/p", 7, 0);
+  const ratify = steps().at(-1);
+  assert.equal(ratify?.k, "Ratify");
+  const node = /** @type {any} */ (stepNode(view, /** @type {any} */ (ratify), 7));
+  const [head] = node.find("div").filter((each) => each.className === "ratify-head");
+  assert.ok(head, "Ratify has a head");
+  const lines = head.childNodes.filter((line) => line.tag);
+  assert.deepEqual(lines.map((line) => line.className), ["ratify-review", "ratify-check"], "the review's line, then the map check's");
+  assert.equal(lines[0].text, "Map text review: 2 checked, 1 flagged");
+  const [part, link] = node.find("li").filter((each) => each.className === "ratify-row");
+  const marks = (row) => row.find("button").filter((button) => button.className.includes("brief-why-mark"));
+  assert.equal(marks(part).length, 1, "the flagged row carries the mark");
+  assert.equal(marks(link).length, 0, "an unflagged row shows nothing");
+  const accept = part.find("button").find((button) => button.text === "Accept");
+  assert.equal(accept?.disabled ?? false, false, "Accept stays enabled on a flagged row");
+  player.close();
+});
+
+test("the Ratify step shows while the review runs, with nothing to ratify (#645)", async () => {
+  const { setPlaying, setReview, steps, player } = await import("../../dist/map-brief-player.js");
+  const stored = { version: 1, pr: 7, head: "bbb", written_at: 1, stale: false, model: "opus", brief: brief({ chapters: [chapter("Fog", "Now")] }) };
+  setPlaying(/** @type {any} */ ({ brief: stored, partial: false }), null, []);
+  player.open("/p", 7, 0);
+  setReview(null);
+  assert.deepEqual(steps().map((s) => s.k), ["Now"]);
+  setReview({ head: "bbb", state: "reviewing", checked: 0, flagged: 0, line: null, items: [] });
+  assert.deepEqual(steps().map((s) => s.k), ["Now", "Ratify"]);
+  player.close();
+});
+
+test("a flagged map text's copy for the agent names the item in system-map.json and gives the review's why (#645)", () => {
+  const flags = ["Purpose (overreach): It also writes the page. See server/src/lib.rs:41."];
+  const prompt = agentPrompt(7, "map-text", { of: "map-text", kind: "part", id: "server", flags });
+  assert.match(prompt, /^In PR #7 \(branch map-text\), the map text review flagged the part server's text in system-map\.json/);
+  assert.match(prompt, /Check it against the code, correct the map or say why it holds, and tell me what you changed\./);
+  assert.match(prompt, /\nWhy it is not confirmed:\n- Purpose \(overreach\): It also writes the page\. See server\/src\/lib\.rs:41\.$/);
+});

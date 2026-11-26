@@ -7,7 +7,7 @@ import { El, fakeDocument, tauri } from "./dom.mjs";
 const calls = [];
 tauri(calls);
 globalThis.document = fakeDocument({ body: new El("body") });
-const { mapCheckNode, overturnNote, ratifyActions, ratifyHead } = await import("../../dist/map-ratify.js");
+const { mapCheckNode, mapReviewNode, overturnNote, ratifyActions, ratifyHead } = await import("../../dist/map-ratify.js");
 
 const all = (node) => [node, ...node.childNodes.filter((child) => child instanceof El).flatMap(all)];
 const statuses = (node) => all(node).filter((each) => each.getAttribute("role") === "status");
@@ -66,4 +66,31 @@ test("the head's map check opens to its problems, stays open when the step is dr
   node.listeners.toggle();
   assert.equal(/** @type {any} */ (mapCheckNode("/w/app|12|cafe", problems)).open, true, "drawn again, it is still open");
   assert.equal(/** @type {any} */ (mapCheckNode("/w/app|13|beef", problems)).open, false, "another PR's opens closed");
+});
+
+// The Map text review's line at Ratify's head (#645), in each state `pr_map_review` gives.
+const review = (state, extra = {}) => ({ head: "cafe", state, items: [], checked: 0, flagged: 0, line: null, ...extra });
+
+test("the review's line says each state at Ratify's head, and its button starts the review once (#645)", async () => {
+  assert.equal(mapReviewNode("/w/app", 12, null, () => {}), null, "a head that changed no map text has no line");
+  const running = /** @type {any} */ (mapReviewNode("/w/app", 12, review("reviewing"), () => {}));
+  assert.equal(running.className, "ratify-review");
+  assert.equal(running.text, "Reviewing map text…");
+  assert.deepEqual(running.find("button"), [], "nothing to press while it runs");
+  const done = /** @type {any} */ (mapReviewNode("/w/app", 12, review("done", { checked: 5, flagged: 2 }), () => {}));
+  assert.equal(done.text, "Map text review: 5 checked, 2 flagged");
+  const failed = /** @type {any} */ (mapReviewNode("/w/app", 12, review("failed", { line: "the run timed out" }), () => {}));
+  assert.equal(failed.find("span")[0]?.text, "Map text review failed: the run timed out");
+  const [again] = failed.find("button");
+  assert.equal(again.text, "Run again");
+  const started = [];
+  const idle = /** @type {any} */ (mapReviewNode("/w/app", 12, review("idle"), (got) => started.push(got)));
+  const [button] = idle.find("button");
+  assert.equal(button.text, "Review map text");
+  const before = calls.length;
+  button.listeners.click();
+  assert.equal(button.disabled, true, "pressed once, it waits for the answer");
+  await later(10);
+  assert.deepEqual(calls.slice(before), [["map_review_start", { project: "/w/app", number: 12 }]]);
+  assert.deepEqual(started, [null], "the answer goes to the step, which draws it again");
 });

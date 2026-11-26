@@ -1,7 +1,7 @@
 // Ratifying's pure part (ticket #343), run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { copyOverturn, decideWith, detailLines, evidenceLine, mapCheckLine, noteFor, openRows, overturnPrompt, overturnReport, ratifyStep, sheetLinkItem, sheetPending, siteDrawer, sitesDrawer, statusWords } from "../../dist/ratify.js";
+import { copyOverturn, decideWith, detailLines, evidenceLine, mapCheckLine, noteFor, openRows, overturnPrompt, overturnReport, ratifyStep, headBrings, reviewFlags, reviewLine, sheetLinkItem, sheetPending, siteDrawer, sitesDrawer, statusWords } from "../../dist/ratify.js";
 
 // A row with no detail of its own, as the page reads one whose kind has none.
 const row = (kind, id, status = "not-yet", extra = {}) => /** @type {import("../../dist/types.js").RatifyRow} */ ({ pr: 7, kind, id, text: `${id} text`, change: "", status, ...extra });
@@ -227,4 +227,58 @@ test("the count opens every site in the drawer, each opening its snippet", () =>
   assert.deepEqual(drawer.picks.map((pick) => pick.label), ["alpha/a.ts:3", "alpha/c.ts:1", "alpha/c.ts:2", "beta/Cargo.toml"]);
   drawer.picks[1].open();
   assert.deepEqual(opened, [{ file: "alpha/c.ts", line: 1 }]);
+});
+
+// The Map text review (#645, spec #634 "Ratify's display"): its verdicts by item id, as `pr_map_review` gives them.
+const verdict = (id, flagged, why = `${id} why`, cites = []) => ({ id, verdict: flagged ? "overreach" : "supported", why, cites, flagged });
+const review = (state, items = [], line = null) => ({ head: "cafe", state, items, checked: items.length, flagged: items.filter((each) => each.flagged).length, line });
+
+test("a row's review flags are its part's, held items', link's or law's flagged verdicts, each with its field, why and cites (#645)", () => {
+  const part = row("part", "server", "not-yet", {
+    detail: { of: "part", name: { before: null, after: "Server" }, purpose: { before: null, after: "Serves." }, caption: { before: null, after: null }, holds: [{ name: "Queue", text: { before: null, after: "Every failure is requeued." }, paths_added: [], paths_removed: [] }], paths_added: [], paths_removed: [] },
+  });
+  const got = review("done", [
+    verdict("part:server/purpose", true, "It also writes the page.", ["server/src/lib.rs:41", "server/src/api.rs:9"]),
+    verdict("part:server/name", false),
+    verdict("held:server/1", true, "Only a timeout is requeued."),
+    verdict("part:serverless/purpose", true, "another part's"),
+    verdict("link:server-ui/reason", true, "The page never calls it.", ["ui/map.ts:3"]),
+    verdict("law:one-queue/text", true, "Two queues run."),
+  ]);
+  assert.deepEqual(reviewFlags(got, part), [
+    "Purpose (overreach): It also writes the page. See server/src/lib.rs:41, server/src/api.rs:9.",
+    "Holds Queue (overreach): Only a timeout is requeued.",
+  ]);
+  assert.deepEqual(reviewFlags(got, row("link", "server-ui")), ["Reason (overreach): The page never calls it. See ui/map.ts:3."]);
+  assert.deepEqual(reviewFlags(got, row("law", "one-queue")), ["Text (overreach): Two queues run."]);
+  assert.deepEqual(reviewFlags(got, row("decision", "server")), [], "a decision is not map text");
+  assert.deepEqual(reviewFlags(review("done", [verdict("part:server/name", false)]), part), [], "an unflagged row shows nothing");
+  assert.deepEqual(reviewFlags(null, part), []);
+});
+
+test("the review's line at Ratify's head says each state, and offers the button before a review and Run again after a failure (#645)", () => {
+  assert.equal(reviewLine(null), null, "a head that changed no map text has none");
+  assert.deepEqual(reviewLine(review("idle")), { line: null, start: "Review map text" });
+  assert.deepEqual(reviewLine(review("reviewing")), { line: "Reviewing map text…", start: null });
+  assert.deepEqual(reviewLine(review("done", [verdict("a", true), verdict("b", false), verdict("c", false)])), { line: "Map text review: 3 checked, 1 flagged", start: null });
+  assert.deepEqual(reviewLine(review("failed", [], "the run timed out")), { line: "Map text review failed: the run timed out", start: "Run again" });
+  assert.deepEqual(reviewLine(review("failed")), { line: "Map text review failed", start: "Run again" });
+});
+
+test("an overturn of a flagged row quotes the review's why, and an unflagged one says nothing of the review (#645)", () => {
+  const part = row("part", "server", "not-yet", { text: "Server", change: "edited" });
+  const flags = reviewFlags(review("done", [verdict("part:server/purpose", true, "It also writes the page.", ["server/src/lib.rs:41"])]), part);
+  const prompt = overturnPrompt({ ...part, flags }, "map-text");
+  assert.match(prompt, /The map text review flagged it: Purpose \(overreach\): It also writes the page\. See server\/src\/lib\.rs:41\./);
+  assert.match(prompt, /Undo it and tell me what you changed\.$/);
+  assert.doesNotMatch(overturnPrompt({ ...part, flags: [] }, null), /review/);
+});
+
+test("the Ratify step shows with nothing to ratify while the review runs or has flags, or the map check fails (#645, #641)", () => {
+  assert.equal(headBrings(undefined, review("reviewing")), true);
+  assert.equal(headBrings([], review("done", [verdict("a", true)])), true);
+  assert.equal(headBrings(["a problem"], null), true);
+  assert.equal(headBrings([], review("done", [verdict("a", false)])), false, "a review with no flags brings nothing");
+  assert.equal(headBrings([], review("idle")), false);
+  assert.equal(headBrings(undefined, null), false);
 });
