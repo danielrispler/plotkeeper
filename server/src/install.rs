@@ -107,8 +107,7 @@ struct State {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     opencode: Option<OpencodeRecord>,
     /// Each harness the user answered for, by its id (`claude`, `agy`, `codex`, `cursor`, `copilot`, `qwen`,
-    /// `opencode`); a harness
-    /// with none has not been asked (#434).
+    /// `opencode`); a harness with none has not been asked (#434).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     harnesses: BTreeMap<String, HarnessRecord>,
     /// Written by a build that keeps answers (#434), on every save, and kept through uninstall, so a harness with no
@@ -119,10 +118,13 @@ struct State {
 }
 
 /// What install did for OpenCode: the folders it made for its plugin file, outermost first, which uninstall removes
-/// when they are empty.
+/// when they are empty, and whether a `plotkeeper.js` not plotkeeper's was there, backed up as
+/// `opencode-plotkeeper.js`.
 #[derive(Default, Serialize, Deserialize)]
 struct OpencodeRecord {
     made: Vec<PathBuf>,
+    #[serde(default)]
+    backed_up: bool,
 }
 
 /// Install's record of one harness.
@@ -735,8 +737,8 @@ impl Harness {
     }
 
     /// The fingerprint of what install renders for it with the hook binaries in `bin`: Claude Code's, agy's and
-    /// Copilot's plugin folders, Codex's and Cursor's entries, Qwen Code's extension, OpenCode's plugin. It changes when a template does,
-    /// and when the binaries' path does.
+    /// Copilot's plugin folders, Codex's and Cursor's entries, Qwen Code's extension, OpenCode's plugin. It changes
+    /// when a template does, and when the binaries' path does.
     fn fingerprint(self, home: &Path, bin: &Path) -> Result<String, String> {
         let entries = |file: HookFile| -> Result<Vec<(String, String)>, String> {
             let ours = Value::Object(file.ours(bin)?);
@@ -969,8 +971,19 @@ fn opencode_line(home: &Path) -> String {
     )
 }
 
+/// The name of the backup of a `plotkeeper.js` that was not plotkeeper's.
+const OPENCODE_BACKUP: &str = "opencode-plotkeeper.js";
+
+/// Whether `file` is plotkeeper's OpenCode plugin for the binaries in `bin`, of this template or an older one: it runs
+/// their hook.
+fn opencode_ours(file: &Path, bin: &Path) -> bool {
+    let hook = format!("const HOOK = \"{}/plotkeeper-hook\";", bin.display());
+    fs::read_to_string(file).is_ok_and(|text| text.contains(&hook))
+}
+
 /// Writes `plugin-opencode/plotkeeper.js` for the binaries in `bin` into OpenCode's plugins folder, which OpenCode
-/// watches and reloads. The folders it makes are recorded first, once, so uninstall leaves them as they were.
+/// watches and reloads. The folders it makes, and a `plotkeeper.js` already there that is not plotkeeper's, are
+/// recorded first, once, the file backed up, so uninstall leaves them as they were.
 fn install_opencode(
     home: &Path,
     bin: &Path,
@@ -986,7 +999,15 @@ fn install_opencode(
             .map(Path::to_path_buf)
             .collect();
         made.reverse();
-        state.opencode = Some(OpencodeRecord { made });
+        let backed_up = file.exists() && !opencode_ours(&file, bin);
+        if backed_up {
+            let backups = record_dir(home).join("backups");
+            fs::create_dir_all(&backups)
+                .map_err(|e| format!("could not make {}: {e}", backups.display()))?;
+            fs::copy(&file, backups.join(OPENCODE_BACKUP))
+                .map_err(|e| format!("could not back up {}: {e}", file.display()))?;
+        }
+        state.opencode = Some(OpencodeRecord { made, backed_up });
         save(home, state)?;
     }
     fs::create_dir_all(dir).map_err(|e| format!("could not make {}: {e}", dir.display()))?;
@@ -1520,17 +1541,34 @@ impl Undo<'_> {
             return;
         };
         let file = opencode_plugin(self.home);
-        match fs::remove_file(&file) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-                return self.fail(format!("could not remove {}: {e}", file.display()));
+        let backup = self.backups.join(OPENCODE_BACKUP);
+        if opencode_ours(&file, &self.bin) {
+            let done = if record.backed_up {
+                fs::copy(&backup, &file).map(|_| ())
+            } else {
+                fs::remove_file(&file)
+            };
+            if let Err(e) = done {
+                return self.fail(format!("could not put back {}: {e}", file.display()));
             }
-            _ => {}
+            say(
+                self.out,
+                format!("OpenCode: removed plotkeeper's {}", file.display()),
+            );
+        } else if file.exists() {
+            say(
+                self.out,
+                format!(
+                    "OpenCode: {} is not plotkeeper's now, so it is left as it is",
+                    file.display()
+                ),
+            );
         }
+        fs::remove_file(&backup).ok();
         for dir in record.made.iter().rev() {
             // A folder that holds something else stays.
             fs::remove_dir(dir).ok();
         }
-        say(self.out, format!("OpenCode: removed {}", file.display()));
         self.state.opencode = None;
     }
 

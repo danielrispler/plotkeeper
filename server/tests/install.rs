@@ -1041,6 +1041,33 @@ fn opencode_install_then_uninstall_leaves_no_folder_it_made() {
     assert!(!machine.home.join(".config/opencode").exists());
 }
 
+/// A `plotkeeper.js` of the user's own in OpenCode's plugins folder is backed up at install and put back at uninstall,
+/// and one the user wrote over plotkeeper's after install is left as it is (#370).
+#[test]
+fn opencode_keeps_a_plotkeeper_js_that_is_not_plotkeepers() {
+    let machine = Machine::new(false, false).with_opencode();
+    let own = "export default { id: \"mine\", setup() {} }\n";
+    machine.write(".config/opencode/plugins/plotkeeper.js", own);
+    let before = files(&machine.home);
+    machine.run("install");
+    machine.run("install");
+    let plugin = machine.home.join(".config/opencode/plugins/plotkeeper.js");
+    assert!(fs::read_to_string(&plugin).unwrap().contains("--agent"));
+    machine.run("uninstall");
+    assert_eq!(files(&machine.home), before);
+
+    let machine = Machine::new(false, false).with_opencode();
+    machine.run("install");
+    machine.write(".config/opencode/plugins/plotkeeper.js", own);
+    let out = machine.run("uninstall");
+    let plugin = machine.home.join(".config/opencode/plugins/plotkeeper.js");
+    assert_eq!(fs::read_to_string(&plugin).unwrap(), own);
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("left as it is"),
+        "{out:?}"
+    );
+}
+
 /// Adds the user's own hook `command` under `event` to the hook file at `rel`, as an entry of `entry`'s shape.
 fn add_own_hook(machine: &Machine, rel: &str, event: &str, entry: serde_json::Value) {
     let path = machine.home.join(rel);

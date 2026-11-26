@@ -8,9 +8,9 @@
 //! the prompt and its message id), its `tool` hooks (`tool.execute.before` and
 //! `tool.execute.after`, with the tool's name, call id and input, and at the end its `status`,
 //! error and a shell's `exit`), and from its event stream `permission.asked` and a turn's end
-//! (`session.execution.succeeded`, `.failed` or `.interrupted`, and `.started` for a turn that starts with no
-//! prompt, as when a background subagent's result wakes its parent), whose end carries the model the turn's
-//! steps named and the turn's last text. OpenCode reports no session start or end. A subagent is a
+//! (`session.execution.succeeded`, `.failed` or `.interrupted`; `.started` only for a turn that
+//! starts with no prompt, as when a background subagent's result wakes its parent), which carries
+//! the model the turn's steps named and the turn's last text. OpenCode reports no session start or end. A subagent is a
 //! child session whose calls the plugin puts under the session that spawned it. The tool names
 //! and inputs are those of a real run of OpenCode 2.4.1 (`core/tests/fixtures/opencode/run.jsonl`)
 //! and of its tools' sources (anomalyco/opencode at v2.4.2, `packages/core/src/tool/plugin/`).
@@ -140,23 +140,26 @@ fn adapt(raw: Raw) -> Event {
             id: id.clone(),
         }),
         "tool.execute.after" => {
-            let exited = raw.exit.filter(|code| *code != 0);
+            let nonzero_exit = raw.exit.filter(|code| *code != 0);
             happened.push(Happened::ToolEnd {
                 tool: call(),
                 id: id.clone(),
-                failed: raw.status == "error" || exited.is_some(),
+                failed: raw.status == "error" || nonzero_exit.is_some(),
             });
-            if let Some(code) = exited {
+            if let Some(code) = nonzero_exit {
                 happened.push(Happened::ExitedNonZero);
                 happened.push(Happened::ExitCode(code));
             }
         }
         "permission.asked" => {
+            // An ask names an action and its resources: a shell's command, an edit's path, or a URL, a query, an
+            // agent's or a skill's id (https://opencode.ai/docs/permissions, at v2.4.2).
             let action = raw.permission["action"].as_str().unwrap_or_default();
-            let resource = raw.permission["resources"][0].as_str();
+            let resources = &raw.permission["resources"];
             let input = match action {
-                "shell" => serde_json::json!({ "command": resource }),
-                _ => serde_json::json!({ "path": resource }),
+                "shell" => serde_json::json!({ "command": resources[0] }),
+                "write" | "edit" | "patch" | "read" => serde_json::json!({ "path": resources[0] }),
+                _ => serde_json::json!({ "resources": resources }),
             };
             happened.push(Happened::PermissionAsked {
                 tool: tool(action, &input, &raw.cwd),
