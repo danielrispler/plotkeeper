@@ -2,6 +2,24 @@
 
 All notable changes to plotkeeper's npm package. Newest first; each version's section is the notes of its GitHub Release.
 
+## 0.4.0
+
+### Added
+
+- A PR's brief plays on a map diff. It shows today's map with the PR's changes: parts it adds marked "New", parts it removes as struck-through "Gone", edited parts marked "Edited", and links it adds or removes. Ratify gets a map text review that flags map text the code doesn't back, and it shows whether the map check passes at the PR's head. A PR that only changes the map gets a short brief, even without `claude`. (#657)
+- A part's sheet leads with a catch-up card: how many changes landed since you last caught up, with "Catch up" and "I know this". Catch-ups are written when a turn ends, so one is ready when you open the map. The purpose is cut to two lines and the sections fold, each showing a short value and staying open or closed as you left it. (#651)
+- The map can read Java, Python, PHP, Dart and .NET imports: add `java-imports`, `python-imports`, `php-imports`, `dart-imports` or `dotnet-projects` to your map's `extractors`. (#614, #615, #660, #649, #632)
+
+### Changed
+
+- Every hover shows one page-wide hint in place of the browser's tooltip. It opens on keyboard focus too, closes with Esc, and says why an unavailable button can't be used. (#591)
+- The wheel zooms the map more gently. The map head has a Fit button, and the "N not placed" list, toasts, Pre-flight and the Ready-for-review tray no longer get in the way of the side area or the left panel. (#680)
+- The left panel's header reads "Running · auto mode" and "est. up to 12m left", and says when a run is past its estimate. (#680)
+
+### Fixed
+
+- A background run's check, setup or harness that times out or is cancelled no longer leaves processes running. (#616)
+
 ## 0.3.0
 
 ### Breaking
