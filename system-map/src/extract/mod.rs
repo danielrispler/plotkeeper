@@ -8,6 +8,7 @@ mod contract;
 mod go;
 mod java;
 mod names;
+mod php;
 mod python;
 pub(crate) mod registry;
 mod rust_modules;
