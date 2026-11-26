@@ -82,6 +82,7 @@ fn only_an_agy_session_asks_for_agys_version() {
         ("copilot", include_str!("fixtures/copilot/run.jsonl")),
         ("cursor", include_str!("fixtures/cursor/run.jsonl")),
         ("qwen", include_str!("fixtures/qwen/run.jsonl")),
+        ("opencode", include_str!("fixtures/opencode/run.jsonl")),
     ] {
         let mut studio = Studio::default();
         let asked = run

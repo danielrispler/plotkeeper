@@ -11,8 +11,8 @@ use std::{
     time::{Duration, Instant},
 };
 use studio_server::runner::{
-    Config, End, Harness, HarnessCommand, Kind, Limits, Plan, Request, RunState, Runner,
-    SANDBOX_CHECK, SANDBOX_DOWN, allowed_tools, claude_command, private_tmp, sandbox_settings,
+    BWRAP_CHECK, Config, End, Harness, HarnessCommand, Kind, Limits, Plan, Request, RunState,
+    Runner, SANDBOX_DOWN, allowed_tools, claude_command, private_tmp, sandbox_settings,
 };
 
 const PROJECT: &str = "/p/app";
@@ -247,9 +247,16 @@ fn the_claude_command_holds_the_flags_the_tools_and_the_sandbox_block() {
         assert!(command.env_remove.iter().any(|n| n == name), "{name} stays");
     }
     // The launcher checks the sandbox first, and the run's tools get a temp folder of its own.
-    assert_eq!(command.check, SANDBOX_CHECK.map(String::from));
-    // Inside another sandbox only a profile that denies something fails to apply (#395's gate, probe `unavailable`).
-    assert!(SANDBOX_CHECK[2].contains("(deny "), "{}", SANDBOX_CHECK[2]);
+    #[cfg(target_os = "macos")]
+    {
+        use studio_server::runner::SANDBOX_CHECK;
+        assert_eq!(command.check, SANDBOX_CHECK.map(String::from));
+        // Inside another sandbox only a profile that denies something fails to apply (#395's gate, probe `unavailable`).
+        assert!(SANDBOX_CHECK[2].contains("(deny "), "{}", SANDBOX_CHECK[2]);
+    }
+    // On Linux, bubblewrap's (#704).
+    #[cfg(target_os = "linux")]
+    assert_eq!(command.check, BWRAP_CHECK.map(String::from));
     let tmp = command.private_tmp.clone().expect("no private temp folder");
     assert_eq!(
         command.env.get("CLAUDE_CODE_TMPDIR").map(String::as_str),
@@ -325,6 +332,90 @@ fn a_run_whose_sandbox_cannot_start_fails_before_its_harness_runs() {
         .find(|run| run.id == id)
         .unwrap();
     assert_eq!(view.prompt.as_deref(), Some("touch ran"));
+
+    // On Linux the check is bubblewrap's (#704), run here with stand-in `bwrap` and `socat` on its `PATH`. Each failure
+    // names its cause; bubblewrap's are its own words, as the probe in Docker measured them (local evidence
+    // `2026-11-27-issue-704-linux-sandbox-probe`): a default container, then one with seccomp and AppArmor unconfined.
+    const NO_NAMESPACE: &str = "bwrap: No permissions to create new namespace, likely because the kernel does not allow \
+        non-privileged user namespaces. See <https://deb.li/bubblewrap> or \
+        <file:///usr/share/doc/bubblewrap/README.Debian.gz>.";
+    const NO_PROC: &str = "bwrap: Can't mount proc on /newroot/proc: Operation not permitted";
+    let dir = tempfile::tempdir().unwrap();
+    settings(dir.path(), r#"{ "checks": { "/p/app": ["cargo test"] } }"#);
+    let bin = dir.path().join("bin");
+    let (runner, changes) = open(dir.path(), Arc::new(Bwrapped(bin.clone())));
+    for (bwrap, socat, said) in [
+        (
+            None,
+            true,
+            "bubblewrap (bwrap) is not installed: install bubblewrap",
+        ),
+        (Some(0), false, "socat is not installed: install socat"),
+        (Some(1), true, NO_NAMESPACE),
+        (Some(1), true, NO_PROC),
+    ] {
+        stand_ins(&bin, bwrap.map(|exit| (said, exit)), socat);
+        let id = submit(&runner, PROJECT, "touch ran");
+        until(&runner, &changes, ended(&id));
+        let outcome = runner.outcome(&id).unwrap();
+        assert_eq!(outcome.end, End::Failed, "{said}");
+        assert_eq!(outcome.result, format!("{SANDBOX_DOWN}: {said}"));
+        assert!(
+            !dir.path().join("runs").join(&id).join("work/ran").exists(),
+            "the harness ran: {said}"
+        );
+    }
+
+    // With both there and a sandbox that starts, the harness runs; bubblewrap was asked for Claude Code's shape, with
+    // the sandbox's own network namespace and a fresh /proc.
+    stand_ins(&bin, Some(("", 0)), true);
+    let id = submit(&runner, PROJECT, "touch ran");
+    until(&runner, &changes, ended(&id));
+    assert_eq!(runner.outcome(&id).unwrap().end, End::Done);
+    assert!(dir.path().join("runs").join(&id).join("work/ran").exists());
+    assert_eq!(
+        fs::read_to_string(bin.join("bwrap.args")).unwrap().trim(),
+        "--new-session --die-with-parent --unshare-net --ro-bind / / --dev /dev --unshare-pid --unshare-user \
+         --cap-drop ALL --proc /proc -- /bin/sh -c true"
+    );
+}
+
+/// The fake harness with the Linux sandbox check, run with `PATH` set to the folder of stand-ins.
+struct Bwrapped(PathBuf);
+
+impl Harness for Bwrapped {
+    fn command(&self, plan: &Plan) -> Result<HarnessCommand, String> {
+        let mut command = Script.command(plan)?;
+        command.check = ["/usr/bin/env".into(), format!("PATH={}", self.0.display())]
+            .into_iter()
+            .chain(BWRAP_CHECK.map(String::from))
+            .collect();
+        Ok(command)
+    }
+}
+
+/// Fills `bin` with a stand-in `bwrap`, if any, that saves its arguments to `bwrap.args`, prints the text on standard
+/// error and exits with the code, and a `socat` if asked.
+fn stand_ins(bin: &Path, bwrap: Option<(&str, i32)>, socat: bool) {
+    use std::os::unix::fs::PermissionsExt;
+    drop(fs::remove_dir_all(bin));
+    fs::create_dir_all(bin).unwrap();
+    let mut tools = Vec::new();
+    if let Some((said, exit)) = bwrap {
+        let script = format!(
+            "#!/bin/sh\necho \"$*\" > '{}'\nprintf '%s\\n' '{}' >&2\nexit {exit}\n",
+            bin.join("bwrap.args").display(),
+            said.replace('\'', r"'\''"),
+        );
+        tools.push(("bwrap", script));
+    }
+    if socat {
+        tools.push(("socat", "#!/bin/sh\nexit 0\n".into()));
+    }
+    for (name, script) in tools {
+        fs::write(bin.join(name), script).unwrap();
+        fs::set_permissions(bin.join(name), fs::Permissions::from_mode(0o755)).unwrap();
+    }
 }
 
 #[test]

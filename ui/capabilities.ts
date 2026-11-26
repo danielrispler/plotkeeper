@@ -7,7 +7,7 @@ type WithCapabilities = { capabilities: Capabilities };
 export const reports = (session: WithCapabilities, what: Exclude<keyof Capabilities, "agent" | "transcript_format">): boolean => session.capabilities[what];
 
 // An agent's display name, as the header's model line and the usage glance show it: one entry an agent; one not here shows its id.
-export const agentNames: Record<string, string> = { claude: "Claude", agy: "agy", codex: "Codex", qwen: "Qwen Code", cursor: "Cursor", copilot: "Copilot" };
+export const agentNames: Record<string, string> = { claude: "Claude", agy: "agy", codex: "Codex", qwen: "Qwen Code", cursor: "Cursor", copilot: "Copilot", opencode: "OpenCode" };
 
 // A model's short name, read from the model's own name: "claude-opus-5-5" is "Opus 5.5", "gemini-3.8-flash-high" is
 // "Flash high". A name with no word in it shows whole.

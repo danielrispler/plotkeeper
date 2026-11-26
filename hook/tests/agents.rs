@@ -207,3 +207,16 @@ fn every_copilot_entry_names_copilot_and_its_event() {
     wired.sort();
     assert_eq!(copilot, wired);
 }
+
+/// OpenCode 2 runs its plugins in one background service (`opencode serve --service`, reparented to
+/// init) that outlives every session it runs (#370), so an OpenCode line records no pid: its sessions
+/// take the idle path, as Codex's daemon's do (#369). Another agent's line still records its parent.
+#[test]
+fn an_opencode_line_records_no_pid() {
+    let payload = json!({ "session_id": "ses_1", "hook_event_name": "session.prompt", "cwd": "/" });
+    let opencode = logged(&["--agent", "opencode"], payload.clone(), "opencode-pid");
+    assert_eq!(opencode["studio_agent"], "opencode");
+    assert_eq!(opencode.get("studio_pid"), None);
+    let claude = logged(&["--agent", "claude"], payload, "opencode-pid-claude");
+    assert!(claude["studio_pid"].is_u64());
+}

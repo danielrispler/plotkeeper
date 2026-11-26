@@ -94,6 +94,16 @@ esac"#,
         self
     }
 
+    /// Puts a fake `opencode` on the PATH, which logs any call: install writes OpenCode's plugin file itself, so it
+    /// calls none (#370).
+    fn with_opencode(self) -> Machine {
+        script(
+            &self.tools.join("opencode"),
+            r#"echo "$@" >> "$(dirname "$0")/opencode-calls""#,
+        );
+        self
+    }
+
     fn run(&self, verb: &str) -> Output {
         let out = self.run_any(verb);
         assert!(
@@ -360,9 +370,14 @@ fn install_then_uninstall_leaves_every_file_byte_identical() {
     for (name, setup) in homes {
         for (claude, agy) in [(true, true), (false, false)] {
             let machine = Machine::new(claude, agy);
-            // Codex, Copilot and Qwen Code go with the others, so Codex's hook file is changed and put back too.
+            // Codex, Copilot, Qwen Code and OpenCode go with the others, so Codex's hook file and OpenCode's plugin
+            // folder are changed and put back too.
             let machine = if claude {
-                machine.with_codex().with_copilot().with_qwen()
+                machine
+                    .with_codex()
+                    .with_copilot()
+                    .with_qwen()
+                    .with_opencode()
             } else {
                 machine
             };
@@ -411,6 +426,11 @@ fn a_harness_not_found_is_skipped_with_one_line() {
     );
     assert_eq!(
         text.lines().filter(|l| l.contains("Qwen Code")).count(),
+        1,
+        "{text}"
+    );
+    assert_eq!(
+        text.lines().filter(|l| l.contains("OpenCode")).count(),
         1,
         "{text}"
     );
@@ -964,6 +984,105 @@ fn qwen_goes_through_qwen_extensions_and_never_opens_its_files() {
     for file in &files {
         assert!(fs::symlink_metadata(file).unwrap().file_type().is_fifo());
     }
+}
+
+/// OpenCode 2 loads every `.js` file in `~/.config/opencode/plugins/`, and has no command for a local plugin file, so
+/// install writes plotkeeper's there itself and uninstall removes it, with the folders install made for it (#370).
+/// OpenCode's config and login files, which can hold API keys, are FIFOs here: opening one would hang the test.
+// @law: install-never-opens-opencode-config
+#[test]
+fn opencode_gets_its_plugin_file_and_its_other_files_are_never_opened() {
+    let machine = Machine::new(false, false).with_opencode();
+    let config = machine.home.join(".config/opencode");
+    machine.write(".config/opencode/plugins/mine.js", "export default {}\n");
+    let secrets = [
+        config.join("opencode.json"),
+        config.join("opencode.jsonc"),
+        machine.home.join(".local/share/opencode/auth.json"),
+    ];
+    fs::create_dir_all(machine.home.join(".local/share/opencode")).unwrap();
+    for file in &secrets {
+        assert!(Command::new("mkfifo").arg(file).status().unwrap().success());
+    }
+
+    for _ in 0..2 {
+        machine.run("install");
+        let plugin = fs::read_to_string(config.join("plugins/plotkeeper.js")).unwrap();
+        let hook = format!("const HOOK = \"{}/plotkeeper-hook\";", machine.bin());
+        assert!(plugin.contains(&hook), "{plugin}");
+        assert!(plugin.contains(r#"["--agent", "opencode"]"#), "{plugin}");
+        assert!(!plugin.contains("__PLOTKEEPER_BIN__"), "{plugin}");
+    }
+    assert!(machine.calls("opencode").is_empty());
+
+    machine.run("uninstall");
+    assert!(!config.join("plugins/plotkeeper.js").exists());
+    assert_eq!(
+        fs::read_to_string(config.join("plugins/mine.js")).unwrap(),
+        "export default {}\n"
+    );
+    for file in &secrets {
+        assert!(fs::symlink_metadata(file).unwrap().file_type().is_fifo());
+    }
+}
+
+/// On a home with no `~/.config`, uninstall removes the folders install made for OpenCode's plugin, which a list of
+/// files cannot show (#370).
+#[test]
+fn opencode_install_then_uninstall_leaves_no_folder_it_made() {
+    let machine = Machine::new(false, false).with_opencode();
+    machine.run("install");
+    assert!(
+        machine
+            .home
+            .join(".config/opencode/plugins/plotkeeper.js")
+            .is_file()
+    );
+    machine.run("uninstall");
+    assert!(!machine.home.join(".config").exists());
+
+    let machine = Machine::new(false, false).with_opencode();
+    machine.write(".config/other/file", "x");
+    machine.run("install");
+    machine.run("uninstall");
+    assert!(machine.home.join(".config/other/file").is_file());
+    assert!(!machine.home.join(".config/opencode").exists());
+}
+
+/// A `plotkeeper.js` of the user's own in OpenCode's plugins folder is backed up at install and put back at uninstall,
+/// and one the user wrote over plotkeeper's after install is left as it is (#370).
+#[test]
+fn opencode_keeps_a_plotkeeper_js_that_is_not_plotkeepers() {
+    let machine = Machine::new(false, false).with_opencode();
+    let own = "export default { id: \"mine\", setup() {} }\n";
+    machine.write(".config/opencode/plugins/plotkeeper.js", own);
+    let before = files(&machine.home);
+    machine.run("install");
+    machine.run("install");
+    let plugin = machine.home.join(".config/opencode/plugins/plotkeeper.js");
+    assert!(fs::read_to_string(&plugin).unwrap().contains("--agent"));
+    machine.run("uninstall");
+    assert_eq!(files(&machine.home), before);
+
+    let machine = Machine::new(false, false).with_opencode();
+    machine.run("install");
+    machine.write(".config/opencode/plugins/plotkeeper.js", own);
+    let out = machine.run("uninstall");
+    let plugin = machine.home.join(".config/opencode/plugins/plotkeeper.js");
+    assert_eq!(fs::read_to_string(&plugin).unwrap(), own);
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("left as it is"),
+        "{out:?}"
+    );
+
+    // One written over plotkeeper's before a second install is backed up by it, and put back at uninstall.
+    let machine = Machine::new(false, false).with_opencode();
+    machine.run("install");
+    machine.write(".config/opencode/plugins/plotkeeper.js", own);
+    machine.run("install");
+    machine.run("uninstall");
+    let plugin = machine.home.join(".config/opencode/plugins/plotkeeper.js");
+    assert_eq!(fs::read_to_string(&plugin).unwrap(), own);
 }
 
 /// Adds the user's own hook `command` under `event` to the hook file at `rel`, as an entry of `entry`'s shape.
