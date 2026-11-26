@@ -216,6 +216,22 @@ impl Bench {
         }
     }
 
+    /// Waits until the one run started so far is running: its working folder.
+    fn running(&self) -> PathBuf {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !self
+            .runner
+            .runs(&self.project())
+            .runs
+            .iter()
+            .any(|run| run.state == RunState::Running)
+        {
+            assert!(Instant::now() < deadline, "the review never ran");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        self.work()
+    }
+
     /// The working folder of the one run started so far.
     fn work(&self) -> PathBuf {
         let runs = self.runner.runs(&self.project()).runs;
@@ -263,7 +279,7 @@ fn bench() -> Bench {
     .unwrap();
     fs::set_permissions(&gh, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
     let script = format!(
-        "[ -e .git ] && touch '{0}/saw-git'\nwhile [ -e '{0}/slow' ]; do sleep 0.05; done\ncat '{0}/answer.json'\n",
+        "[ -e .git ] && touch '{0}/saw-git'\nwhile [ -e '{0}/slow' ]; do sleep 0.05; done\ncat '{0}/answer.json'\n[ ! -e '{0}/fail' ]\n",
         root.display()
     );
     let runner = Runner::new(Config {
@@ -342,7 +358,48 @@ fn a_brief_stored_for_daniels_own_pr_reviews_the_heads_files_reading_only_and_ke
         ("link:core-server/reason", "supported", "It polls."),
         ("law:cache-expires/text", "unreadable", "Which entries?"),
     ]);
+    // The run waits while its folder and command are read, since a finished review's run is dismissed.
+    fs::write(bench.root().join("slow"), "").unwrap();
     bench.reviews.brief_stored(&bench.project(), 7, &head);
+    let work = bench.running();
+
+    // The run's tools only read: no shell, no edits, no Edit rule.
+    let commands = bench.commands();
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0]["kind"], "map-review");
+    let args: Vec<&str> = commands[0]["args"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|arg| arg.as_str().unwrap())
+        .collect();
+    let tools = args.iter().position(|arg| *arg == "--tools").unwrap();
+    assert_eq!(args[tools + 1], "Read,Glob,Grep");
+    assert!(!args.iter().any(|arg| arg.starts_with("Edit(")), "{args:?}");
+    // No setup, though the project has one: it would run the PR's code outside the sandbox.
+    let run = work.parent().unwrap().join("run.json");
+    let stored: serde_json::Value = serde_json::from_slice(&fs::read(run).unwrap()).unwrap();
+    assert!(stored["setup"].is_null(), "{stored}");
+    assert!(!bench.root().join("setup-ran").exists());
+    // Its folder is the head's files, with no git data.
+    assert!(work.join("system-map.json").is_file() && work.join("cache/lib.rs").is_file());
+    assert!(!work.join(".git").exists() && !bench.root().join("saw-git").exists());
+    assert_eq!(
+        fs::read_to_string(work.join("system-map.json")).unwrap(),
+        PR_MAP
+    );
+    // The prompt names each item by kind and id and holds none of the PR's words.
+    let prompt = commands[0]["prompt"].as_str().unwrap();
+    for id in CHANGED {
+        assert!(prompt.contains(id), "{id} in {prompt}");
+    }
+    for words in PR_WORDS
+        .iter()
+        .chain(["Folds events", "Only core writes"].iter())
+    {
+        assert!(!prompt.contains(words), "{words} in {prompt}");
+    }
+    fs::remove_file(bench.root().join("slow")).unwrap();
     let view = bench.settled(&head);
     assert_eq!(view.state, ReviewState::Done, "{view:?}");
     assert_eq!((view.checked, view.flagged), (7, 3), "{view:?}");
@@ -363,44 +420,6 @@ fn a_brief_stored_for_daniels_own_pr_reviews_the_heads_files_reading_only_and_ke
             .unwrap()
             .flagged
     );
-
-    // The run's tools only read: no shell, no edits, no Edit rule.
-    let commands = bench.commands();
-    assert_eq!(commands.len(), 1);
-    assert_eq!(commands[0]["kind"], "map-review");
-    let args: Vec<&str> = commands[0]["args"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|arg| arg.as_str().unwrap())
-        .collect();
-    let tools = args.iter().position(|arg| *arg == "--tools").unwrap();
-    assert_eq!(args[tools + 1], "Read,Glob,Grep");
-    assert!(!args.iter().any(|arg| arg.starts_with("Edit(")), "{args:?}");
-    // No setup, though the project has one: it would run the PR's code outside the sandbox.
-    let run = bench.work().parent().unwrap().join("run.json");
-    let stored: serde_json::Value = serde_json::from_slice(&fs::read(run).unwrap()).unwrap();
-    assert!(stored["setup"].is_null(), "{stored}");
-    assert!(!bench.root().join("setup-ran").exists());
-    // Its folder is the head's files, with no git data.
-    let work = bench.work();
-    assert!(work.join("system-map.json").is_file() && work.join("cache/lib.rs").is_file());
-    assert!(!work.join(".git").exists() && !bench.root().join("saw-git").exists());
-    assert_eq!(
-        fs::read_to_string(work.join("system-map.json")).unwrap(),
-        PR_MAP
-    );
-    // The prompt names each item by kind and id and holds none of the PR's words.
-    let prompt = commands[0]["prompt"].as_str().unwrap();
-    for id in CHANGED {
-        assert!(prompt.contains(id), "{id} in {prompt}");
-    }
-    for words in PR_WORDS
-        .iter()
-        .chain(["Folds events", "Only core writes"].iter())
-    {
-        assert!(!prompt.contains(words), "{words} in {prompt}");
-    }
 }
 
 #[test]
@@ -577,4 +596,128 @@ fn a_late_brief_of_an_older_head_neither_cancels_the_current_heads_review_nor_st
     assert_eq!(bench.runner.runs(&bench.project()).runs.len(), 1);
     fs::remove_file(bench.root().join("slow")).unwrap();
     assert_eq!(bench.settled(&second).state, ReviewState::Done);
+}
+
+#[test]
+fn a_review_whose_run_is_cancelled_while_another_projects_review_fetches_still_fails() {
+    let bench = bench();
+    bench.author("daniel");
+    bench.all_supported();
+    fs::write(bench.root().join("slow"), "").unwrap();
+    let head = bench.first_head();
+    bench.reviews.brief_stored(&bench.project(), 7, &head);
+    let run = bench.runner.runs(&bench.project()).runs[0].id.clone();
+    // A second project, whose fetch of its PR's head waits until it is let go.
+    let other = bench.root().join("other");
+    git(
+        bench.root(),
+        &[
+            "clone",
+            "-q",
+            &bench.origin.to_string_lossy(),
+            &other.to_string_lossy(),
+        ],
+    );
+    git(&other, &["fetch", "-q", "origin", "refs/pull/7/head"]);
+    let upload = bench.root().join("slow-upload-pack");
+    fs::write(
+        &upload,
+        format!(
+            "#!/bin/sh\ntouch '{0}/fetching'\nwhile [ -e '{0}/hold-fetch' ]; do sleep 0.05; done\nexec git-upload-pack \"$@\"\n",
+            bench.root().display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&upload, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    git(
+        &other,
+        &[
+            "config",
+            "remote.origin.uploadpack",
+            &upload.to_string_lossy(),
+        ],
+    );
+    fs::write(bench.root().join("hold-fetch"), "").unwrap();
+    let reviews = bench.reviews.clone();
+    let project = other.to_string_lossy().into_owned();
+    let at = head.clone();
+    let fetch = std::thread::spawn(move || reviews.request(&project, 7, &at));
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !bench.root().join("fetching").exists() {
+        assert!(Instant::now() < deadline, "the other project never fetched");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // Daniel cancels the first project's review in the Runs tray while the other one fetches.
+    bench.runner.cancel(&run).unwrap();
+    fs::remove_file(bench.root().join("hold-fetch")).unwrap();
+    fs::remove_file(bench.root().join("slow")).unwrap();
+    fetch.join().unwrap();
+    let view = bench.reviews.view(&bench.project(), 7, &head).unwrap();
+    assert_eq!(view.state, ReviewState::Failed, "{view:?}");
+}
+
+/// Waits, on the reviews' own change notices, until `done` holds.
+fn until(bench: &Bench, what: &str, done: impl Fn() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while !done() {
+        let left = deadline.saturating_duration_since(Instant::now());
+        bench
+            .changes
+            .recv_timeout(left)
+            .unwrap_or_else(|_| panic!("{what}"));
+    }
+}
+
+#[test]
+fn a_finished_reviews_run_is_dismissed_once_its_answer_is_kept() {
+    let bench = bench();
+    bench.author("daniel");
+    bench.all_supported();
+    let head = bench.first_head();
+    bench.reviews.brief_stored(&bench.project(), 7, &head);
+    assert_eq!(bench.settled(&head).state, ReviewState::Done);
+    until(&bench, "the run was never dismissed", || {
+        bench.runner.runs(&bench.project()).runs.is_empty()
+    });
+    let folders: Vec<PathBuf> = fs::read_dir(bench.root().join("runs"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.is_dir())
+        .collect();
+    assert!(
+        folders.is_empty(),
+        "the run's copy of the head is left: {folders:?}"
+    );
+}
+
+#[test]
+fn a_review_stopped_by_a_usage_limit_waits_and_runs_again_on_resume() {
+    let bench = bench();
+    bench.author("daniel");
+    let limited = serde_json::json!({ "type": "result", "subtype": "success", "is_error": true,
+        "result": "Claude usage limit reached. Your limit will reset at 5pm.", "total_cost_usd": 0 });
+    fs::write(bench.root().join("answer.json"), limited.to_string()).unwrap();
+    fs::write(bench.root().join("fail"), "").unwrap();
+    let head = bench.first_head();
+    bench.reviews.brief_stored(&bench.project(), 7, &head);
+    until(&bench, "the review never waited for Resume", || {
+        let runs = bench.runner.runs(&bench.project());
+        runs.paused.is_some() && runs.runs.iter().any(|run| run.state == RunState::Queued)
+    });
+    let view = bench.reviews.view(&bench.project(), 7, &head).unwrap();
+    assert_eq!(
+        view.state,
+        ReviewState::Reviewing,
+        "it waits, as a queued run does: {view:?}"
+    );
+    fs::remove_file(bench.root().join("fail")).unwrap();
+    bench.all_supported();
+    bench.runner.resume();
+    let view = bench.settled(&head);
+    assert_eq!(
+        (view.state, view.checked),
+        (ReviewState::Done, 7),
+        "{view:?}"
+    );
+    assert_eq!(bench.commands().len(), 2);
 }

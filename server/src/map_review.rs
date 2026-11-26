@@ -421,48 +421,45 @@ impl MapReviews {
         }
         let guard = self.lock();
         let mut record = self.read(project, pr);
-        if self.cancel_others(&mut record, head) {
-            self.write(&record);
-            drop(guard);
-            self.tell(project);
-        }
+        let Some(runs) = replace_others(&mut record, head) else {
+            return;
+        };
+        self.write(&record);
+        drop(guard);
+        self.cancel_runs(pr, runs);
+        self.tell(project);
     }
 
-    /// Cancels the run of each head but `head` that is being reviewed: whether one was.
-    fn cancel_others(&self, record: &mut Record, head: &str) -> bool {
-        let mut cancelled = false;
-        for (_, other) in record
-            .heads
-            .iter_mut()
-            .filter(|(at, other)| at.as_str() != head && other.state == ReviewState::Reviewing)
-        {
-            if let (Some(runner), Some(id)) = (self.runner.upgrade(), &other.run)
-                && let Err(e) = runner.cancel(id)
-            {
-                log::warn!(
-                    "map text review of PR #{}: the older head's run was not cancelled: {e}",
-                    record.pr
-                );
+    /// Cancels each of PR `pr`'s runs `runs`. Never called with the lock held: a cancel tells the runs changed, which takes it.
+    fn cancel_runs(&self, pr: u64, runs: Vec<String>) {
+        let Some(runner) = self.runner.upgrade() else {
+            return;
+        };
+        for id in runs {
+            if let Err(e) = runner.cancel(&id) {
+                log::warn!("map text review of PR #{pr}: run {id} was not cancelled: {e}");
             }
-            other.state = ReviewState::Failed;
-            other.why = Some("A newer head replaced it".into());
-            other.run = None;
-            cancelled = true;
         }
-        cancelled
     }
 
     /// Starts the review of `items` at PR `pr`'s `head`: only the items with no verdict yet go to the run, and with none left the
-    /// head is done at once. A head being reviewed or done is left alone.
+    /// head is done at once. A head being reviewed or done is left alone, and so is a head the PR has moved on from. The lock is
+    /// held only to read and write the PR's file, never across the fetch, the archive or a call to the runner.
     fn start(&self, project: &str, pr: u64, head: &str, items: Vec<ReviewItem>) {
         let guard = self.lock();
         if !self.is_current(project, pr, head) {
             return;
         }
         let mut record = self.read(project, pr);
-        self.cancel_others(&mut record, head);
+        let replaced = replace_others(&mut record, head);
         let now = record.heads.get(head).map(|head| head.state);
         if matches!(now, Some(ReviewState::Reviewing | ReviewState::Done)) {
+            if let Some(runs) = replaced {
+                self.write(&record);
+                drop(guard);
+                self.cancel_runs(pr, runs);
+                self.tell(project);
+            }
             return;
         }
         let missing: Vec<ReviewItem> = items
@@ -470,30 +467,54 @@ impl MapReviews {
             .filter(|item| record.verdict(item).is_none())
             .cloned()
             .collect();
-        let mut kept = Head {
+        // A head being reviewed with no run yet is claimed: a second start leaves it alone, and its run is written down below.
+        let state = if missing.is_empty() {
+            ReviewState::Done
+        } else {
+            ReviewState::Reviewing
+        };
+        let kept = Head {
             items,
-            state: ReviewState::Done,
+            state,
             run: None,
             why: None,
         };
-        if !missing.is_empty() {
-            match self.submit(project, pr, head, &missing) {
-                Ok(id) => {
-                    kept.state = ReviewState::Reviewing;
-                    kept.run = Some(id);
-                }
-                Err(why) => {
-                    kept.state = ReviewState::Failed;
-                    kept.why = Some(why);
-                }
-            }
-        }
         record.heads.insert(head.to_string(), kept);
         self.write(&record);
         drop(guard);
+        self.cancel_runs(pr, replaced.unwrap_or_default());
+        if !missing.is_empty() {
+            let submitted = self.submit(project, pr, head, &missing);
+            self.started(project, pr, head, submitted);
+        }
         // A run that ended before its review was written down is read now.
         self.runs_changed(project);
         self.tell(project);
+    }
+
+    /// The run of PR `pr`'s review at `head` was submitted, its id, or refused, why: written down on the head, which fails on a
+    /// refusal. A head replaced meanwhile by a newer one keeps its failure, and the run submitted for it is cancelled.
+    fn started(&self, project: &str, pr: u64, head: &str, submitted: Result<String, String>) {
+        let guard = self.lock();
+        let mut record = self.read(project, pr);
+        let claimed = record
+            .heads
+            .get_mut(head)
+            .filter(|kept| kept.state == ReviewState::Reviewing && kept.run.is_none());
+        match (claimed, submitted) {
+            (Some(kept), Ok(id)) => kept.run = Some(id),
+            (Some(kept), Err(why)) => {
+                kept.state = ReviewState::Failed;
+                kept.why = Some(why);
+            }
+            (None, Ok(id)) => {
+                drop(guard);
+                self.cancel_runs(pr, vec![id]);
+                return;
+            }
+            (None, Err(_)) => return,
+        }
+        self.write(&record);
     }
 
     /// Fetches PR `pr`'s head, fills a new run's folder with `head`'s files and submits the run: its id.
@@ -570,7 +591,7 @@ impl MapReviews {
     }
 
     /// The runner says `project`'s runs changed: each review whose run ended has its answer read, on a thread of its own, and one
-    /// whose run is gone failed.
+    /// whose run is gone failed. It waits for the lock, which no one holds across git or a call to the runner, so no change is lost.
     pub fn runs_changed(&self, project: &str) {
         let Some(runner) = self.runner.upgrade() else {
             return;
@@ -596,19 +617,12 @@ impl MapReviews {
                         );
                         thread::spawn(move || {
                             if let Some(reviews) = me.upgrade() {
-                                reviews.finish(&project, pr, &head, &id, &outcome);
-                                reviews.reading.lock().unwrap().remove(&id);
-                                // A run that ended while this one was read is read now.
-                                reviews.runs_changed(&project);
-                                reviews.tell(&project);
+                                reviews.ended(&project, pr, &head, &id, &outcome);
                             }
                         });
                     }
                     None if !runner.runs(project).runs.iter().any(|run| run.id == id) => {
-                        // A start or a cancel holds the lock while the runner tells this; each looks again once it lets go.
-                        let Ok(guard) = self.writing.try_lock() else {
-                            continue;
-                        };
+                        let guard = self.lock();
                         let mut now = self.read(project, record.pr);
                         if let Some(kept) = now.heads.get_mut(head)
                             && kept.run.as_deref() == Some(id.as_str())
@@ -630,16 +644,51 @@ impl MapReviews {
         }
     }
 
+    /// Run `id` of PR `pr`'s review at `head` ended with `outcome`: its answer is kept, the run is dismissed, since its folder holds
+    /// a copy of the head that nothing reads any more, and a review the login or a limit stopped is submitted again, to wait in
+    /// the paused queue until Resume.
+    fn ended(&self, project: &str, pr: u64, head: &str, id: &str, outcome: &Outcome) {
+        let again = self.finish(project, pr, head, id, outcome);
+        self.cancel_runs(pr, vec![id.to_string()]);
+        self.reading.lock().unwrap().remove(id);
+        if let Some(missing) = again {
+            let submitted = self.submit(project, pr, head, &missing);
+            self.started(project, pr, head, submitted);
+        }
+        // A run that ended while this one was read is read now.
+        self.runs_changed(project);
+        self.tell(project);
+    }
+
     /// Run `id` of PR `pr`'s review at `head` ended with `outcome`: a finished run's verdicts are kept, and the head is done when
-    /// every item has one; any other end fails it.
-    fn finish(&self, project: &str, pr: u64, head: &str, id: &str, outcome: &Outcome) {
+    /// every item has one. A run the login or a usage or rate limit stopped leaves the head waiting with no run: the items it
+    /// still lacks, to submit again. Any other end fails it.
+    fn finish(
+        &self,
+        project: &str,
+        pr: u64,
+        head: &str,
+        id: &str,
+        outcome: &Outcome,
+    ) -> Option<Vec<ReviewItem>> {
         let _guard = self.lock();
         let mut record = self.read(project, pr);
-        let Some(kept) = record.heads.get(head).cloned() else {
-            return;
-        };
+        let kept = record.heads.get(head).cloned()?;
         if kept.run.as_deref() != Some(id) || kept.state != ReviewState::Reviewing {
-            return;
+            return None;
+        }
+        if matches!(outcome.end, End::NotLoggedIn | End::RateLimited) {
+            let missing: Vec<ReviewItem> = kept
+                .items
+                .iter()
+                .filter(|item| record.verdict(item).is_none())
+                .cloned()
+                .collect();
+            record
+                .heads
+                .insert(head.to_string(), Head { run: None, ..kept });
+            self.write(&record);
+            return Some(missing);
         }
         let why = if matches!(outcome.end, End::Done | End::Denied) {
             for verdict in read_answer(&outcome.result, &kept.items) {
@@ -680,9 +729,11 @@ impl MapReviews {
             },
         );
         self.write(&record);
+        None
     }
 
-    /// At a start: each review whose run ended meanwhile has its answer read, and one whose run is gone failed.
+    /// At a start: each review whose run ended meanwhile has its answer read, one whose run is gone failed, and one whose run
+    /// plotkeeper stopped before submitting failed too.
     pub fn pick_up(&self) {
         let folders = fs::read_dir(&self.config.store)
             .into_iter()
@@ -695,14 +746,27 @@ impl MapReviews {
         {
             let files = fs::read_dir(&folder).into_iter().flatten().flatten();
             for file in files.map(|entry| entry.path()) {
-                if let Some(record) = fs::read(&file)
+                let Some(mut record) = fs::read(&file)
                     .ok()
                     .and_then(|text| serde_json::from_slice::<Record>(&text).ok())
-                    && record
-                        .heads
-                        .values()
-                        .any(|head| head.state == ReviewState::Reviewing)
-                {
+                else {
+                    continue;
+                };
+                let reviewing = |head: &Head| head.state == ReviewState::Reviewing;
+                let mut unsubmitted = false;
+                for head in record.heads.values_mut() {
+                    if reviewing(head) && head.run.is_none() {
+                        head.state = ReviewState::Failed;
+                        head.why =
+                            Some("plotkeeper stopped before the review's run started".into());
+                        unsubmitted = true;
+                    }
+                }
+                if unsubmitted {
+                    let _guard = self.lock();
+                    self.write(&record);
+                }
+                if record.heads.values().any(reviewing) {
                     projects.insert(record.project);
                 }
             }
@@ -711,6 +775,24 @@ impl MapReviews {
             .iter()
             .for_each(|project| self.runs_changed(project));
     }
+}
+
+/// Marks each head of `record` but `head` that is being reviewed as replaced by a newer one: the ids of their runs, for the caller
+/// to cancel once it lets go of the lock; none when no head was being reviewed.
+fn replace_others(record: &mut Record, head: &str) -> Option<Vec<String>> {
+    let mut runs = Vec::new();
+    let mut replaced = false;
+    for (_, other) in record
+        .heads
+        .iter_mut()
+        .filter(|(at, other)| at.as_str() != head && other.state == ReviewState::Reviewing)
+    {
+        runs.extend(other.run.take());
+        other.state = ReviewState::Failed;
+        other.why = Some("A newer head replaced it".into());
+        replaced = true;
+    }
+    replaced.then_some(runs)
 }
 
 /// The open PR `number`'s map text review at its head, for Ratify's head; none when it is not open and ready or its head changed
