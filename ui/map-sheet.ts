@@ -158,10 +158,11 @@ function drawSheet(view: MapView) {
   if (bar.parentElement === slot) [...slot.children].forEach((child) => child !== bar && child.remove());
   else slot.replaceChildren(bar);
   slot.append(card);
-  fitPurpose(slot);
   if (keepFocus) toggle.focus();
   drawStrip(view, part.id, extra);
   syncSide(view.slots);
+  // Measured once the side column shows: in a hidden one the purpose has no size.
+  fitPurpose(slot);
 }
 
 // The sheet's card for `part` on `view`, its History fold's body (the history strip's, drawn once the card is in the page) and its `?`.

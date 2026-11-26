@@ -535,14 +535,14 @@ fn write_ahead(
 
 /// `project`'s session ended its turn: `origin` is fetched through the cooldown of `fetches` (`fetch`), and `read_ci` runs when
 /// that fetch was not skipped; the fog is refreshed without starting it, and the catch-ups of at most `ON_SHOW` fogged Core and
-/// Interface-only parts start writing as `show` does, into the store that `store` opens. `None` when the project's fog never
-/// started (its map was never opened): nothing is fetched, read, opened or written. Else the parts whose write started; `done`
-/// runs as each ends.
+/// Interface-only parts start writing as `show` does, into the store that `store` opens, with the PR briefs that `lit_of` opens.
+/// `None` when the project's fog never started (its map was never opened): nothing is fetched, read, opened or written. Else the
+/// parts whose write started; `done` runs as each ends.
 #[allow(
     clippy::too_many_arguments,
     reason = "no type groups these inputs, and one made only for this call would be a new abstraction (#555)"
 )]
-pub fn turn_end(
+pub fn turn_end<L: Fn(u64) -> Option<Vec<Vec<String>>>>(
     catch_ups: &CatchUps,
     writer: Option<&SharedWriter>,
     model: &str,
@@ -551,7 +551,7 @@ pub fn turn_end(
     read_ci: impl FnOnce(),
     project: &str,
     file: &Path,
-    lit_of: &dyn Fn(u64) -> Option<Vec<Vec<String>>>,
+    lit_of: impl FnOnce() -> L,
     store: impl FnOnce() -> Option<CatchUpStore>,
     done: impl Fn() + Clone + Send + 'static,
 ) -> Option<Vec<String>> {
@@ -582,8 +582,9 @@ pub fn turn_end(
     let user = crate::map::read_user(file, project);
     // The fogged parts the map shows: Core and Interface-only, since a black box never shows fog (`fog::effective`).
     let parts = crate::fog::effective(&user, &source).into_keys().collect();
+    let lit_of = lit_of();
     Some(write_ahead(
-        catch_ups, writer, model, project, &user, parts, lit_of, &store, done,
+        catch_ups, writer, model, project, &user, parts, &lit_of, &store, done,
     ))
 }
 
@@ -610,7 +611,7 @@ pub fn turn_ended(app: &Arc<App>, folder: String) {
             || crate::ci_laws::refresh_later(&app.ci, &app.events, &project),
             &project,
             &file,
-            &lit_of(&project),
+            || lit_of(&project),
             || store_of(&project),
             move || events.emit("map-landed", serde_json::json!(landed)),
         );
@@ -1145,9 +1146,10 @@ mod tests {
         catch_ups: CatchUps,
         ended: std::sync::mpsc::Sender<()>,
         ends: std::sync::mpsc::Receiver<()>,
-        /// How many times a turn's end read CI again, and opened the catch-up store.
+        /// How many times a turn's end read CI again, opened the catch-up store, and opened the PR brief store.
         ci_reads: std::cell::Cell<usize>,
         stores_opened: std::cell::Cell<usize>,
+        briefs_opened: std::cell::Cell<usize>,
     }
 
     impl Shows {
@@ -1174,6 +1176,7 @@ mod tests {
                 ends,
                 ci_reads: std::cell::Cell::new(0),
                 stores_opened: std::cell::Cell::new(0),
+                briefs_opened: std::cell::Cell::new(0),
             }
         }
         fn push(&self, part: &str, text: &str) {
@@ -1519,7 +1522,10 @@ mod tests {
                 || self.ci_reads.set(self.ci_reads.get() + 1),
                 &self.rig.main,
                 &self.rig.file(),
-                lit_of,
+                || {
+                    self.briefs_opened.set(self.briefs_opened.get() + 1);
+                    lit_of
+                },
                 || {
                     self.stores_opened.set(self.stores_opened.get() + 1);
                     Some(self.store())
@@ -1559,8 +1565,9 @@ mod tests {
         let user = read_user(&shows.rig.file(), &shows.rig.main);
         assert_eq!(user.fog.processed, None, "the fog stays unstarted");
         assert!(writer.wrote().is_empty());
-        // No data folder is made for it, and CI is not read.
+        // No data folder is made for it, neither the catch-ups' nor the PR briefs', and CI is not read.
         assert_eq!(shows.stores_opened.get(), 0);
+        assert_eq!(shows.briefs_opened.get(), 0);
         assert_eq!(shows.ci_reads.get(), 0);
     }
 
