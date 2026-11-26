@@ -1652,24 +1652,46 @@ fn without_claude_a_pr_that_changes_the_map_but_fogs_nothing_still_gets_its_shor
         "{:?}",
         stored.map_problems
     );
-    // A PR that fogs something needs the writer: it fails at its head, and nothing is stored.
+    // A PR that fogs something needs the writer: nothing is stored, no failure is kept for the tray to offer again, and the head
+    // is not gathered again.
     let full = source(&head);
-    let mut logged = Vec::new();
     assert_eq!(
-        on_lookup(
-            &with,
-            &seen,
-            8,
-            &head,
-            || Ok(full),
-            |line| logged.push(line)
-        ),
-        Did::Failed
+        on_lookup(&with, &seen, 8, &head, || Ok(full), |_| {}),
+        Did::Kept
     );
     assert!(store.get(8, &head).is_none());
+    let again = || -> Result<PrSource, String> { panic!("gathered again") };
+    assert_eq!(on_lookup(&with, &seen, 8, &head, again, |_| {}), Did::Kept);
+    let briefs = PrBriefs::new(None);
+    *briefs.seen_of("/p").lock().unwrap() = std::mem::take(&mut *seen.lock().unwrap());
+    let mut tray = [ready_pr(8, &head)];
+    briefs.annotate_with("/p", &store, None, &mut tray);
     assert!(
-        logged.iter().any(|line| line.contains("no writer")),
-        "{logged:?}"
+        !tray[0].brief.as_ref().is_some_and(|info| info.failed),
+        "{:?}",
+        tray[0].brief
+    );
+}
+
+#[test]
+fn without_claude_a_new_head_leaves_a_full_brief_as_it_is_and_gathers_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = BriefStore::open(dir.path()).unwrap();
+    let (seen, fake) = (Mutex::new(Seen::default()), Fake::new());
+    assert_eq!(lookup(&store, &seen, &fake, "h1"), Did::Wrote);
+    let with = Writing {
+        writer: None,
+        model: "opus",
+        store: &store,
+        reading: None,
+    };
+    let unread = || -> Result<PrSource, String> {
+        panic!("a full brief's head is not gathered without a writer")
+    };
+    assert_eq!(on_lookup(&with, &seen, 7, "h2", unread, |_| {}), Did::Kept);
+    assert!(
+        !store.get(7, "h1").unwrap().stale,
+        "the full brief is not marked stale"
     );
 }
 

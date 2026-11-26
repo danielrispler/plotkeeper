@@ -110,19 +110,32 @@ fn store_short(with: &Writing, source: &PrSource) -> Result<Option<StoredBrief>,
     Ok(Some(short))
 }
 
+/// What a write at a head did.
+enum Wrote {
+    /// A brief is stored: the writer's, or a short one.
+    Brief(Box<StoredBrief>),
+    /// The PR would fog nothing and its map did not change: no brief.
+    Quiet,
+    /// The brief needs the writer, and there is none: nothing is stored, and that is no failure.
+    NeedsWriter,
+}
+
 /// Builds the source and writes; the failure of either is told to `log` and returned. Every brief of a PR's head is stored here: the
-/// writer's, or, for a PR that fogs nothing but changes the map, the short brief. `Ok(None)`: the PR would fog nothing and its map did
-/// not change.
+/// writer's, or, for a PR that fogs nothing but changes the map, the short brief, which needs no writer.
 fn write_now(
     with: &Writing,
     source: impl FnOnce() -> Result<PrSource, String>,
     mut log: impl FnMut(String),
-) -> Result<Option<StoredBrief>, String> {
+) -> Result<Wrote, String> {
     let written = source().and_then(|source| {
         if fogs_nothing(&source)? {
-            return store_short(with, &source);
+            return Ok(store_short(with, &source)?
+                .map_or(Wrote::Quiet, |brief| Wrote::Brief(Box::new(brief))));
         }
-        write_brief(with, &source, &mut log).map(Some)
+        if with.writer.is_none() {
+            return Ok(Wrote::NeedsWriter);
+        }
+        write_brief(with, &source, &mut log).map(|brief| Wrote::Brief(Box::new(brief)))
     });
     if let Err(why) = &written {
         log(format!("write the PR brief: {why}"));
@@ -140,10 +153,16 @@ pub fn on_lookup(
     source: impl FnOnce() -> Result<PrSource, String>,
     log: impl FnMut(String),
 ) -> Did {
+    // Without `claude` a full brief is left as it is, neither marked stale nor gathered for: only the writer could rewrite it.
+    if with.writer.is_none() && with.store.latest(pr).is_some_and(|brief| !brief.short) {
+        return Did::Kept;
+    }
     let (again, skip) = {
         let mut seen = seen.lock().unwrap();
         let before = seen.heads.insert(pr, head.to_string());
-        let skip = seen.is_quiet(pr, head) || seen.has_failed(pr, head);
+        let skip = seen.is_quiet(pr, head)
+            || seen.has_failed(pr, head)
+            || seen.unwritten.contains(&(pr, head.to_string()));
         drop(seen);
         (before.as_deref() == Some(head), skip)
     };
@@ -177,10 +196,17 @@ pub fn on_lookup(
         write_since(with, full, &from, &mut log).ok();
     }
     match write_now(with, move || built, log) {
-        Ok(Some(_)) => Did::Wrote,
-        Ok(None) => {
+        Ok(Wrote::Brief(_)) => Did::Wrote,
+        Ok(Wrote::Quiet) => {
             seen.lock().unwrap().quiet.insert((pr, head.to_string()));
             Did::Quiet
+        }
+        Ok(Wrote::NeedsWriter) => {
+            seen.lock()
+                .unwrap()
+                .unwritten
+                .insert((pr, head.to_string()));
+            Did::Kept
         }
         Err(_) => {
             seen.lock().unwrap().failed.insert(pr, head.to_string());
@@ -207,15 +233,24 @@ pub fn on_open(
                 return Ok(copy);
             }
             seen.lock().unwrap().failed.remove(&pr);
-            write_now(with, source, log)
-                .inspect_err(|_| {
-                    seen.lock().unwrap().failed.insert(pr, head.to_string());
-                })?
-                .ok_or_else(|| {
+            let wrote = write_now(with, source, log).inspect_err(|_| {
+                seen.lock().unwrap().failed.insert(pr, head.to_string());
+            })?;
+            match wrote {
+                Wrote::Brief(brief) => Ok(*brief),
+                Wrote::Quiet => {
                     // The tray row becomes the quiet one, which does not open.
                     seen.lock().unwrap().quiet.insert((pr, head.to_string()));
-                    "Nothing you track changed in this PR, so it has no brief.".into()
-                })
+                    Err("Nothing you track changed in this PR, so it has no brief.".into())
+                }
+                Wrote::NeedsWriter => {
+                    seen.lock()
+                        .unwrap()
+                        .unwritten
+                        .insert((pr, head.to_string()));
+                    Err("PR briefs need Claude: `claude` was not found.".into())
+                }
+            }
         }
     }
 }

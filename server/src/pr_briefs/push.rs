@@ -17,6 +17,9 @@ pub struct Seen {
     pub(super) quiet: HashSet<(u64, String)>,
     /// The head whose write failed, per PR: it is not retried at every lookup, only when the head changes or Daniel opens the brief.
     pub(super) failed: HashMap<u64, String>,
+    /// The PRs and heads whose brief needs the writer, which plotkeeper does not have (no `claude`): no failure, and not gathered
+    /// again.
+    pub(super) unwritten: HashSet<(u64, String)>,
     /// What the push to the head each PR is at did to Daniel's read (spec #477, part B), and whether that is settled: a settled
     /// verdict is worked out once, an unsettled one again at each ask. Kept in memory, as the rest of `Seen`: after a restart the
     /// tray's note is gone, while a carried read and its copied brief are on disk.
