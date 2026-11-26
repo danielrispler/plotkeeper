@@ -627,7 +627,7 @@ fn output(dir: &Path, name: &str) -> Result<File, Status> {
 
 /// Runs `command` until `deadline`, through the one process runner: its exit code, none when a signal ended it. The
 /// run's time limit passing, or a Stop ([`stopped`]), ends it as timed out, with nothing it started left running.
-fn run_logged(command: &mut Command, deadline: Instant) -> Result<Option<i32>, RunOutcome> {
+fn run_step(command: &mut Command, deadline: Instant) -> Result<Option<i32>, RunOutcome> {
     let left = deadline.saturating_duration_since(Instant::now());
     match studio_workbench::run::run_logged(command, left, &stopped) {
         Ok(status) => Ok(status.code()),
@@ -638,7 +638,7 @@ fn run_logged(command: &mut Command, deadline: Instant) -> Result<Option<i32>, R
     }
 }
 
-/// Why [`run_logged`] gave no exit code.
+/// Why [`run_step`] gave no exit code.
 enum RunOutcome {
     TimedOut,
     NotStarted(String),
@@ -662,7 +662,7 @@ fn run_check(stored: &Launched, deadline: Instant) -> Result<(), Status> {
         ..Status::default()
     };
     let mut check = Command::new(program);
-    check.args(args).stdout(Stdio::null());
+    check.args(args);
     let left = deadline.saturating_duration_since(Instant::now());
     let output = match studio_workbench::run::run_until_unless(&mut check, left, &stopped) {
         Ok(_) => return Ok(()),
@@ -716,7 +716,7 @@ fn run_setup(dir: &Path, stored: &Launched, deadline: Instant) -> Result<(), Sta
         setup_exit: Some(setup_exit),
         ..Status::default()
     };
-    match run_logged(&mut command, deadline) {
+    match run_step(&mut command, deadline) {
         Ok(Some(0)) => Ok(()),
         Ok(code) => Err(failed(code.unwrap_or(-1))),
         Err(RunOutcome::TimedOut) => Err(timed_out()),
@@ -737,7 +737,7 @@ fn run_harness(dir: &Path, stored: &Launched, deadline: Instant) -> Result<Optio
     for name in &command.env_remove {
         harness.env_remove(name);
     }
-    run_logged(&mut harness, deadline).map_err(|outcome| match outcome {
+    run_step(&mut harness, deadline).map_err(|outcome| match outcome {
         RunOutcome::TimedOut => timed_out(),
         RunOutcome::NotStarted(e) => Status {
             error: Some(format!(
@@ -1421,7 +1421,7 @@ impl Runner {
         })
     }
 
-    /// Cancel: a queued run is dropped, a running one has its process group killed, and either way the run's folder is
+    /// Cancel: a queued run is dropped, a running one is stopped ([`Runner::stop`]), and either way the run's folder is
     /// removed and the next run of its project starts. An ended run is only removed, and so is a run that ended on its own
     /// at that moment, which is recorded as it ended. A running run is killed only when its lock is held and the process
     /// its folder names still has the start time written down, so a process id that was reused is never signalled;
@@ -1473,7 +1473,8 @@ impl Runner {
         Ok(())
     }
 
-    /// Stops the running run in `dir` by killing its launcher's process group, and waits until its lock is free: true when
+    /// Stops the running run in `dir`, a `SIGTERM` to its launcher's process group and a `SIGKILL` past [`STOP_GRACE`],
+    /// and waits until its lock is free: true when
     /// it was killed here, false when its launcher had already gone, or was going at this very moment, so there was
     /// nothing to stop. Refuses, with the lock still held, when the process the folder names is not the one that was
     /// started.

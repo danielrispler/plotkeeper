@@ -55,7 +55,7 @@ All in `settings.json` ([Settings files](../settings.md)), read by the server an
 - `backgroundRuns.harness`: `claude`, the default and the only harness. Any other value refuses the run.
 - `backgroundRuns.model`: the model. Unset, the CLI's own default.
 - `checks`: the project's entry, picked as a session's is ([Checks](checks.md)): the longest folder that is the project's or holds it. There is no default list here. A project with no entry gets "Set this project's checks" and the prompt to copy; a micro-world, which has no `Bash`, needs none.
-- `setup`: per project folder like `checks`, one command, such as `npm ci`. plotkeeper runs it in the working folder before the agent starts, outside the sandbox and with the network, so offline checks find their dependencies. With none set, it is skipped. A setup that fails ends the run before the agent starts.
+- `setup`: per project folder like `checks`, one command, such as `npm ci`. plotkeeper runs it in the working folder before the agent starts, outside the sandbox and with the network, so offline checks find their dependencies. With none set, it is skipped. A setup that fails ends the run before the agent starts. Whatever the setup leaves running when it exits is killed then (#568), so a setup cannot start a service for the agent to use.
 
 ## A run's folder
 

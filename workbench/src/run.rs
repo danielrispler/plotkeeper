@@ -1,7 +1,9 @@
 //! The one process runner (#548, "One process runner in `studio-workbench`"): every `git` and `gh` the workspace
 //! starts is built here, so none waits on a prompt nobody sees. Every wait on a child with a deadline goes through it:
-//! [`run_until`] for a command whose output is read, [`run_logged`] for one whose output goes to a file (the background
-//! runs' launcher and the micro-world checks, #568). Both leave no helper of a stopped command behind.
+//! [`run_until`] for a command whose output is read whole, [`run_logged`] for one whose output goes to a file (the
+//! background runs' launcher and the micro-world checks, #568). Both leave no helper of a stopped command behind. The
+//! one exception is a command whose output is read as it comes and cut short: the hook's untracked-file listing
+//! (`hook/src/lib.rs`, `untracked_within`) is built here and waited on by its caller.
 
 use std::{
     ffi::OsStr,
