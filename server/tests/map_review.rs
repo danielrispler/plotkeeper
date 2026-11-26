@@ -411,6 +411,18 @@ fn the_items_are_the_map_text_the_pr_changed_and_the_unchanged_text_of_the_parts
         .replace(r#""on":"core""#, r#""on":"server""#)
         .replace(r#""paths":["core/"]"#, r#""paths":["core/","fold/"]"#)
         .replace(r#""kind":"import""#, r#""kind":"call""#);
+    // Core's still-true items in `RICH`, for a head that changed a file of Core's alone.
+    let core = vec![
+        "part:core/purpose",
+        "part:core/caption",
+        "held:core/1",
+        "held:core/3",
+        "link:core-server/reason",
+        "link:browser-core/reason",
+        "law:one-writer/text",
+        "law:reads-only/text",
+        "law:asks-politely/text",
+    ];
     // A case: its name, the base when not `BASE`, the head's files, and its changed and still-true items.
     type Case<'a> = (
         &'a str,
@@ -419,7 +431,7 @@ fn the_items_are_the_map_text_the_pr_changed_and_the_unchanged_text_of_the_parts
         Vec<&'a str>,
         Vec<&'a str>,
     );
-    let cases: [Case; 3] = [
+    let cases: [Case; 4] = [
         (
             // An item the PR changed is a changed item only, and nothing it removed is reviewed.
             "the PR's map and code",
@@ -437,17 +449,16 @@ fn the_items_are_the_map_text_the_pr_changed_and_the_unchanged_text_of_the_parts
             Some(RICH),
             vec![("core/lib.rs", "pub fn fold() -> u8 { 1 }\n")],
             vec![],
-            vec![
-                "part:core/purpose",
-                "part:core/caption",
-                "held:core/1",
-                "held:core/3",
-                "link:core-server/reason",
-                "link:browser-core/reason",
-                "law:one-writer/text",
-                "law:reads-only/text",
-                "law:asks-politely/text",
-            ],
+            core.clone(),
+        ),
+        (
+            // git quotes a non-ASCII path unless asked for NUL-ended names; the quoted path matches no part.
+            "a code change to a non-ASCII path only",
+            Some(RICH),
+            vec![("core/café.rs", "pub fn fold() -> u8 { 1 }\n")],
+            vec![],
+            // Fold holds `core/lib.rs` alone.
+            core.into_iter().filter(|id| *id != "held:core/1").collect(),
         ),
         (
             "other fields alone",

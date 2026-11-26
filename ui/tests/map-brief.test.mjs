@@ -572,8 +572,8 @@ test("the Ratify step shows while the review runs, with nothing to ratify (#645)
 // #698: a review whose only items are still-true ones brings the Ratify step by a flag or a failure, and loses it when it runs again.
 // Run again is pressed on the drawn step and its answer comes back through the page's own reply path (`startReview`, `reviewed`). The
 // redraw it ends in, `show` with its clamp and dots, needs the drawn map (`currentMap`), which the stand-in DOM cannot draw, so the clamp is
-// called here as `show` calls it first, and the dots are one per step of `steps()`.
-test("on a still-true-only PR the Ratify step follows the review's state while the brief is open, and the dots follow the step list (#698)", async () => {
+// called here as `show` calls it first and the test checks the step list `steps()` it draws from; the dots are not drawn.
+test("on a still-true-only PR the Ratify step follows the review's state while the brief is open, and the player's clamp keeps the brief on its new last step (#698)", async () => {
   const { El, fakeDocument, tauri } = await import("./dom.mjs");
   const calls = [];
   // The server's answer to Run again on a still-true-only head with no flag: its running review shows nothing.
@@ -605,7 +605,7 @@ test("on a still-true-only PR the Ratify step follows the review's state while t
   assert.deepEqual(steps().map((s) => s.k), ["Now"]);
   player.clamp(steps().length);
   assert.equal(player.current()?.step, 0);
-  // It ends with a flag (read again on `map-landed`): the step comes back with the flag as its row, and the dots (one per step) count it.
+  // It ends with a flag (read again on `map-landed`): the step comes back with the flag as its row.
   setReview(/** @type {any} */ (only("done", [flag])));
   assert.deepEqual(steps().map((s) => s.k), ["Now", "Ratify"]);
   // Running again with that flag kept, done with no flag, or with only a flag decided before: no step.

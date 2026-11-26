@@ -226,9 +226,17 @@ struct Touched {
 fn touched_at(repo: &Path, head: &str) -> Option<Touched> {
     let (reference, _) = crate::map::default_ref(repo)?;
     let base = crate::map::git(repo, &["merge-base", &reference, head]).ok()?;
-    let names =
-        crate::map::git(repo, &["diff", "--no-renames", "--name-only", &base, head]).ok()?;
-    let files: Vec<String> = names.lines().map(String::from).collect();
+    // NUL-ended names, so git does not quote a path with non-ASCII characters.
+    let names = crate::map::git(
+        repo,
+        &["diff", "--no-renames", "--name-only", "-z", &base, head],
+    )
+    .ok()?;
+    let files: Vec<String> = names
+        .split('\0')
+        .filter(|name| !name.is_empty())
+        .map(String::from)
+        .collect();
     let text = crate::ratify::map_at(repo, head).text()?.to_string();
     let map = system_map::parse_lenient(&text).ok()?;
     let value = system_map::convert_value(&text).ok()?;
