@@ -125,12 +125,17 @@ for (const [run, said] of [
 // edits), "pushint" (edits, commits and pushes its commit to the integration branch), "lost" (edits, and origin goes away), "empty" (exits 0 with no change), "fail" (exits 1), "chatty" (prints an event
 // every 50 ms and never ends), "push" (edits, commits and pushes its commit to a branch of its own), "branch" (edits and
 // pushes the integration tip as \`issue-7-cheap\`, no commit of its own) or "silent" (prints nothing and waits). FAKE_SILENT_MODELS, a comma-separated list, makes those models "silent" whatever FAKE_OPENCODE says;
-// a silent worker leaves a stray file first. Every call is logged with the environment it got.
+// a silent worker leaves a stray file first. Every worker call is logged with the environment it got. \`models opencode\`
+// lists FAKE_MODELS, a comma-separated list, or the test models by default, and is not logged.
 const fakeOpencode = `#!/usr/bin/env node
 const { execFileSync } = require("node:child_process");
 const { appendFileSync, writeFileSync } = require("node:fs");
 const { join } = require("node:path");
 const env = process.env;
+if (process.argv[2] === "models") {
+  if (process.argv[3] === "opencode") console.log((env.FAKE_MODELS ?? "opencode/test-free,opencode/a-free,opencode/b-free").split(",").join("\\n"));
+  process.exit(0);
+}
 const seen = Object.fromEntries(Object.entries(env).filter(([key]) => key.startsWith("OPENCODE_") || key === "PLOTKEEPER_INTERNAL"));
 appendFileSync(join(env.FAKE_DIR, "opencode-calls.jsonl"), JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), env: seen }) + "\\n");
 const model = process.argv[process.argv.indexOf("-m") + 1];
@@ -502,6 +507,22 @@ test("run: with opencode missing, the run could not start: exit 1, and no worktr
   assert.match(ran.stderr, /^could not start: opencode .*ENOENT/);
   assert.equal(ran.stdout, "");
   gone(scratch);
+});
+
+test("run: with no cheap candidate in opencode's models, the run could not start: exit 1, and no worker or worktree", () => {
+  const scratch = scratchRun({ cheap: two });
+  const ran = scratch.run({ FAKE_OPENCODE: "edit", FAKE_MODELS: "opencode/beam-free,opencode/big-pickle" });
+  assert.equal(ran.status, 1, ran.stderr);
+  assert.equal(ran.stderr, "could not start: opencode serves none of the cheap models opencode/a-free, opencode/b-free\n");
+  assert.equal(ran.stdout, "");
+  assert.deepEqual(ran.calls("opencode"), []);
+  gone(scratch);
+});
+
+test("run: with one cheap candidate left in opencode's models, the run goes on", () => {
+  const ran = scratchRun({ cheap: two }).run({ FAKE_OPENCODE: "edit", FAKE_MODELS: "opencode/b-free" });
+  assert.equal(ran.status, 0, ran.stderr);
+  assert.match(ran.stdout, /^pass\n/);
 });
 
 test("run: a leftover issue-<n>-cheap worktree and branch are removed first", () => {

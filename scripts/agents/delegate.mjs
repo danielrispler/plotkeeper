@@ -472,6 +472,9 @@ const runTicket = async ({ ticket, integration, effort, routing }) => {
       console.log("escalate medium (silent)");
       return 0;
     }
+    // The free models withdrawn: OpenCode serves none of them (spec #592, "`delegate.mjs run`, a cheap ticket").
+    const served = must(root, "opencode", ["models", "opencode"]).split("\n").map((line) => line.trim());
+    if (!cheap.some((each) => served.includes(each.model))) throw new CouldNotStart(`opencode serves none of the cheap models ${cheap.map((each) => each.model).join(", ")}`);
     git(root, "fetch", "--quiet", "origin");
     const base = git(root, "rev-parse", `origin/${integration}^{commit}`);
     git(root, "worktree", "add", "--quiet", "--no-track", "-b", branch, worktree, base);
