@@ -12,9 +12,12 @@ pub(super) enum Tok {
     Literal,
 }
 
-/// The tokens of `text` with the raw line each starts on, or none when the file cannot be lexed: a malformed escape, or
-/// a comment, string, char literal or text block never closed (JLS §3.3, §3.7, §3.10).
+/// The tokens of `text` with the raw line each starts on, or none when the file cannot be lexed: a malformed escape, a
+/// comment, string, char literal or text block never closed, or a text block whose opening `"""` no line terminator
+/// follows (JLS §3.3, §3.7, §3.10).
 pub(super) fn tokens(text: &str) -> Option<Vec<(Tok, u32)>> {
+    // A UTF-8 byte order mark, which some editors write, is not code.
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let mut lexer = Lexer::new(text)?;
     let tokens: Vec<(Tok, u32)> = lexer.by_ref().collect();
     (!lexer.unclosed).then_some(tokens)
@@ -70,7 +73,8 @@ struct Lexer {
     /// The offsets in `text` just past each raw line terminator, ascending.
     breaks: Vec<usize>,
     at: usize,
-    /// Whether a comment, string, char literal or text block ran to a line break or the end of the text unclosed.
+    /// Whether a comment, string, char literal or text block ran to a line break or the end of the text unclosed, or a
+    /// text block's opening `"""` had no line terminator after it.
     unclosed: bool,
 }
 
@@ -124,10 +128,17 @@ impl Lexer {
         None
     }
 
-    /// The end of a text block starting at `from`: past its closing `"""`, which `\"""` does not make, or none at the
-    /// end of the text.
+    /// The end of a text block starting at `from`: past its closing `"""`, which `\"""` does not make. None when its
+    /// opening `"""` is not followed by optional blanks (spaces, tabs, form feeds) and a line terminator (JLS §3.10.6),
+    /// or at the end of the text.
     fn text_block_end(&self, from: usize) -> Option<usize> {
         let mut i = from + 3;
+        while matches!(self.text.get(i), Some(b' ' | b'\t' | b'\x0c')) {
+            i += 1;
+        }
+        if self.terminator(i) == 0 {
+            return None;
+        }
         while i < self.text.len() {
             if self.text[i] == b'\\' {
                 i += 2;

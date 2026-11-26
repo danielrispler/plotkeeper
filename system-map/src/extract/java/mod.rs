@@ -246,7 +246,8 @@ fn after_annotation(tokens: &Tokens, at: usize) -> usize {
 }
 
 /// A dotted name read from `at`, `Ident { . Ident }` with an optional `.*` after it: its segments, the token after it,
-/// and whether `.*` ended it.
+/// and whether `.*` ended it. A `.` with neither a segment nor `*` after it is the token after the name, so `a.;` is
+/// no name before a `;`.
 fn dotted(tokens: &Tokens, mut at: usize) -> (Vec<String>, usize, bool) {
     let mut name = Vec::new();
     while let Some((Tok::Ident(segment), _)) = tokens.get(at) {
@@ -255,10 +256,13 @@ fn dotted(tokens: &Tokens, mut at: usize) -> (Vec<String>, usize, bool) {
         if !is_punct(tokens, at, b'.') {
             break;
         }
-        at += 1;
-        if is_punct(tokens, at, b'*') {
-            return (name, at + 1, true);
+        if is_punct(tokens, at + 1, b'*') {
+            return (name, at + 2, true);
         }
+        if !matches!(tokens.get(at + 1), Some((Tok::Ident(_), _))) {
+            break;
+        }
+        at += 1;
     }
     (name, at, false)
 }

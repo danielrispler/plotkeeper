@@ -1,54 +1,14 @@
 //! `java-imports`: Java repositories in temporary folders, read through `check` and `imports` (spec #590, "Testing
 //! Decisions").
 
-use std::{path::Path, process::Command};
-
 use serde_json::{Value, json};
 
-use crate::common::{has, project_text, write};
+use crate::common::{extractor_map, has, pairs, repo, report, run, write};
 
 /// A map naming `java-imports` whose parts are `parts`, each an id with its paths, whose import links are `links`, and
 /// which ignores `ignored` besides its own file.
 fn map(parts: &[(&str, &[&str])], links: &[(&str, &str)], ignored: &[&str]) -> Value {
-    let mut ignored = ignored.to_vec();
-    ignored.push("system-map.json");
-    json!({
-        "version": 2,
-        "extractors": ["java-imports"],
-        "parts": parts.iter().map(|(id, paths)| json!({
-            "id": id, "name": id, "caption": id, "purpose": "A part.", "holds": [], "tier": "core", "paths": paths
-        })).collect::<Vec<_>>(),
-        "actors": [],
-        "links": links.iter().map(|(from, to)| json!({
-            "id": format!("{from}-{to}"), "from": from, "to": to, "kind": "import"
-        })).collect::<Vec<_>>(),
-        "ignored": ignored,
-        "laws": []
-    })
-}
-
-/// A repository holding `map` and `files` with their texts, committed.
-fn repo(map: &Value, files: &[(&str, &str)]) -> (tempfile::TempDir, String) {
-    let (dir, root) = project_text(&map.to_string(), &[]);
-    for (file, text) in files {
-        write(dir.path(), file, text);
-    }
-    studio_test_support::git(dir.path(), &["add", "-A"]);
-    studio_test_support::git(dir.path(), &["commit", "-q", "-m", "Code"]);
-    (dir, root)
-}
-
-fn report(root: &str) -> system_map::Report {
-    system_map::check(Path::new(root))
-}
-
-/// Every file pair of the computed edges, as `from>to`.
-fn pairs(report: &system_map::Report) -> Vec<String> {
-    report
-        .edges
-        .iter()
-        .flat_map(|e| e.pairs.iter().map(|p| format!("{}>{}", p.from, p.to)))
-        .collect()
+    extractor_map("java-imports", parts, links, ignored)
 }
 
 /// The file pairs a repository of `files` gives, its part `a` owning everything under `a/` and `b` the rest, with no
@@ -56,15 +16,6 @@ fn pairs(report: &system_map::Report) -> Vec<String> {
 fn java_pairs(files: &[(&str, &str)]) -> Vec<String> {
     let (_dir, root) = repo(&map(&[("b", &["**"]), ("a", &["a/"])], &[], &[]), files);
     pairs(&report(&root))
-}
-
-fn run(root: &str, command: &str, args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_system-map"))
-        .arg(command)
-        .args(args)
-        .args(["--root", root])
-        .output()
-        .unwrap()
 }
 
 /// Each file pair's import sites in `check --json`, as `from>to file:line`, sorted.
@@ -474,6 +425,24 @@ fn the_header_reads_annotations_a_package_line_imports_and_stray_semicolons_up_t
 }
 
 #[test]
+fn an_import_or_package_name_ending_in_a_dot_is_no_name() {
+    // `import lib.Util.;` is passed over and the header reads on; `package lib.;` is no package line, so `Gone` is
+    // never a target.
+    let found = pairs_of_imports(
+        &["import lib.Util.;", "import lib.Gone;", "import lib.Other;"],
+        &[
+            lib("Util", "public class Util {}"),
+            lib("Other", "public class Other {}"),
+            (
+                "lib/src/main/java/lib/Gone.java".to_string(),
+                "package lib.;\n\npublic class Gone {}\n".to_string(),
+            ),
+        ],
+    );
+    assert_eq!(found, [format!("{MAIN}>lib/src/main/java/lib/Other.java")]);
+}
+
+#[test]
 fn import_sites_count_lines_on_the_raw_text_whichever_line_terminator_it_uses() {
     let (_dir, root) = repo(
         &map(&[("b", &["**"]), ("a", &["a/"])], &[], &[]),
@@ -565,14 +534,41 @@ fn a_backslash_after_an_odd_number_of_backslashes_is_no_escape_and_a_translated_
     assert_eq!(sites(&root), [format!("{MAIN}>{LIB_OTHER} {MAIN}:4")]);
 }
 
-/// Files the reader cannot lex, each with its text: a malformed escape, and a comment, a string, a char literal and a
-/// text block never closed.
-const UNLEXABLE: [(&str, &str); 6] = [
+#[test]
+fn a_leading_byte_order_mark_is_dropped_so_the_package_line_and_imports_are_read() {
+    let (_dir, root) = repo(
+        &map(&[("a", &["a/"]), ("b", &["b/"])], &[("a", "b")], &[]),
+        &[
+            (
+                "a/src/main/java/y/D.java",
+                "\u{feff}package y;\nimport x.B;\npublic class D {}\n",
+            ),
+            (
+                "b/src/main/java/x/B.java",
+                "package x;\n\npublic class B {}\n",
+            ),
+        ],
+    );
+    let found = report(&root);
+    assert_eq!(found.problems, Vec::<String>::new());
+    assert_eq!(
+        pairs(&found),
+        ["a/src/main/java/y/D.java>b/src/main/java/x/B.java"]
+    );
+}
+
+/// Files the reader cannot lex, each with its text: a malformed escape, a comment, a string, a char literal and a text
+/// block never closed, and a text block whose opening `"""` no line terminator follows.
+const UNLEXABLE: [(&str, &str); 7] = [
     ("malformed escape", "class T { String s = \"\\u00zz\"; }\n"),
     ("short escape", "class T {}\n// \\u12\n"),
     (
         "unclosed text block",
         "class T { String s = \"\"\"\n  text\n}\n",
+    ),
+    (
+        "text block opened with no line terminator",
+        "class T { String s = \"\"\" \tx\"\"\"; }\n",
     ),
     ("unclosed block comment", "class T {}\n/* never closed\n"),
     ("unclosed string", "class T { String s = \"abc;\n}\n"),
