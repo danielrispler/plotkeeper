@@ -2,7 +2,7 @@
 
 use super::{
     Extractor, cargo::Cargo, dart::DartImports, dotnet::DotnetProjects, go::GoImports,
-    java::JavaImports, python::PythonImports, rust_modules::RustModules,
+    java::JavaImports, php::PhpImports, python::PythonImports, rust_modules::RustModules,
     typescript::TypescriptImports,
 };
 
@@ -14,5 +14,6 @@ pub(crate) const EXTRACTORS: &[&dyn Extractor] = &[
     &JavaImports,
     &PythonImports,
     &DartImports,
+    &PhpImports,
     &DotnetProjects,
 ];
