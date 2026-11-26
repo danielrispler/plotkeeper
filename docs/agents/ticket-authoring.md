@@ -26,7 +26,7 @@ The installed skill remains unchanged. Where it and this file differ, follow thi
 
 - **Template.** A ticket has `## Parent`, `## What to build`, `## Acceptance criteria`, `## Reading` and `## Touches` (**Ticket context** below). File paths go in Reading and Touches, where the skill's template has none.
 - **Edges.** Link each ticket to its spec as a sub-issue and add its blockers as native dependencies (**Wayfinder tracker operations** below), in place of the skill's `## Blocked by` section. A ticket waits only for what it uses, whatever its place in the build order.
-- **Agreed breakdown.** When Daniel approved the ticket list and its edges in the current conversation, publish it; the skill's quiz is for a breakdown he has not seen.
+- **Agreed breakdown.** Show each ticket's route in the breakdown, so Daniel approves routes with the granularity. When Daniel approved the ticket list, its edges and its routes in the current conversation, publish it; the skill's quiz is for a breakdown he has not seen.
 - **Shared docs.** A file that most tickets of a spec would edit, such as `README.md`, goes to one closing ticket blocked by the tickets it describes, so parallel implementers never meet in it.
 - **Behaviour docs.** A ticket that changes behaviour updates that area's doc under `docs/studio/behaviour/` (or `plugin.md`, `settings.md`) and names it in Touches, not `README.md`.
 - **Labels.** `ready-for-agent`; `needs-triage` for a ticket that holds a choice of Daniel's.
@@ -39,7 +39,7 @@ The installed skill remains unchanged. Where it and this file differ, follow thi
   ]}
   ```
 
-  The run first checks that the spec is open, every body for `## Reading` and `## Touches` with its **Files** and **Session** lines, every label against the repository, and every blocker for a file of the manifest and for cycles. Any problem stops it before an issue exists, naming the file. Then it creates the issues blockers first, links each to the spec as a sub-issue and adds its blocked-by edges (**Wayfinder tracker operations** below), and prints one row per ticket: its file, issue number and blockers. It records each write in `<folder>/published.json`, so after a failure, fix the cause and run it again: it does only what is missing.
+  The run first checks that the spec is open, every body for `## Reading` and `## Touches` with its **Files**, **Session** and **Route** lines (a Route line not shaped `<tier> · effort <effort> — <reason>` with a reason, a tier other than `strong`, `medium` or `cheap`, or an effort other than `medium` or `high`, is refused), every label against the repository, and every blocker for a file of the manifest and for cycles. Any problem stops it before an issue exists, naming the file. Then it creates the issues blockers first, links each to the spec as a sub-issue and adds its blocked-by edges (**Wayfinder tracker operations** below), and prints one row per ticket: its file, issue number and blockers. It records each write in `<folder>/published.json`, so after a failure, fix the cause and run it again: it does only what is missing.
 
 ## Spec and ticket constraints
 
@@ -53,10 +53,11 @@ Resolve meaningful tickets when their agreed work and verification are complete.
 
 Every new Wayfinder ticket must include `## Reading` before linking it to the map. List relevant current decision resolutions and research artifacts by name, with one short reason per link. Use comment permalinks for specific resolutions. When no prior material applies, write `None — no prior decisions or research required.` Reading links are a starting set, not a limit on investigation; preserve the ticket's question, scope and stop condition.
 
-Every new ticket must also include `## Touches`, so parallel planning can spot conflicts without reading the code. List two things, one line each:
+Every new ticket must also include `## Touches`, so parallel planning can spot conflicts without reading the code. List three things, one line each:
 
 - **Files:** the main files or modules it edits, each in backticks. This is a best-effort planning hint, not a scope limit. Write `new` right before a path the ticket creates (a new `core/src/ledger.rs`): `wayfinder-startup` warns about any other path of a claimed or ready ticket that is not in the checkout.
 - **Session:** `auto mode`. Every ticket runs in auto mode; a ticket that launches nested agents adds `, with blocked commands` (see **Nested agents** above).
+- **Route:** `<tier> · effort <medium|high> — <reason>`, for example `- **Route:** cheap · effort medium — renames one wire field in three tests, no stored type`. `/to-tickets` drafts it by the five cheap rules in `issue-tracker.md`, Routing.
 
 Add or refresh `## Touches` alongside `## Reading` before starting an existing ticket.
 

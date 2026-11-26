@@ -1,0 +1,12 @@
+{
+  "strong": [{ "cli": "claude", "model": "opus" }],
+  "medium": [{ "cli": "claude", "model": "sonnet" }],
+  "cheap": [
+    { "cli": "opencode", "model": "opencode/deepseek-v4.1-flash-free", "variant": { "medium": null, "high": "high" } },
+    { "cli": "opencode", "model": "opencode/beam-free", "variant": { "medium": "medium", "high": "high" } }
+  ],
+  "critic": [
+    { "cli": "agy", "model": "gemini-4-neon-medium" },
+    { "cli": "claude", "model": "sonnet", "effort": "high" }
+  ]
+}

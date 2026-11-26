@@ -1,6 +1,7 @@
 // `npm run snap:all`: renders every fixture (scripts/snap/fixtures.ts) once into a temp folder, as CI does after
 // `npm run build` (#144), and fails if any fails: Chrome's exit, a `snap:fail` line or an uncaught error in the page.
-// Fixtures render one per core at a time, each with its own Chrome; once one fails, no new one starts.
+// Fixtures render one per core at a time, each with its own Chrome (`SNAP_JOBS=<n>` caps that, for a machine that runs several
+// of these at once); once one fails, no new one starts.
 // Run `npm run build` first. `npm run check` leaves it out, so agents' checks stay fast.
 // `npm run snap:all -- --shard=<i>/<n>` renders only the i-th of n shares (shard.mjs), as CI's two snap jobs do (#432).
 import { spawn } from "node:child_process";
@@ -53,7 +54,8 @@ const render = (name) =>
 const worker = async () => {
   while (queue.length && failure === undefined) await render(queue.shift());
 };
-await Promise.all(Array.from({ length: availableParallelism() }, worker));
+const jobs = Number.parseInt(process.env.SNAP_JOBS ?? "", 10);
+await Promise.all(Array.from({ length: jobs > 0 ? jobs : availableParallelism() }, worker));
 rmSync(folder, { recursive: true, force: true });
 if (failure !== undefined) process.exit(failure);
 console.log(`snap:all: ${total} fixtures rendered${shardFlag ? ` (shard ${shardFlag})` : ""}`);
