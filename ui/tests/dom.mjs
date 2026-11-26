@@ -218,6 +218,14 @@ const roots = new WeakSet();
 /** @returns {any} */
 const page = () => globalThis.document;
 class LiveStandIn extends FieldStandIn {
+  // Its inline style writes its `style` attribute, as a browser's does, so `patch` copies a new draw's style onto a kept node.
+  style = new Proxy(/** @type {Record<string, string>} */ ({}), {
+    set: (props, name, value) => {
+      props[/** @type {string} */ (name)] = value;
+      this.setAttribute("style", Object.entries(props).map(([k, v]) => `${k}: ${v}`).join("; "));
+      return true;
+    },
+  });
   get parentNode() {
     const from = held.get(this);
     return from?.childNodes.includes(this) ? from : null;

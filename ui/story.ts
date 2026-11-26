@@ -30,6 +30,7 @@ import { stretches, tipStore, tipText } from "./tips.js";
 import {
   askKind,
   stateLabels,
+  type Anchor,
   type Ask,
   type AskKind,
   type ListedCheck,
@@ -484,8 +485,8 @@ function folded(key: string, title: string, hover: string, body: HTMLElement[], 
 // the turn ended. A subagent's view and a turn-less session keep the box.
 function drawNow(session: Session | null, latest: Turn | null): Now | null {
   const now = session && latest ? nowOf(session.state, latest, latest.id ? summaryOf(latest.id) : null) : null;
-  const asked = now && latest && session?.state === "running" ? [text("p", askedLabel(latest), "label"), text("p", latest.prompt || "No prompt", "prompt")] : [];
-  patch(element("now-asked"), asked);
+  const prompted = now && latest && session?.state === "running" ? [text("p", askedLabel(latest), "label"), text("p", latest.prompt || "No prompt", "prompt")] : [];
+  patch(element("now-asked"), prompted);
   element("intention").hidden = now !== null && now.intention === null;
   element("intention-label").hidden = now?.intention !== "why";
   return now;
@@ -598,11 +599,11 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
   if (now) {
     if (now.headline) {
       node.append(rendered("p", now.headline, "headline-text"));
-      if (index !== null) node.append(askAnchor(session.id, { kind: "headline", turn: index }, "this turn's Headline"));
+      if (index !== null) node.append(headlineAsk(session, index));
     }
   } else if (turn && index !== null) {
     // A past row's Headline is on its line; its Ask box is the one made while the turn was newest, answer and all (spec #661, Q7).
-    node.append(askAnchor(session.id, { kind: "headline", turn: index }, "this turn's Headline"));
+    node.append(headlineAsk(session, index));
   }
   // The evidence line, under the Headline: a running turn shows only a check that ended failed.
   if (turn && index !== null && hasEvidence(turn, session.capabilities)) {
@@ -642,7 +643,7 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
   if (!turn) return node;
   const summary = turn.id ? summaryOf(turn.id) : null;
   const { headline } = headlineOf(summary, turn.message);
-  if (!drawnPast.has(key) && block.index !== null && asked(session.id, { kind: "headline", turn: block.index })) opened.add(key);
+  if (!drawnPast.has(key) && block.index !== null && asked(session.id, headlineAnchor(block.index))) opened.add(key);
   drawnPast.add(key);
   const open = opened.has(key);
   const line = foldedLine(turn, headline);
@@ -659,7 +660,7 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
   // The line's prompt is the turn's first words, so its hint holds the whole prompt; a span, which opens once #586's pointer path is in.
   // A wake-up's prompt is the returning task, marked as one in the DOM's own words (#675).
   const first = text("span", turn.wake_up ? "" : line.prompt, "prompt");
-  if (turn.wake_up) first.append(text("span", "Woken by", "woken"), ` ${line.prompt}`);
+  if (turn.wake_up) first.append(text("span", askedLabel(turn), "woken"), ` ${line.prompt}`);
   first.setAttribute("data-key", `turn-${key}`);
   button.append(
     hint(first, turn.prompt.trim() || line.prompt),
@@ -691,6 +692,14 @@ function openCitation(id: string) {
   drawFeed();
   const node = element("feed").children[session.turns.length - 1 - index];
   (node as HTMLElement | undefined)?.scrollIntoView?.({ block: "start" });
+}
+
+// A turn's Headline as the anchor of a side question, and its Ask box.
+function headlineAnchor(turn: number): Anchor {
+  return { kind: "headline", turn };
+}
+function headlineAsk(session: Session, turn: number): HTMLDetailsElement {
+  return askAnchor(session.id, headlineAnchor(turn), "this turn's Headline");
 }
 
 function turnElement(session: Session, block: FeedTurn, now: Now | null): HTMLElement {
@@ -834,10 +843,10 @@ function showQuestions(questions: Question[]) {
   const decision = openDecision();
   const shown = JSON.stringify([decision, open.map((question) => [question, askFor(question)])]);
   if (shown === docked) return;
-  docked = shown;
   const nodes = [...(decision ? [decisionElement(decision)] : []), ...open.map(questionElement)];
   element("dock").replaceChildren(...nodes);
   element("dock").hidden = nodes.length === 0;
+  docked = shown;
 }
 
 // The brief, folded under the feed, drawn again only when it changed.
@@ -845,10 +854,10 @@ let briefShown = "";
 function showBrief(cards: SessionCards) {
   const shown = JSON.stringify(briefSlots(cards));
   if (shown === briefShown) return;
-  briefShown = shown;
   const nodes = briefNodes(cards, openCitation);
   element("brief").replaceChildren(...nodes);
   element("brief-fold").hidden = nodes.length === 0;
+  briefShown = shown;
 }
 
 /** The server's session payload: the selected session's brief, cards and decisions, taken in and drawn. */
@@ -870,14 +879,19 @@ export function turnHeadline(session: Session, index: number): string | null {
   return turn ? headlineOf(turn.id ? summaryOf(turn.id) : null, turn.message).headline : null;
 }
 
-// The turn whose outline flashes, and when its flash ends: a redraw meanwhile carries the flash on from where it was.
+// The turn whose outline flashes, when its flash ends, and the delay each node drawn for it got, by its key: a redraw meanwhile carries
+// the flash on from where it was. A node the draw keeps gets the delay it already has, so its running animation is left as it is; a
+// node drawn anew starts as far into the flash as the flash is.
 const flashMs = 1000;
-let flashed: { session: string; index: number; until: number } | null = null;
+let flashed: { session: string; index: number; until: number; delays: Map<string, string> } | null = null;
 function flashing(session: Session, index: number | null, node: HTMLElement): HTMLElement {
   const left = flashed && flashed.session === session.id && flashed.index === index ? flashed.until - Date.now() : 0;
-  if (left > 0) {
+  if (flashed && left > 0) {
+    const key = node.getAttribute("data-key") ?? "";
+    const delay = flashed.delays.get(key) ?? `${left - flashMs}ms`;
+    flashed.delays.set(key, delay);
     node.classList.add("flash");
-    node.style.animationDelay = `${left - flashMs}ms`;
+    node.style.animationDelay = delay;
   }
   return node;
 }
@@ -889,7 +903,7 @@ export function showTurn(index: number) {
   const turn = session.turns[index];
   if (!turn) return;
   if (index < session.turns.length - 1) opened.add(`${session.id} ${index} turn`);
-  const flash = { session: session.id, index, until: Date.now() + flashMs };
+  const flash = { session: session.id, index, until: Date.now() + flashMs, delays: new Map<string, string>() };
   flashed = flash;
   drawFeed();
   const node = element("feed").children[session.turns.length - 1 - index] as HTMLElement | undefined;

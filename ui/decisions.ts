@@ -58,7 +58,6 @@ let drawn = "";
 function draw() {
   const shown = JSON.stringify([decisions, cleared, notes]);
   if (shown === drawn) return;
-  drawn = shown;
   const entries: [number, HTMLElement][] = [
     ...decisions.map((d): [number, HTMLElement] => [d.at, entry(d)]),
     ...cleared.map((at): [number, HTMLElement] => [at, marker(at)]),
@@ -68,6 +67,7 @@ function draw() {
   element("decisions-title").textContent = `Decisions (${decisions.length})`;
   hint(element("decisions-title"), "Show or hide the decisions made in this session");
   element("decisions").hidden = entries.length === 0;
+  drawn = shown;
 }
 
 function marker(at: number): HTMLElement {

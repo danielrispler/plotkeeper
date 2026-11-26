@@ -16,7 +16,7 @@ globalThis.document = fakeDocument(
 globalThis.marked = createRequire(import.meta.url)("marked");
 const replies = new Map();
 tauri([], (command, args) => replies.get(command)?.(args) ?? null);
-const { askedLabel, blockKind, cardTime, feedTurns, foldedLine, foldedTurn, headlineOf, nowOf, oneAtATime, showView, startStory, turnAt } = await import("../../dist/story.js");
+const { askedLabel, blockKind, cardTime, feedTurns, foldedLine, foldedTurn, headlineOf, nowOf, oneAtATime, showCards, showTurn, showView, startStory, turnAt } = await import("../../dist/story.js");
 const state = await import("../../dist/state.js");
 const { setSelection, studio } = state;
 
@@ -434,4 +434,48 @@ test("opening Brief or Decisions scrolls it into view, smoothly unless reduced m
     }
   }
   delete (/** @type {any} */ (globalThis).matchMedia);
+});
+
+// Spec #661: a turn's flash runs its 1 s whatever draws come meanwhile. A draw that keeps the flashing node leaves its animation as it
+// is, so it does not jump ahead; a node drawn anew mid-flash picks the flash up where it is.
+test("a draw during a turn's flash leaves a kept node's animation alone, and a new node resumes it", () => {
+  const session = sessionOf({ id: "s9", turns: [ended(1, { id: "f1" }), ended(2, { id: "f2" })] });
+  draw(session);
+  showTurn(0);
+  const row = feed().childNodes[1];
+  const style = row.getAttribute("style");
+  mock.timers.tick(400);
+  draw({ ...session, last_event_at: session.last_event_at + 1 });
+  assert.equal(feed().childNodes[1], row, "the draw keeps the flashing row");
+  assert.equal(row.getAttribute("style"), style, "the kept row's animation is untouched");
+  // The row's reply changed: the draw swaps it, and the new row starts 400 ms into the flash.
+  draw({ ...session, last_event_at: session.last_event_at + 2, turns: [ended(1, { id: "f1", message: "Changed." }), ended(2, { id: "f2" })] });
+  assert.notEqual(feed().childNodes[1], row);
+  assert.equal(feed().childNodes[1].getAttribute("style"), "animationDelay: -400ms");
+});
+
+// Spec #661: the dock, the Brief and the Decisions list are drawn again only when what they show changed. A draw that failed
+// part-way drew nothing, so the same content is drawn on the next try.
+test("a dock, Brief or Decisions draw that throws is drawn again on the next call with the same content", () => {
+  /** @param {string} id @param {() => void} run */
+  const failOnce = (id, run) => {
+    /** @type {any} */
+    const slot = document.getElementById(id);
+    slot.replaceChildren(); // the list as a draw before this one left it, empty
+    const real = slot.replaceChildren;
+    slot.replaceChildren = () => {
+      throw new Error("draw failed");
+    };
+    assert.throws(run);
+    slot.replaceChildren = real;
+    run();
+    assert.ok(slot.childNodes.length > 0, `${id} is drawn on the next call`);
+  };
+  const cards = { brief: null, goal: "A goal never drawn before", answers: [], open: [], design: [], decisions: [], risk_notes: [], decision_notes: [] };
+  failOnce("brief", () => showCards(cards));
+  /** @type {import("../../dist/types.js").Decision} */
+  const decision = { call: "toolu_9", agent: null, tool: "Bash", input: {}, answer: "allow", at: NOW, source: "card" };
+  failOnce("decisions-list", () => showCards({ ...cards, decisions: [decision] }));
+  const open = question({ tool_use_id: "toolu_q9", agent: null, answer: "open", questions: [{ question: "Which?", header: "Which", options: [{ label: "A", description: "" }], multiSelect: false }] });
+  failOnce("dock", () => draw(sessionOf({ id: "s10", questions: [open] })));
 });
