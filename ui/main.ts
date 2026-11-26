@@ -24,13 +24,13 @@ import { openBriefOf } from "./map-brief.js";
 import { briefOpen } from "./map-brief-player.js";
 import { openPreFlight, startPreFlight } from "./map-pre-flight.js";
 import { startMapAgents } from "./map-agents.js";
-import { drawSidebar, showSessions, staleDots, startList } from "./list.js";
+import { drawSidebar, holdList, listOrder, showSessions, staleDots, startList } from "./list.js";
 import { listSpace, secondLine, sessionName } from "./list-model.js";
 import { deselect, pressSession, select, show } from "./selection.js";
 import { diffIn, historyIn, logIn, startPanes } from "./panes.js";
 import { besideSheet, closePanel, panelShown, showHistory, showPanel, startPanel } from "./panel.js";
 import { showPalette } from "./palette.js";
-import { selectedProject, sidebarOrder } from "./projects.js";
+import { selectedProject } from "./projects.js";
 import { narrowBelow, selectedView } from "./map-model.js";
 import { focusSend } from "./questions.js";
 import { reload } from "./settings.js";
@@ -78,11 +78,17 @@ window.addEventListener("pointerdown", () => listHover.pressed(true), true);
 for (const type of ["pointerup", "pointercancel"]) window.addEventListener(type, () => listHover.pressed(false), true);
 const list = document.querySelector<HTMLElement>(".list");
 if (!list) throw new Error(".list is not on the page");
+// The list holds its order while the pointer is in it, the strip and the list open over the map included, as they are inside `.list`
+// (spec #659, `holdList` in `list.ts`). Its redraws patch its children, so the `.list` under the pointer stays and fires no leave.
 list.addEventListener("pointerenter", (event) => {
   listHover.pressed(held(event as PointerEvent));
   listHover.enter("list");
+  holdList(true);
 });
-list.addEventListener("pointerleave", () => listHover.leave("list"));
+list.addEventListener("pointerleave", () => {
+  listHover.leave("list");
+  holdList(false);
+});
 // Leaving focus mode from the toast.
 window.addEventListener("layout", layout);
 layout();
@@ -91,8 +97,9 @@ layout();
 // peels the map's layers, ⌘⇧↩ toggles focus mode. A needs-you only toasts (danielrispler/Falinks#573).
 const toggle = (name: string) => document.body.classList.toggle(name);
 // The keyboard spine (danielrispler/Falinks#575): ⌘] and ⌘[ step through the sessions, ⌘J goes to the next needs-you, else the next unseen, ↑
-// and ↓ move in the list, 1–4 answer the docked card and ⌘⇧P opens the palette of every action here.
-const inSidebar = () => sidebarOrder(studio.listed);
+// and ↓ move in the list, 1–4 answer the docked card and ⌘⇧P opens the palette of every action here. The steps follow the list's order on
+// screen, held while the pointer is in it (spec #659); ↑ and ↓ read its rows.
+const inSidebar = () => listOrder();
 const selectedId = () => studio.selection?.session.id ?? null;
 const go = (id: string | null) => void (id && select(id));
 

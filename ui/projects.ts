@@ -59,7 +59,34 @@ export function projectGroups<S extends Pick<Session, "project" | "state" | "id"
   }));
 }
 
-// The sessions in the sidebar's order: project by project, by state, without ended ones. The session keys step over it.
+// The groups drawn while the list is held (spec #659): `now`'s groups, in `last`'s places. A group keeps its place, its sessions theirs, each in
+// the state group it was drawn in, while its glyph shows its state now. A new session joins the end of its project's group, in the last state
+// group when that is its state, else in one of its own; a new project joins the end of the groups. What `now` no longer has is left out.
+export function holdGroups<S extends Pick<Session, "state" | "id">>(last: ProjectGroup<S>[], now: ProjectGroup<S>[]): ProjectGroup<S>[] {
+  const was = new Map(last.map((group) => [group.key, group]));
+  const order = [...last.filter((group) => now.some(({ key }) => key === group.key)), ...now.filter((group) => !was.has(group.key))];
+  return order.map(({ key }) => {
+    const group = now.find((group) => group.key === key) as ProjectGroup<S>;
+    const held = was.get(key);
+    if (!held) return group;
+    const sessions = new Map(group.states.flatMap(({ sessions }) => sessions.map((session) => [session.id, session] as const)));
+    const states = held.states.flatMap(({ state, sessions: rows }) => {
+      const kept = rows.flatMap((row) => sessions.get(row.id) ?? []);
+      return kept.length ? [{ state, sessions: kept }] : [];
+    });
+    const placed = new Set(states.flatMap(({ sessions }) => sessions.map(({ id }) => id)));
+    for (const session of sessions.values()) {
+      if (placed.has(session.id)) continue;
+      const end = states.at(-1);
+      if (end?.state === session.state) end.sessions.push(session);
+      else states.push({ state: session.state, sessions: [session] });
+    }
+    return { ...group, states };
+  });
+}
+
+// The sessions in the sidebar's real order: project by project, by state, without ended ones, as the map's session badges read them. The
+// session keys step over the list's order on screen instead, which holds under the pointer (`listOrder` in `list.ts`).
 export const sidebarOrder = <S extends Pick<Session, "project" | "state" | "id">>(sessions: S[]): S[] =>
   projectGroups(sessions).flatMap((group) => group.states.flatMap((state) => state.sessions));
 

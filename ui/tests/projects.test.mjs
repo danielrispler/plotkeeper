@@ -2,7 +2,7 @@
 // folder on the page. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { knownProjects, projectGroups, selectedProject, sessionProjectName, sidebarOrder } from "../../dist/projects.js";
+import { holdGroups, knownProjects, projectGroups, selectedProject, sessionProjectName, sidebarOrder } from "../../dist/projects.js";
 import { studio } from "../../dist/state.js";
 
 // A session with only the fields the projects read: its project, the core's, and its folder, which a `cd` moves. The project of a
@@ -73,4 +73,37 @@ test("the Map view's projects are the saved ones, and the selected session's is 
   // A selected session that moved to another folder still opens its project's map.
   studio.selection = { session: at("c", "idle", "/r/q/ui", "/r/p"), agent: null };
   assert.equal(selectedProject(), "/r/p");
+});
+
+// The held order (spec #659): while the pointer is in the list, the groups and the rows in each keep the last draw's places.
+const shown = (groups) => groups.map((g) => [g.key, g.states.map((s) => [s.state, s.sessions.map((x) => [x.id, x.state])])]);
+
+test("while held, a session whose state changed keeps its place, and so does its group, with its new state", () => {
+  const last = projectGroups([at("a", "needs_you", "/r/p"), at("b", "running", "/r/p"), at("c", "running", "/r/q"), at("d", "idle", "/r/q")]);
+  // a's question was answered and c now needs you: unheld, q's group would go first and c before d's idle group's row.
+  const now = projectGroups([at("c", "needs_you", "/r/q"), at("b", "running", "/r/p"), at("a", "running", "/r/p"), at("d", "your_turn", "/r/q")]);
+  assert.deepEqual(shown(holdGroups(last, now)), [
+    ["/r/p", [["needs_you", [["a", "running"]]], ["running", [["b", "running"]]]]],
+    ["/r/q", [["running", [["c", "needs_you"]]], ["idle", [["d", "your_turn"]]]]],
+  ]);
+});
+
+test("while held, a session no longer listed leaves, and a group with nothing left goes unless it is a saved header", () => {
+  const saved = [{ path: "/r/s", gone: false }];
+  const last = projectGroups([at("a", "running", "/r/p"), at("b", "running", "/r/p"), at("c", "idle", "/r/q")], saved);
+  // b was deleted, c ended: q's group has no live session and is not saved, so it goes; the saved header stays.
+  const now = projectGroups([at("a", "running", "/r/p"), at("c", "ended", "/r/q")], saved);
+  assert.deepEqual(shown(holdGroups(last, now)), [["/r/p", [["running", [["a", "running"]]]]], ["/r/s", []]]);
+});
+
+test("while held, a new session joins the end of its project's group, and a new project the end of the groups", () => {
+  const last = projectGroups([at("a", "running", "/r/p"), at("b", "idle", "/r/p"), at("c", "running", "/r/q")]);
+  // d and e start in p, needing you and idle; f starts the new project n, which unheld would go first. The new rows come after the
+  // held ones in the order they are listed, each in its own state group unless it shares the last one's state.
+  const now = projectGroups([at("f", "needs_you", "/r/n"), at("d", "needs_you", "/r/p"), at("a", "running", "/r/p"), at("c", "running", "/r/q"), at("b", "idle", "/r/p"), at("e", "idle", "/r/p")]);
+  assert.deepEqual(shown(holdGroups(last, now)), [
+    ["/r/p", [["running", [["a", "running"]]], ["idle", [["b", "idle"]]], ["needs_you", [["d", "needs_you"]]], ["idle", [["e", "idle"]]]]],
+    ["/r/q", [["running", [["c", "running"]]]]],
+    ["/r/n", [["needs_you", [["f", "needs_you"]]]]],
+  ]);
 });

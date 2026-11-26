@@ -662,3 +662,68 @@ export const cutTextStill = (): Fixture => ({
       log("cut text still ok");`,
   motion: "reduce", snapDone: "cut text still ok",
 });
+
+/**
+ * The held order (spec #659): while the pointer is in the list, a session that changed state keeps its row, with its new glyph, its group
+ * keeps its place, a new session joins the end of its project's group, and the strip holds the same way; ⌘] and ↓ follow the order on
+ * screen. When the pointer leaves, the list and the strip take the real order. The pointer's enter and leave are synthetic events on `.list`.
+ */
+export const listHeld = (): Fixture => {
+  const plotkeeper = { cwd: "/w/plotkeeper", project: "/w/plotkeeper" };
+  const timburr = { cwd: "/w/timburr", project: "/w/timburr", folder_name: "timburr" };
+  const sessions = [
+    session("s1", "Fix the hook", "running", plotkeeper),
+    session("s3", "Running tracker", "running", timburr),
+    session("s2", "Write the docs", "your_turn", plotkeeper),
+  ];
+  // s3 and s2 now need you and s4 started: unheld, timburr's group goes first and s2 above s1. In the server's order.
+  const later = [
+    session("s3", "Running tracker", "needs_you", timburr),
+    session("s2", "Write the docs", "needs_you", plotkeeper),
+    session("s4", "Review the PR", "running", plotkeeper),
+    session("s1", "Fix the hook", "running", plotkeeper),
+  ];
+  return {
+    ...base,
+    sessions,
+    selected: { session: sessions[0], agent: null },
+    snapScript: `
+      const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+      await wait(300);
+      const rows = () => [...document.querySelectorAll("#groups .session-row")].map((row) => row.dataset.key.trim()).join();
+      const heads = () => [...document.querySelectorAll("#groups .project-head .name")].map((name) => name.textContent).join();
+      const strip = () => [...document.querySelectorAll("#strip button")].map((button) => button.dataset.key).filter((key) => key.startsWith("strip s")).map((key) => key.slice(6)).join();
+      const word = (id) => document.querySelector('#groups .session-row[data-key="' + id + ' "] .glyph')?.getAttribute("aria-label");
+      const selected = () => document.querySelector("#groups .session-row[aria-pressed=true]")?.dataset.key.trim();
+      const expect = (what, got, want) => got !== want && log("snap:fail " + what + ": " + got + ", not " + want);
+      expect("the rows before", rows(), "s1,s2,s3");
+      expect("the strip before", strip(), "s1,s3,s2");
+      const list = document.querySelector(".list");
+      list.dispatchEvent(new PointerEvent("pointerenter"));
+      window.__snapEmit("sessions", ${JSON.stringify(later)});
+      await wait(200);
+      expect("the held rows", rows(), "s1,s2,s4,s3");
+      expect("the held headers", heads(), "plotkeeper,timburr");
+      expect("the held strip", strip(), "s1,s3,s2,s4");
+      expect("s2's glyph while held", word("s2"), "Needs you");
+      expect("s3's glyph while held", word("s3"), "Needs you");
+      // A press shows its row selected at once, before the stub's empty \`select\` reply clears the selection, so it is read at once.
+      document.dispatchEvent(new KeyboardEvent("keydown", { code: "BracketRight", key: "]", metaKey: true, bubbles: true }));
+      expect("the session after s1 by ⌘] while held", selected(), "s2");
+      await wait(200);
+      expect("the rows after ⌘]", rows(), "s1,s2,s4,s3");
+      // ↓ moves in the list from the row that has the focus, so it is pressed there.
+      const fourth = document.querySelector('#groups .session-row[data-key="s4 "]');
+      fourth.focus();
+      fourth.dispatchEvent(new KeyboardEvent("keydown", { code: "ArrowDown", key: "ArrowDown", bubbles: true }));
+      expect("the row after s4 by ↓ while held", document.activeElement?.dataset.key?.trim(), "s3");
+      await wait(200);
+      list.dispatchEvent(new PointerEvent("pointerleave"));
+      await wait(200);
+      expect("the rows once the pointer left", rows(), "s3,s2,s4,s1");
+      expect("the headers once the pointer left", heads(), "timburr,plotkeeper");
+      expect("the strip once the pointer left", strip(), "s3,s2,s4,s1");
+      log("held ok");`,
+    snapDone: "held ok",
+  };
+};
