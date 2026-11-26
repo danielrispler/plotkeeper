@@ -160,7 +160,7 @@ fn a_roots_src_folder_is_a_root_with_or_without_a_config() {
 }
 
 #[test]
-fn a_config_under_an_excluded_folder_or_an_ignored_path_makes_no_root() {
+fn a_config_under_an_excluded_folder_makes_no_root() {
     for folder in ["tests", "test", "testdata", "fixtures", "x/fixtures"] {
         let config = format!("{folder}/d/pyproject.toml");
         let helper = format!("{folder}/d/helper.py");
@@ -180,19 +180,112 @@ fn a_config_under_an_excluded_folder_or_an_ignored_path_makes_no_root() {
     assert_eq!(found, ["app.py>data/d/helper.py"]);
 }
 
+/// A repository of `files` whose map ignores `ignored` beside itself, each `.py` file a part of its own.
+fn ignoring(ignored: &[&str], files: &[(&str, &str)]) -> (tempfile::TempDir, String) {
+    let python: Vec<(&str, &str)> = files
+        .iter()
+        .copied()
+        .filter(|(f, _)| f.ends_with(".py"))
+        .collect();
+    let mut map = each_file_a_part(&python);
+    map["ignored"] = json!(
+        ["system-map.json"]
+            .iter()
+            .chain(ignored)
+            .collect::<Vec<_>>()
+    );
+    repo(&map, files)
+}
+
 #[test]
-fn a_config_in_a_path_the_map_ignores_makes_no_root() {
-    let mut ignoring = each_file_a_part(&[("app.py", ""), ("vendored/d/helper.py", "")]);
-    ignoring["ignored"] = json!(["system-map.json", "vendored/d/pyproject.toml"]);
-    let (_dir, root) = repo(
-        &ignoring,
+fn a_config_in_a_path_the_map_ignores_still_makes_a_root() {
+    let (_dir, root) = ignoring(
+        &["vendored/d/pyproject.toml"],
         &[
             ("vendored/d/pyproject.toml", PYPROJECT.1),
             ("vendored/d/helper.py", "x = 1\n"),
             ("app.py", "import helper\n"),
         ],
     );
-    assert_eq!(pairs(&report(&root)), Vec::<String>::new());
+    assert_eq!(pairs(&report(&root)), ["app.py>vendored/d/helper.py"]);
+}
+
+#[test]
+fn an_ignored_config_declaring_lib_replaces_src_with_lib() {
+    for (config, text) in [
+        (
+            "pyproject.toml",
+            "[tool.setuptools.packages.find]\nwhere = [\"lib\"]\n",
+        ),
+        ("setup.cfg", "[options]\npackage_dir =\n    = lib\n"),
+    ] {
+        let (_dir, root) = ignoring(
+            &[config],
+            &[
+                (config, text),
+                ("lib/pkg/__init__.py", "x = 1\n"),
+                ("src/other/__init__.py", "x = 1\n"),
+                ("app.py", "import pkg\nimport other\n"),
+            ],
+        );
+        assert_eq!(
+            pairs(&report(&root)),
+            ["app.py>lib/pkg/__init__.py"],
+            "{config}"
+        );
+    }
+}
+
+#[test]
+fn an_ignored_config_that_does_not_parse_gives_the_note_and_no_problem() {
+    for (config, text, folder) in [
+        ("pyproject.toml", "[project\nname = \n", "."),
+        ("setup.cfg", "name = m\n[options]\n", "."),
+        ("vendored/pyproject.toml", "[project\nname = \n", "vendored"),
+    ] {
+        let mut linked = map(
+            &[("app", &["app.py"]), ("pkg", &["src/**"])],
+            &[("app", "pkg")],
+        );
+        linked["ignored"] = json!(["system-map.json", config]);
+        let (_dir, root) = repo(
+            &linked,
+            &[
+                (config, text),
+                ("src/pkg/__init__.py", "x = 1\n"),
+                ("app.py", "import pkg\n"),
+            ],
+        );
+        let found = report(&root);
+        assert_eq!(found.problems, Vec::<String>::new(), "{config}");
+        assert_eq!(
+            found.notes,
+            [format!(
+                "python-imports did not read {config}, which does not parse; failing links into {folder} may be false"
+            )],
+            "{config}"
+        );
+        // The project keeps its default roots.
+        assert_eq!(pairs(&found), ["app.py>src/pkg/__init__.py"], "{config}");
+        assert_eq!(run(&root, "check", &[]).status.code(), Some(0), "{config}");
+    }
+}
+
+#[test]
+fn an_ignored_config_under_testdata_is_never_read() {
+    let (_dir, root) = ignoring(
+        &["testdata/"],
+        &[
+            ("testdata/d/pyproject.toml", PYPROJECT.1),
+            ("testdata/d/helper.py", "x = 1\n"),
+            ("testdata/e/pyproject.toml", "[project\nname = \n"),
+            ("app.py", "import helper\n"),
+        ],
+    );
+    let found = report(&root);
+    assert_eq!(pairs(&found), Vec::<String>::new());
+    assert_eq!(found.problems, Vec::<String>::new());
+    assert_eq!(found.notes, Vec::<String>::new());
 }
 
 #[test]
@@ -602,7 +695,7 @@ fn an_unparseable_pyproject_toml_is_a_problem_naming_the_file() {
 }
 
 #[test]
-fn a_broken_config_under_an_excluded_folder_or_an_ignored_path_is_no_problem() {
+fn a_broken_config_under_an_excluded_folder_is_no_problem() {
     for folder in ["testdata", "tests", "test", "fixtures", "a/fixtures"] {
         let broken = format!("{folder}/pyproject.toml");
         let (_dir, root) = repo(
@@ -611,16 +704,6 @@ fn a_broken_config_under_an_excluded_folder_or_an_ignored_path_is_no_problem() {
         );
         assert_eq!(problems(&root), Vec::<String>::new(), "{folder}");
     }
-    let mut ignoring = map(&[("all", &["**"])], &[]);
-    ignoring["ignored"] = json!(["system-map.json", "vendored/"]);
-    let (_dir, root) = repo(
-        &ignoring,
-        &[
-            ("vendored/pyproject.toml", "[project\nname = \n"),
-            ("m.py", ""),
-        ],
-    );
-    assert_eq!(problems(&root), Vec::<String>::new());
 }
 
 fn problems(root: &str) -> Vec<String> {
