@@ -3,7 +3,7 @@
 // on Daniel's click (`server/src/runner.rs`), never a session; no module starts one yet. A run that failed, or finished with tool calls
 // denied, offers its prompt to copy into his own agent, as an overturn does (`ratify.ts`).
 
-import { confirmed, drawWithStatus, failure, invoke, pressable, promptBox, sayAction, text, type Confirm } from "./dom.js";
+import { confirmed, drawWithStatus, failure, hint, invoke, pressable, promptBox, sayAction, text, type Confirm } from "./dom.js";
 import { onDraw, reloadMap, syncSide, type MapView } from "./map.js";
 import { copyOverturn, overturnReport } from "./ratify.js";
 import type { RunView, Runs } from "./types.js";
@@ -45,7 +45,7 @@ export function runRows(runs: Runs | null | undefined): RunRow[] {
 
 const button = (words: string, title: string, click: () => unknown) => {
   const node = pressable(text("button", words, "btn quiet"), null);
-  node.title = title;
+  hint(node, title);
   node.addEventListener("click", click);
   return node;
 };

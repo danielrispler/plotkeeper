@@ -11,12 +11,15 @@ globalThis.matchMedia = () => /** @type {any} */ ({ matches: false, addEventList
 const { sheetCard } = await import("../../dist/map-sheet.js");
 const { SHEET } = await import("../../dist/explanations.js");
 const { studio } = await import("../../dist/state.js");
+const { hintOf } = await import("../../dist/dom.js");
 
 const all = (node) => [node, ...node.childNodes.filter((child) => child instanceof El).flatMap(all)];
 const classed = (node, name) => all(node).filter((each) => each.className.split(" ").includes(name));
 const lines = (node) => classed(node, "explain");
 const byId = (node, id) => all(node).find((each) => each.id === id);
-const described = (node) => all(node).filter((each) => each.getAttribute("aria-describedby") !== null);
+// What a node is described by besides its own hint (spec #582): the explanation lines.
+const explainedBy = (each) => each.getAttribute("aria-describedby") !== null && each.getAttribute("aria-describedby") !== each.getAttribute("interestfor");
+const described = (node) => all(node).filter(explainedBy);
 
 /** @type {import("../../dist/map-model.js").Part} */
 const plugins = {
@@ -72,7 +75,7 @@ test("on: each heading, the selected tier and the links carry their lines, kinds
   explanations(true);
   const { card, toggle } = sheetCard(view(), plugins);
   assert.equal(toggle.getAttribute("aria-pressed"), "true");
-  assert.equal(toggle.title, "Hide explanations");
+  assert.equal(hintOf(toggle)?.textContent, "Hide explanations");
   const headings = classed(card, "sheet-heading");
   assert.deepEqual(headings.map((h) => h.text), ["Holds", "Tier", "Laws", "Talks to", "Fog", "CI on main"]);
   for (const heading of headings) {
@@ -84,7 +87,7 @@ test("on: each heading, the selected tier and the links carry their lines, kinds
   const tiers = classed(card, "sheet-tiers")[0].childNodes.filter((child) => child instanceof El);
   const pressed = tiers.find((button) => button.getAttribute("aria-pressed") === "true");
   assert.equal(byId(card, pressed.getAttribute("aria-describedby")).text, SHEET.tiers.core);
-  assert.equal(tiers.filter((button) => button.getAttribute("aria-describedby")).length, 1);
+  assert.equal(tiers.filter(explainedBy).length, 1);
   // Talks to: file's and not yet ratified's at the first link, spawn's at the second, nothing at the third or fourth.
   const rows = classed(card, "sheet-link");
   assert.equal(rows.length, 4);
@@ -98,7 +101,7 @@ test("off: no line is drawn, nothing points at one, and the ? is not pressed", (
   explanations(false);
   const { card, toggle } = sheetCard(view(), plugins);
   assert.equal(toggle.getAttribute("aria-pressed"), "false");
-  assert.equal(toggle.title, "Show explanations");
+  assert.equal(hintOf(toggle)?.textContent, "Show explanations");
   assert.deepEqual(lines(card), []);
   assert.deepEqual(described(card), []);
   assert.equal(classed(card, "sheet-link").length, 4);
@@ -137,4 +140,14 @@ test("on: a line sits under the fog buttons whatever they are, saying what the b
   const { card } = sheetCard(view({ fog: { plugins: "thick" } }), plugins);
   assert.deepEqual(lines(card), []);
   assert.deepEqual(described(card), []);
+});
+
+test("a law's mark on the sheet is a mark, its hint the law's backing and text as the row's title said, keyed apart from the plate's", () => {
+  const { card } = sheetCard(view(), plugins);
+  const [mark] = classed(card, "law-mark");
+  assert.equal(mark.getAttribute("role"), "img");
+  assert.equal(mark.getAttribute("aria-label"), "Backed by a check: Events apply in order");
+  assert.equal(hintOf(mark)?.textContent, "Backed by a check: Events apply in order");
+  assert.equal(mark.getAttribute("data-key"), "sheet-plugins-plugins-order");
+  assert.equal(mark.getAttribute("tabindex"), null);
 });

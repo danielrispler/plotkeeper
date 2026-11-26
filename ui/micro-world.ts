@@ -6,7 +6,7 @@
 // `frame-src 'none'` (`server/src/web.rs`): no frame of it loads a URL. The frame sits in an overlay in the glass the size of the settings
 // dialog, the first layer Esc closes.
 
-import { element, failure, invoke, pressable, promptBox, sayAction, text } from "./dom.js";
+import { availability, element, failure, hint, invoke, pressable, promptBox, sayAction, text } from "./dom.js";
 import { onDraw, registerLayer, reloadMap, shownProject } from "./map.js";
 import { copyOverturn, overturnReport } from "./ratify.js";
 import { logStop } from "./stop-rules.js";
@@ -44,9 +44,10 @@ export function exploreOffers(worlds: MicroWorlds | null | undefined, key: strin
 
 const button = (words: string, title: string, click: (() => void) | null) => {
   const node = pressable(text("button", words, "btn quiet"), null);
-  node.title = title;
-  if (click) node.addEventListener("click", click);
-  else node.disabled = true;
+  if (click) {
+    hint(node, title);
+    node.addEventListener("click", click);
+  } else availability(node, title, title); // waiting: it says why, and stays focusable (#582)
   return node;
 };
 
@@ -74,7 +75,7 @@ export function frameNode(html: string): HTMLElement {
   frame.className = "micro-world-frame";
   frame.setAttribute("sandbox", "allow-scripts");
   frame.setAttribute("referrerpolicy", "no-referrer");
-  frame.setAttribute("title", "Micro-world");
+  frame.setAttribute("aria-label", "Micro-world");
   frame.setAttribute("srcdoc", html);
   return frame;
 }

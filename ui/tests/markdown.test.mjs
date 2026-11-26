@@ -15,8 +15,8 @@ test("a table, a list, code and an http(s) link render", () => {
   assert.match(html, /<ul>\s*<li>one<\/li>\s*<li>two<\/li>/);
   assert.match(html, /<code>x &lt;= y<\/code>/);
   assert.match(html, /<pre><code>let a = 1;\n<\/code><\/pre>/);
-  assert.match(html, /<a href="https:\/\/example.com\/a\?b=1&amp;c=2" target="_blank" rel="noopener noreferrer" title="Open https:\/\/example.com\/a\?b=1&amp;c=2 in a new tab">docs<\/a>/);
-  assert.match(html, /<a href="http:\/\/example.org" target="_blank" rel="noopener noreferrer" title="Open http:\/\/example.org in a new tab">http:\/\/example.org<\/a>/);
+  assert.match(html, /<a href="https:\/\/example.com\/a\?b=1&amp;c=2" target="_blank" rel="noopener noreferrer">docs<\/a>/);
+  assert.match(html, /<a href="http:\/\/example.org" target="_blank" rel="noopener noreferrer">http:\/\/example.org<\/a>/);
 });
 
 test("raw HTML, a javascript: link and an event handler come out as inert text", () => {
@@ -37,7 +37,7 @@ test("raw HTML, a javascript: link and an event handler come out as inert text",
 
 test("an http(s) link opens in a new tab; a file link, which the page cannot open, is its text (danielrispler/Falinks#557)", () => {
   const html = markdown("[keys](apps/studio/ui/keys.ts#L12) [abs](file:///Users/d/a.rs) [web](https://e.com) [no](javascript:x())");
-  assert.match(html, /<a href="https:\/\/e.com" target="_blank" rel="noopener noreferrer" title="Open https:\/\/e.com in a new tab">web<\/a>/);
+  assert.match(html, /<a href="https:\/\/e.com" target="_blank" rel="noopener noreferrer">web<\/a>/);
   assert.doesNotMatch(html, /<a[^>]*>(keys|abs|no)/);
   assert.match(html, /keys abs/);
 });
@@ -57,5 +57,5 @@ test("inline code is never a link, a path or not", () => {
 test("inline code inside a Markdown link stays in the one link (danielrispler/Falinks#581)", () => {
   const html = markdown("[`src/a.rs`](https://x.com)");
   assert.equal(html.match(/<a\b/g)?.length, 1, html);
-  assert.match(html, /<a href="https:\/\/x.com" target="_blank" rel="noopener noreferrer" title="Open https:\/\/x.com in a new tab"><code>src\/a.rs<\/code><\/a>/);
+  assert.match(html, /<a href="https:\/\/x.com" target="_blank" rel="noopener noreferrer"><code>src\/a.rs<\/code><\/a>/);
 });

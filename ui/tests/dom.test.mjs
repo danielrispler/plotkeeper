@@ -89,3 +89,39 @@ test("element with a type returns that type and names a wrong one", async () => 
     document.getElementById = was;
   }
 });
+
+// The hint (spec #582): a button's or link's own `popover="hint"`, wired by `interestfor`, with the ARIA rule and no `title`.
+const buttonWith = (label, attrs = {}) => new Field("button", attrs, [label]);
+
+test("a hint gives a button its own hint of the text, wired by interestfor, and no title", async () => {
+  const { hint, hintOf } = await import("../../dist/dom.js");
+  const button = buttonWith("Go", { title: "old words" });
+  assert.equal(hint(button, "Go to the first session that needs you"), button);
+  const target = hintOf(button);
+  assert.equal(target?.textContent, "Go to the first session that needs you");
+  assert.equal(target?.getAttribute("popover"), "hint");
+  assert.equal(button.getAttribute("interestfor"), target?.getAttribute("id"));
+  assert.equal(button.getAttribute("title"), null);
+});
+
+test("a hint that adds to the trigger's name is its description; one that repeats it adds nothing", async () => {
+  const { hint, hintOf } = await import("../../dist/dom.js");
+  const adds = hint(buttonWith("Go", { "data-key": "adds" }), "Go to the first session");
+  assert.equal(hintOf(adds)?.getAttribute("role"), "tooltip");
+  assert.equal(adds.getAttribute("aria-describedby"), adds.getAttribute("interestfor"));
+  const repeats = hint(buttonWith("", { "data-key": "repeats", "aria-label": "Settings" }), "Settings");
+  assert.equal(hintOf(repeats)?.getAttribute("role"), null);
+  assert.equal(repeats.getAttribute("aria-describedby"), null);
+  const labelled = hint(buttonWith("  Close \n", { "data-key": "close" }), "Close");
+  assert.equal(labelled.getAttribute("aria-describedby"), null);
+});
+
+test("a hint leaves the author's own aria-describedby, and is drawn again for the same trigger without a second hint", async () => {
+  const { hint, hintOf } = await import("../../dist/dom.js");
+  const own = hint(buttonWith("Go", { "data-key": "own", "aria-describedby": "elsewhere" }), "Go on");
+  assert.equal(own.getAttribute("aria-describedby"), "elsewhere");
+  const first = hintOf(hint(buttonWith("Go", { "data-key": "again" }), "One"));
+  const second = hintOf(hint(buttonWith("Go", { "data-key": "again" }), "Two"));
+  assert.equal(second, first);
+  assert.equal(second?.textContent, "Two");
+});

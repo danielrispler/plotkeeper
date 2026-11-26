@@ -7,7 +7,7 @@
 // hooks there.
 
 import { logStop } from "./stop-rules.js";
-import { failure, invoke, pressable, text } from "./dom.js";
+import { failure, hint, invoke, pressable, text } from "./dom.js";
 import { currentMap, currentScrub, onDraw, onUnread, registerLayer, setScrub, type MapView } from "./map.js";
 import { closeDrawer, openDrawer } from "./map-drawer.js";
 import { hideAgents } from "./map-agents.js";
@@ -49,11 +49,11 @@ function rows(view: MapView, list: HTMLElement, entries: HistoryEntry[]) {
       const item = text("li", "", `hist-row${row.fogged ? " fogged" : ""}${row.current ? " current" : ""}`);
       item.dataset.commit = row.commit;
       const scrub = pressable(text("button", row.label, "btn quiet hist-commit"), null);
-      scrub.title = row.title;
+      hint(scrub, row.title);
       scrub.setAttribute("aria-pressed", String(row.current));
       scrub.addEventListener("click", () => scrubTo(row.current ? null : row.commit).catch(failure("map_at")));
       const files = pressable(text("button", "Files", "btn quiet hist-files"), null);
-      files.title = `Show the files and diff of ${row.short}`;
+      hint(files, `Show the files and diff of ${row.short}`);
       files.addEventListener("click", () => {
         invoke("map_commit", { project: view.project, commit: row.commit })
           .then((found) => openDrawer(commitDrawer(found)))
@@ -65,7 +65,7 @@ function rows(view: MapView, list: HTMLElement, entries: HistoryEntry[]) {
       const offer = briefOffer(row);
       if (offer) {
         const brief = pressable(text("button", offer.label, "btn quiet hist-brief"), null);
-        brief.title = offer.title;
+        hint(brief, offer.title);
         brief.addEventListener("click", () => void deps.openBriefOf(view.project, offer.number, 0, true));
         actions.append(brief);
       }
@@ -101,14 +101,13 @@ export function drawStrip(view: MapView, part: string, slot: HTMLElement) {
 /** The banner: "Viewing <commit> · Back to now" while `scrub` is set, empty with none. A commit whose map cannot be read keeps it too. */
 export function showBanner(banner: HTMLElement, scrub: Scrub | null) {
   if (!scrub) {
-    banner.removeAttribute("title");
     return banner.replaceChildren();
   }
   const words = scrubBanner(scrub);
   const back = pressable(text("button", words.back, "btn quiet banner-back"), null);
-  back.title = "Show the map as it is now";
+  hint(back, "Show the map as it is now");
   back.addEventListener("click", () => scrubTo(null).catch(failure("map_at")));
-  banner.title = scrub.label;
+  hint(banner, scrub.label);
   banner.replaceChildren(text("span", words.text, "banner-text"), " · ", back);
 }
 

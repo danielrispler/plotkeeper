@@ -34,18 +34,18 @@ code:empty { display: none; }
 .btn { font: inherit; color: inherit; background: var(--raised); border: 0; border-radius: var(--radius);
        padding: var(--sp-2) var(--sp-4); cursor: pointer; text-align: start;
        transition: background-color var(--motion), color var(--motion), box-shadow var(--motion); }
-.btn:hover:not(:disabled) { background: var(--pressed); }
-.btn:active:not(:disabled) { background: var(--selected); }
+.btn:hover:not(:disabled, [aria-disabled="true"]) { background: var(--pressed); }
+.btn:active:not(:disabled, [aria-disabled="true"]) { background: var(--selected); }
 .btn[aria-pressed="true"] { background: var(--selected); }
 /* A disabled button keeps its hover, which says why it is off (#220). */
-.btn:disabled { opacity: .45; cursor: default; }
+.btn:disabled, .btn[aria-disabled="true"] { opacity: .45; cursor: default; }
 /* Quiet: no fill until hovered, for actions that should recede. */
 .btn.quiet, .btn.row, .strip .btn { background: none; }
-.btn.quiet:hover:not(:disabled), .btn.row:hover:not(:disabled), .strip .btn:hover { background: var(--hover); }
+.btn.quiet:hover:not(:disabled, [aria-disabled="true"]), .btn.row:hover:not(:disabled, [aria-disabled="true"]), .strip .btn:hover { background: var(--hover); }
 /* The selected row: a fill and an edge bar at its start (danielrispler/Falinks#570). */
 .btn.row[aria-pressed="true"], .strip .btn[aria-pressed="true"] { background: var(--selected); box-shadow: inset var(--mark) 0 0 var(--fg); }
 .btn.small { font-size: var(--size-small); padding: var(--sp-1) var(--sp-4); color: var(--muted); }
-.btn.small:hover:not(:disabled) { color: var(--fg); }
+.btn.small:hover:not(:disabled, [aria-disabled="true"]) { color: var(--fg); }
 
 /* The window (#386), Treatment C's frame: a 34 px top bar over a grid of the map and the session list, laid right to left so the list is on
    the right; each region lays itself out left to right. The list and the map are told apart by tone and the map's rounded corner, never a line. */
@@ -372,7 +372,7 @@ h1 { margin: 0 0 var(--sp-4); }
 .choices li:has(.btn) { padding: 0; }
 .choices li .btn { display: flex; flex-direction: column; align-items: flex-start; width: 100%; padding: var(--sp-3) var(--sp-5);
                    background: none; }
-.choices li .btn:hover:not(:disabled) { background: var(--hover); }
+.choices li .btn:hover:not(:disabled, [aria-disabled="true"]) { background: var(--hover); }
 .answer-buttons { display: flex; gap: var(--sp-4); }
 /* A plan the card can approve (danielrispler/Falinks#478): its text, scrolled within the dock. */
 .decision .plan { white-space: pre-wrap; max-height: 30vh; overflow-y: auto; margin: var(--sp-3) 0 0; padding: var(--sp-3) var(--sp-5);
@@ -534,7 +534,7 @@ body[data-panel="diff"] .map-stage { --panel-w: min(var(--panel-wide), calc(100%
    text while it is dragged. */
 .btn.sheet-resize { position: absolute; top: 0; bottom: 0; left: 0; width: var(--sheet-handle); padding: 0; border: 0; border-radius: var(--glass-radius) 0 0 var(--glass-radius);
                 background: transparent; cursor: col-resize; touch-action: none; -webkit-user-select: none; user-select: none; transition: background var(--motion); }
-.btn.sheet-resize:hover:not(:disabled), .btn.sheet-resize.dragging { background: var(--selected); }
+.btn.sheet-resize:hover:not(:disabled, [aria-disabled="true"]), .btn.sheet-resize.dragging { background: var(--selected); }
 .btn.sheet-resize:focus-visible { outline-offset: calc(-1 * var(--mark)); background: var(--selected); }
 body.resizing { -webkit-user-select: none; user-select: none; cursor: col-resize; }
 /* The left panel (#385): the story, History, the diff (widened to at most 780 px) or Settings, inset like the sheet and in its glass. */
@@ -650,6 +650,7 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .runs-paused { display: flex; align-items: baseline; gap: var(--sp-3); margin: 0; padding: 0 var(--sp-3); color: var(--muted); }
 .map-links { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
 .map-links .link { stroke: var(--link); stroke-width: var(--link-width); }
+.link-mark { pointer-events: auto; }
 .link-mark.check { fill: var(--law-check); }
 .link-mark.trust { fill: var(--map-bg); stroke: var(--law-trust); stroke-width: var(--hair); }
 .plate { position: absolute; transform: translate(-50%, -50%); width: var(--plate-w); height: var(--plate-h); padding: var(--sp-5);
@@ -663,7 +664,7 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .plate.tier-black-box .plate-caption { color: var(--faint); }
 /* The part's open button (#460): the plate's text area, drawn as plain text, so Tab reaches the part and the page's focus ring marks it. */
 .btn.plate-open { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; padding: 0; border-radius: var(--radius-small); text-align: left; cursor: inherit; }
-.btn.plate-open, .btn.plate-open:hover:not(:disabled), .btn.plate-open:active:not(:disabled) { background: none; }
+.btn.plate-open, .btn.plate-open:hover:not(:disabled, [aria-disabled="true"]), .btn.plate-open:active:not(:disabled, [aria-disabled="true"]) { background: none; }
 /* The plate's slots: the mist behind it, the law marks at its top right, and a session badge or the spotlit session's chip along its foot. */
 .plate-fog { position: absolute; inset: calc(-1 * var(--sp-7)); z-index: -1; pointer-events: none; }
 .plate-marks { position: absolute; top: var(--sp-4); right: var(--sp-5); display: flex; gap: var(--sp-3); align-items: center; }
@@ -724,7 +725,7 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .btn.explain-toggle { display: grid; place-items: center; width: calc(var(--sp-6) + var(--sp-2)); height: calc(var(--sp-6) + var(--sp-2)); padding: 0;
                       border-radius: 50%; font-size: var(--size-xs); font-weight: 600; line-height: 1; color: var(--muted); box-shadow: inset 0 0 0 var(--hair) var(--muted); }
 .btn.explain-toggle[aria-pressed="true"] { background: var(--fg); color: var(--bg); box-shadow: none; }
-.btn.explain-toggle[aria-pressed="true"]:hover:not(:disabled) { background: var(--muted); }
+.btn.explain-toggle[aria-pressed="true"]:hover:not(:disabled, [aria-disabled="true"]) { background: var(--muted); }
 /* An explanation: one short muted line under its heading, pulled up to it; the selected option's and the fog actions' sit under their
    buttons at the sheet's own gap. */
 .explain { margin: calc(-1 * var(--sp-2)) 0 0; font-size: var(--size-xs); line-height: 1.45; color: var(--muted); text-wrap: pretty; }
@@ -862,8 +863,8 @@ mark.drawer-line .drawer-n::before { content: "→ " / ""; color: var(--fg); }
 .btn.session-badge { flex: none; margin-inline-start: auto; min-width: var(--badge); height: var(--badge); padding: 0 var(--sp-3); border-radius: calc(var(--badge) / 2);
                      font-size: var(--size-xs); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; color: var(--fg); background: var(--raised);
                      box-shadow: inset 0 0 0 var(--hair) var(--plate-edge), var(--shadow); transition: opacity var(--motion), box-shadow var(--motion); }
-.btn.session-badge:hover:not(:disabled) { background: var(--raised); color: var(--fg); box-shadow: inset 0 0 0 var(--hair) var(--muted), var(--shadow); }
-.btn.session-badge.needs-you, .btn.session-badge.needs-you:hover:not(:disabled) { color: var(--needs-you); background: var(--needs-you-bg); box-shadow: inset 0 0 0 var(--hair) var(--needs-you-line), var(--shadow); }
+.btn.session-badge:hover:not(:disabled, [aria-disabled="true"]) { background: var(--raised); color: var(--fg); box-shadow: inset 0 0 0 var(--hair) var(--muted), var(--shadow); }
+.btn.session-badge.needs-you, .btn.session-badge.needs-you:hover:not(:disabled, [aria-disabled="true"]) { color: var(--needs-you); background: var(--needs-you-bg); box-shadow: inset 0 0 0 var(--hair) var(--needs-you-line), var(--shadow); }
 .btn.session-badge.dim { opacity: var(--badge-dim); }
 @media (prefers-reduced-motion: reduce) { .btn.session-badge { transition: none; } }
 .btn.session-badge[aria-expanded="true"] { box-shadow: 0 0 0 var(--mark) var(--ring-warm), var(--shadow); }
@@ -883,7 +884,7 @@ mark.drawer-line .drawer-n::before { content: "→ " / ""; color: var(--fg); }
 .btn.session-pick { display: grid; grid-template-columns: var(--logo) minmax(0, 1fr); align-items: baseline; gap: 0 var(--sp-3); padding: var(--sp-3) var(--sp-4);
                     text-align: start; white-space: normal; overflow-wrap: anywhere; }
 .btn.session-pick { background: none; }
-.btn.session-pick:hover:not(:disabled) { background: var(--hover); }
+.btn.session-pick:hover:not(:disabled, [aria-disabled="true"]) { background: var(--hover); }
 .session-pick > :not(.logo) { grid-column: 2; }
 .session-pick-name { font-size: var(--size-small); font-weight: 600; }
 .session-pick-state { font-size: var(--size-xs); color: var(--faint); }
@@ -1092,3 +1093,40 @@ mark.drawer-line .drawer-n::before { content: "→ " / ""; color: var(--fg); }
 .refresher-flows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); font-size: var(--size-small); }
 .refresher-flow-name { font-weight: 600; }
 .refresher-hops { margin: var(--sp-1) 0 0; padding-inline-start: var(--sp-6); color: var(--muted); line-height: 1.45; }
+
+/* The hint (spec #582): the one hover of the page, a trigger's own `popover="hint"` beside it through the trigger's implicit anchor
+   (`interestfor`), above it, flipped below when the window's top is in the way, so it never covers the control the focus is on. It
+   shows after --hint-delay, and at once while a hint is open among a toolbar's or a list's neighbouring triggers; the pointer may rest on
+   it, and Esc closes it. Needs Chrome 157+ (`docs/studio/behaviour/sessions.md`). */
+/* biome-ignore lint/correctness/noUnknownProperty: Chrome 149's interest invokers, which biome does not know yet */
+[interestfor] { interest-delay-start: var(--hint-delay); }
+/* biome-ignore lint/correctness/noUnknownPseudoClass: Chrome 149's interest invokers */
+.top:has(:interest-source) [interestfor], .list:has(:interest-source) [interestfor] {
+  /* biome-ignore lint/correctness/noUnknownProperty: Chrome 149's interest invokers */
+  interest-delay-start: 0s;
+}
+/* The invisible box an SVG trigger's hint anchors to (dom.ts, `anchorOver`). */
+.hint-anchor { position: fixed; pointer-events: none; }
+.hint { position-area: block-start; position-try-fallbacks: flip-block; inset: auto; margin-block: var(--hint-gap); margin-inline: 0; width: max-content; max-width: var(--hint);
+        padding: var(--sp-2) var(--sp-4); border: var(--hair) solid var(--line); border-radius: var(--radius-small); background: var(--raised); color: var(--fg);
+        box-shadow: var(--shadow); font-size: var(--size-small); line-height: 1.4; white-space: pre-line; overflow-wrap: anywhere; }
+
+/* Cut text scrolls in place (spec #582): a `.cut` element, made by `cut()` in dom.ts, is one line the layout ends in an ellipsis (its own rule
+   above does that, with `overflow: hidden`) and keeps its text whole in an inner span. Its own inline scroll timeline sets --truncated only
+   while the text overflows, and only then does the span move, on hover over the text or focus on the control that holds it, so a line that
+   fits stays still. With reduced motion asked for, nothing moves. */
+@property --truncated { syntax: "<integer>"; inherits: false; initial-value: 0; }
+@keyframes truncated { from, to { --truncated: 1; } }
+.cut { animation: truncated linear both; animation-timeline: scroll(self inline); }
+@media (prefers-reduced-motion: no-preference) {
+  .cut:hover, :is(button, a, summary, [tabindex]):focus-visible .cut { text-overflow: clip; }
+  @container style(--truncated: 1) {
+    .cut:hover > span, :is(button, a, summary, [tabindex]):focus-visible .cut > span {
+      display: inline-block;
+      margin-inline-start: 100%;
+      translate: calc(var(--hair) - 100%);
+      transition: margin-inline-start 2s ease-in, translate 2s ease-in;
+    }
+    .cut:hover:dir(rtl) > span, :is(button, a, summary, [tabindex]):focus-visible .cut:dir(rtl) > span { translate: calc(100% - var(--hair)); }
+  }
+}

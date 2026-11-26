@@ -2,7 +2,7 @@
 // worker's explanation (danielrispler/plotkeeper#348); the PR brief is. The server's session payload is taken in by `showCards`
 // (`story.ts`), which draws the brief from here.
 
-import { glyphOnly, pressable, prose, text } from "./dom.js";
+import { glyphOnly, hint, pressable, prose, text } from "./dom.js";
 import type { SessionCards } from "./types.js";
 
 /**
@@ -23,8 +23,9 @@ export function briefSlots(cards: SessionCards): BriefSlot[] {
 // A design line's citation: a button that opens the turn it came from in the rail (an older line may cite a card, which opens its turn).
 function citation(id: string, open: (id: string) => void): HTMLElement {
   const button = pressable(text("button", "", "cite"), null, () => open(id));
-  button.title = "Open the turn it came from";
+  // Named first: `hint()` reads the name to tell a hint that repeats it from one that adds to it.
   button.setAttribute("aria-label", "Open the turn it came from");
+  hint(button, "Open the turn it came from");
   button.append(glyphOnly("↗"));
   return button;
 }

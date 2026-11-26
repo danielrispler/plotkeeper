@@ -9,7 +9,7 @@
 // text is announced with `ariaNotify`. A modal dialog holds them back until it closes. A toast closed with the focus in it hands
 // the focus to the next toast, else back to where it was before it entered the toasts.
 
-import { element, fullTitle, pressable, text } from "./dom.js";
+import { cut, element, hint, pressable, text } from "./dom.js";
 import type { LayoutMode } from "./layout.js";
 import { sessionName } from "./list-model.js";
 import { setFocus, studio } from "./state.js";
@@ -58,7 +58,8 @@ export function toastButtons(toast: HTMLElement, main: () => HTMLElement, close:
   if (!toast.contains(action)) toast.replaceChildren(action);
   const button = pressable(text("button", "×", "btn quiet small"), null);
   button.setAttribute("aria-label", "Dismiss");
-  button.title = hover;
+  button.dataset.key = `${toast.id}-dismiss`;
+  hint(button, hover);
   button.addEventListener("click", close);
   toast.append(button);
   const buttons = { main: action, close: button };
@@ -149,6 +150,7 @@ export function showToast() {
   if (shown) {
     const action = () => {
       const button = pressable(text("button", "", "btn quiet toast-main"), null);
+      button.dataset.key = "toast-main";
       button.addEventListener("click", jumpToNeedsYou);
       return button;
     };
@@ -156,9 +158,9 @@ export function showToast() {
     const more = shown.count > 1 ? `+${shown.count - 1} more` : "";
     const name = sessionName(shown.session);
     const line = questionLine(shown.session);
-    main.replaceChildren(fullTitle(text("strong", name, "name"), name), ...(more ? [text("span", more, "count")] : []), fullTitle(text("span", line, "line"), line));
+    main.replaceChildren(cut(text("strong", name, "name")), ...(more ? [text("span", more, "count")] : []), cut(text("span", line, "line")));
     toast.dataset.say = toastSays([name, more, line]);
-    toast.title = titled(studio.files.keymap, HOVERS.goToSession, "studio::NextNeedsYou");
+    hint(main, titled(studio.files.keymap, HOVERS.goToSession, "studio::NextNeedsYou"));
   }
   stackToasts();
 }
@@ -195,14 +197,13 @@ export function showClearToast(count: number, undo: () => void) {
   if (!clearName) {
     const name = text("strong", "", "name");
     const undoButton = pressable(text("button", "Undo", "btn small"), null);
-    undoButton.title = "Bring the cleared sessions back";
+    hint(undoButton, "Bring the cleared sessions back");
     undoButton.addEventListener("click", () => undoClear());
     toast.replaceChildren(name, undoButton);
     toastButtons(toast, () => undoButton, hideClearToast, "Hide this toast; the clear goes on");
     clearName = name;
   }
-  clearName.textContent = message;
-  fullTitle(clearName, message);
+  cut(clearName, message);
   toast.dataset.say = toastSays([message]);
   toast.hidden = false;
   stackToasts();
@@ -224,7 +225,7 @@ export function showWhatsNewToast(version: string, url: string) {
   link.href = url;
   link.target = "_blank";
   link.rel = "noopener noreferrer";
-  link.title = "Open this version's release notes on GitHub";
+  hint(link, "Open this version's release notes on GitHub");
   toast.replaceChildren(text("strong", message, "name"), link);
   toastButtons(toast, () => link, hideWhatsNewToast, "Hide this toast; it does not come back for this version");
   toast.dataset.say = toastSays([message]);

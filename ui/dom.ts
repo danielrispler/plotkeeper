@@ -229,13 +229,249 @@ export function sayAction(words: string) {
 }
 
 /**
- * `node` with `full` as its native hover title: the full text of what the layout cuts (#162). No title for an empty text,
- * which would hide the tooltip of the element under it.
+ * `node` as cut text that scrolls in place (#582): its text stays whole in the page, in an inner box the `cut` class cuts with an ellipsis
+ * and moves on hover or focus, only when it overflows (`style.css`). With `words`, they replace what the node held, as for a node the
+ * page draws once and fills again.
  */
-export function fullTitle<T extends HTMLElement>(node: T, full: string | null | undefined): T {
-  if (full) node.title = full;
+export function cut<T extends HTMLElement>(node: T, words?: string): T {
+  if (!/(^| )cut( |$)/.test(node.className)) node.className = `${node.className} cut`.trim();
+  const inner = document.createElement("span");
+  if (words === undefined) inner.append(...node.childNodes);
+  else inner.textContent = words;
+  node.replaceChildren(inner);
   return node;
 }
+
+/** `node` with `key` as its `data-key`, the name its hint and `patch` know it by; returns `node`. */
+export function keyed<T extends HTMLElement>(node: T, key: string): T {
+  node.setAttribute("data-key", key);
+  return node;
+}
+
+// The page's hints (spec #582): each trigger's own `popover="hint"`, kept in `#hints` by id, so a trigger drawn again, as the list's rows
+// are on every update, finds its hint and does not make another. A hint whose trigger the page dropped for good goes once the trigger is collected.
+const hints = new Map<string, HTMLElement>();
+// A trigger kept off the page (a box a view keeps and puts back) keeps its hint: only a trigger the page has dropped for good loses it.
+const owners = new Map<string, WeakRef<Element>>();
+let loose = 0;
+let pruneQueued = false;
+const hintId = (key: string) => `hint-${key.replace(/[^\w-]/g, (c) => `_${c.charCodeAt(0).toString(16)}`)}`;
+const squeezed = (words: string | null) => (words ?? "").replace(/\s+/g, " ").trim();
+
+// The hint `trigger` names now: its `interestfor` or its `data-hint`.
+const named = (trigger: Element) => trigger.getAttribute("interestfor") ?? trigger.getAttribute("data-hint");
+
+// A hint stays while a trigger on the page names it, or while its trigger, kept off the page, still does. A trigger drawn again with
+// other words, as an unkeyed one is, names a new hint, so the old one goes, once it is closed: an open one waits for the next prune.
+function pruneHints() {
+  pruneQueued = false;
+  if (!document.querySelectorAll) return;
+  const wired = new Set([...document.querySelectorAll("[interestfor], [data-hint]")].map(named));
+  let waiting = false;
+  for (const [id, node] of hints) {
+    const owner = owners.get(id)?.deref();
+    if (wired.has(id) || (owner && named(owner) === id)) continue;
+    if (node.matches(":popover-open")) {
+      waiting = true;
+      continue;
+    }
+    node.remove();
+    owners.delete(id);
+    hints.delete(id);
+  }
+  if (waiting) queuePrune();
+}
+function queuePrune() {
+  if (pruneQueued) return;
+  pruneQueued = true;
+  setTimeout(pruneHints, 300);
+}
+
+// The listener path, for what `interestfor` cannot reach (a summary, an input, a select, and the marks of ticket 4): the trigger's own
+// pointer-enter/leave and focus/blur open and close its hint, with `showPopover({ source })` so the trigger is its implicit anchor, after
+// the page's `--hint-delay` (0.5 s) and Chromium's end delay (0.15 s). The pointer may rest on the hint. Esc and light dismiss are the
+// popover's own. A trigger a neighbour's hint is open beside, one sharing its parent, shows at once, as the CSS does for the other path.
+// The trigger's listeners open the hint its `data-hint` names when they run, so a trigger `patch` kept, which took a new draw's
+// `data-hint`, opens that draw's hint; a hint's own listeners act for the trigger that opened it, so no hint holds a trigger the page dropped.
+const listened = new Set(["SUMMARY", "INPUT", "SELECT", "TEXTAREA"]);
+// What `interestfor` reaches: any other trigger (a mark, a span with words) is pointer-only, or by focus too when it has a tabindex.
+const interested = new Set(["BUTTON", "A", "AREA"]);
+// Whether the pointer (on the trigger or its open hint) or the focus holds a trigger's hint, and its pending open or close.
+type Interest = { pointer: boolean; focus: boolean; timer?: ReturnType<typeof setTimeout> };
+const interests = new WeakMap<Element, Interest>();
+const HINT_END_DELAY = 150;
+// The one open hint of the listener path, and the trigger that opened it.
+let openTrigger: Element | null = null;
+let openHint: HTMLElement | null = null;
+
+// An SVG shape cannot be an anchor, nor the `source` of `showPopover`: its hint anchors to this box, an invisible HTML one laid over
+// the shape, a single one since only one hint is open at a time.
+let anchorBox: HTMLElement | null = null;
+function anchorOver(shape: Element): HTMLElement {
+  if (!anchorBox) {
+    anchorBox = document.createElement("div");
+    anchorBox.className = "hint-anchor";
+    element("hints").append(anchorBox);
+  }
+  const at = shape.getBoundingClientRect();
+  Object.assign(anchorBox.style, { left: `${at.left}px`, top: `${at.top}px`, width: `${at.width}px`, height: `${at.height}px` });
+  return anchorBox;
+}
+const isSvg = (node: Element) => "namespaceURI" in node && node.namespaceURI === "http://www.w3.org/2000/svg";
+
+function startDelay(): number {
+  const read = typeof getComputedStyle === "function" ? Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hint-delay")) : Number.NaN;
+  return Number.isFinite(read) ? read * 1000 : 500;
+}
+
+const hintNamed = (trigger: Element) => hints.get(trigger.getAttribute("data-hint") ?? "") ?? null;
+
+function showFor(trigger: Element, interest: Interest) {
+  const node = hintNamed(trigger);
+  if (!node || !(interest.pointer || interest.focus) || node.matches(":popover-open")) return;
+  node.showPopover({ source: isSvg(trigger) ? anchorOver(trigger) : (trigger as HTMLElement) });
+  openTrigger = trigger;
+  openHint = node;
+}
+function hideFor(trigger: Element, interest: Interest) {
+  if (interest.pointer || interest.focus || openTrigger !== trigger) return;
+  if (openHint?.matches(":popover-open")) openHint.hidePopover();
+  openTrigger = openHint = null;
+}
+function interestIn(trigger: Element, interest: Interest) {
+  clearTimeout(interest.timer);
+  const beside = openTrigger !== null && openTrigger !== trigger && openTrigger.isConnected !== false && openTrigger.parentElement === trigger.parentElement;
+  interest.timer = setTimeout(() => showFor(trigger, interest), beside ? 0 : startDelay());
+}
+function loseInterest(trigger: Element, interest: Interest) {
+  clearTimeout(interest.timer);
+  interest.timer = setTimeout(() => hideFor(trigger, interest), HINT_END_DELAY);
+}
+
+// A hint's own listeners, added once when it is made: the pointer resting on it holds it open for the trigger that opened it.
+function listenOnHint(node: HTMLElement) {
+  const opener = () => (openHint === node && openTrigger ? openTrigger : null);
+  node.addEventListener("pointerenter", () => {
+    const trigger = opener();
+    const interest = trigger && interests.get(trigger);
+    if (!interest) return;
+    interest.pointer = true;
+    clearTimeout(interest.timer);
+  });
+  node.addEventListener("pointerleave", () => {
+    const trigger = opener();
+    const interest = trigger && interests.get(trigger);
+    if (!interest) return;
+    interest.pointer = false;
+    loseInterest(trigger, interest);
+  });
+  node.addEventListener("toggle", (event) => {
+    if ((event as ToggleEvent).newState === "closed" && openHint === node) openTrigger = openHint = null;
+  });
+}
+
+/**
+ * Wires `trigger` to open and close the hint its `data-hint` names, by pointer and, when `keyboard`, by focus. A mark that stays out of
+ * the Tab order passes false: it is pointer-only. The trigger's listeners are added once.
+ */
+function listenForHint(trigger: Element, keyboard: boolean) {
+  if (interests.has(trigger)) return;
+  const interest: Interest = { pointer: false, focus: false };
+  interests.set(trigger, interest);
+  trigger.addEventListener("pointerenter", () => {
+    interest.pointer = true;
+    interestIn(trigger, interest);
+  });
+  trigger.addEventListener("pointerleave", () => {
+    interest.pointer = false;
+    loseInterest(trigger, interest);
+  });
+  if (!keyboard) return;
+  trigger.addEventListener("focus", () => {
+    if (!trigger.matches(":focus-visible")) return;
+    interest.focus = true;
+    interestIn(trigger, interest);
+  });
+  trigger.addEventListener("blur", () => {
+    interest.focus = false;
+    loseInterest(trigger, interest);
+  });
+}
+
+/**
+ * `trigger`, an enabled `<button>` or `<a>`, or a `<summary>`, `<input>` or `<select>` (the listener path), with its own hint of `words`, the one hover of the page: it shows on hover and on focus,
+ * closes on Esc and sits beside its trigger (`interestfor`, `popover="hint"`; `style.css`). The words are plain text, known when the
+ * trigger is drawn. A hint that adds to the trigger's name (its `aria-label`, else its text) is its description: `role="tooltip"` on the
+ * hint and `aria-describedby` on the trigger, unless the author set one; a hint that only repeats the name adds nothing, as it would be
+ * read twice. Any `title` goes. The trigger's `data-key` or `id` pins its hint across draws; give a trigger one. A trigger this has
+ * already wired keeps its hint when drawn again.
+ */
+export function hint<T extends Element>(trigger: T, words: string): T {
+  const id = named(trigger) ?? hintId(trigger.getAttribute("data-key") ?? trigger.getAttribute("id") ?? `n${++loose}`);
+  let node = hints.get(id);
+  if (!node) {
+    node = document.createElement("div");
+    node.setAttribute("id", id);
+    node.setAttribute("popover", "hint");
+    node.className = "hint";
+    hints.set(id, node);
+    listenOnHint(node);
+    element("hints").append(node);
+  }
+  node.textContent = words;
+  owners.set(id, new WeakRef(trigger));
+  const adds = squeezed(words) !== squeezed(trigger.getAttribute("aria-label") ?? trigger.textContent);
+  if (adds) node.setAttribute("role", "tooltip");
+  else node.removeAttribute("role");
+  trigger.removeAttribute("title");
+  if (interested.has(trigger.nodeName)) trigger.setAttribute("interestfor", id);
+  else {
+    trigger.setAttribute("data-hint", id);
+    listenForHint(trigger, listened.has(trigger.nodeName) || trigger.hasAttribute("tabindex"));
+  }
+  const described = trigger.getAttribute("aria-describedby");
+  if (adds && (described === null || described === id)) trigger.setAttribute("aria-describedby", id);
+  else if (!adds && described === id) trigger.removeAttribute("aria-describedby");
+  queuePrune();
+  return trigger;
+}
+
+/** `trigger` without its hint, on either path: it names none and is described by none it had; the hint goes at the next prune. */
+export function unhint<T extends Element>(trigger: T): T {
+  const id = named(trigger);
+  if (id === null) return trigger;
+  trigger.removeAttribute("interestfor");
+  trigger.removeAttribute("data-hint");
+  if (trigger.getAttribute("aria-describedby") === id) trigger.removeAttribute("aria-describedby");
+  queuePrune();
+  return trigger;
+}
+
+/**
+ * `node`, a mark or a dot that explains itself (a state's shape, a law's mark, an agent's logo): `role="img"` named by `words`, with
+ * `words` as its hint on the pointer alone (#582). It stays out of the Tab order, so what it says must also reach the keyboard some
+ * other way, in the part sheet's law list or the row's own words. Give it a `data-key` or an `id`, so its hint is the same on every draw.
+ */
+export function mark<T extends Element>(node: T, words: string): T {
+  node.setAttribute("role", "img");
+  node.setAttribute("aria-label", words);
+  return hint(node, words);
+}
+
+/**
+ * `button` available, with `words` as its hint, or, given `why`, unavailable: `aria-disabled="true"` instead of `disabled`, so it
+ * stays focusable and its hint says why (#582). Its handlers check `isUnavailable` first, as a click or Enter still reaches them.
+ */
+export function availability(button: HTMLElement, words: string, why: string | null = null) {
+  if (why === null) button.removeAttribute("aria-disabled");
+  else button.setAttribute("aria-disabled", "true");
+  hint(button, why ?? words);
+}
+
+export const isUnavailable = (button: HTMLElement) => button.getAttribute("aria-disabled") === "true";
+
+/** `trigger`'s hint, for a test to read, or null when it has none. */
+export const hintOf = (trigger: HTMLElement): HTMLElement | null => hints.get(trigger.getAttribute("interestfor") ?? trigger.getAttribute("data-hint") ?? "") ?? null;
 
 export const stepText = (step: Step | null) => (step ? `${step.tool} ${step.detail ?? ""}` : "No step yet");
 
