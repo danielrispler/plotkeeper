@@ -10,10 +10,13 @@ import { join } from "node:path";
 const script = join(import.meta.dirname, "../../scripts/agents/delegate.mjs");
 
 // The stand-in `agy`. `/usage` reports FAKE_AGY_5H and FAKE_AGY_WEEKLY as the Gemini windows left, or fails
-// with no output when FAKE_AGY_USAGE is "none". A critic run answers as FAKE_AGY_RUN says: "ok", "error"
-// (status ERROR), "fail" (exit 1) or "timeout" (exit 3, how `--print-timeout` ends). Every call is logged.
+// with no output when FAKE_AGY_USAGE is "none". A critic run reads the draft through the hook the script wrote (unless
+// FAKE_AGY_RUN is "noread"), then answers as FAKE_AGY_RUN says: "ok", "none" (no findings), "error" (status ERROR),
+// "empty" (status SUCCESS and no answer, how a run ended on a denied command, #618), "pointer" (an answer that only
+// points at a plan file, #618), "fail" (exit 1) or "timeout" (exit 3, how `--print-timeout` ends). Every call is logged.
 const fakeAgy = `#!/usr/bin/env node
-const { appendFileSync } = require("node:fs");
+const { execSync } = require("node:child_process");
+const { appendFileSync, existsSync, readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const env = process.env;
 const call = { argv: process.argv.slice(2), cwd: process.cwd(), internal: env.PLOTKEEPER_INTERNAL, terminal: env.PLOTKEEPER_TERMINAL_ID };
@@ -26,10 +29,24 @@ if (process.argv.includes("/usage")) {
   process.exit(0);
 }
 const run = env.FAKE_AGY_RUN;
+const seen = { draft: null, worktree: existsSync("repo/.git"), tree: readFileSync("review/tree.txt", "utf8") };
+if (run !== "noread") {
+  const command = JSON.parse(readFileSync(".agents/hooks.json", "utf8")).readonly.PreToolUse[0].hooks[0].command;
+  const path = join(process.cwd(), "review/draft.md");
+  const decided = JSON.parse(execSync(command, { input: JSON.stringify({ cwd: process.cwd(), toolCall: { name: "read_file", args: { Path: path } } }) }));
+  if (decided.decision === "allow") seen.draft = readFileSync(path, "utf8");
+}
+appendFileSync(join(env.FAKE_AGY_DIR, "agy-seen.jsonl"), JSON.stringify(seen) + "\\n");
 if (run === "fail") { console.error("something broke"); process.exit(1); }
 if (run === "timeout") process.exit(3);
-if (run === "error") { console.log(JSON.stringify({ status: "ERROR", error: "no" })); process.exit(0); }
-console.log(JSON.stringify({ status: "SUCCESS", response: "1. high: the spec cites a line that is not there." }));
+const conversation_id = "conv-test";
+const answer = (rest) => { console.log(JSON.stringify({ conversation_id, status: "SUCCESS", ...rest })); process.exit(0); };
+if (run === "error") { console.log(JSON.stringify({ conversation_id, status: "ERROR", error: "no" })); process.exit(0); }
+if (run === "empty") answer({ response: "" });
+if (run === "pointer") answer({ response: "I have created the implementation plan in [implementation_plan.md](file:///home/me/.gemini/antigravity-cli/brain/conv-test/implementation_plan.md). Please review and let me know if you'd like me to proceed." });
+if (run === "none") answer({ response: "", structured_output: { findings: [] } });
+const finding = { severity: "high", claim: "The store reads src/store.rs:7", status: "contradiction", evidence: "src/store.rs:1", summary: "The file has one line." };
+answer({ response: "", structured_output: { findings: [finding] } });
 `;
 
 const routing = {
@@ -38,45 +55,68 @@ const routing = {
   cheap: [],
   critic: [
     { cli: "agy", model: "gemini-test-model" },
-    { cli: "claude", model: "sonnet", effort: "high" },
+    { cli: "claude", model: "opus", effort: "high" },
   ],
 };
 
-/** Runs `pick critic` on a draft spec with the fake `agy` set by `fake`; returns its output and agy's calls. */
+/** Runs `pick critic`, from a git repository's root, on a draft spec with the fake `agy` set by `fake`; returns its output, agy's calls and what it saw. */
 const pickCritic = (fake) => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "delegate-test-")));
   const repo = join(dir, "repo");
   mkdirSync(join(dir, "bin"));
-  mkdirSync(repo);
+  mkdirSync(join(repo, "src"), { recursive: true });
   writeFileSync(join(dir, "bin/agy"), fakeAgy);
   chmodSync(join(dir, "bin/agy"), 0o755);
   writeFileSync(join(dir, "routing.json"), JSON.stringify(routing));
   writeFileSync(join(dir, "draft.md"), "# A draft\n\nThe store reads `src/store.rs:7`.\n");
-  const env = { ...process.env, PATH: `${join(dir, "bin")}:${process.env.PATH}`, FAKE_AGY_DIR: dir, PLOTKEEPER_TERMINAL_ID: "claude-test", ...fake };
+  const gitEnv = { GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
+  const git = (...args) => execFileSync("git", args, { cwd: repo, env: { ...process.env, ...gitEnv }, stdio: "ignore" });
+  writeFileSync(join(repo, "src/store.rs"), "fn main() {}\n");
+  git("init", "--quiet");
+  git("add", ".");
+  git("commit", "--quiet", "-m", "one");
+  const env = { ...process.env, ...gitEnv, PATH: `${join(dir, "bin")}:${process.env.PATH}`, TMPDIR: dir, FAKE_AGY_DIR: dir, PLOTKEEPER_TERMINAL_ID: "claude-test", ...fake };
   const args = [script, "pick", "critic", "--spec", join(dir, "draft.md"), "--routing", join(dir, "routing.json")];
   const ran = spawnSync(process.execPath, args, { cwd: repo, env, encoding: "utf8" });
-  const log = join(dir, "agy-calls.jsonl");
-  const calls = existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line)) : [];
-  return { ...ran, calls, repo };
+  const lines = (name) => (existsSync(join(dir, name)) ? readFileSync(join(dir, name), "utf8").trim().split("\n").map((line) => JSON.parse(line)) : []);
+  const worktrees = execFileSync("git", ["worktree", "list", "--porcelain"], { cwd: repo, encoding: "utf8" });
+  return { ...ran, calls: lines("agy-calls.jsonl"), seen: lines("agy-seen.jsonl"), repo, dir, worktrees };
 };
 
-test("with both Gemini windows at their floors, pick critic runs the Gemini critic and prints its answer", () => {
+test("with both Gemini windows at their floors, pick critic runs the Gemini critic read-only and prints its findings", () => {
   const ran = pickCritic({ FAKE_AGY_5H: "0.5", FAKE_AGY_WEEKLY: "0.3", FAKE_AGY_RUN: "ok" });
   assert.equal(ran.status, 0, ran.stderr);
-  assert.equal(ran.stdout, "critic: agy gemini-test-model\n\n1. high: the spec cites a line that is not there.\n");
+  assert.equal(
+    ran.stdout,
+    "critic: agy gemini-test-model\n\n1. high, contradiction: The store reads src/store.rs:7\n   Evidence: src/store.rs:1\n   The file has one line.\n",
+  );
   const critic = ran.calls.find((call) => !call.argv.includes("/usage"));
   assert.ok(critic, "agy -p was not called for the critic");
   const argv = critic.argv;
   const after = (flag) => argv[argv.indexOf(flag) + 1];
-  assert.equal(after("--mode"), "plan");
+  // Not plan mode, which ends the run at the first denied command (#618): the deny hook keeps it read-only.
+  assert.equal(argv.includes("--mode"), false);
   assert.equal(after("--model"), "gemini-test-model");
   assert.equal(after("--print-timeout"), "15m");
   assert.equal(after("--output-format"), "json");
+  assert.equal(after("--json-schema"), join(critic.cwd, "review/schema.json"));
   assert.match(after("-p"), /check every claim/i);
-  assert.match(after("-p"), /The store reads `src\/store\.rs:7`\./);
-  assert.equal(critic.cwd, ran.repo);
+  assert.match(after("-p"), /Your only working tool is read_file/);
+  assert.equal(after("-p").includes("@"), false, "an at-sign may read a file past the hook");
+  assert.notEqual(critic.cwd, ran.repo);
   assert.equal(critic.internal, "1");
   assert.equal(critic.terminal, undefined);
+  // It read the draft through the hook, in a worktree of HEAD whose files tree.txt lists.
+  assert.deepEqual(ran.seen, [{ draft: "# A draft\n\nThe store reads `src/store.rs:7`.\n", worktree: true, tree: `${join(critic.cwd, "repo/src/store.rs")}\n` }]);
+  // And left no throwaway folder or worktree behind.
+  assert.equal(existsSync(critic.cwd), false);
+  assert.equal(ran.worktrees.match(/^worktree /gm).length, 1, ran.worktrees);
+});
+
+test("a Gemini critic run with no findings says so", () => {
+  const ran = pickCritic({ FAKE_AGY_5H: "0.9", FAKE_AGY_WEEKLY: "0.9", FAKE_AGY_RUN: "none" });
+  assert.equal(ran.status, 0, ran.stderr);
+  assert.equal(ran.stdout, "critic: agy gemini-test-model\n\nNo findings.\n");
 });
 
 const ranCritic = (calls) => calls.some((call) => !call.argv.includes("/usage"));
@@ -90,29 +130,29 @@ const claudeCritic = (stdout) => {
 // The prompt a Claude critic gets: the critic's brief, then the draft.
 const BRIEFED = /^You are the critic of a draft spec[\s\S]*Check every claim[\s\S]*\n\nThe draft:\n\n# A draft\n\nThe store reads `src\/store\.rs:7`\.\n$/;
 
-test("with the 5-hour window below its floor, pick critic names Sonnet at high and prints its prompt, without running Gemini", () => {
+test("with the 5-hour window below its floor, pick critic names Opus at high and prints its prompt, without running Gemini", () => {
   const ran = pickCritic({ FAKE_AGY_5H: "0.49", FAKE_AGY_WEEKLY: "0.9", FAKE_AGY_RUN: "ok" });
   assert.equal(ran.status, 0, ran.stderr);
   const { head, prompt } = claudeCritic(ran.stdout);
-  assert.equal(head, "critic: claude sonnet effort high\nwhy: agy gemini-test-model has 49% of its 5h window and 90% of its weekly window left, under its floors of 50% and 30%");
+  assert.equal(head, "critic: claude opus effort high\nwhy: agy gemini-test-model has 49% of its 5h window and 90% of its weekly window left, under its floors of 50% and 30%");
   assert.match(prompt, BRIEFED);
   assert.equal(ranCritic(ran.calls), false);
 });
 
-test("with the weekly window below its floor, pick critic names Sonnet at high without running Gemini", () => {
+test("with the weekly window below its floor, pick critic names Opus at high without running Gemini", () => {
   const ran = pickCritic({ FAKE_AGY_5H: "0.9", FAKE_AGY_WEEKLY: "0.29", FAKE_AGY_RUN: "ok" });
   assert.equal(ran.status, 0, ran.stderr);
   const { head, prompt } = claudeCritic(ran.stdout);
-  assert.equal(head, "critic: claude sonnet effort high\nwhy: agy gemini-test-model has 90% of its 5h window and 29% of its weekly window left, under its floors of 50% and 30%");
+  assert.equal(head, "critic: claude opus effort high\nwhy: agy gemini-test-model has 90% of its 5h window and 29% of its weekly window left, under its floors of 50% and 30%");
   assert.match(prompt, BRIEFED);
   assert.equal(ranCritic(ran.calls), false);
 });
 
-test("with no quota reading, pick critic names Sonnet at high without running Gemini", () => {
+test("with no quota reading, pick critic names Opus at high without running Gemini", () => {
   const ran = pickCritic({ FAKE_AGY_USAGE: "none", FAKE_AGY_RUN: "ok" });
   assert.equal(ran.status, 0, ran.stderr);
   const { head, prompt } = claudeCritic(ran.stdout);
-  assert.equal(head, "critic: claude sonnet effort high\nwhy: agy gemini-test-model gave no quota reading");
+  assert.equal(head, "critic: claude opus effort high\nwhy: agy gemini-test-model gave no quota reading");
   assert.match(prompt, BRIEFED);
   assert.equal(ran.calls.length, 1);
   assert.ok(ran.calls[0].argv.includes("/usage"));
@@ -120,17 +160,22 @@ test("with no quota reading, pick critic names Sonnet at high without running Ge
 
 for (const [run, said] of [
   ["fail", "agy gemini-test-model failed: exit 1: something broke"],
-  ["error", "agy gemini-test-model failed: status ERROR"],
+  ["error", "agy gemini-test-model failed: status ERROR (conversation conv-test)"],
+  ["empty", "agy gemini-test-model answered nothing (status SUCCESS, conversation conv-test)"],
+  ["pointer", "agy gemini-test-model answered only with a pointer to implementation_plan.md (conversation conv-test)"],
+  ["noread", "agy gemini-test-model read no file, so it saw no draft (conversation conv-test)"],
   ["timeout", "agy gemini-test-model was cut at 15 minutes"],
 ]) {
-  test(`a Gemini critic run that ends with "${run}" names Sonnet at high as the fallback, with the prompt Gemini got`, () => {
+  test(`a Gemini critic run that ends with "${run}" names Opus at high as the fallback, with the brief Gemini got`, () => {
     const ran = pickCritic({ FAKE_AGY_5H: "0.9", FAKE_AGY_WEEKLY: "0.9", FAKE_AGY_RUN: run });
     assert.equal(ran.status, 0, ran.stderr);
     const { head, prompt } = claudeCritic(ran.stdout);
-    assert.equal(head, `critic: claude sonnet effort high\nwhy: ${said}; Sonnet is the fallback`);
+    assert.equal(head, `critic: claude opus effort high\nwhy: ${said}`);
     assert.equal(ranCritic(ran.calls), true);
+    assert.match(prompt, BRIEFED);
     const gemini = ran.calls.find((call) => !call.argv.includes("/usage")).argv;
-    assert.equal(prompt, gemini[gemini.indexOf("-p") + 1], "the Claude critic gets the prompt Gemini got");
+    const critic = prompt.slice(0, prompt.indexOf("\n\nThe draft:"));
+    assert.ok(gemini[gemini.indexOf("-p") + 1].startsWith(critic), "the Claude critic gets the brief Gemini got");
   });
 }
 
