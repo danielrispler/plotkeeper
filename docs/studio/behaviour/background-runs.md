@@ -1,14 +1,14 @@
 # Background runs
 
-A **background run** is a headless agent run with scoped tools that plotkeeper starts on Daniel's click (spec #378, ticket #390). It is never a session or a terminal: plotkeeper still starts no session. The runner is `server/src/runner.rs` and its launcher is `plotkeeper-run` (`server/src/bin/plotkeeper-run.rs`). Back a law and micro-worlds start them ([Back a law](#back-a-law), [Micro-worlds](#micro-worlds)). The sandbox gate (#395, below) proved the containment on a real `claude`.
+A **background run** is a headless agent run with scoped tools that plotkeeper starts on Daniel's click (spec #378, ticket #390). It is never a session or a terminal: plotkeeper still starts no session. The runner is `server/src/runner.rs` and its launcher is `plotkeeper-run` (`server/src/bin/plotkeeper-run.rs`). Back a law, micro-worlds and the map text review start them ([Back a law](#back-a-law), [Micro-worlds](#micro-worlds), [Map text review](#map-text-review)). The map text review bends two rules, for its kind only: it starts without a click for a PR by Daniel's own login, and its folder holds a PR's head. The sandbox gate (#395, below) proved the containment on a real `claude`.
 
 ## The seam
 
 A run goes in as a request: its kind, its working folder, its prompt and its limits. It comes out as an outcome: the result text, the tool calls it was denied, its cost and its exit code. The module that asked for a run is told how it ended (`Runner::on_end`), as it ends or when a start finds it ended. The harness, the agent program, only builds the command: `claude` is the one harness, and the tests' harness is a shell script.
 
-There are two kinds. **Back a law** has `Bash`, `Read`, `Edit`, `Write`, `Glob` and `Grep`. **Micro-world** has the same without `Bash`. The command carries only the flags spec #378 gives; a micro-world reads the project from its working folder and writes only into `.micro-world/` there ([Micro-worlds](#micro-worlds)).
+There are three kinds. **Back a law** has `Bash`, `Read`, `Edit`, `Write`, `Glob` and `Grep`. **Micro-world** has the same without `Bash`. **Map text review** has only `Read`, `Glob` and `Grep`. The command carries only the flags spec #378 gives; a micro-world reads the project from its working folder and writes only into `.micro-world/` there ([Micro-worlds](#micro-worlds)).
 
-A prompt holds only text plotkeeper wrote or Daniel confirmed. An issue's, a PR's or a comment's text never goes into a run, since strangers can write it on a public repository.
+A prompt holds only text plotkeeper wrote or Daniel confirmed. An issue's, a PR's or a comment's text never goes into a prompt, since strangers can write it on a public repository. The map text review's folder holds a PR's head, so its agent reads text a PR wrote; its prompt still holds none ([Map text review](#map-text-review)).
 
 ## The command
 
@@ -39,7 +39,7 @@ The sandbox block is this, with plotkeeper's data folder first in `denyRead`, si
 
 ## The allow list
 
-`--allowedTools` lists edits inside the working folder (for a micro-world, only inside its `.micro-world/`), and for a kind with `Bash`:
+`--allowedTools` lists edits inside the working folder (for a micro-world, only inside its `.micro-world/`; for a map text review none, and the flag is left out), and for a kind with `Bash`:
 
 - read-only git, `git status`, `git diff` and `git log`, plus `git add`, since the working folder is a clone;
 - one entry per command of the project's `checks`, each bare and with arguments (`Bash(cargo test)` and `Bash(cargo test *)`).
@@ -55,7 +55,7 @@ All in `settings.json` ([Settings files](../settings.md)), read by the server an
 - `backgroundRuns.harness`: `claude`, the default and the only harness. Any other value refuses the run.
 - `backgroundRuns.model`: the model. Unset, the CLI's own default.
 - `checks`: the project's entry, picked as a session's is ([Checks](checks.md)): the longest folder that is the project's or holds it. There is no default list here. A project with no entry gets "Set this project's checks" and the prompt to copy; a micro-world, which has no `Bash`, needs none.
-- `setup`: per project folder like `checks`, one command, such as `npm ci`. plotkeeper runs it in the working folder before the agent starts, outside the sandbox and with the network, so offline checks find their dependencies. With none set, it is skipped. A setup that fails ends the run before the agent starts. Whatever the setup leaves running when it exits is killed then (#568), so a setup cannot start a service for the agent to use.
+- `setup`: per project folder like `checks`, one command, such as `npm ci`. plotkeeper runs it in the working folder before the agent starts, outside the sandbox and with the network, so offline checks find their dependencies. With none set, it is skipped, and a map text review never gets one: its folder holds a PR's head, whose code a setup such as `npm ci` would run outside the sandbox. A setup that fails ends the run before the agent starts. Whatever the setup leaves running when it exits is killed then (#568), so a setup cannot start a service for the agent to use.
 
 ## A run's folder
 
@@ -81,8 +81,8 @@ plotkeeper starts each run through the launcher, `plotkeeper-run <run's folder>`
 ## Limits
 
 - One run at a time per project. The others wait in the order they were asked for, and the queue shows on the map.
-- A run starts only on a click. Nothing starts one on a timer.
-- 30 minutes, 10 for a micro-world, setup included. At the limit the runner kills the running step's process group, and the launcher writes the status and kills its own.
+- A run starts only on a click, but for the map text review of a PR by Daniel's own login, which starts when its brief is stored. Nothing starts one on a timer.
+- 30 minutes, 10 for a micro-world or a map text review, setup included. At the limit the runner kills the running step's process group, and the launcher writes the status and kills its own.
 - A third of the cores for builds and tests: `CARGO_BUILD_JOBS` and `NEXTEST_TEST_THREADS`.
 - A run that fails because the login is missing or a usage or rate limit is hit pauses every project's queue. The map shows one indicator with **Resume**, and nothing starts until Daniel presses it. Every project with runs is told, and the pause outlives a restart.
 
@@ -111,6 +111,16 @@ The Map view's side area lists the project's runs under **Background runs** (`ui
 - **Kept** in the data folder, `micro-worlds/<project>-<hash>/` (the project's path with each character not a letter or digit as `_`, and its FNV-1a hash, so two paths that read alike never share a folder), one file per world by its key (`flow:<id>`, or `figure:<pr>:<chapter>:<step>`), with the commit it was built at; only a page that passed the checks is stored, and the API (`micro_world_page`) serves only a stored page. A world whose stored page was built before a change, between that commit and the map's commit now, to a path of a part on it says **This may be out of date**, with **Rebuild**, which starts a run as Explore this does; the older page opens meanwhile.
 - **Shown** in an overlay in the glass the size of the settings dialog: the page is fetched through the API and put in a frame by `srcdoc`, with `sandbox="allow-scripts"` and never `allow-same-origin`. The frame has an opaque origin, no network and no way to plotkeeper's API, and `srcdoc` sends no cookie. The sandbox and the page's own policy do not stop the frame navigating itself to a network URL with what it read in the address, so plotkeeper serves its page with `Content-Security-Policy: frame-src 'none'`: a `srcdoc` frame still loads, and no frame of the page loads a URL (checked in headless Chrome, 2026-11-24: without the header the navigation reached a local server, with it nothing did). Esc closes it before any other layer of the map; another project closes it.
 - **Stop rule**: micro-worlds are kept if opened at least twice in the review's window (`micro-world-opened`).
+
+## Map text review
+
+The read-only check of the map text a PR changed against the PR's code (spec #634, ticket #642; `server/src/map_review.rs`). Its verdicts show on Ratify's rows and never block (#645).
+
+- **The items** are the text the PR added or changed, read by the same join as Ratify's rows (`ratify::pr_changes`), so a reformatted map changes nothing: an added or edited part's name, purpose and caption, each only where it changed; its added or changed held items' text; an added or changed link's reason; an added or changed law's text. Nothing removed is reviewed. Each is named by kind and the map's ids, `part:<id>/purpose`, `held:<part>/<n>` (its place in the part's `holds`, never its name, which is the PR's text), `link:<id>/reason`, `law:<id>/text`, and kept with an FNV-1a hash of its text. An item whose id is not one the map takes is left out, since the id could carry text; the head's map check names it.
+- **The run.** Only `Read`, `Glob` and `Grep`, no `--allowedTools`, no setup even when the project has one, and 10 minutes. Its folder is a `git archive` of the PR's head after `git fetch origin refs/pull/<n>/head`, with no git data. Its prompt holds plotkeeper's instructions and the items' ids, never their text: the agent reads that from `system-map.json` in its folder, and answers with `{"items": [{"id", "verdict", "why", "cites"}]}`, a verdict being `supported`, `overreach`, `contradicted` or `unreadable`. Any but `supported` is a flag.
+- **When it runs.** When a brief is stored at a head with changed text and the PR's author is Daniel's own login (`gh pr view --json author` against `gh api user`, run as his normal `gh`, reading no credential file). Any other PR is reviewed only on "Review map text" (the `map_review_start` command), and drafts get no brief, so no review. A lookup that sees a new head cancels the review of an older one, queued or running. It joins the project's one-at-a-time queue, and a login, usage or rate-limit failure pauses the queues as for every run.
+- **Kept** in the data folder, `map-reviews/<project>-<hash>/<pr>.json`: each verdict by item id and hash, and each head's items and state. A head whose items all have a verdict from an earlier head, by id and hash, runs nothing; one whose items partly do sends only the rest to its run. An answer that leaves an item without a verdict, or a run that ends any other way than finished, fails the head with why, and "Run again" (the same command) runs what is left. The page reads a head's review with `pr_map_review`.
+- **Why the exceptions are safe.** The tools (no `Bash`, no `Edit`, no `Write`), no setup, the folder with no git data, and the sandbox's network and read rules ([The command](#the-command)) bound what a planted sentence in the PR can do: bend a verdict, and a verdict never blocks.
 
 ## The sandbox gate
 
@@ -160,7 +170,7 @@ A law on trust in a part's sheet has **Back a law** (`ui/patch-review.ts`, `serv
 
 ## Limits v1 accepts
 
-v1 is one user on his own Mac, runs start only on his click, and a prompt holds only trusted text. Hardening past that is #411 ([research](../research/sandbox-loopback-preflight-temp.md)):
+v1 is one user on his own Mac, runs start only on his click (but the map text review of his own PRs), and a prompt holds only trusted text. Hardening past that is #411 ([research](../research/sandbox-loopback-preflight-temp.md)):
 
 - A run's tools can connect to any server on the Mac's loopback. plotkeeper's own server needs its cookie or token, which a run cannot read.
 - Only the shell is sandboxed, not the whole `claude` process, which Anthropic's docs ask of fully unattended runs.

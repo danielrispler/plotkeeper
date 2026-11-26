@@ -139,6 +139,10 @@ pub fn lookup_later(app: &Arc<App>, project: &str, ready: Vec<Ready>) {
         crate::settings::brief_backfill().window_ms,
         &|pr| has_fresh_brief(&store, pr),
     );
+    // A new head cancels the map text review of an older one.
+    for pr in &ready {
+        app.reviews.head_now(project, pr.number, &pr.head);
+    }
     for pr in ready.into_iter().filter(|pr| allowed.contains(&pr.number)) {
         let (app, project) = (app.clone(), project.to_string());
         std::thread::spawn(move || {
@@ -176,7 +180,12 @@ pub fn lookup_later(app: &Arc<App>, project: &str, ready: Vec<Ready>) {
             );
             drop(claim);
             if did != Did::Kept {
-                app.events.emit("map-landed", serde_json::json!(project));
+                app.events
+                    .emit("map-landed", serde_json::json!(project.clone()));
+            }
+            // A brief stored at this head may start its map text review.
+            if matches!(did, Did::Wrote | Did::Carried) {
+                app.reviews.brief_stored(&project, pr.number, &pr.head);
             }
         });
     }
@@ -266,7 +275,12 @@ pub fn pr_brief(
                 .ok();
             }
             drop(claim);
-            app.events.emit("map-landed", serde_json::json!(project));
+            app.events
+                .emit("map-landed", serde_json::json!(project.clone()));
+            // A brief stored at this head may start its map text review.
+            if store.get(number, &head).is_some() {
+                app.reviews.brief_stored(&project, number, &head);
+            }
         }
     };
     let opened = briefs.open_in_background(&project, number, write);

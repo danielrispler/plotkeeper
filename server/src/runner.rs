@@ -1,5 +1,6 @@
 //! Background runs (spec danielrispler/plotkeeper#378, ticket #390): a headless agent run with scoped tools, started by
-//! Daniel's click and never a session. This is the runner; back a law (`back_a_law.rs`) and micro-worlds (`micro_worlds.rs`) start runs.
+//! Daniel's click and never a session. This is the runner; back a law (`back_a_law.rs`), micro-worlds (`micro_worlds.rs`) and
+//! the map text review (`map_review.rs`, which also starts by itself for Daniel's own PRs) start runs.
 //!
 //! - **The seam.** A [`Request`] (run kind, working folder, prompt, limits) goes in through [`Runner::submit`]; an
 //!   [`Outcome`] (result text, denials, cost, exit) comes out through [`Runner::outcome`]. The [`Harness`] builds the
@@ -56,6 +57,8 @@ pub enum Kind {
     BackLaw,
     /// Builds a small simulator page from the project's code, with no shell.
     MicroWorld,
+    /// Checks a PR's changed map text against the PR's code, reading only (`map_review.rs`).
+    MapReview,
 }
 
 impl Kind {
@@ -64,7 +67,14 @@ impl Kind {
         match self {
             Kind::BackLaw => &["Bash", "Read", "Edit", "Write", "Glob", "Grep"],
             Kind::MicroWorld => &["Read", "Edit", "Write", "Glob", "Grep"],
+            Kind::MapReview => &["Read", "Glob", "Grep"],
         }
+    }
+
+    /// Whether the project's `setup` runs before the agent. Never for a map text review: its folder holds a PR's head, whose
+    /// code a setup such as `npm ci` would run outside the sandbox, and with no shell it needs none.
+    fn takes_setup(self) -> bool {
+        self != Kind::MapReview
     }
 
     /// Whether the agent has a shell, and so needs the project's checks to allow in it.
@@ -80,11 +90,11 @@ pub struct Limits {
 }
 
 impl Limits {
-    /// 30 minutes, and 10 for a micro-world.
+    /// 30 minutes, and 10 for a micro-world or a map text review.
     pub fn of(kind: Kind) -> Limits {
         let minutes = match kind {
             Kind::BackLaw => 30,
-            Kind::MicroWorld => 10,
+            Kind::MicroWorld | Kind::MapReview => 10,
         };
         Limits {
             timeout: Duration::from_secs(minutes * 60),
@@ -206,15 +216,16 @@ const GIT: [&str; 4] = ["git status", "git diff", "git log", "git add"];
 pub const MICRO_WORLD_OUT: &str = ".micro-world";
 
 /// What `--allowedTools` lists for a run: edits inside its working `folder` (a micro-world's only inside
-/// [`MICRO_WORLD_OUT`] there), and for a kind with a shell the read-only
+/// [`MICRO_WORLD_OUT`] there, and none for a map text review, which only reads), and for a kind with a shell the read-only
 /// git commands and one entry per command of the project's `checks`, each bare and with arguments. An entry of `checks`
 /// that has `git` or `gh` as any of its words is left out, so no list ever allows a push. This list is not a security
 /// boundary: an allowed check runs code the agent wrote. The OS sandbox and trusted input are.
 pub fn allowed_tools(kind: Kind, folder: &Path, checks: &[String]) -> Vec<String> {
     // The rule's own form for an absolute path: `//` and the path.
     let writes = match kind {
+        Kind::MapReview => return Vec::new(),
         Kind::MicroWorld => folder.join(MICRO_WORLD_OUT),
-        _ => folder.to_path_buf(),
+        Kind::BackLaw => folder.to_path_buf(),
     };
     let mut allowed = vec![format!("Edit(/{}/**)", writes.display())];
     if kind.shell() {
@@ -260,9 +271,12 @@ pub fn claude_command(program: &Path, plan: &Plan) -> HarnessCommand {
         args.extend(["--model".into(), model.into()]);
     }
     args.extend(["--tools".into(), plan.kind.tools().join(",")]);
-    // `--allowedTools` takes several values, so an option must follow it.
-    args.push("--allowedTools".into());
-    args.extend(allowed_tools(plan.kind, plan.folder, plan.checks));
+    // `--allowedTools` takes several values, so an option must follow it. An empty list is no flag at all.
+    let allowed = allowed_tools(plan.kind, plan.folder, plan.checks);
+    if !allowed.is_empty() {
+        args.push("--allowedTools".into());
+        args.extend(allowed);
+    }
     args.extend(["--settings".into(), sandbox_settings(plan.data).to_string()]);
     args.extend(["--output-format".into(), "json".into()]);
     // NUL bytes, which no argument can hold, are dropped.
@@ -1139,7 +1153,7 @@ impl Runner {
             prompt: request.prompt.clone(),
             created_ms: millis(),
             timeout_secs: request.limits.timeout.as_secs().max(1),
-            setup: settings.setup,
+            setup: settings.setup.filter(|_| request.kind.takes_setup()),
             command,
         };
         write_json(&dir.join(RUN), &stored)

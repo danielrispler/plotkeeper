@@ -36,6 +36,7 @@ const partDetail = {
   of: "part",
   name: words("Server", "Server"),
   purpose: words("Serves the page.", "Serves the page and keeps its state."),
+  caption: words("Serves the page", "Serves the page"),
   holds: [
     { name: "Fog", text: words("Greys a part.", "Greys a part a PR changed."), paths_added: ["server/src/fog/"], paths_removed: [] },
     { name: "Same", text: words("Unchanged.", "Unchanged."), paths_added: [], paths_removed: [] },
@@ -93,9 +94,10 @@ test("a detail shows only what changed, old beside new, and an added part shows 
     { label: "Holds Locks", before: "One writer.", after: null },
   ]);
   /** @type {import("../../dist/types.js").RatifyDetail} */
-  const added = { of: "part", name: words(null, "Install"), purpose: words(null, "Installs the hook."), holds: [{ name: "Copies", text: words(null, "The hook's copies."), paths_added: [], paths_removed: [] }], paths_added: ["server/src/install.rs"], paths_removed: [] };
+  const added = { of: "part", name: words(null, "Install"), purpose: words(null, "Installs the hook."), caption: words(null, "Wires the hook"), holds: [{ name: "Copies", text: words(null, "The hook's copies."), paths_added: [], paths_removed: [] }], paths_added: ["server/src/install.rs"], paths_removed: [] };
   assert.deepEqual(detailLines(added), [
     { label: "Name", before: null, after: "Install" },
+    { label: "Caption", before: null, after: "Wires the hook" },
     { label: "Purpose", before: null, after: "Installs the hook." },
     { label: "Paths", before: null, after: "server/src/install.rs", code: true },
     { label: "Holds Copies", before: null, after: "The hook's copies." },
@@ -105,6 +107,15 @@ test("a detail shows only what changed, old beside new, and an added part shows 
     { label: "Reason", before: "", after: "The page calls the server over HTTP." },
   ]);
   assert.deepEqual(detailLines(null), []);
+});
+
+test("a changed caption shows as Caption, and a link whose ends swapped as Direction, old beside new (#643)", () => {
+  const captioned = { ...partDetail, name: words("Server", "Server"), caption: words("The page", "The page and its state"), holds: [], paths_added: [], paths_removed: [], purpose: words("p", "p") };
+  assert.deepEqual(detailLines(captioned), [{ label: "Caption", before: "The page", after: "The page and its state" }]);
+  const added = { ...captioned, name: words(null, "Install"), caption: words(null, "Wires the agents"), purpose: words(null, "Installs the hook.") };
+  assert.deepEqual(detailLines(added).map((line) => line.label), ["Name", "Caption", "Purpose"], "the caption reads after the name, as on the plate");
+  const flipped = { ...linkDetail, kind: words("import", "import"), reason: words("", ""), direction: words("server to ui", "ui to server") };
+  assert.deepEqual(detailLines(flipped), [{ label: "Direction", before: "server to ui", after: "ui to server" }]);
 });
 
 test("an import link added or removed without a reason shows no Reason line", () => {

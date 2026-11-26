@@ -361,7 +361,9 @@ function drawLinks(layer: Element, view: MapView) {
     const b = rimPoint(to, sizeOf(view.doc, line.to), from);
     // A Map diff's new line is bright and thick, its removed one dashed (#640); a line on both sides keeps the plain stroke.
     const tag = lineTag(view.diff, line.from, line.to);
-    nodes.push(svg("line", { class: `link${tag ? ` d-${tag}` : ""}`, "data-link": line.ids.join(" "), "data-from": line.from, x1: String(a.x), y1: String(a.y), x2: String(b.x), y2: String(b.y) }));
+    // `data-mark` is the line's id as a Ratify row names it (#643): its ends in sorted order.
+    const mark = `line:${[line.from, line.to].sort().join("|")}`;
+    nodes.push(svg("line", { class: `link${tag ? ` d-${tag}` : ""}`, "data-link": line.ids.join(" "), "data-mark": mark, "data-from": line.from, x1: String(a.x), y1: String(a.y), x2: String(b.x), y2: String(b.y) }));
     const laws = view.doc.laws.filter((law) => line.ids.includes(law.on));
     const points = markPoints(a, b, laws.length);
     laws.forEach((law, i) => {
@@ -371,6 +373,7 @@ function drawLinks(layer: Element, view: MapView) {
       // An added law's ring around its diamond, drawn under it.
       if (lawTag === "added") nodes.push(svg("rect", { class: "link-ring", width: "13", height: "13", x: "-6.5", y: "-6.5", transform: `translate(${at.x} ${at.y}) rotate(45)` }));
       const diamond = linkMark(line.ids, law, at);
+      diamond.setAttribute("data-mark", `law:${law.id}`);
       if (lawTag) diamond.classList.add(`d-${lawTag}`);
       nodes.push(diamond);
     });
@@ -411,9 +414,12 @@ function plateNode(part: Part, current: MapView, links: SVGElement, fit: () => v
   const tag = current.diff?.parts[part.id];
   const plate = text("div", "", `plate tier-${tier}${mist ? ` fog-${mist}` : ""}${tag ? ` d-${tag}` : ""}`);
   plate.dataset.id = part.id;
+  // The mark's id a Ratify row lights (#643), as a law's and a line's are.
+  plate.dataset.mark = `part:${part.id}`;
   const [fog, marks, chips] = [text("div", "", "plate-fog"), text("div", "", "plate-marks"), text("div", "", "plate-chips")];
   marks.append(...doc.laws.filter((law) => law.on === part.id).map((law) => {
     const node = lawMark(law, `plate-${part.id}-${law.id}`);
+    node.dataset.mark = `law:${law.id}`;
     const lawTag = current.diff?.laws[law.id];
     if (lawTag) node.classList.add(`d-${lawTag}`);
     return node;
@@ -472,7 +478,7 @@ function drawMap(body: HTMLElement, state: MapState, doc: LoadedMap, past: Scrub
   for (const actor of doc.actors) {
     const actorTag = shown?.actors[actor.id];
     const label = text("div", actor.name, `actor${actorTag ? ` d-${actorTag}` : ""}`);
-    label.dataset.id = actor.id;
+    Object.assign(label.dataset, { id: actor.id, mark: `actor:${actor.id}` }); // the mark a Ratify row lights (#643)
     grab(label, actor.id, current, links, fit, () => {});
     nodes.set(actor.id, label);
     elements.push(label);

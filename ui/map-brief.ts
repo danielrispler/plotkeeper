@@ -23,7 +23,7 @@ import { logStop } from "./stop-rules.js";
 import { expectedLine } from "./map-pre-flight.js";
 import { exploreRow } from "./micro-world.js";
 import { guardRow } from "./patch-review.js";
-import { branchOf, mapCheckNode, overturnNote, ratifyActions, ratifyDetail, ratifyEvidence, ratifyHead } from "./map-ratify.js";
+import { branchOf, lightsMark, mapCheckNode, overturnNote, ratifyActions, ratifyDetail, ratifyEvidence, ratifyHead } from "./map-ratify.js";
 import { copyOverturn, statusWords } from "./ratify.js";
 import type { Copied } from "./notes.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
@@ -603,6 +603,8 @@ function ratifyNode(view: MapView, rows: RatifyRow[]) {
     const item = text("li", "", "ratify-row");
     item.dataset.kind = row.kind;
     item.dataset.id = row.id;
+    // Pointing at the row lights its mark on the Map diff (#643).
+    if (row.mark) lightsMark(item, row.mark, () => currentMap()?.slots.canvas ?? null);
     const kind = row.kind === "decision" ? "Decided" : `${row.change ? `${row.change.charAt(0).toUpperCase()}${row.change.slice(1)} ` : ""}${row.kind}`;
     item.append(text("span", kind, "ratify-kind"), text("span", row.text || row.id, "ratify-text"));
     if (row.status === "not-yet") {

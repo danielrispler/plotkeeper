@@ -52,6 +52,8 @@ export const base = {
   micro_world_page: "",
   briefs_waiting: null,
   pr_ratify: [],
+  pr_map_review: null,
+  map_review_start: null,
   pr_map_diff: null,
   ratify_site: { file: "", first: 1, lines: [] },
   projects: [],

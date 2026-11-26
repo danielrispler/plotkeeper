@@ -293,7 +293,7 @@ pub fn by_own_login(repo: &Path, number: u64) -> bool {
 }
 
 /// `by_own_login` with the `gh` at `program`.
-fn by_own_login_with(program: &str, repo: &Path, number: u64) -> bool {
+pub(crate) fn by_own_login_with(program: &str, repo: &Path, number: u64) -> bool {
     let n = number.to_string();
     let login = |args: &[&str]| {
         let output = run_until(run::gh_at(program, repo).args(args), GH_LIMIT).ok()?;
