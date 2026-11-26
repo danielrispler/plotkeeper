@@ -454,11 +454,10 @@ export const selectedView = (session: string, project: string, agent: string | n
   panel: agent === null ? { kind: "story", session } : { kind: "log", session, agent },
 });
 /**
- * A press on a project header shows that project's map; a session's panel of another project closes with the switch. A press on the shown
- * project's header folds its group, as the header did before it switched projects (#97).
+ * A press on a project's name shows that project's map, the shown one's included; a session's panel of another project closes with the
+ * switch. Folding the group is the header's chevron (#674).
  */
-export function pressHeader(page: PageView, pressed: string, projectOf: (session: string) => string | null): PageView | "fold" {
-  if (pressed === page.project) return "fold";
+export function pressHeader(page: PageView, pressed: string, projectOf: (session: string) => string | null): PageView {
   const session = panelSession(page.panel);
   return { project: pressed, panel: session === null || projectOf(session) === pressed ? page.panel : null };
 }

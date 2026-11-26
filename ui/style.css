@@ -129,6 +129,13 @@ h1 { margin: 0 0 var(--sp-4); }
 /* Its header switches the map (#386): quiet, in the faint tone, the shown project's a step brighter. */
 .project-toggle { display: flex; flex: 1; gap: var(--sp-3); align-items: center; min-width: 0; padding: var(--sp-2) var(--sp-4); border-radius: var(--radius); font-size: var(--size-xs); font-weight: 500; color: var(--faint); text-align: start; background: none; border: 0; font-family: inherit; cursor: pointer; }
 .project-toggle:hover { background: var(--hover); }
+/* Its chevron (#674) folds the group: a control-sized button before the name, turned down while the group is open as a row's is. */
+.project-head .fold { flex: none; display: grid; place-items: center; width: var(--control); height: var(--control); padding: 0; border: 0; border-radius: var(--radius-small); background: none; color: var(--muted); cursor: pointer; }
+.project-head .fold:hover { color: var(--fg); background: var(--hover); }
+.project-head .fold svg { width: var(--icon); height: var(--icon); transition: transform var(--motion); }
+.project-head .fold[aria-expanded="true"] svg { transform: rotate(90deg); }
+.project-head .fold:dir(rtl) svg { transform: scaleX(-1); }
+.project-head .fold[aria-expanded="true"]:dir(rtl) svg { transform: scaleX(-1) rotate(90deg); }
 .project-head.current .project-toggle { color: var(--muted); }
 /* The header's quiet dot (#386): Home's mark, drawn as the map's mist; its hover names what lit it. */
 .project-toggle .project-dot { flex: none; margin-inline: auto 0; background: var(--mist-thick); filter: blur(var(--sp-1)); }

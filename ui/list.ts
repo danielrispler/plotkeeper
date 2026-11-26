@@ -90,18 +90,13 @@ async function readDots() {
   drawSidebar();
 }
 
-// A press on a project's header (#386): another project's map shows, and a session's panel of another project closes; on the shown project's
-// header it folds the group.
+// A press on a project's name (#386): its map shows, and a session's panel of another project closes.
 function pressHead(path: string) {
   const projectOf = (id: string) => {
     const session = studio.listed.find((s) => s.id === id);
     return session ? projectOfCwd(session.cwd) : null;
   };
   const next = pressHeader({ project: shownProject(), panel: panelShown() }, path, projectOf);
-  if (next === "fold") {
-    if (!shut.delete(path)) shut.add(path);
-    return drawSidebar();
-  }
   if (next.panel === null && panelShown() !== null) closePanel();
   openMap(next.project);
 }
@@ -419,7 +414,6 @@ export function projectHead(group: ProjectGroup<Session>): HTMLElement {
   head.dataset.key = `head ${group.key}`;
   head.dataset.project = group.key;
   const toggle = pressable(text("button", "", "project-toggle"), null, () => pressHead(group.key));
-  toggle.setAttribute("aria-expanded", String(projectOpen(group.key)));
   toggle.dataset.key = `toggle ${group.key}`;
   toggle.append(text("span", group.name, "name"));
   if (group.rollup) toggle.append(glyph(`head ${group.key}`, group.rollup));
@@ -427,8 +421,19 @@ export function projectHead(group: ProjectGroup<Session>): HTMLElement {
   if (why?.length) {
     toggle.append(mark(keyed(text("span", "", "project-dot mist-swatch"), `dot ${group.key}`), dotTitle(why), "start"));
   }
-  hint(toggle, `${group.gone ? `${group.key} is gone` : group.key || group.name}\n${group.key === shownProject() ? "Fold or unfold its sessions" : "Show its map"}`, "start");
-  head.append(toggle, ...(group.live ? [] : [projectMore(group)]));
+  hint(toggle, `${group.gone ? `${group.key} is gone` : group.key || group.name}\nShow its map`, "start");
+  // The chevron folds the group, only while it has live sessions to fold; named as the subagent chevrons are.
+  const fold = group.live ? icon("fold", CHEVRON, () => {
+    if (!shut.delete(group.key)) shut.add(group.key);
+    drawSidebar();
+  }) : null;
+  if (fold) {
+    fold.dataset.key = `fold ${group.key}`;
+    fold.setAttribute("aria-label", `Sessions of ${group.name}`);
+    fold.setAttribute("aria-expanded", String(projectOpen(group.key)));
+    hint(fold, "Fold or unfold its sessions", "start");
+  }
+  head.append(...(fold ? [fold] : []), toggle, ...(group.live ? [] : [projectMore(group)]));
   return head;
 }
 
