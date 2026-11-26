@@ -116,20 +116,27 @@ const projectOpen = (key: string) => !shut.has(key);
 
 
 // The name's hover, only for a prompt-named session: its full name, then the identity's PR and worktree, which the prompt
-// name leaves out. Any other name is in the row's own title.
+// name leaves out. Any other name is in the row's own hint.
 function nameTitle(session: Session): string {
   return session.name || !session.prompt_name ? "" : `${sessionName(session)} · ${session.identity.name}`;
 }
 
-// The mark's node, with the context's hover.
+// The name's node: cut text that scrolls in place, keyed before its hint, which only a prompt-named session has.
+function nameNode(session: Session): HTMLElement {
+  const node = keyed(cut(text("span", sessionName(session), "name")), `name-${session.id}`);
+  const full = nameTitle(session);
+  return full ? hint(node, full) : node;
+}
+
+// The mark's node: a mark named by what it says in full, the context's tokens among them; an empty one, with no context, is none.
 function markNode(session: Session): HTMLElement {
   const node = text("span", rowMark(session), "id");
   node.setAttribute("data-key", `mark-${session.id}`);
   // A span is no button: its hint opens once the helper's pointer path reaches it (#586).
-  if (session.shell) return hint(node, "A plain terminal");
-  if (session.status_only) return hint(node, "Another agent, followed by its reported status only");
+  if (session.shell) return mark(node, "A plain terminal");
+  if (session.status_only) return mark(node, "Another agent, followed by its reported status only");
   const context = contextTitle(session.transcript.context);
-  return context ? hint(node, context) : node;
+  return context ? mark(node, context) : node;
 }
 
 
@@ -159,7 +166,7 @@ function done(all: Children, children: Subagent[] = []): HTMLElement[] {
 
 // A row's lines: its name and status glyph, then, if any, what it is doing, muted. Its hint pairs
 // the name with the status's word, and a note on its footprint when it has one.
-function rowLines(button: HTMLElement, state: string, name: HTMLElement[], below: HTMLElement[] | null, unseen = false, landed = false, unwatched = false, note: string | null = null, called = name[0]?.textContent ?? "") {
+function rowLines(button: HTMLElement, state: string, name: HTMLElement[], below: HTMLElement[] | null, unseen = false, landed = false, unwatched = false, note: string | null = null) {
   const first = text("span", "", "l1");
   first.append(...name, glyph(button.getAttribute("data-key") ?? "", state, unseen, landed, unwatched));
   button.append(first);
@@ -169,7 +176,7 @@ function rowLines(button: HTMLElement, state: string, name: HTMLElement[], below
     second.append(...below);
     button.append(second);
   }
-  hint(button, withNote(`${called} · ${status(state, unseen, landed, unwatched)[1]}`, note));
+  hint(button, withNote(`${name[0]?.textContent ?? ""} · ${status(state, unseen, landed, unwatched)[1]}`, note));
   return first;
 }
 
@@ -197,7 +204,7 @@ export function row(session: Session, children: Children, token: string | null =
   const first = rowLines(
     button,
     session.state,
-    [cut(text("span", sessionName(session), "name")), markNode(session), ...(token ? [cut(text("span", token, "id token"))] : [])],
+    [nameNode(session), markNode(session), ...(token ? [cut(text("span", token, "id token"))] : [])],
     line === null
       ? null
       : [...done(children, children.get("session")), rowLine(line, session.id), ...(turn ? [hint(counts(clock, turn[1]), turn[0])] : [])],
@@ -205,7 +212,6 @@ export function row(session: Session, children: Children, token: string | null =
     session.landed,
     !session.pid,
     rowNote(session.id),
-    nameTitle(session) || sessionName(session),
   );
   // Hovering the row spotlights its session on the map (#382, #562) and shows its footprint (#559); a session that touched no part in the
   // last 7 days says so in the row's hint, built when the row is drawn. The placement can arrive after the row: the sidebar is drawn again then.

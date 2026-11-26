@@ -13,7 +13,7 @@
 
 import { logStop } from "./stop-rules.js";
 import { age, cut, element, failure, hint, invoke, pageStore, pressable, text } from "./dom.js";
-import { currentMap, onDraw, onPlateClick, reloadMap, registerLayer, syncSide, type MapView } from "./map.js";
+import { currentMap, lawMark, onDraw, onPlateClick, reloadMap, registerLayer, syncSide, type MapView } from "./map.js";
 import { openDrawer } from "./map-drawer.js";
 import { drawStrip } from "./map-history.js";
 import { overturnNote, ratifyActions } from "./map-ratify.js";
@@ -186,7 +186,8 @@ export function sheetCard(view: MapView, part: Part): { card: HTMLElement; extra
   const unratified = view.scrub ? sheetPending([], part.id, []) : sheetPending(view.state.ratify ?? [], part.id, view.doc.links);
   const ratified = () => void reloadMap().catch(failure("map_state"));
   const laws = sheet.laws.map((law) => {
-    const mark = text("span", "", `law-mark ${law.backing}`);
+    // The law's mark says its backing and text on the pointer, as the row's title did; keyed apart from the plate's own mark of it.
+    const mark = lawMark({ id: law.id, on: part.id, backing: law.backing, text: law.text }, `sheet-${part.id}-${law.id}`);
     const row = text("li", "", "sheet-law");
     row.dataset.law = law.id;
     const acts = text("span", "", "sheet-law-actions");

@@ -141,3 +141,13 @@ test("on: a line sits under the fog buttons whatever they are, saying what the b
   assert.deepEqual(lines(card), []);
   assert.deepEqual(described(card), []);
 });
+
+test("a law's mark on the sheet is a mark, its hint the law's backing and text as the row's title said, keyed apart from the plate's", () => {
+  const { card } = sheetCard(view(), plugins);
+  const [mark] = classed(card, "law-mark");
+  assert.equal(mark.getAttribute("role"), "img");
+  assert.equal(mark.getAttribute("aria-label"), "Backed by a check: Events apply in order");
+  assert.equal(hintOf(mark)?.textContent, "Backed by a check: Events apply in order");
+  assert.equal(mark.getAttribute("data-key"), "sheet-plugins-plugins-order");
+  assert.equal(mark.getAttribute("tabindex"), null);
+});

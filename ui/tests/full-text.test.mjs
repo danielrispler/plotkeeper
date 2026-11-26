@@ -92,6 +92,13 @@ test("a session row's name and token scroll in place, its step and identity are 
   noEmptyTitle(button);
 });
 
+test("a prompt-named row's hint is its name and status, as its title was; the name's own hint adds the identity", () => {
+  const button = row(session, new Map(), token);
+  assert.equal(hintOf(button)?.textContent, `${long} · Running`);
+  const name = path(button, "name")?.at(-1);
+  assert.equal(hintOf(name)?.textContent, `${long} · PR #9 · issue-9`);
+});
+
 test("a named session's name needs no title of its own: the row's hint holds it", () => {
   const button = row({ ...session, name: "Short", prompt_name: null }, new Map());
   cuts(button, "name", "Short");
@@ -159,7 +166,7 @@ const covered = {
   ".strip .btn": "list.ts: the button's hint holds the name and state",
   ".row .l1": "a container: its name, token and glyph carry the titles",
   ".row .l2": "a container: its step carries the title",
-  ".row .name": "list.ts: the row button's hint holds it; a prompt-named session's own title adds the identity",
+  ".row .name": "list.ts: the row button's hint holds it; a prompt-named session's name has its own hint, which adds the identity",
   ".row .row-step": "list.ts: the step's title",
   ".row .token": "list.ts: the token's title",
   ".project-toggle .name": "list.ts: the toggle's hint is the project's path",

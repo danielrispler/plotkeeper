@@ -7,6 +7,8 @@ import { fakeDocument } from "./dom.mjs";
 const { mark, hintOf: hintFor } = await import("../../dist/dom.js");
 const { logo } = await import("../../dist/logos.js");
 const { lawMark, brokenMark, linkMark } = await import("../../dist/map.js");
+const { row } = await import("../../dist/list.js");
+const { staleMark } = await import("../../dist/map-stale.js");
 
 const page = new Map();
 globalThis.document = fakeDocument({
@@ -69,4 +71,21 @@ test("no source of the page sets a native title: not an attribute, a property, a
   const found = files.flatMap((name) => readFileSync(new URL(name, dir), "utf8").split("\n").map((line, i) => [`${name}:${i + 1}`, line]))
     .filter(([, line]) => sets.test(line) && !/document\.title\s*=/.test(line));
   assert.deepEqual(found, []);
+});
+
+test("a session row's id mark is a mark, named by what it says in full", () => {
+  const session = /** @type {any} */ ({
+    id: "s", name: "Named", prompt_name: null, folder_name: "f", identity: { issue: null, name: "f" }, capabilities: { agent: "claude" },
+    transcript: { context: { tokens: 12000 } }, state: "idle", line: null, questions: [], agents: [], unseen: false, landed: false,
+    started_at: 0, last_event_at: 0, turn_span: null, status_only: false, shell: false,
+  });
+  /** @type {(drawn: any) => any} */
+  const idOf = (drawn) => drawn.childNodes[0].childNodes.find((/** @type {any} */ child) => child.className === "id");
+  isMark(idOf(row(session, new Map())), "12k tokens used");
+  isMark(idOf(row({ ...session, id: "t", shell: true }, new Map())), "A plain terminal");
+  isMark(idOf(row({ ...session, id: "u", status_only: true }, new Map())), "Another agent, followed by its reported status only");
+});
+
+test("a stale plate's band is a mark, named by its band's words", () => {
+  isMark(staleMark("core", 2), "You last engaged with this part 6 weeks or more ago");
 });

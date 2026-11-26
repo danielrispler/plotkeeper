@@ -4,7 +4,7 @@
 // once with no writer call; entering it is an activity on the part, which clears its band. A past commit's map shows no band.
 
 import { logStop } from "./stop-rules.js";
-import { hint, hintOf, invoke, text } from "./dom.js";
+import { hint, hintOf, invoke, keyed, mark, text } from "./dom.js";
 import { onPlate, reloadMap, type MapView } from "./map.js";
 import { exploreRow } from "./micro-world.js";
 import { refresherOf, staleWords } from "./refresher.js";
@@ -13,10 +13,13 @@ onPlate(({ view, part, plate }) => {
   const band = view.scrub ? undefined : view.state.stale?.[part.id];
   if (!band) return;
   plate.classList.add("stale", `stale-${band}`);
-  plate.append(text("div", "", "plate-stale"));
+  plate.append(staleMark(part.id, band));
   const open = plate.querySelector<HTMLElement>(".plate-open");
   if (open) hint(open, `${hintOf(open)?.textContent ?? ""}\n\n${staleWords(band)}`);
 });
+
+/** A stale part's band along its plate's foot: a mark named by its band's words, keyed before its hint reads the name. */
+export const staleMark = (part: string, band: number) => mark(keyed(text("div", "", "plate-stale"), `stale-${part}`), staleWords(band));
 
 /**
  * The band's line at the top of the sheet (#495): the server's, with the last engagement's date, else the band alone; null when the part
