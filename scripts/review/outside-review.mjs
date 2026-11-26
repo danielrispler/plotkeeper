@@ -235,6 +235,26 @@ export const outcome = ({ status, missing, stdout, stderr, reads }) => {
   };
 };
 
+/** Makes `folder` a read-only workspace for an `agy` run started in it: `deny-hook.mjs` denies every tool but a read inside it, logging each decision to `log`. */
+export const readOnly = (folder, log) => {
+  const hook = join(import.meta.dirname, "deny-hook.mjs");
+  const command = [process.execPath, hook, folder, log].map((part) => `'${part}'`).join(" ");
+  mkdirSync(join(folder, ".agents"));
+  writeFileSync(
+    join(folder, ".agents/hooks.json"),
+    JSON.stringify({ readonly: { PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command, timeout: 10 }] }] } }),
+  );
+};
+
+/** The hook's decisions, from its log. */
+export const hookDecisions = (log) =>
+  safe(() => readFileSync(log, "utf8"), "")
+    .split("\n")
+    .flatMap((line) => safe(() => [JSON.parse(line)], []));
+
+/** How many reads the hook allowed: none means the run saw no file. */
+export const allowedReads = (decisions) => decisions.filter((d) => d.decision === "allow" && d.tool === "read_file").length;
+
 /** The Gemini quota left, by window, as fractions, from `agy -p /usage --output-format json`. */
 export const quota = (stdout) => {
   try {
@@ -360,20 +380,13 @@ const main = async (opts) => {
     writeFileSync(join(folder, "review/changed.txt"), absolute(git("diff", "--name-only", "--diff-filter=d", base, head)));
     writeFileSync(join(folder, "review/tree.txt"), absolute(git("ls-tree", "-r", "--name-only", head)));
     writeFileSync(join(folder, "review/schema.json"), JSON.stringify(SCHEMA));
-    const hook = join(import.meta.dirname, "deny-hook.mjs");
-    const command = [process.execPath, hook, folder, log].map((part) => `'${part}'`).join(" ");
-    mkdirSync(join(folder, ".agents"));
-    writeFileSync(
-      join(folder, ".agents/hooks.json"),
-      JSON.stringify({ readonly: { PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command, timeout: 10 }] }] } }),
-    );
+    readOnly(folder, log);
     const quotaBefore = quotaLeft();
     const call = agyCall(opts, { schema: join(folder, "review/schema.json"), prompt: brief(folder), env: process.env });
     const ran = await spawned(call.args, { cwd: folder, env: call.env }, (TIMEOUT_MINUTES + 2) * 60_000, (c) => (child = c));
     child = null;
-    const logged = safe(() => readFileSync(log, "utf8"), "").split("\n");
-    const decisions = logged.flatMap((line) => safe(() => [JSON.parse(line)], []));
-    const result = outcome({ ...ran, reads: decisions.filter((d) => d.decision === "allow" && d.tool === "read_file").length });
+    const decisions = hookDecisions(log);
+    const result = outcome({ ...ran, reads: allowedReads(decisions) });
     const dirty = safe(() => git("-C", repo, "status", "--porcelain"), "");
     if (dirty) notes.push(`warning: the review changed its throwaway tree, so the deny hook let a write through:\n${dirty}`);
     if (safe(() => git("status", "--porcelain"), before) !== before) notes.push("warning: the reviewed checkout changed during the review");
