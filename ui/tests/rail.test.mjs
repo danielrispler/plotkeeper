@@ -16,9 +16,9 @@ globalThis.document = fakeDocument(
 globalThis.marked = createRequire(import.meta.url)("marked");
 const replies = new Map();
 tauri([], (command, args) => replies.get(command)?.(args) ?? null);
-const { blockKind, cardTime, feedTurns, foldedLine, headlineOf, nowOf, oneAtATime, showView, turnAt } = await import("../../dist/story.js");
+const { askedLabel, blockKind, cardTime, feedTurns, foldedLine, foldedTurn, headlineOf, nowOf, oneAtATime, showView, turnAt } = await import("../../dist/story.js");
 const state = await import("../../dist/state.js");
-const { setSelection } = state;
+const { setSelection, studio } = state;
 
 test("summaries on open are written one at a time, in the order asked, newest first", async () => {
   const started = [];
@@ -265,4 +265,22 @@ test("the focus in an Ask box, an open fold and the banner's open Brief survive 
   assert.ok(response.open, "the open fold stays open");
   assert.equal(slot.querySelector("details.banner-brief"), brief);
   assert.ok(brief.open, "the banner's Brief stays open");
+});
+
+// #675: a turn a wake-up opened is the returning task's, never Daniel's prompt; a turn stored before the flag reads as his.
+test("a woken turn reads \"Woken by\" with the returning task; Daniel's turn reads \"You asked\"", () => {
+  assert.equal(askedLabel({ wake_up: true }), "Woken by");
+  assert.equal(askedLabel({ wake_up: false }), "You asked");
+  assert.equal(askedLabel({}), "You asked");
+
+  studio.selection = null;
+  const past = (turn) =>
+    foldedTurn(
+      /** @type {import("../../dist/types.js").Session} */ ({ id: "s" }),
+      /** @type {import("../../dist/story.js").FeedTurn} */ (/** @type {unknown} */ ({ index: 0, turn: { id: null, message: null, checks: [], ...turn }, cards: [] })),
+    );
+  // A past row's prompt column: the returning task, marked as a wake-up; Daniel's prompt as it is.
+  const promptOf = (node) => node.querySelector(".prompt").textContent;
+  assert.equal(promptOf(past({ prompt: "worker bqv59 returned", wake_up: true })), "Woken by worker bqv59 returned");
+  assert.equal(promptOf(past({ prompt: "Fix the parser" })), "Fix the parser");
 });

@@ -261,6 +261,11 @@ export function foldedLine(turn: Pick<Turn, "prompt" | "checks">, headline: stri
   return { prompt, headline, failed: turn.checks.some((check) => check.status === "failed") };
 }
 
+// What a turn's prompt is labelled: a wake-up's returning task, never Daniel's prompt (#675).
+export function askedLabel(turn: Pick<Turn, "wake_up">): "Woken by" | "You asked" {
+  return turn.wake_up ? "Woken by" : "You asked";
+}
+
 /**
  * What "now" holds in each state: one thing per state. While running, what Daniel asked and the intention, boxed.
  * At your turn (and idle or ended), what he asked, the Headline, the Body lines and the full response, with no
@@ -475,7 +480,7 @@ function folded(key: string, title: string, hover: string, body: HTMLElement[], 
 // the turn ended. A subagent's view and a turn-less session keep the box.
 function drawNow(session: Session | null, latest: Turn | null): Now | null {
   const now = session && latest ? nowOf(session.state, latest, latest.id ? summaryOf(latest.id) : null) : null;
-  const asked = now && session?.state === "running" ? [text("p", "You asked", "label"), text("p", latest?.prompt || "No prompt", "prompt")] : [];
+  const asked = now && latest && session?.state === "running" ? [text("p", askedLabel(latest), "label"), text("p", latest.prompt || "No prompt", "prompt")] : [];
   patch(element("now-asked"), asked);
   element("intention").hidden = now !== null && now.intention === null;
   element("intention-label").hidden = now?.intention !== "why";
@@ -553,7 +558,7 @@ function turnContent(session: Session, block: FeedTurn, now: Now | null): HTMLEl
     const prompt = text("p", turn.prompt || "No prompt", "prompt");
     prompt.setAttribute("data-key", `prompt-${key}`);
     hint(prompt, turn.prompt || "No prompt");
-    node.append(...(now?.asked ? [text("p", "You asked", "label")] : []), prompt);
+    node.append(...(now?.asked ? [text("p", askedLabel(turn), "label")] : []), prompt);
   }
   if (now?.soFar) node.append(text("p", "So far this turn", "label"));
   const summary = turn?.id ? summaryOf(turn.id) : null;
@@ -619,7 +624,9 @@ export function foldedTurn(session: Session, block: FeedTurn): HTMLElement {
   hint(button, "Fold or unfold this turn");
   button.setAttribute("aria-expanded", String(open));
   // The line's prompt is the turn's first words, so its hint holds the whole prompt; a span, which opens once #586's pointer path is in.
-  const first = text("span", line.prompt, "prompt");
+  // A wake-up's prompt is the returning task, marked as one in the DOM's own words (#675).
+  const first = text("span", turn.wake_up ? "" : line.prompt, "prompt");
+  if (turn.wake_up) first.append(text("span", "Woken by", "woken"), ` ${line.prompt}`);
   first.setAttribute("data-key", `turn-${key}`);
   button.append(
     hint(first, turn.prompt.trim() || line.prompt),
