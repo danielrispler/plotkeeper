@@ -7,10 +7,10 @@
       "purpose": "Small config folders, one per agent, that decide which of its events reach the hook and name the agent to it.",
       "holds": [
         { "name": "Claude Code's plugin", "text": "The hooks Claude Code runs on each event, installed with `claude plugin`.", "paths": ["plugin/"] },
-        { "name": "The other agents' configs", "text": "agy's, Copilot's and Qwen Code's plugin or extension, and Codex's and Cursor's user-level hook files.", "paths": ["plugin-agy/", "plugin-copilot/", "plugin-qwen/", "plugin-codex/", "plugin-cursor/"] },
+        { "name": "The other agents' configs", "text": "agy's, Copilot's, Qwen Code's and OpenCode's plugin or extension, and Codex's and Cursor's user-level hook files.", "paths": ["plugin-agy/", "plugin-copilot/", "plugin-qwen/", "plugin-opencode/", "plugin-codex/", "plugin-cursor/"] },
         { "name": "Rendering", "text": "`plotkeeper install` fills each with the path of the hook binaries in the data folder's `bin/` before it installs it." }
       ],
-      "tier": "interface", "paths": ["plugin/", "plugin-agy/", "plugin-codex/", "plugin-cursor/", "plugin-copilot/", "plugin-qwen/"]
+      "tier": "interface", "paths": ["plugin/", "plugin-agy/", "plugin-codex/", "plugin-cursor/", "plugin-copilot/", "plugin-qwen/", "plugin-opencode/"]
     },
     {
       "id": "hook", "name": "Hook", "caption": "Records every agent event",
@@ -28,7 +28,7 @@
       "id": "core", "name": "Core", "caption": "Turns events into session state",
       "purpose": "Plain Rust logic that reads the event log's lines in order and knows every session's turns, checks, subagents and whether it needs you.",
       "holds": [
-        { "name": "The agent adapters", "text": "Turn each agent's hook line into one neutral event: Claude Code, agy, Codex, Copilot, Cursor and Qwen Code.", "paths": ["core/src/claude.rs", "core/src/agy.rs", "core/src/codex.rs", "core/src/copilot.rs", "core/src/cursor.rs", "core/src/qwen.rs", "core/src/event.rs"] },
+        { "name": "The agent adapters", "text": "Turn each agent's hook line into one neutral event: Claude Code, agy, Codex, Copilot, Cursor, Qwen Code and OpenCode.", "paths": ["core/src/claude.rs", "core/src/agy.rs", "core/src/codex.rs", "core/src/copilot.rs", "core/src/cursor.rs", "core/src/qwen.rs", "core/src/opencode.rs", "core/src/event.rs"] },
         { "name": "Session state", "text": "The sessions, the project each started in, their turns and subagents, and whether one needs you, from the events one at a time.", "paths": ["core/src/studio.rs", "core/src/studio/take.rs", "core/src/session.rs", "core/src/output.rs", "core/src/saved.rs"] },
         { "name": "The step ledger", "text": "One row for every tool call of a session, its workers' included, and which of them were checks.", "paths": ["core/src/ledger.rs", "core/src/checks.rs"] },
         { "name": "The transcript reader", "text": "A tolerant reader of a session's transcript, for what the session is doing and why.", "paths": ["core/src/transcript.rs"] }
@@ -191,6 +191,8 @@
       "text": "Install and uninstall reach Claude Code only through `claude plugin` and never open its settings file." },
     { "id": "install-never-opens-qwen-settings", "on": "install", "backing": "check",
       "text": "Install and uninstall reach Qwen Code only through `qwen extensions` and never open its settings file, which can hold API keys." },
+    { "id": "install-never-opens-opencode-config", "on": "install", "backing": "check",
+      "text": "Install and uninstall touch only plotkeeper's own plugin file in OpenCode's plugins folder, and never open OpenCode's config or login, which can hold API keys." },
     { "id": "hook-never-makes-agent-wait", "on": "hook", "backing": "trust",
       "text": "The hook never makes the agent wait, except for your answer." },
     { "id": "projects-leave-only-by-remove", "on": "server", "backing": "check",

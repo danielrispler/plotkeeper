@@ -31,6 +31,12 @@
 //! `packages/core/src/hooks/hookRegistry.ts`, "Extension hooks are always loaded"). Install renders `plugin-qwen/` and
 //! runs `qwen extensions install <folder> --consent`, which copies it into Qwen Code's own extension folder; uninstall
 //! runs `qwen extensions uninstall plotkeeper`. No file under `~/.qwen` is opened.
+//!
+//! OpenCode 2 has no command for a local plugin file and loads every `.js` file in `~/.config/opencode/plugins/`
+//! (https://opencode.ai/docs/plugins, read at anomalyco/opencode v2.4.2), so install writes plotkeeper's plugin there
+//! itself, as `plotkeeper.js`, and uninstall removes it with the folders install made for it (#370). No other file of
+//! OpenCode's is opened: `opencode.json(c)` and its login can hold keys.
+// shortcut: OpenCode's config folder can move (`XDG_CONFIG_HOME`); install writes the default one only.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -63,6 +69,8 @@ const COPILOT_HOOKS_JSON: &str = include_str!("../../plugin-copilot/hooks.json")
 const CURSOR_HOOKS_JSON: &str = include_str!("../../plugin-cursor/hooks.json");
 /// plotkeeper's extension for Qwen Code (#379): its manifest, which holds its hooks.
 const QWEN_EXTENSION_JSON: &str = include_str!("../../plugin-qwen/qwen-extension.json");
+/// plotkeeper's plugin for OpenCode (#370), one file.
+const OPENCODE_PLUGIN_JS: &str = include_str!("../../plugin-opencode/plotkeeper.js");
 /// The archived app's plugin for agy, by its folder's name.
 const OLD_AGY_PLUGIN: &str = "studio";
 
@@ -95,8 +103,11 @@ struct State {
     /// plotkeeper's Qwen Code extension was installed with `qwen extensions` (#379).
     #[serde(default)]
     qwen: bool,
-    /// Each harness the user answered for, by its id (`claude`, `agy`, `codex`, `cursor`, `copilot`, `qwen`); a harness
-    /// with none has not been asked (#434).
+    /// plotkeeper's OpenCode plugin file was written (#370), and the folders made for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    opencode: Option<OpencodeRecord>,
+    /// Each harness the user answered for, by its id (`claude`, `agy`, `codex`, `cursor`, `copilot`, `qwen`,
+    /// `opencode`); a harness with none has not been asked (#434).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     harnesses: BTreeMap<String, HarnessRecord>,
     /// Written by a build that keeps answers (#434), on every save, and kept through uninstall, so a harness with no
@@ -104,6 +115,16 @@ struct State {
     /// record is from before answers, and reading it gives each flagged harness a wired answer (`State::with_answers`).
     #[serde(default)]
     answers_kept: bool,
+}
+
+/// What install did for OpenCode: the folders it made for its plugin file, outermost first, which uninstall removes
+/// when they are empty, and whether a `plotkeeper.js` not plotkeeper's was there, backed up as
+/// `opencode-plotkeeper.js`.
+#[derive(Default, Serialize, Deserialize)]
+struct OpencodeRecord {
+    made: Vec<PathBuf>,
+    #[serde(default)]
+    backed_up: bool,
 }
 
 /// Install's record of one harness.
@@ -597,6 +618,7 @@ fn wire_one(
         }
         Harness::Copilot => install_copilot(home, bin, &found("copilot")?, state, out)?,
         Harness::Qwen => install_qwen(home, bin, &found("qwen")?, state, out)?,
+        Harness::Opencode => install_opencode(home, bin, state, out)?,
     }
     Ok(())
 }
@@ -610,15 +632,17 @@ enum Harness {
     Cursor,
     Copilot,
     Qwen,
+    Opencode,
 }
 
-const HARNESSES: [Harness; 6] = [
+const HARNESSES: [Harness; 7] = [
     Harness::Claude,
     Harness::Agy,
     Harness::Codex,
     Harness::Cursor,
     Harness::Copilot,
     Harness::Qwen,
+    Harness::Opencode,
 ];
 
 const CODEX_RETRUST: &str = "Codex: once, run `/hooks` in Codex and trust plotkeeper's changed hooks; Codex skips a changed hook until it is trusted again";
@@ -635,6 +659,7 @@ impl Harness {
             Harness::Cursor => "cursor",
             Harness::Copilot => "copilot",
             Harness::Qwen => "qwen",
+            Harness::Opencode => "opencode",
         }
     }
 
@@ -646,6 +671,7 @@ impl Harness {
             Harness::Cursor => "Cursor",
             Harness::Copilot => "Copilot",
             Harness::Qwen => "Qwen Code",
+            Harness::Opencode => "OpenCode",
         }
     }
 
@@ -706,12 +732,13 @@ impl Harness {
                 "Qwen Code: qwen extensions install {}",
                 plugins.join("qwen").join(NAME).display()
             )],
+            Harness::Opencode => vec![opencode_line(home)],
         }
     }
 
     /// The fingerprint of what install renders for it with the hook binaries in `bin`: Claude Code's, agy's and
-    /// Copilot's plugin folders, Codex's and Cursor's entries, Qwen Code's extension. It changes when a template does,
-    /// and when the binaries' path does.
+    /// Copilot's plugin folders, Codex's and Cursor's entries, Qwen Code's extension, OpenCode's plugin. It changes
+    /// when a template does, and when the binaries' path does.
     fn fingerprint(self, home: &Path, bin: &Path) -> Result<String, String> {
         let entries = |file: HookFile| -> Result<Vec<(String, String)>, String> {
             let ours = Value::Object(file.ours(bin)?);
@@ -729,6 +756,7 @@ impl Harness {
                 "qwen-extension.json".into(),
                 render(QWEN_EXTENSION_JSON, bin)?,
             )],
+            Harness::Opencode => vec![("plotkeeper.js".into(), render(OPENCODE_PLUGIN_JS, bin)?)],
         };
         Ok(fingerprint(&files))
     }
@@ -747,6 +775,7 @@ impl Harness {
             Harness::Cursor => state.cursor.is_some(),
             Harness::Copilot => state.copilot,
             Harness::Qwen => state.qwen,
+            Harness::Opencode => state.opencode.is_some(),
         }
     }
 }
@@ -925,6 +954,75 @@ fn rewire_changed(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Res
             writeln!(out, "  {CODEX_RETRUST}").ok();
         }
     }
+    Ok(())
+}
+
+/// Where OpenCode loads plotkeeper's plugin from: its user-level plugins folder.
+fn opencode_plugin(home: &Path) -> PathBuf {
+    home.join(".config/opencode/plugins")
+        .join(format!("{NAME}.js"))
+}
+
+/// What install says when it writes OpenCode's plugin.
+fn opencode_line(home: &Path) -> String {
+    format!(
+        "OpenCode: write plotkeeper's plugin to {}",
+        opencode_plugin(home).display()
+    )
+}
+
+/// The name of the backup of a `plotkeeper.js` that was not plotkeeper's.
+const OPENCODE_BACKUP: &str = "opencode-plotkeeper.js";
+
+/// Whether `file` is plotkeeper's OpenCode plugin for the binaries in `bin`, of this template or an older one: it runs
+/// their hook.
+fn opencode_ours(file: &Path, bin: &Path) -> bool {
+    let Ok(hook) = render("const HOOK = \"__PLOTKEEPER_BIN__/plotkeeper-hook\";", bin) else {
+        return false;
+    };
+    fs::read_to_string(file).is_ok_and(|text| text.contains(&hook))
+}
+
+/// Writes `plugin-opencode/plotkeeper.js` for the binaries in `bin` into OpenCode's plugins folder, which OpenCode
+/// watches and reloads. The folders it makes, and a `plotkeeper.js` already there that is not plotkeeper's, are
+/// recorded first, once, the file backed up, so uninstall leaves them as they were.
+fn install_opencode(
+    home: &Path,
+    bin: &Path,
+    state: &mut State,
+    out: &mut dyn Write,
+) -> Result<(), String> {
+    let file = opencode_plugin(home);
+    let dir = file.parent().unwrap_or(home);
+    if state.opencode.is_none() {
+        let mut made: Vec<PathBuf> = dir
+            .ancestors()
+            .take_while(|d| *d != home && !d.exists())
+            .map(Path::to_path_buf)
+            .collect();
+        made.reverse();
+        state.opencode = Some(OpencodeRecord {
+            made,
+            backed_up: false,
+        });
+        save(home, state)?;
+    }
+    // A file of the user's own, there before the first install or written over plotkeeper's since, is kept; one
+    // backup only, so a second such file in a later install is replaced.
+    let record = state.opencode.as_mut().ok_or("no OpenCode record")?;
+    if !record.backed_up && file.exists() && !opencode_ours(&file, bin) {
+        let backups = record_dir(home).join("backups");
+        fs::create_dir_all(&backups)
+            .map_err(|e| format!("could not make {}: {e}", backups.display()))?;
+        fs::copy(&file, backups.join(OPENCODE_BACKUP))
+            .map_err(|e| format!("could not back up {}: {e}", file.display()))?;
+        record.backed_up = true;
+        save(home, state)?;
+    }
+    fs::create_dir_all(dir).map_err(|e| format!("could not make {}: {e}", dir.display()))?;
+    write_whole(&file, render(OPENCODE_PLUGIN_JS, bin)?)
+        .map_err(|e| format!("could not write {}: {e}", file.display()))?;
+    say(out, opencode_line(home));
     Ok(())
 }
 
@@ -1307,6 +1405,7 @@ pub fn uninstall(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Resu
     undo.hook_files();
     undo.copilot();
     undo.qwen();
+    undo.opencode();
     undo.agy();
     undo.claude();
     undo.zshrc();
@@ -1443,6 +1542,55 @@ impl Undo<'_> {
             }
             Err(e) => self.fail(e),
         }
+    }
+
+    /// OpenCode's plugin file, and the folders install made for it, when nothing else is in them.
+    fn opencode(&mut self) {
+        let Some((made, backed_up)) =
+            (self.state.opencode.as_ref()).map(|r| (r.made.clone(), r.backed_up))
+        else {
+            return;
+        };
+        let file = opencode_plugin(self.home);
+        let backup = self.backups.join(OPENCODE_BACKUP);
+        let restore = backed_up && backup.exists();
+        if opencode_ours(&file, &self.bin) {
+            let done = if restore {
+                fs::copy(&backup, &file).map(|_| ())
+            } else {
+                fs::remove_file(&file)
+            };
+            if let Err(e) = done {
+                return self.fail(format!("could not put back {}: {e}", file.display()));
+            }
+            say(
+                self.out,
+                format!("OpenCode: removed plotkeeper's {}", file.display()),
+            );
+        } else if restore && file.exists() {
+            // Both are the user's: the one there now, and the one install backed up, which is not dropped.
+            return self.fail(format!(
+                "OpenCode: {} is not plotkeeper's now, and install kept your earlier one at {}; move one of them and run uninstall again",
+                file.display(),
+                backup.display()
+            ));
+        } else if file.exists() {
+            say(
+                self.out,
+                format!(
+                    "OpenCode: {} is not plotkeeper's now, so it is left as it is",
+                    file.display()
+                ),
+            );
+        } else if restore && let Err(e) = fs::copy(&backup, &file) {
+            return self.fail(format!("could not put back {}: {e}", file.display()));
+        }
+        fs::remove_file(&backup).ok();
+        for dir in made.iter().rev() {
+            // A folder that holds something else stays.
+            fs::remove_dir(dir).ok();
+        }
+        self.state.opencode = None;
     }
 
     /// agy's plugin, and the plugins of the same name install moved aside.
