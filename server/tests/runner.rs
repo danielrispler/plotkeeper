@@ -272,14 +272,14 @@ fn a_runs_temp_folder_is_its_own_and_short_enough_for_claude_code_to_use() {
 /// The fake harness, with a sandbox check of `check` (a shell script) and, under `tmp`, a private temp folder named in
 /// `PK_TMP`.
 struct Checked {
-    check: &'static str,
+    check: String,
     tmp: Option<PathBuf>,
 }
 
 impl Harness for Checked {
     fn command(&self, plan: &Plan) -> Result<HarnessCommand, String> {
         let mut command = Script.command(plan)?;
-        command.check = ["/bin/sh", "-c", self.check].map(String::from).into();
+        command.check = ["/bin/sh", "-c", &self.check].map(String::from).into();
         if let Some(tmp) = &self.tmp {
             command
                 .env
@@ -295,7 +295,7 @@ fn a_run_whose_sandbox_cannot_start_fails_before_its_harness_runs() {
     let dir = tempfile::tempdir().unwrap();
     settings(dir.path(), r#"{ "checks": { "/p/app": ["cargo test"] } }"#);
     let harness = Checked {
-        check: "echo 'sandbox_apply: Operation not permitted' >&2; exit 71",
+        check: "echo 'sandbox_apply: Operation not permitted' >&2; exit 71".into(),
         tmp: None,
     };
     let (runner, changes) = open(dir.path(), Arc::new(harness));
@@ -333,7 +333,7 @@ fn a_runs_private_temp_folder_is_made_new_and_private_and_removed_after() {
     settings(dir.path(), r#"{ "checks": { "/p/app": ["cargo test"] } }"#);
     let tmp = dir.path().join("pk-tmp");
     let harness = Checked {
-        check: "true",
+        check: "true".into(),
         tmp: Some(tmp.clone()),
     };
     let (runner, changes) = open(dir.path(), Arc::new(harness));
@@ -366,7 +366,7 @@ fn a_run_whose_check_fails_leaves_a_folder_of_its_temp_folders_name_alone() {
     fs::create_dir(&tmp).unwrap();
     fs::write(tmp.join("theirs"), "").unwrap();
     let harness = Checked {
-        check: "exit 3",
+        check: "exit 3".into(),
         tmp: Some(tmp.clone()),
     };
     let (runner, changes) = open(dir.path(), Arc::new(harness));
@@ -391,7 +391,7 @@ fn cancel_removes_the_temp_folder_of_the_run_it_kills() {
     settings(dir.path(), r#"{ "checks": { "/p/app": ["cargo test"] } }"#);
     let tmp = dir.path().join("pk-tmp");
     let harness = Checked {
-        check: "true",
+        check: "true".into(),
         tmp: Some(tmp.clone()),
     };
     let (runner, changes) = open(dir.path(), Arc::new(harness));
@@ -970,6 +970,101 @@ fn a_run_past_its_limit_is_stopped() {
         .unwrap();
     assert!(gone(child), "the run's child outlived its limit");
     assert_eq!(bench.records()[0]["outcome"], "timed-out");
+}
+
+/// The pid a script wrote to `file`, waited for.
+fn pid_in(file: &Path) -> u64 {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Some(pid) = fs::read_to_string(file)
+            .ok()
+            .and_then(|text| text.trim().parse().ok())
+        {
+            return pid;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "nothing wrote {}",
+            file.display()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// A script that starts a helper, writes its pid to `file`, and sleeps.
+fn hangs(file: &Path) -> String {
+    format!("sleep 60 & echo $! > '{}'; sleep 60", file.display())
+}
+
+#[test]
+fn a_check_or_setup_past_the_runs_limit_leaves_no_process_behind() {
+    let dir = tempfile::tempdir().unwrap();
+    let check_pid = dir.path().join("check.pid");
+    let harness = Checked {
+        check: hangs(&check_pid),
+        tmp: None,
+    };
+    settings(dir.path(), r#"{ "checks": { "/p/app": ["cargo test"] } }"#);
+    let (runner, changes) = open(dir.path(), Arc::new(harness));
+    let mut request = Request {
+        kind: Kind::BackLaw,
+        project: PROJECT.into(),
+        folder: runner.new_folder().unwrap(),
+        prompt: "touch ran".into(),
+        limits: Limits::of(Kind::BackLaw),
+    };
+    request.limits.timeout = Duration::from_secs(1);
+    let id = runner.submit(request).unwrap();
+    until(&runner, &changes, ended(&id));
+    assert_eq!(runner.outcome(&id).unwrap().end, End::TimedOut);
+    assert!(
+        gone(pid_in(&check_pid)),
+        "the check's helper outlived the limit"
+    );
+
+    let bench = bench();
+    let setup_pid = bench.dir.path().join("setup.pid");
+    settings(
+        bench.dir.path(),
+        &serde_json::json!({ "checks": { PROJECT: ["make"] }, "setup": { PROJECT: hangs(&setup_pid) } })
+            .to_string(),
+    );
+    let mut request = bench.request(PROJECT, "touch ran");
+    request.limits.timeout = Duration::from_secs(1);
+    let folder = request.folder.clone();
+    let id = bench.runner.submit(request).unwrap();
+    bench.until(ended(&id));
+    assert_eq!(bench.runner.outcome(&id).unwrap().end, End::TimedOut);
+    assert!(
+        gone(pid_in(&setup_pid)),
+        "the setup's helper outlived the limit"
+    );
+    assert!(
+        !folder.join("ran").exists(),
+        "the harness ran after a setup that timed out"
+    );
+}
+
+#[test]
+fn cancel_ends_a_running_setup_and_what_it_started() {
+    let bench = bench();
+    let setup_pid = bench.dir.path().join("setup.pid");
+    settings(
+        bench.dir.path(),
+        &serde_json::json!({ "checks": { PROJECT: ["make"] }, "setup": { PROJECT: hangs(&setup_pid) } })
+            .to_string(),
+    );
+    let id = bench.run("touch ran");
+    let helper = pid_in(&setup_pid);
+    let launcher = launch(&bench.folder(&id))["pid"].as_u64().unwrap();
+
+    bench.runner.cancel(&id).unwrap();
+    assert!(
+        !bench.folder(&id).exists(),
+        "Cancel removes the run's folder"
+    );
+    assert!(gone(launcher), "the launcher outlived Cancel");
+    assert!(gone(helper), "the setup's helper outlived Cancel");
 }
 
 #[test]

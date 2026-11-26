@@ -105,7 +105,7 @@
       "id": "workbench", "name": "Workbench", "caption": "Worktrees and PRs",
       "purpose": "The one runner of `git` and `gh`, git worktrees and fetches, other agents' resume commands, and agy's plugin. A black box: it never fogs.",
       "holds": [
-        { "name": "The runner", "text": "Builds every `git` and `gh` with prompts off and no input, and runs a command to a deadline that kills its process group.", "paths": ["workbench/src/run.rs"] },
+        { "name": "The runner", "text": "Builds every `git` and `gh` with prompts off and no input, and runs every wait with a deadline, killing its process group.", "paths": ["workbench/src/run.rs"] },
         { "name": "Git", "text": "A folder's main checkout, `origin`'s fetch and what removing a worktree would lose, never with force.", "paths": ["workbench/src/lib.rs"] }
       ],
       "tier": "black-box", "paths": ["workbench/"]
