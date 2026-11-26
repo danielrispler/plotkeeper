@@ -25,14 +25,47 @@ pub enum Offer {
     /// The one PR's brief has a chapter that lights the part: that chapter opens.
     Chapter { pr: u64, chapter: usize },
     /// A part catch-up: `ready` when one is stored for the part's current fog list, `writing` while one is written, `failed` when
-    /// the last write for this fog list failed. `stage`: which call of the write runs now (#450).
+    /// the last write for this fog list failed. `stage`: which call of the write runs now (#450). `outline`, when `ready`: what the
+    /// sheet's catch-up card shows of it (#636).
     CatchUp {
         ready: bool,
         writing: bool,
         failed: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         stage: Option<Stage>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        outline: Option<Outline>,
     },
+}
+
+/// A stored catch-up as its part's catch-up card shows it (spec #633, "The offer carries what the card shows"): its title and, per
+/// step of its one chapter, the step's kind and headline. Never its gist, which stays behind Explain-back.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Outline {
+    pub title: String,
+    pub steps: Vec<OutlineStep>,
+}
+
+/// One step of an `Outline`: its kind (`k`: Where, Before, Now, ...) and headline (`h`), named as in the PR brief's steps.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct OutlineStep {
+    pub k: String,
+    pub h: String,
+}
+
+/// `stored`'s outline.
+fn outline(stored: &StoredCatchUp) -> Outline {
+    let steps = stored.brief.chapters.first().map_or(&[][..], |c| &c.steps);
+    Outline {
+        title: stored.brief.title.clone(),
+        steps: steps
+            .iter()
+            .map(|step| OutlineStep {
+                k: step.k.clone(),
+                h: step.h.clone(),
+            })
+            .collect(),
+    }
 }
 
 /// What `part`'s fog (`fog`, its entries) offers. `lit_of(pr)` is what each chapter of PR `pr`'s stored brief lights, `None` with
@@ -58,6 +91,7 @@ pub fn offer(
         writing: false,
         failed: false,
         stage: None,
+        outline: None,
     })
 }
 
@@ -246,22 +280,36 @@ pub fn offers(
         .map(|part| {
             let fog = fog_of(user, part);
             let offered = match offer(repo, &fog, part, &lit_of) {
-                Offer::CatchUp { .. } => {
-                    let list = commits(&fog);
-                    Offer::CatchUp {
-                        ready: catch_ups
-                            .as_ref()
-                            .is_some_and(|s| fresh(s, part, &list).is_some()),
-                        writing: app.catch_ups.writing(project, part),
-                        failed: app.catch_ups.failed(project, part, &list),
-                        stage: app.catch_ups.stage(project, part),
-                    }
-                }
+                Offer::CatchUp { .. } => catch_up_offer(
+                    catch_ups.as_ref(),
+                    &app.catch_ups,
+                    project,
+                    part,
+                    &commits(&fog),
+                ),
                 chapter => chapter,
             };
             (part.clone(), offered)
         })
         .collect()
+}
+
+/// The catch-up offer of `part` over its fog list `list`, from what `store` holds and what `catch_ups` is writing.
+fn catch_up_offer(
+    store: Option<&CatchUpStore>,
+    catch_ups: &CatchUps,
+    project: &str,
+    part: &str,
+    list: &[String],
+) -> Offer {
+    let stored = store.and_then(|s| fresh(s, part, list));
+    Offer::CatchUp {
+        ready: stored.is_some(),
+        writing: catch_ups.writing(project, part),
+        failed: catch_ups.failed(project, part, list),
+        stage: catch_ups.stage(project, part),
+        outline: stored.as_ref().map(outline),
+    }
 }
 
 /// What a click on a part's catch-up answers: the catch-up, or that it is being written (it comes through `map-landed`).
@@ -574,6 +622,7 @@ mod tests {
         writing: false,
         failed: false,
         stage: None,
+        outline: None,
     };
     fn lit(chapters: &[&[&str]]) -> Option<Vec<Vec<String>>> {
         Some(
@@ -693,6 +742,78 @@ mod tests {
             "part of it cleared"
         );
         assert!(fresh(&store, "b", &fog(&["c1", "c2"])).is_none());
+    }
+
+    #[test]
+    fn a_ready_offer_carries_the_catch_ups_title_and_step_headlines_and_never_its_gist() {
+        use studio_understanding::pr_brief::{Brief, Chapter, Step};
+        let data = tempfile::tempdir().unwrap();
+        let store = CatchUpStore::open(data.path()).unwrap();
+        let fog = vec!["c1".to_string(), "c2".to_string()];
+        let step = |k: &str, h: &str| Step {
+            k: k.into(),
+            h: h.into(),
+            b: format!("the body of {k}"),
+            ..Step::default()
+        };
+        store
+            .put(&StoredCatchUp {
+                part: "a".into(),
+                fog: fog.clone(),
+                brief: Brief {
+                    title: "Store writes go atomic".into(),
+                    chapters: vec![Chapter {
+                        title: "the chapter".into(),
+                        gist: "THE GIST: writes rename a temp file".into(),
+                        steps: vec![
+                            step("Where", "The store keeps the state"),
+                            step("Before", "Writes went straight in"),
+                            step("Now", "Each write renames a temp file"),
+                        ],
+                        ..Chapter::default()
+                    }],
+                    ..Brief::default()
+                },
+                ..StoredCatchUp::default()
+            })
+            .unwrap();
+        let catch_ups = CatchUps::default();
+        let offered = catch_up_offer(Some(&store), &catch_ups, "p", "a", &fog);
+        let Offer::CatchUp { ready, outline, .. } = &offered else {
+            panic!("a catch-up: {offered:?}");
+        };
+        assert!(ready);
+        let line = |k: &str, h: &str| OutlineStep {
+            k: k.into(),
+            h: h.into(),
+        };
+        assert_eq!(
+            outline.as_ref(),
+            Some(&Outline {
+                title: "Store writes go atomic".into(),
+                steps: vec![
+                    line("Where", "The store keeps the state"),
+                    line("Before", "Writes went straight in"),
+                    line("Now", "Each write renames a temp file"),
+                ],
+            })
+        );
+        let wire = serde_json::to_string(&offered).unwrap();
+        assert!(!wire.contains("GIST"), "no gist on the wire: {wire}");
+        assert!(!wire.contains("the body of"), "no step body: {wire}");
+
+        let stale = catch_up_offer(Some(&store), &catch_ups, "p", "a", &fog[..1]);
+        assert!(
+            matches!(
+                stale,
+                Offer::CatchUp {
+                    ready: false,
+                    outline: None,
+                    ..
+                }
+            ),
+            "a stale one offers no outline: {stale:?}"
+        );
     }
 
     // ---- written when the map shows ----

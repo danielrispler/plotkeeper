@@ -325,6 +325,13 @@ fn the_wire_samples_of_the_map_view_are_written_for_tsc() {
                             writing: false,
                             failed: false,
                             stage: None,
+                            outline: Some(studio_server::part_catch_ups::Outline {
+                                title: "Store writes go atomic".into(),
+                                steps: vec![studio_server::part_catch_ups::OutlineStep {
+                                    k: "Where".into(),
+                                    h: "The store keeps each project's map state".into(),
+                                }],
+                            }),
                         },
                     ),
                     (
@@ -336,6 +343,7 @@ fn the_wire_samples_of_the_map_view_are_written_for_tsc() {
                             stage: Some(studio_understanding::pr_brief_check::Stage::Fixing {
                                 claims: 2,
                             }),
+                            outline: None,
                         },
                     ),
                     (
