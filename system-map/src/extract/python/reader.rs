@@ -112,28 +112,38 @@ impl Lexer<'_> {
         self.toks.push((tok, self.line));
     }
 
-    /// Moves to `end`, counting the lines it passes.
+    /// Moves to `end`, counting the lines it passes: each `\n`, and each `\r` not followed by one.
     fn advance_to(&mut self, end: usize) {
         let end = end.min(self.text.len());
-        self.line += self.text[self.at..end]
-            .iter()
-            .filter(|&&b| b == b'\n')
+        self.line += (self.at..end)
+            .filter(|&i| match self.text[i] {
+                b'\n' => true,
+                b'\r' => self.text.get(i + 1) != Some(&b'\n'),
+                _ => false,
+            })
             .count() as u32;
         self.at = end;
     }
 
-    /// Reads one token or one piece of skipped text.
+    /// Reads one token or one piece of skipped text. A line ends at `\n`, `\r\n` or a lone `\r`, as in Python.
     fn next(&mut self) {
         let rest = &self.text[self.at..];
         let byte = rest[0];
         match byte {
-            b'\n' => {
+            b'\r' if rest.get(1) == Some(&b'\n') => self.at += 1,
+            b'\n' | b'\r' => {
                 if self.depth == 0 {
                     self.push(Tok::Newline);
                 }
                 self.advance_to(self.at + 1);
             }
-            b'#' => self.at += rest.iter().position(|&b| b == b'\n').unwrap_or(rest.len()),
+            b'#' => {
+                self.at += rest
+                    .iter()
+                    .copied()
+                    .position(is_newline)
+                    .unwrap_or(rest.len());
+            }
             b'\\' => self.backslash(),
             b'\'' | b'"' => self.string(self.at, false, false),
             b'0'..=b'9' => self.number(),
@@ -153,7 +163,7 @@ impl Lexer<'_> {
             b':' => self.single(Tok::Colon, 1),
             b'*' => self.single(Tok::Star, 1),
             _ if is_ident(byte) => self.word(),
-            b' ' | b'\t' | b'\r' | 0x0c => self.at += 1,
+            b' ' | b'\t' | 0x0c => self.at += 1,
             _ => self.single(Tok::Other, 1),
         }
     }
@@ -170,6 +180,8 @@ impl Lexer<'_> {
             self.advance_to(self.at + 2);
         } else if rest.starts_with(b"\r\n") {
             self.advance_to(self.at + 3);
+        } else if rest.starts_with(b"\r") {
+            self.advance_to(self.at + 2);
         } else {
             self.bad(self.at + 1);
         }
@@ -224,6 +236,11 @@ impl Lexer<'_> {
     }
 }
 
+/// Whether a byte ends a line: `\n`, or `\r` alone or before `\n`.
+fn is_newline(byte: u8) -> bool {
+    matches!(byte, b'\n' | b'\r')
+}
+
 fn is_ident(byte: u8) -> bool {
     byte == b'_' || byte.is_ascii_alphabetic() || byte >= 0x80
 }
@@ -266,7 +283,7 @@ fn skip_string(
         };
         match b {
             b'\\' => i = escape(text, i, raw, interpolated)?,
-            b'\n' if !triple => return Err(i),
+            b'\n' | b'\r' if !triple => return Err(i),
             _ if b == quote && !triple => return Ok(i + 1),
             _ if b == quote && text[i..].starts_with(&[quote; 3]) => return Ok(i + 3),
             b'{' if interpolated && text.get(i + 1) == Some(&b'{') => i += 2,
@@ -303,7 +320,7 @@ fn field(text: &[u8], mut i: usize) -> Result<usize, usize> {
         };
         match b {
             b'\'' | b'"' => i = skip_string(text, i, false, false)?,
-            b'#' => i += text[i..].iter().take_while(|&&c| c != b'\n').count(),
+            b'#' => i += text[i..].iter().take_while(|&&c| !is_newline(c)).count(),
             b'(' | b'[' | b'{' => {
                 depth += 1;
                 i += 1;

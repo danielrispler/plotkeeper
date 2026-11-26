@@ -328,16 +328,20 @@ fn third_party_standard_library_and_missing_names_give_no_pair() {
 }
 
 #[test]
-fn a_first_segment_two_roots_provide_gives_no_pair_and_no_problem() {
-    let found = py_pairs(&[
+fn a_first_segment_two_roots_provide_gives_no_pair_and_makes_the_importer_unsure() {
+    let files = [
         ("p/pyproject.toml", PYPROJECT.1),
         ("q/pyproject.toml", PYPROJECT.1),
         ("p/m.py", ""),
         ("q/m.py", ""),
         ("p/only.py", ""),
         ("p/user.py", "import m\nimport only\n"),
-    ]);
-    assert_eq!(found, ["p/user.py>p/only.py"]);
+    ];
+    assert_eq!(py_pairs(&files), ["p/user.py>p/only.py"]);
+    assert_eq!(
+        doubts(&files),
+        ["p/user.py | m | two roots provide it | p/m.py, q/m.py"]
+    );
 }
 
 #[test]
@@ -394,13 +398,12 @@ fn the_dots_of_a_relative_import_add_up_and_each_one_past_the_first_climbs_a_fol
     ]);
     assert_eq!(
         py_pairs(&files),
+        // Past one dot, `from .. import y` never pairs with the `__init__.py` it climbs to: that package holds the
+        // importer, so its init file ran before it.
         [
-            "a/b/c/d/four.py>a/__init__.py",
             "a/b/c/d/four.py>a/y.py",
-            "a/b/c/d/mixed.py>a/b/__init__.py",
             "a/b/c/d/mixed.py>a/b/y.py",
             "a/b/c/d/three.py>a/b/x.py",
-            "a/b/c/d/two.py>a/b/c/__init__.py",
             "a/b/c/d/two.py>a/b/c/y.py",
         ]
     );
@@ -454,7 +457,7 @@ fn a_climb_that_works_under_some_roots_only_makes_the_importer_unsure() {
     assert_eq!(
         doubts(&files),
         [
-            format!("p/pkg/m.py | .. | {CLIMBS} | p/__init__.py, p/w.py"),
+            format!("p/pkg/m.py | .. | {CLIMBS} | p/w.py"),
             format!("p/pkg/m.py | ..x | {CLIMBS} | p/x.py"),
         ]
     );
@@ -815,6 +818,14 @@ fn an_import_is_read_wherever_a_statement_can_start_and_at_the_line_it_starts() 
         ("x = [\n    1,  # import os\n]\nimport lib\n", "4"),
         ("\u{feff}import lib\n", "1"),
         ("import lib\r\nimport os\r\n", "1"),
+        // A lone `\r` ends a line as `\n` and `\r\n` do.
+        ("# h\rimport lib\rx = 1\r", "2"),
+        ("x = 1\rimport lib\r", "2"),
+        ("x = 1\r\ny = 2\rimport lib\n", "3"),
+        ("x = \"\"\"\r\r\"\"\"\rimport lib\r", "4"),
+        ("x = 1\rimport \\\r    lib\r", "2"),
+        ("s = 'unterminated\rimport lib\r", "2"),
+        ("x = f'''{y # c\r}'''\rimport lib\r", "3"),
         ("import lib", "1"),
         ("with a as b: import lib\n", "1"),
         ("import os  # lib\nfrom lib import y  # import os\n", "2"),
@@ -1481,6 +1492,33 @@ fn a_renamed_package_in_one_project_and_a_folder_of_that_name_in_another_are_a_f
         ("app.py", "import mypkg\n"),
     ]);
     assert_eq!(found, Vec::<String>::new());
+}
+
+#[test]
+fn a_renamed_package_at_the_folder_a_root_already_gives_its_name_is_one_provider() {
+    let config = pyproject("[tool.setuptools.package-dir]\nmypkg = \"src/mypkg\"\n");
+    let files = [
+        ("pyproject.toml", config.as_str()),
+        ("src/mypkg/__init__.py", ""),
+        ("src/mypkg/core.py", ""),
+        ("app.py", "from mypkg import core\n"),
+    ];
+    assert_eq!(
+        py_pairs(&files),
+        ["app.py>src/mypkg/__init__.py", "app.py>src/mypkg/core.py"]
+    );
+    assert_eq!(doubts(&files), Vec::<String>::new());
+    let files = [
+        ("setup.cfg", "[options]\npackage_dir =\n    mypkg = mypkg\n"),
+        ("mypkg/__init__.py", ""),
+        ("mypkg/core.py", ""),
+        ("app.py", "import mypkg.core\n"),
+    ];
+    assert_eq!(
+        py_pairs(&files),
+        ["app.py>mypkg/__init__.py", "app.py>mypkg/core.py"]
+    );
+    assert_eq!(doubts(&files), Vec::<String>::new());
 }
 
 #[test]

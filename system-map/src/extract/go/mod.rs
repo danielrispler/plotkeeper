@@ -8,7 +8,7 @@ mod work;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    Extractor, Output, Pair, Repo, Unsure,
+    Extractor, Output, Pair, Repo, Unsure, folder_of, group,
     names::{Lookup, Names},
 };
 
@@ -85,11 +85,6 @@ fn excluded(path: &str) -> bool {
 /// build constraint can never hold with `ignore` off, as `go mod tidy` judges it (`build_tags`).
 fn skipped(text: &str, head: &Head) -> bool {
     head.package.as_deref() == Some("documentation") || build_tags::never_builds(text)
-}
-
-/// The folder holding `file`, as a prefix: empty for the root, else ending in `/`.
-pub(super) fn folder_of(file: &str) -> &str {
-    file.rfind('/').map_or("", |at| &file[..=at])
 }
 
 /// The folder above `folder`, or none for the root.
@@ -565,9 +560,4 @@ fn go_imports(repo: &Repo) -> Output {
         }
     }
     found
-}
-
-/// The name a folder's package goes by as a pair's group: the folder, or `./` for the root.
-pub(super) fn group(folder: &str) -> String {
-    if folder.is_empty() { "./" } else { folder }.to_string()
 }

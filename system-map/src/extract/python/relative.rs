@@ -5,11 +5,11 @@
 use std::collections::BTreeSet;
 
 use super::{
-    Index,
+    Index, Step,
     doubt::Resolution,
     reader::{Import, Imported},
 };
-use crate::extract::go::folder_of;
+use crate::extract::folder_of;
 
 /// The reason a climb that some roots allow and others do not gives.
 const CLIMBS: &str = "climbs past the top package under some roots";
@@ -27,9 +27,10 @@ fn climb(folder: &str, up: u32) -> Option<String> {
 impl Index<'_, '_> {
     /// The files a relative import in `importer` runs, from the folder its dots climb to: the module's package inits
     /// and file, and each imported name that is a submodule. `from . import y` also pairs with the package's own
-    /// `__init__.py`, where `y` may be defined. A climb is legal under a root holding the importer when the importer is
-    /// at least as many folders below it as the import has dots: legal under all of them pairs, under some only makes
-    /// the importer Unsure, and under none, or past the repository, or naming no file, gives nothing.
+    /// `__init__.py`, where `y` may be defined; `from .. import y` does not. A climb is legal under a root holding the
+    /// importer when the importer is at least as many folders below it as the import has dots: legal under all of them
+    /// pairs, under some only makes the importer Unsure, and under none, or past the repository, or naming no file,
+    /// gives nothing.
     pub(super) fn relative(
         &self,
         importer: &str,
@@ -42,8 +43,15 @@ impl Index<'_, '_> {
         };
         let landings = self.walk_all(importer, &[anchor.as_str()], &import.module);
         let mut files: Vec<String> = landings.iter().flat_map(|l| l.files.clone()).collect();
-        if import.module.is_empty() {
-            files.extend(self.own_init(&anchor).filter(|init| init != importer));
+        // Only the importer's own package: two or more dots climb to a package that holds the importer, whose init file
+        // ran before it, as an absolute import leaves it out (`Index::init`). A namespace `__init__.py`, which only
+        // extends its `__path__`, is no package of its own and gets no pair.
+        if import.module.is_empty()
+            && import.dots == 1
+            && let Some(Step::Package { init, .. }) = self.folder_step(&anchor)
+            && init != importer
+        {
+            files.push(init);
         }
         if let Imported::Names(names) = &import.imported {
             let folders: Vec<&str> = landings
@@ -95,16 +103,5 @@ impl Index<'_, '_> {
         } else {
             Resolution::Nothing
         }
-    }
-
-    /// The init file of the package at `folder`, unless the package is a namespace one whose `__init__.py` only extends
-    /// its `__path__`, which gets no pair.
-    fn own_init(&self, folder: &str) -> Option<String> {
-        ["py", "pyi"].into_iter().find_map(|ext| {
-            let init = format!("{folder}__init__.{ext}");
-            (self.repo.files().contains(init.as_str())
-                && !(ext == "py" && self.extends_path_only(&init)))
-            .then_some(init)
-        })
     }
 }

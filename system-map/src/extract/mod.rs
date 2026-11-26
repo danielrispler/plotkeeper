@@ -220,7 +220,8 @@ pub(crate) struct Output {
 /// groups, none counting as lowest.
 /// An Unsure finding with no candidates is a problem, one in an untracked, ignored or skipped file is dropped, and
 /// findings of one file, name and reason are kept once, sorted, with the union of their candidates. A name the registry
-/// lacks is a problem. Every extractor's notes are kept, in the order of `names`. A group's member that is untracked or skipped is dropped.
+/// lacks is a problem. Every extractor's notes are kept, in the order of `names`. A group's member that is untracked or
+/// skipped is dropped.
 pub(crate) fn run(registry: &[&dyn Extractor], names: &[String], repo: &Repo) -> Output {
     let mut problems = Vec::new();
     let mut notes = Vec::new();
@@ -334,6 +335,16 @@ pub(crate) fn read_parts<'p>(
         })
         .map(|part| part.id.as_str())
         .collect()
+}
+
+/// The folder holding `file`, as a prefix: empty for the root, else ending in `/`.
+fn folder_of(file: &str) -> &str {
+    file.rfind('/').map_or("", |at| &file[..=at])
+}
+
+/// The name a folder's files go by as a pair's group: the folder, or `./` for the root.
+fn group(folder: &str) -> String {
+    if folder.is_empty() { "./" } else { folder }.to_string()
 }
 
 #[cfg(test)]

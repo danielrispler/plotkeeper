@@ -12,11 +12,7 @@ use std::{cell::RefCell, collections::BTreeMap, collections::BTreeSet};
 use doubt::Resolution;
 use layouts::{Layout, Reading};
 
-use super::{
-    Extractor, Output, Pair, Repo, Unsure,
-    go::{folder_of, group},
-    names::Names,
-};
+use super::{Extractor, Output, Pair, Repo, Unsure, folder_of, group, names::Names};
 
 pub(crate) struct PythonImports;
 
@@ -184,7 +180,8 @@ impl<'r, 'a> Index<'r, 'a> {
     /// `renamed` holds the packages a project renames to a folder of its own, `package-dir = {mypkg = "lib"}` as
     /// (`mypkg`, `lib/`). Each registers its name under a root of its own, `\0` and the folder, which no real root is
     /// and which `step` knows: that root holds the name, and only it, as the package at the folder. So the first-segment
-    /// lookup, the doubt rules and the walk see a renamed package as any other.
+    /// lookup, the doubt rules and the walk see a renamed package as any other. A renamed package at the folder a real
+    /// root already gives its name, `mypkg = "src/mypkg"` beside the root `src/`, registers nothing more.
     fn new(
         repo: &'r Repo<'a>,
         roots: &BTreeSet<String>,
@@ -210,7 +207,9 @@ impl<'r, 'a> Index<'r, 'a> {
             }
         }
         for (name, folder) in packages {
-            if has_folder(repo, folder) {
+            // A root that already holds the name at that folder provides the same package: one provider, not two.
+            let same = roots.iter().any(|root| format!("{root}{name}/") == *folder);
+            if !same && has_folder(repo, folder) {
                 let root = format!("\0{folder}");
                 first.register(name, root.clone());
                 renamed.insert(root, (name.clone(), folder.clone()));
@@ -233,13 +232,8 @@ impl<'r, 'a> Index<'r, 'a> {
         }
         let folder = format!("{dir}{name}/");
         for ext in ["py", "pyi"] {
-            let init = format!("{folder}__init__.{ext}");
-            if has(&init) {
-                // A namespace `__init__.py` is a regular package to Python but merges here like a bare folder.
-                if ext == "py" && self.extends_path_only(&init) {
-                    return Some(Step::Bare { folder });
-                }
-                return Some(Step::Package { folder, init });
+            if let Some(step) = self.by_init(&folder, ext) {
+                return Some(step);
             }
             let file = format!("{dir}{name}.{ext}");
             if has(&file) {
@@ -253,20 +247,29 @@ impl<'r, 'a> Index<'r, 'a> {
 impl Index<'_, '_> {
     /// What the folder `folder` is as a package of its own: a regular package or a bare folder.
     fn folder_step(&self, folder: &str) -> Option<Step> {
-        for ext in ["py", "pyi"] {
-            let init = format!("{folder}__init__.{ext}");
-            if self.repo.files().contains(init.as_str()) {
-                if ext == "py" && self.extends_path_only(&init) {
-                    break;
-                }
-                return Some(Step::Package {
+        ["py", "pyi"]
+            .into_iter()
+            .find_map(|ext| self.by_init(folder, ext))
+            .or_else(|| {
+                has_folder(self.repo, folder).then(|| Step::Bare {
                     folder: folder.to_string(),
-                    init,
-                });
-            }
+                })
+            })
+    }
+
+    /// What the folder `folder` is by its `__init__.{ext}`: a regular package, or a bare folder when that is an
+    /// `__init__.py` that only extends its `__path__` (a regular package to Python, but one that merges like a bare
+    /// folder); none when the folder lacks the file.
+    fn by_init(&self, folder: &str, ext: &str) -> Option<Step> {
+        let init = format!("{folder}__init__.{ext}");
+        if !self.repo.files().contains(init.as_str()) {
+            return None;
         }
-        has_folder(self.repo, folder).then(|| Step::Bare {
-            folder: folder.to_string(),
+        let folder = folder.to_string();
+        Some(if ext == "py" && self.extends_path_only(&init) {
+            Step::Bare { folder }
+        } else {
+            Step::Package { folder, init }
         })
     }
 

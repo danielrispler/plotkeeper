@@ -1,5 +1,6 @@
-//! Which files an absolute import means, and when that is in doubt (spec #589, "Resolution of an absolute import"): the
+//! Which files an import means, and when that is in doubt (spec #589, "Resolution of an absolute import"): the
 //! providers of the first segment, the merging of bare folders, and the `__init__.py` that only extends its `__path__`.
+//! Relative imports (`relative.rs`) share its walk, its submodule lookup and its `Resolution`.
 
 use std::collections::BTreeSet;
 
@@ -10,13 +11,14 @@ use super::{
 };
 use crate::extract::names::Lookup;
 
-/// What an absolute import resolves to.
+/// What an import, absolute or relative, resolves to.
 pub(super) enum Resolution {
     /// No local file, or none the import can be said to mean: a third-party or missing module, the standard library.
     Nothing,
     /// The files the import runs.
     Pairs(Vec<String>),
-    /// More than one provider could be meant, so the importer is Unsure of `name` for `reason`.
+    /// The import could mean more than one thing (two providers have its name, or only some roots allow its climb), so
+    /// the importer is Unsure of `name` for `reason`.
     Unsure {
         name: String,
         reason: &'static str,
@@ -128,15 +130,15 @@ impl Index<'_, '_> {
     }
 
     /// The files an absolute import in `importer` runs: the init file of each package on the way and the module's file;
-    /// for `from M import n`, also `n`'s file when it is a submodule of `M`. Nothing for a relative import, or when no
-    /// root provides the first segment.
+    /// for `from M import n`, also `n`'s file when it is a submodule of `M`. Nothing when no root provides the first
+    /// segment.
     ///
     /// The first segment is looked up under every root and in the standard-library list, each a provider. Two or more
     /// that have it as a module or regular package make the importer Unsure, even when only one holds the final file; a
     /// bare folder is no such provider, and never competes with the standard library. Below that, the importer is Unsure
     /// only when the final file is found more than once.
     pub(super) fn absolute(&self, importer: &str, import: &Import) -> Resolution {
-        let Some(first) = import.module.first().filter(|_| import.dots == 0) else {
+        let Some(first) = import.module.first() else {
             return Resolution::Nothing;
         };
         let roots: Vec<&String> = match self.first.lookup(first) {
