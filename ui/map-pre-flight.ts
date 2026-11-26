@@ -262,6 +262,19 @@ export function openPreFlight(fresh = false) {
     });
 }
 
+/**
+ * The Pre-flight button opens and closes the overlay. A pointer press outside the overlay and its button closes it too, in its start and
+ * result phases (#666); while Daniel picks parts by hand or waits on the writer, it stays, so a stray press loses neither.
+ */
+export function startPreFlight() {
+  const button = element("pre-flight-button");
+  button.addEventListener("click", () => openPreFlight());
+  document.addEventListener("pointerdown", (event) => {
+    const target = event.target as Node;
+    if ((phase?.kind === "start" || phase?.kind === "result") && !overlay().contains(target) && !button.contains(target)) show(null);
+  }, true);
+}
+
 // The parts of the project's pre-flight are framed on the map, marked predicted or picked; a past commit's map shows none.
 // The word sits among the law marks, since the session badges replace their slot's children.
 onPlate(({ view, part, plate, marks }) => {

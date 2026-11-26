@@ -225,6 +225,8 @@ export const fakeDocument = (extra = {}, Element = El) => ({
   getElementById: () => new Element("div"),
   querySelector: () => null,
   activeElement: null,
+  // The viewport's width, which the toasts are placed against (`toast.ts`).
+  documentElement: { clientWidth: 0 },
   ...extra,
 });
 

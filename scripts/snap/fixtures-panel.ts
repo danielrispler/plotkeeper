@@ -416,8 +416,9 @@ export const mapPanelHistory = (): Fixture =>
       await wait(300);
       if (!panelOpen() || panel.querySelector(".panel-title")?.textContent !== "History") return log("snap:fail the History link did not open History in the left panel");
       if (panel.querySelectorAll(".history .row").length !== 2) log("snap:fail History lists " + panel.querySelectorAll(".history .row").length + " ended sessions");
-      const tray = document.getElementById("map-tray").getBoundingClientRect();
-      if (tray.left < panel.getBoundingClientRect().right) log("snap:fail the tray is under the open panel");
+      // The tray hides while a left panel is open, at every width (#666), and comes back when it closes.
+      const trayShown = () => document.getElementById("map-tray").getClientRects().length > 0;
+      if (trayShown()) log("snap:fail the tray shows beside the open panel");
       checkAll("with History open");
       // Hovering an ended session's row spotlights its footprint; Esc closes History under the pointer, and the hover ends with its row.
       const firm = () => [...document.querySelectorAll("#map .plate.foot-firm")].map((p) => p.dataset.id).join();
@@ -426,6 +427,7 @@ export const mapPanelHistory = (): Fixture =>
       if (firm() !== "hook") log("snap:fail the History row's footprint: " + firm());
       await esc();
       if (panelOpen()) log("snap:fail Esc did not close History");
+      if (!trayShown()) log("snap:fail the tray did not come back when History closed");
       if (firm() !== "") log("snap:fail the removed History row's spotlight stuck: " + firm());
       document.querySelector("#history-link .history-link").click();
       await wait(300);
@@ -529,6 +531,88 @@ export const mapNotPlacedHint = (): Fixture => {
     if (!document.querySelector("#map-not-placed details")?.open) log("snap:fail a click on the line did not fold it out");
     log("not placed hint ok");`, { map_state: mapState(), map_place: {} });
   return { ...f, sessions: [], realKeys: true, realPointer: true, snapDone: "not placed hint ok" };
+};
+/**
+ * The not placed list on the glass (#666): over Understanding's sheet, the closed line is one bare line, with no glass; opened, the list
+ * has the sheet's glass, so no plate under it shows through; closed again, the sheet under it is where it was. The screenshot is it open.
+ */
+export const mapNotPlacedGlass = (): Fixture =>
+  mapPanel(`
+      const slot = document.getElementById("map-not-placed");
+      const details = slot.querySelector("details");
+      if (!details) return log("snap:fail the map has no not placed list");
+      await plate("understanding");
+      if (!sheetOpen()) return log("snap:fail the plate's click did not open its sheet");
+      const look = (node) => { const style = getComputedStyle(node); return style.backgroundColor + " " + style.backdropFilter; };
+      const glass = look(sheet);
+      const sheetTop = sheet.getBoundingClientRect().top;
+      if (getComputedStyle(slot).backdropFilter !== "none" || rgb(getComputedStyle(slot).backgroundColor)[3] !== 0) log("snap:fail the closed not placed line has the glass: " + look(slot));
+      const line = details.querySelector("summary").getBoundingClientRect().height;
+      if (slot.getBoundingClientRect().height !== line) log("snap:fail the closed not placed line is " + slot.getBoundingClientRect().height + " px tall, not its one line's " + line);
+      details.open = true;
+      await wait(200);
+      if (look(slot) !== glass) log("snap:fail the open not placed list is not on the sheet's glass: " + look(slot) + ", not " + glass);
+      checkAll("with the not placed list open");
+      details.open = false;
+      await wait(200);
+      if (sheet.getBoundingClientRect().top !== sheetTop) log("snap:fail the sheet moved after the list closed: " + sheet.getBoundingClientRect().top + ", not " + sheetTop);
+      details.open = true;
+      await wait(200);
+      log("panel ok");`);
+/**
+ * The toasts beside the side area (#666), in focus mode: the needs-you toast stacks against the side area's left edge, so it covers neither
+ * the not placed line nor, once a sheet opens, the sheet's ×; widening the sheet moves it; with no side area it keeps the map's top-right
+ * corner. The Clear toast keeps the bottom-left corner. The screenshot is the toast beside the widened sheet.
+ */
+export const mapToastBeside = (): Fixture => {
+  const sessions = busySessions().map((s) => (s.id === "s4" ? { ...s, state: "your_turn" as const, landed: true } : s));
+  return mapPanel(`
+      const toast = document.getElementById("toast");
+      const side = document.getElementById("map-side");
+      const region = () => document.getElementById("toasts").getBoundingClientRect();
+      const box = (node) => node.getBoundingClientRect();
+      const over = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+      const round = (b) => [b.left, b.top, b.right, b.bottom].map(Math.round).join();
+      const beside = (when) => {
+        const [t, s] = [box(toast), box(side)];
+        if (t.right > s.left || s.left - t.right > 40) log("snap:fail the toast is not against the side area's left edge " + when + ": " + round(t) + " beside " + round(s));
+        if (Math.round(t.top) !== Math.round(region().top)) log("snap:fail the toast left the map's top " + when + ": " + round(t));
+      };
+      document.dispatchEvent(new KeyboardEvent("keydown", { code: "Enter", key: "Enter", metaKey: true, shiftKey: true, bubbles: true }));
+      await wait(200);
+      if (!toast.matches(":popover-open")) return log("snap:fail no needs-you toast in focus mode");
+      const line = document.querySelector("#map-not-placed summary");
+      if (!line || side.hidden) return log("snap:fail the side area does not show the not placed line");
+      if (over(box(toast), box(line))) log("snap:fail the toast covers the not placed line: " + round(box(toast)) + " over " + round(box(line)));
+      beside("with the not placed line");
+      await plate("understanding");
+      const close = sheet.querySelector(".sheet-close");
+      if (!close) return log("snap:fail the plate's click did not open its sheet");
+      if (over(box(toast), box(close))) log("snap:fail the toast covers the sheet's ×: " + round(box(toast)) + " over " + round(box(close)));
+      beside("with the sheet");
+      const was = box(toast).left;
+      for (let i = 0; i < 6; i++) sheet.querySelector(".sheet-resize").dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+      await wait(100);
+      if (box(toast).left >= was) log("snap:fail widening the sheet did not move the toast: " + was + " then " + box(toast).left);
+      beside("with the sheet widened");
+      // The Clear toast keeps the bottom-left corner.
+      document.querySelector(".list .clear-landed").click();
+      await wait(100);
+      const clear = document.getElementById("clear-toast");
+      if (!clear.matches(":popover-open")) return log("snap:fail Clear landed showed no toast");
+      if (Math.round(box(clear).left) !== Math.round(region().left) || Math.round(box(clear).bottom) !== Math.round(region().bottom)) log("snap:fail the Clear toast left its corner: " + round(box(clear)) + " in " + round(region()));
+      // With no side area, the toast keeps the map's top-right corner.
+      __snapEmit("sessions", ${JSON.stringify(sessions)}.filter((s) => ["s1", "s2"].includes(s.id)));
+      await esc();
+      await wait(100);
+      if (!side.hidden) return log("snap:fail the side area still shows");
+      if (Math.round(box(toast).right) !== Math.round(region().right) || Math.round(box(toast).top) !== Math.round(region().top)) log("snap:fail with no side area the toast is not in the map's top-right corner: " + round(box(toast)) + " in " + round(region()));
+      // The side area back, the toast moves out of its way again, for the screenshot.
+      __snapEmit("sessions", ${JSON.stringify(sessions)});
+      await plate("understanding");
+      await wait(100);
+      beside("with the side area back");
+      log("panel ok");`, { sessions });
 };
 /** A PR brief over the story and the sheet: the one thing that dims the map, and both panels with it. */
 export const mapPanelBrief = (): Fixture =>
