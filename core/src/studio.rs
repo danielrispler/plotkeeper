@@ -9,7 +9,7 @@ use crate::{
     TranscriptFormat, TurnDiff, TurnFiles, TurnFilesSnapshot, TurnTrees, Work, agy, checks, claude,
     codex, compute_turn_files, copilot, cursor,
     event::{Event, Happened, Start, ToolKind},
-    qwen, range,
+    opencode, qwen, range,
     session::{
         FALLBACK_MS, IDLE_AFTER_MS, MISMATCH_AFTER_MS, Since, card_time, folder_name, short,
         shown_state, task_path,
@@ -27,7 +27,7 @@ use std::{
 /// harness is one arm here, beside its `Capabilities` constant and its parser.
 enum Named {
     Agy,
-    /// An agent read by a parser of its own, Codex's, Cursor's (#362), Qwen Code's or Copilot's (#361), and the line's
+    /// An agent read by a parser of its own, Codex's, Cursor's (#362), Qwen Code's, Copilot's (#361) or OpenCode's (#370), and the line's
     /// time, for its drift when that parser cannot read it.
     Parsed(Parse, u64),
     /// The line's time, for its drift.
@@ -53,6 +53,7 @@ impl Named {
             Some(cursor::CURSOR) => Named::Parsed(cursor::parse, stamp.studio_received_ms),
             Some(qwen::QWEN) => Named::Parsed(qwen::parse, stamp.studio_received_ms),
             Some(copilot::COPILOT) => Named::Parsed(copilot::parse, stamp.studio_received_ms),
+            Some(opencode::OPENCODE) => Named::Parsed(opencode::parse, stamp.studio_received_ms),
             Some(_) => Named::Other(stamp.studio_received_ms),
         }
     }

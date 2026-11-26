@@ -51,3 +51,34 @@ jobs:
         env:
           NEXTEST_TEST_THREADS: 5
 
+  ubuntu:
+    # The Linux run of the same checks (#510, #699). Not required yet: it becomes required once the suite passes here.
+    # A draft pull request skips it. The snap fixtures run in `snap.yml`, on macOS.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      # Reads rust-toolchain.toml; caches cargo's registry and target.
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          rustflags: ""
+          cache-workspaces: . -> target
+      # `check` runs the Rust tests with nextest, then type-checks the wire samples they wrote (`scripts/wire/`, #246),
+      # and looks for unused Rust dependencies with cargo machete.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest,cargo-machete
+      - run: npm ci
+      # The same command an agent runs locally (package.json, `check`).
+      # The macOS runner has 3 cores and most tests wait on git, processes and timers, so nextest runs 5 at once, not 3.
+      # Not more: the hook gives up on its trees after 1.2s, and at twice the cores its tests fail on a loaded machine.
+      - run: npm run check
+        env:
+          NEXTEST_TEST_THREADS: 5
+
