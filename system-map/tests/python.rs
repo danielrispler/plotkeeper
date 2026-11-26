@@ -211,41 +211,37 @@ fn a_config_in_a_path_the_map_ignores_still_makes_a_root() {
 }
 
 #[test]
-fn an_ignored_pyproject_toml_declaring_where_lib_replaces_src_with_lib() {
-    let (_dir, root) = ignoring(
-        &["pyproject.toml"],
-        &[
-            (
-                "pyproject.toml",
-                "[tool.setuptools.packages.find]\nwhere = [\"lib\"]\n",
-            ),
-            ("lib/pkg/__init__.py", "x = 1\n"),
-            ("src/other/__init__.py", "x = 1\n"),
-            ("app.py", "import pkg\nimport other\n"),
-        ],
-    );
-    assert_eq!(pairs(&report(&root)), ["app.py>lib/pkg/__init__.py"]);
-}
-
-#[test]
-fn an_ignored_setup_cfg_declaring_package_dir_is_read_the_same_way() {
-    let (_dir, root) = ignoring(
-        &["setup.cfg"],
-        &[
-            ("setup.cfg", "[options]\npackage_dir =\n    = lib\n"),
-            ("lib/pkg/__init__.py", "x = 1\n"),
-            ("src/other/__init__.py", "x = 1\n"),
-            ("app.py", "import pkg\nimport other\n"),
-        ],
-    );
-    assert_eq!(pairs(&report(&root)), ["app.py>lib/pkg/__init__.py"]);
+fn an_ignored_config_declaring_lib_replaces_src_with_lib() {
+    for (config, text) in [
+        (
+            "pyproject.toml",
+            "[tool.setuptools.packages.find]\nwhere = [\"lib\"]\n",
+        ),
+        ("setup.cfg", "[options]\npackage_dir =\n    = lib\n"),
+    ] {
+        let (_dir, root) = ignoring(
+            &[config],
+            &[
+                (config, text),
+                ("lib/pkg/__init__.py", "x = 1\n"),
+                ("src/other/__init__.py", "x = 1\n"),
+                ("app.py", "import pkg\nimport other\n"),
+            ],
+        );
+        assert_eq!(
+            pairs(&report(&root)),
+            ["app.py>lib/pkg/__init__.py"],
+            "{config}"
+        );
+    }
 }
 
 #[test]
 fn an_ignored_config_that_does_not_parse_gives_the_note_and_no_problem() {
-    for (config, text) in [
-        ("pyproject.toml", "[project\nname = \n"),
-        ("setup.cfg", "name = m\n[options]\n"),
+    for (config, text, folder) in [
+        ("pyproject.toml", "[project\nname = \n", "."),
+        ("setup.cfg", "name = m\n[options]\n", "."),
+        ("vendored/pyproject.toml", "[project\nname = \n", "vendored"),
     ] {
         let mut linked = map(
             &[("app", &["app.py"]), ("pkg", &["src/**"])],
@@ -265,7 +261,7 @@ fn an_ignored_config_that_does_not_parse_gives_the_note_and_no_problem() {
         assert_eq!(
             found.notes,
             [format!(
-                "python-imports did not read {config}, which does not parse; failing links into . may be false"
+                "python-imports did not read {config}, which does not parse; failing links into {folder} may be false"
             )],
             "{config}"
         );
