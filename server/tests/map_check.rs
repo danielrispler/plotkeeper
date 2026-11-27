@@ -91,3 +91,17 @@ fn an_error_exits_two_and_the_other_map_commands_stay_the_checkers() {
         );
     }
 }
+
+#[test]
+fn scan_prints_the_free_scan_as_text_or_json_and_exits_zero() {
+    let (_dir, root) = project(None);
+    let text = plotkeeper(&["map", "scan", "--root", &root]);
+    assert_eq!(text.status.code(), Some(0), "{text:?}");
+    let text = String::from_utf8(text.stdout).unwrap();
+    assert!(text.starts_with("1 part\n  alpha: alpha/\n"), "{text}");
+    let json = plotkeeper(&["map", "scan", "--json", "--root", &root]);
+    assert_eq!(json.status.code(), Some(0), "{json:?}");
+    let value: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(value["map"]["parts"][0]["paths"][0], "alpha/");
+    assert_eq!(value["loose_files"], serde_json::json!([]));
+}

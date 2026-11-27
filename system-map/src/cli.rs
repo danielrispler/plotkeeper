@@ -53,6 +53,9 @@ fn run(args: Vec<String>, commands: &[&str]) -> Result<ExitCode, String> {
     if touched {
         return run_touched(&root, paths, json);
     }
+    if command.as_deref() == Some("scan") {
+        return run_scan(&root, json);
+    }
     if command.as_deref() == Some("imports") {
         return run_imports(&root, json);
     }
@@ -162,6 +165,53 @@ fn run_touched(root: &Path, mut paths: Vec<String>, json: bool) -> Result<ExitCo
         if !found.unowned.is_empty() {
             println!("unowned: {}", found.unowned.join(", "));
         }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `scan`: the free scan of the repository, which exits 0, or 2 when git cannot list the files.
+fn run_scan(root: &Path, json: bool) -> Result<ExitCode, String> {
+    let found = crate::scan(root)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&found).map_err(|e| e.to_string())?
+        );
+        return Ok(ExitCode::SUCCESS);
+    }
+    let parts = found.map["parts"].as_array().map_or(&[][..], Vec::as_slice);
+    let n = parts.len();
+    println!("{n} part{}", if n == 1 { "" } else { "s" });
+    for part in parts {
+        println!(
+            "  {}: {}",
+            part["id"].as_str().unwrap_or(""),
+            part["paths"][0].as_str().unwrap_or("")
+        );
+    }
+    if !found.ignore_candidates.is_empty() {
+        println!("ignore candidates:");
+    }
+    for candidate in &found.ignore_candidates {
+        println!(
+            "  [{}] {}",
+            if candidate.ticked { "x" } else { " " },
+            candidate.path
+        );
+    }
+    for (title, files) in [
+        ("loose files", &found.loose_files),
+        ("loose tests", &found.loose_tests),
+    ] {
+        if !files.is_empty() {
+            println!("{title}:");
+        }
+        for file in files {
+            println!("  {file}");
+        }
+    }
+    if !found.unread_languages.is_empty() {
+        println!("no reader for: {}", found.unread_languages.join(", "));
     }
     Ok(ExitCode::SUCCESS)
 }

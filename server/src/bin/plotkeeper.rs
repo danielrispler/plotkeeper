@@ -62,13 +62,13 @@ fn main() -> ExitCode {
         // `--yes` is for scripts: install never asks, as running it is the consent.
         ["install"] | ["install", "--yes"] => return wire("install", &home),
         ["uninstall"] => return wire("uninstall", &home),
-        // The checker's own `check`, which `system-map check` also runs; its other commands stay its own.
-        ["map", "check", ..] => {
-            return system_map::cli::main("plotkeeper map", args[1..].to_vec(), &["check"]);
+        // The checker's own `check`, which `system-map check` also runs, and the free scan; its other commands stay its own.
+        ["map", "check" | "scan", ..] => {
+            return system_map::cli::main("plotkeeper map", args[1..].to_vec(), &["check", "scan"]);
         }
         _ => {
             eprintln!(
-                "plotkeeper: unknown command {:?}; run plotkeeper, plotkeeper install [--yes], plotkeeper uninstall, plotkeeper map check or plotkeeper --version",
+                "plotkeeper: unknown command {:?}; run plotkeeper, plotkeeper install [--yes], plotkeeper uninstall, plotkeeper map check, plotkeeper map scan or plotkeeper --version",
                 args.join(" ")
             );
             return ExitCode::FAILURE;
