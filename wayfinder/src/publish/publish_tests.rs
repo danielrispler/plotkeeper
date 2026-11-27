@@ -280,12 +280,18 @@ fn warned_folder(rows: &[Row]) -> Vec<String> {
 }
 #[test]
 fn a_strong_route_whose_reason_names_no_risk_or_open_choice_is_warned() {
-    let warning = "a.md: **Route:** strong, but its reason names no risk (persistence, stored, queue, concurrency, wire, redraw, layout, handler, trust boundary, untested edge case) and no open choice (open, choice, undecided, Daniel); file count, a new module and hand-checked trials raise the tier to medium only (issue-tracker.md, Routing)";
-    let cases: [(&str, &[&str]); 8] = [
+    let warning = "a.md: **Route:** strong, but its reason names no risk (persistence, stored, queue, concurrency, wire, redraw, layout, handler, trust boundary, untested edge case) and no open choice (open, choice, choices, undecided, daniel); file count, a new module and hand-checked trials raise the tier to medium only (issue-tracker.md, Routing)";
+    let cases: [(&str, &[&str]); 10] = [
         (
             "strong · effort medium — a new module with heuristics checked on fixture repositories",
             &[warning],
         ),
+        // The choice terms are whole words: a name holding one is no open choice.
+        (
+            "strong · effort medium — runs OpenCode and reopens a log",
+            &[warning],
+        ),
+        ("strong · effort medium — two choices are Daniel's", &[]),
         ("strong · effort medium — a hand-checked trial", &[warning]),
         ("strong · effort high — a Stored type gains a field", &[]),
         ("strong · effort medium — two handlers across a redraw", &[]),
@@ -304,6 +310,22 @@ fn a_strong_route_whose_reason_names_no_risk_or_open_choice_is_warned() {
             "{route}"
         );
     }
+    // Only the Route line in ## Touches counts, not one quoted in What to build.
+    let (manifest, mut bodies) = folder(
+        &[(
+            "a.md",
+            &[],
+            "`a.rs`",
+            "strong · effort medium — a new module",
+        )],
+        "",
+    );
+    let body = bodies["a.md"].replace(
+        "X.\n",
+        "X. Was `- **Route:** strong · effort high — a stored type`.\n",
+    );
+    bodies.insert("a.md".into(), body);
+    assert_eq!(publish_warnings(&manifest, &bodies), [warning]);
 }
 #[test]
 fn publish_prints_the_longest_chain_marking_edges_that_share_a_file() {

@@ -27,14 +27,10 @@ fn body_problems(body: &str) -> Vec<String> {
             "says to run `{install}`, a global install auto mode blocks: hand Daniel the install before /implement-spec starts"
         ));
     }
-    let mut after = body
-        .lines()
-        .skip_while(|line| line.trim_end() != "## Touches");
-    if after.next().is_none() {
+    let Some(touches) = touches(body) else {
         problems.push("lacks ## Touches".to_owned());
         return problems;
-    }
-    let touches: Vec<&str> = after.take_while(|line| !line.starts_with("## ")).collect();
+    };
     let line = |key: &str| touches.iter().copied().find(|line| line.contains(key));
     for key in ["**Files:**", "**Session:**", "**Route:**"] {
         if line(key).is_none() {
@@ -46,6 +42,14 @@ fn body_problems(body: &str) -> Vec<String> {
         problems.extend(route_problems(route, &files));
     }
     problems
+}
+/// The lines of a body's `## Touches` section, or nothing when it has none.
+fn touches(body: &str) -> Option<Vec<&str>> {
+    let mut after = body
+        .lines()
+        .skip_while(|line| line.trim_end() != "## Touches");
+    after.next()?;
+    Some(after.take_while(|line| !line.starts_with("## ")).collect())
 }
 /// Whether a Touches path is UI, which is never `cheap` (`docs/agents/issue-tracker.md`, Routing,
 /// rule 3): under `ui/` or `scripts/snap/`, or an `.html` or `.css` file.
@@ -355,25 +359,31 @@ fn publish_warnings(
 }
 /// The terms one of which a `strong` route's reason names when the ticket holds a choice left open
 /// (`docs/agents/issue-tracker.md`, Routing): besides `RISKS`, the only other reason for `strong`.
-const CHOICES: [&str; 4] = ["open", "choice", "undecided", "Daniel"];
-/// Whether a body's Route is `strong` with a reason naming neither a risk nor an open choice. The
-/// check matches words, so it warns and never refuses.
+/// Each is matched as a whole word of the reason, so "OpenCode" or "reopens" names no open choice.
+const CHOICES: [&str; 5] = ["open", "choice", "choices", "undecided", "daniel"];
+/// Whether a body's Route line in `## Touches`, the one `body_problems` checks, is `strong` with a
+/// reason naming neither a risk nor an open choice. The check matches words, so it warns and never
+/// refuses.
 fn unjustified_strong(body: &str) -> bool {
-    let Some(route) = body.lines().find_map(|line| line.split_once("**Route:**")) else {
+    let route = touches(body)
+        .unwrap_or_default()
+        .into_iter()
+        .find_map(|line| line.split_once("**Route:**"));
+    let Some(route) = route else {
         return false;
     };
     let Some((head, reason)) = route.1.trim().split_once(" — ") else {
         return false;
     };
     let reason = reason.to_lowercase();
+    let mut words = reason.split(|c: char| !c.is_alphanumeric());
     head.starts_with("strong ·")
-        && !RISKS
-            .iter()
-            .chain(&CHOICES)
-            .any(|term| reason.contains(&term.to_lowercase()))
+        && !RISKS.iter().any(|risk| reason.contains(risk))
+        && !words.any(|word| CHOICES.contains(&word))
 }
 /// The longest blocker chain, each edge marked with the **Files** paths its two tickets share, or
-/// nothing when no ticket waits on another. Ties go to the earlier ticket in publish order.
+/// nothing when no ticket waits on another. Of equally long chains it ends at the earliest ticket in
+/// publish order, and goes through the first blocker in `blocked_by` order.
 fn longest_chain(
     manifest: &Manifest,
     bodies: &std::collections::HashMap<String, String>,
