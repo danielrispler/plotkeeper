@@ -312,6 +312,7 @@ for (const [id, words] of [
   ["mark-unseen", "Mark this session unseen, to come back to it"],
   ["delete", "Remove this session from the list; its cards are kept"],
   ["notice-dismiss", "Hide this notice"],
+  ["keep-current-button", "Snippets for your agent instructions and CI that keep the map true"],
   ["pre-flight-button", "Before you start: the parts this work will likely cross"],
   ["panel-close", "Close the panel (Esc)"],
   ["rename-dialog-save", "Save this name (↩)"],

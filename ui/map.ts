@@ -22,6 +22,7 @@ import { availability, confirmed, element, failure, hint, invoke, isUnavailable,
 import { cameraRig, type CameraRig, fitCamera, panTo, revealPan, zoomAt } from "./map-camera.js";
 import { brokenParts, brokenText, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Drag, type Law, type Layer, type LayerName, type MapDoc, askedProject, startProject, switchProject, wasRemoved, parseMap, type Part, type Point, placement, plateSize, plateTitle, sizeOf, lineTag, linkLines, markPoints, readingOrder, rimPoint, type Scrub, tagWord, type Tier } from "./map-model.js";
 import { copyButton } from "./copy-button.js";
+import { askKeep, drawKeep, startKeep } from "./map-keep.js";
 import { type DraftField, drawDraft, openingWords, replaceAsked } from "./map-draft.js";
 import { drawScan } from "./map-scan.js";
 import { recheckSeen } from "./seen.js";
@@ -344,6 +345,8 @@ function drawHead(state: MapState | null) {
   drawPending(state);
   // A folder in no git repository offers no run (#753).
   element("pre-flight-button").hidden = state?.status === "not-git";
+  // Keep it current (#766): its button while a map is drawn, its card after Accept or when the button asked.
+  drawKeep(element("map-keep"), element("keep-current-button"), state?.project ?? project, state?.status === "loaded");
 }
 
 // The check's problems over a checkout map (#753): the count, the first three and a copy of them all. A draw with the same problems keeps the
@@ -430,7 +433,11 @@ function pressPending(asked: string, busy: NonNullable<PendingPress["busy"]>, ru
   pendingPress = press;
   draw();
   void run().then(
-    () => (press.busy = null),
+    () => {
+      press.busy = null;
+      // A closed PR's Write or new draft PR puts the map in place as Accept does (#766); Discard does not.
+      if (busy !== "discard") askKeep(asked);
+    },
     (why: unknown) => {
       failure(`map_pending_${busy}`)(why);
       [press.busy, press.note] = [null, messageOf(why)];
@@ -602,6 +609,7 @@ async function writeFile(project: string, command: "map_draft_accept" | "map_pen
 // stands.
 async function writeMap(project: string): Promise<MapDraft | null> {
   if (!(await writeFile(project, "map_draft_accept"))) return invoke("map_draft", { project });
+  askKeep(project);
   await load(project, false);
   return null;
 }
@@ -610,6 +618,7 @@ async function writeMap(project: string): Promise<MapDraft | null> {
 // Map draft.
 async function openPr(project: string): Promise<MapDraft | null> {
   await invoke("map_draft_pr", { project });
+  askKeep(project);
   await load(project, false);
   return null;
 }
@@ -964,6 +973,7 @@ function draw() {
 /** Wires the view: the project menu, the window's focus and a merge the server saw. */
 export function startMap(given: MapDeps) {
   deps = given;
+  startKeep(element("keep-current-button"), () => project, draw);
   element("map-legend").append(
     lawMark({ id: "", on: "", backing: "check", text: "a test stands behind it" }, "legend-check"), " law, backed by a check ",
     lawMark({ id: "", on: "", backing: "trust", text: "nothing checks it" }, "legend-trust"), " law, on trust",

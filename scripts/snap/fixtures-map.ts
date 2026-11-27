@@ -1318,12 +1318,39 @@ export const mapDraftWrite = (): Fixture =>
     if (!document.querySelector("#map .map-canvas .plate[data-id=shell]")) log("snap:fail the written map is not drawn: " + document.getElementById("map-body").textContent.replace(/\\s+/g, " ").slice(0, 200));
     if (document.getElementById("map-ref").textContent !== "Map not committed yet") log("snap:fail the head says " + document.getElementById("map-ref").textContent);
     if ([...document.querySelectorAll("#map button")].some((b) => /draft PR/.test(b.textContent))) log("snap:fail a PR button shows on the written map");
+    const keep = document.getElementById("map-keep");
+    if (keep.hidden || !keep.textContent.includes("Keep it current")) log("snap:fail the card does not open after Accept");
     log("draft write ok");`, {
     map_state: mapState({ status: "none", source: null, from: null }),
     map_draft: reviewDraft,
     budget: 9000,
     snapDone: "draft write ok",
   });
+/**
+ * Keep it current (#753, ticket #766): the quiet button in the map's head is there with the map drawn and the card shut; a press opens the card
+ * with its two snippets, each with Copy, and the note naming .git/info/exclude, and a second press shuts it.
+ */
+export const mapKeepCurrent = (): Fixture =>
+  mapBaseOf(`
+    const button = document.getElementById("keep-current-button");
+    const card = document.getElementById("map-keep");
+    if (button.hidden || button.textContent !== "Keep it current") return log("snap:fail no Keep it current button with a map drawn");
+    if (!card.hidden) log("snap:fail the card is open before it is asked for");
+    button.click();
+    await wait(200);
+    if (card.hidden || button.getAttribute("aria-expanded") !== "true") return log("snap:fail the button did not open the card");
+    const code = [...card.querySelectorAll("pre")].map((pre) => pre.textContent);
+    if (code.length !== 2 || !code[0].includes("npx -y plotkeeper map check") || !code[1].includes("actions/checkout")) log("snap:fail the snippets are " + JSON.stringify(code));
+    if ([...card.querySelectorAll('button[aria-label^="Copy"]')].length !== 2) log("snap:fail each snippet has no Copy");
+    if (!card.textContent.includes(".git/info/exclude")) log("snap:fail the card does not name .git/info/exclude");
+    frame("with the Keep it current card");
+    checkColours("with the Keep it current card");
+    button.click();
+    await wait(100);
+    if (!card.hidden) log("snap:fail a second press did not shut the card");
+    button.click();
+    await wait(100);
+    log("base ok");`);
 // Switching projects (#386's review): what one project's map started is not lost or left over on the next. `calls` are the commands the
 // page sends from here on; `open(path)` presses a project's header. Pokedex's folder is gone, and it has a live session, so its header
 // shows (spec #659).
