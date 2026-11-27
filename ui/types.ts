@@ -559,7 +559,7 @@ export type Expected = { expected: string[]; touched: string[] };
 // it was asked for, started or ended, by its state. An ended run says how it ended in `line`, lists the tool calls it was denied, and
 // carries its `prompt` to copy on every end but a clean one. `paused` is why every queue waits, null while they run.
 type RunEnd = "done" | "denied" | "failed" | "timed-out" | "died" | "setup-failed" | "not-logged-in" | "rate-limited";
-export type RunView = { id: string; kind: "back-law" | "micro-world" | "map-review"; state: "queued" | "running" | "ended"; at: number; outcome: RunEnd | null; line: string | null; denials: string[]; prompt: string | null };
+export type RunView = { id: string; kind: "back-law" | "micro-world" | "map-review" | "first-map"; state: "queued" | "running" | "ended"; at: number; outcome: RunEnd | null; line: string | null; denials: string[]; prompt: string | null };
 export type Runs = { paused: string | null; runs: RunView[] };
 /** Ratifying (`ratify.rs`): an item of a PR is a map change (kind part, actor, link, law or flow) or a decision the agent declared. */
 export type PendingItem = { pr: number; kind: string; id: string };
