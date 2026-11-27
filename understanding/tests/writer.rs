@@ -341,37 +341,6 @@ fn summary_reply(summary: &str, options: [&str; 3]) -> String {
 }
 
 #[test]
-fn the_summary_call_runs_in_safe_mode_with_the_settings_model_effort_and_its_own_system_prompt() {
-    let writer = ClaudeWriter::new(CLAUDE.into(), "/card-writer".into());
-    let (command, input) = writer.summary_command(&setup(), &turn("s", 1), &[]);
-
-    let args: Vec<_> = command.get_args().map(|a| a.to_str().unwrap()).collect();
-    let [tools, none, mcp, safe, model, m, effort, e, system, s, p] = args[..] else {
-        panic!("{args:?}");
-    };
-    assert_eq!(
-        [tools, none, mcp, safe, model, m, effort, e, system, p],
-        [
-            "--tools",
-            "",
-            "--strict-mcp-config",
-            "--safe-mode",
-            "--model",
-            "claude-haiku-4-5",
-            "--effort",
-            "medium",
-            "--system-prompt",
-            "-p"
-        ]
-    );
-    assert!(s.contains("turn summary"), "{s}");
-    assert!(s.contains("keeps its bound or condition"), "{s}");
-    assert!(input.contains("Explain the parser"));
-    assert!(input.contains("It keeps a bracket stack."));
-    assert!(input.contains("- Rewrote the parser.\n"));
-}
-
-#[test]
 fn the_summary_asks_for_no_quiz_and_keeps_none_from_a_reply_that_has_one() {
     let writer = ClaudeWriter::new(CLAUDE.into(), "/card-writer".into());
     let (command, input) = writer.summary_command(&setup(), &turn("s", 1), &[]);
@@ -463,31 +432,22 @@ fn the_summary_input_holds_the_sessions_last_3_summaries() {
 }
 
 #[test]
-fn a_reply_with_a_null_quiz_gives_the_summary_alone_and_logs_nothing() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = summaries(dir.path());
-    let writer = recording(r#"{"headline": "Merged the lanes.", "quiz": null}"#.into());
-    let mut lines = Vec::new();
+fn a_reply_with_a_null_or_missing_quiz_gives_the_summary_alone_and_logs_nothing() {
+    for reply in [
+        r#"{"headline": "Merged the lanes.", "quiz": null}"#,
+        r#"{"headline": "Rewrote the parser."}"#,
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let store = summaries(dir.path());
+        let writer = recording(reply.into());
+        let mut lines = Vec::new();
 
-    let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |l| lines.push(l));
+        let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |l| lines.push(l));
 
-    assert_eq!(summary.unwrap().quiz, None);
-    assert_eq!(lines, Vec::<String>::new());
-    assert_eq!(writer.inputs().len(), 1, "no retry");
-}
-
-#[test]
-fn a_reply_with_no_quiz_field_gives_the_summary_alone_and_logs_nothing() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = summaries(dir.path());
-    let writer = recording(r#"{"headline": "Rewrote the parser."}"#.into());
-    let mut lines = Vec::new();
-
-    let summary = write_summary(&store, &writer, &setup(), turn("s", 1), |l| lines.push(l));
-
-    assert_eq!(summary.unwrap().quiz, None);
-    assert_eq!(lines, Vec::<String>::new());
-    assert_eq!(writer.inputs().len(), 1, "no retry");
+        assert_eq!(summary.unwrap().quiz, None, "{reply}");
+        assert_eq!(lines, Vec::<String>::new(), "{reply}");
+        assert_eq!(writer.inputs().len(), 1, "no retry: {reply}");
+    }
 }
 
 #[test]
@@ -528,31 +488,41 @@ const SPAWNED: &str = "Review the parser change.\nLook for off-by-ones.";
 const LAST: &str = "Done.\nThe parser change is fine: the bounds hold.";
 
 #[test]
-fn the_subagent_summary_call_runs_in_safe_mode_with_the_settings_model_and_effort() {
+fn the_summary_and_subagent_calls_run_in_safe_mode_with_the_settings_model_effort_and_their_own_system_prompt()
+ {
     let writer = ClaudeWriter::new(CLAUDE.into(), "/card-writer".into());
-    let (command, input) = writer.agent_summary_command(&setup(), SPAWNED, LAST);
-
-    let args: Vec<_> = command.get_args().map(|a| a.to_str().unwrap()).collect();
-    let [tools, none, mcp, safe, model, m, effort, e, system, s, p] = args[..] else {
-        panic!("{args:?}");
-    };
-    assert_eq!(
-        [tools, none, mcp, safe, model, m, effort, e, system, p],
-        [
-            "--tools",
-            "",
-            "--strict-mcp-config",
-            "--safe-mode",
-            "--model",
-            "claude-haiku-4-5",
-            "--effort",
-            "medium",
-            "--system-prompt",
-            "-p"
-        ]
-    );
-    assert!(s.contains("subagent"), "{s}");
-    assert!(input.contains(SPAWNED) && input.contains(LAST), "{input}");
+    let calls = [
+        (
+            writer.summary_command(&setup(), &turn("s", 1), &[]),
+            "turn summary",
+        ),
+        (
+            writer.agent_summary_command(&setup(), SPAWNED, LAST),
+            "subagent",
+        ),
+    ];
+    for ((command, input), system_mentions) in calls {
+        let args: Vec<_> = command.get_args().map(|a| a.to_str().unwrap()).collect();
+        let after = |flag: &str| {
+            let at = args.iter().position(|a| *a == flag);
+            at.map(|i| args[i + 1])
+        };
+        assert_eq!(after("--tools"), Some(""), "{args:?}");
+        for flag in ["--strict-mcp-config", "--safe-mode", "-p"] {
+            assert!(args.contains(&flag), "{flag} in {args:?}");
+        }
+        assert_eq!(after("--model"), Some("claude-haiku-4-5"), "{args:?}");
+        assert_eq!(after("--effort"), Some("medium"), "{args:?}");
+        let system = after("--system-prompt").expect("its own system prompt");
+        assert!(system.contains(system_mentions), "{system}");
+        if system_mentions == "turn summary" {
+            assert!(system.contains("keeps its bound or condition"), "{system}");
+            assert!(input.contains("Explain the parser"));
+            assert!(input.contains("It keeps a bracket stack."));
+        } else {
+            assert!(input.contains(SPAWNED) && input.contains(LAST), "{input}");
+        }
+    }
 }
 
 #[test]
@@ -626,52 +596,43 @@ fn watched(
 }
 
 #[test]
-fn a_writer_that_cannot_start_gives_one_notice_until_a_call_works() {
-    let dir = tempfile::tempdir().unwrap();
-    let program = dir.path().join("claude");
-    let (writer, heard) = watched(&program, dir.path());
+fn a_writer_that_cannot_start_or_fails_gives_one_notice_telling_why_until_a_call_works() {
+    // (a claude that is missing or fails, what the one notice says)
+    let cases: [(Option<&str>, &[&str]); 2] = [
+        (None, &["Summaries are off"]),
+        (
+            Some("echo 'Not logged in. Please run /login'; exit 1"),
+            &["Summaries are off: ", "not logged in", "claude"],
+        ),
+    ];
+    for (body, says) in cases {
+        let dir = tempfile::tempdir().unwrap();
+        let claude = match body {
+            Some(body) => shell(dir.path(), "claude", body),
+            None => dir.path().join("claude"),
+        };
+        let (writer, heard) = watched(&claude, dir.path());
 
-    for _ in 0..3 {
-        assert!(writer.goal(&["a prompt"]).is_err());
+        for _ in 0..3 {
+            assert!(writer.goal(&["a prompt"]).is_err());
+        }
+        {
+            let heard = heard.lock().unwrap().clone();
+            assert_eq!(heard.len(), 1, "{heard:?}");
+            let text = heard[0].as_deref().unwrap();
+            for part in says {
+                assert!(text.contains(part), "{part} in {text}");
+            }
+            if body.is_some() {
+                assert!(text.starts_with("Summaries are off: "), "{text}");
+            }
+        }
+
+        shell(dir.path(), "claude", "echo ok");
+        assert_eq!(writer.goal(&["a prompt"]).unwrap().trim(), "ok");
+        assert_eq!(heard.lock().unwrap().last(), Some(&None));
+        assert_eq!(heard.lock().unwrap().len(), 2);
     }
-    {
-        let heard = heard.lock().unwrap().clone();
-        assert_eq!(heard.len(), 1, "{heard:?}");
-        let text = heard[0].as_deref().unwrap();
-        assert!(text.contains("Summaries are off"), "{text}");
-    }
-
-    shell(dir.path(), "claude", "echo ok");
-    assert_eq!(writer.goal(&["a prompt"]).unwrap().trim(), "ok");
-    assert_eq!(heard.lock().unwrap().last(), Some(&None));
-    assert_eq!(heard.lock().unwrap().len(), 2);
-}
-
-#[test]
-fn a_writer_that_starts_and_fails_tells_why_and_what_to_do_once_until_a_call_works() {
-    let dir = tempfile::tempdir().unwrap();
-    let claude = shell(
-        dir.path(),
-        "claude",
-        "echo 'Not logged in. Please run /login'; exit 1",
-    );
-    let (writer, heard) = watched(&claude, dir.path());
-
-    for _ in 0..3 {
-        assert!(writer.goal(&["a prompt"]).is_err());
-    }
-    {
-        let heard = heard.lock().unwrap().clone();
-        assert_eq!(heard.len(), 1, "{heard:?}");
-        let text = heard[0].as_deref().unwrap();
-        assert!(text.starts_with("Summaries are off: "), "{text}");
-        assert!(text.contains("not logged in"), "{text}");
-        assert!(text.contains("claude"), "{text}");
-    }
-
-    shell(dir.path(), "claude", "echo ok");
-    assert!(writer.goal(&["a prompt"]).is_ok());
-    assert_eq!(heard.lock().unwrap().last(), Some(&None));
 }
 
 #[test]
