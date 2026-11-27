@@ -24,6 +24,16 @@ fn a_shell_between_the_agent_and_the_hook_is_skipped() {
     assert_eq!(agent_pid(None, 501, t), Some(500));
 }
 
+/// busybox's shell, by its applet name, as the Linux lookup gives it for a busybox executable.
+#[test]
+fn a_busybox_shell_between_the_agent_and_the_hook_is_skipped() {
+    for shell in ["sh", "ash"] {
+        let rows: &'static [(u32, &'static str, u32)] =
+            Box::leak(Box::new([(501, shell, 500), (500, "/usr/bin/claude", 100)]));
+        assert_eq!(agent_pid(None, 501, table(rows)), Some(500), "{shell}");
+    }
+}
+
 #[test]
 fn the_wrapper_pid_wins_and_a_bad_one_is_ignored() {
     let t = || table(&[(501, "/bin/sh", 500)]);
@@ -135,10 +145,15 @@ fn no_pid_when_the_agent_is_codexs_shared_daemon() {
 
 /// On Linux the lookup gives `/proc/<pid>/exe`, a full path, so the checks above see what macOS's
 /// `ps` gives them (#702). The rows are the paths VS Code and Cursor run from under each install shape
-/// (system package, `/opt`, snap, AppImage mount), and Codex's daemon in a Linux release.
+/// (system package, `/opt`, snap, AppImage mount, and the remote server Remote-SSH and Remote-WSL
+/// install in the home, unverified), and Codex's daemon in a Linux release.
 #[test]
 fn no_pid_when_the_agent_is_an_ide_installed_on_linux() {
-    const IDES: [&str; 11] = [
+    const IDES: [&str; 15] = [
+        "/home/me/.vscode-server/bin/0123abcd/node",
+        "/home/me/.vscode-server/cli/servers/Stable-0123abcd/server/node",
+        "/home/me/.cursor-server/bin/0123abcd/node",
+        "/home/me/.cursor-server/cli/servers/Stable-0123abcd/server/node",
         "/usr/share/code/code",
         "/usr/share/code-insiders/code-insiders",
         "/usr/share/cursor/cursor",
@@ -209,4 +224,26 @@ fn the_real_lookup_finds_a_childs_executable_and_its_parent() {
         found,
         Some((exe.to_string_lossy().into_owned(), std::process::id()))
     );
+}
+
+/// On a busybox system `/bin/sh` is busybox, so a shell's executable reads as `/bin/busybox`: the lookup gives the
+/// applet's name from `stat` instead, and the shell is skipped as any other. A copy of `/bin/sh` named `busybox`, run
+/// through a link named `sh`, stands in for busybox.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_real_lookup_skips_a_busybox_shell() {
+    let dir = scratch("busybox");
+    fs::copy("/bin/sh", dir.join("busybox")).unwrap();
+    std::os::unix::fs::symlink("busybox", dir.join("sh")).unwrap();
+    let mut child = std::process::Command::new(dir.join("sh"))
+        .args(["-c", "read line"])
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let found = agent_pid(None, child.id(), studio_hook::inspect);
+    let shell = studio_hook::inspect(child.id());
+    drop(child.stdin.take());
+    child.wait().unwrap();
+    assert_eq!(shell.map(|(command, _)| command).as_deref(), Some("sh"));
+    assert_eq!(found, Some(std::process::id()));
 }

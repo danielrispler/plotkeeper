@@ -15,12 +15,21 @@ fn beside(root: &Path, tag: &str) -> std::path::PathBuf {
     dir
 }
 
+/// Clears `XDG_DATA_HOME` in this test's process, so on Linux `bin_dir` of the temporary home is under it and never a
+/// real data folder's `bin/`. `isolated_home` does the same, but this part may not import it (the system map's parts).
+fn no_xdg() {
+    // SAFETY: `remove_var` is sound only while no other thread reads or writes the environment. That holds because the
+    // tests run under nextest, which runs each test in a process of its own, and each calls this before it starts one.
+    unsafe { std::env::remove_var("XDG_DATA_HOME") };
+}
+
 fn read(path: &Path) -> String {
     fs::read_to_string(path).unwrap()
 }
 
 #[test]
 fn a_start_with_no_bin_creates_it_with_both_copies() {
+    no_xdg();
     let home = tempfile::tempdir().unwrap();
     let from = beside(home.path(), "v1");
     let bin = studio_hook::bin_dir(home.path());
@@ -49,6 +58,7 @@ fn a_start_with_no_bin_creates_it_with_both_copies() {
 
 #[test]
 fn a_start_with_equal_copies_leaves_them_untouched() {
+    no_xdg();
     let home = tempfile::tempdir().unwrap();
     let from = beside(home.path(), "v1");
     let bin = studio_hook::bin_dir(home.path());
@@ -70,6 +80,7 @@ fn a_start_with_equal_copies_leaves_them_untouched() {
 
 #[test]
 fn a_start_with_a_differing_copy_replaces_it_by_rename() {
+    no_xdg();
     let home = tempfile::tempdir().unwrap();
     let bin = studio_hook::bin_dir(home.path());
     refresh(&beside(home.path(), "v1"), &bin).unwrap();
@@ -105,6 +116,7 @@ fn a_start_with_a_differing_copy_replaces_it_by_rename() {
 
 #[test]
 fn a_start_with_the_binaries_missing_says_so_once_and_keeps_the_copies() {
+    no_xdg();
     let home = tempfile::tempdir().unwrap();
     let bin = studio_hook::bin_dir(home.path());
     refresh(&beside(home.path(), "v1"), &bin).unwrap();

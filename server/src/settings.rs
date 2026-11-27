@@ -629,12 +629,30 @@ impl ApiKeys for Keychain {
 
 /// The Secret Service entries on Linux (#510, "API keys"): the same service and accounts as the Keychain's, through
 /// `secret-tool` (libsecret) found on the PATH, which only ever touches these entries. There is no fallback: with no
-/// `secret-tool` or no Secret Service running, a save is refused with what to install, and no key is read.
-pub struct SecretTool;
+/// `secret-tool` or no Secret Service running, a save is refused with what to install, and no key is read. A call that
+/// does not answer by its deadline, 10 s, is killed, so a locked keyring never holds up the server's start.
+pub struct SecretTool {
+    /// How long one `secret-tool` call may take.
+    deadline: std::time::Duration,
+}
+
+impl Default for SecretTool {
+    fn default() -> Self {
+        Self::with_deadline(std::time::Duration::from_secs(10))
+    }
+}
+
+impl SecretTool {
+    /// The Secret Service with each `secret-tool` call cut off at `deadline`, for a test.
+    pub fn with_deadline(deadline: std::time::Duration) -> Self {
+        Self { deadline }
+    }
+}
 
 const NO_SECRET_TOOL: &str = "secret-tool is not installed; install libsecret-tools.";
 const NO_SECRET_STORE: &str =
     "No secret store on this machine; install a keyring and libsecret-tools, or pick a CLI writer.";
+const KEYRING_SILENT: &str = "The keyring did not answer; it may be locked and waiting to be unlocked. Unlock it, then save again.";
 
 /// Whether `secret-tool`'s error says no Secret Service is reachable: no session bus to reach it on, or a bus with no
 /// store on it (GLib's and D-Bus's own words, which `secret-tool` prints after its name).
@@ -652,43 +670,39 @@ fn no_secret_store(error: &str) -> bool {
 }
 
 impl SecretTool {
-    /// Runs `secret-tool <action> [--label=…] service plotkeeper account <account>`, `stdin` written whole, then closed.
-    /// Its error, which never holds the key, is read only to tell a missing store from another failure.
+    /// Runs `secret-tool <action> [--label=…] service plotkeeper account <account>`, `stdin` written whole, then closed,
+    /// through the one process runner: one that exits without reading its input is still heard, and one that does not
+    /// answer by the deadline, as a locked keyring waiting on an unlock prompt no one sees, is killed. Its error, which
+    /// never holds the key, is read only to tell a missing store from another failure.
     fn run(
         &self,
         action: &str,
         kind: WriterKind,
         stdin: Option<&str>,
     ) -> Result<std::process::Output, String> {
-        use std::io::Write;
-        use std::process::{Command, Stdio};
+        use studio_workbench::run::{RunError, run_until, run_until_with_input};
         let account = account(kind);
         let label = format!("--label=plotkeeper {account}");
-        let mut command = Command::new("secret-tool");
+        let mut command = std::process::Command::new("secret-tool");
         command.arg(action);
         if action == "store" {
             command.arg(&label);
         }
-        let mut child = command
-            .args(["service", SERVICE, "account", &account])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| match e.kind() {
-                std::io::ErrorKind::NotFound => NO_SECRET_TOOL.to_string(),
-                _ => format!("the Secret Service could not be reached: {e}"),
-            })?;
-        let mut input = child.stdin.take().expect("piped");
-        if let Some(stdin) = stdin {
-            input
-                .write_all(stdin.as_bytes())
-                .map_err(|e| format!("the Secret Service could not be reached: {e}"))?;
-        }
-        drop(input);
-        let out = child
-            .wait_with_output()
-            .map_err(|e| format!("the Secret Service could not be reached: {e}"))?;
+        command.args(["service", SERVICE, "account", &account]);
+        let ran = match stdin {
+            Some(stdin) => run_until_with_input(&mut command, stdin.as_bytes(), self.deadline),
+            None => run_until(&mut command, self.deadline),
+        };
+        let out = match ran {
+            Ok(out) | Err(RunError::Failed(out)) => out,
+            Err(RunError::Start(e)) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(NO_SECRET_TOOL.into());
+            }
+            Err(RunError::Start(e)) => {
+                return Err(format!("the Secret Service could not be reached: {e}"));
+            }
+            Err(RunError::TimedOut(_)) => return Err(KEYRING_SILENT.into()),
+        };
         if !out.status.success() && no_secret_store(&String::from_utf8_lossy(&out.stderr)) {
             return Err(NO_SECRET_STORE.into());
         }
@@ -734,7 +748,7 @@ pub fn os_keys() -> std::sync::Arc<dyn ApiKeys> {
     #[cfg(target_os = "macos")]
     let keys = std::sync::Arc::new(Keychain::default());
     #[cfg(not(target_os = "macos"))]
-    let keys = std::sync::Arc::new(SecretTool);
+    let keys = std::sync::Arc::new(SecretTool::default());
     keys
 }
 
@@ -1365,5 +1379,26 @@ esac
                 "{line}"
             );
         }
+    }
+
+    /// A `secret-tool` that exits on a missing store without reading its standard input closes the pipe the input is
+    /// written to; its error is still what it said. An input that fills the pipe makes the write fail every time; a key,
+    /// at most 512 characters, only when the program wins the race to exit, which is why this calls `run` itself.
+    #[test]
+    fn a_secret_tool_that_exits_before_reading_its_input_is_still_heard() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("secret-tool");
+        std::fs::write(
+            &program,
+            "#!/bin/sh\necho 'secret-tool: Cannot autolaunch D-Bus without X11 $DISPLAY' >&2\nexit 1\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // SAFETY: nextest runs each test in a process of its own, and no thread has started yet.
+        unsafe { std::env::set_var("PATH", format!("{}:/usr/bin:/bin", dir.path().display())) };
+        let input = "k".repeat(1 << 20);
+        let said = super::SecretTool::default().run("store", WriterKind::Anthropic, Some(&input));
+        assert_eq!(said.err().as_deref(), Some(super::NO_SECRET_STORE));
     }
 }

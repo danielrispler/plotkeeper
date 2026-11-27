@@ -90,7 +90,7 @@ fn append() -> Result<(), Box<dyn Error>> {
     let home = env::home_dir().ok_or("no home directory")?;
     // The old data folder moves before anything is created in the new one (#322).
     studio_hook::move_old_data_dir(&home)?;
-    let path = studio_hook::event_log(&home);
+    let path = studio_hook::hook_data_dir(&home).join(studio_hook::EVENT_LOG);
     let data = path.parent().ok_or("no data directory")?;
     fs::create_dir_all(data)?;
     // The line goes in the log even when the trees cannot be recorded.
