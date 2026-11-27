@@ -1,7 +1,9 @@
 // Seam 1 (#426): the hook binary with a scratch `HOME` and a temporary repository, fed the lines
 // wave 1's trial recorded of one Codex and one Cursor turn that fixed `calc.py` (#369;
-// `core/tests/fixtures/{codex,cursor}/trial.jsonl`, the trial's folder written `/w/trial`). Each
-// harness's turn records the start and end trees of the worktree it worked in, as Claude Code's does.
+// `core/tests/fixtures/{codex,cursor}/trial.jsonl`, the trial's folder written `/w/trial`), and
+// the lines of a real OpenCode turn that wrote `hello.txt` (#717; the first turn of
+// `core/tests/fixtures/opencode/run.jsonl`, in `/Users/me/work/hello`). Each harness's turn records
+// the start and end trees of the worktree it worked in, as Claude Code's does.
 use crate::common::{feed, hook};
 use serde_json::Value;
 use std::{fs, path::Path};
@@ -9,14 +11,20 @@ use studio_test_support::git;
 
 const CODEX: &str = include_str!("../../core/tests/fixtures/codex/trial.jsonl");
 const CURSOR: &str = include_str!("../../core/tests/fixtures/cursor/trial.jsonl");
+const OPENCODE: &str = include_str!("../../core/tests/fixtures/opencode/run.jsonl");
 
 const BUGGY: &str = "def add(a, b):\n    return a - b\n\nprint(\"2+3 =\", add(2, 3))\n";
 const FIXED: &str = "def add(a, b):\n    return a + b\n\nprint(\"2+3 =\", add(2, 3))\n";
 
-/// Feeds the hook entry of `agent` each of the trial's lines its hooks sent, with the trial's folder
-/// a fresh repository holding the buggy `calc.py`, which is fixed before the call that edits it
+/// Feeds the hook entry of `agent` each of the lines its hooks sent in `recorded`, with their
+/// `folder` a fresh repository holding the buggy `file`, which is fixed before the call that edits it
 /// reports. Returns the repository's root and the lines the hook logged.
-fn replay(agent: &str, recorded: &str, edited: impl Fn(&Value) -> bool) -> (String, Vec<Value>) {
+fn replay(
+    agent: &str,
+    recorded: &str,
+    (folder, file): (&str, &str),
+    edited: impl Fn(&Value) -> bool,
+) -> (String, Vec<Value>) {
     let base = std::env::temp_dir().join(format!("studio-harness-{agent}-{}", std::process::id()));
     // Cleanup: a leftover temp file fails no test.
     fs::remove_dir_all(&base).ok();
@@ -26,12 +34,12 @@ fn replay(agent: &str, recorded: &str, edited: impl Fn(&Value) -> bool) -> (Stri
     // `git` spells a temp dir through its symlinks.
     let trial = trial.canonicalize().unwrap();
     git(&trial, &["init", "-q"]);
-    fs::write(trial.join("calc.py"), BUGGY).unwrap();
+    fs::write(trial.join(file), BUGGY).unwrap();
     git(&trial, &["add", "."]);
     git(&trial, &["commit", "-qm", "init"]);
     let root = trial.to_str().unwrap().to_string();
     for line in recorded.lines() {
-        let line: Value = serde_json::from_str(&line.replace("/w/trial", &root)).unwrap();
+        let line: Value = serde_json::from_str(&line.replace(folder, &root)).unwrap();
         // The server's own lines never reach the hook.
         if line.get("studio_agent").is_none() {
             continue;
@@ -40,7 +48,7 @@ fn replay(agent: &str, recorded: &str, edited: impl Fn(&Value) -> bool) -> (Stri
         let fields = payload.as_object_mut().unwrap();
         fields.retain(|key, _| !key.starts_with("studio_"));
         if edited(&line) {
-            fs::write(trial.join("calc.py"), FIXED).unwrap();
+            fs::write(trial.join(file), FIXED).unwrap();
         }
         let mut cmd = untimed(hook(&home));
         cmd.args(["--agent", agent]);
@@ -70,23 +78,59 @@ fn changed(root: &str, from: &str, to: &str) -> String {
     changed
 }
 
-#[test]
-fn a_codex_turn_that_patches_a_file_records_its_worktrees_start_and_end_trees() {
-    let patched =
-        |l: &Value| l["hook_event_name"] == "PostToolUse" && l["tool_name"] == "apply_patch";
-    let (root, lines) = replay("codex", CODEX, patched);
-    let start = tree(&lines, "UserPromptSubmit", "studio_turn_start", &root);
-    let end = tree(&lines, "Stop", "studio_turn_end", &root);
-    assert_eq!(changed(&root, &start, &end), "calc.py");
+/// The first turn of `session` in `recorded`: its lines up to the first that `ends`.
+fn first_turn(recorded: &str, session: &str, ends: &str) -> String {
+    let lines = recorded.lines().filter(|l| l.contains(session));
+    let mut turn = Vec::new();
+    for line in lines {
+        turn.push(line);
+        if line.contains(ends) {
+            break;
+        }
+    }
+    turn.join("\n")
 }
 
 #[test]
-fn a_cursor_turn_that_writes_a_file_records_its_worktrees_start_and_end_trees() {
-    let written = |l: &Value| l["hook_event_name"] == "postToolUse" && l["tool_name"] == "Write";
-    let (root, lines) = replay("cursor", CURSOR, written);
-    let start = tree(&lines, "beforeSubmitPrompt", "studio_turn_start", &root);
-    let end = tree(&lines, "stop", "studio_turn_end", &root);
-    assert_eq!(changed(&root, &start, &end), "calc.py");
+fn a_harness_turn_that_edits_a_file_records_its_worktrees_start_and_end_trees() {
+    let opencode = first_turn(
+        OPENCODE,
+        "ses_de5fa80f2ffeXThZwnlgn61UPk",
+        "session.execution.succeeded",
+    );
+    let trial = ("/w/trial", "calc.py");
+    // Each harness, its lines, their folder and the file its turn edits, the call that edits it, and
+    // the names of the lines its start and end trees land on.
+    let cases = [
+        (
+            "codex",
+            CODEX,
+            trial,
+            ("PostToolUse", "apply_patch"),
+            ("UserPromptSubmit", "Stop"),
+        ),
+        (
+            "cursor",
+            CURSOR,
+            trial,
+            ("postToolUse", "Write"),
+            ("beforeSubmitPrompt", "stop"),
+        ),
+        (
+            "opencode",
+            opencode.as_str(),
+            ("/Users/me/work/hello", "hello.txt"),
+            ("tool.execute.after", "write"),
+            ("session.prompt", "session.execution.succeeded"),
+        ),
+    ];
+    for (agent, recorded, at, (call, tool), (starts, ends)) in cases {
+        let edits = |l: &Value| l["hook_event_name"] == call && l["tool_name"] == tool;
+        let (root, lines) = replay(agent, recorded, at, edits);
+        let start = tree(&lines, starts, "studio_turn_start", &root);
+        let end = tree(&lines, ends, "studio_turn_end", &root);
+        assert_eq!(changed(&root, &start, &end), at.1, "{agent}");
+    }
 }
 
 /// `cmd` with a trees budget a loaded machine cannot run out of: these tests check what the trees
@@ -302,4 +346,100 @@ fn a_cursor_prompts_late_trees_leave_the_worktrees_start_to_its_next_touch() {
     fs::remove_dir_all(&base).ok();
 
     assert!(written["studio_turn_start"][&a].is_string(), "{written}");
+}
+
+/// OpenCode's plugin spawns one hook an event and never waits for it, so the hooks of a turn's last
+/// calls and its end run at once with the next turn's start, and reach the turns file in any order
+/// (#717). Here each such group is spawned at once, last line first, after the turn's edit; the third
+/// turn is a wake-up, which has no prompt id. Each turn still records the start and end trees of its
+/// own edit: its start on one of its own lines, its end on its own end's line or the next start's.
+#[test]
+fn opencode_turns_whose_hooks_run_at_once_out_of_order_each_record_their_own_edit() {
+    use serde_json::json;
+    let base = std::env::temp_dir().join(format!("studio-opencode-order-{}", std::process::id()));
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&base).ok();
+    let home = base.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let root = repository(&base, "hello");
+    let line = |name: &str, sent: u64, extra: Value| {
+        let mut line = json!({
+            "session_id": "ses_1", "cwd": root, "hook_event_name": name, "sent_ms": sent,
+        });
+        line.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        line
+    };
+    const TURNS: u64 = 4;
+    let start = |k: u64| match k {
+        2 => line("session.execution.started", 100 * k + 10, json!({})),
+        _ => line(
+            "session.prompt",
+            100 * k + 10,
+            json!({ "prompt_id": format!("msg_{k}") }),
+        ),
+    };
+    let call = |name: &str, k: u64, sent: u64| {
+        let input = json!({ "path": format!("f{k}.txt"), "content": "x" });
+        let extra = json!({ "tool_name": "write", "tool_use_id": format!("call_{k}"), "tool_input": input });
+        line(name, 100 * k + sent, extra)
+    };
+    let end = |k: u64| line("session.execution.succeeded", 100 * k + 40, json!({}));
+    let run = |lines: Vec<Value>| {
+        let children: Vec<_> = (lines.iter().rev())
+            .map(|payload| {
+                let mut cmd = hook(&home);
+                cmd.args(["--agent", "opencode"]);
+                feed(cmd, payload)
+            })
+            .collect();
+        for mut child in children {
+            assert!(child.wait().unwrap().success());
+        }
+    };
+
+    run(vec![start(0)]);
+    for k in 0..TURNS {
+        fs::write(Path::new(&root).join(format!("f{k}.txt")), "x\n").unwrap();
+        let mut group = vec![
+            call("tool.execute.before", k, 20),
+            call("tool.execute.after", k, 30),
+            end(k),
+        ];
+        if k + 1 < TURNS {
+            group.push(start(k + 1));
+        }
+        run(group);
+    }
+
+    let log = fs::read_to_string(studio_hook::event_log(&home)).unwrap();
+    let lines: Vec<Value> = log
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let trees = |key: &str, sent: &dyn Fn(u64) -> bool| -> Vec<String> {
+        let on = lines
+            .iter()
+            .filter(|l| sent(l["sent_ms"].as_u64().unwrap()));
+        on.filter_map(|l| Some(l[key][&root].as_str()?.to_owned()))
+            .collect()
+    };
+    let mut changes = Vec::new();
+    for k in 0..TURNS {
+        let starts = trees("studio_turn_start", &|s| {
+            (100 * k + 10..=100 * k + 40).contains(&s)
+        });
+        let ends = trees("studio_turn_end", &|s| {
+            s == 100 * k + 40 || s == 100 * (k + 1) + 10
+        });
+        assert_eq!((starts.len(), ends.len()), (1, 1), "turn {k}: {log}");
+        changes.push(git(
+            Path::new(&root),
+            &["diff", "--name-only", &starts[0], &ends[0]],
+        ));
+    }
+    // Cleanup: a leftover temp file fails no test.
+    fs::remove_dir_all(&base).ok();
+    assert_eq!(changes, ["f0.txt", "f1.txt", "f2.txt", "f3.txt"]);
 }

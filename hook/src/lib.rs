@@ -362,6 +362,10 @@ pub struct Turn {
     pub prompt_id: Option<String>,
     pub roots: Vec<String>,
     pub ended: bool,
+    /// For a harness whose lines land in any order (`take_at`): when the turn's start was sent,
+    /// and the end sent last that the hook took.
+    pub from: Option<u64>,
+    pub until: Option<u64>,
 }
 
 impl Default for Turn {
@@ -370,6 +374,8 @@ impl Default for Turn {
             prompt_id: None,
             roots: Vec::new(),
             ended: true,
+            from: None,
+            until: None,
         }
     }
 }
@@ -400,9 +406,43 @@ impl Turn {
                 prompt_id: prompt_id.map(Into::into),
                 roots: Vec::new(),
                 ended: name == "Stop",
+                ..*self
             };
         }
         (ended, !self.ended && name != "Stop" && !idle)
+    }
+
+    /// As `take`, for an event sent at `sent` (Unix milliseconds) by a harness whose hooks run in
+    /// parallel, so that its lines reach the hook in any order (OpenCode's, #717). An event sent
+    /// before the turn the hook is in began, or a start sent before the last end the hook took, is
+    /// of a turn already past, as is a call or an end sent in the millisecond the turn began: it
+    /// returns `None` and leaves the turn as it is. Without `sent` it is `take`.
+    pub fn take_at(
+        &mut self,
+        name: &str,
+        prompt_id: Option<&str>,
+        idle: bool,
+        sent: Option<u64>,
+    ) -> Option<(Vec<String>, bool)> {
+        let Some(sent) = sent else {
+            return Some(self.take(name, prompt_id, idle));
+        };
+        let start = name == "UserPromptSubmit";
+        let before = |at: Option<u64>| at.is_some_and(|at| sent < at);
+        // No turn's call or end comes in the millisecond it began: such a line is the last turn's.
+        let at_start = self.from.is_some_and(|from| sent == from) && !start;
+        if before(self.from) || at_start || start && before(self.until) {
+            return None;
+        }
+        let (prompt, was_ended) = (self.prompt_id.clone(), self.ended);
+        let taken = self.take(name, prompt_id, idle);
+        if self.prompt_id != prompt || was_ended && !self.ended {
+            self.from = Some(sent);
+        }
+        if name == "Stop" {
+            self.until = self.until.max(Some(sent));
+        }
+        Some(taken)
     }
 }
 
@@ -703,9 +743,9 @@ pub const INTERRUPTED: &str = "StudioInterrupted";
 /// has none of, and an end of each worktree it touched at the later of that turn's end and its own
 /// stop. What it knows of the turn and its workers is kept in `turns/` in the data directory `data`,
 /// until the session ends or, if its end never comes, for 7 days.
-/// Codex's and Cursor's turns are mapped by their lines in Claude Code's names (#426); another
-/// agent's line records none, as its capabilities' `turn_trees: false` says, though its payload may
-/// be Claude-shaped (#359).
+/// Codex's, Cursor's and OpenCode's turns are mapped by their lines in Claude Code's names (#426,
+/// #717); another agent's line records none, as its capabilities' `turn_trees: false` says, though
+/// its payload may be Claude-shaped (#359).
 pub fn trees(
     event: &mut serde_json::Map<String, serde_json::Value>,
     data: &Path,
@@ -715,6 +755,7 @@ pub fn trees(
         None | Some("claude") => return claude_trees(event, data),
         Some("codex") => codex_shaped(event),
         Some("cursor") => cursor_shaped(event),
+        Some("opencode") => opencode_shaped(event),
         Some(_) => return Ok(()),
     };
     claude_trees(&mut shaped, data)?;
@@ -832,6 +873,68 @@ fn cursor_shaped(event: &Line) -> Line {
     shaped
 }
 
+/// OpenCode line `event` in the names `claude_trees` reads: a prompt or a wake-up starts a turn, a
+/// call's start and end are its steps, a `write`, `edit` or `patch` edits its `path`, which is relative
+/// to the session's folder, and a `shell` call runs its command. A run's end ends the turn, or with a
+/// `subagent_session_id` that subagent's run, whose lines are a worker's. The plugin spawns one hook an
+/// event, all in parallel, so the lines land in any order: each carries when the plugin sent it
+/// (`sent_ms`, else when the hook got it), by which `Turn::take_at` leaves out a line of a turn past.
+// The tool names copy `kind` in core/src/opencode.rs, as the hook does not depend on core.
+// shortcut: OpenCode does not wait for its hooks, so a call's start may record the start tree of a
+// worktree other than the session folder's after the call changed it, as with Codex's async hooks.
+fn opencode_shaped(event: &Line) -> Line {
+    use serde_json::{Value, json};
+    let text = |key: &str| event.get(key).and_then(Value::as_str);
+    let mut shaped = event.clone();
+    shaped.remove("studio_agent");
+    let sent = event.get("sent_ms").or(event.get("studio_received_ms"));
+    let sent = sent.and_then(Value::as_u64);
+    if let Some(sent) = sent {
+        shaped.insert("studio_sent_ms".into(), sent.into());
+    }
+    let subagent = text("subagent_session_id");
+    if let Some(subagent) = subagent {
+        shaped.insert("agent_id".into(), subagent.into());
+    }
+    let name = match text("hook_event_name").unwrap_or_default() {
+        "session.prompt" => "UserPromptSubmit",
+        "session.execution.started" => {
+            // A wake-up has no prompt id, but starts a turn of its own: it gets one by when it was sent.
+            let id = format!("wake-up {}", sent.unwrap_or_default());
+            shaped.insert("prompt_id".into(), id.into());
+            "UserPromptSubmit"
+        }
+        "session.execution.succeeded"
+        | "session.execution.failed"
+        | "session.execution.interrupted" => {
+            if subagent.is_some() {
+                "SubagentStop"
+            } else {
+                "Stop"
+            }
+        }
+        "tool.execute.before" => "PreToolUse",
+        "tool.execute.after" => "PostToolUse",
+        other => other,
+    };
+    shaped.insert("hook_event_name".into(), name.into());
+    let input = event.get("tool_input");
+    match text("tool_name") {
+        Some("write" | "edit" | "patch") => {
+            let path = input.and_then(|i| i["path"].as_str());
+            let cwd = text("cwd").unwrap_or_default();
+            let file = path.map(|p| Path::new(cwd).join(p).to_string_lossy().into_owned());
+            shaped.insert("tool_name".into(), "Edit".into());
+            shaped.insert("tool_input".into(), json!({ "file_path": file }));
+        }
+        Some("shell") => {
+            shaped.insert("tool_name".into(), "Bash".into());
+        }
+        _ => {}
+    }
+    shaped
+}
+
 #[allow(
     clippy::too_many_lines,
     reason = "left whole when the lint came in (#555); spec #548 names no split of it"
@@ -882,6 +985,8 @@ fn claude_trees(event: &mut Line, data: &Path) -> Result<(), Box<dyn std::error:
         prompt_id: kept["prompt_id"].as_str().map(Into::into),
         roots: strings(&kept["roots"]),
         ended: kept["ended"].as_bool().unwrap_or(true),
+        from: kept["from"].as_u64(),
+        until: kept["until"].as_u64(),
     };
     // Each worker's turn, by its prompt id, and the worktrees it touched.
     let mut workers = kept["workers"].as_object().cloned().unwrap_or_default();
@@ -942,7 +1047,11 @@ fn claude_trees(event: &mut Line, data: &Path) -> Result<(), Box<dyn std::error:
     match text("agent_id") {
         None => {
             let (before, was_ended) = (turn.prompt_id.clone(), turn.ended);
-            let (ended, in_turn) = turn.take(name, text("prompt_id"), idle);
+            // When the harness sent the line, for one whose lines land in any order (`opencode_shaped`).
+            let sent = event.get("studio_sent_ms").and_then(Value::as_u64);
+            let Some((ended, in_turn)) = turn.take_at(name, text("prompt_id"), idle, sent) else {
+                return Ok(());
+            };
             if turn.prompt_id != before || was_ended && !turn.ended {
                 began = Some(now);
             }
@@ -1003,6 +1112,7 @@ fn claude_trees(event: &mut Line, data: &Path) -> Result<(), Box<dyn std::error:
     }
     let kept = json!({
         "prompt_id": turn.prompt_id, "roots": turn.roots, "ended": turn.ended, "began": began,
+        "from": turn.from, "until": turn.until,
         "workers": workers,
         "worktrees": known,
     });
@@ -1304,6 +1414,98 @@ mod tests {
         assert_eq!(turn.take(INTERRUPTED, Some("p1"), true), (vec![], false));
         assert!(!turn.ended);
         assert_eq!(turn.roots, ["/w/a"]);
+    }
+
+    /// OpenCode's hooks run in parallel, so a session's lines reach the hook in any order (#717):
+    /// each case takes its events, a name, a prompt id and when the plugin sent it, in the order the
+    /// hook got them, and gives what each returned (`None` for an event of a turn already past) and
+    /// whether the turn is ended after the last.
+    #[test]
+    fn a_line_that_lands_after_a_later_ones_turn_began_or_ended_is_left_out() {
+        type Taken = Option<(Vec<String>, bool)>;
+        type Sent<'a> = (&'a str, Option<&'a str>, u64);
+        let ran =
+            |ends: &[&str]| -> Taken { Some((ends.iter().map(|r| (*r).into()).collect(), true)) };
+        let start = || ran(&[]);
+        let ends = |roots: &[&str]| -> Taken {
+            Some((roots.iter().map(|r| (*r).into()).collect(), false))
+        };
+        let cases: [(&str, &[Sent], &[Taken], bool); 6] = [
+            (
+                "in order",
+                &[
+                    ("UserPromptSubmit", Some("p1"), 10),
+                    ("PreToolUse", None, 20),
+                    ("Stop", None, 30),
+                ],
+                &[start(), start(), ends(&["/w/a"])],
+                true,
+            ),
+            (
+                "the stop before its prompt: the late prompt starts no turn",
+                &[
+                    ("Stop", None, 30),
+                    ("UserPromptSubmit", Some("p1"), 10),
+                    ("PreToolUse", None, 20),
+                ],
+                &[ends(&[]), None, ends(&[])],
+                true,
+            ),
+            (
+                "the next prompt before the stop: the late stop ends no turn",
+                &[
+                    ("UserPromptSubmit", Some("p1"), 10),
+                    ("UserPromptSubmit", Some("p2"), 40),
+                    ("Stop", None, 30),
+                ],
+                &[start(), ran(&["/w/a"]), None],
+                false,
+            ),
+            (
+                "a call of the last turn after the next prompt is not the next turn's",
+                &[
+                    ("UserPromptSubmit", Some("p1"), 10),
+                    ("UserPromptSubmit", Some("p2"), 40),
+                    ("PostToolUse", None, 20),
+                ],
+                &[start(), ran(&["/w/a"]), None],
+                false,
+            ),
+            (
+                "a call after its turn's stop is in no turn",
+                &[
+                    ("UserPromptSubmit", Some("p1"), 10),
+                    ("Stop", None, 30),
+                    ("PostToolUse", None, 20),
+                ],
+                &[start(), ends(&["/w/a"]), ends(&[])],
+                true,
+            ),
+            (
+                "a stop sent in the millisecond the next turn began is the last turn's",
+                &[
+                    ("UserPromptSubmit", Some("p1"), 10),
+                    ("UserPromptSubmit", Some("wake-up 50"), 50),
+                    ("Stop", None, 50),
+                    ("PostToolUse", None, 60),
+                ],
+                &[start(), ran(&["/w/a"]), None, start()],
+                false,
+            ),
+        ];
+        for (case, events, expected, ended) in cases {
+            let mut turn = Turn::default();
+            let mut got = Vec::new();
+            for &(name, prompt, sent) in events {
+                let taken = turn.take_at(name, prompt, false, Some(sent));
+                if taken.as_ref().is_some_and(|(_, in_turn)| *in_turn) && turn.roots.is_empty() {
+                    turn.roots.push("/w/a".into());
+                }
+                got.push(taken);
+            }
+            assert_eq!(got, expected, "{case}");
+            assert_eq!(turn.ended, ended, "{case}");
+        }
     }
 
     #[test]

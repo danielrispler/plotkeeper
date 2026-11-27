@@ -645,23 +645,26 @@ export const mapPanelFieldHints = (): Fixture => ({
   snapDone: "field hints ok",
 });
 /**
- * The hint of a fold-out header (spec #582, ticket 2), with real input: Tab, then focus on the map's "not placed"
- * line (a summary), opens its hint beside it without moving focus and Esc closes it; the pointer on it opens it too, and a click on the line
- * still folds it out.
+ * The hint of the map's not placed line (spec #582, ticket 2; #694), with real input: Tab, then focus on the line, opens its hint beside it
+ * without moving focus and Esc closes it; the pointer on it opens it too. The hint names the sessions it counts. A press opens the story of
+ * the next unplaced session that needs Daniel after the open one, wrapping: the first with none open, the second, then the first again.
  */
 export const mapNotPlacedHint = (): Fixture => {
-  const running = (id: string, name: string) => session(id, name, "running", { turns: [] });
-  const sessions = [running("s3", "#312 · CI marks"), running("s4", "#314 · Runs")];
+  const asking = (id: string, name: string) => session(id, name, "needs_you", { turns: [] });
+  const sessions = [asking("s3", "#312 · CI marks"), asking("s4", "#314 · Runs")];
   const f = mapOpened(`
     const open = (hint) => hint.matches(":popover-open");
-    const line = () => document.querySelector("#map-not-placed summary");
+    const line = () => document.querySelector("#map-not-placed .not-placed-line");
     window.__snapEmit("sessions", ${JSON.stringify(sessions)});
     await wait(150);
-    const hintOf = (node) => document.getElementById(node.getAttribute("data-hint"));
+    const hintOf = (node) => document.getElementById(node.getAttribute("interestfor") ?? node.getAttribute("data-hint"));
     if (!line()) return log("snap:fail the map has no not placed line");
+    if (line().textContent !== "2 need you \u00B7 not on the map") log("snap:fail the line says " + JSON.stringify(line().textContent));
+    if (line().tagName !== "BUTTON") log("snap:fail the line is not a button");
     const shown = hintOf(line());
     if (!shown?.matches('[popover="hint"]')) return log("snap:fail the not placed line has no hint");
     if (line().hasAttribute("title")) log("snap:fail the not placed line kept its title");
+    if (shown.textContent !== "#312 \u00B7 CI marks\\n#314 \u00B7 Runs\\nA press opens the next one's story") log("snap:fail the hint says " + JSON.stringify(shown.textContent));
     await __snapKey("Tab");
     line().focus();
     await wait(600);
@@ -674,39 +677,19 @@ export const mapNotPlacedHint = (): Fixture => {
     await __snapMove(line());
     await wait(600);
     if (!open(shown)) log("snap:fail the pointer on the not placed line did not open its hint");
-    await __snapClick(line());
-    await wait(100);
-    if (!document.querySelector("#map-not-placed details")?.open) log("snap:fail a click on the line did not fold it out");
-    log("not placed hint ok");`, { map_state: mapState(), map_place: {} });
+    const opened = () => document.getElementById("session-name")?.textContent;
+    for (const want of ["#312 \u00B7 CI marks", "#314 \u00B7 Runs", "#312 \u00B7 CI marks"]) {
+      await __snapClick(line());
+      await wait(100);
+      if (opened() !== want) log("snap:fail the press opened " + JSON.stringify(opened()) + ", not " + JSON.stringify(want));
+    }
+    log("not placed hint ok");`, {
+    map_state: mapState(),
+    map_place: {},
+    select: { __by: "id", values: Object.fromEntries(sessions.map((s) => [s.id, { session: s, agent: null }])) },
+  });
   return { ...f, sessions: [], realKeys: true, realPointer: true, snapDone: "not placed hint ok" };
 };
-/**
- * The not placed list on the glass (#666): over Understanding's sheet, the closed line is one bare line, with no glass; opened, the list
- * has the sheet's glass, so no plate under it shows through; closed again, the sheet under it is where it was. The screenshot is it open.
- */
-export const mapNotPlacedGlass = (): Fixture =>
-  mapPanel(`
-      const slot = document.getElementById("map-not-placed");
-      const details = slot.querySelector("details");
-      if (!details) return log("snap:fail the map has no not placed list");
-      await plate("understanding");
-      if (!sheetOpen()) return log("snap:fail the plate's click did not open its sheet");
-      const look = (node) => { const style = getComputedStyle(node); return style.backgroundColor + " " + style.backdropFilter; };
-      const glass = look(sheet);
-      const sheetTop = sheet.getBoundingClientRect().top;
-      if (getComputedStyle(slot).backdropFilter !== "none" || rgb(getComputedStyle(slot).backgroundColor)[3] !== 0) log("snap:fail the closed not placed line has the glass: " + look(slot));
-      const line = details.querySelector("summary").getBoundingClientRect().height;
-      if (slot.getBoundingClientRect().height !== line) log("snap:fail the closed not placed line is " + slot.getBoundingClientRect().height + " px tall, not its one line's " + line);
-      details.open = true;
-      await wait(200);
-      if (look(slot) !== glass) log("snap:fail the open not placed list is not on the sheet's glass: " + look(slot) + ", not " + glass);
-      checkAll("with the not placed list open");
-      details.open = false;
-      await wait(200);
-      if (sheet.getBoundingClientRect().top !== sheetTop) log("snap:fail the sheet moved after the list closed: " + sheet.getBoundingClientRect().top + ", not " + sheetTop);
-      details.open = true;
-      await wait(200);
-      log("panel ok");`);
 /**
  * The toasts beside the side area (#666), in focus mode: the needs-you toast stacks against the side area's left edge, so it covers neither
  * the not placed line nor, once a sheet opens, the sheet's ×; widening the sheet moves it; with no side area it keeps the map's top-right
@@ -729,7 +712,7 @@ export const mapToastBeside = (): Fixture => {
       document.dispatchEvent(new KeyboardEvent("keydown", { code: "Enter", key: "Enter", metaKey: true, shiftKey: true, bubbles: true }));
       await wait(200);
       if (!toast.matches(":popover-open")) return log("snap:fail no needs-you toast in focus mode");
-      const line = document.querySelector("#map-not-placed summary");
+      const line = document.querySelector("#map-not-placed .not-placed-line");
       if (!line || side.hidden) return log("snap:fail the side area does not show the not placed line");
       if (over(box(toast), box(line))) log("snap:fail the toast covers the not placed line: " + round(box(toast)) + " over " + round(box(line)));
       beside("with the not placed line");
@@ -1071,40 +1054,37 @@ export const mapSheetClose = (): Fixture => ({
 });
 
 /**
- * An open sheet keeps still while sessions join and leave the not placed list (#472): the list is one line, "N not placed", whose
- * height is kept while a sheet is open, even at none; a click opens it, and it stays open across the next change.
+ * An open sheet keeps still while sessions start and stop needing Daniel (#472, #694): the not placed line is one line, "N need you · not on the
+ * map", present only while an unplaced session needs him, and its slot keeps its height while a sheet is open, even with no line. Seven unseen
+ * Your turn sessions, which the session list already marks, and Running ones place no line. The closed slot has no glass and no rows.
  */
 export const mapSheetStill = (): Fixture => {
   const idle = session("s7", "#55 · Delete default", "your_turn");
   const running = (id: string, name: string, state: "running" | "needs_you" = "running") => session(id, name, state, { turns: [] });
   const one = [idle, running("s3", "#312 · CI marks")];
   const three = [...one, running("s4", "#314 · Runs"), running("s6", "#313 · Docs", "needs_you")];
+  const four = [...three, running("s8", "#316 · Brief", "needs_you")];
+  const seen = Array.from({ length: 7 }, (_, at) => session("u" + at, "#7" + at + " · Unseen", "your_turn", { unseen: true, turns: [] }));
   const f = mapOpened(`
     const top = () => document.getElementById("map-sheet").getBoundingClientRect().top;
-    const line = () => document.querySelector("#map-not-placed summary")?.textContent ?? "";
+    const line = () => document.querySelector("#map-not-placed .not-placed-line")?.textContent ?? "";
     const show = async (sessions) => { window.__snapEmit("sessions", sessions); await wait(150); };
     document.querySelector("#map .plate[data-id=shell]").click();
     await wait(300);
     if (!document.querySelector("#map-sheet .sheet")) return log("snap:fail the sheet did not open");
     const still = top();
-    for (const [sessions, want] of [[${JSON.stringify(one)}, "1 not placed"], [${JSON.stringify(three)}, "3 not placed · 1 needs you"], [${JSON.stringify([idle])}, ""]]) {
+    const slot = document.getElementById("map-not-placed");
+    const middot = " \u00B7 not on the map";
+    for (const [sessions, want] of [[${JSON.stringify(one)}, ""], [${JSON.stringify(three)}, "1 needs you" + middot], [${JSON.stringify(four)}, "2 need you" + middot], [${JSON.stringify(seen)}, ""], [${JSON.stringify([idle])}, ""], [${JSON.stringify(three)}, "1 needs you" + middot]]) {
       await show(sessions);
       if (line() !== want) log("snap:fail the not placed line says " + JSON.stringify(line()) + ", not " + JSON.stringify(want));
       if (top() !== still) log("snap:fail the sheet moved from " + still + " to " + top() + " at " + JSON.stringify(want || "none"));
+      if (slot.querySelector("details, .session-pick")) log("snap:fail the not placed slot holds a list");
     }
-    await show(${JSON.stringify(three)});
-    const pick = document.querySelector("#map-not-placed .session-pick");
-    if (!pick || pick.checkVisibility()) log("snap:fail the closed line shows its rows");
-    document.querySelector("#map-not-placed summary").click();
-    await wait(100);
-    await show(${JSON.stringify(one)});
-    const open = [...document.querySelectorAll("#map-not-placed .session-pick-name")].filter((c) => c.checkVisibility()).map((c) => c.textContent);
-    if (open.join() !== "#312 · CI marks") log("snap:fail the opened list did not stay open with its rows: " + open.join());
-    // Emptied and filled again, it comes back closed, so it never drops the sheet by a whole list without a click.
-    await show(${JSON.stringify([idle])});
-    await show(${JSON.stringify(three)});
-    if (document.querySelector("#map-not-placed details")?.open) log("snap:fail the list came back open after it emptied");
-    if (top() !== still) log("snap:fail the sheet moved when the list came back: " + top());
+    const look = getComputedStyle(slot);
+    if (look.backdropFilter !== "none") log("snap:fail the not placed line has the glass: " + look.backdropFilter);
+    const row = slot.querySelector(".not-placed-line").getBoundingClientRect().height;
+    if (slot.getBoundingClientRect().height !== row) log("snap:fail the not placed slot is " + slot.getBoundingClientRect().height + " px tall, not its one line's " + row);
     log("sheet still ok");`, { map_state: mapState(), map_place: {} });
   return { ...f, sessions: [idle], selected: { session: idle, agent: null }, snapDone: "sheet still ok" };
 };

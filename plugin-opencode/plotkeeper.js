@@ -59,7 +59,9 @@ function recorder(ctx) {
     calls: new Map(),
     // A permission ask whose call has not started yet, by its call id.
     asks: new Map(),
-    line: (name, session, fields) => ({ hook_event_name: name, session_id: session, cwd, ...fields }),
+    // When the line was sent: each goes through a hook process of its own, all in parallel, so the lines land in any
+    // order, and the hook orders a turn's lines by it (#717).
+    line: (name, session, fields) => ({ hook_event_name: name, session_id: session, cwd, sent_ms: Date.now(), ...fields }),
     // A subagent's line names it; its top-level session's own lines carry no such field.
     subagent: (top, sessionID) => (top === sessionID ? {} : { subagent_session_id: sessionID }),
   };

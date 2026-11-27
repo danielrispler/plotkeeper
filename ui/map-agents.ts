@@ -1,6 +1,6 @@
 // Live sessions on the Map view (spec danielrispler/plotkeeper#306, ticket #311; spec #549): since #562 one count badge per part that marked
-// sessions' latest turns touch (`sessionBadges`, `map-live.ts`), whose press opens one kept list of those sessions; a quiet "not placed" list
-// beside the map for the marked sessions no part holds; and, while a session is spotlit, its footprint as corner brackets (#559), its chip on
+// sessions' latest turns touch (`sessionBadges`, `map-live.ts`), whose press opens one kept list of those sessions; one line
+// beside the map for the marked sessions no part holds that need Daniel (#694), whose press opens the next one's story; and, while a session is spotlit, its footprint as corner brackets (#559), its chip on
 // its latest turn's parts with its line on the home part, and the other badges dimmed. The pure rules are `map-live.ts`'s; this file draws
 // them from the sessions the window already has, and `map_place` (the server, `studio-system-map`) says which part owns each path.
 
@@ -9,7 +9,7 @@ import { currentMap, onCamera, onDraw, registerLayer, revealParts, syncSide } fr
 import { logStop } from "./stop-rules.js";
 import { logo, logoKey } from "./logos.js";
 import { sidebarOrder } from "./projects.js";
-import { type Badge, type BadgeRow, footprint, footprintNote, spotlightView, latestParts, notPlacedLine, placeGroups, type Placement, sessionBadges, spotlit, turnLight } from "./map-live.js";
+import { type Badge, type BadgeRow, footprint, footprintNote, spotlightView, latestParts, askingOf, notPlacedLine, notPlacedTarget, placeGroups, type Placement, sessionBadges, spotlit, turnLight } from "./map-live.js";
 import { stateLabels, type Session, type Subagent, type Turn } from "./types.js";
 
 // What the drawing needs of the window, given by `main.ts`: the sessions, the jump to a session or a Worker's log,
@@ -32,7 +32,7 @@ let placed: Placement = {};
 export const currentPlacement = (): Placement => placed;
 const latest = newest();
 
-// The session whose row the pointer is on (a session list or History row, a badge list's or the not placed list's), which is spotlit
+// The session whose row the pointer is on (a session list or History row, a badge list's), which is spotlit
 // (#559, #562), and that row: a hover ends when the row leaves the page (a session moving to History, a redraw, the panel closing) or its
 // list closes (`endHoverIn`), which `pointerleave` never reports.
 let hovered: string | null = null;
@@ -57,7 +57,7 @@ export function openAgents(session: string | null) {
   paint();
 }
 
-// Hides every badge, chip and the not placed list, or shows them again: for a view of a past commit, where nothing is live.
+// Hides every badge, chip and the not placed line, or shows them again: for a view of a past commit, where nothing is live.
 export function hideAgents(hide: boolean) {
   hidden = hide;
   paint();
@@ -106,7 +106,7 @@ const needsYouPill = () => {
   return pill;
 };
 
-// A session's row in a badge's list or the not placed list: its agent's logo, its full name, its state and its line; hovering it spotlights
+// A session's row in a badge's list: its agent's logo, its full name, its state and its line; hovering it spotlights
 // the session, pressing it opens its story. A badge's list follows it with the session's Workers on the part, each opening its log.
 function sessionRows(session: Session, workers: Subagent[], close: () => void): HTMLElement[] {
   const line = deps.line(session);
@@ -222,18 +222,15 @@ function spotChip(session: Session, home: boolean, part: string): HTMLElement {
   return hint(chip, [deps.name(session), stateWord(session), ...(line ? [line] : [])].join("\n"));
 }
 
-// The not placed list: a closed <details> whose summary is the line, made at the first paint and kept.
-let kept: { details: HTMLDetailsElement; summary: HTMLElement; rows: HTMLElement } | undefined;
-const notPlacedList = () => {
-  if (kept) return kept;
-  const details = document.createElement("details");
-  const summary = text("summary", "", "side-title");
-  const rows = text("div", "", "not-placed-rows");
-  details.append(summary, rows);
-  details.addEventListener("toggle", () => details.open || endHoverIn(rows));
-  kept = { details, summary, rows };
-  return kept;
-};
+// The not placed line (#694): one button, made at the first paint and kept, that opens the story of the next unplaced session that needs
+// Daniel. `lineTarget` is that session as the last paint found it.
+let line: HTMLButtonElement | undefined;
+let lineTarget: string | null = null;
+const notPlacedButton = () =>
+  (line ??= pressable(text("button", "", "not-placed-line"), null, () => {
+    logMapAction();
+    if (lineTarget !== null) deps.select(lineTarget, null);
+  }));
 
 // Corner brackets around the spotlit session's plates (#559): firm on its latest turn's parts, faint on the rest within the cut.
 function paintFootprint(view: View, spot: Session | null) {
@@ -274,7 +271,7 @@ export function revealTurn(turn: LitTurn) {
   if (parts.length) revealParts(parts);
 }
 
-// Puts the badges or the spotlit session's chips on the plates, the not placed list in its slot and the footprint, from what the last refresh
+// Puts the badges or the spotlit session's chips on the plates, the not placed line in its slot and the footprint, from what the last refresh
 // found; keeps the open badge list while its part still has a badge, and the keyboard on a part's badge. Also called when a brief opens or closes.
 export function paint() {
   const view = currentMap();
@@ -302,22 +299,22 @@ export function paint() {
     if (!rows || listProject !== view.project || deps.briefOpen()) closeBadgeList();
     else fillRows(badgeList(), rowsKey(rows), () => rows.flatMap((row) => sessionRows(row.session, row.workers, closeBadgeList)));
   }
-  // One line that a click opens (#472), so a session joining or leaving changes its count and not its height. The same element is kept
-  // from paint to paint, so an opened list stays open, and its line keeps the focus, while sessions come and go.
+  // One line at most (#694), so a session joining or leaving changes its text and not its height. The same button is kept from paint to
+  // paint, so its focus survives while sessions come and go.
   const slot = view.slots.notPlaced;
-  if (notPlaced.length) {
-    const list = notPlacedList();
-    const line = notPlacedLine(notPlaced);
-    list.summary.replaceChildren(text("span", line.count), ...(line.needsYou ? [text("span", ` · ${line.needsYou}`, "not-placed-asking")] : []));
+  const words = notPlacedLine(notPlaced);
+  if (words !== null) {
+    const button = notPlacedButton();
+    const asking = askingOf(notPlaced);
+    lineTarget = notPlacedTarget(notPlaced, opened);
+    if (button.textContent !== words) button.textContent = words;
     // Drawn each time: the kept line's hint is dropped while the line is off the page.
-    hint(keyed(list.summary, "not-placed"), "The sessions whose latest turn touched no part: click to show or hide them");
-    fillRows(list.rows, rowsKey(notPlaced.map((session) => ({ session, workers: [] }))), () => notPlaced.flatMap((session) => sessionRows(session, [], () => {})));
-    // Back in its slot after it emptied or the map was cleared, the list comes back closed, so it never drops the sheet without a click.
-    if (list.details.parentElement !== slot) {
-      list.details.open = false;
-      slot.replaceChildren(list.details);
-    }
-  } else slot.replaceChildren();
+    hint(keyed(button, "not-placed"), [...asking.map((session) => deps.name(session)), "A press opens the next one's story"].join("\n"));
+    if (button.parentElement !== slot) slot.replaceChildren(button);
+  } else {
+    lineTarget = null;
+    slot.replaceChildren();
+  }
   syncSide(view.slots);
   paintFootprint(view, spot);
   // The row hovered may leave the page in the same update that painted (the list and History are drawn after the sessions are read):

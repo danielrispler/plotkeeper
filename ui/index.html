@@ -101,7 +101,7 @@
     </aside>
 
     <!-- The Map view (danielrispler/plotkeeper#306), the page's base (#386): a project's map beside the session list, whose headers switch it.
-         `map.ts` draws it. Over the map float the tray, the left panel and the side area (the sheet, the drawer, the not-placed list). -->
+         `map.ts` draws it. Over the map float the tray, the left panel and the side area (the sheet, the drawer, the not-placed line). -->
     <main id="map" class="map-view" aria-label="Map" tabindex="-1">
       <header class="map-head">
         <span id="map-ref" class="map-ref"></span>
@@ -132,7 +132,7 @@
           <button id="panel-close" class="btn quiet panel-close" type="button" aria-label="Close">×</button>
           <div id="panel-body" class="panel-body"></div>
         </section>
-        <!-- The right side, floating over the map: the sessions not placed, then the part's sheet and the drawer under it, each in the same glass,
+        <!-- The right side, floating over the map: the line for the sessions that need you and no part holds, then the part's sheet and the drawer under it, each in the same glass,
              then the background runs (#390). The sessions come first, so their list keeps the map's top right whether a sheet is open or not, and a
              sheet never pushes it down over a part (#466). -->
         <!-- A session badge's list (#562): its sessions and their Workers, a popover placed by the badge that opened it; `map-agents.ts` fills it.
