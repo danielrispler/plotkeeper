@@ -1356,6 +1356,9 @@ impl Runner {
     fn finish(&self, run: &mut Run) -> End {
         let dir = self.dir(&run.stored.id);
         let (outcome, status) = read_outcome(&dir);
+        // A launcher that ended with a status removed its own temp folder, if it made one. One that died wrote none, so
+        // the folder is removed here, best effort, as Cancel removes it. A folder that was there before is never removed.
+        let died = status.is_none();
         let launched = read_json::<Launch>(&dir.join(LAUNCH)).map_or(0, |launch| launch.at_ms);
         let (from, to) = status.map_or((launched, millis()), |s| (s.started_ms, s.ended_ms));
         let duration = to.saturating_sub(from);
@@ -1370,6 +1373,9 @@ impl Runner {
                 "run {}: its `recorded` mark was not written: {e}",
                 run.stored.id
             );
+        }
+        if let (true, Some(tmp)) = (died, &run.stored.command.private_tmp) {
+            fs::remove_dir_all(tmp).ok();
         }
         let end = outcome.end;
         run.phase = Phase::Ended { outcome, at_ms: to };
