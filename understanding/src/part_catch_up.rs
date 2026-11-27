@@ -680,7 +680,7 @@ pub fn gather_catch_up(repo: &Path, part: &str, fog: &[String]) -> Result<CatchU
         .or_else(|_| {
             git(repo, &["hash-object", "-t", "tree", "/dev/null"]).map(|s| s.trim().to_string())
         })?;
-    let pr = gather(repo, &base, newest, PrMeta::default())?;
+    let pr = gather(repo, &base, newest, PrMeta::default(), None)?;
     let mut entries = Vec::new();
     for commit in fog {
         let subject = git(repo, &["log", "-1", "--format=%s", commit])?;

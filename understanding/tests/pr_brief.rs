@@ -1860,7 +1860,7 @@ fn gather_reads_the_map_the_diff_and_the_tagged_tests_from_git() {
         head: head.clone(),
         ..PrMeta::default()
     };
-    let s = gather(root, &base, &head, meta).unwrap();
+    let s = gather(root, &base, &head, meta, None).unwrap();
     assert!(
         s.map_text.contains("Alpha two")
             && s.map_diff.contains("+")
@@ -1879,6 +1879,49 @@ fn gather_reads_the_map_the_diff_and_the_tagged_tests_from_git() {
     let facts = build_facts(&s).unwrap();
     assert_eq!(facts.shape.required, ["alpha"]);
     assert!(section(&facts, "MAP DIFF IN THIS PR").contains("Alpha two"));
+}
+
+#[test]
+fn gather_places_a_brief_by_the_passed_map_when_the_repository_never_committed_one() {
+    let (dir, _) = studio_test_support::repo();
+    let root = dir.path();
+    let write = |path: &str, text: &str| {
+        let p = root.join(path);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, text).unwrap();
+    };
+    write("alpha/a.rs", "fn a() {}\n");
+    studio_test_support::git(root, &["add", "."]);
+    studio_test_support::git(root, &["commit", "-qm", "base"]);
+    let base = studio_test_support::git(root, &["rev-parse", "HEAD"]);
+    write("alpha/a.rs", "fn a() {}\nfn b() {}\n");
+    studio_test_support::git(root, &["commit", "-qam", "change"]);
+    let head = studio_test_support::git(root, &["rev-parse", "HEAD"]);
+    let meta = PrMeta {
+        number: 11,
+        head: head.clone(),
+        ..PrMeta::default()
+    };
+
+    // With no map in the repository and none passed in, there is nothing to place the brief by.
+    assert!(gather(root, &base, &head, meta.clone(), None).is_err());
+
+    let s = gather(root, &base, &head, meta, Some(MAP));
+    assert!(s.is_ok(), "gather refused the passed map: {:?}", s.err());
+    let s = s.unwrap();
+    assert_eq!(s.map_text, MAP);
+    assert!(s.map_diff.is_empty());
+    assert_eq!(
+        s.map_note.as_deref(),
+        Some("none: the map is not in the repository yet")
+    );
+    let facts = build_facts(&s).unwrap();
+    assert_eq!(facts.shape.required, ["alpha"]);
+    assert!(facts.shape.flows_changed.is_empty() && !facts.shape.overview);
+    assert_eq!(
+        section(&facts, "MAP DIFF IN THIS PR").trim(),
+        "none: the map is not in the repository yet"
+    );
 }
 
 // ---- the claim check and the one retry (#338) ----

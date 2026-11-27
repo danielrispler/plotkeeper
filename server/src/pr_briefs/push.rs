@@ -134,6 +134,7 @@ impl Reading for GitReading {
             from,
             &full.meta.head,
             full.meta.clone(),
+            None,
         )?;
         source.tier_overrides = full.tier_overrides.clone();
         source.earlier_decisions = full.earlier_decisions.clone();
@@ -224,7 +225,7 @@ pub fn push_of(
             head: new.to_string(),
             ..Default::default()
         };
-        return match gather(repo, old, new, meta).and_then(|mut source| {
+        return match gather(repo, old, new, meta, None).and_then(|mut source| {
             source.tier_overrides = tiers.clone();
             fogs_nothing(&source)
         }) {

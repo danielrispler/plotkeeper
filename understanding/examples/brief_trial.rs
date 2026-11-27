@@ -67,7 +67,7 @@ fn main() {
             meta.head = merge.clone();
         }
         let base = format!("{}^", meta.head);
-        let source = gather(&repo, &base, &meta.head, meta.clone()).expect("gather");
+        let source = gather(&repo, &base, &meta.head, meta.clone(), None).expect("gather");
         let facts = build_facts(&source).expect("facts");
         std::fs::write(out.join(format!("{number}-facts.txt")), &facts.text).unwrap();
         let mut budget = format!(

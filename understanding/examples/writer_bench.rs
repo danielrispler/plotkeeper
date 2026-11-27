@@ -109,7 +109,7 @@ fn main() {
                 .cloned()
                 .unwrap_or_else(|| "origin/main".into());
             let base = git(&repo, &["merge-base", &base_ref, &head]);
-            let source = gather(&repo, &base, &head, meta).expect("the brief's source");
+            let source = gather(&repo, &base, &head, meta, None).expect("the brief's source");
             let facts = build_facts(&source).expect("the brief's facts");
             result["facts_bytes"] = json!(facts.budget.total_bytes);
             result["shape"] = json!(facts.shape.label());
