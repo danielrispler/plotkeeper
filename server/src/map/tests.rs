@@ -27,23 +27,187 @@ fn commit_file(dir: &Path, name: &str, text: &str) {
     git(dir, &["commit", "-q", "-m", name]);
 }
 
+/// One case of the read order: what each source holds, and what the Map view is told.
+struct ReadCase {
+    name: &'static str,
+    /// `system-map.json` pushed to `origin`'s default branch.
+    default: Option<&'static str>,
+    /// `system-map.json` written into the main checkout, uncommitted.
+    checkout: Option<&'static str>,
+    /// A file committed to the checkout's local branch, never pushed: tracked, so `check` sees it.
+    tracked: Option<&'static str>,
+    /// The accepted map waiting on draft PR #12, in the data folder.
+    pending: Option<&'static str>,
+    /// The project's folder is a git repository.
+    git: bool,
+    status: Status,
+    from: Option<ReadFrom>,
+    /// A word of the note, when one is wanted.
+    note: Option<&'static str>,
+    /// A word of the first problem of the banner, or none for no banner.
+    problem: Option<&'static str>,
+}
+
+/// A case with no source holding a map, in a git repository.
+const NOTHING: ReadCase = ReadCase {
+    name: "",
+    default: None,
+    checkout: None,
+    tracked: None,
+    pending: None,
+    git: true,
+    status: Status::None,
+    from: None,
+    note: None,
+    problem: None,
+};
+
+/// The read order's cases (#753's ticket #757): each source alone, each beside a later one, each unreadable, a checkout map failing
+/// `check`, none, and a folder in no git repository.
+fn read_cases() -> Vec<ReadCase> {
+    use ReadFrom::{Checkout, DefaultBranch, PendingPr};
+    let read = |name, from| ReadCase {
+        name,
+        status: Status::Loaded,
+        from: Some(from),
+        ..NOTHING
+    };
+    let unread = |name, from| ReadCase {
+        name,
+        status: Status::Unreadable,
+        from: Some(from),
+        note: Some("does not read"),
+        ..NOTHING
+    };
+    vec![
+        ReadCase {
+            default: Some(MAP),
+            ..read("default branch only", DefaultBranch)
+        },
+        ReadCase {
+            checkout: Some(MAP),
+            ..read("checkout only", Checkout)
+        },
+        ReadCase {
+            pending: Some(MAP),
+            ..read("pending only", PendingPr)
+        },
+        // The working tree's own copy differs, and the default branch wins: no banner for its problems.
+        ReadCase {
+            default: Some(MAP),
+            checkout: Some("not the map"),
+            pending: Some(MAP),
+            ..read("default beside a checkout file", DefaultBranch)
+        },
+        ReadCase {
+            checkout: Some(MAP),
+            pending: Some("not the map"),
+            ..read("checkout beside a pending map", Checkout)
+        },
+        ReadCase {
+            default: Some("{ nope"),
+            checkout: Some(MAP),
+            ..unread("unreadable default branch file", DefaultBranch)
+        },
+        ReadCase {
+            checkout: Some("{ nope"),
+            pending: Some(MAP),
+            ..unread("unreadable checkout file", Checkout)
+        },
+        ReadCase {
+            pending: Some("{ nope"),
+            ..unread("unreadable pending map", PendingPr)
+        },
+        // A tracked file no part owns: `check` fails, and the map is drawn with the banner.
+        ReadCase {
+            checkout: Some(MAP),
+            tracked: Some("lib.rs"),
+            problem: Some("lib.rs"),
+            ..read("readable checkout file failing check", Checkout)
+        },
+        ReadCase {
+            name: "no map anywhere",
+            ..NOTHING
+        },
+        ReadCase {
+            name: "a non-git folder",
+            checkout: Some(MAP),
+            pending: Some(MAP),
+            git: false,
+            status: Status::NotGit,
+            note: Some("not a git repository"),
+            ..NOTHING
+        },
+    ]
+}
+
 #[test]
-fn the_map_comes_from_origins_default_branch_not_the_working_tree() {
-    let o = origin();
-    commit_file(&o.seed, MAP_FILE, MAP);
-    git(&o.seed, &["push", "-q", "origin", "HEAD"]);
-    git(&o.main, &["fetch", "-q", "origin"]);
-    // The working tree's own copy differs and is never read.
-    commit_file(&o.main, MAP_FILE, "not the map");
-    let state = read_map(&o.main);
-    assert_eq!(state.status, Status::Loaded);
-    assert_eq!(state.source.as_deref(), Some(MAP));
-    assert_eq!(state.reference.as_deref(), Some("origin/trunk"));
-    assert_eq!(state.note, None);
-    assert_eq!(
-        state.commit,
-        Some(git(&o.main, &["rev-parse", "origin/trunk"]))
-    );
+fn the_map_reads_the_default_branch_else_the_checkout_else_a_pending_pr() {
+    for c in read_cases() {
+        let o = origin();
+        let plain = tempfile::tempdir().unwrap();
+        let repo = if c.git {
+            o.main.clone()
+        } else {
+            plain.path().to_path_buf()
+        };
+        if let Some(text) = c.default {
+            commit_file(&o.seed, MAP_FILE, text);
+            git(&o.seed, &["push", "-q", "origin", "HEAD"]);
+            git(&o.main, &["fetch", "-q", "origin"]);
+        }
+        if let Some(name) = c.tracked {
+            commit_file(&repo, name, "fn main() {}");
+        }
+        if let Some(text) = c.checkout {
+            std::fs::write(repo.join(MAP_FILE), text).unwrap();
+        }
+        let data = tempfile::tempdir().unwrap();
+        let pending = data.path().join("pending.json");
+        if let Some(text) = c.pending {
+            let file = serde_json::json!({ "number": 12, "branch": "first-map/1", "map": text });
+            std::fs::write(&pending, file.to_string()).unwrap();
+        }
+        let state = read_checked(&repo, |_| Some(pending.clone()));
+        let name = c.name;
+        assert_eq!(state.status, c.status, "{name}: status");
+        assert_eq!(state.from, c.from, "{name}: from");
+        let want = (c.status == Status::Loaded).then(|| MAP.to_string());
+        assert_eq!(state.source, want, "{name}: source");
+        if let Some(word) = c.note {
+            assert!(
+                state.note.as_deref().is_some_and(|n| n.contains(word)),
+                "{name}: note {:?}",
+                state.note
+            );
+        }
+        match c.problem {
+            Some(word) => assert!(
+                state.problems.first().is_some_and(|p| p.contains(word)),
+                "{name}: banner {:?}",
+                state.problems
+            ),
+            None => assert_eq!(state.problems, Vec::<String>::new(), "{name}: banner"),
+        }
+        let pending = (c.from == Some(ReadFrom::PendingPr)).then_some(PendingPr {
+            number: 12,
+            closed: false,
+        });
+        assert_eq!(state.pending, pending, "{name}: pending PR");
+        if c.git {
+            // The default branch's ref and commit stay known whichever source the map came from.
+            assert_eq!(
+                state.reference.as_deref(),
+                Some("origin/trunk"),
+                "{name}: reference"
+            );
+            assert_eq!(
+                state.commit,
+                Some(git(&o.main, &["rev-parse", "origin/trunk"])),
+                "{name}: commit"
+            );
+        }
+    }
 }
 
 #[test]
@@ -255,14 +419,6 @@ fn a_version_1_map_is_stored_and_sent_as_version_2() {
 }
 
 #[test]
-fn a_default_branch_without_the_file_is_the_empty_state() {
-    let o = origin();
-    let state = read_map(&o.main);
-    assert_eq!(state.status, Status::None);
-    assert_eq!(state.source, None);
-}
-
-#[test]
 fn an_unset_origin_head_falls_back_to_local_main_with_a_quiet_note() {
     let (dir, main) = repo();
     commit_file(dir.path(), MAP_FILE, MAP);
@@ -278,15 +434,6 @@ fn local_master_is_read_when_there_is_no_main() {
     git(dir.path(), &["branch", "-m", "master"]);
     commit_file(dir.path(), MAP_FILE, MAP);
     assert_eq!(default_ref(Path::new(&main)).unwrap().0, "master");
-}
-
-#[test]
-fn a_file_that_does_not_read_is_unreadable_with_its_problem() {
-    let (dir, main) = repo();
-    commit_file(dir.path(), MAP_FILE, "{ nope");
-    let state = read_map(Path::new(&main));
-    assert_eq!(state.status, Status::Unreadable);
-    assert!(state.note.is_some());
 }
 
 #[test]

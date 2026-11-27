@@ -418,7 +418,8 @@ export type Work = {
   estimate: { range: [number, number] | null; depends_on_you: boolean };
 };
 
-// The Map view's payload (`server/src/map.rs`, `MapState`): one project's map as read from `origin`'s default branch, and Daniel's own
+// The Map view's payload (`server/src/map.rs`, `MapState`): one project's map as read from `origin`'s default branch (or its checkout, or a
+// pending PR, #753), and Daniel's own
 // positions and tiers for it. A feature of the view adds its field here and in `MapState` there; `server/tests/wire.rs` holds
 // the two to agree (#333).
 // What landed since Daniel caught up and what he has read of each PR's brief (`fog.rs`); `UserMap.fog`, which the window does not read.
@@ -441,9 +442,17 @@ type Staleness = { since: number | null; parts: Record<string, { at: number; kin
 export type UserMap = { positions: Record<string, [number, number]>; tiers: Record<string, string>; fog?: FogState; view?: Camera | null; staleness?: Staleness };
 export type MapState = {
   project: string;
-  status: "loaded" | "none" | "unreadable";
+  // "not-git": the project's folder is in no git repository, so there is no map to read or draft.
+  status: "loaded" | "none" | "unreadable" | "not-git";
   // The text of `system-map.json` when it loaded.
   source: string | null;
+  // Where the map was read from (#753): the default branch, else the main checkout's file, else the accepted map waiting on its draft PR;
+  // null when no source has one.
+  from: "default-branch" | "checkout" | "pending-pr" | null;
+  // The draft PR a `pending-pr` map waits on, and whether it closed unmerged.
+  pending: { number: number; closed: boolean } | null;
+  // For a `checkout` map that reads, the problems `system-map check` finds in the working tree; empty for the others.
+  problems: string[];
   reference: string | null;
   commit: string | null;
   note: string | null;

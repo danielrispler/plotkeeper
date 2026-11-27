@@ -40,7 +40,7 @@ export const base = {
   stop_facts: { active_days: 0, merged_prs: 0, engaged_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, counts: {}, began: null, stale_since: null },
   stop_dismiss: null,
   map_proof: [],
-  map_state: { project: "/w/plotkeeper", status: "none", source: null, reference: "origin/main", commit: null, note: null, user: { positions: {}, tiers: {} }, fog: {}, ci: null, ready: [], ratify: [], runs: { paused: null, runs: [] }, stale: {}, stale_why: {}, catch_ups: {} },
+  map_state: { project: "/w/plotkeeper", status: "none", source: null, from: null, pending: null, problems: [], reference: "origin/main", commit: null, note: null, user: { positions: {}, tiers: {} }, fog: {}, ci: null, ready: [], ratify: [], runs: { paused: null, runs: [] }, stale: {}, stale_why: {}, catch_ups: {} },
   open: noSelection,
   pr_brief: null,
   part_catch_up: null,
