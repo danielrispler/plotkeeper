@@ -1,4 +1,4 @@
-// The README stays a showcase (danielrispler/plotkeeper#148, decision 7): at most 850 words (700 until the Linux section, #710), no line over 400 characters,
+// The README stays a showcase (danielrispler/plotkeeper#148, decision 7): at most 900 words (700 until the Linux section, #710; 850 until First map, #769), no line over 400 characters,
 // every relative link leads to a file in the repository, and the npm transform rewrites all relative links and images
 // to absolute GitHub URLs so nothing breaks on npmjs.com. Run: `npm test`.
 import { test } from "node:test";
@@ -14,9 +14,9 @@ const readme = readFileSync(resolve(root, "README.md"), "utf8");
 // The relative targets of the README's links and images, without any #fragment.
 const relativeLinks = (text) => findRelativeTargets(text).map((target) => target.split("#")[0]);
 
-test("the README is at most 850 words", () => {
+test("the README is at most 900 words", () => {
   const words = readme.split(/\s+/).filter(Boolean).length;
-  assert.ok(words <= 850, `README.md has ${words} words`);
+  assert.ok(words <= 900, `README.md has ${words} words`);
 });
 
 test("no README line is over 400 characters", () => {
