@@ -1,7 +1,7 @@
 //! The read loop (danielrispler/plotkeeper#324, spec #319 "The server"): it reads the event log from its start, then from where
 //! it stopped, and sends what changed to the [`Sink`](crate::Sink) the shell set: the session list, the selection, the cards, the
 //! notices (a `notification` event). It holds no window: whether Daniel is looking comes from the sink's `focused`, and what he last said
-//! the page shows (`rail_shown`, `split_shown`) from the [`App`].
+//! the page shows (`rail_shown`) from the [`App`].
 
 use crate::{
     App, CardsKey, PROCESS_CHECK, append_to, cards, current_cards_key, process_ends,
@@ -520,17 +520,9 @@ fn notify(app: &App) {
         studio.session(id).is_some_and(|s| s.state == NeedsYou)
     };
     let due = app.notices().due(uptime(), focused, needs_you, || {
-        // The split's pane shows a terminal: a status-only row's id, or a session's in it.
-        let split = app.split_shown().clone();
         let studio = app.core();
         let selected = studio.selected().map(|s| s.agent.id.clone());
-        let mut on_screen: Vec<String> = selected.into_iter().collect();
-        if let Some(terminal) = split {
-            let in_it = studio.sessions().into_iter();
-            let in_it = in_it.filter(|s| s.terminal.as_ref() == Some(&terminal));
-            on_screen.extend(in_it.map(|s| s.agent.id.clone()));
-            on_screen.push(terminal);
-        }
+        let on_screen: Vec<String> = selected.into_iter().collect();
         drop(studio);
         on_screen
     });
