@@ -574,15 +574,20 @@ fn turn_origin(transcript: &str, initial: u64) -> Option<Origin> {
     })
 }
 
-pub(crate) fn tool_of(name: &str, args: &Value) -> Tool {
-    let kind = match name {
+/// What a call of tool `name` is.
+pub(crate) fn kind(name: &str) -> ToolKind {
+    match name {
         "write_file" | "replace_file_content" | "multi_replace_file_content" | "edit_file" => {
             ToolKind::Edit
         }
         "run_command" => ToolKind::Command,
         "invoke_subagent" => ToolKind::Spawn,
         _ => ToolKind::Other,
-    };
+    }
+}
+
+pub(crate) fn tool_of(name: &str, args: &Value) -> Tool {
+    let kind = kind(name);
     let text = |keys: &[&str]| {
         keys.iter()
             .find_map(|key| args[key].as_str())

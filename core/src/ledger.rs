@@ -4,7 +4,7 @@
 //! are read on demand, by one seek and one read of the event's length (`Row::details`), so a read
 //! costs the same on a large log as on a small one.
 
-use crate::event::{Event, Tool};
+use crate::event::{Event, Tool, ToolKind};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -48,6 +48,10 @@ pub struct Row {
     /// The call's id (`tool_use_id`), unique among the rows of its agent.
     pub call: String,
     pub tool: String,
+    /// What its adapter takes the call for. `None` only in a row of a saved state written before rows
+    /// had it, until `Studio::resume` classifies it by `tool` (#723).
+    #[serde(default)]
+    pub(crate) kind: Option<ToolKind>,
     /// The file it works on, as its input names it.
     pub file: Option<String>,
     pub command: Option<String>,
@@ -148,6 +152,11 @@ impl Row {
         }
     }
 
+    /// Whether the call changes the file its input names.
+    pub(crate) fn edits(&self) -> bool {
+        self.kind == Some(ToolKind::Edit)
+    }
+
     /// Whether it ended in failure.
     pub fn failed(&self) -> bool {
         matches!(self.outcome, Some(Outcome::Failed { .. }))
@@ -193,6 +202,13 @@ impl Ledger {
         &self.rows
     }
 
+    /// Gives each row restored with no kind the one `kind` gives its tool's name.
+    pub(crate) fn classify(&mut self, kind: impl Fn(&str) -> ToolKind) {
+        for row in self.rows.iter_mut().filter(|r| r.kind.is_none()) {
+            row.kind = Some(kind(&row.tool));
+        }
+    }
+
     /// The rows of turn `turn`, its workers' included.
     pub fn turn(&self, turn: usize) -> impl Iterator<Item = &Row> {
         self.rows.iter().filter(move |r| r.turn == Some(turn))
@@ -228,6 +244,7 @@ impl Ledger {
                 self.rows.push(Row {
                     call: call.into(),
                     tool: tool.name.clone(),
+                    kind: Some(tool.kind.clone()),
                     file: ["file_path", "notebook_path", "path"]
                         .iter()
                         .find_map(|k| text(k))

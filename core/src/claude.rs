@@ -140,11 +140,10 @@ pub(crate) fn parse(line: &str) -> Result<Event, serde_json::Error> {
     }
 }
 
-fn tool(raw: &Raw) -> Tool {
-    let name = raw.tool_name.clone().unwrap_or_default();
-    let input = &raw.tool_input;
-    let kind = match name.as_str() {
-        "Edit" | "Write" => ToolKind::Edit,
+/// What a call of tool `name` with `input` is.
+pub(crate) fn kind(name: &str, input: &Value) -> ToolKind {
+    match name {
+        "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => ToolKind::Edit,
         "Bash" => ToolKind::Command,
         "Agent" => ToolKind::Spawn,
         "Skill" => ToolKind::Skill(input["skill"].as_str().map(Into::into)),
@@ -152,10 +151,19 @@ fn tool(raw: &Raw) -> Tool {
         PLAN_TOOL => ToolKind::Plan,
         _ if name.starts_with("mcp__") => ToolKind::External,
         _ => ToolKind::Other,
-    };
+    }
+}
+
+fn tool(raw: &Raw) -> Tool {
+    let name = raw.tool_name.clone().unwrap_or_default();
+    let input = &raw.tool_input;
+    let kind = kind(&name, input);
+    let path = input["file_path"]
+        .as_str()
+        .or(input["notebook_path"].as_str());
     Tool {
         path: (kind == ToolKind::Edit)
-            .then(|| input["file_path"].as_str().map(Into::into))
+            .then(|| path.map(Into::into))
             .flatten(),
         command: (kind == ToolKind::Command)
             .then(|| input["command"].as_str().map(Into::into))
