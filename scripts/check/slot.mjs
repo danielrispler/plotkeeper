@@ -10,7 +10,7 @@
 // The tests set the folder and the timing limits through `CHECK_SLOT_DIR`, `CHECK_SLOT_POLL_MS`, `CHECK_SLOT_TOUCH_MS`
 // and `CHECK_SLOT_STALE_MS`; they are not a setting.
 import { spawn } from "node:child_process";
-import { closeSync, fstatSync, futimesSync, linkSync, mkdirSync, openSync, readFileSync, rmdirSync, statSync, unlinkSync, writeSync } from "node:fs";
+import { closeSync, fstatSync, ftruncateSync, futimesSync, linkSync, mkdirSync, openSync, readFileSync, rmdirSync, statSync, unlinkSync, writeSync } from "node:fs";
 import { constants, homedir } from "node:os";
 import { join } from "node:path";
 
@@ -20,7 +20,10 @@ const POLL_MS = Number(env.CHECK_SLOT_POLL_MS ?? 1000);
 const STALE_MS = Number(env.CHECK_SLOT_STALE_MS ?? 60_000);
 const TOUCH_MS = Number(env.CHECK_SLOT_TOUCH_MS ?? 10_000);
 
-/** `check-slots/` in plotkeeper's per-user cache folder (`docs/studio/behaviour/storage.md`). */
+/**
+ * `check-slots/` in plotkeeper's per-user cache folder, beside the runs folder: the rule `hook/src/lib.rs` follows for the
+ * runs folder (`docs/studio/behaviour/storage.md`), kept the same here.
+ */
 const slotDir = () => {
   if (env.CHECK_SLOT_DIR) return env.CHECK_SLOT_DIR;
   if (process.platform === "darwin") return join(homedir(), "Library/Caches/plotkeeper/check-slots");
@@ -31,13 +34,22 @@ const slotDir = () => {
 const dir = slotDir();
 const [command, ...args] = process.argv.slice(2);
 
-/** Writes this check's slot file under a temporary name and keeps it open, so it can be told apart from a later one. */
+/** Makes this check's slot file under a temporary name and keeps it open, so it can be told apart from a later one. */
 const prepare = () => {
   mkdirSync(dir, { recursive: true });
   const tmp = join(dir, `.${process.pid}.${Date.now()}.tmp`);
-  const fd = openSync(tmp, "wx");
-  writeSync(fd, JSON.stringify({ pid: process.pid, worktree: process.cwd(), since: Date.now() }));
-  return { tmp, fd };
+  const mine = { tmp, fd: openSync(tmp, "wx") };
+  stamp(mine);
+  return mine;
+};
+
+/**
+ * Writes the slot file's pid, worktree and start time, which also touches it. Before each try for a slot, while the file
+ * is still only this check's: a slot taken after a wait past the staleness limit is not already stale.
+ */
+const stamp = (mine) => {
+  ftruncateSync(mine.fd, 0);
+  writeSync(mine.fd, JSON.stringify({ pid: process.pid, worktree: process.cwd(), since: Date.now() }), 0);
 };
 
 /** Links the slot file to the first free slot's name; the slot's path, or null when both are held. */
@@ -52,6 +64,9 @@ const take = (tmp) => {
   }
   return null;
 };
+
+/** The pid, worktree and start time a slot file holds. */
+const holderOf = (path) => JSON.parse(readFileSync(path, "utf8"));
 
 /** Whether a process has this pid, asked without starting one. */
 const alive = (pid) => {
@@ -69,7 +84,7 @@ const alive = (pid) => {
  */
 const stale = (path) => {
   if (Date.now() - statSync(path).mtimeMs > STALE_MS) return true;
-  const holder = JSON.parse(readFileSync(path, "utf8"));
+  const holder = holderOf(path);
   return !(Number.isInteger(holder.pid) && alive(holder.pid));
 };
 
@@ -100,7 +115,7 @@ const reap = (slot) => {
 const holders = () =>
   SLOTS.flatMap((slot) => {
     try {
-      return [JSON.parse(readFileSync(join(dir, slot), "utf8"))];
+      return [holderOf(join(dir, slot))];
     } catch {
       return [];
     }
@@ -124,6 +139,9 @@ const release = (mine) => {
   closeSync(mine.fd);
 };
 
+/** The exit status of a process ended by `signal`, as a shell gives it. */
+const statusOf = (signal) => 128 + constants.signals[signal];
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // The slot file while this check waits for a slot, then the check's child once it runs.
@@ -140,9 +158,9 @@ const dropWaiting = () => {
   waiting = null;
 };
 
-// A stop passes on to the child's process group; the child's end gives the slot back. A stop while waiting ends the
-// check before it runs anything.
-for (const signal of ["SIGINT", "SIGTERM"]) {
+// A stop (Ctrl+C, a timeout's SIGTERM, a closed terminal's SIGHUP) passes on to the child's process group, which is not
+// the terminal's, and the child's end gives the slot back. A stop while waiting ends the check before it runs anything.
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
   process.on(signal, () => {
     if (child) {
       try {
@@ -151,7 +169,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
       return;
     }
     dropWaiting();
-    process.exit(128 + constants.signals[signal]);
+    process.exit(statusOf(signal));
   });
 }
 
@@ -162,11 +180,13 @@ const withoutSlot = (error) => {
 };
 
 /** Takes a free slot, or one taken back from a dead holder; null when both are held. */
-const takeOrReap = (tmp) => {
-  const slot = take(tmp);
+const takeOrReap = (mine) => {
+  stamp(mine);
+  const slot = take(mine.tmp);
   if (slot) return slot;
   for (const name of SLOTS) reap(name);
-  return take(tmp);
+  stamp(mine);
+  return take(mine.tmp);
 };
 
 /** Waits for a slot and takes it; null when the slot folder can't be written (a sandboxed run). */
@@ -182,7 +202,7 @@ const hold = async () => {
   for (;;) {
     let slot;
     try {
-      slot = takeOrReap(mine.tmp);
+      slot = takeOrReap(mine);
     } catch (error) {
       return withoutSlot(error);
     }
@@ -205,7 +225,7 @@ const run = (mine) => {
   child = spawn(command, args, { stdio: ["ignore", "inherit", "inherit"], detached: true });
   child.on("close", (code, signal) => {
     if (mine) release(mine);
-    process.exit(code ?? 128 + constants.signals[signal]);
+    process.exit(code ?? statusOf(signal));
   });
 };
 

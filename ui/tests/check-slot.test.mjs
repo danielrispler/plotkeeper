@@ -48,6 +48,11 @@ const within = async (wrapper, ms) => {
   return ended;
 };
 
+/** Resolves once `done()` holds, polling every 20 ms. */
+const until = async (done) => {
+  while (!done()) await new Promise((resolve) => setTimeout(resolve, 20));
+};
+
 const log = (dir) => (existsSync(join(dir, "log.jsonl")) ? readFileSync(join(dir, "log.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line)) : []);
 
 test("the wrapped command's output and exit code pass through", async () => {
@@ -69,31 +74,39 @@ const mostAtOnce = (lines) => {
   return most;
 };
 
-const literal = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-test("three checks at once run two at a time, past the staleness limit: the third waits, names the holders, and starts after one ends", async () => {
+test("four checks run two at a time, past the staleness limit: each waiter names the holders once and starts after a slot frees", async () => {
   const dir = scratch();
   const slots = join(dir, "slots");
-  const worktrees = ["one", "two", "three"].map((name) => {
+  const worktrees = ["one", "two", "three", "four"].map((name) => {
     mkdirSync(join(dir, name));
     return join(dir, name);
   });
-  // Each check runs past the staleness limit, so a holder keeps its slot only by touching it.
-  const env = { CHECK_SLOT_TOUCH_MS: "100", CHECK_SLOT_STALE_MS: "1500" };
-  const wrappers = worktrees.map((cwd, i) => wrap({ dir, slots, cwd, name: String(i), ms: 2000, env }));
-  const ran = await Promise.all(wrappers.map((wrapper) => wrapper.done));
+  // Each check runs, and the last two wait, past the staleness limit: a holder keeps its slot only by touching it, and a
+  // slot taken after a long wait is not already stale. The first two end apart, so one waiter takes a slot while the
+  // other still waits.
+  const env = { CHECK_SLOT_TOUCH_MS: "500", CHECK_SLOT_STALE_MS: "1000" };
+  const first = [1500, 4000].map((ms, i) => wrap({ dir, slots, cwd: worktrees[i], name: String(i), ms, env }));
+  await until(() => log(dir).length === 2);
+  const rest = [2, 3].map((i) => wrap({ dir, slots, cwd: worktrees[i], name: String(i), ms: 1500, env }));
+  const ran = await Promise.all([...first, ...rest].map((wrapper) => wrapper.done));
   for (const one of ran) assert.equal(one.status, 0, one.stderr);
   const lines = log(dir);
-  assert.equal(lines.length, 6);
+  assert.equal(lines.length, 8);
   assert.equal(mostAtOnce(lines), 2);
   const starts = lines.filter((line) => line.at === "start").sort((a, b) => a.t - b.t);
   const firstEnd = Math.min(...lines.filter((line) => line.at === "end").map((line) => line.t));
   assert.ok(starts[2].t >= firstEnd, "the third started before a slot freed");
-  const waited = ran.filter((one) => /waiting for a check slot/.test(one.stderr));
-  assert.equal(waited.length, 1, ran.map((one) => one.stderr).join("\n"));
-  assert.equal(waited[0].stderr.match(/waiting for a check slot/g).length, 1, "the waiting line is printed once");
-  const holders = worktrees.filter((_, i) => ran[i] !== waited[0]);
-  for (const holder of holders) assert.match(waited[0].stderr, new RegExp(`${literal(holder)} \\(\\d+s\\)`));
+  const waiters = worktrees.slice(2);
+  const holder = worktrees.map(escapeRegExp).join("|");
+  assert.equal(ran[0].stderr + ran[1].stderr, "", "a check that found a free slot printed nothing");
+  for (const waiter of waiters) {
+    const { stderr } = ran[worktrees.indexOf(waiter)];
+    assert.equal(stderr.match(/waiting for a check slot/g).length, 1, "the waiting line is printed once");
+    assert.match(stderr, new RegExp(`^check: waiting for a check slot, held by (${holder}) \\(\\d+s\\) and (${holder}) \\(\\d+s\\)\n$`));
+    assert.equal(stderr.includes(`${waiter} (`), false, "a waiter names itself");
+  }
 });
 
 /** Fills a slot as another check would have: its file names `pid` and was last touched `ago` ms ago. */
@@ -130,26 +143,70 @@ test("a slot whose live holder left it untouched past the limit is taken back, a
   assert.equal(existsSync(join(slots, "1")), false, "the check gave its slot back");
 });
 
-test("SIGTERM to a waiting check ends it without running the command, and leaves nothing in the slot folder", async () => {
-  const dir = scratch();
-  const slots = join(dir, "slots");
-  for (const slot of ["1", "2"]) holdSlot(slots, slot, process.pid);
-  const wrapper = wrap({ dir, slots, name: "a", env: { CHECK_SLOT_STALE_MS: "60000" } });
-  while (!/waiting for a check slot/.test(wrapper.stderr())) await new Promise((resolve) => setTimeout(resolve, 20));
-  wrapper.child.kill("SIGTERM");
-  const ran = await within(wrapper, 3000);
-  assert.notEqual(ran, "still waiting");
-  assert.equal(ran.status, 143, ran.stderr);
-  assert.deepEqual(log(dir), []);
-  assert.deepEqual(readdirSync(slots).sort(), ["1", "2"]);
-});
+// A stop, from Ctrl+C, an agent's timeout or a closed terminal, as its signal and the exit status it ends with.
+/** @type {{ signal: NodeJS.Signals, status: number }[]} */
+const STOPS = [
+  { signal: "SIGINT", status: 130 },
+  { signal: "SIGTERM", status: 143 },
+  { signal: "SIGHUP", status: 129 },
+];
 
-test("a slot folder that can't be made runs the command without a slot and says so", async () => {
-  const dir = scratch();
-  writeFileSync(join(dir, "file"), "");
-  const slots = join(dir, "file/slots");
-  const ran = await wrap({ dir, slots, name: "a" }).done;
-  assert.equal(ran.status, 0, ran.stderr);
-  assert.equal(ran.stdout, "job a ran\n");
-  assert.equal(ran.stderr, `check: the check slot folder ${slots} can't be written (ENOTDIR), so this check runs without a slot\n`);
-});
+for (const { signal, status } of STOPS) {
+  test(`${signal} to a waiting check ends it without running the command, and leaves nothing in the slot folder`, async () => {
+    const dir = scratch();
+    const slots = join(dir, "slots");
+    for (const slot of ["1", "2"]) holdSlot(slots, slot, process.pid);
+    const wrapper = wrap({ dir, slots, name: "a", env: { CHECK_SLOT_STALE_MS: "60000" } });
+    await until(() => /waiting for a check slot/.test(wrapper.stderr()));
+    wrapper.child.kill(signal);
+    const ran = await within(wrapper, 3000);
+    assert.notEqual(ran, "still waiting");
+    assert.equal(ran.status, status, ran.stderr);
+    assert.deepEqual(log(dir), []);
+    assert.deepEqual(readdirSync(slots).sort(), ["1", "2"]);
+  });
+
+  test(`${signal} to a running check stops the command and gives its slot back`, async () => {
+    const dir = scratch();
+    const slots = join(dir, "slots");
+    const wrapper = wrap({ dir, slots, name: "a", ms: 10_000 });
+    await until(() => log(dir).length === 1);
+    wrapper.child.kill(signal);
+    const ran = await within(wrapper, 3000);
+    assert.notEqual(ran, "still waiting");
+    assert.equal(ran.status, status, ran.stderr);
+    assert.deepEqual(log(dir).map((line) => line.at), ["start"], "the command ran on");
+    assert.deepEqual(readdirSync(slots), []);
+  });
+}
+
+// A slot folder that can't be made or written, as in a sandboxed run, as a way to cause it and the error it gives.
+const UNWRITABLE = [
+  {
+    kind: "a path under a file",
+    code: "ENOTDIR",
+    make: (dir) => {
+      writeFileSync(join(dir, "file"), "");
+      return join(dir, "file/slots");
+    },
+  },
+  {
+    kind: "a read-only folder",
+    code: "EACCES",
+    make: (dir) => {
+      mkdirSync(join(dir, "slots"), { mode: 0o500 });
+      return join(dir, "slots");
+    },
+  },
+];
+
+for (const { kind, code, make } of UNWRITABLE) {
+  test(`a slot folder that can't be written (${kind}) runs the command without a slot and says so`, async () => {
+    const dir = scratch();
+    const slots = make(dir);
+    const ran = await wrap({ dir, slots, name: "a" }).done;
+    assert.equal(ran.status, 0, ran.stderr);
+    assert.equal(ran.stdout, "job a ran\n");
+    assert.equal(ran.stderr, `check: the check slot folder ${slots} can't be written (${code}), so this check runs without a slot\n`);
+  });
+}
