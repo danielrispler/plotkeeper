@@ -18,8 +18,7 @@ const CLIMBS: &str = "climbs past the top package under some roots";
 fn climb(folder: &str, up: u32) -> Option<String> {
     let mut at = folder;
     for _ in 0..up {
-        let parent = at.strip_suffix('/')?;
-        at = parent.rfind('/').map_or("", |i| &parent[..=i]);
+        at = crate::extract::folders::parent(at)?;
     }
     Some(at.to_string())
 }
