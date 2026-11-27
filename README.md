@@ -54,7 +54,7 @@ Summaries default to `claude -p` (`claude` on your login shell's `PATH`); Settin
 Linux (x86_64 and arm64, desktop as the target) is supported. Install `bubblewrap` and `socat` for [background runs](docs/studio/behaviour/background-runs.md), and `libsecret-tools` with a keyring (GNOME Keyring or KWallet) for API keys; without a keyring, saving a key is refused.
 
 - **Confirmed** in a Docker trial (arm64; x86_64 only in CI): install wires Claude Code and Codex, their sessions are recorded and end when the agent exits, and the background-run sandbox check refuses where user namespaces are barred and passes where allowed. Codex's terminal app records no process id, as on macOS: `/quit` ends its session, `Ctrl+C` leaves it idle.
-- **WSL2:** agents run inside WSL2 are recorded and background runs work. API keys without a secret store and Windows-side agents do not.
+- **WSL2** (untried): agents inside WSL2 should record and run in the background as on Linux; API keys and Windows-side agents do not.
 - **Remote box:** reach its `127.0.0.1` page with `ssh -L <port>:127.0.0.1:<port> <host>`.
 - **Unverified:** a desktop secret store with a real keyring; Cursor, agy, Copilot and Qwen Code sessions; shortcut collisions in a Linux browser; Ubuntu 24.04's AppArmor limit on user namespaces.
 
