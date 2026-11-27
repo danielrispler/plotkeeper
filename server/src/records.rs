@@ -162,10 +162,13 @@ pub(crate) fn project_folder(store: &Path, project: &str) -> PathBuf {
 }
 
 /// FNV-1a of `text`: the same in every build, as a name or hash kept across builds must be.
-pub(crate) fn fnv1a(text: &str) -> u64 {
-    text.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
-    })
+pub(crate) fn fnv1a(text: impl AsRef<[u8]>) -> u64 {
+    text.as_ref()
+        .iter()
+        .copied()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+        })
 }
 
 #[cfg(test)]

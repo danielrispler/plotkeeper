@@ -22,7 +22,7 @@ import { element, failure, hint, invoke, keyed, listen, mark, messageOf, newest,
 import { cameraRig, type CameraRig, fitCamera, panTo, revealPan, zoomAt } from "./map-camera.js";
 import { brokenParts, brokenText, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Drag, type Law, type Layer, type LayerName, type MapDoc, askedProject, startProject, switchProject, wasRemoved, parseMap, type Part, type Point, placement, plateSize, plateTitle, sizeOf, lineTag, linkLines, markPoints, readingOrder, rimPoint, type Scrub, tagWord, type Tier } from "./map-model.js";
 import { copyButton } from "./copy-button.js";
-import { type DraftField, drawDraft } from "./map-draft.js";
+import { type DraftField, drawDraft, replaceAsked } from "./map-draft.js";
 import { drawScan } from "./map-scan.js";
 import { recheckSeen } from "./seen.js";
 import { knownProjects, listedProjects, projectGone } from "./projects.js";
@@ -379,10 +379,15 @@ export function linkMark(ids: string[], law: Law, at: Point): SVGElement {
   return mark(diamond, lawWords(law));
 }
 
+// Whether `state`'s project may hold a Map draft: a git repository with no map, or whose checkout system-map.json does not read (#764). The
+// scan is offered only with no map (Q21), but a Map draft already there shows over a broken file, for Write to ask before replacing it.
+const draftable = (state: MapState | null) => state?.status === "none" || (state?.status === "unreadable" && state.from === "checkout");
+
 // The scan screen's scan (#760) for a git repository whose map status is the empty state (no map anywhere): asked the first time it is
-// wanted, and drawn when it answers; never for a folder in no git repository or a map that does not read.
+// wanted, with the Map draft, and drawn when it answers; never for a folder in no git repository or a map that does not read, though both
+// are asked for a checkout file that does not read, whose Map draft shows.
 function scanFor(state: MapState | null): MapScan | "asking" | null {
-  if (state?.status !== "none" || project === null || projectGone(project)) return null;
+  if (!draftable(state) || project === null || projectGone(project)) return null;
   if (scanned?.project !== project) {
     const asked: Scanned = { project, scan: "asking", note: null, edits: Promise.resolve(), refused: null, starting: false, draft: "asking", draftNote: null };
     scanned = asked;
@@ -396,7 +401,7 @@ function scanFor(state: MapState | null): MapScan | "asking" | null {
       done(null);
     });
   }
-  return scanned.scan;
+  return state?.status === "none" ? scanned.scan : null;
 }
 
 // Sends `edit` of the held skeleton to the server, after any edit still on its way, and draws its answer: the plates and lines again, the
@@ -422,8 +427,8 @@ function editScan(edit: ScanEdit) {
   });
 }
 
-// The Map draft of a project whose map status is the empty state, once `scanFor` asked it.
-const draftFor = (state: MapState | null) => (state?.status === "none" && scanned?.project === project ? scanned.draft : null);
+// The Map draft of a project that may hold one, once `scanFor` asked it.
+const draftFor = (state: MapState | null) => (draftable(state) && scanned?.project === project ? scanned.draft : null);
 
 // Draws `request`'s Map draft when it is the newest asked and its project still shows; a failure says why, and a first read that failed
 // leaves the scan.
@@ -482,9 +487,30 @@ function draftActs(asked: Scanned) {
     },
     retry: (group: number) => settleDraft(asked, "map_draft_retry", invoke("map_draft_retry", { project, group })),
     redraft: (part: string) => settleDraft(asked, "map_draft_redraft", invoke("map_draft_redraft", { project, part })),
+    accept: () => {
+      // One Write at a time: a second press while the first is on its way, or its question is open, does nothing.
+      if (writing) return;
+      writing = true;
+      settleDraft(asked, "map_draft_accept", writeMap(project).finally(() => (writing = false)));
+    },
     discard: () => settleDraft(asked, "map_draft_discard", invoke("map_draft_discard", { project }).then(() => null)),
     note: asked.draftNote,
   };
+}
+
+// Whether a Write is on its way.
+let writing = false;
+// Accept's Write (#764): the map goes into the checkout. A file there that does not read is replaced only on a yes, sent with what the
+// server read of it, so a file changed since is asked about again. Once written, the map is read again and shows from the checkout, and
+// there is no Map draft; on a no, the Map draft as it stands.
+async function writeMap(project: string): Promise<MapDraft | null> {
+  let reply = await invoke("map_draft_accept", { project });
+  while (reply.kind === "replace") {
+    if (!(await replaceAsked(reply.problem))) return invoke("map_draft", { project });
+    reply = await invoke("map_draft_accept", { project, replace: reply.seen });
+  }
+  await load(project, false);
+  return null;
 }
 
 // Where `plotkeeper install` is explained.
@@ -517,7 +543,7 @@ function drawEmpty(body: HTMLElement, state: MapState | null) {
     );
   } else if (state === null) {
     box.append(text("p", "Reading the map…", "empty"));
-  } else if (scanFor(state) === "asking" || draftFor(state) === "asking") {
+  } else if (scanFor(state) === "asking" || (state.status === "none" && draftFor(state) === "asking")) {
     box.append(text("p", "Scanning this repository's folders…", "empty"));
   } else if (state.status === "not-git") {
     // Nothing to read or draft (#753): no prompt and no button.

@@ -1106,6 +1106,20 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
         ("About", json(studio_server::about())),
         ("MapDraft", json(map_draft())),
         (
+            "MapAccepted",
+            json(studio_server::map_draft::Accepted::Written {
+                path: "/w/app/system-map.json".into(),
+            }),
+        ),
+        (
+            "MapAccepted",
+            json(studio_server::map_draft::Accepted::Replace {
+                path: "/w/app/system-map.json".into(),
+                problem: "expected `,` or `}` at line 1 column 13".into(),
+                seen: "00c0ffee00c0ffee".into(),
+            }),
+        ),
+        (
             "MapScan",
             json(studio_server::map_scan::MapScan {
                 map: r#"{"version":2,"parts":[],"links":[]}"#.into(),
@@ -1155,6 +1169,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
             "NewLaw",
             "MapScan",
             "MapDraft",
+            "MapAccepted",
         ],
         &samples,
     );
@@ -1203,6 +1218,7 @@ fn map_draft() -> studio_server::map_draft::MapDraftView {
             why: "No code shows it.".into(),
         }],
         ready: false,
+        path: "/w/app/system-map.json".into(),
     }
 }
 

@@ -761,10 +761,14 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .map-drafting-left { display: flex; flex-direction: column; gap: var(--sp-2); }
 .map-drafting-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
 .map-drafting-foot .btn { margin-inline-start: auto; }
-/* Accept and Discard stay in reach at the panel's foot while the cards scroll; a field focused by Tab scrolls clear of them. */
-.map-drafting-panel { scroll-padding-block-end: calc(3 * var(--sp-7)); }
-.map-drafting-actions { position: sticky; bottom: calc(-1 * var(--sp-6)); display: flex; gap: var(--sp-3); padding-block: var(--sp-4) var(--sp-6); background: var(--bg); }
+/* Accept's two ways out and Discard stay in reach at the panel's foot while the cards scroll; a field focused by Tab scrolls clear of them.
+   Write takes the whole row, its checkout's path wrapping, with the line on what it adds under it (#764). */
+.map-drafting-panel { scroll-padding-block-end: calc(6 * var(--sp-7)); }
+.map-drafting-actions { position: sticky; bottom: calc(-1 * var(--sp-6)); display: flex; flex-wrap: wrap; gap: var(--sp-3); padding-block: var(--sp-4) var(--sp-6); background: var(--bg); }
 .map-drafting-actions .primary:not([aria-disabled="true"]) { background: var(--selected); }
+.map-drafting-write { flex: 1 1 100%; text-align: start; }
+.map-drafting-path { font-family: var(--mono); overflow-wrap: anywhere; }
+.map-drafting-uncommitted { flex: 1 1 100%; margin: 0; font-size: var(--size-small); color: var(--muted); }
 /* With the left panel open, the scan takes the room the panel leaves, as the empty map does (#462). */
 body.panel-open .map-scan { inset-inline-start: calc(var(--inset) + var(--panel-w)); }
 body.narrow .map-scan { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }

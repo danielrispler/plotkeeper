@@ -12,14 +12,16 @@ use std::{
     sync::{Arc, mpsc},
     time::{Duration, Instant},
 };
-use studio_server::map_draft::{Config as DraftConfig, Edit, GroupState, MapDraftView, MapDrafts};
+use studio_server::map_draft::{
+    Accepted, Config as DraftConfig, Edit, GroupState, MapDraftView, MapDrafts,
+};
 use studio_server::runner::{
     Config, Harness, HarnessCommand, Kind, Limits, Plan, Request, RunState, Runner,
 };
 
 /// The skeleton the page gives: part `a` in zone `x`, `b` and `c` in zone `y`, so two writer groups, `[a]` and `[b, c]`;
-/// `vendor/` is a reference copy, ignored.
-const SKELETON: &str = r#"{"version":2,"parts":[
+/// `vendor/` is a reference copy, ignored. `a` imports `b`, an edge the scan's links leave out, as Accept computes them again.
+const SKELETON: &str = r#"{"version":2,"extractors":["typescript-imports"],"parts":[
   {"id":"a","name":"A","caption":"Not yet described","purpose":"Not yet described.","holds":[],"tier":"interface","paths":["a/"],"zone":"x"},
   {"id":"b","name":"B","caption":"Not yet described","purpose":"Not yet described.","holds":[],"tier":"interface","paths":["b/"],"zone":"y"},
   {"id":"c","name":"C","caption":"Not yet described","purpose":"Not yet described.","holds":[],"tier":"interface","paths":["c/"],"zone":"y"}],
@@ -111,9 +113,10 @@ fn bench() -> Bench {
     let project = root.join("project");
     fs::create_dir_all(&project).unwrap();
     git(&project, &["init", "-q", "-b", "main"]);
-    for file in ["a/x.ts", "b/y.ts", "c/z.ts", "vendor/v.ts"] {
+    for file in ["b/y.ts", "c/z.ts", "vendor/v.ts"] {
         write(&project, file, "export const x = 1;\n");
     }
+    write(&project, "a/x.ts", "import { x } from \"../b/y\";\n");
     git(&project, &["add", "-A"]);
     git(&project, &["commit", "-qm", "code"]);
     fs::create_dir_all(root.join("answers")).unwrap();
@@ -261,6 +264,24 @@ impl Bench {
             .into_iter()
             .filter(|asked| asked["key"] == key)
             .collect()
+    }
+
+    /// `system-map.json` in the main checkout, where Accept writes.
+    fn map_file(&self) -> PathBuf {
+        Path::new(&self.main()).join("system-map.json")
+    }
+
+    /// A Map draft every reviewer answered on: each part written and its purpose supported.
+    fn ready(&self) -> MapDraftView {
+        self.answer("writer-a", &wrote(&["a"]));
+        self.answer("writer-b", &wrote(&["b", "c"]));
+        self.answer("reviewer-a", &judged(&[("a", "supported")]));
+        self.answer(
+            "reviewer-b",
+            &judged(&[("b", "supported"), ("c", "supported")]),
+        );
+        self.start();
+        self.until(|view| view.ready)
     }
 
     fn file(&self) -> PathBuf {
@@ -502,6 +523,12 @@ fn redraft_this_part_rewrites_one_part_with_its_flag_then_checks_it_again() {
     let view = bench.drafts.redraft(&bench.project(), "c").unwrap();
     // Accept is locked again until the redraft's reviewer answers.
     assert!(!view.ready);
+    let early = bench.drafts.accept(&bench.project(), None);
+    assert_eq!(
+        early.unwrap_err(),
+        "Accept unlocks once a reviewer has checked every part"
+    );
+    assert!(!bench.map_file().exists());
     assert_eq!(
         view.groups
             .last()
@@ -746,4 +773,203 @@ fn alive(pid: u64) -> bool {
         .unwrap()
         .status
         .success()
+}
+
+#[test]
+fn accept_writes_the_map_with_its_import_links_into_the_checkout_uncommitted_and_deletes_the_draft()
+{
+    let bench = bench();
+    let view = bench.ready();
+    let path = bench.map_file().display().to_string();
+    assert_eq!(view.path, path);
+    let edit = Edit {
+        name: Some("Alpha".into()),
+        tier: Some("core".into()),
+        ..Edit::default()
+    };
+    bench.drafts.edit(&bench.project(), "a", edit).unwrap();
+
+    let accepted = bench.drafts.accept(&bench.project(), None).unwrap();
+    assert_eq!(accepted, Accepted::Written { path: path.clone() });
+    // The skeleton with the written text and the edits, the computed edge as an `import` link with no reason, no laws and no flows.
+    let map: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    let view = MapDraftView {
+        map: map.to_string(),
+        ..view
+    };
+    assert_eq!(
+        parts(&view),
+        [
+            (
+                "a".into(),
+                "Alpha".into(),
+                "a does its job.".into(),
+                "core".into()
+            ),
+            (
+                "b".into(),
+                "B part".into(),
+                "b does its job.".into(),
+                "interface".into()
+            ),
+            (
+                "c".into(),
+                "C part".into(),
+                "c does its job.".into(),
+                "interface".into()
+            ),
+        ]
+    );
+    assert_eq!(
+        map["links"],
+        serde_json::json!([{ "id": "a-b", "from": "a", "to": "b", "kind": "import" }])
+    );
+    assert_eq!(map["laws"], serde_json::json!([]));
+    assert_eq!(map["flows"], serde_json::json!([]));
+    assert_eq!(map["ignored"], serde_json::json!(["vendor/"]));
+    let report = system_map::check(Path::new(&bench.main()));
+    assert_eq!(report.problems, Vec::<String>::new());
+    // It is left uncommitted, for the person to commit.
+    let status = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(bench.main())
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&status.stdout),
+        "?? system-map.json\n"
+    );
+    // The Map draft is deleted.
+    assert_eq!(bench.view(), None);
+    assert!(!bench.file().exists());
+    let again = bench.drafts.accept(&bench.project(), None);
+    assert_eq!(again.unwrap_err(), "There is no Map draft to accept");
+}
+
+#[test]
+fn accept_is_refused_with_why_writing_nothing_and_keeping_the_draft() {
+    /// A case: its name, what is done to the checkout once the draft is ready, the file it leaves to stay as it is, and the refusal.
+    type Case = (&'static str, fn(&Bench) -> PathBuf, &'static str);
+    let cases: [Case; 5] = [
+        (
+            "the map fails its check",
+            |bench| {
+                let edit = Edit {
+                    purpose: Some("A".repeat(300)),
+                    ..Edit::default()
+                };
+                bench.drafts.edit(&bench.project(), "b", edit).unwrap();
+                bench.map_file()
+            },
+            "The map does not pass its check: part \"b\": purpose is 300 characters, the cap is 240",
+        ),
+        (
+            "the checkout's system-map.json is a symbolic link",
+            |bench| {
+                let outside = bench.root().join("outside.json");
+                fs::write(&outside, "kept").unwrap();
+                std::os::unix::fs::symlink(&outside, bench.map_file()).unwrap();
+                outside
+            },
+            "system-map.json in the checkout is a symbolic link",
+        ),
+        (
+            "a symbolic link to nothing",
+            |bench| {
+                let nowhere = bench.root().join("nowhere.json");
+                std::os::unix::fs::symlink(&nowhere, bench.map_file()).unwrap();
+                nowhere
+            },
+            "system-map.json in the checkout is a symbolic link",
+        ),
+        (
+            "the checkout has a map that reads",
+            |bench| {
+                fs::write(bench.map_file(), SKELETON).unwrap();
+                bench.map_file()
+            },
+            "This repository has a map already",
+        ),
+        (
+            "the default branch has a map",
+            |bench| {
+                fs::write(bench.map_file(), SKELETON).unwrap();
+                git(Path::new(&bench.main()), &["add", "system-map.json"]);
+                git(Path::new(&bench.main()), &["commit", "-qm", "map"]);
+                bench.map_file()
+            },
+            "This repository has a map already",
+        ),
+    ];
+    for (name, setup, refusal) in cases {
+        let bench = bench();
+        bench.ready();
+        let kept = setup(&bench);
+        let before = fs::read(&kept).ok();
+        let refused = bench.drafts.accept(&bench.project(), None);
+        let why = refused.expect_err(name);
+        assert!(why.starts_with(refusal), "{name}: {why}");
+        assert_eq!(fs::read(&kept).ok(), before, "{name}");
+        assert!(bench.view().is_some(), "{name}: the draft went");
+    }
+    // A link is left a link, never written through.
+    let bench = bench();
+    bench.ready();
+    std::os::unix::fs::symlink(bench.root().join("nowhere.json"), bench.map_file()).unwrap();
+    bench
+        .drafts
+        .accept(&bench.project(), Some("0"))
+        .unwrap_err();
+    assert!(
+        fs::symlink_metadata(bench.map_file())
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+}
+
+#[test]
+fn an_unreadable_system_map_json_is_replaced_only_on_a_yes_to_the_file_as_it_was_asked_about() {
+    let bench = bench();
+    bench.ready();
+    let path = bench.map_file().display().to_string();
+    fs::write(bench.map_file(), "{ \"parts\": 1").unwrap();
+    // Write asks first, naming the file's first problem as the Map view says it.
+    let asked = bench.drafts.accept(&bench.project(), None).unwrap();
+    let Accepted::Replace {
+        path: asked_path,
+        problem,
+        seen,
+    } = asked
+    else {
+        panic!("Write did not ask: {asked:?}");
+    };
+    assert_eq!(asked_path, path);
+    let shown = studio_server::map::read_map(Path::new(&bench.main())).note;
+    assert_eq!(
+        Some(format!("system-map.json does not read: {problem}")),
+        shown
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), "{ \"parts\": 1");
+    // A yes to another file than the one there asks again.
+    let stale = bench.drafts.accept(&bench.project(), Some("0")).unwrap();
+    assert!(
+        matches!(&stale, Accepted::Replace { seen: again, .. } if *again == seen),
+        "{stale:?}"
+    );
+    // The file changed between the question and the yes: it is asked about again.
+    fs::write(bench.map_file(), "not a map").unwrap();
+    let changed = bench.drafts.accept(&bench.project(), Some(&seen)).unwrap();
+    let Accepted::Replace { seen: now, .. } = changed else {
+        panic!("a changed file was replaced: {changed:?}");
+    };
+    assert_ne!(now, seen);
+    assert_eq!(fs::read_to_string(&path).unwrap(), "not a map");
+    assert!(bench.view().is_some());
+    // A yes to the file as it is replaces it.
+    let written = bench.drafts.accept(&bench.project(), Some(&now)).unwrap();
+    assert_eq!(written, Accepted::Written { path: path.clone() });
+    let map: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(map["parts"].as_array().map(Vec::len), Some(3));
+    assert_eq!(bench.view(), None);
 }

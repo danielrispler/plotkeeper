@@ -421,7 +421,7 @@ test("a Map draft's part stands where its latest group does, and the progress li
     [[group(["a", "b", "c"], "done")], { a: verdict("a", "supported"), b: verdict("b", "supported"), c: verdict("c", "contradicted") }, ["checked", "checked", "flagged"], "3 of 3 parts checked"],
   ];
   for (const [groups, verdicts, stages, line] of cases) {
-    const draft = { map: "", groups, verdicts, not_written: [], ready: false };
+    const draft = { map: "", groups, verdicts, not_written: [], ready: false, path: "/w/app/system-map.json" };
     assert.deepEqual(["a", "b", "c"].map((id) => partStage(draft, id)), stages, JSON.stringify(groups));
     assert.equal(draftProgress(draft, ["a", "b", "c"]), line, JSON.stringify(groups));
   }
