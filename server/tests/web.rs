@@ -14,6 +14,7 @@ use studio_server::{
     lock::{Instance, acquire},
     web::{Web, new_token},
 };
+use studio_test_support::git;
 use studio_understanding::{CardStore, Effects, FakeWriter, RiskNotes};
 
 const LOG: &str = include_str!("../../core/tests/fixtures/two-sessions.jsonl");
@@ -545,4 +546,127 @@ fn only_an_error_of_the_servers_own_reaches_the_page_as_server_error() {
         .map(|(_, data)| data)
         .collect();
     assert_eq!(sent, [serde_json::json!("save the cards: disk full")]);
+}
+
+/// A repository with one commit in a new folder under `base`, spelled as `git` spells it.
+fn repo_in(base: &std::path::Path, name: &str) -> String {
+    let dir = base.join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    git(&dir, &["init", "-q", "-b", "main"]);
+    git(&dir, &["commit", "-q", "--allow-empty", "-m", "Start"]);
+    dir.canonicalize().unwrap().display().to_string()
+}
+
+/// Start-up registration (spec #753, "Projects"): the folder plotkeeper starts in adds its git root's project, in process for a first
+/// start and through the API for a second. The folders are under `/var/tmp`: the system's temporary folders are never saved, and a
+/// folder under the build's own (`CARGO_TARGET_TMPDIR`) is, in a task's worktree, that worktree's main checkout's.
+#[test]
+fn a_start_folder_adds_its_repositorys_project() {
+    let base = tempfile::tempdir_in("/var/tmp").unwrap();
+    let base_path = base.path().canonicalize().unwrap();
+    let main = repo_in(&base_path, "main");
+    git(
+        std::path::Path::new(&main),
+        &[
+            "worktree",
+            "add",
+            "-q",
+            ".claude/worktrees/task",
+            "-b",
+            "task",
+        ],
+    );
+    git(
+        std::path::Path::new(&main),
+        &["worktree", "add", "-q", "../elsewhere", "-b", "elsewhere"],
+    );
+    std::fs::create_dir_all(format!("{main}/src/deep")).unwrap();
+    let elsewhere = format!("{}/elsewhere", base_path.display());
+    let not_git = base_path.join("plain");
+    std::fs::create_dir(&not_git).unwrap();
+    let rows: [(&str, String, Option<&str>); 5] = [
+        ("a git root", main.clone(), Some(&main)),
+        (
+            "a folder inside it",
+            format!("{main}/src/deep"),
+            Some(&main),
+        ),
+        (
+            "a task's worktree is its main checkout's",
+            format!("{main}/.claude/worktrees/task"),
+            Some(&main),
+        ),
+        (
+            "any other worktree is its own",
+            elsewhere.clone(),
+            Some(&elsewhere),
+        ),
+        (
+            "a folder with no git root adds nothing",
+            not_git.display().to_string(),
+            None,
+        ),
+    ];
+    let f = fixture();
+    let saved = |f: &Fixture| -> Vec<String> {
+        let reply = post(f, "projects", "{}");
+        let list: Vec<serde_json::Value> = serde_json::from_str(&reply.body).unwrap();
+        list.iter()
+            .map(|p| p["path"].as_str().unwrap().to_string())
+            .collect()
+    };
+    for (case, folder, expected) in rows {
+        let added = Vec::from_iter(expected.map(String::from));
+        // In process, as a first start does.
+        let data = tempfile::tempdir().unwrap();
+        let projects = studio_server::projects::Projects::at(data.path().join("projects.json"));
+        assert_eq!(
+            projects.register(&folder).unwrap().as_deref(),
+            expected,
+            "{case}"
+        );
+        let listed: Vec<String> = projects.list().into_iter().map(|p| p.path).collect();
+        assert_eq!(listed, added, "{case}");
+
+        // Through the API, as a second start sends its folder to the running server.
+        let body = serde_json::json!({ "folder": folder }).to_string();
+        let before = saved(&f);
+        let reply = post(&f, "register_folder", &body);
+        assert_eq!(reply.status, 200, "{case}: {}", reply.body);
+        let reply: Option<String> = serde_json::from_str(&reply.body).unwrap();
+        assert_eq!(reply.as_deref(), expected, "{case}");
+        let now = saved(&f);
+        match expected {
+            Some(project) => assert!(now.iter().any(|p| p == project), "{case}: {now:?}"),
+            None => assert_eq!(now, before, "{case}"),
+        }
+    }
+
+    // A removed project comes back when plotkeeper starts in it again.
+    let data = tempfile::tempdir().unwrap();
+    let projects = studio_server::projects::Projects::at(data.path().join("projects.json"));
+    projects.register(&main).unwrap();
+    assert_eq!(projects.remove(&main, 1).unwrap(), []);
+    assert_eq!(
+        projects.register(&main).unwrap().as_deref(),
+        Some(main.as_str())
+    );
+    assert_eq!(projects.list().len(), 1);
+
+    // Only a caller holding the server's token adds a folder.
+    let other = repo_in(&base_path, "other");
+    let body = serde_json::json!({ "folder": other }).to_string();
+    let port = f.web.port();
+    let refused = request(
+        port,
+        "POST",
+        "/api/register_folder",
+        &format!("127.0.0.1:{port}"),
+        &["Cookie: plotkeeper=wrong"],
+        &body,
+    );
+    assert_eq!(refused.status, 403);
+    assert!(!saved(&f).contains(&other));
+    assert_eq!(post(&f, "register_folder", &body).status, 200);
+    assert!(saved(&f).contains(&other));
 }

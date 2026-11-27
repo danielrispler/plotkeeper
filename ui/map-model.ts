@@ -444,12 +444,14 @@ export const pressRow = (panel: PanelContent | null, session: string): PanelCont
 export const panelSession = (panel: PanelContent | null): string | null =>
   panel?.kind === "story" || panel?.kind === "diff" || panel?.kind === "log" ? panel.session : null;
 /**
- * The project the page opens on (#386): the last viewed, while the saved list still holds it, else the first of those the session list
- * shows (`listed`: not a gone or temporary one, spec #659), else, when it shows none, or the sessions are not read yet, the first saved;
- * none on a fresh install.
+ * The project the page opens on (#386): the first of `wanted` (the one its address asks for, then the last viewed) while the saved list
+ * still holds it, else the first of those the session list shows (`listed`: not a gone or temporary one, spec #659), else, when it shows
+ * none, or the sessions are not read yet, the first saved; none on a fresh install.
  */
-export const startProject = (last: string | null, projects: string[], listed: string[]): string | null =>
-  last !== null && projects.includes(last) ? last : (listed[0] ?? projects[0] ?? null);
+export const startProject = (wanted: (string | null)[], projects: string[], listed: string[]): string | null =>
+  wanted.find((path) => path !== null && projects.includes(path)) ?? listed[0] ?? projects[0] ?? null;
+/** The project the page's address asks for: `#project=<path>`, which `plotkeeper` started in a repository opens on (#756). */
+export const askedProject = (hash: string): string | null => new URLSearchParams(hash.slice(1)).get("project");
 /**
  * Whether the shown project was removed from the saved list (`before` to `now`), so the map gives way: a project never saved, a temporary
  * one or a live session's, stays shown through another project's change.

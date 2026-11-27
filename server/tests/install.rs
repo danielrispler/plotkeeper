@@ -168,7 +168,9 @@ esac"#,
         } else {
             Command::new(self.tools.join("plotkeeper"))
         };
+        // In the home folder, in no git repository, so the start adds no project and its address carries none (#756).
         command
+            .current_dir(&self.home)
             .env("HOME", &self.home)
             .env_remove("XDG_DATA_HOME")
             .env("PATH", format!("{}:/usr/bin:/bin", self.tools.display()))

@@ -43,7 +43,7 @@
         { "name": "The commands", "text": "The functions behind the page's learning-layer and session-view commands.", "paths": ["server/src/learning.rs", "server/src/session_view.rs"] },
         { "name": "The read loop", "text": "Follows the event log and sends what changed (the list, the selection, the brief, notices, the text of the settings files) to the page.", "paths": ["server/src/read_loop.rs"] },
         { "name": "Settings and projects", "text": "The writer, its API keys in plotkeeper's own Keychain entries (the Secret Service's on Linux), the settings and the saved project list.", "paths": ["server/src/settings.rs", "server/src/settings/", "server/src/projects.rs", "server/src/projects/"] },
-        { "name": "The programs", "text": "`plotkeeper`, which starts the server and opens the page, and `plotkeeper-run`, the launcher of one background run.", "paths": ["server/src/bin/plotkeeper.rs", "server/src/bin/plotkeeper-run.rs"] }
+        { "name": "The programs", "text": "`plotkeeper`, which starts the server, adds its folder's repository and opens the page on it, and `plotkeeper-run`, one run's launcher.", "paths": ["server/src/bin/plotkeeper.rs", "server/src/bin/plotkeeper-run.rs"] }
       ],
       "tier": "core", "paths": ["server/"]
     },
