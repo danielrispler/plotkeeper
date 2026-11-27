@@ -55,9 +55,6 @@ impl Studio {
                     if session.project.is_empty() {
                         session.project = crate::session::project_of(&session.cwd).into();
                     }
-                    // A row saved before rows recorded their kind (#723) takes it from its tool's name.
-                    let agent = session.capabilities.agent;
-                    (session.ledger).classify(|tool| crate::event::kind_of(agent, tool));
                 }
                 *self = state;
                 self.log_end

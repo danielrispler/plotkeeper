@@ -236,24 +236,6 @@ fn logged(lines: &[String]) -> (std::path::PathBuf, tempfile::TempDir) {
     (log, dir)
 }
 
-/// The studio restored from the state a replay of `lines` saved, as the build before a ledger row
-/// recorded its tool kind wrote it: its rows have no kind.
-fn restored_without_kinds(lines: &[String], log_len: u64) -> Studio {
-    let saved = Studio::replayed(lines).save();
-    let at = saved.iter().position(|b| *b == b'\n').unwrap() + 1;
-    let mut state: Value = serde_json::from_slice(&saved[at..]).unwrap();
-    for session in state["sessions"].as_object_mut().unwrap().values_mut() {
-        for row in session["ledger"].as_array_mut().unwrap() {
-            row.as_object_mut().unwrap().remove("kind");
-        }
-    }
-    let mut old = saved[..at].to_vec();
-    old.extend(serde_json::to_vec(&state).unwrap());
-    let mut studio = Studio::default();
-    assert_eq!(studio.resume(&old, log_len), log_len, "it reads");
-    studio
-}
-
 /// A Copilot CLI session in `/w/hello` whose one turn creates `hello.txt`.
 fn copilot_create() -> Vec<String> {
     let line = |name: &str, ms: u64, extra: Value| {
@@ -298,8 +280,7 @@ fn claude_edit(tool: &str, input: Value) -> Vec<String> {
 }
 
 /// What edits a file is the kind of call each agent's adapter records, not a list of tool names
-/// (#723): every agent's edit is a step that edited the file, and so it is in a saved state written
-/// before a row recorded its kind.
+/// (#723): every agent's edit is a step that edited the file.
 #[test]
 fn a_files_facts_list_every_agents_edit_as_a_step_that_edited_it() {
     let agy_brain =
@@ -353,24 +334,15 @@ fn a_files_facts_list_every_agents_edit_as_a_step_that_edited_it() {
             path: path.into(),
             from: None,
         };
-        let log_len = std::fs::metadata(&log).unwrap().len();
-        for (studio, how) in [
-            (Studio::replayed(&lines), "replayed"),
-            (restored_without_kinds(&lines, log_len), "restored"),
-        ] {
-            let facts = studio.ask_facts(session, &anchor, &log).unwrap();
-            let edited = facts
-                .sections
-                .iter()
-                .find(|s| s.label == "Steps that edited it");
-            let steps: Option<Vec<&str>> =
-                edited.map(|s| s.facts.iter().map(|f| f.text.as_str()).collect());
-            assert_eq!(
-                steps,
-                Some(vec![step]),
-                "{case}, {how}: {:?}",
-                labels(&facts)
-            );
-        }
+        let facts = Studio::replayed(&lines)
+            .ask_facts(session, &anchor, &log)
+            .unwrap();
+        let edited = facts
+            .sections
+            .iter()
+            .find(|s| s.label == "Steps that edited it");
+        let steps: Option<Vec<&str>> =
+            edited.map(|s| s.facts.iter().map(|f| f.text.as_str()).collect());
+        assert_eq!(steps, Some(vec![step]), "{case}: {:?}", labels(&facts));
     }
 }
