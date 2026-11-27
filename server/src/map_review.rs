@@ -673,12 +673,8 @@ impl MapReviews {
     fn write(&self, record: &Record) {
         let file = self.file(&record.project, record.pr);
         let dir = file.parent().unwrap_or(Path::new("")).to_path_buf();
-        let saved = fs::create_dir_all(&dir).and_then(|()| {
-            let mut temp = tempfile::NamedTempFile::new_in(&dir)?;
-            serde_json::to_writer(&mut temp, record)?;
-            temp.persist(&file)?;
-            Ok(())
-        });
+        let saved = fs::create_dir_all(&dir)
+            .and_then(|()| studio_workbench::write_atomic(&file, &serde_json::to_vec(record)?));
         if let Err(e) = saved {
             log::error!("save the map text review of PR #{}: {e}", record.pr);
         }

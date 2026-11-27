@@ -1143,9 +1143,7 @@ pub fn resume(studio: &Mutex<Studio>, log: &Path) -> u64 {
 
 /// Keeps the replayed state beside the log, through a new file that takes the old one's place.
 pub fn save_state(log: &Path, state: &[u8]) {
-    let file = studio_hook::state_file(log);
-    let next = file.with_extension("json.next");
-    let saved = std::fs::write(&next, state).and_then(|()| std::fs::rename(&next, &file));
+    let saved = studio_workbench::write_atomic(&studio_hook::state_file(log), state);
     if let Err(e) = saved {
         log::error!("keep the replayed state: {e}");
     }
@@ -1153,10 +1151,9 @@ pub fn save_state(log: &Path, state: &[u8]) {
 
 /// Keeps `roots` beside the log, through a new file that takes the old one's place.
 pub fn save_roots(log: &Path, roots: &HashMap<String, String>) {
-    let next = roots_file(log).with_extension("json.next");
     let written = serde_json::to_vec(roots).map_err(io::Error::from);
-    let saved = written.and_then(|bytes| std::fs::write(&next, bytes));
-    if let Err(e) = saved.and_then(|()| std::fs::rename(&next, roots_file(log))) {
+    let saved = written.and_then(|bytes| studio_workbench::write_atomic(&roots_file(log), &bytes));
+    if let Err(e) = saved {
         log::error!("keep the worktree roots: {e}");
     }
 }

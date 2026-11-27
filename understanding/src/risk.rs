@@ -5,8 +5,7 @@ use crate::{CardWriter, ClaudeWriter, WriterRequest, parse_object};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashSet},
-    fs,
-    io::{self, Write},
+    fs, io,
     path::{Path, PathBuf},
     process::Command,
     sync::Mutex,
@@ -220,11 +219,7 @@ impl RiskNotes {
         };
         let note = RiskNote { level, line, at };
         self.kept.entry(key.0).or_default().insert(key.1, note);
-        let written = self.path.with_extension("json.tmp");
-        let mut file = fs::File::create(&written)?;
-        file.write_all(&serde_json::to_vec(&self.kept)?)?;
-        file.sync_all()?;
-        fs::rename(written, &self.path)
+        studio_workbench::write_atomic(&self.path, &serde_json::to_vec(&self.kept)?)
     }
 
     /// What each card of `session` shows of its note; a card nobody asked a note for has none.

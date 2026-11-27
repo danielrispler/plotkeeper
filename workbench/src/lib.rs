@@ -1,8 +1,8 @@
 //! Workbench git (danielrispler/Falinks#328, module 7; danielrispler/Falinks#461, decision 8): a folder's main
 //! checkout, `origin`'s fetch and what removing a task's worktree would lose, with no call passing git's force
-//! option; the `gh` to run; the resume commands of agents other than Claude Code; and the agy plugin. What
-//! only its own tests used is in `archive/workbench/` (#415), with the `claude` command and status line wrapper
-//! a studio terminal ran and the context window its snapshots held (#416).
+//! option; the `gh` to run; the resume commands of agents other than Claude Code; the agy plugin; and the one atomic
+//! write of a whole stored file (#728). What only its own tests used is in `archive/workbench/` (#415), with the
+//! `claude` command and status line wrapper a studio terminal ran and the context window its snapshots held (#416).
 
 // Spec #548, Group 3: these two crates document their public API.
 #![warn(missing_docs)]
@@ -11,7 +11,31 @@ pub mod clock;
 pub mod run;
 
 use serde::Serialize;
-use std::{path::Path, process::Command, sync::OnceLock, time::Duration};
+use std::{
+    io::{self, Write},
+    path::Path,
+    process::Command,
+    sync::OnceLock,
+    time::Duration,
+};
+
+/// Writes `contents` as `file` whole, the one way every store saves a whole JSON file (#728): into a temporary
+/// file beside it, synced, then renamed over it, so a crash leaves the old file or the new one, never a part
+/// of either. The folder must exist; a failed write returns its error and leaves the old file and no temporary one.
+pub fn write_atomic(file: &Path, contents: &[u8]) -> io::Result<()> {
+    let folder = file.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{} has no folder", file.display()),
+        )
+    })?;
+    // Dropped on any failure below, which deletes it.
+    let mut temp = tempfile::NamedTempFile::new_in(folder)?;
+    temp.write_all(contents)?;
+    temp.as_file().sync_all()?;
+    temp.persist(file)?;
+    Ok(())
+}
 
 /// The main checkout of the repository that holds `folder`, which may be any of its worktrees: the parent
 /// of git's common dir. A folder git does not recognise is refused with a message.

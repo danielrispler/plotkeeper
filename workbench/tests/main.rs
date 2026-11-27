@@ -2,6 +2,7 @@
 
 mod agy_plugin;
 mod fetch;
+mod json_write;
 mod revival;
 mod run;
 mod tasks;

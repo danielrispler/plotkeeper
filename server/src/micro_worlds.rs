@@ -416,12 +416,8 @@ impl MicroWorlds {
 
     fn write(&self, project: &str, record: &Record) {
         let file = self.file(project, &record.key);
-        let saved = fs::create_dir_all(self.folder(project)).and_then(|()| {
-            let mut temp = tempfile::NamedTempFile::new_in(self.folder(project))?;
-            serde_json::to_writer(&mut temp, record)?;
-            temp.persist(&file)?;
-            Ok(())
-        });
+        let saved = fs::create_dir_all(self.folder(project))
+            .and_then(|()| studio_workbench::write_atomic(&file, &serde_json::to_vec(record)?));
         if let Err(e) = saved {
             log::error!("save the micro-world {} of {project}: {e}", record.key);
         }
