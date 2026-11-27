@@ -195,7 +195,7 @@ test("a badge carries the accent when any of its sessions needs you, a Worker's 
   assert.deepEqual(counts(byPart), { core: ["b"], window: ["a", "b"] });
 });
 
-test("the not placed sessions are the marked sessions, Unseen included, whose latest turn touches no part, one row each", () => {
+test("the not placed sessions are the marked sessions, Unseen included, whose latest turn touches no part, once each", () => {
   const sessions = [
     session("none", "running", { turns: [turn([])] }),
     session("stray", "needs_you", { agents: [worker("w1")], turns: [turn(["stray.txt", ["docs/a.md", "w1"]])] }),
@@ -204,11 +204,14 @@ test("the not placed sessions are the marked sessions, Unseen included, whose la
     // An earlier turn's part does not place the session.
     session("before", "your_turn", { unseen: true, turns: [turn(["core/x.rs"], day), turn([])] }),
     session("placed", "running", { turns: [turn(["core/x.rs"])] }),
+    // A Needs-you session whose latest turn places a part is on its badge, not on the line (#694).
+    session("badged", "needs_you", { turns: [turn(["core/x.rs"])] }),
     session("seen", "idle", { turns: [turn([])] }),
   ];
   const { byPart, notPlaced } = sessionBadges(sessions, placed, now, here);
   assert.deepEqual(notPlaced.map((s) => s.id), ["stray", "none", "unseen", "codex", "before"]);
-  assert.deepEqual(counts(byPart), { core: ["placed"] });
+  assert.deepEqual(counts(byPart), { core: ["badged", "placed"] });
+  assert.equal(notPlacedLine(notPlaced), "1 needs you \u00B7 not on the map");
 });
 
 // The home part (#562): where the spotlit session's line sits.

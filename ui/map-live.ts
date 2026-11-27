@@ -194,7 +194,7 @@ export function spotlightView(byPart: Record<string, Badge>, spot: Session | nul
 
 // The sessions among those no part holds that need Daniel: the only ones the map says anything about (#694), since the session list already
 // shows the rest.
-const askingOf = <T extends Pick<Session, "state">>(notPlaced: T[]): T[] => notPlaced.filter((session) => session.state === "needs_you");
+export const askingOf = <T extends Pick<Session, "state">>(notPlaced: T[]): T[] => notPlaced.filter((session) => session.state === "needs_you");
 
 // The one line over the map for the unplaced sessions that need Daniel (#694), "2 need you · not on the map"; null when none does.
 export function notPlacedLine(notPlaced: Pick<Session, "state">[]): string | null {

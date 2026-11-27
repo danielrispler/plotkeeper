@@ -961,7 +961,7 @@ mark.drawer-line .drawer-n::before { content: "→ " / ""; color: var(--fg); }
 #map-not-placed { --not-placed-line: 1.5rem; }
 .map-side:has(> #map-sheet:not(:empty)) > #map-not-placed:empty { display: block; block-size: var(--not-placed-line); }
 .btn.not-placed-line { display: flex; align-items: center; max-inline-size: 100%; block-size: var(--not-placed-line); margin: 0; padding: 0; background: none;
-                       font-size: var(--size-xs); font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--needs-you);
+                       font-size: var(--size-xs); font-weight: 600; color: var(--needs-you);
                        white-space: nowrap; cursor: pointer; }
 .btn.not-placed-line:focus-visible { outline-offset: calc(-1 * var(--mark)); }
 .btn.not-placed-line:hover:not(:disabled, [aria-disabled="true"]) { background: none; text-decoration: underline; }

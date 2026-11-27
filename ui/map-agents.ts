@@ -9,7 +9,7 @@ import { currentMap, onCamera, onDraw, registerLayer, revealParts, syncSide } fr
 import { logStop } from "./stop-rules.js";
 import { logo, logoKey } from "./logos.js";
 import { sidebarOrder } from "./projects.js";
-import { type Badge, type BadgeRow, footprint, footprintNote, spotlightView, latestParts, notPlacedLine, notPlacedTarget, placeGroups, type Placement, sessionBadges, spotlit, turnLight } from "./map-live.js";
+import { type Badge, type BadgeRow, footprint, footprintNote, spotlightView, latestParts, askingOf, notPlacedLine, notPlacedTarget, placeGroups, type Placement, sessionBadges, spotlit, turnLight } from "./map-live.js";
 import { stateLabels, type Session, type Subagent, type Turn } from "./types.js";
 
 // What the drawing needs of the window, given by `main.ts`: the sessions, the jump to a session or a Worker's log,
@@ -305,7 +305,7 @@ export function paint() {
   const words = notPlacedLine(notPlaced);
   if (words !== null) {
     const button = notPlacedButton();
-    const asking = notPlaced.filter((session) => session.state === "needs_you");
+    const asking = askingOf(notPlaced);
     lineTarget = notPlacedTarget(notPlaced, opened);
     button.textContent = words;
     // Drawn each time: the kept line's hint is dropped while the line is off the page.
