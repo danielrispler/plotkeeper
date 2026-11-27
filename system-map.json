@@ -66,6 +66,7 @@
         { "name": "Extractors and links", "text": "One module per language behind one contract, turning files into edges that prove or fail each import link.", "paths": ["system-map/src/extract/", "system-map/src/edges.rs"] },
         { "name": "Imports", "text": "`system-map imports`: how well the parts follow the code's imports, counted per importing file.", "paths": ["system-map/src/imports.rs", "system-map/src/imports/"] },
         { "name": "Laws", "text": "Finds the `@law:` tags that tie tests to laws.", "paths": ["system-map/src/laws.rs"] },
+        { "name": "Command line", "text": "The arguments, report text and exit codes of `system-map` and of `plotkeeper map check`, which runs the same `check`.", "paths": ["system-map/src/cli.rs", "system-map/src/main.rs"] },
         { "name": "Commit mode", "text": "Reads a commit's files and their text without checking it out, for `--commit`.", "paths": ["system-map/src/commit.rs"] }
       ],
       "tier": "core",
