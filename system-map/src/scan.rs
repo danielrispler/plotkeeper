@@ -295,6 +295,58 @@ fn seeds_of(root: &Path, files: &[String], pool: &[&str]) -> Vec<String> {
         .collect()
 }
 
+/// The build manifests that mark a folder as built on its own.
+const MANIFESTS: &[&str] = &[
+    "package.json",
+    "go.mod",
+    "Cargo.toml",
+    "pubspec.yaml",
+    "pyproject.toml",
+    "setup.py",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "composer.json",
+    "Gemfile",
+];
+
+/// The top-level folders that look like reference copies though no name says so: a folder holding at least a fifth of the
+/// code, with no build manifest at any depth, that no code file outside it names. Only in a repository that tracks a
+/// manifest somewhere, since with none every folder would qualify. "Names" is a text search of the code files outside the
+/// folder for its folder name, not the extractors, which need a map to run.
+fn unbuilt_unimported(
+    root: &Path,
+    files: &[String],
+    code: &[&str],
+    known: &BTreeMap<String, bool>,
+) -> Vec<String> {
+    let is_manifest = |f: &str| {
+        let name = f.rsplit('/').next().unwrap_or(f);
+        MANIFESTS.contains(&name) || name.ends_with(".csproj")
+    };
+    if !files.iter().any(|f| is_manifest(f) && !is_hidden(f)) {
+        return vec![];
+    }
+    let mut found = Vec::new();
+    for (folder, count) in children("", code.iter().copied()) {
+        if known.contains_key(&folder)
+            || count * 5 < code.len()
+            || files.iter().any(|f| under(f, &folder) && is_manifest(f))
+        {
+            continue;
+        }
+        let name = folder.trim_end_matches('/');
+        let named = code
+            .iter()
+            .filter(|f| !under(f, &folder))
+            .any(|f| read_regular(root, f).is_some_and(|text| text.contains(name)));
+        if !named {
+            found.push(folder);
+        }
+    }
+    found
+}
+
 /// The extractors that detect a file they read, and the languages of the code (tests apart) that no extractor reads.
 fn readers(
     root: &Path,
@@ -395,6 +447,10 @@ fn scan_files(root: &Path, files: &[String]) -> Scan {
     };
     parts.sort();
     fold(&mut parts, &code);
+
+    for folder in unbuilt_unimported(root, files, &code, &candidates) {
+        candidates.insert(folder, false);
+    }
 
     let owned = |file: &str| parts.iter().any(|p| under(file, p));
     let loose = |tests: bool| -> Vec<String> {

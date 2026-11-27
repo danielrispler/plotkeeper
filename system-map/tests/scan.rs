@@ -211,7 +211,56 @@ fn reference_copies_are_listed_and_ticked_only_when_sure() {
 }
 
 #[test]
-fn a_chery_like_copy_folder_stays_a_part_and_is_not_ignored() {
+fn a_top_level_code_folder_nothing_builds_or_imports_is_listed_unticked() {
+    let manifest = |dir: &str| (format!("{dir}/package.json"), "{}");
+    let importer = |dir: &str, name: &str| (format!("{dir}/uses.ts"), name.to_string());
+    // (name, files, candidates)
+    type Row<'a> = (&'a str, Vec<(String, String)>, Vec<(&'a str, bool)>);
+    let mut cases: Vec<Row> = Vec::new();
+    let own = |tree: Vec<(String, &str)>| -> Vec<(String, String)> {
+        tree.into_iter().map(|(f, t)| (f, t.to_string())).collect()
+    };
+    let mut chery = files(&[
+        code("relevant-code-from-system/core", 4),
+        code("apps/ui", 3),
+    ]);
+    chery.push(("pnpm-workspace.yaml".into(), "packages:\n  - apps/*\n"));
+    chery.push(manifest("apps/ui"));
+    cases.push((
+        "chery-like: no manifest, nothing imports it",
+        own(chery.clone()),
+        vec![("relevant-code-from-system/", false)],
+    ));
+    let mut imported = own(chery.clone());
+    imported.push(importer(
+        "apps/ui",
+        "import x from '../../relevant-code-from-system/core/f0'",
+    ));
+    cases.push(("another folder names it", imported, vec![]));
+    let mut small = own(files(&[code("misc", 1), code("apps/ui", 9)]));
+    small.push(("apps/ui/package.json".into(), "{}".into()));
+    cases.push(("holds under a fifth of the code", small, vec![]));
+    cases.push((
+        "no manifest anywhere lists no folder",
+        own(files(&[code("a", 4), code("b", 4)])),
+        vec![],
+    ));
+    for (name, tree, expected) in cases {
+        let tree: Vec<(&str, &str)> = tree.iter().map(|(f, t)| (f.as_str(), t.as_str())).collect();
+        let (_dir, root) = tracked(&tree);
+        let scan = system_map::scan(Path::new(&root)).unwrap();
+        let listed: Vec<(&str, bool)> = scan
+            .ignore_candidates
+            .iter()
+            .map(|c| (c.path.as_str(), c.ticked))
+            .collect();
+        assert_eq!(listed, expected, "{name}");
+        assert_eq!(scan.map["ignored"], serde_json::json!([]), "{name}");
+    }
+}
+
+#[test]
+fn a_chery_like_copy_folder_stays_a_part() {
     let mut tree = files(&[
         code("relevant-code-from-system/core", 4),
         code("apps/ui", 3),
