@@ -77,10 +77,11 @@ pub(crate) fn parse(line: &str) -> Result<Event, serde_json::Error> {
     serde_json::from_str::<Raw>(line).map(adapt)
 }
 
-/// The first file a patch names (`*** Update File: …`, `*** Add File: …`, `*** Delete File: …`).
+/// The first file a patch names (`*** Update File: …`, `*** Add File: …`, `*** Delete File: …`), in
+/// a Codex or Copilot CLI `apply_patch`.
 // shortcut: a patch that changes several files is taken as touching its first.
 // hook/src/lib.rs's `codex_shaped` keeps a copy, as the hook does not depend on core.
-fn patched_file(patch: &str) -> Option<String> {
+pub(crate) fn patched_file(patch: &str) -> Option<String> {
     patch.lines().find_map(|line| {
         let line = line.trim_start().strip_prefix("*** ")?;
         let (_, path) = line.split_once(" File: ")?;
