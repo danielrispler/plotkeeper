@@ -8,9 +8,10 @@
 //! by `opencode run -s`, started a background subagent that read a file, whose result woke the
 //! session for a turn of its own. In `other`, a rule asked before any
 //! shell command (`--auto` approved it). The scratch folders' path is replaced by `/Users/me/work`.
+//! It was recorded before #718, so its spawn's end names no child.
 
 use serde_json::{Value, json};
-use studio_core::{OPENCODE_CAPABILITIES, Outcome, State, Studio};
+use studio_core::{OPENCODE_CAPABILITIES, Outcome, Parent, State, Status, Studio};
 
 const RUN: &str = include_str!("fixtures/opencode/run.jsonl");
 const HELLO: &str = "ses_de5fa80f2ffeXThZwnlgn61UPk";
@@ -44,8 +45,9 @@ fn the_recorded_run_replays_into_its_sessions_turns_and_tools() {
         prompts[1].starts_with("Use the subagent tool"),
         "{prompts:?}"
     );
-    // The turn the subagent's result woke. Subagents are not mapped, so it names none.
-    assert_eq!(prompts[2], "worker  returned");
+    // The turn the subagent's result woke. The plugin before #718 did not send the spawn's child, so
+    // the child is unattached and named by its id.
+    assert_eq!(prompts[2], "worker ses_d returned");
     let messages: Vec<_> = hello.turns.iter().map(|t| t.message.as_deref()).collect();
     assert_eq!(
         messages,
@@ -188,4 +190,49 @@ fn an_opencode_session_ended_by_the_server_stays_opencode() {
         assert_eq!(session.state, State::Ended);
         assert_eq!(session.capabilities, OPENCODE_CAPABILITIES);
     }
+}
+
+/// `fixtures/opencode/subagent.jsonl`, a real run (2026-11-27, OpenCode 2.4.1's service) of the
+/// plugin since #718: one turn started a background subagent that read a file, and its result woke
+/// the session for a turn of its own.
+#[test]
+fn a_background_subagent_replays_as_its_sessions_subagent_with_its_calls_and_reply() {
+    let lines: Vec<_> = include_str!("fixtures/opencode/subagent.jsonl")
+        .lines()
+        .collect();
+    let studio = Studio::replayed(&lines);
+    let session = studio.session("ses_de36d8bc3ffeKHlJcfIDXNryLS").unwrap();
+    let child = "ses_de36d7ee3ffesJGKi1dM4DiGOK";
+
+    let [agent] = session.agents.as_slice() else {
+        panic!("one subagent: {:?}", session.agents);
+    };
+    assert_eq!(agent.agent.id, child);
+    assert_eq!(agent.parent, Parent::Session);
+    assert_eq!(agent.name, "Read README first line");
+    assert_eq!(agent.agent_type.as_deref(), Some("general"));
+    assert_eq!(agent.turn, Some(0));
+    assert_eq!(agent.status, Status::Completed);
+    assert_eq!(agent.result.as_deref(), Some("# Hello"));
+    assert!(session.capabilities.replies);
+
+    let rows: Vec<_> = (session.ledger.rows().iter())
+        .map(|r| (r.tool.as_str(), r.agent.as_deref()))
+        .collect();
+    assert_eq!(rows, [("subagent", None), ("read", Some(child))]);
+
+    let prompts: Vec<_> = session.turns.iter().map(|t| t.prompt.as_str()).collect();
+    assert_eq!(prompts[1], "worker Read README first line returned");
+    let messages: Vec<_> = session.turns.iter().map(|t| t.message.as_deref()).collect();
+    assert_eq!(
+        messages,
+        [
+            Some(
+                "I've started the subagent to read `README.md`. I'll report the first line once it returns."
+            ),
+            Some("# Hello"),
+        ]
+    );
+    assert_eq!(session.model.as_deref(), Some("big-pickle"));
+    assert_eq!(session.state, State::YourTurn);
 }

@@ -6,9 +6,10 @@
 // export with an `id` and a `setup`. OpenCode loads it once in its background service for each folder a session runs
 // in. Its hooks (`session` `prompt`, `tool` `execute.before` and `execute.after`) see only that folder's sessions, but
 // its event stream is the whole service's, so it records the events of the sessions its own hooks saw and no other.
-// A subagent is a child session of its own: its prompt and turns are not recorded, and its tool calls and permission
-// asks go under the session it was spawned from. A background subagent's result starts its parent's next turn with no
-// prompt, which is sent as `session.execution.started`, a wake-up.
+// A subagent is a child session of its own (#718): its spawn's end names it (`spawned_session_id`), its tool calls,
+// permission asks and the end of each of its runs, with its reply, go under the session it was spawned from with its
+// own id (`subagent_session_id`), and its prompt is not recorded. A background subagent's result starts its parent's
+// next turn with no prompt, which is sent as `session.execution.started`, a wake-up.
 
 import { spawn } from "node:child_process";
 
@@ -59,15 +60,18 @@ function recorder(ctx) {
     // A permission ask whose call has not started yet, by its call id.
     asks: new Map(),
     line: (name, session, fields) => ({ hook_event_name: name, session_id: session, cwd, ...fields }),
+    // A subagent's line names it; its top-level session's own lines carry no such field.
+    subagent: (top, sessionID) => (top === sessionID ? {} : { subagent_session_id: sessionID }),
   };
 }
 
-/** Each prompt to a top-level session starts its turn. */
+/** Each prompt to a top-level session starts its turn; a subagent's prompt is not sent, as its spawn's input holds it. */
 function recordPrompts(ctx, r) {
   ctx.session.hook("prompt", async (event) => {
+    // Before the session's lookup, which its turn's start may overtake.
     r.prompted.add(event.sessionID);
     const top = await r.root(event.sessionID);
-    if (top !== event.sessionID) return;
+    if (top !== event.sessionID) return void r.prompted.delete(event.sessionID);
     r.turns.set(top, { model: r.turns.get(top)?.model, reply: "" });
     send(r.line("session.prompt", top, { prompt_id: event.messageID, prompt: event.prompt?.text ?? "" }));
   });
@@ -75,13 +79,19 @@ function recordPrompts(ctx, r) {
 
 /** A permission ask's line, with its call's tool and input, by which the studio finds the call it waits on. */
 const askLine = (r, top, data, call) =>
-  r.line("permission.asked", top, { tool_name: call.tool, tool_use_id: data.source?.id, tool_input: call.input, permission: data });
+  r.line("permission.asked", top, {
+    tool_name: call.tool,
+    tool_use_id: data.source?.id,
+    tool_input: call.input,
+    permission: data,
+    ...r.subagent(top, data.sessionID),
+  });
 
 /** Each tool call's start and end, a subagent's under the session it was spawned from. */
 function recordTools(ctx, r) {
   const tool = async (name, event, fields) => {
     const top = await r.root(event.sessionID);
-    const subagent = top === event.sessionID ? {} : { subagent_session_id: event.sessionID };
+    const subagent = r.subagent(top, event.sessionID);
     send(r.line(name, top, { tool_name: event.tool, tool_use_id: event.id, tool_input: event.input ?? {}, ...subagent, ...fields }));
   };
   ctx.tool.hook("execute.before", async (event) => {
@@ -97,11 +107,14 @@ function recordTools(ctx, r) {
       status: event.status,
       error: event.error?.message ?? null,
       exit: event.result?.metadata?.exit ?? null,
+      // A `subagent` call returns at once with its child session's id; the child runs in the background.
+      ...(event.tool === "subagent" ? { spawned_session_id: event.result?.metadata?.sessionID ?? null } : {}),
     });
   });
 }
 
-/** The event stream's permission asks and turn starts and ends, of the sessions this instance's hooks saw. */
+/** The event stream's permission asks and turn starts and ends, of the sessions this instance's hooks saw: a
+ * subagent's runs end under its top-level session, with its own reply and no model. */
 async function recordEvents(ctx, r, signal) {
   const types = ["session.execution.started", "session.step.started", "session.text.ended", "permission.asked", ...TURN_ENDS];
   for await (const event of ctx.event.subscribe({ types, signal })) {
@@ -116,17 +129,21 @@ async function recordEvents(ctx, r, signal) {
       else send(askLine(r, top, data, call ?? {}));
       continue;
     }
-    if (top !== data.sessionID) continue;
-    const turn = r.turns.get(top) ?? { reply: "" };
-    r.turns.set(top, turn);
+    const own = data.sessionID;
+    const child = top !== own;
+    const turn = r.turns.get(own) ?? { reply: "" };
+    r.turns.set(own, turn);
     if (event.type === "session.execution.started") {
-      if (!r.prompted.delete(top)) {
-        turn.reply = "";
-        send(r.line(event.type, top, {}));
-      }
+      // A top-level turn with no prompt is a wake-up; a subagent's run is never sent.
+      const wakeUp = !child && !r.prompted.delete(top);
+      if (child || wakeUp) turn.reply = "";
+      if (wakeUp) send(r.line(event.type, top, {}));
     } else if (event.type === "session.step.started") turn.model = data.model?.id;
     else if (event.type === "session.text.ended") turn.reply = data.text ?? "";
-    else send(r.line(event.type, top, { model: turn.model ?? null, last_assistant_message: turn.reply }));
+    else if (child) {
+      send(r.line(event.type, top, { last_assistant_message: turn.reply, ...r.subagent(top, own) }));
+      r.turns.delete(own);
+    } else send(r.line(event.type, top, { model: turn.model ?? null, last_assistant_message: turn.reply }));
   }
 }
 

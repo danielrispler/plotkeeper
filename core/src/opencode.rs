@@ -11,11 +11,16 @@
 //! (`session.execution.succeeded`, `.failed` or `.interrupted`; `.started` only for a turn that
 //! starts with no prompt, as when a background subagent's result wakes its parent), which carries
 //! the model the turn's steps named and the turn's last text. OpenCode reports no session start or end. A subagent is a
-//! child session whose calls the plugin puts under the session that spawned it. The tool names
-//! and inputs are those of a real run of OpenCode 2.4.1 (`core/tests/fixtures/opencode/run.jsonl`)
+//! child session that always runs in the background (#718): its `subagent` call's end names it
+//! (`spawned_session_id`), and the plugin puts its calls, asks and the end of each of its runs
+//! under the session that spawned it, with its own id (`subagent_session_id`). The tool names
+//! and inputs are those of real runs of OpenCode 2.4.1 (`core/tests/fixtures/opencode/run.jsonl`
+//! and `subagent.jsonl`)
 //! and of its tools' sources (anomalyco/opencode at v2.4.2, `packages/core/src/tool/plugin/`).
 
-use crate::event::{Capabilities, Event, Happened, Origin, Tool, ToolKind, TranscriptFormat};
+use crate::event::{
+    Capabilities, Event, Happened, Origin, Spawned, Tool, ToolKind, TranscriptFormat,
+};
 use crate::ledger::Bytes;
 use serde::Deserialize;
 use serde_json::Value;
@@ -23,15 +28,15 @@ use serde_json::Value;
 /// The name OpenCode's plugin passes (`--agent opencode`), which its lines carry.
 pub(crate) const OPENCODE: &str = "opencode";
 
-/// What OpenCode reports: a permission that waits on Daniel, and the model a turn ran at. Its
-/// transcript has no reader here, so no version or context size; no background task ids, no
-/// subagents' replies, no permission mode, no durations, and no turn trees (spec #320, "Turn trees
+/// What OpenCode reports: a permission that waits on Daniel, the model a turn ran at, and a
+/// subagent's reply. Its transcript has no reader here, so no version or context size; no
+/// background task ids, no permission mode, no durations, and no turn trees (spec #320, "Turn trees
 /// and pruning per harness").
 pub const CAPABILITIES: Capabilities = Capabilities {
     agent: OPENCODE,
     asks: true,
     background_tasks: false,
-    replies: false,
+    replies: true,
     permission_mode: false,
     durations: false,
     transcript_version: false,
@@ -71,6 +76,10 @@ struct Raw {
     model: Option<String>,
     #[serde(default)]
     last_assistant_message: String,
+    /// The subagent's own session, on a line of a subagent's.
+    subagent_session_id: Option<String>,
+    /// The child session a `subagent` call started, on its end.
+    spawned_session_id: Option<String>,
     #[serde(default)]
     studio_received_ms: u64,
     studio_pid: Option<u32>,
@@ -86,6 +95,7 @@ pub(crate) fn kind(name: &str) -> ToolKind {
     match name {
         "write" | "edit" | "patch" => ToolKind::Edit,
         "shell" => ToolKind::Command,
+        "subagent" => ToolKind::Spawn,
         "question" => ToolKind::Question,
         _ => ToolKind::Other,
     }
@@ -128,10 +138,15 @@ fn adapt(raw: Raw) -> Event {
             prompt: String::new(),
             origin: Some(Origin::WakeUp),
         }),
+        // A turn's end, or a subagent's run's end, with its reply; a subagent's names no model.
         "session.execution.succeeded"
         | "session.execution.failed"
         | "session.execution.interrupted" => {
-            happened.push(Happened::TurnEnd);
+            if raw.subagent_session_id.is_some() {
+                happened.push(Happened::SubagentEnd);
+            } else {
+                happened.push(Happened::TurnEnd);
+            }
             happened.push(Happened::Reply(raw.last_assistant_message.clone()));
             if let Some(model) = raw.model.clone() {
                 happened.push(Happened::Model(model));
@@ -143,6 +158,22 @@ fn adapt(raw: Raw) -> Event {
         }),
         "tool.execute.after" => {
             let nonzero_exit = raw.exit.filter(|code| *code != 0);
+            // A `subagent` call returns at its child's launch, which runs in the background.
+            if let Some(child) = raw.spawned_session_id.clone()
+                && raw.status != "error"
+            {
+                let input = &raw.tool_input;
+                happened.push(Happened::SubagentSpawned(Spawned {
+                    child,
+                    call: id.clone(),
+                    name: input["description"].as_str().map(Into::into),
+                    prompt: input["prompt"].as_str().unwrap_or_default().into(),
+                    agent_type: input["agent"].as_str().map(Into::into),
+                    worktree: false,
+                    // OpenCode runs every subagent in the background.
+                    finished: false,
+                }));
+            }
             happened.push(Happened::ToolEnd {
                 tool: call(),
                 id: id.clone(),
@@ -177,7 +208,7 @@ fn adapt(raw: Raw) -> Event {
     }
     Event {
         session_id: raw.session_id,
-        agent_id: None,
+        agent_id: raw.subagent_session_id,
         agent_type: None,
         cwd: raw.cwd,
         transcript_path: String::new(),
