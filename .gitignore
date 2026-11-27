@@ -6,8 +6,7 @@ dist/
 archive/src-tauri/gen/
 # Daniel's real-run evidence: never pushed (AGENTS.md, "Local evidence").
 /local-evidence/
-# The npm package's built artifacts, created by scripts/npm/pack.sh (#368).
-/npm/bin/
+# The launcher package's built files, created by scripts/npm/pack.sh (#368); the platform packages are built in target/npm/ (#706).
 /npm/README.md
 /npm/LICENSE
 # A cheap worker's ticket, brief and logs in its worktree, written by scripts/agents/delegate.mjs (#592).
