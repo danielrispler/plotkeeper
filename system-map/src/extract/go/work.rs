@@ -83,17 +83,7 @@ fn folder(base: &str, path: &str) -> Option<String> {
     if path.starts_with('/') {
         return None;
     }
-    let mut elements: Vec<&str> = base.split('/').filter(|e| !e.is_empty()).collect();
-    for element in path.split('/') {
-        match element {
-            "" | "." => {}
-            ".." => {
-                elements.pop()?;
-            }
-            element => elements.push(element),
-        }
-    }
-    Some(elements.iter().map(|e| format!("{e}/")).collect())
+    crate::extract::folders::join(base, path).map(|joined| crate::extract::folders::prefix(&joined))
 }
 
 /// The paths a `go.work`'s `use` directives name, each with its line, or the line and problem of a malformed one.

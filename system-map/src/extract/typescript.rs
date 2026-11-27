@@ -513,18 +513,7 @@ fn resolve_import(from: &str, spec: &str, tracked: &BTreeSet<&str>) -> Option<St
     if !spec.starts_with("./") && !spec.starts_with("../") {
         return None;
     }
-    let mut segments: Vec<&str> = from.split('/').collect();
-    segments.pop();
-    for part in spec.split('/') {
-        match part {
-            "." | "" => {}
-            ".." => {
-                segments.pop()?;
-            }
-            name => segments.push(name),
-        }
-    }
-    let target = segments.join("/");
+    let target = crate::extract::folders::join(crate::extract::folder_of(from), spec)?;
     let mut candidates = vec![target.clone()];
     for (written, real) in [
         (".js", ".ts"),
