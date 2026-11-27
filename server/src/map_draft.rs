@@ -7,7 +7,8 @@
 //! - **Ends.** The runner tells each First map run's end ([`Runner::on_end`]) while its batch still holds the project's slot, so
 //!   the reviewer joined then never waits behind another request. The run's answer is read, kept in its group, and the run is
 //!   dismissed: its folder only holds a copy of the repository.
-//! - **Failure.** A writer or reviewer that ends badly, or answers no JSON, fails its group with why; the other groups stand.
+//! - **Failure.** A writer or reviewer that ends badly, cannot start, is cancelled, or answers no JSON, fails its group with
+//!   why; the other groups stand.
 //!   Retry runs the failed step again, joining the batch. A login or limit failure pauses the runner's queues, so a retry then
 //!   waits for Resume.
 //! - **Redraft this part** adds a group of one part, whose writer is given the part's flag, then its reviewer.
@@ -249,7 +250,7 @@ impl MapDrafts {
                 return;
             }
             if let Some(drafts) = me.upgrade() {
-                drafts.settle(&ended.project, &ended.id);
+                drafts.settle(&ended.project, &ended.id, Some(ended.end));
             }
         });
         drafts
@@ -426,8 +427,6 @@ impl MapDrafts {
             return Err(e);
         }
         drop(guard);
-        // A run that could not start ended with no end told.
-        ids.iter().for_each(|id| self.settle(&main, id));
         self.changed.tell(&main);
         self.view_of(&main)
             .ok_or_else(|| "The Map draft is gone".into())
@@ -497,14 +496,26 @@ impl MapDrafts {
         })
     }
 
-    /// Run `id` of `main`'s Map draft ended: its answer is kept in its group, a writer's reviewer is started, and the run is
-    /// dismissed. Nothing for a run that is not ended, or that no group waits on, so an end read twice is read once.
-    fn settle(&self, main: &str, id: &str) {
+    /// Run `id` of `main`'s Map draft ended, as the runner `told` it when it did: its answer is kept in its group, a writer's
+    /// reviewer is started, and the run is dismissed. A run told ended that the runner no longer has was cancelled, and fails its
+    /// group, retryable. Nothing for a run that is not ended, or that no group waits on, so an end read twice is read once.
+    fn settle(&self, main: &str, id: &str, told: Option<End>) {
         let Ok(runner) = self.runner() else {
             return;
         };
-        let Some(outcome) = runner.outcome(id) else {
-            return;
+        let (outcome, gone) = match (runner.outcome(id), told) {
+            (Some(outcome), _) => (outcome, false),
+            (None, Some(_)) => (
+                Outcome {
+                    end: End::Cancelled,
+                    result: String::new(),
+                    denials: Vec::new(),
+                    cost: None,
+                    exit: None,
+                },
+                true,
+            ),
+            (None, None) => return,
         };
         let guard = self.lock();
         let Some(mut draft) = self.read(main) else {
@@ -527,6 +538,7 @@ impl MapDrafts {
         let saved = self.write(&draft);
         drop(guard);
         if saved.is_ok()
+            && !gone
             && let Err(e) = runner.cancel(id)
         {
             log::warn!("first map: run {id} was not dismissed: {e}");
@@ -664,12 +676,8 @@ impl MapDrafts {
             }
             _ => return Err("That group has not failed".into()),
         }
-        let run = draft.groups[group].run.clone();
         self.write(&draft)?;
         drop(guard);
-        if let Some(id) = run {
-            self.settle(&main, &id);
-        }
         self.changed.tell(&main);
         self.view_of(&main)
             .ok_or_else(|| "The Map draft is gone".into())
@@ -715,10 +723,9 @@ impl MapDrafts {
         });
         let at = draft.groups.len() - 1;
         let id = self.write_group(&runner, &mut draft, at)?;
-        draft.groups[at].run = Some(id.clone());
+        draft.groups[at].run = Some(id);
         self.write(&draft)?;
         drop(guard);
-        self.settle(&main, &id);
         self.changed.tell(&main);
         self.view_of(&main)
             .ok_or_else(|| "The Map draft is gone".into())
@@ -1118,7 +1125,7 @@ impl MapDrafts {
                 self.write(&draft).ok();
             }
             drop(guard);
-            ended.iter().for_each(|id| self.settle(&main, id));
+            ended.iter().for_each(|id| self.settle(&main, id, None));
             self.changed.tell(&main);
         }
     }
@@ -1142,6 +1149,7 @@ fn ended(role: &str, outcome: &Outcome) -> String {
         End::RateLimited => {
             format!("Claude hit its usage or rate limit: Resume the runs, then retry the {role}")
         }
+        End::Cancelled => format!("The {role} was cancelled: retry it"),
         End::Done | End::Denied | End::Failed | End::SetupFailed => {
             let first = outcome
                 .result
@@ -1168,7 +1176,11 @@ fn reviewed(group: &mut Group, outcome: &Outcome) {
         return;
     }
     let items = items_of(group);
-    group.verdicts = map_review::read_answer(&outcome.result, &items);
+    // One verdict an item: an item answered twice keeps its first, and one not asked about is never read.
+    let mut verdicts = map_review::read_answer(&outcome.result, &items);
+    let mut seen = std::collections::BTreeSet::new();
+    verdicts.retain(|verdict| seen.insert(verdict.id.clone()));
+    group.verdicts = verdicts;
     let left = items.len() - group.verdicts.len();
     if left > 0 {
         let why = format!(

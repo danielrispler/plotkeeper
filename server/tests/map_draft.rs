@@ -127,6 +127,8 @@ fn bench() -> Bench {
     git(&project, &["config", "maintenance.auto", "false"]);
     fs::create_dir_all(root.join("answers")).unwrap();
     stub_gh(root);
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_plotkeeper-run"), root.join("launcher"))
+        .unwrap();
     let (runner, drafts, changes) = open(root);
     Bench {
         _guard: LauncherGuard::new(root.join("runs")),
@@ -169,7 +171,8 @@ fn open(root: &Path) -> (Arc<Runner>, Arc<MapDrafts>, mpsc::Receiver<String>) {
         data: data.clone(),
         runs: root.join("runs"),
         settings: data.join("settings.json"),
-        launcher: env!("CARGO_BIN_EXE_plotkeeper-run").into(),
+        // The real launcher, through a link a test removes to keep a run from starting.
+        launcher: root.join("launcher"),
         harness: Arc::new(Stub {
             root: root.to_path_buf(),
         }),
@@ -469,37 +472,55 @@ fn the_groups_land_in_order_and_each_reviewer_checks_its_groups_purposes_alone()
 #[test]
 fn a_failed_group_is_kept_apart_and_retried_alone() {
     let bench = bench();
-    // The first writer answers no JSON; the second group's reviewer leaves a purpose without a verdict.
+    // The first writer answers no JSON; the second group's reviewer cannot start, its launcher gone by then.
     fs::write(
         bench.root().join("answers/writer-a.json"),
         result(&"I could not tell.".into()),
     )
     .unwrap();
     bench.answer("writer-b", &wrote(&["b", "c"]));
-    bench.answer("reviewer-b", &judged(&[("b", "supported")]));
+    bench.hold("writer-b");
     bench.start();
-    let view = bench.until(|view| {
-        view.groups[0].state == GroupState::WriterFailed
-            && view.groups[1].state == GroupState::ReviewerFailed
-    });
+    bench.until(|view| view.groups[0].state == GroupState::WriterFailed);
+    let launcher = bench.root().join("launcher");
+    fs::remove_file(&launcher).unwrap();
+    bench.release("writer-b");
+    let view = bench.until(|view| view.groups[1].state == GroupState::ReviewerFailed);
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_plotkeeper-run"), &launcher).unwrap();
     assert_eq!(
         view.groups[0].why.as_deref(),
         Some("The writer's answer held no JSON")
     );
-    assert_eq!(
-        view.groups[1].why.as_deref(),
-        Some("The review gave no verdict for 1 of 2 purposes")
+    let why = view.groups[1].why.clone().unwrap_or_default();
+    assert!(
+        why.starts_with("The reviewer failed: the launcher") && why.contains("did not start"),
+        "{why}"
     );
     // The rest stand: the second group's text shows.
     assert_eq!(purpose_of(&view, "b"), "b does its job.");
     assert!(!view.ready);
 
-    // Retry runs the failed step of that group alone, as a new run.
+    // Retry runs the failed step of that group alone, as a new run. A purpose answered twice has its one verdict.
     bench.answer("writer-a", &wrote(&["a"]));
-    bench.answer("reviewer-a", &judged(&[("a", "supported")]));
+    bench.answer(
+        "reviewer-a",
+        &judged(&[("a", "supported"), ("a", "supported")]),
+    );
     let retried = bench.drafts.retry(&bench.project(), 0).unwrap();
     assert_eq!(retried.groups[0].why, None);
     bench.until(|view| view.groups[0].state == GroupState::Done);
+    // A reviewer that answers one purpose twice and the other never leaves that one without a verdict.
+    bench.answer(
+        "reviewer-b",
+        &judged(&[("b", "supported"), ("b", "supported")]),
+    );
+    bench.drafts.retry(&bench.project(), 1).unwrap();
+    let view = bench.until(|view| view.groups[1].state == GroupState::ReviewerFailed);
+    assert_eq!(
+        view.groups[1].why.as_deref(),
+        Some("The review gave no verdict for 1 of 2 purposes")
+    );
+    assert!(!view.ready);
     bench.answer(
         "reviewer-b",
         &judged(&[("b", "supported"), ("c", "supported")]),
@@ -520,7 +541,7 @@ fn a_failed_group_is_kept_apart_and_retried_alone() {
             count("writer-b"),
             count("reviewer-b")
         ],
-        [2, 1, 1, 2]
+        [2, 1, 1, 3]
     );
     let refused = bench.drafts.retry(&bench.project(), 0);
     assert_eq!(refused.unwrap_err(), "That group has not failed");
@@ -635,6 +656,31 @@ fn discard_mid_batch_stops_every_run_frees_the_slot_and_deletes_the_draft() {
     assert_eq!(state(&later), Some(RunState::Queued));
     let running = bench.runner.runs(&main).runs.len();
     assert_eq!(running, 3, "{:?}", bench.runner.runs(&main));
+
+    // A Discard whose cancel of the first writer is refused (its process is not the one plotkeeper started) keeps the draft,
+    // and the group whose reviewer it did stop is failed, retryable, never left being checked.
+    let written: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(bench.file()).unwrap()).unwrap();
+    let writer = written["groups"][0]["run"].as_str().unwrap().to_string();
+    let launch = bench.root().join("runs").join(&writer).join("launch.json");
+    let started = fs::read(&launch).unwrap();
+    let mut other: serde_json::Value = serde_json::from_slice(&started).unwrap();
+    other["start"] = "another process".into();
+    fs::write(&launch, other.to_string()).unwrap();
+    let refused = bench.drafts.discard(&bench.project());
+    assert!(
+        refused
+            .unwrap_err()
+            .contains("not the one plotkeeper started")
+    );
+    let view = bench.until(|view| view.groups[1].state == GroupState::ReviewerFailed);
+    assert_eq!(
+        view.groups[1].why.as_deref(),
+        Some("The reviewer was cancelled: retry it")
+    );
+    assert_eq!(view.groups[0].state, GroupState::Writing);
+    assert_eq!(state(&later), Some(RunState::Queued));
+    fs::write(&launch, started).unwrap();
 
     bench.drafts.discard(&bench.project()).unwrap();
     assert_eq!(bench.view(), None);

@@ -1015,6 +1015,11 @@ fn a_batch_with_a_request_refused_is_refused_whole_and_leaves_no_folder() {
 #[test]
 fn discarding_a_batch_cancels_every_run_of_it_and_frees_the_slot() {
     let bench = bench();
+    // A module that listens is told each end: a cancelled run's as `Cancelled`, a run that ended on its own as it ended, and once.
+    let (tell, told) = mpsc::channel();
+    bench
+        .runner
+        .on_end(move |end| drop(tell.send((end.id, end.end))));
     // Queued behind another run: its runs are dropped and never start.
     let before = bench.run(&waits("before"));
     let queued = bench
@@ -1062,6 +1067,21 @@ fn discarding_a_batch_cancels_every_run_of_it_and_frees_the_slot() {
         .filter(|record| record["outcome"] == "cancelled")
         .count();
     assert_eq!(cancelled, 3);
+    let mut ends: Vec<(String, End)> = (0..6)
+        .map(|_| told.recv_timeout(Duration::from_secs(30)).unwrap())
+        .collect();
+    ends.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut want = vec![
+        (before, End::Done),
+        (queued[0].clone(), End::Cancelled),
+        (queued[1].clone(), End::Cancelled),
+        (batch[0].clone(), End::Cancelled),
+        (batch[1].clone(), End::Done),
+        (later, End::Done),
+    ];
+    want.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(ends, want);
+    assert!(told.recv_timeout(Duration::from_millis(300)).is_err());
 }
 
 /// The script of a harness that fails on a usage limit.
@@ -1752,6 +1772,9 @@ fn a_launcher_that_does_not_start_fails_the_run_once_and_frees_the_queue() {
         runner
     };
     let runner = open_with("/no/such/plotkeeper-run");
+    // Its end is told as any end is, so the module that asked for the run is not left waiting on it.
+    let (tell, told) = mpsc::channel();
+    runner.on_end(move |end| drop(tell.send((end.id, end.end))));
     let submit = |script: &str| {
         runner
             .submit(Request {
@@ -1779,6 +1802,11 @@ fn a_launcher_that_does_not_start_fails_the_run_once_and_frees_the_queue() {
     );
     let records = || fs::read_to_string(dir.path().join("data/background-runs.jsonl")).unwrap();
     assert_eq!(records().lines().count(), 2);
+    for id in [&first, &second] {
+        let end = told.recv_timeout(Duration::from_secs(30));
+        assert_eq!(end, Ok((id.clone(), End::Failed)));
+    }
+    assert!(told.recv_timeout(Duration::from_millis(300)).is_err());
 
     // The next start records nothing again and removes what is left.
     drop(runner);
@@ -2020,7 +2048,7 @@ fn cancel_of_a_run_that_ends_at_that_moment_never_fails() {
 }
 
 #[test]
-fn every_module_that_listens_is_told_a_runs_end_once_also_at_a_pick_up() {
+fn every_module_that_listens_is_told_a_runs_end_once_also_at_a_pick_up_and_past_one_that_panics() {
     let dir = tempfile::tempdir().unwrap();
     let _guard = LauncherGuard::new(dir.path().join("runs"));
     settings(dir.path(), r#"{ "checks": { "/p/app": ["cargo test"] } }"#);
@@ -2031,6 +2059,8 @@ fn every_module_that_listens_is_told_a_runs_end_once_also_at_a_pick_up() {
         told
     };
     let runner = Runner::new(config(dir.path(), Arc::new(Script)));
+    // A module whose listener panics is logged, and keeps no other from being told.
+    runner.on_end(|_| panic!("a listener that panics"));
     // Back a law and First map each listen, and each is told.
     let told = ends(&runner);
     let other = ends(&runner);
@@ -2059,6 +2089,23 @@ fn every_module_that_listens_is_told_a_runs_end_once_also_at_a_pick_up() {
     assert!(told.recv_timeout(Duration::from_millis(300)).is_err());
     assert_eq!(other.recv_timeout(Duration::from_secs(30)).ok(), Some(end));
     assert!(other.recv_timeout(Duration::from_millis(300)).is_err());
+    // Nor does it leave a batch holding its project's slot: the request behind the batch runs.
+    let batch = runner
+        .submit_batch(vec![Request {
+            kind: Kind::BackLaw,
+            project: PROJECT.into(),
+            folder: runner.new_folder().unwrap(),
+            prompt: "echo batch".into(),
+            limits: Limits::of(Kind::BackLaw),
+        }])
+        .unwrap();
+    let later = submit(&runner, PROJECT, "echo later");
+    for id in [&batch[0], &later] {
+        assert_eq!(
+            told.recv_timeout(Duration::from_secs(30)).map(|end| end.id),
+            Ok(id.clone())
+        );
+    }
 
     // A run that ends while plotkeeper is stopped is told at the next start, when it is picked up.
     let waiting = runner.new_folder().unwrap();
