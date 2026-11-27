@@ -14,4 +14,5 @@ mod ownership;
 mod parts;
 mod php;
 mod python;
+mod scan;
 mod touched;
