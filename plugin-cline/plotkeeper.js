@@ -58,6 +58,9 @@ const outcomes = (output) =>
     ? output.map((entry) => ({ query: entry?.query ?? null, success: entry?.success !== false, error: entry?.error ?? null }))
     : null;
 
+// Each running run's prompt message id, by run id, from `beforeRun`.
+const prompts = new Map();
+
 // The session this sandbox runs the plugin for, and its folder, from `setup`.
 let session = null;
 let cwd = "";
@@ -85,6 +88,7 @@ export default {
     // A run is a turn: the prompt is the run's last message.
     beforeRun({ snapshot }) {
       const last = snapshot.messages?.at(-1);
+      if (last?.role === "user") prompts.set(snapshot.runId, last.id);
       send(line("beforeRun", snapshot, { prompt: last?.role === "user" ? text(last) : "" }));
     },
     beforeTool({ snapshot, toolCall, input }) {
@@ -105,10 +109,15 @@ export default {
     // run that ends with `submit_and_exit` has Cline's `Submission recorded (…)` line as its final text, and the answer
     // it showed in that message (#372).
     async afterRun({ snapshot, result }) {
-      // This run's messages: those after its prompt, the last `user` one (a tool's result is a `tool` message).
+      // This run's messages: those after its prompt, found by the id `beforeRun` saw, as Cline adds `user` messages of
+      // its own during a run (its completion reminder); without that id, after the last `user` message.
       const messages = result?.messages ?? [];
-      const prompt = messages.findLastIndex((m) => m?.role === "user");
-      const said = messages.slice(prompt + 1).filter((m) => m?.role === "assistant").map(text).filter(Boolean);
+      const id = prompts.get(snapshot.runId);
+      prompts.delete(snapshot.runId);
+      const at = messages.findIndex((m) => id !== undefined && m?.id === id);
+      const prompt = at >= 0 ? at : messages.findLastIndex((m) => m?.role === "user");
+      const said = (messages.slice(prompt + 1).filter((m) => m?.role === "assistant").map(text))
+        .filter((t) => t.trim() !== "");
       send(
         line("afterRun", snapshot, {
           status: result?.status ?? "",
