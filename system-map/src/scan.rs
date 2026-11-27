@@ -38,7 +38,7 @@ pub struct Scan {
 }
 
 /// A folder that may be a reference copy.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct IgnoreCandidate {
     /// The folder, with its trailing slash.
     pub path: String,
@@ -96,8 +96,13 @@ fn is_hidden(file: &str) -> bool {
     file.split('/').any(|part| part.starts_with('.'))
 }
 
+/// Whether `file` is code the scan proposes parts from: in a language it knows, in no hidden folder.
+pub fn is_code(file: &str) -> bool {
+    language(file).is_some() && !is_hidden(file)
+}
+
 /// Whether `file` is a test: in a folder of tests, or named as one.
-fn is_test(file: &str) -> bool {
+pub fn is_test(file: &str) -> bool {
     let (dirs, name) = file.rsplit_once('/').map_or(("", file), |(d, n)| (d, n));
     dirs.split('/').any(|d| {
         matches!(
@@ -393,7 +398,7 @@ fn scan_files(root: &Path, files: &[String]) -> Scan {
     let code: Vec<&str> = files
         .iter()
         .map(String::as_str)
-        .filter(|f| language(f).is_some() && !is_hidden(f))
+        .filter(|f| is_code(f))
         .collect();
     let all: Vec<&str> = files
         .iter()
@@ -506,7 +511,7 @@ fn draft_map(extractors: &[&str], parts: &[String], ignored: &[String]) -> Value
         "extractors": extractors,
         "parts": parts.iter().zip(&ids).map(|(path, id)| json!({
             "id": id,
-            "name": title(path),
+            "name": folder_title(path),
             "caption": "Not yet described",
             "purpose": "Not yet described.",
             "holds": [],
@@ -610,7 +615,7 @@ fn ids_of(parts: &[String]) -> Vec<String> {
 }
 
 /// A part's name: its last folder's words, capitalised.
-fn title(path: &str) -> String {
+pub fn folder_title(path: &str) -> String {
     let last = path.trim_end_matches('/').rsplit('/').next().unwrap_or("");
     let words: Vec<String> = last
         .split(|c: char| !c.is_ascii_alphanumeric())

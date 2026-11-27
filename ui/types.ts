@@ -697,9 +697,28 @@ export type SavedProject = { path: string; gone: boolean; temporary: boolean };
 
 /**
  * The free scan of a git repository with no map (`server/src/map_scan.rs`, #753): the skeleton map with the computed edges as `import` links, as
- * text; each part's tracked file count; the languages a reader reads and those none reads yet; and whether `claude` was found.
+ * text; each part's tracked file count; the languages a reader reads and those none reads yet; whether `claude` was found; the folders that
+ * look like copies, each ticked while the skeleton ignores it; the code files and tests no part owns; and the subfolders each part that can
+ * split would split into (#761).
  */
-export type MapScan = { map: string; files: Record<string, number>; read_languages: string[]; unread_languages: string[]; claude: boolean };
+export type MapScan = {
+  map: string;
+  files: Record<string, number>;
+  read_languages: string[];
+  unread_languages: string[];
+  claude: boolean;
+  ignore_candidates: { path: string; ticked: boolean }[];
+  loose_files: string[];
+  loose_tests: string[];
+  splits: Record<string, string[]>;
+};
+
+/** One change of the skeleton on the scan screen (`Edit` in `server/src/map_scan.rs`, #761); `part: null` gives the files a new part. */
+export type ScanEdit =
+  | { kind: "ignore"; folder: string; ignored: boolean }
+  | { kind: "home"; files: string[]; part: string | null }
+  | { kind: "merge"; part: string; into: string }
+  | { kind: "split"; part: string };
 
 /** What the page asks at start (#527): plotkeeper's package version, for the toast after an update (`whats-new.ts`). */
 export type About = { version: string };
@@ -775,6 +794,7 @@ export interface Commands {
   map_proof: { args: Project & { law: string }; reply: Proof[] };
   map_state: { args: Project & { fetch: boolean }; reply: MapState };
   map_scan: { args: Project; reply: MapScan };
+  map_scan_edit: { args: Project & { map: string; edit: ScanEdit }; reply: MapScan };
   pr_brief: { args: InPr & { full?: boolean | null }; reply: BriefOpened | null };
   // `older` (#638): "Read the one you have", the stored catch-up of an earlier fog list while it still holds.
   part_catch_up: { args: InPart & { older?: boolean | null }; reply: CatchUpOpened | null };

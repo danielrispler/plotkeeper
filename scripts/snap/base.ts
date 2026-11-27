@@ -19,7 +19,8 @@ export type Fixture = { [C in Command]?: Reply<C> | ByArg<Reply<C>> } & { appErr
 const noSelection: Selection | null = null;
 
 // The free scan of a repository with no map (#760), which `base`'s map state is: three grey parts, the computed links from App and Cli to Lib,
-// two read languages and one not.
+// two read languages and one not, two folders that look like copies (one ticked), two loose files and a loose test, and Lib split by its
+// subfolders (#761).
 const scanPart = (id: string, name: string, path: string) => ({ id, name, caption: "Not yet described", purpose: "Not yet described.", holds: [], tier: "interface", paths: [path] });
 const scanFile = JSON.stringify({
   version: 2,
@@ -53,7 +54,18 @@ export const base = {
   stop_facts: { active_days: 0, merged_prs: 0, engaged_days: 0, scrubs: 0, proofs: 0, knows: 0, dismissed: [], briefs_offered: 0, briefs_opened: 0, chapters_done: 0, counts: {}, began: null, stale_since: null },
   stop_dismiss: null,
   map_proof: [],
-  map_scan: { map: scanFile, files: { app: 12, cli: 1, lib: 30 }, read_languages: ["TypeScript", "Go"], unread_languages: ["Ruby"], claude: true },
+  map_scan: {
+    map: scanFile,
+    files: { app: 12, cli: 1, lib: 30 },
+    read_languages: ["TypeScript", "Go"],
+    unread_languages: ["Ruby"],
+    claude: true,
+    ignore_candidates: [{ path: "reference-copy/", ticked: false }, { path: "vendor/", ticked: true }],
+    loose_files: ["src/index.ts", "src/main.ts"],
+    loose_tests: ["tests/app.test.ts"],
+    splits: { lib: ["src/lib/core/", "src/lib/net/"] },
+  },
+  map_scan_edit: { map: scanFile, files: { app: 12, cli: 1, lib: 30 }, read_languages: [], unread_languages: [], claude: true, ignore_candidates: [], loose_files: [], loose_tests: [], splits: {} },
   map_state: { project: "/w/plotkeeper", status: "none", source: null, from: null, pending: null, problems: [], reference: "origin/main", commit: null, note: null, user: { positions: {}, tiers: {} }, fog: {}, ci: null, ready: [], ratify: [], runs: { paused: null, runs: [] }, stale: {}, stale_why: {}, catch_ups: {} },
   open: noSelection,
   pr_brief: null,

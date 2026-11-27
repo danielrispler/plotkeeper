@@ -18,14 +18,14 @@
 //   a PR brief borrows the camera with `lendCamera` and `giveCameraBack` shows Daniel's view again (`cameraRig` in `map-camera.ts`).
 
 import { logStop, reviewNode, reviewOf } from "./stop-rules.js";
-import { element, failure, hint, invoke, keyed, listen, mark, newest, pageStore, pressable, svg, text } from "./dom.js";
+import { element, failure, hint, invoke, keyed, listen, mark, messageOf, newest, pageStore, pressable, svg, text } from "./dom.js";
 import { cameraRig, type CameraRig, fitCamera, panTo, revealPan, zoomAt } from "./map-camera.js";
 import { brokenParts, brokenText, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Drag, type Law, type Layer, type LayerName, type MapDoc, askedProject, startProject, switchProject, wasRemoved, parseMap, type Part, type Point, placement, plateSize, plateTitle, sizeOf, lineTag, linkLines, markPoints, readingOrder, rimPoint, type Scrub, tagWord, type Tier } from "./map-model.js";
 import { copyButton } from "./copy-button.js";
 import { drawScan } from "./map-scan.js";
 import { recheckSeen } from "./seen.js";
 import { knownProjects, listedProjects, projectGone } from "./projects.js";
-import type { Camera, MapDiff, MapScan, MapState } from "./types.js";
+import type { Camera, MapDiff, MapScan, MapState, ScanEdit } from "./types.js";
 
 export type LoadedMap = Extract<MapDoc, { ok: true }>;
 /** What the view holds once a map loaded: its payload, the map as parsed, and every id's centre in the world. */
@@ -80,8 +80,11 @@ let rig: CameraRig | null = null;
 let revealed: string | null = null;
 // The Map diff drawn on today's map (#640): set by a PR brief whose PR changed the map, for the whole brief; a scrub's past map draws without it.
 let diff: MapDiff | null = null;
-// The free scan of `project` while it has no map (#760): asked once per `openMap`, "asking" until it answers, null when it failed.
-let scanned: { project: string; scan: MapScan | "asking" | null } | null = null;
+// The free scan of `project` while it has no map (#760): asked once per `openMap`, "asking" until it answers, null when it failed. Its
+// skeleton is the one the person edited (#761), each edit's answer replacing it; `note` is why the last edit did not apply, and `edits`
+// chains the edits, so each is sent with the skeleton the one before it left. Draft the map (#762) starts from `scan.map` as it is then.
+type Scanned = { project: string; scan: MapScan | "asking" | null; note: string | null; edits: Promise<void> };
+let scanned: Scanned | null = null;
 
 /** The map is the page's base (#386): the body carries `map-open` from the start and never loses it. */
 export const mapShown = () => document.body?.classList.contains("map-open") === true;
@@ -367,7 +370,7 @@ export function linkMark(ids: string[], law: Law, at: Point): SVGElement {
 function scanFor(state: MapState | null): MapScan | "asking" | null {
   if (state?.status !== "none" || project === null || projectGone(project)) return null;
   if (scanned?.project !== project) {
-    const asked = { project, scan: "asking" as MapScan | "asking" | null };
+    const asked: Scanned = { project, scan: "asking", note: null, edits: Promise.resolve() };
     scanned = asked;
     const done = (scan: MapScan | null) => {
       asked.scan = scan;
@@ -379,6 +382,29 @@ function scanFor(state: MapState | null): MapScan | "asking" | null {
     });
   }
   return scanned.scan;
+}
+
+// Sends `edit` of the held skeleton to the server, after any edit still on its way, and draws its answer: the plates and lines again, the
+// panel kept (#761). An edit that fails keeps the skeleton and says why.
+function editScan(edit: ScanEdit) {
+  const asked = scanned;
+  if (!asked) return;
+  asked.edits = asked.edits.then(async () => {
+    const now = asked.scan;
+    if (!now || now === "asking") return;
+    // While the server works the edit out, the screen says it is busy.
+    const busy = element("map-body").querySelector(".map-scan");
+    busy?.setAttribute("aria-busy", "true");
+    try {
+      asked.scan = await invoke("map_scan_edit", { project: asked.project, map: now.map, edit });
+      asked.note = null;
+    } catch (why) {
+      failure("map_scan_edit")(why);
+      asked.note = messageOf(why);
+    }
+    busy?.removeAttribute("aria-busy");
+    if (scanned === asked && mapShown()) draw();
+  });
 }
 
 // Where `plotkeeper install` is explained.
@@ -715,7 +741,7 @@ function draw() {
   const unreadable = loaded && doc && !doc.ok ? { ...loaded, status: "unreadable" as const, note: doc.why } : loaded;
   const scan = scanFor(unreadable);
   // A scan that failed, or whose map does not read, leaves today's empty screen with its prompt.
-  if (!unreadable || !scan || scan === "asking" || !drawScan(body, unreadable, scan)) drawEmpty(body, unreadable);
+  if (!unreadable || !scan || scan === "asking" || !drawScan(body, unreadable, scan, { edit: editScan, note: scanned?.note ?? null })) drawEmpty(body, unreadable);
   const slots = { side: element("map-side"), notPlaced: element("map-not-placed"), tray: element("map-tray"), runs: element("map-runs"), sheet: element("map-sheet"), drawer: element("map-drawer"), banner: element("map-banner") };
   // No map is drawn, so nothing of the last one may stay: its banner, sheet and drawer would belong to another project.
   [slots.notPlaced, slots.tray, slots.runs, slots.sheet, slots.drawer, slots.banner].forEach((slot) => slot.replaceChildren());

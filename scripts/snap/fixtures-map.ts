@@ -863,9 +863,105 @@ export const mapScan = (): Fixture =>
       copy.click();
       await wait(150);
       if (window.__copied !== prompt.textContent) log("snap:fail the clipboard holds " + JSON.stringify(window.__copied) + ", not the prompt");
+      // The skeleton's optional edits (#761): the copies to ignore, ticked as the scan set them, and the loose files and tests by folder, each
+      // offered a part or a new part.
+      const checks = [...screen.querySelectorAll(".map-scan-check")].map((row) => [row.textContent, row.querySelector("input[type=checkbox]")?.checked]);
+      if (JSON.stringify(checks) !== JSON.stringify([["reference-copy/", false], ["vendor/", true]])) log("snap:fail the ignore checkboxes: " + JSON.stringify(checks));
+      const legends = [...screen.querySelectorAll(".map-scan-set legend")].map((l) => l.textContent);
+      if (JSON.stringify(legends) !== JSON.stringify(["Copies and vendored code", "Loose files", "Loose tests"])) log("snap:fail the edits' groups: " + JSON.stringify(legends));
+      const rows = [...screen.querySelectorAll(".map-scan-loose")].map((row) => row.querySelector(".map-scan-where").textContent);
+      if (JSON.stringify(rows) !== JSON.stringify(["src/ · index.ts and main.ts", "tests/ · app.test.ts"])) log("snap:fail the loose rows: " + JSON.stringify(rows));
+      const offered = [...(screen.querySelector(".map-scan-loose select")?.options ?? [])].map((o) => o.textContent);
+      if (JSON.stringify(offered) !== JSON.stringify(["A new part", "App", "Cli", "Lib"])) log("snap:fail a loose row offers " + JSON.stringify(offered));
+      for (const pick of screen.querySelectorAll(".map-scan-panel select")) if (!pick.labels?.length) log("snap:fail a select has no label");
+      if (draft.compareDocumentPosition(screen.querySelector(".map-scan-set")) & Node.DOCUMENT_POSITION_FOLLOWING) log("snap:fail the edits come after Draft the map");
       frame("on the scan");
       checkColours("on the scan");
       log("base ok");`, { map_state: mapState({ status: "none", source: null, from: null }), map_scan: mapScanOf() });
+// The base scan with App merged into Lib: Lib holds both folders, and Cli's line to Lib is the one left.
+const mergedScan = (() => {
+  const map = JSON.parse(mapScanOf().map);
+  const lib = map.parts.find((part: { id: string }) => part.id === "lib");
+  lib.paths.push("src/app/");
+  map.parts = map.parts.filter((part: { id: string }) => part.id !== "app");
+  map.links = map.links.filter((link: { from: string }) => link.from !== "app");
+  return JSON.stringify(map);
+})();
+/**
+ * Merge into… on a scan's plate (#753, story 9; ticket #761): App's press opens its actions beside it, with the other parts to merge into and
+ * Split by subfolders muted, as its folder has none. Merging it into Lib sends the held skeleton and the edit; the answer redraws the plates
+ * and lines (Cli's line to Lib alone) while the panel stays open, the same node at the same scroll, and focus lands on Lib's plate. A tick
+ * in the panel then keeps its focus across the redraw.
+ */
+export const mapScanMerge = (): Fixture =>
+  mapBaseOf(`
+    const screen = document.querySelector("#map .map-scan");
+    if (!screen) return log("snap:fail no scan screen");
+    const side = screen.querySelector(".map-scan-panel");
+    side.style.maxBlockSize = "320px";
+    side.scrollTop = 120;
+    const scrolled = side.scrollTop;
+    if (!(scrolled > 0)) log("snap:fail the panel does not scroll, so its scroll is not tested");
+    window.__sent = [];
+    const real = window.fetch;
+    window.fetch = (url, init) => {
+      if (String(url).endsWith("/map_scan_edit")) window.__sent.push(JSON.parse(init.body));
+      return real(url, init);
+    };
+    const app = screen.querySelector(".plate[data-id=app] .plate-open");
+    if (!app) return log("snap:fail App's plate has no button to press");
+    app.click();
+    await wait(100);
+    const menu = screen.querySelector(".map-scan-actions");
+    if (!menu?.matches(":popover-open")) return log("snap:fail App's press opens no actions");
+    if (app.getAttribute("aria-expanded") !== "true") log("snap:fail App's plate does not say its actions are open");
+    const [plateBox, menuBox] = [app.closest(".plate").getBoundingClientRect(), menu.getBoundingClientRect()];
+    if (Math.abs(menuBox.top - plateBox.bottom) > 16 && Math.abs(plateBox.top - menuBox.bottom) > 16) log("snap:fail the actions are not beside App's plate");
+    const options = [...menu.querySelectorAll("select option")].map((o) => o.textContent);
+    if (JSON.stringify(options) !== JSON.stringify(["Cli", "Lib"])) log("snap:fail Merge into offers " + JSON.stringify(options));
+    const split = [...menu.querySelectorAll("button")].find((b) => b.textContent === "Split by subfolders");
+    if (split?.getAttribute("aria-disabled") !== "true") log("snap:fail App's Split by subfolders is not muted, though its folder has no subfolders");
+    split?.click();
+    await wait(50);
+    if (window.__sent.length) log("snap:fail a muted split was sent");
+    frame("with App's actions open");
+    menu.querySelector("select").value = "lib";
+    menu.querySelector("form").requestSubmit();
+    await wait(300);
+    const sent = window.__sent[0];
+    if (sent?.edit?.kind !== "merge" || sent.edit.part !== "app" || sent.edit.into !== "lib" || sent.project !== "/w/plotkeeper" || !sent.map?.includes('"src/app/"')) log("snap:fail the merge sent " + JSON.stringify(sent));
+    if (menu.matches(":popover-open")) log("snap:fail the actions stay open after Merge");
+    const after = document.querySelector("#map .map-scan");
+    if (after !== screen) log("snap:fail the scan screen was drawn anew");
+    if (after.querySelector(".map-scan-panel") !== side) log("snap:fail the panel was drawn anew, not kept open");
+    if (side.scrollTop !== scrolled) log("snap:fail the panel's scroll moved from " + scrolled + " to " + side.scrollTop);
+    const plates = [...after.querySelectorAll(".plate")].map((p) => p.dataset.id);
+    if (JSON.stringify(plates) !== JSON.stringify(["cli", "lib"])) log("snap:fail the plates after the merge: " + JSON.stringify(plates));
+    const lines = [...after.querySelectorAll(".map-links line.link")].map((l) => l.dataset.link);
+    if (JSON.stringify(lines) !== JSON.stringify(["cli-lib"])) log("snap:fail the lines after the merge: " + JSON.stringify(lines));
+    for (const line of after.querySelectorAll(".map-links line.link")) if (!(Number(line.getAttribute("x1")) > 0)) log("snap:fail a line is not placed: " + line.outerHTML);
+    const lib = after.querySelector(".plate[data-id=lib]");
+    if (lib?.querySelector(".plate-caption")?.textContent !== "src/lib/ +1 · 42 files") log("snap:fail Lib's plate says " + lib?.textContent);
+    if (document.activeElement !== lib?.querySelector(".plate-open")) log("snap:fail focus is not on the part merged into, but on " + document.activeElement?.outerHTML.slice(0, 80));
+    if (!side.querySelector(".map-draft")?.textContent.includes('"src/app/"') || side.querySelector(".map-scan-proposes")) log("snap:fail the copy-prompt lost the merged folder");
+    const offered = [...side.querySelector(".map-scan-loose select").options].map((o) => o.textContent);
+    if (JSON.stringify(offered) !== JSON.stringify(["A new part", "Cli", "Lib"])) log("snap:fail a loose row still offers " + JSON.stringify(offered));
+    if (!side.textContent.includes("these 2 parts")) log("snap:fail the panel still counts three parts");
+    frame("after the merge");
+    checkColours("after the merge");
+    // A tick in the panel is sent, and the redraw keeps the box focused.
+    const box = side.querySelector(".map-scan-check input");
+    box.focus();
+    box.click();
+    await wait(300);
+    const tick = window.__sent[1];
+    if (tick?.edit?.kind !== "ignore" || tick.edit.folder !== "reference-copy/" || tick.edit.ignored !== true) log("snap:fail the tick sent " + JSON.stringify(tick));
+    if (document.activeElement !== box || !box.isConnected) log("snap:fail the tick's box lost its focus in the redraw");
+    log("base ok");`, {
+    map_state: mapState({ status: "none", source: null, from: null }),
+    map_scan: mapScanOf(),
+    map_scan_edit: mapScanOf({ map: mergedScan, files: { cli: 1, lib: 42 } }),
+  });
 /** Draft the map muted when `claude` is not found (#753, story 12): aria-disabled with its one-line reason, a press starts nothing, and the copy-prompt leads. */
 export const mapScanNoClaude = (): Fixture =>
   mapOpened(`
