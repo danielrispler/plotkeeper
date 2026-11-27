@@ -10,6 +10,7 @@ use std::{
 };
 use studio_server::micro_worlds::{CSP, Explored, MicroWorlds, Phase, Subject, Topic, flow_topic};
 use studio_server::runner::{Config, Harness, HarnessCommand, Plan, Runner};
+use studio_test_support::LauncherGuard;
 
 /// The fake harness: `sh -c <script>` in the run's working folder, with the run's prompt in `PROMPT`.
 struct Writes(String);
@@ -58,6 +59,8 @@ const MAP: &str = r#"{
 }"#;
 
 struct Bench {
+    /// Stops the launchers the test left running; first, so it drops while their folders are still there.
+    _guard: LauncherGuard,
     dir: tempfile::TempDir,
     runner: Arc<Runner>,
     worlds: Arc<MicroWorlds>,
@@ -144,6 +147,7 @@ fn bench(script: &str, dsh: bool) -> Bench {
     });
     runner.pick_up();
     Bench {
+        _guard: LauncherGuard::new(dir.path().join("runs")),
         dir,
         runner,
         worlds,

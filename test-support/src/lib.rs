@@ -2,8 +2,10 @@
 //! temporary repositories the tests start from.
 
 use std::{
+    fs,
     path::{Path, PathBuf},
     process::Command,
+    time::{Duration, Instant},
 };
 
 /// Runs `git` in `dir` as the studio's own identity, away from the developer's git config, and
@@ -71,5 +73,139 @@ pub fn origin() -> Origin {
         seed,
         main,
         first,
+    }
+}
+
+/// Stops, when dropped, every `plotkeeper-run` launcher a test started under a runs folder, so a test that ends with a
+/// run still going leaves no launcher polling for its limit. A panicking test drops it while unwinding.
+///
+/// A launcher is stopped only when `ps` still gives its pid the start time its `launch.json` recorded (the identity
+/// check plotkeeper's Cancel makes); any other pid, and a run folder without a readable `launch.json`, is left alone.
+/// Hold it in a variable that is named, never `_` or `..`, which drop it at once; declare it before the folder it
+/// watches, so it drops first.
+pub struct LauncherGuard {
+    runs: PathBuf,
+}
+
+impl LauncherGuard {
+    pub fn new(runs: impl Into<PathBuf>) -> Self {
+        Self { runs: runs.into() }
+    }
+}
+
+impl Drop for LauncherGuard {
+    fn drop(&mut self) {
+        let Ok(entries) = fs::read_dir(&self.runs) else {
+            return;
+        };
+        let launchers: Vec<i32> = entries
+            .flatten()
+            .filter_map(|run| confirmed_launcher(&run.path().join("launch.json")))
+            .collect();
+        // SIGTERM first: the launcher then kills its child's process group, which is not its own, and ends.
+        for &pid in &launchers {
+            // SAFETY: signals the process group a confirmed launcher leads.
+            unsafe { libc::killpg(pid, libc::SIGTERM) };
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while launchers.iter().any(|&pid| alive(pid)) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        for &pid in launchers.iter().filter(|&&pid| alive(pid)) {
+            // SAFETY: as above; the launcher did not end within the grace.
+            unsafe { libc::killpg(pid, libc::SIGKILL) };
+        }
+    }
+}
+
+fn alive(pid: i32) -> bool {
+    // SAFETY: signal 0 only checks.
+    unsafe { libc::kill(pid, 0) == 0 }
+}
+
+/// The pid `launch` names, when a process with that pid started at the time `launch` records.
+fn confirmed_launcher(launch: &Path) -> Option<i32> {
+    let launch: serde_json::Value = serde_json::from_str(&fs::read_to_string(launch).ok()?).ok()?;
+    let pid = i32::try_from(launch["pid"].as_u64()?)
+        .ok()
+        .filter(|&p| p > 1)?;
+    let out = Command::new("ps")
+        .args(["-o", "lstart=", "-p", &pid.to_string()])
+        .env("LC_ALL", "C")
+        .output()
+        .ok()?;
+    let now = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!now.is_empty() && launch["start"].as_str()? == now).then_some(pid)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::process::CommandExt;
+
+    #[test]
+    fn a_pid_whose_start_time_differs_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sleeper = Command::new("sleep")
+            .arg("60")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let run = dir.path().join("a-run");
+        fs::create_dir(&run).unwrap();
+        fs::write(
+            run.join("launch.json"),
+            format!(
+                r#"{{"pid":{},"start":"Thu Jan  1 00:00:00 1970","at_ms":0}}"#,
+                sleeper.id()
+            ),
+        )
+        .unwrap();
+        // A run folder with no launch.json beside it, and one with an unreadable one.
+        fs::create_dir(dir.path().join("no-launch")).unwrap();
+        fs::create_dir(dir.path().join("torn")).unwrap();
+        fs::write(dir.path().join("torn/launch.json"), "{").unwrap();
+        drop(LauncherGuard::new(dir.path()));
+        let still_running = sleeper.try_wait().unwrap().is_none();
+        sleeper.kill().unwrap();
+        sleeper.wait().unwrap();
+        assert!(
+            still_running,
+            "the guard signalled a pid it could not confirm"
+        );
+    }
+
+    #[test]
+    fn a_launcher_that_still_matches_is_stopped() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sleeper = Command::new("sleep")
+            .arg("60")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = sleeper.id();
+        let ps = Command::new("ps")
+            .args(["-o", "lstart=", "-p", &pid.to_string()])
+            .env("LC_ALL", "C")
+            .output()
+            .unwrap();
+        let start = String::from_utf8_lossy(&ps.stdout).trim().to_string();
+        let run = dir.path().join("a-run");
+        fs::create_dir(&run).unwrap();
+        fs::write(
+            run.join("launch.json"),
+            format!(r#"{{"pid":{pid},"start":"{start}","at_ms":0}}"#),
+        )
+        .unwrap();
+        // The test reaps the sleeper, as init reaps a real launcher, so the guard sees it gone at once.
+        let guard = std::thread::spawn({
+            let runs = dir.path().to_path_buf();
+            move || drop(LauncherGuard::new(runs))
+        });
+        assert!(
+            sleeper.wait().unwrap().code().is_none(),
+            "the launcher was not stopped by a signal"
+        );
+        guard.join().unwrap();
     }
 }

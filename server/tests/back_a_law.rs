@@ -15,7 +15,7 @@ use studio_server::{
     ratify,
     runner::{self, Harness, HarnessCommand, Plan, Runner},
 };
-use studio_test_support::git;
+use studio_test_support::{LauncherGuard, git};
 use studio_understanding::pr_brief::{BriefReply, BriefWriter, Guard, StoredBrief};
 
 /// The fake agent: `sh -c <script>` in the run's working folder, whatever the prompt.
@@ -85,6 +85,8 @@ const PLANT: &str = "echo 'export const add = (a, b) => a - b;' > src/add.mjs\n"
 const DONE: &str = r#"echo '{"type":"result","subtype":"success","is_error":false,"result":"Backed.","permission_denials":[]}'"#;
 
 struct Bench {
+    /// Stops the launchers the test left running; first, so it drops while their folders are still there.
+    _guard: LauncherGuard,
     dir: tempfile::TempDir,
     /// Daniel's repository, a clone of `origin` on a branch of his own.
     repo: PathBuf,
@@ -170,6 +172,7 @@ fn bench_with(map: &str, agent: &str, home: bool) -> Bench {
     fs::set_permissions(&gh, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
     let (runner, laws, changes) = start_plotkeeper_in(&root, agent, home);
     Bench {
+        _guard: LauncherGuard::new(root.join("runs")),
         dir,
         repo,
         project,

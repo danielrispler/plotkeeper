@@ -6,7 +6,6 @@ mod isolated_home;
 use std::{
     fs,
     path::{Path, PathBuf},
-    process::Command,
     sync::{Arc, mpsc},
     time::{Duration, Instant},
 };
@@ -14,6 +13,7 @@ use studio_server::runner::{
     BWRAP_CHECK, Config, End, Harness, HarnessCommand, Kind, Limits, Plan, Request, RunState,
     Runner, SANDBOX_DOWN, allowed_tools, claude_command, private_tmp, sandbox_settings,
 };
+use studio_test_support::LauncherGuard;
 
 const PROJECT: &str = "/p/app";
 
@@ -52,6 +52,8 @@ impl Harness for Missing {
 }
 
 struct Bench {
+    /// Declared before `dir`, so it drops first and stops the launchers while their folders are still there.
+    guard: LauncherGuard,
     dir: tempfile::TempDir,
     runner: Arc<Runner>,
     changes: mpsc::Receiver<String>,
@@ -90,6 +92,7 @@ fn bench_with(harness: Arc<dyn Harness>) -> Bench {
     );
     let (runner, changes) = open(dir.path(), harness);
     Bench {
+        guard: LauncherGuard::new(dir.path().join("runs")),
         dir,
         runner,
         changes,
@@ -176,12 +179,7 @@ fn waits(result: &str) -> String {
 }
 
 fn alive(pid: u64) -> bool {
-    Command::new("kill")
-        .args(["-0", &pid.to_string()])
-        .output()
-        .unwrap()
-        .status
-        .success()
+    studio_hook::sys::pid_alive(pid)
 }
 
 /// Waits until process `pid` is gone; a killed process takes a moment to be reaped.
@@ -315,6 +313,7 @@ impl Harness for Checked {
 #[test]
 fn a_run_whose_sandbox_cannot_start_fails_before_its_harness_runs() {
     let dir = tempfile::tempdir().unwrap();
+    let _guard = LauncherGuard::new(dir.path().join("runs"));
     settings(dir.path(), r#"{ "checks": { "/p/app": ["cargo test"] } }"#);
     let harness = Checked {
         check: "echo 'sandbox_apply: Operation not permitted' >&2; exit 71".into(),
@@ -356,6 +355,7 @@ fn a_run_whose_sandbox_cannot_start_fails_before_its_harness_runs() {
         <file:///usr/share/doc/bubblewrap/README.Debian.gz>.";
     const NO_PROC: &str = "bwrap: Can't mount proc on /newroot/proc: Operation not permitted";
     let dir = tempfile::tempdir().unwrap();
+    let _guard = LauncherGuard::new(dir.path().join("runs"));
     settings(dir.path(), r#"{ "checks": { "/p/app": ["cargo test"] } }"#);
     let bin = dir.path().join("bin");
     let (runner, changes) = open(dir.path(), Arc::new(Bwrapped(bin.clone())));
@@ -436,6 +436,7 @@ fn stand_ins(bin: &Path, bwrap: Option<(&str, i32)>, socat: bool) {
 #[test]
 fn a_runs_private_temp_folder_is_made_new_and_private_and_removed_after() {
     let dir = tempfile::tempdir().unwrap();
+    let _guard = LauncherGuard::new(dir.path().join("runs"));
     settings(dir.path(), r#"{ "checks": { "/p/app": ["cargo test"] } }"#);
     let tmp = dir.path().join("pk-tmp");
     let harness = Checked {
@@ -472,6 +473,7 @@ fn a_runs_private_temp_folder_is_made_new_and_private_and_removed_after() {
 #[test]
 fn a_run_whose_check_fails_leaves_a_folder_of_its_temp_folders_name_alone() {
     let dir = tempfile::tempdir().unwrap();
+    let _guard = LauncherGuard::new(dir.path().join("runs"));
     settings(dir.path(), r#"{ "checks": { "/p/app": ["cargo test"] } }"#);
     let tmp = dir.path().join("pk-tmp");
     fs::create_dir(&tmp).unwrap();
@@ -499,6 +501,7 @@ fn a_run_whose_check_fails_leaves_a_folder_of_its_temp_folders_name_alone() {
 #[test]
 fn cancel_removes_the_temp_folder_of_the_run_it_kills() {
     let dir = tempfile::tempdir().unwrap();
+    let _guard = LauncherGuard::new(dir.path().join("runs"));
     settings(dir.path(), r#"{ "checks": { "/p/app": ["cargo test"] } }"#);
     let tmp = dir.path().join("pk-tmp");
     let harness = Checked {
@@ -711,6 +714,7 @@ fn a_failed_run_offers_its_prompt_to_copy() {
 #[test]
 fn a_run_that_cannot_start_is_refused_with_the_prompt_to_copy() {
     let dir = tempfile::tempdir().unwrap();
+    let _guard = LauncherGuard::new(dir.path().join("runs"));
     settings(dir.path(), r#"{ "checks": { "/p/app": ["cargo test"] } }"#);
     let (runner, _changes) = open(dir.path(), Arc::new(Missing));
     let folder = runner.new_folder().unwrap();
@@ -829,11 +833,35 @@ fn one_run_at_a_time_per_project_and_the_queue_runs_in_order() {
 }
 
 #[test]
+fn a_bench_dropped_while_a_run_waits_stops_its_launcher() {
+    let bench = bench();
+    let id = bench.run(&waits("x"));
+    let folder = bench.folder(&id);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let pid = loop {
+        if let Some(pid) = fs::read_to_string(folder.join("launch.json"))
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .and_then(|launch| launch["pid"].as_u64())
+        {
+            break pid;
+        }
+        assert!(Instant::now() < deadline, "the launcher never started");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert!(alive(pid));
+    drop(bench);
+    assert!(gone(pid), "the launcher outlived its bench");
+}
+
+#[test]
 fn a_run_survives_a_restart_and_is_picked_up() {
     let Bench {
         dir,
         runner,
         changes,
+        // Last, so it drops first, while the runs folder is still there.
+        guard: _guard,
     } = bench();
     let folder = runner.new_folder().unwrap();
     let id = runner
@@ -908,6 +936,8 @@ fn a_run_found_dead_at_start_is_failed_and_frees_the_queue() {
         dir,
         runner,
         changes,
+        // Last, so it drops first, while the runs folder is still there.
+        guard: _guard,
     } = bench_with(Arc::new(WithTmp));
     let submit = |runner: &Runner, script: &str| {
         runner
@@ -1047,6 +1077,7 @@ fn an_auth_or_rate_limit_failure_pauses_the_queue_until_resumed() {
             dir,
             runner,
             changes,
+            guard: _guard,
         } = bench;
         drop((runner, changes));
         let (runner, changes) = open(dir.path(), Arc::new(Script));
@@ -1119,6 +1150,7 @@ fn hangs(file: &Path) -> String {
 #[test]
 fn a_check_or_setup_past_the_runs_limit_leaves_no_process_behind() {
     let dir = tempfile::tempdir().unwrap();
+    let _guard = LauncherGuard::new(dir.path().join("runs"));
     let check_pid = dir.path().join("check.pid");
     let harness = Checked {
         check: hangs(&check_pid),
@@ -1202,6 +1234,7 @@ fn a_runs_builds_get_a_third_of_the_cores() {
 #[test]
 fn a_folder_with_no_run_is_removed_at_start() {
     let dir = tempfile::tempdir().unwrap();
+    let _guard = LauncherGuard::new(dir.path().join("runs"));
     settings(dir.path(), "{}");
     let (runner, _changes) = open(dir.path(), Arc::new(Script));
     // A working folder was made and plotkeeper stopped before its run was submitted.
@@ -1311,6 +1344,7 @@ fn submitting_a_runs_folder_twice_is_refused_and_leaves_the_run_alone() {
 #[test]
 fn a_launcher_that_does_not_start_fails_the_run_once_and_frees_the_queue() {
     let dir = tempfile::tempdir().unwrap();
+    let _guard = LauncherGuard::new(dir.path().join("runs"));
     settings(dir.path(), r#"{ "checks": { "/p/app": ["cargo test"] } }"#);
     let open_with = |launcher: &str| {
         let runner = Runner::new(Config {
@@ -1384,6 +1418,8 @@ fn a_start_leaves_a_running_run_it_cannot_read_alone() {
         dir,
         runner,
         changes,
+        // Last, so it drops first, while the runs folder is still there.
+        guard: _guard,
     } = bench();
     let id = submit(&runner, PROJECT, "sleep 60");
     until(&runner, &changes, |r| {
@@ -1419,6 +1455,8 @@ fn a_queued_run_never_starts_beside_a_running_one_whatever_their_order_on_disk()
         dir,
         runner,
         changes,
+        // Last, so it drops first, while the runs folder is still there.
+        guard: _guard,
     } = bench();
     let running = submit(&runner, PROJECT, &waits("first"));
     let queued = submit(&runner, PROJECT, "echo second");
@@ -1493,6 +1531,7 @@ fn the_launcher_closes_standard_input_and_removes_what_the_command_says() {
         "the test needs HOME set to see it removed"
     );
     let dir = tempfile::tempdir().unwrap();
+    let _guard = LauncherGuard::new(dir.path().join("runs"));
     settings(
         dir.path(),
         r#"{ "checks": { "/p/app": ["cargo test"] }, "setup": { "/p/app": "echo \"setup ${HOME:+has HOME}\" > setup-said" } }"#,
@@ -1527,6 +1566,8 @@ fn a_pause_is_told_to_every_project_with_runs_and_a_pause_file_of_another_build_
         dir,
         runner,
         changes,
+        // Last, so it drops first, while the runs folder is still there.
+        guard: _guard,
     } = bench();
     let other = submit(&runner, "/p/other", &waits("other"));
     until(&runner, &changes, |r| {
@@ -1584,6 +1625,7 @@ fn cancel_of_a_run_that_ends_at_that_moment_never_fails() {
 #[test]
 fn the_module_that_asked_for_a_run_is_told_its_end_once_also_at_a_pick_up() {
     let dir = tempfile::tempdir().unwrap();
+    let _guard = LauncherGuard::new(dir.path().join("runs"));
     settings(dir.path(), r#"{ "checks": { "/p/app": ["cargo test"] } }"#);
     fs::create_dir_all(dir.path().join("data")).unwrap();
     let ends = |runner: &Runner| {
