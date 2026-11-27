@@ -166,6 +166,37 @@ fn an_apply_patch_edits_the_first_file_its_patch_names() {
     }
 }
 
+/// A headless `cline` ends its run with `submit_and_exit`, and Cline's final text is then its `Submission recorded
+/// (…): <summary>` line, while the answer it showed is the text of its last message (`last_text`), 396 words against 87
+/// in #372's trial. The reply is the longer of the two, so a short message before the submission keeps the summary.
+#[test]
+fn a_cline_reply_is_the_longer_of_its_final_text_and_its_last_message() {
+    let submitted =
+        "Submission recorded (verified): ran the tests, four passed, and explained calc.py.";
+    let answer = "Test run: four tests passed. calc.py has add, sub, mul, div and pow_, and the tests miss pow_.";
+    let end = fixture().len() - 1;
+    for (last_text, reply) in [
+        (Some(answer), answer),
+        (Some("Done."), submitted),
+        (Some(""), submitted),
+        (None, submitted),
+    ] {
+        let mut lines: Vec<String> = fixture()[..end].iter().map(ToString::to_string).collect();
+        let mut fields = json!({ "last_assistant_message": submitted });
+        if let Some(text) = last_text {
+            fields["last_text"] = json!(text);
+        }
+        lines.push(changed(end, fields));
+        let studio = Studio::replayed(&lines);
+        let session = studio.session(HELLO).unwrap();
+        assert_eq!(
+            session.turns[0].message.as_deref(),
+            Some(reply),
+            "{last_text:?}"
+        );
+    }
+}
+
 #[test]
 fn a_line_the_adapter_does_not_map_is_no_drift() {
     let mut lines: Vec<String> = fixture().iter().map(ToString::to_string).collect();
