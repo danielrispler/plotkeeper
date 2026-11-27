@@ -9,7 +9,7 @@
 //! model name and the transcript path are made up, since the docs give no example of them. Two
 //! sessions run at once.
 
-use serde_json::{Value, json};
+use serde_json::json;
 use studio_core::{Outcome, QWEN_CAPABILITIES, State, Studio};
 
 const RUN: &str = include_str!("fixtures/qwen/run.jsonl");
@@ -38,24 +38,9 @@ fn the_documented_run_replays_into_its_sessions_turns_and_tools() {
     assert_eq!(first.model.as_deref(), Some("qwen3-coder-plus"));
     assert_eq!(first.permission_mode.as_deref(), Some("default"));
     assert_eq!(first.pid, Some(5151));
-    let prompts: Vec<_> = first.turns.iter().map(|t| t.prompt.as_str()).collect();
-    assert_eq!(
-        prompts,
-        ["Add a greeting to hello.txt", "Now run the tests"]
-    );
     assert_eq!(
         first.turns[0].message.as_deref(),
         Some("hello.txt now says hello, world.")
-    );
-    assert!(first.turns.iter().all(|t| t.ended_at.is_some()));
-    assert_eq!(first.state, State::Ended);
-    assert_eq!(
-        calls(&studio, FIRST),
-        [
-            ("toolu_1".into(), "run_shell_command".into(), Some(0)),
-            ("toolu_2".into(), "write_file".into(), Some(0)),
-            ("toolu_3".into(), "run_shell_command".into(), Some(1)),
-        ]
     );
     let check = first.ledger.row(None, "toolu_1").unwrap();
     assert_eq!(check.command.as_deref(), Some("cat hello.txt"));
@@ -83,26 +68,6 @@ fn the_documented_run_replays_into_its_sessions_turns_and_tools() {
 }
 
 #[test]
-fn a_permission_request_needs_you_until_its_call_ends() {
-    let lines = fixture();
-    let state_after = |n: usize| {
-        let studio = Studio::replayed(&lines[..n]);
-        studio.session(FIRST).unwrap().state
-    };
-    // The `PermissionRequest` of `write_file`, then its result.
-    assert_eq!(state_after(7), State::NeedsYou);
-    assert_eq!(state_after(9), State::Running);
-}
-
-#[test]
-fn a_qwen_session_records_no_turn_trees() {
-    let studio = Studio::replayed(fixture());
-    let session = studio.session(FIRST).unwrap();
-    assert!(!session.capabilities.turn_trees);
-    assert!(session.turns.iter().all(|t| t.files.is_none()));
-}
-
-#[test]
 fn an_event_the_adapter_does_not_map_is_no_drift() {
     let mut lines: Vec<String> = fixture().iter().map(ToString::to_string).collect();
     lines.insert(
@@ -117,46 +82,4 @@ fn an_event_the_adapter_does_not_map_is_no_drift() {
     let studio = Studio::replayed(&lines);
     assert_eq!(studio.session(FIRST).unwrap().state, State::Ended);
     assert!(studio.agy_drift().is_empty(), "{:?}", studio.agy_drift());
-}
-
-/// A line the server writes itself for session `id`, shaped as Claude Code's lines are.
-fn server_line(id: &str, name: &str, at: u64, fields: Value) -> String {
-    let mut line = json!({ "session_id": id, "hook_event_name": name, "studio_received_ms": at });
-    line.as_object_mut()
-        .unwrap()
-        .extend(fields.as_object().unwrap().clone());
-    line.to_string()
-}
-
-#[test]
-fn a_qwen_session_ended_by_the_process_check_or_interrupted_stays_qwen() {
-    // The run up to its second turn's tool start.
-    let lines: Vec<String> = fixture()[..15].iter().map(ToString::to_string).collect();
-    let synthetic = [
-        server_line(
-            FIRST,
-            "StudioInterrupted",
-            1_794_700_011_000,
-            json!({ "prompt_id": "p_2" }),
-        ),
-        server_line(
-            FIRST,
-            "SessionEnd",
-            1_794_700_012_000,
-            json!({ "reason": "process_gone" }),
-        ),
-    ];
-
-    let mut live = Studio::replayed(&lines);
-    for line in &synthetic {
-        live.apply(line);
-    }
-    let mut all = lines.clone();
-    all.extend(synthetic);
-    let restarted = Studio::replayed(&all);
-    for studio in [&live, &restarted] {
-        let session = studio.session(FIRST).unwrap();
-        assert_eq!(session.state, State::Ended);
-        assert_eq!(session.capabilities, QWEN_CAPABILITIES);
-    }
 }

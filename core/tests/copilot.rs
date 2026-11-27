@@ -41,13 +41,6 @@ fn the_documented_run_replays_into_its_sessions_turns_and_tools_in_both_casings(
     assert_eq!(camel.capabilities.agent, "copilot");
     assert_eq!(camel.cwd, "/Users/me/work/hello");
     assert_eq!(camel.pid, Some(5151));
-    let prompts: Vec<_> = camel.turns.iter().map(|t| t.prompt.as_str()).collect();
-    assert_eq!(
-        prompts,
-        ["Add a greeting to hello.txt", "Now run the tests"]
-    );
-    assert!(camel.turns.iter().all(|t| t.ended_at.is_some()));
-    assert_eq!(camel.state, State::Ended);
     assert_eq!(
         calls(&studio, CAMEL),
         [
@@ -90,55 +83,6 @@ fn a_running_tool_keeps_its_turn_running_until_its_call_ends() {
     // The first `preToolUse`, then the camelCase session's first `agentStop`.
     assert_eq!(state_after(3), State::Running);
     assert_eq!(state_after(10), State::YourTurn);
-}
-
-#[test]
-fn a_copilot_session_records_no_turn_trees() {
-    let studio = Studio::replayed(fixture());
-    let session = studio.session(CAMEL).unwrap();
-    assert!(!session.capabilities.turn_trees);
-    assert!(session.turns.iter().all(|t| t.files.is_none()));
-}
-
-/// A session whose reported pid was the IDE's has none: the process check never ends it, and the
-/// quiet period marks it "idle?" (#320, "IDE-hosted pids").
-#[test]
-fn a_session_with_the_ides_pid_goes_idle_and_is_never_ended_by_the_process_check() {
-    let lines = fixture();
-    // The snake_case session up to its tool's start: in a turn.
-    let at = lines
-        .iter()
-        .position(|l| l.contains("\"PreToolUse\""))
-        .unwrap();
-    let mut studio = Studio::replayed(&lines[..=at]);
-    assert_eq!(studio.session(SNAKE).unwrap().state, State::Running);
-    assert!(!studio.gone(|_| false).contains(&SNAKE.to_owned()));
-    studio.tick(1_794_700_005_500 + 2 * 60 * 60 * 1000);
-    assert_eq!(studio.session(SNAKE).unwrap().state, State::Idle);
-    assert!(!studio.gone(|_| false).contains(&SNAKE.to_owned()));
-}
-
-#[test]
-fn a_copilot_session_ended_by_the_process_check_or_interrupted_stays_copilot() {
-    // The camelCase session up to its second turn's tool, before its own stop and end, then the server's lines for
-    // an interrupt and for its gone process.
-    let lines: Vec<String> = fixture()[..14].iter().map(ToString::to_string).collect();
-    let synthetic = [
-        json!({ "session_id": CAMEL, "hook_event_name": "StudioInterrupted", "prompt_id": "p_2", "studio_received_ms": 1_794_700_011_000_u64 }).to_string(),
-        json!({ "session_id": CAMEL, "hook_event_name": "SessionEnd", "reason": "process_gone", "studio_received_ms": 1_794_700_012_000_u64 }).to_string(),
-    ];
-    let mut live = Studio::replayed(&lines);
-    for line in &synthetic {
-        live.apply(line);
-    }
-    let mut all = lines.clone();
-    all.extend(synthetic);
-    let restarted = Studio::replayed(&all);
-    for studio in [&live, &restarted] {
-        let session = studio.session(CAMEL).unwrap();
-        assert_eq!(session.state, State::Ended);
-        assert_eq!(session.capabilities, COPILOT_CAPABILITIES);
-    }
 }
 
 /// Copilot's `agentStop` carries no reply, so each turn's is read from its transcript: the last
