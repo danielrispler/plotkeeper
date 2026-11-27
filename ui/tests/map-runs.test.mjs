@@ -36,8 +36,8 @@ const button = (node, words) => node.find("button").find((each) => each.text ===
 const texts = (nodes) => nodes.map((node) => node.text).join("\n");
 
 test("the queue shows in order: the running run first as it was asked for, then the ones that wait", () => {
-  const rows = runRows({ paused: null, runs: [run("a", "running"), run("b", "queued"), run("c", "queued", { kind: "micro-world" })] });
-  assert.deepEqual(rows.map((row) => [row.id, row.title, row.action]), [["a", "Back a law", "Cancel"], ["b", "Back a law", "Cancel"], ["c", "Micro-world", "Cancel"]]);
+  const rows = runRows({ paused: null, runs: [run("a", "running"), run("b", "queued"), run("c", "queued", { kind: "micro-world" }), run("d", "queued", { kind: "first-map" })] });
+  assert.deepEqual(rows.map((row) => [row.id, row.title, row.action]), [["a", "Back a law", "Cancel"], ["b", "Back a law", "Cancel"], ["c", "Micro-world", "Cancel"], ["d", "First map", "Cancel"]]);
   assert.match(rows[0].note, /^Running since \d\d:\d\d$/);
   assert.equal(rows[1].note, "Queued, next");
   assert.equal(rows[2].note, "Queued");
