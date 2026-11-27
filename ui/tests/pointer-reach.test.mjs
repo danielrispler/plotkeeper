@@ -9,7 +9,7 @@ const reasons = {
   ".map-links": "the Map view's lines run under the plates and are no control; a plate takes its own pointer and a link's mark turns pointer events back on, for its hint (#588)",
   ".hint-anchor": "the invisible box an SVG mark's hint anchors to holds no control and takes no pointer, so the mark under it does",
   ".map-light": "the PR brief's light runs over the links and is no control; the plates under it take the pointer",
-  ".map-side": "the side area's empty space over the map lets the pointer reach the map; its sheet, drawer and not placed list turn pointer events back on",
+  ".map-side": "the side area's empty space over the map lets the pointer reach the map; its sheet, drawer and not placed line turn pointer events back on",
   ".plate-fog": "the mist behind a plate holds no control, and the plate over it takes the pointer",
   ".plate.foot-firm::after": "a footprint's corner brackets lie around the plate's edge and hold no control; the plate and its badge take the pointer",
   ".plate.foot-faint::after": "a footprint's corner brackets lie around the plate's edge and hold no control; the plate and its badge take the pointer",

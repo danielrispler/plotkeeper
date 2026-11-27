@@ -527,8 +527,8 @@ h1 { margin: 0 0 var(--sp-4); }
 body[data-panel="diff"] .map-stage { --panel-w: min(var(--panel-wide), calc(100% - 2 * var(--inset))); }
 .map-body { position: relative; min-width: 0; min-height: 0; }
 /* One glass recipe (#385) for every card over the map, Treatment C's part sheet: a near-opaque surface, a backdrop blur, a top highlight, a
-   faint edge, a deep shadow and a round corner. It never darkens the map under it. The not placed list takes it while open only (#666). */
-.glass, #map-not-placed:has(> details[open]) { background: var(--glass); backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur)); border-radius: var(--glass-radius);
+   faint edge, a deep shadow and a round corner. It never darkens the map under it. */
+.glass { background: var(--glass); backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur)); border-radius: var(--glass-radius);
          box-shadow: var(--glass-shadow); }
 /* The side area, over the map's right: the agents no part holds (first, so a sheet never pushes them down over a part, #466), the part's sheet,
    the drawer under it, then the background runs, on the sheet's glass too, since the map pans under them (#472).
@@ -934,7 +934,7 @@ mark.drawer-line .drawer-n::before { content: "→ " / ""; color: var(--fg); }
    line; cut to the plate's width, its title holding the whole. */
 .spot-chip { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; max-width: 100%; padding: 0 var(--sp-4); font-size: var(--size-xs); line-height: 1.6;
              border-radius: var(--radius); color: var(--fg); background: var(--raised); box-shadow: inset 0 0 0 var(--hair) var(--plate-edge), var(--shadow); }
-.spot-chip .logo, .spot-chip .logo svg, .badge-list .logo, .badge-list .logo svg, #map-not-placed .logo, #map-not-placed .logo svg { width: var(--logo); height: var(--logo); }
+.spot-chip .logo, .spot-chip .logo svg, .badge-list .logo, .badge-list .logo svg { width: var(--logo); height: var(--logo); }
 .spot-chip-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .spot-chip-line { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 .spot-chip-line::before { content: "· " / ""; }
@@ -942,7 +942,7 @@ mark.drawer-line .drawer-n::before { content: "→ " / ""; color: var(--fg); }
    its logo, full name, state and line; its Workers on the part follow, indented. */
 .badge-list { position: fixed; inset: auto; margin: 0; border: 0; width: var(--badge-list); max-height: calc(100vh - 2 * var(--sp-5)); overflow-y: auto; overscroll-behavior: contain; padding: var(--sp-3);
               border-radius: var(--radius); color: var(--fg); background: var(--surface); box-shadow: inset 0 0 0 var(--hair) var(--edge), var(--shadow); }
-.badge-list:popover-open, #map-not-placed .not-placed-rows { display: grid; gap: var(--sp-1); }
+.badge-list:popover-open { display: grid; gap: var(--sp-1); }
 .btn.session-pick { display: grid; grid-template-columns: var(--logo) minmax(0, 1fr); align-items: baseline; gap: 0 var(--sp-3); padding: var(--sp-3) var(--sp-4);
                     text-align: start; white-space: normal; overflow-wrap: anywhere; }
 .btn.session-pick { background: none; }
@@ -955,19 +955,16 @@ mark.drawer-line .drawer-n::before { content: "→ " / ""; color: var(--fg); }
 .btn.session-pick.worker { padding-block: var(--sp-2); }
 .session-pick.worker .session-pick-name { font-weight: 400; color: var(--muted); }
 .session-pick.worker .session-pick-name::before { content: "\21B3  " / ""; }
-/* The not placed list (#472): one line, "N not placed", that a click opens. Its line has a fixed height, and while a sheet is open the
-   slot keeps that height even with no session in it, so sessions joining and leaving never move the sheet under it while the list is closed. */
+/* The not placed line (#694): one line, "N need you · not on the map", a button that opens the next such session's story, bare on the map with
+   no glass, in Needs you's colour. Its line has a fixed height, and while a sheet is open the slot keeps that height even with no line in it, so
+   sessions starting and stopping to need Daniel never move the sheet under it (#472). */
 #map-not-placed { --not-placed-line: 1.5rem; }
 .map-side:has(> #map-sheet:not(:empty)) > #map-not-placed:empty { display: block; block-size: var(--not-placed-line); }
-#map-not-placed .side-title { display: flex; align-items: center; block-size: var(--not-placed-line); margin: 0; font-size: var(--size-xs); font-weight: 400;
-                              letter-spacing: .12em; text-transform: uppercase; color: var(--faint); cursor: pointer; }
-#map-not-placed .side-title:hover { color: var(--muted); }
-#map-not-placed .side-title::before { content: "\25B8" / ""; display: inline-block; width: var(--glyph); margin-inline-end: var(--sp-4); }
-#map-not-placed details[open] > .side-title::before { content: "\25BE" / ""; }
-#map-not-placed .not-placed-asking { margin-inline-start: .5ch; font-weight: 600; color: var(--needs-you); }
-#map-not-placed .not-placed-rows { padding-block-start: var(--sp-3); }
-/* Open, on the glass, its rows read over a busy map; closed, the bare line keeps its height, so the sheet under it never moves (#666). */
-#map-not-placed:has(> details[open]) { padding: 0 var(--sp-4) var(--sp-4); }
+.btn.not-placed-line { display: flex; align-items: center; max-inline-size: 100%; block-size: var(--not-placed-line); margin: 0; padding: 0; background: none;
+                       font-size: var(--size-xs); font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--needs-you);
+                       white-space: nowrap; cursor: pointer; }
+.btn.not-placed-line:focus-visible { outline-offset: calc(-1 * var(--mark)); }
+.btn.not-placed-line:hover:not(:disabled, [aria-disabled="true"]) { background: none; text-decoration: underline; }
 
 /* The PR brief (spec #334, ticket #339): treatment C. One focus per step in a panel at the foot of the map, which the camera leaves room for; the
    parts a step lights stand out and the rest of the map dims; a light runs the step's links. Never a colour of its own: the warm light of a brief.

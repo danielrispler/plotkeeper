@@ -251,9 +251,10 @@ export const mapBusy = (): Fixture => {
       if (counts !== "core:1,hook:1,shell:1,window:1") log("snap:fail the badges: " + counts);
       if (!badge("hook")?.matches(".needs-you") || badge("core")?.matches(".needs-you")) log("snap:fail only Hook's badge carries the Needs-you accent");
       if (document.querySelector("#map .spot-chip")) log("snap:fail a chip shows with no session spotlit");
-      const rest = [...document.querySelectorAll("#map-not-placed .session-pick:not(.worker) .session-pick-name")].map((c) => c.textContent);
-      if (rest.join("|") !== "#313 · Docs|#312 · CI marks|agy · Name from the prompt|codex · plotkeeper") log("snap:fail not placed: " + rest.join("|"));
-      if (document.querySelector("#map-not-placed .session-pick.worker")) log("snap:fail the not placed list shows a Worker row");
+      // Of the four sessions no part holds (#313 asks; #312, agy and Codex run), only the one that needs Daniel is on the map, as one line (#694).
+      const rest = [...document.querySelectorAll("#map-not-placed .not-placed-line")].map((c) => c.textContent);
+      if (rest.join("|") !== "1 needs you \u00B7 not on the map") log("snap:fail not placed: " + rest.join("|"));
+      if (document.querySelector("#map-not-placed details, #map-not-placed .session-pick")) log("snap:fail the not placed list is still there");
       if ([...document.querySelectorAll("#map [interestfor], #map-not-placed [interestfor]")].some((node) => document.getElementById(node.getAttribute("interestfor"))?.textContent.includes("Read the log"))) log("snap:fail a Helper is on the map");
       log("badges ok, not placed " + rest.length);`, {
       map_state: mapState(),
@@ -629,7 +630,7 @@ export const mapScrubbed = (): Fixture => {
       await wait(200);
       const banner = document.getElementById("map-banner");
       if (!banner.textContent.includes("Viewing 2222222") || !banner.textContent.includes("Back to now")) return log("snap:fail banner: " + banner.textContent);
-      if (document.querySelector("#map .session-badge, #map .spot-chip, #map-not-placed .session-pick")) log("snap:fail a live session shows in the past");
+      if (document.querySelector("#map .session-badge, #map .spot-chip, #map-not-placed .not-placed-line")) log("snap:fail a live session shows in the past");
       if (document.querySelector("#map .plate .law-broken")) log("snap:fail a broken-law mark shows in the past");
       if (document.querySelector("#map .plate.fog-thin, #map .plate.fog-thick")) log("snap:fail fog shows in the past");
       if (document.querySelector("#map .plate[data-id=workbench]")) log("snap:fail the workbench was not yet there");
@@ -1094,13 +1095,13 @@ export const mapFog = () =>
     if (document.getElementById("map").hidden) log("snap:fail the first Esc left the Map view");
     document.querySelector("#map .plate[data-id=shell]").click();
     await wait(300);
-    // With the sheet open, the not placed list's title sits over no plate (#466).
-    const title = document.querySelector("#map-not-placed .side-title");
-    if (!title) return log("snap:fail no Not placed title");
+    // With the sheet open, the not placed line sits over no plate (#466).
+    const title = document.querySelector("#map-not-placed .not-placed-line");
+    if (!title) return log("snap:fail no not placed line");
     const at = title.getBoundingClientRect();
     for (const plate of document.querySelectorAll("#map .plate")) {
       const box = plate.getBoundingClientRect();
-      if (at.left < box.right && box.left < at.right && at.top < box.bottom && box.top < at.bottom) log("snap:fail the Not placed title is over the " + plate.dataset.id + " plate");
+      if (at.left < box.right && box.left < at.right && at.top < box.bottom && box.top < at.bottom) log("snap:fail the not placed line is over the " + plate.dataset.id + " plate");
     }
     log("thin " + thin + ", thick " + thick);`, { map_state: mapState({ fog: { shell: "thick", window: "thick", core: "thin", hook: "thin" } }), map_know: { positions: {}, tiers: {} }, contrast: true });
 /**

@@ -2,7 +2,7 @@
 // the spotlit session, run on the `tsc` output.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { footprint, footprintNote, homePart, spotlightView, marked, notPlacedLine, placeGroups, sessionBadges, sessionHere, spotlit, turnLight, oldTurn, OLD_TURN } from "../../dist/map-live.js";
+import { footprint, footprintNote, homePart, spotlightView, marked, notPlacedLine, notPlacedTarget, placeGroups, sessionBadges, sessionHere, spotlit, turnLight, oldTurn, OLD_TURN } from "../../dist/map-live.js";
 
 const day = 24 * 60 * 60 * 1000;
 const now = 100 * day;
@@ -195,7 +195,7 @@ test("a badge carries the accent when any of its sessions needs you, a Worker's 
   assert.deepEqual(counts(byPart), { core: ["b"], window: ["a", "b"] });
 });
 
-test("the not placed rows are the marked sessions, Unseen included, whose latest turn touches no part, one row each", () => {
+test("the not placed sessions are the marked sessions, Unseen included, whose latest turn touches no part, one row each", () => {
   const sessions = [
     session("none", "running", { turns: [turn([])] }),
     session("stray", "needs_you", { agents: [worker("w1")], turns: [turn(["stray.txt", ["docs/a.md", "w1"]])] }),
@@ -257,9 +257,27 @@ test("a spotlit session with no part in its latest turn has no chip and no home,
   assert.deepEqual(spotlightView(byPart, spot, placed, now, []), { chips: [], home: null, dimmed: ["hook"] });
 });
 
-test("the not placed line counts the sessions no part holds, and says how many need you (#472)", () => {
+test("the not placed line counts only the unplaced sessions that need you, and is absent with none (#694)", () => {
   const of = (...states) => states.map((state) => ({ state }));
-  assert.deepEqual(notPlacedLine(of("running")), { count: "1 not placed", needsYou: null });
-  assert.deepEqual(notPlacedLine(of("running", "needs_you", "needs_you")), { count: "3 not placed", needsYou: "2 need you" });
-  assert.deepEqual(notPlacedLine(of("needs_you")), { count: "1 not placed", needsYou: "1 needs you" });
+  assert.equal(notPlacedLine([]), null);
+  // Unseen Your turn and Idle sessions, and Running ones, that place no part get no line.
+  assert.equal(notPlacedLine(of("your_turn", "your_turn", "your_turn", "your_turn", "your_turn", "idle", "idle")), null);
+  assert.equal(notPlacedLine(of("running")), null);
+  assert.equal(notPlacedLine(of("needs_you")), "1 needs you \u00B7 not on the map");
+  assert.equal(notPlacedLine(of("running", "needs_you", "needs_you")), "2 need you \u00B7 not on the map");
+});
+
+test("the not placed line's press opens the next unplaced needs-you session after the open one, wrapping (#694)", () => {
+  const list = [session("a", "needs_you"), session("r", "running"), session("b", "needs_you"), session("c", "needs_you")];
+  assert.equal(notPlacedTarget(list, null), "a");
+  assert.equal(notPlacedTarget(list, "a"), "b");
+  assert.equal(notPlacedTarget(list, "b"), "c");
+  // Wraps past the last one.
+  assert.equal(notPlacedTarget(list, "c"), "a");
+  // An open session that is not one of them (a Running one, or one placed on a part) leaves no place to start from: the first.
+  assert.equal(notPlacedTarget(list, "r"), "a");
+  assert.equal(notPlacedTarget(list, "elsewhere"), "a");
+  // With one, it opens that one even while it is open.
+  assert.equal(notPlacedTarget([list[0]], "a"), "a");
+  assert.equal(notPlacedTarget([], null), null);
 });
