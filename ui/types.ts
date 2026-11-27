@@ -701,6 +701,21 @@ export type SavedProject = { path: string; gone: boolean; temporary: boolean };
  */
 export type MapScan = { map: string; files: Record<string, number>; read_languages: string[]; unread_languages: string[]; claude: boolean };
 
+/**
+ * First map's Map draft (`server/src/map_draft.rs`, #762): `map`, the skeleton with each part's latest written text and the person's
+ * edits, as text; each writer group (and each Redraft this part) by index, which `map_draft_retry` takes, with its state and why it
+ * failed; the reviewer's verdict on each part's purpose as `map` shows it, by part id; what the writers left out; and `ready`, true once
+ * every group is done, for Accept.
+ */
+export type MapDraftState = "writing" | "checking" | "done" | "writer-failed" | "reviewer-failed";
+export type MapDraft = {
+  map: string;
+  groups: { parts: string[]; state: MapDraftState; why: string | null; redraft: boolean }[];
+  verdicts: Record<string, MapReviewItem>;
+  not_written: { what: string; why: string }[];
+  ready: boolean;
+};
+
 /** What the page asks at start (#527): plotkeeper's package version, for the toast after an update (`whats-new.ts`). */
 export type About = { version: string };
 /** Why a project header's quiet dot lights (`map.rs`, #386): fog on a Core part, a broken law, a PR brief waiting. */
@@ -775,6 +790,12 @@ export interface Commands {
   map_proof: { args: Project & { law: string }; reply: Proof[] };
   map_state: { args: Project & { fetch: boolean }; reply: MapState };
   map_scan: { args: Project; reply: MapScan };
+  map_draft: { args: Project; reply: MapDraft | null };
+  map_draft_start: { args: Project & { skeleton?: string | null }; reply: MapDraft };
+  map_draft_retry: { args: Project & { group: number }; reply: MapDraft };
+  map_draft_redraft: { args: InPart; reply: MapDraft };
+  map_draft_edit: { args: InPart & { name?: string | null; caption?: string | null; purpose?: string | null; tier?: string | null }; reply: MapDraft };
+  map_draft_discard: { args: Project; reply: void };
   pr_brief: { args: InPr & { full?: boolean | null }; reply: BriefOpened | null };
   // `older` (#638): "Read the one you have", the stored catch-up of an earlier fog list while it still holds.
   part_catch_up: { args: InPart & { older?: boolean | null }; reply: CatchUpOpened | null };

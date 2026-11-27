@@ -240,9 +240,11 @@ fn run(log: &std::path::Path, held: lock::Held) -> std::io::Result<()> {
     studio_server::set_summaries_on(&app, summaries_on);
     // The background runs a start before left: the running ones go on, the queued ones take their turn.
     app.runner.pick_up();
-    // The micro-worlds whose run ended meanwhile are checked now, and the map text reviews' answers read.
+    // The micro-worlds whose run ended meanwhile are checked now, and the map text reviews' answers read; a Map draft's group
+    // whose run was lost fails, retryable.
     app.worlds.pick_up();
     app.reviews.pick_up();
+    app.drafts.pick_up();
     let project = register(|folder| studio_server::register_folder(&app, folder));
     let token = web::new_token();
     let page = Web::start(

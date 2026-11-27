@@ -943,6 +943,39 @@ fn a_run_that_joins_an_active_batch_starts_at_once() {
 }
 
 #[test]
+fn a_run_its_batchs_last_end_joins_starts_before_the_request_waiting_behind_the_batch() {
+    let bench = bench();
+    let ids = bench
+        .runner
+        .submit_batch(vec![bench.request(PROJECT, &waits("writer"))])
+        .unwrap();
+    let writer = ids[0].clone();
+    bench.until(|_| bench.state(&writer) == Some(RunState::Running));
+    let later = bench.run("echo later");
+    // The module told of the writer's end joins its reviewer then, as First map does, before the slot frees.
+    let (tell, joined) = mpsc::channel();
+    let runner = Arc::downgrade(&bench.runner);
+    let reviewer = bench.request(PROJECT, &waits("reviewer"));
+    let reviewer = std::sync::Mutex::new(Some(reviewer));
+    let batch = writer.clone();
+    bench.runner.on_end(move |end| {
+        if end.id != batch {
+            return;
+        }
+        let request = reviewer.lock().unwrap().take();
+        if let (Some(runner), Some(request)) = (runner.upgrade(), request) {
+            drop(tell.send(runner.join(&batch, request).unwrap()));
+        }
+    });
+    fs::write(bench.folder(&writer).join("work/go"), "").unwrap();
+    let reviewer = joined.recv_timeout(Duration::from_secs(30)).unwrap();
+    assert_eq!(bench.state(&reviewer), Some(RunState::Running));
+    assert_eq!(bench.state(&later), Some(RunState::Queued));
+    fs::write(bench.folder(&reviewer).join("work/go"), "").unwrap();
+    bench.until(ended(&later));
+}
+
+#[test]
 fn a_batch_with_a_request_refused_is_refused_whole_and_leaves_no_folder() {
     let bench = bench();
     let first = bench.request(PROJECT, "echo first");
@@ -1900,7 +1933,7 @@ fn cancel_of_a_run_that_ends_at_that_moment_never_fails() {
 }
 
 #[test]
-fn the_module_that_asked_for_a_run_is_told_its_end_once_also_at_a_pick_up() {
+fn every_module_that_listens_is_told_a_runs_end_once_also_at_a_pick_up() {
     let dir = tempfile::tempdir().unwrap();
     settings(dir.path(), r#"{ "checks": { "/p/app": ["cargo test"] } }"#);
     fs::create_dir_all(dir.path().join("data")).unwrap();
@@ -1910,7 +1943,9 @@ fn the_module_that_asked_for_a_run_is_told_its_end_once_also_at_a_pick_up() {
         told
     };
     let runner = Runner::new(config(dir.path(), Arc::new(Script)));
+    // Back a law and First map each listen, and each is told.
     let told = ends(&runner);
+    let other = ends(&runner);
     runner.pick_up();
     let folder = runner.new_folder().unwrap();
     let id = runner
@@ -1934,6 +1969,8 @@ fn the_module_that_asked_for_a_run_is_told_its_end_once_also_at_a_pick_up() {
         (id.as_str(), Kind::BackLaw, PROJECT, &folder, End::Done)
     );
     assert!(told.recv_timeout(Duration::from_millis(300)).is_err());
+    assert_eq!(other.recv_timeout(Duration::from_secs(30)).ok(), Some(end));
+    assert!(other.recv_timeout(Duration::from_millis(300)).is_err());
 
     // A run that ends while plotkeeper is stopped is told at the next start, when it is picked up.
     let waiting = runner.new_folder().unwrap();
@@ -1946,7 +1983,7 @@ fn the_module_that_asked_for_a_run_is_told_its_end_once_also_at_a_pick_up() {
             limits: Limits::of(Kind::BackLaw),
         })
         .unwrap();
-    drop((runner, told));
+    drop((runner, told, other));
     fs::write(waiting.join("go"), "").unwrap();
     let deadline = Instant::now() + Duration::from_secs(30);
     while !dir
@@ -1962,7 +1999,9 @@ fn the_module_that_asked_for_a_run_is_told_its_end_once_also_at_a_pick_up() {
     std::thread::sleep(Duration::from_millis(200));
     let runner = Runner::new(config(dir.path(), Arc::new(Script)));
     let told = ends(&runner);
+    let other = ends(&runner);
     runner.pick_up();
     let end = told.recv_timeout(Duration::from_secs(30)).unwrap();
     assert_eq!((end.id.as_str(), end.end), (id.as_str(), End::Done));
+    assert_eq!(other.recv_timeout(Duration::from_secs(30)).ok(), Some(end));
 }

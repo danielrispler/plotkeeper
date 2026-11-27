@@ -168,6 +168,29 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
         "agent_summary" => out(crate::agent_summary(app, arg(a, "agent_id")?)),
         "map_state" => res(crate::map_state(arc, arg(a, "project")?, arg(a, "fetch")?)),
         "map_scan" => res(crate::map_scan::map_scan(arg(a, "project")?)),
+        "map_draft" => out(crate::map_draft::map_draft(app, arg(a, "project")?)),
+        "map_draft_start" => res(crate::map_draft::map_draft_start(
+            app,
+            arg(a, "project")?,
+            arg(a, "skeleton")?,
+        )),
+        "map_draft_retry" => res(app
+            .drafts
+            .retry(&arg::<String>(a, "project")?, arg(a, "group")?)),
+        "map_draft_redraft" => res(app
+            .drafts
+            .redraft(&arg::<String>(a, "project")?, &arg::<String>(a, "part")?)),
+        "map_draft_edit" => res(app.drafts.edit(
+            &arg::<String>(a, "project")?,
+            &arg::<String>(a, "part")?,
+            crate::map_draft::Edit {
+                name: arg(a, "name")?,
+                caption: arg(a, "caption")?,
+                purpose: arg(a, "purpose")?,
+                tier: arg(a, "tier")?,
+            },
+        )),
+        "map_draft_discard" => res(app.drafts.discard(&arg::<String>(a, "project")?)),
         "map_know" => res(crate::map::map_know(arg(a, "project")?, arg(a, "part")?)),
         "map_refresher" => res(crate::map::map_refresher(
             arg(a, "project")?,

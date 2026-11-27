@@ -29,7 +29,7 @@ pub fn map_scan(project: String) -> Result<MapScan, String> {
 
 /// The scan of the main checkout of `repo`, with `claude` as found: the skeleton gets the edges `check_text` computes on it as
 /// `import` links, one per pair of parts in the edge's direction, with no reason, as Accept writes them (#753, "The map written").
-fn scan_of(repo: &Path, claude: bool) -> Result<MapScan, String> {
+pub(crate) fn scan_of(repo: &Path, claude: bool) -> Result<MapScan, String> {
     let main = studio_workbench::main_checkout(repo)?;
     let root = Path::new(&main);
     let found = system_map::scan(root)?;

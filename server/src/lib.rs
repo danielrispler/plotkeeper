@@ -39,6 +39,7 @@ pub mod learning;
 pub mod lock;
 pub mod map;
 pub mod map_diff;
+pub mod map_draft;
 pub mod map_review;
 pub mod map_scan;
 pub mod micro_worlds;
@@ -157,6 +158,8 @@ pub struct App {
     pub laws: Arc<back_a_law::LawRuns>,
     /// The map text reviews (`map_review.rs`): their runs and the verdicts kept per PR.
     pub reviews: Arc<map_review::MapReviews>,
+    /// First map's Map drafts (`map_draft.rs`): their writers and reviewers, and what they gave, kept per project.
+    pub drafts: Arc<map_draft::MapDrafts>,
     /// The map items each landed commit changed (`ratify::changes_of`).
     changes: ratify::ChangesCache,
     /// Each project's part births (`staleness::births`).
@@ -322,6 +325,14 @@ impl App {
                 reviews.runs_changed(project);
             }
         });
+        let drafts = map_draft::MapDrafts::new(
+            map_draft::Config {
+                store: data.join("first-map"),
+            },
+            &runner,
+        );
+        let told = events.clone();
+        drafts.on_change(move |project| told.emit("map-landed", project.into()));
         let laws = back_a_law::LawRuns::new(runner.clone(), back_a_law::Config::beside(log));
         let told = events.clone();
         laws.on_change(move |project| told.emit("map-landed", project.into()));
@@ -355,6 +366,7 @@ impl App {
             worlds,
             laws,
             reviews,
+            drafts,
             changes: Mutex::default(),
             births: Mutex::default(),
         })

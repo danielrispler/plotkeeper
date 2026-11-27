@@ -1,6 +1,7 @@
 //! Background runs (spec danielrispler/plotkeeper#378, ticket #390): a headless agent run with scoped tools, started by
-//! Daniel's click and never a session. This is the runner; back a law (`back_a_law.rs`), micro-worlds (`micro_worlds.rs`) and
-//! the map text review (`map_review.rs`, which also starts by itself for Daniel's own PRs) start runs.
+//! Daniel's click and never a session. This is the runner; back a law (`back_a_law.rs`), micro-worlds (`micro_worlds.rs`),
+//! the map text review (`map_review.rs`, which also starts by itself for Daniel's own PRs) and First map (`map_draft.rs`) start
+//! runs.
 //!
 //! - **The seam.** A [`Request`] (run kind, working folder, prompt, limits) goes in through [`Runner::submit`]; an
 //!   [`Outcome`] (result text, denials, cost, exit) comes out through [`Runner::outcome`]. The [`Harness`] builds the
@@ -27,7 +28,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{
-        Arc, Mutex, OnceLock, Weak,
+        Arc, Mutex, Weak,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread,
@@ -1004,6 +1005,9 @@ struct State {
     paused: Option<Pause>,
     /// The ended runs whose folder a module is still reading, by id, with how many holds each has ([`Runner::hold`]).
     held: BTreeMap<String, usize>,
+    /// The batches whose run's end is being told, by project and batch, once per end: each holds its project's slot as a
+    /// running run does, so a run the module joins then (a First map reviewer) starts before a request queued behind.
+    telling: Vec<(String, String)>,
 }
 
 /// A module's hold on an ended run's folder: Dismiss is refused until it is dropped.
@@ -1037,14 +1041,15 @@ pub struct Ended {
     pub end: End,
 }
 
-type EndTold = Box<dyn Fn(Ended) + Send + Sync>;
+type EndTold = Arc<dyn Fn(Ended) + Send + Sync>;
 
 /// The background runs of every project: their queue, their processes and their outcomes.
 pub struct Runner {
     config: Config,
     state: Mutex<State>,
     changed: Notice,
-    ended: OnceLock<EndTold>,
+    /// What is told of a run's end, one per module that listens ([`Runner::on_end`]).
+    ended: Mutex<Vec<EndTold>>,
     /// For the threads that wait on a run's end: a runner that is gone is told nothing.
     me: Weak<Runner>,
     ids: AtomicU64,
@@ -1057,7 +1062,7 @@ impl Runner {
             config,
             state: Mutex::default(),
             changed: Notice::default(),
-            ended: OnceLock::new(),
+            ended: Mutex::default(),
             me: me.clone(),
             ids: AtomicU64::new(0),
         })
@@ -1068,11 +1073,15 @@ impl Runner {
         self.changed.set(changed);
     }
 
-    /// Sets what is told when a run ends on its own, as it ends or when [`Runner::pick_up`] finds it ended; never for a
-    /// cancelled run. Set it before `pick_up`; the first call wins.
+    /// Adds what is told when a run ends on its own, as it ends or when [`Runner::pick_up`] finds it ended; never for a
+    /// cancelled run. Each module that listens adds its own, before `pick_up`, and each is told every end, in the order
+    /// they were added. While the end of a batch's run is told, the batch keeps its project's slot, so a run joined to it
+    /// then ([`Runner::join`]) starts at once, ahead of a request queued behind the batch.
     pub fn on_end(&self, ended: impl Fn(Ended) + Send + Sync + 'static) {
-        // Set once; a later set keeps the first value, which is the same.
-        self.ended.set(Box::new(ended)).ok();
+        self.ended
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(Arc::new(ended));
     }
 
     fn tell(&self, project: &str) {
@@ -1259,7 +1268,8 @@ impl Runner {
 
     /// Starts the first queued run of each project that has none going, unless the queues are paused, and with it every
     /// other queued run of its batch. A project is busy while any of its runs is running, wherever that run sits in the
-    /// order; while that run is a batch's, a queued run of the same batch joins it and starts.
+    /// order, or while the end of a batch's run is told; while that run is a batch's, a queued run of the same batch joins
+    /// it and starts.
     fn advance(&self, state: &mut State) {
         if state.paused.is_some() {
             return;
@@ -1272,6 +1282,8 @@ impl Runner {
         let mut busy: Vec<(String, Option<String>)> = running
             .map(|run| (run.stored.project.clone(), run.stored.batch.clone()))
             .collect();
+        let telling = state.telling.iter().cloned();
+        busy.extend(telling.map(|(project, batch)| (project, Some(batch))));
         for run in &mut state.runs {
             let stored = &run.stored;
             let free = !busy.iter().any(|(project, _)| *project == stored.project);
@@ -1386,6 +1398,7 @@ impl Runner {
         let project = run.stored.project.clone();
         let end = self.finish(run);
         let ended = Self::ended_of(&run.stored, end);
+        let telling = Self::telling(&mut state, &ended.id);
         let pause = end.pause();
         if pause.is_some() {
             self.pause(&mut state, pause);
@@ -1394,8 +1407,17 @@ impl Runner {
         // A pause holds every project's queue, so each project with runs draws again.
         let told = Self::told(&state, pause, &project);
         drop(state);
-        self.tell_end(ended);
+        self.tell_ends(vec![ended], telling);
         told.iter().for_each(|project| self.tell(project));
+    }
+
+    /// Marks the batch of ended run `id`, if it has one, as having its end told, which holds its project's slot: the mark,
+    /// for [`Runner::tell_ends`] to take off.
+    fn telling(state: &mut State, id: &str) -> Option<(String, String)> {
+        let run = state.runs.iter().find(|run| run.stored.id == id)?;
+        let mark = (run.stored.project.clone(), run.stored.batch.clone()?);
+        state.telling.push(mark.clone());
+        Some(mark)
     }
 
     fn ended_of(stored: &Stored, end: End) -> Ended {
@@ -1408,10 +1430,33 @@ impl Runner {
         }
     }
 
-    fn tell_end(&self, ended: Ended) {
-        if let Some(tell) = self.ended.get() {
-            tell(ended);
+    /// Tells every listener each of `ends`, with the runner's lock let go, then takes off the marks `telling` of their
+    /// batches, so a batch with no run left frees its project's slot, and starts what may start.
+    fn tell_ends(&self, ends: Vec<Ended>, telling: impl IntoIterator<Item = (String, String)>) {
+        let listeners = self
+            .ended
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        for ended in ends {
+            for tell in &listeners {
+                tell(ended.clone());
+            }
         }
+        let mut state = self.state();
+        let mut freed = Vec::new();
+        for mark in telling {
+            if let Some(at) = state.telling.iter().position(|each| *each == mark) {
+                freed.push(state.telling.remove(at).0);
+            }
+        }
+        if freed.is_empty() {
+            return;
+        }
+        self.advance(&mut state);
+        drop(state);
+        freed.dedup();
+        freed.iter().for_each(|project| self.tell(project));
     }
 
     /// The projects that have a run, each once.
@@ -1726,9 +1771,13 @@ impl Runner {
         if paused.is_some() {
             self.pause(&mut state, paused);
         }
+        let telling: Vec<(String, String)> = ended
+            .iter()
+            .filter_map(|ended| Self::telling(&mut state, &ended.id))
+            .collect();
         self.advance(&mut state);
         drop(state);
-        ended.into_iter().for_each(|ended| self.tell_end(ended));
+        self.tell_ends(ended, telling);
     }
 
     /// `project`'s runs as the map shows them, and the pause line.
