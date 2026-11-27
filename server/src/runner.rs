@@ -12,8 +12,9 @@
 //!   launcher holds an exclusive lock on the folder's `lock` for as long as it lives and writes `status.json` whole when the
 //!   child exits. A run is alive while that lock is held: a free lock with no status is a dead run. So a run outlives
 //!   plotkeeper, and [`Runner::pick_up`] finds it again at the next start.
-//! - **The limits.** One run at a time per project, the others queued in the order they were asked for; a time limit the
-//!   launcher keeps; a third of the cores for builds; and a failure on the login or a rate limit pauses every queue until
+//! - **The limits.** One run at a time per project, or one batch of runs that hold the project's slot together
+//!   ([`Runner::submit_batch`]), the others queued in the order they were asked for; a time limit the launcher keeps; a
+//!   third of the cores for builds; and a failure on the login or a rate limit pauses every queue until
 //!   [`Runner::resume`].
 
 use crate::records::Notice;
@@ -60,6 +61,8 @@ pub enum Kind {
     MicroWorld,
     /// Checks a PR's changed map text against the PR's code, reading only (`map_review.rs`).
     MapReview,
+    /// Writes or reviews a part group's text for a repository's first map, reading only and answering in its result.
+    FirstMap,
 }
 
 impl Kind {
@@ -68,14 +71,15 @@ impl Kind {
         match self {
             Kind::BackLaw => &["Bash", "Read", "Edit", "Write", "Glob", "Grep"],
             Kind::MicroWorld => &["Read", "Edit", "Write", "Glob", "Grep"],
-            Kind::MapReview => &["Read", "Glob", "Grep"],
+            Kind::MapReview | Kind::FirstMap => &["Read", "Glob", "Grep"],
         }
     }
 
     /// Whether the project's `setup` runs before the agent. Never for a map text review: its folder holds a PR's head, whose
-    /// code a setup such as `npm ci` would run outside the sandbox, and with no shell it needs none.
+    /// code a setup such as `npm ci` would run outside the sandbox, and with no shell it needs none. Nor for a first map,
+    /// which only reads.
     fn takes_setup(self) -> bool {
-        self != Kind::MapReview
+        !matches!(self, Kind::MapReview | Kind::FirstMap)
     }
 
     /// Whether the agent has a shell, and so needs the project's checks to allow in it.
@@ -91,11 +95,11 @@ pub struct Limits {
 }
 
 impl Limits {
-    /// 30 minutes, and 10 for a micro-world or a map text review.
+    /// 30 minutes, and 10 for a micro-world, a map text review or a first map.
     pub fn of(kind: Kind) -> Limits {
         let minutes = match kind {
             Kind::BackLaw => 30,
-            Kind::MicroWorld | Kind::MapReview => 10,
+            Kind::MicroWorld | Kind::MapReview | Kind::FirstMap => 10,
         };
         Limits {
             timeout: Duration::from_secs(minutes * 60),
@@ -241,14 +245,14 @@ const GIT: [&str; 4] = ["git status", "git diff", "git log", "git add"];
 pub const MICRO_WORLD_OUT: &str = ".micro-world";
 
 /// What `--allowedTools` lists for a run: edits inside its working `folder` (a micro-world's only inside
-/// [`MICRO_WORLD_OUT`] there, and none for a map text review, which only reads), and for a kind with a shell the read-only
-/// git commands and one entry per command of the project's `checks`, each bare and with arguments. An entry of `checks`
-/// that has `git` or `gh` as any of its words is left out, so no list ever allows a push. This list is not a security
-/// boundary: an allowed check runs code the agent wrote. The OS sandbox and trusted input are.
+/// [`MICRO_WORLD_OUT`] there, and none for a map text review or a first map, which only read), and for a kind with a
+/// shell the read-only git commands and one entry per command of the project's `checks`, each bare and with arguments. An
+/// entry of `checks` that has `git` or `gh` as any of its words is left out, so no list ever allows a push. This list is
+/// not a security boundary: an allowed check runs code the agent wrote. The OS sandbox and trusted input are.
 pub fn allowed_tools(kind: Kind, folder: &Path, checks: &[String]) -> Vec<String> {
     // The rule's own form for an absolute path: `//` and the path.
     let writes = match kind {
-        Kind::MapReview => return Vec::new(),
+        Kind::MapReview | Kind::FirstMap => return Vec::new(),
         Kind::MicroWorld => folder.join(MICRO_WORLD_OUT),
         Kind::BackLaw => folder.to_path_buf(),
     };
@@ -511,6 +515,9 @@ struct Stored {
     #[serde(default)]
     setup: Option<String>,
     command: HarnessCommand,
+    /// The batch the run is part of, named by its first run's id ([`Runner::submit_batch`]); none for a run on its own.
+    #[serde(default)]
+    batch: Option<String>,
 }
 
 /// What the launcher reads of `run.json`: only what it runs, so a run of a kind this build does not know still keeps its
@@ -1105,11 +1112,77 @@ impl Runner {
         }
     }
 
-    /// Queues `request` and starts it when its project has no run going: the run's id. Reads `settings.json` now, so a
+    /// Queues `request` and starts it when its project has no run or batch going: the run's id. Reads `settings.json` now, so a
     /// saved change counts from the next run. A run that cannot start is refused with the prompt to copy instead, and its
     /// folder is removed: a harness other than `claude`, a kind with a shell in a project with no `checks`, or a harness
     /// that builds no command.
     pub fn submit(&self, request: Request) -> Result<String, Refusal> {
+        let stored = self.prepare(&request, None)?;
+        Ok(self.queue(vec![stored]).remove(0))
+    }
+
+    /// Queues `requests` as one batch, which holds its project's slot together: its runs start together, each with its own
+    /// folder, limit and status, and the slot frees when the last of them ends. The ids of its runs, in order; the first
+    /// names the batch, for [`Runner::join`] and [`Runner::cancel_batch`]. One request refused refuses the whole batch, as
+    /// [`Runner::submit`] refuses a run, and removes every new folder of it.
+    pub fn submit_batch(&self, requests: Vec<Request>) -> Result<Vec<String>, Refusal> {
+        let batch = requests
+            .first()
+            .and_then(|first| self.run_dir_of(&first.folder))
+            .and_then(|dir| {
+                dir.file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            });
+        let mut prepared = Vec::new();
+        for (at, request) in requests.iter().enumerate() {
+            match self.prepare(request, batch.clone()) {
+                Ok(stored) => prepared.push(stored),
+                Err(refusal) => {
+                    let others = requests.iter().enumerate().filter(|(each, _)| *each != at);
+                    for (_, other) in others {
+                        // The new runs' own folders, and the ones already prepared here: never a submitted run's.
+                        let new = self.run_dir_of(&other.folder).filter(|dir| {
+                            !dir.join(RUN).exists()
+                                || prepared.iter().any(|stored| other.folder == stored.folder)
+                        });
+                        if let Some(dir) = new {
+                            // Best effort: a file already gone is fine.
+                            fs::remove_dir_all(dir).ok();
+                        }
+                    }
+                    return Err(refusal);
+                }
+            }
+        }
+        Ok(self.queue(prepared))
+    }
+
+    /// Queues `request` in `batch`: while a run of that batch is running it starts at once, as a reviewer or a retry of a
+    /// batch does; otherwise it waits its turn, and starts with the batch's other queued runs. Refused as
+    /// [`Runner::submit`] refuses.
+    pub fn join(&self, batch: &str, request: Request) -> Result<String, Refusal> {
+        let stored = self.prepare(&request, Some(batch.to_string()))?;
+        Ok(self.queue(vec![stored]).remove(0))
+    }
+
+    /// Queues the prepared runs and starts what may start: their ids.
+    fn queue(&self, runs: Vec<Stored>) -> Vec<String> {
+        let ids: Vec<String> = runs.iter().map(|stored| stored.id.clone()).collect();
+        let mut projects: Vec<String> = runs.iter().map(|stored| stored.project.clone()).collect();
+        projects.dedup();
+        let mut state = self.state();
+        state.runs.extend(runs.into_iter().map(|stored| Run {
+            stored,
+            phase: Phase::Queued,
+        }));
+        self.advance(&mut state);
+        drop(state);
+        projects.iter().for_each(|project| self.tell(project));
+        ids
+    }
+
+    /// Checks `request` and saves it as a run of `batch` in its folder, or refuses it and removes that folder.
+    fn prepare(&self, request: &Request, batch: Option<String>) -> Result<Stored, Refusal> {
         // The folder of the new run; none for a folder that is no run's, or that a run was already submitted with.
         let new = self
             .run_dir_of(&request.folder)
@@ -1168,18 +1241,11 @@ impl Runner {
             timeout_secs: request.limits.timeout.as_secs().max(1),
             setup: settings.setup.filter(|_| request.kind.takes_setup()),
             command,
+            batch,
         };
         write_json(&dir.join(RUN), &stored)
             .map_err(|e| refuse(format!("the run could not be saved: {e}")))?;
-        let mut state = self.state();
-        state.runs.push(Run {
-            stored,
-            phase: Phase::Queued,
-        });
-        self.advance(&mut state);
-        drop(state);
-        self.tell(&request.project);
-        Ok(id)
+        Ok(stored)
     }
 
     /// The folder of the run whose working folder is `folder`: `<runs>/<id>` for `<runs>/<id>/work`, and no other path.
@@ -1191,25 +1257,33 @@ impl Runner {
             .then(|| dir.to_path_buf())
     }
 
-    /// Starts the first queued run of each project that has none going, unless the queues are paused. A project is busy
-    /// while any of its runs is running, wherever that run sits in the order.
+    /// Starts the first queued run of each project that has none going, unless the queues are paused, and with it every
+    /// other queued run of its batch. A project is busy while any of its runs is running, wherever that run sits in the
+    /// order; while that run is a batch's, a queued run of the same batch joins it and starts.
     fn advance(&self, state: &mut State) {
         if state.paused.is_some() {
             return;
         }
+        // Each project that is busy, with the batch that holds it: none for a run on its own.
         let running = state
             .runs
             .iter()
             .filter(|run| matches!(run.phase, Phase::Running { .. }));
-        let mut busy: Vec<String> = running.map(|run| run.stored.project.clone()).collect();
+        let mut busy: Vec<(String, Option<String>)> = running
+            .map(|run| (run.stored.project.clone(), run.stored.batch.clone()))
+            .collect();
         for run in &mut state.runs {
-            if !matches!(run.phase, Phase::Queued) || busy.contains(&run.stored.project) {
+            let stored = &run.stored;
+            let free = !busy.iter().any(|(project, _)| *project == stored.project);
+            let joins = stored.batch.is_some()
+                && busy.contains(&(stored.project.clone(), stored.batch.clone()));
+            if !matches!(run.phase, Phase::Queued) || !(free || joins) {
                 continue;
             }
             run.phase = self.start(&run.stored);
             // A run that could not start ended at once, and the next in its queue has its turn.
             if matches!(run.phase, Phase::Running { .. }) {
-                busy.push(run.stored.project.clone());
+                busy.push((run.stored.project.clone(), run.stored.batch.clone()));
             }
         }
     }
@@ -1498,6 +1572,29 @@ impl Runner {
         drop(state);
         told.iter().for_each(|project| self.tell(project));
         Ok(())
+    }
+
+    /// Discard of a batch: every run of it is cancelled ([`Runner::cancel`]), the queued ones first, so none of them starts
+    /// while the running ones are stopped; once the last is gone its project's slot is free. Every run is tried, and the
+    /// first refusal is told.
+    pub fn cancel_batch(&self, batch: &str) -> Result<(), String> {
+        let state = self.state();
+        let mut runs: Vec<(bool, String)> = state
+            .runs
+            .iter()
+            .filter(|run| run.stored.batch.as_deref() == Some(batch))
+            .map(|run| (!matches!(run.phase, Phase::Queued), run.stored.id.clone()))
+            .collect();
+        drop(state);
+        // `false` sorts first: the queued runs.
+        runs.sort_by_key(|(started, _)| *started);
+        let mut refused = None;
+        for (_, id) in runs {
+            if let Err(e) = self.cancel(&id) {
+                refused.get_or_insert(e);
+            }
+        }
+        refused.map_or(Ok(()), Err)
     }
 
     /// Stops the running run in `dir`, a `SIGTERM` to its launcher's process group and a `SIGKILL` past [`STOP_GRACE`],
