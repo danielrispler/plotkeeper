@@ -241,9 +241,9 @@ fn a_high_effort_whose_reason_names_no_risk_is_refused() {
 }
 /// A ticket of `checked_folder`: its file, its blockers, its Files line and its Route line.
 type Row<'a> = (&'a str, &'a [&'a str], &'a str, &'a str);
-/// The problems of a folder whose tickets are `rows`, each body `BODY` with its Files and Route
-/// lines replaced and `extra` added to its What to build.
-fn checked_folder(rows: &[Row], extra: &str) -> Vec<String> {
+/// A folder whose tickets are `rows`, each body `BODY` with its Files and Route lines replaced and
+/// `extra` added to its What to build.
+fn folder(rows: &[Row], extra: &str) -> (Manifest, std::collections::HashMap<String, String>) {
     let manifest = Manifest {
         parent: 9,
         tickets: rows
@@ -261,7 +261,123 @@ fn checked_folder(rows: &[Row], extra: &str) -> Vec<String> {
             (file.to_string(), body)
         })
         .collect();
+    (manifest, bodies)
+}
+/// The problems of the folder `folder` makes of `rows` and `extra`.
+fn checked_folder(rows: &[Row], extra: &str) -> Vec<String> {
+    let (manifest, bodies) = folder(rows, extra);
     publish_problems(&manifest, &bodies, &labels())
+}
+/// The warnings of the folder `folder` makes of `rows`, which must have no problems: warnings never
+/// stop a publish.
+fn warned_folder(rows: &[Row]) -> Vec<String> {
+    let (manifest, bodies) = folder(rows, "");
+    assert_eq!(
+        publish_problems(&manifest, &bodies, &labels()),
+        [] as [&str; 0]
+    );
+    publish_warnings(&manifest, &bodies)
+}
+#[test]
+fn a_strong_route_whose_reason_names_no_risk_or_open_choice_is_warned() {
+    let warning = "a.md: **Route:** strong, but its reason names no risk (persistence, stored, queue, concurrency, wire, redraw, layout, handler, trust boundary, untested edge case) and no open choice (open, choice, choices, undecided, daniel); file count, a new module and hand-checked trials raise the tier to medium only (issue-tracker.md, Routing)";
+    let cases: [(&str, &[&str]); 10] = [
+        (
+            "strong · effort medium — a new module with heuristics checked on fixture repositories",
+            &[warning],
+        ),
+        // The choice terms are whole words: a name holding one is no open choice.
+        (
+            "strong · effort medium — runs OpenCode and reopens a log",
+            &[warning],
+        ),
+        ("strong · effort medium — two choices are Daniel's", &[]),
+        ("strong · effort medium — a hand-checked trial", &[warning]),
+        ("strong · effort high — a Stored type gains a field", &[]),
+        ("strong · effort medium — two handlers across a redraw", &[]),
+        (
+            "strong · effort medium — the scan rules are still open",
+            &[],
+        ),
+        ("strong · effort medium — holds a choice of Daniel's", &[]),
+        ("medium · effort medium — a new module", &[]),
+        ("cheap · effort medium — one check in one file", &[]),
+    ];
+    for (route, expected) in cases {
+        assert_eq!(
+            warned_folder(&[("a.md", &[], "`a.rs`", route)]),
+            expected,
+            "{route}"
+        );
+    }
+    // Only the Route line in ## Touches counts, not one quoted in What to build.
+    let (manifest, mut bodies) = folder(
+        &[(
+            "a.md",
+            &[],
+            "`a.rs`",
+            "strong · effort medium — a new module",
+        )],
+        "",
+    );
+    let body = bodies["a.md"].replace(
+        "X.\n",
+        "X. Was `- **Route:** strong · effort high — a stored type`.\n",
+    );
+    bodies.insert("a.md".into(), body);
+    assert_eq!(publish_warnings(&manifest, &bodies), [warning]);
+}
+#[test]
+fn publish_prints_the_longest_chain_marking_edges_that_share_a_file() {
+    const MEDIUM: &str = "medium · effort medium — a reason";
+    let cases: [(&str, &[Row], &[&str]); 4] = [
+        (
+            "no edges: no chain",
+            &[
+                ("a.md", &[], "`a.rs`", MEDIUM),
+                ("b.md", &[], "`b.rs`", MEDIUM),
+            ],
+            &[],
+        ),
+        (
+            "a chain with no shared files",
+            &[
+                ("a.md", &[], "`a.rs`", MEDIUM),
+                ("b.md", &["a.md"], "`b.rs`", MEDIUM),
+            ],
+            &["longest chain (2 tickets): a.md → b.md"],
+        ),
+        (
+            "the longer of two chains, one edge sharing a file and a folder",
+            &[
+                ("a.md", &[], "`server/src/map.rs`, `docs/a.md`", MEDIUM),
+                (
+                    "b.md",
+                    &["a.md"],
+                    "`server/`, `ui/map.ts`, `docs/a.md`",
+                    MEDIUM,
+                ),
+                ("c.md", &["b.md"], "`ui/map.ts`", MEDIUM),
+                ("d.md", &["x.md"], "`d.rs`", MEDIUM),
+                ("x.md", &[], "`x.rs`", MEDIUM),
+            ],
+            &[
+                "longest chain (3 tickets): a.md → b.md (shares `server/src/map.rs`) → c.md (shares `ui/map.ts`); an edge that only shares a file can often go by moving the shared piece to the other ticket (ticket-authoring.md, Edges)",
+            ],
+        ),
+        (
+            "a ticket with two blockers follows the longer one",
+            &[
+                ("a.md", &[], "`a.rs`", MEDIUM),
+                ("b.md", &["a.md"], "`b.rs`", MEDIUM),
+                ("c.md", &["a.md", "b.md"], "`c.rs`", MEDIUM),
+            ],
+            &["longest chain (3 tickets): a.md → b.md → c.md"],
+        ),
+    ];
+    for (case, rows, expected) in cases {
+        assert_eq!(warned_folder(rows), expected, "{case}");
+    }
 }
 #[test]
 fn a_shared_source_file_needs_a_blocker_path_either_way() {
