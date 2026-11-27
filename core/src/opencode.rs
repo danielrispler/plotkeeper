@@ -82,15 +82,20 @@ pub(crate) fn parse(line: &str) -> Result<Event, serde_json::Error> {
     serde_json::from_str::<Raw>(line).map(adapt)
 }
 
-/// A call of tool `name` with `input`, in session folder `cwd`. OpenCode's tools take a `path`
-/// relative to it, or absolute; the call's input names it absolute, as the ledger reads it there.
-fn tool(name: &str, input: &Value, cwd: &str) -> Tool {
-    let kind = match name {
+/// What a call of tool `name` is.
+pub(crate) fn kind(name: &str) -> ToolKind {
+    match name {
         "write" | "edit" | "patch" => ToolKind::Edit,
         "shell" => ToolKind::Command,
         "question" => ToolKind::Question,
         _ => ToolKind::Other,
-    };
+    }
+}
+
+/// A call of tool `name` with `input`, in session folder `cwd`. OpenCode's tools take a `path`
+/// relative to it, or absolute; the call's input names it absolute, as the ledger reads it there.
+fn tool(name: &str, input: &Value, cwd: &str) -> Tool {
+    let kind = kind(name);
     let mut input = input.clone();
     let path = input["path"].as_str().map(|path| {
         let path = std::path::Path::new(cwd).join(path);

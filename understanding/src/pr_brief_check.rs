@@ -132,12 +132,11 @@ pub fn claim_prompt(brief: &Brief) -> String {
 /// The `{ ... }` object in a reply's text (or in the whole `claude` envelope).
 fn object_in(text: &str) -> Result<Value, String> {
     let text = crate::pr_brief::read_envelope(text)?.text;
-    let (a, b) = text
-        .find('{')
-        .zip(text.rfind('}'))
-        .filter(|(a, b)| a < b)
-        .ok_or("the reply holds no JSON object")?;
-    serde_json::from_str(&text[a..=b]).map_err(|e| format!("the reply's JSON does not read: {e}"))
+    crate::read_object(
+        &text,
+        "the reply holds no JSON object",
+        "the reply's JSON does not read: ",
+    )
 }
 
 /// A claim the checker found unsupported.

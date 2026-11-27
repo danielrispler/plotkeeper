@@ -78,17 +78,22 @@ pub(crate) fn parse(line: &str) -> Result<Event, serde_json::Error> {
     serde_json::from_str::<Raw>(line).map(adapt)
 }
 
+/// What a call of tool `name` is.
 // hook/src/lib.rs's `cursor_shaped` keeps a copy of the tool names, as the hook does not depend on core.
-fn tool(raw: &Raw) -> Tool {
-    let name = raw.tool_name.clone().unwrap_or_default();
-    let input = &raw.tool_input;
-    let kind = match name.as_str() {
+pub(crate) fn kind(name: &str) -> ToolKind {
+    match name {
         "Write" | "Delete" => ToolKind::Edit,
         "Shell" => ToolKind::Command,
         "Task" => ToolKind::Spawn,
         _ if name.starts_with("MCP:") => ToolKind::External,
         _ => ToolKind::Other,
-    };
+    }
+}
+
+fn tool(raw: &Raw) -> Tool {
+    let name = raw.tool_name.clone().unwrap_or_default();
+    let input = &raw.tool_input;
+    let kind = kind(&name);
     let text = |key: &str| input[key].as_str().map(String::from);
     Tool {
         path: (kind == ToolKind::Edit)

@@ -845,7 +845,7 @@ impl Studio {
         let (since, until) = session.trees_window(turn);
         let made = |r: &&Row| {
             let rejected = r.outcome == Some(Outcome::Rejected);
-            !rejected && !(turn_files::edits(&r.tool) && r.failed())
+            !rejected && !(r.edits() && r.failed())
         };
         let others: Vec<&Row> = (self.sessions.values())
             .flat_map(|s| {

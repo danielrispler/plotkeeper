@@ -89,18 +89,23 @@ fn patched_file(patch: &str) -> Option<String> {
     })
 }
 
-fn tool(raw: &Raw) -> Tool {
-    let name = raw.tool_name.clone().unwrap_or_default();
-    let input = &raw.tool_input;
-    // `Bash` and `apply_patch` both carry their text in `command`.
-    let command = input["command"].as_str();
-    let kind = match name.as_str() {
+/// What a call of tool `name` is.
+pub(crate) fn kind(name: &str) -> ToolKind {
+    match name {
         "apply_patch" => ToolKind::Edit,
         "Bash" => ToolKind::Command,
         "spawn_agent" => ToolKind::Spawn,
         _ if name.starts_with("mcp__") => ToolKind::External,
         _ => ToolKind::Other,
-    };
+    }
+}
+
+fn tool(raw: &Raw) -> Tool {
+    let name = raw.tool_name.clone().unwrap_or_default();
+    let input = &raw.tool_input;
+    // `Bash` and `apply_patch` both carry their text in `command`.
+    let command = input["command"].as_str();
+    let kind = kind(&name);
     Tool {
         path: (kind == ToolKind::Edit)
             .then(|| command.and_then(patched_file))

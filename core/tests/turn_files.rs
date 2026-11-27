@@ -623,9 +623,72 @@ fn with_no_other_toucher_of_the_root_every_differing_file_is_the_turns() {
     assert_eq!(kept(vec![elsewhere]), ["src/a.rs", "src/b.rs"]);
 }
 
+/// A Qwen Code session's prompt in the root, and its call of `tool` editing `/w/repo/src/a.rs`, which
+/// failed when `failed`.
+fn qwen_edit(tool: &str, failed: bool) -> Vec<String> {
+    let line = |name: &str, ms: u64, extra: Value| {
+        let base = json!({
+            "session_id": "q-1", "hook_event_name": name, "cwd": ROOT, "prompt_id": "qp1",
+            "studio_agent": "qwen", "studio_received_ms": AT + ms,
+        });
+        common::with(base, extra)
+    };
+    let call = json!({ "tool_name": tool, "tool_use_id": "q1",
+        "tool_input": { "file_path": "/w/repo/src/a.rs", "content": "b" } });
+    let (end, result) = if failed {
+        ("PostToolUseFailure", json!({ "error": "Failed to edit" }))
+    } else {
+        (
+            "PostToolUse",
+            json!({ "tool_response": { "success": true } }),
+        )
+    };
+    let end = line(end, 2_100, result);
+    let end = common::with(serde_json::from_str(&end).unwrap(), call.clone());
+    vec![
+        line("UserPromptSubmit", 600, json!({ "prompt": "go" })),
+        line("PreToolUse", 2_000, call),
+        end,
+    ]
+}
+
+/// A Copilot CLI session's prompt in the root, and its call of `tool` editing `/w/repo/src/a.rs`,
+/// which failed when `failed`.
+fn copilot_edit(tool: &str, failed: bool) -> Vec<String> {
+    let line = |name: &str, ms: u64, extra: Value| {
+        let base = json!({
+            "sessionId": "cs-1", "timestamp": AT + ms, "cwd": ROOT, "studio_event": name,
+            "studio_agent": "copilot", "studio_received_ms": AT + ms,
+        });
+        common::with(base, extra)
+    };
+    let args = json!({ "path": "/w/repo/src/a.rs", "file_text": "b" }).to_string();
+    let (end, result) = if failed {
+        (
+            "postToolUseFailure",
+            json!({ "error": "old_str not found" }),
+        )
+    } else {
+        let result = json!({ "resultType": "success", "textResultForLlm": "ok" });
+        ("postToolUse", json!({ "toolResult": result }))
+    };
+    let call = json!({ "toolName": tool, "toolArgs": args });
+    let end = common::with(
+        serde_json::from_str(&line(end, 2_100, result)).unwrap(),
+        call.clone(),
+    );
+    vec![
+        line("userPromptSubmitted", 600, json!({ "prompt": "go" })),
+        line("preToolUse", 2_000, call),
+        end,
+    ]
+}
+
+/// What edits a file is the kind of call its agent's adapter records, not its tool's name (#723):
+/// another session's edit takes the file whichever agent made it, and a failed one does not.
 #[test]
-fn another_sessions_edit_of_the_absolute_path_takes_the_file() {
-    let edit = other_call(
+fn another_sessions_edit_of_the_absolute_path_takes_the_file_and_a_failed_one_does_not() {
+    let claude = other_call(
         2_000,
         "x1",
         "Edit",
@@ -633,7 +696,25 @@ fn another_sessions_edit_of_the_absolute_path_takes_the_file() {
         ROOT,
         None,
     );
-    assert_eq!(kept(vec![edit]), ["src/b.rs"]);
+    let both = ["src/a.rs", "src/b.rs"].as_slice();
+    let cases = [
+        ("claude Edit", vec![claude], ["src/b.rs"].as_slice()),
+        (
+            "qwen write_file",
+            qwen_edit("write_file", false),
+            &["src/b.rs"],
+        ),
+        ("qwen edit, failed", qwen_edit("edit", true), both),
+        (
+            "copilot create",
+            copilot_edit("create", false),
+            &["src/b.rs"],
+        ),
+        ("copilot edit, failed", copilot_edit("edit", true), both),
+    ];
+    for (case, others, files) in cases {
+        assert_eq!(kept(others), files, "{case}");
+    }
 }
 
 #[test]

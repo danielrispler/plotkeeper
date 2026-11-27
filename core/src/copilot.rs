@@ -92,17 +92,22 @@ fn call_id(name: &str, input: &Value) -> String {
     format!("copilot-{hash:016x}")
 }
 
+/// What a call of tool `name` is.
+pub(crate) fn kind(name: &str) -> ToolKind {
+    match name {
+        "bash" | "Bash" => ToolKind::Command,
+        "edit" | "create" | "Edit" | "Write" => ToolKind::Edit,
+        _ => ToolKind::Other,
+    }
+}
+
 fn tool(raw: &Raw) -> Tool {
     let name = raw.tool_name.clone().unwrap_or_default();
     let input = match &raw.tool_input {
         Value::String(text) => serde_json::from_str(text).unwrap_or_else(|_| text.clone().into()),
         other => other.clone(),
     };
-    let kind = match name.as_str() {
-        "bash" | "Bash" => ToolKind::Command,
-        "edit" | "create" | "Edit" | "Write" => ToolKind::Edit,
-        _ => ToolKind::Other,
-    };
+    let kind = kind(&name);
     let path = input["path"].as_str().or(input["file_path"].as_str());
     Tool {
         path: (kind == ToolKind::Edit)

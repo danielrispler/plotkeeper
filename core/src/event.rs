@@ -190,6 +190,21 @@ pub(crate) enum ToolKind {
     External,
 }
 
+/// What a call of tool `name` of agent `agent` (`Capabilities::agent`) is, by its adapter's own
+/// table: for a ledger row saved before rows recorded their kind. Its input is not saved, so a skill
+/// call's skill is not known.
+pub(crate) fn kind_of(agent: &str, name: &str) -> ToolKind {
+    match agent {
+        "agy" => crate::agy::kind(name),
+        crate::codex::CODEX => crate::codex::kind(name),
+        crate::cursor::CURSOR => crate::cursor::kind(name),
+        crate::qwen::QWEN => crate::qwen::kind(name),
+        crate::opencode::OPENCODE => crate::opencode::kind(name),
+        crate::copilot::COPILOT => crate::copilot::kind(name),
+        _ => crate::claude::kind(name, &Value::Null),
+    }
+}
+
 impl Tool {
     /// Whether it asks Daniel, before any permission request.
     pub(crate) fn asks(&self) -> bool {
