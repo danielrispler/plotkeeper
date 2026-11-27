@@ -78,16 +78,21 @@ pub(crate) fn parse(line: &str) -> Result<Event, serde_json::Error> {
     serde_json::from_str::<Raw>(line).map(adapt)
 }
 
-fn tool(raw: &Raw) -> Tool {
-    let name = raw.tool_name.clone().unwrap_or_default();
-    let input = &raw.tool_input;
-    let kind = match name.as_str() {
+/// What a call of tool `name` is.
+pub(crate) fn kind(name: &str) -> ToolKind {
+    match name {
         "write_file" | "edit" => ToolKind::Edit,
         "run_shell_command" => ToolKind::Command,
         // shortcut: the docs do not show how an MCP tool is named; Claude Code's prefix is assumed.
         _ if name.starts_with("mcp__") => ToolKind::External,
         _ => ToolKind::Other,
-    };
+    }
+}
+
+fn tool(raw: &Raw) -> Tool {
+    let name = raw.tool_name.clone().unwrap_or_default();
+    let input = &raw.tool_input;
+    let kind = kind(&name);
     Tool {
         path: (kind == ToolKind::Edit)
             .then(|| input["file_path"].as_str().map(Into::into))
