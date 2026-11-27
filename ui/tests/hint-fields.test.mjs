@@ -95,6 +95,9 @@ test("a hint opens at once while another is open, beside it or elsewhere on the 
     b.listeners.pointerenter({});
     mock.timers.tick(1);
     assert.equal(hintOf(b).popoverOpen, true, String(what));
+    // The stand-in's hints do not close each other, as `popover="hint"` does, so the next row starts with none open.
+    hintOf(a).hidePopover();
+    hintOf(b).hidePopover();
   }
 });
 

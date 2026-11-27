@@ -595,6 +595,17 @@ export const hints = (): Fixture => ({
         document.body.append(fold);
         return hint(summary, "Fold hint " + n);
       });
+      // Two interestfor buttons, each in a container of its own outside the top bar and the list.
+      const boxed = [1, 2].map((n) => {
+        const box = document.createElement("div");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = "Box " + n;
+        box.append(button);
+        Object.assign(box.style, { position: "fixed", left: "60%", top: n * 120 + "px", zIndex: "50", background: "var(--raised)" });
+        document.body.append(box);
+        return hint(button, "Box hint " + n);
+      });
       const hintFor = (node) => document.getElementById(node.getAttribute("interestfor") ?? node.getAttribute("data-hint"));
       const preFlight = document.getElementById("pre-flight-button");
       const fit = document.getElementById("fit-map-button");
@@ -605,6 +616,7 @@ export const hints = (): Fixture => ({
       };
       const slides = [
         ["one map head button to another", preFlight, fit],
+        ["a button to a button in another container", boxed[0], boxed[1]],
         ["a top bar button to a map head button", gear, preFlight],
         ["a summary to a summary in another details", made[0], made[1]],
         ["a summary to a button", made[0], preFlight],
@@ -632,7 +644,7 @@ export const hints = (): Fixture => ({
         else if (waited < 400) log("snap:fail the first hint of " + what + " opened after only " + Math.round(waited) + " ms");
       }
       log("hints ok");`,
-  realKeys: true, realPointer: true, budget: 14000, snapDone: "hints ok",
+  realKeys: true, realPointer: true, budget: 16000, snapDone: "hints ok",
 });
 
 /**
