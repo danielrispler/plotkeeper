@@ -22,10 +22,11 @@ import { element, failure, hint, invoke, keyed, listen, mark, messageOf, newest,
 import { cameraRig, type CameraRig, fitCamera, panTo, revealPan, zoomAt } from "./map-camera.js";
 import { brokenParts, brokenText, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Drag, type Law, type Layer, type LayerName, type MapDoc, askedProject, startProject, switchProject, wasRemoved, parseMap, type Part, type Point, placement, plateSize, plateTitle, sizeOf, lineTag, linkLines, markPoints, readingOrder, rimPoint, type Scrub, tagWord, type Tier } from "./map-model.js";
 import { copyButton } from "./copy-button.js";
+import { type DraftField, drawDraft } from "./map-draft.js";
 import { drawScan } from "./map-scan.js";
 import { recheckSeen } from "./seen.js";
 import { knownProjects, listedProjects, projectGone } from "./projects.js";
-import type { Camera, MapDiff, MapScan, MapState, ScanEdit } from "./types.js";
+import type { Camera, MapDiff, MapDraft, MapScan, MapState, ScanEdit } from "./types.js";
 
 export type LoadedMap = Extract<MapDoc, { ok: true }>;
 /** What the view holds once a map loaded: its payload, the map as parsed, and every id's centre in the world. */
@@ -82,9 +83,22 @@ let revealed: string | null = null;
 let diff: MapDiff | null = null;
 // The free scan of `project` while it has no map (#760): asked once per `openMap`, "asking" until it answers, null when it failed. Its
 // skeleton is the one the person edited (#761), each edit's answer replacing it; `note` is why the last edit did not apply, and `edits`
-// chains the edits, so each is sent with the skeleton the one before it left. Draft the map (#762) starts from `scan.map` as it is then.
-type Scanned = { project: string; scan: MapScan | "asking" | null; note: string | null; edits: Promise<void> };
+// chains the edits, so each is sent with the skeleton the one before it left. Draft the map (#763) starts the drafting run (#762) from
+// `scan.map` as the edits leave it; `refused` is why the server refused the last start. `draft` is the project's Map draft, asked with the
+// scan and again on each `map-landed`, "asking" until it answers, null when there is none; `draftNote` is why the last press on it failed.
+type Scanned = {
+  project: string;
+  scan: MapScan | "asking" | null;
+  note: string | null;
+  edits: Promise<void>;
+  refused: string | null;
+  starting: boolean;
+  draft: MapDraft | "asking" | null;
+  draftNote: string | null;
+};
 let scanned: Scanned | null = null;
+// The Map draft's answers, of which only the newest lands, so a slow read never draws over a later press's answer.
+const latestDraft = newest();
 
 /** The map is the page's base (#386): the body carries `map-open` from the start and never loses it. */
 export const mapShown = () => document.body?.classList.contains("map-open") === true;
@@ -370,8 +384,9 @@ export function linkMark(ids: string[], law: Law, at: Point): SVGElement {
 function scanFor(state: MapState | null): MapScan | "asking" | null {
   if (state?.status !== "none" || project === null || projectGone(project)) return null;
   if (scanned?.project !== project) {
-    const asked: Scanned = { project, scan: "asking", note: null, edits: Promise.resolve() };
+    const asked: Scanned = { project, scan: "asking", note: null, edits: Promise.resolve(), refused: null, starting: false, draft: "asking", draftNote: null };
     scanned = asked;
+    settleDraft(asked, "map_draft", invoke("map_draft", { project }));
     const done = (scan: MapScan | null) => {
       asked.scan = scan;
       if (scanned === asked && mapShown()) draw();
@@ -407,6 +422,71 @@ function editScan(edit: ScanEdit) {
   });
 }
 
+// The Map draft of a project whose map status is the empty state, once `scanFor` asked it.
+const draftFor = (state: MapState | null) => (state?.status === "none" && scanned?.project === project ? scanned.draft : null);
+
+// Draws `request`'s Map draft when it is the newest asked and its project still shows; a failure says why, and a first read that failed
+// leaves the scan.
+function settleDraft(asked: Scanned, command: string, request: Promise<MapDraft | null>) {
+  const drawn = () => {
+    if (scanned === asked && mapShown()) draw();
+  };
+  latestDraft(request).then(
+    (draft) => {
+      if (draft === undefined) return;
+      asked.draft = draft;
+      asked.draftNote = null;
+      drawn();
+    },
+    (why: unknown) => {
+      failure(command)(why);
+      if (asked.draft === "asking") asked.draft = null;
+      else asked.draftNote = messageOf(why);
+      drawn();
+    },
+  );
+}
+
+// Draft the map (#763): after any edit still on its way, the drafting run starts from the skeleton it left; the answer is the Map draft.
+function startDraft() {
+  const asked = scanned;
+  if (!asked || asked.starting) return;
+  asked.starting = true;
+  asked.edits = asked.edits.then(async () => {
+    const now = asked.scan;
+    if (now && now !== "asking") {
+      const busy = element("map-body").querySelector(".map-scan");
+      busy?.setAttribute("aria-busy", "true");
+      try {
+        const draft = await latestDraft(invoke("map_draft_start", { project: asked.project, skeleton: now.map }));
+        if (draft !== undefined) asked.draft = draft;
+        asked.refused = null;
+      } catch (why) {
+        failure("map_draft_start")(why);
+        asked.refused = messageOf(why);
+      }
+      busy?.removeAttribute("aria-busy");
+    }
+    asked.starting = false;
+    if (scanned === asked && mapShown()) draw();
+  });
+}
+
+// The Map draft's presses (#763), each answered with the Map draft as it then stands; Discard's answer is none, which returns to the scan.
+function draftActs(asked: Scanned) {
+  const { project } = asked;
+  return {
+    edit: (part: string, field: DraftField, value: string) => {
+      const fields: Partial<Record<DraftField, string>> = { [field]: value };
+      settleDraft(asked, "map_draft_edit", invoke("map_draft_edit", { project, part, ...fields }));
+    },
+    retry: (group: number) => settleDraft(asked, "map_draft_retry", invoke("map_draft_retry", { project, group })),
+    redraft: (part: string) => settleDraft(asked, "map_draft_redraft", invoke("map_draft_redraft", { project, part })),
+    discard: () => settleDraft(asked, "map_draft_discard", invoke("map_draft_discard", { project }).then(() => null)),
+    note: asked.draftNote,
+  };
+}
+
 // Where `plotkeeper install` is explained.
 const installDocs = "https://github.com/danielrispler/plotkeeper/blob/main/docs/studio/plugin.md";
 
@@ -437,7 +517,7 @@ function drawEmpty(body: HTMLElement, state: MapState | null) {
     );
   } else if (state === null) {
     box.append(text("p", "Reading the map…", "empty"));
-  } else if (scanFor(state) === "asking") {
+  } else if (scanFor(state) === "asking" || draftFor(state) === "asking") {
     box.append(text("p", "Scanning this repository's folders…", "empty"));
   } else if (state.status === "not-git") {
     // Nothing to read or draft (#753): no prompt and no button.
@@ -740,8 +820,12 @@ function draw() {
   view = null;
   const unreadable = loaded && doc && !doc.ok ? { ...loaded, status: "unreadable" as const, note: doc.why } : loaded;
   const scan = scanFor(unreadable);
+  const draft = draftFor(unreadable);
+  // A Map draft shows in the scan's place until it is accepted or discarded (#763).
+  const drafted = unreadable && scanned && draft && draft !== "asking" && drawDraft(body, unreadable, draft, draftActs(scanned));
   // A scan that failed, or whose map does not read, leaves today's empty screen with its prompt.
-  if (!unreadable || !scan || scan === "asking" || !drawScan(body, unreadable, scan, { edit: editScan, note: scanned?.note ?? null })) drawEmpty(body, unreadable);
+  const acts = { edit: editScan, note: scanned?.note ?? null, draft: startDraft, refused: scanned?.refused ?? null };
+  if (!drafted && (!unreadable || !scan || scan === "asking" || draft === "asking" || !drawScan(body, unreadable, scan, acts))) drawEmpty(body, unreadable);
   const slots = { side: element("map-side"), notPlaced: element("map-not-placed"), tray: element("map-tray"), runs: element("map-runs"), sheet: element("map-sheet"), drawer: element("map-drawer"), banner: element("map-banner") };
   // No map is drawn, so nothing of the last one may stay: its banner, sheet and drawer would belong to another project.
   [slots.notPlaced, slots.tray, slots.runs, slots.sheet, slots.drawer, slots.banner].forEach((slot) => slot.replaceChildren());
@@ -766,6 +850,9 @@ export function startMap(given: MapDeps) {
     if (mapShown() && project !== null && !projectGone(project)) load(project, true).catch(failure("map"));
   });
   listen<string>("map-landed", (landed) => {
-    if (mapShown() && landed === project) load(landed, false).catch(failure("map"));
+    if (!mapShown() || landed !== project) return;
+    load(landed, false).catch(failure("map"));
+    // A group of the Map draft landed, or a run of it ended (#763): it is read again.
+    if (scanned?.project === landed && scanned.draft !== "asking") settleDraft(scanned, "map_draft", invoke("map_draft", { project: landed }));
   });
 }

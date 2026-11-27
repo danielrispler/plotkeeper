@@ -4,7 +4,7 @@
 
 import { messageOf } from "./dom.js";
 import { isObject } from "./settings.js";
-import type { Ci, CommitFiles, Fog, FogEntry, HistoricalMap, HistoryEntry, MapDiff, MapTag, Proof } from "./types.js";
+import type { Ci, CommitFiles, Fog, FogEntry, HistoricalMap, HistoryEntry, MapDiff, MapTag, Proof, MapDraft } from "./types.js";
 
 export type Tier = "core" | "interface" | "black-box";
 export type Point = { x: number; y: number };
@@ -562,3 +562,23 @@ export const lineTag = (diff: Pick<MapDiff, "lines"> | null, from: string, to: s
 };
 /** The word a Map diff's tag writes on a plate's edge. */
 export const tagWord = (tag: MapTag): string => ({ added: "New", removed: "Gone", edited: "Edited" })[tag];
+
+/**
+ * Where a Map draft's part stands (#753, stories 14-16 and 20; ticket #763): as its latest group does, since a Redraft this part is a group
+ * of its own after the first; a done part is flagged when the reviewer's verdict on its purpose is.
+ */
+export type DraftStage = "writing" | "redrafting" | "checking" | "checked" | "flagged" | "writing-failed" | "checking-failed";
+export function partStage(draft: MapDraft, id: string): DraftStage {
+  const group = draft.groups.filter((each) => each.parts.includes(id)).at(-1);
+  if (!group || group.state === "writing") return group?.redraft ? "redrafting" : "writing";
+  if (group.state === "done") return draft.verdicts[id]?.flagged ? "flagged" : "checked";
+  return group.state === "checking" ? "checking" : group.state === "writer-failed" ? "writing-failed" : "checking-failed";
+}
+
+/** The Map draft's progress line: how many of `ids` a reviewer answered on, and how many are being checked, being written or failed. */
+export function draftProgress(draft: MapDraft, ids: string[]): string {
+  const stages = ids.map((id) => partStage(draft, id));
+  const count = (...of: DraftStage[]) => stages.filter((stage) => of.includes(stage)).length;
+  const rest: [number, string][] = [[count("checking"), "being checked"], [count("writing", "redrafting"), "being written"], [count("writing-failed", "checking-failed"), "failed"]];
+  return [`${count("checked", "flagged")} of ${ids.length} ${ids.length === 1 ? "part" : "parts"} checked`, ...rest.filter(([n]) => n > 0).map(([n, words]) => `${n} ${words}`)].join(" · ");
+}
