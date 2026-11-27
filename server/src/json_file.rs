@@ -14,7 +14,6 @@ pub(crate) enum UpdateError {
     NoFolder(&'static str),
     Io(std::io::Error),
     Json(serde_json::Error),
-    Persist(tempfile::PersistError),
 }
 
 impl fmt::Display for UpdateError {
@@ -24,7 +23,6 @@ impl fmt::Display for UpdateError {
             UpdateError::NoFolder(name) => write!(f, "no folder for {name}"),
             UpdateError::Io(e) => e.fmt(f),
             UpdateError::Json(e) => e.fmt(f),
-            UpdateError::Persist(e) => e.fmt(f),
         }
     }
 }
@@ -87,7 +85,7 @@ pub(crate) fn update_json_file<T: Serialize + DeserializeOwned + Default>(
     Ok(mine)
 }
 
-/// Writes `value` as `file` (`name` in errors), pretty, by a temporary file beside it and a rename.
+/// Writes `value` as `file` (`name` in errors), pretty, by the workbench's atomic write.
 pub(crate) fn write_json(
     file: &Path,
     name: &'static str,
@@ -95,8 +93,6 @@ pub(crate) fn write_json(
 ) -> Result<(), UpdateError> {
     let dir = file.parent().ok_or(UpdateError::NoFolder(name))?;
     std::fs::create_dir_all(dir).map_err(UpdateError::Io)?;
-    let mut temp = tempfile::NamedTempFile::new_in(dir).map_err(UpdateError::Io)?;
-    serde_json::to_writer_pretty(&mut temp, value).map_err(UpdateError::Json)?;
-    temp.persist(file).map_err(UpdateError::Persist)?;
-    Ok(())
+    let text = serde_json::to_vec_pretty(value).map_err(UpdateError::Json)?;
+    studio_workbench::write_atomic(file, &text).map_err(UpdateError::Io)
 }

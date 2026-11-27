@@ -693,13 +693,11 @@ impl CiCache {
             .filter(|(_, ci)| ci.status != Status::Unknown)
             .collect();
         let write = || -> Result<(), String> {
-            let text = serde_json::to_string(&finished).map_err(|e| e.to_string())?;
+            let text = serde_json::to_vec(&finished).map_err(|e| e.to_string())?;
             if let Some(dir) = file.parent() {
                 std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
             }
-            let tmp = file.with_extension("json.tmp");
-            std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
-            std::fs::rename(&tmp, file).map_err(|e| e.to_string())
+            studio_workbench::write_atomic(file, &text).map_err(|e| e.to_string())
         };
         if let Err(e) = write() {
             log::warn!("ci: cannot keep the last result: {e}");

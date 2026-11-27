@@ -150,23 +150,15 @@ impl BriefStore {
     pub fn put_since(&self, from: &str, brief: &StoredBrief) -> std::io::Result<()> {
         let path = self.since_path(brief.pr, from, &brief.head);
         std::fs::create_dir_all(path.parent().unwrap_or(&self.dir))?;
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(
-            &tmp,
-            serde_json::to_vec_pretty(brief).map_err(std::io::Error::other)?,
-        )?;
-        std::fs::rename(tmp, path)
+        let text = serde_json::to_vec_pretty(brief).map_err(std::io::Error::other)?;
+        studio_workbench::write_atomic(&path, &text)
     }
 
     /// Writes `brief`, through a temporary file so a crash leaves the old one.
     pub fn put(&self, brief: &StoredBrief) -> std::io::Result<()> {
         let path = self.path(brief.pr, &brief.head);
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(
-            &tmp,
-            serde_json::to_vec_pretty(brief).map_err(std::io::Error::other)?,
-        )?;
-        std::fs::rename(tmp, path)
+        let text = serde_json::to_vec_pretty(brief).map_err(std::io::Error::other)?;
+        studio_workbench::write_atomic(&path, &text)
     }
 
     /// Marks the brief of `pr` at `head` stale; false when there is none.
