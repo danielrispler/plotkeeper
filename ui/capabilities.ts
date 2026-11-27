@@ -25,8 +25,7 @@ function shortModel(model: string): string {
 }
 
 // The header's model line: the agent's mark and the latest model's short name, "Claude · Opus 5.5" or "agy · Flash high".
-// The model is in the transcript when the agent's capabilities say so (Claude's), else on the session (agy's); a
-// status-only session shows none.
+// The model is in the transcript when the agent's capabilities say so (Claude's), else on the session (agy's).
 export function modelLine(session: Pick<Session, "capabilities" | "model" | "transcript">): string {
   const { agent } = session.capabilities;
   const model = reports(session, "transcript_model") ? session.transcript.model : session.model;

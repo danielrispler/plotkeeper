@@ -13,7 +13,6 @@ const caps = (agent, rest = {}) => ({
 });
 const claude = /** @type {Session} */ ({ capabilities: caps("claude", { asks: true, replies: true, permission_mode: true, transcript_version: true, transcript_model: true, context: true, turn_trees: true }), model: null, transcript: { context: { tokens: 9000 }, model: "claude-opus-5-5" } });
 const agy = /** @type {Session} */ ({ capabilities: caps("agy"), model: "gemini-3.8-flash-high", transcript: { context: null, model: null } });
-const codex = /** @type {Session} */ ({ capabilities: caps(""), model: null, status_only: true, transcript: { context: null, model: null } });
 
 // A transcript with only the fields a test sets.
 /** @returns {Session["transcript"]} */
@@ -28,10 +27,9 @@ test("a part of the view shows only when the session's capabilities report it", 
   assert.equal(reports(agy, "turn_trees"), false);
 });
 
-test("an agy row shows no text mark (its logo says it), a Claude row its context size, a status-only row its own", () => {
-  assert.equal(rowMark({ ...agy, status_only: false }), "");
-  assert.equal(rowMark({ ...claude, status_only: false }), "9k");
-  assert.equal(rowMark(codex), "status only");
+test("an agy row shows no text mark (its logo says it), a Claude row its context size", () => {
+  assert.equal(rowMark(agy), "");
+  assert.equal(rowMark(claude), "9k");
 });
 
 test("an agy session's mode and subagent result are hidden, with its status shown instead", () => {
@@ -40,10 +38,9 @@ test("an agy session's mode and subagent result are hidden, with its status show
   assert.equal(subagentHistory({ agents: [agent], capabilities: claude.capabilities }, new Map())[0].result, "done it");
 });
 
-test("the header shows each session's model by its agent's mark, none for status only", () => {
+test("the header shows each session's model by its agent's mark, none without a model", () => {
   assert.equal(modelLine(claude), "Claude · Opus 5.5");
   assert.equal(modelLine(agy), "agy · Flash high");
-  assert.equal(modelLine(codex), "");
   assert.equal(modelLine({ ...agy, model: null }), "");
   assert.equal(modelLine({ ...claude, transcript: transcript({ model: "claude-haiku-5" }) }), "Claude · Haiku 5");
   assert.equal(modelLine({ ...claude, transcript: transcript({ model: "claude-3-5-sonnet-20241022" }) }), "Claude · Sonnet 3.5");

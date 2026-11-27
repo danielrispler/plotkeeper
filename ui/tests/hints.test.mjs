@@ -16,7 +16,7 @@ globalThis.document = fakeDocument({
 const session = /** @type {import("../../dist/types.js").Session} */ ({
   id: "s", name: "Fix the build", prompt_name: null, folder_name: "f", identity: { issue: null, name: "PR #9 · issue-9" },
   capabilities: { agent: "claude" }, transcript: { context: null }, state: "needs_you", line: "Bash cargo test", questions: [], agents: [],
-  unseen: false, landed: false, started_at: 0, last_event_at: 0, turn_span: null, status_only: false, shell: false, pid: 1,
+  unseen: false, landed: false, started_at: 0, last_event_at: 0, turn_span: null, pid: 1,
 });
 const words = (button) => hintOf(button)?.textContent;
 const described = (button) => button.getAttribute("aria-describedby") === button.getAttribute("interestfor");

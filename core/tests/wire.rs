@@ -1,5 +1,5 @@
 //! The wire's agreement check (#246) for the core's types: sessions replayed from the fixtures, their checks, the
-//! selection and a subagent's log, written into `scripts/wire/core.ts` (`scripts/wire/samples.rs`). It sees only the
+//! selection and a Claude subagent's log, written into `scripts/wire/core.ts` (`scripts/wire/samples.rs`). It sees only the
 //! shapes these samples produce: an optional field no sample fills is not checked.
 
 use crate::samples::{Sample, json, write};
@@ -25,12 +25,56 @@ fn logs() -> Vec<String> {
     logs
 }
 
-/// The recorded agy run, whose subagent has a log the core reads from its brain folder.
+/// The recorded agy run, read from its brain folder.
 fn agy() -> Studio {
     let brain = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/agy/brain");
     let run =
         include_str!("fixtures/agy/run.jsonl").replace("@BRAIN@", &brain.display().to_string());
     Studio::replayed(run.lines())
+}
+
+/// A Claude session in `dir` with a subagent whose log, beside the session's transcript, holds a
+/// prompt, a call, its result and a reply.
+fn claude_subagent(dir: &std::path::Path) -> Studio {
+    const AGENT: &str = "a7e2c4f6b8d0a1c3e";
+    let logs = dir.join("s1/subagents");
+    std::fs::create_dir_all(&logs).unwrap();
+    let line = |kind: &str, content: serde_json::Value| {
+        let message = serde_json::json!({ "role": kind, "content": content });
+        serde_json::json!({ "type": kind, "agentId": AGENT, "sessionId": "s1", "isSidechain": true, "message": message })
+            .to_string()
+    };
+    let log = [
+        line("user", serde_json::json!("Find the probe.")),
+        line(
+            "assistant",
+            serde_json::json!([{ "type": "tool_use", "id": "c1", "name": "Read", "input": { "file_path": "/w/probe.rs" } }]),
+        ),
+        line(
+            "user",
+            serde_json::json!([{ "type": "tool_result", "tool_use_id": "c1", "content": "fn probe() {}" }]),
+        ),
+        line(
+            "assistant",
+            serde_json::json!([{ "type": "text", "text": "Found it." }]),
+        ),
+    ];
+    std::fs::write(
+        logs.join(format!("agent-{AGENT}.jsonl")),
+        log.join("\n") + "\n",
+    )
+    .unwrap();
+    let transcript = dir.join("s1.jsonl");
+    let own = serde_json::json!({
+        "session_id": "s1", "hook_event_name": "UserPromptSubmit", "cwd": "/w", "prompt": "Go.",
+        "transcript_path": transcript, "studio_received_ms": 0,
+    });
+    let step = serde_json::json!({
+        "session_id": "s1", "hook_event_name": "PreToolUse", "cwd": "/w", "agent_id": AGENT,
+        "tool_name": "Read", "tool_use_id": "t0", "tool_input": { "file_path": "/w/probe.rs" },
+        "transcript_path": transcript, "studio_received_ms": 1,
+    });
+    Studio::replayed([own.to_string(), step.to_string()])
 }
 
 // @law: wire-types-agree
@@ -41,6 +85,8 @@ fn the_wire_samples_of_the_core_are_written_for_tsc() {
         .map(|log| Studio::replayed(log.lines()))
         .collect();
     studios.push(agy());
+    let dir = tempfile::tempdir().unwrap();
+    studios.push(claude_subagent(dir.path()));
     let mut samples: Vec<Sample> = Vec::new();
     for studio in &mut studios {
         let ids: Vec<String> = studio

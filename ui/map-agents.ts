@@ -64,7 +64,7 @@ export function hideAgents(hide: boolean) {
 }
 
 // The shown project's sessions, whose turns are placed: none on a past commit's map.
-const shownSessions = (project: string) => (hidden ? [] : deps.sessions().filter((session) => !session.shell && session.project === project));
+const shownSessions = (project: string) => (hidden ? [] : deps.sessions().filter((session) => session.project === project));
 
 // The added hover text of a session's row (#559): "Touched no part in the last 7 days" once the placement says so; null otherwise, and for
 // a session the map does not show.

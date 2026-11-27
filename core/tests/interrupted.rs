@@ -1,19 +1,17 @@
-//! Seam 1: replay hook events and scripted daemon `list` status through the core. A turn Daniel
-//! interrupts fires no `Stop`, and no `idle_prompt` either, so Claude Code's own OSC 7501 `idle`
-//! ends it: past `MISMATCH_AFTER_MS` the core asks the shell for a `StudioInterrupted` line, and
-//! that line, as a restart replays it, ends the turn.
+//! Seam 1: replay hook events through the core. A turn Daniel interrupts fires no `Stop`, and no
+//! `idle_prompt` either: a `StudioInterrupted` line, as the hook writes for a Codex `Interrupt` and
+//! older logs hold for Claude Code, ends it, live and as a restart replays it; else the next
+//! prompt does.
 
 use crate::common;
 use serde_json::{Value, json};
-use studio_core::{Output, State, Studio, Terminal};
+use studio_core::{Output, State, Studio};
 
 const ID: &str = "a1f0cafd-0e34-46d1-816e-357ce0fccbb2";
-const TERMINAL: &str = "claude-ae926462";
 const T0: u64 = 1_795_168_437_000;
 
 fn event(name: &str, at: u64, extra: Value) -> String {
-    let mut base = common::base(ID, name, "/Users/danielrispler/work/plotkeeper", at);
-    base["studio_terminal_id"] = json!(TERMINAL);
+    let base = common::base(ID, name, "/Users/danielrispler/work/plotkeeper", at);
     common::with(base, extra)
 }
 
@@ -25,47 +23,9 @@ fn prompt(at: u64, text: &str, prompt_id: &str) -> String {
     )
 }
 
-/// The line the shell appends for an `Output::Interrupted`.
+/// The `StudioInterrupted` line for turn `prompt_id`.
 fn interrupted_line(at: u64, prompt_id: &str) -> String {
     event("StudioInterrupted", at, json!({ "prompt_id": prompt_id }))
-}
-
-/// Daniel's terminal in the daemon's `list`, reporting `state` through OSC 7501.
-fn term(state: &str, at: u64) -> Terminal {
-    serde_json::from_value(json!({
-        "id": TERMINAL,
-        "argv": ["claude"],
-        "cwd": "/Users/danielrispler/work/plotkeeper",
-        "pid": 100,
-        "exited": null,
-        "foreground": "claude",
-        "processes": [],
-        "state": state,
-        "kind": null,
-        "app": "claude-code",
-        "status_ms": at,
-        "turn": 0,
-    }))
-    .unwrap()
-}
-
-fn listed(studio: &mut Studio, state: &str, now: u64) -> Vec<Output> {
-    studio.tick(now);
-    studio.terminals(&[term(state, now)], now)
-}
-
-fn interrupts(outputs: &[Output]) -> Vec<(&str, &str)> {
-    outputs
-        .iter()
-        .filter_map(|o| match o {
-            Output::Interrupted {
-                session_id,
-                prompt_id,
-                ..
-            } => Some((session_id.as_str(), prompt_id.as_str())),
-            _ => None,
-        })
-        .collect()
 }
 
 fn state(studio: &Studio) -> State {
@@ -79,57 +39,6 @@ fn cancelled_first_prompt() -> Studio {
     studio.apply(&prompt(T0 + 2_000, "claude", "p-1"));
     assert_eq!(state(&studio), State::Running);
     studio
-}
-
-#[test]
-fn a_turn_whose_terminal_stays_idle_asks_for_one_interrupted_line() {
-    let mut studio = cancelled_first_prompt();
-
-    let mut out = Vec::new();
-    for s in 0..20 {
-        out.extend(listed(&mut studio, "idle", T0 + 3_000 + s * 1_000));
-    }
-
-    assert_eq!(interrupts(&out), [(ID, "p-1")]);
-}
-
-#[test]
-fn a_turn_end_reported_as_done_asks_for_none() {
-    // At a normal turn's end 7501 says `done` before the `Stop` hook lands, and may linger.
-    let mut studio = cancelled_first_prompt();
-    let mut out = Vec::new();
-    for s in 0..20 {
-        out.extend(listed(&mut studio, "done", T0 + 3_000 + s * 1_000));
-    }
-
-    assert!(interrupts(&out).is_empty(), "{out:?}");
-    assert_eq!(state(&studio), State::Running);
-}
-
-#[test]
-fn a_brief_idle_asks_for_none() {
-    let mut studio = cancelled_first_prompt();
-    let mut out = listed(&mut studio, "idle", T0 + 3_000);
-    out.extend(listed(&mut studio, "idle", T0 + 6_000));
-    out.extend(listed(&mut studio, "working", T0 + 7_000));
-    out.extend(listed(&mut studio, "idle", T0 + 10_000));
-
-    assert!(interrupts(&out).is_empty(), "{out:?}");
-}
-
-#[test]
-fn an_idle_after_a_lasting_done_still_asks() {
-    // A new 7501 state starts a new disagreement, with its own line.
-    let mut studio = cancelled_first_prompt();
-    let mut out = Vec::new();
-    for s in 0..10 {
-        out.extend(listed(&mut studio, "done", T0 + 3_000 + s * 1_000));
-    }
-    for s in 0..10 {
-        out.extend(listed(&mut studio, "idle", T0 + 13_000 + s * 1_000));
-    }
-
-    assert_eq!(interrupts(&out), [(ID, "p-1")]);
 }
 
 #[test]
@@ -205,7 +114,7 @@ fn a_first_turn_interrupted_before_any_step_is_named_again_from_the_next_prompt(
 
 #[test]
 fn a_first_turn_ended_by_the_next_prompt_before_any_step_is_named_from_it() {
-    // Outside a studio terminal there is no 7501: the next prompt ends the turn.
+    // With no interrupted line, the next prompt ends the turn.
     let mut studio = Studio::default();
     studio.apply(&prompt(T0 + 2_000, "claude", "p-1"));
 
@@ -246,46 +155,4 @@ fn a_late_stop_after_the_interrupted_line_tells_nothing_again() {
         !late.iter().any(|o| matches!(o, Output::YourTurn { .. })),
         "{late:?}"
     );
-}
-
-#[test]
-fn a_permission_wait_asks_for_none() {
-    // Needs you comes from the hooks only (danielrispler/Falinks#540); 7501 never changes it.
-    let mut studio = cancelled_first_prompt();
-    studio.apply(&event(
-        "PermissionRequest",
-        T0 + 3_000,
-        json!({ "prompt_id": "p-1", "tool_name": "Bash", "tool_input": { "command": "rm -rf target" } }),
-    ));
-    assert_eq!(state(&studio), State::NeedsYou);
-
-    let mut out = Vec::new();
-    for state in ["blocked", "idle"] {
-        for s in 0..10 {
-            out.extend(listed(&mut studio, state, T0 + 4_000 + s * 1_000));
-        }
-    }
-
-    assert!(interrupts(&out).is_empty(), "{out:?}");
-    assert_eq!(state(&studio), State::NeedsYou);
-}
-
-#[test]
-fn a_long_call_or_a_queued_prompt_reporting_working_asks_for_none() {
-    let mut studio = cancelled_first_prompt();
-    studio.apply(&event(
-        "PreToolUse",
-        T0 + 3_000,
-        json!({ "prompt_id": "p-1", "tool_name": "Bash", "tool_input": { "command": "npm run check" }, "tool_use_id": "t1" }),
-    ));
-    // Typed while it runs: queued with the running turn's id.
-    studio.apply(&prompt(T0 + 4_000, "and push it", "p-1"));
-
-    let mut out = Vec::new();
-    for s in 0..120 {
-        out.extend(listed(&mut studio, "working", T0 + 5_000 + s * 1_000));
-    }
-
-    assert!(interrupts(&out).is_empty(), "{out:?}");
-    assert_eq!(state(&studio), State::Running);
 }

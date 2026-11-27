@@ -94,10 +94,9 @@ function showHeader(session: Session, agent: Subagent | null) {
   hint(element("headline"), [estimate, ...times(session, stepSpan).map(([, draw]) => draw(now)), runsAt].filter(Boolean).join(" · "));
 }
 
-// The "⋯" menu's actions. Another agent's row (danielrispler/Falinks#560) has no name of its own to keep, nor turns to mark, and comes
-// back with its status if dropped.
+// The "⋯" menu's actions, for a session's own view.
 function showActions(session: Session, agent: Subagent | null) {
-  const own = agent === null && !session.status_only;
+  const own = agent === null;
   element("rename").hidden = !own;
   element("rename").onclick = () => askName(session);
   element("mark-unseen").hidden = !own || session.state !== "your_turn" || session.unseen === true;
@@ -109,11 +108,7 @@ function showActions(session: Session, agent: Subagent | null) {
 // The step the agent is on: its tool, its detail with long paths shortened, and its full command, folded.
 function showStep(session: Session, agent: Subagent | null) {
   const step = (agent ?? session).last_step;
-  element("tool").textContent = session.shell
-    ? "A plain terminal"
-    : session.status_only
-    ? "Status only: another agent, with no steps, intention or brief"
-    : (step?.tool ?? (agent === null ? session.returned : null) ?? "No step yet");
+  element("tool").textContent = step?.tool ?? (agent === null ? session.returned : null) ?? "No step yet";
   const [detail, fullDetail] = shortPaths(step?.detail ?? "");
   element("detail").textContent = detail;
   // A shortened path says itself whole in a hint; a detail that is not shortened has none, and drops one left from the last draw.
@@ -309,18 +304,11 @@ function showIntention(story: Session["transcript"] | null) {
   element("unavailable-why").textContent = story?.unavailable ? `The transcript cannot be read: ${story.unavailable}.` : "";
 }
 
-/**
- * The transcript the rail tells: none for a subagent's, which the studio does not read, nor for
- * another agent's status-only row (danielrispler/Falinks#560).
- */
-export const storyOf = (session: Session, agent: unknown) => (agent === null && !session.status_only ? session.transcript : null);
+/** The transcript the rail tells: none for a subagent's, which the studio does not read. */
+const storyOf = (session: Session, agent: unknown) => (agent === null ? session.transcript : null);
 
-/**
- * What the rail draws for `selected`: its latest turn, which "now" tells, and the feed. A status-only row
- * (danielrispler/Falinks#560) has no turns to show.
- */
-export function railOf({ session, agent }: Selection) {
-  if (session.status_only) return { latest: null, blocks: [] };
+/** What the rail draws for `selected`: its latest turn, which "now" tells, and the feed. */
+function railOf({ session, agent }: Selection) {
   const own = agent === null;
   const turns = own ? session.turns : [];
   const blocks = feedTurns(turns, {

@@ -43,17 +43,6 @@ pub enum Output {
     /// Daniel's first prompt of a session arrived, or its turn ended when that prompt was a bare
     /// slash command: its prompt name.
     Name(NameRequest),
-    /// A Claude session's hook state and its OSC 7501 state disagreed past `MISMATCH_AFTER_MS`:
-    /// `line` goes to the local mismatch log, for debugging (danielrispler/Falinks#560).
-    Mismatch { line: String },
-    /// A Claude session's turn has been running by its hooks while its terminal's OSC 7501 state
-    /// said `idle` past `MISMATCH_AFTER_MS`: Daniel interrupted it, which fires no `Stop`. The
-    /// shell appends a `StudioInterrupted` line for turn `prompt_id`, with its end trees, and that
-    /// line ends the turn.
-    Interrupted {
-        session_id: String,
-        prompt_id: String,
-    },
     /// A session's first `Stop`: read Claude Code's version from its transcript, and nothing else
     /// (danielrispler/Falinks#369, decision 9).
     Version { transcript_path: String },
@@ -306,9 +295,10 @@ pub const RENAME: &str = "StudioRename";
 /// `studio_name`. The log is what a restart replays, so the name survives it.
 pub const PROMPT_NAME: &str = "StudioPromptName";
 
-/// The line the shell appends when Daniel interrupted a session's turn (`Output::Interrupted`): its
-/// `prompt_id` and the turn's end trees. An interrupt fires no `Stop` and no `idle_prompt`, so this
-/// line ends the turn, at once and after a restart; it ends no later turn.
+/// The line that says Daniel interrupted a session's turn: its `prompt_id` and the turn's end trees.
+/// The hook writes it for a Codex `Interrupt`, and older logs hold the shell's for Claude Code. An
+/// interrupt fires no `Stop` and no `idle_prompt`, so this line ends the turn, at once and after a
+/// restart; it ends no later turn.
 pub const INTERRUPTED: &str = "StudioInterrupted";
 
 /// The event the shell appends to the log when Daniel deletes a session: its row leaves the list,

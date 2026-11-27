@@ -116,7 +116,7 @@ test("a dropped span's hint leaves #hints once the span is gone", async () => {
 test("the step's detail drawn without a shortened path opens no hint left from the last step", () => {
   const step = (/** @type {string} */ detail) => /** @type {any} */ ({ tool: "Read", detail, command: null });
   const session = (/** @type {string} */ detail) =>
-    /** @type {any} */ ({ id: "s", name: null, prompt_name: null, folder_name: "p", state: "idle", line: "", questions: [], shell: false, status_only: false, capabilities: { agent: "claude", context: true }, identity: { issue: null, name: "p" }, transcript: { context: null }, permission_mode: null, work: {}, agents: [], turns: [], checks: [], cleared: [], prompts: [], model: null, last_step: step(detail) });
+    /** @type {any} */ ({ id: "s", name: null, prompt_name: null, folder_name: "p", state: "idle", line: "", questions: [], capabilities: { agent: "claude", context: true }, identity: { issue: null, name: "p" }, transcript: { context: null }, permission_mode: null, work: {}, agents: [], turns: [], checks: [], cleared: [], prompts: [], model: null, last_step: step(detail) });
   const draw = (/** @type {string} */ detail) => {
     try {
       showView({ session: session(detail), agent: null });

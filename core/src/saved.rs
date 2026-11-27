@@ -5,16 +5,12 @@
 //! settings) are not saved.
 
 use crate::Studio;
-use std::{
-    cell::Cell,
-    collections::{BTreeMap, BTreeSet},
-    fmt,
-};
+use std::{cell::Cell, collections::BTreeMap, fmt};
 
 /// The saved state's format. Bump it when a saved field changes meaning or a field the pane's JSON
 /// leaves out is added, so an older file is not read as the new shape: a field the old file lacks
 /// makes it unreadable anyway, unless it has a default.
-const FORMAT: u32 = 8;
+const FORMAT: u32 = 9;
 
 thread_local! {
     static SAVING: Cell<bool> = const { Cell::new(false) };
@@ -80,7 +76,6 @@ impl fmt::Debug for Studio {
             sessions,
             selected,
             viewed,
-            awaiting,
             held,
             now: _,
             roots: _,
@@ -89,9 +84,6 @@ impl fmt::Debug for Studio {
             durations,
             rows,
             summaries_on_open: _,
-            mismatched,
-            listed,
-            live_terminals,
             tasks,
         } = self;
         f.debug_struct("Studio")
@@ -99,17 +91,10 @@ impl fmt::Debug for Studio {
             .field("sessions", &sessions.iter().collect::<BTreeMap<_, _>>())
             .field("selected", selected)
             .field("viewed", viewed)
-            .field("awaiting", awaiting)
             .field("held", held)
             .field("log_end", log_end)
             .field("durations", &durations.sorted())
             .field("rows", &rows.iter().collect::<BTreeMap<_, _>>())
-            .field("mismatched", &mismatched.iter().collect::<BTreeMap<_, _>>())
-            .field("listed", listed)
-            .field(
-                "live_terminals",
-                &live_terminals.iter().collect::<BTreeSet<_>>(),
-            )
             .field("tasks", &tasks.iter().collect::<BTreeMap<_, _>>())
             .finish()
     }

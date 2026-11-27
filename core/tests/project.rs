@@ -3,8 +3,7 @@
 //! while its folder, folder name and worktree name follow them.
 
 use crate::common::base;
-use serde_json::{Value, json};
-use studio_core::{Studio, Terminal};
+use studio_core::Studio;
 
 const T0: u64 = 1_793_270_000_000;
 const REPO: &str = "/w/plotkeeper";
@@ -87,33 +86,4 @@ fn a_session_whose_first_events_have_no_folder_takes_the_first_folder_it_gets() 
     );
 
     assert_eq!(project(&studio, "s1"), REPO);
-}
-
-fn terminal(id: &str, cwd: &str, state: Option<&str>) -> Terminal {
-    let row: Value = json!({
-        "id": id, "argv": [], "cwd": cwd, "pid": 100, "exited": null, "foreground": "node", "processes": [],
-        "state": state, "kind": null, "app": state.map(|_| "codex"), "status_ms": state.map(|_| T0), "turn": 0,
-    });
-    serde_json::from_value(row).unwrap()
-}
-
-#[test]
-fn a_status_only_or_shell_session_takes_the_folder_it_is_made_with() {
-    let mut studio = studio();
-    let made = [
-        terminal("t-7", &format!("{TASK}/core"), Some("working")),
-        terminal("shell-1", "/w/notes", None),
-    ];
-    studio.terminals(&made, T0);
-    assert_eq!(project(&studio, "t-7"), REPO);
-    assert_eq!(project(&studio, "shell-1"), "/w/notes");
-
-    let moved = [
-        terminal("t-7", "/w/elsewhere", Some("working")),
-        terminal("shell-1", &format!("{REPO}/ui"), None),
-    ];
-    studio.terminals(&moved, T0 + 1);
-    assert_eq!(project(&studio, "t-7"), REPO);
-    assert_eq!(project(&studio, "shell-1"), "/w/notes");
-    assert_eq!(studio.session("shell-1").unwrap().folder_name, "ui");
 }

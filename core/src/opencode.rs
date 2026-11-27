@@ -73,7 +73,6 @@ struct Raw {
     last_assistant_message: String,
     #[serde(default)]
     studio_received_ms: u64,
-    studio_terminal_id: Option<String>,
     studio_pid: Option<u32>,
 }
 
@@ -132,9 +131,7 @@ fn adapt(raw: Raw) -> Event {
         "session.execution.succeeded"
         | "session.execution.failed"
         | "session.execution.interrupted" => {
-            happened.push(Happened::TurnEnd {
-                background_pending: false,
-            });
+            happened.push(Happened::TurnEnd);
             happened.push(Happened::Reply(raw.last_assistant_message.clone()));
             if let Some(model) = raw.model.clone() {
                 happened.push(Happened::Model(model));
@@ -186,7 +183,6 @@ fn adapt(raw: Raw) -> Event {
         transcript_path: String::new(),
         prompt_id: raw.prompt_id,
         studio_received_ms: raw.studio_received_ms,
-        studio_terminal_id: raw.studio_terminal_id,
         studio_pid: raw.studio_pid,
         studio_turn_start: Default::default(),
         studio_turn_end: Default::default(),

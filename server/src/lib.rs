@@ -54,7 +54,7 @@ pub mod stop_rules;
 pub(crate) mod story_bar;
 pub mod web;
 
-pub use read_loop::{Follower, Notice, ServerEffects, follow, listed, tell, uptime};
+pub use read_loop::{Follower, Notice, ServerEffects, follow, tell, uptime};
 
 /// The card store, which the log thread adds to and the pane records guesses in.
 pub type Cards = Arc<Mutex<CardStore>>;

@@ -519,7 +519,7 @@ fn a_turn_the_shells_interrupted_line_ends_ends_its_foreground_subagents_only() 
     studio.apply(&spawn(5, "t2", None));
     studio.apply(&step(6, "c1", "/w"));
 
-    // Esc; Claude Code's 7501 `idle` makes the shell append the line.
+    // Esc; the line that says so ends the turn.
     studio.apply(&ev("StudioInterrupted", 10, "p1", json!({})));
 
     assert_eq!(status(&studio, "c1"), ("interrupted".into(), Some(10)));

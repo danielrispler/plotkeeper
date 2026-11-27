@@ -1,6 +1,6 @@
 //! Seam 1 (danielrispler/Falinks#474, danielrispler/Falinks#461 decision 18): `/clear` keeps the session's row. Claude Code ends the session
 //! with reason `clear` and starts a new one, under a new id, with source `clear`. The new one continues
-//! the row on the same studio terminal, or in the same folder outside studio terminals.
+//! the row in the same folder.
 
 use crate::common;
 use serde_json::{Value, json};
@@ -12,14 +12,13 @@ const OLD: &str = "5b1e0c7a-2d94-4f63-a8e1-9c3f6d20b417";
 const NEW: &str = "9a7d3e21-0c4b-4e8f-b6a2-71d5c0e9f384";
 const OTHER: &str = "c3f0a8d2-6e17-4b59-9d4c-2a8e5f1b7c06";
 
-fn event(id: &str, name: &str, at: u64, terminal: Option<&str>, extra: Value) -> String {
-    let mut base = common::base(id, name, FOLDER, at);
-    base["studio_terminal_id"] = json!(terminal);
+fn event(id: &str, name: &str, at: u64, extra: Value) -> String {
+    let base = common::base(id, name, FOLDER, at);
     common::with(base, extra)
 }
 
-/// A session that asked a question Daniel answered, renamed, then cleared, in `terminal`.
-fn cleared(id: &str, new: &str, terminal: Option<&str>) -> Vec<String> {
+/// A session that asked a question Daniel answered, renamed, then cleared.
+fn cleared(id: &str, new: &str) -> Vec<String> {
     let ask = json!({
         "tool_name": "AskUserQuestion",
         "tool_use_id": "toolu_ask",
@@ -29,20 +28,20 @@ fn cleared(id: &str, new: &str, terminal: Option<&str>) -> Vec<String> {
     let mut answered = ask.clone();
     answered["tool_response"] = json!({ "answers": { "Which base?": "origin/main" } });
     vec![
-        event(id, "SessionStart", 1_000, terminal, json!({ "source": "startup" })),
-        event(id, "UserPromptSubmit", 2_000, terminal, json!({ "prompt": "Plan it.", "prompt_id": "p-1" })),
-        event(id, "PreToolUse", 3_000, terminal, ask),
-        event(id, "PostToolUse", 4_000, terminal, answered),
-        event(id, "Stop", 5_000, terminal, json!({ "last_assistant_message": "Done." })),
+        event(id, "SessionStart", 1_000, json!({ "source": "startup" })),
+        event(id, "UserPromptSubmit", 2_000, json!({ "prompt": "Plan it.", "prompt_id": "p-1" })),
+        event(id, "PreToolUse", 3_000, ask),
+        event(id, "PostToolUse", 4_000, answered),
+        event(id, "Stop", 5_000, json!({ "last_assistant_message": "Done." })),
         json!({ "session_id": id, "hook_event_name": "StudioRename", "studio_name": "Clear keeps the row", "studio_received_ms": 6_000 }).to_string(),
-        event(id, "SessionEnd", 7_000, terminal, json!({ "reason": "clear" })),
-        event(new, "SessionStart", 7_100, terminal, json!({ "source": "clear" })),
+        event(id, "SessionEnd", 7_000, json!({ "reason": "clear" })),
+        event(new, "SessionStart", 7_100, json!({ "source": "clear" })),
     ]
 }
 
 #[test]
-fn a_clear_on_a_studio_terminal_continues_the_row_with_a_cleared_marker() {
-    let mut studio = Studio::replayed(cleared(OLD, NEW, Some("claude-1")));
+fn a_clear_continues_the_row_with_a_cleared_marker() {
+    let mut studio = Studio::replayed(cleared(OLD, NEW));
 
     assert_eq!(studio.sessions().len(), 1, "one row, not a new one");
     let row = studio.sessions()[0];
@@ -61,7 +60,6 @@ fn a_clear_on_a_studio_terminal_continues_the_row_with_a_cleared_marker() {
         NEW,
         "UserPromptSubmit",
         8_000,
-        Some("claude-1"),
         json!({ "prompt": "Next.", "prompt_id": "p-2" }),
     ));
     let rename = json!({ "session_id": NEW, "hook_event_name": "StudioRename", "studio_name": "Renamed", "studio_received_ms": 9_000 });
@@ -76,22 +74,15 @@ fn a_clear_on_a_studio_terminal_continues_the_row_with_a_cleared_marker() {
 #[test]
 fn of_two_sessions_in_one_folder_only_the_cleared_one_continues() {
     let mut lines = vec![
-        event(
-            OTHER,
-            "SessionStart",
-            500,
-            None,
-            json!({ "source": "startup" }),
-        ),
+        event(OTHER, "SessionStart", 500, json!({ "source": "startup" })),
         event(
             OTHER,
             "UserPromptSubmit",
             600,
-            None,
             json!({ "prompt": "Other work.", "prompt_id": "o-1" }),
         ),
     ];
-    lines.extend(cleared(OLD, NEW, None));
+    lines.extend(cleared(OLD, NEW));
     let studio = Studio::replayed(lines);
 
     assert_eq!(studio.sessions().len(), 2);
@@ -107,21 +98,19 @@ fn of_two_sessions_in_one_folder_only_the_cleared_one_continues() {
 
 #[test]
 fn a_session_end_with_another_reason_still_ends_the_row() {
-    let mut lines = cleared(OLD, NEW, Some("claude-1"));
+    let mut lines = cleared(OLD, NEW);
     lines.truncate(6);
     lines.push(event(
         OLD,
         "SessionEnd",
         7_000,
-        Some("claude-1"),
         json!({ "reason": "prompt_input_exit" }),
     ));
-    // A later fresh session on the same terminal is a new row.
+    // A later fresh session in the same folder is a new row.
     lines.push(event(
         NEW,
         "SessionStart",
         8_000,
-        Some("claude-1"),
         json!({ "source": "startup" }),
     ));
     let studio = Studio::replayed(lines);
@@ -134,7 +123,7 @@ fn a_session_end_with_another_reason_still_ends_the_row() {
 }
 
 /// The checkpoint day's log (danielrispler/Falinks#370) holds two real clears, each a `SessionEnd` then a `SessionStart`
-/// about 60 ms later, in the main checkout and outside studio terminals.
+/// about 60 ms later, in the main checkout.
 #[test]
 fn the_checkpoint_days_clears_each_keep_their_row() {
     let studio = Studio::replayed(include_str!("fixtures/checkpoint-day.jsonl").lines());
@@ -159,24 +148,17 @@ fn the_checkpoint_days_clears_each_keep_their_row() {
 /// the one the selection names, so a focused window raises no toast for the session Daniel looks at.
 #[test]
 fn your_turn_after_a_clear_names_the_selected_row() {
-    let mut studio = Studio::replayed(cleared(OLD, NEW, Some("claude-1")));
+    let mut studio = Studio::replayed(cleared(OLD, NEW));
     studio.select(NEW);
     studio.apply(&event(
         NEW,
         "UserPromptSubmit",
         8_000,
-        Some("claude-1"),
         json!({ "prompt": "Next.", "prompt_id": "p-2" }),
     ));
     let mut notifications = Notifications::default();
 
-    let stop = event(
-        NEW,
-        "Stop",
-        9_000,
-        Some("claude-1"),
-        json!({ "prompt_id": "p-2" }),
-    );
+    let stop = event(NEW, "Stop", 9_000, json!({ "prompt_id": "p-2" }));
     let your_turn = Output::YourTurn {
         session_id: OLD.into(),
     };

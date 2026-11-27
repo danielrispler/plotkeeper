@@ -92,7 +92,7 @@ pub fn event_log(home: &Path) -> PathBuf {
 /// How long the hook waits for the log's lock before it drops the event (#43, decision 11).
 pub const PATIENCE: Duration = Duration::from_secs(5);
 
-/// The drops file beside the log `log`: a line `<Unix ms> <event> <terminal>` for each event the
+/// The drops file beside the log `log`: a line `<Unix ms> <event>` for each event the
 /// hook dropped.
 pub fn drops_file(log: &Path) -> PathBuf {
     log.with_file_name("drops.txt")
@@ -333,13 +333,13 @@ fn lightened(line: &[u8]) -> Option<Vec<u8>> {
     Some(light)
 }
 
-/// Notes in the drops file beside `log` that the hook dropped `event` of `terminal` at `at`, in Unix
-/// milliseconds, with no lock and one small write.
-pub fn drop_event(log: &Path, at: u64, event: &str, terminal: &str) -> std::io::Result<()> {
+/// Notes in the drops file beside `log` that the hook dropped `event` at `at`, in Unix milliseconds,
+/// with no lock and one small write.
+pub fn drop_event(log: &Path, at: u64, event: &str) -> std::io::Result<()> {
     use std::io::Write;
     // The fields are space-separated, so none may hold whitespace.
     let plain = |text: &str| text.split_whitespace().collect::<Vec<_>>().join("_");
-    let line = format!("{at} {} {}\n", plain(event), plain(terminal));
+    let line = format!("{at} {}\n", plain(event));
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)

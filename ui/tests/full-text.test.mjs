@@ -79,8 +79,6 @@ const session = /** @type {import("../../dist/types.js").Session} */ ({
   started_at: 0,
   last_event_at: 0,
   turn_span: null,
-  status_only: false,
-  shell: false,
 });
 
 test("a session row's name and token scroll in place, its step and identity are in a hint, and none is empty", () => {

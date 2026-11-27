@@ -77,13 +77,11 @@ test("a session row's id mark is a mark, named by what it says in full", () => {
   const session = /** @type {any} */ ({
     id: "s", name: "Named", prompt_name: null, folder_name: "f", identity: { issue: null, name: "f" }, capabilities: { agent: "claude" },
     transcript: { context: { tokens: 12000 } }, state: "idle", line: null, questions: [], agents: [], unseen: false, landed: false,
-    started_at: 0, last_event_at: 0, turn_span: null, status_only: false, shell: false,
+    started_at: 0, last_event_at: 0, turn_span: null,
   });
   /** @type {(drawn: any) => any} */
   const idOf = (drawn) => drawn.childNodes[0].childNodes.find((/** @type {any} */ child) => child.className === "id");
   isMark(idOf(row(session, new Map())), "12k tokens used");
-  isMark(idOf(row({ ...session, id: "t", shell: true }, new Map())), "A plain terminal");
-  isMark(idOf(row({ ...session, id: "u", status_only: true }, new Map())), "Another agent, followed by its reported status only");
 });
 
 test("a stale plate's band is a mark, named by its band's words", () => {

@@ -16,7 +16,6 @@ const HOOK = "__PLOTKEEPER_BIN__/plotkeeper-hook";
 
 // The service keeps the environment of the terminal that started it, not that of the session's.
 const ENV = { ...process.env };
-delete ENV.PLOTKEEPER_TERMINAL_ID;
 delete ENV.PLOTKEEPER_AGENT_PID;
 
 const TURN_ENDS = ["session.execution.succeeded", "session.execution.failed", "session.execution.interrupted"];

@@ -69,7 +69,6 @@ struct Raw {
     notification_type: String,
     #[serde(default)]
     studio_received_ms: u64,
-    studio_terminal_id: Option<String>,
     studio_pid: Option<u32>,
 }
 
@@ -125,9 +124,7 @@ fn adapt(raw: Raw) -> Event {
             origin: None,
         }),
         "Stop" => {
-            happened.push(Happened::TurnEnd {
-                background_pending: false,
-            });
+            happened.push(Happened::TurnEnd);
             happened.push(Happened::Reply(raw.last_assistant_message.clone()));
         }
         "PreToolUse" => happened.push(Happened::ToolStart {
@@ -165,7 +162,6 @@ fn adapt(raw: Raw) -> Event {
         transcript_path: raw.transcript_path,
         prompt_id: raw.prompt_id,
         studio_received_ms: raw.studio_received_ms,
-        studio_terminal_id: raw.studio_terminal_id,
         studio_pid: raw.studio_pid,
         studio_turn_start: Default::default(),
         studio_turn_end: Default::default(),

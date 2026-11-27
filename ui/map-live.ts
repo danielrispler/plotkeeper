@@ -61,11 +61,11 @@ const partsOf = (paths: string[], placed: Placement): string[] => [...new Set(pa
 // The parts a turn changed, Workers' files included; none while its files are not diffed.
 const turnParts = (turn: Pick<Turn, "files">, placed: Placement): string[] => partsOf((turn.files?.files ?? []).map((file) => file.path), placed);
 
-// Whether a session is marked, wants Daniel's attention on the map: Running or Needs you, or Your turn or Idle while unseen. Never a plain
-// shell or an Ended session; `inProject`, asked of its project folder, keeps another project's out. (A Helper is an agent of a session,
+// Whether a session is marked, wants Daniel's attention on the map: Running or Needs you, or Your turn or Idle while unseen. Never an
+// Ended session; `inProject`, asked of its project folder, keeps another project's out. (A Helper is an agent of a session,
 // never a session.)
 export function marked(session: Session, inProject: (project: string) => boolean): boolean {
-  if (session.shell || !inProject(session.project)) return false;
+  if (!inProject(session.project)) return false;
   if (session.state === "running" || session.state === "needs_you") return true;
   return (session.state === "your_turn" || session.state === "idle") && session.unseen === true;
 }

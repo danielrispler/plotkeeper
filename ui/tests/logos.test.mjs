@@ -11,21 +11,17 @@ const { rowMark } = await import("../../dist/list-model.js");
 globalThis.document = fakeDocument({ visibilityState: "hidden" });
 const make = (tag) => document.createElement(tag);
 
-const base = /** @type {import("../../dist/types.js").Session} */ ({ id: "s", name: null, prompt_name: null, folder_name: "p", state: "idle", line: "", questions: [], shell: false, status_only: false, unseen: false, landed: false });
+const base = /** @type {import("../../dist/types.js").Session} */ ({ id: "s", name: null, prompt_name: null, folder_name: "p", state: "idle", line: "", questions: [], unseen: false, landed: false });
 const caps = (agent) => /** @type {import("../../dist/types.js").Capabilities} */ ({ agent, context: agent === "claude", transcript_model: agent === "claude" });
 const claude = /** @type {import("../../dist/types.js").Session} */ ({ ...base, capabilities: caps("claude"), identity: { issue: null, name: "p" }, transcript: { context: { tokens: 9000 } } });
 const agy = /** @type {import("../../dist/types.js").Session} */ ({ ...base, capabilities: caps("agy"), identity: { issue: null, name: "p" }, transcript: { context: null } });
-const statusOnly = (program) => /** @type {import("../../dist/types.js").Session} */ ({ ...base, status_only: true, capabilities: caps(""), identity: { issue: null, name: `${program} · p` }, transcript: { context: null } });
-const shell = { ...statusOnly("zsh"), shell: true };
+const codex = /** @type {import("../../dist/types.js").Session} */ ({ ...base, capabilities: caps("codex"), identity: { issue: null, name: "p" }, transcript: { context: null } });
 
-test("a session's logo follows its adapter's agent, shell and, for a status-only row, its program", () => {
+test("a session's logo follows its adapter's agent", () => {
   assert.equal(logoKey(claude), "claude");
   assert.equal(logoKey(agy), "agy");
-  assert.equal(logoKey(statusOnly("codex")), "codex");
-  assert.equal(logoKey(statusOnly("aider")), "generic");
-  assert.equal(logoKey(shell), "shell");
-  // Only the program `codex` is Codex's: a longer name is not.
-  assert.equal(logoKey(statusOnly("codex-fork")), "generic");
+  // Only the agent `codex` is Codex's: a longer name is not.
+  assert.equal(logoKey("codex-fork"), "generic");
   // An agent alone, as the usage glance asks.
   assert.equal(logoKey({ agent: "claude" }), "claude");
   assert.equal(logoKey({ agent: "codex" }), "codex");
@@ -48,11 +44,10 @@ const partial = (/** @type {object} */ fields) => /** @type {import("../../dist/
 const logoOf = (/** @type {any} */ node) => node.find("span").find((s) => s.className === "logo");
 
 test("a recorded Codex session wears Codex's logo, titled by its name (#359)", () => {
-  const codex = /** @type {import("../../dist/types.js").Session} */ ({ ...base, capabilities: caps("codex"), identity: { issue: null, name: "p" }, transcript: { context: null } });
   assert.equal(logoKey(codex), "codex");
   const drawn = logoOf(row(codex, new Map()));
   assert.equal(drawn.getAttribute("data-logo"), "codex");
-  // Its row's title is the note on what it reports; the mark's own title names Codex, no longer as status only.
+  // Its row's title is the note on what it reports; the mark's own title names Codex.
   assert.match(drawn.getAttribute("aria-label"), /no context size/);
   assert.equal(logo("codex").getAttribute("aria-label"), "Codex");
 });
@@ -100,7 +95,7 @@ test("a session row in the list and History shows the logo before its name; an a
 test("the strip, the project header's rollup and a subagent row draw no logo", () => {
   const withLogos = (/** @type {any} */ node) => node.find("span").filter((s) => s.className === "logo");
   /** @type {import("../../dist/types.js").Session[]} */
-  const sessions = [{ ...claude, state: "running" }, { ...agy, id: "g", state: "needs_you" }, { ...statusOnly("codex"), id: "c", state: "running" }];
+  const sessions = [{ ...claude, state: "running" }, { ...agy, id: "g", state: "needs_you" }, { ...codex, id: "c", state: "running" }];
   const strip = stripOf(sessions);
   assert.ok(strip.length > 1);
   for (const button of strip) assert.equal(withLogos(button).length, 0);
@@ -174,8 +169,6 @@ test("the no-context note follows the session's capabilities, not the agent's na
   const noNote = await railOf({ ...agy, capabilities: /** @type {import("../../dist/types.js").Capabilities} */ ({ agent: "agy", context: true }) });
   assert.doesNotMatch(noNote("mark").childNodes[0].getAttribute("aria-label"), /no context size/);
   assert.doesNotMatch(logoOf(row({ ...agy, capabilities: /** @type {import("../../dist/types.js").Capabilities} */ ({ agent: "agy", context: true }) }, new Map())).getAttribute("aria-label"), /no context size/);
-  // A status-only row has no agent of its own to note.
-  assert.doesNotMatch(logoOf(row(statusOnly("codex"), new Map())).getAttribute("aria-label"), /no context size/);
 });
 
 test("a selected subagent's rail logo carries no model line", async () => {
