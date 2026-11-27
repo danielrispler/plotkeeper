@@ -100,7 +100,8 @@ fn kind(name: &str) -> ToolKind {
     match name {
         "editor" | "apply_patch" => ToolKind::Edit,
         "run_commands" => ToolKind::Command,
-        "ask_question" => ToolKind::Question,
+        // Not `Question`: its input is one `question` with its `options`, not the `questions` list the page's
+        // question cards read, and Cline reports no answer to its plugins.
         "spawn_agent" => ToolKind::Spawn,
         _ => ToolKind::Other,
     }

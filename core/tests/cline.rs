@@ -174,3 +174,18 @@ fn a_line_the_adapter_does_not_map_is_no_drift() {
     assert_eq!(studio.session(HELLO).unwrap().state, State::YourTurn);
     assert!(studio.agy_drift().is_empty(), "{:?}", studio.agy_drift());
 }
+
+/// Cline's `ask_question` takes one `question` and its `options`, not the `questions` list the page's question cards
+/// read, and Cline reports no answer; so it is an ordinary call, not a question that waits on Daniel.
+#[test]
+fn an_ask_question_call_is_no_open_question() {
+    let call = json!({
+        "tool_name": "ask_question", "tool_use_id": "toolu_ask",
+        "tool_input": { "question": "Which file?", "options": ["a", "b"] },
+    });
+    let lines = [fixture()[0].to_owned(), changed(3, call)];
+    let studio = Studio::replayed(&lines);
+    let session = studio.session(HELLO).unwrap();
+    assert!(session.questions.is_empty(), "{:?}", session.questions);
+    assert_eq!(session.state, State::Running);
+}
