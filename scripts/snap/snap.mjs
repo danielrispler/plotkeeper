@@ -229,7 +229,8 @@ const server = createServer(async (req, res) => {
 });
 await new Promise((done) => server.listen(0, "127.0.0.1", done));
 // The page's time: 5 s, and a second more for a fixture with `contrast`, whose pass runs after a script written against the 5 s.
-const budget = fixture.contrast ? 6000 : 5000;
+// A fixture with a long script names its own `budget`, in ms.
+const budget = fixture.budget ?? (fixture.contrast ? 6000 : 5000);
 const chromeArgs = [
   "--headless=new", "--enable-logging=stderr", "--v=0", "--disable-gpu", `--force-device-scale-factor=${scale}`, `--user-data-dir=${profile}`, `--window-size=${width},${height}`,
   `--virtual-time-budget=${budget}`, `--screenshot=${resolve(out)}`, ...(fixture.realPointer || fixture.realKeys || fixture.contrast ? ["--remote-debugging-port=0"] : []),
