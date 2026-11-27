@@ -882,8 +882,15 @@ fn a_dead_run_is_failed_and_frees_the_queue() {
     let next = bench.run("echo next ran");
     bench.until(|_| bench.state(&dead) == Some(RunState::Running));
     let tmp = private_tmp(&bench.folder(&dead).join("work"));
-    // A run still running keeps its temp folder.
-    assert!(tmp.exists(), "a running run lost its temp folder");
+    // The launcher makes the folder after its check and setup: wait for it, then a running run keeps it.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !tmp.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the run never made its temp folder"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
     let pid = launch(&bench.folder(&dead))["pid"].as_u64().unwrap();
     // The launcher and its child die with no final status.
     kill_group(pid);
@@ -922,7 +929,14 @@ fn a_run_found_dead_at_start_is_failed_and_frees_the_queue() {
         .as_u64()
         .unwrap();
     let tmp = private_tmp(&dir.path().join("runs").join(&dead).join("work"));
-    assert!(tmp.exists(), "a running run lost its temp folder");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !tmp.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the run never made its temp folder"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
     drop((runner, changes));
     kill_group(pid);
     assert!(gone(pid));
