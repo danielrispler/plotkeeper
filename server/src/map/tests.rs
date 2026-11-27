@@ -189,9 +189,14 @@ fn the_map_reads_the_default_branch_else_the_checkout_else_a_pending_pr() {
             ),
             None => assert_eq!(state.problems, Vec::<String>::new(), "{name}: banner"),
         }
-        let pending = (c.from == Some(ReadFrom::PendingPr)).then_some(PendingPr {
+        let pending = (c.from == Some(ReadFrom::PendingPr)).then(|| PendingPr {
             number: 12,
             closed: false,
+            path: Path::new(&studio_workbench::main_checkout(&repo).unwrap())
+                .join(MAP_FILE)
+                .display()
+                .to_string(),
+            pr_muted: None,
         });
         assert_eq!(state.pending, pending, "{name}: pending PR");
         if c.git {

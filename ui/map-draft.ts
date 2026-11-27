@@ -3,7 +3,8 @@
 // them says how far the draft is, offers Retry of a failed group alone, and holds a card a part: its name, caption and purpose to edit in
 // place, the reviewer's flag on its purpose with the lines it cites, its tier, and Redraft this part. Accept stays locked until every
 // reviewer answered (`ready`). Then its main way out writes `system-map.json` into the checkout, uncommitted, asking before it replaces a file
-// there that does not read (#764); its second, Open a draft PR, is #765's and muted until then. Discard asks first, then returns to the scan.
+// there that does not read (#764); its second, Open a draft PR, pushes the map on a new branch and opens a draft PR for it, writing nothing to
+// the checkout, muted while `gh` is missing or not logged in (#765). Discard asks first, then returns to the scan.
 //
 // The server keeps the Map draft (`map_draft.rs`); each answer, and each `map-landed` while it drafts, draws it again here. A screen
 // already drawn is patched, plates and panel alike, so a field being typed in keeps its words and its focus while another group lands;
@@ -20,17 +21,22 @@ type Part = Doc["parts"][number];
 export type DraftField = "name" | "caption" | "purpose" | "tier";
 /**
  * What the Map draft's presses do: `edit` keeps one field of a part in the Map draft, `retry` runs a failed group again, `redraft` runs
- * one part's writer again, `accept` writes the map into the checkout, `discard` throws the Map draft away; `note` is why the last of them
- * did not go through, or null.
+ * one part's writer again, `accept` writes the map into the checkout, `openPr` opens a draft PR with it, `discard` throws the Map draft
+ * away; `note` is why the last of them did not go through, or null, and `opening` says a draft PR is being opened.
  */
 export type DraftActs = {
   edit: (part: string, field: DraftField, value: string) => void;
   retry: (group: number) => void;
   redraft: (part: string) => void;
   accept: () => void;
+  openPr: () => void;
   discard: () => void;
   note: string | null;
+  opening: boolean;
 };
+
+/** The words of Open a draft PR while it is on its way: the fetch, the push and `gh` take some seconds. */
+export const openingWords = "Opening the draft PR…";
 
 const tiers: [Tier, string][] = [["core", "Core"], ["interface", "Interface"], ["black-box", "Black box"]];
 const coreLine = "Mark the parts you work in as Core: they'll tell you when they change.";
@@ -206,13 +212,14 @@ function panelOf(draft: MapDraft, doc: Doc, acts: DraftActs): HTMLElement {
 }
 
 // Accept's two ways out, both locked until every reviewer answered: Write is the main one, with the line on what it adds; Open a draft PR
-// is #765's. Then Discard.
+// writes nothing to the checkout and is muted while `gh` cannot open one. Both wait while a draft PR is being opened. Then Discard.
 function actionsOf(draft: MapDraft, acts: DraftActs): HTMLElement {
   const actions = text("div", "", "map-drafting-actions");
   actions.dataset.key = "draft actions";
   actions.setAttribute("role", "group");
   actions.setAttribute("aria-label", "Accept or discard the Map draft");
-  const locked = draft.ready ? null : "Accept unlocks once a reviewer has checked every part";
+  actions.setAttribute("aria-busy", String(acts.opening));
+  const locked = draft.ready ? (acts.opening ? "A draft PR is being opened" : null) : "Accept unlocks once a reviewer has checked every part";
   const folder = draft.path.slice(0, draft.path.lastIndexOf("/")) || draft.path;
   const write = text("button", "", "btn primary map-drafting-write");
   write.append("Write system-map.json to ", Object.assign(text("span", folder, "map-drafting-path"), { translate: false }));
@@ -223,9 +230,12 @@ function actionsOf(draft: MapDraft, acts: DraftActs): HTMLElement {
   availability(write, `Accept the map: write ${draft.path} into your checkout, uncommitted`, locked);
   const uncommitted = text("p", "It adds an uncommitted file to your checkout, like a CLAUDE.md: commit it the way you commit anything.", "map-drafting-uncommitted");
   uncommitted.dataset.key = "draft uncommitted";
-  const pr = pressable(text("button", "Open a draft PR", "btn"), null);
+  const pr = pressable(text("button", acts.opening ? openingWords : "Open a draft PR", "btn"), null, () => {
+    if (!isUnavailable(pr)) acts.openPr();
+  });
   pr.dataset.key = "draft pr";
-  availability(pr, "Accept the map as a draft PR, writing nothing to your checkout", locked ?? "Not available yet: write the file instead");
+  const prWords = "Accept the map as a draft PR on a new branch, writing nothing to your checkout; it shows from plotkeeper's copy until the PR merges";
+  availability(pr, prWords, locked ?? draft.pr_muted);
   const discard = pressable(text("button", "Discard", "btn"), null, async () => {
     const lost = "The Map draft's names, captions and purposes and your edits are thrown away, and its runs stop. The scan stays, to draft again.";
     if (await confirmed({ heading: "Discard the Map draft?", lost, verb: "Discard draft" })) acts.discard();

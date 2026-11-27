@@ -18,6 +18,7 @@ use studio_server::map_draft::{
 use studio_server::runner::{
     Config, Harness, HarnessCommand, Kind, Limits, Plan, Request, RunState, Runner,
 };
+use studio_test_support::LauncherGuard;
 
 /// The skeleton the page gives: part `a` in zone `x`, `b` and `c` in zone `y`, so two writer groups, `[a]` and `[b, c]`;
 /// `vendor/` is a reference copy, ignored. `a` imports `b`, an edge the scan's links leave out, as Accept computes them again.
@@ -80,6 +81,7 @@ impl Harness for Stub {
 }
 
 struct Bench {
+    _guard: LauncherGuard,
     dir: tempfile::TempDir,
     runner: Arc<Runner>,
     drafts: Arc<MapDrafts>,
@@ -119,9 +121,15 @@ fn bench() -> Bench {
     write(&project, "a/x.ts", "import { x } from \"../b/y\";\n");
     git(&project, &["add", "-A"]);
     git(&project, &["commit", "-qm", "code"]);
+    // The person's own git identity, which a draft PR's commit carries.
+    git(&project, &["config", "user.name", "Daniel"]);
+    git(&project, &["config", "user.email", "daniel@example.com"]);
+    git(&project, &["config", "maintenance.auto", "false"]);
     fs::create_dir_all(root.join("answers")).unwrap();
+    stub_gh(root);
     let (runner, drafts, changes) = open(root);
     Bench {
+        _guard: LauncherGuard::new(root.join("runs")),
         dir,
         runner,
         drafts,
@@ -129,10 +137,34 @@ fn bench() -> Bench {
     }
 }
 
-/// The runner and Map drafts over `root`, as a start of plotkeeper makes them: the runs there and the Map drafts picked up.
+/// The recorded `gh`; no test reaches GitHub. It logs each call's arguments to `gh.log`. `auth status` fails while `gh.logged-out` is
+/// there. `pr create` keeps its folder, the branch there and the body it was given, and answers with PR `gh.next`'s address (7 when
+/// none). `pr view` prints `gh.view`, or fails while `gh.view-fails` is there.
+fn stub_gh(root: &Path) {
+    let gh = root.join("gh");
+    fs::write(
+        &gh,
+        format!(
+            "#!/bin/sh\necho \"$@\" >> '{0}/gh.log'\ncase \"$1 $2\" in\n\
+             'auth status') [ ! -e '{0}/gh.logged-out' ] || {{ echo 'You are not logged into any GitHub hosts.' >&2; exit 1; }} ;;\n\
+             'pr create') pwd -P > '{0}/gh.cwd'; git branch --show-current > '{0}/gh.branch'; cat > '{0}/gh.body'\n\
+               echo \"https://github.com/someone/app/pull/$(cat '{0}/gh.next' 2>/dev/null || echo 7)\" ;;\n\
+             'pr view') [ ! -e '{0}/gh.view-fails' ] || {{ echo 'HTTP 502' >&2; exit 1; }}; cat '{0}/gh.view' ;;\n\
+             esac\n",
+            root.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&gh, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+}
+
+/// The runner and Map drafts over `root`, as a start of plotkeeper makes them: the runs there and the Map drafts picked up. The Map
+/// drafts are kept where the Map view reads the map waiting on a draft PR, the test's home's data folder.
 fn open(root: &Path) -> (Arc<Runner>, Arc<MapDrafts>, mpsc::Receiver<String>) {
     let data = root.join("data");
     fs::create_dir_all(&data).unwrap();
+    let main = studio_workbench::main_checkout(&root.join("project")).unwrap();
+    let store = studio_server::map::pending_file(&main).unwrap();
     let runner = Runner::new(Config {
         data: data.clone(),
         runs: root.join("runs"),
@@ -144,7 +176,8 @@ fn open(root: &Path) -> (Arc<Runner>, Arc<MapDrafts>, mpsc::Receiver<String>) {
     });
     let drafts = MapDrafts::new(
         DraftConfig {
-            store: data.join("first-map"),
+            store: store.parent().unwrap().to_path_buf(),
+            gh: Some(root.join("gh")),
         },
         &runner,
     );
@@ -290,9 +323,12 @@ impl Bench {
             .chars()
             .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
             .collect();
-        self.root()
-            .join("data/first-map")
-            .join(format!("{name}.json"))
+        self.pending().with_file_name(format!("{name}.json"))
+    }
+
+    /// Where the map waiting on a draft PR is kept, as the Map view reads it.
+    fn pending(&self) -> PathBuf {
+        studio_server::map::pending_file(&self.main()).unwrap()
     }
 }
 
@@ -721,6 +757,7 @@ fn a_restart_mid_batch_reads_the_draft_back_and_a_dead_runs_group_is_retryable()
 
     // plotkeeper stops; meanwhile the first writer dies and the second group's reviewer answers.
     let Bench {
+        _guard,
         dir,
         runner,
         drafts,
@@ -738,6 +775,7 @@ fn a_restart_mid_batch_reads_the_draft_back_and_a_dead_runs_group_is_retryable()
 
     let (runner, drafts, changes) = open(&root);
     let bench = Bench {
+        _guard,
         dir,
         runner,
         drafts,
@@ -972,4 +1010,388 @@ fn an_unreadable_system_map_json_is_replaced_only_on_a_yes_to_the_file_as_it_was
     let map: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(map["parts"].as_array().map(Vec::len), Some(3));
     assert_eq!(bench.view(), None);
+}
+
+/// What `git args` prints in `dir`, trimmed.
+fn out(dir: &Path, args: &[&str]) -> String {
+    let done = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert!(
+        done.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&done.stderr)
+    );
+    String::from_utf8_lossy(&done.stdout).trim().to_string()
+}
+
+/// Every file of `dir` but git's own, with its bytes.
+fn tree(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    let mut found = Vec::new();
+    let mut left = vec![dir.to_path_buf()];
+    while let Some(at) = left.pop() {
+        for entry in fs::read_dir(&at).unwrap() {
+            let path = entry.unwrap().path();
+            if path.file_name().is_some_and(|name| name == ".git") {
+                continue;
+            }
+            if path.is_dir() {
+                left.push(path);
+            } else {
+                found.push((path.clone(), fs::read(&path).unwrap()));
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
+impl Bench {
+    /// Gives the repository an `origin`, a bare repository beside it, holding its `main` as the default branch.
+    fn with_origin(&self) -> PathBuf {
+        let origin = self.root().join("origin.git");
+        git(
+            self.root(),
+            &["init", "-q", "--bare", "-b", "main", "origin.git"],
+        );
+        let project = self.root().join("project");
+        git(
+            &project,
+            &["remote", "add", "origin", origin.to_str().unwrap()],
+        );
+        git(&project, &["push", "-q", "origin", "main"]);
+        git(&project, &["remote", "set-head", "origin", "main"]);
+        origin
+    }
+
+    fn read_map(&self) -> studio_server::map::MapState {
+        studio_server::map::read_map(Path::new(&self.main()))
+    }
+
+    /// The pending file as JSON.
+    fn pending_json(&self) -> serde_json::Value {
+        serde_json::from_slice(&fs::read(self.pending()).unwrap()).unwrap()
+    }
+
+    /// What `gh` was asked, a line a call.
+    fn gh_asked(&self) -> Vec<String> {
+        fs::read_to_string(self.root().join("gh.log"))
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// The branches `origin` holds under `first-map/`.
+    fn pushed(&self, origin: &Path) -> Vec<String> {
+        out(
+            origin,
+            &[
+                "for-each-ref",
+                "--format=%(refname:short)",
+                "refs/heads/first-map/",
+            ],
+        )
+        .lines()
+        .map(str::to_string)
+        .collect()
+    }
+
+    /// The map waiting on PR `number`, as #757's reader expects the file: its number, branch and map, `closed` when it closed.
+    fn seed_pending(&self, number: u64, closed: bool, map: &str) {
+        let mut file = serde_json::json!({ "number": number, "branch": "first-map/1", "map": map });
+        if closed {
+            file["closed"] = true.into();
+        }
+        fs::create_dir_all(self.pending().parent().unwrap()).unwrap();
+        fs::write(self.pending(), file.to_string()).unwrap();
+    }
+}
+
+#[test]
+fn open_a_draft_pr_pushes_the_map_from_a_temporary_worktree_writes_nothing_to_the_checkout_and_keeps_it_pending()
+ {
+    let bench = bench();
+    let origin = bench.with_origin();
+    bench.ready();
+    let main = PathBuf::from(bench.main());
+    let files = tree(&main);
+    let head = out(&main, &["rev-parse", "HEAD"]);
+
+    let opened = bench.drafts.open_pr(&bench.project()).unwrap();
+    assert_eq!(
+        (opened.number, opened.url.as_str()),
+        (7, "https://github.com/someone/app/pull/7")
+    );
+
+    // One branch on origin, one commit on main holding the map alone, by the person's own git identity.
+    let pushed = bench.pushed(&origin);
+    let [branch] = pushed.as_slice() else {
+        panic!("origin holds {pushed:?}");
+    };
+    assert_eq!(
+        out(&origin, &["rev-parse", &format!("{branch}^")]),
+        out(&origin, &["rev-parse", "main"])
+    );
+    assert_eq!(
+        out(&origin, &["diff", "--name-only", "main", branch]),
+        "system-map.json"
+    );
+    assert_eq!(
+        out(&origin, &["log", "-1", "--format=%an <%ae>", branch]),
+        "Daniel <daniel@example.com>"
+    );
+    let map_text = out(&origin, &["show", &format!("{branch}:system-map.json")]);
+    let map: serde_json::Value = serde_json::from_str(&map_text).unwrap();
+    assert_eq!(map["parts"].as_array().map(Vec::len), Some(3));
+    assert_eq!(
+        map["links"],
+        serde_json::json!([{ "id": "a-b", "from": "a", "to": "b", "kind": "import" }])
+    );
+
+    // A draft PR, made from the temporary worktree on that branch.
+    let created = bench
+        .gh_asked()
+        .into_iter()
+        .find(|line| line.starts_with("pr create"))
+        .unwrap();
+    assert!(created.starts_with("pr create --draft"), "{created}");
+    assert!(created.contains(&format!("--head {branch}")), "{created}");
+    assert!(created.contains("--base main"), "{created}");
+    assert_eq!(
+        fs::read_to_string(bench.root().join("gh.branch"))
+            .unwrap()
+            .trim(),
+        branch
+    );
+    let body = fs::read_to_string(bench.root().join("gh.body")).unwrap();
+    assert!(body.contains("system-map.json"), "{body}");
+    assert!(!body.contains('@'), "a mention in the body: {body}");
+
+    // Nothing is written to the checkout, its branch is as it was, and the temporary worktree and branch are gone.
+    let made = PathBuf::from(
+        fs::read_to_string(bench.root().join("gh.cwd"))
+            .unwrap()
+            .trim(),
+    );
+    assert!(!made.exists(), "the temporary worktree is removed");
+    assert_eq!(tree(&main), files);
+    assert_eq!(out(&main, &["status", "--porcelain"]), "");
+    assert_eq!(out(&main, &["rev-parse", "HEAD"]), head);
+    assert_eq!(out(&main, &["branch", "--show-current"]), "main");
+    assert_eq!(out(&main, &["branch", "--list", "first-map/*"]), "");
+    assert_eq!(
+        out(&main, &["worktree", "list", "--porcelain"])
+            .matches("worktree ")
+            .count(),
+        1
+    );
+
+    // The accepted map is kept with the PR's number and branch, and the Map view shows it waiting on the PR; the Map draft is gone.
+    let pending = bench.pending_json();
+    assert_eq!(pending["number"], 7);
+    assert_eq!(pending["branch"], branch.as_str());
+    assert_eq!(pending.get("closed"), None);
+    assert_eq!(
+        pending["map"].as_str().map(str::trim_end),
+        Some(map_text.as_str())
+    );
+    let state = bench.read_map();
+    assert_eq!(state.from, Some(studio_server::map::ReadFrom::PendingPr));
+    assert_eq!(state.status, studio_server::map::Status::Loaded);
+    assert_eq!(
+        state.pending.as_ref().map(|pr| (pr.number, pr.closed)),
+        Some((7, false))
+    );
+    assert_eq!(bench.view(), None);
+    assert!(!bench.file().exists());
+}
+
+#[test]
+fn open_a_draft_pr_is_muted_with_why_when_gh_is_missing_or_not_logged_in() {
+    /// A case: its name, what is done to `gh`, and a word of why the button is muted, or none.
+    type Case = (&'static str, fn(&Bench), Option<&'static str>);
+    let cases: [Case; 3] = [
+        ("logged in", |_| {}, None),
+        (
+            "not logged in",
+            |bench| fs::write(bench.root().join("gh.logged-out"), "").unwrap(),
+            Some("gh auth login"),
+        ),
+        (
+            "missing",
+            |bench| fs::remove_file(bench.root().join("gh")).unwrap(),
+            Some("not found"),
+        ),
+    ];
+    for (name, setup, muted) in cases {
+        let bench = bench();
+        let origin = bench.with_origin();
+        setup(&bench);
+        let view = bench.ready();
+        match muted {
+            None => assert_eq!(view.pr_muted, None, "{name}"),
+            Some(word) => {
+                let why = view.pr_muted.clone().unwrap_or_default();
+                assert!(why.contains(word), "{name}: {why:?}");
+                let refused = bench.drafts.open_pr(&bench.project()).unwrap_err();
+                assert_eq!(refused, why, "{name}");
+                assert_eq!(bench.pushed(&origin), Vec::<String>::new(), "{name}");
+                assert!(bench.view().is_some(), "{name}: the draft went");
+            }
+        }
+    }
+}
+
+const PENDING_MAP: &str =
+    r#"{"version":2,"parts":[],"actors":[],"links":[],"ignored":[],"laws":[]}"#;
+
+#[test]
+fn the_pending_pr_is_followed_merged_deletes_its_file_closed_keeps_it_and_anything_else_changes_nothing()
+ {
+    /// A case: its name, what `gh pr view` prints (none: it fails), whether the file stays, and whether it then says closed.
+    type Case = (&'static str, Option<&'static str>, bool, bool);
+    let cases: [Case; 6] = [
+        (
+            "merged",
+            Some(r#"{"state":"MERGED","mergedAt":"2026-11-27T10:00:00Z"}"#),
+            false,
+            false,
+        ),
+        (
+            "closed",
+            Some(r#"{"state":"CLOSED","mergedAt":null}"#),
+            true,
+            true,
+        ),
+        (
+            "open",
+            Some(r#"{"state":"OPEN","mergedAt":null}"#),
+            true,
+            false,
+        ),
+        ("a gh error", None, true, false),
+        (
+            "an unreadable answer",
+            Some("<html>rate limited</html>"),
+            true,
+            false,
+        ),
+        (
+            "a state it does not know",
+            Some(r#"{"state":"LOCKED"}"#),
+            true,
+            false,
+        ),
+    ];
+    for (name, view, kept, closed) in cases {
+        let bench = bench();
+        bench.seed_pending(12, false, PENDING_MAP);
+        match view {
+            Some(text) => fs::write(bench.root().join("gh.view"), text).unwrap(),
+            None => fs::write(bench.root().join("gh.view-fails"), "").unwrap(),
+        }
+        bench.drafts.follow(&bench.project());
+        assert!(
+            bench
+                .gh_asked()
+                .contains(&"pr view 12 --json state,mergedAt".to_string()),
+            "{name}: {:?}",
+            bench.gh_asked()
+        );
+        assert_eq!(bench.pending().exists(), kept, "{name}");
+        let state = bench.read_map();
+        let shown = state.pending.as_ref().map(|pr| (pr.number, pr.closed));
+        assert_eq!(shown, kept.then_some((12, closed)), "{name}");
+        if kept {
+            assert_eq!(bench.pending_json()["map"], PENDING_MAP, "{name}");
+        }
+    }
+    // With no map waiting, nothing is asked.
+    let bench = bench();
+    bench.drafts.follow(&bench.project());
+    assert_eq!(bench.gh_asked(), Vec::<String>::new());
+}
+
+/// A bench whose accepted map's draft PR, #7, closed unmerged, with its `origin`.
+fn closed_bench() -> (Bench, PathBuf) {
+    let bench = bench();
+    let origin = bench.with_origin();
+    bench.ready();
+    bench.drafts.open_pr(&bench.project()).unwrap();
+    fs::write(
+        bench.root().join("gh.view"),
+        r#"{"state":"CLOSED","mergedAt":null}"#,
+    )
+    .unwrap();
+    bench.drafts.follow(&bench.project());
+    assert_eq!(
+        bench.read_map().pending.map(|pr| (pr.number, pr.closed)),
+        Some((7, true))
+    );
+    (bench, origin)
+}
+
+#[test]
+fn from_a_closed_pr_write_open_a_draft_pr_and_discard_each_work() {
+    use studio_server::map::{ReadFrom, Status};
+    // Write puts the accepted map into the checkout, uncommitted, and the copy goes.
+    let (bench, _) = closed_bench();
+    let map = bench.pending_json()["map"].as_str().unwrap().to_string();
+    let written = bench.drafts.pending_write(&bench.project(), None).unwrap();
+    let path = bench.map_file().display().to_string();
+    assert_eq!(written, Accepted::Written { path: path.clone() });
+    assert_eq!(fs::read_to_string(&path).unwrap(), map);
+    assert!(!bench.pending().exists());
+    assert_eq!(bench.read_map().from, Some(ReadFrom::Checkout));
+    assert_eq!(
+        out(Path::new(&bench.main()), &["status", "--porcelain"]),
+        "?? system-map.json"
+    );
+
+    // Open a draft PR opens a new one on a new branch, and the map waits on it; the checkout stays as it was.
+    let (bench, origin) = closed_bench();
+    let main = PathBuf::from(bench.main());
+    let files = tree(&main);
+    fs::write(bench.root().join("gh.next"), "8").unwrap();
+    let opened = bench.drafts.pending_pr(&bench.project()).unwrap();
+    assert_eq!(opened.number, 8);
+    assert_eq!(bench.pushed(&origin).len(), 2);
+    let pending = bench.pending_json();
+    assert_eq!(
+        (pending["number"].as_u64(), pending.get("closed")),
+        (Some(8), None)
+    );
+    assert_eq!(pending["map"].as_str(), Some(map.as_str()));
+    assert_eq!(
+        bench.read_map().pending.map(|pr| (pr.number, pr.closed)),
+        Some((8, false))
+    );
+    assert_eq!(tree(&main), files);
+
+    // Discard deletes plotkeeper's copy, and the repository has no map again.
+    let (bench, _) = closed_bench();
+    bench.drafts.pending_discard(&bench.project()).unwrap();
+    assert!(!bench.pending().exists());
+    assert_eq!(bench.read_map().status, Status::None);
+}
+
+#[test]
+fn a_map_whose_pr_is_still_open_is_not_written_reopened_or_discarded() {
+    let bench = bench();
+    bench.seed_pending(12, false, PENDING_MAP);
+    let before = fs::read(bench.pending()).unwrap();
+    let refusals = [
+        bench.drafts.pending_write(&bench.project(), None).map(drop),
+        bench.drafts.pending_pr(&bench.project()).map(drop),
+        bench.drafts.pending_discard(&bench.project()),
+    ];
+    for refused in refusals {
+        let why = refused.unwrap_err();
+        assert!(why.contains("PR #12 is still open"), "{why}");
+    }
+    assert_eq!(fs::read(bench.pending()).unwrap(), before);
+    assert!(!bench.map_file().exists());
 }

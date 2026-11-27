@@ -201,6 +201,13 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "project")?,
             arg(a, "replace")?,
         )),
+        "map_draft_pr" => res(app.drafts.open_pr(&arg::<String>(a, "project")?)),
+        "map_pending_write" => res(app.drafts.pending_write(
+            &arg::<String>(a, "project")?,
+            arg::<Option<String>>(a, "replace")?.as_deref(),
+        )),
+        "map_pending_pr" => res(app.drafts.pending_pr(&arg::<String>(a, "project")?)),
+        "map_pending_discard" => res(app.drafts.pending_discard(&arg::<String>(a, "project")?)),
         "map_know" => res(crate::map::map_know(arg(a, "project")?, arg(a, "part")?)),
         "map_refresher" => res(crate::map::map_refresher(
             arg(a, "project")?,
