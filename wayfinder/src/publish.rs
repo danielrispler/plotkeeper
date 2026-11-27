@@ -274,10 +274,19 @@ fn publish_problems(
     problems.extend(unordered_shares(manifest, bodies));
     problems
 }
+/// The paths of a body's **Files** that two tickets can meet in: Markdown and `system-map.json` are
+/// left out, since most tickets edit them and the Shared docs rule covers the shared ones
+/// (`ticket-authoring.md`).
+fn shareable_files(body: &str) -> Vec<String> {
+    crate::touches::touched_files(body)
+        .into_iter()
+        .filter(|path| {
+            crate::touches::is_path(path) && !path.ends_with(".md") && path != "system-map.json"
+        })
+        .collect()
+}
 /// Each pair of tickets whose **Files** share a path (a folder shares every path under it) with no
 /// blocker path between them in either direction, so parallel implementers would meet in it.
-/// Markdown and `system-map.json` are left out: most tickets edit them, and the Shared docs rule
-/// covers the shared ones (`ticket-authoring.md`).
 fn unordered_shares(
     manifest: &Manifest,
     bodies: &std::collections::HashMap<String, String>,
@@ -287,17 +296,7 @@ fn unordered_shares(
         .tickets
         .iter()
         .filter(|ticket| seen.insert(ticket.file.as_str()))
-        .filter_map(|ticket| {
-            let files = crate::touches::touched_files(bodies.get(&ticket.file)?)
-                .into_iter()
-                .filter(|path| {
-                    crate::touches::is_path(path)
-                        && !path.ends_with(".md")
-                        && path != "system-map.json"
-                })
-                .collect();
-            Some((ticket, files))
-        })
+        .filter_map(|ticket| Some((ticket, shareable_files(bodies.get(&ticket.file)?))))
         .collect();
     // Whether `from` waits on `to`, directly or through other tickets.
     let waits = |from: &Ticket, to: &str| {
@@ -331,6 +330,111 @@ fn unordered_shares(
         }
     }
     problems
+}
+/// What a publish prints without stopping: each `strong` route that justifies nothing, then the
+/// longest blocker chain. Only for a folder `publish_problems` passed.
+fn publish_warnings(
+    manifest: &Manifest,
+    bodies: &std::collections::HashMap<String, String>,
+) -> Vec<String> {
+    let mut warnings: Vec<String> = manifest
+        .tickets
+        .iter()
+        .filter(|ticket| bodies.get(&ticket.file).is_some_and(|body| unjustified_strong(body)))
+        .map(|ticket| {
+            format!(
+                "{}: **Route:** strong, but its reason names no risk ({}) and no open choice ({}); file count, a new module and hand-checked trials raise the tier to medium only (issue-tracker.md, Routing)",
+                ticket.file,
+                RISKS.join(", "),
+                CHOICES.join(", ")
+            )
+        })
+        .collect();
+    warnings.extend(longest_chain(manifest, bodies));
+    warnings
+}
+/// The terms one of which a `strong` route's reason names when the ticket holds a choice left open
+/// (`docs/agents/issue-tracker.md`, Routing): besides `RISKS`, the only other reason for `strong`.
+const CHOICES: [&str; 4] = ["open", "choice", "undecided", "Daniel"];
+/// Whether a body's Route is `strong` with a reason naming neither a risk nor an open choice. The
+/// check matches words, so it warns and never refuses.
+fn unjustified_strong(body: &str) -> bool {
+    let Some(route) = body.lines().find_map(|line| line.split_once("**Route:**")) else {
+        return false;
+    };
+    let Some((head, reason)) = route.1.trim().split_once(" — ") else {
+        return false;
+    };
+    let reason = reason.to_lowercase();
+    head.starts_with("strong ·")
+        && !RISKS
+            .iter()
+            .chain(&CHOICES)
+            .any(|term| reason.contains(&term.to_lowercase()))
+}
+/// The longest blocker chain, each edge marked with the **Files** paths its two tickets share, or
+/// nothing when no ticket waits on another. Ties go to the earlier ticket in publish order.
+fn longest_chain(
+    manifest: &Manifest,
+    bodies: &std::collections::HashMap<String, String>,
+) -> Option<String> {
+    let order = publish_order(manifest).ok()?;
+    // Each ticket's chain length, and the blocker its longest chain comes through.
+    let mut depth: std::collections::HashMap<&str, (usize, Option<&str>)> = Default::default();
+    for ticket in &order {
+        let best = ticket
+            .blocked_by
+            .iter()
+            .map(|blocker| (depth[blocker.as_str()].0, blocker.as_str()))
+            .fold(None, |best: Option<(usize, &str)>, next| match best {
+                Some(best) if best.0 >= next.0 => Some(best),
+                _ => Some(next),
+            });
+        depth.insert(
+            &ticket.file,
+            best.map_or((1, None), |(length, blocker)| (length + 1, Some(blocker))),
+        );
+    }
+    let mut end = None;
+    for ticket in &order {
+        let length = depth[ticket.file.as_str()].0;
+        if end.is_none_or(|(best, _)| length > best) {
+            end = Some((length, ticket.file.as_str()));
+        }
+    }
+    let (length, mut file) = end.filter(|(length, _)| *length > 1)?;
+    let mut chain = vec![file];
+    while let Some(blocker) = depth[file].1 {
+        chain.push(blocker);
+        file = blocker;
+    }
+    chain.reverse();
+    let files = |file: &str| {
+        bodies
+            .get(file)
+            .map_or(vec![], |body| shareable_files(body))
+    };
+    let mut steps = vec![chain[0].to_owned()];
+    let mut shares_any = false;
+    for pair in chain.windows(2) {
+        let shared = crate::touches::shared_files(&files(pair[0]), &files(pair[1]));
+        if shared.is_empty() {
+            steps.push(pair[1].to_owned());
+        } else {
+            shares_any = true;
+            let shared: Vec<String> = shared.iter().map(|path| format!("`{path}`")).collect();
+            steps.push(format!("{} (shares {})", pair[1], shared.join(", ")));
+        }
+    }
+    let hint = if shares_any {
+        "; an edge that only shares a file can often go by moving the shared piece to the other ticket (ticket-authoring.md, Edges)"
+    } else {
+        ""
+    };
+    Some(format!(
+        "longest chain ({length} tickets): {}{hint}",
+        steps.join(" → ")
+    ))
 }
 /// One write a `--publish` run makes.
 #[derive(Debug, PartialEq)]
@@ -371,7 +475,10 @@ pub(crate) fn publish(dir: &str) -> Result<()> {
     let manifest = parse_manifest(&serde_json::from_str(&fs::read_to_string(
         dir.join("tickets.json"),
     )?)?)?;
-    check_publish(dir, &manifest)?;
+    let bodies = check_publish(dir, &manifest)?;
+    for warning in publish_warnings(&manifest, &bodies) {
+        eprintln!("warning: {warning}");
+    }
     let order = publish_order(&manifest)?;
     let record = dir.join("published.json");
     let mut published: Value = match fs::read_to_string(&record) {
@@ -461,8 +568,11 @@ pub(crate) fn publish(dir: &str) -> Result<()> {
 }
 
 /// Checks the parent is open and every ticket's body, labels and blockers, before anything is
-/// written; any problem stops the publish.
-fn check_publish(dir: &std::path::Path, manifest: &Manifest) -> Result<()> {
+/// written; any problem stops the publish. Returns the bodies it read, by file.
+fn check_publish(
+    dir: &std::path::Path,
+    manifest: &Manifest,
+) -> Result<std::collections::HashMap<String, String>> {
     use std::{collections::HashMap, fs};
     let bodies: HashMap<String, String> = manifest
         .tickets
@@ -492,7 +602,7 @@ fn check_publish(dir: &std::path::Path, manifest: &Manifest) -> Result<()> {
         problems.is_empty(),
         &format!("nothing published:\n{}", problems.join("\n")),
     )?;
-    Ok(())
+    Ok(bodies)
 }
 
 /// The issue number `published.json` records for ticket `file`.
