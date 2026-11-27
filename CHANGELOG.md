@@ -2,22 +2,31 @@
 
 All notable changes to plotkeeper's npm package. Newest first; each version's section is the notes of its GitHub Release.
 
-## 0.4.0
+## 0.5.0
 
 ### Added
 
+- plotkeeper runs on Linux, x86_64 and arm64. `npx plotkeeper` runs the binary for your platform, data lives in the XDG folders, API keys are kept in the Secret Service, and shortcuts use Ctrl. Background runs need bubblewrap and socat. (#714)
+- `plotkeeper install` records OpenCode sessions through a plugin in `~/.config/opencode/plugins/`, and leaves your OpenCode config untouched. (#716)
+- A session's row shows a mark when its PR brief is waiting, and pressing the mark opens the brief on the map. (#688)
+- Ratify's map text review also asks "Still true?" of unchanged map text on the parts a PR touched, with Accept and Overturn. (#715)
 - A PR's brief plays on a map diff. It shows today's map with the PR's changes: parts it adds marked "New", parts it removes as struck-through "Gone", edited parts marked "Edited", and links it adds or removes. Ratify gets a map text review that flags map text the code doesn't back, and it shows whether the map check passes at the PR's head. A PR that only changes the map gets a short brief, even without `claude`. (#657)
 - A part's sheet leads with a catch-up card: how many changes landed since you last caught up, with "Catch up" and "I know this". Catch-ups are written when a turn ends, so one is ready when you open the map. The purpose is cut to two lines and the sections fold, each showing a short value and staying open or closed as you left it. (#651)
 - The map can read Java, Python, PHP, Dart and .NET imports: add `java-imports`, `python-imports`, `php-imports`, `dart-imports` or `dotnet-projects` to your map's `extractors`. (#614, #615, #660, #649, #632)
 
 ### Changed
 
+- The session list holds still under the pointer. A session keeps the project it started in, so a `cd` no longer makes a new project. Temporary and deleted folders leave the list. A project header's chevron folds the group, and its name opens the map. (#692)
+- The story panel holds still while it updates, and a side question's answer stays with its turn. A turn woken by a background task reads "Woken by" instead of looking like your prompt. (#686)
+- The npm page names Antigravity CLI and is easier to find in search. (#693)
 - Every hover shows one page-wide hint in place of the browser's tooltip. It opens on keyboard focus too, closes with Esc, and says why an unavailable button can't be used. (#591)
 - The wheel zooms the map more gently. The map head has a Fit button, and the "N not placed" list, toasts, Pre-flight and the Ready-for-review tray no longer get in the way of the side area or the left panel. (#680)
 - The left panel's header reads "Running · auto mode" and "est. up to 12m left", and says when a run is past its estimate. (#680)
 
 ### Fixed
 
+- A queued prompt shows on its own turn instead of "No prompt". (#686)
+- `python-imports` reads Python configs in paths the map ignores, so their source roots still count. (#685)
 - A background run's check, setup or harness that times out or is cancelled no longer leaves processes running. (#616)
 
 ## 0.3.0
