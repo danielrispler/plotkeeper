@@ -113,11 +113,7 @@ pub(super) fn gathered(project: &str, meta: PrMeta, trusted: bool) -> Result<PrS
     let head = meta.head.clone();
     // A repository that never committed a map still gets a brief: the map read from the checkout or a pending PR places it, and
     // the gather gives it no map diff (#753, "PR briefs while the map is not committed").
-    let read = crate::map::read_map(repo);
-    let passed = match read.from {
-        Some(crate::map::ReadFrom::Checkout | crate::map::ReadFrom::PendingPr) => read.source,
-        _ => None,
-    };
+    let passed = crate::map::uncommitted_map(repo);
     let mut source = gather(repo, &base, &head, meta, passed.as_deref())?;
     // Read from the head when the brief is written, never live in Ratify (#499, #641).
     let check = crate::ratify::head_check(repo, &base, &head, trusted);

@@ -182,6 +182,16 @@ pub fn read_map(repo: &Path) -> MapState {
     read_from(repo, pending_file)
 }
 
+/// The map of a repository that never committed one, for its PR briefs (#753, "PR briefs while the map is not committed"): the
+/// map `read_map` reads from the checkout or a pending PR; none when it reads the default branch's, or none.
+pub(crate) fn uncommitted_map(repo: &Path) -> Option<String> {
+    let read = read_map(repo);
+    match read.from {
+        Some(ReadFrom::Checkout | ReadFrom::PendingPr) => read.source,
+        _ => None,
+    }
+}
+
 /// `read_map` as the Map view shows it: for a `checkout` map that reads, also the problems `system-map check` finds in the working tree,
 /// for the banner over the map. The default branch's map gets none, since CI owns that; nor do the other readers, which need only the map.
 fn read_checked(repo: &Path, pending: impl FnOnce(&str) -> Option<PathBuf>) -> MapState {
