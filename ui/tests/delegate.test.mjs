@@ -19,7 +19,7 @@ const { execSync } = require("node:child_process");
 const { appendFileSync, existsSync, readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const env = process.env;
-const call = { argv: process.argv.slice(2), cwd: process.cwd(), internal: env.PLOTKEEPER_INTERNAL, terminal: env.PLOTKEEPER_TERMINAL_ID };
+const call = { argv: process.argv.slice(2), cwd: process.cwd(), internal: env.PLOTKEEPER_INTERNAL };
 appendFileSync(join(env.FAKE_AGY_DIR, "agy-calls.jsonl"), JSON.stringify(call) + "\\n");
 if (process.argv.includes("/usage")) {
   if (env.FAKE_AGY_USAGE === "none") process.exit(1);
@@ -75,7 +75,7 @@ const pickCritic = (fake, kind = "spec") => {
   git("init", "--quiet");
   git("add", ".");
   git("commit", "--quiet", "-m", "one");
-  const env = { ...process.env, ...gitEnv, PATH: `${join(dir, "bin")}:${process.env.PATH}`, TMPDIR: dir, FAKE_AGY_DIR: dir, PLOTKEEPER_TERMINAL_ID: "claude-test", ...fake };
+  const env = { ...process.env, ...gitEnv, PATH: `${join(dir, "bin")}:${process.env.PATH}`, TMPDIR: dir, FAKE_AGY_DIR: dir, ...fake };
   const args = [script, "pick", "critic", `--${kind}`, join(dir, "draft.md"), "--routing", join(dir, "routing.json")];
   const ran = spawnSync(process.execPath, args, { cwd: repo, env, encoding: "utf8" });
   const lines = (name) => (existsSync(join(dir, name)) ? readFileSync(join(dir, name), "utf8").trim().split("\n").map((line) => JSON.parse(line)) : []);
@@ -105,7 +105,6 @@ test("with both Gemini windows at their floors, pick critic runs the Gemini crit
   assert.equal(after("-p").includes("@"), false, "an at-sign may read a file past the hook");
   assert.notEqual(critic.cwd, ran.repo);
   assert.equal(critic.internal, "1");
-  assert.equal(critic.terminal, undefined);
   // It read the draft through the hook, in a worktree of HEAD whose files tree.txt lists.
   assert.deepEqual(ran.seen, [{ draft: "# A draft\n\nThe store reads `src/store.rs:7`.\n", worktree: true, tree: `${join(critic.cwd, "repo/src/store.rs")}\n` }]);
   // And left no throwaway folder or worktree behind.

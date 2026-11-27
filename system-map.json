@@ -118,7 +118,7 @@
     },
     {
       "id": "workbench", "name": "Workbench", "caption": "Worktrees and PRs",
-      "purpose": "The one runner of `git` and `gh`, git worktrees and fetches, other agents' resume commands, and agy's plugin. A black box: it never fogs.",
+      "purpose": "The one runner of `git` and `gh`, git worktrees and fetches, and agy's plugin. A black box: it never fogs.",
       "holds": [
         { "name": "The runner", "text": "Builds every `git` and `gh` with prompts off and no input, and runs commands to a deadline that kills their process group.", "paths": ["workbench/src/run.rs"] },
         { "name": "Git", "text": "A folder's main checkout, `origin`'s fetch and what removing a worktree would lose, never with force.", "paths": ["workbench/src/lib.rs"] }
@@ -157,7 +157,6 @@
     { "id": "map-engine-workbench", "from": "map-engine", "to": "workbench", "kind": "import" },
     { "id": "install-hook", "from": "install", "to": "hook", "kind": "import" },
     { "id": "install-workbench", "from": "install", "to": "workbench", "kind": "import" },
-    { "id": "core-workbench", "from": "core", "to": "workbench", "kind": "import" },
     { "id": "understanding-core", "from": "understanding", "to": "core", "kind": "import" },
     { "id": "understanding-hook", "from": "understanding", "to": "hook", "kind": "import" },
     { "id": "understanding-workbench", "from": "understanding", "to": "workbench", "kind": "import" },

@@ -106,8 +106,6 @@ struct Raw {
     permission_mode: Option<String>,
     /// On a tool's result, how long its call took.
     duration_ms: Option<u64>,
-    /// The terminal the session runs in, which the hook records from `PLOTKEEPER_TERMINAL_ID`.
-    studio_terminal_id: Option<String>,
     /// The agent's process, from the hook (#330).
     studio_pid: Option<u32>,
     /// The trees the hook recorded at a turn's first touch of each worktree, by root (danielrispler/Falinks#486).
@@ -217,13 +215,7 @@ fn adapt(raw: Raw) -> Event {
             }
         }
         "Stop" => {
-            let pending = raw
-                .background_tasks
-                .as_array()
-                .is_some_and(|t| !t.is_empty());
-            happened.push(Happened::TurnEnd {
-                background_pending: pending,
-            });
+            happened.push(Happened::TurnEnd);
             happened.push(Happened::Reply(raw.last_assistant_message.clone()));
         }
         "SubagentStop" => {
@@ -336,7 +328,6 @@ fn adapt(raw: Raw) -> Event {
         transcript_path: raw.transcript_path,
         prompt_id: raw.prompt_id,
         studio_received_ms: raw.studio_received_ms,
-        studio_terminal_id: raw.studio_terminal_id,
         studio_pid: raw.studio_pid,
         studio_turn_start: raw.studio_turn_start,
         studio_turn_end: raw.studio_turn_end,

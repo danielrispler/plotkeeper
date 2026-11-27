@@ -9,7 +9,7 @@ const { hintOf } = await import("../../dist/dom.js");
 
 // A session as the core sends it, less the fields the row never reads.
 /** @param {number | null} pr @param {import("../../dist/types.js").SessionState} state */
-const session = (pr, state = "idle", extra = {}) => /** @type {Pick<import("../../dist/types.js").Session, "identity" | "state">} */ ({ id: "s", cwd: "/w/p", state, terminal: 3, identity: { issue: null, branch: "b", pr, worktree: "/w/p", name: "n" }, ...extra });
+const session = (pr, state = "idle", extra = {}) => /** @type {Pick<import("../../dist/types.js").Session, "identity" | "state">} */ ({ id: "s", cwd: "/w/p", state, identity: { issue: null, branch: "b", pr, worktree: "/w/p", name: "n" }, ...extra });
 const waiting = { project: "/p", numbers: [7] };
 
 test("the row is there for a live session whose PR has a brief waiting, and says so quietly", () => {

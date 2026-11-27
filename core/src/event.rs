@@ -21,8 +21,6 @@ pub(crate) struct Event {
     /// The agent's id of the turn the event belongs to, absent until the first user input.
     pub prompt_id: Option<String>,
     pub studio_received_ms: u64,
-    /// The terminal the session runs in, which the hook records from `PLOTKEEPER_TERMINAL_ID`.
-    pub studio_terminal_id: Option<String>,
     /// The agent's process, which the hook records as `studio_pid`: its parent, or the pid the
     /// agy wrapper passes. `None` when it could not tell (#330).
     pub studio_pid: Option<u32>,
@@ -52,10 +50,8 @@ pub(crate) enum Happened {
         /// leaves it to the prompt's text, as Claude's wake-ups name a task the session knows.
         origin: Option<Origin>,
     },
-    /// A turn ends; `background_pending` when work goes on in the background.
-    TurnEnd {
-        background_pending: bool,
-    },
+    /// A turn ends.
+    TurnEnd,
     ToolStart {
         tool: Tool,
         id: String,
@@ -312,7 +308,7 @@ impl Event {
     }
 
     pub(crate) fn turn_ends(&self) -> bool {
-        self.has(|h| matches!(h, Happened::TurnEnd { .. }))
+        self.has(|h| matches!(h, Happened::TurnEnd))
     }
 
     /// The prompt of the turn it starts.

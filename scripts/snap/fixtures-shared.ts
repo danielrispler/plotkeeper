@@ -8,8 +8,8 @@ export const session = (id: string, name: string, state: SessionState, extra: Pa
   const now = Date.now();
   return {
     id, capabilities: { agent: "claude", asks: true, background_tasks: true, replies: true, permission_mode: true, durations: true, transcript_version: true, transcript_model: true, context: true, turn_trees: true },
-    model: null, shell: false, cwd: `/w/plotkeeper/.claude/worktrees/${id}`, project: "/w/plotkeeper", folder_name: id, terminal: null, status_only: false, name, prompt_name: null,
-    resume_id: id, permission_mode: null, started_mode: null, cleared: [], asks_before_closing: false, landed: false, last_step: null,
+    model: null, cwd: `/w/plotkeeper/.claude/worktrees/${id}`, project: "/w/plotkeeper", folder_name: id, name, prompt_name: null,
+    resume_id: id, permission_mode: null, cleared: [], landed: false, last_step: null,
     started_at: now - 3600e3, last_event_at: now - 60e3, turn_span: null, step_span: null, state, agents: [], asker: null,
     prompts: [], turns: [], since_looked: { turns: 0, files: 0, passed: 0, failed: 0, ran: 0 }, questions: [], blocked_commands: [], returned: null,
     transcript: { intention: null, steps_ago: 0, responses: [], unavailable: null, context: null, branch: null, model: null, effort: null },
@@ -238,7 +238,7 @@ export const busySessions = () => {
       session("s2", "Ship PR 286", "needs_you", { turns: touched("hook/src/main.rs") }),
       session("s3", "#312 · CI marks", "running"),
       session("s4", "agy · Name from the prompt", "running", { capabilities: agy }),
-      session("s5", "codex · plotkeeper", "running", { status_only: true, turns: [] }),
+      session("s5", "codex · plotkeeper", "running", { capabilities: { ...agy, agent: "codex" }, turns: [] }),
       session("s6", "#313 · Docs", "needs_you", { turns: touched("docs/notes.md") }),
       session("s7", "#55 · Delete default", "your_turn"),
     ];

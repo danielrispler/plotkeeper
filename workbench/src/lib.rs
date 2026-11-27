@@ -1,6 +1,6 @@
 //! Workbench git (danielrispler/Falinks#328, module 7; danielrispler/Falinks#461, decision 8): a folder's main
 //! checkout, `origin`'s fetch and what removing a task's worktree would lose, with no call passing git's force
-//! option; the `gh` to run; the resume commands of agents other than Claude Code; and the agy plugin. What
+//! option; the `gh` to run; and the agy plugin. What
 //! only its own tests used is in `archive/workbench/` (#415), with the `claude` command and status line wrapper
 //! a studio terminal ran and the context window its snapshots held (#416).
 
@@ -33,30 +33,6 @@ pub fn main_checkout(folder: &Path) -> Result<String, String> {
 /// writes `refs/remotes/*` and `FETCH_HEAD` only, never a branch, the index or a worktree's files.
 pub fn fetch(repo: &Path) -> Result<(), String> {
     git(repo, &["fetch", "--quiet", "origin"], FETCH_LIMIT).map(drop)
-}
-
-/// The command that brings back an agent other than Claude Code (danielrispler/Falinks#561), by the name of the program a
-/// revived terminal had in its foreground: conversation `id` when it is known, else the latest one
-/// in the terminal's folder. `None` for any other program, which revives as a plain shell. Checked
-/// from each tool's `--help`: `agy` 1.4.7 and `codex` 0.167.0 (2026-11-11). Cursor's `agent` was not
-/// installed; its `--resume [id]` is from its docs (2026-11-09), unchecked.
-pub fn resume(program: &str, id: Option<&str>) -> Option<Vec<String>> {
-    let argv: &[&str] = match (program, id) {
-        ("agy", Some(_)) => &["agy", "--conversation"],
-        ("agy", None) => &["agy", "--continue"],
-        ("agent" | "cursor-agent", _) => &[program, "--resume"],
-        ("codex", Some(_)) => &["codex", "resume"],
-        // `codex resume` lists the folder's sessions only, unless given `--all`.
-        ("codex", None) => &["codex", "resume", "--last"],
-        _ => return None,
-    };
-    Some(argv.iter().copied().chain(id).map(String::from).collect())
-}
-
-/// Whether `argv` is `resume`'s command for an agent's latest conversation, not a known one.
-pub fn resumes_latest(argv: &[String]) -> bool {
-    argv.first()
-        .is_some_and(|program| resume(program, None).as_deref() == Some(argv))
 }
 
 /// The `gh` to run: the first on Daniel's login shell's `PATH`, found once; bare `gh` when it

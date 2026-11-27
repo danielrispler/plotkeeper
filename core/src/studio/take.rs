@@ -38,7 +38,6 @@ impl Studio {
         if event.session_id != own_id {
             self.rows.insert(own_id.clone(), event.session_id.clone());
         }
-        self.drop_throwaways(&event);
         if self.take_mark(&event) {
             return Vec::new();
         }
@@ -61,9 +60,6 @@ impl Studio {
                     ..Session::default()
                 }
             });
-        let moves = moves_terminal(&event, session, self.listed, |own| {
-            self.live_terminals.contains(own)
-        });
         let mut take = Take {
             session,
             event: &event,
@@ -80,19 +76,7 @@ impl Studio {
             in_turn: false,
             outputs: Vec::new(),
         };
-        take.follow_process(moves);
-        // The session Daniel started in a new terminal takes the selection, so the rail follows its pane.
-        if self.awaiting.is_some() && take.session.terminal == self.awaiting {
-            self.awaiting = None;
-            self.selected = Some(event.session_id.clone());
-            self.viewed = None;
-        }
-        // So does one whose terminal's own row was selected, a status-only or shell row, whose id is
-        // the terminal's: as agy's at its first prompt, or `claude` typed into a plain terminal.
-        if take.session.terminal.is_some() && self.selected == take.session.terminal {
-            self.selected = Some(event.session_id.clone());
-            self.viewed = None;
-        }
+        take.follow_process();
         let before = take.track(&own_id, continues, command);
         take.bound_turns(before.ends_early, before.opens);
         take.credit_subagent_edit();
@@ -106,28 +90,6 @@ impl Studio {
             self.estimate(&event.session_id);
         }
         outputs
-    }
-
-    /// A resume or fork in a `claude` replaces the id it started under, which had no prompt
-    /// (danielrispler/Falinks#562).
-    fn drop_throwaways(&mut self, event: &Event) {
-        if event.session_starts()
-            && matches!(event.started_from(), Some(Start::Resume | Start::Fork))
-            && event.studio_terminal_id.is_some()
-        {
-            let throwaway = |s: &&mut Session| {
-                s.agent.id != event.session_id
-                    && s.terminal == event.studio_terminal_id
-                    && s.prompts.is_empty()
-            };
-            for s in self.sessions.values_mut().filter(throwaway) {
-                s.deleted = true;
-                // Daniel's new terminal selected the throwaway id; its replacement keeps the selection.
-                if self.selected.as_deref() == Some(&s.agent.id) {
-                    self.selected = Some(event.session_id.clone());
-                }
-            }
-        }
     }
 
     /// Takes a rename, a prompt's name or a delete, which each name a known session and are none
@@ -164,25 +126,6 @@ impl Studio {
             return true;
         }
         false
-    }
-}
-
-/// Whether `event` moves `session`'s terminal link to its own. Every event of a studio-run
-/// `claude` carries its terminal, so a resume elsewhere moves it (#101): a start does, and so does
-/// an event from a terminal once the session's own is gone. An event with no terminal, or from a
-/// second live terminal of the conversation, leaves the link as it is, so the pane neither loses a
-/// running terminal nor flips between two. Before the first terminal list (`listed`) nothing is
-/// known to be dead, so only a start or no link moves it.
-fn moves_terminal(
-    event: &Event,
-    session: &Session,
-    listed: bool,
-    live: impl Fn(&String) -> bool,
-) -> bool {
-    match (&event.studio_terminal_id, &session.terminal) {
-        (_, None) => true,
-        (None, Some(_)) => event.session_starts(),
-        (Some(new), Some(own)) => new == own || event.session_starts() || (listed && !live(own)),
     }
 }
 
@@ -224,26 +167,19 @@ struct Take<'a> {
 }
 
 impl Take<'_> {
-    /// The process facts every event carries: its terminal, pid, mode, model, branch and
-    /// transcript format.
-    fn follow_process(&mut self, moves: bool) {
+    /// The process facts every event carries: its pid, mode, model, branch and transcript format.
+    fn follow_process(&mut self) {
         let (session, event) = (&mut *self.session, self.event);
         // A deleted session that starts again, by a resume, is back in the list; a late end is not.
         session.deleted &= !event.session_starts();
         // The hooks are async, so the latest event can land before an earlier one.
         session.agent.last_event_at = session.agent.last_event_at.max(event.studio_received_ms);
-        if moves {
-            session.terminal.clone_from(&event.studio_terminal_id);
-        }
         // A subagent's event is the same process as its session's.
         if event.studio_pid.is_some() {
             session.pid = event.studio_pid;
         }
         if let Some(mode) = event.permission_mode() {
             session.permission_mode = Some(mode.into());
-            if session.started_mode.is_none() {
-                session.started_mode = Some(mode.into());
-            }
         }
         session.capabilities = event.capabilities;
         if let Some(model) = event.model() {
@@ -496,7 +432,7 @@ impl Take<'_> {
                 Happened::ToolStart { tool, id } if tool.kind == ToolKind::Command => {
                     self.retry_started(tool, id);
                 }
-                Happened::TurnEnd { .. } | Happened::SubagentEnd => {
+                Happened::TurnEnd | Happened::SubagentEnd => {
                     self.approvals_unused(matches!(happened, Happened::SubagentEnd));
                 }
                 Happened::ToolEnd { id, failed, .. } => self.retry_ended(id, *failed),
@@ -585,12 +521,11 @@ impl Take<'_> {
             // subagent's reply (Claude Code's `SubagentStop`) is never its parent turn's.
             Happened::Reply(reply)
                 if event.agent_id.is_none()
-                    && !event
-                        .has(|h| matches!(h, Happened::TurnEnd { .. } | Happened::SubagentEnd)) =>
+                    && !event.has(|h| matches!(h, Happened::TurnEnd | Happened::SubagentEnd)) =>
             {
                 self.reply(reply);
             }
-            Happened::TurnEnd { background_pending } => self.turn_end(*background_pending),
+            Happened::TurnEnd => self.turn_end(),
             Happened::SessionEnd => self.session_end(),
             Happened::SessionStart => self.session_start(),
             Happened::ToolStart { tool, .. } => self.tool_start(tool),
@@ -868,7 +803,7 @@ impl Take<'_> {
     }
 
     /// The turn's end: its card, its summary, its name, and the version of the agent.
-    fn turn_end(&mut self, background_pending: bool) {
+    fn turn_end(&mut self) {
         let (session, event, at) = (&mut *self.session, self.event, self.at);
         // A reply that asks in text blocks nothing, so the turn ends on your turn unless a
         // subagent's block outlasts it (danielrispler/Falinks#540).
@@ -878,7 +813,6 @@ impl Take<'_> {
             "" => waiting.as_str(),
             own => own,
         };
-        session.background = background_pending;
         let output = session.end_turn(self.changes.remove(&session.agent.id), at);
         if in_turn && event.capabilities.turn_trees {
             session.keep_end_trees(&event.studio_turn_end);
@@ -1213,7 +1147,6 @@ impl Take<'_> {
             State::Running
         };
         session.update_unseen();
-        session.asks_before_closing = session.in_turn() || !session.ended && session.background;
         session.work.estimate.depends_on_you = session.state == State::NeedsYou;
         session.asker = session.blocks.first().map(|block| Asker {
             agent: block.asker(),

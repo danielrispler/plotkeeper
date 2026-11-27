@@ -93,9 +93,53 @@ fn saved_state_of_another_format_or_beside_a_shorter_log_is_ignored() {
     let mut other_format = b"studio-state 0".to_vec();
     other_format.extend(&saved[newline..]);
     again(&other_format, log.len() as u64);
+    again(&with_terminals(&saved), log.len() as u64);
     again(&saved, log.len() as u64 - 1);
     again(&saved[..saved.len() / 2], log.len() as u64);
     again(b"", log.len() as u64);
+}
+
+/// The saved state `saved` as the build before #725 wrote it, format 8: the studio and its
+/// sessions kept the terminal list's fields.
+fn with_terminals(saved: &[u8]) -> Vec<u8> {
+    let at = saved.iter().position(|b| *b == b'\n').unwrap() + 1;
+    let mut state: serde_json::Value = serde_json::from_slice(&saved[at..]).unwrap();
+    let terminal = serde_json::json!({
+        "awaiting": null, "mismatched": {}, "listed": true, "live_terminals": ["claude-1"],
+    });
+    state
+        .as_object_mut()
+        .unwrap()
+        .extend(terminal.as_object().unwrap().clone());
+    for session in state["sessions"].as_object_mut().unwrap().values_mut() {
+        let fields = serde_json::json!({
+            "terminal": "claude-1", "started_mode": null, "asks_before_closing": false,
+            "status_only": false, "shell": false, "terminal_blocked": false, "reported_turn": 0,
+            "background": false,
+        });
+        session
+            .as_object_mut()
+            .unwrap()
+            .extend(fields.as_object().unwrap().clone());
+    }
+    let mut old = b"studio-state 8\n".to_vec();
+    old.extend(serde_json::to_vec(&state).unwrap());
+    old
+}
+
+/// An event log's lines from before #725 carry the session's studio terminal: they replay as if
+/// they did not, and the log is not rewritten.
+#[test]
+fn a_logs_terminal_fields_replay_as_if_absent() {
+    for (name, lines) in fixtures() {
+        // A key of the same length that nothing reads keeps every line's byte offsets.
+        let renamed: Vec<String> = (lines.iter())
+            .map(|line| line.replace("\"studio_terminal_id\"", "\"unknown_field_name\""))
+            .collect();
+        let as_logged = format!("{:#?}", replayed(&file(&lines)));
+        let without = format!("{:#?}", replayed(&file(&renamed)));
+        assert!(as_logged == without, "{name}");
+    }
 }
 
 /// The saved state `saved` as the build before spec #659 wrote it: its sessions have no project folder.

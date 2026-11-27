@@ -18,8 +18,7 @@ fn scratch(name: &str) -> PathBuf {
 fn hook(home: &Path, patience_ms: u64, event: serde_json::Value) -> Duration {
     let start = Instant::now();
     let mut cmd = hook_command(home);
-    cmd.env("PLOTKEEPER_TERMINAL_ID", "t-1")
-        .env("PLOTKEEPER_HOOK_PATIENCE_MS", patience_ms.to_string())
+    cmd.env("PLOTKEEPER_HOOK_PATIENCE_MS", patience_ms.to_string())
         .stdout(Stdio::piped());
     let out = feed(cmd, &event).wait_with_output().unwrap();
     assert!(out.status.success());
@@ -46,7 +45,7 @@ fn a_held_lock_gives_a_drops_line_and_no_log_line_once_its_patience_runs_out() {
     let drops = fs::read_to_string(studio_hook::drops_file(&log)).unwrap();
     let fields: Vec<&str> = drops.trim_end().split(' ').collect();
     assert_eq!(drops.lines().count(), 1);
-    assert_eq!(&fields[1..], ["PostToolUse", "t-1"]);
+    assert_eq!(&fields[1..], ["PostToolUse"]);
     assert!(fields[0].parse::<u64>().is_ok());
     // Cleanup: a leftover temp file fails no test.
     fs::remove_dir_all(&home).ok();

@@ -42,13 +42,12 @@ git -C "$repo" commit -qm "Start"
 
 # `-p` waits for background subagents before it exits, so the worker's events all land. Without
 # `Edit` and `Write` the worker edits through Bash, as the workers that are not isolated do. The
-# prompt is not quoted, so it names `$worktree`; it holds no other `$` or backtick unescaped. The
-# session must not take the terminal of a studio shell this runs in, so it gets no
-# `PLOTKEEPER_TERMINAL_ID`. Step b waits before it writes: the hooks are async, and a helper's base is
+# prompt is not quoted, so it names `$worktree`; it holds no other `$` or backtick unescaped. Step b
+# waits before it writes: the hooks are async, and a helper's base is
 # taken when the shell reads its command's `PreToolUse`, so a write that lands first never makes it a
 # worker (the shortcut in `core/src/studio.rs`, danielrispler/Falinks#434, decision 23).
 cd "$repo"
-env -u PLOTKEEPER_TERMINAL_ID CLAUDE_CODE_PLUGIN_DIRS="$studio/plugin" claude -p --session-id "$session" \
+CLAUDE_CODE_PLUGIN_DIRS="$studio/plugin" claude -p --session-id "$session" \
   --allowedTools "Bash" --disallowedTools "Edit" "Write" "NotebookEdit" <<PROMPT
 This session is a scripted test. Follow these steps exactly and keep every reply short.
 

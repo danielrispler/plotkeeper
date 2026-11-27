@@ -409,17 +409,16 @@ export const paletteOpen = () => {
     if (!document.querySelector("#palette .row")) log("snap:fail the palette did not open");`;
   return { ...list(), snapScript };
 };
-/** The list with each agent's logo in each state (#158): Claude, agy, status-only Codex, another program and a shell. */
+/** The list with each agent's logo in each state (#158): Claude, agy, Codex and an agent with no mark of its own. */
 export const logos = () => {
   const agy = { capabilities: { agent: "agy", asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, transcript_model: false, context: false, turn_trees: false }, model: "gemini-3.8-flash-high" };
-  const only = (program: string, extra: Partial<Session> = {}) => ({ status_only: true, capabilities: { agent: "", asks: false, background_tasks: false, replies: false, permission_mode: false, durations: false, transcript_version: false, transcript_model: false, context: false, turn_trees: false }, ...extra, identity: { issue: null, branch: null, pr: null, worktree: "", name: `${program} · plotkeeper` } });
+  const other = (agent: string): Partial<Session> => ({ capabilities: { ...agy.capabilities, agent } });
   const sessions = [
     session("s1", "#56 · Row controls", "running", { transcript: { ...session("x", "x", "idle").transcript, context: { tokens: 90000 } } }),
     session("s2", "agy · Name from the prompt", "needs_you", agy),
     session("s3", "#54 · Subagent terminal", "your_turn", { unseen: true }),
-    session("s4", "codex · plotkeeper", "running", only("codex")),
-    session("s5", "aider · plotkeeper", "your_turn", only("aider")),
-    session("s6", "plotkeeper", "idle", only("zsh", { shell: true })),
+    session("s4", "codex · plotkeeper", "running", other("codex")),
+    session("s5", "aider · plotkeeper", "your_turn", other("aider")),
     session("s7", "#55 · Delete default", "idle", agy),
   ];
   // The idle group is folded by default: open it, so the idle rows show.

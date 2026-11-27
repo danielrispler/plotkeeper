@@ -15,10 +15,10 @@ pub(crate) fn scratch(label: &str) -> PathBuf {
     home
 }
 
-/// `plotkeeper-hook` with `home` as its `HOME` and outside a studio terminal, not yet started.
+/// `plotkeeper-hook` with `home` as its `HOME`, not yet started.
 pub(crate) fn hook(home: &Path) -> Command {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_plotkeeper-hook"));
-    cmd.env("HOME", home).env_remove("PLOTKEEPER_TERMINAL_ID");
+    cmd.env("HOME", home);
     cmd
 }
 

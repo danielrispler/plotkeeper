@@ -68,7 +68,6 @@ struct Raw {
     timestamp: Value,
     #[serde(default)]
     studio_received_ms: u64,
-    studio_terminal_id: Option<String>,
     studio_pid: Option<u32>,
 }
 
@@ -150,9 +149,7 @@ fn adapt(raw: Raw) -> Event {
             if let Some(reply) = final_response(&raw.transcript_path, &raw.timestamp) {
                 happened.push(Happened::Reply(reply));
             }
-            happened.push(Happened::TurnEnd {
-                background_pending: false,
-            });
+            happened.push(Happened::TurnEnd);
         }
         "preToolUse" | "PreToolUse" => {
             let (tool, id) = call();
@@ -184,7 +181,6 @@ fn adapt(raw: Raw) -> Event {
         transcript_path: raw.transcript_path,
         prompt_id: None,
         studio_received_ms: raw.studio_received_ms,
-        studio_terminal_id: raw.studio_terminal_id,
         studio_pid: raw.studio_pid,
         studio_turn_start: Default::default(),
         studio_turn_end: Default::default(),

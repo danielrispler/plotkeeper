@@ -63,7 +63,6 @@ struct Raw {
     tool_use_id: String,
     #[serde(default)]
     studio_received_ms: u64,
-    studio_terminal_id: Option<String>,
     studio_pid: Option<u32>,
     /// The trees the hook recorded for the turn, as for Claude Code's (#426).
     #[serde(default)]
@@ -123,9 +122,7 @@ fn adapt(raw: Raw) -> Event {
         }),
         "afterAgentResponse" => happened.push(Happened::Reply(raw.text.clone())),
         "stop" if raw.status == "aborted" => happened.push(Happened::Interrupted),
-        "stop" => happened.push(Happened::TurnEnd {
-            background_pending: false,
-        }),
+        "stop" => happened.push(Happened::TurnEnd),
         // The call is recorded at its end: its start, then its end.
         "postToolUse" | "postToolUseFailure" => {
             happened.push(Happened::ToolStart {
@@ -155,7 +152,6 @@ fn adapt(raw: Raw) -> Event {
         transcript_path: raw.transcript_path.unwrap_or_default(),
         prompt_id: raw.generation_id.filter(|g| !g.is_empty()),
         studio_received_ms: raw.studio_received_ms,
-        studio_terminal_id: raw.studio_terminal_id,
         studio_pid: raw.studio_pid,
         studio_turn_start: raw.studio_turn_start,
         studio_turn_end: raw.studio_turn_end,

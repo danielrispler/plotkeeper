@@ -2,12 +2,12 @@
 //! core's neutral `Event`s (danielrispler/plotkeeper#43, decisions 2, 3, 6, 7, 10 and 15). agy's
 //! event names, tool names, record types and files stay here.
 //!
-//! Unlike Claude's, the adapter has state: a subagent is a conversation of its own with no parent id
-//! in its payload, a turn's origin is read from the transcript once, and hooks that arrive out of
-//! order are tolerated by remembering which steps ended.
+//! Unlike Claude's, the adapter has state: a turn's origin is read from the transcript once, and
+//! hooks that arrive out of order are tolerated by remembering which steps ended. A subagent's
+//! payload names no parent, so each conversation is a session of its own.
 
 use crate::event::{
-    Capabilities, Event, Happened, Origin, Spawned, Start, Tool, ToolKind, TranscriptFormat,
+    Capabilities, Event, Happened, Origin, Start, Tool, ToolKind, TranscriptFormat,
 };
 use crate::ledger::Bytes;
 use serde::{Deserialize, Serialize};
@@ -99,17 +99,11 @@ impl Hook {
     }
 }
 
-/// One conversation: a session's own, or a subagent's.
+/// One conversation, a session.
 #[derive(Clone, Default, Serialize, Deserialize)]
 struct Conversation {
-    /// The conversation it is a subagent of, once found.
-    parent: Option<String>,
-    /// The child's file `state` when first seen.
-    state: Option<String>,
-    ended: bool,
     transcript: String,
     cwd: String,
-    terminal: Option<String>,
     /// The open turn's start.
     turn: Option<Turn>,
     last_input: String,
@@ -124,9 +118,6 @@ struct Conversation {
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub(crate) struct Adapter {
     conversations: HashMap<String, Conversation>,
-    /// The latest session's conversation on each terminal, which a new conversation there is a
-    /// subagent of.
-    sessions: HashMap<String, String>,
     pub drift: Vec<Drift>,
 }
 
@@ -143,133 +134,67 @@ impl Adapter {
             return Some(Vec::new());
         };
         let id = id.to_owned();
-        self.know(&id, raw["studio_terminal_id"].as_str());
-        let conversation = self.conversations.get_mut(&id)?;
+        let conversation = self.conversations.entry(id.clone()).or_default();
         if let Some(text) = raw["transcriptPath"].as_str().filter(|t| !t.is_empty()) {
             conversation.transcript = text.into();
         }
         if let Some(text) = raw["cwd"].as_str().filter(|t| !t.is_empty()) {
             conversation.cwd = text.into();
         }
-        let parent = conversation.parent.clone();
-        let own = parent.is_none();
-        let mut events = Vec::new();
-        // A child of a session whose file names it goes under it by its own spawn event, which
-        // the session's own agent sends.
-        if parent.is_some() {
-            events.extend(self.attach(&id, at));
-        }
-        let session = parent.clone().unwrap_or_else(|| id.clone());
-        let mut event = frame(
-            &self.conversations[&id],
-            session,
-            parent.map(|_| id.clone()),
-            at,
-        );
+        let mut event = frame(&self.conversations[&id], id.clone(), at);
         event.studio_pid = raw["studio_pid"]
             .as_u64()
             .and_then(|p| u32::try_from(p).ok());
         event.studio_turn_start = strings(&raw["studio_turn_start"]);
         event.studio_turn_end = strings(&raw["studio_turn_end"]);
-        if own && let Some(model) = raw["modelName"].as_str().filter(|m| !m.is_empty()) {
+        if let Some(model) = raw["modelName"].as_str().filter(|m| !m.is_empty()) {
             event.happened.push(Happened::Model(model.into()));
         }
         match hook {
-            Hook::SessionStart if own => {
+            Hook::SessionStart => {
                 event.happened.push(Happened::SessionStart);
                 event.happened.push(Happened::StartedFrom(Start::Other));
                 event
                     .happened
                     .extend(branch(&event.cwd).map(Happened::Branch));
             }
-            Hook::PreInvocation if own && raw["invocationNum"] == 0 => {
+            Hook::PreInvocation if raw["invocationNum"] == 0 => {
                 self.turn_starts(&id, &raw, &mut event);
             }
             Hook::PreToolUse | Hook::PostToolUse => {
                 self.tool_event(&id, hook, &raw, &mut event);
             }
             Hook::Stop => {
-                let idle = raw["fullyIdle"].as_bool().unwrap_or(true);
-                if own {
-                    // agy's `Stop` carries no reply, so the turn's final response is read from its
-                    // transcript, which agy has written by then (#358).
-                    if let Some(reply) = self.final_response(&id) {
-                        event.happened.push(Happened::Reply(reply));
-                    }
-                    event.happened.push(Happened::TurnEnd {
-                        background_pending: !idle,
-                    });
-                    self.check_turn(&id, at);
-                } else if idle {
-                    event.happened.push(Happened::SubagentEnd);
-                    if let Some(conversation) = self.conversations.get_mut(&id) {
-                        conversation.ended = true;
-                    }
+                // agy's `Stop` carries no reply, so the turn's final response is read from its
+                // transcript, which agy has written by then (#358).
+                if let Some(reply) = self.final_response(&id) {
+                    event.happened.push(Happened::Reply(reply));
                 }
+                event.happened.push(Happened::TurnEnd);
+                self.check_turn(&id, at);
                 self.scan(&id, at);
             }
             _ => {}
         }
-        if own && matches!(hook, Hook::PreInvocation | Hook::Stop) {
-            events.extend(self.refresh(&id, at));
-        }
-        events.push(event);
-        Some(events)
+        Some(vec![event])
     }
 
     /// The main event of `line` with the adapter's state left as it is: only the conversation of
-    /// the line, its parent's and its terminal's session are copied, so it costs the same however
-    /// many sessions there are.
+    /// the line is copied, so it costs the same however many sessions there are.
     pub(crate) fn peek(&self, line: &str) -> Option<Event> {
         let raw: Value = serde_json::from_str(line).ok()?;
         let id = raw["conversationId"].as_str()?;
-        let terminal = raw["studio_terminal_id"].as_str();
-        let session = terminal.and_then(|t| self.sessions.get(t));
-        let parent = self.conversations.get(id).and_then(|c| c.parent.as_ref());
         let mut scratch = Adapter::default();
-        for known in [
-            Some(id),
-            parent.map(String::as_str),
-            session.map(String::as_str),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            if let Some(conversation) = self.conversations.get(known) {
-                scratch
-                    .conversations
-                    .insert(known.into(), conversation.clone());
-            }
-        }
-        if let (Some(t), Some(session)) = (terminal, session) {
-            scratch.sessions.insert(t.into(), session.clone());
+        if let Some(conversation) = self.conversations.get(id) {
+            scratch
+                .conversations
+                .insert(id.into(), conversation.clone());
         }
         scratch.events(line)?.pop()
     }
 
     pub(crate) fn drift(&mut self, at: u64, kind: DriftKind) {
         self.drift.push(Drift { at, kind });
-    }
-
-    /// Notes conversation `id`, first seen on `terminal`: a subagent of the session last seen on
-    /// that terminal, or else a session itself.
-    fn know(&mut self, id: &str, terminal: Option<&str>) {
-        if self.conversations.contains_key(id) {
-            return;
-        }
-        let parent = terminal.and_then(|t| self.sessions.get(t));
-        let parent = parent.filter(|p| *p != id).cloned();
-        if let (None, Some(t)) = (&parent, terminal) {
-            self.sessions.insert(t.into(), id.into());
-        }
-        self.conversations.insert(
-            id.into(),
-            Conversation {
-                parent,
-                terminal: terminal.map(Into::into),
-                ..Conversation::default()
-            },
-        );
     }
 
     /// A session's first `PreInvocation` of a turn: where the turn came from, decided once.
@@ -328,97 +253,6 @@ impl Adapter {
                 failed,
             });
         }
-    }
-
-    /// Looks for child `id`'s file in its parent's `subagents/` folder, and when it is there the
-    /// first time, returns the spawn the session's own agent reports. A child whose file is not
-    /// there yet is tried again at each of its events, until its `Stop`; a child that ends with none
-    /// stays unattached (decision 7). A child's end by its file's `state` changing is told here too.
-    fn attach(&mut self, id: &str, at: u64) -> Option<Event> {
-        let conversation = self.conversations.get(id)?;
-        let parent = conversation.parent.clone()?;
-        if conversation.state.is_some() {
-            return None;
-        }
-        let file = self.subagent_file(&parent, id)?;
-        let step = file["spawnStepIndex"].as_u64();
-        let prompt = step
-            .and_then(|step| self.spawn_prompt(&parent, step))
-            .unwrap_or_default();
-        let descriptor = &file["subagentDescriptor"];
-        let spawn = Spawned {
-            child: id.into(),
-            call: step.map(|s| s.to_string()).unwrap_or_default(),
-            name: descriptor["role"].as_str().map(Into::into),
-            prompt,
-            agent_type: descriptor["typeName"].as_str().map(Into::into),
-            worktree: false,
-            finished: false,
-        };
-        self.conversations.get_mut(id)?.state = Some(file_state(&file).unwrap_or_default());
-        let mut event = self.bare(&parent, None, at);
-        event.happened.push(Happened::SubagentSpawned(spawn));
-        Some(event)
-    }
-
-    /// The subagents of `parent` whose file `state` changed since it was first seen have ended.
-    fn refresh(&mut self, parent: &str, at: u64) -> Vec<Event> {
-        let children: Vec<String> = self
-            .conversations
-            .iter()
-            .filter(|(_, c)| c.parent.as_deref() == Some(parent) && !c.ended && c.state.is_some())
-            .map(|(id, _)| id.clone())
-            .collect();
-        let mut events = Vec::new();
-        for child in children {
-            let seen = self.conversations[&child].state.clone();
-            let now = self
-                .subagent_file(parent, &child)
-                .and_then(|f| file_state(&f));
-            if now.is_some() && now != seen {
-                let conversation = self.conversations.get_mut(&child).expect("known");
-                conversation.ended = true;
-                let mut event = self.bare(parent, Some(&child), at);
-                event.happened.push(Happened::SubagentEnd);
-                events.push(event);
-            }
-        }
-        events
-    }
-
-    /// An event of conversation `session`'s session with nothing in it yet.
-    fn bare(&self, session: &str, agent: Option<&str>, at: u64) -> Event {
-        frame(
-            &self.conversations[session],
-            session.into(),
-            agent.map(Into::into),
-            at,
-        )
-    }
-
-    /// The `.system_generated` folder of conversation `id`, from its transcript's path.
-    fn generated(&self, id: &str) -> Option<&Path> {
-        let transcript = Path::new(&self.conversations.get(id)?.transcript);
-        transcript.parent()?.parent()
-    }
-
-    fn subagent_file(&self, parent: &str, child: &str) -> Option<Value> {
-        let path = self
-            .generated(parent)?
-            .join(format!("subagents/{child}.json"));
-        serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
-    }
-
-    /// The prompt of the `invoke_subagent` call at step `step` of `parent`'s transcript.
-    fn spawn_prompt(&self, parent: &str, step: u64) -> Option<String> {
-        let transcript = &self.conversations.get(parent)?.transcript;
-        // The call's step comes after the response that made it.
-        let before = step.checked_sub(1)?;
-        records(transcript)?
-            .into_iter()
-            .find(|r| r["step_index"] == before)?["tool_calls"][0]["args"]["Prompt"]
-            .as_str()
-            .map(Into::into)
     }
 
     /// The open turn's last `PLANNER_RESPONSE` with text in conversation `id`'s transcript. The turn's
@@ -516,22 +350,16 @@ pub(crate) fn subagent_transcript(parent: &Path, child: &str) -> Option<PathBuf>
     )
 }
 
-/// The `state` of a subagent's file.
-fn file_state(file: &Value) -> Option<String> {
-    file["state"].as_str().map(Into::into)
-}
-
 /// An event of `session`, from `conversation`'s place and files, with nothing in it yet.
-fn frame(conversation: &Conversation, session: String, agent_id: Option<String>, at: u64) -> Event {
+fn frame(conversation: &Conversation, session: String, at: u64) -> Event {
     Event {
         session_id: session,
-        agent_id,
+        agent_id: None,
         agent_type: None,
         cwd: conversation.cwd.clone(),
         transcript_path: conversation.transcript.clone(),
         prompt_id: None,
         studio_received_ms: at,
-        studio_terminal_id: conversation.terminal.clone(),
         studio_pid: None,
         studio_turn_start: BTreeMap::new(),
         studio_turn_end: BTreeMap::new(),

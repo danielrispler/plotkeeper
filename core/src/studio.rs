@@ -3,23 +3,20 @@
 mod take;
 
 use crate::{
-    AGY_CAPABILITIES, Agent, AgyDrift, AgyDriftKind, Bytes, CardRequest, Change, CheckLists,
-    FactFile, Facts, Fingerprint, Kind, LiveFacts, MIN_HISTORY, Outcome, Output, Purpose, Revive,
-    RootDiff, Row, Session, State, Status, Subagent, SubagentLog, SubagentLogFile, Terminal,
-    TranscriptFormat, TurnDiff, TurnFiles, TurnFilesSnapshot, TurnTrees, Work, agy, checks, claude,
-    codex, compute_turn_files, copilot, cursor,
+    AGY_CAPABILITIES, AgyDrift, AgyDriftKind, Bytes, CardRequest, Change, CheckLists, FactFile,
+    Facts, Fingerprint, Kind, LiveFacts, MIN_HISTORY, Outcome, Output, Purpose, RootDiff, Row,
+    Session, State, Status, Subagent, SubagentLog, SubagentLogFile, TranscriptFormat, TurnDiff,
+    TurnFiles, TurnFilesSnapshot, TurnTrees, Work, agy, checks, claude, codex, compute_turn_files,
+    copilot, cursor,
     event::{Event, Happened, Start, ToolKind},
     opencode, qwen, range,
-    session::{
-        FALLBACK_MS, IDLE_AFTER_MS, MISMATCH_AFTER_MS, Since, card_time, folder_name, short,
-        shown_state, task_path,
-    },
+    session::{FALLBACK_MS, IDLE_AFTER_MS, Since, card_time, short, task_path},
     turn_files,
 };
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::Reverse,
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, HashMap},
 };
 
 /// Who reads a line that is not Claude's: agy, when its hook entry named agy or named no agent (a
@@ -68,9 +65,6 @@ pub struct Studio {
     pub(crate) selected: Option<String>,
     /// The subagent of it whose line he opened since, whose own view shows instead.
     pub(crate) viewed: Option<String>,
-    /// The studio terminal of a session Daniel started, which is selected when its first event
-    /// names that terminal (danielrispler/Falinks#567).
-    pub(crate) awaiting: Option<String>,
     /// The session Daniel marked unseen, which looking at it does not see until he selects it
     /// again (danielrispler/Falinks#556).
     pub(crate) held: Option<String>,
@@ -95,16 +89,6 @@ pub struct Studio {
     /// (danielrispler/Falinks#517, decisions 13 and 16), from the settings.
     #[serde(skip)]
     pub(crate) summaries_on_open: bool,
-    /// Since when each Claude session's hook state and its terminal's OSC 7501 state disagree, the
-    /// 7501 state it disagrees with, and whether that disagreement was logged (danielrispler/Falinks#560).
-    /// A new 7501 state starts a new disagreement.
-    pub(crate) mismatched: HashMap<String, (u64, String, bool)>,
-    /// Whether `terminals` has had its first list: the rows that list finds tell nothing, as Claude
-    /// sessions replayed at start tell nothing (danielrispler/Falinks#522).
-    pub(crate) listed: bool,
-    /// The terminals of the daemon's last list that have not exited (#101): a session keeps the
-    /// terminal it has while that one is here.
-    pub(crate) live_terminals: HashSet<String>,
     /// What the shell last found about each task's work, by the task's worktree folder: its files,
     /// its PR and its issue, asked at a turn's end, at the window's focus and on a refresh. The main
     /// checkout is never here, so it never lands.
@@ -273,8 +257,7 @@ impl Studio {
     }
 
     /// The row `event` belongs to: its session's, or for a start from `/clear`, the cleared session's
-    /// on the same terminal, or in the same folder outside studio terminals (danielrispler/Falinks#461, decision 18); for a
-    /// start from a fork, the live session with a prompt on the same terminal (danielrispler/Falinks#562).
+    /// in the same folder (danielrispler/Falinks#461, decision 18).
     // shortcut: a start that lands before its clear's `SessionEnd` makes a new row; match both ways
     // if the async hooks show it.
     fn row(&self, event: &Event) -> String {
@@ -283,24 +266,8 @@ impl Studio {
         }
         let fresh = !self.sessions.contains_key(&event.session_id);
         if fresh && event.is_start_from(Start::Clear) {
-            let same = |s: &&Session| match &event.studio_terminal_id {
-                Some(terminal) => s.terminal.as_ref() == Some(terminal),
-                None => s.terminal.is_none() && s.cwd == event.cwd,
-            };
-            let cleared = self.sessions.values().filter(|s| s.clearing).filter(same);
+            let cleared = (self.sessions.values()).filter(|s| s.clearing && s.cwd == event.cwd);
             if let Some(s) = cleared.max_by_key(|s| s.agent.last_event_at) {
-                return s.agent.id.clone();
-            }
-        }
-        // A fork mid-conversation goes on in the same `claude`, so on the same terminal (danielrispler/Falinks#562).
-        if fresh && event.is_start_from(Start::Fork) {
-            let forked = self.sessions.values().filter(|s| {
-                s.terminal.is_some()
-                    && s.terminal == event.studio_terminal_id
-                    && !s.ended
-                    && !s.prompts.is_empty()
-            });
-            if let Some(s) = forked.max_by_key(|s| s.agent.last_event_at) {
                 return s.agent.id.clone();
             }
         }
@@ -939,7 +906,7 @@ impl Studio {
     /// The resume ids of the sessions whose leader pid `alive` no longer lists (#330).
     pub fn gone(&self, alive: impl Fn(u32) -> bool) -> Vec<String> {
         let gone: Vec<&Session> = (self.sessions.values())
-            .filter(|s| !s.ended && !s.deleted && !s.status_only)
+            .filter(|s| !s.ended && !s.deleted)
             .filter(|s| s.pid.is_some_and(|pid| !alive(pid)))
             .collect();
         let mut ids: Vec<String> = gone.into_iter().map(|s| s.resume_id.clone()).collect();
@@ -959,294 +926,6 @@ impl Studio {
     /// The latest tick, in Unix milliseconds.
     pub fn now(&self) -> u64 {
         self.now
-    }
-
-    /// How each terminal of `terms` that has not exited comes back in a new daemon: a terminal spawned
-    /// with an argv, a Claude terminal, reopens its latest session with `claude --resume`, whether or
-    /// not the hangup ended it. A shell whose foreground program, or else its 7501 `app`, is another
-    /// agent with a resume command (`studio_workbench::resume`, danielrispler/Falinks#561) comes back as that agent, rerun
-    /// the same way at the next revival; any other shell restarts in its folder. A Claude terminal
-    /// no session links to does not come back (#17). `busy` says what runs in it now.
-    pub fn revival(&self, terms: &[Terminal]) -> Vec<Revive> {
-        let running = terms.iter().filter(|t| t.exited.is_none());
-        let revive = |t: &Terminal| {
-            let linked = self
-                .sessions
-                .values()
-                .filter(|s| s.terminal.as_ref() == Some(&t.id));
-            let latest = linked.max_by_key(|s| s.agent.last_event_at);
-            let program = || Some(t.foreground.clone().unwrap_or_else(|| "a program".into()));
-            let busy = if t.argv.is_empty() {
-                // Its leader is the shell, so its prompt is when the shell itself has the foreground.
-                let leader = t.processes.iter().find(|p| Some(p.pid) == t.pid);
-                let at_prompt = leader.is_some_and(|l| Some(&l.command) == t.foreground.as_ref());
-                if at_prompt { None } else { program() }
-            } else {
-                match latest {
-                    // The rule a close asks by (danielrispler/Falinks#469).
-                    Some(s) if s.in_turn() => Some("a turn".into()),
-                    Some(s) if s.asks_before_closing => Some("background tasks".into()),
-                    Some(s) if !s.ended => None,
-                    // Started, with no event yet, or its session ended while the program runs on.
-                    _ => program(),
-                }
-            };
-            // A shell's `busy` is its foreground program. The conversation's id is not known yet, so
-            // the agent resumes the latest one in the folder.
-            let agent = busy.as_deref().filter(|_| t.argv.is_empty());
-            // A node-launched agent's foreground is `node`: its 7501 `app` names it then.
-            let resume = |program: &str| studio_workbench::resume(program, None);
-            let argv = agent.and_then(|p| resume(p).or_else(|| t.app.as_deref().and_then(resume)));
-            // An agent the picker started (agy, Codex) resumes by its own command: its linked
-            // session's conversation, else the folder's latest, as a status-only row has no id.
-            // Only Claude's is `claude --resume`.
-            let claude = t.argv.iter().any(|a| a == "claude");
-            let picked = t.argv.first().filter(|_| !claude).and_then(|program| {
-                let id = latest
-                    .map(|s| s.resume_id.as_str())
-                    .filter(|id| !id.is_empty());
-                studio_workbench::resume(program, id)
-            });
-            Revive {
-                id: t.id.clone(),
-                cwd: t.cwd.clone(),
-                argv: argv.or(picked).unwrap_or_else(|| t.argv.clone()),
-                session: claude
-                    .then(|| latest.map(|s| s.resume_id.clone()))
-                    .flatten(),
-                busy,
-                revives: latest.is_some() || !t.argv.iter().any(|a| a == "claude"),
-            }
-        };
-        running.map(revive).collect()
-    }
-
-    /// Sets whether session `id`'s terminal reports it blocked, and moves its state with it.
-    fn terminal_blocks(&mut self, id: &str, blocked: bool) -> Option<Output> {
-        let session = self.sessions.get_mut(id)?;
-        if std::mem::replace(&mut session.terminal_blocked, blocked) == blocked || session.ended {
-            return None;
-        }
-        let before = session.state;
-        session.state = if session.needs_you() {
-            State::NeedsYou
-        } else if session.turn_ended {
-            State::YourTurn
-        } else {
-            State::Running
-        };
-        session.update_unseen();
-        session.work.estimate.depends_on_you = session.state == State::NeedsYou;
-        (before != State::NeedsYou && session.state == State::NeedsYou).then(|| Output::NeedsYou {
-            session_id: id.into(),
-            agent: None,
-        })
-    }
-
-    /// The daemon's `list` at `now` (danielrispler/Falinks#560). A terminal that has not exited, whose program reports OSC
-    /// 7501 and is not Claude Code, gets a status-only row named by its `app`, else its foreground
-    /// program, and its folder; the row goes when the status clears or the terminal does. A Claude
-    /// session keeps its hook state; when its terminal's 7501 state disagrees past
-    /// `MISMATCH_AFTER_MS`, one `Output::Mismatch` line says so. A plain terminal New terminal
-    /// started (`shell-…`) gets a shell row, named "terminal · <folder>", while nothing in it reports
-    /// a status or links a session. Returns the notices a status-only row raises, as a Claude
-    /// session's would.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "left whole when the lint came in (#555); spec #548 names no split of it"
-    )]
-    pub fn terminals(&mut self, terms: &[Terminal], now: u64) -> Vec<Output> {
-        let mut outputs = Vec::new();
-        let reporting = terms.iter().filter(|t| t.exited.is_none());
-        let reporting: Vec<(&Terminal, &str)> = reporting
-            .filter_map(|t| Some((t, t.state.as_deref()?)))
-            .collect();
-        let claude_on = |sessions: &HashMap<String, Session>, id: &str| {
-            let on = |s: &&Session| !s.status_only && !s.ended && s.terminal.as_deref() == Some(id);
-            sessions.values().find(on).map(|s| s.agent.id.clone())
-        };
-        // A Claude session's hook state stays; a lasting disagreement is logged once.
-        let mut disagreeing = BTreeSet::new();
-        for (t, reported) in &reporting {
-            let Some(id) = claude_on(&self.sessions, &t.id) else {
-                continue;
-            };
-            // An agent with no permission hook of its own needs Daniel while its terminal says `blocked`.
-            if !self.sessions[&id].capabilities.asks {
-                outputs.extend(self.terminal_blocks(&id, *reported == "blocked"));
-                continue;
-            }
-            let hook = self.sessions[&id].state;
-            let hook_shown = if hook == State::Idle {
-                State::YourTurn
-            } else {
-                hook
-            };
-            if shown_state(reported).is_none_or(|s| s == hook_shown) {
-                continue;
-            }
-            disagreeing.insert(id.clone());
-            let fresh = (now, reported.to_string(), false);
-            let entry = self
-                .mismatched
-                .entry(id.clone())
-                .or_insert_with(|| fresh.clone());
-            if entry.1 != *reported {
-                *entry = fresh;
-            }
-            let (since, _, logged) = entry;
-            if !*logged && now.saturating_sub(*since) >= MISMATCH_AFTER_MS {
-                *logged = true;
-                let line = format!("{now} session {id}: hook {hook:?}, 7501 {reported}");
-                outputs.push(Output::Mismatch { line });
-                // A turn that ends normally reports `done`; only an interrupted one goes `idle`.
-                let session = &self.sessions[&id];
-                if hook == State::Running
-                    && *reported == "idle"
-                    && session.in_turn()
-                    && let Some(prompt_id) = session.turn.clone()
-                {
-                    outputs.push(Output::Interrupted {
-                        session_id: id.clone(),
-                        prompt_id,
-                    });
-                }
-            }
-        }
-        self.mismatched.retain(|id, _| disagreeing.contains(id));
-        // A terminal that is gone, or reports no state, no longer says `blocked`.
-        let silent: Vec<String> = self
-            .sessions
-            .iter()
-            .filter(|(_, s)| s.terminal_blocked)
-            .filter(|(_, s)| {
-                !reporting
-                    .iter()
-                    .any(|(t, _)| s.terminal.as_deref() == Some(&t.id))
-            })
-            .map(|(id, _)| id.clone())
-            .collect();
-        for id in silent {
-            outputs.extend(self.terminal_blocks(&id, false));
-        }
-        // Everyone else's terminal: a status-only row.
-        let mut rows = BTreeSet::new();
-        let at_start = !std::mem::replace(&mut self.listed, true);
-        self.live_terminals = (terms.iter().filter(|t| t.exited.is_none()))
-            .map(|t| t.id.clone())
-            .collect();
-        for (t, reported) in &reporting {
-            let claude = t.app.as_deref() == Some("claude-code");
-            if claude || claude_on(&self.sessions, &t.id).is_some() {
-                continue;
-            }
-            // An agent typed into a plain terminal turns its row into the agent's.
-            if self.sessions.get(&t.id).is_some_and(|s| s.shell) {
-                self.sessions.remove(&t.id);
-            }
-            let shown = shown_state(reported);
-            // An unknown state leaves a row as it was, and makes none.
-            let Some(state) = shown.or(self.sessions.get(&t.id).map(|s| s.state)) else {
-                continue;
-            };
-            rows.insert(t.id.clone());
-            let at = t.status_ms.unwrap_or(now);
-            let first_seen = !self.sessions.contains_key(&t.id);
-            let row = self
-                .sessions
-                .entry(t.id.clone())
-                .or_insert_with(|| Session {
-                    agent: Agent::new(&t.id, at),
-                    terminal: Some(t.id.clone()),
-                    status_only: true,
-                    state,
-                    reported_turn: t.turn,
-                    ..Session::default()
-                });
-            row.cwd.clone_from(&t.cwd);
-            row.set_project_once(|| self.roots.of(&t.cwd));
-            row.folder_name = folder_name(&t.cwd);
-            let program = t.app.as_ref().or(t.foreground.as_ref());
-            let program = program.map_or("a program", String::as_str);
-            row.identity.name = format!("{program} · {}", row.folder_name);
-            // Revival resumed the folder's latest conversation, which may not be the one it had (danielrispler/Falinks#561).
-            if studio_workbench::resumes_latest(&t.argv) {
-                row.identity.name.push_str(" · latest conversation");
-            }
-            row.agent.last_event_at = at;
-            // A turn ended since the last list, even one that ended and restarted between two lists.
-            let turn_ended = t.turn > std::mem::replace(&mut row.reported_turn, t.turn);
-            if first_seen {
-                if !at_start && state == State::NeedsYou {
-                    outputs.push(Output::NeedsYou {
-                        session_id: t.id.clone(),
-                        agent: None,
-                    });
-                }
-                continue;
-            }
-            // The tick's idle stays until the status changes.
-            let idle = row.state == State::Idle && state == State::YourTurn && !turn_ended;
-            let was = if idle {
-                row.state
-            } else {
-                std::mem::replace(&mut row.state, state)
-            };
-            let reached = matches!(was, State::Running | State::NeedsYou) && was != state;
-            match state {
-                State::NeedsYou if was != state || turn_ended => {
-                    outputs.push(Output::NeedsYou {
-                        session_id: t.id.clone(),
-                        agent: None,
-                    });
-                }
-                State::NeedsYou => {}
-                _ if turn_ended || state == State::YourTurn && reached => {
-                    outputs.push(Output::YourTurn {
-                        session_id: t.id.clone(),
-                    });
-                }
-                _ => {}
-            }
-        }
-        // A plain terminal New terminal started, with no row of its own yet: a shell row.
-        let shells = terms
-            .iter()
-            .filter(|t| t.exited.is_none() && t.id.starts_with("shell-"));
-        for t in shells {
-            if rows.contains(&t.id) || claude_on(&self.sessions, &t.id).is_some() {
-                continue;
-            }
-            rows.insert(t.id.clone());
-            // An agent that quit leaves the plain terminal's row again.
-            if self.sessions.get(&t.id).is_some_and(|s| !s.shell) {
-                self.sessions.remove(&t.id);
-            }
-            let row = self
-                .sessions
-                .entry(t.id.clone())
-                .or_insert_with(|| Session {
-                    agent: Agent::new(&t.id, now),
-                    terminal: Some(t.id.clone()),
-                    status_only: true,
-                    shell: true,
-                    state: State::YourTurn,
-                    ..Session::default()
-                });
-            row.cwd.clone_from(&t.cwd);
-            row.set_project_once(|| self.roots.of(&t.cwd));
-            row.folder_name = folder_name(&t.cwd);
-            row.identity.name = format!("terminal · {}", row.folder_name);
-        }
-        self.sessions
-            .retain(|id, s| !s.status_only || rows.contains(id));
-        // A row from the list, not a hook event, for the terminal Daniel just started takes the
-        // selection, as a session's first event does (danielrispler/Falinks#567).
-        if let Some(id) = self.awaiting.take_if(|id| rows.contains(id)) {
-            self.selected = Some(id);
-            self.viewed = None;
-        }
-        outputs
     }
 
     /// Reads what was added to the transcripts of the sessions that have not ended, and of the
@@ -1447,27 +1126,15 @@ impl Studio {
     }
 
     /// The session list: every session Daniel has not deleted, grouped in `State` order, the newest first in each group.
-    /// A session with no prompt is no row while its terminal's live session has prompts: a session
-    /// loaded beside it, as by the `/resume` picker backed out of, until its first prompt (danielrispler/Falinks#562).
-    /// Nor is a session with no folder and no prompt of an agent whose capabilities say it starts
+    /// A session with no folder and no prompt of an agent whose capabilities say it starts
     /// sessions from an empty window: the one Cursor.app's empty window starts at its launch, until its
     /// first prompt (#427).
     pub fn sessions(&self) -> Vec<&Session> {
         let empty_window = |s: &Session| {
             s.capabilities.empty_window_starts && s.cwd.is_empty() && s.prompts.is_empty()
         };
-        let beside_live = |s: &Session| {
-            s.prompts.is_empty()
-                && s.terminal.is_some()
-                && self.sessions.values().any(|live| {
-                    live.terminal == s.terminal
-                        && !live.ended
-                        && !live.deleted
-                        && !live.prompts.is_empty()
-                })
-        };
         let mut sessions: Vec<&Session> = (self.sessions.values())
-            .filter(|s| !s.deleted && !beside_live(s) && !empty_window(s))
+            .filter(|s| !s.deleted && !empty_window(s))
             .collect();
         sessions.sort_by_key(|s| (s.state, Reverse(s.agent.started_at), &s.agent.id));
         sessions
@@ -1482,7 +1149,6 @@ impl Studio {
             session.update_unseen();
         }
         self.viewed = None;
-        self.awaiting = None;
         self.held = None;
     }
 
@@ -1490,7 +1156,6 @@ impl Studio {
     pub fn select_none(&mut self) {
         self.selected = None;
         self.viewed = None;
-        self.awaiting = None;
         self.held = None;
     }
 

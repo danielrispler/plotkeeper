@@ -4,12 +4,13 @@
 
 `~/Library/Application Support/plotkeeper/events.jsonl`, one hook payload per line, with added fields:
 
-- `studio_terminal_id`: the session's `PLOTKEEPER_TERMINAL_ID`, when set;
 - `studio_agent`: the agent its hook entry named (`--agent claude`, `--agent agy`, `--agent codex`, `--agent qwen`, `--agent cursor`, `--agent copilot`, `--agent opencode`), by which the core picks the line's parser and a prune finds its session (#355). A name plotkeeper has no parser for is counted as drift, not read as Claude's; a line with no name, written before entries named one or by the app, is read by its shape;
 - `studio_event`: the event its hook entry named (`--event preToolUse`), for a payload that names none: Copilot's camelCase payloads (#361);
 - `studio_received_ms`: when the hook received the event, in Unix milliseconds.
 
-The app appends lines of its own, named `Studio…`, such as `StudioInterrupted`, which ends a turn Daniel interrupted, by its `prompt_id`, with that turn's end trees.
+Lines from before #725 may also carry `studio_terminal_id`, the studio terminal a session ran in; the log is not rewritten, and a replay ignores the field.
+
+The app appends lines of its own, named `Studio…`, such as `StudioRename`. A `StudioInterrupted` line ends a turn Daniel interrupted, by its `prompt_id`, with that turn's end trees: the hook writes it for a Codex `Interrupt`, and older logs hold the app's for Claude Code.
 
 The data folder was `~/Library/Application Support/dev.falinks.studio/` before plotkeeper. At the first start of the hook or the app, if that folder exists and `plotkeeper/` does not, it is renamed to `plotkeeper/` and a symbolic link to it is left at the old path, so the plugin path in `~/.zshrc` (through the folder's `checkout` link) and a hook built with the old path keep working. The move never goes over an existing `plotkeeper/`.
 
@@ -45,7 +46,7 @@ The app writes each file whole to a temporary file and renames it into place, so
 
 ## The Studio log
 
-`~/Library/Logs/dev.falinks.studio/studio.log` holds the app's own errors, warnings and panics, one line each with a local time, a level and the module that wrote it. The UI's failures are in it too: a failed call from the window to the app is a line with the command's name and the error's message, and an uncaught error or unhandled rejection in the page is an `error` line. The same lines print to stderr. At most 500 KB a file, with one dated older file kept when it fills. Each start writes an `info` line with the version, and the **Mismatch log** lines are `info` lines with the target `mismatch`. A panic is logged at `error` with its location, then reaches the default panic output. The studio's own crates log at `Debug` and libraries at `Warn`, in every build. "Reveal log" in the palette opens Finder with the file selected.
+`~/Library/Logs/dev.falinks.studio/studio.log` holds the app's own errors, warnings and panics, one line each with a local time, a level and the module that wrote it. The UI's failures are in it too: a failed call from the window to the app is a line with the command's name and the error's message, and an uncaught error or unhandled rejection in the page is an `error` line. The same lines print to stderr. At most 500 KB a file, with one dated older file kept when it fills. Each start writes an `info` line with the version. A panic is logged at `error` with its location, then reaches the default panic output. The studio's own crates log at `Debug` and libraries at `Warn`, in every build. "Reveal log" in the palette opens Finder with the file selected.
 
 An `error` line, from the app or from the page, also shows in the window's notice line, in every build, beside the settings errors and the Claude Code version notice. A message shows once, however often it repeats, until Daniel dismisses it: the line's "Dismiss" button hides it and clears its error lines, and a later error shows it again. Warnings stay in the file only.
 

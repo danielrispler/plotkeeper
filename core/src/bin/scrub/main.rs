@@ -37,7 +37,6 @@ const TOP_LEVEL_TEXT: &[&str] = &[
     "session_id",
     "source",
     "studio_asked_by",
-    "studio_terminal_id",
     "tool_name",
     "tool_use_id",
 ];
