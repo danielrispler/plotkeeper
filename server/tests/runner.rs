@@ -520,20 +520,28 @@ fn a_result_that_only_names_the_sandbox_settings_is_no_failure() {
     assert_eq!(bench.runner.outcome(&id).unwrap().end, End::Done);
 }
 
+/// Seatbelt's refusal on macOS, and bubblewrap's two measured refusals on Linux (#704), each failing every command of a
+/// run whose start check passed.
 #[test]
 fn a_run_that_shows_a_failed_sandbox_is_a_failure_even_at_exit_zero() {
-    let bench = bench();
-    let id = bench.run(&says(
-        r#"{"type":"result","subtype":"success","is_error":false,"result":"Every command failed: sandbox_apply: Operation not permitted"}"#,
-    ));
-    bench.until(ended(&id));
-    let outcome = bench.runner.outcome(&id).unwrap();
-    assert_eq!(outcome.end, End::Failed);
-    assert!(
-        outcome.result.starts_with(SANDBOX_DOWN),
-        "{}",
-        outcome.result
-    );
+    for refusal in [
+        "sandbox_apply: Operation not permitted",
+        "bwrap: No permissions to create new namespace, likely because the kernel does not allow non-privileged user namespaces.",
+        "bwrap: Can't mount proc on /newroot/proc: Operation not permitted",
+    ] {
+        let bench = bench();
+        let result = serde_json::json!({ "type": "result", "subtype": "success", "is_error": false,
+            "result": format!("Every command failed: {refusal}") });
+        let id = bench.run(&says(&result.to_string()));
+        bench.until(ended(&id));
+        let outcome = bench.runner.outcome(&id).unwrap();
+        assert_eq!(outcome.end, End::Failed, "{refusal}");
+        assert!(
+            outcome.result.starts_with(SANDBOX_DOWN),
+            "{refusal}: {}",
+            outcome.result
+        );
+    }
 }
 
 #[test]

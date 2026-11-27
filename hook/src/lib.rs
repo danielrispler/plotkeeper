@@ -53,6 +53,32 @@ fn xdg_base(home: &Path, var: &str, fallback: &str) -> PathBuf {
 
 const DATA_FOLDER: &str = "plotkeeper";
 
+/// The data folder of the hook binary that runs now: on Linux, the one its copy sits in when it runs from a data folder's
+/// `bin/` (`<data>/bin/<name>`, see [`bin_dir`]), so it writes where the `plotkeeper` that copied it reads, whatever
+/// `XDG_DATA_HOME` its agent was started with (#510, "Folders"); else [`data_dir`]. On macOS, always [`data_dir`].
+pub fn hook_data_dir(home: &Path) -> PathBuf {
+    #[cfg(not(target_os = "macos"))]
+    if let Some(data) = env::current_exe().ok().as_deref().and_then(copy_data_dir) {
+        return data;
+    }
+    data_dir(home)
+}
+
+/// The data folder `exe` is a hook binary's copy in, when its path is `<data>/bin/<name>` with `<data>` named for
+/// plotkeeper and `<name>` one of [`HOOK_BINARIES`].
+#[cfg(not(target_os = "macos"))]
+fn copy_data_dir(exe: &Path) -> Option<PathBuf> {
+    let name = exe.file_name()?;
+    let bin = exe.parent()?;
+    let data = bin.parent()?;
+    let copy = HOOK_BINARIES
+        .iter()
+        .any(|binary| name == OsStr::new(binary))
+        && bin.file_name()? == "bin"
+        && data.file_name()? == DATA_FOLDER;
+    copy.then(|| data.to_path_buf())
+}
+
 /// The data folder's `bin/`, where the hooks find their binaries at a path that never moves (#356): copies of
 /// [`HOOK_BINARIES`], which each `plotkeeper` start refreshes from the ones beside its own executable.
 pub fn bin_dir(home: &Path) -> PathBuf {
@@ -116,8 +142,11 @@ mod link_tests {
 
 /// The log in the studio's data directory. The hook writes it; the app reads it.
 pub fn event_log(home: &Path) -> PathBuf {
-    data_dir(home).join("events.jsonl")
+    data_dir(home).join(EVENT_LOG)
 }
+
+/// The event log's name in the data folder.
+pub const EVENT_LOG: &str = "events.jsonl";
 
 /// How long the hook waits for the log's lock before it drops the event (#43, decision 11).
 pub const PATIENCE: Duration = Duration::from_secs(5);
@@ -1134,14 +1163,18 @@ fn codex_daemon(command: &str) -> bool {
 
 /// Whether `command`, a process's executable path, belongs to an IDE, as its processes do; an agent's
 /// CLI is a program of its own. On macOS that is a path inside an app bundle. On Linux it is a VS Code
-/// or Cursor install: a system package (`/usr/share/code/`, `/usr/share/cursor/`), `/opt`, a snap, or
-/// an AppImage's mount (`/tmp/.mount_<name><random>/`), where the executable is the editor's own.
+/// or Cursor install: a system package (`/usr/share/code/`, `/usr/share/cursor/`), `/opt`, a snap, the
+/// remote server that Remote-SSH and Remote-WSL install in the home (`~/.vscode-server/`,
+/// `~/.cursor-server/`), or an AppImage's mount (`/tmp/.mount_<name><random>/`), where the executable
+/// is the editor's own.
 fn in_app(command: &str) -> bool {
     if command.contains(".app/Contents/") {
         return true;
     }
     let path = command.to_ascii_lowercase();
-    const INSTALLS: [&str; 10] = [
+    const INSTALLS: [&str; 12] = [
+        "/.vscode-server/",
+        "/.cursor-server/",
         "/usr/share/code/",
         "/usr/share/code-insiders/",
         "/usr/share/cursor/",
@@ -1174,7 +1207,7 @@ fn in_app(command: &str) -> bool {
 fn is_shell(command: &str) -> bool {
     let name = command.rsplit('/').next().unwrap_or(command);
     let name = name.trim_start_matches('-');
-    matches!(name, "sh" | "bash" | "zsh" | "dash" | "fish")
+    matches!(name, "sh" | "ash" | "bash" | "zsh" | "dash" | "fish")
 }
 
 /// The harness whose own payload `event` is, by a marker field only its payloads carry, when that is
@@ -1222,11 +1255,13 @@ pub fn inspect(pid: u32) -> Option<(String, u32)> {
 
 /// The executable's full path (`/proc/<pid>/exe`) and parent pid (`/proc/<pid>/stat`) of process
 /// `pid`; `None` when it has gone. When the link cannot be read (a process of another user, say),
-/// the name in `stat` stands in, enough to tell a shell.
+/// the name in `stat` stands in, enough to tell a shell, and so it does for busybox, whose one
+/// executable is every applet: there the name is the applet's, such as `sh`.
 #[cfg(target_os = "linux")]
 pub fn inspect(pid: u32) -> Option<(String, u32)> {
     let (name, parent) = parse_stat(&fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)?;
     let command = match fs::read_link(format!("/proc/{pid}/exe")) {
+        Ok(exe) if exe.file_name() == Some(OsStr::new("busybox")) => name,
         // A binary replaced while it runs reads as "<path> (deleted)".
         Ok(exe) => {
             let exe = exe.to_string_lossy();

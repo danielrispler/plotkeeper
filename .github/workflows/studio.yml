@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   macos:
-    # plotkeeper is built and used on macOS only.
+    # The macOS run of the checks; the `ubuntu` job runs the same ones on Linux (#510).
     # A draft pull request skips it. The snap fixtures run in `snap.yml`.
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: macos-latest
@@ -52,7 +52,7 @@ jobs:
           NEXTEST_TEST_THREADS: 5
 
   ubuntu:
-    # The Linux run of the same checks (#510, #699). Not required yet: it becomes required once the suite passes here.
+    # The Linux run of the same checks (#510, #699). The suite passes here; the job becomes required when Daniel makes it a required check.
     # A draft pull request skips it. The snap fixtures run in `snap.yml`, on macOS.
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest

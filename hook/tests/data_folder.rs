@@ -236,3 +236,32 @@ fn on_linux_the_old_folder_is_never_moved() {
     assert!(!studio_hook::move_old_data_dir(&home).unwrap());
     assert!(!fs::symlink_metadata(&old).unwrap().is_symlink());
 }
+
+/// On Linux a hook run from its copy in a data folder's `bin/` writes to that data folder, whatever `XDG_DATA_HOME` its
+/// agent was started with, as an IDE started from the desktop has none while `plotkeeper` started from a terminal had
+/// one: the `plotkeeper` that copied it there reads that folder (#510, "Folders").
+#[cfg(target_os = "linux")]
+#[test]
+fn on_linux_a_hook_copy_writes_to_the_data_folder_it_sits_in() {
+    let home = scratch("hook-copy");
+    let data = home.join("terminal-data/plotkeeper");
+    fs::create_dir_all(data.join("bin")).unwrap();
+    let copy = data.join("bin/plotkeeper-hook");
+    fs::copy(env!("CARGO_BIN_EXE_plotkeeper-hook"), &copy).unwrap();
+    for xdg_data_home in [None, Some(home.join("desktop-data"))] {
+        let mut cmd = std::process::Command::new(&copy);
+        cmd.env("HOME", &home).env_remove("PLOTKEEPER_TERMINAL_ID");
+        match &xdg_data_home {
+            Some(dir) => cmd.env("XDG_DATA_HOME", dir),
+            None => cmd.env_remove("XDG_DATA_HOME"),
+        };
+        let payload = serde_json::json!({ "hook_event_name": "Stop", "session_id": "s" });
+        assert!(feed(cmd, &payload).wait().unwrap().success());
+    }
+    let logs: Vec<_> = walk(&home)
+        .into_iter()
+        .filter(|p| p.ends_with("events.jsonl"))
+        .collect();
+    assert_eq!(logs, [data.join("events.jsonl")]);
+    assert_eq!(fs::read_to_string(&logs[0]).unwrap().lines().count(), 2);
+}

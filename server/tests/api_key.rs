@@ -362,7 +362,8 @@ const NO_STORE: &str =
 
 /// A fake `secret-tool` in `dir/bin`, which keeps each entry in `dir/store/<account>` and logs its arguments to `dir/log`.
 /// While `dir/no-store` exists, every call prints that file's text as `secret-tool`'s error and fails, as when no Secret
-/// Service runs. The real Secret Service is never touched.
+/// Service runs; while `dir/hang` exists, every call waits 10 s first, as for a locked keyring's unlock prompt that no
+/// one sees. The real Secret Service is never touched.
 fn fake_secret_tool(dir: &std::path::Path) -> std::path::PathBuf {
     use std::os::unix::fs::PermissionsExt;
     let bin = dir.join("bin");
@@ -376,6 +377,7 @@ fn fake_secret_tool(dir: &std::path::Path) -> std::path::PathBuf {
 PATH=/usr/bin:/bin
 dir='{dir}'
 echo "ARGS $*" >> "$dir/log"
+if [ -f "$dir/hang" ]; then sleep 10; fi
 if [ -f "$dir/no-store" ]; then cat "$dir/no-store" >&2; exit 1; fi
 for word; do account=$word; done
 case "$1" in
@@ -437,7 +439,10 @@ fn the_secret_service_keeps_the_keys_through_secret_tool_on_the_path() {
     assert_eq!(studio_server::settings::os_keys().store(), os);
 
     // Read at start.
-    let app = app_with(dir.path(), Arc::new(studio_server::settings::SecretTool));
+    let app = app_with(
+        dir.path(),
+        Arc::new(studio_server::settings::SecretTool::default()),
+    );
     let start = studio_server::api::call(&app, &NoPage, "writers", Value::Null).unwrap();
     assert_eq!(start["key_store"], "the Secret Service", "{start}");
     assert_eq!(start["keys"], json!(["anthropic"]), "{start}");
@@ -531,7 +536,10 @@ fn without_secret_tool_a_save_names_the_package_to_install() {
     std::fs::create_dir(&empty).unwrap();
     // SAFETY: nextest runs each test in a process of its own, and no thread has started yet.
     unsafe { std::env::set_var("PATH", &empty) };
-    let app = app_with(dir.path(), Arc::new(studio_server::settings::SecretTool));
+    let app = app_with(
+        dir.path(),
+        Arc::new(studio_server::settings::SecretTool::default()),
+    );
     assert_eq!(
         app.keys.get(studio_understanding::WriterKind::Anthropic),
         None
@@ -540,5 +548,38 @@ fn without_secret_tool_a_save_names_the_package_to_install() {
     assert_eq!(
         refusal(&app, "set_api_key", args),
         "secret-tool is not installed; install libsecret-tools."
+    );
+}
+
+/// A `secret-tool` that never answers, as with a locked keyring waiting on an unlock prompt that has no screen (over SSH,
+/// in WSL2), is cut off at its deadline (#510, "API keys"): the server still starts, with no key read, and a save says the
+/// keyring did not answer.
+#[test]
+fn a_keyring_that_never_answers_holds_up_no_start() {
+    isolated_home::set();
+    let dir = tempfile::tempdir().unwrap();
+    let bin = fake_secret_tool(dir.path());
+    // SAFETY: nextest runs each test in a process of its own, and no thread has started yet.
+    unsafe { std::env::set_var("PATH", format!("{}:/usr/bin:/bin", bin.display())) };
+    std::fs::write(dir.path().join("store/anthropic-api-key"), PLANTED).unwrap();
+    std::fs::write(dir.path().join("hang"), "").unwrap();
+
+    let started = std::time::Instant::now();
+    let keys =
+        studio_server::settings::SecretTool::with_deadline(std::time::Duration::from_millis(300));
+    let app = app_with(dir.path(), Arc::new(keys));
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "the start waited {:?} on the keyring",
+        started.elapsed()
+    );
+    let start = studio_server::api::call(&app, &NoPage, "writers", Value::Null).unwrap();
+    assert_eq!(start["keys"], json!([]), "{start}");
+
+    let args =
+        json!({ "writer": "openai", "key": OPENAI_PLANTED, "base_url": null, "expected": null });
+    assert_eq!(
+        refusal(&app, "set_api_key", args),
+        "The keyring did not answer; it may be locked and waiting to be unlocked. Unlock it, then save again."
     );
 }

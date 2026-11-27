@@ -32,6 +32,7 @@ The writer section, in the Settings panel over the map (the gear at the top of t
 
 - `secret-tool` is not installed: "secret-tool is not installed; install libsecret-tools."
 - no Secret Service is running, as on a headless machine, over SSH or in WSL2 without a desktop (`secret-tool` says it cannot reach the session bus, or that no store answers on it): "No secret store on this machine; install a keyring and libsecret-tools, or pick a CLI writer."
+- `secret-tool` does not answer within 10 s, as with a locked keyring waiting on an unlock prompt that has no screen to show on: "The keyring did not answer; it may be locked and waiting to be unlocked. Unlock it, then save again." The call is killed. At start a lookup cut off this way reads as no key set, so the server still starts, at most 10 s later for each API-key writer.
 
 Any other refusal of the store says the Secret Service did not save the key, and to check that the keyring is unlocked. There is no fallback: without a secret store, plotkeeper writes no key to a file and reads none from the environment; the CLI writers still work. Unverified on a desktop with a real keyring: the tests use a fake `secret-tool`.
 

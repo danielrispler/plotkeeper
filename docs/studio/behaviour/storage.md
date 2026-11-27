@@ -2,7 +2,7 @@
 
 ## The data folder
 
-plotkeeper keeps its data in one folder, the data folder: `~/Library/Application Support/plotkeeper/` on macOS, and on Linux `$XDG_DATA_HOME/plotkeeper/` when `XDG_DATA_HOME` holds an absolute path, else `~/.local/share/plotkeeper/` (#510). The paths below name the macOS folder.
+plotkeeper keeps its data in one folder, the data folder: `~/Library/Application Support/plotkeeper/` on macOS, and on Linux `$XDG_DATA_HOME/plotkeeper/` when `XDG_DATA_HOME` holds an absolute path, else `~/.local/share/plotkeeper/` (#510). Each program reads its own `XDG_DATA_HOME`, so on Linux a hook binary run from its copy in a data folder's `bin/` (below) takes that data folder, the one the `plotkeeper` that copied it reads, and only otherwise its own `XDG_DATA_HOME`: an IDE started from the desktop without the variable then still writes where a `plotkeeper` started from a terminal with it reads. The paths below name the macOS folder.
 
 ## The event log
 
