@@ -19,7 +19,7 @@ use std::{
     thread,
     time::Duration,
 };
-use studio_core::{Notifications, Session, State::Ended, Studio, TaskFacts, TaskQuery};
+use studio_core::{Notifications, Session, Studio, TaskFacts, TaskQuery};
 use studio_understanding::{
     CardStore, ClaudeWriter, Core, Effects, FakeWriter, OpenItem, RiskNotes, RiskView, Row,
     SessionCards, StoredSummary, SummarySetup, TurnWriting, Writer, WriterKind, live_roots, millis,
@@ -107,18 +107,6 @@ impl Events {
     }
 }
 
-/// The landed sessions Daniel cleared whose undo window is still open (danielrispler/plotkeeper#244): the window tells the shell,
-/// as `(session, terminal)`, so a quit inside the window can commit them.
-#[derive(Default)]
-pub struct Clearing(pub Mutex<Vec<Cleared>>);
-
-/// A cleared session and the terminal it runs in.
-#[derive(serde::Deserialize)]
-pub struct Cleared {
-    pub id: String,
-    pub terminal: Option<String>,
-}
-
 /// Everything the process owns that the commands read and change. Its locked state is reached through
 /// its accessors (`core`, `cards`, `notes` and the rest); a holder of several takes them in one order,
 /// core, then cards, then notes (`core_and_cards`, `core_cards_and_notes`). The notices are the exception:
@@ -131,7 +119,6 @@ pub struct App {
     pub writer: Writer,
     pub writing: TurnWriting,
     notices: Notices,
-    pub clearing: Clearing,
     pub fetches: Arc<map::Fetches>,
     pub ci: Arc<ci_laws::CiCache>,
     /// The PRs found for each project's branches (`prs.rs`) and the PR briefs written for the ready ones (`pr_briefs.rs`).
@@ -152,9 +139,6 @@ pub struct App {
     /// Whether the story rail shows, as the UI last said: not in focus mode, behind a closed overlay or under the skills
     /// browser, when a turn on it is not seen (danielrispler/Falinks#556).
     pub rail_shown: AtomicBool,
-    /// The terminal the split's second pane shows, as the UI last said, `None` with no split: its session is on screen, so its
-    /// turn's end raises no toast.
-    split_shown: Mutex<Option<String>>,
     /// Where the API-key writers' keys are kept: the Keychain at start (`with_keys`), memory before; and the writers whose
     /// key is set, all the page learns of them.
     pub keys: Arc<dyn settings::ApiKeys>,
@@ -220,11 +204,6 @@ impl App {
     /// The card writer's last notice not yet cleared, locked.
     pub fn writer_notice(&self) -> MutexGuard<'_, Option<String>> {
         self.writer_notice.lock().unwrap()
-    }
-
-    /// The terminal the split's second pane shows, locked.
-    pub fn split_shown(&self) -> MutexGuard<'_, Option<String>> {
-        self.split_shown.lock().unwrap()
     }
 
     /// The writers whose API key is set, locked.
@@ -352,7 +331,6 @@ impl App {
             writer,
             writing,
             notices: Notices::default(),
-            clearing: Clearing::default(),
             fetches: Arc::default(),
             ci: Arc::new(ci_laws::load_cache()),
             prs: prs::Prs::default(),
@@ -365,7 +343,6 @@ impl App {
             summaries_on: AtomicBool::new(true),
             list_changed: AtomicBool::new(false),
             rail_shown: AtomicBool::new(true),
-            split_shown: Mutex::new(None),
             keys: Arc::new(settings::MemoryKeys::default()),
             key_set: Mutex::new(Vec::new()),
             runner,
@@ -818,16 +795,6 @@ pub fn select(app: &App, id: Option<String>) -> serde_json::Value {
     shown
 }
 
-/// Daniel started a session in studio terminal `terminal`; returns the selection, `null` until the
-/// session's first event names that terminal and selects it (danielrispler/Falinks#567).
-pub fn select_terminal(app: &App, terminal: String) -> serde_json::Value {
-    let mut studio = app.core();
-    studio.select_terminal(&terminal);
-    let shown = selection(&studio);
-    drop(studio);
-    shown
-}
-
 /// Daniel opened subagent `agent_id`'s line; returns the selection, which names it. The card store
 /// keeps the opening of a failed line, so it stays faded after a restart.
 pub fn open(app: &App, agent_id: String) -> serde_json::Value {
@@ -904,85 +871,6 @@ pub fn delete_session(id: String) -> Result<(), String> {
     })])
 }
 
-/// Replaces the cleared sessions pending their delete; an empty list after Undo or after the window's commit.
-pub fn clearing(app: &App, sessions: Vec<Cleared>) {
-    *app.clearing.0.lock().unwrap() = sessions;
-}
-
-/// What committing the cleared `sessions` sends: the daemon's `kill` and `forget` of each terminal, and a `StudioDelete`
-/// line for each session, as Delete does. The cards stay in the store.
-/// `ends` gives the lines that end the sessions of a terminal, as closing its pane does (`closed`), which come first.
-pub fn clear_commit(
-    sessions: &[Cleared],
-    in_use: impl Fn(&str, &[Cleared]) -> bool,
-    ends: impl Fn(&str) -> Vec<serde_json::Value>,
-) -> (Vec<serde_json::Value>, Vec<serde_json::Value>) {
-    let mut requests = Vec::new();
-    let mut lines = Vec::new();
-    let mut ended = HashSet::new();
-    for terminal in sessions.iter().filter_map(|s| s.terminal.as_ref()) {
-        // Each terminal once, and never one a session that is not being cleared still uses.
-        if in_use(terminal, sessions) || !ended.insert(terminal) {
-            continue;
-        }
-        requests.push(serde_json::json!({ "op": "kill", "id": terminal }));
-        requests.push(serde_json::json!({ "op": "forget", "id": terminal }));
-        lines.extend(ends(terminal));
-    }
-    lines.extend(sessions.iter().map(|s| {
-        serde_json::json!({
-            "session_id": s.id,
-            "hook_event_name": studio_core::DELETE,
-            "studio_received_ms": millis(),
-        })
-    }));
-    (requests, lines)
-}
-
-/// The cleared `pending` sessions as they are now, from `current(id)`, which gives whether the session is still landed and the terminal
-/// it runs in now: a session that is gone or no longer landed is dropped, and each keeps its current terminal.
-pub fn resolve_clearing(
-    pending: Vec<Cleared>,
-    current: impl Fn(&str) -> Option<(bool, Option<String>)>,
-) -> Vec<Cleared> {
-    (pending.into_iter())
-        .filter_map(|cleared| {
-            let (landed, terminal) = current(&cleared.id)?;
-            landed.then_some(Cleared {
-                id: cleared.id,
-                terminal,
-            })
-        })
-        .collect()
-}
-
-/// Daniel closed terminal `terminal` (danielrispler/Falinks#461, story 15 and decision 8): a `SessionEnd` line in the event
-/// log for each session in it that has not ended, as its `claude` may die before its own hook runs.
-/// A real `SessionEnd` after it changes nothing.
-pub fn closed(app: &App, terminal: String) -> Result<(), String> {
-    append(&session_ends(&app.core, &terminal))
-}
-
-/// The `SessionEnd` lines for the sessions of `terminal` that have not ended.
-pub fn session_ends(studio: &Mutex<Studio>, terminal: &str) -> Vec<serde_json::Value> {
-    studio
-        .lock()
-        .unwrap()
-        .sessions()
-        .into_iter()
-        .filter(|s| s.terminal.as_deref() == Some(terminal) && s.state != Ended)
-        .filter(|s| !s.status_only)
-        .map(|s| {
-            serde_json::json!({
-                "session_id": s.resume_id,
-                "hook_event_name": "SessionEnd",
-                "reason": "studio_close",
-                "studio_received_ms": millis(),
-            })
-        })
-        .collect()
-}
-
 /// How often the follower checks each session's agent process (#330).
 pub const PROCESS_CHECK: Duration = Duration::from_secs(30);
 
@@ -1014,11 +902,6 @@ pub fn mark_unseen(app: &App, id: String) {
 /// The UI's rail showed or hid.
 pub fn rail_shown(app: &App, shown: bool) {
     app.rail_shown.store(shown, Ordering::Release);
-}
-
-/// The UI's split opened, closed or pinned another terminal.
-pub fn split_shown(app: &App, terminal: Option<String>) {
-    *app.split_shown() = terminal;
 }
 
 // The session's brief and its risk notes.
@@ -1382,11 +1265,6 @@ pub fn map_marks(app: &App, projects: Vec<String>) -> Result<Vec<map::Mark>, Str
     map::map_marks(projects, &app.ci, &app.prs)
 }
 
-/// Opens the sessions' notices: `sounds` is the setting from `settings.json`, which the window parses.
-pub fn sounds(app: &App, on: bool) {
-    app.notices().sounds = on;
-}
-
 #[cfg(test)]
 mod tests {
     use super::{cards_key, join_notes, lost_data, saved_roots, scrubbed};
@@ -1510,119 +1388,6 @@ mod tests {
             studio_core::State::Ended
         );
         assert!(super::process_ends(&studio, alive).is_empty());
-    }
-
-    #[test]
-    fn a_quit_inside_the_clear_window_kills_each_terminal_and_deletes_each_session() {
-        let cleared = |id: &str, terminal: Option<&str>| super::Cleared {
-            id: id.into(),
-            terminal: terminal.map(Into::into),
-        };
-        // The sessions that run in terminal t1 and have not ended: the same lines the window's close of the pane writes.
-        let ends = |terminal: &str| {
-            vec![serde_json::json!({
-                "session_id": format!("resume-{terminal}"),
-                "hook_event_name": "SessionEnd",
-            })]
-        };
-        let (requests, lines) = super::clear_commit(
-            &[cleared("a", Some("t1")), cleared("b", None)],
-            |_, _| false,
-            ends,
-        );
-        assert_eq!(
-            requests,
-            vec![
-                serde_json::json!({ "op": "kill", "id": "t1" }),
-                serde_json::json!({ "op": "forget", "id": "t1" }),
-            ]
-        );
-        let deleted: Vec<_> = lines
-            .iter()
-            .map(|l| {
-                (
-                    l["session_id"].as_str().unwrap(),
-                    l["hook_event_name"].as_str().unwrap(),
-                )
-            })
-            .collect();
-        // Its sessions end first, as Delete's closing of the pane does, then each cleared session is deleted.
-        assert_eq!(
-            deleted,
-            [
-                ("resume-t1", "SessionEnd"),
-                ("a", studio_core::DELETE),
-                ("b", studio_core::DELETE)
-            ]
-        );
-        assert!(
-            super::clear_commit(&[], |_, _| false, |_| vec![])
-                .1
-                .is_empty()
-        );
-    }
-
-    fn cleared(id: &str, terminal: Option<&str>) -> super::Cleared {
-        super::Cleared {
-            id: id.into(),
-            terminal: terminal.map(Into::into),
-        }
-    }
-
-    #[test]
-    fn two_cleared_sessions_in_one_terminal_end_it_once() {
-        let ends = |t: &str| vec![serde_json::json!({ "session_id": format!("r-{t}") })];
-        let (requests, lines) = super::clear_commit(
-            &[cleared("a", Some("t1")), cleared("b", Some("t1"))],
-            |_, _| false,
-            ends,
-        );
-        assert_eq!(requests.len(), 2);
-        // One session end, then the two deletes.
-        assert_eq!(lines.len(), 3);
-    }
-
-    #[test]
-    fn a_terminal_a_session_not_being_cleared_uses_is_not_killed_but_its_cleared_session_is_still_deleted()
-     {
-        let ends = |t: &str| vec![serde_json::json!({ "session_id": format!("r-{t}") })];
-        let (requests, lines) = super::clear_commit(
-            &[cleared("a", Some("t1")), cleared("b", Some("t2"))],
-            |t, _| t == "t1",
-            ends,
-        );
-        assert_eq!(
-            requests,
-            vec![
-                serde_json::json!({ "op": "kill", "id": "t2" }),
-                serde_json::json!({ "op": "forget", "id": "t2" }),
-            ]
-        );
-        let ids: Vec<_> = lines
-            .iter()
-            .map(|l| l["session_id"].as_str().unwrap())
-            .collect();
-        assert_eq!(ids, ["r-t2", "a", "b"]);
-    }
-
-    #[test]
-    fn a_quit_commits_only_sessions_still_landed_each_in_the_terminal_it_has_now() {
-        let current = |id: &str| match id {
-            "landed" => Some((true, Some("t9".to_string()))),
-            "moved on" => Some((false, Some("t2".to_string()))),
-            _ => None,
-        };
-        let pending = vec![
-            cleared("landed", None),
-            cleared("moved on", Some("t2")),
-            cleared("gone", Some("t3")),
-        ];
-        let kept = super::resolve_clearing(pending, current);
-        assert_eq!(kept.len(), 1);
-        assert_eq!(
-            (kept[0].id.as_str(), kept[0].terminal.as_deref()),
-            ("landed", Some("t9"))
-        );
     }
 
     #[test]

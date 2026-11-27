@@ -338,29 +338,6 @@ fn a_plain_terminal_new_terminal_started_has_a_shell_row_until_an_agent_in_it_re
     assert!(studio.session("shell-1").is_none());
 }
 
-#[test]
-fn a_terminal_or_codex_daniel_starts_is_selected_when_its_row_arrives() {
-    // Its row comes from the list, not a hook event, so the list hands it the selection (danielrispler/Falinks#567).
-    let mut studio = Studio::default();
-    studio.select_terminal("shell-1");
-    listed(&mut studio, &[term("shell-1", None, None, T0)], T0);
-    assert_eq!(
-        studio.selected().map(|s| s.agent.id.as_str()),
-        Some("shell-1")
-    );
-
-    studio.select_terminal("codex-1");
-    listed(
-        &mut studio,
-        &[term("codex-1", Some("working"), Some("codex"), T0 + 1_000)],
-        T0 + 1_000,
-    );
-    assert_eq!(
-        studio.selected().map(|s| s.agent.id.as_str()),
-        Some("codex-1")
-    );
-}
-
 /// The selected session's id, if any.
 fn selected(studio: &Studio) -> Option<&str> {
     studio.selected().map(|s| s.agent.id.as_str())
@@ -370,7 +347,7 @@ fn selected(studio: &Studio) -> Option<&str> {
 fn an_agy_daniel_starts_keeps_the_selection_when_its_first_prompt_links_its_session() {
     // agy reports 7501 at its prompt, before its first hook: its status-only row takes the selection.
     let mut studio = Studio::default();
-    studio.select_terminal("agy-1");
+    studio.select("agy-1");
     listed(
         &mut studio,
         &[term("agy-1", Some("idle"), Some("antigravity"), T0)],
@@ -407,7 +384,7 @@ fn an_agy_daniel_starts_keeps_the_selection_when_its_first_prompt_links_its_sess
 #[test]
 fn a_plain_terminal_keeps_the_selection_when_claude_typed_into_it_links_its_session() {
     let mut studio = Studio::default();
-    studio.select_terminal("shell-1");
+    studio.select("shell-1");
     listed(&mut studio, &[term("shell-1", None, None, T0)], T0);
     assert_eq!(selected(&studio), Some("shell-1"));
 
