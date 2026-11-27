@@ -204,8 +204,6 @@ h1 { margin: 0 0 var(--sp-4); }
 .clear-landed:hover { color: var(--fg); }
 .pane[hidden] { display: block; }
 .pane[hidden] { visibility: hidden; }
-/* A split's divider (danielrispler/Falinks#529), in the gap between its two panes. */
-/* The terminal panel (danielrispler/Falinks#542): a band under the panes, its height set by `panel.ts`; its divider on its top edge. */
 /* The toasts (#457): manual popovers in the top layer, so no z-index; the region spans the map's box less a margin, and
    `toast.ts` places each open toast in it: the needs-you, the note, the copy and the what's-new toasts down its top-right corner (against the side
    area's left edge while it shows, #666), the Clear toast at its bottom-left. The needs-you toast (danielrispler/Falinks#573) takes none of the map's space. */
@@ -242,7 +240,6 @@ h1 { margin: 0 0 var(--sp-4); }
 .toast.copy .copy-lines { margin: 0; color: var(--muted); white-space: pre; overflow: hidden; text-overflow: ellipsis; }
 .toast.copy .ratify-prompt { margin-top: 0; resize: vertical; }
 .toast.copy > .btn.small:not(.quiet) { margin: var(--sp-3) 0 0; }
-#probe { position: absolute; visibility: hidden; white-space: pre; font: var(--term-size)/var(--term-line) var(--mono); }
 
 /* The rail (danielrispler/Falinks#574): a header of two lines (#444), the open question docked under it, then the story: "now" and the
    feed of turns. It shows in the left panel over the map (#385, #386). */
@@ -334,7 +331,6 @@ h1 { margin: 0 0 var(--sp-4); }
 .markdown table { border-collapse: collapse; display: block; overflow-x: auto; }
 .markdown th, .markdown td { border: var(--hair) solid var(--edge); padding: var(--sp-1) var(--sp-4); text-align: start; }
 .markdown a { color: var(--fg); text-decoration: underline; }
-.markdown a[data-file]:has(> code):not(:hover) { text-decoration: none; }
 .markdown blockquote { margin: var(--sp-4) 0 0; padding-left: var(--sp-5); border-left: var(--halo) solid var(--line); color: var(--muted); }
 /* The session's brief, folded under the feed; its code wraps. */
 .brief { margin: var(--sp-5) 0 0; font-size: var(--size-read); }
@@ -415,7 +411,6 @@ h1 { margin: 0 0 var(--sp-4); }
 .ask input { width: 100%; box-sizing: border-box; font: inherit; padding: var(--sp-3); background: var(--raised); color: var(--fg);
              border: var(--hair) solid var(--field-edge); border-radius: var(--radius); }
 .ask input[type="checkbox"] { width: auto; }
-#delete-losses ul { margin: 0 0 var(--sp-3); padding-left: var(--sp-6); overflow-wrap: anywhere; }
 .ask-buttons { display: flex; flex-direction: row-reverse; gap: var(--sp-4); margin-top: var(--sp-5); }
 .ask-buttons .btn:first-child { background: var(--selected); }
 /* The confirm before a destructive button (#459): its heading, and its scroll kept in the dialog, never chained to the page under it. */

@@ -122,23 +122,6 @@ fn a_failure_in_this_workspaces_it_binary_breaks_the_law_tagged_in_its_test_file
             "{file} {test}"
         );
     }
-    // The studio crate has only `src/main.rs`, so nextest names its unit tests `studio::bin/studio`; they belong to `src/` files.
-    assert_eq!(
-        broken_laws(
-            &failures,
-            &[tagged("b", "src-tauri/src/answer.rs", "bin_unit_fails")]
-        ),
-        ["b"]
-    );
-    for (file, test) in [
-        ("src-tauri/src/other.rs", "bin_unit_fails"),
-        ("src-tauri/tests/answer.rs", "bin_unit_fails"),
-    ] {
-        assert!(
-            broken_laws(&failures, &[tagged("b", file, test)]).is_empty(),
-            "{file}"
-        );
-    }
     // A unit test of the crate's own source: bare crate binary, module path.
     let unit = [tagged("u", "core/src/ids.rs", "unit_fails")];
     assert_eq!(broken_laws(&failures, &unit), ["u"]);

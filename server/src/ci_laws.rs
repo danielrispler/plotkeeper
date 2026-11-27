@@ -222,7 +222,7 @@ fn holds(failure: &Failure, test: &LawTest) -> bool {
 }
 
 /// Whether a nextest failure `name` in `binary` is the Rust test `test` of the tagged `file`. The file's crate is its first folder
-/// (`core` is `studio-core`, `src-tauri` is `studio`). An integration test file `<crate>/tests/<module>.rs` is a module of the
+/// (`core` is `studio-core`). An integration test file `<crate>/tests/<module>.rs` is a module of the
 /// crate's one `it` binary (`studio-core::it`, test `<module>::<fn>`); a source file holds unit tests in the bare crate binary
 /// (`<module>::tests::<fn>`), and so does a binary target's `bin/<name>` id (the studio crate's own).
 fn rust_holds(binary: &str, name: &str, file: &str, test: &str) -> bool {
@@ -238,11 +238,7 @@ fn rust_holds(binary: &str, name: &str, file: &str, test: &str) -> bool {
     let Some((dir, rest)) = file.split_once('/') else {
         return false;
     };
-    let dir_crate = if dir == "src-tauri" {
-        "studio".to_string()
-    } else {
-        format!("studio-{dir}")
-    };
+    let dir_crate = format!("studio-{dir}");
     if krate != dir && krate != dir_crate {
         return false;
     }
@@ -807,10 +803,7 @@ fn test_paths(failure: &Failure) -> Vec<String> {
         Some((krate, id)) => (krate, Some(id)),
         None => (binary.as_str(), None),
     };
-    let dir = match krate {
-        "studio" => "src-tauri",
-        other => other.strip_prefix("studio-").unwrap_or(other),
-    };
+    let dir = krate.strip_prefix("studio-").unwrap_or(krate);
     match test_binary.filter(|id| !id.starts_with("bin/")) {
         Some("it") => {
             let module = failure.name.split("::").next().unwrap_or_default();
