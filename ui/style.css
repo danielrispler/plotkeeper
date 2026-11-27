@@ -513,7 +513,7 @@ h1 { margin: 0 0 var(--sp-4); }
             overflow: hidden; position: relative; z-index: 2; }
 /* The rail is outside the left panel only while no story shows: it is never drawn there (#385). */
 .app > .rail { display: none; }
-.map-head { display: flex; align-items: baseline; gap: var(--sp-5); padding: var(--sp-6) var(--map-gutter) var(--sp-4); }
+.map-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-5); padding: var(--sp-6) var(--map-gutter) var(--sp-4); }
 .map-ref { font-size: var(--size-small); color: var(--faint); }
 /* The one-time review (#314): a quiet line, in the muted colour, with one small button; never a colour of its own. */
 .review { display: flex; align-items: baseline; gap: var(--sp-4); font-size: var(--size-small); color: var(--muted); }
@@ -522,6 +522,11 @@ h1 { margin: 0 0 var(--sp-4); }
 /* Not recording (#437): the same quiet line, muted, never a colour of its own. */
 .map-wiring { margin: 0 0 0 var(--sp-5); min-width: 0; font-size: var(--size-small); color: var(--muted); }
 .map-banner:not(:empty) { margin-inline-start: auto; font-size: var(--size-small); color: var(--muted); }
+/* The check's problems of a checkout map (#753): a full-width line under the head's row, in the muted text, never a colour of its own. */
+.map-problems { flex-basis: 100%; min-width: 0; font-size: var(--size-small); color: var(--muted); }
+.map-problems-head { display: flex; align-items: center; gap: var(--sp-3); }
+.map-problems-title, .map-problems-more { margin: 0; }
+.map-problems-list { margin: var(--sp-2) 0 0; padding-inline-start: var(--sp-6); overflow-wrap: anywhere; }
 /* The map fills the stage; the left panel, the side area and the tray float over it, so opening one never moves or squashes a part (#385). */
 .map-stage { --panel-w: var(--rail); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); min-height: 0; position: relative; }
 body[data-panel="diff"] .map-stage { --panel-w: min(var(--panel-wide), calc(100% - 2 * var(--inset))); }
