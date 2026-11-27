@@ -144,12 +144,13 @@ fn read_regular(root: &Path, file: &str) -> Option<String> {
 fn segment_matches(pattern: &str, segment: &str) -> bool {
     match pattern.split_once('*') {
         None => pattern == segment,
-        Some((head, tail)) => {
-            segment.len() >= head.len() + tail.len()
-                && segment.starts_with(head)
-                && (0..=segment.len() - head.len() - tail.len())
-                    .any(|skip| segment_matches(tail, &segment[head.len() + skip..]))
-        }
+        // The rest after `head` is tried from each character on, never inside one.
+        Some((head, tail)) => segment.strip_prefix(head).is_some_and(|rest| {
+            rest.char_indices()
+                .map(|(at, _)| at)
+                .chain([rest.len()])
+                .any(|at| segment_matches(tail, &rest[at..]))
+        }),
     }
 }
 

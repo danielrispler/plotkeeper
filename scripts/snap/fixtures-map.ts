@@ -1766,11 +1766,21 @@ export const mapPendingSteps = (): Fixture =>
     if (sentOf("map_pending_pr").length) log("snap:fail a muted Open a draft PR reached the server");
     ${confirmFirst(`document.querySelector('#map-pending [data-key="pending discard"]').click()`, "map_pending_discard", "Discard map", ["plotkeeper's copy", "closed PR stays"])}
     await wait(300);
+    // A no to the replace question writes nothing and opens no Keep it current card.
+    answer("map_pending_write", { kind: "replace", path: "/w/plotkeeper/system-map.json", problem: ${JSON.stringify(brokenFile)}, seen: "00c0ffee00c0ffee" });
+    press("pending write").click();
+    await wait(300);
+    const dialog = document.getElementById("confirm-dialog");
+    if (!dialog.matches(":modal")) return log("snap:fail the closed PR's Write did not ask before replacing the file");
+    [...dialog.querySelectorAll("button")].find((b) => b.textContent === "Cancel").click();
+    await wait(600);
+    if (!document.getElementById("map-keep").hidden) log("snap:fail a no to the replace question opened Keep it current");
     answer("map_pending_write", { kind: "written", path: "/w/plotkeeper/system-map.json" });
     answer("map_state", ${JSON.stringify(mapState({ from: "checkout" }))});
     press("pending write").click();
     await wait(600);
-    if (JSON.stringify(sentOf("map_pending_write")) !== JSON.stringify([{ project: "/w/plotkeeper" }])) log("snap:fail Write sent " + JSON.stringify(sentOf("map_pending_write")));
+    if (JSON.stringify(sentOf("map_pending_write")) !== JSON.stringify([{ project: "/w/plotkeeper" }, { project: "/w/plotkeeper" }])) log("snap:fail Write sent " + JSON.stringify(sentOf("map_pending_write")));
+    if (document.getElementById("map-keep").hidden) log("snap:fail the card does not open after the closed PR's Write");
     if (document.getElementById("map-ref").textContent !== "Map not committed yet") log("snap:fail the head says " + document.getElementById("map-ref").textContent);
     if (!document.getElementById("map-pending").hidden) log("snap:fail the ways forward stay once the map is written");
     log("pending steps ok");`, {

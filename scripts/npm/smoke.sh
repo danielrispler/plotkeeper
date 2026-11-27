@@ -139,12 +139,6 @@ kill -INT "$server"
 wait "$server" || fail "plotkeeper did not stop cleanly on Ctrl+C"
 server=
 
-# The npm install folder goes, as when Node is switched; the hooks run the data folder's copies and still record.
-npm rm -g --prefix "$prefix" plotkeeper "$platform"
-[ ! -e "$package" ] && [ ! -e "$bin" ] || fail "the packages are still installed"
-command=$(node -p "require('$hooks').hooks.SessionStart[0].hooks[0].command")
-echo '{"hook_event_name":"SessionStart","session_id":"smoke-368"}' | sh -c "$command"
-grep -q "smoke-368" "$data/events.jsonl" || fail "the hook recorded nothing after the package was removed"
 # `plotkeeper map check` runs the map checker through the launcher: a small repository with a map passes and exits 0.
 repo="$work/map-repo"
 mkdir -p "$repo/src"
@@ -169,4 +163,11 @@ case "$checked" in
   "ok: 1 part own 1 file"*) ;;
   *) fail "plotkeeper map check printed $checked" ;;
 esac
+
+# The npm install folder goes, as when Node is switched; the hooks run the data folder's copies and still record.
+npm rm -g --prefix "$prefix" plotkeeper "$platform"
+[ ! -e "$package" ] && [ ! -e "$bin" ] || fail "the packages are still installed"
+command=$(node -p "require('$hooks').hooks.SessionStart[0].hooks[0].command")
+echo '{"hook_event_name":"SessionStart","session_id":"smoke-368"}' | sh -c "$command"
+grep -q "smoke-368" "$data/events.jsonl" || fail "the hook recorded nothing after the package was removed"
 echo "smoke: ok"

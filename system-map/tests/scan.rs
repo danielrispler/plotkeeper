@@ -120,49 +120,76 @@ fn a_tracked_workspace_manifest_makes_each_member_a_part() {
         code("crates/two", 1),
         code("tools", 1),
     ]);
-    let with = |file: &'static str, text: &'static str| {
+    let with = |file: &'static str, text: &'static str, more: &[&str]| {
         let mut all = members.clone();
         all.push((file.to_string(), text));
+        for folder in more {
+            all.extend(code(folder, 1));
+        }
         all
     };
-    let cases = vec![
+    let all: &[&str] = &["crates/one/", "crates/two/", "tools/"];
+    /// A case: its name, the files, and the parts' paths.
+    type Case<'a> = (&'a str, Vec<(String, &'a str)>, &'a [&'a str]);
+    let cases: Vec<Case> = vec![
         (
             "cargo",
-            with("Cargo.toml", "[workspace]\nmembers = [\"crates/*\"]\n"),
+            with("Cargo.toml", "[workspace]\nmembers = [\"crates/*\"]\n", &[]),
+            all,
         ),
         (
             "npm",
-            with("package.json", "{\"workspaces\": [\"crates/*\"]}"),
+            with("package.json", "{\"workspaces\": [\"crates/*\"]}", &[]),
+            all,
         ),
         (
             "npm packages object",
             with(
                 "package.json",
                 "{\"workspaces\": {\"packages\": [\"crates/*\"]}}",
+                &[],
             ),
+            all,
         ),
         (
             "pnpm",
             with(
                 "pnpm-workspace.yaml",
                 "packages:\n  - 'crates/*'\n  - '!crates/two'\n",
+                &[],
             ),
+            &["crates/one/", "tools/"],
         ),
         (
             "go",
             with(
                 "go.work",
                 "go 1.22\n\nuse (\n\t./crates/one\n\t./crates/two\n)\n",
+                &[],
             ),
+            all,
+        ),
+        (
+            "a member named in letters past ASCII",
+            with(
+                "package.json",
+                "{\"workspaces\": [\"crates/*\"]}",
+                &["crates/café"],
+            ),
+            &["crates/café/", "crates/one/", "crates/two/", "tools/"],
+        ),
+        (
+            "a pattern with two stars",
+            with(
+                "package.json",
+                "{\"workspaces\": [\"crates/*o*\"]}",
+                &["crates/o"],
+            ),
+            &["crates/o/", "crates/one/", "crates/two/", "tools/"],
         ),
     ];
-    for (name, tree) in cases {
+    for (name, tree, expected) in cases {
         let f = found(&tree);
-        let expected: &[&str] = if name == "pnpm" {
-            &["crates/one/", "tools/"]
-        } else {
-            &["crates/one/", "crates/two/", "tools/"]
-        };
         assert_eq!(strings(&f.parts), expected, "{name}");
     }
 }

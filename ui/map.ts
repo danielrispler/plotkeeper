@@ -433,10 +433,11 @@ function pressPending(asked: string, busy: NonNullable<PendingPress["busy"]>, ru
   pendingPress = press;
   draw();
   void run().then(
-    () => {
+    (done) => {
       press.busy = null;
-      // A closed PR's Write or new draft PR puts the map in place as Accept does (#766); Discard does not.
-      if (busy !== "discard") askKeep(asked);
+      // A closed PR's Write or new draft PR puts the map in place as Accept does (#766); Discard does not, nor a Write whose replace
+      // question got a no (`writeFile` says false).
+      if (busy !== "discard" && done !== false) askKeep(asked);
     },
     (why: unknown) => {
       failure(`map_pending_${busy}`)(why);

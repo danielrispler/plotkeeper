@@ -517,6 +517,20 @@ fn the_pending_pr_is_followed_after_a_fetch_that_passed_whichever_path_fetched()
     assert_eq!(open(later + Duration::from_secs(1), Ok(())), Some(true));
     // Within the follow's own cooldown it is not asked again.
     assert_eq!(open(later + Duration::from_secs(2), Ok(())), None);
+
+    // A fetch after a merge (`merged`) follows nothing and leaves the follow's cooldown alone: the Map open right after still asks.
+    let fetches = Fetches::default();
+    let followed = std::cell::Cell::new(None);
+    let now = Instant::now();
+    fetch(&fetches, "/no/such/repository");
+    fetch_and_follow(
+        &fetches,
+        "/no/such/repository",
+        now,
+        || Ok(()),
+        |passed| followed.set(Some(passed)),
+    );
+    assert_eq!(followed.take(), Some(false));
 }
 
 #[test]

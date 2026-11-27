@@ -454,15 +454,15 @@ pub fn update_user(
     )?)
 }
 
-/// Fetches `origin` for `project` through the cooldown. A failure is logged quietly and the refs stay as they were.
+/// Fetches `origin` for `project` through the cooldown, following nothing. A failure is logged quietly and the refs stay as they were.
 fn fetch(fetches: &Fetches, project: &str) -> Fetched {
-    fetch_and_follow(
-        fetches,
-        project,
-        Instant::now(),
-        || studio_workbench::fetch(Path::new(project)),
-        |_| {},
-    )
+    let result = fetches.run(project, Instant::now(), || {
+        studio_workbench::fetch(Path::new(project))
+    });
+    if let Fetched::Failed(why) = &result {
+        log::warn!("map: fetch of {project} failed: {why}");
+    }
+    result
 }
 
 /// The Map view's `fetch` of `project` at `now` through the cooldown, then the lookup of the draft PR an accepted map waits on
@@ -480,6 +480,7 @@ fn fetch_and_follow(
     if let Fetched::Failed(why) = &result {
         log::warn!("map: fetch of {project} failed: {why}");
     }
+    // Its slot is the follow's alone: `fetch`, a fetch after a merge, never takes it.
     fetches.run(&format!("{project}\npending PR"), now, || {
         follow(fetches.passed(project));
         Ok(())
