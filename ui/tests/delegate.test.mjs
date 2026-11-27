@@ -219,8 +219,8 @@ for (const [run, said] of [
 // every 50 ms and never ends), "push" (edits, commits and pushes its commit to a branch of its own), "branch" (edits and
 // pushes the integration tip as \`issue-7-cheap\`, no commit of its own), "escape" (edits, and also writes escaped.txt into
 // the main checkout \`repo\`), "pushescape" (as "push", and also writes escaped.txt into \`repo\`) or "silent" (prints nothing and waits). FAKE_SILENT_MODELS, a comma-separated list, makes those models "silent" whatever FAKE_OPENCODE says;
-// a silent worker leaves a stray file first. Every worker call is logged with the environment it got. \`models opencode\`
-// lists FAKE_MODELS, a comma-separated list, or the test models by default, and is not logged. Like \`opencode run\`
+// a silent worker leaves a stray file first. Every worker call is logged with the environment it got. \`models\`
+// (v2.4: no provider argument, which it refuses as the real one does) lists FAKE_MODELS, a comma-separated list, or the test models by default, and is not logged. Like \`opencode run\`
 // without \`--dir\` (1.19.6: \`process.env.PWD??process.cwd()\`), it works in PWD's folder, not in the cwd it was given.
 const fakeOpencode = `#!/usr/bin/env node
 const { execFileSync, spawn } = require("node:child_process");
@@ -228,13 +228,17 @@ const { appendFileSync, writeFileSync } = require("node:fs");
 const { join } = require("node:path");
 const env = process.env;
 if (process.argv[2] === "models") {
-  if (process.argv[3] === "opencode") console.log((env.FAKE_MODELS ?? "opencode/test-free,opencode/a-free,opencode/b-free").split(",").join("\\n"));
+  if (process.argv[3]) {
+    console.error('Unexpected positional argument: "' + process.argv[3] + '"');
+    process.exit(1);
+  }
+  console.log((env.FAKE_MODELS ?? "opencode/test-free,opencode/a-free,opencode/b-free").split(",").join("\\n"));
   process.exit(0);
 }
 process.chdir(env.PWD ?? process.cwd());
 const seen = Object.fromEntries(Object.entries(env).filter(([key]) => key.startsWith("OPENCODE_") || key === "PLOTKEEPER_INTERNAL"));
 appendFileSync(join(env.FAKE_DIR, "opencode-calls.jsonl"), JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), env: seen }) + "\\n");
-const model = process.argv[process.argv.indexOf("-m") + 1];
+const model = process.argv[process.argv.indexOf("-m") + 1].split("#")[0];
 const mode = (env.FAKE_SILENT_MODELS ?? "").split(",").includes(model) ? "silent" : env.FAKE_OPENCODE;
 const event = (type, part) => console.log(JSON.stringify({ type, timestamp: 1, sessionID: "ses_test", part: { sessionID: "ses_test", ...part } }));
 const other = (file, text) => {
@@ -451,7 +455,7 @@ test("run: the worker runs in the worktree with the brief, the ticket and its sp
   const [worker] = ran.calls("opencode");
   assert.equal(worker.cwd, worktree);
   assert.deepEqual(worker.argv.slice(0, 6), ["run", "--auto", "--format", "json", "-m", "opencode/test-free"]);
-  assert.equal(worker.argv.length, 7, "effort medium maps to no --variant for this model");
+  assert.equal(worker.argv.length, 7, "effort medium maps to no variant for this model");
   assert.match(worker.argv[6], /Read \.delegate\/ticket\.md/);
   assert.equal(readFileSync(join(worktree, ".delegate/brief.md"), "utf8").trim(), worker.argv[6]);
   assert.deepEqual(worker.env, {
@@ -469,12 +473,13 @@ test("run: the worker runs in the worktree with the brief, the ticket and its sp
   assert.equal(readFileSync(join(worktree, ".delegate/run.log"), "utf8"), `> read {"filePath":"${worktree}/AGENTS.md"}\n> edit {"filePath":"shared.txt"}\nDone: the ticket is implemented.\n`);
 });
 
-test("run: effort high passes the candidate's variant for high", () => {
+test("run: effort high passes the candidate's variant for high on the model id, not as --variant", () => {
   const { run } = scratchRun();
   const ran = run({ FAKE_OPENCODE: "edit" }, ["--effort", "high"]);
   assert.equal(ran.status, 0, ran.stderr);
   const [worker] = ran.calls("opencode");
-  assert.deepEqual(worker.argv.slice(6, 8), ["--variant", "high"]);
+  assert.equal(worker.argv[5], "opencode/test-free#high");
+  assert.ok(!worker.argv.includes("--variant"));
   assert.match(ran.stdout, /Route outcome: cheap·high opencode\/test-free → pass/);
 });
 
@@ -536,7 +541,7 @@ const two = [
 // machine: at 300 ms the healthy candidate was once killed as silent too.
 const HEALTHY_SILENCE_MS = "2000";
 
-const models = (calls) => calls.map((call) => call.argv[call.argv.indexOf("-m") + 1]);
+const models = (calls) => calls.map((call) => call.argv[call.argv.indexOf("-m") + 1].split("#")[0]);
 
 test("run: a silent worker is killed and marked out, and the next candidate runs in the reset worktree", () => {
   const { repo, run, worktree } = scratchRun({ cheap: two });
