@@ -1,6 +1,6 @@
 {
   "name": "plotkeeper",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Local control room for coding agents (Claude Code, Codex, Cursor, Antigravity CLI) on macOS and Linux that explains what your prompts changed on a live system map",
   "license": "MIT",
   "author": "Daniel Rispler",
@@ -45,8 +45,8 @@
     "launcher.js"
   ],
   "optionalDependencies": {
-    "plotkeeper-darwin": "0.4.0",
-    "plotkeeper-linux-x64": "0.4.0",
-    "plotkeeper-linux-arm64": "0.4.0"
+    "plotkeeper-darwin": "0.5.0",
+    "plotkeeper-linux-x64": "0.5.0",
+    "plotkeeper-linux-arm64": "0.5.0"
   }
 }
