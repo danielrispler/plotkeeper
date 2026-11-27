@@ -8,6 +8,7 @@ mod agy;
 mod ask;
 mod checks;
 mod claude;
+mod cline;
 mod codex;
 mod copilot;
 mod cursor;
@@ -30,6 +31,7 @@ pub use checks::{
     output as check_output,
 };
 pub use claude::CAPABILITIES as CLAUDE_CAPABILITIES;
+pub use cline::CAPABILITIES as CLINE_CAPABILITIES;
 pub use codex::CAPABILITIES as CODEX_CAPABILITIES;
 pub use copilot::CAPABILITIES as COPILOT_CAPABILITIES;
 pub use cursor::CAPABILITIES as CURSOR_CAPABILITIES;

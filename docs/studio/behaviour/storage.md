@@ -8,7 +8,7 @@ plotkeeper keeps its data in one folder, the data folder: `~/Library/Application
 
 `~/Library/Application Support/plotkeeper/events.jsonl` (on Linux, `events.jsonl` in the data folder above), one hook payload per line, with added fields:
 
-- `studio_agent`: the agent its hook entry named (`--agent claude`, `--agent agy`, `--agent codex`, `--agent qwen`, `--agent cursor`, `--agent copilot`, `--agent opencode`), by which the core picks the line's parser and a prune finds its session (#355). A name plotkeeper has no parser for is counted as drift, not read as Claude's; a line with no name, written before entries named one or by the app, is read by its shape;
+- `studio_agent`: the agent its hook entry named (`--agent claude`, `--agent agy`, `--agent codex`, `--agent qwen`, `--agent cursor`, `--agent copilot`, `--agent opencode`, `--agent cline`), by which the core picks the line's parser and a prune finds its session (#355). A name plotkeeper has no parser for is counted as drift, not read as Claude's; a line with no name, written before entries named one or by the app, is read by its shape;
 - `studio_event`: the event its hook entry named (`--event preToolUse`), for a payload that names none: Copilot's camelCase payloads (#361);
 - `studio_received_ms`: when the hook received the event, in Unix milliseconds.
 

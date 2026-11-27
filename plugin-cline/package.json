@@ -1,0 +1,10 @@
+{
+  "name": "plotkeeper",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Appends Cline's events to plotkeeper's event log",
+  "type": "module",
+  "cline": {
+    "plugins": [{ "paths": ["./plotkeeper.js"], "capabilities": ["hooks"] }]
+  }
+}

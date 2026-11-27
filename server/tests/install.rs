@@ -105,6 +105,16 @@ esac"#,
         self
     }
 
+    /// Puts a fake `cline` on the PATH, which logs its arguments and writes nothing, as plotkeeper may not look at what
+    /// the real one writes (#371).
+    fn with_cline(self) -> Machine {
+        script(
+            &self.tools.join("cline"),
+            r#"echo "$@" >> "$(dirname "$0")/cline-calls""#,
+        );
+        self
+    }
+
     fn run(&self, verb: &str) -> Output {
         let out = self.run_any(verb);
         assert!(
@@ -382,6 +392,10 @@ fn install_then_uninstall_leaves_every_file_byte_identical() {
             ".qwen/settings.json",
             "{ \"env\": { \"DASHSCOPE_API_KEY\": \"sk-planted\" } }\n",
         );
+        m.write(
+            ".cline/data/settings/providers.json",
+            "{ \"anthropic\": { \"apiKey\": \"sk-planted\" } }\n",
+        );
     };
     let homes: [(&str, Setup); 3] = [
         ("absent", absent),
@@ -391,14 +405,15 @@ fn install_then_uninstall_leaves_every_file_byte_identical() {
     for (name, setup) in homes {
         for (claude, agy) in [(true, true), (false, false)] {
             let machine = Machine::new(claude, agy);
-            // Codex, Copilot, Qwen Code and OpenCode go with the others, so Codex's hook file and OpenCode's plugin
-            // folder are changed and put back too.
+            // Codex, Copilot, Qwen Code, OpenCode and Cline go with the others, so Codex's hook file and OpenCode's
+            // plugin folder are changed and put back too.
             let machine = if claude {
                 machine
                     .with_codex()
                     .with_copilot()
                     .with_qwen()
                     .with_opencode()
+                    .with_cline()
             } else {
                 machine
             };
@@ -425,36 +440,18 @@ fn a_harness_not_found_is_skipped_with_one_line() {
     let machine = Machine::new(false, false);
     let out = machine.run("install");
     let text = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(
-        text.lines().filter(|l| l.contains("Claude Code")).count(),
-        1,
-        "{text}"
-    );
-    assert_eq!(
-        text.lines().filter(|l| l.contains("agy")).count(),
-        1,
-        "{text}"
-    );
-    assert_eq!(
-        text.lines().filter(|l| l.contains("Codex")).count(),
-        1,
-        "{text}"
-    );
-    assert_eq!(
-        text.lines().filter(|l| l.contains("Copilot")).count(),
-        1,
-        "{text}"
-    );
-    assert_eq!(
-        text.lines().filter(|l| l.contains("Qwen Code")).count(),
-        1,
-        "{text}"
-    );
-    assert_eq!(
-        text.lines().filter(|l| l.contains("OpenCode")).count(),
-        1,
-        "{text}"
-    );
+    for label in [
+        "Claude Code",
+        "agy",
+        "Codex",
+        "Copilot",
+        "Qwen Code",
+        "OpenCode",
+        "Cline",
+    ] {
+        let lines = text.lines().filter(|l| l.contains(label)).count();
+        assert_eq!(lines, 1, "{label}: {text}");
+    }
     assert!(text.contains("not found"), "{text}");
 }
 
@@ -1005,6 +1002,84 @@ fn qwen_goes_through_qwen_extensions_and_never_opens_its_files() {
     for file in &files {
         assert!(fs::symlink_metadata(file).unwrap().file_type().is_fifo());
     }
+}
+
+/// Cline keeps its API keys in its config folder (#371), so install renders `plugin-cline/` into the data folder and
+/// runs `cline plugin install` on it, after `cline plugin uninstall` of an earlier one (Cline refuses to install over
+/// one), uninstall runs `cline plugin uninstall`, and neither opens a file of
+/// Cline's: its provider settings, which hold its keys, and its global settings are FIFOs here.
+// @law: install-never-opens-cline-config
+#[test]
+fn cline_goes_through_cline_plugin_and_never_opens_its_files() {
+    let machine = Machine::new(false, false).with_cline();
+    let settings = machine.home.join(".cline/data/settings");
+    fs::create_dir_all(&settings).unwrap();
+    let files = [
+        settings.join("providers.json"),
+        settings.join("global-settings.json"),
+    ];
+    for file in &files {
+        assert!(Command::new("mkfifo").arg(file).status().unwrap().success());
+    }
+
+    machine.run("install");
+    let plugin = machine.data().join("plugins/cline/plotkeeper");
+    let (uninstall, install) = (
+        "plugin uninstall plotkeeper".to_owned(),
+        format!("plugin install {}", plugin.display()),
+    );
+    assert_eq!(machine.calls("cline"), [uninstall.clone(), install.clone()]);
+    let package: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(plugin.join("package.json")).unwrap()).unwrap();
+    assert_eq!(package["name"], "plotkeeper");
+    assert_eq!(
+        package["cline"]["plugins"][0]["paths"][0],
+        "./plotkeeper.js"
+    );
+    let entry = fs::read_to_string(plugin.join("plotkeeper.js")).unwrap();
+    assert!(
+        entry.contains(&format!(
+            "const HOOK = \"{}/plotkeeper-hook\";",
+            machine.bin()
+        )),
+        "{entry}"
+    );
+    assert!(entry.contains(r#"["--agent", "cline"]"#));
+
+    // A second install replaces the first.
+    machine.run("install");
+    assert_eq!(
+        machine.calls("cline")[2..],
+        [uninstall.clone(), install.clone()]
+    );
+
+    machine.run("uninstall");
+    assert_eq!(machine.calls("cline")[4..], [uninstall]);
+    assert!(!machine.data().join("plugins").exists());
+    for file in &files {
+        assert!(fs::symlink_metadata(file).unwrap().file_type().is_fifo());
+    }
+}
+
+/// Cline's "No plugin found matching", as a first install's uninstall gets, or an uninstall after the user took
+/// plotkeeper's plugin out of Cline themselves, is the plugin gone already, not a failure.
+#[test]
+fn a_cline_plugin_already_gone_is_uninstalled() {
+    let machine = Machine::new(false, false).with_cline();
+    script(
+        &machine.tools.join("cline"),
+        r#"echo "$@" >> "$(dirname "$0")/cline-calls"
+[ "$2" = uninstall ] && { echo 'error: No plugin found matching "plotkeeper"' >&2; exit 1; }
+exit 0"#,
+    );
+    machine.run("install");
+
+    let out = machine.run("uninstall");
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("Cline: cline plugin uninstall plotkeeper"),
+        "{out:?}"
+    );
+    assert!(!machine.data().join("plugins").exists());
 }
 
 /// OpenCode 2 loads every `.js` file in `~/.config/opencode/plugins/`, and has no command for a local plugin file, so
