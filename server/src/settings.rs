@@ -652,7 +652,12 @@ impl SecretTool {
 const NO_SECRET_TOOL: &str = "secret-tool is not installed; install libsecret-tools.";
 const NO_SECRET_STORE: &str =
     "No secret store on this machine; install a keyring and libsecret-tools, or pick a CLI writer.";
-const KEYRING_SILENT: &str = "The keyring did not answer; it may be locked and waiting to be unlocked. Unlock it, then save again.";
+/// What a timed-out `secret-tool` call says, with the action to try again: "save" or "remove".
+fn keyring_silent(again: &str) -> String {
+    format!(
+        "The keyring did not answer; it may be locked and waiting to be unlocked. Unlock it, then {again} again."
+    )
+}
 
 /// Whether `secret-tool`'s error says no Secret Service is reachable: no session bus to reach it on, or a bus with no
 /// store on it (GLib's and D-Bus's own words, which `secret-tool` prints after its name).
@@ -701,7 +706,13 @@ impl SecretTool {
             Err(RunError::Start(e)) => {
                 return Err(format!("the Secret Service could not be reached: {e}"));
             }
-            Err(RunError::TimedOut(_)) => return Err(KEYRING_SILENT.into()),
+            Err(RunError::TimedOut(_)) => {
+                return Err(keyring_silent(if action == "clear" {
+                    "remove"
+                } else {
+                    "save"
+                }));
+            }
         };
         if !out.status.success() && no_secret_store(&String::from_utf8_lossy(&out.stderr)) {
             return Err(NO_SECRET_STORE.into());

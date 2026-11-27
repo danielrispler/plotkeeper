@@ -582,4 +582,9 @@ fn a_keyring_that_never_answers_holds_up_no_start() {
         refusal(&app, "set_api_key", args),
         "The keyring did not answer; it may be locked and waiting to be unlocked. Unlock it, then save again."
     );
+    let args = json!({ "writer": "openai" });
+    assert_eq!(
+        refusal(&app, "remove_api_key", args),
+        "The keyring did not answer; it may be locked and waiting to be unlocked. Unlock it, then remove again."
+    );
 }

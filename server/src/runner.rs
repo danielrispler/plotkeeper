@@ -170,14 +170,11 @@ fn sandbox_check() -> Vec<String> {
     check.iter().map(|word| (*word).to_string()).collect()
 }
 
-/// What Claude Code, Seatbelt and bubblewrap print when the sandbox fails after the start: a run that shows one failed,
-/// whatever its exit. Whole phrases, so a result that only names the setting does not match. bubblewrap's are the two
-/// refusals measured for the Linux check (#704).
-const SANDBOX_FAILURES: [&str; 4] = [
+/// What Claude Code and Seatbelt print when the sandbox fails after the start: a run that shows one failed, whatever its
+/// exit. Whole phrases, so a result that only names the setting does not match.
+const SANDBOX_FAILURES: [&str; 2] = [
     "sandbox_apply: Operation not permitted",
     "Sandbox is required but",
-    "No permissions to create new namespace",
-    "Can't mount proc on /newroot/proc",
 ];
 
 /// What a harness builds its command from.
