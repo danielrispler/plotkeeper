@@ -74,17 +74,8 @@ impl<'a> Reading<'a> {
         if dir.starts_with('/') {
             return None;
         }
-        let mut parts: Vec<&str> = self.project.split('/').filter(|e| !e.is_empty()).collect();
-        for part in dir.split('/') {
-            match part {
-                "" | "." => {}
-                ".." => {
-                    parts.pop()?;
-                }
-                _ => parts.push(part),
-            }
-        }
-        Some(parts.iter().map(|e| format!("{e}/")).collect())
+        crate::extract::folders::join(self.project, dir)
+            .map(|joined| crate::extract::folders::prefix(&joined))
     }
 
     /// Declares `dir` a source folder, or notes `key` when `dir` is not a folder of the repository.
