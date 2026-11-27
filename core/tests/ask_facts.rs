@@ -85,13 +85,7 @@ fn session() -> (Studio, std::path::PathBuf, tempfile::TempDir) {
         "npm run check",
         "Exit code 2\nline one\nerror: it broke",
     ));
-    let dir = tempfile::tempdir().unwrap();
-    let log = dir.path().join("events.jsonl");
-    std::fs::write(
-        &log,
-        lines.iter().map(|l| format!("{l}\n")).collect::<String>(),
-    )
-    .unwrap();
+    let (log, dir) = logged(&lines);
     (Studio::replayed(&lines), log, dir)
 }
 
