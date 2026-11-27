@@ -796,7 +796,7 @@ fn also_touched_sorts_the_files_of_no_lit_part_by_kind_the_first_match_winning()
 }
 
 #[test]
-fn the_caps_are_checked() {
+fn the_caps_are_checked_and_sit_exactly_where_the_prompt_says() {
     let facts = build_facts(&source(&["alpha/a.rs", "beta/b.rs", "gamma/c.rs"])).unwrap();
     let long = "word ".repeat(46);
     let mut b = good_brief_without_overview();
@@ -850,6 +850,36 @@ fn the_caps_are_checked() {
             .join("\n")
             .contains("an overview where SHAPE said none")
     );
+
+    // The step caps sit exactly where the prompt says.
+    let facts = build_facts(&source(&["alpha/a.rs", "beta/b.rs", "gamma/c.rs"])).unwrap();
+    let with_steps = |counts: &[usize]| {
+        let mut b = good_brief_without_overview();
+        let chapters: Vec<serde_json::Value> = counts
+            .iter()
+            .map(|n| {
+                let steps: Vec<serde_json::Value> = (0..*n)
+                    .map(|i| step(["Before", "Now", "Could break", "Must stay true", "Your turn"][i], &["alpha"]))
+                    .collect();
+                json!({ "behaviour": "order", "parts": ["alpha"], "title": "Order", "steps": steps })
+            })
+            .collect();
+        b["chapters"] = json!(chapters);
+        flags_of(&checked(&facts, b)).join("\n")
+    };
+    // A chapter is 3 or 4 steps.
+    assert!(
+        !with_steps(&[3, 4]).contains(" steps"),
+        "{}",
+        with_steps(&[3, 4])
+    );
+    assert!(with_steps(&[3, 5]).contains("5 steps"));
+    assert!(with_steps(&[2, 3]).contains("2 steps"));
+    // Twelve steps in all is the most.
+    assert!(!with_steps(&[3, 3, 3, 3]).contains("steps in all"));
+    assert!(with_steps(&[4, 3, 3, 3]).contains("13 steps in all"));
+    // Two to four chapters.
+    assert!(with_steps(&[3]).contains("1 chapters"));
 }
 
 #[test]
@@ -1368,29 +1398,29 @@ fn a_failed_call_or_an_unreadable_reply_stores_and_records_nothing() {
 }
 
 #[test]
-fn a_briefs_call_runs_at_the_brief_effort_and_at_claudes_own_without_one() {
+fn a_briefs_call_runs_at_the_brief_effort_and_the_claim_check_and_an_unset_one_at_claudes_own() {
     use studio_understanding::ClaudeWriter;
-    let args = |w: &ClaudeWriter| -> Vec<String> {
-        w.brief_command("opus", CallKind::Write, None, "p")
+    let plain = || ClaudeWriter::new("/bin/claude".into(), "/w/card-writer".into());
+    let low = || plain().with_brief_effort(|| "low".into());
+    let unset = || plain().with_brief_effort(String::new);
+    // (writer, kind of call, the --effort it passes)
+    let rows: [(ClaudeWriter, CallKind, Option<&str>); 5] = [
+        (plain(), CallKind::Write, None),
+        (low(), CallKind::Write, Some("low")),
+        (unset(), CallKind::Write, None),
+        (low(), CallKind::Check, None),
+        (plain(), CallKind::Check, None),
+    ];
+    for (n, (writer, kind, want)) in rows.iter().enumerate() {
+        let args: Vec<String> = writer
+            .brief_command("opus", *kind, Some("FACTS"), "p")
             .0
             .get_args()
             .map(|a| a.to_string_lossy().into_owned())
-            .collect()
-    };
-    let plain = ClaudeWriter::new("/bin/claude".into(), "/w/card-writer".into());
-    assert!(
-        !args(&plain).contains(&"--effort".to_string()),
-        "{:?}",
-        args(&plain)
-    );
-    let low = ClaudeWriter::new("/bin/claude".into(), "/w/card-writer".into())
-        .with_brief_effort(|| "low".into());
-    let got = args(&low);
-    let at = got.iter().position(|a| a == "--effort");
-    assert_eq!(at.map(|i| got[i + 1].as_str()), Some("low"), "{got:?}");
-    let unset = ClaudeWriter::new("/bin/claude".into(), "/w/card-writer".into())
-        .with_brief_effort(String::new);
-    assert!(!args(&unset).contains(&"--effort".to_string()));
+            .collect();
+        let at = args.iter().position(|a| a == "--effort");
+        assert_eq!(at.map(|i| args[i + 1].as_str()), *want, "row {n}: {args:?}");
+    }
 }
 
 #[test]
@@ -1433,25 +1463,6 @@ fn a_briefs_facts_with_a_nul_byte_still_spawn() {
     let spawned = command.spawn();
     assert!(spawned.is_ok(), "{:?}", spawned.err());
     spawned.unwrap().wait().unwrap();
-}
-
-#[test]
-fn the_claim_checks_call_runs_at_claudes_own_effort_whatever_the_brief_effort() {
-    use studio_understanding::ClaudeWriter;
-    let writer = ClaudeWriter::new("/bin/claude".into(), "/w/card-writer".into())
-        .with_brief_effort(|| "low".into());
-    let effort = |kind| -> Option<String> {
-        let args: Vec<String> = writer
-            .brief_command("opus", kind, Some("FACTS"), "p")
-            .0
-            .get_args()
-            .map(|a| a.to_string_lossy().into_owned())
-            .collect();
-        let at = args.iter().position(|a| a == "--effort")?;
-        Some(args[at + 1].clone())
-    };
-    assert_eq!(effort(CallKind::Write), Some("low".into()));
-    assert_eq!(effort(CallKind::Check), None);
 }
 
 // The brief effort covers the brief and catch-up writer and its retry only: pre-flight and the law draft call plain
@@ -2365,38 +2376,6 @@ fn a_not_in_the_plan_step_comes_first_in_its_chapter_when_the_spec_was_written_t
         .map(|s| s.k.as_str())
         .collect();
     assert_eq!(kinds, ["Before", "Now", "Not in the plan"]);
-}
-
-#[test]
-fn the_step_caps_sit_exactly_where_the_prompt_says() {
-    let facts = build_facts(&source(&["alpha/a.rs", "beta/b.rs", "gamma/c.rs"])).unwrap();
-    let with_steps = |counts: &[usize]| {
-        let mut b = good_brief_without_overview();
-        let chapters: Vec<serde_json::Value> = counts
-            .iter()
-            .map(|n| {
-                let steps: Vec<serde_json::Value> = (0..*n)
-                    .map(|i| step(["Before", "Now", "Could break", "Must stay true", "Your turn"][i], &["alpha"]))
-                    .collect();
-                json!({ "behaviour": "order", "parts": ["alpha"], "title": "Order", "steps": steps })
-            })
-            .collect();
-        b["chapters"] = json!(chapters);
-        flags_of(&checked(&facts, b)).join("\n")
-    };
-    // A chapter is 3 or 4 steps.
-    assert!(
-        !with_steps(&[3, 4]).contains(" steps"),
-        "{}",
-        with_steps(&[3, 4])
-    );
-    assert!(with_steps(&[3, 5]).contains("5 steps"));
-    assert!(with_steps(&[2, 3]).contains("2 steps"));
-    // Twelve steps in all is the most.
-    assert!(!with_steps(&[3, 3, 3, 3]).contains("steps in all"));
-    assert!(with_steps(&[4, 3, 3, 3]).contains("13 steps in all"));
-    // Two to four chapters.
-    assert!(with_steps(&[3]).contains("1 chapters"));
 }
 
 // ---- Since you read (#497, spec #477 part B) ----

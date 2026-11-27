@@ -3,7 +3,10 @@
 
 use serde_json::{Value, json};
 
-use crate::common::{extractor_map, has, pairs, repo, report, run, write};
+use crate::common::{
+    assert_only_candidate_links_relaxed, assert_unsure_file_listed_and_link_unproven,
+    extractor_map, has, imports_json, pairs, repo, report, run, sites, write,
+};
 
 /// A map naming `go-imports` whose parts are `parts`, each an id with its paths, and whose import links are `links`.
 fn map(parts: &[(&str, &[&str])], links: &[(&str, &str)]) -> Value {
@@ -121,7 +124,7 @@ fn named_dot_and_blank_imports_count_each_at_its_own_line() {
         ],
     );
     assert_eq!(
-        sites(&root),
+        sites(&root, &[]),
         [
             "a/main.go>v/v.go a/main.go:8",
             "a/main.go>w/w.go a/main.go:8",
@@ -130,28 +133,6 @@ fn named_dot_and_blank_imports_count_each_at_its_own_line() {
             "a/main.go>z/z.go a/main.go:6",
         ]
     );
-}
-
-/// Each file pair's import sites in `check --json`, as `from>to file:line`.
-fn sites(root: &str) -> Vec<String> {
-    let out = run(root, "check", &["--json"]);
-    let value: Value = serde_json::from_slice(&out.stdout).unwrap();
-    let mut found = Vec::new();
-    for edge in value["edges"].as_array().into_iter().flatten() {
-        for pair in edge["pairs"].as_array().unwrap() {
-            for site in pair["sites"].as_array().unwrap() {
-                found.push(format!(
-                    "{}>{} {}:{}",
-                    pair["from"].as_str().unwrap(),
-                    pair["to"].as_str().unwrap(),
-                    site["file"].as_str().unwrap(),
-                    site["line"]
-                ));
-            }
-        }
-    }
-    found.sort();
-    found
 }
 
 const IMPORTS_LIB: &str = "package main\n\nimport \"example.com/m/lib\"\n";
@@ -221,44 +202,6 @@ fn tag_skips(text: &str) -> bool {
     !found.contains(&"a/main.go>lib/f.go".to_string())
 }
 
-#[test]
-fn a_build_constraint_that_can_never_hold_with_ignore_off_skips_the_file() {
-    for text in [
-        "//go:build ignore && linux\n\npackage lib\n",
-        "// +build ignore\n// +build linux\n\npackage lib\n",
-        "//go:build linux\n//go:build darwin\n\npackage lib\n",
-    ] {
-        assert!(tag_skips(text), "{text}");
-    }
-}
-
-#[test]
-fn a_build_constraint_that_can_hold_with_any_other_tag_keeps_the_file() {
-    for text in [
-        "//go:build linux\n\npackage lib\n",
-        "//go:build !ignore\n\npackage lib\n",
-        "//go:build linux\n// +build ignore\n\npackage lib\n",
-    ] {
-        assert!(!tag_skips(text), "{text}");
-    }
-}
-
-#[test]
-fn a_go_build_line_with_a_double_negation_does_not_parse_and_skips_the_file() {
-    // Go's `go/build/constraint` rejects `!!`, spaced or not, but takes a negation in parentheses.
-    assert!(tag_skips("//go:build !!linux\n\npackage lib\n"));
-    assert!(tag_skips("//go:build ! !linux\n\npackage lib\n"));
-    assert!(!tag_skips("//go:build !linux\n\npackage lib\n"));
-    assert!(!tag_skips("//go:build !(!linux)\n\npackage lib\n"));
-}
-
-#[test]
-fn a_build_constraint_after_a_leading_byte_order_mark_is_read() {
-    // Go drops a leading U+FEFF before it reads the header.
-    assert!(tag_skips("\u{FEFF}//go:build ignore\n\npackage lib\n"));
-    assert!(tag_skips("\u{FEFF}// +build ignore\n\npackage lib\n"));
-}
-
 /// A `//go:build` line of `linux` in `depth` parentheses.
 fn nested(depth: usize) -> String {
     format!(
@@ -268,30 +211,96 @@ fn nested(depth: usize) -> String {
     )
 }
 
-#[test]
-fn a_go_build_line_over_a_thousand_terms_deep_does_not_parse_and_skips_the_file() {
-    // Go's parser counts each operand it starts and rejects the thousand and first (`go/build/constraint`'s `maxSize`).
-    assert!(!tag_skips(&nested(999)));
-    assert!(tag_skips(&nested(1000)));
+/// A `// +build` line of `ignore` joined by `terms - 1` commas.
+fn plus_build(terms: usize) -> String {
+    format!(
+        "// +build {}\n\npackage lib\n",
+        vec!["ignore"; terms].join(",")
+    )
 }
 
 #[test]
-fn a_plus_build_line_of_over_a_hundred_operators_is_not_read() {
-    // Go rejects a `// +build` line of more than a hundred `,` and ` ` operators, and `ShouldBuild` then passes over
-    // the line, so the file stays in.
-    let line = |terms: usize| {
-        format!(
-            "// +build {}\n\npackage lib\n",
-            vec!["ignore"; terms].join(",")
-        )
-    };
-    assert!(tag_skips(&line(101)));
-    assert!(!tag_skips(&line(102)));
-}
-
-#[test]
-fn a_build_constraint_after_the_package_clause_is_not_read() {
-    assert!(!tag_skips("package lib\n\n//go:build ignore\n"));
+fn a_build_constraint_skips_the_file_only_when_it_can_never_hold_or_does_not_parse() {
+    let rows: Vec<(&str, String, bool)> = vec![
+        // A constraint that can never hold with `ignore` off skips the file; one that can hold with any other tag keeps it.
+        (
+            "never holds",
+            "//go:build ignore && linux\n\npackage lib\n".into(),
+            true,
+        ),
+        (
+            "never holds, plus-build lines",
+            "// +build ignore\n// +build linux\n\npackage lib\n".into(),
+            true,
+        ),
+        (
+            "never holds, two go:build lines",
+            "//go:build linux\n//go:build darwin\n\npackage lib\n".into(),
+            true,
+        ),
+        (
+            "can hold",
+            "//go:build linux\n\npackage lib\n".into(),
+            false,
+        ),
+        (
+            "can hold, negated ignore",
+            "//go:build !ignore\n\npackage lib\n".into(),
+            false,
+        ),
+        (
+            "can hold, ignore in a plus-build line",
+            "//go:build linux\n// +build ignore\n\npackage lib\n".into(),
+            false,
+        ),
+        // Go's `go/build/constraint` rejects `!!`, spaced or not, but takes a negation in parentheses.
+        (
+            "double negation",
+            "//go:build !!linux\n\npackage lib\n".into(),
+            true,
+        ),
+        (
+            "spaced double negation",
+            "//go:build ! !linux\n\npackage lib\n".into(),
+            true,
+        ),
+        (
+            "single negation",
+            "//go:build !linux\n\npackage lib\n".into(),
+            false,
+        ),
+        (
+            "negation in parentheses",
+            "//go:build !(!linux)\n\npackage lib\n".into(),
+            false,
+        ),
+        // Go drops a leading U+FEFF before it reads the header.
+        (
+            "go:build after a byte order mark",
+            "\u{FEFF}//go:build ignore\n\npackage lib\n".into(),
+            true,
+        ),
+        (
+            "plus-build after a byte order mark",
+            "\u{FEFF}// +build ignore\n\npackage lib\n".into(),
+            true,
+        ),
+        // Go's parser counts each operand it starts and rejects the thousand and first (`go/build/constraint`'s `maxSize`).
+        ("999 deep", nested(999), false),
+        ("1000 deep", nested(1000), true),
+        // Go rejects a `// +build` line of more than a hundred `,` and ` ` operators, and `ShouldBuild` then passes over
+        // the line, so the file stays in.
+        ("101 plus-build terms", plus_build(101), true),
+        ("102 plus-build terms", plus_build(102), false),
+        (
+            "after the package clause",
+            "package lib\n\n//go:build ignore\n".into(),
+            false,
+        ),
+    ];
+    for (what, text, skips) in rows {
+        assert_eq!(tag_skips(&text), skips, "{what}: {text}");
+    }
 }
 
 #[test]
@@ -340,18 +349,11 @@ fn declared_twice(links: &[(&str, &str)]) -> (tempfile::TempDir, String) {
 #[test]
 fn a_path_declared_twice_makes_the_importer_unsure_and_relaxes_only_the_link_to_its_candidates() {
     let (_dir, root) = declared_twice(&[("app", "xa"), ("app", "xb")]);
-    let out = run(&root, "check", &[]);
-    assert_eq!(
-        String::from_utf8_lossy(&out.stderr),
-        "note: app/main.go is unsure of example.com/x/sub; its links to xa pass as unproven\n"
-    );
-    let problems = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(problems.lines().count(), 1, "{problems}");
-    assert!(
-        problems.starts_with(
-            "import link \"app-xb\" runs from \"app\" to \"xb\", but the code shows no dependency"
-        ),
-        "{problems}"
+    assert_only_candidate_links_relaxed(
+        &root,
+        "note: app/main.go is unsure of example.com/x/sub; its links to xa pass as unproven\n",
+        "app",
+        "xb",
     );
     let out = run(&root, "check", &["--json"]);
     let value: Value = serde_json::from_slice(&out.stdout).unwrap();
@@ -374,21 +376,7 @@ fn a_path_declared_twice_makes_the_importer_unsure_and_relaxes_only_the_link_to_
 #[test]
 fn imports_json_lists_the_unsure_files_and_the_pass_line_counts_the_relaxed_link_unproven() {
     let (_dir, root) = declared_twice(&[("app", "xa")]);
-    let out = run(&root, "imports", &["--json"]);
-    let value: Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(value["unsure"][0]["file"], "app/main.go");
-    assert_eq!(value["unsure"][0]["reason"], "declared twice");
-    let out = run(&root, "check", &[]);
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stdout)
-    );
-    assert!(
-        String::from_utf8_lossy(&out.stdout).contains("1 import (0 proven, 1 unproven)"),
-        "{}",
-        String::from_utf8_lossy(&out.stdout)
-    );
+    assert_unsure_file_listed_and_link_unproven(&root, "app/main.go");
 }
 
 /// The report of [`declared_twice`]'s repository with `work` added, its `go.work` files, which a part `rest` owns, and
@@ -744,11 +732,6 @@ fn import_like_text_in_comments_and_after_the_imports_gives_no_pair() {
         ("z/z.go", "package z\n"),
     ]);
     assert_eq!(found, ["a/main.go>y/y.go"]);
-}
-
-fn imports_json(root: &str) -> Value {
-    let out = run(root, "imports", &["--json"]);
-    serde_json::from_slice(&out.stdout).unwrap()
 }
 
 #[test]

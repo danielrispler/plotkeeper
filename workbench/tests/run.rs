@@ -328,7 +328,9 @@ fn no_git_or_gh_is_built_outside_the_runner() {
     assert!(listed.status.success());
     let listed = String::from_utf8(listed.stdout).unwrap();
     let ours = listed.split('\0').filter(|file| {
-        let helper = file.starts_with("test-support/") || file.contains("/tests/");
+        let helper = file.starts_with("test-support/")
+            || file.contains("/tests/")
+            || file.ends_with("tests.rs");
         !file.is_empty()
             && !helper
             && !file.starts_with("archive/")
@@ -344,7 +346,7 @@ fn no_git_or_gh_is_built_outside_the_runner() {
     let mut found = Vec::new();
     for file in ours {
         let text = std::fs::read_to_string(root.join(file)).unwrap();
-        // A file's own test module is a test helper.
+        // A file's own test module, inline or in its `tests.rs`, is a test helper.
         for (number, line) in text.lines().enumerate() {
             if line.trim_start().starts_with("#[cfg(test)]") {
                 break;

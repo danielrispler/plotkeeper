@@ -1,52 +1,15 @@
 //! `dotnet-projects`: .NET repositories in temporary folders, read through `check` and `imports` (spec #617, "Testing
 //! Decisions").
 
-use std::{path::Path, process::Command};
-
 use serde_json::{Value, json};
 
-use crate::common::{has, project_text, write};
+use crate::common::{
+    assert_only_candidate_links_relaxed, extractor_map, has, pairs, repo, report, run, sites, write,
+};
 
-/// A map naming `dotnet-projects` whose parts are `parts`, each an id with its paths, and whose import links are
-/// `links`.
+/// A map naming `dotnet-projects` whose parts are `parts`, each an id with its paths, and whose import links are `links`.
 fn map(parts: &[(&str, &[&str])], links: &[(&str, &str)]) -> Value {
-    json!({
-        "version": 2,
-        "extractors": ["dotnet-projects"],
-        "parts": parts.iter().map(|(id, paths)| json!({
-            "id": id, "name": id, "caption": id, "purpose": "A part.", "holds": [], "tier": "core", "paths": paths
-        })).collect::<Vec<_>>(),
-        "actors": [],
-        "links": links.iter().map(|(from, to)| json!({
-            "id": format!("{from}-{to}"), "from": from, "to": to, "kind": "import"
-        })).collect::<Vec<_>>(),
-        "ignored": ["system-map.json"],
-        "laws": []
-    })
-}
-
-/// A repository holding `map` and `files` with their texts, committed.
-fn repo(map: &Value, files: &[(&str, &str)]) -> (tempfile::TempDir, String) {
-    let (dir, root) = project_text(&map.to_string(), &[]);
-    for (file, text) in files {
-        write(dir.path(), file, text);
-    }
-    studio_test_support::git(dir.path(), &["add", "-A"]);
-    studio_test_support::git(dir.path(), &["commit", "-q", "-m", "Code"]);
-    (dir, root)
-}
-
-fn report(root: &str) -> system_map::Report {
-    system_map::check(Path::new(root))
-}
-
-/// Every file pair of the computed edges, as `from>to`.
-fn pairs(report: &system_map::Report) -> Vec<String> {
-    report
-        .edges
-        .iter()
-        .flat_map(|e| e.pairs.iter().map(|p| format!("{}>{}", p.from, p.to)))
-        .collect()
+    extractor_map("dotnet-projects", parts, links, &[])
 }
 
 /// The file pairs a repository of `files` gives, its parts `a` owning only the files named `a/App.*` and `b` the rest,
@@ -54,15 +17,6 @@ fn pairs(report: &system_map::Report) -> Vec<String> {
 fn net_pairs(files: &[(&str, &str)]) -> Vec<String> {
     let (_dir, root) = repo(&map(&[("b", &["**"]), ("a", &["a/App.*"])], &[]), files);
     pairs(&report(&root))
-}
-
-fn run(root: &str, command: &str, args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_system-map"))
-        .arg(command)
-        .args(args)
-        .args(["--root", root])
-        .output()
-        .unwrap()
 }
 
 /// A project file holding `body` in an SDK-style `Project`.
@@ -139,9 +93,44 @@ fn a_semicolon_list_gives_one_pair_per_piece_and_an_escaped_semicolon_stays_in_o
 }
 
 #[test]
-fn an_entity_in_a_path_is_decoded_before_it_is_read() {
-    let found = from_app("..\\a&amp;b\\X.csproj", &["a&b/X.csproj"]);
-    assert_eq!(found, ["a/App.csproj>a&b/X.csproj"]);
+fn a_reference_is_resolved_from_its_project_files_folder_and_one_that_names_no_other_file_gives_nothing()
+ {
+    let core = ["core/Core.csproj"];
+    for (what, include, targets, expected) in [
+        (
+            "an entity is decoded",
+            "..\\a&amp;b\\X.csproj",
+            &["a&b/X.csproj"][..],
+            &["a/App.csproj>a&b/X.csproj"][..],
+        ),
+        (
+            "a stale reference",
+            "..\\gone\\Gone.csproj",
+            &core[..],
+            &[][..],
+        ),
+        (
+            "a climbing one",
+            "..\\..\\core\\Core.csproj",
+            &core[..],
+            &[][..],
+        ),
+        (
+            "a wrongly cased one",
+            "..\\Core\\core.csproj",
+            &core[..],
+            &[][..],
+        ),
+        (
+            "dots and repeated separators collapse",
+            ".\\..\\\\core\\.\\x\\..\\Core.csproj",
+            &core[..],
+            &["a/App.csproj>core/Core.csproj"][..],
+        ),
+        ("the project file itself", "App.csproj", &[][..], &[][..]),
+    ] {
+        assert_eq!(from_app(include, targets), expected, "{what}");
+    }
 }
 
 #[test]
@@ -215,25 +204,6 @@ fn separators_left_after_a_project_folder_property_still_read_from_the_project_f
 }
 
 #[test]
-fn a_stale_a_climbing_and_a_wrongly_cased_reference_give_nothing() {
-    let found = from_app("..\\gone\\Gone.csproj", &["core/Core.csproj"]);
-    assert_eq!(found, Vec::<String>::new());
-    let found = from_app("..\\..\\core\\Core.csproj", &["core/Core.csproj"]);
-    assert_eq!(found, Vec::<String>::new());
-    let found = from_app("..\\Core\\core.csproj", &["core/Core.csproj"]);
-    assert_eq!(found, Vec::<String>::new());
-}
-
-#[test]
-fn dots_and_repeated_separators_collapse() {
-    let found = from_app(
-        ".\\..\\\\core\\.\\x\\..\\Core.csproj",
-        &["core/Core.csproj"],
-    );
-    assert_eq!(found, ["a/App.csproj>core/Core.csproj"]);
-}
-
-#[test]
 fn a_reference_to_a_tracked_esproj_pairs_and_its_part_stays_unproven() {
     let files = [
         ("a/App.csproj", &refers("..\\ui\\Ui.esproj")[..]),
@@ -248,11 +218,6 @@ fn a_reference_to_a_tracked_esproj_pairs_and_its_part_stays_unproven() {
         (found.counts.links.proven, found.counts.links.unproven),
         (0, 1)
     );
-}
-
-#[test]
-fn a_reference_to_the_project_file_itself_gives_nothing() {
-    assert_eq!(from_app("App.csproj", &[]), Vec::<String>::new());
 }
 
 #[test]
@@ -313,15 +278,13 @@ fn property_repo(links: &[(&str, &str)]) -> (tempfile::TempDir, String) {
 #[test]
 fn a_property_path_makes_the_file_unsure_and_relaxes_only_the_link_to_its_candidates_part() {
     let (_dir, root) = property_repo(&[("app", "core"), ("app", "lib")]);
-    let out = run(&root, "check", &[]);
-    assert_eq!(
-        String::from_utf8_lossy(&out.stderr),
-        "note: a/App.csproj is unsure of $(SourceRoot)src\\Core\\Core.csproj; its links to core pass as unproven\n"
-    );
     // The link to `lib`, another one from the same part, still fails.
-    let problems = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(problems.lines().count(), 1, "{problems}");
-    assert!(problems.contains("import link \"app-lib\""), "{problems}");
+    assert_only_candidate_links_relaxed(
+        &root,
+        "note: a/App.csproj is unsure of $(SourceRoot)src\\Core\\Core.csproj; its links to core pass as unproven\n",
+        "app",
+        "lib",
+    );
     let out = run(&root, "check", &["--json"]);
     let value: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(
@@ -638,28 +601,6 @@ fn an_ignored_broken_project_file_is_not_read() {
         has(&problems, &["src/T.csproj", "not a project file"]),
         "{problems:?}"
     );
-}
-
-/// Each file pair's import sites in `check --json`, as `from>to file:line`.
-fn sites(root: &str, args: &[&str]) -> Vec<String> {
-    let out = run(root, "check", &[&["--json"], args].concat());
-    let value: Value = serde_json::from_slice(&out.stdout).unwrap();
-    let mut found = Vec::new();
-    for edge in value["edges"].as_array().into_iter().flatten() {
-        for pair in edge["pairs"].as_array().unwrap() {
-            for site in pair["sites"].as_array().unwrap() {
-                found.push(format!(
-                    "{}>{} {}:{}",
-                    pair["from"].as_str().unwrap(),
-                    pair["to"].as_str().unwrap(),
-                    site["file"].as_str().unwrap(),
-                    site["line"]
-                ));
-            }
-        }
-    }
-    found.sort();
-    found
 }
 
 #[test]
