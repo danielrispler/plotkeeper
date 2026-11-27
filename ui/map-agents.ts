@@ -307,7 +307,7 @@ export function paint() {
     const button = notPlacedButton();
     const asking = askingOf(notPlaced);
     lineTarget = notPlacedTarget(notPlaced, opened);
-    button.textContent = words;
+    if (button.textContent !== words) button.textContent = words;
     // Drawn each time: the kept line's hint is dropped while the line is off the page.
     hint(keyed(button, "not-placed"), [...asking.map((session) => deps.name(session)), "A press opens the next one's story"].join("\n"));
     if (button.parentElement !== slot) slot.replaceChildren(button);
