@@ -2,7 +2,8 @@
 // the scan's parts are its plates, and each fills in as its writer group lands, "being checked" until its reviewer answers. The panel beside
 // them says how far the draft is, offers Retry of a failed group alone, and holds a card a part: its name, caption and purpose to edit in
 // place, the reviewer's flag on its purpose with the lines it cites, its tier, and Redraft this part. Accept stays locked until every
-// reviewer answered (`ready`); its ways out are #764's. Discard asks first, then returns to the scan.
+// reviewer answered (`ready`). Then its main way out writes `system-map.json` into the checkout, uncommitted, asking before it replaces a file
+// there that does not read (#764); its second, Open a draft PR, is #765's and muted until then. Discard asks first, then returns to the scan.
 //
 // The server keeps the Map draft (`map_draft.rs`); each answer, and each `map-landed` while it drafts, draws it again here. A screen
 // already drawn is patched, plates and panel alike, so a field being typed in keeps its words and its focus while another group lands;
@@ -19,12 +20,14 @@ type Part = Doc["parts"][number];
 export type DraftField = "name" | "caption" | "purpose" | "tier";
 /**
  * What the Map draft's presses do: `edit` keeps one field of a part in the Map draft, `retry` runs a failed group again, `redraft` runs
- * one part's writer again, `discard` throws the Map draft away; `note` is why the last of them did not go through, or null.
+ * one part's writer again, `accept` writes the map into the checkout, `discard` throws the Map draft away; `note` is why the last of them
+ * did not go through, or null.
  */
 export type DraftActs = {
   edit: (part: string, field: DraftField, value: string) => void;
   retry: (group: number) => void;
   redraft: (part: string) => void;
+  accept: () => void;
   discard: () => void;
   note: string | null;
 };
@@ -198,22 +201,48 @@ function panelOf(draft: MapDraft, doc: Doc, acts: DraftActs): HTMLElement {
     left.append(text("p", "The writers left these out rather than guess:", "map-scan-note"), list);
     panel.append(left);
   }
+  panel.append(actionsOf(draft, acts));
+  return panel;
+}
+
+// Accept's two ways out, both locked until every reviewer answered: Write is the main one, with the line on what it adds; Open a draft PR
+// is #765's. Then Discard.
+function actionsOf(draft: MapDraft, acts: DraftActs): HTMLElement {
   const actions = text("div", "", "map-drafting-actions");
   actions.dataset.key = "draft actions";
-  // Accept's ways out are #764's: here it only shows whether every reviewer answered.
-  const accept = pressable(text("button", "Accept", "btn primary"), null);
-  accept.dataset.key = "draft accept";
-  availability(accept, "Accept this Map draft as the repository's map", draft.ready ? null : "Accept unlocks once a reviewer has checked every part");
+  actions.setAttribute("role", "group");
+  actions.setAttribute("aria-label", "Accept or discard the Map draft");
+  const locked = draft.ready ? null : "Accept unlocks once a reviewer has checked every part";
+  const folder = draft.path.slice(0, draft.path.lastIndexOf("/")) || draft.path;
+  const write = text("button", "", "btn primary map-drafting-write");
+  write.append("Write system-map.json to ", Object.assign(text("span", folder, "map-drafting-path"), { translate: false }));
+  pressable(write, null, () => {
+    if (!isUnavailable(write)) acts.accept();
+  });
+  write.dataset.key = "draft accept";
+  availability(write, `Accept the map: write ${draft.path} into your checkout, uncommitted`, locked);
+  const uncommitted = text("p", "It adds an uncommitted file to your checkout, like a CLAUDE.md: commit it the way you commit anything.", "map-drafting-uncommitted");
+  uncommitted.dataset.key = "draft uncommitted";
+  const pr = pressable(text("button", "Open a draft PR", "btn"), null);
+  pr.dataset.key = "draft pr";
+  availability(pr, "Accept the map as a draft PR, writing nothing to your checkout", locked ?? "Not available yet: write the file instead");
   const discard = pressable(text("button", "Discard", "btn"), null, async () => {
     const lost = "The Map draft's names, captions and purposes and your edits are thrown away, and its runs stop. The scan stays, to draft again.";
     if (await confirmed({ heading: "Discard the Map draft?", lost, verb: "Discard draft" })) acts.discard();
   });
   discard.dataset.key = "draft discard";
   hint(discard, "Throw the Map draft away and return to the scan");
-  actions.append(accept, discard);
-  panel.append(actions);
-  return panel;
+  actions.append(write, uncommitted, pr, discard);
+  return actions;
 }
+
+/** Asks before Write replaces the checkout's `system-map.json`, which does not read for `problem` (#764, story 25); true on a yes. */
+export const replaceAsked = (problem: string) =>
+  confirmed({
+    heading: "Replace system-map.json?",
+    lost: `The system-map.json in your checkout does not read: ${problem}. Writing the map replaces it, and what it holds now is lost unless git has it.`,
+    verb: "Replace it",
+  });
 
 // The Map draft's text in each field not being typed in, as a patch leaves a field the person changed with its own words.
 function sayDraft(screen: Element) {

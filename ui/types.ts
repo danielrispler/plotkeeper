@@ -724,7 +724,7 @@ export type ScanEdit =
  * First map's Map draft (`server/src/map_draft.rs`, #762): `map`, the skeleton with each part's latest written text and the person's
  * edits, as text; each writer group (and each Redraft this part) by index, which `map_draft_retry` takes, with its state and why it
  * failed; the reviewer's verdict on each part's purpose as `map` shows it, by part id; what the writers left out; and `ready`, true once
- * every group is done, for Accept.
+ * every group is done, for Accept; and `path`, the `system-map.json` Accept writes.
  */
 export type MapDraftState = "writing" | "checking" | "done" | "writer-failed" | "reviewer-failed";
 export type MapDraft = {
@@ -733,7 +733,13 @@ export type MapDraft = {
   verdicts: Record<string, MapReviewItem>;
   not_written: { what: string; why: string }[];
   ready: boolean;
+  path: string;
 };
+/**
+ * What Accept's Write did (`Accepted` in `server/src/map_draft.rs`, #764): wrote the map to `path`, uncommitted, or wrote nothing since a file
+ * there does not read, for `problem`; Accept again with `replace: seen` replaces that file as it was asked about.
+ */
+export type MapAccepted = { kind: "written"; path: string } | { kind: "replace"; path: string; problem: string; seen: string };
 
 /** What the page asks at start (#527): plotkeeper's package version, for the toast after an update (`whats-new.ts`). */
 export type About = { version: string };
@@ -816,6 +822,7 @@ export interface Commands {
   map_draft_redraft: { args: InPart; reply: MapDraft };
   map_draft_edit: { args: InPart & { name?: string | null; caption?: string | null; purpose?: string | null; tier?: string | null }; reply: MapDraft };
   map_draft_discard: { args: Project; reply: void };
+  map_draft_accept: { args: Project & { replace?: string | null }; reply: MapAccepted };
   pr_brief: { args: InPr & { full?: boolean | null }; reply: BriefOpened | null };
   // `older` (#638): "Read the one you have", the stored catch-up of an earlier fog list while it still holds.
   part_catch_up: { args: InPart & { older?: boolean | null }; reply: CatchUpOpened | null };

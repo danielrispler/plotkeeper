@@ -354,17 +354,10 @@ pub(crate) fn scan_of(repo: &Path, claude: bool) -> Result<MapScan, String> {
     Ok(screen_of(root, map, found, files, claude))
 }
 
-/// The scan screen of the skeleton `map`: it gets the edges `check_text` computes on it as `import` links, one per pair of parts in the
-/// edge's direction, with no reason, as Accept writes them (#753, "The map written"); its loose files, ticks and splits are its own.
-fn screen_of(
-    root: &Path,
-    mut map: Value,
-    found: system_map::Scan,
-    files: Vec<String>,
-    claude: bool,
-) -> MapScan {
-    let report = system_map::check_text(root, files.clone(), &map.to_string());
-    map["links"] = report
+/// The edges `report` computed, as `import` links: one per pair of parts in the edge's direction, `<from>-<to>`, with no reason, which an
+/// `import` link needs none of (`system-map/src/edges.rs`).
+pub(crate) fn import_links(report: &system_map::Report) -> Value {
+    report
         .edges
         .iter()
         .map(|edge| {
@@ -375,7 +368,20 @@ fn screen_of(
                 "kind": "import",
             })
         })
-        .collect();
+        .collect()
+}
+
+/// The scan screen of the skeleton `map`: it gets the edges `check_text` computes on it as `import` links, one per pair of parts in the
+/// edge's direction, with no reason, as Accept writes them (#753, "The map written"); its loose files, ticks and splits are its own.
+fn screen_of(
+    root: &Path,
+    mut map: Value,
+    found: system_map::Scan,
+    files: Vec<String>,
+    claude: bool,
+) -> MapScan {
+    let report = system_map::check_text(root, files.clone(), &map.to_string());
+    map["links"] = import_links(&report);
     let loose = |tests: bool| -> Vec<String> {
         let free = |file: &&String| {
             system_map::is_code(file)

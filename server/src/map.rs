@@ -291,9 +291,7 @@ fn read_from(repo: &Path, pending: impl FnOnce(&str) -> Option<PathBuf>) -> MapS
     };
     state.from = Some(from);
     // A version 1 map is stored converted, so everything after reads version 2 only.
-    match text.and_then(|text| {
-        system_map::convert(&text).and_then(|text| system_map::parse_lenient(&text).map(|_| text))
-    }) {
+    match text.and_then(|text| readable(&text)) {
         Ok(text) => {
             state.status = Status::Loaded;
             state.source = Some(text);
@@ -304,6 +302,12 @@ fn read_from(repo: &Path, pending: impl FnOnce(&str) -> Option<PathBuf>) -> MapS
         }
     }
     state
+}
+
+/// The map file's `text` as version 2, when it reads as a map: `convert` and `parse_lenient` accept it, whatever `check` says
+/// (#753, "Readable vs unreadable"); else its first problem.
+pub(crate) fn readable(text: &str) -> Result<String, String> {
+    system_map::convert(text).and_then(|text| system_map::parse_lenient(&text).map(|_| text))
 }
 
 /// The outcome of a guarded fetch.

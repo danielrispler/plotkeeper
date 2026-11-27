@@ -196,6 +196,11 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             },
         )),
         "map_draft_discard" => res(app.drafts.discard(&arg::<String>(a, "project")?)),
+        "map_draft_accept" => res(crate::map_draft::map_draft_accept(
+            app,
+            arg(a, "project")?,
+            arg(a, "replace")?,
+        )),
         "map_know" => res(crate::map::map_know(arg(a, "project")?, arg(a, "part")?)),
         "map_refresher" => res(crate::map::map_refresher(
             arg(a, "project")?,

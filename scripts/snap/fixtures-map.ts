@@ -1007,7 +1007,7 @@ const written: Record<string, { name: string; caption: string; purpose: string }
 const draftOf = (landed: string[], extra: Partial<MapDraft> = {}, edits: Record<string, Record<string, string>> = {}): MapDraft => {
   const map = JSON.parse(mapScanOf().map);
   for (const part of map.parts) Object.assign(part, landed.includes(part.id) ? written[part.id] : {}, edits[part.id] ?? {});
-  return { map: JSON.stringify(map), groups: [], verdicts: {}, not_written: [], ready: false, ...extra };
+  return { map: JSON.stringify(map), groups: [], verdicts: {}, not_written: [], ready: false, path: "/w/plotkeeper/system-map.json", ...extra };
 };
 const group = (parts: string[], state: MapDraftState, why: string | null = null, redraft = false) => ({ parts, state, why, redraft });
 const verdict = (id: string, flag: MapReviewItem["verdict"] = "supported", why = "", cites: string[] = []): MapReviewItem => ({ id: `part:${id}/purpose`, verdict: flag, why, cites, flagged: flag !== "supported" });
@@ -1032,7 +1032,7 @@ const draftHarness = `
     const field = (id, name) => card(id)?.querySelector('[name="' + name + '"]');
     const plate = (id) => document.querySelector('#map .map-drafting .plate[data-id="' + id + '"]');
     const button = (root, words) => [...(root?.querySelectorAll("button") ?? [])].find((b) => b.textContent === words);
-    const accept = () => button(document.querySelector("#map .map-drafting-panel"), "Accept");
+    const accept = () => document.querySelector('#map .map-drafting-panel [data-key="draft accept"]');
     const land = async (draft) => {
       answer("map_draft", draft);
       __snapEmit("map-landed", "/w/plotkeeper");
@@ -1121,8 +1121,8 @@ export const mapDrafting = (): Fixture =>
     const failed = screen.querySelector(".map-drafting-failed");
     if (!failed?.textContent.includes("Store") && !failed?.textContent.includes("Lib")) log("snap:fail the failed group does not name its part: " + failed?.textContent);
     if (!failed?.textContent.includes("rate limit")) log("snap:fail the failed group does not say why");
-    const accept = [...screen.querySelectorAll("button")].find((b) => b.textContent === "Accept");
-    if (accept?.getAttribute("aria-disabled") !== "true") log("snap:fail Accept is not locked while drafting");
+    const ways = ["draft accept", "draft pr"].map((key) => screen.querySelector('[data-key="' + key + '"]')?.getAttribute("aria-disabled"));
+    if (JSON.stringify(ways) !== JSON.stringify(["true", "true"])) log("snap:fail Accept's ways out are not locked while drafting: " + JSON.stringify(ways));
     for (const pick of screen.querySelectorAll("input, textarea, select")) if (!pick.labels?.length) log("snap:fail a field has no label: " + pick.name);
     frame("while drafting");
     checkColours("while drafting");
@@ -1148,7 +1148,7 @@ export const mapDraftReview = (): Fixture =>
     if (JSON.stringify(tiers) !== JSON.stringify(["interface", "interface", "interface"])) log("snap:fail the tiers start as " + JSON.stringify(tiers));
     const offered = [...(screen.querySelector('select[name="tier"]')?.options ?? [])].map((o) => o.textContent);
     if (JSON.stringify(offered) !== JSON.stringify(["Core", "Interface", "Black box"])) log("snap:fail a tier picker offers " + JSON.stringify(offered));
-    const accept = [...screen.querySelectorAll("button")].find((b) => b.textContent === "Accept");
+    const accept = screen.querySelector('[data-key="draft accept"]');
     if (!accept || accept.hasAttribute("aria-disabled")) log("snap:fail a flag locks Accept");
     for (const pick of screen.querySelectorAll("input, textarea, select")) if (!pick.labels?.length) log("snap:fail a field has no label: " + pick.name);
     // The picture shows the flag: the panel scrolls to it.
@@ -1186,6 +1186,91 @@ export const mapDraftRedraft = (): Fixture =>
     map_draft_redraft: draftOf(["app", "cli", "lib"], { groups: [group(["app"], "done"), group(["cli"], "done"), group(["lib"], "done"), group(["cli"], "writing", null, true)], verdicts: checked }),
     budget: 9000,
     snapDone: "draft redraft ok",
+  });
+/**
+ * Accept's two ways out (#753, stories 23 and 26; ticket #764) once every reviewer answered: Write system-map.json to the checkout's path,
+ * with the line saying it adds an uncommitted file like a CLAUDE.md, and Open a draft PR, muted with its reason until #765.
+ */
+export const mapDraftAccept = (): Fixture =>
+  mapBaseOf(`
+    const screen = document.querySelector("#map .map-scan.map-drafting");
+    if (!screen) return log("snap:fail no Map draft: " + document.getElementById("map-body").textContent.replace(/\\s+/g, " ").slice(0, 200));
+    const actions = screen.querySelector(".map-drafting-actions");
+    if (actions?.getAttribute("role") !== "group" || !actions.getAttribute("aria-label")) log("snap:fail Accept's ways out are not a named group");
+    const write = actions?.querySelector('[data-key="draft accept"]');
+    if (write?.textContent !== "Write system-map.json to /w/plotkeeper") log("snap:fail Write says " + JSON.stringify(write?.textContent));
+    if (!write || write.hasAttribute("aria-disabled")) log("snap:fail Write is muted on a checked draft");
+    const line = actions?.querySelector(".map-drafting-uncommitted")?.textContent ?? "";
+    if (!line.includes("uncommitted") || !line.includes("CLAUDE.md")) log("snap:fail the line under Write says " + JSON.stringify(line));
+    const pr = [...actions.querySelectorAll("button")].find((b) => b.textContent === "Open a draft PR");
+    if (pr?.getAttribute("aria-disabled") !== "true") log("snap:fail Open a draft PR is not muted");
+    const order = [...actions.querySelectorAll("button")].map((b) => b.dataset.key);
+    if (JSON.stringify(order) !== JSON.stringify(["draft accept", "draft pr", "draft discard"])) log("snap:fail the ways out come in the order " + JSON.stringify(order));
+    frame("with Accept's ways out");
+    checkColours("with Accept's ways out");
+    log("base ok");`, { map_state: mapState({ status: "none", source: null, from: null }), map_draft: reviewDraft });
+// A checkout system-map.json that does not read, with a Map draft kept from before it came: its first problem, as the Map view says it.
+const brokenFile = "expected `,` or `}` at line 1 column 13";
+/**
+ * The replace question (#753, story 25): with a system-map.json in the checkout that does not read, the Map draft still shows, and Write asks
+ * before replacing the file, naming its first problem, Cancel focused.
+ */
+export const mapDraftReplace = (): Fixture =>
+  mapBaseOf(`
+    const screen = document.querySelector("#map .map-scan.map-drafting");
+    if (!screen) return log("snap:fail a Map draft does not show over a checkout file that does not read: " + document.getElementById("map-body").textContent.replace(/\\s+/g, " ").slice(0, 200));
+    screen.querySelector('[data-key="draft accept"]').click();
+    await wait(400);
+    const dialog = document.getElementById("confirm-dialog");
+    if (!dialog.matches(":modal")) return log("snap:fail Write did not ask before replacing the file");
+    if (document.getElementById("confirm-heading").textContent !== "Replace system-map.json?") log("snap:fail the question is " + document.getElementById("confirm-heading").textContent);
+    if (!dialog.textContent.includes(${JSON.stringify(brokenFile)})) log("snap:fail the question does not name the file's problem: " + dialog.textContent.replace(/\\s+/g, " "));
+    if (document.getElementById("confirm-yes").textContent !== "Replace it") log("snap:fail the yes says " + document.getElementById("confirm-yes").textContent);
+    if (document.activeElement?.textContent !== "Cancel") log("snap:fail Cancel is not focused but " + document.activeElement?.textContent);
+    checkColours("with the replace question");
+    log("base ok");`, {
+    map_state: mapState({ status: "unreadable", source: null, from: "checkout", note: "system-map.json does not read: " + brokenFile }),
+    map_draft: reviewDraft,
+    map_draft_accept: { kind: "replace", path: "/w/plotkeeper/system-map.json", problem: brokenFile, seen: "00c0ffee00c0ffee" },
+  });
+/**
+ * Write's steps (#753, stories 24 and 25): a no to the replace question writes nothing and keeps the Map draft; a yes sends what the server
+ * read of the file, and once written the map shows from the checkout, "Map not committed yet" in its head, with no Map draft and no PR button.
+ */
+export const mapDraftWrite = (): Fixture =>
+  mapOpened(`
+    ${draftHarness}
+    const replace = { kind: "replace", path: "/w/plotkeeper/system-map.json", problem: ${JSON.stringify(brokenFile)}, seen: "00c0ffee00c0ffee" };
+    answer("map_draft_accept", replace);
+    const dialog = document.getElementById("confirm-dialog");
+    if (!accept()) return log("snap:fail no Write on the Map draft: " + document.getElementById("map-body").textContent.replace(/\\s+/g, " ").slice(0, 200));
+    accept().click();
+    await wait(300);
+    if (!dialog.matches(":modal")) return log("snap:fail Write did not ask before replacing the file");
+    const reads = sentOf("map_draft").length;
+    [...dialog.querySelectorAll("button")].find((b) => b.textContent === "Cancel").click();
+    await wait(300);
+    if (JSON.stringify(sentOf("map_draft_accept")) !== JSON.stringify([{ project: "/w/plotkeeper" }])) log("snap:fail a no sent " + JSON.stringify(sentOf("map_draft_accept")));
+    if (sentOf("map_draft").length !== reads + 1) log("snap:fail a no did not read the Map draft again");
+    if (!document.querySelector("#map .map-drafting")) log("snap:fail a no dropped the Map draft");
+    accept().click();
+    await wait(300);
+    if (!dialog.matches(":modal")) return log("snap:fail Write did not ask again");
+    answer("map_draft_accept", { kind: "written", path: "/w/plotkeeper/system-map.json" });
+    answer("map_state", ${JSON.stringify(mapState({ from: "checkout" }))});
+    document.getElementById("confirm-yes").click();
+    await wait(600);
+    const asked = sentOf("map_draft_accept");
+    if (JSON.stringify(asked.at(-1)) !== JSON.stringify({ project: "/w/plotkeeper", replace: "00c0ffee00c0ffee" })) log("snap:fail the yes sent " + JSON.stringify(asked.at(-1)));
+    if (document.querySelector("#map .map-drafting, #map .map-scan")) log("snap:fail the Map draft stays once the map is written");
+    if (!document.querySelector("#map .map-canvas .plate[data-id=shell]")) log("snap:fail the written map is not drawn: " + document.getElementById("map-body").textContent.replace(/\\s+/g, " ").slice(0, 200));
+    if (document.getElementById("map-ref").textContent !== "Map not committed yet") log("snap:fail the head says " + document.getElementById("map-ref").textContent);
+    if ([...document.querySelectorAll("#map button")].some((b) => /draft PR/.test(b.textContent))) log("snap:fail a PR button shows on the written map");
+    log("draft write ok");`, {
+    map_state: mapState({ status: "none", source: null, from: null }),
+    map_draft: reviewDraft,
+    budget: 9000,
+    snapDone: "draft write ok",
   });
 // Switching projects (#386's review): what one project's map started is not lost or left over on the next. `calls` are the commands the
 // page sends from here on; `open(path)` presses a project's header. Pokedex's folder is gone, and it has a live session, so its header

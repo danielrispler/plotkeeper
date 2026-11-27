@@ -2,7 +2,7 @@
 //! four groups and starts one batch of read-only writers, a writer per group, that name and describe the parts. When a group's
 //! writer lands, its reviewer joins the batch and checks the group's purposes with the Map text review's prompt
 //! (`map_review::prompt`, First map's wording). What they give back is kept in the **Map draft**, `<data>/first-map/<project>.json`,
-//! until Discard (or Accept, a later ticket) deletes it, so it survives a restart.
+//! until Discard or Accept deletes it, so it survives a restart. Accept writes the accepted map into the main checkout (#764).
 //!
 //! - **Ends.** The runner tells each First map run's end ([`Runner::on_end`]) while its batch still holds the project's slot, so
 //!   the reviewer joined then never waits behind another request. The run's answer is read, kept in its group, and the run is
@@ -33,6 +33,8 @@ const MAX_GROUPS: usize = 4;
 const GROUP_PARTS: usize = 5;
 /// The Map draft's format.
 const VERSION: u32 = 1;
+/// Why a Map draft cannot be started or accepted once the repository has a map.
+const HAS_MAP: &str = "This repository has a map already";
 /// The tiers a part may be set to.
 const TIERS: [&str; 3] = ["core", "interface", "black-box"];
 
@@ -172,6 +174,23 @@ pub struct MapDraftView {
     pub not_written: Vec<NotWritten>,
     /// Whether every group is done, so Accept may unlock.
     pub ready: bool,
+    /// Where Accept writes the map: `system-map.json` at the main checkout's root.
+    pub path: String,
+}
+
+/// What Accept did (`map_draft_accept`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum Accepted {
+    /// The map was written to `path`, uncommitted, and the Map draft deleted.
+    Written { path: String },
+    /// `path` holds a file that does not read, for `problem`: nothing was written. Accept again with `seen` to replace that file as
+    /// it was; a file changed since is asked about again.
+    Replace {
+        path: String,
+        problem: String,
+        seen: String,
+    },
 }
 
 /// Every project's Map draft and the runs that fill it.
@@ -264,7 +283,7 @@ impl MapDrafts {
             return Err("A Map draft is there already: accept or discard it first".into());
         }
         if crate::map::read_map(root).status != crate::map::Status::None {
-            return Err("This repository has a map already".into());
+            return Err(HAS_MAP.into());
         }
         let skeleton = match skeleton {
             Some(skeleton) => skeleton,
@@ -391,6 +410,10 @@ impl MapDrafts {
                 .groups
                 .iter()
                 .all(|group| group.state == GroupState::Done),
+            path: Path::new(main)
+                .join(system_map::MAP_FILE)
+                .display()
+                .to_string(),
         })
     }
 
@@ -676,6 +699,41 @@ impl MapDrafts {
         Ok(())
     }
 
+    /// Accept's Write `system-map.json` to `<path>` (#753, "Accepting"): the accepted map ([`accepted_map`]) is written to the main
+    /// checkout's root, uncommitted, and the Map draft deleted. Refused, writing nothing, until every group is done, when the
+    /// repository has a map, or when the map fails `check`. A file at the path that does not read is replaced only when `replace`
+    /// is the `seen` of the question about it, and still holds what was asked about; a symbolic link there is never written.
+    pub fn accept(&self, project: &str, replace: Option<&str>) -> Result<Accepted, String> {
+        let main = studio_workbench::main_checkout(Path::new(project))?;
+        let root = Path::new(&main);
+        let guard = self.lock();
+        let view = self
+            .view_of(&main)
+            .ok_or("There is no Map draft to accept")?;
+        if !view.ready {
+            return Err("Accept unlocks once a reviewer has checked every part".into());
+        }
+        let read = crate::map::read_map(root).from;
+        if matches!(
+            read,
+            Some(crate::map::ReadFrom::DefaultBranch | crate::map::ReadFrom::PendingPr)
+        ) {
+            return Err(HAS_MAP.into());
+        }
+        let map = accepted_map(root, &view.map)?;
+        let accepted = write_checkout(&root.join(system_map::MAP_FILE), &map, replace)?;
+        if matches!(accepted, Accepted::Replace { .. }) {
+            return Ok(accepted);
+        }
+        if let Err(e) = fs::remove_file(self.file(&main)) {
+            // The map is written, and shows from the checkout; a draft left behind only blocks a new one.
+            log::warn!("first map: the accepted Map draft of {main} was not deleted: {e}");
+        }
+        drop(guard);
+        self.changed.tell(&main);
+        Ok(accepted)
+    }
+
     /// At a start, after the runner's `pick_up`, which told the ends of the runs that ended meanwhile: a group whose run the
     /// runner no longer knows (gone with plotkeeper, or never written down) fails, retryable, and the groups already landed
     /// stay as they are.
@@ -907,6 +965,161 @@ fn map_with(skeleton: &str, text: &BTreeMap<String, PartText>) -> String {
     map.to_string()
 }
 
+/// The map Accept writes from the Map draft's `map` (#753, "The map written"): its parts with their latest text and edits, the edges
+/// `check_text` computes on it as `import` links with no reason, `laws: []` and `flows: []`, as `check` must pass it in `root`;
+/// else the check's problems, the first three and how many more.
+fn accepted_map(root: &Path, map: &str) -> Result<String, String> {
+    let mut map: Value =
+        serde_json::from_str(map).map_err(|e| format!("The Map draft does not read: {e}"))?;
+    map["links"] = Value::Array(Vec::new());
+    map["laws"] = Value::Array(Vec::new());
+    map["flows"] = Value::Array(Vec::new());
+    let files = system_map::tracked_files(root)?;
+    let report = system_map::check_text(root, files.clone(), &map.to_string());
+    map["links"] = crate::map_scan::import_links(&report);
+    let text = serde_json::to_string_pretty(&Ordered(&map)).map_err(|e| e.to_string())? + "\n";
+    let problems = system_map::check_text(root, files, &text).problems;
+    if problems.is_empty() {
+        return Ok(text);
+    }
+    let more = match problems.len() {
+        0..=3 => String::new(),
+        n => format!(" (and {} more)", n - 3),
+    };
+    Err(format!(
+        "The map does not pass its check: {}{more}",
+        problems[..problems.len().min(3)].join("; ")
+    ))
+}
+
+/// The keys of a map's objects in the order this repository's own map gives them, so the written file reads as one written by
+/// hand; other keys come after, by name.
+const KEY_ORDER: [&str; 19] = [
+    "version",
+    "extractors",
+    "id",
+    "name",
+    "caption",
+    "purpose",
+    "holds",
+    "text",
+    "tier",
+    "paths",
+    "zone",
+    "from",
+    "to",
+    "kind",
+    "parts",
+    "actors",
+    "links",
+    "ignored",
+    "laws",
+];
+
+/// A JSON value serialized with each object's keys in [`KEY_ORDER`].
+struct Ordered<'a>(&'a Value);
+
+impl Serialize for Ordered<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::{SerializeMap, SerializeSeq};
+        match self.0 {
+            Value::Object(object) => {
+                let rank = |key: &str| {
+                    KEY_ORDER
+                        .iter()
+                        .position(|k| *k == key)
+                        .unwrap_or(KEY_ORDER.len())
+                };
+                let mut keys: Vec<&String> = object.keys().collect();
+                keys.sort_by_key(|key| (rank(key), *key));
+                let mut out = serializer.serialize_map(Some(keys.len()))?;
+                for key in keys {
+                    out.serialize_entry(key, &Ordered(&object[key]))?;
+                }
+                out.end()
+            }
+            Value::Array(items) => {
+                let mut out = serializer.serialize_seq(Some(items.len()))?;
+                for item in items {
+                    out.serialize_element(&Ordered(item))?;
+                }
+                out.end()
+            }
+            other => other.serialize(serializer),
+        }
+    }
+}
+
+/// Writes the map `text` to `path`, the checkout's `system-map.json`, never through a symbolic link: a new file when none is there,
+/// failing if one comes meanwhile, else in place of a file that does not read, only when `replace` is the `seen` of the file as it
+/// is now. A file that reads is a map, and is never replaced.
+fn write_checkout(path: &Path, text: &str, replace: Option<&str>) -> Result<Accepted, String> {
+    let shown = path.display().to_string();
+    let written = || Accepted::Written {
+        path: shown.clone(),
+    };
+    let temp = || {
+        let folder = path.parent().ok_or("The checkout has no folder")?;
+        let mut temp = tempfile::Builder::new()
+            .prefix(".system-map.json.")
+            .tempfile_in(folder)
+            .map_err(|e| format!("system-map.json could not be written: {e}"))?;
+        io::Write::write_all(&mut temp, text.as_bytes())
+            .and_then(|()| temp.as_file().sync_all())
+            .map_err(|e| format!("system-map.json could not be written: {e}"))?;
+        Ok::<_, String>(temp)
+    };
+    let found = match fs::symlink_metadata(path) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            // Never over a file that came since: the link fails when anything is there by then.
+            temp()?
+                .persist_noclobber(path)
+                .map_err(|e| match e.error.kind() {
+                    io::ErrorKind::AlreadyExists => {
+                        "A system-map.json came into the checkout meanwhile: accept again"
+                            .to_string()
+                    }
+                    _ => format!("system-map.json could not be written: {}", e.error),
+                })?;
+            return Ok(written());
+        }
+        Err(e) => {
+            return Err(format!(
+                "system-map.json in the checkout cannot be read: {e}"
+            ));
+        }
+        Ok(found) => found,
+    };
+    if found.file_type().is_symlink() {
+        return Err("system-map.json in the checkout is a symbolic link: plotkeeper writes only a plain file there, so remove the link first".into());
+    }
+    if !found.is_file() {
+        return Err("system-map.json in the checkout is not a file: remove it first".into());
+    }
+    let bytes = fs::read(path)
+        .map_err(|e| format!("system-map.json in the checkout cannot be read: {e}"))?;
+    let problem = match std::str::from_utf8(&bytes) {
+        Ok(text) => match crate::map::readable(text) {
+            Ok(_) => return Err(HAS_MAP.into()),
+            Err(problem) => problem,
+        },
+        Err(e) => format!("cannot read it ({e})"),
+    };
+    let seen = format!("{:016x}", crate::records::fnv1a(&bytes));
+    if replace != Some(seen.as_str()) {
+        return Ok(Accepted::Replace {
+            path: shown,
+            problem,
+            seen,
+        });
+    }
+    // A rename: what is at the path is replaced, never written through.
+    temp()?
+        .persist(path)
+        .map_err(|e| format!("system-map.json could not be written: {}", e.error))?;
+    Ok(written())
+}
+
 /// Fills a run's working `folder` with the repository's files at `head` and `map` as its `system-map.json`.
 fn fill(root: &Path, head: &str, folder: &Path, map: &str) -> Result<(), String> {
     crate::micro_worlds::archive(root, head, folder)?;
@@ -1119,6 +1332,15 @@ pub fn map_draft_start(
     skeleton: Option<String>,
 ) -> Result<MapDraftView, String> {
     app.drafts.start(&project, skeleton)
+}
+
+/// `map_draft_accept`: Write `system-map.json` to the main checkout, replacing the file asked about when `replace` is its `seen`.
+pub fn map_draft_accept(
+    app: &crate::App,
+    project: String,
+    replace: Option<String>,
+) -> Result<Accepted, String> {
+    app.drafts.accept(&project, replace.as_deref())
 }
 
 #[cfg(test)]
