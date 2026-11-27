@@ -60,7 +60,7 @@
       "id": "map-engine", "name": "Map engine", "caption": "Reads code into parts and links",
       "purpose": "The `system-map` crate and command: checks a repository's `system-map.json` against its files, says which part owns each path, proves its links with the language extractors and counts how parts follow imports.",
       "holds": [
-        { "name": "Ownership", "text": "Which part owns each tracked file, by the last pattern that matches, and which parts a list of paths touches.", "paths": ["system-map/src/lib.rs", "system-map/src/pattern.rs", "system-map/src/touched.rs"] },
+        { "name": "Ownership", "text": "Which part owns each tracked file, by the last pattern that matches, and which parts and held items a list of paths touches.", "paths": ["system-map/src/lib.rs", "system-map/src/pattern.rs", "system-map/src/touched.rs"] },
         { "name": "Part text", "text": "A part's purpose and held items with their caps, and the conversion of a version 1 map.", "paths": ["system-map/src/parts.rs"] },
         { "name": "Extractors and links", "text": "One module per language behind one contract, turning files into edges that prove or fail each import link.", "paths": ["system-map/src/extract/", "system-map/src/edges.rs"] },
         { "name": "Imports", "text": "`system-map imports`: how well the parts follow the code's imports, counted per importing file.", "paths": ["system-map/src/imports.rs"] },
@@ -76,7 +76,7 @@
       "holds": [
         { "name": "The map", "text": "Reads the map from the default branch, with its fog, history, staleness, CI laws, what you ratified and a PR's Map diff.", "paths": ["server/src/map.rs", "server/src/fog.rs", "server/src/history.rs", "server/src/staleness.rs", "server/src/ci_laws.rs", "server/src/ratify.rs", "server/src/map_diff.rs"] },
         { "name": "Briefs", "text": "PR lookups, the PR briefs of ready PRs, part catch-ups, the pre-flight and the end-of-story bar.", "paths": ["server/src/prs.rs", "server/src/pr_briefs.rs", "server/src/pr_briefs/write.rs", "server/src/part_catch_ups.rs", "server/src/pre_flight.rs", "server/src/story_bar.rs"] },
-        { "name": "Background runs", "text": "Sandboxed runs on your click, one per project; the map text review starts itself on your PRs and reads a PR's head, its prompt no PR text.", "paths": ["server/src/runner.rs", "server/src/back_a_law.rs", "server/src/micro_worlds.rs", "server/src/micro_world_guard.mjs", "server/src/map_review.rs"] },
+        { "name": "Background runs", "text": "Sandboxed runs on your click, one per project; your PRs' map text review starts itself, checks still-true text too, its prompt no PR text.", "paths": ["server/src/runner.rs", "server/src/back_a_law.rs", "server/src/micro_worlds.rs", "server/src/micro_world_guard.mjs", "server/src/map_review.rs"] },
         { "name": "The quiet log", "text": "One line per thing you use, kept for the stop rules, with nothing shown.", "paths": ["server/src/stop_rules.rs"] }
       ],
       "tier": "core",
@@ -86,7 +86,7 @@
         "server/src/part_catch_ups.rs", "server/src/prs.rs", "server/src/story_bar.rs", "server/src/runner.rs",
         "server/src/back_a_law.rs", "server/src/micro_worlds.rs", "server/src/micro_world_guard.mjs", "server/src/map_review.rs",
         "server/tests/back_a_law.rs", "server/tests/micro_worlds.rs", "server/tests/map_review.rs", "server/tests/runner.rs",
-        "server/tests/fake-dsh-visual/", "server/tests/ci-logs/", "server/tests/map-diff/"
+        "server/tests/fake-dsh-visual/", "server/tests/ci-logs/", "server/tests/map-diff/", "server/tests/map-review/"
       ]
     },
     {

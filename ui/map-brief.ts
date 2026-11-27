@@ -24,7 +24,7 @@ import { expectedLine } from "./map-pre-flight.js";
 import { exploreRow } from "./micro-world.js";
 import { guardRow } from "./patch-review.js";
 import { branchOf, lightsMark, mapCheckNode, mapReviewNode, overturnNote, ratifyActions, ratifyDetail, ratifyEvidence, ratifyHead, unlightMarks } from "./map-ratify.js";
-import { reviewFlags, reviewLine, statusWords } from "./ratify.js";
+import { reviewFlags, reviewLine, statusWords, stillTrueFlags } from "./ratify.js";
 import { copyButton, type Prompt } from "./copy-button.js";
 import { type Bar, explainsBack, storyBar } from "./story-bar.js";
 import { agentPrompt, alsoAt, diffArgs, type AlsoRow, awaitedWrite, citeDrawer, figureMax, figureShapes, figureSize, latestReplies, latestRequest, partialFactsLines, storySteps, type Shape, stepCode, unconfirmed, unconfirmedReasons } from "./map-brief-model.js";
@@ -32,7 +32,7 @@ import { awaitedCatchUp, fogListLines, stageLabel } from "./map-catch-up.js";
 import { effectiveTier, commitDrawer } from "./map-model.js";
 import type { BriefFigure, BriefStep, CatchUpOffer, CommitFiles, MapDiff, MapReview, PrBrief, RatifyRow, ReadyPr, StaleBase } from "./types.js";
 import { BRIEF, explained, explainLine, explanationsOn, explainToggle, onExplanations, pressToggle, RATIFY, stepLine } from "./explanations.js";
-import { briefOpen, catchUpId, clearPlaying, mapReview, panel, player, playingBrief, playingCatchUp, prOf, ratifyRows, setPlaying, setReview, steps, stopWatching, watchLast } from "./map-brief-player.js";
+import { briefOpen, catchUpId, clearPlaying, decidedStillTrue, mapReview, panel, player, playingBrief, playingCatchUp, prOf, ratifyRows, setPlaying, setReview, steps, stopWatching, watchLast } from "./map-brief-player.js";
 import { aim, light, reduced, stopLight, unlight } from "./map-brief-light.js";
 import { checkNode, checkWaits, grade, paintOrder, runOf, syncNext, wireTaps } from "./map-brief-check.js";
 
@@ -424,7 +424,6 @@ function bodyNode(body: string) {
  */
 export function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBrief["also"] = []) {
   const playing = playingBrief();
-  const ratifying = ratifyRows();
   stopMarks();
   const part = (id: string) => partName(view, id);
   const words = text("div", "", "brief-txt");
@@ -445,7 +444,7 @@ export function stepNode(view: MapView, step: BriefStep, pr: number, also: PrBri
     const check = playing && pr > 0 ? mapCheckNode(`${view.project}|${pr}|${playing.brief.head}`, playing.brief.map_problems ?? []) : null;
     const head = ratifyHead([review, check].filter((line): line is HTMLElement => line !== null));
     if (head) words.append(head);
-    words.append(ratifyNode(view, ratifying));
+    words.append(ratifyNode(view, ratifyRows(pr)));
     const guard = playing?.brief.guard;
     if (guard && pr > 0 && !view.scrub) words.append(guardRow(view, pr, guard, () => {
       const now = currentMap();
@@ -590,20 +589,24 @@ function ratifyNode(view: MapView, rows: RatifyRow[]) {
     item.dataset.id = row.id;
     // Pointing at the row lights its mark on the Map diff (#643).
     if (row.mark) lightsMark(item, row.mark, () => currentMap()?.slots.canvas ?? null);
-    const kind = row.kind === "decision" ? "Decided" : `${row.change ? `${row.change.charAt(0).toUpperCase()}${row.change.slice(1)} ` : ""}${row.kind}`;
-    item.append(text("span", kind, "ratify-kind"), text("span", row.text || row.id, "ratify-text"));
+    // A still-true row (#698): the review's flag on text the PR left unchanged, titled by the map's name for it.
+    const still = row.kind === "still-true" ? mapReview()?.still_true.find((each) => each.ratify_id === row.id) : undefined;
+    const kind = still ? "Still true?" : row.kind === "decision" ? "Decided" : `${row.change ? `${row.change.charAt(0).toUpperCase()}${row.change.slice(1)} ` : ""}${row.kind}`;
+    item.append(text("span", kind, "ratify-kind"), text("span", still ? still.name : row.text || row.id, "ratify-text"));
     // What the Map text review flagged on the row (#645): the not-confirmed mark below, and Overturn's prompt quotes it.
-    const flags = reviewFlags(mapReview(), row);
+    const flags = still ? stillTrueFlags(still) : reviewFlags(mapReview(), row);
     if (row.status === "not-yet") {
-      item.append(ratifyActions(view.project, { ...row, flags }, (state) => {
-        row.status = state;
+      item.append(ratifyActions(view.project, { ...row, flags, ...(still ? { item: still.id } : {}) }, (state) => {
+        // A still-true row is drawn from the review afresh each time, so the player keeps what was decided on it.
+        if (still) decidedStillTrue(row.id, state);
+        else row.status = state;
         const now = currentMap();
         if (now) show(now, true);
       }));
     } else {
       item.append(text("span", statusWords[row.status], "ratify-mark done"));
     }
-    if (row.status === "not-yet" && !told) {
+    if (row.status === "not-yet" && !told && !still) {
       told = true;
       item.append(explainLine(RATIFY.notYet, "explain-link"));
     }
@@ -617,7 +620,7 @@ function ratifyNode(view: MapView, rows: RatifyRow[]) {
       item.append(unconfirmedMark(view, row.pr, decided.flags, `decision:${row.id}`, copy));
     }
     if (flags.length) {
-      const copy = () => agentPrompt(row.pr, branchOf(row.pr), { of: "map-text", kind: row.kind, id: row.id, flags });
+      const copy = () => agentPrompt(row.pr, branchOf(row.pr), still ? { of: "map-text", kind: "still-true item", id: still.id, flags } : { of: "map-text", kind: row.kind, id: row.id, flags });
       item.append(unconfirmedMark(view, row.pr, flags, `review:${row.kind}:${row.id}`, copy));
     }
     list.append(item);

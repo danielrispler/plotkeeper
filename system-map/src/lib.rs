@@ -30,7 +30,7 @@ pub use imports::{Across, Count, Hub, Imports, Inside, Share, imports};
 pub use laws::{LawReport, LawTest, Tag, attribute_brackets, law_tests, tag_id, test_name_after};
 pub use parts::{convert, convert_value, part_text};
 use pattern::Pattern;
-pub use touched::{Touched, touched, touched_for_map};
+pub use touched::{Touched, held_reached, touched, touched_for_map};
 
 /// The map file's name, at the repository's root.
 pub const MAP_FILE: &str = "system-map.json";

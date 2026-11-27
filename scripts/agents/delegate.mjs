@@ -3,6 +3,8 @@
 // spec from `routing.json`'s `critic` list (spec #592, "The cold critic and the veto gate"). When it is Gemini, it runs
 // it and prints its findings, which the orchestrator writes to `reports/critic.md`; when it is Claude, it prints the
 // prompt that critic gets: the brief Gemini gets, then the draft. This script is where the critic's brief is written.
+// `pick critic --breakdown <draft>` does the same for a draft ticket breakdown, its spec first (#722), with a brief that
+// holds its routes to the routing rules.
 // Gemini runs as the outside review runs it (#618): in a throwaway folder with a worktree of HEAD, where the deny hook
 // allows only reads, answering in a schema. Plan mode ended the run at its first denied shell command.
 //
@@ -17,22 +19,32 @@ import { agyCall, allowedReads, hookDecisions, quotaLeft, readOnly } from "../re
 
 const MINUTES = 15;
 
-const CRITIC = `You are the critic of a draft spec for this repository. Check every claim of the draft against the repository. Mark each claim verified, with its file:line or a command and its output, or unverified. Flag contradictions with AGENTS.md, system-map.json and existing code. Rate each finding high, medium or low. You can change nothing: answer with your findings only.`;
+// Each kind of draft's brief, and the name the draft goes by in the prompt.
+const KINDS = {
+  spec: {
+    critic: `You are the critic of a draft spec for this repository. Check every claim of the draft against the repository. Mark each claim verified, with its file:line or a command and its output, or unverified. Flag contradictions with AGENTS.md, system-map.json and existing code. Rate each finding high, medium or low. You can change nothing: answer with your findings only.`,
+    draft: "The draft",
+  },
+  breakdown: {
+    critic: `You are the critic of a draft ticket breakdown for this repository: a spec, then the tickets it is cut into, each with its route, its blockers and its Touches Files. Hold the breakdown to the Routing section of docs/agents/issue-tracker.md and the "Repository-specific \`to-tickets\`" section of docs/agents/ticket-authoring.md, read in the repository. Report each route that breaks one of the five cheap rules or the effort rule; each Risk isolation cut that routes no ticket lower; each check that needs CI, which runs as its own non-draft PR before /implement-spec; each place the breakdown departs from the spec's plan; and each choice left open that is Daniel's to make. Mark each claim verified, with its file:line or a command and its output, or unverified. Rate each finding high, medium or low. You can change nothing: answer with your findings only.`,
+    draft: "The breakdown, with its spec",
+  },
+};
 
 /** The Claude critic's prompt: the brief, then the draft. */
-const BRIEF = `${CRITIC}
+const brief = (kind) => `${KINDS[kind].critic}
 
-The draft:
+${KINDS[kind].draft}:
 
 `;
 
 // Gemini's prompt. Like the outside review's, it names files by absolute path, the only form its read tool takes, and
 // holds no at-sign, so the draft is a file it reads rather than text in the prompt.
-const geminiBrief = (folder) => `${CRITIC}
+const geminiBrief = (folder, kind) => `${KINDS[kind].critic}
 
 Your only working tool is read_file, and it takes absolute paths only. Do not try to write a file or run a command: those calls are denied, and so is a read outside ${folder}. Where you would run a command, read the files instead, and cite what you read as file:line.
 
-- The draft: ${folder}/review/draft.md
+- ${KINDS[kind].draft}: ${folder}/review/draft.md
 - Every file of the repository, one absolute path a line: ${folder}/review/tree.txt
 - The repository: ${folder}/repo
 
@@ -78,9 +90,10 @@ const parseFlags = (rest, names, defaults) => {
 const parse = (argv) => {
   const [verb, role] = argv;
   if (verb === "pick" && role === "critic") {
-    const flags = parseFlags(argv.slice(2), ["spec", "routing"], { routing: ROUTING });
-    if (!flags.spec) throw new Usage("--spec <draft> is required");
-    return { command: "critic", flags };
+    const flags = parseFlags(argv.slice(2), ["spec", "breakdown", "routing"], { routing: ROUTING });
+    if (!flags.spec === !flags.breakdown) throw new Usage("one of --spec <draft> or --breakdown <draft> is required");
+    const kind = flags.spec ? "spec" : "breakdown";
+    return { command: "critic", flags: { kind, draft: flags[kind], routing: flags.routing } };
   }
   if (verb === "run") {
     const flags = parseFlags(argv.slice(1), ["ticket", "integration", "effort", "routing"], { routing: ROUTING });
@@ -119,7 +132,7 @@ const criticOutcome = ({ status, signal, error, stdout, stderr, reads }) => {
 };
 
 /** One headless, read-only Gemini critic run of `draft`, in a throwaway folder holding a worktree of HEAD. */
-const runAgy = (model, draft) => {
+const runAgy = (model, draft, kind) => {
   const git = (...args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
   const folder = realpathSync(mkdtempSync(join(tmpdir(), "critic-")));
   const repo = join(folder, "repo");
@@ -132,7 +145,7 @@ const runAgy = (model, draft) => {
     writeFileSync(join(folder, "review/tree.txt"), tree.map((path) => join(repo, path)).join("\n") + "\n");
     writeFileSync(join(folder, "review/schema.json"), JSON.stringify(SCHEMA));
     readOnly(folder, log);
-    const call = agyCall({ model }, { schema: join(folder, "review/schema.json"), prompt: geminiBrief(folder), env: process.env });
+    const call = agyCall({ model }, { schema: join(folder, "review/schema.json"), prompt: geminiBrief(folder, kind), env: process.env });
     const ran = spawnSync("agy", call.args, { cwd: folder, env: call.env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: (MINUTES + 1) * 60_000, maxBuffer: 64 * 1024 * 1024 });
     return criticOutcome({ ...ran, reads: allowedReads(hookDecisions(log)) });
   } catch (error) {
@@ -169,10 +182,10 @@ const shortOf = (candidate) => {
 
 const named = (candidate) => [`critic: ${candidate.cli} ${candidate.model}`, candidate.effort && `effort ${candidate.effort}`].filter(Boolean).join(" ");
 
-const pickCritic = ({ spec, routing }) => {
+const pickCritic = ({ kind, draft: path, routing }) => {
   let why = null;
-  const draft = readFileSync(spec, "utf8");
-  const prompt = BRIEF + draft;
+  const draft = readFileSync(path, "utf8");
+  const prompt = brief(kind) + draft;
   for (const candidate of JSON.parse(readFileSync(routing, "utf8")).critic) {
     const short = shortOf(candidate);
     if (short) {
@@ -180,7 +193,7 @@ const pickCritic = ({ spec, routing }) => {
       continue;
     }
     if (candidate.cli !== "agy") return `${[named(candidate), why && `why: ${why}`].filter(Boolean).join("\n")}\n\n${prompt.trimEnd()}`;
-    const { answer, failed } = runAgy(candidate.model, draft);
+    const { answer, failed } = runAgy(candidate.model, draft, kind);
     if (answer) return `${named(candidate)}\n\n${answer.trimEnd()}`;
     why = `${candidate.cli} ${candidate.model} ${failed}`;
   }
@@ -639,7 +652,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === import.meta.filename) {
     else process.exitCode = await runTicket(flags);
   } catch (error) {
     if (!(error instanceof Usage)) throw error;
-    console.error(`${error.message}\nusage: delegate pick critic --spec <draft> [--routing <file>]\n       delegate run --ticket <n> --integration <branch> --effort <medium|high> [--routing <file>]`);
+    console.error(`${error.message}\nusage: delegate pick critic --spec <draft> | --breakdown <draft> [--routing <file>]\n       delegate run --ticket <n> --integration <branch> --effort <medium|high> [--routing <file>]`);
     process.exit(2);
   }
 }

@@ -10,8 +10,9 @@ import { copyOverturn, decideWith, detailLines, evidenceLine, mapCheckLine, note
 import { logStop } from "./stop-rules.js";
 import type { ImportSite, LinkSites, MapReview, RatifyRow } from "./types.js";
 
-// `flags`: what the Map text review flagged on it (`reviewFlags`, #645), which an overturn quotes.
-export type Ratifiable = Pick<RatifyRow, "pr" | "kind" | "id" | "text" | "change"> & { detail?: RatifyRow["detail"]; evidence?: LinkSites; flags?: string[] };
+// `flags`: what the Map text review flagged on it (`reviewFlags`, #645), which an overturn quotes; `item`: a Still true? row's review item
+// id (#698).
+export type Ratifiable = Pick<RatifyRow, "pr" | "kind" | "id" | "text" | "change"> & { detail?: RatifyRow["detail"]; evidence?: LinkSites; flags?: string[]; item?: string };
 
 /** The branch of PR `pr` while it is open: the Map view's ready PRs name it. */
 export const branchOf = (pr: number): string | null => currentMap()?.state.ready?.find((ready) => ready.number === pr)?.branch || null;
@@ -205,7 +206,7 @@ export function lightsMark(row: HTMLElement, mark: string, canvas: () => ParentN
 /**
  * The Map text review's line at Ratify's head (#645, spec #634 "Ratify's display"): "Map text review: N checked, M flagged", "Reviewing
  * map text…", the failure with "Run again", or "Review map text" for a PR not by Daniel's login. The button calls `start`, which starts the
- * review (`map_review_start`) and draws the step again with its answer. Null when the head changed no map text.
+ * review (`map_review_start`) and draws the step again with its answer. Null when the head changed no map text and its review did not fail.
  */
 export function mapReviewNode(review: MapReview | null, start: () => Promise<unknown>): HTMLElement | null {
   const said = reviewLine(review);
