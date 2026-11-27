@@ -253,9 +253,10 @@ fn an_opencode_turn_that_writes_a_file_by_a_relative_path_lists_it() {
 
 /// The log the hook writes when a session's lines reach it out of order (#744): it appends them in
 /// the order it took them, and marks late those of a turn already past. Here turn 0's call and end
-/// land after turn 1's prompt, and turn 1's end after the wake-up that starts turn 2. A late end ends
-/// no turn, a late call is the previous turn's, and the wake-up ends turn 1 and starts its own, so
-/// each turn keeps its own start and end trees.
+/// land after turn 1's prompt, turn 1's end after the wake-up that starts turn 2, and a wake-up sent
+/// before turn 2 began after them. A late end ends no turn, a late call is the previous turn's, a late
+/// start starts none, and the wake-up ends turn 1 and starts its own, so each turn keeps its own start
+/// and end trees.
 #[test]
 fn opencode_lines_the_hook_took_late_end_no_turn_and_their_calls_are_the_turn_befores() {
     let root = "/Users/me/work/hello";
@@ -300,6 +301,7 @@ fn opencode_lines_the_hook_took_late_end_no_turn_and_their_calls_are_the_turn_be
             json!({ "studio_turn_end": { root: "t2" }, "studio_turn_start": { root: "t2" } }),
         ),
         line("session.execution.succeeded", 140, late(json!({}))),
+        line("session.execution.started", 200, late(json!({}))),
         line(
             "session.execution.succeeded",
             240,

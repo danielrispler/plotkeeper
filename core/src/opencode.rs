@@ -230,7 +230,9 @@ fn adapt(raw: Raw) -> Event {
         }
         _ => {}
     }
+    // A start of a turn already past has no turn of its own to start, nor the running one to end.
     if raw.studio_late {
+        prompt_id = None;
         happened.push(Happened::Late);
     }
     Event {
