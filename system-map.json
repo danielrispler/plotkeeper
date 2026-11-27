@@ -195,7 +195,7 @@
     ".agents/", ".claude/", ".github/", ".gitignore", "AGENTS.md", "CHANGELOG.md", "CLAUDE.md", "Cargo.lock", "Cargo.toml", "LICENSE",
     "README.md", "package-lock.json", "package.json", "rust-toolchain.toml", "tsconfig.json", "biome.json", "knip.jsonc",
     "skills-lock.json",
-    "docs/", "scripts/agents/", "scripts/review/", "scripts/snap/", "scripts/system-map/", "scripts/wire/", "archive/",
+    "docs/", "scripts/agents/", "scripts/check/", "scripts/review/", "scripts/snap/", "scripts/system-map/", "scripts/wire/", "archive/",
     "wayfinder/", "test-support/"
   ],
   "laws": [
