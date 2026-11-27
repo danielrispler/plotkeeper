@@ -208,38 +208,29 @@ export function stripLabels(sessions: Pick<Session, "name" | "identity" | "folde
  */
 export type Clock = { set(run: () => void, ms: number): unknown; clear(id: unknown): void };
 export const CLEAR_WINDOW_MS = 8000;
-type ClearDeps = { landed(id: string): Session | undefined; commit(session: Session): Promise<unknown> | void; changed(pending: Session[], writing: Session[]): void };
-// What Clear holds: the rows it hides, those in its window (`pending`) and those whose delete is in flight (`writing`): the server still
-// hears those, so a quit before the write commits them (#244).
-type ClearState = { hidden: Set<string>; pending: Map<string, Session>; writing: Map<string, Session>; tell(): void };
+type ClearDeps = { landed(id: string): Session | undefined; commit(session: Session): Promise<unknown> | void; changed(pending: Session[]): void };
+// What Clear holds: the rows it hides, and those in its window (`pending`).
+type ClearState = { hidden: Set<string>; pending: Map<string, Session>; tell(): void };
 
 // The window closed: each session still landed goes through Delete, and one whose Delete failed comes back.
-function commitDue({ hidden, pending, writing, tell }: ClearState, deps: ClearDeps) {
+function commitDue({ hidden, pending, tell }: ClearState, deps: ClearDeps) {
   const due = [...pending.keys()].map((id) => ({ id, session: deps.landed(id) }));
   pending.clear();
-  for (const { id, session } of due) if (session) writing.set(id, session);
   tell();
   for (const { id, session } of due) {
     if (!session) hidden.delete(id);
+    // A row whose Delete failed comes back.
     else
-      void Promise.resolve(deps.commit(session)).then(
-        () => {
-          writing.delete(id);
-          tell();
-        },
-        // A row whose Delete failed comes back.
-        () => {
-          writing.delete(id);
-          hidden.delete(id);
-          tell();
-        },
-      );
+      void Promise.resolve(deps.commit(session)).catch(() => {
+        hidden.delete(id);
+        tell();
+      });
   }
 }
 
 export function clearing(time: Clock, deps: ClearDeps, hidden = new Set<string>()) {
-  const state: ClearState = { hidden, pending: new Map(), writing: new Map(), tell: () => deps.changed([...state.pending.values()], [...state.writing.values()]) };
-  const { pending, writing, tell } = state;
+  const state: ClearState = { hidden, pending: new Map(), tell: () => deps.changed([...state.pending.values()]) };
+  const { pending, tell } = state;
   let timer: unknown = null;
   const stop = () => {
     if (timer !== null) time.clear(timer);
@@ -274,7 +265,6 @@ export function clearing(time: Clock, deps: ClearDeps, hidden = new Set<string>(
         if (deps.landed(id)) continue;
         hidden.delete(id);
         dropped = pending.delete(id) || dropped;
-        dropped = writing.delete(id) || dropped;
       }
       if (!dropped) return;
       if (pending.size === 0) stop();

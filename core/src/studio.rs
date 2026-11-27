@@ -1473,8 +1473,7 @@ impl Studio {
         sessions
     }
 
-    /// Daniel clicked session `id`'s row, whose own view shows. Only this and a session he starts
-    /// (`select_terminal`) change the selection.
+    /// Daniel clicked session `id`'s row, whose own view shows. Only this changes the selection.
     pub fn select(&mut self, id: &str) {
         self.selected = Some(id.into());
         let id = self.rows.get(id).map_or(id, String::as_str);
@@ -1519,14 +1518,6 @@ impl Studio {
         session.update_unseen();
         self.held = Some(id.clone());
         Some((id, session.seen))
-    }
-
-    /// Daniel started a session in studio terminal `terminal`: nothing is selected until its first
-    /// event names that terminal, and then it is (danielrispler/Falinks#567). The pane and the rail never show two sessions.
-    pub fn select_terminal(&mut self, terminal: &str) {
-        self.selected = None;
-        self.viewed = None;
-        self.awaiting = Some(terminal.into());
     }
 
     /// Daniel opened subagent `id`'s line, so its view shows, with its own cards and brief, and a

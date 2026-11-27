@@ -140,22 +140,7 @@ fn relative(file: &str, uri: &str) -> Option<String> {
     if scheme || uri.is_empty() || uri.starts_with('/') {
         return None;
     }
-    joined(folder_of(file), uri)
-}
-
-/// `path` joined to `folder`, with `.` and `..` removed; none when it climbs above the root.
-fn joined(folder: &str, path: &str) -> Option<String> {
-    let mut segments: Vec<&str> = folder.split('/').filter(|s| !s.is_empty()).collect();
-    for segment in path.split('/') {
-        match segment {
-            "" | "." => {}
-            ".." => {
-                segments.pop()?;
-            }
-            _ => segments.push(segment),
-        }
-    }
-    Some(segments.join("/"))
+    crate::extract::folders::join(folder_of(file), uri)
 }
 
 /// The packages `package:` URIs can name: each indexed `pubspec.yaml`'s package (spec #621, "The package index").
@@ -271,7 +256,7 @@ fn resolve(repo: &Repo, packages: &Packages, file: &str, uri: &str) -> Resolved 
         return Resolved::Nothing;
     };
     // The path within `lib/`, with `.` and `..` removed as in a relative URI; one climbing above `lib/` names nothing.
-    let Some(path) = joined("", path) else {
+    let Some(path) = crate::extract::folders::join("", path) else {
         return Resolved::Nothing;
     };
     let lib = |folder: &str| format!("{folder}lib/{path}");
