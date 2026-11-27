@@ -14,7 +14,8 @@
 //! child session that always runs in the background (#718): its `subagent` call's end names it
 //! (`spawned_session_id`), and the plugin puts its calls, asks and the end of each of its runs
 //! under the session that spawned it, with its own id (`subagent_session_id`). The tool names
-//! and inputs are those of a real run of OpenCode 2.4.1 (`core/tests/fixtures/opencode/run.jsonl`)
+//! and inputs are those of real runs of OpenCode 2.4.1 (`core/tests/fixtures/opencode/run.jsonl`
+//! and `subagent.jsonl`)
 //! and of its tools' sources (anomalyco/opencode at v2.4.2, `packages/core/src/tool/plugin/`).
 
 use crate::event::{
@@ -137,19 +138,15 @@ fn adapt(raw: Raw) -> Event {
             prompt: String::new(),
             origin: Some(Origin::WakeUp),
         }),
-        // A subagent's run ends with its reply; a later run of it (a follow-up) runs it again.
-        "session.execution.succeeded"
-        | "session.execution.failed"
-        | "session.execution.interrupted"
-            if raw.subagent_session_id.is_some() =>
-        {
-            happened.push(Happened::SubagentEnd);
-            happened.push(Happened::Reply(raw.last_assistant_message.clone()));
-        }
+        // A turn's end, or a subagent's run's end, with its reply; a subagent's names no model.
         "session.execution.succeeded"
         | "session.execution.failed"
         | "session.execution.interrupted" => {
-            happened.push(Happened::TurnEnd);
+            if raw.subagent_session_id.is_some() {
+                happened.push(Happened::SubagentEnd);
+            } else {
+                happened.push(Happened::TurnEnd);
+            }
             happened.push(Happened::Reply(raw.last_assistant_message.clone()));
             if let Some(model) = raw.model.clone() {
                 happened.push(Happened::Model(model));
@@ -173,6 +170,7 @@ fn adapt(raw: Raw) -> Event {
                     prompt: input["prompt"].as_str().unwrap_or_default().into(),
                     agent_type: input["agent"].as_str().map(Into::into),
                     worktree: false,
+                    // OpenCode runs every subagent in the background.
                     finished: false,
                 }));
             }

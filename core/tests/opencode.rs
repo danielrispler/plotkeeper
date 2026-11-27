@@ -196,7 +196,7 @@ fn an_opencode_session_ended_by_the_server_stays_opencode() {
 /// plugin since #718: one turn started a background subagent that read a file, and its result woke
 /// the session for a turn of its own.
 #[test]
-fn a_background_subagent_replays_as_its_sessions_with_its_calls_and_reply() {
+fn a_background_subagent_replays_as_its_sessions_subagent_with_its_calls_and_reply() {
     let lines: Vec<_> = include_str!("fixtures/opencode/subagent.jsonl")
         .lines()
         .collect();

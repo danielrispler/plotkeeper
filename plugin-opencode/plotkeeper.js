@@ -65,12 +65,13 @@ function recorder(ctx) {
   };
 }
 
-/** Each prompt to a top-level session starts its turn; a subagent's prompt is its spawn's, which is recorded. */
+/** Each prompt to a top-level session starts its turn; a subagent's prompt is not sent, as its spawn's input holds it. */
 function recordPrompts(ctx, r) {
   ctx.session.hook("prompt", async (event) => {
+    // Before the session's lookup, which its turn's start may overtake.
     r.prompted.add(event.sessionID);
     const top = await r.root(event.sessionID);
-    if (top !== event.sessionID) return;
+    if (top !== event.sessionID) return void r.prompted.delete(event.sessionID);
     r.turns.set(top, { model: r.turns.get(top)?.model, reply: "" });
     send(r.line("session.prompt", top, { prompt_id: event.messageID, prompt: event.prompt?.text ?? "" }));
   });
@@ -129,18 +130,20 @@ async function recordEvents(ctx, r, signal) {
       continue;
     }
     const own = data.sessionID;
+    const child = top !== own;
     const turn = r.turns.get(own) ?? { reply: "" };
     r.turns.set(own, turn);
     if (event.type === "session.execution.started") {
-      if (top !== own) turn.reply = "";
-      else if (!r.prompted.delete(top)) {
-        turn.reply = "";
-        send(r.line(event.type, top, {}));
-      }
+      // A top-level turn with no prompt is a wake-up; a subagent's run is never sent.
+      const wakeUp = !child && !r.prompted.delete(top);
+      if (child || wakeUp) turn.reply = "";
+      if (wakeUp) send(r.line(event.type, top, {}));
     } else if (event.type === "session.step.started") turn.model = data.model?.id;
     else if (event.type === "session.text.ended") turn.reply = data.text ?? "";
-    else if (top !== own) send(r.line(event.type, top, { last_assistant_message: turn.reply, ...r.subagent(top, own) }));
-    else send(r.line(event.type, top, { model: turn.model ?? null, last_assistant_message: turn.reply }));
+    else if (child) {
+      send(r.line(event.type, top, { last_assistant_message: turn.reply, ...r.subagent(top, own) }));
+      r.turns.delete(own);
+    } else send(r.line(event.type, top, { model: turn.model ?? null, last_assistant_message: turn.reply }));
   }
 }
 
