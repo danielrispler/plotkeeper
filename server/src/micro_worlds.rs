@@ -15,15 +15,16 @@
 //!   page is served only once checked ([`MicroWorlds::page`]). It "may be out of date" once a path of a part on its flow has
 //!   changed since that commit.
 
+use crate::records::Records;
 use crate::runner::{Kind, Limits, MICRO_WORLD_OUT, Request, Runner};
 use serde::{Deserialize, Serialize};
 use std::fmt::Write as _;
 use std::{
-    collections::{BTreeMap, BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet},
     fs::{self, File},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::{Arc, Mutex, OnceLock, Weak},
+    sync::{Arc, Weak},
     thread,
     time::Duration,
 };
@@ -337,19 +338,13 @@ pub struct Explored {
     pub prompt: Option<String>,
 }
 
-type Changed = Box<dyn Fn(&str) + Send + Sync>;
-
 /// Every project's micro-worlds: their runs, their checks and their pages.
 pub struct MicroWorlds {
-    /// `<data>/micro-worlds`: a folder per project, a file per world.
-    store: PathBuf,
+    /// `<data>/micro-worlds`: a folder per project, a file per world, its page beside it. Its in-flight set holds the runs whose
+    /// end is being checked, so a run is checked once, and its lock serialises the read, change and write of a world's file.
+    store: Records<Record>,
     settings: PathBuf,
     runner: Weak<Runner>,
-    changed: OnceLock<Changed>,
-    /// The runs whose end is being checked, so a run is checked once.
-    checking: Mutex<HashSet<String>>,
-    /// Serialises the read, change and write of a world's file.
-    writing: Mutex<()>,
     me: Weak<MicroWorlds>,
 }
 
@@ -369,26 +364,20 @@ impl MicroWorlds {
     /// The micro-worlds kept in `store`, built by `runner`'s runs, with `settings` read anew for each.
     pub fn new(store: PathBuf, settings: PathBuf, runner: &Arc<Runner>) -> Arc<MicroWorlds> {
         Arc::new_cyclic(|me| MicroWorlds {
-            store,
+            store: Records::new(store),
             settings,
             runner: Arc::downgrade(runner),
-            changed: OnceLock::new(),
-            checking: Mutex::default(),
-            writing: Mutex::default(),
             me: me.clone(),
         })
     }
 
     /// Sets what is told the project whose micro-worlds changed; the first call wins.
     pub fn on_change(&self, changed: impl Fn(&str) + Send + Sync + 'static) {
-        // Set once; a later set keeps the first value, which is the same.
-        self.changed.set(Box::new(changed)).ok();
+        self.store.on_change(changed);
     }
 
     fn tell(&self, project: &str) {
-        if let Some(changed) = self.changed.get() {
-            changed(project);
-        }
+        self.store.tell(project);
     }
 
     /// `microWorlds.dshVisual`, read now.
@@ -398,41 +387,20 @@ impl MicroWorlds {
         crate::settings::micro_worlds_dsh_visual_in(&text, &home)
     }
 
-    fn folder(&self, project: &str) -> PathBuf {
-        project_folder(&self.store, project)
-    }
-
-    fn file(&self, project: &str, key: &str) -> PathBuf {
-        self.folder(project).join(format!("{}.json", hex(key)))
-    }
-
     fn page_file(&self, project: &str, key: &str) -> PathBuf {
-        self.folder(project).join(format!("{}.html", hex(key)))
+        self.store
+            .folder(project)
+            .join(format!("{}.html", hex(key)))
     }
 
     fn read(&self, project: &str, key: &str) -> Option<Record> {
-        serde_json::from_slice(&fs::read(self.file(project, key)).ok()?).ok()
+        self.store.read(project, &hex(key))
     }
 
     fn write(&self, project: &str, record: &Record) {
-        let file = self.file(project, &record.key);
-        let saved = fs::create_dir_all(self.folder(project))
-            .and_then(|()| studio_workbench::write_atomic(&file, &serde_json::to_vec(record)?));
-        if let Err(e) = saved {
+        if let Err(e) = self.store.write(project, &hex(&record.key), record) {
             log::error!("save the micro-world {} of {project}: {e}", record.key);
         }
-    }
-
-    fn records(&self, project: &str) -> Vec<Record> {
-        let files = fs::read_dir(self.folder(project))
-            .into_iter()
-            .flatten()
-            .flatten();
-        files
-            .map(|entry| entry.path())
-            .filter(|path| path.extension().is_some_and(|e| e == "json"))
-            .filter_map(|path| serde_json::from_slice(&fs::read(path).ok()?).ok())
-            .collect()
     }
 
     /// "Explore this" on `topic`, at `commit` of `project`: starts a run when `microWorlds.dshVisual` is set, else gives the
@@ -447,10 +415,7 @@ impl MicroWorlds {
         if self.scripts().is_none() {
             return copy("Set microWorlds.dshVisual for a run to build it".into());
         }
-        let guard = self
-            .writing
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let guard = self.store.lock();
         let old = self.read(project, &topic.key);
         if old.as_ref().is_some_and(|old| old.phase == Phase::Building) {
             return Explored {
@@ -490,7 +455,7 @@ impl MicroWorlds {
     }
 
     /// Starts `record`'s run, with the template of the failed run in `previous` and what failed; writes the record down, as
-    /// building or failed. Called with `writing` held.
+    /// building or failed. Called with the store's lock held.
     fn start(
         &self,
         project: &str,
@@ -547,23 +512,23 @@ impl MicroWorlds {
         let Some(runner) = self.runner.upgrade() else {
             return;
         };
-        for record in self.records(project) {
+        for record in self.store.records(project) {
             let (Phase::Building, Some(id)) = (record.phase, record.run.clone()) else {
                 continue;
             };
-            if self.checking.lock().unwrap().contains(&id) {
+            if self.store.claimed(&id) {
                 continue;
             }
             match runner.outcome(&id) {
                 Some(outcome) => {
-                    if !self.checking.lock().unwrap().insert(id.clone()) {
+                    if !self.store.claim(&id) {
                         continue;
                     }
                     let (me, project) = (self.me.clone(), project.to_string());
                     thread::spawn(move || {
                         if let Some(worlds) = me.upgrade() {
                             worlds.finish(&project, &record.key, &id, outcome);
-                            worlds.checking.lock().unwrap().remove(&id);
+                            worlds.store.release(&id);
                             // A rewrite's run that ended before its world was written down is checked now.
                             worlds.runs_changed(&project);
                             worlds.tell(&project);
@@ -573,7 +538,7 @@ impl MicroWorlds {
                 None if !runner.runs(project).runs.iter().any(|run| run.id == id) => {
                     // Explore this and a rewrite hold the lock while their run is submitted, which tells this; each looks
                     // again once it lets go, so a busy lock is left to that look rather than waited on.
-                    let Ok(guard) = self.writing.try_lock() else {
+                    let Some(guard) = self.store.try_lock() else {
                         continue;
                     };
                     if let Some(mut record) = self.read(project, &record.key)
@@ -619,10 +584,7 @@ impl MicroWorlds {
             )),
             _ => None,
         };
-        let _guard = self
-            .writing
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _guard = self.store.lock();
         // Rebuild may have started another run meanwhile.
         let Some(mut record) = self
             .read(project, key)
@@ -675,7 +637,7 @@ impl MicroWorlds {
 
     /// `project`'s micro-worlds as the map shows them, out of date against `current`, the map's commit now.
     pub fn state(&self, project: &str, current: Option<&str>) -> WorldsState {
-        let worlds = self.records(project).into_iter().map(|record| {
+        let worlds = self.store.records(project).into_iter().map(|record| {
             let page = self.page_file(project, &record.key).exists();
             let stale = page
                 && match (&record.built, current) {
@@ -710,23 +672,11 @@ impl MicroWorlds {
 
     /// At a start: each project's building worlds whose run ended meanwhile are checked, and one whose run is gone failed.
     pub fn pick_up(&self) {
-        let folders = fs::read_dir(&self.store).into_iter().flatten().flatten();
-        let mut projects = BTreeSet::new();
-        for folder in folders
-            .map(|entry| entry.path())
-            .filter(|path| path.is_dir())
-        {
-            let files = fs::read_dir(&folder).into_iter().flatten().flatten();
-            for file in files.map(|entry| entry.path()) {
-                if let Some(record) = fs::read(&file)
-                    .ok()
-                    .and_then(|text| serde_json::from_slice::<Record>(&text).ok())
-                    && record.phase == Phase::Building
-                {
-                    projects.insert(record.project);
-                }
-            }
-        }
+        let building = self.store.every().into_iter();
+        let projects: BTreeSet<String> = building
+            .filter(|record| record.phase == Phase::Building)
+            .map(|record| record.project)
+            .collect();
         projects
             .iter()
             .for_each(|project| self.runs_changed(project));
@@ -770,22 +720,6 @@ pub fn micro_world_explore(
 /// The page's request for world `key`'s checked page, to show in its locked-down frame.
 pub fn micro_world_page(app: &crate::App, project: String, key: String) -> Result<String, String> {
     app.worlds.page(&project, &key)
-}
-
-/// `project`'s folder in `store`: its path, readable, and a hash of it, so two paths that read alike never share one.
-pub(crate) fn project_folder(store: &Path, project: &str) -> PathBuf {
-    let name: String = project
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-        .collect();
-    store.join(format!("{name}-{:016x}", fnv1a(project)))
-}
-
-/// FNV-1a of `text`: the same in every build, as a name or hash kept across builds must be.
-pub(crate) fn fnv1a(text: &str) -> u64 {
-    text.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
-    })
 }
 
 /// Fills a run's working `folder` with `repo`'s files at `commit` and makes the output folder in it.

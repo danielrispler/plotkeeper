@@ -16,6 +16,7 @@
 //!   launcher keeps; a third of the cores for builds; and a failure on the login or a rate limit pauses every queue until
 //!   [`Runner::resume`].
 
+use crate::records::Notice;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -997,8 +998,6 @@ impl Drop for Hold {
     }
 }
 
-type Changed = Box<dyn Fn(&str) + Send + Sync>;
-
 /// A run that ended, as told to the module that asked for it ([`Runner::on_end`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Ended {
@@ -1016,7 +1015,7 @@ type EndTold = Box<dyn Fn(Ended) + Send + Sync>;
 pub struct Runner {
     config: Config,
     state: Mutex<State>,
-    changed: OnceLock<Changed>,
+    changed: Notice,
     ended: OnceLock<EndTold>,
     /// For the threads that wait on a run's end: a runner that is gone is told nothing.
     me: Weak<Runner>,
@@ -1029,7 +1028,7 @@ impl Runner {
         Arc::new_cyclic(|me| Runner {
             config,
             state: Mutex::default(),
-            changed: OnceLock::new(),
+            changed: Notice::default(),
             ended: OnceLock::new(),
             me: me.clone(),
             ids: AtomicU64::new(0),
@@ -1038,8 +1037,7 @@ impl Runner {
 
     /// Sets what is told the project whose runs changed; the first call wins.
     pub fn on_change(&self, changed: impl Fn(&str) + Send + Sync + 'static) {
-        // Set once; a later set keeps the first value, which is the same.
-        self.changed.set(Box::new(changed)).ok();
+        self.changed.set(changed);
     }
 
     /// Sets what is told when a run ends on its own, as it ends or when [`Runner::pick_up`] finds it ended; never for a
@@ -1050,9 +1048,7 @@ impl Runner {
     }
 
     fn tell(&self, project: &str) {
-        if let Some(changed) = self.changed.get() {
-            changed(project);
-        }
+        self.changed.tell(project);
     }
 
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
