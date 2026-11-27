@@ -101,12 +101,19 @@ export default {
         }),
       );
     },
-    // `completed`, `aborted` or `failed`, with the run's last text.
+    // `completed`, `aborted` or `failed`, with the run's final text and the text of its last message that has any: a
+    // run that ends with `submit_and_exit` has Cline's `Submission recorded (…)` line as its final text, and the answer
+    // it showed in that message (#372).
     async afterRun({ snapshot, result }) {
+      // This run's messages: those after its prompt, the last `user` one (a tool's result is a `tool` message).
+      const messages = result?.messages ?? [];
+      const prompt = messages.findLastIndex((m) => m?.role === "user");
+      const said = messages.slice(prompt + 1).filter((m) => m?.role === "assistant").map(text).filter(Boolean);
       send(
         line("afterRun", snapshot, {
           status: result?.status ?? "",
           last_assistant_message: result?.outputText ?? "",
+          last_text: said.at(-1) ?? "",
           error: result?.error?.message ?? null,
         }),
       );
