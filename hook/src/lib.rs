@@ -415,8 +415,8 @@ impl Turn {
     /// As `take`, for an event sent at `sent` (Unix milliseconds) by a harness whose hooks run in
     /// parallel, so that its lines reach the hook in any order (OpenCode's, #717). An event sent
     /// before the turn the hook is in began, or a start sent before the last end the hook took, is
-    /// of a turn already past: it returns `None` and leaves the turn as it is. Without `sent` it is
-    /// `take`.
+    /// of a turn already past, as is a call or an end sent in the millisecond the turn began: it
+    /// returns `None` and leaves the turn as it is. Without `sent` it is `take`.
     pub fn take_at(
         &mut self,
         name: &str,
@@ -429,7 +429,9 @@ impl Turn {
         };
         let start = name == "UserPromptSubmit";
         let before = |at: Option<u64>| at.is_some_and(|at| sent < at);
-        if before(self.from) || start && before(self.until) {
+        // No turn's call or end comes in the millisecond it began: such a line is the last turn's.
+        let at_start = self.from.is_some_and(|from| sent == from) && !start;
+        if before(self.from) || at_start || start && before(self.until) {
             return None;
         }
         let (prompt, was_ended) = (self.prompt_id.clone(), self.ended);
@@ -1428,7 +1430,7 @@ mod tests {
         let ends = |roots: &[&str]| -> Taken {
             Some((roots.iter().map(|r| (*r).into()).collect(), false))
         };
-        let cases: [(&str, &[Sent], &[Taken], bool); 5] = [
+        let cases: [(&str, &[Sent], &[Taken], bool); 6] = [
             (
                 "in order",
                 &[
@@ -1478,6 +1480,17 @@ mod tests {
                 ],
                 &[start(), ends(&["/w/a"]), ends(&[])],
                 true,
+            ),
+            (
+                "a stop sent in the millisecond the next turn began is the last turn's",
+                &[
+                    ("UserPromptSubmit", Some("p1"), 10),
+                    ("UserPromptSubmit", Some("wake-up 50"), 50),
+                    ("Stop", None, 50),
+                    ("PostToolUse", None, 60),
+                ],
+                &[start(), ran(&["/w/a"]), None, start()],
+                false,
             ),
         ];
         for (case, events, expected, ended) in cases {
