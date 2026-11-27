@@ -538,13 +538,9 @@ fn read_json<T: serde::de::DeserializeOwned>(file: &Path) -> Option<T> {
     serde_json::from_slice(&fs::read(file).ok()?).ok()
 }
 
-/// Writes `value` as `file` whole: beside it, then renamed over it.
+/// Writes `value` as `file` whole, by the workbench's atomic write.
 fn write_json(file: &Path, value: &impl Serialize) -> io::Result<()> {
-    let dir = file.parent().unwrap_or(Path::new(""));
-    let mut temp = tempfile::NamedTempFile::new_in(dir)?;
-    serde_json::to_writer(&mut temp, value)?;
-    temp.persist(file)?;
-    Ok(())
+    studio_workbench::write_atomic(file, &serde_json::to_vec(value)?)
 }
 
 /// Whether nobody holds the lock of the run in `dir`: its launcher is gone, or never started.

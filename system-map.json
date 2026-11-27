@@ -118,10 +118,11 @@
     },
     {
       "id": "workbench", "name": "Workbench", "caption": "Worktrees and PRs",
-      "purpose": "The one runner of `git` and `gh`, git worktrees and fetches, and agy's plugin. A black box: it never fogs.",
+      "purpose": "The one runner of `git` and `gh`, git worktrees and fetches, agy's plugin, and the atomic write every store saves a whole file with. A black box: it never fogs.",
       "holds": [
         { "name": "The runner", "text": "Builds every `git` and `gh` with prompts off and no input, and runs commands to a deadline that kills their process group.", "paths": ["workbench/src/run.rs"] },
-        { "name": "Git", "text": "A folder's main checkout, `origin`'s fetch and what removing a worktree would lose, never with force.", "paths": ["workbench/src/lib.rs"] }
+        { "name": "Git", "text": "A folder's main checkout, `origin`'s fetch and what removing a worktree would lose, never with force.", "paths": ["workbench/src/lib.rs"] },
+        { "name": "The atomic write", "text": "Saves a whole JSON file by a synced temporary file beside it, renamed over it, for the server's and the understanding layer's stores.", "paths": ["workbench/src/lib.rs"] }
       ],
       "tier": "black-box", "paths": ["workbench/"]
     }

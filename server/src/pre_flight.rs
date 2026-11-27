@@ -43,10 +43,8 @@ impl Store {
         if let Some(dir) = self.file.parent() {
             std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         }
-        let text = serde_json::to_string_pretty(saved).map_err(|e| e.to_string())?;
-        let temp = self.file.with_extension("json.tmp");
-        std::fs::write(&temp, text).map_err(|e| e.to_string())?;
-        std::fs::rename(&temp, &self.file).map_err(|e| e.to_string())
+        let text = serde_json::to_vec_pretty(saved).map_err(|e| e.to_string())?;
+        studio_workbench::write_atomic(&self.file, &text).map_err(|e| e.to_string())
     }
 
     /// Reads, changes and writes the file under one lock, so a note from a brief's write never loses a pre-flight set meanwhile.
