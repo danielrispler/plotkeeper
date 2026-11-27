@@ -535,7 +535,7 @@ test("a flagged Ratify row carries the not-confirmed mark beside Accept, and Rat
     { pr: 7, kind: "link", id: "server-ui", text: "Server to UI", change: "added", status: "not-yet", detail: null },
   ];
   setPlaying(/** @type {any} */ ({ brief: stored, partial: false }), null, /** @type {any} */ (rows));
-  setReview({ head: "bbb", state: "done", checked: 2, flagged: 1, line: null, left_out: 0, items: [
+  setReview({ head: "bbb", state: "done", checked: 2, flagged: 1, line: null, left_out: 0, still_true: [], changed: true, items: [
     { id: "part:server/purpose", verdict: "overreach", why: "It also writes the page.", cites: ["server/src/lib.rs:41"], flagged: true },
     { id: "link:server-ui/reason", verdict: "supported", why: "", cites: [], flagged: false },
   ] });
@@ -564,8 +564,99 @@ test("the Ratify step shows while the review runs, with nothing to ratify (#645)
   player.open("/p", 7, 0);
   setReview(null);
   assert.deepEqual(steps().map((s) => s.k), ["Now"]);
-  setReview({ head: "bbb", state: "reviewing", checked: 0, flagged: 0, line: null, left_out: 0, items: [] });
+  setReview({ head: "bbb", state: "reviewing", checked: 0, flagged: 0, line: null, left_out: 0, still_true: [], changed: true, items: [] });
   assert.deepEqual(steps().map((s) => s.k), ["Now", "Ratify"]);
+  player.close();
+});
+
+// #698: a review whose only items are still-true ones brings the Ratify step by a flag or a failure, and loses it when it runs again.
+// Run again is pressed on the drawn step and its answer comes back through the page's own reply path (`startReview`, `reviewed`). The
+// redraw it ends in, `show` with its clamp and dots, needs the drawn map (`currentMap`), which the stand-in DOM cannot draw, so the clamp is
+// called here as `show` calls it first and the test checks the step list `steps()` it draws from; the dots are not drawn.
+test("on a still-true-only PR the Ratify step follows the review's state while the brief is open, and the player's clamp keeps the brief on its new last step (#698)", async () => {
+  const { El, fakeDocument, tauri } = await import("./dom.mjs");
+  const calls = [];
+  // The server's answer to Run again on a still-true-only head with no flag: its running review shows nothing.
+  tauri(calls, () => null);
+  globalThis.IntersectionObserver = /** @type {any} */ (class { observe() {} disconnect() {} });
+  globalThis.document = fakeDocument({ body: new El("body") });
+  const { stepNode } = await import("../../dist/map-brief.js");
+  const { mapReview, setPlaying, setReview, steps, player } = await import("../../dist/map-brief-player.js");
+  const view = /** @type {import("../../dist/map.js").MapView} */ (/** @type {unknown} */ ({ project: "/p", doc: { parts: [], laws: [] }, scrub: null }));
+  const stored = { version: 1, pr: 7, head: "bbb", written_at: 1, stale: false, model: "opus", brief: brief({ chapters: [chapter("Fog", "Now")] }) };
+  setPlaying(/** @type {any} */ ({ brief: stored, partial: false }), null, []);
+  const only = (state, still_true = [], line = null) => ({ head: "bbb", state, checked: 0, flagged: 0, line, left_out: 0, still_true, items: [], changed: false });
+  const flag = { id: "part:server/purpose", verdict: "overreach", why: "It writes.", cites: [], name: "Server purpose", text: "Serves.", ratify_id: "part:server/purpose@abc", decided: false };
+  player.open("/p", 7, 0);
+  // A failed review's Ratify step is the last step, and the brief is on it.
+  setReview(/** @type {any} */ (only("failed", [], "the run timed out")));
+  assert.deepEqual(steps().map((s) => s.k), ["Now", "Ratify"]);
+  player.go(1, steps().length);
+  assert.equal(player.current()?.step, 1);
+  // Run again, pressed on the step as drawn.
+  const node = /** @type {any} */ (stepNode(view, /** @type {any} */ (steps().at(-1)), 7));
+  const again = node.find("button").find((button) => button.text === "Run again");
+  assert.ok(again, "the failed review offers Run again");
+  again.listeners.click();
+  await new Promise((done) => setTimeout(done, 20));
+  assert.deepEqual(calls.map(([command, args]) => [command, args?.number]), [["map_review_start", 7]]);
+  assert.equal(mapReview(), null, "the answer was applied");
+  // The step goes, and the brief stays open on its new last step.
+  assert.deepEqual(steps().map((s) => s.k), ["Now"]);
+  player.clamp(steps().length);
+  assert.equal(player.current()?.step, 0);
+  // It ends with a flag (read again on `map-landed`): the step comes back with the flag as its row.
+  setReview(/** @type {any} */ (only("done", [flag])));
+  assert.deepEqual(steps().map((s) => s.k), ["Now", "Ratify"]);
+  // Running again with that flag kept, done with no flag, or with only a flag decided before: no step.
+  setReview(/** @type {any} */ (only("reviewing", [{ ...flag, decided: true }])));
+  assert.deepEqual(steps().map((s) => s.k), ["Now"]);
+  setReview(/** @type {any} */ (only("done")));
+  assert.deepEqual(steps().map((s) => s.k), ["Now"]);
+  setReview(/** @type {any} */ (only("done", [{ ...flag, decided: true }])));
+  assert.deepEqual(steps().map((s) => s.k), ["Now"]);
+  player.close();
+});
+
+test("a Still true? row decided while the brief plays stays drawn, decided, with its overturn's note; one decided before is not shown (#698)", async () => {
+  const { El, fakeDocument, tauri } = await import("./dom.mjs");
+  const calls = [];
+  tauri(calls);
+  globalThis.IntersectionObserver = /** @type {any} */ (class { observe() {} disconnect() {} });
+  globalThis.document = fakeDocument({ body: new El("body") });
+  const { stepNode } = await import("../../dist/map-brief.js");
+  const { setPlaying, setReview, steps, player } = await import("../../dist/map-brief-player.js");
+  const view = /** @type {import("../../dist/map.js").MapView} */ (/** @type {unknown} */ ({ project: "/p", doc: { parts: [], laws: [] }, scrub: null }));
+  const stored = { version: 1, pr: 7, head: "bbb", written_at: 1, stale: false, model: "opus", brief: brief({ chapters: [chapter("Fog", "Now")] }) };
+  const flag = { id: "part:server/purpose", verdict: "overreach", why: "It writes.", cites: [], name: "Server purpose", text: "Serves.", ratify_id: "part:server/purpose@abc", decided: false };
+  const review = { head: "bbb", state: "done", checked: 0, flagged: 0, line: null, left_out: 0, items: [], still_true: [flag], changed: false };
+  const decided = { ...review, still_true: [{ ...flag, decided: true }] };
+  const rows = (node) => node.find("li").filter((each) => each.className === "ratify-row");
+  setPlaying(/** @type {any} */ ({ brief: stored, partial: false }), null, []);
+  setReview(/** @type {any} */ (review));
+  player.open("/p", 7, 0);
+  // Its only row, overturned, with no clipboard to copy to.
+  const [row] = rows(/** @type {any} */ (stepNode(view, /** @type {any} */ (steps().at(-1)), 7)));
+  row.find("button").find((button) => button.text === "Overturn").listeners.click();
+  await new Promise((done) => setTimeout(done, 20));
+  assert.deepEqual(calls.filter(([command]) => command === "ratify_set").map(([, args]) => [args.kind, args.id, args.state]), [["still-true", flag.ratify_id, "overturned"]]);
+  assert.equal(flag.decided, false, "the review as read is not changed");
+  // The review read again says it is decided: the step stays, the row shows its decision, and the prompt waits to be copied by hand.
+  setReview(/** @type {any} */ (decided));
+  assert.deepEqual(steps().map((s) => s.k), ["Now", "Ratify"]);
+  const node = /** @type {any} */ (stepNode(view, /** @type {any} */ (steps().at(-1)), 7));
+  const [kept] = rows(node);
+  assert.ok(kept, "the decided row is still drawn");
+  assert.deepEqual(kept.find("span").filter((span) => span.className === "ratify-mark done").map((span) => span.text), ["Overturned"]);
+  const [note] = node.find("div").filter((each) => each.className === "ratify-note");
+  assert.ok(note, "the overturn's note is drawn");
+  assert.match(note.find("textarea")[0]?.value ?? "", /I overturn the map text part:server\/purpose: “Serves\.”/);
+  player.close();
+  // Opened again, the flag decided before is not shown, and brings no step.
+  setPlaying(/** @type {any} */ ({ brief: stored, partial: false }), null, []);
+  setReview(/** @type {any} */ (decided));
+  player.open("/p", 7, 0);
+  assert.deepEqual(steps().map((s) => s.k), ["Now"]);
   player.close();
 });
 

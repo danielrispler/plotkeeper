@@ -1,19 +1,23 @@
 //! The Map text review (spec danielrispler/plotkeeper#634, ticket #642): a read-only background run that checks the map text a PR
-//! changed against the PR's code, and keeps a verdict per item.
+//! changed, and the unchanged text of the parts whose files it changed (still-true items, spec #687), against the PR's code, and
+//! keeps a verdict per item.
 //!
 //! - **The items** are the text the PR added or changed ([`review_items`]), read by the same join as Ratify's rows, each named by
-//!   kind and id and kept with a hash of its text.
+//!   kind and id and kept with a hash of its text; then the still-true items ([`still_true_items`]), kept with a hash of their text
+//!   and of the head's blobs of the changed files that reach them. Only a still-true item's flag is shown ([`StillTrueFlag`]).
 //! - **The run** is of kind map review (`runner.rs`): Read, Glob and Grep, no `Edit` rule, no setup, 10 minutes. Its folder is a
 //!   `git archive` of the PR's head, fetched as `pull/<n>/head`, with no git data. Its prompt holds plotkeeper's instructions and
-//!   the items' kinds and ids, of bounded characters and length ([`takes`]), never their text: the agent reads that from
+//!   the items' kinds and ids under their kind's heading, of bounded characters and length ([`takes`]), never their text: the agent reads that from
 //!   `system-map.json` in its folder.
-//! - **When it runs.** On its own when a brief is stored at a head with changed text and the PR is by Daniel's own login
+//! - **When it runs.** One run per head, of its unjudged items of both kinds. On its own when a brief is stored at a head with any
+//!   item and the PR is by Daniel's own login
 //!   ([`MapReviews::brief_stored`]); for any other PR on "Review map text" ([`MapReviews::request`]). A new head cancels the
 //!   review of an older one, queued or running, and only the PR's head as the lookups last saw it starts or cancels one. A head
-//!   whose items were all judged before, by id and hash, runs nothing. A run the login or a limit stopped is submitted again and
+//!   whose items were all judged before, by id, kind and hash, runs nothing. A run the login or a limit stopped is submitted again and
 //!   waits for Resume; a run whose answer is kept is dismissed.
-//! - **Kept** in the data folder, `map-reviews/<project>-<hash>/<pr>.json`: each verdict by item id and hash, and each head's
-//!   items and state.
+//! - **Kept** in the data folder, `map-reviews/<project>-<hash>/<pr>.json`: each verdict by item id, kind and hash, and each head's
+//!   items and state. A missing kind, in a file from before still-true items, is `changed`, unless the key is a still-true one
+//!   ([`Record::with_kinds`]).
 
 use crate::ratify::{Detail, MapItem};
 use crate::runner::{End, Kind, Limits, Outcome, Request, Runner};
@@ -35,27 +39,248 @@ pub struct Config {
     pub store: PathBuf,
     /// The `gh` to run; none: Daniel's own, as the login shell finds it.
     pub gh: Option<PathBuf>,
+    /// The ratify file (`ratify::file`), which says whether Daniel decided a flagged still-true item.
+    pub ratify: PathBuf,
 }
 
-/// One piece of changed map text to review: its id (`part:<id>/purpose`, `held:<part>/<n>`, `link:<id>/reason`, `law:<id>/text`)
-/// and a hash of its text at the head.
+/// The ratify kind of a flagged still-true item (spec #687, "Accept and Overturn").
+pub const STILL_TRUE_KIND: &str = "still-true";
+
+/// One piece of map text to review: its id (`part:<id>/purpose`, `held:<part>/<n>`, `link:<id>/reason`, `law:<id>/text`), its
+/// kind, and its verdict key's hash: of its text at the head for a changed item, and for a still-true item of its text and of the
+/// head's blobs of the files that reach it ([`still_true_items`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReviewItem {
     pub id: String,
     pub hash: String,
+    /// Missing in a file from before still-true items: `changed`.
+    #[serde(default)]
+    pub kind: ItemKind,
 }
 
-/// The map text PR head `head` of `repo` changed, against where it left the default branch: the same join as Ratify's rows
-/// (`ratify::pr_changes`), so a reformatted map changes nothing.
+/// Whether the PR changed an item's text, or left it unchanged on a part whose files it changed, to check it is still true.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ItemKind {
+    #[default]
+    Changed,
+    StillTrue,
+}
+
+/// The items PR head `head` of `repo` gives the review: the map text it changed, against where it left the default branch, by the
+/// same join as Ratify's rows (`ratify::pr_changes`), so a reformatted map changes nothing; then its still-true items
+/// ([`still_true_items`]).
 pub fn review_items(repo: &Path, head: &str) -> Vec<ReviewItem> {
-    review_of(repo, head).0
+    review_of(repo, head).items
 }
 
-/// [`review_items`], and how many changed map items were left out for their id ([`takes`]).
-fn review_of(repo: &Path, head: &str) -> (Vec<ReviewItem>, usize) {
+/// What a head gives the review: its items, changed ones first, how many changed map items were left out for their id
+/// ([`takes`]), and each still-true item's name and text as the head's map has them.
+struct Found {
+    items: Vec<ReviewItem>,
+    left_out: usize,
+    unchanged: Vec<Unchanged>,
+}
+
+/// A still-true item, with the map's name for it and its text at the head.
+struct Unchanged {
+    item: ReviewItem,
+    name: String,
+    text: String,
+}
+
+fn review_of(repo: &Path, head: &str) -> Found {
     let cache = crate::ratify::ChangesCache::default();
     let (changes, _) = crate::ratify::pr_changes(&cache, repo, 0, Some(head));
-    items_of(&changes)
+    let (mut items, left_out) = items_of(&changes);
+    let unchanged = still_true_items(repo, head, &items);
+    items.extend(unchanged.iter().map(|found| found.item.clone()));
+    Found {
+        items,
+        left_out,
+        unchanged,
+    }
+}
+
+/// The still-true items of PR head `head` of `repo`: the unchanged text of each part the PR touched, a part owning a file the PR
+/// changed by the head's map (`system_map::touched_for_map`), as the brief places it. Of each touched part: its purpose and
+/// caption; its held items whose `paths` hold a changed file (`system_map::held_reached`), or that have no paths; the reason of
+/// each link at it; the text of each law on trust on it or on one of those links. Not its name, not a law backed by a check or on
+/// a flow, not empty text, and never an item `changed` holds. An item whose map id the review does not take ([`takes`]) is
+/// skipped, uncounted: the head's map check names that id already. Each is keyed by its text and by the head's blobs of the
+/// changed files that reach it, in path order: the part's, for a link both ends', for a law on a link the link's.
+fn still_true_items(repo: &Path, head: &str, changed: &[ReviewItem]) -> Vec<Unchanged> {
+    let Some(at) = touched_at(repo, head) else {
+        return Vec::new();
+    };
+    let list = |key: &str| at.value[key].as_array().cloned().unwrap_or_default();
+    let field =
+        |item: &serde_json::Value, name: &str| item[name].as_str().unwrap_or_default().to_string();
+    let (parts, actors, links, laws) = (list("parts"), list("actors"), list("links"), list("laws"));
+    let name_of = |id: &str| {
+        let named = parts.iter().chain(&actors).find(|item| item["id"] == id);
+        named.map_or_else(|| id.to_string(), |item| field(item, "name"))
+    };
+    let files_of = |ends: &[&str]| -> String {
+        let mut lines: Vec<&String> = ends
+            .iter()
+            .flat_map(|end| at.reach.get(*end))
+            .flatten()
+            .collect();
+        lines.sort();
+        lines.into_iter().map(String::as_str).collect()
+    };
+    let mut found: Vec<Unchanged> = Vec::new();
+    let mut add = |id: String, map_id: &str, name: String, text: String, files: &str| {
+        let known = changed
+            .iter()
+            .chain(found.iter().map(|f| &f.item))
+            .any(|item| item.id == id);
+        if text.trim().is_empty() || !takes(map_id) || known {
+            return;
+        }
+        let item = ReviewItem {
+            id,
+            hash: format!("{}-{}", hash(&text), hash(files)),
+            kind: ItemKind::StillTrue,
+        };
+        found.push(Unchanged { item, name, text });
+    };
+    for touched in &at.touched {
+        let id = touched.id.as_str();
+        let Some(part) = parts.iter().find(|part| part["id"] == id) else {
+            continue;
+        };
+        let (name, files) = (field(part, "name"), files_of(&[id]));
+        for words in ["purpose", "caption"] {
+            add(
+                format!("part:{id}/{words}"),
+                id,
+                format!("{name} {words}"),
+                field(part, words),
+                &files,
+            );
+        }
+        let reached = system_map::held_reached(&at.map, id, &touched.files);
+        let holds = part["holds"].as_array().cloned().unwrap_or_default();
+        for (n, held) in holds.iter().enumerate() {
+            let pathless = held["paths"].as_array().is_none_or(Vec::is_empty);
+            if pathless || reached.contains(&n) {
+                let id_n = format!("held:{id}/{}", n + 1);
+                add(id_n, id, field(held, "name"), field(held, "text"), &files);
+            }
+        }
+        // The laws on the part, then those on each link at it, each keyed by the files that reach what it is on.
+        let mut on = vec![(id.to_string(), files)];
+        for link in links
+            .iter()
+            .filter(|link| link["from"] == id || link["to"] == id)
+        {
+            let (link_id, from, to) = (field(link, "id"), field(link, "from"), field(link, "to"));
+            let files = files_of(&[&from, &to]);
+            let ends = format!("{} → {}", name_of(&from), name_of(&to));
+            let reason = field(link, "reason");
+            add(
+                format!("link:{link_id}/reason"),
+                &link_id,
+                ends,
+                reason,
+                &files,
+            );
+            on.push((link_id, files));
+        }
+        for (target, files) in &on {
+            let trust = laws
+                .iter()
+                .filter(|law| law["backing"] == "trust" && law["on"] == target.as_str());
+            for law in trust {
+                let law_id = field(law, "id");
+                let text = field(law, "text");
+                add(
+                    format!("law:{law_id}/text"),
+                    &law_id,
+                    law_id.clone(),
+                    text,
+                    files,
+                );
+            }
+        }
+    }
+    found
+}
+
+/// The parts PR head `head` of `repo` touched, by its map.
+struct Touched {
+    map: system_map::Map,
+    /// The head's map as version 2.
+    value: serde_json::Value,
+    /// Each touched part, with its changed files in path order.
+    touched: Vec<system_map::PartFiles>,
+    /// Each touched part's changed files as a verdict key hashes them, one `<path> <blob>` line each, in path order; a file the head
+    /// deleted has `deleted` for its blob.
+    reach: BTreeMap<String, Vec<String>>,
+}
+
+/// The files PR head `head` changed from where it left the default branch, placed by the head's map; none when git does not answer,
+/// the head's map does not read, or no part owns a changed file.
+fn touched_at(repo: &Path, head: &str) -> Option<Touched> {
+    let (reference, _) = crate::map::default_ref(repo)?;
+    let base = crate::map::git(repo, &["merge-base", &reference, head]).ok()?;
+    // NUL-ended names, so git does not quote a path with non-ASCII characters.
+    let names = crate::map::git(
+        repo,
+        &["diff", "--no-renames", "--name-only", "-z", &base, head],
+    )
+    .ok()?;
+    let files: Vec<String> = names
+        .split('\0')
+        .filter(|name| !name.is_empty())
+        .map(String::from)
+        .collect();
+    let text = crate::ratify::map_at(repo, head).text()?.to_string();
+    let map = system_map::parse_lenient(&text).ok()?;
+    let value = system_map::convert_value(&text).ok()?;
+    let touched = system_map::touched_for_map(&map, &files).parts;
+    if touched.is_empty() {
+        return None;
+    }
+    let changed: Vec<&str> = touched
+        .iter()
+        .flat_map(|part| &part.files)
+        .map(String::as_str)
+        .collect();
+    let blobs = blobs(repo, head, &changed);
+    let reach = touched
+        .iter()
+        .map(|part| {
+            let lines = part.files.iter().map(|file| {
+                let blob = blobs.get(file).map_or("deleted", String::as_str);
+                format!("{file} {blob}\n")
+            });
+            (part.id.clone(), lines.collect())
+        })
+        .collect();
+    Some(Touched {
+        map,
+        value,
+        touched,
+        reach,
+    })
+}
+
+/// The blob id of each of `files` at commit `head`; a file the head does not hold has none.
+fn blobs(repo: &Path, head: &str, files: &[&str]) -> BTreeMap<String, String> {
+    let mut args = vec!["--literal-pathspecs", "ls-tree", "-r", "-z", head, "--"];
+    args.extend(files);
+    let listed = crate::map::git(repo, &args).unwrap_or_default();
+    // `<mode> blob <id>\t<path>`, each ended by a NUL.
+    listed
+        .split('\0')
+        .filter_map(|entry| {
+            let (meta, path) = entry.split_once('\t')?;
+            Some((path.to_string(), meta.rsplit(' ').next()?.to_string()))
+        })
+        .collect()
 }
 
 /// The longest id the review takes. The map's own ids are names of a few words (plotkeeper's longest is 35 characters); a longer
@@ -97,6 +322,7 @@ fn text_of(change: &MapItem) -> Vec<ReviewItem> {
             items.push(ReviewItem {
                 id,
                 hash: hash(after),
+                kind: ItemKind::Changed,
             });
         }
     };
@@ -191,13 +417,40 @@ pub struct ReviewView {
     pub line: Option<String>,
     /// How many of the head's changed map items the review left out, for an id it does not take.
     pub left_out: usize,
+    /// The head's still-true items that have a flag, in the order they were asked; a supported one is never sent.
+    pub still_true: Vec<StillTrueFlag>,
+    /// Whether the head changed map text, an item left out included. A head that did not has still-true items alone, and the page
+    /// shows of its review only a failure, with "Run again", and the flags not decided: no "Reviewing map text…", no count and no
+    /// "Review map text" (spec #687, "What the page reads").
+    pub changed: bool,
 }
 
-/// A verdict as kept: for the item `id` whose text hashed to `hash`.
+/// A flagged still-true item (spec #687): its verdict, and its name and text as the head's map has them.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct StillTrueFlag {
+    pub id: String,
+    /// `overreach`, `contradicted` or `unreadable`.
+    pub verdict: String,
+    pub why: String,
+    pub cites: Vec<String>,
+    /// The map's name for it: the part's name and `purpose` or `caption`, the held item's name, the link's ends, the law's id.
+    pub name: String,
+    pub text: String,
+    /// The id Ratify decides it by, of kind [`STILL_TRUE_KIND`]: the item's id and its verdict key's hash, so a push that judges it
+    /// anew is a new item.
+    pub ratify_id: String,
+    /// Whether a ratify record of it says Daniel accepted or overturned it on this PR.
+    pub decided: bool,
+}
+
+/// A verdict as kept: for the item `id` of `kind` whose verdict key hashed to `hash` ([`ReviewItem`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct Verdict {
     id: String,
     hash: String,
+    /// Missing in a file from before still-true items: `changed`.
+    #[serde(default)]
+    kind: ItemKind,
     verdict: String,
     #[serde(default)]
     why: String,
@@ -234,10 +487,26 @@ struct Record {
 }
 
 impl Record {
+    /// The record with each still-true item and verdict of its kind again. A build from before still-true items drops the kind
+    /// when it writes the file back, so a missing kind reads as `changed`; a still-true key is two hashes joined by `-`, which a
+    /// changed item's never is ([`still_true_items`]).
+    fn with_kinds(mut self) -> Self {
+        let items = self.heads.values_mut().flat_map(|head| &mut head.items);
+        let kinds = items
+            .map(|item| (&item.hash, &mut item.kind))
+            .chain(self.verdicts.iter_mut().map(|v| (&v.hash, &mut v.kind)));
+        for (hash, kind) in kinds {
+            if hash.contains('-') {
+                *kind = ItemKind::StillTrue;
+            }
+        }
+        self
+    }
+
     fn verdict(&self, item: &ReviewItem) -> Option<&Verdict> {
         self.verdicts
             .iter()
-            .find(|v| v.id == item.id && v.hash == item.hash)
+            .find(|v| (&v.id, &v.hash, v.kind) == (&item.id, &item.hash, item.kind))
     }
 }
 
@@ -267,12 +536,32 @@ Give each item one verdict:
 - `unreadable`: the text is too unclear to check.
 Say why in one or two sentences, and cite the lines your verdict rests on as `path:line`, the path from your current folder.";
 
-/// The prompt of a review of `items`: plotkeeper's instructions and the items' ids, never their text.
+/// The heading over each kind of item, with what the review is to know of it.
+const HEADINGS: [(ItemKind, &str); 2] = [
+    (
+        ItemKind::Changed,
+        "The items the pull request changed, whose text it added or edited:",
+    ),
+    (
+        ItemKind::StillTrue,
+        "The items the pull request left unchanged, on parts whose files it changed. Their text was not edited by the pull \
+request: judge it against the code at the head, as it stands in your folder, not against the pull request's changes alone:",
+    ),
+];
+
+/// The prompt of a review of `items`: plotkeeper's instructions and the items' ids under their kind's heading, never their text.
 fn prompt(items: &[ReviewItem]) -> String {
-    let mut prompt = format!("{INSTRUCTIONS}\n\nThe items:\n");
-    for item in items {
+    let mut prompt = INSTRUCTIONS.to_string();
+    for (kind, heading) in HEADINGS {
+        let mut of_kind = items.iter().filter(|item| item.kind == kind).peekable();
+        if of_kind.peek().is_none() {
+            continue;
+        }
         // Writing to a `String` cannot fail.
-        writeln!(prompt, "- {}", item.id).ok();
+        write!(prompt, "\n\n{heading}\n").ok();
+        for item in of_kind {
+            writeln!(prompt, "- {}", item.id).ok();
+        }
     }
     let example = items.first().map_or("part:server/purpose", |item| &item.id);
     // Writing to a `String` cannot fail.
@@ -304,6 +593,7 @@ fn read_answer(result: &str, asked: &[ReviewItem]) -> Vec<Verdict> {
             VERDICTS.contains(&verdict).then(|| Verdict {
                 id: item.id.clone(),
                 hash: item.hash.clone(),
+                kind: item.kind,
                 verdict: verdict.to_string(),
                 why: cut(entry["why"].as_str().unwrap_or_default(), 600),
                 cites: entry["cites"]
@@ -372,6 +662,7 @@ impl MapReviews {
     fn read(&self, project: &str, pr: u64) -> Record {
         let read = fs::read(self.file(project, pr)).ok();
         read.and_then(|text| serde_json::from_slice(&text).ok())
+            .map(Record::with_kinds)
             .unwrap_or_else(|| Record {
                 project: project.into(),
                 pr,
@@ -412,7 +703,7 @@ impl MapReviews {
             .is_none_or(|(_, now)| now == head)
     }
 
-    /// A brief of PR `pr` was stored at `head`: a head with changed text is reviewed when the PR is by Daniel's own login, unless
+    /// A brief of PR `pr` was stored at `head`: a head with an item of either kind is reviewed when the PR is by Daniel's own login, unless
     /// it is reviewed already or every item was judged at an earlier head. Any older head's review is cancelled. A head the PR
     /// has moved on from (a brief whose write ended after a newer head was seen) starts and cancels nothing.
     pub fn brief_stored(&self, project: &str, pr: u64, head: &str) {
@@ -433,7 +724,8 @@ impl MapReviews {
     }
 
     /// "Review map text", or "Run again" after a failure, on PR `pr` at `head`, whoever wrote it: its review, none when the head
-    /// changed no map text. A head being reviewed or reviewed is left as it is.
+    /// has no item, or shows none ([`MapReviews::view`]). A head being reviewed or reviewed is left as it is. The page offers
+    /// "Review map text" only on a head with changed text, so a stranger's PR with still-true items alone starts nothing.
     pub fn request(&self, project: &str, pr: u64, head: &str) -> Option<ReviewView> {
         let items = review_items(Path::new(project), head);
         if items.is_empty() {
@@ -594,16 +886,25 @@ impl MapReviews {
         crate::prs::by_own_login_with(&program, Path::new(project), pr)
     }
 
-    /// PR `pr`'s review at `head`; none when the head changed no map text. A head never started whose items were all judged at an
-    /// earlier head is done.
+    /// PR `pr`'s review at `head`; none when the head has no item, or has still-true items alone and its review is not started,
+    /// running, or done with no flag. A head never started whose items were all judged at an earlier head is done. Its counts and
+    /// `items` are of changed items; of still-true items it holds only the flags, each with whether Daniel decided it.
     pub fn view(&self, project: &str, pr: u64, head: &str) -> Option<ReviewView> {
-        let (items, left_out) = review_of(Path::new(project), head);
+        let found = review_of(Path::new(project), head);
+        let (items, left_out) = (&found.items, found.left_out);
         if items.is_empty() && left_out == 0 {
             return None;
         }
         let record = self.read(project, pr);
+        let kept = record.heads.get(head);
+        let state = match kept {
+            Some(kept) => kept.state,
+            None if items.iter().all(|item| record.verdict(item).is_some()) => ReviewState::Done,
+            None => ReviewState::Idle,
+        };
         let judged: Vec<Judged> = items
             .iter()
+            .filter(|item| item.kind == ItemKind::Changed)
             .filter_map(|item| record.verdict(item))
             .map(|v| Judged {
                 id: v.id.clone(),
@@ -613,12 +914,33 @@ impl MapReviews {
                 flagged: v.verdict != VERDICTS[0],
             })
             .collect();
-        let kept = record.heads.get(head);
-        let state = match kept {
-            Some(kept) => kept.state,
-            None if judged.len() == items.len() => ReviewState::Done,
-            None => ReviewState::Idle,
-        };
+        let decided = crate::ratify::read(&self.config.ratify, project);
+        let still_true: Vec<StillTrueFlag> = found
+            .unchanged
+            .iter()
+            .filter_map(|found| Some((found, record.verdict(&found.item)?)))
+            .filter(|(_, v)| v.verdict != VERDICTS[0])
+            .map(|(found, v)| {
+                let ratify_id = format!("{}@{}", v.id, v.hash);
+                let item = crate::ratify::Item::new(pr, STILL_TRUE_KIND, &ratify_id);
+                StillTrueFlag {
+                    id: v.id.clone(),
+                    verdict: v.verdict.clone(),
+                    why: v.why.clone(),
+                    cites: v.cites.clone(),
+                    name: found.name.clone(),
+                    text: found.text.clone(),
+                    decided: decided.status(&item, None) != crate::ratify::Status::NotYet,
+                    ratify_id,
+                }
+            })
+            .collect();
+        // A head whose only items are still-true ones is none while it is not started, runs, or ends with no flag; with a flag or a
+        // failure the page shows of it only the failure, with "Run again", and the flags not decided (`changed`).
+        let changed = left_out > 0 || items.iter().any(|item| item.kind == ItemKind::Changed);
+        if !changed && state != ReviewState::Failed && still_true.is_empty() {
+            return None;
+        }
         Some(ReviewView {
             head: head.to_string(),
             state,
@@ -627,6 +949,8 @@ impl MapReviews {
             items: judged,
             line: kept.and_then(|kept| kept.why.clone()),
             left_out,
+            still_true,
+            changed,
         })
     }
 
@@ -835,8 +1159,8 @@ fn replace_others(record: &mut Record, head: &str) -> Option<Vec<String>> {
     replaced.then_some(runs)
 }
 
-/// The open PR `number`'s map text review at its head, for Ratify's head; none when it is not open and ready or its head changed
-/// no map text.
+/// The open PR `number`'s map text review at its head, for Ratify's head; none when it is not open and ready or its head shows no
+/// review ([`MapReviews::view`]).
 pub fn pr_map_review(
     app: &crate::App,
     project: String,
@@ -851,7 +1175,7 @@ pub fn pr_map_review(
     Ok(head.and_then(|head| app.reviews.view(&project, number, &head)))
 }
 
-/// "Review map text" or "Run again" on the open PR `number`, at its head: its review, none when the head changed no map text.
+/// "Review map text" or "Run again" on the open PR `number`, at its head: its review, none when its head shows none.
 pub fn map_review_start(
     app: &crate::App,
     project: String,

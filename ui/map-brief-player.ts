@@ -7,7 +7,7 @@ import { currentScrub } from "./map.js";
 import { scrubTo } from "./map-history.js";
 import { watchSeen } from "./seen.js";
 import { logStop } from "./stop-rules.js";
-import { headBrings, ratifyStep } from "./ratify.js";
+import { headBrings, ratifyStep, stillTrueRows } from "./ratify.js";
 import { briefPlayer, chapterGate, type Gate, playlist, storySteps } from "./map-brief-model.js";
 import { catchUpIds } from "./map-catch-up.js";
 import type { BriefStep, BriefView, MapReview, RatifyRow, StoredCatchUp } from "./types.js";
@@ -22,13 +22,18 @@ let catchUp: CatchUp | null = null;
 let ratifying: RatifyRow[] = [];
 // The PR head's Map text review (`pr_map_review`, #645), read when the brief opens and again when the server says it changed.
 let review: MapReview | null = null;
+// The Still true? rows decided while the brief plays (#698), by ratify id. A review read since says them decided, and a decided flag is
+// left out, so a row decided here is kept here, to stay drawn with its decision and its overturn's note, as any Ratify row does.
+let decidedHere = new Map<string, RatifyRow["status"]>();
 
 /** The brief being played, null with none. */
 export const playingBrief = () => playing;
 /** The part catch-up being played, null while a PR brief plays or none does. */
 export const playingCatchUp = () => catchUp;
-/** The rows the brief offers to ratify. */
-export const ratifyRows = () => ratifying;
+/** The rows the brief offers to ratify: its own, then its review's Still true? rows (#698), as PR `pr`'s. */
+export const ratifyRows = (pr: number): RatifyRow[] => [...ratifying, ...stillTrueRows(review, pr, decidedHere)];
+/** Daniel decided the Still true? row `id` while the brief plays. */
+export const decidedStillTrue = (id: string, state: RatifyRow["status"]) => void decidedHere.set(id, state);
 /** The brief's Map text review, null when its head changed no map text. */
 export const mapReview = () => review;
 /** The Map text review read for the brief played. */
@@ -40,6 +45,7 @@ export function setPlaying(brief: BriefView, caught: CatchUp | null, rows: Ratif
   playing = brief;
   catchUp = caught;
   ratifying = rows;
+  decidedHere = new Map();
 }
 /** Nothing is played. */
 export function clearPlaying() {
@@ -47,6 +53,7 @@ export function clearPlaying() {
   catchUp = null;
   ratifying = [];
   review = null;
+  decidedHere = new Map();
 }
 
 /** Each part's catch-up plays under a negative number of its own, which no PR has. */
@@ -65,7 +72,7 @@ export const steps = (): BriefStep[] => {
   // The ratify step ends the last chapter (the only one of a single story), and holds Guard with a law's row when the brief offers it (#401)
   // and its head's lines when they bring it: the map check failing (#641), the Map text review running or flagging (#645).
   const head = headBrings(playing.brief.map_problems, review);
-  const ratify = now.chapter >= Math.max(0, playing.brief.brief.chapters.length - 1) ? ratifyStep(ratifying.filter((row) => row.status !== "ratified"), [...new Set(list.flatMap((step) => step.on))], !!playing.brief.guard, head) : null;
+  const ratify = now.chapter >= Math.max(0, playing.brief.brief.chapters.length - 1) ? ratifyStep(ratifyRows(now.pr).filter((row) => row.status !== "ratified"), [...new Set(list.flatMap((step) => step.on))], !!playing.brief.guard, head) : null;
   return ratify ? [...list, ratify] : list;
 };
 
