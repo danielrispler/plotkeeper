@@ -8,7 +8,7 @@ import { railFixtures } from "./rail-fixtures.ts";
 import { list, withSaved } from "./fixtures-shared.ts";
 import { alerts, cutText, cutTextStill, hints, listClearLanded, listHeld, listHints, listNarrow, listSecondLines, logDone, logFixture, logos, noticeErrors, notRecording, paletteFocus, paletteOpen, projectChevron, projectMenuScript, projectsSaved, recording, skipLink, snapRealKeys, toastKeys, whatsNewToast } from "./fixtures-page.ts";
 import { mapBadgeList, mapBase, mapBriefPairLight, mapBriefSwitch, mapBroken, mapBusy, mapCalm, mapCamera, mapDotsOrder, mapDotsRetry, mapEmpty, mapFog, mapFogPlates, mapFresh, mapGlassMotion, mapGoneFocus, mapHeaderDot, mapMarkHints, mapMarks, mapNoMap, mapPartKeys, mapPartRedraw, mapProjectGone, mapProjectRemoved, mapRefresher, mapPurposeMore, mapCaughtUp, mapCatchUpOlder, mapReview, mapScrubbed, mapSmallGaps, mapSpotlight, mapStale, mapSwitchSavesViews, mapTalksTo, readmeHero } from "./fixtures-map.ts";
-import { mapFootprint, mapLatePlace, mapPanelBrief, mapPanelDiff, mapNotPlacedGlass, mapNotPlacedHint, mapPanelFieldHints, mapPanelFocus, mapPanelHead, mapPanelHistory, mapPanelLine2, mapPanelNoSession, mapPanelPeel, mapListFold, mapPanelSettings, mapPanelStory, mapPanelToggle, mapSheetClose, mapSheetExplained, mapSheetHere, mapSheetHolds, mapSheetKeptWidth, mapSheetResizeRedraw, mapSheetScrollShort, mapSheetStill, mapSheetUnratified, mapSheetWidth, mapToastBeside, mapTurnLight, mapPanelPatched, mapPanelAskStays, mapPanelBriefFoot } from "./fixtures-panel.ts";
+import { mapFootprint, mapLatePlace, mapPanelBrief, mapPanelDiff, mapNotPlacedHint, mapPanelFieldHints, mapPanelFocus, mapPanelHead, mapPanelHistory, mapPanelLine2, mapPanelNoSession, mapPanelPeel, mapListFold, mapPanelSettings, mapPanelStory, mapPanelToggle, mapSheetClose, mapSheetExplained, mapSheetHere, mapSheetHolds, mapSheetKeptWidth, mapSheetResizeRedraw, mapSheetScrollShort, mapSheetStill, mapSheetUnratified, mapSheetWidth, mapToastBeside, mapTurnLight, mapPanelPatched, mapPanelAskStays, mapPanelBriefFoot } from "./fixtures-panel.ts";
 import { mapBackLaw, mapMicroWorld, mapMicroWorldBuilding, mapPreFlight, mapPreFlightOutside, mapPreFlightOutsideKept, mapPreFlightPalette, mapPreFlightPick, mapPreFlightStatus, mapRuns, mapRunsAnnounced, mapRunsBesideSheet, mapRunsPaused, mapTray, mapTrayAfterPush } from "./fixtures-runs.ts";
 import { mapBriefAlsoGroups, mapBriefAnnounce, mapBriefBar, mapBriefBold, mapBriefBoldUnpaired, mapBriefChapterLast, mapBriefChapterMid, mapBriefChapters, mapBriefCopied, mapBriefCopyByHand, mapBriefExplainBack, mapBriefExplained, mapBriefFigure, mapBriefGuard, mapBriefHeights, mapBriefMapCheck, mapBriefNoFacts, mapBriefReview, mapBriefStillTrue, mapBriefNoStaleBase, mapBriefOrderRight, mapBriefOrderSlots, mapBriefOrderWrong, mapBriefOverturn, mapBriefPartialFacts, mapBriefPick, mapBriefRatify, mapBriefRatifyDetail, mapBriefRatifyEvidence, mapBriefShort, mapBriefSince, mapBriefStaleBase, mapBriefStart, mapBriefStepCode, mapBriefStory, mapBriefTall, mapBriefTaller, mapBriefTallScroll, mapBriefUnconfirmed, mapBriefWhy, mapBriefWhyDecision, mapBriefWriting, mapCatchUp, mapCatchUpBold, mapCatchUpCard, mapCatchUpStage, mapCatchUpSummarising, mapCatchUpWriting, mapDiffClosed, mapDiffLitGhost, mapDiffRatifyLit, mapDiffRemoval, mapDiffRemovalBrief, mapDiffSplit, mapDiffSplitBrief, listBriefMark, railBriefReady } from "./fixtures-brief.ts";
 import { writersBriefsNeedClaude, writersFailed, writersKeyError, writersKeyNotSet, writersKeySet, writersList, writersOpenAI, writersPassed, writersSecretService } from "./fixtures-writers.ts";
@@ -182,7 +182,7 @@ export const fixtures = {
   mapPreFlightPick,
   mapFogPlates,
   // The Map view busy (#311, #562): a badge on each part a session's latest turn touched, a Worker's part counting its session, a Needs-you
-  // badge, and the not placed list (no files yet, agy, status-only Codex, ignored-only edits); a Helper and a finished session never show.
+  // badge, and the not placed line for the one that needs Daniel (the others have no files yet, are agy, status-only Codex or ignored-only edits); a Helper and a finished session never show.
   mapBusy,
   mapSheetStill,
   // Session badges (#562): an accented badge and its open list, and the spotlight's view with a dimmed and a full Needs-you badge.
@@ -220,7 +220,6 @@ export const fixtures = {
   mapPanelSettings,
   mapPanelFieldHints,
   mapNotPlacedHint,
-  mapNotPlacedGlass,
   mapToastBeside,
   mapPanelBrief,
   mapPanelNarrow: mapPanelStory,

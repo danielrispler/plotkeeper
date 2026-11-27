@@ -2,6 +2,7 @@
 // the map's drawing (`map-agents.ts`) and the story read. Placement is per path: `map_place` is asked one group per distinct path, and its
 // answer (`Placement`, a path to the part that owns it) is folded back here per session, Worker and turn.
 
+import { nextNeedsYou } from "./keys.js";
 import type { Session, Subagent, Turn, TurnFile } from "./types.js";
 
 // The page's 7-day cut, mirroring core's `SINCE_MS` (`core/src/turn_files.rs`): core asks for a turn's files only within it, but keeps
@@ -147,7 +148,7 @@ export function latestParts(session: Session, placed: Placement, now: number): s
 }
 
 // The badges of the parts, from the sessions in the session list's order: each marked session (`marked`) counted once on every part of its
-// latest turn, with its running Workers whose files are there; the marked sessions whose latest turn touches no part are `notPlaced`.
+// latest turn, with its running Workers whose files are there; the marked sessions whose latest turn touches no part are `notPlaced` (the map says only which of them need you, `notPlacedLine`).
 export function sessionBadges(sessions: Session[], placed: Placement, now: number, inProject: (project: string) => boolean): { byPart: Record<string, Badge>; notPlaced: Session[] } {
   const byPart: Record<string, Badge> = {};
   const notPlaced: Session[] = [];
@@ -191,8 +192,16 @@ export function spotlightView(byPart: Record<string, Badge>, spot: Session | nul
   return { chips, home: chips.length ? homePart(spot, placed, now, order) : null, dimmed };
 }
 
-// The not placed list's closed line (#472): how many sessions no part holds, and how many of them need you, so a needs-you one stays loud.
-export function notPlacedLine(notPlaced: Pick<Session, "state">[]): { count: string; needsYou: string | null } {
-  const asking = notPlaced.filter((session) => session.state === "needs_you").length;
-  return { count: `${notPlaced.length} not placed`, needsYou: asking ? `${asking} ${asking === 1 ? "needs" : "need"} you` : null };
+// The sessions among those no part holds that need Daniel: the only ones the map says anything about (#694), since the session list already
+// shows the rest.
+export const askingOf = <T extends Pick<Session, "state">>(notPlaced: T[]): T[] => notPlaced.filter((session) => session.state === "needs_you");
+
+// The one line over the map for the unplaced sessions that need Daniel (#694), "2 need you · not on the map"; null when none does.
+export function notPlacedLine(notPlaced: Pick<Session, "state">[]): string | null {
+  const asking = askingOf(notPlaced).length;
+  return asking ? `${asking} ${asking === 1 ? "needs" : "need"} you \u00B7 not on the map` : null;
 }
+
+// The session the line's press opens: the next unplaced one that needs Daniel after the session open in the left panel, in the list's order,
+// wrapping; the first with none open (or an open one the line does not count). Null with none.
+export const notPlacedTarget = (notPlaced: Pick<Session, "id" | "state">[], open: string | null): string | null => nextNeedsYou(askingOf(notPlaced), open);
