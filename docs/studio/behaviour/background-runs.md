@@ -59,7 +59,7 @@ All in `settings.json` ([Settings files](../settings.md)), read by the server an
 
 ## A run's folder
 
-Runs live in the runs folder, `~/Library/Caches/plotkeeper/runs/`, outside plotkeeper's data folder, which a run may not read. A run's folder is `<id>/`, and it holds:
+Runs live in the runs folder, `~/Library/Caches/plotkeeper/runs/` on macOS and `~/.cache/plotkeeper/runs/` (or under `$XDG_CACHE_HOME`) on Linux ([storage](storage.md)), outside plotkeeper's data folder, which a run may not read. A run's folder is `<id>/`, and it holds:
 
 - `work/`: the working folder, the agent's current folder and the only place it writes. The module that asks for the run fills it first, with a clone or nothing.
 - `run.json`: the run as asked for, with its built command, its sandbox check and its private temp folder.
@@ -70,7 +70,7 @@ Runs live in the runs folder, `~/Library/Caches/plotkeeper/runs/`, outside plotk
 
 plotkeeper starts each run through the launcher, `plotkeeper-run <run's folder>`, in a process group of its own, so the run outlives plotkeeper: stopping plotkeeper to rebuild it does not kill a run.
 
-- **The start.** The launcher first checks that the sandbox can start, by running `/usr/bin/true` under `sandbox-exec`. It cannot inside another sandbox, such as a plotkeeper started from a sandboxed shell, and Claude Code then keeps the run going with every command refused and exits 0. A failed check ends the run as failed, "The sandbox could not start", before setup and before the harness; the check counts against the run's time limit. Then the setup command, then the run's private temp folder, made new and `0700`, then the harness. A folder already there fails the run and is left alone. The launcher removes the folder it made when the harness exits, and Cancel removes the folder of a run it kills.
+- **The start.** The launcher first checks that the sandbox can start. On macOS it runs `/usr/bin/true` under `sandbox-exec`. It cannot inside another sandbox, such as a plotkeeper started from a sandboxed shell, and Claude Code then keeps the run going with every command refused and exits 0. On Linux it checks that bubblewrap and socat are on `PATH` and that bubblewrap can start a sandbox with its own network namespace ([On Linux](#on-linux)). A failed check ends the run as failed, "The sandbox could not start", before setup and before the harness; the check counts against the run's time limit. Then the setup command, then the run's private temp folder, made new and `0700`, then the harness. A folder already there fails the run and is left alone. The launcher removes the folder it made when the harness exits, and Cancel removes the folder of a run it kills.
 
 - **The lock.** plotkeeper takes an exclusive lock on the folder's `lock` and hands it to the launcher as its standard input. The launcher gives it to no child and holds it until it exits, however it exits. A run is alive exactly while that lock is held, which plotkeeper asks without waiting.
 - **The status.** When the harness exits, or the time limit passes, the launcher writes `status.json` whole, by a temporary file and a rename. The check, the setup and the harness each run through the one process runner (`workbench/src/run.rs`, #568), in a process group of their own: at the limit the runner kills that group, and when one exits it kills what it left running there, so nothing a run started outlives it: not a run stopped at its limit, and not a stray child of a run that finished. The launcher's last act is then to kill its own process group, itself included.
@@ -148,6 +148,28 @@ What the gate found on the way, and changed here:
 - **`failIfUnavailable` does not stop such a run.** Inside another sandbox Claude Code starts, every command fails with `sandbox_apply: Operation not permitted`, and the run exits 0 as a success. Hence the launcher's check, and the reading of those words as a failure. An `(allow default)` profile still applies inside another sandbox, so the check's profile denies something.
 
 The raw output of each round is in `local-evidence/2026-11-24-issue-395-sandbox-gate/` on Daniel's machine. Rerun the gate after a Claude Code update: its behaviour here changed between the versions tried.
+
+### On Linux
+
+Claude Code's sandbox on Linux is bubblewrap, with socat for its network bridge, and when either is missing or the sandbox cannot start, Claude Code runs commands unsandboxed. So the launcher's check on Linux (`BWRAP_CHECK`, #704) looks both up on `PATH`, as Claude Code does, then runs `/bin/sh -c true` under bubblewrap in the shape Claude Code's sandbox runtime gives it, less its mounts and bridges:
+
+```
+bwrap --new-session --die-with-parent --unshare-net --ro-bind / / --dev /dev --unshare-pid --unshare-user \
+  --cap-drop ALL --proc /proc -- /bin/sh -c true
+```
+
+A run whose check fails ends as failed before setup and before the harness, with "The sandbox could not start:" and one of:
+
+| Cause | Message after "The sandbox could not start:" |
+|---|---|
+| No bubblewrap | `bubblewrap (bwrap) is not installed: install bubblewrap` |
+| No socat | `socat is not installed: install socat` |
+| A container or kernel that refuses user namespaces, such as Docker's default seccomp profile | `bwrap: No permissions to create new namespace, likely because the kernel does not allow non-privileged user namespaces. See <https://deb.li/bubblewrap> or <file:///usr/share/doc/bubblewrap/README.Debian.gz>.` |
+| A container that allows namespaces but masks paths of `/proc`, such as Docker with seccomp and AppArmor unconfined | `bwrap: Can't mount proc on /newroot/proc: Operation not permitted` |
+
+bubblewrap's own words are passed on as it prints them. The texts were measured on 2026-11-27 in Docker Desktop on the Mac (kernel 6.12.76-linuxkit, aarch64), as root and as a non-root user, with bubblewrap 0.8.0 (Debian 12) and 0.9.0 (Ubuntu 24.04), in 11 containers. In a Docker container the check passes with `--security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined`, or with `--privileged`; in the default container and with seccomp and AppArmor unconfined alone it fails, as above. Inside a passing sandbox the network has no interface but loopback and the kernel's tunnel devices. In every case the check agreed with `srt` 0.0.83 (the sandbox runtime Claude Code builds on): it passed where `srt /bin/sh -c true` passed and failed where it failed, and `srt` named the same missing tool ("Sandbox dependencies not available: bubblewrap (bwrap) not installed", "… socat not installed"). The raw output is in `local-evidence/2026-11-27-issue-704-linux-sandbox-probe/` on Daniel's machine.
+
+Not measured: a real host with Ubuntu 24.04's AppArmor limit on user namespaces (`kernel.apparmor_restrict_unprivileged_userns`), x86_64, and Claude Code's own words on Linux when its sandbox fails after the start. The words read as a failure after the start are those of [Outcome](#outcome), which are macOS's; bubblewrap's texts above were measured only for the start check, and are not matched after it, because a run that quotes them (working on plotkeeper's own runner or docs) would end failed at exit 0. The after-start words on Linux are left to the Docker trial (#709).
 
 ## Back a law
 

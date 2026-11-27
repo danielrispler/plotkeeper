@@ -53,6 +53,8 @@ use studio_workbench::agy_plugin;
 
 use crate::hook_copies::{self, Refresh};
 
+/// Whether the archived macOS app's `~/.zshrc` setup can exist here, so install and uninstall touch that file.
+const OLD_APP_SETUP: bool = cfg!(target_os = "macos");
 /// The plugin's and its marketplace's name for Claude Code.
 const NAME: &str = "plotkeeper";
 /// The plugin id `claude plugin` knows it by.
@@ -475,8 +477,10 @@ fn wire(
 
     // The archived app's line in `~/.zshrc`, once: a second install keeps the first record. Only the removed lines
     // are recorded, never a copy of the file, which may export a token.
+    // Only on macOS, where the archived app ran: elsewhere `~/.zshrc` is never read or written (#701).
     let zshrc = home.join(".zshrc");
-    if state.zshrc.is_none()
+    if OLD_APP_SETUP
+        && state.zshrc.is_none()
         && state.zshrc_edits.is_none()
         && let Ok(text) = fs::read_to_string(&zshrc)
     {
@@ -1408,8 +1412,10 @@ pub fn uninstall(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Resu
     undo.opencode();
     undo.agy();
     undo.claude();
-    undo.zshrc();
-    undo.zshrc_edits();
+    if OLD_APP_SETUP {
+        undo.zshrc();
+        undo.zshrc_edits();
+    }
     let Undo {
         out,
         bin,

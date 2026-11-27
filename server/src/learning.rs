@@ -43,10 +43,12 @@ pub struct Writers {
     pub keys: Vec<WriterKind>,
     /// The OpenAI-compatible writer's base URL, from `settings.json`; none: OpenAI's own.
     pub base_url: Option<String>,
+    /// Where the keys are kept, as the page names it: "the macOS Keychain" or "the Secret Service" (#510).
+    pub key_store: &'static str,
 }
 
 pub fn writers(app: &App) -> Writers {
-    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
+    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
     let mut writers = studio_understanding::found_writers(shell.as_ref());
     let keys = app.key_set().clone();
     let base_url = settings::openai_base_url();
@@ -62,6 +64,7 @@ pub fn writers(app: &App) -> Writers {
         briefs: app.briefs.writes(),
         keys,
         base_url,
+        key_store: app.keys.store(),
     }
 }
 
@@ -123,7 +126,7 @@ pub fn test_writer(
     }
 }
 
-/// Saves what the page set for API-key writer `writer` (spec #320, "API-key writers"): the key pasted, in the Keychain,
+/// Saves what the page set for API-key writer `writer` (spec #320, "API-key writers"): the key pasted, in the key store,
 /// replacing the one set, and given to the writer; for the OpenAI-compatible writer (#367), also its base URL, in
 /// `settings.json` (`expected` is the text the page last read; empty: OpenAI's own), and its key is optional. Returns
 /// `settings.json`'s new text when it changed. The key is never sent back, logged or written anywhere else.
@@ -167,7 +170,7 @@ pub fn set_api_key(
     Ok(Some(text))
 }
 
-/// Removes API-key writer `writer`'s key from the Keychain and from the writer, whose calls then fail as having no key; for
+/// Removes API-key writer `writer`'s key from the key store and from the writer, whose calls then fail as having no key; for
 /// the OpenAI-compatible writer, its base URL too. Returns `settings.json`'s new text when it changed.
 pub fn remove_api_key(
     app: &App,

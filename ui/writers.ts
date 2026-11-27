@@ -4,10 +4,10 @@
 // passes, a user who arrived with none configured gets no summaries (the Test gate), which the writer's notice line says.
 // PR briefs are written by `claude` whatever writer is picked, so without it the section, and the Map view's tray, say
 // "briefs need Claude".
-// An Anthropic API key (ticket #366) is pasted here and kept in the macOS Keychain; the server says only whether one is set,
-// and the API-key writer is listed, first, once it is. Below it, the OpenAI-compatible API (ticket #367): a base URL, kept in
-// `settings.json` as `summaries.base_url` (none: OpenAI's own), and an optional key, also kept in the Keychain, as a local
-// Ollama needs none.
+// An Anthropic API key (ticket #366) is pasted here and kept in the OS's key store, which the server names (`key_store`: the
+// macOS Keychain, or the Secret Service on Linux, #510); the server says only whether one is set, and the API-key writer is
+// listed, first, once it is. Below it, the OpenAI-compatible API (ticket #367): a base URL, kept in `settings.json` as
+// `summaries.base_url` (none: OpenAI's own), and an optional key, kept in the same store, as a local Ollama needs none.
 
 import { confirmed, drawWithStatus, failure, hint, invoke, messageOf, pressable, text } from "./dom.js";
 import type { Settings } from "./settings.js";
@@ -28,9 +28,9 @@ const OPENAI_URL = "https://api.openai.com/v1";
 /** Whether writer `kind`'s API key is set, as its key row says it; the key itself never reaches the page. */
 export const keySet = (list: Writers, kind: WriterKind = "anthropic"): boolean => list.keys.includes(kind);
 export function keyLine(list: Writers, kind: WriterKind = "anthropic"): string {
-  if (kind === "anthropic") return keySet(list) ? "Anthropic API key: set, kept in the macOS Keychain." : "Anthropic API key: not set.";
+  if (kind === "anthropic") return keySet(list) ? `Anthropic API key: set, kept in ${list.key_store}.` : "Anthropic API key: not set.";
   if (!list.writers.some((w) => w.kind === kind && w.found)) return "OpenAI-compatible API: not set.";
-  const key = keySet(list, kind) ? "key: set, kept in the macOS Keychain" : "no key";
+  const key = keySet(list, kind) ? `key: set, kept in ${list.key_store}` : "no key";
   return `OpenAI-compatible API at ${list.base_url ?? OPENAI_URL}, ${key}.`;
 }
 
@@ -176,10 +176,10 @@ function keyRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[]
   input.spellcheck = false;
   input.placeholder = set ? "Replace the API key…" : "Add an API key…";
   input.setAttribute("aria-label", "Anthropic API key");
-  hint(input, "An Anthropic API key; it is kept in the macOS Keychain and never shown again");
+  hint(input, `An Anthropic API key; it is kept in ${known.key_store} and never shown again`);
   const save = pressable(text("button", "Save key", "btn small"), null);
   save.id = "writer-key-save";
-  hint(save, "Keep the pasted key in the macOS Keychain, in place of any key set; the page never shows it again");
+  hint(save, `Keep the pasted key in ${known.key_store}, in place of any key set; the page never shows it again`);
   save.addEventListener("click", () => {
     const key = input.value.trim();
     if (!key) return;
@@ -201,9 +201,9 @@ function keyRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElement[]
   if (set) {
     const remove = pressable(text("button", "Remove key", "btn small"), null);
     remove.id = "writer-key-remove";
-    hint(remove, "Remove the key from the macOS Keychain; the API-key writer then cannot write");
+    hint(remove, `Remove the key from ${known.key_store}; the API-key writer then cannot write`);
     remove.addEventListener("click", async () => {
-      const lost = "The Anthropic API key is deleted from the macOS Keychain; the API-key writer cannot write until a key is pasted again.";
+      const lost = `The Anthropic API key is deleted from ${known.key_store}; the API-key writer cannot write until a key is pasted again.`;
       if (!(await confirmed({ heading: "Remove the API key?", lost, verb: "Remove key" }))) return;
       invoke("remove_api_key", { writer: "anthropic", expected: null })
         .then(() => {
@@ -284,10 +284,10 @@ function openaiRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElemen
   input.spellcheck = false;
   input.placeholder = keySet(known, "openai") ? "Replace the key (optional)…" : "Its API key (optional)…";
   input.setAttribute("aria-label", "API key of the OpenAI-compatible API");
-  hint(input, "The endpoint's API key, if it needs one; it is kept in the macOS Keychain and never shown again");
+  hint(input, `The endpoint's API key, if it needs one; it is kept in ${known.key_store} and never shown again`);
   const save = pressable(text("button", "Save", "btn small"), null);
   save.id = "writer-openai-save";
-  hint(save, "Keep the base URL in settings.json and any pasted key in the macOS Keychain; the page never shows the key again");
+  hint(save, `Keep the base URL in settings.json and any pasted key in ${known.key_store}; the page never shows the key again`);
   save.addEventListener("click", () => {
     const key = input.value.trim();
     input.value = "";
@@ -311,10 +311,10 @@ function openaiRow(panel: HTMLElement, hooks: Hooks, known: Writers): HTMLElemen
   if (found) {
     const remove = pressable(text("button", "Remove", "btn small"), null);
     remove.id = "writer-openai-remove";
-    hint(remove, "Remove the base URL from settings.json and the key from the macOS Keychain");
+    hint(remove, `Remove the base URL from settings.json and the key from ${known.key_store}`);
     remove.addEventListener("click", async () => {
       const url = known.base_url ? `The base URL ${known.base_url}` : "The base URL";
-      const lost = `${url} is removed from settings.json, and the endpoint's key, if one is set, from the macOS Keychain.`;
+      const lost = `${url} is removed from settings.json, and the endpoint's key, if one is set, from ${known.key_store}.`;
       if (!(await confirmed({ heading: "Remove the OpenAI-compatible API?", lost, verb: "Remove" }))) return;
       invoke("remove_api_key", { writer: "openai", expected: hooks.texts().settings })
         .then((settings) => {

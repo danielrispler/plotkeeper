@@ -12,9 +12,9 @@ const codex = (found) => ({ kind: "codex", name: "Codex", found, models: ["gpt-6
 const anthropic = (found) => ({ kind: "anthropic", name: "Anthropic API key", found, models: ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"], efforts: ["", "low", "medium", "high"] });
 const openai = (found) => ({ kind: "openai", name: "OpenAI-compatible API", found, models: ["gpt-6-luna", "gpt-5.6-luna", "gpt-5.6-terra"], efforts: ["", "low", "medium", "high"] });
 // `keys`: the API-key writers whose key is set, by default the Anthropic one when it is found; `base_url`: the OpenAI-compatible
-// writer's, when one is set.
-const list = (writers, summaries_on = false, briefs = true, keys = writers.filter((w) => w.kind === "anthropic" && w.found).map((w) => w.kind), base_url = null) =>
-  ({ writers, summaries_on, briefs, keys, base_url });
+// writer's, when one is set; `key_store`: where the server keeps the keys (#510).
+const list = (writers, summaries_on = false, briefs = true, keys = writers.filter((w) => w.kind === "anthropic" && w.found).map((w) => w.kind), base_url = null, key_store = "the macOS Keychain") =>
+  ({ writers, summaries_on, briefs, keys, base_url, key_store });
 /** @param {import("../../dist/types.js").WriterKind} [writer] */
 const settings = (writer = "claude", model = "haiku", effort = "") => ({ model, effort, on_open: false, writer });
 
@@ -81,6 +81,10 @@ test("the API key set comes first in the preset order, and the key row says it i
   const set = list([anthropic(true), claude(true), agy(true)]);
   assert.equal(keySet(set), true);
   assert.match(keyLine(set), /: set, kept in the macOS Keychain/);
+  // On Linux, the row names the store the server keeps it in (#510).
+  const linux = list([anthropic(true), openai(true)], false, true, ["anthropic", "openai"], null, "the Secret Service");
+  assert.equal(keyLine(linux), "Anthropic API key: set, kept in the Secret Service.");
+  assert.match(keyLine(linux, "openai"), /key: set, kept in the Secret Service\.$/);
   assert.deepEqual(preset(set, settings()), { writer: "anthropic", model: "claude-haiku-5-5", effort: "" });
   // A Test of the Anthropic writer reads as any writer's.
   assert.deepEqual(testLine({ outcome: "not_logged_in", line: "`anthropic` has no working API key. Add or replace the API key in Settings, under the gear at the top of the page.", settings: null }).passed, false);

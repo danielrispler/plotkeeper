@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { bound, titled, keyLabel, keystroke, newestUnseen, nextNeedsYou, stepLine, paletteEntries, run, stepSession, windowBinding } from "../../dist/keys.js";
-import { initial, reload } from "../../dist/settings.js";
+import { defaultsFor, initial, platformOf, reload } from "../../dist/settings.js";
 
 const key = (code, mods = {}, key = "") => ({
   key, code, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...mods,
@@ -291,4 +291,87 @@ test("a binding named __proto__, constructor or toString runs nothing: it is an 
   const { keymap } = reload(initial, { settings: null, keymap: `[{ "bindings": { "cmd-8": "constructor", "cmd-7": "toString" } }]` });
   const titles = paletteEntries(keymap, [...actions.keys()]).map((entry) => entry.title);
   assert.deepEqual(titles, ["Toggle list"]);
+});
+
+// Linux (spec #510, user stories 22-25; #705). The page picks its default keymap by platform: Cmd on macOS, Ctrl elsewhere.
+// The keys the browser or the desktop already owns on Linux, so no default may sit on them. Chrome's from its Windows & Linux list
+// (support.google.com/chrome/answer/157179, read 2026-11-27); Firefox's and IBus's from their usual bindings (unverified here).
+const BROWSER_OWNED = [
+  // Chrome: tabs, windows, find, history, downloads, address bar, print, save, reload, open, source, bookmark, zoom.
+  ...["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "=", "-", "tab"].map((k) => `ctrl-${k}`),
+  ..."nwtfghjlkeprsoud".split("").map((k) => `ctrl-${k}`),
+  // Chrome: incognito, reopen, close window, bookmarks bar and manager, find previous, devtools, hard reload, bookmark all, profiles;
+  // Ctrl+Enter and Ctrl+Shift+Enter in the address bar.
+  ..."ntwbogjrdm".split("").map((k) => `ctrl-shift-${k}`), "ctrl-shift-delete", "ctrl-enter", "ctrl-shift-enter",
+  // Firefox: library, page info, bookmarks sidebar, mute, quit, redo; private window, history, responsive view, consoles,
+  // downloads, screenshot, text direction, add-ons, inspector. IBus: Ctrl+Shift+U types a Unicode character.
+  ..."ibmqy".split("").map((k) => `ctrl-${k}`),
+  ..."phmkeyjsxaciqu".split("").map((k) => `ctrl-shift-${k}`),
+  // Chrome's menu and its back and forward.
+  "alt-f", "alt-e", "alt-d", "alt-left", "alt-right", "alt-home",
+];
+
+test("the default keymap is Cmd's on macOS and Ctrl's on Linux, never on a key the browser owns", () => {
+  assert.equal(platformOf("MacIntel"), "mac");
+  assert.equal(platformOf("macOS"), "mac");
+  assert.equal(platformOf("Linux x86_64"), "linux");
+  assert.equal(platformOf("Linux"), "linux");
+  const mac = defaultsFor("mac").keymap.get("Workspace");
+  assert.equal(mac.get("cmd-j"), "studio::NextNeedsYou");
+  assert.equal(mac.get("shift-cmd-p"), "studio::Palette");
+  const linux = defaultsFor("linux").keymap.get("Workspace");
+  const strokes = [...linux.keys()];
+  assert.ok(strokes.every((s) => !s.includes("cmd")), `a Linux default holds Cmd: ${strokes}`);
+  for (const stroke of strokes) assert.ok(!BROWSER_OWNED.includes(stroke), `${stroke} is the browser's`);
+  // Every action the macOS defaults bind is bound on Linux too, and each Cmd key moved to Ctrl.
+  const actions = (map) => new Set([...map.values()].map((b) => JSON.stringify(b)));
+  assert.deepEqual(actions(linux), actions(mac));
+  for (const [stroke, action] of linux) if (!mac.has(stroke)) assert.match(stroke, /^ctrl-/, `${stroke} -> ${action}`);
+  assert.deepEqual([...defaultsFor("linux").keymap.get("List")], [...defaultsFor("mac").keymap.get("List")]);
+});
+
+test("on Linux the Ctrl defaults run, and a held Ctrl key repeats as a held Cmd key does on macOS", () => {
+  const { keymap } = defaultsFor("linux");
+  const ctrl = (code, more = {}) => key(code, { ctrlKey: true, ...more });
+  assert.equal(windowBinding(keymap, ctrl("BracketRight"), false, false, false, "linux"), "studio::NextSession");
+  assert.equal(windowBinding(keymap, ctrl("BracketLeft"), false, false, false, "linux"), "studio::PreviousSession");
+  assert.equal(windowBinding(keymap, ctrl("Backslash"), false, false, false, "linux"), "studio::NextNeedsYou");
+  assert.equal(windowBinding(keymap, ctrl("Backslash", { shiftKey: true }), false, false, false, "linux"), "studio::JumpToUnseen");
+  assert.equal(windowBinding(keymap, ctrl("Space", { shiftKey: true }), false, false, false, "linux"), "studio::Palette");
+  assert.equal(windowBinding(keymap, ctrl("KeyL", { shiftKey: true }), false, false, false, "linux"), "studio::ShowMap");
+  assert.equal(windowBinding(keymap, ctrl("KeyF", { shiftKey: true }), false, false, false, "linux"), "studio::ToggleFocus");
+  // Cmd (Super) does nothing on Linux, and a held Ctrl key steps on.
+  assert.equal(windowBinding(keymap, key("BracketRight", { metaKey: true }), false, false, false, "linux"), undefined);
+  assert.equal(windowBinding(keymap, { ...ctrl("BracketRight"), repeat: true }, false, false, false, "linux"), "studio::NextSession");
+  // Typing in a field, a Ctrl shortcut still runs, as a Cmd one does on macOS.
+  assert.equal(windowBinding(keymap, ctrl("BracketRight"), true, false, false, "linux"), "studio::NextSession");
+});
+
+test("on Linux the text-editing Ctrl keys keep their text meaning in a field, even when keymap.json binds them", () => {
+  const strokes = ["ctrl-a", "ctrl-c", "ctrl-v", "ctrl-x", "ctrl-z", "ctrl-shift-z", "ctrl-y", "ctrl-left", "ctrl-shift-right", "ctrl-backspace", "ctrl-delete", "ctrl-home", "ctrl-shift-end"];
+  const bindings = Object.fromEntries(strokes.map((s) => [s, "studio::Palette"]));
+  const { keymap } = reload(defaultsFor("linux"), { settings: null, keymap: JSON.stringify([{ bindings }]) }, "linux");
+  const codes = { a: "KeyA", c: "KeyC", v: "KeyV", x: "KeyX", z: "KeyZ", y: "KeyY", left: "ArrowLeft", right: "ArrowRight", backspace: "Backspace", delete: "Delete", home: "Home", end: "End" };
+  for (const stroke of strokes) {
+    const name = stroke.replace(/^ctrl-(shift-)?/, "");
+    const press = key(codes[name], { ctrlKey: true, shiftKey: stroke.includes("shift-") });
+    assert.equal(windowBinding(keymap, press, true, false, false, "linux"), undefined, `${stroke} while typing`);
+    // Outside a field the user's binding runs.
+    assert.equal(windowBinding(keymap, press, false, false, false, "linux"), "studio::Palette", `${stroke} outside a field`);
+  }
+});
+
+test("the palette shows Ctrl on Linux and the macOS glyphs on macOS", () => {
+  assert.equal(keyLabel("ctrl-shift-space", "linux"), "Ctrl+Shift+Space");
+  assert.equal(keyLabel("ctrl-]", "linux"), "Ctrl+]");
+  assert.equal(keyLabel("ctrl-alt-left", "linux"), "Ctrl+Alt+←");
+  assert.equal(keyLabel("cmd-k", "linux"), "Super+K");
+  assert.equal(keyLabel("escape", "linux"), "Esc");
+  assert.equal(keyLabel("0", "linux"), "0");
+  assert.equal(keyLabel("shift-cmd-p", "mac"), "⇧⌘P");
+  const linux = defaultsFor("linux").keymap;
+  const palette = paletteEntries(linux, ["studio::Palette", "studio::NextSession"], "linux");
+  assert.deepEqual(palette.map((e) => e.keys), [["Ctrl+]"], ["Ctrl+Shift+Space"]]);
+  assert.equal(titled(linux, "Map", "studio::ShowMap", "linux"), "Map (Ctrl+Shift+L)");
+  assert.deepEqual(paletteEntries(defaultsFor("mac").keymap, ["studio::Palette"], "mac")[0].keys, ["⇧⌘P"]);
 });

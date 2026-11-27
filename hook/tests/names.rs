@@ -4,8 +4,12 @@
 use std::{fs, path::Path};
 
 fn old_name(text: &str) -> bool {
-    // VS Code's app is "Visual Studio Code", which is no name of plotkeeper's (#361).
-    let text = text.to_lowercase().replace("visual studio code", "");
+    // VS Code's app is "Visual Studio Code", and its Linux package folder `visual-studio-code`;
+    // neither is a name of plotkeeper's (#361, #702).
+    let text = text
+        .to_lowercase()
+        .replace("visual studio code", "")
+        .replace("visual-studio-code", "");
     text.contains("studio") || text.contains("falinks")
 }
 

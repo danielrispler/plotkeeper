@@ -166,7 +166,7 @@ pub fn uptime() -> Duration {
 /// agy's version, from `agy --version` run in Daniel's login shell, so a Dock-started app finds it
 /// on his `PATH`; `None` when agy is missing or fails.
 fn agy_version() -> Option<String> {
-    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
+    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
     let out = Command::new(shell)
         .args(["-lc", "agy --version"])
         .output()

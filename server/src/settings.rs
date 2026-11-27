@@ -484,8 +484,8 @@ fn plain_json(text: &str) -> String {
     out
 }
 
-/// Where the API-key writers' keys are kept (spec #320, "API-key writers"): the macOS Keychain under plotkeeper's own
-/// entries, one per writer, or memory in a test. Never another tool's config or the environment. A key goes in and is read
+/// Where the API-key writers' keys are kept (spec #320, "API-key writers"): the OS's own store under plotkeeper's own
+/// entries, one per writer (the macOS Keychain, or the Secret Service on Linux, #510), or memory in a test. Never another tool's config or the environment. A key goes in and is read
 /// back by the writer; the page only ever learns whether one is set.
 pub trait ApiKeys: Send + Sync {
     /// Writer `kind`'s key, when one is set.
@@ -494,6 +494,8 @@ pub trait ApiKeys: Send + Sync {
     fn set(&self, kind: WriterKind, key: &str) -> Result<(), String>;
     /// Removes writer `kind`'s key; none set is no error.
     fn remove(&self, kind: WriterKind) -> Result<(), String>;
+    /// The store's name as the page says it, such as "the macOS Keychain"; never a key.
+    fn store(&self) -> &'static str;
 }
 
 /// The Keychain entries: service `plotkeeper`, account `anthropic-api-key` or `openai-api-key`, through the `security`
@@ -606,9 +608,149 @@ impl ApiKeys for Keychain {
             Some(_) => Err("The Keychain did not remove the key.".into()),
         }
     }
+
+    fn store(&self) -> &'static str {
+        "the macOS Keychain"
+    }
 }
 
-/// Keys kept in memory: a test's, and the server's until it is given the Keychain at start.
+/// The Secret Service entries on Linux (#510, "API keys"): the same service and accounts as the Keychain's, through
+/// `secret-tool` (libsecret) found on the PATH, which only ever touches these entries. There is no fallback: with no
+/// `secret-tool` or no Secret Service running, a save is refused with what to install, and no key is read. A call that
+/// does not answer by its deadline, 10 s, is killed, so a locked keyring never holds up the server's start.
+pub struct SecretTool {
+    /// How long one `secret-tool` call may take.
+    deadline: std::time::Duration,
+}
+
+impl Default for SecretTool {
+    fn default() -> Self {
+        Self::with_deadline(std::time::Duration::from_secs(10))
+    }
+}
+
+impl SecretTool {
+    /// The Secret Service with each `secret-tool` call cut off at `deadline`, for a test.
+    pub fn with_deadline(deadline: std::time::Duration) -> Self {
+        Self { deadline }
+    }
+}
+
+const NO_SECRET_TOOL: &str = "secret-tool is not installed; install libsecret-tools.";
+const NO_SECRET_STORE: &str =
+    "No secret store on this machine; install a keyring and libsecret-tools, or pick a CLI writer.";
+/// What a timed-out `secret-tool` call says, with the action to try again: "save" or "remove".
+fn keyring_silent(again: &str) -> String {
+    format!(
+        "The keyring did not answer; it may be locked and waiting to be unlocked. Unlock it, then {again} again."
+    )
+}
+
+/// Whether `secret-tool`'s error says no Secret Service is reachable: no session bus to reach it on, or a bus with no
+/// store on it (GLib's and D-Bus's own words, which `secret-tool` prints after its name).
+fn no_secret_store(error: &str) -> bool {
+    let error = error.to_ascii_lowercase();
+    [
+        "org.freedesktop.secrets",
+        "d-bus",
+        "dbus",
+        "message bus",
+        "could not connect",
+    ]
+    .iter()
+    .any(|marker| error.contains(marker))
+}
+
+impl SecretTool {
+    /// Runs `secret-tool <action> [--label=…] service plotkeeper account <account>`, `stdin` written whole, then closed,
+    /// through the one process runner: one that exits without reading its input is still heard, and one that does not
+    /// answer by the deadline, as a locked keyring waiting on an unlock prompt no one sees, is killed. Its error, which
+    /// never holds the key, is read only to tell a missing store from another failure.
+    fn run(
+        &self,
+        action: &str,
+        kind: WriterKind,
+        stdin: Option<&str>,
+    ) -> Result<std::process::Output, String> {
+        use studio_workbench::run::{RunError, run_until, run_until_with_input};
+        let account = account(kind);
+        let label = format!("--label=plotkeeper {account}");
+        let mut command = std::process::Command::new("secret-tool");
+        command.arg(action);
+        if action == "store" {
+            command.arg(&label);
+        }
+        command.args(["service", SERVICE, "account", &account]);
+        let ran = match stdin {
+            Some(stdin) => run_until_with_input(&mut command, stdin.as_bytes(), self.deadline),
+            None => run_until(&mut command, self.deadline),
+        };
+        let out = match ran {
+            Ok(out) | Err(RunError::Failed(out)) => out,
+            Err(RunError::Start(e)) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(NO_SECRET_TOOL.into());
+            }
+            Err(RunError::Start(e)) => {
+                return Err(format!("the Secret Service could not be reached: {e}"));
+            }
+            Err(RunError::TimedOut(_)) => {
+                return Err(keyring_silent(if action == "clear" {
+                    "remove"
+                } else {
+                    "save"
+                }));
+            }
+        };
+        if !out.status.success() && no_secret_store(&String::from_utf8_lossy(&out.stderr)) {
+            return Err(NO_SECRET_STORE.into());
+        }
+        Ok(out)
+    }
+}
+
+impl ApiKeys for SecretTool {
+    fn get(&self, kind: WriterKind) -> Option<String> {
+        let out = (self.run("lookup", kind, None).ok()).filter(|out| out.status.success())?;
+        let key = String::from_utf8(out.stdout).ok()?.trim().to_string();
+        (!key.is_empty()).then_some(key)
+    }
+
+    fn set(&self, kind: WriterKind, key: &str) -> Result<(), String> {
+        if !plain_key(key) {
+            return Err("That is not an API key: it is printable characters with no space.".into());
+        }
+        // The key goes on standard input, read whole as the secret, so it never shows in the process list.
+        let out = self.run("store", kind, Some(key))?;
+        if out.status.success() && self.get(kind).as_deref() == Some(key) {
+            Ok(())
+        } else {
+            Err("The Secret Service did not save the key; check that your keyring is unlocked, then save again.".into())
+        }
+    }
+
+    fn remove(&self, kind: WriterKind) -> Result<(), String> {
+        self.run("clear", kind, None)?;
+        match self.get(kind) {
+            None => Ok(()),
+            Some(_) => Err("The Secret Service did not remove the key.".into()),
+        }
+    }
+
+    fn store(&self) -> &'static str {
+        "the Secret Service"
+    }
+}
+
+/// The OS's own key store, which the server is given at start: the Keychain on macOS, the Secret Service on Linux.
+pub fn os_keys() -> std::sync::Arc<dyn ApiKeys> {
+    #[cfg(target_os = "macos")]
+    let keys = std::sync::Arc::new(Keychain::default());
+    #[cfg(not(target_os = "macos"))]
+    let keys = std::sync::Arc::new(SecretTool::default());
+    keys
+}
+
+/// Keys kept in memory: a test's, and the server's until it is given the OS's store at start (`os_keys`).
 #[derive(Default)]
 pub struct MemoryKeys(Mutex<std::collections::HashMap<WriterKind, String>>);
 
@@ -628,6 +770,10 @@ impl ApiKeys for MemoryKeys {
     fn remove(&self, kind: WriterKind) -> Result<(), String> {
         self.0.lock().unwrap().remove(&kind);
         Ok(())
+    }
+
+    fn store(&self) -> &'static str {
+        "memory"
     }
 }
 

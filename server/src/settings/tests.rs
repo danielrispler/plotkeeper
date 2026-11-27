@@ -566,3 +566,24 @@ esac
         );
     }
 }
+
+/// A `secret-tool` that exits on a missing store without reading its standard input closes the pipe the input is
+/// written to; its error is still what it said. An input that fills the pipe makes the write fail every time; a key,
+/// at most 512 characters, only when the program wins the race to exit, which is why this calls `run` itself.
+#[test]
+fn a_secret_tool_that_exits_before_reading_its_input_is_still_heard() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let program = dir.path().join("secret-tool");
+    std::fs::write(
+        &program,
+        "#!/bin/sh\necho 'secret-tool: Cannot autolaunch D-Bus without X11 $DISPLAY' >&2\nexit 1\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // SAFETY: nextest runs each test in a process of its own, and no thread has started yet.
+    unsafe { std::env::set_var("PATH", format!("{}:/usr/bin:/bin", dir.path().display())) };
+    let input = "k".repeat(1 << 20);
+    let said = super::SecretTool::default().run("store", WriterKind::Anthropic, Some(&input));
+    assert_eq!(said.err().as_deref(), Some(super::NO_SECRET_STORE));
+}

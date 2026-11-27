@@ -42,7 +42,7 @@
         { "name": "Serving the page", "text": "The built page, a POST route per command and one event stream, which also carries logged errors, behind a token, a cookie and a Host check.", "paths": ["server/src/web.rs", "server/src/api.rs", "server/src/lock.rs"] },
         { "name": "The commands", "text": "The functions behind the page's learning-layer and session-view commands.", "paths": ["server/src/learning.rs", "server/src/session_view.rs"] },
         { "name": "The read loop", "text": "Follows the event log and sends what changed (the list, the selection, the brief, notices, the text of the settings files) to the page.", "paths": ["server/src/read_loop.rs"] },
-        { "name": "Settings and projects", "text": "The writer, its API keys in plotkeeper's own Keychain entries, the settings and the saved project list.", "paths": ["server/src/settings.rs", "server/src/settings/", "server/src/projects.rs", "server/src/projects/"] },
+        { "name": "Settings and projects", "text": "The writer, its API keys in plotkeeper's own Keychain entries (the Secret Service's on Linux), the settings and the saved project list.", "paths": ["server/src/settings.rs", "server/src/settings/", "server/src/projects.rs", "server/src/projects/"] },
         { "name": "The programs", "text": "`plotkeeper`, which starts the server and opens the page, and `plotkeeper-run`, the launcher of one background run.", "paths": ["server/src/bin/plotkeeper.rs", "server/src/bin/plotkeeper-run.rs"] }
       ],
       "tier": "core", "paths": ["server/"]
@@ -126,6 +126,17 @@
         { "name": "The atomic write", "text": "Saves a whole JSON file by a synced temporary file beside it, renamed over it, for the server's and the understanding layer's stores.", "paths": ["workbench/src/lib.rs"] }
       ],
       "tier": "black-box", "paths": ["workbench/"]
+    },
+    {
+      "id": "npm-package", "name": "npm package", "caption": "npx plotkeeper",
+      "purpose": "The npm packages that install plotkeeper with no Rust: a launcher package and one package of binaries per platform, and the scripts that build, smoke-test and release them.",
+      "holds": [
+        { "name": "The launcher", "text": "Runs the platform package's `plotkeeper`, passing arguments, streams, exit code and signals through.", "paths": ["npm/launcher.js"] },
+        { "name": "The packages", "text": "Packs the launcher and this machine's platform package: universal macOS binaries, or static musl ones on Linux.", "paths": ["npm/package.json", "scripts/npm/pack.sh"] },
+        { "name": "The smoke test", "text": "Installs the packed tarballs with no Rust on the PATH and starts, wires and stops plotkeeper as a user would.", "paths": ["scripts/npm/smoke.sh"] },
+        { "name": "The release script", "text": "Bumps the versions, writes each platform package's manifest, guards the publish and tags the release.", "paths": ["scripts/npm/release.mjs"] }
+      ],
+      "tier": "black-box", "paths": ["npm/", "scripts/npm/"]
     }
   ],
   "actors": [
@@ -134,6 +145,8 @@
     { "id": "github", "name": "GitHub" }
   ],
   "links": [
+    { "id": "npm-package-server", "from": "npm-package", "to": "server", "kind": "spawn",
+      "reason": "The launcher starts the platform package's `plotkeeper`, with the launcher's arguments, streams and signals." },
     { "id": "agents-plugins", "from": "agents", "to": "plugins", "kind": "file",
       "reason": "Each agent reads its plugin's hook config to learn which events to send to the hook." },
     { "id": "plugins-hook", "from": "plugins", "to": "hook", "kind": "spawn",
@@ -180,12 +193,14 @@
   ],
   "ignored": [
     ".agents/", ".claude/", ".github/", ".gitignore", "AGENTS.md", "CHANGELOG.md", "CLAUDE.md", "Cargo.lock", "Cargo.toml", "LICENSE",
-    "README.md", "package-lock.json", "package.json", "npm/", "rust-toolchain.toml", "tsconfig.json", "biome.json", "knip.jsonc",
+    "README.md", "package-lock.json", "package.json", "rust-toolchain.toml", "tsconfig.json", "biome.json", "knip.jsonc",
     "skills-lock.json",
-    "docs/", "scripts/", "archive/",
+    "docs/", "scripts/agents/", "scripts/review/", "scripts/snap/", "scripts/system-map/", "scripts/wire/", "archive/",
     "wayfinder/", "test-support/"
   ],
   "laws": [
+    { "id": "launcher-passes-everything-through", "on": "npm-package", "backing": "check",
+      "text": "The launcher passes plotkeeper its arguments, standard streams and stop signals, and exits as plotkeeper did." },
     { "id": "git-and-gh-go-through-the-runner", "on": "workbench", "backing": "check",
       "text": "Every `git` and `gh` the workspace starts is built by the runner, so none can wait on a prompt." },
     { "id": "install-never-opens-claude-settings", "on": "install", "backing": "check",

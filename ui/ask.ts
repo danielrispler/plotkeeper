@@ -5,7 +5,9 @@
 // a retry.
 
 import { availability, failure, held, hint, invoke, isUnavailable, keepOnly, messageOf, onEnter, pressable, text } from "./dom.js";
+import { keyLabel, primary } from "./keys.js";
 import { rendered } from "./markdown.js";
+import { platform } from "./settings.js";
 import type { Anchor, Facts, Hunk } from "./types.js";
 
 /** A hunk as plain text; `more` ends it with "… N more lines" when the cap left some out, for a view with no button of its own. */
@@ -102,7 +104,7 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
   field.autocomplete = "off";
   field.placeholder = "Your question; the session never sees it…";
   field.setAttribute("aria-label", `Your question about ${what}`);
-  const sendHover = "Ask about this, from what was recorded; the session never sees it (⌘↩)";
+  const sendHover = `Ask about this, from what was recorded; the session never sees it (${keyLabel(platform === "mac" ? "cmd-enter" : "ctrl-enter")})`;
   const send = button("Ask");
   availability(send, sendHover);
   const reply = document.createElement("div");
@@ -126,8 +128,8 @@ function askBox(session: string, anchor: Anchor, what: string): HTMLDetailsEleme
     availability(send, sendHover);
   };
   send.addEventListener("click", ask);
-  // ⌘↩ asks, as Enter alone makes a new line.
-  field.addEventListener("keydown", (event) => event.metaKey && event.key === "Enter" && ask());
+  // ⌘↩ asks (Ctrl+Enter off macOS), as Enter alone makes a new line.
+  field.addEventListener("keydown", (event) => primary(event) && event.key === "Enter" && ask());
   const why = "turn" in anchor ? whyNotBox(session, anchor.turn) : null;
   const picks = document.createElement("div");
   picks.className = "ask-suggestions";

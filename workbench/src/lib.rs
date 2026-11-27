@@ -65,7 +65,7 @@ pub fn gh_path() -> &'static str {
     static GH: OnceLock<String> = OnceLock::new();
     GH.get_or_init(|| {
         // An app started from the Dock gets launchd's `PATH`, which lacks Homebrew's folder.
-        let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
+        let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
         let found = Command::new(shell).args(["-lc", "command -v gh"]).output();
         let found = found.ok().filter(|o| o.status.success()).map(|o| o.stdout);
         found

@@ -1,9 +1,9 @@
 # plotkeeper
 
-**A local macOS control room for coding agents that explains what your prompts changed.**
+**A local control room for coding agents that explains what your prompts changed.**
 
 [![npm version](https://img.shields.io/npm/v/plotkeeper)](https://www.npmjs.com/package/plotkeeper)
-[![macOS only](https://img.shields.io/badge/platform-macOS%20only%20(Apple%20Silicon%20%26%20Intel)-black?logo=apple)](#quick-start)
+[![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-black)](#quick-start)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 ```sh
@@ -41,13 +41,22 @@ Copilot, Qwen Code and OpenCode (version 2) are experimental (wired, untrialled)
 
 ## Quick start
 
-**macOS only** (Apple Silicon & Intel) with Node.js. Run `npx plotkeeper`: first start lists detected agents and asks `Wire these? [Y/n]`. Yes wires them and opens the page (in Codex, run `/hooks` once to trust its hooks); No starts without recording. Answers are kept per agent; `Ctrl+C` stops plotkeeper.
+macOS (Apple Silicon and Intel) and Linux (x86_64 and arm64, a desktop as the target) with Node.js. Run `npx plotkeeper`: first start lists detected agents and asks `Wire these? [Y/n]`. Yes wires them and opens the page (in Codex, run `/hooks` once to trust its hooks); No starts without recording. Answers are kept per agent; `Ctrl+C` stops plotkeeper.
 
-Summaries default to `claude -p` (`claude` on `~/.zprofile` `PATH`); Settings picks another CLI or API-key writer.
+Summaries default to `claude -p` (`claude` on your login shell's `PATH`); Settings picks another CLI or API-key writer.
 
 - **Daily use:** `npm i -g plotkeeper && plotkeeper` (avoids ~70 s offline `npx` wait; or `npx --prefer-offline plotkeeper`).
 - **CLI:** `plotkeeper install` (`--yes` for scripts), `plotkeeper uninstall` (undoes wiring, keeps history; [details](docs/studio/plugin.md)), `plotkeeper --version`.
 - **From source** (Rust): `git clone ... && npm ci && npm start`.
+
+## Linux and WSL2
+
+Linux (x86_64 and arm64, desktop as the target) is supported. Install `bubblewrap` and `socat` for [background runs](docs/studio/behaviour/background-runs.md), and `libsecret-tools` with a keyring (GNOME Keyring or KWallet) for API keys; without a keyring, saving a key is refused.
+
+- **Confirmed** in a Docker trial (arm64; x86_64 only in CI): install wires Claude Code and Codex, their sessions are recorded and end when the agent exits, and the background-run sandbox check refuses where user namespaces are barred and passes where allowed. Codex's terminal app records no process id, as on macOS: `/quit` ends its session, `Ctrl+C` leaves it idle.
+- **WSL2** (untried): agents inside WSL2 should record and run in the background as on Linux; API keys and Windows-side agents do not.
+- **Remote box:** reach its `127.0.0.1` page with `ssh -L <port>:127.0.0.1:<port> <host>`.
+- **Unverified:** a desktop secret store with a real keyring; Cursor, agy, Copilot and Qwen Code sessions; shortcut collisions in a Linux browser; Ubuntu 24.04's AppArmor limit on user namespaces.
 
 ## Local-first & privacy
 
@@ -61,7 +70,7 @@ Coding agents write code faster than I can read their diffs. I was losing track 
 
 ## Status
 
-Early preview · **macOS only** (Apple Silicon and Intel). Issues are welcome; pull requests are not reviewed yet.
+Early preview · macOS and Linux (see [Linux and WSL2](#linux-and-wsl2)). Issues are welcome; pull requests are not reviewed yet.
 
 ## Documentation
 

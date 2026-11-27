@@ -144,7 +144,7 @@ pub struct App {
     /// Whether the story rail shows, as the UI last said: not in focus mode, behind a closed overlay or under the skills
     /// browser, when a turn on it is not seen (danielrispler/Falinks#556).
     pub rail_shown: AtomicBool,
-    /// Where the API-key writers' keys are kept: the Keychain at start (`with_keys`), memory before; and the writers whose
+    /// Where the API-key writers' keys are kept: the OS's store at start (`with_keys`, `settings::os_keys`), memory before; and the writers whose
     /// key is set, all the page learns of them.
     pub keys: Arc<dyn settings::ApiKeys>,
     key_set: Mutex<Vec<WriterKind>>,
@@ -239,11 +239,11 @@ impl App {
             }))
         };
         let app = Self::open_with(log, cards, notes, writer, effects)?;
-        // The checks' fake writer keeps its key in memory, so no check reads the Keychain.
+        // The checks' fake writer keeps its key in memory, so no check reads the OS's key store.
         Ok(if fake {
             app
         } else {
-            app.with_keys(Arc::new(settings::Keychain::default()))
+            app.with_keys(settings::os_keys())
         })
     }
 

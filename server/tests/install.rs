@@ -4,6 +4,7 @@
 
 use std::{
     collections::BTreeMap,
+    ffi::OsStr,
     fs,
     io::{Read, Write},
     os::unix::fs::{FileTypeExt, PermissionsExt},
@@ -12,6 +13,12 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+
+/// The data folder, relative to the home, where `plotkeeper` puts it with no `XDG_DATA_HOME`, which no start here has.
+#[cfg(target_os = "macos")]
+const DATA: &str = "Library/Application Support/plotkeeper";
+#[cfg(target_os = "linux")]
+const DATA: &str = ".local/share/plotkeeper";
 
 /// A scratch machine: `home`, and `tools` holding a copy of `plotkeeper` with fake hook binaries beside it and,
 /// when asked, the fake `claude` and `agy`.
@@ -125,6 +132,7 @@ esac"#,
         let mut child = Command::new(self.tools.join("plotkeeper"))
             .args(args)
             .env("HOME", &self.home)
+            .env_remove("XDG_DATA_HOME")
             .env("PATH", format!("{}:/usr/bin:/bin", self.tools.display()))
             .env("PLOTKEEPER_NO_BROWSER", "1")
             .stdin(Stdio::null())
@@ -146,16 +154,13 @@ esac"#,
 
     fn starting(&self, terminal: bool) -> Command {
         let mut command = if terminal {
-            let mut script = Command::new("/usr/bin/script");
-            script
-                .args(["-q", "/dev/null"])
-                .arg(self.tools.join("plotkeeper"));
-            script
+            in_terminal(&[self.tools.join("plotkeeper").as_os_str()])
         } else {
             Command::new(self.tools.join("plotkeeper"))
         };
         command
             .env("HOME", &self.home)
+            .env_remove("XDG_DATA_HOME")
             .env("PATH", format!("{}:/usr/bin:/bin", self.tools.display()))
             .env("PLOTKEEPER_NO_BROWSER", "1")
             .env("PLOTKEEPER_CARD_WRITER", "fake")
@@ -164,7 +169,7 @@ esac"#,
         command
     }
 
-    /// A bare `plotkeeper` start in a terminal, given through macOS's `/usr/bin/script`: each `Wire these? [Y/n]` it
+    /// A bare `plotkeeper` start in a terminal, given through `/usr/bin/script` (`in_terminal`): each `Wire these? [Y/n]` it
     /// asks is answered with the next of `answers`, and once it prints its address it is stopped with Ctrl+C. Returns
     /// all it printed, with the terminal's line endings made plain.
     fn start(&self, answers: &[&str]) -> String {
@@ -214,7 +219,7 @@ esac"#,
     }
 
     fn data(&self) -> PathBuf {
-        self.home.join("Library/Application Support/plotkeeper")
+        self.home.join(DATA)
     }
 
     fn bin(&self) -> String {
@@ -270,6 +275,30 @@ fn served(child: &mut Child, mut each: impl FnMut(&str, bool)) -> String {
         reader.join().unwrap();
     }
     text.lock().unwrap().clone()
+}
+
+/// `command` run in a terminal of its own by `/usr/bin/script`, which logs to `/dev/null`. macOS's BSD `script`
+/// takes the command's words after the log file; Linux's util-linux `script` takes one shell line after `-c`, so
+/// there each word is single-quoted.
+fn in_terminal(command: &[&OsStr]) -> Command {
+    let mut script = Command::new("/usr/bin/script");
+    #[cfg(target_os = "macos")]
+    script.args(["-q", "/dev/null"]).args(command);
+    #[cfg(target_os = "linux")]
+    {
+        let words: Vec<String> = command
+            .iter()
+            .map(|word| format!("'{}'", word.to_string_lossy().replace('\'', r"'\''")))
+            .collect();
+        script.args([
+            "-q",
+            "-e",
+            "-c",
+            &format!("exec {}", words.join(" ")),
+            "/dev/null",
+        ]);
+    }
+    script
 }
 
 fn script(path: &Path, body: &str) {
@@ -342,10 +371,7 @@ fn install_then_uninstall_leaves_every_file_byte_identical() {
         m.write(".codex/hooks.json", "{}\n");
         m.write(".claude/settings.json", "{ \"theme\": \"dark\" }\n");
         m.write(".gemini/config/plugins/other/plugin.json", "{}");
-        m.write(
-            "Library/Application Support/plotkeeper/events.jsonl",
-            "{}\n",
-        );
+        m.write(&format!("{DATA}/events.jsonl"), "{}\n");
     };
     let customised = |m: &Machine| {
         legacy(m, FALINKS_LINE);
@@ -466,7 +492,7 @@ fn installed_hooks(machine: &Machine) -> Vec<PathBuf> {
         .into_keys()
         .filter(|p| p.ends_with("hooks.json"))
         .filter(|p| {
-            p.starts_with("Library/Application Support/plotkeeper/plugins/claude/")
+            p.starts_with(&format!("{DATA}/plugins/claude/"))
                 || p.starts_with(".gemini/config/plugins/")
                 || p == ".codex/hooks.json"
         })
@@ -483,16 +509,19 @@ fn with_the_legacy_setup_present_exactly_one_hook_records_each_event() {
         legacy(&machine, line);
         machine.run("install");
 
-        let zshrc = fs::read_to_string(machine.home.join(".zshrc")).unwrap();
-        assert!(!zshrc.contains("checkout/plugin"), "{zshrc}");
-        assert!(!zshrc.contains("for every claude session"), "{zshrc}");
-        assert!(zshrc.contains("alias g=git\n") && zshrc.contains("export EDITOR=vim\n"));
-        if line == FALINKS_LINE {
-            // The entries that are not plotkeeper's stay.
-            assert!(
-                zshrc.contains("export CLAUDE_CODE_PLUGIN_DIRS=\"/Users/me/own-plugin\""),
-                "{zshrc}"
-            );
+        // The archived app's `~/.zshrc` cleanup is macOS only (#701).
+        if cfg!(target_os = "macos") {
+            let zshrc = fs::read_to_string(machine.home.join(".zshrc")).unwrap();
+            assert!(!zshrc.contains("checkout/plugin"), "{zshrc}");
+            assert!(!zshrc.contains("for every claude session"), "{zshrc}");
+            assert!(zshrc.contains("alias g=git\n") && zshrc.contains("export EDITOR=vim\n"));
+            if line == FALINKS_LINE {
+                // The entries that are not plotkeeper's stay.
+                assert!(
+                    zshrc.contains("export CLAUDE_CODE_PLUGIN_DIRS=\"/Users/me/own-plugin\""),
+                    "{zshrc}"
+                );
+            }
         }
         let plugins = machine.home.join(".gemini/config/plugins");
         assert!(!plugins.join("studio").exists());
@@ -1192,9 +1221,33 @@ fn no_line_of_zshrc_but_the_removed_ones_is_kept_in_the_data_folder() {
     assert_eq!(files(&machine.home), before);
 }
 
+/// Off macOS the archived app cannot have left a `~/.zshrc` line: install and uninstall neither read nor rewrite the
+/// file, and keep no backup of it (#701).
+#[test]
+#[cfg(not(target_os = "macos"))]
+fn off_macos_install_and_uninstall_leave_zshrc_alone_and_back_nothing_up() {
+    let machine = Machine::new(true, true);
+    legacy(&machine, FALINKS_LINE);
+    let zshrc = machine.home.join(".zshrc");
+    let before = fs::read(&zshrc).unwrap();
+    machine.run("install");
+    assert_eq!(fs::read(&zshrc).unwrap(), before);
+    for (path, bytes) in files(&machine.data()) {
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(!path.contains("zshrc"), "a backup of ~/.zshrc: {path}");
+        assert!(
+            !text.contains("zshrc_edits\":{"),
+            "{path} records zshrc edits:\n{text}"
+        );
+    }
+    machine.run("uninstall");
+    assert_eq!(fs::read(&zshrc).unwrap(), before);
+}
+
 /// A dotfile manager links `~/.zshrc` to its own copy. Install replaces the copy whole, by a rename, so the link stays
 /// a link, and a reader that opened the old file still reads all of it: nothing is ever cut short in place.
 #[test]
+#[cfg(target_os = "macos")]
 fn a_symlinked_zshrc_stays_a_symlink_and_is_replaced_whole() {
     let machine = Machine::new(true, true);
     legacy(&machine, FALINKS_LINE);
@@ -1233,6 +1286,7 @@ fn a_symlinked_zshrc_stays_a_symlink_and_is_replaced_whole() {
 /// A record written before install kept only the removed lines held the whole old `~/.zshrc` in `backups/zshrc` and
 /// the text install wrote in `state.json`'s `zshrc`.
 #[test]
+#[cfg(target_os = "macos")]
 fn uninstall_from_a_record_with_a_whole_zshrc_backup_puts_it_back_and_deletes_the_backup() {
     let machine = Machine::new(false, false);
     let old = "alias g=git\nexport CLAUDE_CODE_PLUGIN_DIRS=\"/x/plotkeeper/checkout/plugin\"\n";
@@ -1240,16 +1294,13 @@ fn uninstall_from_a_record_with_a_whole_zshrc_backup_puts_it_back_and_deletes_th
     machine.write(".zshrc", cleaned);
     let record = machine.data().join("install");
     machine.write(
-        "Library/Application Support/plotkeeper/install/state.json",
+        &format!("{DATA}/install/state.json"),
         &serde_json::json!({
             "claude": false, "agy": false, "zshrc": cleaned, "agy_backups": [], "codex": null, "cursor": null
         })
         .to_string(),
     );
-    machine.write(
-        "Library/Application Support/plotkeeper/install/backups/zshrc",
-        old,
-    );
+    machine.write(&format!("{DATA}/install/backups/zshrc"), old);
     machine.run("uninstall");
     assert_eq!(
         fs::read_to_string(machine.home.join(".zshrc")).unwrap(),
@@ -1414,15 +1465,12 @@ fn install_yes_wires_without_a_question_and_after_uninstall_a_start_asks_again()
 fn uninstall_says_what_it_keeps_and_how_to_remove_the_rest() {
     let machine = Machine::new(true, false);
     machine.run("install");
-    machine.write(
-        "Library/Application Support/plotkeeper/events.jsonl",
-        "{}\n",
-    );
+    machine.write(&format!("{DATA}/events.jsonl"), "{}\n");
     let out = machine.run("uninstall");
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(
         text.contains("your recorded history stays in")
-            && text.contains("Library/Application Support/plotkeeper")
+            && text.contains(DATA)
             && text.contains("npm uninstall -g plotkeeper"),
         "{text}"
     );
@@ -1453,7 +1501,7 @@ fn a_declined_harness_is_wired_by_install_and_the_round_trip_stays_byte_identica
     let outside = |files: &BTreeMap<String, Vec<u8>>| {
         files
             .iter()
-            .filter(|(p, _)| !p.starts_with("Library/Application Support/plotkeeper/"))
+            .filter(|(p, _)| !p.starts_with(&format!("{DATA}/")))
             .map(|(p, b)| (p.clone(), b.clone()))
             .collect::<BTreeMap<_, _>>()
     };
@@ -1734,7 +1782,7 @@ fn install_then_a_rewire_on_start_then_uninstall_leaves_every_file_outside_the_d
     let outside = |files: BTreeMap<String, Vec<u8>>| {
         files
             .into_iter()
-            .filter(|(p, _)| !p.starts_with("Library/Application Support/plotkeeper/"))
+            .filter(|(p, _)| !p.starts_with(&format!("{DATA}/")))
             .collect::<BTreeMap<_, _>>()
     };
     assert_eq!(outside(files(&machine.home)), outside(before));
@@ -1851,13 +1899,19 @@ fn with_stdout_sent_to_a_file_the_question_still_reaches_the_terminal_and_stdout
     let machine = Machine::new(true, false);
     let log = machine.home.join("log");
     // As `plotkeeper > log` in a terminal: stdin and stderr are the terminal, stdout the file.
-    let mut command = Command::new("/usr/bin/script");
-    command
-        .args(["-q", "/dev/null", "/bin/sh", "-c", r#"exec "$0" > "$1""#])
-        .arg(machine.tools.join("plotkeeper"))
-        .arg(&log);
+    let plotkeeper = machine.tools.join("plotkeeper");
+    let mut command = in_terminal(&[
+        "/bin/sh".as_ref(),
+        "-c".as_ref(),
+        r#"exec "$0" > "$1""#.as_ref(),
+        plotkeeper.as_os_str(),
+        log.as_os_str(),
+    ]);
     for (key, value) in machine.starting(true).get_envs() {
-        command.env(key, value.unwrap());
+        match value {
+            Some(value) => command.env(key, value),
+            None => command.env_remove(key),
+        };
     }
     let mut child = command
         .stdin(Stdio::piped())

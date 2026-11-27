@@ -1,20 +1,25 @@
 // The release script (danielrispler/plotkeeper#512): `bump` writes one version into the npm package's manifest, the
 // server crate's manifest and the lockfile's `studio-server` entry, `notesFor` reads a version's changelog section,
-// `checkReleaseCommit` is the publish guard on HEAD's commit, and `tagAndRelease` tags a commit and creates its Release.
+// `checkReleaseCommit` is the publish guard on HEAD's commit, `tagAndRelease` tags a commit and creates its Release, and
+// `platformManifest` writes a platform package's manifest (#706).
 // Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { bump, checkReleaseCommit, notesFor, tagAndRelease } from "../../scripts/npm/release.mjs";
+import { bump, checkReleaseCommit, notesFor, platformManifest, tagAndRelease } from "../../scripts/npm/release.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 const npmManifest = `{
   "name": "plotkeeper",
   "version": "0.1.2",
-  "description": "x"
+  "description": "x",
+  "optionalDependencies": {
+    "plotkeeper-darwin": "0.1.2",
+    "plotkeeper-linux-x64": "0.1.2"
+  }
 }
 `;
 const crateManifest = `[package]
@@ -50,7 +55,11 @@ const expected = (version) => ({
   npmManifest: `{
   "name": "plotkeeper",
   "version": "${version}",
-  "description": "x"
+  "description": "x",
+  "optionalDependencies": {
+    "plotkeeper-darwin": "${version}",
+    "plotkeeper-linux-x64": "${version}"
+  }
 }
 `,
   crateManifest: `[package]
@@ -98,6 +107,74 @@ test("bump rejects major and unknown levels", () => {
 test("bump names the old version a file lacks", () => {
   const stale = { ...texts, crateManifest: crateManifest.replace('version = "0.1.2"\n\n', 'version = "0.1.1"\n\n') };
   assert.throws(() => bump(stale, "patch"), /^Error: server\/Cargo\.toml has no version 0\.1\.2$/);
+});
+
+test("bump names a platform package the launcher asks for at another version", () => {
+  const stale = { ...texts, npmManifest: npmManifest.replace('"plotkeeper-linux-x64": "0.1.2"', '"plotkeeper-linux-x64": "0.1.1"') };
+  assert.throws(
+    () => bump(stale, "patch"),
+    /^Error: npm\/package\.json asks for plotkeeper-linux-x64 0\.1\.1, not its version 0\.1\.2$/,
+  );
+});
+
+test("the npm package asks for each platform package at its own version", () => {
+  const { version, optionalDependencies } = JSON.parse(readFileSync(resolve(root, "npm/package.json"), "utf8"));
+  assert.deepEqual(optionalDependencies, {
+    "plotkeeper-darwin": version,
+    "plotkeeper-linux-x64": version,
+    "plotkeeper-linux-arm64": version,
+  });
+});
+
+const launcherManifest = JSON.stringify({
+  name: "plotkeeper",
+  version: "0.1.2",
+  description: "x",
+  license: "MIT",
+  author: "A",
+  homepage: "https://h",
+  bugs: { url: "https://b" },
+  repository: { type: "git", url: "git+https://r" },
+  keywords: ["k"],
+  bin: { plotkeeper: "launcher.js" },
+  optionalDependencies: { "plotkeeper-darwin": "0.1.2" },
+});
+
+test("platformManifest marks each platform package with its os and cpu, at the launcher's version, with no command", () => {
+  const common = {
+    version: "0.1.2",
+    license: "MIT",
+    author: "A",
+    homepage: "https://h",
+    bugs: { url: "https://b" },
+    repository: { type: "git", url: "git+https://r" },
+    files: ["bin/"],
+  };
+  assert.deepEqual(JSON.parse(platformManifest(launcherManifest, "darwin")), {
+    name: "plotkeeper-darwin",
+    description: "plotkeeper's binaries for macOS (Apple silicon and Intel). Install plotkeeper, which uses this.",
+    ...common,
+    os: ["darwin"],
+    cpu: ["arm64", "x64"],
+  });
+  assert.deepEqual(JSON.parse(platformManifest(launcherManifest, "linux-x64")), {
+    name: "plotkeeper-linux-x64",
+    description: "plotkeeper's binaries for Linux on x64. Install plotkeeper, which uses this.",
+    ...common,
+    os: ["linux"],
+    cpu: ["x64"],
+  });
+  assert.deepEqual(JSON.parse(platformManifest(launcherManifest, "linux-arm64")), {
+    name: "plotkeeper-linux-arm64",
+    description: "plotkeeper's binaries for Linux on arm64. Install plotkeeper, which uses this.",
+    ...common,
+    os: ["linux"],
+    cpu: ["arm64"],
+  });
+});
+
+test("platformManifest refuses a platform with no package", () => {
+  assert.throws(() => platformManifest(launcherManifest, "win32-x64"), /^Error: no platform package for win32-x64$/);
 });
 
 const changelog = `# Changelog

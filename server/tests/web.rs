@@ -455,10 +455,7 @@ fn the_tests_run_in_an_empty_home_not_daniels() {
         std::fs::read_dir(&home).unwrap().next().is_none(),
         "{home:?}"
     );
-    assert!(
-        !home.join("Library/Application Support/plotkeeper").exists(),
-        "{home:?}"
-    );
+    assert!(!studio_hook::data_dir(&home).exists(), "{home:?}");
 }
 
 #[test]
