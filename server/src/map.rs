@@ -196,7 +196,8 @@ fn read_checked(repo: &Path, pending: impl FnOnce(&str) -> Option<PathBuf>) -> M
 }
 
 /// The accepted map waiting on its draft PR (#753, "Open a draft PR"), as that flow keeps it (`map_draft.rs`): the PR's `number` and
-/// `branch`, whether it was `closed` unmerged, and the `map`'s text.
+/// `branch`, whether it was `closed` unmerged, the `map`'s text, and, once closed, the Open a draft PR from it that pushed and
+/// stopped short.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct PendingFile {
     pub number: u64,
@@ -205,6 +206,8 @@ pub(crate) struct PendingFile {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub closed: bool,
     pub map: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opening: Option<crate::map_draft::Opening>,
 }
 
 /// Where the map waiting on a draft PR is kept for the project whose main checkout is `main`: `first-map/<project>.pending.json` in
@@ -422,10 +425,13 @@ pub fn update_user(
     )?)
 }
 
-/// Fetches `origin` for `project` through the cooldown. A failure is logged quietly and the refs stay as they were.
-fn fetch(fetches: &Fetches, project: &str) -> Fetched {
+/// Fetches `origin` for `project` through the cooldown, then runs `after` in the fetch's turn, told whether it passed. A failure is
+/// logged quietly and the refs stay as they were.
+fn fetch(fetches: &Fetches, project: &str, after: impl FnOnce(bool)) -> Fetched {
     let result = fetches.run(project, Instant::now(), || {
-        studio_workbench::fetch(Path::new(project))
+        let fetched = studio_workbench::fetch(Path::new(project));
+        after(fetched.is_ok());
+        fetched
     });
     if let Fetched::Failed(why) = &result {
         log::warn!("map: fetch of {project} failed: {why}");
@@ -440,17 +446,15 @@ pub fn map_state(project: String, fetch: bool, app: &Arc<crate::App>) -> Result<
     let (fetches, cache, events) = (&app.fetches, &app.ci, &app.events);
     if fetch {
         crate::prs::ask_later(app, crate::prs::Trigger::MapOpen, Some(&project));
-        let fetched = self::fetch(fetches, &project);
+        // The draft PR an accepted map waits on is asked about in the fetch's turn, after it, so a merged one's copy goes only once
+        // its map is on the default branch; under the fetch's cooldown and in-flight guard, never on a timer (#753, "Following the PR").
+        let fetched = self::fetch(fetches, &project, |passed| {
+            app.drafts.follow(&project, passed);
+        });
         // A fetch inside the cooldown asks nothing again, unless nothing was read yet.
         if fetched != Fetched::Skipped || !cache.has(&project) {
             crate::ci_laws::refresh_later(cache, events, &project);
         }
-        // The draft PR an accepted map waits on is asked about after the fetch, so a merged one's map is on the default branch by
-        // then; under the fetch's cooldown and in-flight guard, never on a timer (#753, "Following the PR").
-        fetches.run(&format!("{project}\npending PR"), Instant::now(), || {
-            app.drafts.follow(&project);
-            Ok(())
-        });
     }
     let repo = Path::new(&project);
     let file = state_file()?;
@@ -768,7 +772,7 @@ pub fn merged(
     };
     let (fetches, cache, events) = (fetches.clone(), cache.clone(), events.clone());
     std::thread::spawn(move || {
-        fetch(&fetches, &project);
+        fetch(&fetches, &project, |_| {});
         crate::ci_laws::refresh_later(&cache, &events, &project);
         events.emit("map-landed", project.into());
     });

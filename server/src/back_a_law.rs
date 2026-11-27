@@ -632,37 +632,14 @@ impl LawRuns {
         let repo = Path::new(project);
         // The default branch as it is now: a patch is out of date against it, not against the last fetch.
         let reference = default_branch_now(repo)?;
-        let (remote, _) = remote_of(&reference);
         let law = patch
             .text
             .clone()
             .unwrap_or_else(|| law_text(repo, &reference, &patch.law));
         let branch = format!("back-a-law/{}-{id}", patch.law);
-        // An earlier click may have pushed the branch and stopped short: a PR it opened is recorded now, and a branch with no
-        // PR is pushed anew.
-        let listed = gh(
-            self.gh(),
-            repo,
-            &[
-                "pr", "list", "--head", &branch, "--state", "all", "--json", "url", "--jq",
-                ".[].url",
-            ],
-            "",
-        )?;
-        if !listed.is_empty() {
+        // An earlier click may have pushed the branch and stopped short: a PR it opened is recorded now.
+        if let Some(listed) = earlier_pr(repo, self.gh(), &reference, &branch)? {
             return self.opened(project, &file, patch, &law, &listed);
-        }
-        if host_git(
-            repo,
-            &["ls-remote", "--exit-code", "--heads", remote, &branch],
-        )
-        .is_ok()
-        {
-            host_git(
-                repo,
-                &["push", "-q", "--no-verify", remote, "--delete", &branch],
-            )
-            .map_err(|e| format!("the branch an earlier click pushed was not removed: {e}"))?;
         }
         let title = if patch.text.is_some() {
             format!("Add the law `{}` with a test", patch.law)
@@ -1006,6 +983,42 @@ pub(crate) fn default_branch_now(repo: &Path) -> Result<String, String> {
             .map_err(|e| format!("the fetch failed: {e}"))?;
     }
     Ok(reference)
+}
+
+/// What an earlier press of Open draft PR left on `branch`, which may have pushed it and stopped short: the address of the PR it
+/// opened, of any state, as `gh` lists it; else none, and a branch it pushed with no PR is deleted from the remote of the default
+/// branch `reference`, so this press pushes it anew.
+pub(crate) fn earlier_pr(
+    repo: &Path,
+    gh_program: PathBuf,
+    reference: &str,
+    branch: &str,
+) -> Result<Option<String>, String> {
+    let (remote, _) = remote_of(reference);
+    let listed = gh(
+        gh_program,
+        repo,
+        &[
+            "pr", "list", "--head", branch, "--state", "all", "--json", "url", "--jq", ".[].url",
+        ],
+        "",
+    )?;
+    if !listed.is_empty() {
+        return Ok(Some(listed));
+    }
+    if host_git(
+        repo,
+        &["ls-remote", "--exit-code", "--heads", remote, branch],
+    )
+    .is_ok()
+    {
+        host_git(
+            repo,
+            &["push", "-q", "--no-verify", remote, "--delete", branch],
+        )
+        .map_err(|e| format!("the branch an earlier click pushed was not removed: {e}"))?;
+    }
+    Ok(None)
 }
 
 /// The remote and branch of a default branch's `reference`: `origin` for a local one.
