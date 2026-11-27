@@ -318,15 +318,26 @@ pub fn why_not(
 }
 
 /// The JSON object in a writer's reply, perhaps in a code fence: from its first `{` to its last `}`.
-fn object(reply: &str) -> &str {
+fn object(reply: &str) -> Option<&str> {
     let object = reply.find('{').zip(reply.rfind('}'));
     let object = object.filter(|(start, end)| start < end);
-    object.map_or("", |(start, end)| &reply[start..=end])
+    object.map(|(start, end)| &reply[start..=end])
 }
 
 /// The JSON object in a writer's reply, parsed: the one place a reply is read.
 pub(crate) fn parse_object(reply: &str) -> Result<serde_json::Value, serde_json::Error> {
-    serde_json::from_str(object(reply))
+    serde_json::from_str(object(reply).unwrap_or_default())
+}
+
+/// The JSON object in a reply, read as a `T`, or the matching message of `none` (no object in the reply) or `unreadable`
+/// (followed by the reason): the one reader behind the pre-flight, the PR brief and its claim check.
+pub(crate) fn read_object<T: serde::de::DeserializeOwned>(
+    reply: &str,
+    none: &str,
+    unreadable: &str,
+) -> Result<T, String> {
+    let object = object(reply).ok_or(none)?;
+    serde_json::from_str(object).map_err(|e| format!("{unreadable}{e}"))
 }
 
 /// Asks a writer once more when `retry` says the `first` result cannot stand, and `pick` chooses between the second
@@ -1206,7 +1217,29 @@ Reply with one JSON object and nothing else: {"answer": string}, the answer in a
 
 #[cfg(test)]
 mod reply_tests {
-    use super::{once_more, parse_object};
+    use super::{once_more, parse_object, read_object};
+
+    #[test]
+    fn read_object_finds_the_object_or_says_why_not() {
+        let cases: [(&str, Result<i64, &str>); 5] = [
+            ("{\"n\": 1}", Ok(1)),
+            ("Sure:\n```json\n{\"n\": 2}\n```\nDone.", Ok(2)),
+            ("} then {", Err("none")),
+            ("no object at all", Err("none")),
+            ("{\"n\": }", Err("unreadable: ")),
+        ];
+        for (reply, want) in cases {
+            let got = read_object::<serde_json::Value>(reply, "none", "unreadable: ")
+                .map(|v| v["n"].as_i64().unwrap_or_default());
+            match want {
+                Ok(n) => assert_eq!(got, Ok(n), "{reply}"),
+                Err(prefix) => {
+                    let e = got.expect_err(reply);
+                    assert!(e.starts_with(prefix), "{reply}: {e}");
+                }
+            }
+        }
+    }
 
     #[test]
     fn a_reply_in_a_code_fence_parses_to_its_object() {
