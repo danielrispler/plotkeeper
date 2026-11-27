@@ -81,8 +81,13 @@ struct Raw {
     subagent_session_id: Option<String>,
     /// The child session a `subagent` call started, on its end.
     spawned_session_id: Option<String>,
+    /// When the plugin sent the line (#717); a log from the plugin before it has none.
+    sent_ms: Option<u64>,
     #[serde(default)]
     studio_received_ms: u64,
+    /// The hook took the line after its turn was past (#744), which a subagent's line never is.
+    #[serde(default)]
+    studio_late: bool,
     studio_pid: Option<u32>,
     /// The trees the hook recorded for the turn, as for Claude Code's (#717).
     #[serde(default)]
@@ -136,26 +141,37 @@ fn adapt(raw: Raw) -> Event {
     let id = raw.tool_use_id.clone();
     let call = || tool(&raw.tool_name, &raw.tool_input, &raw.cwd);
     let mut happened = Vec::new();
+    let mut prompt_id = raw.prompt_id;
     match raw.hook_event_name.as_str() {
         "session.prompt" => happened.push(Happened::TurnStart {
             prompt: raw.prompt.clone(),
             origin: None,
         }),
         // Sent only for a turn that starts with no prompt: a background subagent's result woke it.
-        "session.execution.started" => happened.push(Happened::TurnStart {
-            prompt: String::new(),
-            origin: Some(Origin::WakeUp),
-        }),
-        // A turn's end, or a subagent's run's end, with its reply; a subagent's names no model.
+        // It has no prompt id, but starts a turn of its own, also while the last one has not ended
+        // in the log: its id is when it was sent, as the hook's is (`opencode_shaped`, #744).
+        "session.execution.started" => {
+            let sent = raw.sent_ms.unwrap_or(raw.studio_received_ms);
+            prompt_id = Some(format!("wake-up {sent}"));
+            happened.push(Happened::TurnStart {
+                prompt: String::new(),
+                origin: Some(Origin::WakeUp),
+            });
+        }
+        // A turn's end, or a subagent's run's end, with its reply; a subagent's names no model. The
+        // end of a turn already past when the hook took it would end the turn running now, so it
+        // ends none, and its reply, of a turn the next start ended, is not this one's.
         "session.execution.succeeded"
         | "session.execution.failed"
         | "session.execution.interrupted" => {
             if raw.subagent_session_id.is_some() {
                 happened.push(Happened::SubagentEnd);
-            } else {
+            } else if !raw.studio_late {
                 happened.push(Happened::TurnEnd);
             }
-            happened.push(Happened::Reply(raw.last_assistant_message.clone()));
+            if !raw.studio_late {
+                happened.push(Happened::Reply(raw.last_assistant_message.clone()));
+            }
             if let Some(model) = raw.model.clone() {
                 happened.push(Happened::Model(model));
             }
@@ -214,13 +230,18 @@ fn adapt(raw: Raw) -> Event {
         }
         _ => {}
     }
+    // A start of a turn already past has no turn of its own to start, nor the running one to end.
+    if raw.studio_late {
+        prompt_id = None;
+        happened.push(Happened::Late);
+    }
     Event {
         session_id: raw.session_id,
         agent_id: raw.subagent_session_id,
         agent_type: None,
         cwd: raw.cwd,
         transcript_path: String::new(),
-        prompt_id: raw.prompt_id,
+        prompt_id,
         studio_received_ms: raw.studio_received_ms,
         studio_pid: raw.studio_pid,
         studio_turn_start: raw.studio_turn_start,

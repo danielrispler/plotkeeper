@@ -97,9 +97,10 @@ fn append() -> Result<(), Box<dyn Error>> {
         .ok()
         .and_then(|ms| ms.parse().ok())
         .map_or(TREES_BUDGET, Duration::from_millis);
-    let mut given_up = None;
-    if let Err(e) = trees(&mut event, data, timed.then_some(budget), &mut given_up) {
-        eprintln!("plotkeeper-hook: record the trees: {e}");
+    let (mut given_up, mut held) = (None, None);
+    match trees(&mut event, data, timed.then_some(budget), &mut given_up) {
+        Ok(lock) => held = lock,
+        Err(e) => eprintln!("plotkeeper-hook: record the trees: {e}"),
     }
     // A lock that never comes must not hold the agent: the event is dropped, with a trace (#43,
     // decision 11).
@@ -121,6 +122,10 @@ fn append() -> Result<(), Box<dyn Error>> {
     if !studio_hook::append(&path, &event, patience)? {
         studio_hook::drop_event(&path, received_ms, name.as_deref().unwrap_or("-"))?;
     }
+    // An OpenCode line's session record stays locked until the line is in the log, so the log holds
+    // a session's lines in the order the hook took them (#744). The plugin never waits for its
+    // hooks, so the wait for the log's lock holds no agent, only the session's next hooks.
+    drop(held);
     // Trees given up stop their `git` and remove its scratch index in a moment.
     if let Some(stopped) = given_up {
         // A closed channel or a timeout both mean carry on.
@@ -134,20 +139,23 @@ type Recorded = (Map<String, Value>, Result<(), String>);
 
 /// `studio_hook::trees` on `event`, given `budget` when there is one; past it the line keeps none
 /// of the trees, which are given up (`studio_hook::abandon_trees`), and `given_up` gets what says
-/// their work has stopped.
+/// their work has stopped. Without a budget it returns the session record `studio_hook::trees`
+/// still holds locked.
 fn trees(
     event: &mut Map<String, Value>,
     data: &Path,
     budget: Option<Duration>,
     given_up: &mut Option<mpsc::Receiver<Recorded>>,
-) -> Result<(), String> {
+) -> Result<Option<fs::File>, String> {
     let Some(budget) = budget else {
         return studio_hook::trees(event, data).map_err(|e| e.to_string());
     };
     let (mut copy, data) = (event.clone(), data.to_owned());
     let (done, recorded) = mpsc::channel();
     thread::spawn(move || {
-        let result = studio_hook::trees(&mut copy, &data).map_err(|e| e.to_string());
+        // Codex's and Cursor's lines hold no lock past their trees.
+        let result = studio_hook::trees(&mut copy, &data).map(drop);
+        let result = result.map_err(|e| e.to_string());
         // The receiver may have gone, and then no one waits for this.
         done.send((copy, result)).ok();
     });
@@ -161,5 +169,5 @@ fn trees(
         Err(_) => recorded.recv().map_err(|e| e.to_string())?,
     };
     *event = copy;
-    result
+    result.map(|()| None)
 }

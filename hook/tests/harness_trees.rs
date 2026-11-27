@@ -6,7 +6,7 @@
 // the start and end trees of the worktree it worked in, as Claude Code's does.
 use crate::common::{feed, hook};
 use serde_json::Value;
-use std::{fs, path::Path};
+use std::{fs, path::Path, time::Duration};
 use studio_test_support::git;
 
 const CODEX: &str = include_str!("../../core/tests/fixtures/codex/trial.jsonl");
@@ -350,11 +350,14 @@ fn a_cursor_prompts_late_trees_leave_the_worktrees_start_to_its_next_touch() {
 
 /// OpenCode's plugin spawns one hook an event and never waits for it, so the hooks of a turn's last
 /// calls and its end run at once with the next turn's start, and reach the turns file in any order
-/// (#717). Here each such group is spawned at once, last line first, after the turn's edit; the third
-/// turn is a wake-up, which has no prompt id. Each turn still records the start and end trees of its
-/// own edit: its start on one of its own lines, its end on its own end's line or the next start's.
+/// (#717). Here each such group is spawned at once, last line first, after the turn's edit, while the
+/// log's lock is held a moment, so that their appends wait on it together; the third turn is a
+/// wake-up, which has no prompt id. The log they wrote, replayed through the core, still has each
+/// turn list its own edit (#744): the log holds a session's lines in the order the hook took them,
+/// and the core takes no turn end from a line of a turn already past, and puts its call in the turn
+/// before.
 #[test]
-fn opencode_turns_whose_hooks_run_at_once_out_of_order_each_record_their_own_edit() {
+fn opencode_turns_whose_hooks_run_at_once_out_of_order_each_list_their_own_edit() {
     use serde_json::json;
     let base = std::env::temp_dir().join(format!("studio-opencode-order-{}", std::process::id()));
     // Cleanup: a leftover temp file fails no test.
@@ -386,7 +389,10 @@ fn opencode_turns_whose_hooks_run_at_once_out_of_order_each_record_their_own_edi
         line(name, 100 * k + sent, extra)
     };
     let end = |k: u64| line("session.execution.succeeded", 100 * k + 40, json!({}));
+    let log = studio_hook::event_log(&home);
+    fs::create_dir_all(log.parent().unwrap()).unwrap();
     let run = |lines: Vec<Value>| {
+        let held = studio_hook::locked(&log, Duration::from_secs(1)).unwrap();
         let children: Vec<_> = (lines.iter().rev())
             .map(|payload| {
                 let mut cmd = hook(&home);
@@ -394,6 +400,9 @@ fn opencode_turns_whose_hooks_run_at_once_out_of_order_each_record_their_own_edi
                 feed(cmd, payload)
             })
             .collect();
+        // Long enough for every hook of the group to reach the log's lock, or the turns file's.
+        std::thread::sleep(Duration::from_millis(300));
+        drop(held);
         for mut child in children {
             assert!(child.wait().unwrap().success());
         }
@@ -413,33 +422,59 @@ fn opencode_turns_whose_hooks_run_at_once_out_of_order_each_record_their_own_edi
         run(group);
     }
 
-    let log = fs::read_to_string(studio_hook::event_log(&home)).unwrap();
-    let lines: Vec<Value> = log
-        .lines()
-        .map(|l| serde_json::from_str(l).unwrap())
-        .collect();
-    let trees = |key: &str, sent: &dyn Fn(u64) -> bool| -> Vec<String> {
-        let on = lines
-            .iter()
-            .filter(|l| sent(l["sent_ms"].as_u64().unwrap()));
-        on.filter_map(|l| Some(l[key][&root].as_str()?.to_owned()))
-            .collect()
-    };
-    let mut changes = Vec::new();
-    for k in 0..TURNS {
-        let starts = trees("studio_turn_start", &|s| {
-            (100 * k + 10..=100 * k + 40).contains(&s)
-        });
-        let ends = trees("studio_turn_end", &|s| {
-            s == 100 * k + 40 || s == 100 * (k + 1) + 10
-        });
-        assert_eq!((starts.len(), ends.len()), (1, 1), "turn {k}: {log}");
-        changes.push(git(
-            Path::new(&root),
-            &["diff", "--name-only", &starts[0], &ends[0]],
-        ));
-    }
+    let log = fs::read_to_string(log).unwrap();
+    let listed = core_listed(&log, &root);
     // Cleanup: a leftover temp file fails no test.
     fs::remove_dir_all(&base).ok();
-    assert_eq!(changes, ["f0.txt", "f1.txt", "f2.txt", "f3.txt"]);
+    assert_eq!(
+        listed,
+        [["f0.txt"], ["f1.txt"], ["f2.txt"], ["f3.txt"]],
+        "{log}"
+    );
+}
+
+/// The files each turn of the one session in `log` lists once the core has read the log and diffed
+/// its turns' trees in repository `root`, as the shell does.
+fn core_listed(log: &str, root: &str) -> Vec<Vec<String>> {
+    use studio_core::{Numstat, RootDiff, Studio};
+    let mut studio = Studio::default();
+    let mut now = 0;
+    for line in log.lines() {
+        let at = serde_json::from_str::<Value>(line).unwrap()["studio_received_ms"].as_u64();
+        now = now.max(at.unwrap_or_default());
+        studio.apply(line);
+    }
+    for ask in studio.turn_diffs(now + 20_000, 100) {
+        let files = (ask.trees.iter())
+            .filter_map(|trees| {
+                let diff = ["diff", "--numstat", &trees.start, trees.end.as_ref()?];
+                Some(git(Path::new(root), &diff))
+            })
+            .flat_map(|numstat| {
+                let lines: Vec<String> = numstat.lines().map(Into::into).collect();
+                lines.into_iter().map(|line| {
+                    let path = line.split('\t').nth(2).unwrap_or_default().to_owned();
+                    Numstat {
+                        path,
+                        from: None,
+                        added: Some(1),
+                        removed: Some(0),
+                    }
+                })
+            })
+            .collect();
+        let diff = RootDiff {
+            root: root.into(),
+            moved: vec![],
+            files,
+        };
+        studio.set_turn_files(&ask, Some(vec![diff]));
+    }
+    let session = studio.sessions()[0];
+    (session.turns.iter())
+        .map(|turn| {
+            let files = turn.files.iter().flat_map(|f| f.files.iter());
+            files.map(|f| f.path.clone()).collect()
+        })
+        .collect()
 }
