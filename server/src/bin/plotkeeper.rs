@@ -56,10 +56,6 @@ fn main() -> ExitCode {
         eprintln!("plotkeeper: no home folder");
         return ExitCode::FAILURE;
     };
-    if let Err(e) = studio_hook::move_old_data_dir(&home) {
-        eprintln!("plotkeeper: could not move the old data folder: {e}");
-        return ExitCode::FAILURE;
-    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
         [] => {}

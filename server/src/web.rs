@@ -77,7 +77,6 @@ impl Sink for WebSink {
 pub struct Web {
     server: Arc<Server>,
     port: u16,
-    token: String,
     bus: Arc<Bus>,
     thread: Option<JoinHandle<()>>,
 }
@@ -110,7 +109,7 @@ impl Web {
         let context = Arc::new(Context {
             app,
             assets,
-            token: token.clone(),
+            token,
             port,
             bus: bus.clone(),
         });
@@ -124,7 +123,6 @@ impl Web {
         Ok(Web {
             server,
             port,
-            token,
             bus,
             thread: Some(thread),
         })
@@ -132,10 +130,6 @@ impl Web {
 
     pub fn port(&self) -> u16 {
         self.port
-    }
-
-    pub fn token(&self) -> &str {
-        &self.token
     }
 
     /// The sink the state sends to: events to this server's stream.

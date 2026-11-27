@@ -1,6 +1,17 @@
 use super::*;
 use studio_test_support::{git as run, repo};
 
+fn classify(
+    old: Option<&str>,
+    new: Option<&str>,
+    changed: &[String],
+) -> BTreeMap<String, Strength> {
+    explain(old, new, changed)
+        .into_iter()
+        .map(|(id, change)| (id, change.strength))
+        .collect()
+}
+
 const BASE: &str = r#"{"version":1,
   "parts":[
     {"id":"a","name":"A","caption":"c","description":"d","tier":"core","paths":["a/"]},

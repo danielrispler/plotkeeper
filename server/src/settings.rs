@@ -243,19 +243,6 @@ fn save_explanations_in(
     )
 }
 
-/// The `repository` setting (danielrispler/Falinks#605): the folder the shell, Workspaces and the picker start in. Read from
-/// the file on each call, so a saved change takes effect; `None` when unset, empty or not a string.
-pub fn repository() -> Option<String> {
-    let [settings, _] = paths()?;
-    repository_in(&fs::read_to_string(settings).ok()?)
-}
-
-fn repository_in(text: &str) -> Option<String> {
-    let json: serde_json::Value = serde_json::from_str(&plain_json(text)).ok()?;
-    let repo = json.get("repository")?.as_str()?;
-    (!repo.is_empty()).then(|| repo.to_string())
-}
-
 /// The card writer `settings.json` names, `summaries.writer`: `claude` unless the file says `agy`, or is missing or broken
 /// (danielrispler/plotkeeper#325: the web server applies it at start, as the page's first save did in the app).
 pub fn summary_writer() -> studio_understanding::WriterKind {

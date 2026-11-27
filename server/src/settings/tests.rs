@@ -1,7 +1,6 @@
 use super::{
     brief_backfill_in, edit_text, plain_json, pr_briefs_effort_in, pr_briefs_model_in,
-    repository_in, run_settings_in, save_explanations_in, save_writer_in, summary_writer_in,
-    write_in,
+    run_settings_in, save_explanations_in, save_writer_in, summary_writer_in, write_in,
 };
 use serde_json::json;
 use studio_understanding::WriterKind;
@@ -454,36 +453,6 @@ fn a_missing_file_is_created_with_the_one_key() {
     let none = dir.path().join("none.json");
     write_in(&none, None, &path(&["zoom"]), None).unwrap();
     assert!(!none.exists());
-}
-
-#[test]
-fn the_repository_setting_reads_zeds_format() {
-    let text = r#"{
-        // The engine, not the studio's own checkout.
-        "repository": "/Users/d/work/Falinks", /* a comment */
-        "editor": ["zed", "{path}//x"],
-    }"#;
-    assert_eq!(
-        repository_in(text).as_deref(),
-        Some("/Users/d/work/Falinks")
-    );
-    assert_eq!(
-        repository_in(r#"{ "repository": "/a//b,}" }"#).as_deref(),
-        Some("/a//b,}")
-    );
-}
-
-#[test]
-fn an_unset_empty_or_wrong_repository_setting_is_none() {
-    for text in [
-        "",
-        "{}",
-        r#"{"repository": ""}"#,
-        r#"{"repository": 3}"#,
-        "{ broken",
-    ] {
-        assert_eq!(repository_in(text), None, "{text}");
-    }
 }
 
 /// The OpenAI-compatible writer's base URL (#367): a non-empty string under `summaries`, in Zed's format.

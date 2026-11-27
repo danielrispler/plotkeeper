@@ -246,20 +246,8 @@ fn changed_ids(kind: &str, old: &[Value], new: &[Value]) -> Vec<String> {
     ids.into_iter().map(|key| format!("{kind} {key}")).collect()
 }
 
-/// The strength each live part of `new` gets from a commit that changed `changed`, against the map `old` of its parent.
+/// The strength each live part of `new` gets from a commit that changed `changed`, against the map `old` of its parent, with why.
 /// A side whose map is missing or does not read gives no fog: nothing can be told apart.
-pub fn classify(
-    old: Option<&str>,
-    new: Option<&str>,
-    changed: &[String],
-) -> BTreeMap<String, Strength> {
-    explain(old, new, changed)
-        .into_iter()
-        .map(|(id, change)| (id, change.strength))
-        .collect()
-}
-
-/// `classify`, with why each part fogs.
 pub fn explain(
     old: Option<&str>,
     new: Option<&str>,

@@ -88,8 +88,6 @@ fn append() -> Result<(), Box<dyn Error>> {
     }
     event.insert("studio_received_ms".into(), received_ms.into());
     let home = env::home_dir().ok_or("no home directory")?;
-    // The old data folder moves before anything is created in the new one (#322).
-    studio_hook::move_old_data_dir(&home)?;
     let path = studio_hook::event_log(&home);
     let data = path.parent().ok_or("no data directory")?;
     fs::create_dir_all(data)?;
