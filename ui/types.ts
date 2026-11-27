@@ -695,6 +695,12 @@ export type PrDiffArgs = { project: string; number: number; head: string; title:
  */
 export type SavedProject = { path: string; gone: boolean; temporary: boolean };
 
+/**
+ * The free scan of a git repository with no map (`server/src/map_scan.rs`, #753): the skeleton map with the computed edges as `import` links, as
+ * text; each part's tracked file count; the languages a reader reads and those none reads yet; and whether `claude` was found.
+ */
+export type MapScan = { map: string; files: Record<string, number>; read_languages: string[]; unread_languages: string[]; claude: boolean };
+
 /** What the page asks at start (#527): plotkeeper's package version, for the toast after an update (`whats-new.ts`). */
 export type About = { version: string };
 /** Why a project header's quiet dot lights (`map.rs`, #386): fog on a Core part, a broken law, a PR brief waiting. */
@@ -768,6 +774,7 @@ export interface Commands {
   };
   map_proof: { args: Project & { law: string }; reply: Proof[] };
   map_state: { args: Project & { fetch: boolean }; reply: MapState };
+  map_scan: { args: Project; reply: MapScan };
   pr_brief: { args: InPr & { full?: boolean | null }; reply: BriefOpened | null };
   // `older` (#638): "Read the one you have", the stored catch-up of an earlier fog list while it still holds.
   part_catch_up: { args: InPart & { older?: boolean | null }; reply: CatchUpOpened | null };

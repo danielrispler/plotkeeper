@@ -38,12 +38,13 @@ fn strings(list: &[String]) -> Vec<&str> {
     list.iter().map(String::as_str).collect()
 }
 
-/// Scans a repository of `files` and returns `(part paths, loose files, loose tests, candidates, unread, extractors)`.
+/// What a scan of a repository of `files` found: part paths, loose files and tests, candidates, read and unread languages, extractors and ignored folders.
 struct Found {
     parts: Vec<String>,
     loose: Vec<String>,
     tests: Vec<String>,
     candidates: Vec<(String, bool)>,
+    read: Vec<String>,
     unread: Vec<String>,
     extractors: Vec<String>,
     ignored: Vec<String>,
@@ -69,6 +70,7 @@ fn found(files: &[(String, &str)]) -> Found {
             .into_iter()
             .map(|c| (c.path, c.ticked))
             .collect(),
+        read: scan.read_languages,
         unread: scan.unread_languages,
         extractors: strs(&scan.map["extractors"]),
         ignored: strs(&scan.map["ignored"]),
@@ -356,7 +358,9 @@ fn parts_with_the_same_last_folder_take_their_parents_into_the_id() {
 fn a_language_no_extractor_reads_is_detected_and_named() {
     let mut tree = files(&[code("src", 1)]);
     tree.push(("src/Main.kt".into(), "x\n"));
+    tree.push(("src/main.go".into(), "package main\n"));
     let f = found(&tree);
+    assert_eq!(f.read, ["Go", "TypeScript"]);
     assert_eq!(f.unread, ["Kotlin"]);
     assert_eq!(f.extractors, ["typescript-imports"]);
 }

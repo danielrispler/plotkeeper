@@ -167,6 +167,35 @@ export const draftPrompt =
   "the files that belong to no part on purpose, and the laws that must stay true. Run `system-map check` and fix what it reports until it passes. " +
   "Add the extractors its `note:` lines suggest to `extractors`.";
 
+// The scan screen (#753, "The free scan"; ticket #760): its words, worked out from the scan the server sends (`MapScan`).
+
+// "A, B and C".
+const listed = (names: string[]) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`);
+
+/** The languages line: those a reader reads, whose links are drawn, then those none reads yet; null when the scan found no code it knows. */
+export function languagesLine(read: string[], unread: string[]): string | null {
+  if (!read.length && !unread.length) return null;
+  if (!read.length) return `${listed(unread)}: no reader yet, so no links are drawn`;
+  return [`${listed(read)}: links computed`, ...(unread.length ? [`${listed(unread)}: no reader yet`] : [])].join(". ");
+}
+
+/** Draft the map's time hint, scaled from the scan's part count: the trial drafted 15 parts in about 3.6 minutes (#753), so a quarter of a minute a part. */
+export function draftTime(parts: number): string {
+  const minutes = Math.max(1, Math.ceil(parts / 4));
+  return `About ${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+}
+
+/** The copy-prompt for the user's own agent (#753, story 13): the skeleton, the file to write and the check to pass, so the agent fills only the words. */
+export function scanPrompt(skeleton: string): string {
+  return (
+    "Write system-map.json at the root of this repository's main checkout, starting from the skeleton below, which plotkeeper's free scan " +
+    "proposed from the folders and build manifests. Keep its parts, paths and import links unless the check asks otherwise. For each part, " +
+    "read its files and write a name, a caption of a few words and a purpose of one or two sentences, saying only what the code shows. " +
+    "Then run `npx plotkeeper map check` and fix what it reports until it passes.\n\n" +
+    JSON.stringify(JSON.parse(skeleton), null, 2)
+  );
+}
+
 // The part sheet (ticket #310) as data: what `map-sheet.ts` draws for one part.
 const tierLabel: Record<Tier, string> = { core: "Core", interface: "Interface-only", "black-box": "Black box" };
 export type Sheet = {

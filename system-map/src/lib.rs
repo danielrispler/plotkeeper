@@ -659,7 +659,10 @@ fn check_ids_and_references(map: &Map) -> Vec<String> {
 const GIT_LIMIT: Duration = Duration::from_secs(30);
 
 /// The files git tracks in `root`, sorted.
-fn tracked_files(root: &Path) -> Result<Vec<String>, String> {
+///
+/// # Errors
+/// When git cannot list them.
+pub fn tracked_files(root: &Path) -> Result<Vec<String>, String> {
     let listed = run_until(git(root).args(["ls-files", "-z"]), GIT_LIMIT);
     let output = listed.map_err(|error| match error {
         RunError::Start(error) => format!("cannot run git in {}: {error}", root.display()),

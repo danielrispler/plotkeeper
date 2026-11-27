@@ -22,9 +22,10 @@ import { element, failure, hint, invoke, keyed, listen, mark, newest, pageStore,
 import { cameraRig, type CameraRig, fitCamera, panTo, revealPan, zoomAt } from "./map-camera.js";
 import { brokenParts, brokenText, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Drag, type Law, type Layer, type LayerName, type MapDoc, askedProject, startProject, switchProject, wasRemoved, parseMap, type Part, type Point, placement, plateSize, plateTitle, sizeOf, lineTag, linkLines, markPoints, readingOrder, rimPoint, type Scrub, tagWord, type Tier } from "./map-model.js";
 import { copyButton } from "./copy-button.js";
+import { drawScan } from "./map-scan.js";
 import { recheckSeen } from "./seen.js";
 import { knownProjects, listedProjects, projectGone } from "./projects.js";
-import type { Camera, MapDiff, MapState } from "./types.js";
+import type { Camera, MapDiff, MapScan, MapState } from "./types.js";
 
 export type LoadedMap = Extract<MapDoc, { ok: true }>;
 /** What the view holds once a map loaded: its payload, the map as parsed, and every id's centre in the world. */
@@ -79,6 +80,8 @@ let rig: CameraRig | null = null;
 let revealed: string | null = null;
 // The Map diff drawn on today's map (#640): set by a PR brief whose PR changed the map, for the whole brief; a scrub's past map draws without it.
 let diff: MapDiff | null = null;
+// The free scan of `project` while it has no map (#760): asked once per `openMap`, "asking" until it answers, null when it failed.
+let scanned: { project: string; scan: MapScan | "asking" | null } | null = null;
 
 /** The map is the page's base (#386): the body carries `map-open` from the start and never loses it. */
 export const mapShown = () => document.body?.classList.contains("map-open") === true;
@@ -108,7 +111,8 @@ async function load(path: string, fetch: boolean) {
   const state = await latest(invoke("map_state", { project: path, fetch }));
   if (!state || path !== project || !mapShown()) return;
   const key = JSON.stringify(state);
-  if (key === drawn && view) return;
+  // A scan screen is kept too, so a focus that changes nothing never resets its panel's scroll (#760).
+  if (key === drawn && (view || element("map-body").querySelector(".map-scan"))) return;
   drawn = key;
   loaded = state;
   draw();
@@ -135,6 +139,7 @@ export function openMap(path: string | null) {
   loaded = null;
   view = null;
   drawn = "";
+  scanned = null;
   // A store that throws keeps nothing: the page opens on the first project instead.
   if (path !== null) lastViewed.set(path);
   // The top bar names the project shown; Treatment C's large title on the map is not drawn, so the name is said once.
@@ -357,6 +362,25 @@ export function linkMark(ids: string[], law: Law, at: Point): SVGElement {
   return mark(diamond, lawWords(law));
 }
 
+// The scan screen's scan (#760) for a git repository whose map status is the empty state (no map anywhere): asked the first time it is
+// wanted, and drawn when it answers; never for a folder in no git repository or a map that does not read.
+function scanFor(state: MapState | null): MapScan | "asking" | null {
+  if (state?.status !== "none" || project === null || projectGone(project)) return null;
+  if (scanned?.project !== project) {
+    const asked = { project, scan: "asking" as MapScan | "asking" | null };
+    scanned = asked;
+    const done = (scan: MapScan | null) => {
+      asked.scan = scan;
+      if (scanned === asked && mapShown()) draw();
+    };
+    invoke("map_scan", { project }).then(done, (why: unknown) => {
+      failure("map_scan")(why);
+      done(null);
+    });
+  }
+  return scanned.scan;
+}
+
 // Where `plotkeeper install` is explained.
 const installDocs = "https://github.com/danielrispler/plotkeeper/blob/main/docs/studio/plugin.md";
 
@@ -387,6 +411,8 @@ function drawEmpty(body: HTMLElement, state: MapState | null) {
     );
   } else if (state === null) {
     box.append(text("p", "Reading the map…", "empty"));
+  } else if (scanFor(state) === "asking") {
+    box.append(text("p", "Scanning this repository's folders…", "empty"));
   } else if (state.status === "not-git") {
     // Nothing to read or draft (#753): no prompt and no button.
     box.append(text("p", "Not a git repository: no map", "map-empty-title"), text("p", `${state.project} is not in a git repository, so it has no map to read or draft.`, "empty"));
@@ -687,7 +713,9 @@ function draw() {
   if (loaded && doc?.ok) return drawMap(body, loaded, doc, past, shown);
   view = null;
   const unreadable = loaded && doc && !doc.ok ? { ...loaded, status: "unreadable" as const, note: doc.why } : loaded;
-  drawEmpty(body, unreadable);
+  const scan = scanFor(unreadable);
+  // A scan that failed, or whose map does not read, leaves today's empty screen with its prompt.
+  if (!unreadable || !scan || scan === "asking" || !drawScan(body, unreadable, scan)) drawEmpty(body, unreadable);
   const slots = { side: element("map-side"), notPlaced: element("map-not-placed"), tray: element("map-tray"), runs: element("map-runs"), sheet: element("map-sheet"), drawer: element("map-drawer"), banner: element("map-banner") };
   // No map is drawn, so nothing of the last one may stay: its banner, sheet and drawer would belong to another project.
   [slots.notPlaced, slots.tray, slots.runs, slots.sheet, slots.drawer, slots.banner].forEach((slot) => slot.replaceChildren());

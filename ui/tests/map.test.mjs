@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { actorSize, autoPlace, draftPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, plateTitle, rimPoint, scrubTickets, sheetOf, sheetMarks, narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject, talksTo, linkLines, readingOrder, markPoints, placement, lineTag, tagWord } from "../../dist/map-model.js";
+import { actorSize, autoPlace, draftPrompt, draftTime, languagesLine, scanPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, plateTitle, rimPoint, scrubTickets, sheetOf, sheetMarks, narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject, talksTo, linkLines, readingOrder, markPoints, placement, lineTag, tagWord } from "../../dist/map-model.js";
 import { cameraRig, revealPan } from "../../dist/map-camera.js";
 
 /** @returns {import("../../dist/map-model.js").Part} */
@@ -386,4 +386,32 @@ test("a Map diff's line is found by its two ends either way round, and its parts
   assert.equal(lineTag(diff, "a", "core"), undefined);
   assert.equal(lineTag(null, "a", "b"), undefined);
   assert.deepEqual(/** @type {const} */ (["added", "removed", "edited"]).map(tagWord), ["New", "Gone", "Edited"]);
+});
+
+// The scan screen's words (#753, "The free scan"; ticket #760).
+test("the languages line names the languages a reader reads, then the ones none reads yet", () => {
+  /** @type {[string[], string[], string | null][]} (read, unread, line) */
+  const cases = [
+    [["TypeScript", "Go"], ["Ruby"], "TypeScript and Go: links computed. Ruby: no reader yet"],
+    [["Rust"], [], "Rust: links computed"],
+    [["Go", "Python", "TypeScript"], ["Kotlin", "Ruby"], "Go, Python and TypeScript: links computed. Kotlin and Ruby: no reader yet"],
+    [[], ["Ruby"], "Ruby: no reader yet, so no links are drawn"],
+    [[], [], null],
+  ];
+  for (const [read, unread, line] of cases) assert.equal(languagesLine(read, unread), line, JSON.stringify([read, unread]));
+});
+
+test("Draft the map's time hint grows with the scan's part count", () => {
+  // The trial drafted 15 parts in about 3.6 minutes (#753): about a quarter of a minute a part, a minute at least.
+  /** @type {[number, string][]} */
+  const cases = [[1, "About 1 minute"], [4, "About 1 minute"], [5, "About 2 minutes"], [15, "About 4 minutes"]];
+  for (const [parts, hint] of cases) assert.equal(draftTime(parts), hint, String(parts));
+});
+
+test("the copy-prompt carries the skeleton and says where to write the map and which check to pass", () => {
+  const skeleton = JSON.stringify({ version: 2, parts: [{ id: "app", paths: ["src/app/"] }], links: [] });
+  const prompt = scanPrompt(skeleton);
+  assert.ok(prompt.includes(JSON.stringify(JSON.parse(skeleton), null, 2)), prompt);
+  assert.match(prompt, /system-map\.json at the root of this repository's main checkout/);
+  assert.match(prompt, /`npx plotkeeper map check`[^.]*until it passes/);
 });

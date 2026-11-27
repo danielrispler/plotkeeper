@@ -31,6 +31,8 @@ pub struct Scan {
     pub loose_files: Vec<String>,
     /// Test files no part owns.
     pub loose_tests: Vec<String>,
+    /// Languages of the code (tests apart) that an extractor reads, so the scan's links cover them.
+    pub read_languages: Vec<String>,
     /// Languages of the code that no extractor reads.
     pub unread_languages: Vec<String>,
 }
@@ -347,13 +349,19 @@ fn unbuilt_unimported(
     found
 }
 
-/// The extractors that detect a file they read, and the languages of the code (tests apart) that no extractor reads.
+/// The languages of a scan's code (tests apart): those an extractor reads, and those none does.
+struct Languages {
+    read: Vec<String>,
+    unread: Vec<String>,
+}
+
+/// The extractors that detect a file they read, and the languages of the code (tests apart), read and not.
 fn readers(
     root: &Path,
     files: &[String],
     code: &[&str],
     ticked: &[String],
-) -> (Vec<&'static str>, Vec<String>) {
+) -> (Vec<&'static str>, Languages) {
     let ignored = |f: &str| ticked.iter().any(|t| under(f, t));
     let repo = Repo::new(root, files, ignored);
     let extractors = EXTRACTORS
@@ -361,12 +369,24 @@ fn readers(
         .filter(|e| e.detect(&repo))
         .map(|e| e.name())
         .collect();
-    let unread: BTreeSet<&str> = code
-        .iter()
-        .filter(|f| !is_test(f) && !ignored(f) && !EXTRACTORS.iter().any(|e| e.reads(f)))
-        .filter_map(|f| language(f))
-        .collect();
-    (extractors, unread.into_iter().map(String::from).collect())
+    let (mut read, mut unread) = (BTreeSet::new(), BTreeSet::new());
+    for file in code.iter().filter(|f| !is_test(f) && !ignored(f)) {
+        if let Some(language) = language(file) {
+            if EXTRACTORS.iter().any(|e| e.reads(file)) {
+                read.insert(language);
+            } else {
+                unread.insert(language);
+            }
+        }
+    }
+    let list = |set: BTreeSet<&str>| set.into_iter().map(String::from).collect();
+    (
+        extractors,
+        Languages {
+            read: list(read),
+            unread: list(unread),
+        },
+    )
 }
 
 fn scan_files(root: &Path, files: &[String]) -> Scan {
@@ -462,7 +482,7 @@ fn scan_files(root: &Path, files: &[String]) -> Scan {
     let (loose_files, loose_tests) = (loose(false), loose(true));
 
     ticked.sort();
-    let (extractors, unread) = readers(root, files, &code, &ticked);
+    let (extractors, languages) = readers(root, files, &code, &ticked);
 
     let map = draft_map(&extractors, &parts, &ticked);
     Scan {
@@ -473,7 +493,8 @@ fn scan_files(root: &Path, files: &[String]) -> Scan {
             .collect(),
         loose_files,
         loose_tests,
-        unread_languages: unread,
+        read_languages: languages.read,
+        unread_languages: languages.unread,
     }
 }
 

@@ -40,6 +40,7 @@ pub mod lock;
 pub mod map;
 pub mod map_diff;
 pub mod map_review;
+pub mod map_scan;
 pub mod micro_worlds;
 pub mod part_catch_ups;
 pub mod pr_briefs;

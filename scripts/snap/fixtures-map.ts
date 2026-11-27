@@ -2,7 +2,7 @@
 
 import type { Ci, MapState } from "../../ui/types.ts";
 import { base, type Fixture } from "./base.ts";
-import { at, briefOf, busyPlace, busySessions, mapBrief, mapFile, mapOpened, mapState, pairFile, panelChecks, session, step, storySteps, withSaved } from "./fixtures-shared.ts";
+import { at, briefOf, busyPlace, busySessions, mapBrief, mapFile, mapOpened, mapScanOf, mapState, pairFile, panelChecks, session, step, storySteps, withSaved } from "./fixtures-shared.ts";
 
 // The page opens on pokedex, the last viewed project, whose folder is gone: its header is hidden, as it has no live session (spec #659).
 const goneOpened: Fixture = { selected: null, storage: { project: "/w/pokedex" } };
@@ -819,19 +819,88 @@ export const mapFresh = (): Fixture =>
       frame("on a fresh install");
       checkColours("on a fresh install");
       log("base ok");`, { sessions: [], projects: [] });
-/** A project without system-map.json keeps today's draft prompt in the map's place. */
-export const mapNoMap = (): Fixture =>
+/**
+ * A git repository without a map opens on the free scan (#753, ticket #760): its parts as grey plates, each with its folder and file count, no
+ * fog, badges or footprints, the computed import links as lines, the languages line, Draft the map with its time hint, and the copy-prompt that
+ * carries the skeleton. Nothing on it is a colour, and the teaching sentence follows the "no system-map.json" line.
+ */
+export const mapScan = (): Fixture =>
   mapBaseOf(`
-      const draft = document.querySelector("#map .map-empty .map-draft");
-      if (!draft) return log("snap:fail no draft prompt");
-      if (document.querySelector("#map .map-empty.map-fresh")) log("snap:fail the fresh line shows for a project");
-      // The teaching sentence (#526) follows the "no system-map.json" line, and the draft prompt stays.
-      const lines = [...document.querySelectorAll("#map .map-empty .empty")].map((p) => p.textContent);
-      const at = lines.findIndex((line) => line.includes("has no system-map.json"));
-      if (at < 0 || lines[at + 1] !== "A map names your parts and their rules; changes light them up.") log("snap:fail no teaching sentence after the no-map line: " + JSON.stringify(lines));
-      frame("without a map");
-      checkColours("without a map");
-      log("base ok");`, { map_state: mapState({ status: "none", source: null, from: null }) });
+      const screen = document.querySelector("#map .map-scan");
+      if (!screen) return log("snap:fail no scan screen: " + document.getElementById("map-body").textContent);
+      if (document.querySelector("#map .map-empty")) log("snap:fail the empty screen shows beside the scan");
+      const plates = [...screen.querySelectorAll(".plate")];
+      if (plates.length !== 3 || plates.some((p) => !p.classList.contains("draft"))) log("snap:fail the scan's plates: " + plates.map((p) => p.className).join(" | "));
+      const lib = screen.querySelector(".plate[data-id=lib]");
+      if (lib?.querySelector(".plate-name")?.textContent !== "Lib" || lib.querySelector(".plate-caption")?.textContent !== "src/lib/ · 30 files") log("snap:fail lib's plate says " + lib?.textContent);
+      if (screen.querySelector(".plate[data-id=cli] .plate-caption")?.textContent !== "src/cli/ · 1 file") log("snap:fail one file is not said so");
+      if (screen.querySelector(".plate-fog, .plate-marks, .plate-chips, .session-badge, .plate.fog-thin, .plate.fog-thick, .plate.foot-firm, .plate.foot-faint")) log("snap:fail a scan plate has fog, a badge or a footprint");
+      const lines = [...screen.querySelectorAll(".map-links line.link")].map((l) => l.dataset.link);
+      if (JSON.stringify(lines) !== JSON.stringify(["app-lib", "cli-lib"])) log("snap:fail the scan's lines: " + JSON.stringify(lines));
+      for (const line of screen.querySelectorAll(".map-links line.link")) if (!(Number(line.getAttribute("x1")) > 0)) log("snap:fail a line is not placed: " + line.outerHTML);
+      // The plates fit the canvas: none is cut by its edge.
+      const area = screen.querySelector(".map-scan-canvas").getBoundingClientRect();
+      for (const plate of plates) {
+        const box = plate.getBoundingClientRect();
+        if (box.left < area.left - 1 || box.right > area.right + 1 || box.top < area.top - 1 || box.bottom > area.bottom + 1) log("snap:fail " + plate.dataset.id + "'s plate is cut by the canvas's edge");
+      }
+      const languages = screen.querySelector(".map-scan-languages")?.textContent;
+      if (languages !== "TypeScript and Go: links computed. Ruby: no reader yet") log("snap:fail the languages line says " + languages);
+      const lines2 = [...screen.querySelectorAll(".empty")].map((p) => p.textContent);
+      const at = lines2.findIndex((line) => line.includes("has no system-map.json"));
+      if (at < 0 || lines2[at + 1] !== "A map names your parts and their rules; changes light them up.") log("snap:fail no teaching sentence after the no-map line: " + JSON.stringify(lines2));
+      const draft = [...screen.querySelectorAll("button")].find((b) => b.textContent === "Draft the map");
+      if (!draft || draft.getAttribute("aria-disabled") === "true") return log("snap:fail Draft the map is missing or muted with claude found");
+      const time = screen.querySelector(".map-scan-time")?.textContent ?? "";
+      if (time !== "About 1 minute · Uses your Claude Code plan") log("snap:fail the time hint says " + JSON.stringify(time));
+      if (screen.textContent.includes("$")) log("snap:fail the scan screen shows a dollar figure");
+      const prompt = screen.querySelector(".map-draft");
+      if (!prompt?.textContent.includes('"src/lib/"') || !prompt.textContent.includes("npx plotkeeper map check")) log("snap:fail the copy-prompt lacks the skeleton or the check: " + prompt?.textContent);
+      if (draft.compareDocumentPosition(prompt) & Node.DOCUMENT_POSITION_PRECEDING) log("snap:fail the copy-prompt leads while claude is found");
+      const copy = screen.querySelector(".copy-icon");
+      if (copy?.getAttribute("aria-label") !== "Copy the prompt") return log("snap:fail the copy-prompt has no copy icon");
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (words) => void (window.__copied = words) } });
+      copy.click();
+      await wait(150);
+      if (window.__copied !== prompt.textContent) log("snap:fail the clipboard holds " + JSON.stringify(window.__copied) + ", not the prompt");
+      frame("on the scan");
+      checkColours("on the scan");
+      log("base ok");`, { map_state: mapState({ status: "none", source: null, from: null }), map_scan: mapScanOf() });
+/** Draft the map muted when `claude` is not found (#753, story 12): aria-disabled with its one-line reason, a press starts nothing, and the copy-prompt leads. */
+export const mapScanNoClaude = (): Fixture =>
+  mapOpened(`
+    const screen = document.querySelector("#map .map-scan");
+    if (!screen) return log("snap:fail no scan screen");
+    const draft = [...screen.querySelectorAll("button")].find((b) => b.textContent === "Draft the map");
+    if (draft?.getAttribute("aria-disabled") !== "true") return log("snap:fail Draft the map is not muted without claude");
+    const why = screen.querySelector(".map-scan-why")?.textContent ?? "";
+    if (!why.includes("claude")) log("snap:fail the muted button gives no reason: " + JSON.stringify(why));
+    const prompt = screen.querySelector(".map-draft");
+    if (!prompt || !(draft.compareDocumentPosition(prompt) & Node.DOCUMENT_POSITION_PRECEDING)) log("snap:fail the copy-prompt does not lead without claude");
+    log("no claude ok");`, { map_state: mapState({ status: "none", source: null, from: null }), map_scan: mapScanOf({ claude: false }) });
+/**
+ * The layout follows the payload while the Map view stays open (#760): a repository with no map shows a quiet line while its scan runs, then the
+ * scan screen; once a map appears (the user's agent wrote it into the checkout), the window's focus draws the map, and the scan is gone.
+ */
+export const mapScanSwitch = (): Fixture =>
+  mapOpened(`
+    const body = document.getElementById("map-body");
+    if (!body.textContent.includes("Scanning")) log("snap:fail no line while the scan runs: " + body.textContent);
+    if (body.querySelector(".map-scan")) log("snap:fail the scan screen shows before its scan");
+    await wait(1500);
+    if (!body.querySelector(".map-scan .plate.draft")) return log("snap:fail the scan did not draw once it came: " + body.textContent);
+    if (!document.getElementById("map-legend").hidden) log("snap:fail the map's legend shows on the scan");
+    const fetched = window.fetch;
+    window.fetch = async (url, init) => {
+      if (!String(url).endsWith("/api/map_state")) return fetched(url, init);
+      return { ok: true, status: 200, json: async () => (${JSON.stringify(mapState({ from: "checkout" }))}) };
+    };
+    window.dispatchEvent(new Event("focus"));
+    await wait(400);
+    if (body.querySelector(".map-scan, .plate.draft")) log("snap:fail the scan stays once a map appears");
+    if (!body.querySelector(".map-canvas .plate[data-id=shell]")) log("snap:fail the map that appeared is not drawn");
+    if (document.getElementById("map-ref").textContent !== "Map not committed yet") log("snap:fail the head says " + document.getElementById("map-ref").textContent);
+    log("switch ok");`, { map_state: mapState({ status: "none", source: null, from: null }), map_scan: { __delay: 3500, value: mapScanOf() } as never, budget: 9000, snapDone: "switch ok" });
 // Switching projects (#386's review): what one project's map started is not lost or left over on the next. `calls` are the commands the
 // page sends from here on; `open(path)` presses a project's header. Pokedex's folder is gone, and it has a live session, so its header
 // shows (spec #659).
@@ -1148,6 +1217,7 @@ export const mapReview = () =>
     if (!review.textContent.includes("Little used so far: the Map view, the history strip and See the proof")) log("snap:fail the review's words: " + review.textContent);
     if (/\\d/.test(review.querySelector(".review-text").textContent)) log("snap:fail the review shows a count");
     log("review ok");`, { map_state: mapState(), stop_facts: dueFacts });
+/** A repository whose scan failed keeps the first map's plain prompt (#669) in the map's place. */
 export const mapEmpty = () =>
   mapOpened(`
     const draft = document.querySelector("#map .map-empty .map-draft");
@@ -1164,7 +1234,7 @@ export const mapEmpty = () =>
     const toast = document.getElementById("copy-toast");
     if (!toast.matches(":popover-open") || !toast.textContent.includes("Prompt copied")) log("snap:fail the copy toast does not say the prompt was copied: " + toast.textContent);
     if (window.__copied !== draft.textContent) log("snap:fail the clipboard holds " + JSON.stringify(window.__copied) + ", not the prompt");
-    log("drafting prompt: " + draft.textContent.slice(0, 40));`, { map_state: mapState({ status: "none", source: null, from: null }) });
+    log("drafting prompt: " + draft.textContent.slice(0, 40));`, { map_state: mapState({ status: "none", source: null, from: null }), map_scan: { __throw: "git ls-files failed" } as never });
 
 // The check's problems of a map read from the checkout (#753): four, of which the banner shows three.
 const checkoutProblems = [
