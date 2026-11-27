@@ -63,6 +63,9 @@ pub(crate) enum Happened {
     },
     /// A subagent was spawned.
     SubagentSpawned(Spawned),
+    /// The line is of a turn already past when the hook took it, as OpenCode's lines land in any
+    /// order (#744): a call it starts or ends is the previous turn's.
+    Late,
     /// The subagent that sent the line ended.
     SubagentEnd,
     /// The model the session runs at, as the agent last said.

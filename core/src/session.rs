@@ -1314,6 +1314,14 @@ impl Session {
         spawned.or_else(|| self.current_turn())
     }
 
+    /// The turn whose call `event` starts or ends: the one `ledger_turn` names, or the one before it
+    /// for a line of a turn already past (`Happened::Late`).
+    pub(crate) fn call_turn(&self, event: &Event) -> Option<usize> {
+        let turn = self.ledger_turn(event.agent_id.as_deref());
+        let late = event.agent_id.is_none() && event.has(|h| matches!(h, Happened::Late));
+        turn.map(|turn| if late { turn.saturating_sub(1) } else { turn })
+    }
+
     /// The index of its latest turn, which a check, subagent or question that starts now is in.
     pub(crate) fn current_turn(&self) -> Option<usize> {
         self.turns.len().checked_sub(1)

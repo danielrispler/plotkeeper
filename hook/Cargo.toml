@@ -19,6 +19,8 @@ serde_json = "1"
 studio-workbench = { path = "../workbench" }
 
 [dev-dependencies]
+# The replay of what the hook logged, in tests only: the hook itself never reads the log.
+studio-core = { path = "../core" }
 studio-test-support = { path = "../test-support" }
 
 [[test]]

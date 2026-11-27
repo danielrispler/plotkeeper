@@ -746,30 +746,38 @@ pub const INTERRUPTED: &str = "StudioInterrupted";
 /// Codex's, Cursor's and OpenCode's turns are mapped by their lines in Claude Code's names (#426,
 /// #717); another agent's line records none, as its capabilities' `turn_trees: false` says, though
 /// its payload may be Claude-shaped (#359).
+/// For an OpenCode line it returns the session's record in `turns/` still locked, for the line's
+/// append to hold until it is in the log (#744): the hook takes a session's OpenCode lines in any
+/// order, and the core must read them in the order the hook took them.
 pub fn trees(
     event: &mut serde_json::Map<String, serde_json::Value>,
     data: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<Option<fs::File>, Box<dyn std::error::Error>> {
     let agent = event.get("studio_agent").and_then(|a| a.as_str());
     let mut shaped = match agent {
-        None | Some("claude") => return claude_trees(event, data),
+        None | Some("claude") => return claude_trees(event, data).map(|_| None),
         Some("codex") => codex_shaped(event),
         Some("cursor") => cursor_shaped(event),
         Some("opencode") => opencode_shaped(event),
-        Some(_) => return Ok(()),
+        Some(_) => return Ok(None),
     };
-    claude_trees(&mut shaped, data)?;
+    let held = claude_trees(&mut shaped, data)?.filter(|_| agent == Some("opencode"));
     for key in [
         "studio_touched_roots",
         "studio_turn_end",
         "studio_turn_start",
+        LATE,
     ] {
         if let Some(value) = shaped.remove(key) {
             event.insert(key.into(), value);
         }
     }
-    Ok(())
+    Ok(held)
 }
+
+/// The field `true` on a line whose turn was already past when the hook took it (`Turn::take_at`),
+/// so the core takes no turn end from it (#744).
+pub const LATE: &str = "studio_late";
 
 type Line = serde_json::Map<String, serde_json::Value>;
 
@@ -939,7 +947,11 @@ fn opencode_shaped(event: &Line) -> Line {
     clippy::too_many_lines,
     reason = "left whole when the lint came in (#555); spec #548 names no split of it"
 )]
-fn claude_trees(event: &mut Line, data: &Path) -> Result<(), Box<dyn std::error::Error>> {
+/// Returns the session's record, still locked, once it has read it.
+fn claude_trees(
+    event: &mut Line,
+    data: &Path,
+) -> Result<Option<fs::File>, Box<dyn std::error::Error>> {
     use serde_json::{Map, Value, json};
     use std::io::{Seek, Write};
     let text = |key: &str| event.get(key).and_then(Value::as_str);
@@ -961,7 +973,7 @@ fn claude_trees(event: &mut Line, data: &Path) -> Result<(), Box<dyn std::error:
         prune_turns(&turns);
     }
     if outside && !idle || !plain {
-        return Ok(());
+        return Ok(None);
     }
     fs::create_dir_all(&turns)?;
     let mut file = fs::OpenOptions::new()
@@ -1050,7 +1062,8 @@ fn claude_trees(event: &mut Line, data: &Path) -> Result<(), Box<dyn std::error:
             // When the harness sent the line, for one whose lines land in any order (`opencode_shaped`).
             let sent = event.get("studio_sent_ms").and_then(Value::as_u64);
             let Some((ended, in_turn)) = turn.take_at(name, text("prompt_id"), idle, sent) else {
-                return Ok(());
+                event.insert(LATE.into(), true.into());
+                return Ok(Some(file));
             };
             if turn.prompt_id != before || was_ended && !turn.ended {
                 began = Some(now);
@@ -1108,7 +1121,7 @@ fn claude_trees(event: &mut Line, data: &Path) -> Result<(), Box<dyn std::error:
     }
     // Trees given up are logged with none, so the record must not say they were taken.
     if !keep_trees() {
-        return Ok(());
+        return Ok(Some(file));
     }
     let kept = json!({
         "prompt_id": turn.prompt_id, "roots": turn.roots, "ended": turn.ended, "began": began,
@@ -1128,7 +1141,7 @@ fn claude_trees(event: &mut Line, data: &Path) -> Result<(), Box<dyn std::error:
             event.insert(key.into(), trees.into());
         }
     }
-    Ok(())
+    Ok(Some(file))
 }
 
 /// Deletes the records in `turns` unchanged for 7 days.

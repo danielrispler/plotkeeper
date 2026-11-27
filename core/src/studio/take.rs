@@ -909,7 +909,7 @@ impl Take<'_> {
     /// for it.
     fn tool_start(&mut self, tool: &Tool) {
         let (session, event, at) = (&mut *self.session, self.event, self.at);
-        let turn = session.ledger_turn(event.agent_id.as_deref());
+        let turn = session.call_turn(event);
         let turn = session.ledger.start(event, tool, turn, self.called.clone());
         if let Some(turn) = turn.filter(|_| tool.kind == ToolKind::Command) {
             let list = self.check_lists.of(&session.cwd);
@@ -1010,7 +1010,7 @@ impl Take<'_> {
     /// its step and its check's duration.
     fn tool_end(&mut self, tool: &Tool, failed: bool) {
         let (session, event) = (&mut *self.session, self.event);
-        let turn = session.ledger_turn(event.agent_id.as_deref());
+        let turn = session.call_turn(event);
         // The turn its call began in, which a new prompt since may have left.
         let turn = session
             .ledger
