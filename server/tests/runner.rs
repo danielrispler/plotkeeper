@@ -52,11 +52,12 @@ impl Harness for Missing {
 }
 
 struct Bench {
-    /// Declared before `dir`, so it drops first and stops the launchers while their folders are still there.
-    guard: LauncherGuard,
-    dir: tempfile::TempDir,
     runner: Arc<Runner>,
     changes: mpsc::Receiver<String>,
+    /// Stops the launchers the test left running. Declared after the runner, so it drops once nothing can start another,
+    /// and before `dir`, so it drops while their folders are still there.
+    guard: LauncherGuard,
+    dir: tempfile::TempDir,
 }
 
 fn config(dir: &Path, harness: Arc<dyn Harness>) -> Config {
@@ -854,14 +855,54 @@ fn a_bench_dropped_while_a_run_waits_stops_its_launcher() {
     assert!(gone(pid), "the launcher outlived its bench");
 }
 
+/// The pids of the launchers whose command line names a folder under `dir`.
+fn launchers_under(dir: &Path) -> Vec<String> {
+    let out = std::process::Command::new("ps")
+        .args(["-Ao", "pid=,command="])
+        .output()
+        .unwrap();
+    let launcher = env!("CARGO_BIN_EXE_plotkeeper-run");
+    let dir = dir.display().to_string();
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|line| line.contains(launcher) && line.contains(&dir))
+        .map(|line| line.trim().to_string())
+        .collect()
+}
+
+#[test]
+fn a_bench_dropped_while_a_run_waits_behind_another_stops_both_launchers() {
+    let bench = bench();
+    let first = bench.run(&waits("first"));
+    let second = bench.run(&waits("second"));
+    bench.until(|_| bench.state(&first) == Some(RunState::Running));
+    assert_eq!(bench.state(&second), Some(RunState::Queued));
+    let dir = bench.dir.path().to_path_buf();
+    drop(bench);
+    // A launcher started as the guard stopped the first would keep polling for its limit; give it time to show.
+    std::thread::sleep(Duration::from_millis(500));
+    let left = launchers_under(&dir);
+    for line in &left {
+        if let Some(pid) = line
+            .split_whitespace()
+            .next()
+            .and_then(|p| p.parse::<i32>().ok())
+        {
+            // SAFETY: a launcher this test's bench started, which leads its own group.
+            unsafe { libc::killpg(pid, libc::SIGKILL) };
+        }
+    }
+    assert!(left.is_empty(), "launchers outlived their bench: {left:?}");
+}
+
 #[test]
 fn a_run_survives_a_restart_and_is_picked_up() {
     let Bench {
         dir,
+        // Before `runner`, so it drops after it and before `dir`.
+        guard: _guard,
         runner,
         changes,
-        // Last, so it drops first, while the runs folder is still there.
-        guard: _guard,
     } = bench();
     let folder = runner.new_folder().unwrap();
     let id = runner
@@ -934,10 +975,10 @@ fn a_dead_run_is_failed_and_frees_the_queue() {
 fn a_run_found_dead_at_start_is_failed_and_frees_the_queue() {
     let Bench {
         dir,
+        // Before `runner`, so it drops after it and before `dir`.
+        guard: _guard,
         runner,
         changes,
-        // Last, so it drops first, while the runs folder is still there.
-        guard: _guard,
     } = bench_with(Arc::new(WithTmp));
     let submit = |runner: &Runner, script: &str| {
         runner
@@ -1075,9 +1116,10 @@ fn an_auth_or_rate_limit_failure_pauses_the_queue_until_resumed() {
         // The pause outlives a restart.
         let Bench {
             dir,
+            // Before `runner`, so it drops after it and before `dir`.
+            guard: _guard,
             runner,
             changes,
-            guard: _guard,
         } = bench;
         drop((runner, changes));
         let (runner, changes) = open(dir.path(), Arc::new(Script));
@@ -1416,10 +1458,10 @@ fn kill_group(pid: u64) {
 fn a_start_leaves_a_running_run_it_cannot_read_alone() {
     let Bench {
         dir,
+        // Before `runner`, so it drops after it and before `dir`.
+        guard: _guard,
         runner,
         changes,
-        // Last, so it drops first, while the runs folder is still there.
-        guard: _guard,
     } = bench();
     let id = submit(&runner, PROJECT, "sleep 60");
     until(&runner, &changes, |r| {
@@ -1453,10 +1495,10 @@ fn a_start_leaves_a_running_run_it_cannot_read_alone() {
 fn a_queued_run_never_starts_beside_a_running_one_whatever_their_order_on_disk() {
     let Bench {
         dir,
+        // Before `runner`, so it drops after it and before `dir`.
+        guard: _guard,
         runner,
         changes,
-        // Last, so it drops first, while the runs folder is still there.
-        guard: _guard,
     } = bench();
     let running = submit(&runner, PROJECT, &waits("first"));
     let queued = submit(&runner, PROJECT, "echo second");
@@ -1564,10 +1606,10 @@ fn a_result_whose_subtype_is_an_error_is_a_failure_even_at_exit_zero() {
 fn a_pause_is_told_to_every_project_with_runs_and_a_pause_file_of_another_build_still_pauses() {
     let Bench {
         dir,
+        // Before `runner`, so it drops after it and before `dir`.
+        guard: _guard,
         runner,
         changes,
-        // Last, so it drops first, while the runs folder is still there.
-        guard: _guard,
     } = bench();
     let other = submit(&runner, "/p/other", &waits("other"));
     until(&runner, &changes, |r| {

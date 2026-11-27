@@ -85,15 +85,16 @@ const PLANT: &str = "echo 'export const add = (a, b) => a - b;' > src/add.mjs\n"
 const DONE: &str = r#"echo '{"type":"result","subtype":"success","is_error":false,"result":"Backed.","permission_denials":[]}'"#;
 
 struct Bench {
-    /// Stops the launchers the test left running; first, so it drops while their folders are still there.
-    _guard: LauncherGuard,
-    dir: tempfile::TempDir,
     /// Daniel's repository, a clone of `origin` on a branch of his own.
     repo: PathBuf,
     project: String,
     laws: Arc<LawRuns>,
     runner: Arc<Runner>,
     changes: mpsc::Receiver<()>,
+    /// Stops the launchers the test left running. Declared after the runner, so it drops once nothing can start another,
+    /// and before `dir`, so it drops while their folders are still there.
+    _guard: LauncherGuard,
+    dir: tempfile::TempDir,
 }
 
 /// A repository whose `origin`'s default branch `main` holds the map, `src/` and an untagged test, and whose checkout is

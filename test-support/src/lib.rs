@@ -1,5 +1,6 @@
-//! What the crates' tests share: `git` run away from the developer's own configuration, and the
-//! temporary repositories the tests start from.
+//! What the crates' tests share: `git` run away from the developer's own configuration, the
+//! temporary repositories the tests start from, and [`LauncherGuard`], which stops the
+//! `plotkeeper-run` launchers a test leaves running.
 
 use std::{
     fs,
@@ -81,8 +82,9 @@ pub fn origin() -> Origin {
 ///
 /// A launcher is stopped only when `ps` still gives its pid the start time its `launch.json` recorded (the identity
 /// check plotkeeper's Cancel makes); any other pid, and a run folder without a readable `launch.json`, is left alone.
-/// Hold it in a variable that is named, never `_` or `..`, which drop it at once; declare it before the folder it
-/// watches, so it drops first.
+/// Hold it in a variable that is named, never `_` or `..`, which drop it at once. Declare it after every `Runner` over
+/// the folder, and anything that holds one, so it drops once no runner is left to start a queued run as it stops a
+/// running one; and before the folder it watches, so it drops while the folder is still there.
 pub struct LauncherGuard {
     runs: PathBuf,
 }
@@ -129,13 +131,18 @@ fn confirmed_launcher(launch: &Path) -> Option<i32> {
     let pid = i32::try_from(launch["pid"].as_u64()?)
         .ok()
         .filter(|&p| p > 1)?;
+    (launch["start"].as_str()? == start_of(pid)?).then_some(pid)
+}
+
+/// When process `pid` started, as `ps` gives it in the C locale; none when no such process runs.
+fn start_of(pid: i32) -> Option<String> {
     let out = Command::new("ps")
         .args(["-o", "lstart=", "-p", &pid.to_string()])
         .env("LC_ALL", "C")
         .output()
         .ok()?;
-    let now = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    (!now.is_empty() && launch["start"].as_str()? == now).then_some(pid)
+    let start = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!start.is_empty()).then_some(start)
 }
 
 #[cfg(test)]
@@ -184,12 +191,7 @@ mod tests {
             .spawn()
             .unwrap();
         let pid = sleeper.id();
-        let ps = Command::new("ps")
-            .args(["-o", "lstart=", "-p", &pid.to_string()])
-            .env("LC_ALL", "C")
-            .output()
-            .unwrap();
-        let start = String::from_utf8_lossy(&ps.stdout).trim().to_string();
+        let start = start_of(i32::try_from(pid).unwrap()).unwrap();
         let run = dir.path().join("a-run");
         fs::create_dir(&run).unwrap();
         fs::write(

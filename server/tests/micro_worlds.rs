@@ -59,13 +59,14 @@ const MAP: &str = r#"{
 }"#;
 
 struct Bench {
-    /// Stops the launchers the test left running; first, so it drops while their folders are still there.
-    _guard: LauncherGuard,
-    dir: tempfile::TempDir,
     runner: Arc<Runner>,
     worlds: Arc<MicroWorlds>,
     changes: mpsc::Receiver<String>,
     repo: PathBuf,
+    /// Stops the launchers the test left running. Declared after the runner, so it drops once nothing can start another,
+    /// and before `dir`, so it drops while their folders are still there.
+    _guard: LauncherGuard,
+    dir: tempfile::TempDir,
 }
 
 fn git(repo: &Path, args: &[&str]) -> String {

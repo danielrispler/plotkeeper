@@ -122,14 +122,15 @@ impl Harness for Reviewer {
 }
 
 struct Bench {
-    /// Stops the launchers the test left running; first, so it drops while their folders are still there.
-    _guard: LauncherGuard,
-    dir: tempfile::TempDir,
     origin: PathBuf,
     project: PathBuf,
     runner: Arc<Runner>,
     reviews: Arc<MapReviews>,
     changes: mpsc::Receiver<String>,
+    /// Stops the launchers the test left running. Declared after the runner, so it drops once nothing can start another,
+    /// and before `dir`, so it drops while their folders are still there.
+    _guard: LauncherGuard,
+    dir: tempfile::TempDir,
 }
 
 impl Bench {
