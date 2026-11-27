@@ -61,22 +61,19 @@ test("a recorded Qwen Code session wears Qwen's logo, titled by its name (#360)"
   assert.equal(logo("qwen").getAttribute("aria-label"), "Qwen Code");
 });
 
-test("a recorded OpenCode session wears OpenCode's logo, and the page names it OpenCode (#370)", async () => {
+test("a recorded OpenCode, Copilot or Cline session wears its agent's logo, and the page names the agent (#370, #361, #371)", async () => {
   const { agentNames } = await import("../../dist/capabilities.js");
-  const opencode = /** @type {import("../../dist/types.js").Session} */ ({ ...base, capabilities: caps("opencode"), identity: { issue: null, name: "p" }, transcript: { context: null } });
-  assert.equal(logoKey(opencode), "opencode");
-  assert.equal(logoOf(row(opencode, new Map())).getAttribute("data-logo"), "opencode");
-  assert.equal(logo("opencode").getAttribute("aria-label"), "OpenCode");
-  assert.equal(agentNames.opencode, "OpenCode");
-});
-
-test("a recorded Copilot session wears Copilot's logo, and the page names it Copilot (#361)", async () => {
-  const { agentNames } = await import("../../dist/capabilities.js");
-  const copilot = /** @type {import("../../dist/types.js").Session} */ ({ ...base, capabilities: caps("copilot"), identity: { issue: null, name: "p" }, transcript: { context: null } });
-  assert.equal(logoKey(copilot), "copilot");
-  assert.equal(logoOf(row(copilot, new Map())).getAttribute("data-logo"), "copilot");
-  assert.equal(logo("copilot").getAttribute("aria-label"), "GitHub Copilot");
-  assert.equal(agentNames.copilot, "Copilot");
+  for (const [agent, title, name] of [
+    ["opencode", "OpenCode", "OpenCode"],
+    ["copilot", "GitHub Copilot", "Copilot"],
+    ["cline", "Cline", "Cline"],
+  ]) {
+    const session = /** @type {import("../../dist/types.js").Session} */ ({ ...base, capabilities: caps(agent), identity: { issue: null, name: "p" }, transcript: { context: null } });
+    assert.equal(logoKey(session), agent);
+    assert.equal(logoOf(row(session, new Map())).getAttribute("data-logo"), agent);
+    assert.equal(logo(agent).getAttribute("aria-label"), title);
+    assert.equal(agentNames[agent], name);
+  }
 });
 
 test("a session row in the list and History shows the logo before its name; an agy row no longer shows \"agy\"", () => {

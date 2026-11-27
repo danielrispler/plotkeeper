@@ -37,6 +37,11 @@
 //! itself, as `plotkeeper.js`, and uninstall removes it with the folders install made for it (#370). No other file of
 //! OpenCode's is opened: `opencode.json(c)` and its login can hold keys.
 // shortcut: OpenCode's config folder can move (`XDG_CONFIG_HOME`); install writes the default one only.
+//!
+//! Cline keeps its API keys in its config folder (`~/.cline` by default), so no file there is opened (#371). Its plugin
+//! goes in with `cline plugin install <folder>` of the folder install renders, which copies it into
+//! `~/.cline/plugins/_installed/`, and out with `cline plugin uninstall plotkeeper`. Install takes an earlier install
+//! out first: Cline CLI 3.0.76 refuses to install over one and still exits 0.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -73,6 +78,9 @@ const CURSOR_HOOKS_JSON: &str = include_str!("../../plugin-cursor/hooks.json");
 const QWEN_EXTENSION_JSON: &str = include_str!("../../plugin-qwen/qwen-extension.json");
 /// plotkeeper's plugin for OpenCode (#370), one file.
 const OPENCODE_PLUGIN_JS: &str = include_str!("../../plugin-opencode/plotkeeper.js");
+/// plotkeeper's plugin for Cline (#371): its package, which names its entry, and the entry.
+const CLINE_PACKAGE_JSON: &str = include_str!("../../plugin-cline/package.json");
+const CLINE_PLUGIN_JS: &str = include_str!("../../plugin-cline/plotkeeper.js");
 /// The archived app's plugin for agy, by its folder's name.
 const OLD_AGY_PLUGIN: &str = "studio";
 
@@ -108,8 +116,11 @@ struct State {
     /// plotkeeper's OpenCode plugin file was written (#370), and the folders made for it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     opencode: Option<OpencodeRecord>,
+    /// plotkeeper's Cline plugin was installed with `cline plugin` (#371).
+    #[serde(default)]
+    cline: bool,
     /// Each harness the user answered for, by its id (`claude`, `agy`, `codex`, `cursor`, `copilot`, `qwen`,
-    /// `opencode`); a harness with none has not been asked (#434).
+    /// `opencode`, `cline`); a harness with none has not been asked (#434).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     harnesses: BTreeMap<String, HarnessRecord>,
     /// Written by a build that keeps answers (#434), on every save, and kept through uninstall, so a harness with no
@@ -623,6 +634,7 @@ fn wire_one(
         Harness::Copilot => install_copilot(home, bin, &found("copilot")?, state, out)?,
         Harness::Qwen => install_qwen(home, bin, &found("qwen")?, state, out)?,
         Harness::Opencode => install_opencode(home, bin, state, out)?,
+        Harness::Cline => install_cline(home, bin, &found("cline")?, state, out)?,
     }
     Ok(())
 }
@@ -637,9 +649,10 @@ enum Harness {
     Copilot,
     Qwen,
     Opencode,
+    Cline,
 }
 
-const HARNESSES: [Harness; 7] = [
+const HARNESSES: [Harness; 8] = [
     Harness::Claude,
     Harness::Agy,
     Harness::Codex,
@@ -647,6 +660,7 @@ const HARNESSES: [Harness; 7] = [
     Harness::Copilot,
     Harness::Qwen,
     Harness::Opencode,
+    Harness::Cline,
 ];
 
 const CODEX_RETRUST: &str = "Codex: once, run `/hooks` in Codex and trust plotkeeper's changed hooks; Codex skips a changed hook until it is trusted again";
@@ -664,6 +678,7 @@ impl Harness {
             Harness::Copilot => "copilot",
             Harness::Qwen => "qwen",
             Harness::Opencode => "opencode",
+            Harness::Cline => "cline",
         }
     }
 
@@ -676,6 +691,7 @@ impl Harness {
             Harness::Copilot => "Copilot",
             Harness::Qwen => "Qwen Code",
             Harness::Opencode => "OpenCode",
+            Harness::Cline => "Cline",
         }
     }
 
@@ -737,11 +753,12 @@ impl Harness {
                 plugins.join("qwen").join(NAME).display()
             )],
             Harness::Opencode => vec![opencode_line(home)],
+            Harness::Cline => vec![cline_line(home)],
         }
     }
 
     /// The fingerprint of what install renders for it with the hook binaries in `bin`: Claude Code's, agy's and
-    /// Copilot's plugin folders, Codex's and Cursor's entries, Qwen Code's extension, OpenCode's plugin. It changes
+    /// Copilot's plugin folders, Codex's and Cursor's entries, Qwen Code's extension, OpenCode's and Cline's plugins. It changes
     /// when a template does, and when the binaries' path does.
     fn fingerprint(self, home: &Path, bin: &Path) -> Result<String, String> {
         let entries = |file: HookFile| -> Result<Vec<(String, String)>, String> {
@@ -761,6 +778,7 @@ impl Harness {
                 render(QWEN_EXTENSION_JSON, bin)?,
             )],
             Harness::Opencode => vec![("plotkeeper.js".into(), render(OPENCODE_PLUGIN_JS, bin)?)],
+            Harness::Cline => cline_files(bin)?,
         };
         Ok(fingerprint(&files))
     }
@@ -780,6 +798,7 @@ impl Harness {
             Harness::Copilot => state.copilot,
             Harness::Qwen => state.qwen,
             Harness::Opencode => state.opencode.is_some(),
+            Harness::Cline => state.cline,
         }
     }
 }
@@ -1075,6 +1094,73 @@ fn install_qwen(
         out,
         format!("Qwen Code: qwen extensions install {}", dir.display()),
     );
+    Ok(())
+}
+
+/// Cline's plugin for the binaries in `bin`: each file by its path in its folder.
+fn cline_files(bin: &Path) -> Result<Vec<(String, String)>, String> {
+    Ok(vec![
+        ("package.json".into(), CLINE_PACKAGE_JSON.to_owned()),
+        ("plotkeeper.js".into(), render(CLINE_PLUGIN_JS, bin)?),
+    ])
+}
+
+/// The folder in the data folder install renders Cline's plugin into.
+fn cline_plugin(home: &Path) -> PathBuf {
+    plugins_dir(home).join("cline").join(NAME)
+}
+
+fn cline_line(home: &Path) -> String {
+    format!(
+        "Cline: cline plugin install {}",
+        cline_plugin(home).display()
+    )
+}
+
+/// `cline plugin uninstall plotkeeper`; a plugin Cline does not have counts as uninstalled.
+fn uninstall_cline(cline: &Path) -> Result<(), String> {
+    let done = run(
+        cline,
+        &["plugin".as_ref(), "uninstall".as_ref(), NAME.as_ref()],
+    );
+    // Cline CLI 3.0.76's words for a plugin it does not have.
+    done.or_else(|e| {
+        if e.contains("No plugin found matching") {
+            Ok(())
+        } else {
+            Err(e)
+        }
+    })
+}
+
+/// Renders `plugin-cline/` for the binaries in `bin` into the data folder and installs it with `cline plugin
+/// install`, which copies it into Cline's own plugin folder. An install of the same folder is taken out first: Cline
+/// CLI 3.0.76 refuses to install over one and still exits 0. plotkeeper opens no file of Cline's (#371).
+fn install_cline(
+    home: &Path,
+    bin: &Path,
+    cline: &Path,
+    state: &mut State,
+    out: &mut dyn Write,
+) -> Result<(), String> {
+    let dir = cline_plugin(home);
+    fs::create_dir_all(&dir).map_err(|e| format!("could not make {}: {e}", dir.display()))?;
+    for (name, text) in cline_files(bin)? {
+        let file = dir.join(name);
+        fs::write(&file, text).map_err(|e| format!("could not write {}: {e}", file.display()))?;
+    }
+    // Every install, as a record lost with the data folder leaves Cline's copy behind. An uninstall that fails keeps
+    // the record, so a later uninstall retries it.
+    uninstall_cline(cline)?;
+    state.cline = false;
+    save(home, state)?;
+    run(
+        cline,
+        &["plugin".as_ref(), "install".as_ref(), dir.as_os_str()],
+    )?;
+    state.cline = true;
+    save(home, state)?;
+    say(out, cline_line(home));
     Ok(())
 }
 
@@ -1410,6 +1496,7 @@ pub fn uninstall(home: &Path, path: Option<&OsStr>, out: &mut dyn Write) -> Resu
     undo.copilot();
     undo.qwen();
     undo.opencode();
+    undo.cline();
     undo.agy();
     undo.claude();
     if OLD_APP_SETUP {
@@ -1597,6 +1684,25 @@ impl Undo<'_> {
             fs::remove_dir(dir).ok();
         }
         self.state.opencode = None;
+    }
+
+    /// Cline's plugin, by `cline plugin uninstall`; one Cline no longer has is gone already.
+    fn cline(&mut self) {
+        if !self.state.cline {
+            return;
+        }
+        let done = on_path("cline", self.path)
+            .ok_or_else(|| {
+                "Cline: `cline` not found, so its plugin cannot be uninstalled".to_owned()
+            })
+            .and_then(|cline| uninstall_cline(&cline));
+        match done {
+            Ok(()) => {
+                say(self.out, format!("Cline: cline plugin uninstall {NAME}"));
+                self.state.cline = false;
+            }
+            Err(e) => self.fail(e),
+        }
     }
 
     /// agy's plugin, and the plugins of the same name install moved aside.

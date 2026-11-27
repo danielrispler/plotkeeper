@@ -210,7 +210,7 @@ pub(crate) struct Spawned {
 /// What an adapter reports, which decides what its sessions' views show (decision 4).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Capabilities {
-    /// The agent's name, for its mark and display name: `claude`, `agy`, `codex`, `qwen`, `cursor`, `copilot` or `opencode`. Nothing in a view hides or
+    /// The agent's name, for its mark and display name: `claude`, `agy`, `codex`, `qwen`, `cursor`, `copilot`, `opencode` or `cline`. Nothing in a view hides or
     /// picks by it; the views follow the flags below.
     pub agent: &'static str,
     /// It reports a permission or a question that waits on Daniel, with its text.
@@ -258,6 +258,7 @@ impl<'de> serde::Deserialize<'de> for Capabilities {
             crate::qwen::QWEN => Ok(crate::qwen::CAPABILITIES),
             crate::opencode::OPENCODE => Ok(crate::opencode::CAPABILITIES),
             crate::copilot::COPILOT => Ok(crate::copilot::CAPABILITIES),
+            crate::cline::CLINE => Ok(crate::cline::CAPABILITIES),
             other => Err(serde::de::Error::custom(format!("unknown agent {other}"))),
         }
     }

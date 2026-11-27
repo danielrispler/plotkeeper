@@ -37,7 +37,7 @@ plotkeeper sits beside the sessions you run in your own terminals and editors. I
 | **Cursor** (IDE & CLI) | Finished calls | Yes | — | — |
 | **Antigravity CLI** (agy) | Hooks + transcript | — | — | — |
 
-Copilot, Qwen Code and OpenCode (version 2) are experimental (wired, untrialled); Cline is planned for v2.
+Copilot, Qwen Code, OpenCode (version 2) and Cline are experimental (wired, untrialled).
 
 ## Quick start
 

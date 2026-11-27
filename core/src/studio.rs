@@ -15,8 +15,8 @@ use crate::{
     AGY_CAPABILITIES, AgyDrift, AgyDriftKind, Bytes, CardRequest, Change, CheckLists, FactFile,
     Facts, Fingerprint, Kind, LiveFacts, MIN_HISTORY, Outcome, Output, Purpose, RootDiff, Row,
     Session, State, Status, Subagent, SubagentLog, SubagentLogFile, TranscriptFormat, TurnDiff,
-    TurnFiles, TurnFilesSnapshot, TurnTrees, Work, agy, checks, claude, codex, compute_turn_files,
-    copilot, cursor,
+    TurnFiles, TurnFilesSnapshot, TurnTrees, Work, agy, checks, claude, cline, codex,
+    compute_turn_files, copilot, cursor,
     event::{Event, Happened, Start, ToolKind},
     opencode, qwen, range,
     session::{FALLBACK_MS, IDLE_AFTER_MS, Since, card_time, short, task_path},
@@ -32,7 +32,7 @@ use std::{
 /// harness is one arm here, beside its `Capabilities` constant and its parser.
 enum Named {
     Agy,
-    /// An agent read by a parser of its own, Codex's, Cursor's (#362), Qwen Code's, Copilot's (#361) or OpenCode's (#370), and the line's
+    /// An agent read by a parser of its own, Codex's, Cursor's (#362), Qwen Code's, Copilot's (#361), OpenCode's (#370) or Cline's (#371), and the line's
     /// time, for its drift when that parser cannot read it.
     Parsed(Parse, u64),
     /// The line's time, for its drift.
@@ -59,6 +59,7 @@ impl Named {
             Some(qwen::QWEN) => Named::Parsed(qwen::parse, stamp.studio_received_ms),
             Some(copilot::COPILOT) => Named::Parsed(copilot::parse, stamp.studio_received_ms),
             Some(opencode::OPENCODE) => Named::Parsed(opencode::parse, stamp.studio_received_ms),
+            Some(cline::CLINE) => Named::Parsed(cline::parse, stamp.studio_received_ms),
             Some(_) => Named::Other(stamp.studio_received_ms),
         }
     }
