@@ -119,11 +119,10 @@ fn prompt(parts: &[serde_json::Value], input: &Input) -> String {
 
 /// The ids in the writer's reply, which may come inside a code fence or with words around it.
 fn read_reply(text: &str) -> Result<Vec<String>, String> {
-    let v: serde_json::Value = crate::read_object(
-        text,
-        "the writer's reply holds no JSON",
-        "the writer's reply does not read: ",
-    )?;
+    let v: serde_json::Value = crate::read_object(text).map_err(|e| match e {
+        None => "the writer's reply holds no JSON".to_string(),
+        Some(e) => format!("the writer's reply does not read: {e}"),
+    })?;
     let parts = v["parts"]
         .as_array()
         .ok_or("the writer's reply has no parts")?;

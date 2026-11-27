@@ -104,8 +104,10 @@ impl TurnSummary {
         material: &str,
     ) -> Result<(TurnSummary, Option<String>), String> {
         let head: String = reply.chars().take(300).collect();
-        let value: serde_json::Value = crate::parse_object(reply)
-            .map_err(|e| format!("the summary reply does not parse ({e}): {head:?}"))?;
+        let value: serde_json::Value = crate::read_object(reply).map_err(|e| match e {
+            Some(e) => format!("the summary reply does not parse ({e}): {head:?}"),
+            None => format!("the summary reply holds no JSON object: {head:?}"),
+        })?;
         let headline = value["headline"]
             .as_str()
             .map(str::trim)
@@ -273,7 +275,7 @@ pub fn write_agent_summary(
     let summary = writer
         .summarize_agent(setup, prompt, message)
         .and_then(|reply| {
-            let value = crate::parse_object(&reply).unwrap_or_default();
+            let value: serde_json::Value = crate::read_object(&reply).unwrap_or_default();
             match value["summary"].as_str().map(str::trim) {
                 Some(summary) if !summary.is_empty() => Ok(summary.to_string()),
                 _ => Err(format!(
@@ -386,7 +388,7 @@ pub fn write_name(
     let name = writer
         .name(setup, prompt, response, folder)
         .and_then(|reply| {
-            let value = crate::parse_object(&reply).unwrap_or_default();
+            let value: serde_json::Value = crate::read_object(&reply).unwrap_or_default();
             let name = value["name"].as_str().unwrap_or_default();
             let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
             if name.is_empty() {

@@ -1,7 +1,7 @@
 //! The risk note (danielrispler/plotkeeper#296, #298): the card writer's one line on what a blocked command would do if
 //! allowed, led by its risk level, written from the command and its folder alone.
 
-use crate::{CardWriter, ClaudeWriter, WriterRequest, parse_object};
+use crate::{CardWriter, ClaudeWriter, WriterRequest, read_object};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashSet},
@@ -47,7 +47,7 @@ impl Risk {
         }
         // Nothing of the reply goes in the message but its head, in quotes, which the log's scrubbing cuts: a serde error
         // may name the reply's own words.
-        let read = parse_object(reply).and_then(serde_json::from_value::<Reply>);
+        let read = read_object::<Reply>(reply);
         #[allow(
             clippy::map_err_ignore,
             reason = "a serde error may name the reply's own words, which the message must not hold (the comment above)"
