@@ -20,12 +20,64 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// The data folder, `~/Library/Application Support/plotkeeper/`: the one place that names it.
+/// The data folder, the one place that names it: `~/Library/Application Support/plotkeeper/` on macOS, and on Linux
+/// `$XDG_DATA_HOME/plotkeeper/`, else `~/.local/share/plotkeeper/` (#510, "Folders").
 pub fn data_dir(home: &Path) -> PathBuf {
-    home.join("Library/Application Support").join(DATA_FOLDER)
+    #[cfg(target_os = "macos")]
+    let base = home.join("Library/Application Support");
+    #[cfg(not(target_os = "macos"))]
+    let base = xdg_base(home, "XDG_DATA_HOME", ".local/share");
+    base.join(DATA_FOLDER)
+}
+
+/// The runs folder, outside the data folder and with no space in its path: `~/Library/Caches/plotkeeper/runs/` on
+/// macOS, and on Linux `$XDG_CACHE_HOME/plotkeeper/runs/`, else `~/.cache/plotkeeper/runs/`, so a cache cleaner treats
+/// the runs as cache.
+pub fn runs_dir(home: &Path) -> PathBuf {
+    #[cfg(target_os = "macos")]
+    let base = home.join("Library/Caches");
+    #[cfg(not(target_os = "macos"))]
+    let base = xdg_base(home, "XDG_CACHE_HOME", ".cache");
+    base.join(DATA_FOLDER).join("runs")
+}
+
+/// An XDG base folder: the variable `var` when it holds an absolute path, else `home/fallback`. The XDG Base Directory
+/// spec ignores an empty or relative value.
+#[cfg(not(target_os = "macos"))]
+fn xdg_base(home: &Path, var: &str, fallback: &str) -> PathBuf {
+    match env::var_os(var).map(PathBuf::from) {
+        Some(dir) if dir.is_absolute() => dir,
+        _ => home.join(fallback),
+    }
 }
 
 const DATA_FOLDER: &str = "plotkeeper";
+
+/// The data folder of the hook binary that runs now: on Linux, the one its copy sits in when it runs from a data folder's
+/// `bin/` (`<data>/bin/<name>`, see [`bin_dir`]), so it writes where the `plotkeeper` that copied it reads, whatever
+/// `XDG_DATA_HOME` its agent was started with (#510, "Folders"); else [`data_dir`]. On macOS, always [`data_dir`].
+pub fn hook_data_dir(home: &Path) -> PathBuf {
+    #[cfg(not(target_os = "macos"))]
+    if let Some(data) = env::current_exe().ok().as_deref().and_then(copy_data_dir) {
+        return data;
+    }
+    data_dir(home)
+}
+
+/// The data folder `exe` is a hook binary's copy in, when its path is `<data>/bin/<name>` with `<data>` named for
+/// plotkeeper and `<name>` one of [`HOOK_BINARIES`].
+#[cfg(not(target_os = "macos"))]
+fn copy_data_dir(exe: &Path) -> Option<PathBuf> {
+    let name = exe.file_name()?;
+    let bin = exe.parent()?;
+    let data = bin.parent()?;
+    let copy = HOOK_BINARIES
+        .iter()
+        .any(|binary| name == OsStr::new(binary))
+        && bin.file_name()? == "bin"
+        && data.file_name()? == DATA_FOLDER;
+    copy.then(|| data.to_path_buf())
+}
 
 /// The data folder's `bin/`, where the hooks find their binaries at a path that never moves (#356): copies of
 /// [`HOOK_BINARIES`], which each `plotkeeper` start refreshes from the ones beside its own executable.
@@ -42,8 +94,12 @@ const OLD_DATA_FOLDER: &str = "dev.falinks.studio";
 /// The one move (#322): when the old data folder exists as a real folder and the new one does not,
 /// renames it to the new name and leaves a symbolic link at the old path, so the plugin path in
 /// `~/.zshrc` (through the folder's `checkout` link) and a hook still built with the old path keep
-/// working. Never moves over an existing new folder. Returns whether it moved.
+/// working. Never moves over an existing new folder. Returns whether it moved. macOS only: the old folder never
+/// existed on Linux, where this moves nothing.
 pub fn move_old_data_dir(home: &Path) -> std::io::Result<bool> {
+    if !cfg!(target_os = "macos") {
+        return Ok(false);
+    }
     let (new, old) = (
         data_dir(home),
         home.join("Library/Application Support")
@@ -86,8 +142,11 @@ mod link_tests {
 
 /// The log in the studio's data directory. The hook writes it; the app reads it.
 pub fn event_log(home: &Path) -> PathBuf {
-    data_dir(home).join("events.jsonl")
+    data_dir(home).join(EVENT_LOG)
 }
+
+/// The event log's name in the data folder.
+pub const EVENT_LOG: &str = "events.jsonl";
 
 /// How long the hook waits for the log's lock before it drops the event (#43, decision 11).
 pub const PATIENCE: Duration = Duration::from_secs(5);
@@ -1102,16 +1161,53 @@ fn codex_daemon(command: &str) -> bool {
     command.contains("/packages/app-server-daemon/") && command.ends_with("/codex")
 }
 
-/// Whether `command`, a process's executable path, lies inside a macOS app bundle, as an IDE's
-/// processes do; an agent's CLI is a program of its own.
+/// Whether `command`, a process's executable path, belongs to an IDE, as its processes do; an agent's
+/// CLI is a program of its own. On macOS that is a path inside an app bundle. On Linux it is a VS Code
+/// or Cursor install: a system package (`/usr/share/code/`, `/usr/share/cursor/`), `/opt`, a snap, the
+/// remote server that Remote-SSH and Remote-WSL install in the home (`~/.vscode-server/`,
+/// `~/.cursor-server/`), or an AppImage's mount (`/tmp/.mount_<name><random>/`), where the executable
+/// is the editor's own.
 fn in_app(command: &str) -> bool {
-    command.contains(".app/Contents/")
+    if command.contains(".app/Contents/") {
+        return true;
+    }
+    let path = command.to_ascii_lowercase();
+    const INSTALLS: [&str; 12] = [
+        "/.vscode-server/",
+        "/.cursor-server/",
+        "/usr/share/code/",
+        "/usr/share/code-insiders/",
+        "/usr/share/cursor/",
+        "/opt/visual-studio-code/",
+        "/opt/vscode",
+        "/opt/cursor/",
+        "/snap/code/",
+        "/snap/code-insiders/",
+        "/snap/cursor/",
+        "/usr/lib/code/",
+    ];
+    if INSTALLS.iter().any(|install| path.contains(install)) {
+        return true;
+    }
+    // An AppImage's mount directory names the image, cut to its first characters.
+    let editor = matches!(
+        path.rsplit('/').next(),
+        Some("code" | "code-insiders" | "cursor")
+    );
+    editor
+        && path.split('/').any(|dir| {
+            dir.strip_prefix(".mount_").is_some_and(|name| {
+                ["cursor", "vscode", "code"]
+                    .iter()
+                    .any(|n| name.starts_with(n))
+            })
+        })
 }
 
 fn is_shell(command: &str) -> bool {
     let name = command.rsplit('/').next().unwrap_or(command);
     let name = name.trim_start_matches('-');
-    matches!(name, "sh" | "bash" | "zsh" | "dash" | "fish")
+    matches!(name, "sh" | "ash" | "bash" | "zsh" | "dash" | "fish")
 }
 
 /// The harness whose own payload `event` is, by a marker field only its payloads carry, when that is
@@ -1143,6 +1239,9 @@ fn copilot_payload(payload: &serde_json::Map<String, serde_json::Value>) -> bool
 }
 
 /// The command and parent pid of process `pid`, from `ps`; `None` when it has gone or `ps` fails.
+/// `ps -o comm=` is the executable's full path on macOS, which `in_app` and `codex_daemon` read; on
+/// Linux it is the bare name, so the lookup reads `/proc` instead (#702).
+#[cfg(not(target_os = "linux"))]
 pub fn inspect(pid: u32) -> Option<(String, u32)> {
     let out = Command::new("ps")
         .args(["-o", "ppid=", "-o", "comm=", "-p", &pid.to_string()])
@@ -1154,11 +1253,54 @@ pub fn inspect(pid: u32) -> Option<(String, u32)> {
     Some((command.trim().to_string(), parent.parse().ok()?))
 }
 
+/// The executable's full path (`/proc/<pid>/exe`) and parent pid (`/proc/<pid>/stat`) of process
+/// `pid`; `None` when it has gone. When the link cannot be read (a process of another user, say),
+/// the name in `stat` stands in, enough to tell a shell, and so it does for busybox, whose one
+/// executable is every applet: there the name is the applet's, such as `sh`.
+#[cfg(target_os = "linux")]
+pub fn inspect(pid: u32) -> Option<(String, u32)> {
+    let (name, parent) = parse_stat(&fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)?;
+    let command = match fs::read_link(format!("/proc/{pid}/exe")) {
+        Ok(exe) if exe.file_name() == Some(OsStr::new("busybox")) => name,
+        // A binary replaced while it runs reads as "<path> (deleted)".
+        Ok(exe) => {
+            let exe = exe.to_string_lossy();
+            exe.strip_suffix(" (deleted)").unwrap_or(&exe).to_owned()
+        }
+        Err(_) => name,
+    };
+    Some((command, parent))
+}
+
+/// The process name and parent pid of a `/proc/<pid>/stat` line, `pid (name) state ppid ...`. The
+/// name may hold spaces and parentheses, so it ends at the line's last `)`.
+#[cfg(target_os = "linux")]
+fn parse_stat(stat: &str) -> Option<(String, u32)> {
+    let open = stat.find('(')?;
+    let close = stat.rfind(')')?;
+    let name = stat.get(open + 1..close)?;
+    let parent = stat.get(close + 1..)?.split_whitespace().nth(1)?;
+    Some((name.to_owned(), parent.parse().ok()?))
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
     use super::{INTERRUPTED, Turn, command};
+
+    /// A name with spaces and parentheses, as Cursor's renamed hosts have, still ends at the last `)`.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_parent_is_read_after_the_names_last_parenthesis() {
+        use super::parse_stat;
+        assert_eq!(
+            parse_stat("4242 (Helper (Plugin) x) S 77 4242 4242 0 -1"),
+            Some(("Helper (Plugin) x".to_owned(), 77))
+        );
+        assert_eq!(parse_stat("4242 (sh) S 1 4242"), Some(("sh".to_owned(), 1)));
+        assert_eq!(parse_stat("garbage"), None);
+    }
 
     /// The hook's view of one session's turns, after `events`, each a name and a prompt id.
     fn after(turn: &mut Turn, name: &str, prompt: &str) -> (Vec<String>, bool) {

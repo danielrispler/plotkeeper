@@ -146,6 +146,30 @@ pub const SANDBOX_CHECK: [&str; 4] = [
     "/usr/bin/true",
 ];
 
+/// Whether Claude Code's Linux sandbox can start here (#704): bubblewrap and socat on `PATH`, where Claude Code looks
+/// them up, and bubblewrap starting a sandbox in the shape Claude Code's sandbox runtime gives it, with its own network
+/// namespace and a fresh `/proc`. A missing tool gets plotkeeper's message naming what to install; a container or
+/// kernel that refuses gets bubblewrap's own words ("No permissions to create new namespace", "Can't mount proc").
+/// Without the check, Claude Code runs commands unsandboxed when either tool is missing. The shape and the texts were
+/// measured in Docker (#704).
+pub const BWRAP_CHECK: [&str; 3] = [
+    "/bin/sh",
+    "-c",
+    "command -v bwrap >/dev/null 2>&1 || { echo 'bubblewrap (bwrap) is not installed: install bubblewrap' >&2; exit 1; }
+command -v socat >/dev/null 2>&1 || { echo 'socat is not installed: install socat' >&2; exit 1; }
+exec bwrap --new-session --die-with-parent --unshare-net --ro-bind / / --dev /dev --unshare-pid --unshare-user \
+--cap-drop ALL --proc /proc -- /bin/sh -c true",
+];
+
+/// The sandbox check of this platform: Seatbelt's on macOS, bubblewrap's elsewhere.
+fn sandbox_check() -> Vec<String> {
+    #[cfg(target_os = "macos")]
+    let check = SANDBOX_CHECK.as_slice();
+    #[cfg(not(target_os = "macos"))]
+    let check = BWRAP_CHECK.as_slice();
+    check.iter().map(|word| (*word).to_string()).collect()
+}
+
 /// What Claude Code and Seatbelt print when the sandbox fails after the start: a run that shows one failed, whatever its
 /// exit. Whole phrases, so a result that only names the setting does not match.
 const SANDBOX_FAILURES: [&str; 2] = [
@@ -179,7 +203,7 @@ pub struct Claude;
 
 impl Harness for Claude {
     fn command(&self, plan: &Plan) -> Result<HarnessCommand, String> {
-        let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
+        let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
         let program = studio_understanding::find(shell.as_ref(), "claude")
             .ok_or("`claude` was not found, so the run cannot start")?;
         Ok(claude_command(&program, plan))
@@ -252,9 +276,9 @@ pub(crate) fn cores() -> usize {
 /// (`--restricted --safe-mode --strict-mcp-config`), nothing asked and nothing allowed that the list does not name
 /// (`dontAsk`), the kind's tools, the sandbox block, and the prompt as its last argument since standard input is closed.
 /// It runs on the CLI's own login, as the writer does: the API key variables are removed, and `PLOTKEEPER_INTERNAL=1`
-/// keeps the hook from recording it. The launcher first checks that the sandbox can start ([`SANDBOX_CHECK`]), and gives
-/// the run a private temp folder, [`private_tmp`], as `CLAUDE_CODE_TMPDIR`: without it, the sandbox lets the tools write
-/// into `/tmp/claude-<uid>`, where every session keeps its scratchpad.
+/// keeps the hook from recording it. The launcher first checks that the sandbox can start ([`SANDBOX_CHECK`] on macOS,
+/// [`BWRAP_CHECK`] on Linux), and gives the run a private temp folder, [`private_tmp`], as `CLAUDE_CODE_TMPDIR`: without
+/// it, the sandbox lets the tools write into `/tmp/claude-<uid>`, where every session keeps its scratchpad.
 pub fn claude_command(program: &Path, plan: &Plan) -> HarnessCommand {
     let mut args: Vec<String> = [
         "--restricted",
@@ -300,7 +324,7 @@ pub fn claude_command(program: &Path, plan: &Plan) -> HarnessCommand {
         ]
         .map(String::from)
         .into(),
-        check: SANDBOX_CHECK.map(String::from).into(),
+        check: sandbox_check(),
         private_tmp: Some(tmp),
     }
 }
@@ -450,11 +474,6 @@ pub struct Config {
     pub harness: Arc<dyn Harness>,
 }
 
-/// The runs folder: `~/Library/Caches/plotkeeper/runs`, outside the data folder and with no space in its path.
-pub fn runs_dir(home: &Path) -> PathBuf {
-    home.join("Library/Caches/plotkeeper/runs")
-}
-
 impl Config {
     /// The runner of the plotkeeper whose event log is `log`: the data folder is the log's, the launcher sits beside this
     /// executable, and the harness is Claude Code.
@@ -463,8 +482,10 @@ impl Config {
         let exe = std::env::current_exe().and_then(|exe| exe.canonicalize());
         let beside = exe.ok().and_then(|exe| exe.parent().map(Path::to_path_buf));
         Config {
-            runs: std::env::home_dir()
-                .map_or_else(|| data.join("../plotkeeper-runs"), |h| runs_dir(&h)),
+            runs: std::env::home_dir().map_or_else(
+                || data.join("../plotkeeper-runs"),
+                |h| studio_hook::runs_dir(&h),
+            ),
             settings: data.join("settings.json"),
             launcher: beside.unwrap_or_default().join("plotkeeper-run"),
             harness: Arc::new(Claude),

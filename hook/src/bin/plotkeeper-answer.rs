@@ -34,7 +34,7 @@ fn run() -> Result<Option<serde_json::Value>, Box<dyn Error>> {
         );
         return Ok(None);
     }
-    let data = studio_hook::data_dir(&env::home_dir().ok_or("no home directory")?);
+    let data = studio_hook::hook_data_dir(&env::home_dir().ok_or("no home directory")?);
     // Tests shorten the 120 seconds.
     let timeout = env::var("PLOTKEEPER_ANSWER_TIMEOUT_MS")
         .ok()

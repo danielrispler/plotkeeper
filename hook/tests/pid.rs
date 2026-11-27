@@ -24,6 +24,16 @@ fn a_shell_between_the_agent_and_the_hook_is_skipped() {
     assert_eq!(agent_pid(None, 501, t), Some(500));
 }
 
+/// busybox's shell, by its applet name, as the Linux lookup gives it for a busybox executable.
+#[test]
+fn a_busybox_shell_between_the_agent_and_the_hook_is_skipped() {
+    for shell in ["sh", "ash"] {
+        let rows: &'static [(u32, &'static str, u32)] =
+            Box::leak(Box::new([(501, shell, 500), (500, "/usr/bin/claude", 100)]));
+        assert_eq!(agent_pid(None, 501, table(rows)), Some(500), "{shell}");
+    }
+}
+
 #[test]
 fn the_wrapper_pid_wins_and_a_bad_one_is_ignored() {
     let t = || table(&[(501, "/bin/sh", 500)]);
@@ -131,4 +141,109 @@ fn no_pid_when_the_agent_is_codexs_shared_daemon() {
     );
     let t = table(&[(9735, "/opt/homebrew/bin/codex", 100)]);
     assert_eq!(agent_pid(None, 9735, t), Some(9735));
+}
+
+/// On Linux the lookup gives `/proc/<pid>/exe`, a full path, so the checks above see what macOS's
+/// `ps` gives them (#702). The rows are the paths VS Code and Cursor run from under each install shape
+/// (system package, `/opt`, snap, AppImage mount, and the remote server Remote-SSH and Remote-WSL
+/// install in the home, unverified), and Codex's daemon in a Linux release.
+#[test]
+fn no_pid_when_the_agent_is_an_ide_installed_on_linux() {
+    const IDES: [&str; 15] = [
+        "/home/me/.vscode-server/bin/0123abcd/node",
+        "/home/me/.vscode-server/cli/servers/Stable-0123abcd/server/node",
+        "/home/me/.cursor-server/bin/0123abcd/node",
+        "/home/me/.cursor-server/cli/servers/Stable-0123abcd/server/node",
+        "/usr/share/code/code",
+        "/usr/share/code-insiders/code-insiders",
+        "/usr/share/cursor/cursor",
+        "/opt/Cursor/cursor",
+        "/opt/cursor/cursor",
+        "/opt/visual-studio-code/code",
+        "/opt/VSCode-linux-x64/code",
+        "/snap/code/178/usr/share/code/code",
+        "/snap/cursor/12/usr/share/cursor/cursor",
+        "/tmp/.mount_cursorAb12Cd/cursor",
+        "/tmp/.mount_VSCodeXy34Zq/code",
+    ];
+    for ide in IDES {
+        let rows: &'static [(u32, &'static str, u32)] =
+            Box::leak(Box::new([(600, "/bin/dash", 700), (700, ide, 1)]));
+        assert_eq!(agent_pid(None, 700, table(rows)), None, "{ide}");
+        // Through a shell too.
+        assert_eq!(agent_pid(None, 600, table(rows)), None, "{ide}");
+    }
+}
+
+/// An agent's own CLI, and a Codex that is no daemon, keep their pid on Linux, whatever its folder.
+#[test]
+fn a_terminal_agent_on_linux_keeps_its_own_pid() {
+    for exe in [
+        "/home/me/.local/share/claude/versions/2.1.0/claude",
+        "/usr/lib/node_modules/@openai/codex/vendor/x86_64-unknown-linux-musl/codex/codex",
+        "/home/me/.local/share/cursor-agent/versions/2025.11.25/node",
+        "/usr/bin/copilot",
+        "/tmp/.mount_codexAb12Cd/codex",
+        "/usr/share/codec/player",
+    ] {
+        let rows: &'static [(u32, &'static str, u32)] = Box::leak(Box::new([
+            (800, "/usr/bin/bash", 900),
+            (900, exe, 100),
+            (100, "/usr/share/code/code", 1),
+        ]));
+        assert_eq!(agent_pid(None, 900, table(rows)), Some(900), "{exe}");
+        assert_eq!(agent_pid(None, 800, table(rows)), Some(900), "{exe}");
+    }
+}
+
+#[test]
+fn no_pid_when_the_agent_is_codexs_shared_daemon_on_linux() {
+    const DAEMON: &str = "/home/me/.codex/packages/app-server-daemon/releases/0.172.0-x86_64-unknown-linux-musl/bin/codex";
+    let t = table(&[(37109, DAEMON, 70019), (70019, DAEMON, 1)]);
+    assert_eq!(agent_pid(None, 37109, t), None);
+    let t = table(&[(601, "/usr/bin/bash", 37109), (37109, DAEMON, 70019)]);
+    assert_eq!(agent_pid(None, 601, t), None);
+}
+
+/// The real lookup reads the real process table: a child's executable and its parent. A stand-in table
+/// cannot catch `ps -o comm=` giving a bare name on Linux, so this runs there against `/proc`.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_real_lookup_finds_a_childs_executable_and_its_parent() {
+    // A shell waiting on its stdin stays the child's executable, whichever shell `/bin/sh` is.
+    let mut child = std::process::Command::new("/bin/sh")
+        .args(["-c", "read line"])
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let found = studio_hook::inspect(child.id());
+    drop(child.stdin.take());
+    child.wait().unwrap();
+    let exe = fs::canonicalize("/bin/sh").unwrap();
+    assert_eq!(
+        found,
+        Some((exe.to_string_lossy().into_owned(), std::process::id()))
+    );
+}
+
+/// On a busybox system `/bin/sh` is busybox, so a shell's executable reads as `/bin/busybox`: the lookup gives the
+/// applet's name from `stat` instead, and the shell is skipped as any other. A copy of `/bin/sh` named `busybox`, run
+/// through a link named `sh`, stands in for busybox.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_real_lookup_skips_a_busybox_shell() {
+    let dir = scratch("busybox");
+    fs::copy("/bin/sh", dir.join("busybox")).unwrap();
+    std::os::unix::fs::symlink("busybox", dir.join("sh")).unwrap();
+    let mut child = std::process::Command::new(dir.join("sh"))
+        .args(["-c", "read line"])
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let found = agent_pid(None, child.id(), studio_hook::inspect);
+    let shell = studio_hook::inspect(child.id());
+    drop(child.stdin.take());
+    child.wait().unwrap();
+    assert_eq!(shell.map(|(command, _)| command).as_deref(), Some("sh"));
+    assert_eq!(found, Some(std::process::id()));
 }

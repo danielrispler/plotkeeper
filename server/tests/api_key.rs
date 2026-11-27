@@ -355,3 +355,236 @@ fn a_pass_whose_choice_was_not_saved_leaves_summaries_off() {
     assert_eq!(test.settings, None, "{}", test.line);
     assert!(!studio_server::writers(&app).summaries_on, "{}", test.line);
 }
+
+/// What the server says when the machine has no Secret Service to keep a key in (#510, "API keys").
+const NO_STORE: &str =
+    "No secret store on this machine; install a keyring and libsecret-tools, or pick a CLI writer.";
+
+/// A fake `secret-tool` in `dir/bin`, which keeps each entry in `dir/store/<account>` and logs its arguments to `dir/log`.
+/// While `dir/no-store` exists, every call prints that file's text as `secret-tool`'s error and fails, as when no Secret
+/// Service runs; while `dir/hang` exists, every call waits 10 s first, as for a locked keyring's unlock prompt that no
+/// one sees. The real Secret Service is never touched.
+fn fake_secret_tool(dir: &std::path::Path) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = dir.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::create_dir_all(dir.join("store")).unwrap();
+    let program = bin.join("secret-tool");
+    std::fs::write(
+        &program,
+        format!(
+            r#"#!/bin/sh
+PATH=/usr/bin:/bin
+dir='{dir}'
+echo "ARGS $*" >> "$dir/log"
+if [ -f "$dir/hang" ]; then sleep 10; fi
+if [ -f "$dir/no-store" ]; then cat "$dir/no-store" >&2; exit 1; fi
+for word; do account=$word; done
+case "$1" in
+  store) cat > "$dir/store/$account";;
+  lookup) [ -f "$dir/store/$account" ] && cat "$dir/store/$account" || exit 1;;
+  clear) rm -f "$dir/store/$account";;
+  *) exit 2;;
+esac
+"#,
+            dir = dir.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    bin
+}
+
+fn app_with(dir: &std::path::Path, keys: Arc<dyn studio_server::settings::ApiKeys>) -> Arc<App> {
+    let log = dir.join("events.jsonl");
+    let writer = ClaudeWriter::new(dir.join("no-claude"), dir.into());
+    let cards = Arc::new(Mutex::new(CardStore::open_beside(&log).unwrap()));
+    let notes = Arc::new(Mutex::new(RiskNotes::open_beside(&log).unwrap()));
+    let app = App::open_with(&log, cards, notes, Arc::new(writer), Arc::new(NoEffects))
+        .unwrap()
+        .with_keys(keys);
+    Arc::new(app)
+}
+
+/// A command's refusal, as the page shows it.
+fn refusal(app: &Arc<App>, name: &str, args: Value) -> String {
+    match studio_server::api::call(app, &NoPage, name, args) {
+        Err(studio_server::api::Failure::Failed(text)) => text,
+        other => panic!("{name} was not refused: {other:?}"),
+    }
+}
+
+/// On Linux the keys are kept in the Secret Service through `secret-tool` (#510, "API keys"), here a fake on the PATH: a
+/// key saved before is read at start, one saved goes in on standard input and one removed is gone, the page is told the
+/// store's name, and a machine with no Secret Service running is named as such. No key is ever in `secret-tool`'s arguments.
+#[test]
+fn the_secret_service_keeps_the_keys_through_secret_tool_on_the_path() {
+    use studio_understanding::WriterKind::{Anthropic, OpenAI};
+    isolated_home::set();
+    let dir = tempfile::tempdir().unwrap();
+    let bin = fake_secret_tool(dir.path());
+    // SAFETY: nextest runs each test in a process of its own, and no thread has started yet.
+    unsafe { std::env::set_var("PATH", format!("{}:/usr/bin:/bin", bin.display())) };
+    let stored =
+        |account: &str| std::fs::read_to_string(dir.path().join("store").join(account)).ok();
+    // A key an earlier run saved.
+    std::fs::write(dir.path().join("store/anthropic-api-key"), PLANTED).unwrap();
+
+    // The server is given the Secret Service on Linux and the Keychain on macOS, which this does not ask.
+    let os = if cfg!(target_os = "macos") {
+        "the macOS Keychain"
+    } else {
+        "the Secret Service"
+    };
+    assert_eq!(studio_server::settings::os_keys().store(), os);
+
+    // Read at start.
+    let app = app_with(
+        dir.path(),
+        Arc::new(studio_server::settings::SecretTool::default()),
+    );
+    let start = studio_server::api::call(&app, &NoPage, "writers", Value::Null).unwrap();
+    assert_eq!(start["key_store"], "the Secret Service", "{start}");
+    assert_eq!(start["keys"], json!(["anthropic"]), "{start}");
+    assert_eq!(app.keys.get(Anthropic).as_deref(), Some(PLANTED));
+
+    // Saved and replaced, each exactly as pasted.
+    let save = |writer: &str, key: &str| {
+        studio_server::api::call(
+            &app,
+            &NoPage,
+            "set_api_key",
+            json!({ "writer": writer, "key": key, "base_url": null, "expected": null }),
+        )
+    };
+    save("openai", OPENAI_PLANTED).unwrap();
+    assert_eq!(stored("openai-api-key").as_deref(), Some(OPENAI_PLANTED));
+    save("anthropic", REPLACED).unwrap();
+    assert_eq!(stored("anthropic-api-key").as_deref(), Some(REPLACED));
+    assert_eq!(app.keys.get(Anthropic).as_deref(), Some(REPLACED));
+
+    // Removed.
+    studio_server::api::call(
+        &app,
+        &NoPage,
+        "remove_api_key",
+        json!({ "writer": "anthropic", "expected": null }),
+    )
+    .unwrap();
+    assert_eq!(stored("anthropic-api-key"), None);
+    let removed = studio_server::api::call(&app, &NoPage, "writers", Value::Null).unwrap();
+    assert_eq!(removed["keys"], json!(["openai"]), "{removed}");
+
+    // No Secret Service: no session bus, or one with no store on it, each as `secret-tool` says it; any other failure is
+    // the store's own.
+    for (error, said) in [
+        (
+            "secret-tool: The name org.freedesktop.secrets was not provided by any .service files",
+            NO_STORE,
+        ),
+        (
+            "secret-tool: Cannot autolaunch D-Bus without X11 $DISPLAY",
+            NO_STORE,
+        ),
+        (
+            "secret-tool: Could not connect: No such file or directory",
+            NO_STORE,
+        ),
+        (
+            "secret-tool: Cannot create an item in a locked collection",
+            "The Secret Service did not save the key; check that your keyring is unlocked, then save again.",
+        ),
+    ] {
+        std::fs::write(dir.path().join("no-store"), format!("{error}\n")).unwrap();
+        let args =
+            json!({ "writer": "anthropic", "key": PLANTED, "base_url": null, "expected": null });
+        assert_eq!(refusal(&app, "set_api_key", args), said, "{error}");
+    }
+    let args = json!({ "writer": "openai", "expected": null });
+    std::fs::write(
+        dir.path().join("no-store"),
+        "secret-tool: Cannot autolaunch D-Bus without X11 $DISPLAY\n",
+    )
+    .unwrap();
+    assert_eq!(refusal(&app, "remove_api_key", args), NO_STORE);
+    assert_eq!(
+        stored("openai-api-key").as_deref(),
+        Some(OPENAI_PLANTED),
+        "a refused removal keeps the key"
+    );
+    assert_eq!(app.keys.get(OpenAI), None, "no store, no key read");
+
+    let log = std::fs::read_to_string(dir.path().join("log")).unwrap();
+    for line in log.lines() {
+        for key in [PLANTED, REPLACED, OPENAI_PLANTED] {
+            assert!(!line.contains(key), "a key in the arguments: {line}");
+        }
+        assert!(
+            line.ends_with(" service plotkeeper account anthropic-api-key")
+                || line.ends_with(" service plotkeeper account openai-api-key"),
+            "{line}"
+        );
+    }
+}
+
+/// Without `secret-tool` on the PATH, start reads no key, and a save is refused with the package to install.
+#[test]
+fn without_secret_tool_a_save_names_the_package_to_install() {
+    isolated_home::set();
+    let dir = tempfile::tempdir().unwrap();
+    let empty = dir.path().join("empty");
+    std::fs::create_dir(&empty).unwrap();
+    // SAFETY: nextest runs each test in a process of its own, and no thread has started yet.
+    unsafe { std::env::set_var("PATH", &empty) };
+    let app = app_with(
+        dir.path(),
+        Arc::new(studio_server::settings::SecretTool::default()),
+    );
+    assert_eq!(
+        app.keys.get(studio_understanding::WriterKind::Anthropic),
+        None
+    );
+    let args = json!({ "writer": "anthropic", "key": PLANTED, "base_url": null, "expected": null });
+    assert_eq!(
+        refusal(&app, "set_api_key", args),
+        "secret-tool is not installed; install libsecret-tools."
+    );
+}
+
+/// A `secret-tool` that never answers, as with a locked keyring waiting on an unlock prompt that has no screen (over SSH,
+/// in WSL2), is cut off at its deadline (#510, "API keys"): the server still starts, with no key read, and a save says the
+/// keyring did not answer.
+#[test]
+fn a_keyring_that_never_answers_holds_up_no_start() {
+    isolated_home::set();
+    let dir = tempfile::tempdir().unwrap();
+    let bin = fake_secret_tool(dir.path());
+    // SAFETY: nextest runs each test in a process of its own, and no thread has started yet.
+    unsafe { std::env::set_var("PATH", format!("{}:/usr/bin:/bin", bin.display())) };
+    std::fs::write(dir.path().join("store/anthropic-api-key"), PLANTED).unwrap();
+    std::fs::write(dir.path().join("hang"), "").unwrap();
+
+    let started = std::time::Instant::now();
+    let keys =
+        studio_server::settings::SecretTool::with_deadline(std::time::Duration::from_millis(300));
+    let app = app_with(dir.path(), Arc::new(keys));
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "the start waited {:?} on the keyring",
+        started.elapsed()
+    );
+    let start = studio_server::api::call(&app, &NoPage, "writers", Value::Null).unwrap();
+    assert_eq!(start["keys"], json!([]), "{start}");
+
+    let args =
+        json!({ "writer": "openai", "key": OPENAI_PLANTED, "base_url": null, "expected": null });
+    assert_eq!(
+        refusal(&app, "set_api_key", args),
+        "The keyring did not answer; it may be locked and waiting to be unlocked. Unlock it, then save again."
+    );
+    let args = json!({ "writer": "openai" });
+    assert_eq!(
+        refusal(&app, "remove_api_key", args),
+        "The keyring did not answer; it may be locked and waiting to be unlocked. Unlock it, then remove again."
+    );
+}

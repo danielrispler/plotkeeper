@@ -1,6 +1,8 @@
 //! The `plotkeeper` binary as Daniel runs it (danielrispler/plotkeeper#325): it serves on a free port, a second start for the
 //! same data folder finds the first and exits, and Ctrl+C stops the first cleanly. The browser stays closed.
 
+mod isolated_home;
+
 use std::{
     io::{BufRead, BufReader},
     process::{Child, Command, Stdio},
@@ -46,6 +48,7 @@ fn wait(child: &mut Child) -> std::process::ExitStatus {
 
 #[test]
 fn a_second_start_opens_the_first_and_ctrl_c_stops_it() {
+    isolated_home::set();
     let home = tempfile::tempdir().unwrap();
     let mut first = plotkeeper(home.path());
     let url = address(&mut first);
@@ -55,7 +58,7 @@ fn a_second_start_opens_the_first_and_ctrl_c_stops_it() {
     );
 
     // The running file says the version, for a second start of another version (#439).
-    let data = home.path().join("Library/Application Support/plotkeeper");
+    let data = studio_hook::data_dir(home.path());
     let running: serde_json::Value =
         serde_json::from_slice(&std::fs::read(data.join("plotkeeper.running.json")).unwrap())
             .unwrap();
@@ -78,6 +81,7 @@ fn a_second_start_opens_the_first_and_ctrl_c_stops_it() {
 /// nothing in the home folder.
 #[test]
 fn version_is_the_npm_packages() {
+    isolated_home::set();
     let home = tempfile::tempdir().unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_plotkeeper"))
         .arg("--version")
@@ -98,8 +102,9 @@ fn version_is_the_npm_packages() {
 /// Holds the data folder's lock as a running plotkeeper would, with `running` as its running file, and starts a second
 /// plotkeeper against it.
 fn second_start_against(running: serde_json::Value) -> std::process::Output {
+    isolated_home::set();
     let home = tempfile::tempdir().unwrap();
-    let data = home.path().join("Library/Application Support/plotkeeper");
+    let data = studio_hook::data_dir(home.path());
     std::fs::create_dir_all(&data).unwrap();
     let lock = std::fs::File::create(data.join("plotkeeper.lock")).unwrap();
     lock.try_lock().unwrap();
@@ -150,8 +155,9 @@ fn a_second_start_against_a_running_file_without_a_version_opens_the_page() {
 /// may be waiting for an answer in its terminal.
 #[test]
 fn a_second_start_while_the_first_has_no_address_says_it_may_be_waiting_for_an_answer() {
+    isolated_home::set();
     let home = tempfile::tempdir().unwrap();
-    let data = home.path().join("Library/Application Support/plotkeeper");
+    let data = studio_hook::data_dir(home.path());
     std::fs::create_dir_all(&data).unwrap();
     let lock = std::fs::File::create(data.join("plotkeeper.lock")).unwrap();
     lock.try_lock().unwrap();
