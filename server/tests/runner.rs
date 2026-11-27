@@ -31,6 +31,17 @@ impl Harness for Script {
     }
 }
 
+/// [`Script`], with the private temp folder a real run has: the launcher makes it, named from the working folder.
+struct WithTmp;
+
+impl Harness for WithTmp {
+    fn command(&self, plan: &Plan) -> Result<HarnessCommand, String> {
+        let mut command = Script.command(plan)?;
+        command.private_tmp = Some(private_tmp(plan.folder));
+        Ok(command)
+    }
+}
+
 /// A harness that is not installed.
 struct Missing;
 
@@ -68,12 +79,16 @@ fn open(dir: &Path, harness: Arc<dyn Harness>) -> (Arc<Runner>, mpsc::Receiver<S
 
 /// A bench whose project has `cargo test` as its one check.
 fn bench() -> Bench {
+    bench_with(Arc::new(Script))
+}
+
+fn bench_with(harness: Arc<dyn Harness>) -> Bench {
     let dir = tempfile::tempdir().unwrap();
     settings(
         dir.path(),
         r#"{ "checks": { "/p/app": ["cargo test"], "/p/other": ["make"] } }"#,
     );
-    let (runner, changes) = open(dir.path(), Arc::new(Script));
+    let (runner, changes) = open(dir.path(), harness);
     Bench {
         dir,
         runner,
@@ -1180,10 +1195,20 @@ fn a_run_survives_a_restart_and_is_picked_up() {
 
 #[test]
 fn a_dead_run_is_failed_and_frees_the_queue() {
-    let bench = bench();
+    let bench = bench_with(Arc::new(WithTmp));
     let dead = bench.run("sleep 60");
     let next = bench.run("echo next ran");
     bench.until(|_| bench.state(&dead) == Some(RunState::Running));
+    let tmp = private_tmp(&bench.folder(&dead).join("work"));
+    // The launcher makes the folder after its check and setup: wait for it, then a running run keeps it.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !tmp.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the run never made its temp folder"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
     let pid = launch(&bench.folder(&dead))["pid"].as_u64().unwrap();
     // The launcher and its child die with no final status.
     kill_group(pid);
@@ -1192,6 +1217,7 @@ fn a_dead_run_is_failed_and_frees_the_queue() {
     assert_eq!((outcome.end, outcome.exit), (End::Died, None));
     assert_eq!(bench.runner.outcome(&next).unwrap().result, "next ran");
     assert_eq!(bench.records()[0]["outcome"], "died");
+    assert!(!tmp.exists(), "a dead run's temp folder was left behind");
 }
 
 #[test]
@@ -1200,7 +1226,7 @@ fn a_run_found_dead_at_start_is_failed_and_frees_the_queue() {
         dir,
         runner,
         changes,
-    } = bench();
+    } = bench_with(Arc::new(WithTmp));
     let submit = |runner: &Runner, script: &str| {
         runner
             .submit(Request {
@@ -1220,14 +1246,24 @@ fn a_run_found_dead_at_start_is_failed_and_frees_the_queue() {
     let pid = launch(&dir.path().join("runs").join(&dead))["pid"]
         .as_u64()
         .unwrap();
+    let tmp = private_tmp(&dir.path().join("runs").join(&dead).join("work"));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !tmp.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the run never made its temp folder"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
     drop((runner, changes));
     kill_group(pid);
     assert!(gone(pid));
 
-    let (runner, changes) = open(dir.path(), Arc::new(Script));
+    let (runner, changes) = open(dir.path(), Arc::new(WithTmp));
     until(&runner, &changes, ended(&next));
     assert_eq!(runner.outcome(&dead).unwrap().end, End::Died);
     assert_eq!(runner.outcome(&next).unwrap().result, "next ran");
+    assert!(!tmp.exists(), "a dead run's temp folder was left behind");
 }
 
 #[test]
