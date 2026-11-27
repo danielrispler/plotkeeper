@@ -7,9 +7,11 @@
 //! camelCase names (`sessionStart`, `preToolUse`, …) get camelCase payloads (`sessionId`,
 //! `toolName`, `toolArgs` as a JSON string) with no event name in them, and PascalCase names
 //! (`SessionStart`, `PreToolUse`, …) get snake_case payloads (`hook_event_name`, `session_id`,
-//! `tool_input`) with Claude-style tool names. Install wires the camelCase names, which VS Code's
-//! agent documents too, and each entry passes its event as `--event`, which the hook stores as
-//! `studio_event`. Neither casing has a tool call id, a turn id or a model, so a call is known by its
+//! `tool_input`) with Claude-style tool names. Install wires the camelCase names, and each entry
+//! passes its event as `--event`, which the hook stores as `studio_event`. VS Code's agent (1.139.1,
+//! #423's trial) runs those same entries but sends snake_case payloads with a PascalCase
+//! `hook_event_name`, an ISO `timestamp`, a `tool_use_id` and its own tool names. Copilot CLI's
+//! payloads have no tool call id, and neither has a turn id or a model, so a call is known by its
 //! tool and arguments, and turns by their prompts and stops.
 
 use crate::event::{Capabilities, Event, Happened, Start, Tool, ToolKind, TranscriptFormat};
@@ -63,7 +65,7 @@ struct Raw {
     /// An object in snake_case payloads, a JSON string in camelCase ones.
     #[serde(default, alias = "toolArgs")]
     tool_input: Value,
-    /// When Copilot sent the event, in ms in a camelCase payload.
+    /// When Copilot sent the event: ms from Copilot CLI, an ISO string from VS Code's agent (#423).
     #[serde(default)]
     timestamp: Value,
     #[serde(default)]
@@ -91,11 +93,14 @@ fn call_id(name: &str, input: &Value) -> String {
     format!("copilot-{hash:016x}")
 }
 
-/// What a call of tool `name` is.
+/// What a call of tool `name` is: Copilot CLI's names, Claude's in a snake_case payload, and VS Code's
+/// agent's (#423's trial).
 pub(crate) fn kind(name: &str) -> ToolKind {
     match name {
-        "bash" | "Bash" => ToolKind::Command,
-        "edit" | "create" | "Edit" | "Write" => ToolKind::Edit,
+        "bash" | "Bash" | "run_in_terminal" => ToolKind::Command,
+        "edit" | "create" | "apply_patch" | "Edit" | "Write" | "insert_edit_into_file" => {
+            ToolKind::Edit
+        }
         _ => ToolKind::Other,
     }
 }
@@ -107,11 +112,14 @@ fn tool(raw: &Raw) -> Tool {
         other => other.clone(),
     };
     let kind = kind(&name);
-    let path = input["path"].as_str().or(input["file_path"].as_str());
+    // VS Code's agent names the file in `filePath`; Copilot CLI's `apply_patch` takes the patch
+    // itself, which names its file.
+    let path = ["path", "file_path", "filePath"]
+        .iter()
+        .find_map(|k| input[k].as_str().map(Into::into))
+        .or_else(|| input.as_str().and_then(crate::codex::patched_file));
     Tool {
-        path: (kind == ToolKind::Edit)
-            .then(|| path.map(Into::into))
-            .flatten(),
+        path: (kind == ToolKind::Edit).then_some(path).flatten(),
         command: (kind == ToolKind::Command)
             .then(|| input["command"].as_str().map(Into::into))
             .flatten(),
@@ -193,12 +201,20 @@ fn adapt(raw: Raw) -> Event {
 
 /// The reply of the turn whose `agentStop` was sent at `timestamp`, from Copilot's transcript at
 /// `path`: the last `assistant.message` with text after the turn's `user.message` and before the
-/// `hook.start` that logged that `agentStop`'s input. A transcript read live may not yet hold that
-/// record, so with none found it is the last such message. `None` when the turn has none or the
+/// stop. Copilot CLI's numeric `timestamp` finds the `hook.start` that logged that `agentStop`'s
+/// input; VS Code's ISO one is placed among the records by their own `timestamp`. A transcript read
+/// live may not yet hold the stop's record, so with none found it is the last such message. `None` when the turn has none or the
 /// transcript cannot be read.
 fn final_response(path: &str, timestamp: &Value) -> Option<String> {
     let mut last = None;
     for record in crate::agy::records(path)? {
+        // VS Code's agent logs no hook records, and its `timestamp` is ISO in the format of its
+        // transcript's own (#423), so a later record is of a later turn.
+        if let (Some(stop), Some(at)) = (timestamp.as_str(), record["timestamp"].as_str())
+            && at > stop
+        {
+            return last;
+        }
         match record["type"].as_str() {
             Some("user.message") => last = None,
             Some("assistant.message") => {

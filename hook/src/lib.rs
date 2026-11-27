@@ -1290,8 +1290,10 @@ pub fn foreign(
 /// Whether `payload` carries Copilot's marker, for the agent guard above: Copilot reads
 /// `.claude/settings.json`, so a payload of Copilot's could reach Claude Code's entry. The marker is
 /// `sessionId`, camelCase, on every payload Copilot CLI sent its own plugin in wave 1's trial (#369);
-/// no other agent's payload has it. The snake_case payloads its docs give VS Code's harness carry no
-/// marker, and that harness is not yet trialled.
+/// no other agent's payload has it. VS Code's agent has no marker here, and needs none: its snake_case
+/// payload's keys are Qwen Code's too, ISO `timestamp` included, and in #423's trial it ran only
+/// Copilot's own entries: install wires Claude Code's hooks as a plugin, which VS Code did not run,
+/// not in the `.claude/settings.json` it reads.
 fn copilot_payload(payload: &serde_json::Map<String, serde_json::Value>) -> bool {
     payload.contains_key("sessionId")
 }
