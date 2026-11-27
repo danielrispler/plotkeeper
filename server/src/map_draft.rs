@@ -997,9 +997,10 @@ impl MapDrafts {
     }
 
     /// Follows the draft PR `project`'s accepted map waits on (#753, "Following the PR"), by `gh pr view`: merged, plotkeeper's copy
-    /// is deleted when this turn's fetch of the default branch passed (`fetched`), so the map read next is the default branch's;
-    /// closed unmerged, the copy stays and says so; open, nothing changes. A `gh` or network error, a timeout or an answer it cannot
-    /// read changes nothing, and the next lookup asks again. The Map view asks it in the map fetch's turn, after the fetch.
+    /// is deleted when the project's last fetch passed (`fetched`), the Map view's or a turn end's, so the map read next is the
+    /// default branch's; closed unmerged, the copy stays and says so; open, nothing changes. A `gh` or network error, a timeout or an
+    /// answer it cannot read changes nothing, and the next lookup asks again. The Map view asks it after its fetch, under a cooldown
+    /// and in-flight guard of its own (`map::fetch_and_follow`).
     pub fn follow(&self, project: &str, fetched: bool) {
         let Ok(main) = studio_workbench::main_checkout(Path::new(project)) else {
             return;
@@ -1029,7 +1030,7 @@ impl MapDrafts {
             return;
         };
         match state {
-            // The default branch's map shows only once fetched: till then the copy stays on show, and a later turn deletes it.
+            // The default branch's map shows only once fetched: till then the copy stays on show, and a later lookup deletes it.
             PrState::Merged if !fetched => return,
             PrState::Merged => {
                 if let Err(e) = fs::remove_file(&file) {

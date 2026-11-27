@@ -345,6 +345,8 @@ pub struct Fetches(Mutex<HashMap<String, Slot>>);
 struct Slot {
     last: Option<Instant>,
     running: bool,
+    /// Whether the last fetch that finished passed.
+    passed: bool,
 }
 
 /// Marks the fetch of its repository as no longer running when dropped.
@@ -373,6 +375,15 @@ impl Fetches {
         self.run_after(repo, now, COOLDOWN, fetch)
     }
 
+    /// Whether the last fetch of `repo` that finished passed, whichever trigger ran it.
+    pub fn passed(&self, repo: &str) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(repo)
+            .is_some_and(|slot| slot.passed)
+    }
+
     /// As `run`, with its own `cooldown`: zero asks at once unless one is running.
     pub fn run_after(
         &self,
@@ -398,6 +409,14 @@ impl Fetches {
         let _running = Running(self, repo);
         let result = fetch();
         drop(_running);
+        if let Some(slot) = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_mut(repo)
+        {
+            slot.passed = result.is_ok();
+        }
         match result {
             Ok(()) => Fetched::Done,
             Err(e) => Fetched::Failed(e),
@@ -435,17 +454,36 @@ pub fn update_user(
     )?)
 }
 
-/// Fetches `origin` for `project` through the cooldown, then runs `after` in the fetch's turn, told whether it passed. A failure is
-/// logged quietly and the refs stay as they were.
-fn fetch(fetches: &Fetches, project: &str, after: impl FnOnce(bool)) -> Fetched {
-    let result = fetches.run(project, Instant::now(), || {
-        let fetched = studio_workbench::fetch(Path::new(project));
-        after(fetched.is_ok());
-        fetched
-    });
+/// Fetches `origin` for `project` through the cooldown. A failure is logged quietly and the refs stay as they were.
+fn fetch(fetches: &Fetches, project: &str) -> Fetched {
+    fetch_and_follow(
+        fetches,
+        project,
+        Instant::now(),
+        || studio_workbench::fetch(Path::new(project)),
+        |_| {},
+    )
+}
+
+/// The Map view's `fetch` of `project` at `now` through the cooldown, then the lookup of the draft PR an accepted map waits on
+/// (`follow`) under a cooldown and in-flight guard of its own, told whether the project's last fetch passed: this one, or one a
+/// session's turn end ran (`part_catch_ups::turn_end`), which shares the fetch's cooldown, so turn ends never keep the PR from being
+/// followed. A failure is logged quietly and the refs stay as they were.
+fn fetch_and_follow(
+    fetches: &Fetches,
+    project: &str,
+    now: Instant,
+    fetch: impl FnOnce() -> Result<(), String>,
+    follow: impl FnOnce(bool),
+) -> Fetched {
+    let result = fetches.run(project, now, fetch);
     if let Fetched::Failed(why) = &result {
         log::warn!("map: fetch of {project} failed: {why}");
     }
+    fetches.run(&format!("{project}\npending PR"), now, || {
+        follow(fetches.passed(project));
+        Ok(())
+    });
     result
 }
 
@@ -456,11 +494,15 @@ pub fn map_state(project: String, fetch: bool, app: &Arc<crate::App>) -> Result<
     let (fetches, cache, events) = (&app.fetches, &app.ci, &app.events);
     if fetch {
         crate::prs::ask_later(app, crate::prs::Trigger::MapOpen, Some(&project));
-        // The draft PR an accepted map waits on is asked about in the fetch's turn, after it, so a merged one's copy goes only once
-        // its map is on the default branch; under the fetch's cooldown and in-flight guard, never on a timer (#753, "Following the PR").
-        let fetched = self::fetch(fetches, &project, |passed| {
-            app.drafts.follow(&project, passed);
-        });
+        // The draft PR an accepted map waits on is asked about after the fetch, and a merged one's copy goes only when the project's
+        // last fetch passed, so its map is on the default branch; never on a timer (#753, "Following the PR").
+        let fetched = fetch_and_follow(
+            fetches,
+            &project,
+            Instant::now(),
+            || studio_workbench::fetch(Path::new(&project)),
+            |passed| app.drafts.follow(&project, passed),
+        );
         // A fetch inside the cooldown asks nothing again, unless nothing was read yet.
         if fetched != Fetched::Skipped || !cache.has(&project) {
             crate::ci_laws::refresh_later(cache, events, &project);
@@ -782,7 +824,7 @@ pub fn merged(
     };
     let (fetches, cache, events) = (fetches.clone(), cache.clone(), events.clone());
     std::thread::spawn(move || {
-        fetch(&fetches, &project, |_| {});
+        fetch(&fetches, &project);
         crate::ci_laws::refresh_later(&cache, &events, &project);
         events.emit("map-landed", project.into());
     });

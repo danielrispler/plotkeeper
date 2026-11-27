@@ -492,6 +492,34 @@ fn a_fetch_in_flight_blocks_another_and_a_failure_is_reported() {
 }
 
 #[test]
+fn the_pending_pr_is_followed_after_a_fetch_that_passed_whichever_path_fetched() {
+    let fetches = Fetches::default();
+    let start = Instant::now();
+    let followed = std::cell::Cell::new(None);
+    let open = |at: Instant, fetch: Result<(), String>| {
+        followed.set(None);
+        fetch_and_follow(
+            &fetches,
+            "a",
+            at,
+            || fetch,
+            |passed| followed.set(Some(passed)),
+        );
+        followed.take()
+    };
+    // The Map view's own fetch passes, or fails.
+    assert_eq!(open(start, Ok(())), Some(true));
+    assert_eq!(open(start + COOLDOWN, Err("offline".into())), Some(false));
+    // A session's turn end fetched just before the Map opens, so the view's fetch waits out the cooldown: the PR is still followed,
+    // told that fetch passed, so a merged PR's copy can go.
+    let later = start + COOLDOWN * 2;
+    assert_eq!(fetches.run("a", later, || Ok(())), Fetched::Done);
+    assert_eq!(open(later + Duration::from_secs(1), Ok(())), Some(true));
+    // Within the follow's own cooldown it is not asked again.
+    assert_eq!(open(later + Duration::from_secs(2), Ok(())), None);
+}
+
+#[test]
 fn user_state_round_trips_and_keeps_other_projects() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("map-state.json");
