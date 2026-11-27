@@ -59,8 +59,8 @@ const routing = {
   ],
 };
 
-/** Runs `pick critic`, from a git repository's root, on a draft spec with the fake `agy` set by `fake`; returns its output, agy's calls and what it saw. */
-const pickCritic = (fake) => {
+/** Runs `pick critic`, from a git repository's root, on a draft (a spec, or with `kind` "breakdown" a breakdown) with the fake `agy` set by `fake`; returns its output, agy's calls and what it saw. */
+const pickCritic = (fake, kind = "spec") => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "delegate-test-")));
   const repo = join(dir, "repo");
   mkdirSync(join(dir, "bin"));
@@ -76,7 +76,7 @@ const pickCritic = (fake) => {
   git("add", ".");
   git("commit", "--quiet", "-m", "one");
   const env = { ...process.env, ...gitEnv, PATH: `${join(dir, "bin")}:${process.env.PATH}`, TMPDIR: dir, FAKE_AGY_DIR: dir, PLOTKEEPER_TERMINAL_ID: "claude-test", ...fake };
-  const args = [script, "pick", "critic", "--spec", join(dir, "draft.md"), "--routing", join(dir, "routing.json")];
+  const args = [script, "pick", "critic", `--${kind}`, join(dir, "draft.md"), "--routing", join(dir, "routing.json")];
   const ran = spawnSync(process.execPath, args, { cwd: repo, env, encoding: "utf8" });
   const lines = (name) => (existsSync(join(dir, name)) ? readFileSync(join(dir, name), "utf8").trim().split("\n").map((line) => JSON.parse(line)) : []);
   const worktrees = execFileSync("git", ["worktree", "list", "--porcelain"], { cwd: repo, encoding: "utf8" });
@@ -118,6 +118,37 @@ test("a Gemini critic run with no findings says so", () => {
   assert.equal(ran.status, 0, ran.stderr);
   assert.equal(ran.stdout, "critic: agy gemini-test-model\n\nNo findings.\n");
 });
+
+// A breakdown's critic gets a brief of its own: the routing rules to hold the routes to, not only claims to check.
+const BREAKDOWN = /^You are the critic of a draft ticket breakdown[\s\S]*Routing section of docs\/agents\/issue-tracker\.md[\s\S]*Risk isolation[\s\S]*CI[\s\S]*departs from the spec[\s\S]*Daniel/;
+
+test("pick critic --breakdown gives the Gemini critic and the Claude fallback the breakdown brief, then the breakdown", () => {
+  const gemini = pickCritic({ FAKE_AGY_5H: "0.9", FAKE_AGY_WEEKLY: "0.9", FAKE_AGY_RUN: "ok" }, "breakdown");
+  assert.equal(gemini.status, 0, gemini.stderr);
+  const argv = gemini.calls.find((call) => !call.argv.includes("/usage")).argv;
+  const brief = argv[argv.indexOf("-p") + 1];
+  assert.match(brief, BREAKDOWN);
+  assert.match(brief, /The breakdown, with its spec: \S+\/review\/draft\.md/);
+  assert.equal(gemini.seen[0].draft, "# A draft\n\nThe store reads `src/store.rs:7`.\n");
+  const claude = pickCritic({ FAKE_AGY_5H: "0.49", FAKE_AGY_WEEKLY: "0.9" }, "breakdown");
+  assert.equal(claude.status, 0, claude.stderr);
+  const { head, prompt } = claudeCritic(claude.stdout);
+  assert.match(head, /^critic: claude opus effort high\n/);
+  assert.match(prompt, BREAKDOWN);
+  assert.match(prompt, /\n\nThe breakdown, with its spec:\n\n# A draft\n\nThe store reads `src\/store\.rs:7`\.\n$/);
+  assert.ok(brief.startsWith(prompt.slice(0, prompt.indexOf("\n\nThe breakdown, with its spec:"))), "the Claude critic gets the brief Gemini got");
+});
+
+for (const [what, args] of [
+  ["neither --spec nor --breakdown", []],
+  ["both --spec and --breakdown", ["--spec", "a.md", "--breakdown", "b.md"]],
+]) {
+  test(`pick critic with ${what} is a usage error`, () => {
+    const ran = spawnSync(process.execPath, [script, "pick", "critic", ...args], { encoding: "utf8" });
+    assert.equal(ran.status, 2);
+    assert.match(ran.stderr, /one of --spec <draft> or --breakdown <draft> is required/);
+  });
+}
 
 const ranCritic = (calls) => calls.some((call) => !call.argv.includes("/usage"));
 

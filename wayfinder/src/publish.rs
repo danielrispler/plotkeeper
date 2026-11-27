@@ -3,13 +3,29 @@
 use crate::{REPO, Result, gh, require, stdout};
 use serde_json::{Value, json};
 
+/// The global installs a worker in auto mode is blocked from running mid-run, so a body must not
+/// ask for them (#720's 6a and 6c would each have installed `cargo-llvm-cov`).
+const INSTALLS: [&str; 7] = [
+    "cargo install",
+    "npm install -g",
+    "npm install --global",
+    "npm i -g",
+    "npm i --global",
+    "brew install",
+    "rustup component add",
+];
 /// What is wrong with a ticket body against the context `docs/agents/ticket-authoring.md` requires:
 /// `## Reading`, and `## Touches` with its Files, Session and Route lines, the route well-formed and
-/// sound for its files.
+/// sound for its files; and no global install to run.
 fn body_problems(body: &str) -> Vec<String> {
     let mut problems = vec![];
     if !body.lines().any(|line| line.trim_end() == "## Reading") {
         problems.push("lacks ## Reading".to_owned());
+    }
+    for install in INSTALLS.iter().filter(|install| body.contains(*install)) {
+        problems.push(format!(
+            "says to run `{install}`, a global install auto mode blocks: hand Daniel the install before /implement-spec starts"
+        ));
     }
     let mut after = body
         .lines()
@@ -38,6 +54,16 @@ fn is_ui(path: &str) -> bool {
         || path.starts_with("scripts/snap/")
         || path.ends_with(".html")
         || path.ends_with(".css")
+}
+/// Whether a Touches path counts toward rule 5's source files: not Markdown, not under a `tests/`
+/// folder, and not a `tests.rs` or `.test.` file.
+fn is_source(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    !path.ends_with(".md")
+        && !path.starts_with("tests/")
+        && !path.contains("/tests/")
+        && name != "tests.rs"
+        && !name.contains(".test.")
 }
 /// The terms one of which an `effort high` route's reason must name: a risk area of rule 3, a
 /// risky-UI trigger, or an edge case the stated tests cannot check (`docs/agents/issue-tracker.md`,
@@ -95,6 +121,18 @@ fn route_problems(route: &str, files: &[String]) -> Vec<String> {
         problems.push(format!(
             "**Route:** cheap, but **Files:** names UI ({}), and UI is never cheap (issue-tracker.md, Routing, rule 3)",
             ui.join(", ")
+        ));
+    }
+    let source: Vec<String> = files
+        .iter()
+        .filter(|path| crate::touches::is_path(path) && is_source(path))
+        .map(|path| format!("`{path}`"))
+        .collect();
+    if tier == "cheap" && source.len() > 3 {
+        problems.push(format!(
+            "**Route:** cheap, but **Files:** names {} source files ({}), over the about three of rule 5 (issue-tracker.md, Routing)",
+            source.len(),
+            source.join(", ")
         ));
     }
     problems
@@ -227,11 +265,70 @@ fn publish_problems(
             }
         }
     }
-    // An unknown blocker or a duplicate would read as a cycle, so the order is checked last.
+    // An unknown blocker or a duplicate would read as a cycle, so the order is checked after them.
     if problems.is_empty()
         && let Err(error) = publish_order(manifest)
     {
         problems.push(error.to_string());
+    }
+    problems.extend(unordered_shares(manifest, bodies));
+    problems
+}
+/// Each pair of tickets whose **Files** share a path (a folder shares every path under it) with no
+/// blocker path between them in either direction, so parallel implementers would meet in it.
+/// Markdown and `system-map.json` are left out: most tickets edit them, and the Shared docs rule
+/// covers the shared ones (`ticket-authoring.md`).
+fn unordered_shares(
+    manifest: &Manifest,
+    bodies: &std::collections::HashMap<String, String>,
+) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let tickets: Vec<(&Ticket, Vec<String>)> = manifest
+        .tickets
+        .iter()
+        .filter(|ticket| seen.insert(ticket.file.as_str()))
+        .filter_map(|ticket| {
+            let files = crate::touches::touched_files(bodies.get(&ticket.file)?)
+                .into_iter()
+                .filter(|path| {
+                    crate::touches::is_path(path)
+                        && !path.ends_with(".md")
+                        && path != "system-map.json"
+                })
+                .collect();
+            Some((ticket, files))
+        })
+        .collect();
+    // Whether `from` waits on `to`, directly or through other tickets.
+    let waits = |from: &Ticket, to: &str| {
+        let mut stack: Vec<&str> = from.blocked_by.iter().map(String::as_str).collect();
+        let mut visited = std::collections::HashSet::new();
+        while let Some(file) = stack.pop() {
+            if file == to {
+                return true;
+            }
+            if visited.insert(file)
+                && let Some(blocker) = manifest.tickets.iter().find(|t| t.file == file)
+            {
+                stack.extend(blocker.blocked_by.iter().map(String::as_str));
+            }
+        }
+        false
+    };
+    let mut problems = vec![];
+    for (i, (a, a_files)) in tickets.iter().enumerate() {
+        for (b, b_files) in &tickets[i + 1..] {
+            let shared = crate::touches::shared_files(a_files, b_files);
+            if !shared.is_empty() && !waits(a, &b.file) && !waits(b, &a.file) {
+                let shared: Vec<String> = shared.iter().map(|path| format!("`{path}`")).collect();
+                problems.push(format!(
+                    "{}, {}: both name {} in **Files:**, with no blocker path between them in either direction",
+                    a.file,
+                    b.file,
+                    shared.join(", ")
+                ));
+            }
+        }
     }
     problems
 }
@@ -611,25 +708,38 @@ mod publish_tests {
         );
     }
     #[test]
-    fn a_cheap_route_that_edits_ui_is_refused_naming_the_ui_files() {
-        let cheap = "- **Route:** cheap · effort medium — one check in one file\n";
-        assert_eq!(
-            problems_with(
+    fn a_cheap_route_over_ui_or_three_source_files_is_refused() {
+        const CHEAP: &str = "- **Route:** cheap · effort medium — one check in one file\n";
+        const MEDIUM: &str = "- **Route:** medium · effort medium — presentational UI\n";
+        let cases: [(&str, &str, &[&str]); 6] = [
+            (
                 "`server/src/a.rs`, `ui/rail.ts`, new `scripts/snap/b.mjs`, `docs/c.html`, `d.css`",
-                cheap
+                CHEAP,
+                &[
+                    "a.md: **Route:** cheap, but **Files:** names UI (`ui/rail.ts`, `scripts/snap/b.mjs`, `docs/c.html`, `d.css`), and UI is never cheap (issue-tracker.md, Routing, rule 3)",
+                    "a.md: **Route:** cheap, but **Files:** names 5 source files (`server/src/a.rs`, `ui/rail.ts`, `scripts/snap/b.mjs`, `docs/c.html`, `d.css`), over the about three of rule 5 (issue-tracker.md, Routing)",
+                ],
             ),
-            [
-                "a.md: **Route:** cheap, but **Files:** names UI (`ui/rail.ts`, `scripts/snap/b.mjs`, `docs/c.html`, `d.css`), and UI is never cheap (issue-tracker.md, Routing, rule 3)"
-            ]
-        );
-        assert!(problems_with("`server/src/a.rs`, `docs/ui.md`", cheap).is_empty());
-        assert!(
-            problems_with(
-                "`ui/rail.ts`",
-                "- **Route:** medium · effort medium — presentational UI\n"
-            )
-            .is_empty()
-        );
+            ("`server/src/a.rs`, `docs/ui.md`", CHEAP, &[]),
+            ("`ui/rail.ts`", MEDIUM, &[]),
+            (
+                "`a.rs`, `b.rs`, `c.mjs`, new `d.rs`, `docs/e.md`",
+                CHEAP,
+                &[
+                    "a.md: **Route:** cheap, but **Files:** names 4 source files (`a.rs`, `b.rs`, `c.mjs`, `d.rs`), over the about three of rule 5 (issue-tracker.md, Routing)",
+                ],
+            ),
+            // Three source files and their tests.
+            (
+                "`a/src/a.rs`, `a/src/b.rs`, `c.mjs`, `a/tests/it.rs`, `a/src/tests.rs`, `scripts/review/c.test.mjs`, `docs/e.md`",
+                CHEAP,
+                &[],
+            ),
+            ("`a.rs`, `b.rs`, `c.rs`, `d.rs`", MEDIUM, &[]),
+        ];
+        for (files, route, expected) in cases {
+            assert_eq!(problems_with(files, route), expected, "{files} {route}");
+        }
     }
     #[test]
     fn a_high_effort_whose_reason_names_no_risk_is_refused() {
@@ -650,6 +760,140 @@ mod publish_tests {
         ] {
             let route = format!("- **Route:** strong · effort high — {reason}\n");
             assert!(problems_with_route(&route).is_empty(), "{reason}");
+        }
+    }
+    /// A ticket of `checked_folder`: its file, its blockers, its Files line and its Route line.
+    type Row<'a> = (&'a str, &'a [&'a str], &'a str, &'a str);
+    /// The problems of a folder whose tickets are `rows`, each body `BODY` with its Files and Route
+    /// lines replaced and `extra` added to its What to build.
+    fn checked_folder(rows: &[Row], extra: &str) -> Vec<String> {
+        let manifest = Manifest {
+            parent: 9,
+            tickets: rows
+                .iter()
+                .map(|(file, blocked_by, _, _)| ticket(file, blocked_by))
+                .collect(),
+        };
+        let bodies = rows
+            .iter()
+            .map(|(file, _, files, route)| {
+                let body = BODY
+                    .replace("X.\n", &format!("X.{extra}\n"))
+                    .replace("- **Files:** `a.rs`", &format!("- **Files:** {files}"))
+                    .replace("cheap · effort medium — one check in one file", route);
+                (file.to_string(), body)
+            })
+            .collect();
+        publish_problems(&manifest, &bodies, &labels())
+    }
+    #[test]
+    fn a_shared_source_file_needs_a_blocker_path_either_way() {
+        const MEDIUM: &str = "medium · effort medium — a reason";
+        let cases: [(&str, &[Row], &str, &[&str]); 5] = [
+            (
+                "two tickets naming one source file with no edge",
+                &[
+                    ("a.md", &[], "`x.rs`, `docs/a.md`", MEDIUM),
+                    ("b.md", &[], "`x.rs`, `docs/a.md`", MEDIUM),
+                ],
+                "",
+                &[
+                    "a.md, b.md: both name `x.rs` in **Files:**, with no blocker path between them in either direction",
+                ],
+            ),
+            (
+                "a folder holding the other ticket's file, no edge",
+                &[
+                    ("a.md", &[], "`wayfinder/`", MEDIUM),
+                    ("b.md", &[], "`wayfinder/src/publish.rs`", MEDIUM),
+                    ("c.md", &[], "`server/`", MEDIUM),
+                ],
+                "",
+                &[
+                    "a.md, b.md: both name `wayfinder/src/publish.rs` in **Files:**, with no blocker path between them in either direction",
+                ],
+            ),
+            (
+                "a shared file with an edge from the second to the first",
+                &[
+                    ("a.md", &[], "`x.rs`", MEDIUM),
+                    ("b.md", &["a.md"], "`x.rs`", MEDIUM),
+                ],
+                "",
+                &[],
+            ),
+            (
+                "a shared file with an edge from the first to the second, through a third",
+                &[
+                    ("a.md", &["c.md"], "`x.rs`", MEDIUM),
+                    ("b.md", &[], "`x.rs`", MEDIUM),
+                    ("c.md", &["b.md"], "`y.rs`", MEDIUM),
+                ],
+                "",
+                &[],
+            ),
+            (
+                "two tickets both naming system-map.json and a Markdown file",
+                &[
+                    ("a.md", &[], "`system-map.json`, `README.md`", MEDIUM),
+                    ("b.md", &[], "`system-map.json`, `README.md`", MEDIUM),
+                ],
+                "",
+                &[],
+            ),
+        ];
+        for (case, rows, extra, expected) in cases {
+            assert_eq!(checked_folder(rows, extra), expected, "{case}");
+        }
+    }
+    #[test]
+    fn a_body_that_says_to_run_a_global_install_is_refused() {
+        const MEDIUM: &str = "medium · effort medium — a reason";
+        let cases: [(&str, &[Row], &str, &[&str]); 5] = [
+            (
+                "a body that says to run cargo install",
+                &[("a.md", &[], "`a.rs`", MEDIUM)],
+                " Install it with `cargo install --locked cargo-llvm-cov`.",
+                &[
+                    "a.md: says to run `cargo install`, a global install auto mode blocks: hand Daniel the install before /implement-spec starts",
+                ],
+            ),
+            (
+                "a body that says to run npm i -g and brew install",
+                &[("a.md", &[], "`a.rs`", MEDIUM)],
+                " Run `npm i -g x`, then `brew install y`.",
+                &[
+                    "a.md: says to run `npm i -g`, a global install auto mode blocks: hand Daniel the install before /implement-spec starts",
+                    "a.md: says to run `brew install`, a global install auto mode blocks: hand Daniel the install before /implement-spec starts",
+                ],
+            ),
+            (
+                "a body that says to run npm install -g",
+                &[("a.md", &[], "`a.rs`", MEDIUM)],
+                " Run `npm install -g x`.",
+                &[
+                    "a.md: says to run `npm install -g`, a global install auto mode blocks: hand Daniel the install before /implement-spec starts",
+                ],
+            ),
+            (
+                "a body that says to run npm install --global",
+                &[("a.md", &[], "`a.rs`", MEDIUM)],
+                " Run `npm install --global x`.",
+                &[
+                    "a.md: says to run `npm install --global`, a global install auto mode blocks: hand Daniel the install before /implement-spec starts",
+                ],
+            ),
+            (
+                "a body that says to run rustup component add",
+                &[("a.md", &[], "`a.rs`", MEDIUM)],
+                " Run `rustup component add llvm-tools`.",
+                &[
+                    "a.md: says to run `rustup component add`, a global install auto mode blocks: hand Daniel the install before /implement-spec starts",
+                ],
+            ),
+        ];
+        for (case, rows, extra, expected) in cases {
+            assert_eq!(checked_folder(rows, extra), expected, "{case}");
         }
     }
     #[test]
