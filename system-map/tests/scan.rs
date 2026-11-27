@@ -181,103 +181,127 @@ fn each_folder_holding_a_go_main_package_is_a_part() {
 }
 
 #[test]
-fn reference_copies_are_listed_and_ticked_only_when_sure() {
-    let tree = files(&[
-        code("src", 6),
-        code("vendor", 1),
-        code("third_party", 1),
-        code("third-party", 1),
-        code("external", 1),
-        code("deps", 1),
-        code("old-copy", 1),
-        code("reference-core", 1),
-        code("snapshots", 1),
-    ]);
-    let f = found(&tree);
-    assert_eq!(
-        f.candidates,
-        vec![
-            ("deps/".to_string(), false),
-            ("external/".to_string(), false),
-            ("old-copy/".to_string(), false),
-            ("reference-core/".to_string(), false),
-            ("snapshots/".to_string(), false),
-            ("third-party/".to_string(), true),
-            ("third_party/".to_string(), true),
-            ("vendor/".to_string(), true),
-        ]
-    );
-    assert_eq!(f.ignored, ["third-party/", "third_party/", "vendor/"]);
-    assert!(!f.parts.iter().any(|p| p == "vendor/"), "{:?}", f.parts);
-    assert!(f.parts.iter().any(|p| p == "external/"), "{:?}", f.parts);
-}
-
-#[test]
-fn a_top_level_code_folder_nothing_builds_or_imports_is_listed_unticked() {
+fn reference_copies_are_listed_ticked_only_when_sure_and_only_a_ticked_one_is_ignored() {
     let manifest = |dir: &str| (format!("{dir}/package.json"), "{}");
     let importer = |dir: &str, name: &str| (format!("{dir}/uses.ts"), name.to_string());
-    // (name, files, candidates)
-    type Row<'a> = (&'a str, Vec<(String, String)>, Vec<(&'a str, bool)>);
-    let mut cases: Vec<Row> = Vec::new();
+    /// A case: its name, the files, the candidates as listed and ticked, the folders ignored, and folders that are parts and that
+    /// are not.
+    struct Case<'a> {
+        name: &'a str,
+        files: Vec<(String, String)>,
+        candidates: Vec<(&'a str, bool)>,
+        ignored: Vec<&'a str>,
+        parts: Vec<&'a str>,
+        not_parts: Vec<&'a str>,
+    }
     let own = |tree: Vec<(String, &str)>| -> Vec<(String, String)> {
         tree.into_iter().map(|(f, t)| (f, t.to_string())).collect()
     };
+    let mut cases: Vec<Case> = vec![Case {
+        name: "the names a copy goes by",
+        files: own(files(&[
+            code("src", 6),
+            code("vendor", 1),
+            code("third_party", 1),
+            code("third-party", 1),
+            code("external", 1),
+            code("deps", 1),
+            code("old-copy", 1),
+            code("reference-core", 1),
+            code("snapshots", 1),
+        ])),
+        candidates: vec![
+            ("deps/", false),
+            ("external/", false),
+            ("old-copy/", false),
+            ("reference-core/", false),
+            ("snapshots/", false),
+            ("third-party/", true),
+            ("third_party/", true),
+            ("vendor/", true),
+        ],
+        ignored: vec!["third-party/", "third_party/", "vendor/"],
+        parts: vec!["external/"],
+        not_parts: vec!["vendor/"],
+    }];
+    // chery-platform-personal's shape, a repository of the 2026-11-27 trial (#753): a top-level copy of another system's code that no
+    // manifest builds and nothing imports, asked about unticked, and a part until it is ignored.
     let mut chery = files(&[
         code("relevant-code-from-system/core", 4),
         code("apps/ui", 3),
     ]);
     chery.push(("pnpm-workspace.yaml".into(), "packages:\n  - apps/*\n"));
     chery.push(manifest("apps/ui"));
-    cases.push((
-        "chery-like: no manifest, nothing imports it",
-        own(chery.clone()),
-        vec![("relevant-code-from-system/", false)],
-    ));
+    cases.push(Case {
+        name: "chery-like: no manifest, nothing imports it",
+        files: own(chery.clone()),
+        candidates: vec![("relevant-code-from-system/", false)],
+        ignored: vec![],
+        parts: vec!["apps/ui/", "relevant-code-from-system/"],
+        not_parts: vec![],
+    });
     let mut imported = own(chery.clone());
     imported.push(importer(
         "apps/ui",
         "import x from '../../relevant-code-from-system/core/f0'",
     ));
-    cases.push(("another folder names it", imported, vec![]));
+    cases.push(Case {
+        name: "another folder names it",
+        files: imported,
+        candidates: vec![],
+        ignored: vec![],
+        parts: vec![],
+        not_parts: vec![],
+    });
     let mut small = own(files(&[code("misc", 1), code("apps/ui", 9)]));
     small.push(("apps/ui/package.json".into(), "{}".into()));
-    cases.push(("holds under a fifth of the code", small, vec![]));
-    cases.push((
-        "no manifest anywhere lists no folder",
-        own(files(&[code("a", 4), code("b", 4)])),
-        vec![],
-    ));
-    for (name, tree, expected) in cases {
-        let tree: Vec<(&str, &str)> = tree.iter().map(|(f, t)| (f.as_str(), t.as_str())).collect();
-        let (_dir, root) = tracked(&tree);
-        let scan = system_map::scan(Path::new(&root)).unwrap();
-        let listed: Vec<(&str, bool)> = scan
-            .ignore_candidates
+    cases.push(Case {
+        name: "holds under a fifth of the code",
+        files: small,
+        candidates: vec![],
+        ignored: vec![],
+        parts: vec![],
+        not_parts: vec![],
+    });
+    cases.push(Case {
+        name: "no manifest anywhere lists no folder",
+        files: own(files(&[code("a", 4), code("b", 4)])),
+        candidates: vec![],
+        ignored: vec![],
+        parts: vec![],
+        not_parts: vec![],
+    });
+    for case in cases {
+        let name = case.name;
+        let tree: Vec<(String, &str)> = case
+            .files
             .iter()
-            .map(|c| (c.path.as_str(), c.ticked))
+            .map(|(f, t)| (f.clone(), t.as_str()))
             .collect();
-        assert_eq!(listed, expected, "{name}");
-        assert_eq!(scan.map["ignored"], serde_json::json!([]), "{name}");
+        let f = found(&tree);
+        let listed: Vec<(&str, bool)> =
+            f.candidates.iter().map(|(p, t)| (p.as_str(), *t)).collect();
+        assert_eq!(listed, case.candidates, "{name}");
+        assert_eq!(strings(&f.ignored), case.ignored, "{name}");
+        for part in case.parts {
+            assert!(
+                f.parts.iter().any(|p| p == part),
+                "{name}: {part} in {:?}",
+                f.parts
+            );
+        }
+        for part in case.not_parts {
+            assert!(
+                !f.parts.iter().any(|p| p == part),
+                "{name}: {part} in {:?}",
+                f.parts
+            );
+        }
     }
 }
 
 #[test]
-fn a_chery_like_copy_folder_stays_a_part() {
-    let mut tree = files(&[
-        code("relevant-code-from-system/core", 4),
-        code("apps/ui", 3),
-    ]);
-    tree.push(("pnpm-workspace.yaml".into(), "packages:\n  - apps/*\n"));
-    let f = found(&tree);
-    assert_eq!(
-        strings(&f.parts),
-        ["apps/ui/", "relevant-code-from-system/"]
-    );
-    assert!(f.ignored.is_empty(), "{:?}", f.ignored);
-}
-
-#[test]
-fn observability_sdks_shape_has_five_loose_files_and_its_tests_apart() {
+fn observability_sdks_shape_keeps_its_loose_files_and_its_tests_apart() {
     let mut tree: Vec<(String, &str)> = [
         "src/index.ts",
         "src/logger.ts",

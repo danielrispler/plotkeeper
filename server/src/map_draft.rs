@@ -1786,29 +1786,6 @@ fn group_parts(parts: &[Sized]) -> Vec<Vec<String>> {
         .collect()
 }
 
-/// `map_draft`: `project`'s Map draft; none when there is none.
-pub fn map_draft(app: &crate::App, project: String) -> Option<MapDraftView> {
-    app.drafts.view(&project)
-}
-
-/// `map_draft_start`: Draft the map, from the page's `skeleton` or a fresh scan.
-pub fn map_draft_start(
-    app: &crate::App,
-    project: String,
-    skeleton: Option<String>,
-) -> Result<MapDraftView, String> {
-    app.drafts.start(&project, skeleton)
-}
-
-/// `map_draft_accept`: Write `system-map.json` to the main checkout, replacing the file asked about when `replace` is its `seen`.
-pub fn map_draft_accept(
-    app: &crate::App,
-    project: String,
-    replace: Option<String>,
-) -> Result<Accepted, String> {
-    app.drafts.accept(&project, replace.as_deref())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

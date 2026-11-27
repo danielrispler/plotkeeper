@@ -754,14 +754,14 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .map-drafting .plate.draft:not(.writing) .plate-caption { font-family: inherit; font-size: var(--size); }
 .plate.draft .plate-state { position: absolute; top: var(--sp-2); right: var(--sp-5); font-size: var(--size-xs); color: var(--faint); }
 .plate.draft.flagged { box-shadow: inset 0 0 0 var(--link-width) var(--muted); }
-.plate.draft.flagged .plate-state, .plate.draft.writing-failed .plate-state, .plate.draft.checking-failed .plate-state { color: var(--fg); font-weight: 600; }
+.plate.draft.flagged .plate-state, .plate.draft.writer-failed .plate-state, .plate.draft.reviewer-failed .plate-state { color: var(--fg); font-weight: 600; }
 .map-drafting-progress, .map-drafting-core { margin: 0; font-size: var(--size-small); color: var(--muted); }
 .map-drafting-failed { display: flex; align-items: start; justify-content: space-between; gap: var(--sp-3); }
 .map-drafting-part { display: flex; flex-direction: column; gap: var(--sp-3); padding-block-start: var(--sp-5); border-block-start: var(--hair) solid var(--edge); }
 .map-drafting-head { display: flex; justify-content: space-between; gap: var(--sp-3); margin: 0; font-size: var(--size-small); }
 .map-drafting-head code, .map-drafting-cites code { font-family: var(--mono); font-size: var(--size-small); overflow-wrap: anywhere; }
 .map-drafting-state { flex: none; color: var(--muted); }
-.map-drafting-state.flagged, .map-drafting-state.writing-failed, .map-drafting-state.checking-failed { color: var(--fg); font-weight: 600; }
+.map-drafting-state.flagged, .map-drafting-state.writer-failed, .map-drafting-state.reviewer-failed { color: var(--fg); font-weight: 600; }
 .map-drafting-field { display: grid; gap: var(--sp-1); }
 .map-drafting-field :is(input, textarea) { box-sizing: border-box; width: 100%; min-width: 0; font: inherit; color: var(--fg); background: var(--raised);
                                          border: var(--hair) solid var(--field-edge); border-radius: var(--radius-small); padding: var(--sp-2) var(--sp-3); }

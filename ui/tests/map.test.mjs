@@ -415,8 +415,8 @@ test("a Map draft's part stands where its latest group does, and the progress li
   /** @type {[ReturnType<typeof group>[], Record<string, ReturnType<typeof verdict>>, string[], string][]} */
   const cases = [
     [[group(["a", "b"], "writing"), group(["c"], "writing")], {}, ["writing", "writing", "writing"], "0 of 3 parts checked · 3 being written"],
-    [[group(["a"], "done"), group(["b"], "checking"), group(["c"], "writer-failed")], { a: verdict("a", "supported") }, ["checked", "checking", "writing-failed"], "1 of 3 parts checked · 1 being checked · 1 failed"],
-    [[group(["a", "b"], "done"), group(["c"], "reviewer-failed")], { a: verdict("a", "overreach"), b: verdict("b", "supported") }, ["flagged", "checked", "checking-failed"], "2 of 3 parts checked · 1 failed"],
+    [[group(["a"], "done"), group(["b"], "checking"), group(["c"], "writer-failed")], { a: verdict("a", "supported") }, ["checked", "checking", "writer-failed"], "1 of 3 parts checked · 1 being checked · 1 failed"],
+    [[group(["a", "b"], "done"), group(["c"], "reviewer-failed")], { a: verdict("a", "overreach"), b: verdict("b", "supported") }, ["flagged", "checked", "reviewer-failed"], "2 of 3 parts checked · 1 failed"],
     [[group(["a", "b", "c"], "done"), group(["b"], "writing", true)], { a: verdict("a", "supported"), c: verdict("c", "supported") }, ["checked", "redrafting", "checked"], "2 of 3 parts checked · 1 being written"],
     [[group(["a", "b", "c"], "done")], { a: verdict("a", "supported"), b: verdict("b", "supported"), c: verdict("c", "contradicted") }, ["checked", "checked", "flagged"], "3 of 3 parts checked"],
   ];

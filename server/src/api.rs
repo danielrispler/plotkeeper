@@ -173,12 +173,10 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "map")?,
             arg(a, "edit")?,
         )),
-        "map_draft" => out(crate::map_draft::map_draft(app, arg(a, "project")?)),
-        "map_draft_start" => res(crate::map_draft::map_draft_start(
-            app,
-            arg(a, "project")?,
-            arg(a, "skeleton")?,
-        )),
+        "map_draft" => out(app.drafts.view(&arg::<String>(a, "project")?)),
+        "map_draft_start" => res(app
+            .drafts
+            .start(&arg::<String>(a, "project")?, arg(a, "skeleton")?)),
         "map_draft_retry" => res(app
             .drafts
             .retry(&arg::<String>(a, "project")?, arg(a, "group")?)),
@@ -196,10 +194,9 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             },
         )),
         "map_draft_discard" => res(app.drafts.discard(&arg::<String>(a, "project")?)),
-        "map_draft_accept" => res(crate::map_draft::map_draft_accept(
-            app,
-            arg(a, "project")?,
-            arg(a, "replace")?,
+        "map_draft_accept" => res(app.drafts.accept(
+            &arg::<String>(a, "project")?,
+            arg::<Option<String>>(a, "replace")?.as_deref(),
         )),
         "map_draft_pr" => res(app.drafts.open_pr(&arg::<String>(a, "project")?)),
         "map_pending_write" => res(app.drafts.pending_write(

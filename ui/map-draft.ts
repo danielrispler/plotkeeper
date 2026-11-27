@@ -53,8 +53,8 @@ function stageWords(stage: DraftStage, draft: MapDraft, id: string): string {
     checking: "Being checked",
     checked: "Checked",
     flagged: `Flagged: ${draft.verdicts[id]?.verdict ?? "flagged"}`,
-    "writing-failed": "Writing failed",
-    "checking-failed": "Checking failed",
+    "writer-failed": "Writing failed",
+    "reviewer-failed": "Checking failed",
   };
   return words[stage];
 }

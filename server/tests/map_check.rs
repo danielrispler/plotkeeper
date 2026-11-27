@@ -1,7 +1,10 @@
-//! `plotkeeper map check` as it runs in a repository, in CI or at the prompt (spec #753, "Keep it current"): the output
-//! of `system-map check`, and exit 0 on a pass, 1 on a fail and 2 on an error.
+//! `plotkeeper map check` as it runs in a repository, in CI or at the prompt (spec #753, "Keep it current"): what `system-map check`
+//! prints, compared with that binary's own output, and exit 0 on a pass, 1 on a fail and 2 on an error.
 
-use std::process::{Command, Output};
+use std::{
+    path::Path,
+    process::{Command, Output},
+};
 
 use studio_test_support::{git, repo};
 
@@ -31,8 +34,24 @@ fn project(extra: Option<&str>) -> (tempfile::TempDir, String) {
 }
 
 fn plotkeeper(args: &[&str]) -> Output {
+    run(env!("CARGO_BIN_EXE_plotkeeper").as_ref(), args)
+}
+
+/// `system-map`, the checker's own binary, which a workspace build (`npm run check`'s `cargo nextest run --workspace`) puts beside
+/// `plotkeeper`.
+fn system_map(args: &[&str]) -> Output {
+    let binary = Path::new(env!("CARGO_BIN_EXE_plotkeeper")).with_file_name("system-map");
+    assert!(
+        binary.exists(),
+        "{} is not built: run this test in a workspace build, `cargo nextest run --workspace`",
+        binary.display()
+    );
+    run(&binary, args)
+}
+
+fn run(binary: &Path, args: &[&str]) -> Output {
     let home = tempfile::tempdir().unwrap();
-    Command::new(env!("CARGO_BIN_EXE_plotkeeper"))
+    Command::new(binary)
         .env("HOME", home.path())
         .env("PATH", "/usr/bin:/bin")
         .args(args)
@@ -41,45 +60,50 @@ fn plotkeeper(args: &[&str]) -> Output {
 }
 
 #[test]
-fn a_passing_map_prints_the_pass_line_and_exits_zero() {
-    let (_dir, root) = project(None);
-    let out = plotkeeper(&["map", "check", "--root", &root]);
-    assert_eq!(out.status.code(), Some(0), "{out:?}");
-    assert_eq!(
-        String::from_utf8(out.stdout).unwrap(),
-        "ok: 1 part own 1 file (1 ignored); 0 links: 0 import (0 proven, 0 unproven), 0 http, 0 file, 0 spawn; 0 laws: 0 check, 0 trust\n"
+fn map_check_prints_what_system_map_check_prints_with_its_exit_codes() {
+    /// A case: its name, a stray file the map does not own, the arguments after `--root <repo>`, and the exit code.
+    type Case = (
+        &'static str,
+        Option<&'static str>,
+        &'static [&'static str],
+        i32,
     );
+    let cases: [Case; 4] = [
+        ("a pass", None, &[], 0),
+        ("a fail", Some("stray.txt"), &[], 1),
+        ("JSON at a commit", None, &["--json", "--commit", "HEAD"], 0),
+        ("an unknown argument", None, &["--bogus"], 2),
+    ];
+    for (name, extra, args, code) in cases {
+        let (_dir, root) = project(extra);
+        let args: Vec<&str> = ["check", "--root", &root]
+            .into_iter()
+            .chain(args.iter().copied())
+            .collect();
+        let ours = plotkeeper(&[["map"].as_slice(), &args].concat());
+        let theirs = system_map(&args);
+        assert_eq!(ours.status.code(), Some(code), "{name}: {ours:?}");
+        assert_eq!(ours.status.code(), theirs.status.code(), "{name}");
+        assert_eq!(
+            String::from_utf8_lossy(&ours.stdout),
+            String::from_utf8_lossy(&theirs.stdout),
+            "{name}"
+        );
+        // An error names the program it came from.
+        let said = |out: &Output, prog: &str| {
+            String::from_utf8_lossy(&out.stderr).replace(&format!("{prog}: "), "<prog>: ")
+        };
+        assert_eq!(
+            said(&ours, "plotkeeper map"),
+            said(&theirs, "system-map"),
+            "{name}"
+        );
+    }
 }
 
 #[test]
-fn a_failing_map_prints_its_problems_and_exits_one() {
-    let (_dir, root) = project(Some("stray.txt"));
-    let out = plotkeeper(&["map", "check", "--root", &root]);
-    assert_eq!(out.status.code(), Some(1), "{out:?}");
-    assert!(String::from_utf8(out.stdout).unwrap().contains("stray.txt"));
-}
-
-#[test]
-fn json_and_a_commit_are_the_checkers_own() {
+fn the_other_map_commands_stay_the_checkers() {
     let (_dir, root) = project(None);
-    let out = plotkeeper(&[
-        "map", "check", "--json", "--commit", "HEAD", "--root", &root,
-    ]);
-    assert_eq!(out.status.code(), Some(0), "{out:?}");
-    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(value["parts"][0]["id"], "alpha");
-}
-
-#[test]
-fn an_error_exits_two_and_the_other_map_commands_stay_the_checkers() {
-    let (_dir, root) = project(None);
-    let out = plotkeeper(&["map", "check", "--bogus", "--root", &root]);
-    assert_eq!(out.status.code(), Some(2), "{out:?}");
-    assert!(
-        String::from_utf8(out.stderr)
-            .unwrap()
-            .contains("unknown argument")
-    );
     for command in ["touched", "imports", "bogus"] {
         let out = plotkeeper(&["map", command, "--root", &root]);
         assert_eq!(out.status.code(), Some(1), "{command}: {out:?}");

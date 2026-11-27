@@ -41,6 +41,16 @@ pub fn repo() -> (tempfile::TempDir, String) {
     (dir, main)
 }
 
+/// A repository with one empty commit on `main` in a new folder `name` under `base`, and its real path as `git` spells it: for a
+/// test that needs the repository under a folder of its own choosing.
+pub fn repo_in(base: &Path, name: &str) -> PathBuf {
+    let dir = base.join(name);
+    fs::create_dir_all(&dir).unwrap();
+    git(&dir, &["init", "-q", "-b", "main"]);
+    git(&dir, &["commit", "-q", "--allow-empty", "-m", "Start"]);
+    dir.canonicalize().unwrap()
+}
+
 /// A bare `origin` whose default branch is `trunk`, with the commit `First` pushed to it from the
 /// clone `seed`, and a second clone `main` made after that.
 pub struct Origin {

@@ -14,7 +14,7 @@ use studio_server::{
     lock::{Instance, acquire},
     web::{Web, new_token},
 };
-use studio_test_support::git;
+use studio_test_support::{git, repo_in};
 use studio_understanding::{CardStore, Effects, FakeWriter, RiskNotes};
 
 const LOG: &str = include_str!("../../core/tests/fixtures/two-sessions.jsonl");
@@ -548,15 +548,6 @@ fn only_an_error_of_the_servers_own_reaches_the_page_as_server_error() {
     assert_eq!(sent, [serde_json::json!("save the cards: disk full")]);
 }
 
-/// A repository with one commit in a new folder under `base`, spelled as `git` spells it.
-fn repo_in(base: &std::path::Path, name: &str) -> String {
-    let dir = base.join(name);
-    std::fs::create_dir_all(&dir).unwrap();
-    git(&dir, &["init", "-q", "-b", "main"]);
-    git(&dir, &["commit", "-q", "--allow-empty", "-m", "Start"]);
-    dir.canonicalize().unwrap().display().to_string()
-}
-
 /// Start-up registration (spec #753, "Projects"): the folder plotkeeper starts in adds its git root's project, in process for a first
 /// start and through the API for a second. The folders are under `/var/tmp`: the system's temporary folders are never saved, and a
 /// folder under the build's own (`CARGO_TARGET_TMPDIR`) is, in a task's worktree, that worktree's main checkout's.
@@ -564,7 +555,7 @@ fn repo_in(base: &std::path::Path, name: &str) -> String {
 fn a_start_folder_adds_its_repositorys_project() {
     let base = tempfile::tempdir_in("/var/tmp").unwrap();
     let base_path = base.path().canonicalize().unwrap();
-    let main = repo_in(&base_path, "main");
+    let main = repo_in(&base_path, "main").display().to_string();
     git(
         std::path::Path::new(&main),
         &[
@@ -654,7 +645,7 @@ fn a_start_folder_adds_its_repositorys_project() {
     assert_eq!(projects.list().len(), 1);
 
     // Only a caller holding the server's token adds a folder.
-    let other = repo_in(&base_path, "other");
+    let other = repo_in(&base_path, "other").display().to_string();
     let body = serde_json::json!({ "folder": other }).to_string();
     let port = f.web.port();
     let refused = request(

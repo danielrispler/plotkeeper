@@ -93,7 +93,7 @@ fn edit_of(repo: &Path, map: &str, edit: Edit, claude: bool) -> Result<MapScan, 
             let mut new: Vec<Value> = Vec::new();
             for folder in &folders {
                 let id = fresh_id(&map, &new, folder);
-                new.push(skeleton_part(
+                new.push(system_map::placeholder_part(
                     &id,
                     &system_map::folder_title(folder),
                     vec![folder.clone()],
@@ -160,40 +160,11 @@ fn owner<'a>(map: &'a Value, file: &str) -> Option<&'a str> {
     part["id"].as_str()
 }
 
-/// A part of the skeleton as the scan writes one, with its placeholder words.
-fn skeleton_part(id: &str, name: &str, paths: Vec<String>) -> Value {
-    serde_json::json!({
-        "id": id,
-        "name": name,
-        "caption": "Not yet described",
-        "purpose": "Not yet described.",
-        "holds": [],
-        "tier": "interface",
-        "paths": paths,
-    })
-}
-
 /// An id for a new part at `path`, as the scan gives one: its last folder's words, with its parents' added while the id is taken by a
 /// part of `map` or of `new`, then a number.
 fn fresh_id(map: &Value, new: &[Value], path: &str) -> String {
     let taken = |id: &str| parts_of(map).iter().chain(new).any(|part| part["id"] == id);
-    let words: Vec<String> = path
-        .trim_end_matches('/')
-        .split('/')
-        .map(|segment| {
-            let slug: String = segment
-                .to_lowercase()
-                .chars()
-                .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-                .collect();
-            let slug = slug
-                .split('-')
-                .filter(|w| !w.is_empty())
-                .collect::<Vec<_>>()
-                .join("-");
-            if slug.is_empty() { "part".into() } else { slug }
-        })
-        .collect();
+    let words = system_map::id_words(path);
     (1..=words.len())
         .map(|take| words[words.len() - take..].join("-"))
         .chain((2..).map(|n| format!("{}-{n}", words.join("-"))))
@@ -235,7 +206,7 @@ fn ignore(map: &mut Value, folder: &str, on: bool, files: &[String]) {
         .any(|file| file.starts_with(folder) && system_map::is_code(file) && !ignored(map, file));
     if !covered && code {
         let id = fresh_id(map, &[], folder);
-        parts_mut(map).push(skeleton_part(
+        parts_mut(map).push(system_map::placeholder_part(
             &id,
             &system_map::folder_title(folder),
             vec![folder.to_string()],
@@ -293,7 +264,7 @@ fn home(
                 ("root", "Root".to_string())
             };
             let id = fresh_id(map, &[], at);
-            parts_mut(map).push(skeleton_part(&id, &name, paths));
+            parts_mut(map).push(system_map::placeholder_part(&id, &name, paths));
         }
     }
     Ok(())
@@ -344,7 +315,8 @@ pub fn map_scan(project: String) -> Result<MapScan, String> {
     scan_of(Path::new(&project), claude)
 }
 
-/// The scan of the main checkout of `repo`, with `claude` as found.
+/// The scan of the main checkout of `repo`, with `claude` as found: the skeleton gets the edges `check_text` computes on it as
+/// `import` links, one per pair of parts in the edge's direction, with no reason, as Accept writes them (#753, "The map written").
 pub(crate) fn scan_of(repo: &Path, claude: bool) -> Result<MapScan, String> {
     let main = studio_workbench::main_checkout(repo)?;
     let root = Path::new(&main);
