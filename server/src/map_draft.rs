@@ -7,7 +7,8 @@
 //! - **Ends.** The runner tells each First map run's end ([`Runner::on_end`]) while its batch still holds the project's slot, so
 //!   the reviewer joined then never waits behind another request. The run's answer is read, kept in its group, and the run is
 //!   dismissed: its folder only holds a copy of the repository.
-//! - **Failure.** A writer or reviewer that ends badly, or answers no JSON, fails its group with why; the other groups stand.
+//! - **Failure.** A writer or reviewer that ends badly, cannot start, is cancelled, or answers no JSON, fails its group with
+//!   why; the other groups stand.
 //!   Retry runs the failed step again, joining the batch. A login or limit failure pauses the runner's queues, so a retry then
 //!   waits for Resume.
 //! - **Redraft this part** adds a group of one part, whose writer is given the part's flag, then its reviewer.
@@ -146,6 +147,15 @@ struct Group {
     verdicts: Vec<Verdict>,
 }
 
+/// An Open a draft PR that pushed, or was about to: its branch and the map it pushed. It is kept with what it opens from, the Map
+/// draft or a closed PR's pending file, before the push, so a press again after it stopped short finds the PR it opened, or pushes
+/// that branch anew, and never opens a second PR.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Opening {
+    pub branch: String,
+    pub map: String,
+}
+
 /// A project's Map draft as its file keeps it. A reader ignores a field it does not know.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Draft {
@@ -164,6 +174,9 @@ struct Draft {
     /// The person's edits, by part id.
     #[serde(default)]
     edits: BTreeMap<String, Edit>,
+    /// The Open a draft PR from it that pushed and stopped short.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    opening: Option<Opening>,
 }
 
 /// A group as the page shows it.
@@ -249,7 +262,7 @@ impl MapDrafts {
                 return;
             }
             if let Some(drafts) = me.upgrade() {
-                drafts.settle(&ended.project, &ended.id);
+                drafts.settle(&ended.project, &ended.id, Some(ended.end));
             }
         });
         drafts
@@ -290,8 +303,13 @@ impl MapDrafts {
             .unwrap_or_else(|| studio_workbench::gh_path().into())
     }
 
-    /// Why Open a draft PR is muted for `project` (#753, story 27): `gh` is not found, or `gh auth status` fails; none when it passes.
+    /// Why Open a draft PR is muted for `project` (#753, story 27): a `system-map.json` in the main checkout, which the read order puts
+    /// before plotkeeper's copy, so the map would not show from that copy (`checkout_file`); `gh` is not found; or `gh auth status`
+    /// fails. None when none of them is so.
     pub fn pr_muted(&self, project: &str) -> Option<String> {
+        if let Some(why) = checkout_file(project) {
+            return Some(why);
+        }
         let passed = || {
             self.gh_passed
                 .lock()
@@ -415,6 +433,7 @@ impl MapDrafts {
                 })
                 .collect(),
             edits: BTreeMap::new(),
+            opening: None,
         };
         if let Err(e) = self.write(&draft) {
             drop(guard);
@@ -426,8 +445,6 @@ impl MapDrafts {
             return Err(e);
         }
         drop(guard);
-        // A run that could not start ended with no end told.
-        ids.iter().for_each(|id| self.settle(&main, id));
         self.changed.tell(&main);
         self.view_of(&main)
             .ok_or_else(|| "The Map draft is gone".into())
@@ -497,14 +514,26 @@ impl MapDrafts {
         })
     }
 
-    /// Run `id` of `main`'s Map draft ended: its answer is kept in its group, a writer's reviewer is started, and the run is
-    /// dismissed. Nothing for a run that is not ended, or that no group waits on, so an end read twice is read once.
-    fn settle(&self, main: &str, id: &str) {
+    /// Run `id` of `main`'s Map draft ended, as the runner `told` it when it did: its answer is kept in its group, a writer's
+    /// reviewer is started, and the run is dismissed. A run told ended that the runner no longer has was cancelled, and fails its
+    /// group, retryable. Nothing for a run that is not ended, or that no group waits on, so an end read twice is read once.
+    fn settle(&self, main: &str, id: &str, told: Option<End>) {
         let Ok(runner) = self.runner() else {
             return;
         };
-        let Some(outcome) = runner.outcome(id) else {
-            return;
+        let (outcome, gone) = match (runner.outcome(id), told) {
+            (Some(outcome), _) => (outcome, false),
+            (None, Some(_)) => (
+                Outcome {
+                    end: End::Cancelled,
+                    result: String::new(),
+                    denials: Vec::new(),
+                    cost: None,
+                    exit: None,
+                },
+                true,
+            ),
+            (None, None) => return,
         };
         let guard = self.lock();
         let Some(mut draft) = self.read(main) else {
@@ -527,6 +556,7 @@ impl MapDrafts {
         let saved = self.write(&draft);
         drop(guard);
         if saved.is_ok()
+            && !gone
             && let Err(e) = runner.cancel(id)
         {
             log::warn!("first map: run {id} was not dismissed: {e}");
@@ -664,12 +694,8 @@ impl MapDrafts {
             }
             _ => return Err("That group has not failed".into()),
         }
-        let run = draft.groups[group].run.clone();
         self.write(&draft)?;
         drop(guard);
-        if let Some(id) = run {
-            self.settle(&main, &id);
-        }
         self.changed.tell(&main);
         self.view_of(&main)
             .ok_or_else(|| "The Map draft is gone".into())
@@ -715,10 +741,9 @@ impl MapDrafts {
         });
         let at = draft.groups.len() - 1;
         let id = self.write_group(&runner, &mut draft, at)?;
-        draft.groups[at].run = Some(id.clone());
+        draft.groups[at].run = Some(id);
         self.write(&draft)?;
         drop(guard);
-        self.settle(&main, &id);
         self.changed.tell(&main);
         self.view_of(&main)
             .ok_or_else(|| "The Map draft is gone".into())
@@ -841,7 +866,13 @@ impl MapDrafts {
         if let Some(why) = self.pr_muted(&main) {
             return Err(why);
         }
-        let (opened, pending) = self.open_draft(root, &view.map)?;
+        let earlier = self.read(&main).and_then(|draft| draft.opening);
+        let (opened, pending) = self.open_draft(root, &view.map, earlier, |opening| {
+            let _guard = self.lock();
+            let mut draft = self.read(&main).ok_or("The Map draft is gone")?;
+            draft.opening = Some(opening.clone());
+            self.write(&draft)
+        })?;
         let guard = self.lock();
         self.keep_pending(&main, &pending, &opened)?;
         if let Err(e) = fs::remove_file(self.file(&main)) {
@@ -854,8 +885,16 @@ impl MapDrafts {
     }
 
     /// Opens the draft PR of the accepted `map` (the Map draft's, or a closed PR's) from the default branch as it is now, by Back a
-    /// law's flow: the map as `check` passes it on that branch's files (`accepted_map`).
-    fn open_draft(&self, root: &Path, map: &str) -> Result<(OpenedPr, PendingFile), String> {
+    /// law's flow: the map as `check` passes it on that branch's files (`accepted_map`). An `earlier` press that pushed and stopped
+    /// short is recovered as Back a law recovers one (`back_a_law::earlier_pr`): the PR it opened is the one, with the map it
+    /// pushed, else its branch is pushed anew. Before the push, `note` keeps this press's branch and map with what it opens from.
+    fn open_draft(
+        &self,
+        root: &Path,
+        map: &str,
+        earlier: Option<Opening>,
+        note: impl FnOnce(&Opening) -> Result<(), String>,
+    ) -> Result<(OpenedPr, PendingFile), String> {
         let reference = crate::back_a_law::default_branch_now(root)?;
         let committed = crate::map::git(
             root,
@@ -864,10 +903,29 @@ impl MapDrafts {
         if committed.is_ok() {
             return Err(HAS_MAP.into());
         }
+        let branch = match earlier {
+            Some(earlier) => {
+                let found =
+                    crate::back_a_law::earlier_pr(root, self.gh(), &reference, &earlier.branch)?;
+                if let Some(url) = found {
+                    let (number, url) = crate::back_a_law::pr_number(&url)
+                        .ok_or_else(|| format!("gh did not say the PR's number: {url}"))?;
+                    let pending = PendingFile {
+                        number,
+                        branch: earlier.branch,
+                        closed: false,
+                        map: earlier.map,
+                        opening: None,
+                    };
+                    return Ok((OpenedPr { number, url }, pending));
+                }
+                earlier.branch
+            }
+            None => format!("first-map/{}", studio_understanding::millis()),
+        };
         let parts = serde_json::from_str::<Value>(map)
             .map(|map| parts_of(&map).count())
             .unwrap_or_default();
-        let branch = format!("first-map/{}", studio_understanding::millis());
         let title = "Add the system map";
         let body = format!(
             "Adds `system-map.json`, this repository's first system map: its {parts} parts, drafted by plotkeeper's First map and \
@@ -894,6 +952,10 @@ impl MapDrafts {
                 fs::write(work.join(system_map::MAP_FILE), &text)
                     .map_err(|e| format!("system-map.json could not be written: {e}"))?;
                 crate::map::git(work, &["add", system_map::MAP_FILE])?;
+                note(&Opening {
+                    branch: branch.clone(),
+                    map: text.clone(),
+                })?;
                 written = Some(text);
                 Ok(true)
             },
@@ -906,6 +968,7 @@ impl MapDrafts {
             branch,
             closed: false,
             map: written.unwrap_or_default(),
+            opening: None,
         };
         Ok((OpenedPr { number, url }, pending))
     }
@@ -934,10 +997,11 @@ impl MapDrafts {
     }
 
     /// Follows the draft PR `project`'s accepted map waits on (#753, "Following the PR"), by `gh pr view`: merged, plotkeeper's copy
-    /// is deleted, and the default branch's map is read once fetched; closed unmerged, the copy stays and says so; open, nothing
-    /// changes. A `gh` or network error, a timeout or an answer it cannot read changes nothing, and the next lookup asks again. The
-    /// Map view asks it under the map fetch's cooldown and in-flight guard.
-    pub fn follow(&self, project: &str) {
+    /// is deleted when the project's last fetch passed (`fetched`), the Map view's or a turn end's, so the map read next is the
+    /// default branch's; closed unmerged, the copy stays and says so; open, nothing changes. A `gh` or network error, a timeout or an
+    /// answer it cannot read changes nothing, and the next lookup asks again. The Map view asks it after its fetch, under a cooldown
+    /// and in-flight guard of its own (`map::fetch_and_follow`).
+    pub fn follow(&self, project: &str, fetched: bool) {
         let Ok(main) = studio_workbench::main_checkout(Path::new(project)) else {
             return;
         };
@@ -966,6 +1030,8 @@ impl MapDrafts {
             return;
         };
         match state {
+            // The default branch's map shows only once fetched: till then the copy stays on show, and a later lookup deletes it.
+            PrState::Merged if !fetched => return,
             PrState::Merged => {
                 if let Err(e) = fs::remove_file(&file) {
                     log::warn!(
@@ -1040,7 +1106,22 @@ impl MapDrafts {
         if let Some(why) = self.pr_muted(&main) {
             return Err(why);
         }
-        let (opened, pending) = self.open_draft(Path::new(&main), &found.map)?;
+        let file = self.pending(&main);
+        let (opened, pending) = self.open_draft(
+            Path::new(&main),
+            &found.map,
+            found.opening.clone(),
+            |opening| {
+                let _guard = self.lock();
+                let mut now = crate::map::read_pending(&file)
+                    .filter(|now| now.number == found.number)
+                    .ok_or("The map waiting on the closed PR is gone")?;
+                now.opening = Some(opening.clone());
+                let text = serde_json::to_vec(&now).map_err(|e| e.to_string())?;
+                studio_workbench::write_atomic(&file, &text)
+                    .map_err(|e| format!("the map waiting on the closed PR was not saved: {e}"))
+            },
+        )?;
         let guard = self.lock();
         self.keep_pending(&main, &pending, &opened)?;
         drop(guard);
@@ -1118,10 +1199,27 @@ impl MapDrafts {
                 self.write(&draft).ok();
             }
             drop(guard);
-            ended.iter().for_each(|id| self.settle(&main, id));
+            ended.iter().for_each(|id| self.settle(&main, id, None));
             self.changed.tell(&main);
         }
     }
+}
+
+/// Why a `system-map.json` in `project`'s main checkout keeps Open a draft PR from opening; none when there is none.
+fn checkout_file(project: &str) -> Option<String> {
+    let main = studio_workbench::main_checkout(Path::new(project)).ok()?;
+    let path = Path::new(&main).join(system_map::MAP_FILE);
+    fs::symlink_metadata(&path).ok()?;
+    let problem = match fs::read_to_string(&path) {
+        Ok(text) => match crate::map::readable(&text) {
+            Ok(_) => return Some(HAS_MAP.into()),
+            Err(problem) => problem,
+        },
+        Err(e) => format!("cannot read it ({e})"),
+    };
+    Some(format!(
+        "system-map.json in the checkout does not read ({problem}): write over it, or remove it to open a draft PR"
+    ))
 }
 
 /// Fails `group` at `state` with `why`.
@@ -1142,6 +1240,7 @@ fn ended(role: &str, outcome: &Outcome) -> String {
         End::RateLimited => {
             format!("Claude hit its usage or rate limit: Resume the runs, then retry the {role}")
         }
+        End::Cancelled => format!("The {role} was cancelled: retry it"),
         End::Done | End::Denied | End::Failed | End::SetupFailed => {
             let first = outcome
                 .result
@@ -1168,7 +1267,11 @@ fn reviewed(group: &mut Group, outcome: &Outcome) {
         return;
     }
     let items = items_of(group);
-    group.verdicts = map_review::read_answer(&outcome.result, &items);
+    // One verdict an item: an item answered twice keeps its first, and one not asked about is never read.
+    let mut verdicts = map_review::read_answer(&outcome.result, &items);
+    let mut seen = std::collections::BTreeSet::new();
+    verdicts.retain(|verdict| seen.insert(verdict.id.clone()));
+    group.verdicts = verdicts;
     let left = items.len() - group.verdicts.len();
     if left > 0 {
         let why = format!(
@@ -1682,29 +1785,6 @@ fn group_parts(parts: &[Sized]) -> Vec<Vec<String>> {
         .into_iter()
         .map(|group| group.into_iter().map(|at| parts[at].id.clone()).collect())
         .collect()
-}
-
-/// `map_draft`: `project`'s Map draft; none when there is none.
-pub fn map_draft(app: &crate::App, project: String) -> Option<MapDraftView> {
-    app.drafts.view(&project)
-}
-
-/// `map_draft_start`: Draft the map, from the page's `skeleton` or a fresh scan.
-pub fn map_draft_start(
-    app: &crate::App,
-    project: String,
-    skeleton: Option<String>,
-) -> Result<MapDraftView, String> {
-    app.drafts.start(&project, skeleton)
-}
-
-/// `map_draft_accept`: Write `system-map.json` to the main checkout, replacing the file asked about when `replace` is its `seen`.
-pub fn map_draft_accept(
-    app: &crate::App,
-    project: String,
-    replace: Option<String>,
-) -> Result<Accepted, String> {
-    app.drafts.accept(&project, replace.as_deref())
 }
 
 #[cfg(test)]

@@ -129,12 +129,14 @@ impl Reading for GitReading {
     }
 
     fn since_source(&self, full: &PrSource, from: &str) -> Result<PrSource, String> {
+        let repo = Path::new(&self.project);
+        let passed = crate::map::uncommitted_map(repo);
         let mut source = gather(
-            Path::new(&self.project),
+            repo,
             from,
             &full.meta.head,
             full.meta.clone(),
-            None,
+            passed.as_deref(),
         )?;
         source.tier_overrides = full.tier_overrides.clone();
         source.earlier_decisions = full.earlier_decisions.clone();
@@ -225,7 +227,9 @@ pub fn push_of(
             head: new.to_string(),
             ..Default::default()
         };
-        return match gather(repo, old, new, meta, None).and_then(|mut source| {
+        // A repository that never committed a map is placed by the one in its checkout or pending PR, as its brief is.
+        let passed = crate::map::uncommitted_map(repo);
+        return match gather(repo, old, new, meta, passed.as_deref()).and_then(|mut source| {
             source.tier_overrides = tiers.clone();
             fogs_nothing(&source)
         }) {

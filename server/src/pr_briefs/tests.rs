@@ -938,6 +938,22 @@ impl Repo {
         repo.commit(&[("alpha/a.rs", "2")]);
         repo
     }
+    /// As [`Repo::new`], but the repository never committed its map: it is only in the checkout, kept out of git (#753, "PR
+    /// briefs while the map is not committed").
+    fn uncommitted() -> Repo {
+        let (dir, path) = studio_test_support::repo();
+        let repo = Repo { dir, path };
+        std::fs::write(
+            repo.dir.path().join(".git/info/exclude"),
+            "system-map.json\n",
+        )
+        .unwrap();
+        std::fs::write(repo.dir.path().join("system-map.json"), REPO_MAP).unwrap();
+        repo.commit(&[("alpha/a.rs", "1"), ("docs/d.md", "1")]);
+        repo.git(&["checkout", "-q", "-b", "pr"]);
+        repo.commit(&[("alpha/a.rs", "2")]);
+        repo
+    }
     fn git(&self, args: &[&str]) -> String {
         studio_test_support::git(self.dir.path(), args)
     }
@@ -996,15 +1012,21 @@ fn read_of(chapters: usize, heads: &[&str]) -> crate::fog::PrRead {
 
 #[test]
 fn a_push_after_a_full_read_that_fogs_nothing_carries_the_read_over() {
-    let repo = Repo::new();
-    let h1 = repo.head();
-    let h2 = repo.commit(&[("docs/d.md", "2")]);
-    let push = repo.push(Some(&read_of(1, &[&h1])), &h1, &h2);
-    assert_eq!(push, Push::Quiet);
-    assert_eq!(
-        push.note().as_deref(),
-        Some("New push touched nothing on your map")
-    );
+    // The map committed, and the map only in the checkout, which places the push as it places the brief.
+    for (name, repo) in [
+        ("committed", Repo::new()),
+        ("in the checkout", Repo::uncommitted()),
+    ] {
+        let h1 = repo.head();
+        let h2 = repo.commit(&[("docs/d.md", "2")]);
+        let push = repo.push(Some(&read_of(1, &[&h1])), &h1, &h2);
+        assert_eq!(push, Push::Quiet, "{name}");
+        assert_eq!(
+            push.note().as_deref(),
+            Some("New push touched nothing on your map"),
+            "{name}"
+        );
+    }
 }
 
 #[test]

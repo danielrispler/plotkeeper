@@ -182,6 +182,16 @@ pub fn read_map(repo: &Path) -> MapState {
     read_from(repo, pending_file)
 }
 
+/// The map of a repository that never committed one, for its PR briefs (#753, "PR briefs while the map is not committed"): the
+/// map `read_map` reads from the checkout or a pending PR; none when it reads the default branch's, or none.
+pub(crate) fn uncommitted_map(repo: &Path) -> Option<String> {
+    let read = read_map(repo);
+    match read.from {
+        Some(ReadFrom::Checkout | ReadFrom::PendingPr) => read.source,
+        _ => None,
+    }
+}
+
 /// `read_map` as the Map view shows it: for a `checkout` map that reads, also the problems `system-map check` finds in the working tree,
 /// for the banner over the map. The default branch's map gets none, since CI owns that; nor do the other readers, which need only the map.
 fn read_checked(repo: &Path, pending: impl FnOnce(&str) -> Option<PathBuf>) -> MapState {
@@ -196,7 +206,8 @@ fn read_checked(repo: &Path, pending: impl FnOnce(&str) -> Option<PathBuf>) -> M
 }
 
 /// The accepted map waiting on its draft PR (#753, "Open a draft PR"), as that flow keeps it (`map_draft.rs`): the PR's `number` and
-/// `branch`, whether it was `closed` unmerged, and the `map`'s text.
+/// `branch`, whether it was `closed` unmerged, the `map`'s text, and, once closed, the Open a draft PR from it that pushed and
+/// stopped short.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct PendingFile {
     pub number: u64,
@@ -205,6 +216,8 @@ pub(crate) struct PendingFile {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub closed: bool,
     pub map: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opening: Option<crate::map_draft::Opening>,
 }
 
 /// Where the map waiting on a draft PR is kept for the project whose main checkout is `main`: `first-map/<project>.pending.json` in
@@ -332,6 +345,8 @@ pub struct Fetches(Mutex<HashMap<String, Slot>>);
 struct Slot {
     last: Option<Instant>,
     running: bool,
+    /// Whether the last fetch that finished passed.
+    passed: bool,
 }
 
 /// Marks the fetch of its repository as no longer running when dropped.
@@ -360,6 +375,15 @@ impl Fetches {
         self.run_after(repo, now, COOLDOWN, fetch)
     }
 
+    /// Whether the last fetch of `repo` that finished passed, whichever trigger ran it.
+    pub fn passed(&self, repo: &str) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(repo)
+            .is_some_and(|slot| slot.passed)
+    }
+
     /// As `run`, with its own `cooldown`: zero asks at once unless one is running.
     pub fn run_after(
         &self,
@@ -385,6 +409,14 @@ impl Fetches {
         let _running = Running(self, repo);
         let result = fetch();
         drop(_running);
+        if let Some(slot) = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_mut(repo)
+        {
+            slot.passed = result.is_ok();
+        }
         match result {
             Ok(()) => Fetched::Done,
             Err(e) => Fetched::Failed(e),
@@ -424,12 +456,34 @@ pub fn update_user(
 
 /// Fetches `origin` for `project` through the cooldown. A failure is logged quietly and the refs stay as they were.
 fn fetch(fetches: &Fetches, project: &str) -> Fetched {
-    let result = fetches.run(project, Instant::now(), || {
-        studio_workbench::fetch(Path::new(project))
-    });
+    fetch_and_follow(
+        fetches,
+        project,
+        Instant::now(),
+        || studio_workbench::fetch(Path::new(project)),
+        |_| {},
+    )
+}
+
+/// The Map view's `fetch` of `project` at `now` through the cooldown, then the lookup of the draft PR an accepted map waits on
+/// (`follow`) under a cooldown and in-flight guard of its own, told whether the project's last fetch passed: this one, or one a
+/// session's turn end ran (`part_catch_ups::turn_end`), which shares the fetch's cooldown, so turn ends never keep the PR from being
+/// followed. A failure is logged quietly and the refs stay as they were.
+fn fetch_and_follow(
+    fetches: &Fetches,
+    project: &str,
+    now: Instant,
+    fetch: impl FnOnce() -> Result<(), String>,
+    follow: impl FnOnce(bool),
+) -> Fetched {
+    let result = fetches.run(project, now, fetch);
     if let Fetched::Failed(why) = &result {
         log::warn!("map: fetch of {project} failed: {why}");
     }
+    fetches.run(&format!("{project}\npending PR"), now, || {
+        follow(fetches.passed(project));
+        Ok(())
+    });
     result
 }
 
@@ -440,17 +494,19 @@ pub fn map_state(project: String, fetch: bool, app: &Arc<crate::App>) -> Result<
     let (fetches, cache, events) = (&app.fetches, &app.ci, &app.events);
     if fetch {
         crate::prs::ask_later(app, crate::prs::Trigger::MapOpen, Some(&project));
-        let fetched = self::fetch(fetches, &project);
+        // The draft PR an accepted map waits on is asked about after the fetch, and a merged one's copy goes only when the project's
+        // last fetch passed, so its map is on the default branch; never on a timer (#753, "Following the PR").
+        let fetched = fetch_and_follow(
+            fetches,
+            &project,
+            Instant::now(),
+            || studio_workbench::fetch(Path::new(&project)),
+            |passed| app.drafts.follow(&project, passed),
+        );
         // A fetch inside the cooldown asks nothing again, unless nothing was read yet.
         if fetched != Fetched::Skipped || !cache.has(&project) {
             crate::ci_laws::refresh_later(cache, events, &project);
         }
-        // The draft PR an accepted map waits on is asked about after the fetch, so a merged one's map is on the default branch by
-        // then; under the fetch's cooldown and in-flight guard, never on a timer (#753, "Following the PR").
-        fetches.run(&format!("{project}\npending PR"), Instant::now(), || {
-            app.drafts.follow(&project);
-            Ok(())
-        });
     }
     let repo = Path::new(&project);
     let file = state_file()?;

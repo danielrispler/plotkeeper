@@ -509,15 +509,11 @@ fn draft_map(extractors: &[&str], parts: &[String], ignored: &[String]) -> Value
     json!({
         "version": 2,
         "extractors": extractors,
-        "parts": parts.iter().zip(&ids).map(|(path, id)| json!({
-            "id": id,
-            "name": folder_title(path),
-            "caption": "Not yet described",
-            "purpose": "Not yet described.",
-            "holds": [],
-            "tier": "interface",
-            "paths": [path],
-        })).collect::<Vec<_>>(),
+        "parts": parts
+            .iter()
+            .zip(&ids)
+            .map(|(path, id)| placeholder_part(id, &folder_title(path), vec![path.clone()]))
+            .collect::<Vec<_>>(),
         "actors": [],
         "links": [],
         "ignored": ignored,
@@ -557,27 +553,47 @@ fn fold(parts: &mut Vec<String>, code: &[&str]) {
     }
 }
 
+/// A part as the scan drafts one, `id` and `name` owning `paths`: tier Interface, no held items, and the placeholder caption and
+/// purpose the writers replace.
+#[must_use]
+pub fn placeholder_part(id: &str, name: &str, paths: Vec<String>) -> Value {
+    json!({
+        "id": id,
+        "name": name,
+        "caption": "Not yet described",
+        "purpose": "Not yet described.",
+        "holds": [],
+        "tier": "interface",
+        "paths": paths,
+    })
+}
+
+/// The words a part id for the folder `path` is made of, one for each of its folders: the folder's name lowercased, each run of
+/// characters other than letters and digits one `-`, or `part` when nothing is left. A scan's ids and a split's new ones join the
+/// last of them.
+#[must_use]
+pub fn id_words(path: &str) -> Vec<String> {
+    path.trim_end_matches('/')
+        .split('/')
+        .map(|segment| {
+            let slug: String = segment
+                .to_lowercase()
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+                .collect();
+            let slug = slug
+                .split('-')
+                .filter(|w| !w.is_empty())
+                .collect::<Vec<_>>()
+                .join("-");
+            if slug.is_empty() { "part".into() } else { slug }
+        })
+        .collect()
+}
+
 /// An id for each part: its last folder's name, with its parents' names added while two parts would share one.
 fn ids_of(parts: &[String]) -> Vec<String> {
-    let words = |path: &str| -> Vec<String> {
-        path.trim_end_matches('/')
-            .split('/')
-            .map(|segment| {
-                let slug: String = segment
-                    .to_lowercase()
-                    .chars()
-                    .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-                    .collect();
-                let slug = slug
-                    .split('-')
-                    .filter(|w| !w.is_empty())
-                    .collect::<Vec<_>>();
-                let slug = slug.join("-");
-                if slug.is_empty() { "part".into() } else { slug }
-            })
-            .collect()
-    };
-    let segments: Vec<Vec<String>> = parts.iter().map(|p| words(p)).collect();
+    let segments: Vec<Vec<String>> = parts.iter().map(|p| id_words(p)).collect();
     let id = |i: usize, take: usize| -> String {
         let s = &segments[i];
         s[s.len().saturating_sub(take)..].join("-")

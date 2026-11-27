@@ -365,6 +365,10 @@ pub enum End {
     NotLoggedIn,
     /// The harness hit a quota or a rate limit. Pauses the queues.
     RateLimited,
+    /// Cancel stopped it, or dropped it before it started. Only ever told to the modules that listen ([`Runner::on_end`]):
+    /// a cancelled run is removed, so no outcome or record holds it.
+    #[serde(skip)]
+    Cancelled,
 }
 
 impl End {
@@ -975,6 +979,7 @@ fn line(stored: &Stored, outcome: &Outcome) -> String {
         End::SetupFailed => with("The project's setup command failed"),
         End::NotLoggedIn => Pause::NotLoggedIn.line().into(),
         End::RateLimited => Pause::RateLimited.line().into(),
+        End::Cancelled => "Cancelled".into(),
     }
 }
 
@@ -1073,10 +1078,13 @@ impl Runner {
         self.changed.set(changed);
     }
 
-    /// Adds what is told when a run ends on its own, as it ends or when [`Runner::pick_up`] finds it ended; never for a
-    /// cancelled run. Each module that listens adds its own, before `pick_up`, and each is told every end, in the order
-    /// they were added. While the end of a batch's run is told, the batch keeps its project's slot, so a run joined to it
-    /// then ([`Runner::join`]) starts at once, ahead of a request queued behind the batch.
+    /// Adds what is told when a run ends, once for each run: as it ends on its own or [`Runner::pick_up`] finds it ended, when
+    /// its launcher cannot start, and when Cancel stops it or drops it before it starts ([`End::Cancelled`]); never for the
+    /// dismissal of a run that already ended. Each module that listens adds its own, before `pick_up`, and each is told every
+    /// end, in the order they were added; a listener that panics is logged, and the others are still told. A run that cannot
+    /// start or is cancelled is told on a thread of its own, so a module that holds its own lock across a submission or a
+    /// Cancel is never called back on that thread. While the end of a batch's run is told, the batch keeps its project's slot,
+    /// so a run joined to it then ([`Runner::join`]) starts at once, ahead of a request queued behind the batch.
     pub fn on_end(&self, ended: impl Fn(Ended) + Send + Sync + 'static) {
         self.ended
             .lock()
@@ -1284,6 +1292,7 @@ impl Runner {
             .collect();
         let telling = state.telling.iter().cloned();
         busy.extend(telling.map(|(project, batch)| (project, Some(batch))));
+        let mut unstarted = Vec::new();
         for run in &mut state.runs {
             let stored = &run.stored;
             let free = !busy.iter().any(|(project, _)| *project == stored.project);
@@ -1294,9 +1303,19 @@ impl Runner {
             }
             run.phase = self.start(&run.stored);
             // A run that could not start ended at once, and the next in its queue has its turn.
-            if matches!(run.phase, Phase::Running { .. }) {
-                busy.push((run.stored.project.clone(), run.stored.batch.clone()));
+            match &run.phase {
+                Phase::Running { .. } => {
+                    busy.push((run.stored.project.clone(), run.stored.batch.clone()));
+                }
+                Phase::Ended { outcome, .. } => {
+                    unstarted.push(Self::ended_of(&run.stored, outcome.end));
+                }
+                Phase::Queued => {}
             }
+        }
+        for ended in unstarted {
+            let mark = Self::telling(state, &ended.id);
+            self.tell_soon(ended, mark);
         }
     }
 
@@ -1440,7 +1459,15 @@ impl Runner {
             .clone();
         for ended in ends {
             for tell in &listeners {
-                tell(ended.clone());
+                let told = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    tell(ended.clone());
+                }));
+                if told.is_err() {
+                    log::error!(
+                        "background run {}: a module told of its end panicked",
+                        ended.id
+                    );
+                }
             }
         }
         let mut state = self.state();
@@ -1457,6 +1484,17 @@ impl Runner {
         drop(state);
         freed.dedup();
         freed.iter().for_each(|project| self.tell(project));
+    }
+
+    /// Tells `ended` ([`Runner::tell_ends`]) on a thread of its own, then takes off `mark`: for an end seen on a thread that may
+    /// hold a module's own lock, a submission's or a Cancel's.
+    fn tell_soon(&self, ended: Ended, mark: Option<(String, String)>) {
+        let me = self.me.clone();
+        thread::spawn(move || {
+            if let Some(runner) = me.upgrade() {
+                runner.tell_ends(vec![ended], mark);
+            }
+        });
     }
 
     /// The projects that have a run, each once.
@@ -1579,7 +1617,8 @@ impl Runner {
     /// removed and the next run of its project starts. An ended run is only removed, and so is a run that ended on its own
     /// at that moment, which is recorded as it ended. A running run is killed only when its lock is held and the process
     /// its folder names still has the start time written down, so a process id that was reused is never signalled;
-    /// otherwise nothing is stopped or removed. A run a module holds ([`Runner::hold`]) is refused.
+    /// otherwise nothing is stopped or removed. A run a module holds ([`Runner::hold`]) is refused. A run stopped or dropped
+    /// here is told to the modules that listen as [`End::Cancelled`], one that ended at that moment as it ended.
     pub fn cancel(&self, id: &str) -> Result<(), String> {
         let mut state = self.state();
         let at = state
@@ -1595,9 +1634,16 @@ impl Runner {
         }
         let dir = self.dir(id);
         let mut pause = None;
+        // How the run ended, to tell: cancelled, or as it ended on its own at this moment; none for an ended run, told already.
+        let mut end = match state.runs[at].phase {
+            Phase::Ended { .. } => None,
+            Phase::Queued | Phase::Running { .. } => Some(End::Cancelled),
+        };
         if matches!(state.runs[at].phase, Phase::Running { .. }) && !Self::stop(&dir)? {
             // It ended on its own: a login or limit failure still pauses.
-            pause = self.finish(&mut state.runs[at]).pause();
+            let ended = self.finish(&mut state.runs[at]);
+            end = Some(ended);
+            pause = ended.pause();
             if pause.is_some() {
                 self.pause(&mut state, pause);
             }
@@ -1623,6 +1669,9 @@ impl Runner {
         self.advance(&mut state);
         let told = Self::told(&state, pause, &run.stored.project);
         drop(state);
+        if let Some(end) = end {
+            self.tell_soon(Self::ended_of(&run.stored, end), None);
+        }
         told.iter().for_each(|project| self.tell(project));
         Ok(())
     }

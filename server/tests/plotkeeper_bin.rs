@@ -3,7 +3,7 @@
 
 mod isolated_home;
 
-use studio_test_support::git;
+use studio_test_support::{git, repo_in};
 
 use std::{
     io::{BufRead, BufReader, Read, Write},
@@ -202,15 +202,6 @@ fn saved_projects(url: &str) -> Vec<String> {
     list.iter()
         .map(|p| p["path"].as_str().unwrap().to_string())
         .collect()
-}
-
-/// A repository with one commit in a new folder under `base`, spelled as `git` spells it.
-fn repo_in(base: &std::path::Path, name: &str) -> std::path::PathBuf {
-    let dir = base.join(name);
-    std::fs::create_dir_all(&dir).unwrap();
-    git(&dir, &["init", "-q", "-b", "main"]);
-    git(&dir, &["commit", "-q", "--allow-empty", "-m", "Start"]);
-    dir.canonicalize().unwrap()
 }
 
 /// Start-up registration (spec #753, "Projects"): a start in a repository adds it and opens the page on its map; a second start,
