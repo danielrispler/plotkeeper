@@ -1006,7 +1006,7 @@ fn qwen_goes_through_qwen_extensions_and_never_opens_its_files() {
 
 /// Cline keeps its API keys in its config folder (#371), so install renders `plugin-cline/` into the data folder and
 /// runs `cline plugin install` on it, after `cline plugin uninstall` of an earlier one (Cline refuses to install over
-/// one and still exits 0), uninstall runs `cline plugin uninstall`, and neither opens a file of
+/// one), uninstall runs `cline plugin uninstall`, and neither opens a file of
 /// Cline's: its provider settings, which hold its keys, and its global settings are FIFOs here.
 // @law: install-never-opens-cline-config
 #[test]

@@ -41,7 +41,7 @@
 //! Cline keeps its API keys in its config folder (`~/.cline` by default), so no file there is opened (#371). Its plugin
 //! goes in with `cline plugin install <folder>` of the folder install renders, which copies it into
 //! `~/.cline/plugins/_installed/`, and out with `cline plugin uninstall plotkeeper`. Install takes an earlier install
-//! out first: Cline CLI 3.0.76 refuses to install over one and still exits 0.
+//! out first: Cline CLI 3.0.76 refuses to install over one.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -1135,7 +1135,7 @@ fn uninstall_cline(cline: &Path) -> Result<(), String> {
 
 /// Renders `plugin-cline/` for the binaries in `bin` into the data folder and installs it with `cline plugin
 /// install`, which copies it into Cline's own plugin folder. An install of the same folder is taken out first: Cline
-/// CLI 3.0.76 refuses to install over one and still exits 0. plotkeeper opens no file of Cline's (#371).
+/// CLI 3.0.76 refuses to install over one. plotkeeper opens no file of Cline's (#371).
 fn install_cline(
     home: &Path,
     bin: &Path,

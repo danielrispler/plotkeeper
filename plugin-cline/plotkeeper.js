@@ -33,12 +33,16 @@ function append(line) {
 // out of order, as a run's end did before its last call's end in a real run.
 let queue = Promise.resolve();
 
-/** Appends `line` to the event log after the lines before it. Each hook returns this, so Cline waits for its line, and
- * a run's last line is written before a one-shot `cline` exits. */
+/** Appends `line` to the event log after the lines before it, without making Cline wait: Cline gives a plugin's hook 3
+ * seconds, and stops calling a plugin whose hooks fail 5 times in a row (Cline CLI 3.0.76, `@cline/core`'s plugin
+ * registry), while the hook may wait 5 for the log's lock. */
 function send(line) {
   queue = queue.then(() => append(line));
-  return queue;
 }
+
+/** Waits for the lines sent so far, up to 2.5 seconds, so a one-shot `cline` writes its run's last line before it
+ * exits. */
+const flushed = () => Promise.race([queue, new Promise((done) => setTimeout(done, 2500).unref?.())]);
 
 /** The text of message `message`, its text parts joined. */
 const text = (message) =>
@@ -79,15 +83,15 @@ export default {
   },
   hooks: {
     // A run is a turn: the prompt is the run's last message.
-    async beforeRun({ snapshot }) {
+    beforeRun({ snapshot }) {
       const last = snapshot.messages?.at(-1);
-      await send(line("beforeRun", snapshot, { prompt: last?.role === "user" ? text(last) : "" }));
+      send(line("beforeRun", snapshot, { prompt: last?.role === "user" ? text(last) : "" }));
     },
-    async beforeTool({ snapshot, toolCall, input }) {
-      await send(line("beforeTool", snapshot, { tool_name: toolCall.toolName, tool_use_id: toolCall.toolCallId, tool_input: input ?? {} }));
+    beforeTool({ snapshot, toolCall, input }) {
+      send(line("beforeTool", snapshot, { tool_name: toolCall.toolName, tool_use_id: toolCall.toolCallId, tool_input: input ?? {} }));
     },
-    async afterTool({ snapshot, toolCall, input, result }) {
-      await send(
+    afterTool({ snapshot, toolCall, input, result }) {
+      send(
         line("afterTool", snapshot, {
           tool_name: toolCall.toolName,
           tool_use_id: toolCall.toolCallId,
@@ -99,13 +103,14 @@ export default {
     },
     // `completed`, `aborted` or `failed`, with the run's last text.
     async afterRun({ snapshot, result }) {
-      await send(
+      send(
         line("afterRun", snapshot, {
           status: result?.status ?? "",
           last_assistant_message: result?.outputText ?? "",
           error: result?.error?.message ?? null,
         }),
       );
+      await flushed();
     },
   },
 };

@@ -9,7 +9,7 @@
 //! `/Users/me/work`.
 
 use serde_json::{Value, json};
-use studio_core::{CLINE_CAPABILITIES, Outcome, State, Studio};
+use studio_core::{CLINE_CAPABILITIES, Outcome, State, Status, Studio};
 
 const RUN: &str = include_str!("fixtures/cline/run.jsonl");
 const HELLO: &str = "1795785548678_7h0oj";
@@ -93,20 +93,77 @@ fn changed(n: usize, fields: Value) -> String {
     line.to_string()
 }
 
-/// A subagent's runs have hooks of their own; neither its start nor its end is the session's turn's
-/// (unverified: no real run of Cline's subagents was recorded).
+/// A subagent's runs have hooks of their own: neither its start nor its end is the session's turn's,
+/// its calls go under it, and its run's end ends it (unverified: no real run of Cline's subagents was
+/// recorded).
 #[test]
-fn a_subagents_run_neither_starts_nor_ends_the_sessions_turn() {
-    let sub = json!({ "agent_id": "agent_sub", "parent_agent_id": "agent_26ef" });
+fn a_subagents_run_is_its_own_not_the_sessions_turn() {
+    let sub =
+        json!({ "agent_id": "agent_sub", "parent_agent_id": "agent_26ef", "run_id": "run_sub" });
     let mut lines: Vec<String> = fixture()[..3].iter().map(ToString::to_string).collect();
-    // Its run's start and end, in the session's turn.
-    lines.push(changed(0, sub.clone()));
-    lines.push(changed(9, sub));
+    // Its run's start, a call of its own, and its run's end, in the session's turn.
+    for n in [0, 1, 2, 9] {
+        lines.push(changed(n, sub.clone()));
+    }
 
     let studio = Studio::replayed(&lines);
     let session = studio.session(HELLO).unwrap();
     assert_eq!(session.turns.len(), 1);
     assert_eq!(session.state, State::Running);
+    let [agent] = session.agents.as_slice() else {
+        panic!("one subagent: {:?}", session.agents);
+    };
+    assert_eq!(agent.agent.id, "agent_sub");
+    assert_eq!(agent.status, Status::Completed);
+    let read = fixture_line(1)["tool_use_id"].as_str().unwrap().to_owned();
+    assert!(session.ledger.row(Some("agent_sub"), &read).is_some());
+}
+
+/// Line `n` of the fixture.
+fn fixture_line(n: usize) -> Value {
+    serde_json::from_str(fixture()[n]).unwrap()
+}
+
+/// Cline wraps a typed prompt in `<user_input mode="…">`; the tag goes, with anything around it kept as it is.
+#[test]
+fn a_prompt_loses_cline_s_tag() {
+    for (sent, prompt) in [
+        ("<user_input mode=\"act\">fix it</user_input>", "fix it"),
+        ("<user_input mode=\"plan\">fix it</user_input>\n", "fix it"),
+        ("fix it", "fix it"),
+        (
+            "<user_input mode=\"act\">fix it",
+            "<user_input mode=\"act\">fix it",
+        ),
+    ] {
+        let studio = Studio::replayed([changed(0, json!({ "prompt": sent }))]);
+        let session = studio.session(HELLO).unwrap();
+        assert_eq!(session.turns[0].prompt, prompt, "{sent:?}");
+    }
+}
+
+/// `apply_patch` takes its patch as `input` or as its whole input; either names the file it edits.
+#[test]
+fn an_apply_patch_edits_the_first_file_its_patch_names() {
+    let patch = "*** Begin Patch\n*** Update File: /Users/me/work/hello/hello.txt\n@@\n-hi\n+bye\n*** End Patch";
+    for input in [json!({ "input": patch }), json!(patch)] {
+        let mut lines: Vec<String> = fixture()[..1].iter().map(ToString::to_string).collect();
+        let call = json!({ "tool_name": "apply_patch", "tool_use_id": "toolu_patch", "tool_input": input });
+        lines.push(changed(3, call.clone()));
+        lines.push(changed(5, call));
+        let studio = Studio::replayed(&lines);
+        let row = studio
+            .session(HELLO)
+            .unwrap()
+            .ledger
+            .row(None, "toolu_patch")
+            .unwrap();
+        assert_eq!(
+            row.file.as_deref(),
+            Some("/Users/me/work/hello/hello.txt"),
+            "{input}"
+        );
+    }
 }
 
 #[test]

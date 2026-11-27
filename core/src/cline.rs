@@ -10,12 +10,12 @@
 //! (`is_error`) and, for a tool that does several things in one call, each one's outcome
 //! (`outcomes`), and `afterRun` with the run's status and last text. A run is a turn. Cline names
 //! no model to its plugins and reports no session start or end, nor any permission ask. A run whose
-//! `parent_agent_id` is set is a subagent's: its calls go under the session with its own id, and
-//! its run's start and end are not the session's turn's (unverified: no real run of Cline's
-//! subagents was recorded). The tool names and inputs are those of a real run of Cline CLI 3.0.76
+//! `parent_agent_id` is set is a subagent's, which `spawn_agent` starts and waits for: its calls go
+//! under the session with its own id, its run's start is not the session's turn's, and its run's end
+//! ends the subagent (unverified: no real run of Cline's subagents was recorded). The tool names and inputs are those of a real run of Cline CLI 3.0.76
 //! (`core/tests/fixtures/cline/run.jsonl`) and of its built-in tools (its binary's `read_files`,
 //! `search_codebase`, `run_commands`, `fetch_web_content`, `apply_patch`, `editor`, `skills`,
-//! `ask_question` and `submit_and_exit`).
+//! `ask_question` and `submit_and_exit`, and `spawn_agent` when subagents are on).
 
 use crate::event::{Capabilities, Event, Happened, Tool, ToolKind, TranscriptFormat};
 use crate::ledger::Bytes;
@@ -101,6 +101,7 @@ fn kind(name: &str) -> ToolKind {
         "editor" | "apply_patch" => ToolKind::Edit,
         "run_commands" => ToolKind::Command,
         "ask_question" => ToolKind::Question,
+        "spawn_agent" => ToolKind::Spawn,
         _ => ToolKind::Other,
     }
 }
@@ -119,7 +120,10 @@ fn tool(name: &str, input: &Value) -> Tool {
     let kind = kind(name);
     let path = match name {
         "editor" => input["path"].as_str().map(Into::into),
-        "apply_patch" => input["input"].as_str().and_then(patched_file),
+        // Its schema takes the patch as `input`, or as the whole input.
+        "apply_patch" => (input["input"].as_str())
+            .or(input.as_str())
+            .and_then(patched_file),
         _ => None,
     };
     // `run_commands` runs each of its commands in turn, one a line here.
@@ -139,7 +143,7 @@ fn tool(name: &str, input: &Value) -> Tool {
 
 /// The prompt without the tag Cline wraps a typed prompt in (`<user_input mode="act">…</user_input>`).
 fn prompt(text: &str) -> &str {
-    let inner = text
+    let inner = (text.trim_end())
         .strip_prefix("<user_input")
         .and_then(|rest| rest.split_once('>'))
         .and_then(|(_, rest)| rest.strip_suffix("</user_input>"));
@@ -166,8 +170,12 @@ fn adapt(raw: Raw) -> Event {
             prompt: prompt(&raw.prompt).to_owned(),
             origin: None,
         }),
-        "afterRun" if !subagent => {
-            happened.push(Happened::TurnEnd);
+        "afterRun" => {
+            happened.push(if subagent {
+                Happened::SubagentEnd
+            } else {
+                Happened::TurnEnd
+            });
             happened.push(Happened::Reply(raw.last_assistant_message.clone()));
         }
         "beforeTool" => happened.push(Happened::ToolStart {
