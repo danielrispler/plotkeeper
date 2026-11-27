@@ -1104,6 +1104,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
             }),
         ),
         ("About", json(studio_server::about())),
+        ("MapDraft", json(map_draft())),
         (
             "MapScan",
             json(studio_server::map_scan::MapScan {
@@ -1153,9 +1154,56 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
             "LawPatchOpened",
             "NewLaw",
             "MapScan",
+            "MapDraft",
         ],
         &samples,
     );
+}
+
+/// A Map draft with a group of each state, one failed with why, a flagged verdict and an item left out.
+fn map_draft() -> studio_server::map_draft::MapDraftView {
+    use studio_server::map_draft::{GroupState, GroupView, MapDraftView, NotWritten};
+    let group = |part: &str, state, why: Option<&str>, redraft| GroupView {
+        parts: vec![part.into()],
+        state,
+        why: why.map(Into::into),
+        redraft,
+    };
+    MapDraftView {
+        map: r#"{"version":2,"parts":[],"links":[]}"#.into(),
+        groups: vec![
+            group("a", GroupState::Writing, None, false),
+            group("b", GroupState::Checking, None, false),
+            group("c", GroupState::Done, None, false),
+            group(
+                "d",
+                GroupState::WriterFailed,
+                Some("The writer's answer held no JSON"),
+                false,
+            ),
+            group(
+                "c",
+                GroupState::ReviewerFailed,
+                Some("The reviewer stopped at its time limit"),
+                true,
+            ),
+        ],
+        verdicts: BTreeMap::from([(
+            "c".into(),
+            studio_server::map_review::Judged {
+                id: "part:c/purpose".into(),
+                verdict: "contradicted".into(),
+                why: "It writes to stdout.".into(),
+                cites: vec!["c/log.ts:37".into()],
+                flagged: true,
+            },
+        )]),
+        not_written: vec![NotWritten {
+            what: "c: rotates its logs".into(),
+            why: "No code shows it.".into(),
+        }],
+        ready: false,
+    }
 }
 
 /// `name` as the page writes it: `agent_id` is `agentId`. `api::call` turns it back.

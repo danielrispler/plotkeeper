@@ -369,7 +369,7 @@ fn text_of(change: &MapItem) -> Vec<ReviewItem> {
 }
 
 /// FNV-1a of `text`, in hex (`records::fnv1a`).
-fn hash(text: &str) -> String {
+pub(crate) fn hash(text: &str) -> String {
     format!("{:016x}", crate::records::fnv1a(text))
 }
 
@@ -388,7 +388,7 @@ pub enum ReviewState {
 }
 
 /// The verdicts a review may give; any but the first is a flag.
-const VERDICTS: [&str; 4] = ["supported", "overreach", "contradicted", "unreadable"];
+pub(crate) const VERDICTS: [&str; 4] = ["supported", "overreach", "contradicted", "unreadable"];
 
 /// One item's verdict.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -531,7 +531,6 @@ impl Wording {
     };
 
     /// First map's wording: the repository with a draft map, and the items the draft wrote.
-    #[allow(dead_code, reason = "First map's reviewer (spec #753) uses it next")]
     pub(crate) const DRAFT: Wording = Wording {
         folder: "the repository, with a draft map, `system-map.json`",
         heading: "The items the draft wrote, whose text it added or edited:",
