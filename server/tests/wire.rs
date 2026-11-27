@@ -1104,6 +1104,16 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
             }),
         ),
         ("About", json(studio_server::about())),
+        (
+            "MapScan",
+            json(studio_server::map_scan::MapScan {
+                map: r#"{"version":2,"parts":[],"links":[]}"#.into(),
+                files: BTreeMap::from([("app".into(), 2)]),
+                read_languages: vec!["TypeScript".into()],
+                unread_languages: vec!["Ruby".into()],
+                claude: true,
+            }),
+        ),
     ];
     // The page's version is the package's, which the release bumps with npm's (#512).
     assert_eq!(
@@ -1135,6 +1145,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
             "BackLawStarted",
             "LawPatchOpened",
             "NewLaw",
+            "MapScan",
         ],
         &samples,
     );

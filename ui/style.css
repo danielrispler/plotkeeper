@@ -698,6 +698,26 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .map-draft-row { display: flex; align-items: start; gap: var(--sp-2); }
 .map-draft { max-width: var(--dialog); margin: 0; padding: var(--sp-5) var(--sp-5); text-align: start; white-space: pre-wrap; font: var(--size-small)/1.6 var(--mono);
              color: var(--muted); background: var(--chrome); border-radius: var(--radius-pane); }
+/* The scan screen (#760): the grey plates on the dot grid, and the scan's panel beside them on the right; stacked below 1007 px (`narrow`, main.ts). Nothing pans:
+   the plates are fitted to the canvas. */
+.map-scan { position: absolute; inset: 0; display: grid; grid-template-columns: minmax(0, 1fr) var(--rail); }
+.map-scan-canvas { position: relative; min-width: 0; min-height: 0; overflow: hidden;
+                   background-image: radial-gradient(var(--map-dot) var(--hair), transparent var(--hair)); background-size: var(--map-grid) var(--map-grid); }
+.map-scan-panel { display: flex; flex-direction: column; gap: var(--sp-4); min-height: 0; padding: var(--sp-6) var(--map-gutter) var(--sp-6) var(--sp-4); overflow-y: auto; overscroll-behavior: contain; }
+.map-scan-panel .map-empty-title, .map-scan-panel .empty, .map-scan-languages, .map-scan-time, .map-scan-why { margin: 0; }
+.map-scan-languages, .map-scan-time, .map-scan-why { font-size: var(--size-small); color: var(--muted); }
+.map-scan-draft { display: flex; flex-direction: column; align-items: start; gap: var(--sp-2); }
+.map-scan-draft .primary { background: var(--selected); }
+.map-scan-prompt { display: flex; flex-direction: column; gap: var(--sp-2); min-height: 0; }
+.map-scan .map-draft-row { min-width: 0; }
+.map-scan .map-draft { min-width: 0; max-block-size: 40vh; overflow: auto; }
+/* A scan's plate is a draft: grey, flat, quiet text, never dragged. */
+.plate.draft { background: var(--plate-black); box-shadow: inset 0 0 0 var(--hair) var(--plate-edge); cursor: default; user-select: text; }
+.plate.draft .plate-caption { font-family: var(--mono); font-size: var(--size-small); }
+/* With the left panel open, the scan takes the room the panel leaves, as the empty map does (#462). */
+body.panel-open .map-scan { inset-inline-start: calc(var(--inset) + var(--panel-w)); }
+body.narrow .map-scan { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+body.narrow .map-scan-panel { max-block-size: 50vh; padding-inline: var(--map-gutter); }
 /* A fresh install (#386): one calm line and the install docs, quiet. */
 .map-install { font-size: var(--size-small); color: var(--muted); text-decoration: underline; text-decoration-color: var(--edge); text-underline-offset: var(--halo); }
 .map-install:hover { color: var(--fg); }

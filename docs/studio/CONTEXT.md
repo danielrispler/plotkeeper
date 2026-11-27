@@ -155,6 +155,12 @@ _Avoid_: Command menu, help
 **Draft**:
 What Daniel has typed into a session's prompt and not sent yet, as the studio follows his keys. The studio types into a terminal only once he has no draft there and has stopped typing for 3 seconds.
 
+**First map**:
+plotkeeper drafting a repository's first system map: a free scan, a few questions, then agents that name and describe the parts, a reviewer, and Daniel's accept (spec #753).
+
+**Map draft**:
+First map's output before it is accepted: kept by plotkeeper, never in the repository; accepting it writes the map, discarding it leaves nothing.
+
 **Presence file**:
 The empty file `present` in the studio's data folder, kept while the window is focused, so Claude Code's Remote Control skips a phone push Daniel would see on screen. Blur, quit and the app's start delete it, and the terminal daemon deletes it when the app's connection drops, unless it dropped the app for falling behind.
 

@@ -185,6 +185,7 @@ const covered = {
   ".subagent-log .log-title": "log.ts: the title's title",
   ".subagent-log .log-call summary": "log.ts: the summary's title",
   ".map-canvas": "map.ts: the map area is a camera, not a text; it pans and zooms to what it cuts",
+  ".map-scan-canvas": "map-scan.ts: the scan's canvas fits its plates to its size; a plate's hint holds its name, folder and file count",
   ".bar-project": "map.ts: the top bar's project name has the project's path as its title",
   ".map-view": "map.ts: the map is cut at its rounded corner; the camera pans to what it cuts",
   ".map-panel": "panel.ts: the left panel's body scrolls, so nothing in it is cut; the panel only rounds its corners",
