@@ -10,6 +10,7 @@
 //! shell command (`--auto` approved it). The scratch folders' path is replaced by `/Users/me/work`.
 //! It was recorded before #718, so its spawn's end names no child.
 
+use crate::common;
 use serde_json::{Value, json};
 use studio_core::{OPENCODE_CAPABILITIES, Outcome, Parent, State, Status, Studio};
 
@@ -137,14 +138,6 @@ fn each_ask_of_a_write_or_a_command_needs_you_until_its_own_call_ends() {
 }
 
 #[test]
-fn an_opencode_session_records_no_turn_trees() {
-    let studio = Studio::replayed(fixture());
-    let session = studio.session(HELLO).unwrap();
-    assert!(!session.capabilities.turn_trees);
-    assert!(session.turns.iter().all(|t| t.files.is_none()));
-}
-
-#[test]
 fn an_event_the_adapter_does_not_map_is_no_drift() {
     let mut lines: Vec<String> = fixture().iter().map(ToString::to_string).collect();
     lines.insert(
@@ -235,4 +228,25 @@ fn a_background_subagent_replays_as_its_sessions_subagent_with_its_calls_and_rep
     );
     assert_eq!(session.model.as_deref(), Some("big-pickle"));
     assert_eq!(session.state, State::YourTurn);
+}
+
+/// The first turn of `hello` in `fixtures/opencode/run.jsonl` wrote `hello.txt`, by a path relative
+/// to the session's folder: taken live with the trees the hook records for it (#717), the turn lists
+/// the file, as a Codex or Cursor turn does. Its reply is one short sentence, which asks no summary.
+#[test]
+fn an_opencode_turn_that_writes_a_file_by_a_relative_path_lists_it() {
+    let mut turn = Vec::new();
+    for line in RUN.lines().filter(|l| l.contains(HELLO)) {
+        turn.push(line);
+        if line.contains("session.execution.succeeded") {
+            break;
+        }
+    }
+    let (listed, carried) = common::trial_files(
+        &turn.join("\n"),
+        ("session.prompt", "session.execution.succeeded"),
+        ("/Users/me/work/hello", "hello.txt"),
+    );
+    assert_eq!(listed, ["hello.txt"]);
+    assert_eq!(carried, None);
 }

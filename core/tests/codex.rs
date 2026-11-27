@@ -64,7 +64,8 @@ fn the_documented_run_replays_into_its_sessions_turns_and_tools() {
 /// summary said nothing was recorded, as Codex recorded no turn trees (#426).
 #[test]
 fn a_codex_turn_that_patches_a_file_lists_it_and_its_summarys_facts_carry_it() {
-    let (listed, carried) = common::trial_files(TRIAL, "UserPromptSubmit", "Stop");
+    let (listed, carried) =
+        common::trial_files(TRIAL, ("UserPromptSubmit", "Stop"), ("/w/trial", "calc.py"));
     assert_eq!(listed, ["calc.py"]);
-    assert_eq!(carried, ["calc.py"]);
+    assert_eq!(carried, Some(vec!["calc.py".to_owned()]));
 }

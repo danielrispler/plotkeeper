@@ -80,9 +80,13 @@ fn a_call_runs_from_its_turn_until_its_post_event() {
 /// was recorded, as Cursor recorded no turn trees (#426).
 #[test]
 fn a_cursor_turn_that_writes_a_file_lists_it_and_its_summarys_facts_carry_it() {
-    let (listed, carried) = common::trial_files(TRIAL, "beforeSubmitPrompt", "stop");
+    let (listed, carried) = common::trial_files(
+        TRIAL,
+        ("beforeSubmitPrompt", "stop"),
+        ("/w/trial", "calc.py"),
+    );
     assert_eq!(listed, ["calc.py"]);
-    assert_eq!(carried, ["calc.py"]);
+    assert_eq!(carried, Some(vec!["calc.py".to_owned()]));
 }
 
 /// Cursor runs `afterAgentResponse` and `stop` as hooks of their own a few milliseconds apart, so
