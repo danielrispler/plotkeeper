@@ -523,6 +523,10 @@ h1 { margin: 0 0 var(--sp-4); }
 .map-wiring { margin: 0 0 0 var(--sp-5); min-width: 0; font-size: var(--size-small); color: var(--muted); }
 .map-banner:not(:empty) { margin-inline-start: auto; font-size: var(--size-small); color: var(--muted); }
 /* The check's problems of a checkout map (#753): a full-width line under the head's row, in the muted text, never a colour of its own. */
+.map-pending { flex-basis: 100%; min-width: 0; font-size: var(--size-small); color: var(--muted); }
+.map-pending-line { margin: 0; text-wrap: pretty; }
+.map-pending-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin-top: var(--sp-3); }
+.map-pending-actions .primary:not([aria-disabled="true"]) { background: var(--selected); }
 .map-problems { flex-basis: 100%; min-width: 0; font-size: var(--size-small); color: var(--muted); }
 .map-problems-head { display: flex; align-items: center; gap: var(--sp-3); }
 .map-problems-title, .map-problems-more { margin: 0; }

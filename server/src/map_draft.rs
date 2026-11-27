@@ -14,6 +14,7 @@
 //! - **The lock.** One lock serialises every read, change and write of a Map draft, and is held across a submission, so an end
 //!   told meanwhile waits until the run is written down. The runner never calls in here with its own lock held.
 
+use crate::map::PendingFile;
 use crate::map_review::{self, ItemKind, Judged, ReviewItem, VERDICTS, Verdict, Wording};
 use crate::records::Notice;
 use crate::runner::{End, Kind, Limits, Outcome, Request, Runner};
@@ -24,8 +25,11 @@ use std::{
     collections::BTreeMap,
     fs, io,
     path::{Path, PathBuf},
+    process::Output,
     sync::{Arc, Mutex, MutexGuard, PoisonError, Weak},
+    time::{Duration, Instant},
 };
+use studio_workbench::run::{self, RunError, run_until};
 
 /// The most writer groups a draft has, so the writers read the same files as few times as they can (#753, Q24).
 const MAX_GROUPS: usize = 4;
@@ -37,11 +41,21 @@ const VERSION: u32 = 1;
 const HAS_MAP: &str = "This repository has a map already";
 /// The tiers a part may be set to.
 const TIERS: [&str; 3] = ["core", "interface", "black-box"];
+/// The longest `gh auth status` or the lookup of the pending PR may take; a lookup past it changes nothing.
+const GH_ASK_LIMIT: Duration = Duration::from_secs(15);
+/// Why Open a draft PR is muted when `gh` is not there.
+const GH_MISSING: &str =
+    "GitHub's CLI, `gh`, was not found: install it to open a draft PR, or write the file instead";
+/// Why Open a draft PR is muted when `gh auth status` fails.
+const GH_LOGGED_OUT: &str =
+    "`gh` is not logged in: run `gh auth login` to open a draft PR, or write the file instead";
 
 /// Where the Map drafts are kept.
 pub struct Config {
     /// `<data>/first-map`: a file per project, beside its `.pending.json`.
     pub store: PathBuf,
+    /// `gh`, for Open a draft PR and following it; none: found as the login shell finds it.
+    pub gh: Option<PathBuf>,
 }
 
 /// Where a group stands.
@@ -176,6 +190,16 @@ pub struct MapDraftView {
     pub ready: bool,
     /// Where Accept writes the map: `system-map.json` at the main checkout's root.
     pub path: String,
+    /// Why Open a draft PR is muted once Accept unlocks: `gh` is missing or not logged in. None while Accept is locked, or when it is
+    /// not muted.
+    pub pr_muted: Option<String>,
+}
+
+/// The draft PR Open a draft PR opened (`map_draft_pr`, `map_pending_pr`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct OpenedPr {
+    pub number: u64,
+    pub url: String,
 }
 
 /// What Accept did (`map_draft_accept`).
@@ -197,8 +221,12 @@ pub enum Accepted {
 pub struct MapDrafts {
     config: Config,
     runner: Weak<Runner>,
-    /// Serialises the read, change and write of a Map draft.
+    /// Serialises the read, change and write of a Map draft, and of the map waiting on a draft PR.
     writing: Mutex<()>,
+    /// One Open a draft PR at a time, held across its push, so the Map draft's lock is not.
+    opening: Mutex<()>,
+    /// When `gh auth status` last passed: trusted for the map fetch's cooldown, so a draw does not ask it each time.
+    gh_passed: Mutex<Option<Instant>>,
     changed: Notice,
 }
 
@@ -210,6 +238,8 @@ impl MapDrafts {
             config,
             runner: Arc::downgrade(runner),
             writing: Mutex::default(),
+            opening: Mutex::default(),
+            gh_passed: Mutex::default(),
             changed: Notice::default(),
         });
         let me = Arc::downgrade(&drafts);
@@ -242,11 +272,51 @@ impl MapDrafts {
 
     /// The Map draft's file of the main checkout `main`: its path with each character but a letter or digit made `_`.
     fn file(&self, main: &str) -> PathBuf {
-        let name: String = main
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-            .collect();
-        self.config.store.join(format!("{name}.json"))
+        self.config.store.join(format!("{}.json", file_name(main)))
+    }
+
+    /// The file of the map waiting on a draft PR of the main checkout `main`, beside its Map draft's: where the Map view reads it
+    /// (`map::pending_file`).
+    fn pending(&self, main: &str) -> PathBuf {
+        self.config
+            .store
+            .join(format!("{}.pending.json", file_name(main)))
+    }
+
+    fn gh(&self) -> PathBuf {
+        self.config
+            .gh
+            .clone()
+            .unwrap_or_else(|| studio_workbench::gh_path().into())
+    }
+
+    /// Why Open a draft PR is muted for `project` (#753, story 27): `gh` is not found, or `gh auth status` fails; none when it passes.
+    pub fn pr_muted(&self, project: &str) -> Option<String> {
+        let passed = || {
+            self.gh_passed
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+        };
+        if passed().is_some_and(|at| at.elapsed() < crate::map::COOLDOWN) {
+            return None;
+        }
+        let asked = run_until(
+            run::gh_at(self.gh(), Path::new(project)).args(["auth", "status"]),
+            GH_ASK_LIMIT,
+        );
+        match asked {
+            Ok(_) => {
+                *passed() = Some(Instant::now());
+                None
+            }
+            Err(RunError::Start(e)) if e.kind() == io::ErrorKind::NotFound => {
+                Some(GH_MISSING.into())
+            }
+            Err(RunError::Failed(_)) => Some(GH_LOGGED_OUT.into()),
+            Err(e) => Some(format!(
+                "`gh auth status` {e}: try again, or write the file instead"
+            )),
+        }
     }
 
     fn read(&self, main: &str) -> Option<Draft> {
@@ -369,7 +439,16 @@ impl MapDrafts {
         self.view_of(&main)
     }
 
+    /// The view of `main`'s Map draft, with why Open a draft PR is muted once Accept unlocks.
     fn view_of(&self, main: &str) -> Option<MapDraftView> {
+        let mut view = self.read_view(main)?;
+        if view.ready {
+            view.pr_muted = self.pr_muted(main);
+        }
+        Some(view)
+    }
+
+    fn read_view(&self, main: &str) -> Option<MapDraftView> {
         let draft = self.read(main)?;
         let mut map: Value = serde_json::from_str(&draft.skeleton).ok()?;
         let mut verdicts = BTreeMap::new();
@@ -414,6 +493,7 @@ impl MapDrafts {
                 .join(system_map::MAP_FILE)
                 .display()
                 .to_string(),
+            pr_muted: None,
         })
     }
 
@@ -708,7 +788,7 @@ impl MapDrafts {
         let root = Path::new(&main);
         let guard = self.lock();
         let view = self
-            .view_of(&main)
+            .read_view(&main)
             .ok_or("There is no Map draft to accept")?;
         if !view.ready {
             return Err("Accept unlocks once a reviewer has checked every part".into());
@@ -732,6 +812,251 @@ impl MapDrafts {
         drop(guard);
         self.changed.tell(&main);
         Ok(accepted)
+    }
+
+    /// Accept's Open a draft PR (#753, "Open a draft PR"): the accepted map goes to the default branch's remote on a new branch
+    /// `first-map/<id>`, from a temporary worktree in the data folder, and a draft PR is opened for it; nothing is written to the
+    /// checkout. The map is kept as the pending file, with the PR's number and branch, which the Map view shows until the PR merges,
+    /// and the Map draft is deleted. Refused, pushing nothing, as Write is, and when `gh` is missing or not logged in.
+    pub fn open_pr(&self, project: &str) -> Result<OpenedPr, String> {
+        let main = studio_workbench::main_checkout(Path::new(project))?;
+        let root = Path::new(&main);
+        let _one = self.opening.lock().unwrap_or_else(PoisonError::into_inner);
+        let view = {
+            let _guard = self.lock();
+            self.read_view(&main)
+                .ok_or("There is no Map draft to accept")?
+        };
+        if !view.ready {
+            return Err("Accept unlocks once a reviewer has checked every part".into());
+        }
+        let read = crate::map::read_map(root);
+        let mapped = match read.from {
+            Some(crate::map::ReadFrom::Checkout) => read.status == crate::map::Status::Loaded,
+            from => from.is_some(),
+        };
+        if mapped {
+            return Err(HAS_MAP.into());
+        }
+        if let Some(why) = self.pr_muted(&main) {
+            return Err(why);
+        }
+        let (opened, pending) = self.open_draft(root, &view.map)?;
+        let guard = self.lock();
+        self.keep_pending(&main, &pending, &opened)?;
+        if let Err(e) = fs::remove_file(self.file(&main)) {
+            // The map waits on its PR, and shows from the pending file; a draft left behind only blocks a new one.
+            log::warn!("first map: the accepted Map draft of {main} was not deleted: {e}");
+        }
+        drop(guard);
+        self.changed.tell(&main);
+        Ok(opened)
+    }
+
+    /// Opens the draft PR of the accepted `map` (the Map draft's, or a closed PR's) from the default branch as it is now, by Back a
+    /// law's flow: the map as `check` passes it on that branch's files (`accepted_map`).
+    fn open_draft(&self, root: &Path, map: &str) -> Result<(OpenedPr, PendingFile), String> {
+        let reference = crate::back_a_law::default_branch_now(root)?;
+        let committed = crate::map::git(
+            root,
+            &["show", &format!("{reference}:{}", system_map::MAP_FILE)],
+        );
+        if committed.is_ok() {
+            return Err(HAS_MAP.into());
+        }
+        let parts = serde_json::from_str::<Value>(map)
+            .map(|map| parts_of(&map).count())
+            .unwrap_or_default();
+        let branch = format!("first-map/{}", studio_understanding::millis());
+        let title = "Add the system map";
+        let body = format!(
+            "Adds `system-map.json`, this repository's first system map: its {parts} parts, drafted by plotkeeper's First map and \
+             accepted in plotkeeper, with the imports its readers found as links. It passes `system-map check`.\n\n\
+             Until this PR merges, plotkeeper shows the map from its own copy; once it merges, the map on the default branch takes over.\n\n\
+             Opened as a draft by plotkeeper's First map.\n"
+        );
+        fs::create_dir_all(&self.config.store)
+            .map_err(|e| format!("the temporary worktree: {e}"))?;
+        let mut written = None;
+        let url = crate::back_a_law::open_draft(
+            &crate::back_a_law::DraftPr {
+                repo: root,
+                data: &self.config.store,
+                gh: self.gh(),
+                reference: &reference,
+                branch: &branch,
+                title,
+                message: "Drafted by plotkeeper's First map and accepted.",
+                body: &body,
+            },
+            |work, _| {
+                let text = accepted_map(work, map)?;
+                fs::write(work.join(system_map::MAP_FILE), &text)
+                    .map_err(|e| format!("system-map.json could not be written: {e}"))?;
+                crate::map::git(work, &["add", system_map::MAP_FILE])?;
+                written = Some(text);
+                Ok(true)
+            },
+        )?
+        .unwrap_or_default();
+        let (number, url) = crate::back_a_law::pr_number(&url)
+            .ok_or_else(|| format!("gh did not say the PR's number: {url}"))?;
+        let pending = PendingFile {
+            number,
+            branch,
+            closed: false,
+            map: written.unwrap_or_default(),
+        };
+        Ok((OpenedPr { number, url }, pending))
+    }
+
+    /// Keeps `pending` as `main`'s map waiting on a draft PR; else why not, naming the PR `opened` opened.
+    fn keep_pending(
+        &self,
+        main: &str,
+        pending: &PendingFile,
+        opened: &OpenedPr,
+    ) -> Result<(), String> {
+        let saved = fs::create_dir_all(&self.config.store).and_then(|()| {
+            let text = serde_json::to_vec(pending).map_err(io::Error::other)?;
+            studio_workbench::write_atomic(&self.pending(main), &text)
+        });
+        saved.map_err(|e| {
+            log::error!(
+                "first map: the map waiting on PR #{} of {main} was not saved: {e}",
+                opened.number
+            );
+            format!(
+                "PR #{} is open at {}, but plotkeeper's copy of the map could not be saved: {e}",
+                opened.number, opened.url
+            )
+        })
+    }
+
+    /// Follows the draft PR `project`'s accepted map waits on (#753, "Following the PR"), by `gh pr view`: merged, plotkeeper's copy
+    /// is deleted, and the default branch's map is read once fetched; closed unmerged, the copy stays and says so; open, nothing
+    /// changes. A `gh` or network error, a timeout or an answer it cannot read changes nothing, and the next lookup asks again. The
+    /// Map view asks it under the map fetch's cooldown and in-flight guard.
+    pub fn follow(&self, project: &str) {
+        let Ok(main) = studio_workbench::main_checkout(Path::new(project)) else {
+            return;
+        };
+        let file = self.pending(&main);
+        let Some(found) = crate::map::read_pending(&file) else {
+            return;
+        };
+        let number = found.number.to_string();
+        let asked = run_until(
+            run::gh_at(self.gh(), Path::new(&main)).args([
+                "pr",
+                "view",
+                &number,
+                "--json",
+                "state,mergedAt",
+            ]),
+            GH_ASK_LIMIT,
+        );
+        let Some(state) = pr_state(asked) else {
+            return;
+        };
+        let guard = self.lock();
+        // A PR opened meanwhile, from a closed one, is followed by the next lookup.
+        let Some(now) = crate::map::read_pending(&file).filter(|now| now.number == found.number)
+        else {
+            return;
+        };
+        match state {
+            PrState::Merged => {
+                if let Err(e) = fs::remove_file(&file) {
+                    log::warn!(
+                        "first map: the map of {main} whose PR #{number} merged was not deleted: {e}"
+                    );
+                    return;
+                }
+            }
+            PrState::Closed if !now.closed => {
+                let closed = PendingFile {
+                    closed: true,
+                    ..now
+                };
+                let text = serde_json::to_vec(&closed).unwrap_or_default();
+                if let Err(e) = studio_workbench::write_atomic(&file, &text) {
+                    log::warn!(
+                        "first map: the map of {main} whose PR #{number} closed was not marked so: {e}"
+                    );
+                    return;
+                }
+            }
+            PrState::Closed | PrState::Open => return,
+        }
+        drop(guard);
+        self.changed.tell(&main);
+    }
+
+    /// The map waiting on a draft PR of `main` once that PR closed unmerged; else why there is nothing to recover.
+    fn closed_pending(&self, main: &str) -> Result<PendingFile, String> {
+        let found = crate::map::read_pending(&self.pending(main))
+            .ok_or("There is no map waiting on a PR")?;
+        if !found.closed {
+            return Err(format!(
+                "The map's PR #{} is still open: plotkeeper shows its copy until the PR merges or closes",
+                found.number
+            ));
+        }
+        Ok(found)
+    }
+
+    /// Write to `<path>` from a closed PR (#753, story 28): the map waiting on it goes into the checkout as Accept's Write puts it,
+    /// asking before it replaces a file there that does not read, and plotkeeper's copy is deleted.
+    pub fn pending_write(&self, project: &str, replace: Option<&str>) -> Result<Accepted, String> {
+        let main = studio_workbench::main_checkout(Path::new(project))?;
+        let guard = self.lock();
+        let found = self.closed_pending(&main)?;
+        let accepted = write_checkout(
+            &Path::new(&main).join(system_map::MAP_FILE),
+            &found.map,
+            replace,
+        )?;
+        if matches!(accepted, Accepted::Replace { .. }) {
+            return Ok(accepted);
+        }
+        if let Err(e) = fs::remove_file(self.pending(&main)) {
+            // The map is written, and the checkout's wins over the copy in the read order.
+            log::warn!("first map: the map of {main} waiting on a closed PR was not deleted: {e}");
+        }
+        drop(guard);
+        self.changed.tell(&main);
+        Ok(accepted)
+    }
+
+    /// Open a draft PR from a closed PR: a new draft PR on a new branch, as Accept's opens, and the map then waits on it.
+    pub fn pending_pr(&self, project: &str) -> Result<OpenedPr, String> {
+        let main = studio_workbench::main_checkout(Path::new(project))?;
+        let _one = self.opening.lock().unwrap_or_else(PoisonError::into_inner);
+        let found = {
+            let _guard = self.lock();
+            self.closed_pending(&main)?
+        };
+        if let Some(why) = self.pr_muted(&main) {
+            return Err(why);
+        }
+        let (opened, pending) = self.open_draft(Path::new(&main), &found.map)?;
+        let guard = self.lock();
+        self.keep_pending(&main, &pending, &opened)?;
+        drop(guard);
+        self.changed.tell(&main);
+        Ok(opened)
+    }
+
+    /// Discard from a closed PR: plotkeeper's copy of the map is deleted, and the repository has no map again.
+    pub fn pending_discard(&self, project: &str) -> Result<(), String> {
+        let main = studio_workbench::main_checkout(Path::new(project))?;
+        let guard = self.lock();
+        self.closed_pending(&main)?;
+        fs::remove_file(self.pending(&main)).map_err(|e| e.to_string())?;
+        drop(guard);
+        self.changed.tell(&main);
+        Ok(())
     }
 
     /// At a start, after the runner's `pick_up`, which told the ends of the runs that ended meanwhile: a group whose run the
@@ -1050,6 +1375,45 @@ impl Serialize for Ordered<'_> {
     }
 }
 
+/// A main checkout's name in the store: its path with each character but a letter or digit made `_`.
+fn file_name(main: &str) -> String {
+    main.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect()
+}
+
+/// Where a draft PR stands, as `gh pr view` says it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PrState {
+    Merged,
+    Closed,
+    Open,
+}
+
+/// What `gh pr view --json state,mergedAt` answered of the pending PR; none, logged, for a `gh` that failed, ran out of time or
+/// answered what this build does not read, so nothing changes.
+fn pr_state(asked: Result<Output, RunError>) -> Option<PrState> {
+    #[derive(Deserialize)]
+    struct Viewed {
+        state: String,
+    }
+    let out = asked
+        .map_err(|e| log::warn!("first map: gh pr view of the pending PR {e}"))
+        .ok()?;
+    let viewed = serde_json::from_slice::<Viewed>(&out.stdout)
+        .map_err(|e| log::warn!("first map: gh pr view's answer does not read: {e}"))
+        .ok()?;
+    match viewed.state.as_str() {
+        "MERGED" => Some(PrState::Merged),
+        "CLOSED" => Some(PrState::Closed),
+        "OPEN" => Some(PrState::Open),
+        other => {
+            log::warn!("first map: gh pr view said the PR is {other}");
+            None
+        }
+    }
+}
+
 /// Writes the map `text` to `path`, the checkout's `system-map.json`, never through a symbolic link: a new file when none is there,
 /// failing if one comes meanwhile, else in place of a file that does not read, only when `replace` is the `seen` of the file as it
 /// is now. A file that reads is a map, and is never replaced.
@@ -1346,6 +1710,44 @@ pub fn map_draft_accept(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What `gh pr view` answered, each way it can: only `MERGED`, `CLOSED` and `OPEN` read, so a timeout, a failure or an answer
+    /// this build does not read changes nothing (`server/tests/map_draft.rs` follows a stub `gh` through the others).
+    #[test]
+    fn a_pending_prs_lookup_reads_merged_closed_and_open_and_nothing_else() {
+        use std::os::unix::process::ExitStatusExt as _;
+        let said = |code: i32, stdout: &str| Output {
+            status: std::process::ExitStatus::from_raw(code << 8),
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: Vec::new(),
+        };
+        let cases: [(&str, Result<Output, RunError>, Option<PrState>); 6] = [
+            (
+                "merged",
+                Ok(said(
+                    0,
+                    r#"{"state":"MERGED","mergedAt":"2026-11-27T10:00:00Z"}"#,
+                )),
+                Some(PrState::Merged),
+            ),
+            (
+                "closed",
+                Ok(said(0, r#"{"state":"CLOSED","mergedAt":null}"#)),
+                Some(PrState::Closed),
+            ),
+            (
+                "open",
+                Ok(said(0, r#"{"state":"OPEN","mergedAt":null}"#)),
+                Some(PrState::Open),
+            ),
+            ("a timeout", Err(RunError::TimedOut(GH_ASK_LIMIT)), None),
+            ("a failure", Err(RunError::Failed(said(1, ""))), None),
+            ("an unreadable answer", Ok(said(0, "not json")), None),
+        ];
+        for (name, asked, want) in cases {
+            assert_eq!(pr_state(asked), want, "{name}");
+        }
+    }
 
     /// A part: its id, zone and file count.
     type Of<'a> = (&'a str, Option<&'a str>, usize);

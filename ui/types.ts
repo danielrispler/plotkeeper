@@ -449,8 +449,9 @@ export type MapState = {
   // Where the map was read from (#753): the default branch, else the main checkout's file, else the accepted map waiting on its draft PR;
   // null when no source has one.
   from: "default-branch" | "checkout" | "pending-pr" | null;
-  // The draft PR a `pending-pr` map waits on, and whether it closed unmerged.
-  pending: { number: number; closed: boolean } | null;
+  // The draft PR a `pending-pr` map waits on, and whether it closed unmerged; once it closed, where Write to `<path>` puts the map and why
+  // Open a draft PR is muted (`gh` missing or not logged in), null when it is not (#765).
+  pending: { number: number; closed: boolean; path: string; pr_muted: string | null } | null;
   // For a `checkout` map that reads, the problems `system-map check` finds in the working tree; empty for the others.
   problems: string[];
   reference: string | null;
@@ -724,7 +725,8 @@ export type ScanEdit =
  * First map's Map draft (`server/src/map_draft.rs`, #762): `map`, the skeleton with each part's latest written text and the person's
  * edits, as text; each writer group (and each Redraft this part) by index, which `map_draft_retry` takes, with its state and why it
  * failed; the reviewer's verdict on each part's purpose as `map` shows it, by part id; what the writers left out; and `ready`, true once
- * every group is done, for Accept; and `path`, the `system-map.json` Accept writes.
+ * every group is done, for Accept; `path`, the `system-map.json` Accept writes; and `pr_muted`, why Open a draft PR is muted once Accept
+ * unlocks (`gh` missing or not logged in, #765), null when it is not.
  */
 export type MapDraftState = "writing" | "checking" | "done" | "writer-failed" | "reviewer-failed";
 export type MapDraft = {
@@ -734,12 +736,15 @@ export type MapDraft = {
   not_written: { what: string; why: string }[];
   ready: boolean;
   path: string;
+  pr_muted: string | null;
 };
 /**
  * What Accept's Write did (`Accepted` in `server/src/map_draft.rs`, #764): wrote the map to `path`, uncommitted, or wrote nothing since a file
  * there does not read, for `problem`; Accept again with `replace: seen` replaces that file as it was asked about.
  */
 export type MapAccepted = { kind: "written"; path: string } | { kind: "replace"; path: string; problem: string; seen: string };
+/** The draft PR Accept's Open a draft PR opened (`OpenedPr` in `server/src/map_draft.rs`, #765): the map waits on it until it merges. */
+export type MapPrOpened = { number: number; url: string };
 
 /** What the page asks at start (#527): plotkeeper's package version, for the toast after an update (`whats-new.ts`). */
 export type About = { version: string };
@@ -823,6 +828,10 @@ export interface Commands {
   map_draft_edit: { args: InPart & { name?: string | null; caption?: string | null; purpose?: string | null; tier?: string | null }; reply: MapDraft };
   map_draft_discard: { args: Project; reply: void };
   map_draft_accept: { args: Project & { replace?: string | null }; reply: MapAccepted };
+  map_draft_pr: { args: Project; reply: MapPrOpened };
+  map_pending_write: { args: Project & { replace?: string | null }; reply: MapAccepted };
+  map_pending_pr: { args: Project; reply: MapPrOpened };
+  map_pending_discard: { args: Project; reply: void };
   pr_brief: { args: InPr & { full?: boolean | null }; reply: BriefOpened | null };
   // `older` (#638): "Read the one you have", the stored catch-up of an earlier fog list while it still holds.
   part_catch_up: { args: InPart & { older?: boolean | null }; reply: CatchUpOpened | null };

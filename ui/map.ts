@@ -18,11 +18,11 @@
 //   a PR brief borrows the camera with `lendCamera` and `giveCameraBack` shows Daniel's view again (`cameraRig` in `map-camera.ts`).
 
 import { logStop, reviewNode, reviewOf } from "./stop-rules.js";
-import { element, failure, hint, invoke, keyed, listen, mark, messageOf, newest, pageStore, pressable, svg, text } from "./dom.js";
+import { availability, confirmed, element, failure, hint, invoke, isUnavailable, keyed, listen, mark, messageOf, newest, pageStore, patch, pressable, svg, text } from "./dom.js";
 import { cameraRig, type CameraRig, fitCamera, panTo, revealPan, zoomAt } from "./map-camera.js";
 import { brokenParts, brokenText, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Drag, type Law, type Layer, type LayerName, type MapDoc, askedProject, startProject, switchProject, wasRemoved, parseMap, type Part, type Point, placement, plateSize, plateTitle, sizeOf, lineTag, linkLines, markPoints, readingOrder, rimPoint, type Scrub, tagWord, type Tier } from "./map-model.js";
 import { copyButton } from "./copy-button.js";
-import { type DraftField, drawDraft, replaceAsked } from "./map-draft.js";
+import { type DraftField, drawDraft, openingWords, replaceAsked } from "./map-draft.js";
 import { drawScan } from "./map-scan.js";
 import { recheckSeen } from "./seen.js";
 import { knownProjects, listedProjects, projectGone } from "./projects.js";
@@ -157,6 +157,7 @@ export function openMap(path: string | null) {
   view = null;
   drawn = "";
   scanned = null;
+  pendingPress = null;
   // A store that throws keeps nothing: the page opens on the first project instead.
   if (path !== null) lastViewed.set(path);
   // The top bar names the project shown; Treatment C's large title on the map is not drawn, so the name is said once.
@@ -340,6 +341,7 @@ function drawHead(state: MapState | null) {
     hint(ref, state?.note ?? "The branch this map was read from, as last fetched");
   }
   drawProblems(state?.status === "loaded" ? state.problems : []);
+  drawPending(state);
   // A folder in no git repository offers no run (#753).
   element("pre-flight-button").hidden = state?.status === "not-git";
 }
@@ -362,6 +364,82 @@ function drawProblems(problems: string[]) {
   const head = text("div", "", "map-problems-head");
   head.append(text("p", `${count}; the map is drawn as it reads`, "map-problems-title"), copy);
   box.replaceChildren(head, list, ...more);
+}
+
+// A press on a closed PR's map (#765): which is on its way, its words, and why the last one did not go through.
+type PendingPress = { project: string; busy: "write" | "pr" | "discard" | null; note: string | null };
+let pendingPress: PendingPress | null = null;
+
+// The ways forward of a map whose draft PR closed unmerged (#753, story 28), under the head that says "Map not in the repo": Write to
+// `<path>`, Open a draft PR again and Discard, each answered by reading the map again. A draw with nothing changed keeps the box as it is.
+function drawPending(state: MapState | null) {
+  const box = element("map-pending");
+  const closed = state?.status === "loaded" && state.from === "pending-pr" && state.pending?.closed ? state.pending : null;
+  const press = pendingPress?.project === state?.project ? pendingPress : null;
+  const key = closed ? JSON.stringify([state?.project, closed, press]) : "";
+  if (box.dataset.key === key) return;
+  box.dataset.key = key;
+  box.hidden = !closed;
+  if (!closed || !state) return box.replaceChildren();
+  const asked = state.project;
+  const busy = press?.busy ?? null;
+  box.setAttribute("aria-busy", String(busy !== null));
+  const waiting = busy ? "Wait until the press on its way is done" : null;
+  const folder = closed.path.slice(0, closed.path.lastIndexOf("/")) || closed.path;
+  const write = text("button", "", "btn small primary");
+  write.append("Write system-map.json to ", Object.assign(text("span", folder, "map-drafting-path"), { translate: false }));
+  pressable(write, null, () => {
+    if (!isUnavailable(write)) pressPending(asked, "write", () => writeFile(asked, "map_pending_write"));
+  });
+  write.dataset.key = "pending write";
+  availability(write, `Write ${closed.path} into your checkout, uncommitted, and drop plotkeeper's copy`, waiting);
+  const pr = pressable(text("button", busy === "pr" ? openingWords : "Open a draft PR", "btn small"), null, () => {
+    if (!isUnavailable(pr)) pressPending(asked, "pr", () => invoke("map_pending_pr", { project: asked }));
+  });
+  pr.dataset.key = "pending pr";
+  availability(pr, "Open a new draft PR with this map on a new branch, writing nothing to your checkout", waiting ?? closed.pr_muted);
+  const discard = pressable(text("button", "Discard", "btn small"), null, async () => {
+    if (isUnavailable(discard)) return;
+    const lost = "plotkeeper's copy of the map is deleted, and this repository has no map again: the scan returns, to draft one anew. The closed PR stays on GitHub.";
+    if (await confirmed({ heading: "Discard the accepted map?", lost, verb: "Discard map" })) pressPending(asked, "discard", () => invoke("map_pending_discard", { project: asked }));
+  });
+  discard.dataset.key = "pending discard";
+  availability(discard, "Delete plotkeeper's copy of this map", waiting);
+  const line = text("p", `PR #${closed.number} closed without merging, so this map is only plotkeeper's copy. Keep it in your checkout, open a new draft PR, or discard it.`, "map-pending-line");
+  const actions = text("div", "", "map-pending-actions");
+  actions.setAttribute("role", "group");
+  actions.setAttribute("aria-label", "What to do with the map");
+  actions.dataset.key = "pending actions";
+  actions.append(write, pr, discard);
+  const shown: HTMLElement[] = [line, actions];
+  if (press?.note) {
+    const note = text("p", `That did not go through: ${press.note}. Try it again.`, "map-scan-why");
+    note.setAttribute("role", "status");
+    shown.push(note);
+  }
+  // The box is patched, so the button pressed keeps the focus through its press; another project's box starts anew, as its presses do.
+  if (box.dataset.project !== asked) box.replaceChildren();
+  box.dataset.project = asked;
+  patch(box, shown);
+}
+
+// Runs one press on a closed PR's map, one at a time; once it is done the map is read again, which draws what it left.
+function pressPending(asked: string, busy: NonNullable<PendingPress["busy"]>, run: () => Promise<unknown>) {
+  if (pendingPress?.project === asked && pendingPress.busy) return;
+  const press: PendingPress = { project: asked, busy, note: null };
+  pendingPress = press;
+  draw();
+  void run().then(
+    () => (press.busy = null),
+    (why: unknown) => {
+      failure(`map_pending_${busy}`)(why);
+      [press.busy, press.note] = [null, messageOf(why)];
+    },
+  ).then(() => {
+    if (pendingPress !== press || asked !== project) return;
+    draw();
+    load(asked, false).catch(failure("map"));
+  });
 }
 
 const lawWords = (law: Law) => `${law.backing === "check" ? "Backed by a check" : "On trust"}: ${law.text}`;
@@ -493,22 +571,45 @@ function draftActs(asked: Scanned) {
       writing = true;
       settleDraft(asked, "map_draft_accept", writeMap(project).finally(() => (writing = false)));
     },
+    openPr: () => {
+      // One Accept at a time, as Write's; the buttons say a draft PR is being opened until it answers.
+      if (writing) return;
+      [writing, opening] = [true, true];
+      draw();
+      settleDraft(asked, "map_draft_pr", openPr(project).finally(() => ([writing, opening] = [false, false])));
+    },
     discard: () => settleDraft(asked, "map_draft_discard", invoke("map_draft_discard", { project }).then(() => null)),
     note: asked.draftNote,
+    opening,
   };
 }
 
-// Whether a Write is on its way.
+// Whether a Write or an Open a draft PR is on its way, and which.
 let writing = false;
-// Accept's Write (#764): the map goes into the checkout. A file there that does not read is replaced only on a yes, sent with what the
-// server read of it, so a file changed since is asked about again. Once written, the map is read again and shows from the checkout, and
-// there is no Map draft; on a no, the Map draft as it stands.
-async function writeMap(project: string): Promise<MapDraft | null> {
-  let reply = await invoke("map_draft_accept", { project });
+let opening = false;
+// Write to `<path>` by `command`, Accept's (#764) or a closed PR's (#765): the map goes into the checkout. A file there that does not read is
+// replaced only on a yes, sent with what the server read of it, so a file changed since is asked about again. True once written.
+async function writeFile(project: string, command: "map_draft_accept" | "map_pending_write"): Promise<boolean> {
+  let reply = await invoke(command, { project });
   while (reply.kind === "replace") {
-    if (!(await replaceAsked(reply.problem))) return invoke("map_draft", { project });
-    reply = await invoke("map_draft_accept", { project, replace: reply.seen });
+    if (!(await replaceAsked(reply.problem))) return false;
+    reply = await invoke(command, { project, replace: reply.seen });
   }
+  return true;
+}
+
+// Accept's Write: once written, the map is read again and shows from the checkout, and there is no Map draft; on a no, the Map draft as it
+// stands.
+async function writeMap(project: string): Promise<MapDraft | null> {
+  if (!(await writeFile(project, "map_draft_accept"))) return invoke("map_draft", { project });
+  await load(project, false);
+  return null;
+}
+
+// Accept's Open a draft PR (#765): once it is open, the map is read again and shows from plotkeeper's copy, waiting on the PR, and there is no
+// Map draft.
+async function openPr(project: string): Promise<MapDraft | null> {
+  await invoke("map_draft_pr", { project });
   await load(project, false);
   return null;
 }

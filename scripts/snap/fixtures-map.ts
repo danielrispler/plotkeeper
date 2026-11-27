@@ -1007,7 +1007,7 @@ const written: Record<string, { name: string; caption: string; purpose: string }
 const draftOf = (landed: string[], extra: Partial<MapDraft> = {}, edits: Record<string, Record<string, string>> = {}): MapDraft => {
   const map = JSON.parse(mapScanOf().map);
   for (const part of map.parts) Object.assign(part, landed.includes(part.id) ? written[part.id] : {}, edits[part.id] ?? {});
-  return { map: JSON.stringify(map), groups: [], verdicts: {}, not_written: [], ready: false, path: "/w/plotkeeper/system-map.json", ...extra };
+  return { map: JSON.stringify(map), groups: [], verdicts: {}, not_written: [], ready: false, path: "/w/plotkeeper/system-map.json", pr_muted: null, ...extra };
 };
 const group = (parts: string[], state: MapDraftState, why: string | null = null, redraft = false) => ({ parts, state, why, redraft });
 const verdict = (id: string, flag: MapReviewItem["verdict"] = "supported", why = "", cites: string[] = []): MapReviewItem => ({ id: `part:${id}/purpose`, verdict: flag, why, cites, flagged: flag !== "supported" });
@@ -1016,7 +1016,9 @@ const flagged = { ...checked, cli: verdict("cli", "overreach", "It parses the fl
 // The review screen: every reviewer answered, Cli's purpose flagged.
 const reviewDraft = draftOf(["app", "cli", "lib"], { groups: [group(["app"], "done"), group(["cli"], "done"), group(["lib"], "done")], verdicts: flagged, ready: true });
 // `answer` sets what a command answers from here on, past the fixture's own reply; `sent` holds each command the page sent, with its arguments.
+// `hintText` is a button's hint.
 const draftHarness = `
+    const hintText = (node) => document.getElementById(node?.getAttribute("interestfor") ?? node?.getAttribute("data-hint") ?? "")?.textContent;
     const sent = [];
     const answers = {};
     const answer = (command, reply) => void (answers[command] = reply);
@@ -1188,8 +1190,8 @@ export const mapDraftRedraft = (): Fixture =>
     snapDone: "draft redraft ok",
   });
 /**
- * Accept's two ways out (#753, stories 23 and 26; ticket #764) once every reviewer answered: Write system-map.json to the checkout's path,
- * with the line saying it adds an uncommitted file like a CLAUDE.md, and Open a draft PR, muted with its reason until #765.
+ * Accept's two ways out (#753, stories 23 and 26; tickets #764 and #765) once every reviewer answered: Write system-map.json to the checkout's
+ * path, with the line saying it adds an uncommitted file like a CLAUDE.md, and Open a draft PR, open to press while `gh` is logged in.
  */
 export const mapDraftAccept = (): Fixture =>
   mapBaseOf(`
@@ -1203,12 +1205,62 @@ export const mapDraftAccept = (): Fixture =>
     const line = actions?.querySelector(".map-drafting-uncommitted")?.textContent ?? "";
     if (!line.includes("uncommitted") || !line.includes("CLAUDE.md")) log("snap:fail the line under Write says " + JSON.stringify(line));
     const pr = [...actions.querySelectorAll("button")].find((b) => b.textContent === "Open a draft PR");
-    if (pr?.getAttribute("aria-disabled") !== "true") log("snap:fail Open a draft PR is not muted");
+    if (!pr || pr.hasAttribute("aria-disabled")) log("snap:fail Open a draft PR is muted with gh logged in");
     const order = [...actions.querySelectorAll("button")].map((b) => b.dataset.key);
     if (JSON.stringify(order) !== JSON.stringify(["draft accept", "draft pr", "draft discard"])) log("snap:fail the ways out come in the order " + JSON.stringify(order));
     frame("with Accept's ways out");
     checkColours("with Accept's ways out");
     log("base ok");`, { map_state: mapState({ status: "none", source: null, from: null }), map_draft: reviewDraft });
+// Why Open a draft PR is muted when `gh` is not logged in, as the server says it.
+const ghLoggedOut = "`gh` is not logged in: run `gh auth login` to open a draft PR, or write the file instead";
+/** Open a draft PR muted with its reason when `gh` is not logged in (#753, story 27): a press sends nothing, and Write stays the way out. */
+export const mapDraftPrMuted = (): Fixture =>
+  mapOpened(`
+    ${draftHarness}
+    const pr = document.querySelector('#map .map-drafting [data-key="draft pr"]');
+    if (!pr) return log("snap:fail no Open a draft PR: " + document.getElementById("map-body").textContent.replace(/\\s+/g, " ").slice(0, 200));
+    if (pr.getAttribute("aria-disabled") !== "true") log("snap:fail Open a draft PR is not muted with gh logged out");
+    if (hintText(pr) !== ${JSON.stringify(ghLoggedOut)}) log("snap:fail the muted button's hint says " + JSON.stringify(hintText(pr)));
+    pr.click();
+    await wait(200);
+    if (sentOf("map_draft_pr").length) log("snap:fail a muted Open a draft PR reached the server");
+    if (document.querySelector('#map [data-key="draft accept"]')?.hasAttribute("aria-disabled")) log("snap:fail Write is muted too");
+    log("draft pr muted ok");`, {
+    map_state: mapState({ status: "none", source: null, from: null }),
+    map_draft: { ...reviewDraft, pr_muted: ghLoggedOut },
+    snapDone: "draft pr muted ok",
+  });
+/**
+ * Open a draft PR's steps (#753, story 26): while it is on its way the button says so and both ways out wait; once it answers, the map shows
+ * from plotkeeper's copy with "Map waiting on PR #7" in its head, no Map draft and no ways forward of a closed PR.
+ */
+export const mapDraftPr = (): Fixture =>
+  mapOpened(`
+    ${draftHarness}
+    const pr = () => document.querySelector('#map .map-drafting [data-key="draft pr"]');
+    if (!pr()) return log("snap:fail no Open a draft PR: " + document.getElementById("map-body").textContent.replace(/\\s+/g, " ").slice(0, 200));
+    pr().click();
+    await wait(300);
+    if (pr()?.textContent !== "Opening the draft PR…") log("snap:fail the button says " + JSON.stringify(pr()?.textContent) + " while the PR opens");
+    if (document.querySelector('#map [data-key="draft accept"]')?.getAttribute("aria-disabled") !== "true") log("snap:fail Write is not muted while the PR opens");
+    if (document.querySelector("#map .map-drafting-actions")?.getAttribute("aria-busy") !== "true") log("snap:fail the ways out are not busy while the PR opens");
+    pr().click();
+    if (sentOf("map_draft_pr").length !== 1) log("snap:fail a second press sent Open a draft PR again: " + sentOf("map_draft_pr").length);
+    answer("map_state", ${JSON.stringify(pendingState(false))});
+    answer("map_draft", null);
+    await wait(1600);
+    if (JSON.stringify(sentOf("map_draft_pr")) !== JSON.stringify([{ project: "/w/plotkeeper" }])) log("snap:fail Open a draft PR sent " + JSON.stringify(sentOf("map_draft_pr")));
+    if (document.querySelector("#map .map-drafting, #map .map-scan")) log("snap:fail the Map draft stays once the PR is open");
+    if (!document.querySelector("#map .map-canvas .plate[data-id=shell]")) log("snap:fail the map waiting on its PR is not drawn: " + document.getElementById("map-body").textContent.replace(/\\s+/g, " ").slice(0, 200));
+    if (document.getElementById("map-ref").textContent !== "Map waiting on PR #7") log("snap:fail the head says " + document.getElementById("map-ref").textContent);
+    if (!document.getElementById("map-pending").hidden) log("snap:fail a closed PR's ways forward show while it is open");
+    log("draft pr ok");`, {
+    map_state: mapState({ status: "none", source: null, from: null }),
+    map_draft: reviewDraft,
+    map_draft_pr: { __delay: 1200, value: { number: 7, url: "https://github.com/someone/plotkeeper/pull/7" } } as never,
+    budget: 9000,
+    snapDone: "draft pr ok",
+  });
 // A checkout system-map.json that does not read, with a Map draft kept from before it came: its first problem, as the Map view says it.
 const brokenFile = "expected `,` or `}` at line 1 column 13";
 /**
@@ -1607,6 +1659,9 @@ export const mapEmpty = () =>
     if (window.__copied !== draft.textContent) log("snap:fail the clipboard holds " + JSON.stringify(window.__copied) + ", not the prompt");
     log("drafting prompt: " + draft.textContent.slice(0, 40));`, { map_state: mapState({ status: "none", source: null, from: null }), map_scan: { __throw: "git ls-files failed" } as never });
 
+// A map waiting on draft PR #7 (#765), open or closed unmerged.
+const pendingState = (closed: boolean, extra: Partial<NonNullable<MapState["pending"]>> = {}) =>
+  mapState({ from: "pending-pr", reference: "origin/main", pending: { number: 7, closed, path: "/w/plotkeeper/system-map.json", pr_muted: null, ...extra } });
 // The check's problems of a map read from the checkout (#753): four, of which the banner shows three.
 const checkoutProblems = [
   "server/src/new.rs: no part owns it",
@@ -1636,6 +1691,66 @@ export const mapCheckout = () =>
     await wait(150);
     for (const problem of ${JSON.stringify(checkoutProblems)}) if (!window.__copied?.includes(problem)) log("snap:fail the copy lacks " + problem);
     log("checkout ok");`, { map_state: mapState({ from: "checkout", problems: checkoutProblems }) });
+/** A map waiting on its draft PR (#753, story 26): drawn from plotkeeper's copy, the head says "Map waiting on PR #7", and nothing asks more. */
+export const mapPendingOpen = (): Fixture =>
+  mapBaseOf(`
+    const ref = document.getElementById("map-ref");
+    if (ref.textContent !== "Map waiting on PR #7") log("snap:fail the head says " + JSON.stringify(ref.textContent));
+    if (!document.querySelector("#map .plate[data-id=shell]")) return log("snap:fail the map waiting on its PR is not drawn");
+    if (!document.getElementById("map-pending").hidden) log("snap:fail an open PR's map shows a closed PR's ways forward");
+    if (!document.getElementById("map-problems").hidden) log("snap:fail a pending map has a problems banner");
+    frame("waiting on its PR");
+    log("base ok");`, { map_state: pendingState(false) });
+/**
+ * A map whose draft PR closed unmerged (#753, story 28): still drawn, the head says "Map not in the repo", and under it the line and the three
+ * ways forward, a named group: Write to the checkout's path, Open a draft PR, and Discard.
+ */
+export const mapPendingClosed = (): Fixture =>
+  mapBaseOf(`
+    const ref = document.getElementById("map-ref");
+    if (ref.textContent !== "Map not in the repo") log("snap:fail the head says " + JSON.stringify(ref.textContent));
+    if (!document.querySelector("#map .plate[data-id=shell]")) return log("snap:fail the closed PR's map is not drawn");
+    const box = document.getElementById("map-pending");
+    if (box.hidden) return log("snap:fail no ways forward for the closed PR's map");
+    if (!box.textContent.includes("PR #7 closed without merging")) log("snap:fail the line says " + box.textContent);
+    const group = box.querySelector('[role="group"]');
+    if (!group?.getAttribute("aria-label")) log("snap:fail the ways forward are not a named group");
+    const order = [...box.querySelectorAll("button")].map((b) => b.dataset.key);
+    if (JSON.stringify(order) !== JSON.stringify(["pending write", "pending pr", "pending discard"])) log("snap:fail the ways forward come in the order " + JSON.stringify(order));
+    const write = box.querySelector('[data-key="pending write"]');
+    if (write?.textContent !== "Write system-map.json to /w/plotkeeper") log("snap:fail Write says " + JSON.stringify(write?.textContent));
+    for (const b of box.querySelectorAll("button")) if (b.hasAttribute("aria-disabled")) log("snap:fail " + b.dataset.key + " is muted");
+    frame("with a closed PR");
+    checkColours("with a closed PR");
+    log("base ok");`, { map_state: pendingState(true) });
+/**
+ * A closed PR's ways forward pressed (#753, story 28): Open a draft PR muted with why while `gh` is logged out sends nothing; Discard asks
+ * first, then sends; Write sends, and once written the map shows from the checkout, "Map not committed yet", with no ways forward left.
+ */
+export const mapPendingSteps = (): Fixture =>
+  mapOpened(`
+    ${draftHarness}
+    const press = (key) => document.querySelector('#map-pending [data-key="' + key + '"]');
+    if (!press("pending write")) return log("snap:fail no ways forward for the closed PR's map");
+    if (press("pending pr").getAttribute("aria-disabled") !== "true") log("snap:fail Open a draft PR is not muted with gh logged out");
+    if (hintText(press("pending pr")) !== ${JSON.stringify(ghLoggedOut)}) log("snap:fail the muted button's hint says " + JSON.stringify(hintText(press("pending pr"))));
+    press("pending pr").click();
+    await wait(200);
+    if (sentOf("map_pending_pr").length) log("snap:fail a muted Open a draft PR reached the server");
+    ${confirmFirst(`document.querySelector('#map-pending [data-key="pending discard"]').click()`, "map_pending_discard", "Discard map", ["plotkeeper's copy", "closed PR stays"])}
+    await wait(300);
+    answer("map_pending_write", { kind: "written", path: "/w/plotkeeper/system-map.json" });
+    answer("map_state", ${JSON.stringify(mapState({ from: "checkout" }))});
+    press("pending write").click();
+    await wait(600);
+    if (JSON.stringify(sentOf("map_pending_write")) !== JSON.stringify([{ project: "/w/plotkeeper" }])) log("snap:fail Write sent " + JSON.stringify(sentOf("map_pending_write")));
+    if (document.getElementById("map-ref").textContent !== "Map not committed yet") log("snap:fail the head says " + document.getElementById("map-ref").textContent);
+    if (!document.getElementById("map-pending").hidden) log("snap:fail the ways forward stay once the map is written");
+    log("pending steps ok");`, {
+    map_state: pendingState(true, { pr_muted: ghLoggedOut }),
+    budget: 9000,
+    snapDone: "pending steps ok",
+  });
 /** The default branch's map gets no banner, whatever its check would say: CI owns that (#753). */
 export const mapDefaultNoBanner = () =>
   mapOpened(`

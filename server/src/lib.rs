@@ -328,6 +328,7 @@ impl App {
         let drafts = map_draft::MapDrafts::new(
             map_draft::Config {
                 store: data.join("first-map"),
+                gh: None,
             },
             &runner,
         );

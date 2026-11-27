@@ -1,5 +1,5 @@
 //! The Map view's shell side (spec danielrispler/plotkeeper#306, ticket #309): it reads `system-map.json` from `origin`'s
-//! default branch as last fetched, else from the main checkout, else the map waiting on a draft PR (#753), keeps Daniel's own part positions and tiers in the data folder, and guards `git fetch`.
+//! default branch as last fetched, else from the main checkout, else the map waiting on a draft PR (#753), keeps Daniel's own part positions and tiers in the data folder, and guards `git fetch` and the lookup of that PR.
 //!
 //! Seams for the tickets that build on this one:
 //! - `MapState` is the one payload the window draws from. A ticket adds its field there (fog, live agents, broken laws),
@@ -55,6 +55,10 @@ pub struct PendingPr {
     pub number: u64,
     /// The PR was closed without merging, so the map is not in the repository.
     pub closed: bool,
+    /// Where Write to `<path>` puts the map once the PR closed: `system-map.json` at the main checkout's root.
+    pub path: String,
+    /// Why Open a draft PR is muted once the PR closed (`gh` missing or not logged in); none when it is not.
+    pub pr_muted: Option<String>,
 }
 
 /// The payload of the Map view: everything the window draws for one project. Extend it with a field per feature.
@@ -191,19 +195,21 @@ fn read_checked(repo: &Path, pending: impl FnOnce(&str) -> Option<PathBuf>) -> M
     state
 }
 
-/// The accepted map waiting on its draft PR (#753, "Open a draft PR"), as that flow keeps it: the PR's `number` and `branch`, whether
-/// it was `closed` unmerged, and the `map`'s text.
-#[derive(Deserialize)]
-struct PendingFile {
-    number: u64,
+/// The accepted map waiting on its draft PR (#753, "Open a draft PR"), as that flow keeps it (`map_draft.rs`): the PR's `number` and
+/// `branch`, whether it was `closed` unmerged, and the `map`'s text.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PendingFile {
+    pub number: u64,
     #[serde(default)]
-    closed: bool,
-    map: String,
+    pub branch: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub closed: bool,
+    pub map: String,
 }
 
 /// Where the map waiting on a draft PR is kept for the project whose main checkout is `main`: `first-map/<project>.pending.json` in
 /// the data folder.
-pub(crate) fn pending_file(main: &str) -> Option<PathBuf> {
+pub fn pending_file(main: &str) -> Option<PathBuf> {
     crate::pr_briefs::project_path("first-map", main)
         .map(|path| path.with_extension("pending.json"))
 }
@@ -217,17 +223,11 @@ fn checkout_text(main: &str) -> Option<Result<String, String>> {
     }
 }
 
-/// The pending PR and its map's text from `file`; none when there is no file, or it is not one this build reads, which is logged.
-fn read_pending(file: &Path) -> Option<(PendingPr, String)> {
+/// The pending file `file`; none when there is none, or it is not one this build reads, which is logged.
+pub(crate) fn read_pending(file: &Path) -> Option<PendingFile> {
     let text = std::fs::read_to_string(file).ok()?;
     match serde_json::from_str::<PendingFile>(&text) {
-        Ok(found) => Some((
-            PendingPr {
-                number: found.number,
-                closed: found.closed,
-            },
-            found.map,
-        )),
+        Ok(found) => Some(found),
         Err(why) => {
             log::warn!("map: {} does not read: {why}", file.display());
             None
@@ -283,9 +283,14 @@ fn read_from(repo: &Path, pending: impl FnOnce(&str) -> Option<PathBuf>) -> MapS
         (ReadFrom::DefaultBranch, Ok(text))
     } else if let Some(text) = checkout_text(&main) {
         (ReadFrom::Checkout, text)
-    } else if let Some((pr, text)) = pending(&main).as_deref().and_then(read_pending) {
-        state.pending = Some(pr);
-        (ReadFrom::PendingPr, Ok(text))
+    } else if let Some(found) = pending(&main).as_deref().and_then(read_pending) {
+        state.pending = Some(PendingPr {
+            number: found.number,
+            closed: found.closed,
+            path: Path::new(&main).join(MAP_FILE).display().to_string(),
+            pr_muted: None,
+        });
+        (ReadFrom::PendingPr, Ok(found.map))
     } else {
         return state;
     };
@@ -440,6 +445,12 @@ pub fn map_state(project: String, fetch: bool, app: &Arc<crate::App>) -> Result<
         if fetched != Fetched::Skipped || !cache.has(&project) {
             crate::ci_laws::refresh_later(cache, events, &project);
         }
+        // The draft PR an accepted map waits on is asked about after the fetch, so a merged one's map is on the default branch by
+        // then; under the fetch's cooldown and in-flight guard, never on a timer (#753, "Following the PR").
+        fetches.run(&format!("{project}\npending PR"), Instant::now(), || {
+            app.drafts.follow(&project);
+            Ok(())
+        });
     }
     let repo = Path::new(&project);
     let file = state_file()?;
@@ -452,6 +463,9 @@ pub fn map_state(project: String, fetch: bool, app: &Arc<crate::App>) -> Result<
         log::warn!("map: staleness of {project} failed: {why}");
     }
     let mut state = read_checked(repo, pending_file);
+    if let Some(pending) = state.pending.as_mut().filter(|pending| pending.closed) {
+        pending.pr_muted = app.drafts.pr_muted(&project);
+    }
     state.user = read_user(&file, &project);
     if let Some(source) = &state.source {
         state.fog = crate::fog::effective(&state.user, source);

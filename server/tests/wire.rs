@@ -12,7 +12,7 @@ use studio_server::{
     back_a_law::{LawPatch, PatchState, Proof},
     ci_laws::{self, Ci},
     fog::{ChapterRead, Entry, FogState, PrRead, Strength},
-    map::{MapState, Mark, MarkWhy, Status, UserState, View},
+    map::{MapState, Mark, MarkWhy, PendingPr, ReadFrom, Status, UserState, View},
     micro_worlds::{Phase, View as WorldView, WorldsState},
     pr_briefs::BriefInfo,
     prs::Ready,
@@ -387,6 +387,29 @@ fn the_wire_samples_of_the_map_view_are_written_for_tsc() {
                 }),
                 micro_worlds: worlds(),
                 law_patches: law_patches(),
+                ..empty(Status::Loaded)
+            }),
+        ));
+    }
+    // A map waiting on its draft PR, then one whose PR closed, with Open a draft PR muted (#765).
+    for (closed, pr_muted) in [
+        (false, None),
+        (
+            true,
+            Some("`gh` is not logged in: run `gh auth login`".into()),
+        ),
+    ] {
+        samples.push((
+            "MapState",
+            json(MapState {
+                source: Some("{ \"parts\": [] }".into()),
+                from: Some(ReadFrom::PendingPr),
+                pending: Some(PendingPr {
+                    number: 7,
+                    closed,
+                    path: "/repo/system-map.json".into(),
+                    pr_muted,
+                }),
                 ..empty(Status::Loaded)
             }),
         ));
@@ -1106,6 +1129,21 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
         ("About", json(studio_server::about())),
         ("MapDraft", json(map_draft())),
         (
+            "MapDraft",
+            json(studio_server::map_draft::MapDraftView {
+                ready: true,
+                pr_muted: Some("GitHub's CLI, `gh`, was not found".into()),
+                ..map_draft()
+            }),
+        ),
+        (
+            "MapPrOpened",
+            json(studio_server::map_draft::OpenedPr {
+                number: 7,
+                url: "https://github.com/someone/app/pull/7".into(),
+            }),
+        ),
+        (
             "MapAccepted",
             json(studio_server::map_draft::Accepted::Written {
                 path: "/w/app/system-map.json".into(),
@@ -1170,6 +1208,7 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
             "MapScan",
             "MapDraft",
             "MapAccepted",
+            "MapPrOpened",
         ],
         &samples,
     );
@@ -1219,6 +1258,7 @@ fn map_draft() -> studio_server::map_draft::MapDraftView {
         }],
         ready: false,
         path: "/w/app/system-map.json".into(),
+        pr_muted: None,
     }
 }
 
