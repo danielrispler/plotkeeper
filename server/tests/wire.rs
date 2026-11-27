@@ -1216,7 +1216,7 @@ fn command_arguments() -> Vec<(String, Vec<String>)> {
 // @law: wire-types-agree
 /// The page's `Commands` (`ui/types.ts`) against the server's handlers (#554): `scripts/wire/server-args.ts` lists each command's
 /// argument names as `api::call` reads them, and `tsc -p scripts/wire` fails when the page has a command the server lacks, lacks one it
-/// has, or names a command's arguments otherwise.
+/// has, or names a command's arguments otherwise. `register_folder` is a second plotkeeper's, never the page's.
 #[test]
 fn the_command_arguments_are_written_for_tsc() {
     use std::fmt::Write;
@@ -1246,8 +1246,8 @@ fn the_command_arguments_are_written_for_tsc() {
     }
     ts.push_str(
         "};\n\n\
-         // The commands the transport posts itself, not through `invoke`.\n\
-         type Own = \"log\" | \"page_focus\";\n\
+         // The commands posted outside `invoke`: the transport's own, and a second plotkeeper's `register_folder` (#756).\n\
+         type Own = \"log\" | \"page_focus\" | \"register_folder\";\n\
          type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;\n\
          // A command with no arguments takes `Record<string, never>`, whose keys are any string.\n\
          type Names<T> = string extends keyof T ? never : keyof T;\n\
@@ -1255,7 +1255,7 @@ fn the_command_arguments_are_written_for_tsc() {
          export const names: { [C in Command]: C extends keyof Server ? Same<Names<Args<C>>, Server[C]> : false } = {\n",
     );
     for (command, _) in &commands {
-        if command != "log" && command != "page_focus" {
+        if !["log", "page_focus", "register_folder"].contains(&command.as_str()) {
             writeln!(ts, "  {command}: true,").expect("a String takes a write");
         }
     }

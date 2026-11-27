@@ -660,6 +660,21 @@ pub fn map_state(app: &Arc<App>, project: String, fetch: bool) -> Result<map::Ma
     map::map_state(project, fetch, app)
 }
 
+/// Start-up registration (spec #753, "Projects"): adds the project of `folder`, the one a `plotkeeper` started in, and sends the
+/// open pages the saved list; returns the project, as [`projects::Projects::register`] does. A first start calls it in process, a
+/// second through the API with the running server's token. The folder must be absolute: a relative one would be looked up from the
+/// server's own.
+pub fn register_folder(app: &App, folder: &str) -> Result<Option<String>, String> {
+    if !Path::new(folder).is_absolute() {
+        return Err(format!("{folder:?} is not an absolute folder"));
+    }
+    let project = app.projects.register(folder)?;
+    let projects = app.projects.list();
+    app.events
+        .emit("projects", serde_json::to_value(&projects).unwrap());
+    Ok(project)
+}
+
 /// The project header's quiet dot: see [`map::map_marks`].
 pub fn map_marks(app: &App, projects: Vec<String>) -> Result<Vec<map::Mark>, String> {
     map::map_marks(projects, &app.ci, &app.prs)

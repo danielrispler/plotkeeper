@@ -343,6 +343,7 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "decision")?,
         )),
         "projects" => out(app.projects.list()),
+        "register_folder" => res(crate::register_folder(app, &arg::<String>(a, "folder")?)),
         "remove_project" => res(app
             .projects
             .remove(&arg::<String>(a, "path")?, studio_understanding::millis())),

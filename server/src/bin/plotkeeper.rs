@@ -8,9 +8,13 @@
 //!
 //! `plotkeeper --version` prints the version, the npm package's (#368).
 //!
+//! A start in a git repository adds its project to the saved list and opens the page on its map (spec #753, "Projects"): a first
+//! start in process, a second through the running server's API.
+//!
 //! `PLOTKEEPER_NO_BROWSER=1` leaves the browser closed (the URL is printed either way), for tests.
 
 use std::{
+    fmt::Write as _,
     io::IsTerminal,
     process::{Command, ExitCode},
     sync::{Arc, mpsc},
@@ -26,8 +30,35 @@ mod embedded {
     include!(concat!(env!("OUT_DIR"), "/assets.rs"));
 }
 
-fn address(port: u16, token: &str) -> String {
-    format!("http://127.0.0.1:{port}/?token={token}")
+/// The page's address; with a project, the page opens on its map, which the fragment names, as the token's redirect keeps it.
+fn address(port: u16, token: &str, project: Option<&str>) -> String {
+    let mut url = format!("http://127.0.0.1:{port}/?token={token}");
+    if let Some(project) = project {
+        url.push_str("#project=");
+        for byte in project.bytes() {
+            if byte.is_ascii_alphanumeric() || b"/-._~".contains(&byte) {
+                url.push(char::from(byte));
+            } else {
+                // Writing to a `String` cannot fail.
+                write!(url, "%{byte:02X}").ok();
+            }
+        }
+    }
+    url
+}
+
+/// Start-up registration: adds the project of the folder this start is in, when it is in a git repository, by `add`, and returns
+/// it. A failure is said, and the page opens anyway on the project shown last.
+fn register(add: impl FnOnce(&str) -> Result<Option<String>, String>) -> Option<String> {
+    let folder = std::env::current_dir().ok()?.display().to_string();
+    studio_understanding::worktree_root(&folder)?;
+    match add(&folder) {
+        Ok(project) => project,
+        Err(e) => {
+            eprintln!("plotkeeper: could not add {folder} to the projects ({e})");
+            None
+        }
+    }
 }
 
 /// Prints the address and opens the browser on it, unless `PLOTKEEPER_NO_BROWSER` is set.
@@ -82,7 +113,10 @@ fn main() -> ExitCode {
             if let Some(line) = running.version_notice(env!("CARGO_PKG_VERSION")) {
                 eprintln!("{line}");
             }
-            show(&address(running.port, &running.token));
+            // Its folder joins the running one's list, which opens the page on it; a failure is said and the page opens anyway.
+            let project =
+                register(|folder| web::register_with(running.port, &running.token, folder));
+            show(&address(running.port, &running.token, project.as_deref()));
             return ExitCode::SUCCESS;
         }
         Err(e) => {
@@ -209,6 +243,7 @@ fn run(log: &std::path::Path, held: lock::Held) -> std::io::Result<()> {
     // The micro-worlds whose run ended meanwhile are checked now, and the map text reviews' answers read.
     app.worlds.pick_up();
     app.reviews.pick_up();
+    let project = register(|folder| studio_server::register_folder(&app, folder));
     let token = web::new_token();
     let page = Web::start(
         app.clone(),
@@ -231,7 +266,7 @@ fn run(log: &std::path::Path, held: lock::Held) -> std::io::Result<()> {
         stop.send(()).ok();
     })
     .map_err(std::io::Error::other)?;
-    show(&address(page.port(), &token));
+    show(&address(page.port(), &token, project.as_deref()));
     // A closed channel or a timeout both mean carry on.
     stopped.recv().ok();
     // The stores write by temp file and rename, so a stop between writes leaves them whole.

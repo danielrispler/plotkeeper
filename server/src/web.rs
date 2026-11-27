@@ -4,6 +4,8 @@
 //! The server listens on 127.0.0.1 only. A start has a random token; the browser opens `/?token=<t>`, the server answers with a
 //! cookie and sends it on to `/` without the token. Every other request needs the cookie, a Host of `127.0.0.1:<port>` or
 //! `localhost:<port>`, and, when it has an Origin, one of those too.
+//!
+//! A second `plotkeeper` calls the running one's `register_folder` as the page does, with the token as the cookie ([`register_with`]).
 
 use crate::{
     App, Sink,
@@ -12,6 +14,7 @@ use crate::{
 use serde_json::Value;
 use std::{
     io::{self, Read, Write},
+    net::TcpStream,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -145,6 +148,33 @@ impl Web {
             thread.join().ok();
         }
     }
+}
+
+/// How long a second start waits on the running server's answer: its git lookup may take up to 30 s.
+const REGISTER_WAIT: Duration = Duration::from_secs(40);
+
+/// A second start's call (spec #753, "Projects"): sends `folder` to the `register_folder` command of the plotkeeper serving on `port`,
+/// with its `token` as the page's cookie, and returns the project it added, as [`crate::register_folder`] does.
+pub fn register_with(port: u16, token: &str, folder: &str) -> Result<Option<String>, String> {
+    let body = serde_json::json!({ "folder": folder }).to_string();
+    let request = format!(
+        "POST /api/register_folder HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: {COOKIE}={token}\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    let mut raw = String::new();
+    TcpStream::connect(("127.0.0.1", port))
+        .and_then(|mut stream| {
+            stream.set_read_timeout(Some(REGISTER_WAIT))?;
+            stream.write_all(request.as_bytes())?;
+            stream.read_to_string(&mut raw)
+        })
+        .map_err(|e| e.to_string())?;
+    let (head, body) = raw.split_once("\r\n\r\n").unwrap_or((&raw, ""));
+    let status = head.split(' ').nth(1).unwrap_or_default();
+    if status != "200" {
+        return Err(format!("it answered {status}: {}", body.trim()));
+    }
+    serde_json::from_str(body).map_err(|e| e.to_string())
 }
 
 fn header(request: &Request, name: &'static str) -> Option<String> {
