@@ -32,7 +32,7 @@ pub use imports::{Across, Count, Hub, Imports, Inside, Share, imports};
 pub use laws::{LawReport, LawTest, Tag, attribute_brackets, law_tests, tag_id, test_name_after};
 pub use parts::{convert, convert_value, part_text};
 use pattern::Pattern;
-pub use scan::{IgnoreCandidate, Scan, scan};
+pub use scan::{IgnoreCandidate, Scan, folder_title, is_code, is_test, scan};
 pub use touched::{Touched, held_reached, touched, touched_for_map};
 
 /// The map file's name, at the repository's root.

@@ -168,6 +168,11 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
         "agent_summary" => out(crate::agent_summary(app, arg(a, "agent_id")?)),
         "map_state" => res(crate::map_state(arc, arg(a, "project")?, arg(a, "fetch")?)),
         "map_scan" => res(crate::map_scan::map_scan(arg(a, "project")?)),
+        "map_scan_edit" => res(crate::map_scan::map_scan_edit(
+            arg(a, "project")?,
+            arg(a, "map")?,
+            arg(a, "edit")?,
+        )),
         "map_know" => res(crate::map::map_know(arg(a, "project")?, arg(a, "part")?)),
         "map_refresher" => res(crate::map::map_refresher(
             arg(a, "project")?,

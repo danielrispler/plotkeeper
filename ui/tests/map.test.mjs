@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { actorSize, autoPlace, draftPrompt, draftTime, languagesLine, scanPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, plateTitle, rimPoint, scrubTickets, sheetOf, sheetMarks, narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject, talksTo, linkLines, readingOrder, markPoints, placement, lineTag, tagWord } from "../../dist/map-model.js";
+import { actorSize, autoPlace, draftPrompt, draftTime, languagesLine, looseGroups, scanPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, plateTitle, rimPoint, scrubTickets, sheetOf, sheetMarks, narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject, talksTo, linkLines, readingOrder, markPoints, placement, lineTag, tagWord } from "../../dist/map-model.js";
 import { cameraRig, revealPan } from "../../dist/map-camera.js";
 
 /** @returns {import("../../dist/map-model.js").Part} */
@@ -406,6 +406,22 @@ test("Draft the map's time hint grows with the scan's part count", () => {
   /** @type {[number, string][]} */
   const cases = [[1, "About 1 minute"], [4, "About 1 minute"], [5, "About 2 minutes"], [15, "About 4 minutes"]];
   for (const [parts, hint] of cases) assert.equal(draftTime(parts), hint, String(parts));
+});
+
+test("the loose files are offered by folder, each folder with the names of its files", () => {
+  // (files, rows as [folder, words]): the root's own files say so, and a long folder names three and counts the rest.
+  /** @type {[string[], [string, string][]][]} */
+  const cases = [
+    [[], []],
+    [["src/index.ts"], [["src/", "index.ts"]]],
+    [["src/index.ts", "main.go", "src/cli.ts", "example/demo/run.ts"], [["The root", "main.go"], ["example/demo/", "run.ts"], ["src/", "cli.ts and index.ts"]]],
+    [["t/a.ts", "t/b.ts", "t/c.ts", "t/d.ts", "t/e.ts"], [["t/", "a.ts, b.ts, c.ts and 2 more"]]],
+  ];
+  for (const [files, rows] of cases) {
+    const groups = looseGroups(files);
+    assert.deepEqual(groups.map((g) => [g.label, g.names]), rows, JSON.stringify(files));
+    assert.deepEqual(groups.flatMap((g) => g.files).sort(), [...files].sort(), "every file is in one row");
+  }
 });
 
 test("the copy-prompt carries the skeleton and says where to write the map and which check to pass", () => {

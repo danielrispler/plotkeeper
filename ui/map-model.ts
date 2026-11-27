@@ -185,6 +185,23 @@ export function draftTime(parts: number): string {
   return `About ${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
 }
 
+/** The loose files or tests of a scan (#761) as the panel offers them: one row a folder, its label and the names of its files. */
+export function looseGroups(files: string[]): { folder: string; label: string; names: string; files: string[] }[] {
+  const byFolder = new Map<string, string[]>();
+  for (const file of files) {
+    const cut = file.lastIndexOf("/") + 1;
+    const folder = file.slice(0, cut);
+    byFolder.set(folder, [...(byFolder.get(folder) ?? []), file]);
+  }
+  return [...byFolder.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([folder, group]) => {
+      const names = group.map((file) => file.slice(folder.length)).sort();
+      const shown = names.length > 4 ? [...names.slice(0, 3), `${names.length - 3} more`] : names;
+      return { folder, label: folder || "The root", names: listed(shown), files: [...group].sort() };
+    });
+}
+
 /** The copy-prompt for the user's own agent (#753, story 13): the skeleton, the file to write and the check to pass, so the agent fills only the words. */
 export function scanPrompt(skeleton: string): string {
   return (

@@ -1112,6 +1112,13 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
                 read_languages: vec!["TypeScript".into()],
                 unread_languages: vec!["Ruby".into()],
                 claude: true,
+                ignore_candidates: vec![system_map::IgnoreCandidate {
+                    path: "vendor/".into(),
+                    ticked: true,
+                }],
+                loose_files: vec!["src/index.ts".into()],
+                loose_tests: vec!["tests/app.test.ts".into()],
+                splits: BTreeMap::from([("app".into(), vec!["src/app/core/".into()])]),
             }),
         ),
     ];
