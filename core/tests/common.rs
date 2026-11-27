@@ -91,13 +91,17 @@ pub(crate) fn temp_file(contents: &str) -> tempfile::NamedTempFile {
     file
 }
 
-/// What a trial turn that fixed `calc.py` in `/w/trial` (wave 1's trial, #369;
-/// `fixtures/{codex,cursor}/trial.jsonl`) shows, taken live with the trees the hook records for it
-/// (#426): `start` names the line its start tree lands on, `stop` the one its end tree does. Returns
-/// the path of each file the page lists for the turn, and of each file its summary's facts carry.
-pub(crate) fn trial_files(recorded: &str, start: &str, stop: &str) -> (Vec<String>, Vec<String>) {
+/// What a recorded turn that changed `file` in worktree `root` shows, taken live with the trees the
+/// hook records for it (#426): wave 1's trial fixed `calc.py` in `/w/trial` (#369;
+/// `fixtures/{codex,cursor}/trial.jsonl`). `start` names the line its start tree lands on, `stop` the
+/// one its end tree does. Returns the path of each file the page lists for the turn, and of each file
+/// its summary's facts carry, when it asked for a summary.
+pub(crate) fn trial_files(
+    recorded: &str,
+    (start, stop): (&str, &str),
+    (root, file): (&str, &str),
+) -> (Vec<String>, Option<Vec<String>>) {
     use studio_core::{Numstat, Output, RootDiff, compute_turn_files};
-    const ROOT: &str = "/w/trial";
     let mut studio = Studio::default();
     let (mut requests, mut now) = (Vec::new(), 0);
     for line in recorded.lines() {
@@ -105,10 +109,10 @@ pub(crate) fn trial_files(recorded: &str, start: &str, stop: &str) -> (Vec<Strin
         now = now.max(line["studio_received_ms"].as_u64().unwrap_or_default());
         let name = line["hook_event_name"].clone();
         if name == start {
-            line["studio_turn_start"] = json!({ ROOT: "start-tree" });
+            line["studio_turn_start"] = json!({ root: "start-tree" });
         }
         if name == stop {
-            line["studio_turn_end"] = json!({ ROOT: "end-tree" });
+            line["studio_turn_end"] = json!({ root: "end-tree" });
         }
         for output in studio.apply(&line.to_string()) {
             if let Output::Summary(request) = output {
@@ -116,13 +120,13 @@ pub(crate) fn trial_files(recorded: &str, start: &str, stop: &str) -> (Vec<Strin
             }
         }
     }
-    // What `git diff --numstat start-tree end-tree` gives for the fix.
+    // What `git diff --numstat start-tree end-tree` gives for the change.
     let diffs = || {
         vec![RootDiff {
-            root: ROOT.into(),
+            root: root.into(),
             moved: vec![],
             files: vec![Numstat {
-                path: "calc.py".into(),
+                path: file.into(),
                 from: None,
                 added: Some(1),
                 removed: Some(1),
@@ -138,14 +142,17 @@ pub(crate) fn trial_files(recorded: &str, start: &str, stop: &str) -> (Vec<Strin
         .flat_map(|t| t.files.iter().flat_map(|f| f.files.iter()))
         .map(|f| f.path.clone())
         .collect();
-    let request = requests.last().expect("a summary request");
-    let carried = match studio.summary_ask(&request.id) {
-        Some(ask) => {
-            let found = compute_turn_files(&studio.turn_files_snapshot(&ask, &diffs()), diffs());
-            let facts = studio.facts_of(&ask, Some(found));
-            facts.files.into_iter().map(|f| f.file.path).collect()
-        }
-        None => Vec::new(),
-    };
+    // A short reply asks no summary.
+    let carried = requests
+        .last()
+        .map(|request| match studio.summary_ask(&request.id) {
+            Some(ask) => {
+                let found =
+                    compute_turn_files(&studio.turn_files_snapshot(&ask, &diffs()), diffs());
+                let facts = studio.facts_of(&ask, Some(found));
+                facts.files.into_iter().map(|f| f.file.path).collect()
+            }
+            None => Vec::new(),
+        });
     (listed, carried)
 }

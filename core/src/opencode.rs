@@ -24,14 +24,15 @@ use crate::event::{
 use crate::ledger::Bytes;
 use serde::Deserialize;
 use serde_json::Value;
+use std::collections::BTreeMap;
 
 /// The name OpenCode's plugin passes (`--agent opencode`), which its lines carry.
 pub(crate) const OPENCODE: &str = "opencode";
 
-/// What OpenCode reports: a permission that waits on Daniel, the model a turn ran at, and a
-/// subagent's reply. Its transcript has no reader here, so no version or context size; no
-/// background task ids, no permission mode, no durations, and no turn trees (spec #320, "Turn trees
-/// and pruning per harness").
+/// What OpenCode reports: a permission that waits on Daniel, the model a turn ran at, a
+/// subagent's reply, and the trees the hook records of each turn (#717). Its transcript has no
+/// reader here, so no version or context size; no background task ids, no permission mode and no
+/// durations.
 pub const CAPABILITIES: Capabilities = Capabilities {
     agent: OPENCODE,
     asks: true,
@@ -42,7 +43,7 @@ pub const CAPABILITIES: Capabilities = Capabilities {
     transcript_version: false,
     transcript_model: false,
     context: false,
-    turn_trees: false,
+    turn_trees: true,
     empty_window_starts: false,
     transcript_format: TranscriptFormat::Unread,
 };
@@ -83,6 +84,12 @@ struct Raw {
     #[serde(default)]
     studio_received_ms: u64,
     studio_pid: Option<u32>,
+    /// The trees the hook recorded for the turn, as for Claude Code's (#717).
+    #[serde(default)]
+    studio_turn_start: BTreeMap<String, String>,
+    #[serde(default)]
+    studio_turn_end: BTreeMap<String, String>,
+    studio_touched_roots: Option<Vec<String>>,
 }
 
 /// The event of OpenCode plugin line `line`; an error when it has no such line's shape.
@@ -91,6 +98,7 @@ pub(crate) fn parse(line: &str) -> Result<Event, serde_json::Error> {
 }
 
 /// What a call of tool `name` is.
+// hook/src/lib.rs's `opencode_shaped` keeps a copy of the edit and shell names, as the hook does not depend on core.
 pub(crate) fn kind(name: &str) -> ToolKind {
     match name {
         "write" | "edit" | "patch" => ToolKind::Edit,
@@ -215,9 +223,9 @@ fn adapt(raw: Raw) -> Event {
         prompt_id: raw.prompt_id,
         studio_received_ms: raw.studio_received_ms,
         studio_pid: raw.studio_pid,
-        studio_turn_start: Default::default(),
-        studio_turn_end: Default::default(),
-        studio_touched_roots: None,
+        studio_turn_start: raw.studio_turn_start,
+        studio_turn_end: raw.studio_turn_end,
+        studio_touched_roots: raw.studio_touched_roots,
         capabilities: CAPABILITIES,
         line: Bytes::default(),
         happened,
