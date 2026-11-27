@@ -418,7 +418,8 @@ export type Work = {
   estimate: { range: [number, number] | null; depends_on_you: boolean };
 };
 
-// The Map view's payload (`server/src/map.rs`, `MapState`): one project's map as read from `origin`'s default branch, and Daniel's own
+// The Map view's payload (`server/src/map.rs`, `MapState`): one project's map as read from `origin`'s default branch (or its checkout, or a
+// pending PR, #753), and Daniel's own
 // positions and tiers for it. A feature of the view adds its field here and in `MapState` there; `server/tests/wire.rs` holds
 // the two to agree (#333).
 // What landed since Daniel caught up and what he has read of each PR's brief (`fog.rs`); `UserMap.fog`, which the window does not read.
@@ -441,9 +442,17 @@ type Staleness = { since: number | null; parts: Record<string, { at: number; kin
 export type UserMap = { positions: Record<string, [number, number]>; tiers: Record<string, string>; fog?: FogState; view?: Camera | null; staleness?: Staleness };
 export type MapState = {
   project: string;
-  status: "loaded" | "none" | "unreadable";
+  // "not-git": the project's folder is in no git repository, so there is no map to read or draft.
+  status: "loaded" | "none" | "unreadable" | "not-git";
   // The text of `system-map.json` when it loaded.
   source: string | null;
+  // Where the map was read from (#753): the default branch, else the main checkout's file, else the accepted map waiting on its draft PR;
+  // null when no source has one.
+  from: "default-branch" | "checkout" | "pending-pr" | null;
+  // The draft PR a `pending-pr` map waits on, and whether it closed unmerged.
+  pending: { number: number; closed: boolean } | null;
+  // For a `checkout` map that reads, the problems `system-map check` finds in the working tree; empty for the others.
+  problems: string[];
   reference: string | null;
   commit: string | null;
   note: string | null;
@@ -550,7 +559,7 @@ export type Expected = { expected: string[]; touched: string[] };
 // it was asked for, started or ended, by its state. An ended run says how it ended in `line`, lists the tool calls it was denied, and
 // carries its `prompt` to copy on every end but a clean one. `paused` is why every queue waits, null while they run.
 type RunEnd = "done" | "denied" | "failed" | "timed-out" | "died" | "setup-failed" | "not-logged-in" | "rate-limited";
-export type RunView = { id: string; kind: "back-law" | "micro-world" | "map-review"; state: "queued" | "running" | "ended"; at: number; outcome: RunEnd | null; line: string | null; denials: string[]; prompt: string | null };
+export type RunView = { id: string; kind: "back-law" | "micro-world" | "map-review" | "first-map"; state: "queued" | "running" | "ended"; at: number; outcome: RunEnd | null; line: string | null; denials: string[]; prompt: string | null };
 export type Runs = { paused: string | null; runs: RunView[] };
 /** Ratifying (`ratify.rs`): an item of a PR is a map change (kind part, actor, link, law or flow) or a decision the agent declared. */
 export type PendingItem = { pr: number; kind: string; id: string };

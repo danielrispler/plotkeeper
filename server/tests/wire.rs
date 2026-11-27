@@ -206,6 +206,9 @@ fn empty(status: Status) -> MapState {
         project: "/repo".into(),
         status,
         source: None,
+        from: None,
+        pending: None,
+        problems: Vec::new(),
         reference: None,
         commit: None,
         note: None,
@@ -324,6 +327,7 @@ fn runs() -> Runs {
         run(RunState::Running, Kind::BackLaw, None),
         run(RunState::Queued, Kind::MicroWorld, None),
         run(RunState::Queued, Kind::MapReview, None),
+        run(RunState::Running, Kind::FirstMap, None),
     ];
     list.extend(ends.map(|end| run(RunState::Ended, Kind::BackLaw, Some(end))));
     Runs {

@@ -831,7 +831,7 @@ export const mapNoMap = (): Fixture =>
       if (at < 0 || lines[at + 1] !== "A map names your parts and their rules; changes light them up.") log("snap:fail no teaching sentence after the no-map line: " + JSON.stringify(lines));
       frame("without a map");
       checkColours("without a map");
-      log("base ok");`, { map_state: mapState({ status: "none", source: null }) });
+      log("base ok");`, { map_state: mapState({ status: "none", source: null, from: null }) });
 // Switching projects (#386's review): what one project's map started is not lost or left over on the next. `calls` are the commands the
 // page sends from here on; `open(path)` presses a project's header. Pokedex's folder is gone, and it has a live session, so its header
 // shows (spec #659).
@@ -1164,7 +1164,52 @@ export const mapEmpty = () =>
     const toast = document.getElementById("copy-toast");
     if (!toast.matches(":popover-open") || !toast.textContent.includes("Prompt copied")) log("snap:fail the copy toast does not say the prompt was copied: " + toast.textContent);
     if (window.__copied !== draft.textContent) log("snap:fail the clipboard holds " + JSON.stringify(window.__copied) + ", not the prompt");
-    log("drafting prompt: " + draft.textContent.slice(0, 40));`, { map_state: mapState({ status: "none", source: null }) });
+    log("drafting prompt: " + draft.textContent.slice(0, 40));`, { map_state: mapState({ status: "none", source: null, from: null }) });
+
+// The check's problems of a map read from the checkout (#753): four, of which the banner shows three.
+const checkoutProblems = [
+  "server/src/new.rs: no part owns it",
+  "part shell: owns no tracked file",
+  "link shell-window: no import proves it",
+  "law brief-cites-facts: no test is tagged with it",
+];
+/**
+ * A map the user's agent wrote into the checkout (#753): drawn at once, the head says "Map not committed yet" in the ref's place, and the
+ * check's problems show over it as a banner, the count, the first three and a copy of all four.
+ */
+export const mapCheckout = () =>
+  mapOpened(`
+    const ref = document.getElementById("map-ref");
+    if (ref.textContent !== "Map not committed yet") log("snap:fail the head says " + JSON.stringify(ref.textContent));
+    if (!document.querySelector("#map .plate[data-id=shell]")) return log("snap:fail a checkout map failing the check is not drawn");
+    const banner = document.getElementById("map-problems");
+    if (banner.hidden || banner.getAttribute("role") !== "status") return log("snap:fail no problems banner");
+    if (!banner.textContent.includes("system-map check found 4 problems")) log("snap:fail the banner's count: " + banner.textContent);
+    const shown = [...banner.querySelectorAll("li")].map((li) => li.textContent);
+    if (JSON.stringify(shown) !== ${JSON.stringify(JSON.stringify(checkoutProblems.slice(0, 3)))}) log("snap:fail the banner lists " + JSON.stringify(shown));
+    if (!banner.textContent.includes("and 1 more")) log("snap:fail the banner does not say there is one more");
+    const copy = banner.querySelector(".copy-icon");
+    if (copy?.getAttribute("aria-label") !== "Copy all the problems") return log("snap:fail the banner has no copy of them all");
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (words) => void (window.__copied = words) } });
+    copy.click();
+    await wait(150);
+    for (const problem of ${JSON.stringify(checkoutProblems)}) if (!window.__copied?.includes(problem)) log("snap:fail the copy lacks " + problem);
+    log("checkout ok");`, { map_state: mapState({ from: "checkout", problems: checkoutProblems }) });
+/** The default branch's map gets no banner, whatever its check would say: CI owns that (#753). */
+export const mapDefaultNoBanner = () =>
+  mapOpened(`
+    if (!document.getElementById("map-problems").hidden) log("snap:fail the default branch's map has a problems banner");
+    if (document.getElementById("map-ref").textContent !== "origin/main · 35745b1") log("snap:fail the head lost its ref: " + document.getElementById("map-ref").textContent);
+    log("default ok");`, { map_state: mapState() });
+/** A project whose folder is in no git repository (#753): it says so, and offers no prompt and no button. */
+export const mapNotGit = () =>
+  mapOpened(`
+    const empty = document.querySelector("#map .map-empty");
+    if (!empty?.textContent.includes("Not a git repository: no map")) return log("snap:fail the non-git folder says " + document.getElementById("map-body").textContent);
+    if (empty.querySelector(".map-draft, .btn")) log("snap:fail the non-git folder offers a prompt or a button");
+    if (document.getElementById("pre-flight-button").checkVisibility()) log("snap:fail the non-git folder offers Pre-flight");
+    if (!document.getElementById("map-problems").hidden) log("snap:fail a problems banner with no map");
+    log("not git ok");`, { map_state: mapState({ status: "not-git", source: null, from: null, reference: null, commit: null, note: "not a git repository: no map" }) });
 
 /**
  * The map's marks show their hint to the real pointer (spec #582, ticket 4): a plate's law mark, a broken-law mark and a link's mark on

@@ -6,7 +6,7 @@ A **background run** is a headless agent run with scoped tools that plotkeeper s
 
 A run goes in as a request: its kind, its working folder, its prompt and its limits. It comes out as an outcome: the result text, the tool calls it was denied, its cost and its exit code. The module that asked for a run is told how it ended (`Runner::on_end`), as it ends or when a start finds it ended. The harness, the agent program, only builds the command: `claude` is the one harness, and the tests' harness is a shell script.
 
-There are three kinds. **Back a law** has `Bash`, `Read`, `Edit`, `Write`, `Glob` and `Grep`. **Micro-world** has the same without `Bash`. **Map text review** has only `Read`, `Glob` and `Grep`. The command carries only the flags spec #378 gives; a micro-world reads the project from its working folder and writes only into `.micro-world/` there ([Micro-worlds](#micro-worlds)).
+There are four kinds. **Back a law** has `Bash`, `Read`, `Edit`, `Write`, `Glob` and `Grep`. **Micro-world** has the same without `Bash`. **Map text review** has only `Read`, `Glob` and `Grep`, and so has **First map**, a writer or a reviewer of a repository's first map (spec #753), which answers in its result and gets no setup. The command carries only the flags spec #378 gives; a micro-world reads the project from its working folder and writes only into `.micro-world/` there ([Micro-worlds](#micro-worlds)).
 
 A prompt holds only text plotkeeper wrote or Daniel confirmed. An issue's, a PR's or a comment's text never goes into a prompt, since strangers can write it on a public repository. The map text review's folder holds a PR's head, so its agent reads text a PR wrote. Its prompt holds none of that text: only plotkeeper's instructions and the changed and still-true items' kinds and ids, which the PR chose but which are bounded to lowercase words of letters and digits joined by hyphens, of at most 40 characters ([Map text review](#map-text-review)).
 
@@ -39,7 +39,7 @@ The sandbox block is this, with plotkeeper's data folder first in `denyRead`, si
 
 ## The allow list
 
-`--allowedTools` lists edits inside the working folder (for a micro-world, only inside its `.micro-world/`; for a map text review none, and the flag is left out), and for a kind with `Bash`:
+`--allowedTools` lists edits inside the working folder (for a micro-world, only inside its `.micro-world/`; for a map text review or a first map none, and the flag is left out), and for a kind with `Bash`:
 
 - read-only git, `git status`, `git diff` and `git log`, plus `git add`, since the working folder is a clone;
 - one entry per command of the project's `checks`, each bare and with arguments (`Bash(cargo test)` and `Bash(cargo test *)`).
@@ -54,8 +54,8 @@ All in `settings.json` ([Settings files](../settings.md)), read by the server an
 
 - `backgroundRuns.harness`: `claude`, the default and the only harness. Any other value refuses the run.
 - `backgroundRuns.model`: the model. Unset, the CLI's own default.
-- `checks`: the project's entry, picked as a session's is ([Checks](checks.md)): the longest folder that is the project's or holds it. There is no default list here. A project with no entry gets "Set this project's checks" and the prompt to copy; a micro-world, which has no `Bash`, needs none.
-- `setup`: per project folder like `checks`, one command, such as `npm ci`. plotkeeper runs it in the working folder before the agent starts, outside the sandbox and with the network, so offline checks find their dependencies. With none set, it is skipped, and a map text review never gets one: its folder holds a PR's head, whose code a setup such as `npm ci` would run outside the sandbox. A setup that fails ends the run before the agent starts. Whatever the setup leaves running when it exits is killed then (#568), so a setup cannot start a service for the agent to use.
+- `checks`: the project's entry, picked as a session's is ([Checks](checks.md)): the longest folder that is the project's or holds it. There is no default list here. A project with no entry gets "Set this project's checks" and the prompt to copy; a micro-world, a map text review or a first map, which have no `Bash`, need none.
+- `setup`: per project folder like `checks`, one command, such as `npm ci`. plotkeeper runs it in the working folder before the agent starts, outside the sandbox and with the network, so offline checks find their dependencies. With none set, it is skipped, and a map text review never gets one: its folder holds a PR's head, whose code a setup such as `npm ci` would run outside the sandbox. Nor does a first map, which only reads. A setup that fails ends the run before the agent starts. Whatever the setup leaves running when it exits is killed then (#568), so a setup cannot start a service for the agent to use.
 
 ## A run's folder
 
@@ -76,15 +76,24 @@ plotkeeper starts each run through the launcher, `plotkeeper-run <run's folder>`
 - **The status.** When the harness exits, or the time limit passes, the launcher writes `status.json` whole, by a temporary file and a rename. The check, the setup and the harness each run through the one process runner (`workbench/src/run.rs`, #568), in a process group of their own: at the limit the runner kills that group, and when one exits it kills what it left running there, so nothing a run started outlives it: not a run stopped at its limit, and not a stray child of a run that finished. The launcher's last act is then to kill its own process group, itself included.
 - **The end.** plotkeeper waits on the lock, with no timer. When it frees, a status means the run ended, and no status means its process died: the run is failed and the next in its queue starts.
 - **Cancel.** For a running run, plotkeeper checks that the lock is held and that the process `launch.json` names still has the start time written there, stops the launcher, and removes the run's folder. The stop is a `SIGTERM` to the launcher's process group: the launcher's child is in a group of its own, which that signal misses, so the launcher kills the child's group, writes its status and ends. A launcher still there 5 s later is killed with `SIGKILL` (#568). A process whose start time differs is never signalled: nothing is stopped or removed, and the notice line says so. A queued run is dropped and its folder removed. A run whose launcher exited a moment before the click is recorded as it ended, not as cancelled. A plotkeeper that died right after it started a launcher may have left no process id; such a run cannot be cancelled and ends at its limit.
-- **A start.** plotkeeper picks the runs back up from the runs folder: a queued run waits its turn again, a run whose lock is held is still running, and a run whose lock is free ended meanwhile, or died if it left no status. An ended run it had not recorded is recorded and listed. The folder of an ended run it had recorded is an orphan and is removed, as is a folder with no run in it. A folder whose `run.json` this build cannot read, such as a newer build's, is left alone while its lock is held: this build neither lists nor records that run, and a later start removes the folder once its lock is free. Whatever order the folders give, a queued run never starts while a run of its project is running.
+- **A start.** plotkeeper picks the runs back up from the runs folder: a queued run waits its turn again, a run whose lock is held is still running, and a run whose lock is free ended meanwhile, or died if it left no status. An ended run it had not recorded is recorded and listed. The folder of an ended run it had recorded is an orphan and is removed, as is a folder with no run in it. A folder whose `run.json` this build cannot read, such as a newer build's, is left alone while its lock is held: this build neither lists nor records that run, and a later start removes the folder once its lock is free. Whatever order the folders give, a queued run never starts while a run of its project is running, unless that run is of its batch ([Batches](#batches)). A batch's runs are found one by one, each by its own folder: a live one is waited for, an ended one recorded, a dead one failed, so a batch whose runs all died holds no slot.
 
 ## Limits
 
-- One run at a time per project. The others wait in the order they were asked for, and the queue shows on the map.
+- One run at a time per project, or one batch ([Batches](#batches)). The others wait in the order they were asked for, and the queue shows on the map.
 - A run starts only on a click, but for the map text review of a PR by Daniel's own login, which starts when its brief is stored. Nothing starts one on a timer.
-- 30 minutes, 10 for a micro-world or a map text review, setup included. At the limit the runner kills the running step's process group, and the launcher writes the status and kills its own.
+- 30 minutes, 10 for a micro-world, a map text review or a first map, setup included. At the limit the runner kills the running step's process group, and the launcher writes the status and kills its own.
 - A third of the cores for builds and tests: `CARGO_BUILD_JOBS` and `NEXTEST_TEST_THREADS`.
 - A run that fails because the login is missing or a usage or rate limit is hit pauses every project's queue. The map shows one indicator with **Resume**, and nothing starts until Daniel presses it. Every project with runs is told, and the pause outlives a restart.
+
+## Batches
+
+A **batch** is several runs asked for as one request (`Runner::submit_batch`), such as a First map's writers (spec #753, "The drafting run"). Its runs take the project's slot together and start together, each with its own folder, time limit, `status.json` and pick-up after a restart. The slot frees when the last of them ends, and a request asked for later waits behind the batch as behind a run. One request of a batch refused refuses the whole batch, and none of its folders stays.
+
+- **Joining.** A run asked for in a batch while a run of that batch is running (`Runner::join`), such as a reviewer, a retry or a redraft, starts at once, ahead of the requests that wait. Once the batch's last run has ended it holds no slot, and a run joining it waits its turn; when that turn comes, the batch's other queued runs start with it.
+- **Discard.** Every run of the batch is cancelled as Cancel cancels one (`Runner::cancel_batch`): the queued ones first, so none of them starts, then the running ones, stopped, and the ended ones, removed. The slot is then free.
+- **A pause.** A login or limit failure mid-batch pauses every queue as any run's does. The batch's runs already going go on, its ended runs stay listed and recorded, and a run joining it waits for Resume; after Resume it starts at once while the batch still runs.
+- **A restart.** Each run of the batch keeps its batch in its `run.json`, so a start finds them all again ([Lifecycle](#lifecycle)): a run still alive holds the slot and a retry still joins it, and no slot stays held with nothing running behind it.
 
 ## Outcome
 

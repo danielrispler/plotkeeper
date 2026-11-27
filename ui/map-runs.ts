@@ -26,7 +26,7 @@ export type RunActs = {
 // The question before a running run's Cancel: a queued run made nothing yet and an ended one was cleaned up, so they leave at once.
 const cancelRunning: Confirm = { heading: "Cancel this run?", lost: "The run stops, and its worktree and the changes it made there are removed.", verb: "Cancel run" };
 
-const kindWords: Record<RunView["kind"], string> = { "back-law": "Back a law", "micro-world": "Micro-world", "map-review": "Map text review" };
+const kindWords: Record<RunView["kind"], string> = { "back-law": "Back a law", "micro-world": "Micro-world", "map-review": "Map text review", "first-map": "First map" };
 const clock = (at: number) => {
   const time = new Date(at);
   return `${String(time.getHours()).padStart(2, "0")}:${String(time.getMinutes()).padStart(2, "0")}`;

@@ -1,6 +1,6 @@
 // The Map view (spec danielrispler/plotkeeper#306, ticket #309): a project's system map as plates on a quiet chart (Treatment C). Since #386
 // it is the page's base: the page opens on the last viewed project's map, and the session list's headers switch it. The server reads the map from
-// `origin`'s default branch and keeps Daniel's positions (`server/src/map.rs`); `map-model.ts` holds the pure logic.
+// `origin`'s default branch, else the checkout, else a pending PR (#753), and keeps Daniel's positions (`server/src/map.rs`); `map-model.ts` holds the pure logic.
 //
 // Where the next tickets plug in, so they add to this file rather than reshape it:
 // - `onPlate(fn)`: runs for each plate each time it is drawn, with the plate's slots: `fog` behind the name, `marks` at its top
@@ -295,11 +295,51 @@ export function revealParts(ids: string[]) {
 
 const name = (path: string) => path.split("/").filter(Boolean).pop() ?? path;
 
-// The head: the ref the map was read from; the project's name is in the top bar (#386).
+// What the head says of a map not read from the default branch (#753), with its hint; null for the default branch's.
+function fromWords(state: MapState): [string, string] | null {
+  if (state.from === "checkout") return ["Map not committed yet", "This map is the system-map.json in your checkout; it is not on the default branch yet"];
+  if (state.from !== "pending-pr" || !state.pending) return null;
+  const pr = `PR #${state.pending.number}`;
+  return state.pending.closed
+    ? ["Map not in the repo", `${pr} closed without merging, so this map is plotkeeper's copy only`]
+    : [`Map waiting on ${pr}`, `The map you accepted, shown from plotkeeper's copy until ${pr} merges`];
+}
+
+// The head: where the map was read from, the ref for the default branch; the project's name is in the top bar (#386). Then the check's
+// problems of a checkout map (#753).
 function drawHead(state: MapState | null) {
   const ref = element("map-ref");
-  ref.textContent = state?.reference ? `${state.reference}${state.commit ? ` · ${state.commit.slice(0, 7)}` : ""}` : "";
-  hint(ref, state?.note ?? "The branch this map was read from, as last fetched");
+  const from = state ? fromWords(state) : null;
+  if (from) {
+    [ref.textContent] = from;
+    hint(ref, from[1]);
+  } else {
+    ref.textContent = state?.reference ? `${state.reference}${state.commit ? ` · ${state.commit.slice(0, 7)}` : ""}` : "";
+    hint(ref, state?.note ?? "The branch this map was read from, as last fetched");
+  }
+  drawProblems(state?.status === "loaded" ? state.problems : []);
+  // A folder in no git repository offers no run (#753).
+  element("pre-flight-button").hidden = state?.status === "not-git";
+}
+
+// The check's problems over a checkout map (#753): the count, the first three and a copy of them all. A draw with the same problems keeps the
+// banner as it is, so its status is not announced again.
+const problemsShown = 3;
+function drawProblems(problems: string[]) {
+  const box = element("map-problems");
+  const key = JSON.stringify(problems);
+  if (box.dataset.key === key) return;
+  box.dataset.key = key;
+  box.hidden = problems.length === 0;
+  if (!problems.length) return box.replaceChildren();
+  const count = `system-map check found ${problems.length} ${problems.length === 1 ? "problem" : "problems"}`;
+  const list = text("ul", "", "map-problems-list");
+  list.append(...problems.slice(0, problemsShown).map((problem) => text("li", problem)));
+  const more = problems.length > problemsShown ? [text("p", `and ${problems.length - problemsShown} more`, "map-problems-more")] : [];
+  const copy = copyButton("Copy all the problems", "Copy every problem the check found, to give to your agent", () => `${count} in system-map.json:\n${problems.map((p) => `- ${p}`).join("\n")}`);
+  const head = text("div", "", "map-problems-head");
+  head.append(text("p", `${count}; the map is drawn as it reads`, "map-problems-title"), copy);
+  box.replaceChildren(head, list, ...more);
 }
 
 const lawWords = (law: Law) => `${law.backing === "check" ? "Backed by a check" : "On trust"}: ${law.text}`;
@@ -320,7 +360,8 @@ export function linkMark(ids: string[], law: Law, at: Point): SVGElement {
 // Where `plotkeeper install` is explained.
 const installDocs = "https://github.com/danielrispler/plotkeeper/blob/main/docs/studio/plugin.md";
 
-// The empty states: a fresh install, a gone folder, a project with no map on its default branch, one whose file does not read, and the wait for the first read.
+// The empty states: a fresh install, a gone folder, a folder in no git repository, a project with no map, one whose file does not read, and the
+// wait for the first read.
 function drawEmpty(body: HTMLElement, state: MapState | null) {
   const box = text("div", "", "map-empty");
   if (project !== null && projectGone(project)) {
@@ -346,6 +387,9 @@ function drawEmpty(body: HTMLElement, state: MapState | null) {
     );
   } else if (state === null) {
     box.append(text("p", "Reading the map…", "empty"));
+  } else if (state.status === "not-git") {
+    // Nothing to read or draft (#753): no prompt and no button.
+    box.append(text("p", "Not a git repository: no map", "map-empty-title"), text("p", `${state.project} is not in a git repository, so it has no map to read or draft.`, "empty"));
   } else if (state.status === "unreadable") {
     box.append(text("p", "This map does not read", "map-empty-title"), text("p", state.note ?? "", "empty"));
   } else {
