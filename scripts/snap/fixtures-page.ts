@@ -533,7 +533,8 @@ export const projectChevron = () =>
 /**
  * The hints (spec #582, ticket 1), with real input: the pointer on the top bar's gear opens its hint after the delay, beside the gear, and
  * on the hint it stays open; Esc closes it; Tab to the gear opens it too; and sliding from one session row to the next opens the next
- * row's hint at once, closing the first.
+ * row's hint at once, closing the first. While any hint is open any other hinted control shows its hint at once, by either path and
+ * wherever it sits (#603); with none open the first waits the delay.
  */
 export const hints = (): Fixture => ({
   ...list(),
@@ -580,8 +581,58 @@ export const hints = (): Fixture => ({
       await wait(120);
       if (!open(hintOf(second))) log("snap:fail the neighbouring row's hint did not open at once");
       if (open(hintOf(first))) log("snap:fail the first row's hint stayed open beside the second's");
+      await __snapKey("Escape");
+      // Any two hinted controls while a hint is open (#603): sliding from a trigger to another shows the second's at once, wherever the
+      // two sit and by whichever path each is wired; with no hint open, a first hint still waits the delay. A listener-path trigger is
+      // a summary the page's own hint() wires, made here in two separate details.
+      const { hint } = await import("./dom.js");
+      const made = [1, 2].map((n) => {
+        const fold = document.createElement("details");
+        const summary = document.createElement("summary");
+        summary.textContent = "Fold " + n;
+        fold.append(summary);
+        Object.assign(fold.style, { position: "fixed", left: "40%", top: n * 120 + "px", zIndex: "50", background: "var(--raised)" });
+        document.body.append(fold);
+        return hint(summary, "Fold hint " + n);
+      });
+      const hintFor = (node) => document.getElementById(node.getAttribute("interestfor") ?? node.getAttribute("data-hint"));
+      const preFlight = document.getElementById("pre-flight-button");
+      const fit = document.getElementById("fit-map-button");
+      const settle = async () => {
+        await __snapKey("Escape");
+        await __snapMove(document.body);
+        await wait(400);
+      };
+      const slides = [
+        ["one map head button to another", preFlight, fit],
+        ["a top bar button to a map head button", gear, preFlight],
+        ["a summary to a summary in another details", made[0], made[1]],
+        ["a summary to a button", made[0], preFlight],
+        ["a button to a summary", preFlight, made[1]],
+      ];
+      for (const [what, from, to] of slides) {
+        await settle();
+        await __snapMove(from);
+        await wait(650);
+        if (!open(hintFor(from))) { log("snap:fail the first hint of " + what + " did not open"); continue; }
+        await __snapMove(to);
+        await wait(120);
+        if (!open(hintFor(to))) log("snap:fail the hint did not open at once, sliding from " + what);
+      }
+      // No hint open: the first waits about the whole delay, by either path.
+      for (const [what, trigger] of [["a button", preFlight], ["a summary", made[0]]]) {
+        await settle();
+        const started = performance.now();
+        await __snapMove(trigger);
+        await wait(250);
+        if (open(hintFor(trigger))) log("snap:fail the first hint of " + what + " opened before the delay");
+        while (!open(hintFor(trigger)) && performance.now() - started < 1500) await wait(20);
+        const waited = performance.now() - started;
+        if (!open(hintFor(trigger))) log("snap:fail the first hint of " + what + " never opened");
+        else if (waited < 400) log("snap:fail the first hint of " + what + " opened after only " + Math.round(waited) + " ms");
+      }
       log("hints ok");`,
-  realKeys: true, realPointer: true, snapDone: "hints ok",
+  realKeys: true, realPointer: true, budget: 14000, snapDone: "hints ok",
 });
 
 /**

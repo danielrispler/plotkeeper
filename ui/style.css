@@ -1200,12 +1200,12 @@ mark.drawer-line .drawer-n::before { content: "→ " / ""; color: var(--fg); }
 
 /* The hint (spec #582): the one hover of the page, a trigger's own `popover="hint"` beside it through the trigger's implicit anchor
    (`interestfor`), above it, flipped below when the window's top is in the way, so it never covers the control the focus is on. It
-   shows after --hint-delay, and at once while a hint is open among a toolbar's or a list's neighbouring triggers; the pointer may rest on
+   shows after --hint-delay, and at once while any hint is open, whichever trigger or path opened it; the pointer may rest on
    it, and Esc closes it. Needs Chrome 157+ (`docs/studio/behaviour/sessions.md`). */
 /* biome-ignore lint/correctness/noUnknownProperty: Chrome 149's interest invokers, which biome does not know yet */
 [interestfor] { interest-delay-start: var(--hint-delay); }
 /* biome-ignore lint/correctness/noUnknownPseudoClass: Chrome 149's interest invokers */
-.top:has(:interest-source) [interestfor], .list:has(:interest-source) [interestfor] {
+:root:has(:interest-source, .hint:popover-open) [interestfor] {
   /* biome-ignore lint/correctness/noUnknownProperty: Chrome 149's interest invokers */
   interest-delay-start: 0s;
 }

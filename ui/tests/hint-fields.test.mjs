@@ -81,18 +81,21 @@ test("the pointer on the hint keeps it open", () => {
   assert.equal(shown.popoverOpen, false);
 });
 
-test("a neighbour's hint opens at once while one is open", () => {
-  const bar = /** @type {any} */ (document.createElement("div"));
-  const [a, b] = /** @type {any[]} */ ([hint(make("summary", "f-a"), "A words"), hint(make("summary", "f-b"), "B words")]);
-  bar.append(a, b);
-  a.parentElement = b.parentElement = bar;
-  a.listeners.pointerenter({});
-  mock.timers.tick(500);
-  assert.equal(hintOf(a).popoverOpen, true);
-  a.listeners.pointerleave({});
-  b.listeners.pointerenter({});
-  mock.timers.tick(1);
-  assert.equal(hintOf(b).popoverOpen, true);
+test("a hint opens at once while another is open, beside it or elsewhere on the page", () => {
+  for (const [what, shared] of [["sharing a parent", true], ["in another container", false]]) {
+    const [a, b] = /** @type {any[]} */ ([hint(make("summary", `f-a-${shared}`), "A words"), hint(make("summary", `f-b-${shared}`), "B words")]);
+    const one = /** @type {any} */ (document.createElement("div"));
+    const two = /** @type {any} */ (document.createElement("div"));
+    a.parentElement = one;
+    b.parentElement = shared ? one : two;
+    a.listeners.pointerenter({});
+    mock.timers.tick(500);
+    assert.equal(hintOf(a).popoverOpen, true, String(what));
+    a.listeners.pointerleave({});
+    b.listeners.pointerenter({});
+    mock.timers.tick(1);
+    assert.equal(hintOf(b).popoverOpen, true, String(what));
+  }
 });
 
 test("a hint drawn again for the same trigger keeps one hint and one set of listeners", () => {

@@ -13,7 +13,7 @@ type ReadCommand = { [C in Command]: Reply<C> extends void ? (void extends Reply
 
 // Beside the replies, the harness's own keys: errors for the log and a script that runs once the UI has drawn (page.mjs). `motion`
 // pins `prefers-reduced-motion` for a fixture that tests motion, since the machine's own setting differs (CI's macOS runner asks for reduce).
-export type Fixture = { [C in Command]?: Reply<C> | ByArg<Reply<C>> } & { appErrors?: string[]; snapScript?: string; snapDone?: string; realPointer?: boolean; realKeys?: boolean; motion?: "full" | "reduce"; contrast?: boolean; storage?: Record<string, string> };
+export type Fixture = { [C in Command]?: Reply<C> | ByArg<Reply<C>> } & { appErrors?: string[]; snapScript?: string; snapDone?: string; realPointer?: boolean; realKeys?: boolean; motion?: "full" | "reduce"; contrast?: boolean; budget?: number; storage?: Record<string, string> };
 
 const noSelection: Selection | null = null;
 

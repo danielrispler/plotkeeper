@@ -295,7 +295,7 @@ function queuePrune() {
 // The listener path, for what `interestfor` cannot reach (a summary, an input, a select, and the marks of ticket 4): the trigger's own
 // pointer-enter/leave and focus/blur open and close its hint, with `showPopover({ source })` so the trigger is its implicit anchor, after
 // the page's `--hint-delay` (0.5 s) and Chromium's end delay (0.15 s). The pointer may rest on the hint. Esc and light dismiss are the
-// popover's own. A trigger a neighbour's hint is open beside, one sharing its parent, shows at once, as the CSS does for the other path.
+// popover's own. A trigger shows at once while any other hint is open, as the CSS does for the other path.
 // The trigger's listeners open the hint its `data-hint` names when they run, so a trigger `patch` kept, which took a new draw's
 // `data-hint`, opens that draw's hint; a hint's own listeners act for the trigger that opened it, so no hint holds a trigger the page dropped.
 const listened = new Set(["SUMMARY", "INPUT", "SELECT", "TEXTAREA"]);
@@ -345,7 +345,9 @@ function hideFor(trigger: Element, interest: Interest) {
 }
 function interestIn(trigger: Element, interest: Interest) {
   clearTimeout(interest.timer);
-  const beside = openTrigger !== null && openTrigger !== trigger && openTrigger.isConnected !== false && openTrigger.parentElement === trigger.parentElement;
+  // Any open hint but the trigger's own, whichever path opened it, so the hint of an `interestfor` trigger counts too.
+  const own = hintNamed(trigger);
+  const beside = [...hints.values()].some((node) => node !== own && node.matches(":popover-open"));
   interest.timer = setTimeout(() => showFor(trigger, interest), beside ? 0 : startDelay());
 }
 function loseInterest(trigger: Element, interest: Interest) {
