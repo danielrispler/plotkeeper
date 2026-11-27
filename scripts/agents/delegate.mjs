@@ -302,12 +302,13 @@ const sessionOf = (line) => {
 /**
  * Runs the worker in the worktree with `message`, continuing `session` when one is given, until it exits or is killed
  * at `limit`; `killed` says why it was, `session` is the OpenCode session its events name. The command is the one the
- * spike verified (#599): `--session` goes with `--format json` and `-m`.
+ * spike verified (#599): `--session` goes with `--format json` and `-m`. OpenCode v2 has no `--variant` flag: the
+ * variant rides on the model id, `-m provider/model#variant`.
  */
 const runWorker = (worktree, { candidate, effort, message, session = null, limit }) =>
   new Promise((resolve, reject) => {
     const variant = candidate.variant?.[effort] ?? null;
-    const args = ["run", "--auto", "--format", "json", "-m", candidate.model, ...(session ? ["--session", session] : []), ...(variant ? ["--variant", variant] : []), message];
+    const args = ["run", "--auto", "--format", "json", "-m", variant ? `${candidate.model}#${variant}` : candidate.model, ...(session ? ["--session", session] : []), message];
     const jsonl = openSync(join(worktree, ".delegate/run.jsonl"), "a");
     const stderr = openSync(join(worktree, ".delegate/stderr.txt"), "w");
     const log = join(worktree, ".delegate/run.log");
@@ -609,7 +610,7 @@ const runTicket = async ({ ticket, integration, effort, routing }) => {
       return 0;
     }
     // The free models withdrawn: OpenCode serves none of them (spec #592, "`delegate.mjs run`, a cheap ticket").
-    const served = must(root, "opencode", ["models", "opencode"]).split("\n").map((line) => line.trim());
+    const served = must(root, "opencode", ["models"]).split("\n").map((line) => line.trim());
     if (!cheap.some((each) => served.includes(each.model))) throw new CouldNotStart(`opencode serves none of the cheap models ${cheap.map((each) => each.model).join(", ")}`);
     // A candidate OpenCode no longer serves is passed over, as one marked out is.
     const next = () => cheap.find((each) => served.includes(each.model) && !isOut(marks, each.model));
