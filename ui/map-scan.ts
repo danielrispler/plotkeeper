@@ -13,8 +13,11 @@ import { copyButton } from "./copy-button.js";
 import type { MapScan, MapState, ScanEdit } from "./types.js";
 
 type Doc = Extract<MapDoc, { ok: true }>;
-/** What the scan screen's edits do: `edit` sends one to the server; `note` is why the last one did not apply, or null. */
-export type ScanActs = { edit: (edit: ScanEdit) => void; note: string | null };
+/**
+ * What the scan screen's presses do: `edit` sends one edit to the server, and `note` is why the last one did not apply, or null; `draft`
+ * starts the drafting run from the skeleton as the edits leave it (#763), and `refused` is why the last start was refused, or null.
+ */
+export type ScanActs = { edit: (edit: ScanEdit) => void; note: string | null; draft: () => void; refused: string | null };
 
 // The gutter kept around the plates when they are fitted to the canvas: `--map-gutter` in tokens.css.
 const gutter = 32;
@@ -91,32 +94,17 @@ function placeBeside(menu: HTMLElement, plate: HTMLElement) {
   menu.style.top = `${Math.max(room, below ? box.bottom + room : box.top - room - h)}px`;
 }
 
-// The grey plates and their lines, fitted to the canvas now and again whenever the canvas changes size; a plate's press opens its actions.
-function drawCanvas(doc: Doc, scan: MapScan, acts: ScanActs): HTMLElement {
+/**
+ * `doc`'s plates, each made by `plateOf`, and its lines, fitted to a canvas now and again whenever the canvas changes size; `menu`, a popover
+ * the canvas holds, is closed by a fit. The scan's grey plates and the Map draft's (#763) are placed the same way, afresh on each draw.
+ */
+export function plateCanvas(doc: Doc, plateOf: (part: Doc["parts"][number]) => HTMLElement, menu: HTMLElement | null = null): HTMLElement {
   const canvas = text("div", "", "map-scan-canvas");
   const world = text("div", "", "map-world");
   const links = svg("svg", { class: "map-links", "aria-hidden": "true" });
-  // The actions of the plate last pressed: one popover in the top layer, placed by the plate's box on the screen, as the badges' list is.
-  const menu = text("div", "", "menu map-scan-actions");
-  menu.setAttribute("popover", "auto");
-  menu.setAttribute("aria-label", "Change this part");
-  let opener: HTMLElement | null = null;
-  menu.addEventListener("toggle", (event) => {
-    if ((event as ToggleEvent).newState === "closed") opener?.setAttribute("aria-expanded", "false");
-  });
   const at = autoPlace(doc.parts, doc.links, {});
-  const press = (plate: HTMLElement, open: HTMLElement, id: string, event: MouseEvent) => {
-    if (opener === open && menu.matches(":popover-open")) return menu.hidePopover();
-    plateActions(menu, doc, scan, id, acts);
-    opener = open;
-    menu.showPopover({ source: open });
-    open.setAttribute("aria-expanded", "true");
-    placeBeside(menu, plate);
-    // A keyboard press (no pointer, `detail` 0) goes into the actions.
-    if (event.detail === 0) menu.querySelector<HTMLElement>("select, button")?.focus();
-  };
   const plates = doc.parts.map((part) => {
-    const plate = plateOf(part, scan.files[part.id] ?? 0, press);
+    const plate = plateOf(part);
     const spot = at[part.id];
     if (spot) Object.assign(plate.style, { left: `${spot.x}px`, top: `${spot.y}px` });
     return plate;
@@ -128,10 +116,10 @@ function drawCanvas(doc: Doc, scan: MapScan, acts: ScanActs): HTMLElement {
     return [svg("line", { class: "link", "data-link": line.ids.join(" "), x1: String(a.x), y1: String(a.y), x2: String(b.x), y2: String(b.y) })];
   }));
   world.append(links, ...plates);
-  canvas.append(world, menu);
+  canvas.append(world, ...(menu ? [menu] : []));
   const spots = Object.values(at);
   const fit = () => {
-    if (menu.matches(":popover-open")) menu.hidePopover();
+    if (menu?.matches(":popover-open")) menu.hidePopover();
     if (!spots.length) return;
     const box = {
       x0: Math.min(...spots.map((p) => p.x)) - plateSize.w / 2, y0: Math.min(...spots.map((p) => p.y)) - plateSize.h / 2,
@@ -144,6 +132,29 @@ function drawCanvas(doc: Doc, scan: MapScan, acts: ScanActs): HTMLElement {
   const resized = new ResizeObserver(() => (canvas.isConnected ? fit() : resized.disconnect()));
   resized.observe(canvas);
   return canvas;
+}
+
+// The grey plates and their lines; a plate's press opens its actions.
+function drawCanvas(doc: Doc, scan: MapScan, acts: ScanActs): HTMLElement {
+  // The actions of the plate last pressed: one popover in the top layer, placed by the plate's box on the screen, as the badges' list is.
+  const menu = text("div", "", "menu map-scan-actions");
+  menu.setAttribute("popover", "auto");
+  menu.setAttribute("aria-label", "Change this part");
+  let opener: HTMLElement | null = null;
+  menu.addEventListener("toggle", (event) => {
+    if ((event as ToggleEvent).newState === "closed") opener?.setAttribute("aria-expanded", "false");
+  });
+  const press = (plate: HTMLElement, open: HTMLElement, id: string, event: MouseEvent) => {
+    if (opener === open && menu.matches(":popover-open")) return menu.hidePopover();
+    plateActions(menu, doc, scan, id, acts);
+    opener = open;
+    menu.showPopover({ source: open });
+    open.setAttribute("aria-expanded", "true");
+    placeBeside(menu, plate);
+    // A keyboard press (no pointer, `detail` 0) goes into the actions.
+    if (event.detail === 0) menu.querySelector<HTMLElement>("select, button")?.focus();
+  };
+  return plateCanvas(doc, (part) => plateOf(part, scan.files[part.id] ?? 0, press), menu);
 }
 
 // The folders that look like copies or vendored code, ticked while the skeleton ignores them (#753, story 7).
@@ -210,16 +221,25 @@ function looseBlock(kind: "files" | "tests", files: string[], doc: Doc, acts: Sc
   return set;
 }
 
-// Draft the map, its time hint, and why it is muted when `claude` was not found. The run it starts is the drafting run's (#762).
-function draftBlock(parts: number, claude: boolean): HTMLElement {
+// Draft the map, its time hint, and why it is muted when `claude` was not found; it starts the drafting run (#762) with the skeleton
+// (#763), and says why when the server refused it.
+function draftBlock(parts: number, claude: boolean, acts: ScanActs): HTMLElement {
   const block = text("div", "", "map-scan-draft");
   block.dataset.key = "scan draft";
-  const button = pressable(text("button", "Draft the map", "btn primary"), null);
+  const button = pressable(text("button", "Draft the map", "btn primary"), null, () => {
+    if (!isUnavailable(button)) acts.draft();
+  });
   button.dataset.key = "scan draft button";
   const why = claude ? null : "Draft the map needs the claude CLI, which plotkeeper did not find on your PATH. Give the prompt to your own agent instead.";
   availability(button, "Name and describe these parts with Claude Code, in the background; nothing is written until you accept", why);
   block.append(button, text("p", `${draftTime(parts)} · Uses your Claude Code plan`, "map-scan-time"));
   if (why) block.append(text("p", why, "map-scan-why"));
+  if (acts.refused) {
+    const refused = text("p", `Draft the map did not start: ${acts.refused}`, "map-scan-why");
+    refused.dataset.key = "scan draft refused";
+    refused.setAttribute("role", "status");
+    block.append(refused);
+  }
   return block;
 }
 
@@ -267,7 +287,7 @@ function panelOf(state: MapState, doc: Doc, scan: MapScan, acts: ScanActs): HTML
   }
   panel.append(...[ignoreBlock(scan, acts), looseBlock("files", scan.loose_files, doc, acts), looseBlock("tests", scan.loose_tests, doc, acts)].filter((node) => node !== null));
   // Without `claude` the copy-prompt leads (#753, story 12).
-  const [draft, prompt] = [draftBlock(count, scan.claude), promptBlock(scan.map, !scan.claude)];
+  const [draft, prompt] = [draftBlock(count, scan.claude, acts), promptBlock(scan.map, !scan.claude)];
   panel.append(...(scan.claude ? [draft, prompt] : [prompt, draft]));
   return panel;
 }

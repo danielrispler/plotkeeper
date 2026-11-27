@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { actorSize, autoPlace, draftPrompt, draftTime, languagesLine, looseGroups, scanPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, plateTitle, rimPoint, scrubTickets, sheetOf, sheetMarks, narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject, talksTo, linkLines, readingOrder, markPoints, placement, lineTag, tagWord } from "../../dist/map-model.js";
+import { actorSize, autoPlace, draftPrompt, draftProgress, draftTime, partStage, languagesLine, looseGroups, scanPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, plateTitle, rimPoint, scrubTickets, sheetOf, sheetMarks, narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject, talksTo, linkLines, readingOrder, markPoints, placement, lineTag, tagWord } from "../../dist/map-model.js";
 import { cameraRig, revealPan } from "../../dist/map-camera.js";
 
 /** @returns {import("../../dist/map-model.js").Part} */
@@ -406,6 +406,25 @@ test("Draft the map's time hint grows with the scan's part count", () => {
   /** @type {[number, string][]} */
   const cases = [[1, "About 1 minute"], [4, "About 1 minute"], [5, "About 2 minutes"], [15, "About 4 minutes"]];
   for (const [parts, hint] of cases) assert.equal(draftTime(parts), hint, String(parts));
+});
+
+test("a Map draft's part stands where its latest group does, and the progress line counts the parts", () => {
+  const group = (parts, state, redraft = false) => ({ parts, state, why: null, redraft });
+  const verdict = (id, flag) => ({ id: `part:${id}/purpose`, verdict: flag, why: "", cites: [], flagged: flag !== "supported" });
+  // (groups, verdicts, each part's stage, the progress line): a redraft is the part's latest group, so it stands as that group does.
+  /** @type {[ReturnType<typeof group>[], Record<string, ReturnType<typeof verdict>>, string[], string][]} */
+  const cases = [
+    [[group(["a", "b"], "writing"), group(["c"], "writing")], {}, ["writing", "writing", "writing"], "0 of 3 parts checked · 3 being written"],
+    [[group(["a"], "done"), group(["b"], "checking"), group(["c"], "writer-failed")], { a: verdict("a", "supported") }, ["checked", "checking", "writing-failed"], "1 of 3 parts checked · 1 being checked · 1 failed"],
+    [[group(["a", "b"], "done"), group(["c"], "reviewer-failed")], { a: verdict("a", "overreach"), b: verdict("b", "supported") }, ["flagged", "checked", "checking-failed"], "2 of 3 parts checked · 1 failed"],
+    [[group(["a", "b", "c"], "done"), group(["b"], "writing", true)], { a: verdict("a", "supported"), c: verdict("c", "supported") }, ["checked", "redrafting", "checked"], "2 of 3 parts checked · 1 being written"],
+    [[group(["a", "b", "c"], "done")], { a: verdict("a", "supported"), b: verdict("b", "supported"), c: verdict("c", "contradicted") }, ["checked", "checked", "flagged"], "3 of 3 parts checked"],
+  ];
+  for (const [groups, verdicts, stages, line] of cases) {
+    const draft = { map: "", groups, verdicts, not_written: [], ready: false };
+    assert.deepEqual(["a", "b", "c"].map((id) => partStage(draft, id)), stages, JSON.stringify(groups));
+    assert.equal(draftProgress(draft, ["a", "b", "c"]), line, JSON.stringify(groups));
+  }
 });
 
 test("the loose files are offered by folder, each folder with the names of its files", () => {
