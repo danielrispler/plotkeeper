@@ -18,6 +18,7 @@ use studio_server::ratify::{Decided, Item, decide};
 use studio_server::runner::{
     Config, Harness, HarnessCommand, Plan, RunState, Runner, claude_command,
 };
+use studio_test_support::LauncherGuard;
 
 const BASE: &str = r#"{"version":2,
   "parts":[
@@ -121,12 +122,15 @@ impl Harness for Reviewer {
 }
 
 struct Bench {
-    dir: tempfile::TempDir,
     origin: PathBuf,
     project: PathBuf,
     runner: Arc<Runner>,
     reviews: Arc<MapReviews>,
     changes: mpsc::Receiver<String>,
+    /// Stops the launchers the test left running. Declared after the runner, so it drops once nothing can start another,
+    /// and before `dir`, so it drops while their folders are still there.
+    _guard: LauncherGuard,
+    dir: tempfile::TempDir,
 }
 
 impl Bench {
@@ -343,6 +347,7 @@ fn bench() -> Bench {
     });
     runner.pick_up();
     Bench {
+        _guard: LauncherGuard::new(root.join("runs")),
         dir,
         origin,
         project,

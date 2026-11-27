@@ -10,6 +10,7 @@ use std::{
 };
 use studio_server::micro_worlds::{CSP, Explored, MicroWorlds, Phase, Subject, Topic, flow_topic};
 use studio_server::runner::{Config, Harness, HarnessCommand, Plan, Runner};
+use studio_test_support::LauncherGuard;
 
 /// The fake harness: `sh -c <script>` in the run's working folder, with the run's prompt in `PROMPT`.
 struct Writes(String);
@@ -58,11 +59,14 @@ const MAP: &str = r#"{
 }"#;
 
 struct Bench {
-    dir: tempfile::TempDir,
     runner: Arc<Runner>,
     worlds: Arc<MicroWorlds>,
     changes: mpsc::Receiver<String>,
     repo: PathBuf,
+    /// Stops the launchers the test left running. Declared after the runner, so it drops once nothing can start another,
+    /// and before `dir`, so it drops while their folders are still there.
+    _guard: LauncherGuard,
+    dir: tempfile::TempDir,
 }
 
 fn git(repo: &Path, args: &[&str]) -> String {
@@ -144,6 +148,7 @@ fn bench(script: &str, dsh: bool) -> Bench {
     });
     runner.pick_up();
     Bench {
+        _guard: LauncherGuard::new(dir.path().join("runs")),
         dir,
         runner,
         worlds,
