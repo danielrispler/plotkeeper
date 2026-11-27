@@ -109,12 +109,15 @@
         <button id="pre-flight-button" class="btn quiet small" type="button">Pre-flight</button>
         <!-- Fit (#669): the whole map back in view, as the palette's `studio::FitMap` and its key do. -->
         <button id="fit-map-button" class="btn quiet small" type="button">Fit</button>
+        <!-- Keep it current (#766): a card of two snippets for the agent instructions and CI; `map-keep.ts` fills it, after Accept or on this button. -->
+        <button id="keep-current-button" class="btn quiet small" type="button" aria-controls="map-keep" aria-expanded="false" hidden>Keep it current</button>
         <div id="map-review" class="map-review" hidden></div>
         <!-- Not recording (#437): while no agent is wired, in the head the base view always shows, never in the story's notice line. -->
         <p id="map-wiring" class="map-wiring" role="status" hidden></p>
         <div id="map-banner" class="map-banner"></div>
         <!-- The ways forward of a map whose draft PR closed unmerged, "Map not in the repo" (#765): `map.ts` fills it. -->
         <div id="map-pending" class="map-pending" hidden></div>
+        <section id="map-keep" class="map-keep" aria-label="Keep it current" hidden></section>
         <!-- The check's problems of a map read from the checkout, not committed yet (#753): `map.ts` fills it. -->
         <div id="map-problems" class="map-problems" role="status" hidden></div>
       </header>
