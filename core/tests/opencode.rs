@@ -250,3 +250,75 @@ fn an_opencode_turn_that_writes_a_file_by_a_relative_path_lists_it() {
     assert_eq!(listed, ["hello.txt"]);
     assert_eq!(carried, None);
 }
+
+/// The log the hook writes when a session's lines reach it out of order (#744): it appends them in
+/// the order it took them, and marks late those of a turn already past. Here turn 0's call and end
+/// land after turn 1's prompt, and turn 1's end after the wake-up that starts turn 2. A late end ends
+/// no turn, a late call is the previous turn's, and the wake-up ends turn 1 and starts its own, so
+/// each turn keeps its own start and end trees.
+#[test]
+fn opencode_lines_the_hook_took_late_end_no_turn_and_their_calls_are_the_turn_befores() {
+    let root = "/Users/me/work/hello";
+    let at = std::cell::Cell::new(1_795_732_713_000u64);
+    let line = |name: &str, sent: u64, fields: Value| {
+        at.set(at.get() + 10);
+        let mut line = json!({
+            "session_id": HELLO, "cwd": root, "hook_event_name": name, "sent_ms": sent,
+            "studio_agent": "opencode", "studio_received_ms": at.get(),
+        });
+        line.as_object_mut()
+            .unwrap()
+            .extend(fields.as_object().unwrap().clone());
+        line.to_string()
+    };
+    let write = json!({ "tool_name": "write", "tool_use_id": "call_0", "tool_input": { "path": "f0.txt" } });
+    let late = |mut fields: Value| {
+        fields["studio_late"] = true.into();
+        fields
+    };
+    let lines = [
+        line(
+            "session.prompt",
+            10,
+            json!({ "prompt_id": "msg_0", "studio_turn_start": { root: "t0" } }),
+        ),
+        line(
+            "session.prompt",
+            110,
+            json!({ "prompt_id": "msg_1", "studio_turn_end": { root: "t1" }, "studio_turn_start": { root: "t1" } }),
+        ),
+        line("tool.execute.before", 20, late(write.clone())),
+        line("tool.execute.after", 30, late(write)),
+        line(
+            "session.execution.succeeded",
+            40,
+            late(json!({ "last_assistant_message": "Turn 0's reply." })),
+        ),
+        line(
+            "session.execution.started",
+            210,
+            json!({ "studio_turn_end": { root: "t2" }, "studio_turn_start": { root: "t2" } }),
+        ),
+        line("session.execution.succeeded", 140, late(json!({}))),
+        line(
+            "session.execution.succeeded",
+            240,
+            json!({ "studio_turn_end": { root: "t3" } }),
+        ),
+    ];
+    let studio = Studio::replayed(&lines);
+
+    let trees: Vec<_> = (0..3)
+        .map(|turn| studio.turn_trees(HELLO, turn, root))
+        .collect();
+    let tree = |start: &str, end: &str| Some((start.into(), Some(end.into())));
+    assert_eq!(
+        trees,
+        [tree("t0", "t1"), tree("t1", "t2"), tree("t2", "t3")]
+    );
+    assert_eq!(studio.session(HELLO).unwrap().turns.len(), 3);
+    assert_eq!(
+        calls(&studio, HELLO),
+        [("call_0".into(), "write".into(), Some(0))]
+    );
+}

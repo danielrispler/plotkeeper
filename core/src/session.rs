@@ -1316,6 +1316,8 @@ impl Session {
 
     /// The turn whose call `event` starts or ends: the one `ledger_turn` names, or the one before it
     /// for a line of a turn already past (`Happened::Late`).
+    // shortcut: a late line is taken as the turn before's, though a hook delayed past two starts
+    // sends one of an older turn; that turn then loses the file to the next one's.
     pub(crate) fn call_turn(&self, event: &Event) -> Option<usize> {
         let turn = self.ledger_turn(event.agent_id.as_deref());
         let late = event.agent_id.is_none() && event.has(|h| matches!(h, Happened::Late));

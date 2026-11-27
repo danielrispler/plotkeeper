@@ -943,11 +943,11 @@ fn opencode_shaped(event: &Line) -> Line {
     shaped
 }
 
+/// Returns the session's record, still locked, once it has read it.
 #[allow(
     clippy::too_many_lines,
     reason = "left whole when the lint came in (#555); spec #548 names no split of it"
 )]
-/// Returns the session's record, still locked, once it has read it.
 fn claude_trees(
     event: &mut Line,
     data: &Path,
